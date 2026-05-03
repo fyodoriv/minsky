@@ -71,6 +71,8 @@ importers:
         specifier: workspace:*
         version: link:../adapters/token-monitor
 
+  novel/handoff-spec: {}
+
 packages:
 
   '@ampproject/remapping@2.3.0':
