@@ -1,0 +1,4 @@
+packages:
+  - "novel/*"
+  - "novel/adapters/*"
+  - "novel/bridges/*"
