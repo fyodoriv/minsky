@@ -8,10 +8,21 @@
 
 ## P0
 
-- [ ] Land constitutional rule #7 (chaos engineering) + Max5 adaptive token economy + per-story failure modes
+- [ ] Land constitutional rule #7 (chaos engineering) + Max5 adaptive token economy + per-story failure modes (@claude-code)
   - **ID**: chaos-rule-and-max5-economy
   - **Tags**: constitution, foundation, docs
   - **Estimate**: 1d (research-heavy doc work; no code)
+  - **Plan**:
+    - [ ] vision.md: add rule #7 (chaos engineering) + glossary row for failure-mode-response labels
+    - [ ] ARCHITECTURE.md: rewrite § Token economy adaptive (no hardcoded Max20, TBD markers, ~30% sustained-rate target)
+    - [ ] user-stories/001: steady-state hypothesis + blast radius + operator escape hatch + failure-mode table (≥10 rows)
+    - [ ] user-stories/002: same shape, ≥5 rows
+    - [ ] user-stories/003: same shape, ≥5 rows
+    - [ ] user-stories/004: same shape, ≥5 rows
+    - [ ] user-stories/005: same shape, ≥5 rows
+    - [ ] verify: pnpm run check, markdownlint, tasks-lint, audit, glossary-discipline
+    - [ ] scout: add ≥1 new follow-up task to TASKS.md from things noticed while reading
+    - [ ] ship: remove this task block, commit, push, gh pr create, watch CI, squash-merge
   - **Details**: Add new constitutional rule #7 to `vision.md` mandating: failure-mode enumeration, deterministic chaos tests (`kill -9`, `tc qdisc netem`, `iptables DROP`, `libfaketime`), no-silent-recovery, steady-state hypothesis, weekly production fault injection. Cite Netflix Chaos Monkey, Basiri et al. *Principles of Chaos* 2016, Beyer *SRE* Ch. 17, Armstrong let-it-crash, Hewitt actor isolation, Kreps log-replay. Rewrite `ARCHITECTURE.md` § "Token economy" for Max5: drop hardcoded Max20 numbers; observe `TokenMonitor` and react at relative 70% / 85% / weekly-warn; mark exact figures with `<TBD: verify against anthropic.com/pricing>` where not publicly published; sustained-rate target ≈30% of observed peak per 5h window. Add a `## Failure modes & chaos verification` section to every `user-stories/*.md` — table of (failure mode | trigger / fault axis | expected behavior — `loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade` | chaos test) with **≥10 rows for story 001**, **≥5 for stories 002–005**. Include steady-state hypothesis + blast radius + operator escape hatch per story.
   - **Files**: `vision.md`, `ARCHITECTURE.md`, `user-stories/001-loop-runs-overnight.md`, `user-stories/002-pause-from-iphone.md`, `user-stories/003-mape-k-improves-prompts.md`, `user-stories/004-budget-auto-pause.md`, `user-stories/005-watch-three-numbers.md`
   - **Verification**:
