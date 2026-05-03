@@ -61,9 +61,15 @@ Trust no component whose failure probability is not provably ≤1e-12. Every nov
 
 Every artifact (file, package, interface, architectural decision, process step) traces to a named, published pattern. New artifacts add a row to `vision.md` § "Pattern conformance index" *in the same commit*. Deviations from the published pattern are declared explicitly in the row's notes column (which property differs, why it's acceptable, what would restore full conformance) and, for substantive deviations, in `research.md`. Identifiers match pattern names when the match is total (`aggregateStatus`, future `MapeKLoop`, `SupervisionTree`, `CircuitBreaker`). Top-of-file comments name the pattern; JSDoc on public interfaces cites it. Silent deviation is itself a constitutional violation. See `vision.md` § 8 for the full rule + sources.
 
-### 9. Hypothesis-driven development
+### 9. Pre-registered hypothesis-driven development (iron rule)
 
-Every task — every PR, every novel package, every system-level success criterion — declares: **hypothesis** (Goal-Question-Metric, Basili 1994), **success threshold** (numeric or rubric), **pivot threshold** (numeric — the value below which the *approach* is abandoned, per Ries 2011 build-measure-learn), **measurement method** (exact runnable shell / OTEL / CI command — no English instructions; tag `<TBD-AFTER: <task-id>>` if the system isn't built yet), and **literature anchor** for the metric. Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. See `vision.md` § 9 for the full rule + sources.
+Every change — every PR, every novel package, **every bugfix**, every refactor — declares, **before code is written**: **hypothesis** (Goal-Question-Metric, Basili 1994), **success threshold** (numeric or rubric), **pivot threshold** (numeric — the value below which the *approach* is abandoned, per Ries 2011 build-measure-learn), **measurement method** (exact runnable shell / OTEL / CI command — no English instructions; tag `<TBD-AFTER: <task-id>>` if the system isn't built yet), and **literature anchor** for the metric.
+
+This is **iron**: no exemption for "small fixes", "obvious bugs", or "just a refactor". A bugfix's hypothesis is "the recurrence rate (or a stability metric to which it contributes) drops from X to Y after this fix"; if that statement can't be made, the root cause hasn't been identified.
+
+If the metric source doesn't exist yet, ship a **preparation PR** that lands the instrumentation, then open the change PR against the now-measurable baseline. Preparation PRs are first-class work; never skip the metric on the grounds that "we'll instrument later".
+
+Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. Post-hoc metrics (chosen after seeing the result) are forbidden. See `vision.md` § 9 for the full rule + sources, including the pre-registration anchor (Munafò et al. 2017, *Nature Human Behaviour*).
 
 ## How to claim and work a task
 
