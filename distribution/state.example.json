@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "defaults": {
+    "budget_tier": "Max5",
+    "observability": "sqlite",
+    "topology": "single-machine"
+  },
+  "ntfy": {
+    "topic": "minsky-REPLACE_ME_WITH_RANDOM_LOWERCASE_ALNUM_16"
+  },
+  "adapters": {},
+  "ledger": {},
+  "last_self_test": {}
+}
