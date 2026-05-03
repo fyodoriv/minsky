@@ -24,25 +24,69 @@
   - **Acceptance**: Issue filed; URLs linked from `research.md` and `competitors/omc.md`
   - **Risk**: Maintainer may reject if framed as a Minsky-specific need. Frame as "ecosystem alignment with the tasks.md spec" with concrete code-level changes pinned to specific OMC files.
 
-- [ ] Implement `claude-budget-guard` v0
+- [ ] `claude-budget-guard` v0 — full package shipped + extracted
   - **ID**: budget-guard-v0
+  - **Tags**: novel, extraction-target, parent
+  - **Estimate**: tracker — see sub-tasks
+  - **Blocked by**: budget-guard-flag-file, budget-guard-http-api, budget-guard-maciek-impl, budget-guard-publish-dry-run
+  - **Details**: This PR (the core decision logic + watchdog loop + tests) shipped under the same name; sub-tasks below ship the runtime envelopes (flag file, HTTP API, real Maciek Strategy) plus the npm dry-run. When the last sub-task lands, the full package is shipped and this tracker is removed.
+  - **Verification**: all four sub-tasks below complete; integration test for `user-stories/004-budget-auto-pause.md` passes against the assembled package.
+  - **Measurement**: `gh pr list --state merged --search 'budget-guard' --json number | jq length` returns ≥5 (this PR + four sub-task PRs).
+  - **Pivot**: if any sub-task discovers the original epic-level shape is wrong (e.g., flag-file model is too coarse for the dashboard), revisit the parent acceptance before continuing the chain.
+  - **Acceptance**: tracker task removed once all four sub-tasks merge.
+
+- [ ] `@minsky/budget-guard` — flag-file envelope (`.minsky/budget.flag`)
+  - **ID**: budget-guard-flag-file
   - **Tags**: novel, extraction-target
-  - **Estimate**: 1d
-  - **Details**: A watchdog (in the precise CS sense — periodic check loop with a deadline) that reads the `TokenMonitor` adapter and exposes "remaining minutes / tokens / cost / weekly headroom" via:
-    - flag file (`/var/run/minsky/budget.flag`) for shell scripts
-    - JSON API (`http://localhost:9876/budget`) for the dashboard and supervisor
-    Extract as a separate npm package (`@minsky/budget-guard`) from day one — useful to anyone running Claude Code on a budget.
-  - **Files**: `novel/adapters/token-monitor.ts`, `novel/adapters/token-monitor.maciek.ts`, `novel/budget-guard/`
-  - **Verification**:
-    - Trigger threshold by stubbing `TokenMonitor.remaining()` to return below 70%; assert `cat /var/run/minsky/budget.flag` shows `THROTTLE` within 10s
-    - `curl -s localhost:9876/budget | jq` returns shape `{ remaining: { tokens, minutes, cost }, weekly_headroom_pct, recommended_action }`
-    - `npm publish --dry-run --workspace novel/budget-guard` succeeds
-  - **Acceptance**:
-    - Flag file written within 10s of threshold crossing
-    - JSON API matches ARCHITECTURE.md spec
-    - Integration test for user-story 004 passes
-    - Published to npm as `@minsky/budget-guard`
-  - **Risk**: Maciek's TokenMonitor cache file format changes upstream — adapter test must run against a real cache file produced by the current Maciek version, not a fixture.
+  - **Parent**: budget-guard-v0
+  - **Estimate**: 2–3h
+  - **Details**: Wire `BudgetGuard`'s decision callback to write `${MINSKY_HOME}/.minsky/budget.flag` whose contents are one of `NORMAL` / `THROTTLE` / `PAUSE` / `WEEKLY_WARN`. Path deviation from task brief's `/var/run/minsky/`: v0 uses `.minsky/` because `/var/run/minsky/` requires root (rule #8 declared deviation in the package README). Write atomically via `fs.rename`.
+  - **Files**: `novel/budget-guard/src/flag-file.ts`, `novel/budget-guard/src/flag-file.test.ts`
+  - **Verification**: `await guard.tick()` with a circuit-break-fixture writes `PAUSE` to the flag file within 10 s; tasks-md tests pass.
+  - **Measurement**: `pnpm vitest run novel/budget-guard/src/flag-file.test.ts`.
+  - **Pivot**: if shell consumers ever need atomic *multi-field* state (action + reason + decided-at), pivot to writing a JSON file (`.minsky/budget.json`) and deprecate the single-word flag.
+  - **Acceptance**: flag file present + correct contents on every state transition; flag-file tests at 100 % coverage.
+  - **Risk**: filesystem races if multiple guards run. Mitigation: atomic rename + flock identical to setup.sh's lock pattern.
+
+- [ ] `@minsky/budget-guard` — HTTP API on `localhost:9876`
+  - **ID**: budget-guard-http-api
+  - **Tags**: novel, extraction-target
+  - **Parent**: budget-guard-v0
+  - **Estimate**: 3–4h
+  - **Details**: Tiny Hono server on `localhost:9876` exposing `GET /budget` returning the decision JSON shape from `ARCHITECTURE.md` § "Token economy": `{ remaining: { tokens, minutes, cost }, weekly_headroom_pct, recommended_action }`. Add Hono as a dep behind a thin adapter so we can swap (rule #2).
+  - **Files**: `novel/budget-guard/src/http-server.ts`, `novel/budget-guard/src/http-server.test.ts`
+  - **Verification**: `curl -s localhost:9876/budget | jq` returns the documented shape; vitest spins the server on an ephemeral port and asserts the JSON.
+  - **Measurement**: `pnpm vitest run novel/budget-guard/src/http-server.test.ts`.
+  - **Pivot**: if multiple consumers need different shapes — pivot to GraphQL or a typed RPC (tRPC) instead of REST.
+  - **Acceptance**: GET /budget returns the documented shape; tests cover normal, throttle, pause, weekly-warn states.
+  - **Risk**: port collision on 9876. Mitigation: env var `MINSKY_BUDGET_GUARD_PORT` overrides; default documented.
+
+- [ ] `@minsky/token-monitor` — Maciek `claude-monitor` Strategy implementation
+  - **ID**: budget-guard-maciek-impl
+  - **Tags**: novel, extraction-target
+  - **Parent**: budget-guard-v0
+  - **Estimate**: 4–6h
+  - **Details**: Real `TokenMonitor` Strategy against Maciek's Python `claude-monitor` cache file (path & format documented in their repo). Polls the cache, parses, returns `TokenSnapshot`. Adapter test runs against a real Maciek install (CI installs Maciek's pinned version once).
+  - **Files**: `novel/adapters/token-monitor/src/maciek.ts`, `novel/adapters/token-monitor/src/maciek.test.ts`
+  - **Verification**: with a real Maciek install, `new MaciekTokenMonitor().snapshot()` returns a `TokenSnapshot` whose `tokensRemainingInWindow` matches `claude-monitor --json`'s reported value.
+  - **Measurement**: `pnpm vitest run novel/adapters/token-monitor/src/maciek.test.ts` (gated on Maciek install on the runner).
+  - **Pivot**: if Maciek's cache format changes more than once a year — pivot to a custom `TokenMonitor` Strategy that polls Anthropic's API directly (when / if Anthropic exposes a usage endpoint).
+  - **Acceptance**: Maciek-backed `TokenMonitor.snapshot()` round-trips real cache values; integration test passes; pattern conformance row updated.
+  - **Risk**: Maciek's format changes upstream. Mitigation: pin a specific Maciek version in the adapter test; gate updates with the test (rule #7 chaos discipline).
+
+- [ ] `@minsky/budget-guard` + `@minsky/token-monitor` — npm publish dry-run + extraction
+  - **ID**: budget-guard-publish-dry-run
+  - **Tags**: extraction, publish
+  - **Parent**: budget-guard-v0
+  - **Blocked by**: budget-guard-flag-file, budget-guard-http-api, budget-guard-maciek-impl
+  - **Estimate**: 1h
+  - **Details**: Run `pnpm publish --dry-run --workspace novel/budget-guard` and the same for `@minsky/token-monitor`; ensure the published artifact has the right `files`, `main`, `types`, and a matching `README.md`. Publish under the `@minsky/*` scope when ready (separate manual step — `npm publish` is blocked-by-default per the `/next-task` skill, so this task only does the dry-run).
+  - **Files**: `novel/budget-guard/package.json`, `novel/adapters/token-monitor/package.json`
+  - **Verification**: dry-run output lists the documented files only (no `dist/*.d.ts.map`, no `tsconfig.json`); `gh pr` description records the dry-run output.
+  - **Measurement**: `pnpm publish --dry-run --workspace novel/budget-guard 2>&1 | grep -c '\.tgz'` returns 1.
+  - **Pivot**: if dry-run reveals files >100 KB, audit `files` field to exclude.
+  - **Acceptance**: Both packages dry-run cleanly; PR description records the published filenames + sizes.
+  - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
 - [ ] Define `claude-handoff-spec` v0
   - **ID**: handoff-spec-v0
