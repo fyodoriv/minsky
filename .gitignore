@@ -42,6 +42,9 @@ desktop.ini
 *.flag
 *.pid
 
+# Minsky setup.sh local state — reference template lives at distribution/state.example.json
+.minsky/
+
 # Claude Code local
 .claude/local/
 .claude/projects/*
