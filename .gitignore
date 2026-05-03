@@ -1,0 +1,50 @@
+# Node
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.pnp.*
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+coverage/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+.obsidian/
+*.swp
+*.swo
+*~
+
+# Obsidian scratch (daily notes, canvases) — keep tracked .md docs only
+*.canvas
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+
+# Minsky runtime state (per ARCHITECTURE.md — paths under .orchestrator/ are never committed)
+.orchestrator/state/
+.orchestrator/logs/
+.orchestrator/handoffs/
+*.flag
+*.pid
+
+# Claude Code local
+.claude/local/
+.claude/projects/*
+
+# Tailscale local state
+.tailscale/

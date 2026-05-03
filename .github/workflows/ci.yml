@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  markdownlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npx -y markdownlint-cli2 "**/*.md" "#node_modules" "#.minsky"
+
+  tasks-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npx -y @tasks-md/lint@latest TASKS.md
+
+  glossary-discipline:
+    # vision.md § 5: every coined term has a glossary anchor.
+    # This guard runs a literal grep for the section heading; if vision.md
+    # ever loses the Glossary, the constitutional rule is unenforceable.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if ! grep -q '## Glossary — every term has a CS anchor' vision.md; then
+            echo "vision.md is missing the Glossary section required by constitutional rule #5" >&2
+            exit 1
+          fi
+
+  ci:
+    needs: [markdownlint, tasks-lint, glossary-discipline]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all required checks green"
