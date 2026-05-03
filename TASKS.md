@@ -8,10 +8,17 @@
 
 ## P0
 
-- [ ] Production-grade `setup.sh` rewrite
+- [ ] Production-grade `setup.sh` rewrite (@claude-code)
   - **ID**: setup-sh-rewrite
   - **Tags**: infra, foundation, bash
   - **Estimate**: 1–2d
+  - **Plan**:
+    - [ ] setup.sh: rewrite with --doctor / --reset modes, flock lockfile, EXIT trap, ledger-cached steps
+    - [ ] .gitignore: add .minsky/
+    - [ ] distribution/state.example.json: documented schema (schema_version, defaults, ntfy.topic, adapters, ledger, last_self_test)
+    - [ ] setup.sh: failure-mode comment header per rule #7; reference selfTest contract at novel/adapters/observability/src/index.ts
+    - [ ] verify: shellcheck setup.sh; ./setup.sh --doctor exits 0; ./setup.sh --reset removes .minsky/ and rebuilds; three consecutive runs are idempotent; concurrent invocation blocked by flock
+    - [ ] scout + ship
   - **Details**: Idempotent, color/no-color/CI aware, three modes: default install, `--doctor` (self-tests only), `--reset` (nuke `.minsky/` and reinstall). Ledger-based step caching. Lockfile via `flock` on `.minsky/setup.lock`. State in `.minsky/state.json` with `{schema_version, defaults: {budget_tier: Max5, observability: sqlite, topology: single-machine}, ntfy.topic (auto-generated), adapters: {}, last_self_test: {}}`. Trap on EXIT — failures print failed step, state path, log path, smallest concrete next step. Final report: GREEN / YELLOW / RED with dashboard URL + Tailscale URL + ntfy topic. Anti-patterns: no `sudo`, no `rm -rf` outside `.minsky/`, no shell-rc mutation, no unpinned `curl|bash`. Define `selfTest()` adapter contract: `{status: green|yellow|red, message, latency_ms, last_check}`. Aggregation: red dominates yellow dominates green.
   - **Files**: `setup.sh`, `.minsky/state.example.json`, `novel/adapters/types.ts` (selfTest contract)
   - **Verification**:
