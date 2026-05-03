@@ -37,23 +37,11 @@
   - **Acceptance**: Both unit-file templates present and parameterized; supervisor restart-on-crash integration test passes on both platforms (or documented why not — e.g., CI runs only one platform)
   - **Risk**: launchd ↔ systemd semantic mismatch. `Restart=on-failure` (systemd) ≠ `KeepAlive=SuccessfulExit:false` (launchd) in subtle ways. Pin behavior with the integration test, not docs alone.
 
-- [ ] Implement `Observability` adapter v0
-  - **ID**: observability-adapter-v0
-  - **Tags**: novel, foundational
-  - **Estimate**: 4–6h
-  - **Details**: Interface + OTEL implementation. All other novel work depends on this for emitting and querying metrics/spans/logs. Start with Claude Code's native OTEL exporter; defer the Loki/Tempo/Prom/Grafana stack to `otel-lite-backend`.
-  - **Files**: `novel/adapters/observability.ts`, `novel/adapters/observability.otel.ts`, `novel/adapters/observability.test.ts`
-  - **Verification**:
-    - Run a local OTEL collector (`docker run -p 4317:4317 otel/opentelemetry-collector-contrib`) with stdout exporter
-    - `npm test novel/adapters/observability.test.ts` — `selfTest()` emits 1 trace, 1 metric, 1 log; collector stdout shows all three within 5s
-  - **Acceptance**: `selfTest()` green against a real OTEL collector; trace IDs propagate through `TRACEPARENT`; interface methods documented with JSDoc
-  - **Risk**: Claude Code's native OTEL exporter shape evolves between versions — pin a specific version in the adapter test and gate updates with the test.
-
 - [ ] Implement `claude-budget-guard` v0
   - **ID**: budget-guard-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 1d
-  - **Blocked by**: supervisor-setup, observability-adapter-v0
+  - **Blocked by**: supervisor-setup
   - **Details**: A watchdog (in the precise CS sense — periodic check loop with a deadline) that reads the `TokenMonitor` adapter and exposes "remaining minutes / tokens / cost / weekly headroom" via:
     - flag file (`/var/run/minsky/budget.flag`) for shell scripts
     - JSON API (`http://localhost:9876/budget`) for the dashboard and supervisor
@@ -98,7 +86,7 @@
   - **ID**: spec-monitor-skill
   - **Tags**: novel, extraction-target, skill
   - **Estimate**: 1d
-  - **Blocked by**: handoff-spec-v0, observability-adapter-v0
+  - **Blocked by**: handoff-spec-v0
   - **Details**: Claude Skill implementing runtime specification monitoring (Havelund & Goldberg 2008). Reads `vision.md` + last N handoffs (via handoff-spec parser) + recent commits, produces structured drift report. Conforms to agentskills.io spec.
   - **Files**: `novel/spec-monitor/SKILL.md`, related scripts, `novel/spec-monitor/test/synthetic-drift/`
   - **Verification**:
@@ -182,7 +170,6 @@
   - **ID**: dashboard-web-v0
   - **Tags**: novel, ux
   - **Estimate**: 1–2d
-  - **Blocked by**: observability-adapter-v0
   - **Details**: Hono or similar minimal web app, ~300 lines. Reads OTEL backend through Observability adapter. Mobile-friendly. Reachable via Tailscale. Shows the 10 success metrics from `vision.md`.
   - **Verification**:
     - `curl localhost:8080/` returns SSR HTML with all 10 metrics

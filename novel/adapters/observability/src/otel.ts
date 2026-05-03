@@ -1,0 +1,170 @@
+/**
+ * OpenTelemetry-backed Observability adapter — Strategy implementation
+ * (Gamma et al., *Design Patterns*, 1994) of the {@link Observability}
+ * interface defined in ./index.ts.
+ *
+ * Pattern conformance (rule #8 / vision.md § Pattern conformance index, row 24):
+ *   - This module:           Strategy of `Observability`. Conformance: full.
+ *   - Three-signal emission: traces (span = unit of work), metrics
+ *                            (counter = countable event), logs (record =
+ *                            structured event) per the OpenTelemetry
+ *                            specification (CNCF, 2020+).
+ *
+ * Constructor accepts optional exporters via dependency injection so tests
+ * can substitute `InMemorySpanExporter` / `InMemoryMetricExporter` /
+ * `InMemoryLogRecordExporter` and verify `selfTest()` behaviour without a
+ * docker collector. Defaults are OTLP HTTP exporters pointing at
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` (env var; default `http://localhost:4318`).
+ *
+ * v0 deviation declared per rule #8: this adapter does *not* register its
+ * providers globally via `trace.setGlobalTracerProvider` /
+ * `metrics.setGlobalMeterProvider` / `logs.setGlobalLoggerProvider`. Why
+ * acceptable: the only consumer in v0 is the adapter's own `selfTest()`;
+ * setting globals from a constructor causes test-isolation pollution and
+ * gives no value yet. What would restore the conventional OTEL global
+ * registration: a single explicit call site (e.g., `setup.sh`'s adapter
+ * bootstrap) that registers the chosen instance once at process start.
+ * Tracked as future task `register-otel-globals-at-bootstrap`.
+ */
+
+import { type Meter, type Tracer, metrics, trace } from "@opentelemetry/api";
+import { type Logger, SeverityNumber, logs } from "@opentelemetry/api-logs";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { Resource } from "@opentelemetry/resources";
+import {
+  type LogRecordExporter,
+  LoggerProvider,
+  SimpleLogRecordProcessor,
+} from "@opentelemetry/sdk-logs";
+import {
+  MeterProvider,
+  PeriodicExportingMetricReader,
+  type PushMetricExporter,
+} from "@opentelemetry/sdk-metrics";
+import {
+  BasicTracerProvider,
+  SimpleSpanProcessor,
+  type SpanExporter,
+} from "@opentelemetry/sdk-trace-base";
+import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+
+import type { Observability, SelfTestResult } from "./index.js";
+
+export interface OtelObservabilityConfig {
+  readonly serviceName?: string;
+  readonly serviceVersion?: string;
+  readonly traceExporter?: SpanExporter;
+  readonly metricExporter?: PushMetricExporter;
+  readonly logExporter?: LogRecordExporter;
+}
+
+/** Strategy implementation of {@link Observability} backed by OpenTelemetry. */
+export class OtelObservability implements Observability {
+  private readonly tracerProvider: BasicTracerProvider;
+  private readonly meterProvider: MeterProvider;
+  private readonly loggerProvider: LoggerProvider;
+  private readonly tracer: Tracer;
+  private readonly meter: Meter;
+  private readonly logger: Logger;
+
+  constructor(config: OtelObservabilityConfig = {}) {
+    const serviceName = config.serviceName ?? "minsky";
+    const serviceVersion = config.serviceVersion ?? "0.0.0";
+    const resource = new Resource({
+      [ATTR_SERVICE_NAME]: serviceName,
+      [ATTR_SERVICE_VERSION]: serviceVersion,
+    });
+
+    const traceExporter = config.traceExporter ?? new OTLPTraceExporter();
+    this.tracerProvider = new BasicTracerProvider({
+      resource,
+      spanProcessors: [new SimpleSpanProcessor(traceExporter)],
+    });
+    this.tracer = this.tracerProvider.getTracer(serviceName);
+
+    const metricExporter = config.metricExporter ?? new OTLPMetricExporter();
+    this.meterProvider = new MeterProvider({
+      resource,
+      readers: [
+        new PeriodicExportingMetricReader({
+          exporter: metricExporter,
+          exportIntervalMillis: 1000,
+        }),
+      ],
+    });
+    this.meter = this.meterProvider.getMeter(serviceName);
+
+    const logExporter = config.logExporter ?? new OTLPLogExporter();
+    this.loggerProvider = new LoggerProvider({ resource });
+    this.loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
+    this.logger = this.loggerProvider.getLogger(serviceName);
+  }
+
+  /**
+   * Emits exactly one span, one metric (counter increment), and one log. Returns
+   * `green` if the SDK accepted all three signals; `red` on any error.
+   *
+   * Health-probe contract per {@link SelfTestResult}; setup.sh's `--doctor`
+   * mode aggregates across adapters via {@link aggregateStatus}.
+   */
+  async selfTest(): Promise<SelfTestResult> {
+    const start = Date.now();
+    try {
+      // 1. Trace — span representing the self-test as a unit of work.
+      const span = this.tracer.startSpan("observability.selfTest");
+      span.setAttribute("selfTest.signal", "trace");
+      span.end();
+
+      // 2. Metric — a counter increment.
+      const counter = this.meter.createCounter("observability.selfTest.count", {
+        description: "Number of selfTest invocations",
+      });
+      counter.add(1, { signal: "metric" });
+
+      // 3. Log — a structured INFO record.
+      this.logger.emit({
+        severityNumber: SeverityNumber.INFO,
+        severityText: "INFO",
+        body: "observability.selfTest",
+        attributes: { signal: "log" },
+      });
+
+      // Flush all three pipelines so an in-memory exporter can observe them
+      // (and an OTLP exporter has at least attempted to send).
+      await this.tracerProvider.forceFlush();
+      await this.meterProvider.forceFlush();
+      await this.loggerProvider.forceFlush();
+
+      const latencyMs = Date.now() - start;
+      return {
+        status: "green",
+        message: "OTEL adapter emitted span, metric, log",
+        latencyMs,
+        lastCheck: new Date().toISOString(),
+      };
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      return {
+        status: "red",
+        message: `OTEL adapter selfTest failed: ${err instanceof Error ? err.message : String(err)}`,
+        latencyMs,
+        lastCheck: new Date().toISOString(),
+      };
+    }
+  }
+
+  /** Cleanly shut down all providers. Idempotent. */
+  async shutdown(): Promise<void> {
+    await Promise.all([
+      this.tracerProvider.shutdown(),
+      this.meterProvider.shutdown(),
+      this.loggerProvider.shutdown(),
+    ]);
+  }
+}
+
+// Re-export the API namespaces so consumers can access globals if they
+// register an instance themselves. v0 deviation: not registered automatically.
+export { metrics, trace, logs };
