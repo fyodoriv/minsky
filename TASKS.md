@@ -5,24 +5,13 @@
 <!-- policy: When closing a task, remove its entire block. History lives in git log per the tasks.md spec. -->
 <!-- policy: Investor / product-manager / growth-analyst personas only run when **Tags** contains business, growth, revenue, customer, or pricing. -->
 <!-- policy: Every term used here must appear in vision.md § Glossary or be sourced from a cited paper. New jargon → glossary entry in the same commit. -->
+<!-- policy: Per constitutional rule #9 (hypothesis-driven development), every new task entry MUST include — in addition to the existing Details / Files / Verification / Acceptance / Risk fields — a runnable measurement command (shell / OTEL query / CI script that produces the metric) and an explicit pivot threshold (the value below which the *approach* is abandoned, not just the change reverted). Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. Existing tasks predating rule #9 are retrofitted under task `rule-9-backfill-existing-tasks`. -->
+<!-- policy: Per constitutional rule #8 (pattern conformance), every new top-level artifact (file under novel/ or distribution/, root-level *.md, novel pnpm workspace package) requires a row in vision.md § Pattern conformance index in the same commit. -->
+<!-- policy: Per constitutional rule #7 (chaos engineering), every new novel package's README and every new user-story includes a "Failure modes & chaos verification" section with steady-state hypothesis, blast radius, operator escape hatch, and a failure-mode table (failure mode | trigger / fault axis | expected behavior — loud-crash-supervisor-restart / circuit-break-and-notify / graceful-degrade | chaos test). -->
 
 ## P0
 
-- [ ] Constitutional rule #9 (hypothesis-driven development) + measurable success-criteria audit + tools / literature integration
-  - **ID**: rule-9-and-measurable-success-criteria
-  - **Tags**: constitution, foundation, docs, measurement
-  - **Estimate**: 1d
-  - **Details**: Add new constitutional rule #9 to `vision.md` mandating hypothesis-driven development (HDD): every development task declares (a) the metric it improves, (b) success threshold (numeric or rubric-based), (c) pivot threshold (numeric — abandon the approach if not met after a defined window), (d) automated measurement method (exact shell command, OTEL query, CI script — reproducible by an outside observer with no manual steps), (e) literature anchor for the metric. Audit the existing 10-row success-criteria table in `vision.md` and add two columns: **Measurement method (automated)** and **Pivot threshold**. Update `TASKS.md` file-level policy comments to require those four fields on every new task entry (and add a CI lint that flags new tasks missing them — separate follow-up task). Integrate tools as a concrete part of the project: Promptfoo (prompt evals, already chosen), DSPy (prompt optimisation, already chosen), OpenTelemetry (metric collection, already chosen), GrowthBook or Statsig (system-level feature-flag A/B; evaluate in `research.md`). Anchor literature for the rule: Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of SE* 1994; Ries, *The Lean Startup*, 2011 (build-measure-learn, validated learning, pivot-or-persevere); Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020 (statistical rigour in A/B); Forsgren, Humble, Kim, *Accelerate*, 2018 (DORA's four-key-metrics for software delivery); Manzi, *Uncontrolled*, 2012 (causal inference outside the lab); Doerr, *Measure What Matters*, 2018 (OKR discipline). Cross-link from `vision.md` § 8 "Pattern conformance index" — rule #9 generalises rule #3 (test-first, metric-first, doc-first) the same way rule #8 generalised rule #5.
-  - **Files**: `vision.md` (new rule #9 + success-criteria table extension + 1+ glossary rows for retired metaphors if any introduced), `TASKS.md` (policy comments + spec for required task fields), `research.md` (HDD literature + GrowthBook/Statsig evaluation), `AGENTS.md` (rule #9 added to constitutional-rules section)
-  - **Verification**:
-    - `grep -E '^### 9\.' vision.md` finds the new rule heading
-    - `vision.md` success-criteria table has new columns "Measurement method (automated)" and "Pivot threshold" populated for **all 10** entries
-    - Each measurement-method cell is a runnable command or query (no English instructions; literal shell / SQL / OTEL syntax)
-    - `TASKS.md` file-level policy comments name the four new required fields
-    - `research.md` has "Hypothesis-driven development" subsection with the 6 literature sources and a GrowthBook-vs-Statsig comparison
-    - `markdownlint`, `tasks-lint`, `glossary-discipline` pass; CI green on all 8 jobs
-  - **Acceptance**: Rule #9 cites all 6 sources; success-criteria table fully populated with reproducible measurement methods + pivot thresholds; TASKS.md policy + spec updated; research.md HDD section + tool eval added; AGENTS.md constitutional-rules list includes rule #9; PR merges with CI green.
-  - **Risk**: Some current metrics don't have clean automated measurement today (e.g., spec-monitor isn't built yet — metric #3 can't be queried). **Mitigation:** for not-yet-implementable metrics, the measurement-method cell names the exact future query and tags it `<TBD-AFTER: <task-id>>` linking to the task that will land the prerequisite. The rule's point is to force the conversation upfront, not to fake measurements.
+(empty — work the highest-priority unblocked item from P1.)
 
 ## P1
 
@@ -240,6 +229,18 @@
   - **Verification**: `research.md` "Native WatchOS app" section documents trigger condition + scope sketch + estimated effort
   - **Acceptance**: research.md section added; trigger condition documented
   - **Risk**: Jumping to native too early eats scope. Pin trigger to a specific metric threshold, not a hunch.
+
+- [ ] Backfill rule-#9 fields (measurement command + pivot threshold) on tasks predating rule-#9 landing
+  - **ID**: rule-9-backfill-existing-tasks
+  - **Tags**: docs, conformance, scout
+  - **Estimate**: 2–3h
+  - **Details**: Constitutional rule #9 (`vision.md` § 9) requires every task to declare a runnable measurement command and a pivot threshold. Tasks added before rule #9 landed don't have these fields. Walk every existing task in `TASKS.md` and add **Measurement** (exact shell / OTEL / CI command — `<TBD-AFTER: …>` if the prerequisite system isn't built) and **Pivot** (numeric value at which the approach is abandoned). Drop any task that on review can't formulate a non-vanity metric — that's itself a rule-#9 finding.
+  - **Files**: `TASKS.md`
+  - **Verification**: every task block in `TASKS.md` has a `**Measurement**:` line and a `**Pivot**:` line; tasks-lint passes.
+  - **Acceptance**: All P1 / P2 / P3 tasks retrofitted; PR merges with all 8 CI gates green.
+  - **Measurement**: `awk '/^- \[ \]/{block=1} block && /^\s*- \*\*(Measurement|Pivot)\*\*:/{found++} /^$/{if(block && found<2){print "missing in:", task} block=0; found=0; task=""} block && /^- \[ \]/{task=$0}' TASKS.md` returns no missing lines.
+  - **Pivot**: if more than 30 % of existing tasks resist a meaningful pivot threshold (resist = "any value triggers the pivot trivially"), revisit rule #9 — the rule may be over-specified for research / spike tasks.
+  - **Risk**: Mechanical backfill produces empty / vacuous fields. Mitigation: for each task, draft the metric *as if proposing it fresh* — if it doesn't pass that bar, reword or delete the task.
 
 - [ ] DSPy idiom fit evaluation
   - **ID**: dspy-fit-eval

@@ -4,6 +4,38 @@ Living scan of the tools Minsky depends on, the tools we've considered, and the 
 
 This document operationalizes constitutional principle 1 — *don't reinvent the wheel*. **Quarterly: every entry is reviewed; choices are reconsidered; replacements are scanned.**
 
+## Hypothesis-driven development tooling
+
+Per constitutional rule #9 (`vision.md` § 9), every Minsky change is an experiment with an automated measurement and a *pre-declared pivot threshold*. Tools that enable this discipline:
+
+- **Promptfoo** (already chosen, see `Orchestrator` row below) — declarative prompt-eval framework with statistical reporting; satisfies the LLM-output-grading layer.
+- **DSPy** (already chosen, see `PromptOptimizer` row below) — Stanford's "programming-not-prompting" framework; metric-as-reward optimization for prompt A / B; satisfies persona-prompt optimization (rolled out by `mape-k-loop`).
+- **OpenTelemetry** (already chosen, see `Observability` row below) — universal metric / trace / log substrate; every measurement command in `vision.md` § "Success criteria" is an OTEL query against this stack.
+- **GrowthBook** (proposed — open-source, MIT) — feature-flagging + A / B testing platform, self-hostable. Satisfies the *system-level* experiment layer: gates new persona / adapter rollouts behind flags; runs Bayesian or frequentist analysis on system metrics; produces audit trails of which variant was active when.
+
+### GrowthBook vs Statsig
+
+| Dimension | GrowthBook | Statsig |
+|---|---|---|
+| Licence | MIT, self-hostable | Commercial (free tier ≤ 1 M events / mo) |
+| Statistical engine | Bayesian + frequentist | Bayesian + sequential |
+| Vendor lock-in risk | None (OSS) | High (proprietary cloud) |
+| Solo-dev fit | Excellent — Docker compose, no cloud account | Acceptable — free tier covers solo use, but cloud-only |
+| Constitutional fit (rule #1: don't reinvent the wheel; rule #2: every dep behind interface) | Full — fits the future `Experiment` adapter without lock-in | Partial — closed control plane breaks the data-plane-OSS-only preference (cf. Tailscale's exception) |
+
+**Decision:** adopt **GrowthBook** for the v0 `Experiment` adapter. Revisit only if scale exceeds 10 M events / month (we don't expect to). Tracked in the dependency table under a forthcoming `Experiment` interface row.
+
+### Operative literature
+
+The five papers / books rule #9 cites are operative reading for anyone proposing a new metric or task spec.
+
+- **Basili, Caldiera, Rombach — Goal-Question-Metric** (*Encyclopedia of Software Engineering* 1994). The canonical "goal → question → metric" formalisation. Every measurement-method cell in `vision.md` is a GQM-derived query.
+- **Ries — *The Lean Startup*** (2011). Supplies the pivot-or-persevere semantics. Pivot threshold = "if metric is below X for window Y, the *approach* (not the patch) is abandoned".
+- **Kohavi, Tang, Xu — *Trustworthy Online Controlled Experiments*** (Cambridge UP 2020). Mandatory before designing any A / B for system metrics; chapters 3, 5, 17 are the working subset.
+- **Forsgren, Humble, Kim — *Accelerate*** (2018). DORA's four-key-metrics — deployment frequency, lead time, MTTR, change-fail rate — feed `vision.md` success criteria #5 (MTTR) and #10 (throughput).
+- **Manzi — *Uncontrolled*** (2012). Calibrates the "we ran an A / B and it was significant" overclaim; the chapter on quasi-experimental causal inference is the one to internalise.
+- **Doerr — *Measure What Matters*** (2018). Outcome-vs-activity discipline. The rule's anti-pattern (vanity metrics) is operationalised here.
+
 ## How to read this file
 
 Each active dependency follows the same shape:
