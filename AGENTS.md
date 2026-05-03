@@ -69,6 +69,8 @@ This is **iron**: no exemption for "small fixes", "obvious bugs", or "just a ref
 
 If the metric source doesn't exist yet, ship a **preparation PR** that lands the instrumentation, then open the change PR against the now-measurable baseline. Preparation PRs are first-class work; never skip the metric on the grounds that "we'll instrument later".
 
+**Automation layer.** Rule #9 commits the repo to executing the contract, not just declaring it. Three timescales: per-PR (daily — `ci-experiment-runner-v0`), weekly–monthly (`experiment-tracker-v0`), quarterly (folded into `mape-k-loop-v0` and `review-q3-2026`). Pre-registration without execution is half a rule. See `vision.md` § 9 for the full architecture.
+
 Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. Post-hoc metrics (chosen after seeing the result) are forbidden. See `vision.md` § 9 for the full rule + sources, including the pre-registration anchor (Munafò et al. 2017, *Nature Human Behaviour*).
 
 ### 10. Deterministic enforcement (iron rule)
