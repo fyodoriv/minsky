@@ -109,6 +109,26 @@ Why this rule exists, separately from rule #5: at 3am, "this module implements X
 
 Sources: Brooks, *No Silver Bullet*, 1986 (essential complexity comes from the problem; named patterns reduce accidental complexity); Lampson, "Hints for Computer System Design", SOSP 1983 ("use a good idea more than once"); Gabriel, *Patterns of Software*, 1996 (pattern languages as architectural commitment); the Gang of Four, *Design Patterns*, 1994 (the foundational catalogue).
 
+### 9. Hypothesis-driven development — every change declares metric, threshold, pivot, and measurement command
+
+Rule #3 said *every feature begins with a failing test, a metric with a numeric threshold, and the doc explaining why*. This rule formalises rule #3 into the discipline of hypothesis-driven development (HDD): every change is treated as an experiment with a falsifiable hypothesis, an automated measurement, and a *pre-declared* pivot criterion. The repo develops by satisfying clearly measurable goals; if the metric doesn't move, the approach is abandoned, not the metric.
+
+Every development task — every PR, every novel package, every adapter, every system-level success criterion — declares five things:
+
+1. **Hypothesis.** The change improves which behaviour, by how much, why we believe so. Anchored in the Goal-Question-Metric paradigm (Basili, Caldiera, Rombach 1994): state the goal, derive the question that operationalises it, derive the metric that answers the question. Tasks that can't formulate a clear hypothesis aren't ready to start.
+2. **Success threshold.** Numeric value (or rubric grade) at or above which the change is kept. Tracks the success-criterion column in `vision.md` § "Success criteria".
+3. **Pivot threshold.** Value below which the *approach is abandoned* — not just the change reverted. The Lean Startup discipline (Ries 2011): build–measure–learn, validated learning, *pivot-or-persevere*. Without a pre-declared pivot, sunk-cost fallacy keeps a wrong approach alive long after the data has spoken.
+4. **Measurement method (automated).** Exact shell command, OTEL query, or CI script that produces the metric. Reproducible by an outside observer with no manual steps. No English instructions ("count the lines"); literal syntax. If the prerequisite system isn't built yet, name the command and tag it `<TBD-AFTER: <task-id>>` linking to the task that lands the prerequisite.
+5. **Literature anchor.** A paper or framework that justifies the metric's choice and the threshold's defensibility. Per rule #5 / rule #8.
+
+The same five fields apply to the system-level table at `vision.md` § "Success criteria" — every metric carries them.
+
+Why a separate rule from #3: rule #3 says *do these things first*. Rule #9 says *make them executable and falsifiable*. Without #9, "metric-first" can degenerate into vague KPIs that nobody actually queries.
+
+**Anti-pattern: vanity metrics.** Counts that always go up (lines of code, commits made, hours spent, tasks "in flight") are *forbidden* as success metrics — they incentivise activity, not outcomes. Ries 2011 names this trap; Doerr 2018 (OKRs) reinforces: *measure outcomes, not activities*. The spec-monitor flags new tasks proposing vanity metrics during runtime specification monitoring.
+
+Sources: Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of Software Engineering* 1994; Ries, *The Lean Startup*, 2011 (build-measure-learn; pivot-or-persevere); Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge University Press 2020 (statistical rigour in A/B testing); Forsgren, Humble, Kim, *Accelerate*, 2018 (DORA's four-key-metrics for software-delivery performance — deployment frequency, lead time, MTTR, change-fail rate); Manzi, *Uncontrolled*, 2012 (causal inference outside the lab); Doerr, *Measure What Matters*, 2018 (OKR discipline; outcomes not activities).
+
 ## Pattern conformance index
 
 Operationalises rule #8. Each row maps a Minsky artifact (file path, package, interface, architectural decision, process step) to its governing pattern, the published source, and its conformance level. **Every PR that adds a new top-level artifact adds a row in the same commit** (a CI lint will eventually enforce this; tracked in TASKS.md).
@@ -143,6 +163,7 @@ Conformance levels:
 | 20 | TypeScript strict++ + Biome + lefthook | Defensive programming + early-failure / fail-fast | Hunt & Thomas, *The Pragmatic Programmer*, 1999 (Tip 32 "crash early"); Lampson 1983 (above) hint "use exceptions only for exceptional conditions"; Beck, *Extreme Programming Explained*, 1999 (continuous integration) | full | Strict types catch defects at compile; Biome catches style/complexity at lint; lefthook fails fast on commit. The constraint (rule #6) is moved to the cheapest possible point. |
 | 21 | The `(@agent-id)` claim convention in TASKS.md | Lease | Gray & Cheriton, "Leases: An Efficient Fault-Tolerant Mechanism for Distributed File Cache Consistency", *SOSP* 1989 | partial | Time-bounded exclusive access. **Deviation:** no explicit timeout; staleness is detected by the picker rule "Found + stale (no related code) → unclaim". **Why acceptable:** humans + git history are the timeout signal. |
 | 22 | This index | Pattern language / pattern catalogue | Alexander et al., *A Pattern Language*, 1977; Gabriel, *Patterns of Software*, 1996 | full | A living catalogue indexed by artifact, anchored in source, with explicit conformance level — the form pattern languages take in software architecture per Gabriel. |
+| 23 | Constitutional rule #9 + the per-task measurement contract | Goal-Question-Metric paradigm | Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of Software Engineering* 1994 | full | Goal = success criterion. Question = "what would tell us the goal is being met?". Metric = the OTEL query / shell command in the measurement-method cell. Pivot threshold operationalises the Lean-Startup pivot-or-persevere check (Ries 2011). |
 
 When you add a new top-level artifact (file, package, interface, named architectural decision, named process step), append a row here in the same commit. When a deviation evolves, edit the row's notes column. When an artifact is removed, remove its row.
 
@@ -243,18 +264,22 @@ When you introduce a new word in any Minsky doc, **add a row to the in-use table
 
 These metrics are tracked on the dashboard from day one. Each has a corresponding integration test in `user-stories/`. Targets are starting points; the MAPE-K loop adjusts them based on observed reality.
 
-| # | Metric | Target | SLI source |
-|---|--------|--------|------------|
-| 1 | Loop uptime, 30/90/365 day | 99% / 97% / 95% | systemd active state |
-| 2 | Tokens per closed user-story | Decreasing trend month-over-month | OTEL token sum / closed-stories count |
-| 3 | Specification alignment | 95%+ spec-monitor runs finding no specification drift | spec-monitor log pass rate |
-| 4 | Self-improvement velocity | ≥4 prompt improvements/month with measured gains, after Q1 | A/B test win count from DSPy adapter |
-| 5 | Mean time to recovery (MTTR) | <5 min from process death to next claim | Supervisor restart-to-claim latency |
-| 6 | Time on user's wrist (inverted) | <60 sec/day to confirm health | Watch surface dwell time |
-| 7 | Extraction count | ≥4 OSS repos extracted by month 6 | GitHub repo count under user account |
-| 8 | Dependency interface coverage | 100% of deps behind adapter | Static check in CI |
-| 9 | Token-budget honoring | Zero hard-rate-limit hits per week | OTEL 429 count |
-| 10 | Task throughput | Sustained tasks/day at chosen budget | tasks.md commit log |
+Per constitutional rule #9, every row carries a **success threshold**, a **pivot threshold** (below which the *approach* is reconsidered), and a **measurement method** that is an exact runnable command — reproducible by an outside observer with no manual steps. Where the prerequisite system isn't built yet, the command names the future query and tags it `<TBD-AFTER: <task-id>>` linking to the task that lands it.
+
+| # | Metric | Success threshold | Pivot threshold | Measurement method (automated) | Literature anchor |
+|---|--------|-------------------|-----------------|-------------------------------|-------------------|
+| 1 | Loop uptime, 30 / 90 / 365 d | 99 % / 97 % / 95 % | <90 % over 30 d → reconsider supervisor design | `systemctl --user is-active minsky-tick-loop && journalctl --user -u minsky-tick-loop --since="30 days ago" -o json \| node scripts/uptime.mjs` ⟨TBD-AFTER: supervisor-setup⟩ | Beyer et al., *SRE* 2016, Ch. 4 (SLI / SLO) |
+| 2 | Tokens per closed user-story | Decreasing trend month-over-month (≥5 % MoM) | Flat or rising for 3 consecutive months → MAPE-K loop isn't helping; pivot the autonomic manager | OTEL trace query: `sum(token_count{event="user_story.complete"}[30d]) / count(span{name="user_story.complete"}[30d])` ⟨TBD-AFTER: observability-adapter-v0⟩ | Goldratt TOC (improving the constraint should move this metric) |
+| 3 | Specification alignment | ≥95 % of spec-monitor runs find no specification drift | <85 % over 7 d → spec is wrong OR system is misaligned; trigger spec audit | `claude-spec-monitor --report --json \| jq '.passed / .total'` ⟨TBD-AFTER: spec-monitor-skill⟩ | Havelund & Goldberg, "Verify Your Runs", *VSTTE* 2008 |
+| 4 | Self-improvement velocity | ≥4 prompt rollouts / month with sustained gain (≥10 %, p < 0.05, 7 d post-rollout) after Q1 | <2 / month sustained 3 months → MAPE-K design or DSPy choice is wrong; pivot | `git log --grep='mape-k rollout' constraints.md --since="30 days ago" \| wc -l` plus DSPy A/B export ⟨TBD-AFTER: mape-k-loop-v0⟩ | Khattab DSPy 2023; Kohavi *Trustworthy* 2020 (statistical rigour) |
+| 5 | Mean time to recovery (MTTR) | <5 min p95 from process death to next claim | p95 >10 min sustained 7 d → supervisor backoff or claim-resume is wrong | OTEL: `histogram_quantile(0.95, supervisor_restart_to_claim_latency_seconds[7d])` ⟨TBD-AFTER: observability-adapter-v0⟩ | Forsgren et al., *Accelerate* 2018 (DORA MTTR) |
+| 6 | Wrist dwell (inverted) | ≤60 s / day | >120 s / day for 14 d → surface is too informative or system is too unhealthy; redesign | `count(http_get_total{path="/watch.json"}[1d]) * estimated_dwell_seconds_per_request` (constant ≈ 2 s) ⟨TBD-AFTER: dashboard-web-v0⟩ | Card & Mackinlay 1999; Weiser & Brown 1995 (calm tech: dwell as friction) |
+| 7 | Extraction count | ≥4 OSS repos extracted by month 6 | <2 by month 4 → re-evaluate extraction policy / scope | `gh repo list fyodoriv --json name,createdAt,description --jq '[.[] \| select(.description \| test("@minsky\|claude-")) ] \| length'` | rule #1 (don't reinvent the wheel) — extraction is the operationalisation |
+| 8 | Dependency interface coverage | 100 % of named deps behind adapter | ≥1 unhidden dep persisting >1 sprint → fix with adapter wrap or task | `node scripts/dep-coverage.mjs` (greps `novel/**/*.ts` excluding `novel/adapters/**` for vendor imports listed in ARCHITECTURE.md dependency table) ⟨TBD-AFTER: ci-lint-pattern-index⟩ | rule #2 (every dep behind interface) |
+| 9 | Token-budget honoring | 0 hard 429 / week sustained 30 d | ≥1 / week sustained 4 weeks → budget-guard logic is broken; pivot | OTEL counter: `sum(rate(claude_code_api_errors_total{status="429"}[7d]))` ⟨TBD-AFTER: observability-adapter-v0 + budget-guard-v0⟩ | Beyer SRE 2016 (error budget) |
+| 10 | Task throughput | Sustained tasks / day at observed budget (≥1 / day at green budget) | <1 / day for 14 d at green budget → bottleneck elsewhere; analyse via TOC | `git log --since="30 days ago" --oneline --grep='^feat\|^fix\|^docs\|^chore' \| wc -l` divided by 30 (close-task removal commits) | Goldratt TOC (throughput as the goal of any system) |
+
+Tooling note: GrowthBook (open-source feature flags + A/B testing, MIT) is the planned `Experiment` adapter for system-level rollouts behind these metrics; see `research.md` § "Hypothesis-driven development tooling".
 
 ## License & openness
 

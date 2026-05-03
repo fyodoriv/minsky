@@ -61,6 +61,10 @@ Trust no component whose failure probability is not provably ≤1e-12. Every nov
 
 Every artifact (file, package, interface, architectural decision, process step) traces to a named, published pattern. New artifacts add a row to `vision.md` § "Pattern conformance index" *in the same commit*. Deviations from the published pattern are declared explicitly in the row's notes column (which property differs, why it's acceptable, what would restore full conformance) and, for substantive deviations, in `research.md`. Identifiers match pattern names when the match is total (`aggregateStatus`, future `MapeKLoop`, `SupervisionTree`, `CircuitBreaker`). Top-of-file comments name the pattern; JSDoc on public interfaces cites it. Silent deviation is itself a constitutional violation. See `vision.md` § 8 for the full rule + sources.
 
+### 9. Hypothesis-driven development
+
+Every task — every PR, every novel package, every system-level success criterion — declares: **hypothesis** (Goal-Question-Metric, Basili 1994), **success threshold** (numeric or rubric), **pivot threshold** (numeric — the value below which the *approach* is abandoned, per Ries 2011 build-measure-learn), **measurement method** (exact runnable shell / OTEL / CI command — no English instructions; tag `<TBD-AFTER: <task-id>>` if the system isn't built yet), and **literature anchor** for the metric. Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. See `vision.md` § 9 for the full rule + sources.
+
 ## How to claim and work a task
 
 Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasksmd/tasks.md).
