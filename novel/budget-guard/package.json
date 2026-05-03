@@ -20,6 +20,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@minsky/token-monitor": "workspace:*"
+    "@hono/node-server": "^1.19.14",
+    "@minsky/token-monitor": "workspace:*",
+    "hono": "^4.12.14"
   }
 }
