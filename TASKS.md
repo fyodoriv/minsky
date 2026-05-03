@@ -28,25 +28,12 @@
   - **ID**: budget-guard-v0
   - **Tags**: novel, extraction-target, parent
   - **Estimate**: tracker — see sub-tasks
-  - **Blocked by**: budget-guard-flag-file, budget-guard-http-api, budget-guard-maciek-impl, budget-guard-publish-dry-run
+  - **Blocked by**: budget-guard-http-api, budget-guard-maciek-impl, budget-guard-publish-dry-run
   - **Details**: This PR (the core decision logic + watchdog loop + tests) shipped under the same name; sub-tasks below ship the runtime envelopes (flag file, HTTP API, real Maciek Strategy) plus the npm dry-run. When the last sub-task lands, the full package is shipped and this tracker is removed.
   - **Verification**: all four sub-tasks below complete; integration test for `user-stories/004-budget-auto-pause.md` passes against the assembled package.
   - **Measurement**: `gh pr list --state merged --search 'budget-guard' --json number | jq length` returns ≥5 (this PR + four sub-task PRs).
   - **Pivot**: if any sub-task discovers the original epic-level shape is wrong (e.g., flag-file model is too coarse for the dashboard), revisit the parent acceptance before continuing the chain.
   - **Acceptance**: tracker task removed once all four sub-tasks merge.
-
-- [ ] `@minsky/budget-guard` — flag-file envelope (`.minsky/budget.flag`) (@claude-code)
-  - **ID**: budget-guard-flag-file
-  - **Tags**: novel, extraction-target
-  - **Parent**: budget-guard-v0
-  - **Estimate**: 2–3h
-  - **Details**: Wire `BudgetGuard`'s decision callback to write `${MINSKY_HOME}/.minsky/budget.flag` whose contents are one of `NORMAL` / `THROTTLE` / `PAUSE` / `WEEKLY_WARN`. Path deviation from task brief's `/var/run/minsky/`: v0 uses `.minsky/` because `/var/run/minsky/` requires root (rule #8 declared deviation in the package README). Write atomically via `fs.rename`.
-  - **Files**: `novel/budget-guard/src/flag-file.ts`, `novel/budget-guard/src/flag-file.test.ts`
-  - **Verification**: `await guard.tick()` with a circuit-break-fixture writes `PAUSE` to the flag file within 10 s; tasks-md tests pass.
-  - **Measurement**: `pnpm vitest run novel/budget-guard/src/flag-file.test.ts`.
-  - **Pivot**: if shell consumers ever need atomic *multi-field* state (action + reason + decided-at), pivot to writing a JSON file (`.minsky/budget.json`) and deprecate the single-word flag.
-  - **Acceptance**: flag file present + correct contents on every state transition; flag-file tests at 100 % coverage.
-  - **Risk**: filesystem races if multiple guards run. Mitigation: atomic rename + flock identical to setup.sh's lock pattern.
 
 - [ ] `@minsky/budget-guard` — HTTP API on `localhost:9876`
   - **ID**: budget-guard-http-api
@@ -78,7 +65,7 @@
   - **ID**: budget-guard-publish-dry-run
   - **Tags**: extraction, publish
   - **Parent**: budget-guard-v0
-  - **Blocked by**: budget-guard-flag-file, budget-guard-http-api, budget-guard-maciek-impl
+  - **Blocked by**: budget-guard-http-api, budget-guard-maciek-impl
   - **Estimate**: 1h
   - **Details**: Run `pnpm publish --dry-run --workspace novel/budget-guard` and the same for `@minsky/token-monitor`; ensure the published artifact has the right `files`, `main`, `types`, and a matching `README.md`. Publish under the `@minsky/*` scope when ready (separate manual step — `npm publish` is blocked-by-default per the `/next-task` skill, so this task only does the dry-run).
   - **Files**: `novel/budget-guard/package.json`, `novel/adapters/token-monitor/package.json`
@@ -301,6 +288,18 @@
   - **Acceptance**: matrix passes; failure-mode table rows 1–4 in `distribution/README.md` are demonstrably exercised by the test.
   - **Risk**: GitHub Actions Ubuntu runners run as a non-login user; user-systemd may need explicit `loginctl enable-linger`. Mitigation: document the workaround inline in the workflow.
   - **Literature anchor**: Forsgren et al., *Accelerate*, 2018 (test reliability as a DORA prerequisite).
+
+- [ ] Exclude nested `node_modules/` from `markdownlint-cli2` glob
+  - **ID**: markdownlint-nested-node-modules
+  - **Tags**: ci, hygiene, scout
+  - **Estimate**: 15m
+  - **Details**: `package.json`'s `lint:md` script ignores only top-level `node_modules` (`#node_modules`). When a workspace package installs its own deps (e.g., `novel/adapters/observability/node_modules/@opentelemetry/semantic-conventions/README.md`), markdownlint scans those vendored READMEs and fails on third-party formatting (currently 2 errors in `@opentelemetry/semantic-conventions`). Surfaced while shipping `budget-guard-flag-file` — the failure is unrelated to local edits and unactionable in this repo. Fix: change `#node_modules` to `#**/node_modules` in the script's ignore list.
+  - **Files**: `package.json`
+  - **Verification**: `pnpm lint:md` exits 0 on a clean main checkout with workspace deps installed.
+  - **Measurement**: `pnpm lint:md 2>&1 | grep -c 'node_modules'` returns 0.
+  - **Pivot**: if `**/node_modules` glob is honored differently across markdownlint-cli2 versions, pin the version (covered by `ci-pin-tooling-versions`) and codify the working glob in a comment.
+  - **Acceptance**: `pnpm lint:md` is green on a fresh `pnpm install`; CI markdownlint job stops failing on third-party READMEs.
+  - **Risk**: An overly broad ignore could silence local docs in nested workspace packages. Mitigation: glob is scoped to `node_modules/` directory names only, never matches workspace source.
 
 - [ ] Pin tooling versions in CI workflow (`@tasks-md/lint`, `markdownlint-cli2`)
   - **ID**: ci-pin-tooling-versions
