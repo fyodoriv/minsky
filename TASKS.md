@@ -24,24 +24,10 @@
   - **Acceptance**: Issue filed; URLs linked from `research.md` and `competitors/omc.md`
   - **Risk**: Maintainer may reject if framed as a Minsky-specific need. Frame as "ecosystem alignment with the tasks.md spec" with concrete code-level changes pinned to specific OMC files.
 
-- [ ] Set up process supervision (systemd / launchd templates)
-  - **ID**: supervisor-setup
-  - **Tags**: infra, ops
-  - **Estimate**: 1d
-  - **Details**: Create unit file templates per ARCHITECTURE.md § "Process supervision tree". Linux systemd version first; macOS launchd version second. Define restart policies per the document (one-for-one for `budget-guard` and `dashboard-web`; backoff for `tick-loop`).
-  - **Files**: `distribution/systemd/`, `distribution/launchd/`
-  - **Verification**:
-    - Linux: `systemctl --user start minsky-supervisor && systemctl --user status minsky-supervisor` reports `active (running)`
-    - macOS: `launchctl load ~/Library/LaunchAgents/com.minsky.supervisor.plist && launchctl list | grep minsky` reports the job
-    - Crash test: `systemctl --user kill -s SIGKILL minsky-tick-loop && sleep 5 && systemctl --user status minsky-tick-loop` shows respawn
-  - **Acceptance**: Both unit-file templates present and parameterized; supervisor restart-on-crash integration test passes on both platforms (or documented why not — e.g., CI runs only one platform)
-  - **Risk**: launchd ↔ systemd semantic mismatch. `Restart=on-failure` (systemd) ≠ `KeepAlive=SuccessfulExit:false` (launchd) in subtle ways. Pin behavior with the integration test, not docs alone.
-
 - [ ] Implement `claude-budget-guard` v0
   - **ID**: budget-guard-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 1d
-  - **Blocked by**: supervisor-setup
   - **Details**: A watchdog (in the precise CS sense — periodic check loop with a deadline) that reads the `TokenMonitor` adapter and exposes "remaining minutes / tokens / cost / weekly headroom" via:
     - flag file (`/var/run/minsky/budget.flag`) for shell scripts
     - JSON API (`http://localhost:9876/budget`) for the dashboard and supervisor
@@ -137,7 +123,7 @@
   - **ID**: first-integration-test
   - **Tags**: testing, validation
   - **Estimate**: 6h
-  - **Blocked by**: supervisor-setup, budget-guard-v0
+  - **Blocked by**: budget-guard-v0
   - **Details**: Implement integration test for `user-stories/001-loop-runs-overnight.md`. Compressed simulation, 60-minute window standing in for an 8h overnight run.
   - **Verification**: `npm test user-stories/001-loop-runs-overnight.test.ts` passes locally and on CI; OTEL collector receives ≥1 span per task type; CI workflow shows green
   - **Acceptance**: Test passes; metrics emit valid OTEL; CI green
@@ -272,6 +258,19 @@
   - **Verification**: a synthetic PR adding a new top-level file without an index row fails the new check; the same PR with a row passes; opt-out comment is honored; CI runs the new check on every PR.
   - **Acceptance**: Script + CI job ship together; new check fails fast on a synthetic test fixture; rule #8 is now mechanically enforced.
   - **Risk**: False positives if path matching is too strict (e.g., new test file). Mitigation: scope to `novel/**`, top-level docs (`*.md` at root), `setup.sh`, `distribution/**`, `.github/workflows/**` — not test files or fixtures.
+
+- [ ] Supervisor integration tests across systemd + launchd
+  - **ID**: supervisor-integration-tests
+  - **Tags**: infra, testing, scout
+  - **Estimate**: 1d
+  - **Details**: Validate the supervisor unit-file templates (shipped under `distribution/systemd/`, `distribution/launchd/`) against real OS supervisors. Linux: spin a Linux runner in CI (or matrix-ed GitHub Actions runner) that exercises `systemctl --user enable --now minsky-supervisor.target`, then SIGKILLs `minsky-tick-loop` and asserts respawn within 10 s. macOS: a separate runner that bootstraps the LaunchAgents and asserts the same on launchctl. Both back the failure-mode rows 1–4 in `distribution/README.md`. Deferred from `supervisor-setup` per the "documented why not" clause.
+  - **Files**: `.github/workflows/ci.yml` (add a Linux integration job + a macOS one); `distribution/test-supervisor.sh` (a portable test driver invoked by both)
+  - **Verification**: CI matrix has linux-supervisor-integration and macos-supervisor-integration jobs that pass against the templates from `distribution/`; the smoke test in `distribution/lint-units.sh` continues to run on every PR.
+  - **Measurement**: `gh run list --workflow ci.yml --json conclusion,name --jq '.[] | select(.name | test("supervisor-integration"))'` returns conclusion=success.
+  - **Pivot**: if the Linux runner can't run `systemctl --user` (CI sandboxes may lack a user-systemd instance) → drop to a `dbus-run-session` workaround OR move integration tests to a self-hosted runner; if both fail, keep the smoke-only path and rely on the per-platform manual run documented in `distribution/README.md`.
+  - **Acceptance**: matrix passes; failure-mode table rows 1–4 in `distribution/README.md` are demonstrably exercised by the test.
+  - **Risk**: GitHub Actions Ubuntu runners run as a non-login user; user-systemd may need explicit `loginctl enable-linger`. Mitigation: document the workaround inline in the workflow.
+  - **Literature anchor**: Forsgren et al., *Accelerate*, 2018 (test reliability as a DORA prerequisite).
 
 - [ ] Pin tooling versions in CI workflow (`@tasks-md/lint`, `markdownlint-cli2`)
   - **ID**: ci-pin-tooling-versions
