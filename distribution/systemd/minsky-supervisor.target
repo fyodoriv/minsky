@@ -1,0 +1,23 @@
+# Minsky supervisor target — groups all minsky child services so they start /
+# stop together. Following systemd's documented "target as supervisor group"
+# convention; not a process supervisor in the Erlang/OTP sense (systemd itself
+# is the supervisor primitive — see ARCHITECTURE.md § "Process supervision
+# tree" and vision.md § "Pattern conformance index" row 4 for the partial-
+# conformance declaration).
+#
+# Install: copy to ~/.config/systemd/user/ after envsubst on placeholders.
+# Placeholders this template uses (substituted by setup.sh):
+#   ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+#
+# Activation:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now minsky-supervisor.target
+
+[Unit]
+Description=Minsky supervisor target — autonomous Claude Code 24/7 loop
+Wants=minsky-tick-loop.service
+Wants=minsky-budget-guard.service
+After=network-online.target
+
+[Install]
+WantedBy=default.target

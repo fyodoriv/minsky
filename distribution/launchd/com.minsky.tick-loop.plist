@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Minsky tick-loop — launchd LaunchAgent for macOS.
+
+Pattern: OTP "transient" restart (Armstrong 2007). launchd's `KeepAlive`
+with `SuccessfulExit=false` is the closest equivalent: keep alive only if
+the process exited non-zero — analogous to systemd's `Restart=on-failure`.
+
+Placeholders substituted by setup.sh via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist
+  launchctl enable gui/$(id -u)/com.minsky.tick-loop
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.tick-loop</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>${MINSKY_HOME}/distribution/launchd/run-tick-loop.sh</string>
+    </array>
+
+    <!-- Restart only on non-zero exit (transient policy per Armstrong 2007). -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Backoff between respawn attempts; caps API hammering on systematic failures. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>${MINSKY_HOME}/.minsky/tick-loop.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${MINSKY_HOME}/.minsky/tick-loop.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,30 @@
+# Minsky budget-guard — watchdog (in the precise CS sense, hardware/OS
+# watchdog literature) that polls the TokenMonitor and pauses tick claims
+# at relative thresholds (70% / 85% / weekly-warn). Restart=always because
+# this process must outlive every other unit — without it, the tick-loop
+# can hit a hard 429 and break (vision.md success criterion #9).
+#
+# Pattern: "one-for-one" supervisor restart strategy (Armstrong 2007) —
+# this unit's death is non-cascading; only this unit restarts.
+# Conformance: partial — see vision.md § "Pattern conformance index" row 4.
+
+[Unit]
+Description=Minsky budget-guard — token-budget watchdog (rule #9 metric source)
+PartOf=minsky-supervisor.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${MINSKY_HOME}
+Environment=MINSKY_HOME=${MINSKY_HOME}
+ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-budget-guard.sh
+
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minsky-budget-guard
+
+[Install]
+WantedBy=minsky-supervisor.target

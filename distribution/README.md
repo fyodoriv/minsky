@@ -1,0 +1,98 @@
+# `distribution/` — Process supervision unit-file templates
+
+Holds the OS-level service definitions that supervise Minsky's runtime processes (the autonomous Claude Code loop, the budget-guard watchdog, and forthcoming dashboard / notifier-relay units).
+
+## Pattern conformance
+
+Per [vision.md § "Pattern conformance index"](../vision.md#pattern-conformance-index) row 4:
+
+- **Supervision tree** — OTP supervision behaviour (Armstrong, *Programming Erlang*, 2007). Conformance: **partial.** Restart strategies match — `Restart=on-failure` (systemd) / `KeepAlive={SuccessfulExit:false}` (launchd) ≅ OTP "transient"; `Restart=always` / `KeepAlive=true` ≅ OTP "permanent". Supervisor primitive is systemd / launchd, not BEAM.
+- **Why partial.** Erlang spawns processes in microseconds; systemd respawn is ~100 ms. **Why acceptable:** tick cadence is minutes-to-hours so 100 ms respawn is invisible to the metric in `vision.md` § "Success criteria" #5 (MTTR < 5 min p95).
+- **What restoration to full conformance would require.** A BEAM-based supervisor (e.g., write the supervisor in Erlang or Elixir and have it spawn `claude -p` subprocesses). Out of scope for solo-dev tier.
+
+## Files
+
+```text
+distribution/
+├── systemd/                                 # Linux
+│   ├── minsky-supervisor.target             # groups the others (Wants=)
+│   ├── minsky-tick-loop.service             # transient (Restart=on-failure + backoff)
+│   └── minsky-budget-guard.service          # permanent (Restart=always)
+├── launchd/                                 # macOS LaunchAgents
+│   ├── com.minsky.tick-loop.plist           # transient (KeepAlive: SuccessfulExit=false)
+│   └── com.minsky.budget-guard.plist        # permanent (KeepAlive=true)
+├── lint-units.sh                            # smoke-tests templates pre-deploy
+└── state.example.json                       # reference schema for setup.sh
+```
+
+Future units (`minsky-dashboard-web`, `minsky-notifier-relay`) land in the corresponding adapter / package PRs — see `dashboard-web-v0` and the notifier-relay scout task in `TASKS.md`.
+
+## Parameterisation
+
+Templates use shell-style `${VAR}` placeholders that `setup.sh` (P0 `setup-sh-rewrite`, shipped) will substitute via `envsubst` at install time. Currently the only placeholder is:
+
+| Variable | Meaning | Example |
+| --- | --- | --- |
+| `${MINSKY_HOME}` | absolute path to the cloned minsky repo | `/Users/alex/apps/minsky` |
+
+Any new placeholder added to a template must be (a) added to the table above and (b) accepted by `lint-units.sh`'s placeholder-hygiene check (which allows only the documented set).
+
+## Install (Linux, systemd user units — no root needed)
+
+```bash
+mkdir -p ~/.config/systemd/user
+for f in distribution/systemd/*.service distribution/systemd/*.target; do
+  envsubst '${MINSKY_HOME}' < "$f" > ~/.config/systemd/user/$(basename "$f")
+done
+systemctl --user daemon-reload
+systemctl --user enable --now minsky-supervisor.target
+```
+
+## Install (macOS, launchd LaunchAgents)
+
+```bash
+mkdir -p ~/Library/LaunchAgents
+for f in distribution/launchd/*.plist; do
+  envsubst '${MINSKY_HOME}' < "$f" > ~/Library/LaunchAgents/$(basename "$f")
+done
+for f in ~/Library/LaunchAgents/com.minsky.*.plist; do
+  launchctl bootstrap gui/"$(id -u)" "$f"
+done
+```
+
+## Smoke-test the templates locally
+
+```bash
+./distribution/lint-units.sh
+```
+
+Validates: launchd plists are well-formed XML (`plutil -lint` — macOS only); systemd unit files contain `[Unit]` / `Description=` / `[Service]` / `ExecStart=` / `Restart=`; only documented placeholders are referenced. Exits non-zero on any failure.
+
+## Failure modes & chaos verification
+
+Per constitutional rule #7 (`vision.md` § 7).
+
+- **Steady-state hypothesis**: the supervisor target reports `active` continuously; its child services restart per their respective policies on simulated crashes.
+- **Blast radius**: a single child service per fault — never the supervisor target itself, never another sibling. systemd's `PartOf=` keeps the cascade contained.
+- **Operator escape hatch**: `systemctl --user stop minsky-supervisor.target` (Linux) / `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist` (macOS) immediately halts the loop.
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | tick-loop process dies non-zero | `systemctl --user kill -s SIGKILL minsky-tick-loop` (process death) | `loud-crash-supervisor-restart` (transient) — respawn within `RestartSec` | kill PID; assert `is-active` returns to `active` within 10 s; respawn count visible in journal |
+| 2 | tick-loop dies cleanly (exit 0) | `kill -s SIGTERM minsky-tick-loop` (graceful exit) | `graceful-degrade` — supervisor does *not* respawn (transient policy) | issue SIGTERM; assert `is-active` reports `inactive` |
+| 3 | budget-guard process dies (any reason) | `systemctl --user kill minsky-budget-guard` (process death) | `loud-crash-supervisor-restart` (permanent) — respawn always | kill PID; assert respawn within 15 s |
+| 4 | tick-loop crashes 11 times in 5 min (StartLimit hit) | continuous SIGKILL loop (rate-limit fault) | `circuit-break-and-notify` — systemd refuses further restarts; budget-guard still alive; emit notification | scripted kill loop; assert `is-failed` and budget-guard remains `active` |
+| 5 | machine reboot mid-tick | `reboot` (cold restart) | `loud-crash-supervisor-restart` — supervisor target re-enabled by `WantedBy=default.target` on next login | reboot test machine; assert services come up; in-flight tick recovered via lease (`tasks-mcp`) |
+| 6 | placeholder substitution fails (e.g., MINSKY_HOME unset) | mis-installed template (config drift) | `loud-crash-supervisor-restart` — service fails to start; clear journal log | unset MINSKY_HOME and reinstall; assert `journalctl --user -u minsky-tick-loop` shows the missing-path error |
+
+## Integration test (deferred)
+
+Full end-to-end "kill-and-respawn" tests across both platforms require an OS-level fixture (Linux VM in CI for systemd; macOS runner with launchctl unload privileges for launchd) that this repo's CI does not yet provide. Tracked as scout task `supervisor-integration-tests` in `TASKS.md`. Until then, `./distribution/lint-units.sh` is the closest mechanical check; this README's failure-mode table is the contract those tests will satisfy.
+
+## Hypothesis-driven development (rule #9)
+
+- **Hypothesis**: per-platform unit-file templates parameterised by a single `${MINSKY_HOME}` envsubst variable are sufficient to install Minsky's supervisor on systemd and launchd without root.
+- **Success threshold**: `./distribution/lint-units.sh` exits 0; `envsubst < template` produces a syntactically valid unit / plist on a fresh macOS or Linux user account; `systemctl --user enable` / `launchctl bootstrap` succeed.
+- **Pivot threshold**: if more than one additional placeholder becomes load-bearing (e.g., a `USER` / `NODE_BIN` / `TICK_INTERVAL_SEC` set) — pivot from envsubst to a real templating tool (Helm-style or shell-script template engine).
+- **Measurement**: `./distribution/lint-units.sh && for f in distribution/systemd/* distribution/launchd/*; do envsubst < "$f" >/dev/null; done`
+- **Literature anchor**: systemd manual (Poettering, "systemd.service(5)" and "systemd.unit(5)"); Apple "Daemons and Services Programming Guide" (deprecated but launchd's plist schema is unchanged); 12-factor config (Wiggins 2011, factor III).
