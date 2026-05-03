@@ -145,3 +145,10 @@ export class BudgetGuard {
     }
   }
 }
+
+export {
+  type FlagToken,
+  decisionToFlagToken,
+  flagFilePath,
+  writeBudgetFlag,
+} from "./flag-file.js";

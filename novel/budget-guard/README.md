@@ -2,7 +2,7 @@
 
 Token-budget watchdog. Observes a `TokenMonitor`, decides which response category applies (`graceful-degrade` / `circuit-break-and-notify` / `weekly-cap-warn` / `normal`), and pushes the decision to a callback.
 
-v0 is the **pure decision logic + watchdog loop only**. Runtime envelopes — `.minsky/budget.flag` for shell consumers, JSON API on `localhost:9876` for the dashboard, real `TokenMonitor` Strategy against Maciek's `claude-monitor` Python tool — ship in follow-up tasks (`budget-guard-flag-file`, `budget-guard-http-api`, `budget-guard-maciek-impl`).
+Runtime envelopes ship incrementally. The **flag-file envelope** (`${MINSKY_HOME}/.minsky/budget.flag`) is shipped — see [Flag-file envelope](#flag-file-envelope) below. JSON API on `localhost:9876` and the real Maciek `TokenMonitor` Strategy ship in follow-up tasks (`budget-guard-http-api`, `budget-guard-maciek-impl`).
 
 ## Pattern conformance
 
@@ -27,6 +27,7 @@ Per constitutional rule #7 (vision.md § 7).
 | 3 | Window-reset edge causes `tokensRemainingInWindow > windowSizeTokens` | clock skew across a 5h boundary (clock) | `graceful-degrade` — clamp to 0 consumed | covered by clamp test |
 | 4 | `windowSizeTokens` is 0 | TokenMonitor returns a freshly-bootstrapped value (upstream-malformed) | `graceful-degrade` — return 0 consumed (avoid div / 0) | covered by zero-window test |
 | 5 | Guard started twice | misconfigured caller (process-state) | `graceful-degrade` — second `start()` is a no-op | covered by idempotency test |
+| 6 | `writeBudgetFlag` fails partway (ENOSPC, EROFS) | disk full / read-only filesystem (resource-exhaustion) | `loud-crash-supervisor-restart` — the rejected promise propagates to the caller's `.catch`; supervisor restarts a misconfigured node | tmp-file `rename(2)` keeps the prior flag readable; covered by atomicity test (no `.tmp` left behind on success) |
 
 ## Hypothesis-driven development (rule #9)
 
@@ -65,11 +66,43 @@ import { decide, DEFAULT_THRESHOLDS } from "@minsky/budget-guard";
 const action = decide(snapshot, DEFAULT_THRESHOLDS).action;
 ```
 
+## Flag-file envelope
+
+Shell consumers (`setup.sh`, supervisor unit-files, ad-hoc scripts) read the current decision by `cat`-ing a single file:
+
+```sh
+cat "${MINSKY_HOME}/.minsky/budget.flag"
+# → NORMAL | THROTTLE | PAUSE | WEEKLY_WARN
+```
+
+Wire it into a `BudgetGuard` like so:
+
+```ts
+import { BudgetGuard, writeBudgetFlag } from "@minsky/budget-guard";
+
+const guard = new BudgetGuard(monitor, (d) => {
+  void writeBudgetFlag(d, process.env.MINSKY_HOME ?? process.cwd());
+});
+guard.start();
+```
+
+Token mapping (matches the `BudgetAction` lattice):
+
+| `BudgetAction`              | flag token   |
+| --------------------------- | ------------ |
+| `normal`                    | `NORMAL`     |
+| `graceful-degrade`          | `THROTTLE`   |
+| `circuit-break-and-notify`  | `PAUSE`      |
+| `weekly-cap-warn`           | `WEEKLY_WARN`|
+
+Atomicity: the writer renders to a sibling `.budget.flag.tmp.<pid>.<rand>` and `rename(2)`-s over the destination. POSIX guarantees `rename(2)` is atomic within a single filesystem, so a concurrent reader sees either the old contents or the new — never partial.
+
+Path deviation: the original task brief specified `/var/run/minsky/budget.flag`, which would require root. v0 uses `${MINSKY_HOME}/.minsky/` instead — declared in `vision.md` § "Pattern conformance index" row 26.
+
 ## Follow-up tasks
 
 The full `budget-guard-v0` epic decomposes into these P1 sub-tasks (tracked in `TASKS.md`):
 
-- **`budget-guard-flag-file`** — write `${MINSKY_HOME}/.minsky/budget.flag` so shell scripts can `cat` it. Path moved from `/var/run/minsky/` (which would need root) to the user-writable `.minsky/`; declared deviation per rule #8 — root-required paths are out of scope for solo-dev tier.
 - **`budget-guard-http-api`** — Hono micro-server on `localhost:9876` returning `{ remaining: { tokens, minutes, cost }, weekly_headroom_pct, recommended_action }` per the original task spec.
 - **`budget-guard-maciek-impl`** — real `TokenMonitor` Strategy against Maciek's Python `claude-monitor` cache file. Adapter test against a live Maciek install.
 - **`budget-guard-publish-dry-run`** — pre-publish smoke for `@minsky/budget-guard` and `@minsky/token-monitor`.
