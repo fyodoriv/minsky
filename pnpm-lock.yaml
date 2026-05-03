@@ -63,6 +63,14 @@ importers:
         specifier: ^1.28.0
         version: 1.40.0
 
+  novel/adapters/token-monitor: {}
+
+  novel/budget-guard:
+    dependencies:
+      '@minsky/token-monitor':
+        specifier: workspace:*
+        version: link:../adapters/token-monitor
+
 packages:
 
   '@ampproject/remapping@2.3.0':

@@ -1,0 +1,22 @@
+{
+  "name": "@minsky/token-monitor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TokenMonitor adapter — interface (Adapter pattern, Gamma 1994) over Claude token-usage trackers.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
