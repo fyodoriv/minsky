@@ -12,7 +12,7 @@ See `vision.md` § "What Minsky is" for full identity.
 
 ## Constitutional rules (non-negotiable)
 
-These come from `vision.md`. Violations are reported by the MAPE-K loop's specification monitor (informally: "constitutional review" — see [Glossary](vision.md#glossary--every-term-has-a-cs-anchor)).
+These come from `vision.md`. Violations are reported by the MAPE-K loop's specification monitor (`claude-spec-monitor`) — runtime specification monitoring per Havelund & Goldberg 2008.
 
 ### 1. Don't reinvent the wheel
 

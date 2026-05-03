@@ -64,7 +64,7 @@ This is also a hedge: when something breaks at 3am, "this is supervision-tree pa
 
 ### 6. Stay alive
 
-The system is designed to operate for years, not days. It throttles itself before hitting limits, recovers from crashes without human help, detects its own drift, and improves itself measurably over time.
+The system is designed to operate for years, not days. It throttles itself before hitting limits, recovers from crashes without human help, detects its own specification drift, and improves itself measurably over time.
 
 "Stays useful indefinitely under constant pressure" is the goal. "Ships features fast" is a byproduct.
 
@@ -178,7 +178,7 @@ Minsky stands on the shoulders of named giants. Each layer in the architecture m
 
 **Omar Khattab — DSPy / "programming, not prompting".** Treat prompts as code; optimize them with metrics as reward signal. Maps to: how the autonomic manager improves persona prompts over time.
 
-**Klaus Havelund & Allen Goldberg — Runtime Verification.** Monitor an executing system's traces against a formal specification; flag violations as they occur. Maps to: specification monitoring (informal label: *constitutional review*) — the project specification lives in `vision.md`; the monitor is a Claude Skill that reads traces + commits and reports drift.
+**Klaus Havelund & Allen Goldberg — Runtime Verification.** Monitor an executing system's traces against a formal specification; flag violations as they occur. Maps to: runtime specification monitoring — the project specification lives in `vision.md`; the monitor is a Claude Skill (`claude-spec-monitor`) that reads traces + commits and reports specification drift.
 
 **Mark Weiser — Calm Technology / Ambient Display** and **Stuart Card / Jock Mackinlay — Glanceable Information Display.** Information should be available at the periphery; the user pulls focus only when something demands it. Maps to: the wrist surface (Apple Watch glance widget) — three numbers, no chrome.
 
@@ -190,31 +190,43 @@ These are organs of one body, not a checklist. They cohere.
 
 This table operationalizes constitutional principle 5. Every word Minsky introduces — whether a metaphor for narrative ease or a technical label — points back to a published computer-science / control-theory / formal-methods source. **Code, package names, file paths, test names, and CLI flags use the precise term in the right column.** Prose may use the metaphor in the left column, provided the precise term has been introduced once on the same page.
 
-| Minsky term | Precise term | Anchor / source |
-|---|---|---|
-| CTO loop / CTO meta-loop | **MAPE-K loop** (component name: *autonomic manager*) | Kephart & Chess, "The Vision of Autonomic Computing", IEEE Computer 2003 |
-| TPM (technical-program-manager agent) | **Manager agent** | Multi-agent systems literature; CrewAI's own term |
-| Constitution / constitutional rules | **Behavioral specification** / **invariants** | Lamport, "Specifying Concurrent Program Modules", TOPLAS 1983 |
-| Constitutional review | **Runtime specification monitoring** | Havelund & Goldberg, "Verify Your Runs", VSTTE 2008 |
-| Watch surface / Watch glance | **Glanceable / ambient display** | Card & Mackinlay 1999; Weiser & Brown, "Calm Technology" 1995 |
-| Tick | **Scheduler iteration** / **control-loop period** | Liu, *Real-Time Systems* (2000) |
-| Claim (a task) | **Lease** / **mutual exclusion** | Gray & Cheriton, "Leases", SOSP 1989 |
-| Handoff | **Actor message-passing** with continuation | Hewitt, Bishop, Steiger 1973 |
-| Persona | **Specialist agent** / **role-based agent** | Wooldridge, *An Introduction to MultiAgent Systems* (2009) |
-| Drift | **Specification drift** (system) / **concept drift** (data) | Widmer & Kubat, "Learning in the Presence of Concept Drift", *Machine Learning* 1996 |
-| Society of minds | (kept as-is — primary literature term) | Marvin Minsky, *The Society of Mind* (1986) |
-| Strange loop | (kept as-is — primary literature term) | Hofstadter, *Gödel, Escher, Bach* (1979) |
-| Watchdog (in `claude-budget-guard`) | (kept as-is — already a precise CS term) | Watchdog timer, hardware/OS literature |
-| Inner loop / Outer loop | (kept as-is — already precise) | Optimization & control systems |
-| Bottleneck | (kept as-is — already precise) | Goldratt TOC (cited above) |
-| Error budget | (kept as-is — already precise) | Beyer et al., *Site Reliability Engineering* (Google, 2016) |
-| Failure-mode response: `loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade` | (labels for established patterns) | Armstrong, *Programming Erlang* 2007 (let-it-crash); Nygard, *Release It!* 2007 (circuit breaker); AWS Well-Architected Framework, Reliability pillar (graceful degradation) |
-| Fault axis | (kept as-is — chaos-engineering term) | Basiri et al., "Principles of Chaos Engineering", IEEE Software 2016 |
-| Steady-state hypothesis | (kept as-is — chaos-engineering term) | Basiri et al. 2016 (above) |
-| Blast radius | (kept as-is — established term) | AWS Well-Architected, Reliability pillar; Beyer et al., *SRE* Ch. 17 2016 |
-| Operator escape hatch / kill switch | (kept as-is — established term) | Beyer et al., *SRE* Ch. 17 2016 |
+Default discipline: **use the right-column term directly**. The left-column metaphor is permitted only when (a) it's a primary literature term in its own right (e.g., "society of minds" — Minsky 1986; "strange loop" — Hofstadter 1979) or (b) the metaphor adds narrative weight that the precise term loses (currently: "constitution" for the project-spec-as-authority framing). Every coined word that has a precise alternative in the right column is **retired** for new prose unless the row notes otherwise — see "Retired terms" below the table.
 
-When you introduce a new word in any Minsky doc, **add a row here in the same commit** (or remove the new word and use an existing row's right-column term).
+| Term in use | Precise / canonical anchor | Source |
+|---|---|---|
+| MAPE-K loop / autonomic manager | autonomic computing reference architecture | Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 2003 |
+| Manager agent | manager / dispatcher role in multi-agent systems | Wooldridge, *An Introduction to MultiAgent Systems* (2009); CrewAI's own term |
+| Constitution / constitutional rule N | behavioral specification / invariants | Lamport, "Specifying Concurrent Program Modules", *TOPLAS* 1983 |
+| Specification drift (system) / concept drift (data) | standard ML / runtime-verification term | Widmer & Kubat, "Learning in the Presence of Concept Drift", *Machine Learning* 1996 |
+| Glanceable / ambient display ("Watch surface" remains as the *specific affordance* name) | calm-technology display | Card & Mackinlay 1999; Weiser & Brown, "Calm Technology" 1995 |
+| Scheduler iteration ("tick" is acceptable shorthand — already a real-time-systems term) | control-loop period | Liu, *Real-Time Systems* (2000) |
+| Lease ("claim" remains in the tasks.md spec as the verb; the underlying mechanism is a lease) | mutual exclusion with timeout | Gray & Cheriton, "Leases", *SOSP* 1989 |
+| Handoff (industry-standard in agentic systems; Anthropic Agent Teams uses it explicitly) | actor message-passing with continuation | Hewitt, Bishop, Steiger 1973 |
+| Specialist agent / persona | role-based agent | Wooldridge 2009 |
+| Society of minds | (primary literature term) | Marvin Minsky, *The Society of Mind* (1986) |
+| Strange loop | (primary literature term) | Hofstadter, *Gödel, Escher, Bach* (1979) |
+| Watchdog (in `claude-budget-guard`) | (already a precise CS term) | Watchdog timer, hardware / OS literature |
+| Inner loop / outer loop | (already precise) | Optimization & control systems |
+| Bottleneck | (already precise) | Goldratt TOC (cited above) |
+| Error budget | (already precise) | Beyer et al., *Site Reliability Engineering* (Google, 2016) |
+| Failure-mode response: `loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade` | (labels for established patterns) | Armstrong, *Programming Erlang* 2007 (let-it-crash); Nygard, *Release It!* 2007 (circuit breaker); AWS Well-Architected, Reliability pillar (graceful degradation) |
+| Fault axis | (chaos-engineering term) | Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 |
+| Steady-state hypothesis | (chaos-engineering term) | Basiri et al. 2016 (above) |
+| Blast radius | (established term) | AWS Well-Architected, Reliability pillar; Beyer et al., *SRE* Ch. 17 2016 |
+| Operator escape hatch / kill switch | (established term) | Beyer et al., *SRE* Ch. 17 2016 |
+
+### Retired terms (do not use in new prose)
+
+These coined terms appeared in earlier drafts. Use the canonical term in the right column instead. New PRs that re-introduce a retired term are flagged in review.
+
+| Retired | Use instead |
+|---|---|
+| CTO loop / CTO meta-loop | MAPE-K loop (and *autonomic manager* for the component) |
+| TPM (technical-program-manager agent) | manager agent |
+| Constitutional review | runtime specification monitoring (or just *spec-monitor* / `claude-spec-monitor`) |
+| Drift (standalone) | specification drift (system behavior) or concept drift (data) |
+
+When you introduce a new word in any Minsky doc, **add a row to the in-use table in the same commit** — or, preferably, remove the new word and use an existing row's right-column term.
 
 ## What Minsky is not
 
@@ -235,7 +247,7 @@ These metrics are tracked on the dashboard from day one. Each has a correspondin
 |---|--------|--------|------------|
 | 1 | Loop uptime, 30/90/365 day | 99% / 97% / 95% | systemd active state |
 | 2 | Tokens per closed user-story | Decreasing trend month-over-month | OTEL token sum / closed-stories count |
-| 3 | Specification alignment ("constitutional alignment") | 95%+ specification-monitor runs finding no drift | spec-monitor log pass rate |
+| 3 | Specification alignment | 95%+ spec-monitor runs finding no specification drift | spec-monitor log pass rate |
 | 4 | Self-improvement velocity | ≥4 prompt improvements/month with measured gains, after Q1 | A/B test win count from DSPy adapter |
 | 5 | Mean time to recovery (MTTR) | <5 min from process death to next claim | Supervisor restart-to-claim latency |
 | 6 | Time on user's wrist (inverted) | <60 sec/day to confirm health | Watch surface dwell time |

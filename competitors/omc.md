@@ -35,7 +35,7 @@ Zero-config multi-agent orchestration plugin for Claude Code. 32 specialist agen
 ## What we extract or learn
 
 - **Persona roster** — adopt all 32; no need to write our own
-- **Architect-verification gate** — extend the pattern to constitutional review at the meta-level
+- **Architect-verification gate** — extend the pattern to runtime specification monitoring at the meta-level (`claude-spec-monitor`)
 - **Smart routing implementation** — borrow patterns for our `claude-budget-guard`
 - **Plugin distribution model** — Minsky may itself eventually ship as a Claude Code plugin
 
