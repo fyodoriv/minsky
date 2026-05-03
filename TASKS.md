@@ -35,7 +35,7 @@
   - **Pivot**: if any sub-task discovers the original epic-level shape is wrong (e.g., flag-file model is too coarse for the dashboard), revisit the parent acceptance before continuing the chain.
   - **Acceptance**: tracker task removed once all four sub-tasks merge.
 
-- [ ] `@minsky/budget-guard` — flag-file envelope (`.minsky/budget.flag`)
+- [ ] `@minsky/budget-guard` — flag-file envelope (`.minsky/budget.flag`) (@claude-code)
   - **ID**: budget-guard-flag-file
   - **Tags**: novel, extraction-target
   - **Parent**: budget-guard-v0
