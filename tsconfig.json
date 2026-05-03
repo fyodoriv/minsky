@@ -1,5 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "files": [],
-  "references": [{ "path": "./novel/adapters/observability" }]
+  "references": [
+    { "path": "./novel/adapters/observability" },
+    { "path": "./novel/adapters/token-monitor" },
+    { "path": "./novel/budget-guard" },
+    { "path": "./novel/handoff-spec" }
+  ]
 }
