@@ -28,7 +28,7 @@
   - **ID**: budget-guard-v0
   - **Tags**: novel, extraction-target, parent
   - **Estimate**: tracker — see sub-tasks
-  - **Blocked by**: budget-guard-flag-file, budget-guard-http-api, budget-guard-maciek-impl, budget-guard-publish-dry-run
+  - **Blocked by**: budget-guard-flag-file, budget-guard-maciek-impl, budget-guard-publish-dry-run
   - **Details**: This PR (the core decision logic + watchdog loop + tests) shipped under the same name; sub-tasks below ship the runtime envelopes (flag file, HTTP API, real Maciek Strategy) plus the npm dry-run. When the last sub-task lands, the full package is shipped and this tracker is removed.
   - **Verification**: all four sub-tasks below complete; integration test for `user-stories/004-budget-auto-pause.md` passes against the assembled package.
   - **Measurement**: `gh pr list --state merged --search 'budget-guard' --json number | jq length` returns ≥5 (this PR + four sub-task PRs).
@@ -48,19 +48,6 @@
   - **Acceptance**: flag file present + correct contents on every state transition; flag-file tests at 100 % coverage.
   - **Risk**: filesystem races if multiple guards run. Mitigation: atomic rename + flock identical to setup.sh's lock pattern.
 
-- [ ] `@minsky/budget-guard` — HTTP API on `localhost:9876` (@claude-code)
-  - **ID**: budget-guard-http-api
-  - **Tags**: novel, extraction-target
-  - **Parent**: budget-guard-v0
-  - **Estimate**: 3–4h
-  - **Details**: Tiny Hono server on `localhost:9876` exposing `GET /budget` returning the decision JSON shape from `ARCHITECTURE.md` § "Token economy": `{ remaining: { tokens, minutes, cost }, weekly_headroom_pct, recommended_action }`. Add Hono as a dep behind a thin adapter so we can swap (rule #2).
-  - **Files**: `novel/budget-guard/src/http-server.ts`, `novel/budget-guard/src/http-server.test.ts`
-  - **Verification**: `curl -s localhost:9876/budget | jq` returns the documented shape; vitest spins the server on an ephemeral port and asserts the JSON.
-  - **Measurement**: `pnpm vitest run novel/budget-guard/src/http-server.test.ts`.
-  - **Pivot**: if multiple consumers need different shapes — pivot to GraphQL or a typed RPC (tRPC) instead of REST.
-  - **Acceptance**: GET /budget returns the documented shape; tests cover normal, throttle, pause, weekly-warn states.
-  - **Risk**: port collision on 9876. Mitigation: env var `MINSKY_BUDGET_GUARD_PORT` overrides; default documented.
-
 - [ ] `@minsky/token-monitor` — Maciek `claude-monitor` Strategy implementation
   - **ID**: budget-guard-maciek-impl
   - **Tags**: novel, extraction-target
@@ -78,7 +65,7 @@
   - **ID**: budget-guard-publish-dry-run
   - **Tags**: extraction, publish
   - **Parent**: budget-guard-v0
-  - **Blocked by**: budget-guard-flag-file, budget-guard-http-api, budget-guard-maciek-impl
+  - **Blocked by**: budget-guard-flag-file, budget-guard-maciek-impl
   - **Estimate**: 1h
   - **Details**: Run `pnpm publish --dry-run --workspace novel/budget-guard` and the same for `@minsky/token-monitor`; ensure the published artifact has the right `files`, `main`, `types`, and a matching `README.md`. Publish under the `@minsky/*` scope when ready (separate manual step — `npm publish` is blocked-by-default per the `/next-task` skill, so this task only does the dry-run).
   - **Files**: `novel/budget-guard/package.json`, `novel/adapters/token-monitor/package.json`
