@@ -8,7 +8,21 @@
 
 ## P0
 
-(empty — work the highest-priority unblocked item from P1.)
+- [ ] Constitutional rule #9 (hypothesis-driven development) + measurable success-criteria audit + tools / literature integration
+  - **ID**: rule-9-and-measurable-success-criteria
+  - **Tags**: constitution, foundation, docs, measurement
+  - **Estimate**: 1d
+  - **Details**: Add new constitutional rule #9 to `vision.md` mandating hypothesis-driven development (HDD): every development task declares (a) the metric it improves, (b) success threshold (numeric or rubric-based), (c) pivot threshold (numeric — abandon the approach if not met after a defined window), (d) automated measurement method (exact shell command, OTEL query, CI script — reproducible by an outside observer with no manual steps), (e) literature anchor for the metric. Audit the existing 10-row success-criteria table in `vision.md` and add two columns: **Measurement method (automated)** and **Pivot threshold**. Update `TASKS.md` file-level policy comments to require those four fields on every new task entry (and add a CI lint that flags new tasks missing them — separate follow-up task). Integrate tools as a concrete part of the project: Promptfoo (prompt evals, already chosen), DSPy (prompt optimisation, already chosen), OpenTelemetry (metric collection, already chosen), GrowthBook or Statsig (system-level feature-flag A/B; evaluate in `research.md`). Anchor literature for the rule: Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of SE* 1994; Ries, *The Lean Startup*, 2011 (build-measure-learn, validated learning, pivot-or-persevere); Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020 (statistical rigour in A/B); Forsgren, Humble, Kim, *Accelerate*, 2018 (DORA's four-key-metrics for software delivery); Manzi, *Uncontrolled*, 2012 (causal inference outside the lab); Doerr, *Measure What Matters*, 2018 (OKR discipline). Cross-link from `vision.md` § 8 "Pattern conformance index" — rule #9 generalises rule #3 (test-first, metric-first, doc-first) the same way rule #8 generalised rule #5.
+  - **Files**: `vision.md` (new rule #9 + success-criteria table extension + 1+ glossary rows for retired metaphors if any introduced), `TASKS.md` (policy comments + spec for required task fields), `research.md` (HDD literature + GrowthBook/Statsig evaluation), `AGENTS.md` (rule #9 added to constitutional-rules section)
+  - **Verification**:
+    - `grep -E '^### 9\.' vision.md` finds the new rule heading
+    - `vision.md` success-criteria table has new columns "Measurement method (automated)" and "Pivot threshold" populated for **all 10** entries
+    - Each measurement-method cell is a runnable command or query (no English instructions; literal shell / SQL / OTEL syntax)
+    - `TASKS.md` file-level policy comments name the four new required fields
+    - `research.md` has "Hypothesis-driven development" subsection with the 6 literature sources and a GrowthBook-vs-Statsig comparison
+    - `markdownlint`, `tasks-lint`, `glossary-discipline` pass; CI green on all 8 jobs
+  - **Acceptance**: Rule #9 cites all 6 sources; success-criteria table fully populated with reproducible measurement methods + pivot thresholds; TASKS.md policy + spec updated; research.md HDD section + tool eval added; AGENTS.md constitutional-rules list includes rule #9; PR merges with CI green.
+  - **Risk**: Some current metrics don't have clean automated measurement today (e.g., spec-monitor isn't built yet — metric #3 can't be queried). **Mitigation:** for not-yet-implementable metrics, the measurement-method cell names the exact future query and tags it `<TBD-AFTER: <task-id>>` linking to the task that will land the prerequisite. The rule's point is to force the conversation upfront, not to fake measurements.
 
 ## P1
 
@@ -91,7 +105,7 @@
 
 ## P2
 
-- [ ] Implement `claude-spec-monitor` Skill (informally: "constitutional review")
+- [ ] Implement `claude-spec-monitor` Skill (runtime specification monitoring)
   - **ID**: spec-monitor-skill
   - **Tags**: novel, extraction-target, skill
   - **Estimate**: 1d
