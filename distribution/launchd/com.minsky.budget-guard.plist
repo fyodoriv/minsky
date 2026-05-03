@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Minsky budget-guard — launchd LaunchAgent for macOS.
+
+Pattern: "one-for-one" supervisor restart (Armstrong 2007). launchd's
+`KeepAlive=true` (always-restart) is the closest equivalent to systemd's
+`Restart=always`. This process must outlive every other unit — see
+vision.md success criterion #9 (zero hard 429 / week).
+
+Placeholders substituted by setup.sh via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.budget-guard</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>${MINSKY_HOME}/distribution/launchd/run-budget-guard.sh</string>
+    </array>
+
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>${MINSKY_HOME}/.minsky/budget-guard.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${MINSKY_HOME}/.minsky/budget-guard.err.log</string>
+</dict>
+</plist>

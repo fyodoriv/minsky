@@ -1,0 +1,39 @@
+# Minsky tick-loop — the per-iteration scheduler that picks the next task,
+# claims it, runs OMC, and ships the result. Restart-on-failure with
+# exponential backoff so a systematic failure doesn't hammer the API.
+#
+# Pattern: OTP supervision behaviour, "transient" restart strategy
+# (Armstrong, *Programming Erlang*, 2007). systemd's `Restart=on-failure` +
+# `RestartSec` + `RestartSteps` is the closest-fitting POSIX equivalent.
+# Conformance: partial — see ARCHITECTURE.md § "Process supervision tree"
+# and vision.md § "Pattern conformance index" row 4.
+#
+# Placeholders (substituted by setup.sh via envsubst):
+#   ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+[Unit]
+Description=Minsky tick-loop — picks the next task and ships it
+PartOf=minsky-supervisor.target
+After=network-online.target minsky-budget-guard.service
+Requires=minsky-budget-guard.service
+
+[Service]
+Type=simple
+WorkingDirectory=${MINSKY_HOME}
+Environment=MINSKY_HOME=${MINSKY_HOME}
+ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
+
+# Erlang-style "transient" restart: only on non-zero exit (let-it-crash
+# discipline, rule #6). Backoff caps the API hammering on systematic failures.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# StandardOutput/StandardError → journal (queryable via journalctl --user)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minsky-tick-loop
+
+[Install]
+WantedBy=minsky-supervisor.target
