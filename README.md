@@ -1,27 +1,46 @@
 # Minsky
 
-> A reproducible recipe for running Claude Code agents 24/7 on a Max subscription — without going over budget, without manual babysitting, without untracked drift.
+> A reproducible recipe for running a team of AI coding agents on your own machine — supervised, on-budget, and observable. Named after [Marvin Minsky](https://en.wikipedia.org/wiki/Marvin_Minsky) and his [*Society of Mind*](https://en.wikipedia.org/wiki/Society_of_Mind) (1986), which argues that intelligence emerges from many simple specialists cooperating.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-## What this is in 30 seconds
+## Who this is for
 
-Minsky is a **curated stack + small custom layers** that wires existing tools (Claude Code, OMC personas, OpenTelemetry, systemd / launchd, the [tasks.md](https://github.com/tasksmd/tasks.md) queue, Apple Shortcuts) into a single supervised pipeline. The custom layers — published as `@minsky/*` on npm — fill the gaps that no upstream tool covers:
+If you've used Claude Code, Cursor, GitHub Copilot, or any other AI coding assistant and thought *"I wish this could just keep working overnight without me babysitting it"* — Minsky is a serious attempt at the supervisor layer that makes that possible.
 
-- **`@minsky/budget-guard`** — token-budget watchdog. Reads your usage, decides `NORMAL` / `THROTTLE` / `PAUSE` / `WEEKLY_WARN`, exposes the decision over a flag file (for shell consumers) and HTTP (`localhost:9876/budget`, for the dashboard / Watch).
-- **`@minsky/observability`** — three-signal OpenTelemetry adapter (traces / metrics / logs) with `selfTest()` health probes.
-- **`@minsky/handoff-spec`** — parseable record format for cross-agent handoffs (subject / from / to / status / artifacts / blockers / suggested next).
-- **`@minsky/token-monitor`** — `TokenMonitor` interface; real Strategy against [Maciek's `claude-monitor`](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) (in flight).
-- **`@minsky/mape-k-loop`** — the autonomic manager that runs the spec monitor, identifies the bottleneck, and A/Bs prompt variants (planned, largest novel layer).
+- **If you're a junior** trying to ship more with one good AI agent: skip ahead to [Quickstart](#quickstart) and run `./setup.sh`. The setup is one command. Every other claim in this README is a link to either code or a paper.
+- **If you're a tech lead or manager** worried about runaway token bills, hidden agent state, or "we shipped something nobody can explain": read [Why this exists](#why-this-exists) — this repo is structurally designed around three concerns that matter to you (cost predictability, observability, change traceability).
+- **If you're a researcher or platform engineer** interested in how the guarantees compose: every architectural choice cites a paper. The supervision tree is Erlang/OTP, the budget guard is Google SRE, the autonomic loop is IBM MAPE-K, the experiment discipline is open-science pre-registration. See [Theoretical foundations](./vision.md#theoretical-foundations).
 
-Everything is MIT, every dependency lives behind an interface (`novel/adapters/`), every rule in [`vision.md`](./vision.md) traces to a published source, every change in this repo is a [pre-registered experiment](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes).
+## What this actually is, in 30 seconds
+
+A **curated stack + small custom layers** that wires together existing tools — [Claude Code](https://claude.com/claude-code), [oh-my-claudecode (OMC) personas](https://github.com/Yeachan-Heo/oh-my-claudecode), [OpenTelemetry](https://opentelemetry.io/), systemd / launchd, the [tasks.md queue spec](https://github.com/tasksmd/tasks.md), Apple Shortcuts — into one supervised pipeline. The custom layers, published as `@minsky/*` on npm, fill gaps no upstream tool covers:
+
+- **`@minsky/budget-guard`** — token-budget watchdog. Reads your usage and decides `NORMAL` / `THROTTLE` / `PAUSE` / `WEEKLY_WARN`. Exposes the decision to shell scripts (a flag file) and HTTP (`localhost:9876/budget`).
+- **`@minsky/observability`** — three-signal OpenTelemetry adapter (traces / metrics / logs) with health-probe `selfTest()`.
+- **`@minsky/handoff-spec`** — parseable record format for handoffs between agents (subject / from / to / status / blockers / suggested next).
+- **`@minsky/token-monitor`** — interface + planned Strategy against [Maciek-roboblog/Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) (the Python tool that actually surfaces Anthropic's hidden usage numbers).
+- **`@minsky/mape-k-loop`** *(planned, largest novel layer)* — the autonomic manager that runs a spec monitor, identifies the bottleneck, A/Bs prompt variants, and rolls out winners.
+
+Everything is MIT, every dependency lives behind an interface (`novel/adapters/`), every rule traces to a published source, and every code change in this repo carries a [pre-registered hypothesis + measurement](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes).
 
 ## What this is *not*
 
-- **Not a framework.** No multi-agent runtime, no proprietary task queue, no proprietary loop driver. Each of those is an existing tool we adapt.
-- **Not for one-off quick fixes.** This repo is a long-tail investment in a system that runs for years. Every change carries a hypothesis + measurement + pivot threshold under [iron rule #9](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes); if a fix can't justify that overhead, it belongs elsewhere.
+- **Not a framework.** No multi-agent runtime, no proprietary task queue, no proprietary loop driver. We adapt existing tools rather than rebuild them.
+- **Not for one-off quick fixes.** Every change in this repo carries the iron-rule overhead (hypothesis + measurement + pivot). If your fix can't justify that, it belongs in another repo.
 - **Not an IDE plugin** · **not a productivity tool** · **not a chatbot.** Minsky targets the supervisor layer, not the editor.
+
+## Why this exists
+
+Most agent stacks ([OMC](https://github.com/Yeachan-Heo/oh-my-claudecode), [CrewAI](https://github.com/joaomdmoura/crewAI), [MetaGPT](https://github.com/geekan/MetaGPT), Microsoft Agent Framework, Composio AO) optimise the **inner** loop — make one task ship faster. Minsky optimises the **outer** loop. Three concrete promises, each with a track-record of being broken in real-world deployments and each addressed by a specific design choice here:
+
+1. **Stay alive** under process death, rate limits, network partitions, OS sleep, upstream drift. Approach: Erlang/OTP supervision (Armstrong 2007), let-it-crash discipline, no try/catch chains.
+2. **Stay on budget.** Treat tokens as an SRE-style error budget (Beyer et al., *Site Reliability Engineering*, 2016, ch. 3) and pre-empt the rate limiter rather than getting throttled by it. The budget watchdog ships in [`@minsky/budget-guard`](./novel/budget-guard/).
+3. **Stay on mission.** Runtime specification monitoring (Havelund & Goldberg, *VSTTE* 2008) reads `vision.md` plus recent work and reports drift. *Every* change is a pre-registered experiment with a declared hypothesis, success threshold, pivot threshold, and measurement command (Munafò et al., *Nature Human Behaviour*, 2017 — pre-registration; Ries 2011 — build-measure-learn).
+4. **Get better.** A MAPE-K autonomic loop (Kephart & Chess, *IEEE Computer* 2003): observe persona-level metrics, identify the bottleneck (Goldratt, *The Goal*, 1984), A/B test prompt variants, roll out winners with a sustained-gain check.
+
+The named patterns aren't decoration — they're the debuggability promise. When something breaks at 3am, *"this is supervision-tree pattern, restart strategy is one-for-one"* is a debuggable answer; *"this is how I happened to wire it"* is not.
 
 ## Status
 
@@ -32,9 +51,9 @@ Everything is MIT, every dependency lives behind an interface (`novel/adapters/`
 - ✅ OpenTelemetry adapter with `selfTest()` (`@minsky/observability`)
 - ✅ Handoff record format + parser + validator (`@minsky/handoff-spec`)
 - ✅ Supervisor unit-file templates for systemd + launchd (`distribution/`)
-- ✅ Iron rule #9 (pre-registered hypothesis-driven development) wired across `vision.md` / `AGENTS.md` / `TASKS.md` policy
+- ✅ Iron rule #9 (pre-registered hypothesis-driven development) + rule #10 (deterministic CI enforcement) wired across `vision.md` / `AGENTS.md` / `TASKS.md` policy
 
-What doesn't work yet — see [`TASKS.md`](./TASKS.md): the Maciek `TokenMonitor` Strategy, the MAPE-K loop, the spec-monitor, the Watch dashboard, the experiment runner / tracker (rule #9 automation layer).
+What doesn't work yet — see [`TASKS.md`](./TASKS.md): the Maciek `TokenMonitor` Strategy, the MAPE-K loop, the spec monitor (deterministic linters first, advisory Skill second), the Watch dashboard, and the rule #9 automation layer (per-PR experiment runner, weekly tracker, quarterly calibration).
 
 ## Quickstart
 
@@ -46,7 +65,7 @@ cd minsky
 
 `./setup.sh` is idempotent and ends with a GREEN / YELLOW / RED self-test. Re-run any time. `./setup.sh --doctor` runs self-tests only; `./setup.sh --reset` rebuilds from scratch.
 
-Then in Claude Code from this directory:
+Then in [Claude Code](https://docs.claude.com/en/docs/claude-code) from this directory:
 
 ```text
 /plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
@@ -55,16 +74,7 @@ Then in Claude Code from this directory:
 /next-task
 ```
 
-`/next-task` is queue mode by default — it picks the highest-priority unblocked task in [`TASKS.md`](./TASKS.md), ships it as a PR, loops to the next, and stops only when the queue is empty across all `~/apps/*/TASKS.md` and the audit cascade is clean.
-
-## Why it's interesting
-
-Most agent stacks (OMC, CrewAI, MetaGPT, Microsoft Agent Framework, Composio AO) optimise the **inner** loop — make one task ship faster. Minsky optimises the **outer** loop:
-
-- **Stay alive** under process death, rate limits, network partitions, OS sleep, upstream drift — Erlang/OTP supervision, not try/catch.
-- **Stay on budget** by treating tokens as an SRE-style error budget (Beyer et al. 2016) and pre-empting the rate limiter, never being throttled by it.
-- **Stay on mission** via runtime specification monitoring — the spec monitor reads `vision.md` plus recent work and reports drift (Havelund & Goldberg 2008).
-- **Get better** via a MAPE-K loop (Kephart & Chess 2003): observe persona-level metrics, identify the bottleneck (Goldratt TOC), A/B test prompt variants via DSPy, roll out winners with a sustained-gain check.
+`/next-task` is queue mode by default — it picks the highest-priority unblocked task from [`TASKS.md`](./TASKS.md), ships it as a PR, loops to the next, and stops only when the queue is empty across all `~/apps/*/TASKS.md` and the audit cascade is clean.
 
 ## How it fits together
 
@@ -79,7 +89,7 @@ Most agent stacks (OMC, CrewAI, MetaGPT, Microsoft Agent Framework, Composio AO)
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Stafford Beer's Viable System Model. Lower layers are existing tools (OMC, tasks.md, OTEL, systemd / launchd). Upper layers are the small custom packages, each extracted as `@minsky/*` on npm from day one.
+Stafford Beer's [Viable System Model](https://en.wikipedia.org/wiki/Viable_system_model) (Beer, *Brain of the Firm*, 1972). Lower layers are existing tools (OMC, tasks.md, OTEL, systemd / launchd). Upper layers are the small custom packages, each extracted as `@minsky/*` on npm from day one.
 
 [`ARCHITECTURE.md`](./ARCHITECTURE.md) has the full wiring, the adapter pattern, the dependency table, and the supervision tree.
 
@@ -87,26 +97,45 @@ Stafford Beer's Viable System Model. Lower layers are existing tools (OMC, tasks
 
 | File | Purpose |
 | --- | --- |
-| [`vision.md`](./vision.md) | Constitution: nine non-negotiable rules, glossary, pattern-conformance index, success criteria |
+| [`vision.md`](./vision.md) | Constitution: ten non-negotiable rules, glossary, pattern-conformance index, success criteria |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | All dependencies wired through interfaces; data flow; supervision tree |
 | [`AGENTS.md`](./AGENTS.md) | How any agent (Claude Code, OMC, future tools) should behave when working in this repo |
-| [`TASKS.md`](./TASKS.md) | Current work queue ([tasks.md](https://github.com/tasksmd/tasks.md) spec), every task carrying Hypothesis / Success / Pivot / Measurement / Anchor per rule #9 |
-| [`research.md`](./research.md) | Living dependency scan, replacement candidates |
+| [`TASKS.md`](./TASKS.md) | Current work queue ([tasks.md](https://github.com/tasksmd/tasks.md) spec); every task carries Hypothesis / Success / Pivot / Measurement / Anchor per rule #9 |
+| [`research.md`](./research.md) | Living dependency scan; replacement candidates |
 | [`competitors/`](./competitors/) | Gap analysis vs OMC, CrewAI, MetaGPT, Microsoft Agent Framework, Composio AO |
 | [`user-stories/`](./user-stories/) | One file per story; metric, integration test, proof, failure modes |
 
-Two governance disciplines are load-bearing: every Minsky-coined term resolves to a published source via the [Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) (rule #5), and every artifact maps to a published pattern via the [Pattern conformance index](./vision.md#pattern-conformance-index) (rule #8) — deviations are declared explicitly. Both rules are enforced by CI lints (in flight).
+Two governance disciplines are load-bearing: every Minsky-coined term resolves to a published source via the [Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) (rule #5), and every artifact maps to a published pattern via the [Pattern conformance index](./vision.md#pattern-conformance-index) (rule #8). Both are enforced by deterministic CI lints per [rule #10](./vision.md#10-deterministic-enforcement--every-rule-is-a-ci-lint-not-a-hope) (in flight).
+
+## The namesake
+
+Marvin Minsky (1927–2016) was a co-founder of MIT's AI Lab and one of the field's foundational figures. *The Society of Mind* (1986) argues that what we experience as a single intelligence is actually a collection of many simple "agents" with limited individual capability, organised into societies that produce coherent behaviour. Minsky's later book *The Emotion Machine* (2006) extends the argument to include affect and self-reflection.
+
+The connection to this project is intentional: a useful AI coding stack is many small specialists (the OMC personas, the MCP tools, the supervisor, the budget guard, the spec monitor) cooperating under a shared discipline — not one monolithic super-agent. The discipline is the constitution in [`vision.md`](./vision.md).
+
+Further reading on Marvin Minsky:
+
+- [Marvin Minsky on Wikipedia](https://en.wikipedia.org/wiki/Marvin_Minsky)
+- [*The Society of Mind* (1986)](https://en.wikipedia.org/wiki/Society_of_Mind) — the idea this project is named after
+- [*The Emotion Machine* (2006)](https://en.wikipedia.org/wiki/The_Emotion_Machine) — extends the argument
+- [MIT Memoir on Marvin Minsky](https://news.mit.edu/2016/marvin-minsky-obituary-0125)
 
 ## Tech defaults
 
 - **Node.js + TypeScript** for everything in `novel/` (publishes to npm under `@minsky/*`)
 - **pnpm** workspaces · **Biome** lint + format · **Vitest** with 90 % line / 85 % branch coverage gate · **lefthook** for pre-commit
 - **Strictest TypeScript** (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`)
-- **OpenTelemetry** everywhere — every novel package emits at least one span per public method
+- **OpenTelemetry** everywhere — every novel package emits at least one span per public method (rule #4)
 - **systemd / launchd** for process supervision; let-it-crash discipline (Armstrong 2007)
 - **MIT** throughout; every novel layer extracted as its own MIT repo from day one
 
 [vision.md § Theoretical foundations](./vision.md#theoretical-foundations) lists the literature each choice is grounded in.
+
+## Contributing
+
+This repo is open-source MIT, but the contribution model is *strict by design*. Every change goes through the [iron-rule discipline of rule #9](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes): you declare a hypothesis, a measurement command, success and pivot thresholds, and a literature anchor *before* you write the code. If that sounds heavy, it is — by design. The repo is for long-tail, measurable improvement of a system that runs for years; not for one-off fixes.
+
+If you want to contribute and that fits, the entry path is `/next-task` against [`TASKS.md`](./TASKS.md). Open issues for discussion before substantive work.
 
 ## License
 

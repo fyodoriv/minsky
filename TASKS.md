@@ -77,10 +77,10 @@
   - **ID**: ci-rule-5-glossary-discipline
   - **Tags**: ci, conformance, rule-10
   - **Estimate**: 3–4h
-  - **Hypothesis**: A CI lint that extracts every `\`back-ticked\`` identifier under sections marked as "coined" (or every PascalCase identifier in code-blocks within `vision.md`) and verifies each appears in `## Glossary — every term has a CS anchor` strengthens rule #5 from "the section header exists" (today's check) to "every term resolves" — without an LLM in the loop.
+  - **Hypothesis**: A CI lint that extracts every backticked identifier under sections marked as "coined" (or every PascalCase identifier in code-blocks within `vision.md`) and verifies each appears in `## Glossary — every term has a CS anchor` strengthens rule #5 from "the section header exists" (today's check) to "every term resolves" — without an LLM in the loop.
   - **Details**: Today's `glossary-discipline` job in `.github/workflows/ci.yml` only checks the section header is present (line ~37 of ci.yml). Replace with a script that extracts coined terms (heuristic: backticked identifiers in `## The constitution` and the rest of `vision.md` outside the Glossary itself, minus a pre-declared allowlist of standard CS terms), then checks each appears in the Glossary's term list. Fails the job on any missing term. The current job header check stays as a fallback.
   - **Files**: `scripts/check-rule-5-glossary-discipline.mjs`, `scripts/check-rule-5-glossary-discipline.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic vision.md introducing `\`FrobnicatorLoop\`` without a Glossary entry → fails with the term name; same file with the entry → passes; allowlisted standard terms (e.g., `\`OTEL\``, `\`HTTP\``) don't trigger the lint.
+  - **Verification**: synthetic vision.md introducing a backticked `FrobnicatorLoop` without a Glossary entry → fails with the term name; same file with the entry → passes; allowlisted standard terms (e.g., `OTEL`, `HTTP`) don't trigger the lint.
   - **Measurement**: `node scripts/check-rule-5-glossary-discipline.mjs` exits 1 against the missing-entry fixture and 0 against the with-entry fixture; `pnpm vitest run scripts/check-rule-5-glossary-discipline.test.mjs` exits 0.
   - **Pivot**: if the heuristic produces ≥3 false positives per PR, switch from "extract every backtick'd identifier" to "extract terms explicitly tagged with `<coined>…</coined>` HTML comments" — narrower scope but zero false positives.
   - **Acceptance**: CI job replaces the section-header-only check; rule #5 is mechanically enforced; ratchet-rule applied (Skill-based glossary checks, if any, are removed in the same PR).
@@ -208,7 +208,6 @@
 ## P2
 
 <!-- spec-monitor-skill (the prior P2 task) is superseded by `spec-monitor-deterministic-rewrite` in P1. Per rule #10 (deterministic enforcement), the previous shape — a Claude Skill as the *primary* enforcement of every constitutional rule — is incompatible with the iron-rule "enforcement is deterministic, not LLM-driven" clause. The replacement task splits the Skill's remit: deterministic linters (`ci-rule-1` … `ci-rule-7`) take the load-bearing share; the residual judgement scope ships as an advisory-only Claude Skill (`spec-monitor-deterministic-rewrite`). Removing this block is the ratchet-rule from rule #10 in action: the prior approach is *removed* in the same PR that introduces the deterministic replacement. -->
-
 
 - [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager)
   - **ID**: mape-k-loop-v0
