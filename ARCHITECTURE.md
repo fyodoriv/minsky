@@ -4,6 +4,8 @@ This document describes how Minsky's pieces fit together. Every choice here is d
 
 ## Layered model
 
+> **Pattern:** Viable System Model (Beer, *Brain of the Firm*, 1972). Conformance: full. See `vision.md` § "Pattern conformance index" row 2.
+
 The vertical structure follows Stafford Beer's Viable System Model. Each layer operates at a different timescale and answers a different question.
 
 ```text
@@ -31,6 +33,8 @@ The vertical structure follows Stafford Beer's Viable System Model. Each layer o
 The three lower layers (Coordination, Operations, Nervous System) are mostly other people's tools. The three upper layers (Identity, Intelligence, Control) are mostly Minsky's novel work.
 
 ## The adapter pattern (the most important section)
+
+> **Pattern:** Adapter (structural) + Strategy (behavioral) per Gamma, Helm, Johnson, Vlissides, *Design Patterns*, 1994. Conformance: full. See `vision.md` § "Pattern conformance index" row 3.
 
 **Every external dependency is accessed through an interface defined in `novel/adapters/`.** Business logic never imports a vendor library directly. This is what makes "don't reinvent the wheel" tractable over a decade — without interfaces, "use someone else's tool" calcifies into vendor lock-in.
 
@@ -189,6 +193,8 @@ Bidirectional sync between tasks.md (canonical) and OMC's internal task list. Tr
 ```
 
 ## Process supervision tree
+
+> **Pattern:** OTP supervision behaviour (Armstrong, *Programming Erlang*, 2007). Conformance: partial — restart strategies match; supervisor primitive is systemd / launchd, not BEAM. See `vision.md` § "Pattern conformance index" row 4 for the deviation rationale.
 
 Inspired by Erlang/OTP supervision. Every long-running process has a supervisor; if it dies, it restarts according to a policy. State is on disk so nothing is lost.
 

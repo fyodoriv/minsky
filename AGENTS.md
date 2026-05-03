@@ -53,6 +53,14 @@ Architectural choices reference named patterns (Hewitt actor model, Beer VSM, Ar
 
 Code paths must handle: process death, rate limit hits, dependency failures, mid-task interruption. Idempotency is default. Long try-catch chains are a smell — prefer "let it crash" with supervisor restart, per Erlang/OTP discipline.
 
+### 7. Chaos engineering
+
+Trust no component whose failure probability is not provably ≤1e-12. Every novel package and every user-story file enumerates failure modes, expected behavior (`loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade`), a deterministic chaos test, and explicit blast radius + operator escape hatch. Silent retry-with-backoff that suppresses failure is itself a constitutional violation. See `vision.md` § 7 for the full rule + sources.
+
+### 8. Pattern conformance
+
+Every artifact (file, package, interface, architectural decision, process step) traces to a named, published pattern. New artifacts add a row to `vision.md` § "Pattern conformance index" *in the same commit*. Deviations from the published pattern are declared explicitly in the row's notes column (which property differs, why it's acceptable, what would restore full conformance) and, for substantive deviations, in `research.md`. Identifiers match pattern names when the match is total (`aggregateStatus`, future `MapeKLoop`, `SupervisionTree`, `CircuitBreaker`). Top-of-file comments name the pattern; JSDoc on public interfaces cites it. Silent deviation is itself a constitutional violation. See `vision.md` § 8 for the full rule + sources.
+
 ## How to claim and work a task
 
 Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasksmd/tasks.md).
