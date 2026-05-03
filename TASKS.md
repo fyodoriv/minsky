@@ -8,19 +8,7 @@
 
 ## P0
 
-- [ ] Resolve OMC handoff persistence question
-  - **ID**: research-omc-handoff-persistence
-  - **Tags**: research, blocking
-  - **Estimate**: 2–3h (read source + experiment)
-  - **Details**: Determine whether OMC's "shared task list" persists to disk in a parseable format, or only in process memory. Read OMC source; experiment by running `/team N:role` and checking the working tree + `~/.claude/` for new artifacts. Determines complexity of `omc-tasksmd-bridge`.
-  - **Files**: `research.md`, `competitors/omc.md`
-  - **Verification**:
-    - `grep -RInE 'writeFileSync|saveTo|persist|JSON\.stringify' <omc-checkout>/` and triage hits
-    - Run OMC `/team 2:executor` against a throwaway repo, then `find . ~/.claude -newer /tmp/.start_marker` to spot any artifacts
-  - **Acceptance**:
-    - `research.md` has a "OMC handoff persistence" subsection: yes/no/partial, file path(s), format, parseability assessment
-    - If not parseable: GitHub issue filed at `Yeachan-Heo/oh-my-claudecode` requesting a parseable artifact, URL recorded in research.md
-  - **Risk**: OMC may persist in an opaque format (e.g., serialized in-process state) that only resembles parseable on the surface — verify with a round-trip parse, not eyeballing.
+(empty — work the highest-priority unblocked item from P1.)
 
 ## P1
 
@@ -247,6 +235,41 @@
   - **Verification**: `research.md` "DSPy fit" entry contains 3 wins + 3 frictions with concrete code references; if poor fit, alternative `PromptOptimizer` implementation proposed in the same entry
   - **Acceptance**: research.md updated; if poor fit, alternative `PromptOptimizer` implementation proposed
   - **Risk**: DSPy idiom is a moving target — pin the version evaluated; revisit on new minor releases.
+
+- [ ] Resolve OMC handoff persistence question
+  - **ID**: research-omc-handoff-persistence
+  - **Tags**: research
+  - **Estimate**: 2–3h (read source + experiment)
+  - **Blocked**: needs-user-approval — task involves running OMC plugin commands locally (invasive machine state) and, conditionally, filing a GitHub issue at `Yeachan-Heo/oh-my-claudecode` (`gh issue create` is blocked-by-default per `/next-task` skill). User to either confirm in-session approval and unblock, or perform the public-surface action themselves and record the URL in research.md.
+  - **Details**: Determine whether OMC's "shared task list" persists to disk in a parseable format, or only in process memory. Read OMC source; experiment by running `/team N:role` and checking the working tree + `~/.claude/` for new artifacts. Determines complexity of `omc-tasksmd-bridge`.
+  - **Files**: `research.md`, `competitors/omc.md`
+  - **Verification**:
+    - `grep -RInE 'writeFileSync|saveTo|persist|JSON\.stringify' <omc-checkout>/` and triage hits
+    - Run OMC `/team 2:executor` against a throwaway repo, then `find . ~/.claude -newer /tmp/.start_marker` to spot any artifacts
+  - **Acceptance**:
+    - `research.md` has a "OMC handoff persistence" subsection: yes/no/partial, file path(s), format, parseability assessment
+    - If not parseable: GitHub issue filed at `Yeachan-Heo/oh-my-claudecode` requesting a parseable artifact, URL recorded in research.md
+  - **Risk**: OMC may persist in an opaque format (e.g., serialized in-process state) that only resembles parseable on the surface — verify with a round-trip parse, not eyeballing.
+
+- [ ] Pattern-conformance audit — annotate every existing user-story, competitor doc, and adapter README
+  - **ID**: pattern-conformance-audit-existing-docs
+  - **Tags**: docs, conformance, scout
+  - **Estimate**: 3–4h
+  - **Details**: Constitutional rule #8 (`vision.md` § 8) commits the repo to explicit pattern conformance for every artifact. PR #6 seeded the index with 22 foundational rows but did not annotate every existing doc. This task adds, in each `user-stories/*.md`, `competitors/*.md`, and (when present) novel-package README, a "Pattern conformance" subsection naming the pattern(s) the artifact instantiates with source citation and conformance level. Cross-link from the row in `vision.md` § "Pattern conformance index". For competitors, the pattern is "what pattern they implement" (e.g., MetaGPT → simulated software company role-play; CrewAI → role-based agent orchestration); the conformance line declares how Minsky's choice (don't adopt) relates.
+  - **Files**: `user-stories/*.md` (5), `competitors/*.md` (6), `novel/adapters/observability/README.md` (when added), index row updates in `vision.md`
+  - **Verification**: every file in the listed sets has a "Pattern conformance" heading; every heading has a row referenced in `vision.md` § "Pattern conformance index"; tasks-lint and markdownlint pass.
+  - **Acceptance**: All listed files annotated; the index in `vision.md` grows by ≥11 rows; PR merges with all 8 CI gates green.
+  - **Risk**: Pattern misattribution. Mitigation: every row cites a primary literature source (paper / book chapter), not a blog post or wiki.
+
+- [ ] CI lint that enforces "every new top-level artifact gets a `vision.md` index row"
+  - **ID**: ci-lint-pattern-index
+  - **Tags**: ci, conformance
+  - **Estimate**: 4–6h
+  - **Details**: Constitutional rule #8 commits every PR that adds a new file / package / interface to add (or amend) a row in `vision.md` § "Pattern conformance index". Today nothing enforces it. Build a small Node script (under `scripts/`) that runs in CI: diff the PR against `main`; for any added top-level file or new pnpm workspace package, require a corresponding row in the index (heuristic: file path or package name appears in the index's table). Fails the `glossary-discipline` job (rename appropriately, e.g., `pattern-discipline`) when a new artifact lacks a row. Allow opt-out by `<!-- pattern: not-applicable -->` comment in the file with a one-line reason.
+  - **Files**: `scripts/check-pattern-index.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: a synthetic PR adding a new top-level file without an index row fails the new check; the same PR with a row passes; opt-out comment is honored; CI runs the new check on every PR.
+  - **Acceptance**: Script + CI job ship together; new check fails fast on a synthetic test fixture; rule #8 is now mechanically enforced.
+  - **Risk**: False positives if path matching is too strict (e.g., new test file). Mitigation: scope to `novel/**`, top-level docs (`*.md` at root), `setup.sh`, `distribution/**`, `.github/workflows/**` — not test files or fixtures.
 
 - [ ] Pin tooling versions in CI workflow (`@tasks-md/lint`, `markdownlint-cli2`)
   - **ID**: ci-pin-tooling-versions
