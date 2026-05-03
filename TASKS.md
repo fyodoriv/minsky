@@ -8,22 +8,6 @@
 
 ## P0
 
-- [ ] Production-grade `setup.sh` rewrite
-  - **ID**: setup-sh-rewrite
-  - **Tags**: infra, foundation, bash
-  - **Estimate**: 1–2d
-  - **Details**: Idempotent, color/no-color/CI aware, three modes: default install, `--doctor` (self-tests only), `--reset` (nuke `.minsky/` and reinstall). Ledger-based step caching. Lockfile via `flock` on `.minsky/setup.lock`. State in `.minsky/state.json` with `{schema_version, defaults: {budget_tier: Max5, observability: sqlite, topology: single-machine}, ntfy.topic (auto-generated), adapters: {}, last_self_test: {}}`. Trap on EXIT — failures print failed step, state path, log path, smallest concrete next step. Final report: GREEN / YELLOW / RED with dashboard URL + Tailscale URL + ntfy topic. Anti-patterns: no `sudo`, no `rm -rf` outside `.minsky/`, no shell-rc mutation, no unpinned `curl|bash`. Define `selfTest()` adapter contract: `{status: green|yellow|red, message, latency_ms, last_check}`. Aggregation: red dominates yellow dominates green.
-  - **Files**: `setup.sh`, `.minsky/state.example.json`, `novel/adapters/types.ts` (selfTest contract)
-  - **Verification**:
-    - `./setup.sh --doctor` exits 0 on a fresh checkout
-    - `./setup.sh --reset` removes `.minsky/` and rebuilds from scratch (test in worktree)
-    - Three consecutive runs produce identical state (idempotency)
-    - Concurrent invocation blocked by `flock` with informative error
-    - `shellcheck setup.sh` exits 0
-    - Failure-mode table added per rule #7
-  - **Acceptance**: setup.sh handles default / `--doctor` / `--reset`; state persisted in `.minsky/state.json`; `selfTest()` interface exported and consumable by future adapters; failure modes documented; PR merges with all 8 CI gates green
-  - **Risk**: Bash idempotency is hard. Mitigation: ledger of completed steps in `state.json` keyed by step name; each step checks the ledger before running.
-
 - [ ] Resolve OMC handoff persistence question
   - **ID**: research-omc-handoff-persistence
   - **Tags**: research, blocking
@@ -146,6 +130,16 @@
     - Oscillation guard: synthetic test where the same prompt is proposed twice in 10 iterations — second is refused
   - **Acceptance**: Integration test for user-story 003 passes; oscillation + sustained-gain guards verified; published as `@minsky/mape-k-loop`
   - **Risk**: Oscillation; confidently rolling out regressions; complexity creep into a research project. Set explicit guards: sustained-gain check (≥7 days post-rollout before counting), oscillation detector (refuses to revisit a prompt within N iterations).
+
+- [ ] Extract `selfTest()` contract to shared adapter-types package
+  - **ID**: extract-adapter-types
+  - **Tags**: novel, refactor, scout
+  - **Estimate**: 2–3h
+  - **Details**: Currently `SelfTestStatus`, `SelfTestResult`, and `aggregateStatus()` live at `novel/adapters/observability/src/index.ts`. By the second adapter (per ARCHITECTURE.md § "The dependency table" — supervisor-setup, budget-guard-v0, etc.) every adapter will need this contract, and importing it through `@minsky/observability` is wrong: an `@minsky/budget-guard` package depending on `@minsky/observability` for a base type is an architectural cycle. Extract to a new pnpm workspace package `novel/adapters/types` (`@minsky/adapter-types`) exporting the contract; have `@minsky/observability` re-export from there for back-compat; future adapters depend directly on `@minsky/adapter-types`. Update setup.sh's comment header reference to point to the new location. Surfaced while shipping `setup-sh-rewrite` (PR #5).
+  - **Files**: `novel/adapters/types/package.json`, `novel/adapters/types/src/index.ts`, `novel/adapters/types/src/index.test.ts`, `novel/adapters/types/tsconfig.json`, `novel/adapters/observability/src/index.ts`, `novel/adapters/observability/package.json`, `setup.sh` (header reference), `pnpm-workspace.yaml` if needed
+  - **Verification**: `pnpm typecheck` passes; existing observability tests pass unchanged; new types-package tests cover `aggregateStatus` 100%; `pnpm publish --dry-run --workspace novel/adapters/types` succeeds.
+  - **Acceptance**: New `@minsky/adapter-types` package compiles, tests pass, observability re-exports work, setup.sh comment updated.
+  - **Risk**: Workspace dependency loops if observability and types depend on each other. Mitigation: `@minsky/adapter-types` has no internal Minsky deps.
 
 - [ ] Implement `omc-tasksmd-bridge` v0
   - **ID**: omc-tasksmd-bridge-v0
