@@ -8,30 +8,10 @@
 
 ## P0
 
-- [ ] Land constitutional rule #7 (chaos engineering) + Max5 adaptive token economy + per-story failure modes
-  - **ID**: chaos-rule-and-max5-economy
-  - **Tags**: constitution, foundation, docs
-  - **Estimate**: 1d (research-heavy doc work; no code)
-  - **Details**: Add new constitutional rule #7 to `vision.md` mandating: failure-mode enumeration, deterministic chaos tests (`kill -9`, `tc qdisc netem`, `iptables DROP`, `libfaketime`), no-silent-recovery, steady-state hypothesis, weekly production fault injection. Cite Netflix Chaos Monkey, Basiri et al. *Principles of Chaos* 2016, Beyer *SRE* Ch. 17, Armstrong let-it-crash, Hewitt actor isolation, Kreps log-replay. Rewrite `ARCHITECTURE.md` § "Token economy" for Max5: drop hardcoded Max20 numbers; observe `TokenMonitor` and react at relative 70% / 85% / weekly-warn; mark exact figures with `<TBD: verify against anthropic.com/pricing>` where not publicly published; sustained-rate target ≈30% of observed peak per 5h window. Add a `## Failure modes & chaos verification` section to every `user-stories/*.md` — table of (failure mode | trigger / fault axis | expected behavior — `loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade` | chaos test) with **≥10 rows for story 001**, **≥5 for stories 002–005**. Include steady-state hypothesis + blast radius + operator escape hatch per story.
-  - **Files**: `vision.md`, `ARCHITECTURE.md`, `user-stories/001-loop-runs-overnight.md`, `user-stories/002-pause-from-iphone.md`, `user-stories/003-mape-k-improves-prompts.md`, `user-stories/004-budget-auto-pause.md`, `user-stories/005-watch-three-numbers.md`
-  - **Verification**:
-    - `grep -E '^### 7\.' vision.md` finds the new rule heading
-    - `grep -i -E '(220k|88k|Max20)' ARCHITECTURE.md` returns no matches in the Token economy section
-    - Each `user-stories/*.md` has a `## Failure modes & chaos verification` heading
-    - Story 001 table has ≥10 data rows; stories 002–005 have ≥5 each
-    - `pnpm run check` passes; `tasks-lint TASKS.md` passes; `markdownlint-cli2` passes; CI green on all 8 jobs
-  - **Acceptance**:
-    - `vision.md` rule #7 cites all 6 sources (Chaos Monkey, *Principles of Chaos*, *SRE* Ch. 17, Armstrong, Hewitt, Kreps)
-    - `ARCHITECTURE.md` token economy is fully adaptive and free of hardcoded Max20 figures
-    - Each user-story has steady-state hypothesis, blast radius, operator escape hatch, and a failure-mode table per the row counts above
-    - PR merges with all 8 CI gates green
-  - **Risk**: Glossary discipline — if any Minsky-coined term is introduced (e.g., a non-standard sense of "fault axis"), it needs a Glossary row in the same commit. Mitigation: stick to terms from the cited literature.
-
 - [ ] Production-grade `setup.sh` rewrite
   - **ID**: setup-sh-rewrite
   - **Tags**: infra, foundation, bash
   - **Estimate**: 1–2d
-  - **Blocked by**: chaos-rule-and-max5-economy
   - **Details**: Idempotent, color/no-color/CI aware, three modes: default install, `--doctor` (self-tests only), `--reset` (nuke `.minsky/` and reinstall). Ledger-based step caching. Lockfile via `flock` on `.minsky/setup.lock`. State in `.minsky/state.json` with `{schema_version, defaults: {budget_tier: Max5, observability: sqlite, topology: single-machine}, ntfy.topic (auto-generated), adapters: {}, last_self_test: {}}`. Trap on EXIT — failures print failed step, state path, log path, smallest concrete next step. Final report: GREEN / YELLOW / RED with dashboard URL + Tailscale URL + ntfy topic. Anti-patterns: no `sudo`, no `rm -rf` outside `.minsky/`, no shell-rc mutation, no unpinned `curl|bash`. Define `selfTest()` adapter contract: `{status: green|yellow|red, message, latency_ms, last_check}`. Aggregation: red dominates yellow dominates green.
   - **Files**: `setup.sh`, `.minsky/state.example.json`, `novel/adapters/types.ts` (selfTest contract)
   - **Verification**:
@@ -273,3 +253,13 @@
   - **Verification**: `research.md` "DSPy fit" entry contains 3 wins + 3 frictions with concrete code references; if poor fit, alternative `PromptOptimizer` implementation proposed in the same entry
   - **Acceptance**: research.md updated; if poor fit, alternative `PromptOptimizer` implementation proposed
   - **Risk**: DSPy idiom is a moving target — pin the version evaluated; revisit on new minor releases.
+
+- [ ] Pin tooling versions in CI workflow (`@tasks-md/lint`, `markdownlint-cli2`)
+  - **ID**: ci-pin-tooling-versions
+  - **Tags**: ci, hygiene, scout
+  - **Estimate**: 30m
+  - **Details**: `.github/workflows/ci.yml` invokes `npx -y @tasks-md/lint@latest TASKS.md` (tasks-lint job) and `npx -y markdownlint-cli2 ...` (markdownlint job, no version specifier at all). Both will silently pick up new versions on every CI run, contradicting `ARCHITECTURE.md` § "Versioning & dependency evolution" (*"Pin major versions of all dependencies"*) and the chaos-engineering discipline of constitutional rule #7 (a new tasks-md or markdownlint-cli2 release on Friday could break Monday's CI without us controlling when). Pin both: change `@tasks-md/lint@latest` to a specific minor (e.g., `@tasks-md/lint@^0.7.0`), and `markdownlint-cli2` invocation to either the lockfile-pinned 0.15.0 (via `pnpm exec markdownlint-cli2 ...`) or `markdownlint-cli2@0.15.0` via npx.
+  - **Files**: `.github/workflows/ci.yml`
+  - **Verification**: `grep -E '@(tasks-md/lint|latest)' .github/workflows/ci.yml` returns only pinned forms; CI green after the change.
+  - **Acceptance**: Both invocations pinned to a specific minor or via the lockfile; ARCHITECTURE.md § "Versioning & dependency evolution" referenced in the PR description; CI green.
+  - **Risk**: Pinning means we miss security patches if we forget to bump. Mitigation: dependabot or a quarterly bump task (covered by `review-q3-2026`).

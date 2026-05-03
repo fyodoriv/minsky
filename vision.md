@@ -68,6 +68,28 @@ The system is designed to operate for years, not days. It throttles itself befor
 
 "Stays useful indefinitely under constant pressure" is the goal. "Ships features fast" is a byproduct.
 
+### 7. Chaos engineering — trust nothing unverified
+
+Trust no component whose failure probability is not provably ≤1e-12. Until verified, every dependency is assumed hostile: it can crash, hang, lie about success, return malformed data, or slow to a crawl mid-call. Rule #6 ("stay alive") sets the goal; this rule makes it falsifiable. The system stays alive only because we enumerate the ways each piece can fail, exercise each failure in tests that run on every CI, and verify the supervisor handles them as designed.
+
+Every novel package and every user-story file enumerates four things:
+
+1. **Failure modes** — concrete things that can break, organized by *fault axis*: process death (`kill -9`), network (`tc qdisc netem` for latency / loss; `iptables -A OUTPUT … -j DROP` for partitions), clock (`libfaketime` for skew and jump), disk-full, OOM, dependency upstream-error, dependency upstream-malformed-response. The Netflix Simian Army catalog (Basiri et al., *Principles of Chaos Engineering*, IEEE Software 2016) is the starting list; extend per the package's surface.
+2. **Expected behavior** for each failure — exactly one of:
+   - `loud-crash-supervisor-restart` — let-it-crash (Armstrong, *Programming Erlang*, 2007); supervisor restarts the process per its policy. Never silent recovery.
+   - `circuit-break-and-notify` — open the circuit (Nygard, *Release It!*, 2007); fire a notification at level ≥ user-set threshold; close on probe success.
+   - `graceful-degrade` — switch to a reduced-capability mode (e.g., Haiku instead of Sonnet under budget pressure) while emitting an OTEL span tagged `degraded=true`.
+3. **Deterministic chaos test** — a CI test that reproduces the failure exactly (same fault axis, same timing) and asserts the expected behavior. A *steady-state hypothesis* (Basiri et al. 2016) is declared per system: the metric whose value defines "healthy" *before* the fault is injected; the test passes only if the metric is restored within the package's recovery SLO after the fault is removed.
+4. **Blast radius** — explicit upper bound on what one failure can damage (single tick / single user-story / single dependency / whole system) and the *operator escape hatch* — the one-command kill switch the user can invoke if a chaos test escapes its bounds.
+
+Weekly production fault injection (Netflix Tech Blog, "Chaos Monkey released into the wild", 2012) on a low-stakes day: the supervisor randomly picks one declared failure mode and triggers it. If the system fails to recover per spec, the developer gets a Watch-level notification and the failure becomes the week's constraint per Goldratt TOC.
+
+Two underlying patterns make recovery deterministic and are presumed by the rule: actor isolation (Hewitt, Bishop, Steiger, "A Universal Modular ACTOR Formalism for Artificial Intelligence", IJCAI 1973) — actors share no state, so one's death corrupts no one else; and log-replay (Kreps, "The Log: What every software engineer should know about real-time data's unifying abstraction", LinkedIn Engineering 2013) — durable input lets any actor recompute its state. Without both, "recovery" is wishful thinking.
+
+**Anti-pattern**: silent retry-with-backoff loops that suppress the failure signal. They look like graceful handling and are in fact the opposite — they paper over a fault that should crash loudly so the supervisor can act and the developer can see. *Suppression of failure is itself a constitutional violation*; the spec-monitor flags it during runtime specification monitoring.
+
+Sources: Basiri et al., "Principles of Chaos Engineering", IEEE Software 2016; Beyer et al., *Site Reliability Engineering*, Ch. 17 "Testing for Reliability", 2016; Armstrong, *Programming Erlang*, 2007; Nygard, *Release It!*, 2007; Hewitt, Bishop, Steiger, IJCAI 1973; Kreps, "The Log", 2013; Netflix Tech Blog, "Chaos Monkey released into the wild", 2012.
+
 ## Theoretical foundations
 
 Minsky stands on the shoulders of named giants. Each layer in the architecture maps to a tested pattern with literature behind it.
@@ -130,6 +152,11 @@ This table operationalizes constitutional principle 5. Every word Minsky introdu
 | Inner loop / Outer loop | (kept as-is — already precise) | Optimization & control systems |
 | Bottleneck | (kept as-is — already precise) | Goldratt TOC (cited above) |
 | Error budget | (kept as-is — already precise) | Beyer et al., *Site Reliability Engineering* (Google, 2016) |
+| Failure-mode response: `loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade` | (labels for established patterns) | Armstrong, *Programming Erlang* 2007 (let-it-crash); Nygard, *Release It!* 2007 (circuit breaker); AWS Well-Architected Framework, Reliability pillar (graceful degradation) |
+| Fault axis | (kept as-is — chaos-engineering term) | Basiri et al., "Principles of Chaos Engineering", IEEE Software 2016 |
+| Steady-state hypothesis | (kept as-is — chaos-engineering term) | Basiri et al. 2016 (above) |
+| Blast radius | (kept as-is — established term) | AWS Well-Architected, Reliability pillar; Beyer et al., *SRE* Ch. 17 2016 |
+| Operator escape hatch / kill switch | (kept as-is — established term) | Beyer et al., *SRE* Ch. 17 2016 |
 
 When you introduce a new word in any Minsky doc, **add a row here in the same commit** (or remove the new word and use an existing row's right-column term).
 
