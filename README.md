@@ -31,9 +31,12 @@ the inner loop. Minsky optimises the outer loop:
   *autonomic manager* observes persona-level metrics, identifies the bottleneck
   (Goldratt TOC), runs A/B tests via DSPy, rolls out winners.
 
-See [`vision.md`](./vision.md) for the full constitution, and the
-[Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) for the term-to-CS-source
-mapping rule (every Minsky-coined word has a literature anchor).
+See [`vision.md`](./vision.md) for the full constitution, the
+[Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) (every Minsky-coined word
+has a literature anchor — rule #5), and the
+[Pattern conformance index](./vision.md#pattern-conformance-index) (every artifact —
+file, package, interface, decision — maps to a published pattern with its conformance
+level; deviations are declared explicitly — rule #8).
 
 ## How it fits together
 
