@@ -152,3 +152,12 @@ export {
   flagFilePath,
   writeBudgetFlag,
 } from "./flag-file.js";
+
+export {
+  type BudgetJson,
+  type BudgetServer,
+  type DecisionGetter,
+  DEFAULT_PORT,
+  HonoBudgetServer,
+  budgetResponse,
+} from "./http-server.js";
