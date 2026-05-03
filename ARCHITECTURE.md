@@ -233,29 +233,36 @@ The Watch shows the smallest set of facts that answer "is the organism still ali
 
 ## Token economy
 
-Hard constraints (Claude Code Max, 2026):
+Tier scope: **Claude Code Max5**. The exact budgets in tokens, requests / minute, and weekly cap are not published by Anthropic for this tier and change over time, so Minsky never hardcodes them. Instead, the system **observes** the current budget through the `TokenMonitor` adapter and reacts at *relative* thresholds. This keeps `claude-budget-guard` correct as Anthropic's numbers shift, and as the user upgrades or downgrades tiers.
 
-- 5h rolling window: ~220k tokens (Max20) / ~88k tokens (Max5)
-- Weekly cap (introduced August 2025; exact value depends on tier and changes over time)
-- Shared bucket with claude.ai usage in the same account
+Hard constraints (observed at runtime; placeholders until verified):
 
-Homeostasis logic (lives in `claude-budget-guard`):
+- 5h rolling window size: `<TBD: verify against anthropic.com/pricing>`
+- Weekly cap (introduced August 2025; tier- and version-dependent): `<TBD: verify against anthropic.com/pricing>`
+- Shared bucket with `claude.ai` usage on the same account: yes
+- Behavior on cap hit: HTTP 429 from the API, surfaced by the `Orchestrator` adapter
 
-- At 70% of 5h window: switch to Haiku for low-effort personas
-- At 85%: pause new tick claims; let in-flight finish
-- At weekly-cap warning: switch to longer sleep cycles between ticks
-- After reset: resume normal cadence
+Adaptive homeostasis (lives in `claude-budget-guard`; thresholds are *relative*, never absolute):
 
-Sustainable rate math:
+- **Below 70%** of the observed 5h window: normal cadence; full model routing per `Orchestrator` rules.
+- **At 70%** of the 5h window: low-effort personas switch from Sonnet to Haiku (`graceful-degrade` per constitutional rule #7); OTEL span tagged `degraded=true`.
+- **At 85%** of the 5h window: pause new tick claims; let in-flight ticks finish (`circuit-break-and-notify` per rule #7); fire a single notification at level=warn.
+- **At weekly-cap warning** (Maciek's `TokenMonitor` surfaces this from its ML-based predictor): extend sleep cycles between ticks; favor Haiku.
+- **After window reset** (TokenMonitor reports remaining > 50% again): resume normal cadence; clear the `degraded=true` tag; emit OTEL counter `budget_guard.resume`.
 
-- Theoretical peak (Max20): 220k × (24/5) = ~1.05M tokens/day
-- Realistic sustainable (weekly cap aware, leaving headroom for human use of claude.ai): **~30-40% of peak, target ~350-450k tokens/day**
+The numeric thresholds (70%, 85%) are configurable via `config/budget-guard.json`; they are not constants in code. The "observed peak" comes from the rolling max of `TokenMonitor.peakObserved()` over the last 30 days, recomputed at every reset.
+
+Sustainable rate target:
+
+- **≈30% of observed 5h-window peak per 5h window**, sustained. Rationale (Google SRE error-budget discipline, Beyer et al. 2016): leave 70% headroom for (a) human use of `claude.ai` on the same bucket, (b) unanticipated spikes from rule-#7 chaos tests, (c) recovery work after a `loud-crash-supervisor-restart`, and (d) the autonomic manager's MAPE-K cycles which themselves consume tokens. The 30% figure is itself adaptive: the `mape-k-loop` adjusts it monthly based on observed weekly-cap distance and the sustained-rate trend in `vision.md` § Success criteria #2 (tokens-per-closed-user-story).
 
 Token-saving rules baked into adapters:
 
-- `Orchestrator`: plan with Opus, execute with Sonnet (`/model opusplan` pattern), Haiku for high-volume scripted runs
-- `Orchestrator`: protect prompt cache prefix — don't add MCP servers or change model mid-session
-- `Observability`: hooks for deterministic checks (zero context cost), not prompts
+- `Orchestrator`: plan with Opus, execute with Sonnet (`/model opusplan` pattern); Haiku for high-volume scripted runs and post-70% degraded mode.
+- `Orchestrator`: protect the prompt-cache prefix — don't add MCP servers or change models mid-session.
+- `Observability`: hooks for deterministic checks (zero LLM-context cost), not prompts.
+
+Failure modes & chaos verification: see `claude-budget-guard`'s README failure-modes section per constitutional rule #7, and `user-stories/004-budget-auto-pause.md` for the per-story failure table.
 
 ## Bootstrap (`./install.sh`)
 

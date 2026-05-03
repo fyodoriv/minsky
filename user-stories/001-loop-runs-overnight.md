@@ -42,6 +42,31 @@ As a solo developer, I close my laptop at 11pm with the loop running, sleep thro
 - **Audit**: `git log --since="8 hours ago"` shows commits authored by the agent identity
 - **Notification**: Single morning ntfy push summarizing tasks closed and tokens consumed
 
+## Failure modes & chaos verification
+
+Per constitutional rule #7 (`vision.md` § 7).
+
+- **Steady-state hypothesis**: ≥1 task closed per scheduler iteration (~5 min) and `systemctl --user is-active minsky-tick-loop` reports `active` with no >30s gap, sustained over the 8h window.
+- **Blast radius**: a single tick / one task. Never the whole loop, never another user-story's flow.
+- **Operator escape hatch**: tap the "pause" Shortcut (story 002). On-machine fallback: `touch state/PAUSED` (the same flag the supervisor honors within one scheduler iteration).
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | tick-loop process killed mid-tool-call | `kill -9 $(pgrep -f minsky-tick-loop)` (process death) | `loud-crash-supervisor-restart` | Kill mid-tick; assert `Restart=on-failure` respawns within MTTR < 5min and the lease is released so a re-claim happens. |
+| 2 | OMC subagent hangs forever | `libfaketime` advances clock past per-step timeout (clock) | `loud-crash-supervisor-restart` | Wrap subagent with `timeout(1)`-style watchdog; assert reap + restart, no zombie. |
+| 3 | Persona returns malformed handoff JSON | Inject a fixture handoff with missing required fields (upstream-malformed) | `circuit-break-and-notify` | Run with a malformed-handoff fixture; assert handoff-spec validator rejects, single notification, no infinite parse loop. |
+| 4 | `tasks-mcp` server dies between claim and complete | `kill -9 $(pgrep -f tasks-mcp)` (process death) | `loud-crash-supervisor-restart` | Kill `tasks-mcp` mid-claim; assert lease expires within configured TTL; another agent / re-spawn re-claims the same task without duplication. |
+| 5 | Network partition to `api.anthropic.com` | `iptables -A OUTPUT -d api.anthropic.com -j DROP` for 60s (network) | `circuit-break-and-notify` | Apply DROP for 60s; assert no 429 in OTEL stream, single notification, automatic resume on probe success. |
+| 6 | Slow API response (200ms → 60s) | `tc qdisc add dev eth0 root netem delay 60s` (network latency) | `graceful-degrade` | Apply 60s netem delay; assert switch to Haiku per the 70% rule, OTEL span tagged `degraded=true`, no tick wedged. |
+| 7 | Disk fills (logs / traces) | `dd if=/dev/zero of=/tmp/fill bs=1M count=$(($(df -m /tmp \| awk 'NR==2 {print $4}')-1))` (disk-full) | `loud-crash-supervisor-restart` | Fill disk; assert log rotation kicks in or process exits cleanly, supervisor restarts, no silent log corruption. |
+| 8 | OS sleep / wake mid-tick (laptop closed) | `pmset sleepnow` on macOS / `systemctl suspend` on Linux (clock + process pause) | `graceful-degrade` | Suspend and resume; assert in-flight tick recovers via lease check, no double-execution, OTEL span shows resume gap. |
+| 9 | Token budget exhausted mid-tick | Mock `TokenMonitor.remaining()` to return 0 (dependency upstream-error) | `circuit-break-and-notify` | Stub TokenMonitor at 0; assert pause new claims, in-flight finishes, single ntfy at level=warn. |
+| 10 | Concurrent claim race (two agents pick same task) | Spawn two simulated agents claiming simultaneously (lease contention) | `graceful-degrade` | Two parallel `pick_task` calls; assert at most one wins via tasks-mcp's lease semantics, the loser picks the next task. |
+| 11 | OTEL collector unreachable | `iptables -A OUTPUT -p tcp --dport 4317 -j DROP` (network) | `graceful-degrade` | Drop port 4317; assert spans are buffered then dropped per exporter policy, no tick blocks waiting for telemetry. |
+| 12 | Clock skew (NTP-less laptop) | `libfaketime "+30m"` before launching tick-loop (clock) | `graceful-degrade` | Skew clock +30 min; assert no premature 5h-window reset, no negative-elapsed claim, supervisor logs the skew. |
+
+Weekly production fault injection: `supervisor-setup` (P1) wires a low-stakes Sunday timer that picks one row at random and runs its chaos test against the live loop; failures escalate to a Watch-level notification.
+
 ## Status
 
 - **Phase**: Specification (not yet implemented)

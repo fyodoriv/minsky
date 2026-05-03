@@ -44,6 +44,23 @@ Over the first month, I notice the QA persona's pass rate is around 62% — too 
 - **Audit**: `constraints.md` contains the full diagnostic narrative; `git log -- .claude/agents/qa-tester.md` shows the prompt change with rationale
 - **Statistical**: 30 days post-rollout, the metric remains ≥10% above baseline
 
+## Failure modes & chaos verification
+
+Per constitutional rule #7 (`vision.md` § 7).
+
+- **Steady-state hypothesis**: ≥4 prompt rollouts per month after Q1 with sustained measured gain (≥10% over baseline, p < 0.05) and no per-persona pass-rate regression in the 7-day post-rollout window.
+- **Blast radius**: a single persona prompt file (`.claude/agents/<persona>.md`). Rollback is `git revert <rollout-commit>` + supervisor restart. Never the loop or another persona.
+- **Operator escape hatch**: `git revert <prompt-rollout-commit> && systemctl --user restart minsky-tick-loop` from CLI. Watch-action equivalent fires the same shell.
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | A/B winner regresses inside 7-day sustained-gain window | Fixture: prompt-B beats A on day 1 but day-5 metric drops below baseline (upstream signal-reversal) | `loud-crash-supervisor-restart` (auto-revert) | Inject the regression fixture; assert auto-revert triggers, `constraints.md` records `result: regressed`, notification fires. |
+| 2 | Oscillation — same prompt proposed twice within N iterations | Cache a "winner" that recurses (upstream-malformed analysis) | `circuit-break-and-notify` | Run with the recurrence; assert oscillation detector refuses the second proposal, fires a notification, advances the cadence to the next constraint. |
+| 3 | DSPy adapter crashes during optimization | `kill -9 $(pgrep -f dspy-worker)` (process death) | `loud-crash-supervisor-restart` (worker only) | Kill the worker; assert mape-k-loop continues, current cycle ends with no rollout, OTEL span `mape.execute.failed=true`. |
+| 4 | Constraint analysis identifies a false bottleneck (low signal-to-noise) | Synthetic workload with no clear bottleneck (upstream-malformed analysis) | `graceful-degrade` | Run on flat-distribution fixture; assert cycle marked inconclusive, no prompts modified, OTEL span `mape.analyze.inconclusive=true`. |
+| 5 | Prompt rollout breaks downstream handoff format | Deliberately broken prompt that produces invalid handoff (upstream-malformed) | `loud-crash-supervisor-restart` (auto-revert within 1 scheduler iteration) | Roll out the broken prompt; assert handoff-spec validator rejects on the next handoff, auto-revert lands within one iteration. |
+| 6 | `constraints.md` write conflicts with concurrent edit | Two writers append simultaneously (file-lock contention) | `graceful-degrade` | Spawn two writes; assert flock serialises, no partial entries, no lost data. |
+
 ## Status
 
 - **Phase**: Specification

@@ -42,6 +42,23 @@ I'm at dinner. My phone buzzes — the agent is about to commit something I want
 - **Dashboard**: Web dashboard banner reads "Paused — tap to resume" with timestamp
 - **Notification**: A confirmation ntfy push fires on every state transition
 
+## Failure modes & chaos verification
+
+Per constitutional rule #7 (`vision.md` § 7).
+
+- **Steady-state hypothesis**: a `POST /pause` HTTP request from a Tailscale-connected device transitions the supervisor to paused state visible to the Watch within 30s p95.
+- **Blast radius**: the in-flight persona step (allowed to finish). No impact on the supervisor process, on other ticks already complete, or on the loop's restart policy.
+- **Operator escape hatch**: SSH to the host and `rm state/PAUSED` to force resume. An admin-token "force-resume" Shortcut is the same path over Tailscale without SSH.
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | Tailscale connection drops between iPhone and host mid-pause-request | `tailscale down` on host (network partition) | `circuit-break-and-notify` | Down Tailscale; assert Shortcut surfaces an error to the user, retry-after-up succeeds, no half-pause state. |
+| 2 | Web app crashes between request received and flag-file write | `kill -9 $(pgrep -f minsky-dashboard-web)` mid-request (process death) | `loud-crash-supervisor-restart` | Kill mid-request; assert paused state recovered from request log on restart OR clear "request lost" notification — never a silent half-pause. |
+| 3 | Pause flag-file write succeeds but supervisor doesn't observe within 30s | Stub the fs-watcher to drop events (dependency upstream-error) | `circuit-break-and-notify` | Patch the watcher; assert OTEL span `pause.detection.latency` exceeds threshold and a notification fires — system flags the bug rather than swallowing it. |
+| 4 | Resume request arrives during a tick that is itself recovering from a crash | Compose: kill tick-loop, then `POST /resume` before respawn completes (clock + process death) | `graceful-degrade` | Sequence the events; assert resume queued until current tick state stabilises, no stuck flag. |
+| 5 | Two pauses within 5s (rapid double-tap) | Fire two `POST /pause` from the same device (request flood) | `graceful-degrade` | Double-fire; assert idempotency — second request acks the existing paused state, no extra ntfy notification. |
+| 6 | ntfy push fails (upstream rate-limit / outage) | `iptables -A OUTPUT -d ntfy.sh -j DROP` during a state transition (network) | `graceful-degrade` | Drop ntfy.sh; assert state still changes, notification queued for retry, dashboard reflects state truth-of-source. |
+
 ## Status
 
 - **Phase**: Specification
