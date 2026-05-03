@@ -29,7 +29,7 @@ Open-source framework for orchestrating role-playing autonomous AI agents. Each 
 
 - **Role/goal/backstory persona shape** — useful framing; cross-check with Bratman BDI
 - **Multiple memory types** — note as a design pattern; we may need similar in `claude-handoff-spec` (short-term per-task vs long-term project-wide)
-- **Manager agent pattern** — multi-agent-systems-literature term for the dispatcher/coordinator role (formerly mislabeled "TPM" in earlier drafts; see [vision.md § Glossary](../vision.md#glossary--every-term-has-a-cs-anchor)); validate that the supervisor pattern is well-tested
+- **Manager agent pattern** — the multi-agent-systems-literature term for the dispatcher / coordinator role; validate that the supervisor pattern is well-tested
 - **Reasoning loop** — "reflect, refine plan, inject" is good shape for any persona's intentions section
 
 ## Why we don't just use it

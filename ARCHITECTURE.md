@@ -91,7 +91,7 @@ Adapters are tested both **against the interface** (does the implementation sati
 | 11 | Process supervision | `Supervisor` | systemd (Linux) / launchd (macOS) | s6, runit, supervisord | Low |
 | 12 | Observability | `Observability` | Claude Code OTEL → local Loki/Tempo/Grafana | Honeycomb, Grafana Cloud | Low |
 | 13 | Prompt optimization | `PromptOptimizer` | DSPy (Stanford) + Promptfoo | OpenAI Evals, custom | Medium — DSPy still evolving |
-| 14 | Specification monitor (informally: *constitutional review*) | `SpecMonitor` | **Custom Claude Skill** (novel; extract as OSS) | (none yet — we may be first) | High — wholly ours |
+| 14 | Specification monitor | `SpecMonitor` | **Custom Claude Skill** (novel; extract as OSS) | (none yet — we may be first) | High — wholly ours |
 
 ## The novel layers (what's actually ours)
 
@@ -121,9 +121,9 @@ A small spec, modeled after AGENTS.md and tasks.md, for structured persona-to-pe
 
 Reference parser. Validator. Could be adopted by OMC, claude-flow, MetaGPT, or any multi-agent system. **A community-effort play to make handoff format the way tasks.md is becoming the way for queues.**
 
-### `claude-spec-monitor` (informally: *constitutional review*)
+### `claude-spec-monitor`
 
-A Claude Skill implementing runtime specification monitoring (Havelund & Goldberg 2008): reads a behavioral-specification document (defaults to `vision.md`, pluggable via skill input) plus the most recent N actions/handoffs from any source, and produces a structured drift report. Reusable in any Claude Code project. See [vision.md § Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) for the term mapping.
+A Claude Skill implementing runtime specification monitoring (Havelund & Goldberg 2008): reads a behavioral-specification document (defaults to `vision.md`, pluggable via skill input) plus the most recent N actions / handoffs from any source, and produces a structured specification-drift report. Reusable in any Claude Code project.
 
 ### `claude-mape-k-loop`
 

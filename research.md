@@ -149,7 +149,7 @@ Each active dependency follows the same shape:
 - **Adapter**: `novel/adapters/prompt-optimizer.dspy.ts` (forthcoming)
 - **Last reviewed**: 2026-05-03
 
-### Specification monitor — `SpecMonitor` (informally: *constitutional review*)
+### Specification monitor — `SpecMonitor`
 
 - **Current**: **Custom Claude Skill** — `novel/spec-monitor/SKILL.md` (forthcoming)
 - **Gives us**: Runtime specification monitoring (Havelund & Goldberg, "Verify Your Runs", VSTTE 2008) — reads a behavioral-specification document plus recent N actions/handoffs; produces structured drift report
@@ -158,7 +158,7 @@ Each active dependency follows the same shape:
 - **Risks**: Wholly novel — most likely place for our design to be wrong; needs iteration based on actual drift patterns observed
 - **Last reviewed**: 2026-05-03
 - **Extraction target**: Yes — published as `@minsky/spec-monitor` from day one
-- **Glossary**: see [vision.md § Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) for the metaphor → CS-term mapping
+- **Glossary**: see [vision.md § Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) for the term-in-use → CS-source mapping (and the retired-terms list)
 
 ---
 
