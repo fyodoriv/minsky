@@ -48,7 +48,7 @@
   - **Acceptance**: flag file present + correct contents on every state transition; flag-file tests at 100 % coverage.
   - **Risk**: filesystem races if multiple guards run. Mitigation: atomic rename + flock identical to setup.sh's lock pattern.
 
-- [ ] `@minsky/budget-guard` — HTTP API on `localhost:9876`
+- [ ] `@minsky/budget-guard` — HTTP API on `localhost:9876` (@claude-code)
   - **ID**: budget-guard-http-api
   - **Tags**: novel, extraction-target
   - **Parent**: budget-guard-v0
