@@ -8,6 +8,42 @@
 
 ## P0
 
+- [ ] Land constitutional rule #7 (chaos engineering) + Max5 adaptive token economy + per-story failure modes
+  - **ID**: chaos-rule-and-max5-economy
+  - **Tags**: constitution, foundation, docs
+  - **Estimate**: 1d (research-heavy doc work; no code)
+  - **Details**: Add new constitutional rule #7 to `vision.md` mandating: failure-mode enumeration, deterministic chaos tests (`kill -9`, `tc qdisc netem`, `iptables DROP`, `libfaketime`), no-silent-recovery, steady-state hypothesis, weekly production fault injection. Cite Netflix Chaos Monkey, Basiri et al. *Principles of Chaos* 2016, Beyer *SRE* Ch. 17, Armstrong let-it-crash, Hewitt actor isolation, Kreps log-replay. Rewrite `ARCHITECTURE.md` § "Token economy" for Max5: drop hardcoded Max20 numbers; observe `TokenMonitor` and react at relative 70% / 85% / weekly-warn; mark exact figures with `<TBD: verify against anthropic.com/pricing>` where not publicly published; sustained-rate target ≈30% of observed peak per 5h window. Add a `## Failure modes & chaos verification` section to every `user-stories/*.md` — table of (failure mode | trigger / fault axis | expected behavior — `loud-crash-supervisor-restart` / `circuit-break-and-notify` / `graceful-degrade` | chaos test) with **≥10 rows for story 001**, **≥5 for stories 002–005**. Include steady-state hypothesis + blast radius + operator escape hatch per story.
+  - **Files**: `vision.md`, `ARCHITECTURE.md`, `user-stories/001-loop-runs-overnight.md`, `user-stories/002-pause-from-iphone.md`, `user-stories/003-mape-k-improves-prompts.md`, `user-stories/004-budget-auto-pause.md`, `user-stories/005-watch-three-numbers.md`
+  - **Verification**:
+    - `grep -E '^### 7\.' vision.md` finds the new rule heading
+    - `grep -i -E '(220k|88k|Max20)' ARCHITECTURE.md` returns no matches in the Token economy section
+    - Each `user-stories/*.md` has a `## Failure modes & chaos verification` heading
+    - Story 001 table has ≥10 data rows; stories 002–005 have ≥5 each
+    - `pnpm run check` passes; `tasks-lint TASKS.md` passes; `markdownlint-cli2` passes; CI green on all 8 jobs
+  - **Acceptance**:
+    - `vision.md` rule #7 cites all 6 sources (Chaos Monkey, *Principles of Chaos*, *SRE* Ch. 17, Armstrong, Hewitt, Kreps)
+    - `ARCHITECTURE.md` token economy is fully adaptive and free of hardcoded Max20 figures
+    - Each user-story has steady-state hypothesis, blast radius, operator escape hatch, and a failure-mode table per the row counts above
+    - PR merges with all 8 CI gates green
+  - **Risk**: Glossary discipline — if any Minsky-coined term is introduced (e.g., a non-standard sense of "fault axis"), it needs a Glossary row in the same commit. Mitigation: stick to terms from the cited literature.
+
+- [ ] Production-grade `setup.sh` rewrite
+  - **ID**: setup-sh-rewrite
+  - **Tags**: infra, foundation, bash
+  - **Estimate**: 1–2d
+  - **Blocked by**: chaos-rule-and-max5-economy
+  - **Details**: Idempotent, color/no-color/CI aware, three modes: default install, `--doctor` (self-tests only), `--reset` (nuke `.minsky/` and reinstall). Ledger-based step caching. Lockfile via `flock` on `.minsky/setup.lock`. State in `.minsky/state.json` with `{schema_version, defaults: {budget_tier: Max5, observability: sqlite, topology: single-machine}, ntfy.topic (auto-generated), adapters: {}, last_self_test: {}}`. Trap on EXIT — failures print failed step, state path, log path, smallest concrete next step. Final report: GREEN / YELLOW / RED with dashboard URL + Tailscale URL + ntfy topic. Anti-patterns: no `sudo`, no `rm -rf` outside `.minsky/`, no shell-rc mutation, no unpinned `curl|bash`. Define `selfTest()` adapter contract: `{status: green|yellow|red, message, latency_ms, last_check}`. Aggregation: red dominates yellow dominates green.
+  - **Files**: `setup.sh`, `.minsky/state.example.json`, `novel/adapters/types.ts` (selfTest contract)
+  - **Verification**:
+    - `./setup.sh --doctor` exits 0 on a fresh checkout
+    - `./setup.sh --reset` removes `.minsky/` and rebuilds from scratch (test in worktree)
+    - Three consecutive runs produce identical state (idempotency)
+    - Concurrent invocation blocked by `flock` with informative error
+    - `shellcheck setup.sh` exits 0
+    - Failure-mode table added per rule #7
+  - **Acceptance**: setup.sh handles default / `--doctor` / `--reset`; state persisted in `.minsky/state.json`; `selfTest()` interface exported and consumable by future adapters; failure modes documented; PR merges with all 8 CI gates green
+  - **Risk**: Bash idempotency is hard. Mitigation: ledger of completed steps in `state.json` keyed by step name; each step checks the ledger before running.
+
 - [ ] Resolve OMC handoff persistence question
   - **ID**: research-omc-handoff-persistence
   - **Tags**: research, blocking
