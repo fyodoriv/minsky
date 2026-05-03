@@ -1,0 +1,19 @@
+# Pre-commit + pre-push hooks. Run only on changed files for speed.
+# Install with: pnpm dlx lefthook install
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{ts,js,json,jsonc,md}"
+      run: pnpm biome check --error-on-warnings --no-errors-on-unmatched {staged_files}
+    typecheck:
+      glob: "*.ts"
+      run: pnpm typecheck
+    test:
+      glob: "*.ts"
+      run: pnpm vitest related --run {staged_files}
+
+pre-push:
+  commands:
+    full-check:
+      run: pnpm run check

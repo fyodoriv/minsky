@@ -1,0 +1,31 @@
+{
+  "name": "minsky",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An integration distribution for autonomous Claude Code on Max5.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check": "pnpm lint && pnpm typecheck && pnpm test:coverage",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\""
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@vitest/coverage-v8": "2.1.9",
+    "lefthook": "1.10.10",
+    "markdownlint-cli2": "0.15.0",
+    "typescript": "5.7.2",
+    "vitest": "2.1.9"
+  }
+}
