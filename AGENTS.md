@@ -73,6 +73,10 @@ If the metric source doesn't exist yet, ship a **preparation PR** that lands the
 
 Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. Post-hoc metrics (chosen after seeing the result) are forbidden. See `vision.md` § 9 for the full rule + sources, including the pre-registration anchor (Munafò et al. 2017, *Nature Human Behaviour*).
 
+### 10. Deterministic enforcement (iron rule)
+
+Every constitutional rule must be enforced by a deterministic CI check — not a Skill, not an LLM, not "the agent will remember". Same input, same output, no model call in the chain. LLM-driven checks (Claude Skills like `claude-spec-monitor`) are *advisory only* and useful for *discovering* rule gaps; they are never load-bearing for *enforcing* rules. When a rule resists mechanisation, split it into a deterministic substrate (the lint catches presence/shape) plus an explicit human-judgement layer — never quietly delegated to a Skill. When a deterministic linter ships for a rule, any prior Skill-based enforcement is *removed* in the same PR (the ratchet rule — never two enforcement mechanisms competing). See `vision.md` § 10 for the full rule + sources.
+
 ## How to claim and work a task
 
 Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasksmd/tasks.md).

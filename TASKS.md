@@ -15,6 +15,8 @@
 
 ## P1
 
+<!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
+
 - [ ] `experiment-record-format` — `EXPERIMENT.yaml` schema + parser (preparation PR for rule #9 automation layer)
   - **ID**: experiment-record-format
   - **Tags**: novel, conformance, preparation
@@ -70,6 +72,123 @@
   - **Acceptance**: Scheduled workflow runs daily; verdicts accumulate; pivot tasks auto-file; validated learnings accrue.
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
+
+- [ ] `ci-rule-1-novel-justification` — CI lint: every `novel/<pkg>/` has a justification row in `research.md`
+  - **ID**: ci-rule-1-novel-justification
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 2–3h
+  - **Hypothesis**: A diff-based CI check that fails when a new directory under `novel/` is added without a corresponding "When the existing tools didn't fit: <pkg>" row in `research.md` mechanically enforces rule #1 (don't reinvent the wheel) — converting the quarterly human review into a per-PR gate without changing rule #1's substance.
+  - **Details**: Build `scripts/check-rule-1-novel-justification.mjs`. Diffs PR vs `main`; for each new top-level directory under `novel/` (excluding `novel/adapters/`), greps `research.md` for the package name in a "When the existing tools didn't fit" subsection; fails if missing. Wire as a required CI job. Allow opt-out via `<!-- rule-1: <existing-tool-considered> rejected because: <reason> -->` in the package's README.
+  - **Files**: `scripts/check-rule-1-novel-justification.mjs`, `scripts/check-rule-1-novel-justification.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic PR adding `novel/foo/` without a research-md entry fails; same PR with the entry passes; opt-out comment honoured.
+  - **Measurement**: `node scripts/check-rule-1-novel-justification.mjs --diff-base=main` exits 1 against the missing-entry fixture and 0 against the with-entry fixture; `pnpm vitest run scripts/check-rule-1-novel-justification.test.mjs` exits 0.
+  - **Pivot**: if false-positive rate exceeds 5 % in the first month (e.g., misclassifying `novel/adapters/` subpackages, or a refactor that splits an existing package), narrow the scope to truly-novel top-level directories AND require an explicit `<!-- rule-1: split-of-<existing-id> -->` annotation for splits.
+  - **Acceptance**: CI job fails fast on the synthetic missing-entry fixture; rule #1 is now mechanically enforced for every new package.
+  - **Anchor**: rule #10 (deterministic enforcement); Lampson 1983 ("move the constraint to the cheapest possible point").
+  - **Risk**: An overly broad regex matches subdirectories of an already-justified package. Mitigation: scope to *added* top-level dirs only; respect existing-package boundaries.
+
+- [ ] `ci-rule-2-dep-coverage` — CI lint: every external dep is accessed only through `novel/adapters/`
+  - **ID**: ci-rule-2-dep-coverage
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 3–4h
+  - **Hypothesis**: A CI lint that greps every `novel/**/*.ts` file outside `novel/adapters/` for vendor-name imports listed in `ARCHITECTURE.md`'s dependency table catches every direct vendor coupling — closing the rule #2 enforcement gap (today only the dependency table itself is reviewed by humans).
+  - **Details**: Build `scripts/check-rule-2-dep-coverage.mjs`. Reads `ARCHITECTURE.md`'s dependency-table column "vendor name(s)"; for each, greps `novel/**/*.ts` (excluding `novel/adapters/**`) for `from "<vendor>"` or `require("<vendor>")`; fails on any hit. Already named in `vision.md` § Success criteria #8 — this is the implementation task.
+  - **Files**: `scripts/check-rule-2-dep-coverage.mjs`, `scripts/check-rule-2-dep-coverage.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic file `novel/foo/leaks.ts` importing `from "hono"` (a listed vendor) fails the lint; same file removed passes; the lint runs in <2 s on a 100-file repo.
+  - **Measurement**: `node scripts/check-rule-2-dep-coverage.mjs` exits 1 against the synthetic-leak fixture and 0 against the clean fixture; `pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs` exits 0; success-criterion #8 in `vision.md` § "Success criteria" gains a queryable command (was `<TBD-AFTER: ci-lint-pattern-index>`).
+  - **Pivot**: if the dependency-table format proves too informal to parse reliably (e.g., vendor names spelled inconsistently), pivot to an explicit machine-readable manifest (`adapters.json`) committed alongside the table; the lint reads the manifest, the human-readable table is a regenerated artifact.
+  - **Acceptance**: CI job runs on every PR; rule #2 is mechanically enforced; success-criterion #8's measurement command is no longer tagged TBD.
+  - **Anchor**: rule #10; Martin, *Clean Architecture*, 2017 (dependency rule); Wiggins, *The Twelve-Factor App*, 2011 (factor II).
+  - **Risk**: False positives if a test fixture imports a vendor for legitimate test reasons. Mitigation: scope is `novel/**/*.ts` excluding `**/*.test.ts` and `**/*.fixture.ts`.
+
+- [ ] `ci-rule-3-doc-first` — CI lint: PRs adding code under `novel/` also touch a `user-stories/*.md` or the package README
+  - **ID**: ci-rule-3-doc-first
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 2h
+  - **Hypothesis**: A CI lint that requires every PR adding ≥1 `novel/**/*.ts` (non-test) file to also touch ≥1 `user-stories/*.md` OR the affected package's `README.md` enforces rule #3's "doc-first" clause without requiring an LLM to judge "is this documented enough" — same-commit-as-code is the deterministic substitute for "first".
+  - **Details**: Build `scripts/check-rule-3-doc-first.mjs`. Diffs PR; if any added/modified file matches `novel/**/*.ts` (non-test), requires at least one of: a touched `user-stories/*.md`, a touched `novel/<pkg>/README.md`, or a `<!-- rule-3: doc-deferred-to-followup-task: <id> -->` comment in the PR description (with the follow-up already filed in TASKS.md).
+  - **Files**: `scripts/check-rule-3-doc-first.mjs`, `scripts/check-rule-3-doc-first.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic PR touching only code → fails; same PR also touching the package README → passes; PR with the deferral comment → passes only if the linked task ID exists in `TASKS.md`.
+  - **Measurement**: `node scripts/check-rule-3-doc-first.mjs --diff-base=main` exits 1 on code-only diffs and 0 on code+doc diffs; `pnpm vitest run scripts/check-rule-3-doc-first.test.mjs` exits 0.
+  - **Pivot**: if the lint produces ≥2 false positives in its first month from purely-internal refactors that legitimately need no doc change, add an explicit `<!-- rule-3: refactor-no-public-surface -->` exemption that the lint honours; reassess after another month.
+  - **Acceptance**: CI job runs on every PR; rule #3's doc-first clause is mechanically enforced.
+  - **Anchor**: rule #10; Beck 1999 (continuous integration); Knuth, *Literate Programming*, 1984 (doc as the primary artifact).
+  - **Risk**: Discourages tiny code-fix PRs by demanding doc churn. Mitigation: the deferral-comment escape hatch + the rule's iron-but-not-stupid framing.
+
+- [ ] `ci-rule-4-otel-coverage` — CI lint: every exported public function in `novel/**` carries an `@otel` JSDoc tag
+  - **ID**: ci-rule-4-otel-coverage
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 4–6h
+  - **Hypothesis**: A TypeScript-AST-walking lint that requires every `export`-ed function/method in `novel/**/*.ts` (non-test) to carry a JSDoc `@otel <span-name>` annotation OR an `@otel-exempt <reason>` annotation enforces rule #4 ("everything measurable, everything visible") at PR time, without waiting for runtime traces to reveal gaps.
+  - **Details**: Build `scripts/check-rule-4-otel-coverage.mjs` using the TypeScript compiler API. Walks every `novel/**/*.ts` (non-test); for each exported function/method, requires the JSDoc to contain `@otel <span-name>` (matching the OTEL naming convention `<package>.<verb>`) OR `@otel-exempt <one-line-reason>`. Reports missing annotations with file:line. The implementation may not actually emit the span (that's a runtime concern), but the *contract* is checked.
+  - **Files**: `scripts/check-rule-4-otel-coverage.mjs`, `scripts/check-rule-4-otel-coverage.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic file with an exported function lacking both annotations → fails with file:line; same file with `@otel <span>` → passes; same file with `@otel-exempt pure-function` → passes.
+  - **Measurement**: `node scripts/check-rule-4-otel-coverage.mjs` exits 1 against the synthetic-missing fixture and 0 against the annotated fixture; `pnpm vitest run scripts/check-rule-4-otel-coverage.test.mjs` exits 0.
+  - **Pivot**: if more than 30 % of currently-exported functions need `@otel-exempt` (i.e., the rule is over-broad for low-level helpers), narrow the scope to public-API surface only — functions exported from a package's top-level `index.ts`, not from internal modules.
+  - **Acceptance**: CI job runs on every PR; rule #4's contract is mechanically enforced; the spec-monitor doesn't need to "look for missing OTEL".
+  - **Anchor**: rule #10; OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method — instrumentation as a structural property).
+  - **Risk**: TS-AST traversal is heavier than grep. Mitigation: cache by content-hash; run on diff-base only when feasible.
+
+- [ ] `ci-rule-5-glossary-discipline` — CI lint: every Minsky-coined term in `vision.md` resolves to a Glossary entry
+  - **ID**: ci-rule-5-glossary-discipline
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 3–4h
+  - **Hypothesis**: A CI lint that extracts every backticked identifier under sections marked as "coined" (or every PascalCase identifier in code-blocks within `vision.md`) and verifies each appears in `## Glossary — every term has a CS anchor` strengthens rule #5 from "the section header exists" (today's check) to "every term resolves" — without an LLM in the loop.
+  - **Details**: Today's `glossary-discipline` job in `.github/workflows/ci.yml` only checks the section header is present (line ~37 of ci.yml). Replace with a script that extracts coined terms (heuristic: backticked identifiers in `## The constitution` and the rest of `vision.md` outside the Glossary itself, minus a pre-declared allowlist of standard CS terms), then checks each appears in the Glossary's term list. Fails the job on any missing term. The current job header check stays as a fallback.
+  - **Files**: `scripts/check-rule-5-glossary-discipline.mjs`, `scripts/check-rule-5-glossary-discipline.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic vision.md introducing a backticked `FrobnicatorLoop` without a Glossary entry → fails with the term name; same file with the entry → passes; allowlisted standard terms (e.g., `OTEL`, `HTTP`) don't trigger the lint.
+  - **Measurement**: `node scripts/check-rule-5-glossary-discipline.mjs` exits 1 against the missing-entry fixture and 0 against the with-entry fixture; `pnpm vitest run scripts/check-rule-5-glossary-discipline.test.mjs` exits 0.
+  - **Pivot**: if the heuristic produces ≥3 false positives per PR, switch from "extract every backtick'd identifier" to "extract terms explicitly tagged with `<coined>…</coined>` HTML comments" — narrower scope but zero false positives.
+  - **Acceptance**: CI job replaces the section-header-only check; rule #5 is mechanically enforced; ratchet-rule applied (Skill-based glossary checks, if any, are removed in the same PR).
+  - **Anchor**: rule #10; rule #5 (theoretical grounding); Gabriel, *Patterns of Software*, 1996 (named patterns are deterministic by construction).
+  - **Risk**: Allowlist drift — every new standard term needs an explicit allowlist update. Mitigation: the allowlist is a single committed file; updating it is part of any PR that legitimately introduces a new standard term.
+
+- [ ] `ci-rule-6-let-it-crash` — CI lint: no nested `try/catch` deeper than 1 level; every catch re-throws or supervises explicitly
+  - **ID**: ci-rule-6-let-it-crash
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 4–5h
+  - **Hypothesis**: A TypeScript-AST lint that flags `try/catch` blocks nested deeper than 1 level OR catch-handlers that swallow without re-throwing OR calling a `supervise(…)` helper enforces rule #6's "let-it-crash" discipline — converting "long try-catch chains are a smell" from prose into a CI failure.
+  - **Details**: Build `scripts/check-rule-6-let-it-crash.mjs` using the TS compiler API. Walks every `novel/**/*.ts` (non-test); flags `try/catch` blocks deeper than 1 level (configurable via comment annotation); flags `catch` blocks whose body lacks a `throw` *or* a call to a registered supervisor helper (defined in `@minsky/adapter-types` or similar). Allow opt-out per catch with `// rule-6: handled-locally — <reason>` immediately above.
+  - **Files**: `scripts/check-rule-6-let-it-crash.mjs`, `scripts/check-rule-6-let-it-crash.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic file with a 2-level-nested try/catch → fails; same file with one level + re-throw → passes; same file with `// rule-6: handled-locally — boundary-with-stdin` → passes.
+  - **Measurement**: `node scripts/check-rule-6-let-it-crash.mjs` exits 1 against the deep-nest fixture and 0 against the clean fixture; `pnpm vitest run scripts/check-rule-6-let-it-crash.test.mjs` exits 0.
+  - **Pivot**: if the lint flags ≥3 false positives per month from genuine system-boundary catches (e.g., process-edge stdin parsing), broaden the opt-out to whole-file via `// rule-6-file: boundary-handler` AND add an explicit "boundary catalogue" in research.md naming each.
+  - **Acceptance**: CI job runs on every PR; rule #6's let-it-crash discipline is mechanically enforced.
+  - **Anchor**: rule #10; Armstrong, *Programming Erlang*, 2007 (let it crash); Lampson 1983 hint "use exceptions only for exceptional conditions".
+  - **Risk**: TS-AST visitor maintenance burden. Mitigation: keep the rule narrow — depth threshold + missing-rethrow are both single-pass checks.
+
+- [ ] `ci-rule-7-chaos-coverage` — CI lint: every novel package's failure-mode table row has a chaos test
+  - **ID**: ci-rule-7-chaos-coverage
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 3–4h
+  - **Hypothesis**: A CI lint that parses each `novel/**/README.md`'s "Failure modes & chaos verification" table and verifies every row's "Chaos test" cell either names a runnable test file OR is explicitly marked `(deferred — covered when <task-id> ships)` enforces rule #7 mechanically — converting "the table exists" into "the table is real".
+  - **Details**: Build `scripts/check-rule-7-chaos-coverage.mjs`. For each `novel/**/README.md`: (a) requires a `## Failure modes & chaos verification` section per the file-level policy in TASKS.md; (b) parses the markdown table; (c) for each row, parses the "Chaos test" column for either a path matching `novel/**/*.test.ts` (which must exist) or the literal pattern `(deferred — covered when <task-id> ships)` (where `<task-id>` must exist in TASKS.md or git log); (d) fails on any row without a satisfying chaos-test reference.
+  - **Files**: `scripts/check-rule-7-chaos-coverage.mjs`, `scripts/check-rule-7-chaos-coverage.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic README with a table row whose Chaos test cell is empty → fails; same row referencing an existing test file → passes; same row with the deferred-task syntax pointing to a real TASKS.md ID → passes.
+  - **Measurement**: `node scripts/check-rule-7-chaos-coverage.mjs` exits 1 against the synthetic-empty-cell fixture and 0 against the with-test fixture; `pnpm vitest run scripts/check-rule-7-chaos-coverage.test.mjs` exits 0.
+  - **Pivot**: if parsing the markdown table proves too brittle (e.g., contributors forget the pipe-separator format), pivot to a structured `failure-modes.yaml` per package, with the README rendered from it.
+  - **Acceptance**: CI job runs on every PR; rule #7's chaos-test contract is mechanically enforced.
+  - **Anchor**: rule #10; Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016; rule #7 (vision.md § 7).
+  - **Risk**: Markdown-table parsing is brittle. Mitigation: use a permissive parser and require the columns by header name, not by position.
+
+- [ ] `spec-monitor-deterministic-rewrite` — split `spec-monitor-skill` into deterministic linters + a thin LLM advisory layer
+  - **ID**: spec-monitor-deterministic-rewrite
+  - **Tags**: novel, conformance, rule-10
+  - **Estimate**: 1d (assumes ci-rule-1..7 land first)
+  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-2-dep-coverage, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
+  - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
+  - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
+  - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
+  - **Verification**:
+    - The Skill loads in a Claude Code session: `claude --skill ./novel/spec-monitor/`
+    - Run against synthetic *judgement-only* fixtures (a hypothesis that's syntactically valid but semantically vacuous): produces an advisory entry with `rule_id`, `evidence`, `severity`, `suggested_repair`.
+    - Run against deterministic-rule-violating fixtures (a hypothesis that should be caught by `ci-experiment-runner-v0`): the Skill is silent — *not* its job. The `ci-rule-*` linters catch it.
+    - The CI never gates merges on the Skill's verdict.
+  - **Measurement**: `pnpm vitest run novel/spec-monitor/test/judgement-only/` exits 0 with ≥3 fixtures; `grep -RE 'spec-monitor.*required' .github/workflows/` returns no matches (the Skill is never a required check).
+  - **Pivot**: if the residual judgement scope turns out to be empty (i.e., every plausible rule-violation can be deterministically caught), drop the Skill entirely — rule #10 says "whatever cannot be deterministically checked is not a constitutional rule", which means the Skill has no remit.
+  - **Acceptance**: Skill ships, advisory-only; the prior `spec-monitor-skill` task is closed by this one (this task is its replacement); `vision.md` § 10 is referenced in the Skill's SKILL.md as the framing rule.
+  - **Anchor**: rule #10 (vision.md § 10); Havelund & Goldberg 2008 (runtime verification — but split into deterministic-monitor + advisory-judgement); Hunt & Thomas 1999 Tip 32 ("crash early") — applied here as "fail deterministically".
+  - **Risk**: The Skill's residual scope drifts upward over time as contributors add "informal" rules that don't fit any linter. Mitigation: the Skill's SKILL.md has a hard cap on scope (≤5 advisory rules at any time); adding a sixth requires either retiring one or shipping a deterministic linter for it.
 
 - [ ] File OMC issue proposing native tasks.md integration
   - **ID**: omc-tasksmd-issue
@@ -144,28 +263,13 @@
 
 ## P2
 
-- [ ] Implement `claude-spec-monitor` Skill (runtime specification monitoring)
-  - **ID**: spec-monitor-skill
-  - **Tags**: novel, extraction-target, skill
-  - **Estimate**: 1d
-  - **Hypothesis**: A Claude Skill that reads `vision.md` + recent handoffs + recent commits can detect each of the 9 constitutional rules' synthetic violations with ≥95 % recall and ≤5 % false-positive rate against paired positive/negative fixtures.
-  - **Details**: Claude Skill implementing runtime specification monitoring (Havelund & Goldberg 2008). Reads `vision.md` + last N handoffs (via handoff-spec parser) + recent commits, produces structured drift report. Conforms to agentskills.io spec.
-  - **Files**: `novel/spec-monitor/SKILL.md`, related scripts, `novel/spec-monitor/test/synthetic-drift/`
-  - **Verification**:
-    - Skill loads in a Claude Code session: `claude --skill ./novel/spec-monitor/`
-    - Run against synthetic drifted fixtures (deliberately violating each constitutional rule): report contains a row per violation with `rule_id`, `evidence`, `severity`, `suggested_repair`
-    - Run against clean fixtures: report has zero violations
-  - **Measurement**: `pnpm vitest run novel/spec-monitor/test/synthetic-drift/` reports recall ≥0.95 and false-positive rate ≤0.05 across the 9 paired fixtures (one positive + one negative per constitutional rule).
-  - **Pivot**: if recall <0.85 or FPR >0.10 after 2 iterations of fixture tuning → spec-monitor-as-Skill isn't the right shape; pivot to a deterministic linter for the rules that allow it (rule #2, rule #8) and keep the LLM only for the open-ended rules (#5, #9 hypothesis quality).
-  - **Acceptance**: Skill loadable in Claude Code; produces structured drift report on synthetic test cases (one drift per rule); published as `@minsky/spec-monitor`
-  - **Anchor**: Havelund & Goldberg, "Verify Your Runs", *VSTTE* 2008 (runtime verification); Kohavi/Tang/Xu 2020 (recall/FPR as the right metrics for detection systems).
-  - **Risk**: Drift detection is the single most novel layer. False positives erode trust; quiet failures are catastrophic. Pin every rule with both a positive and negative fixture from day one.
+<!-- spec-monitor-skill (the prior P2 task) is superseded by `spec-monitor-deterministic-rewrite` in P1. Per rule #10 (deterministic enforcement), the previous shape — a Claude Skill as the *primary* enforcement of every constitutional rule — is incompatible with the iron-rule "enforcement is deterministic, not LLM-driven" clause. The replacement task splits the Skill's remit: deterministic linters (`ci-rule-1` … `ci-rule-7`) take the load-bearing share; the residual judgement scope ships as an advisory-only Claude Skill (`spec-monitor-deterministic-rewrite`). Removing this block is the ratchet-rule from rule #10 in action: the prior approach is *removed* in the same PR that introduces the deterministic replacement. -->
 
 - [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager)
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 3–5d (largest novel layer)
-  - **Blocked by**: spec-monitor-skill, mape-k-cadence
+  - **Blocked by**: spec-monitor-deterministic-rewrite, mape-k-cadence
   - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
   - **Files**: `novel/mape-k-loop/`
