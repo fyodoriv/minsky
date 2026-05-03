@@ -135,6 +135,28 @@ Why a separate rule from #3: rule #3 says *do these things first*. Rule #9 says 
 
 **Anti-pattern: post-hoc metrics.** Picking the metric *after* seeing the change's effect is forbidden. The metric is part of the contract the change is being judged against; choosing it after the fact lets the change always "succeed" by the metric most flattering to it. Pre-registration (Munafò et al. 2017) is the correction: declare in the task block / PR description, *before* code is written, what observable will move and by how much.
 
+**Pre-registration without execution is half a rule.** Pre-registered hypotheses that are never re-measured collapse into wish-lists; pre-registered hypotheses that *are* re-measured but only by hand collapse into "we'll check eventually" and silently rot. Rule #9 therefore commits the repo to a three-timescale **automation layer** that closes the loop from declaration to verdict. Each timescale ships as its own task; together they form the operational substrate of the rule.
+
+1. **Daily / per-PR layer — the experiment runner.**
+   - Every non-trivial PR ships an `EXPERIMENT.yaml` (or equivalent structured frontmatter) parsed from the PR description, carrying the five fields. CI fails fast when the file is missing or malformed.
+   - The runner executes `Measurement` against the merge-base ref (baseline), and again against the post-merge `main` ref (treatment), recording both numbers tagged with the experiment-id into the OTEL backend (or the lightweight `experiment-store` until the OTEL backend lands — see `otel-lite-backend`).
+   - Verdict at this layer is provisional ("first observation"); the structural test it enforces is "the measurement command is runnable and produces a number". This is the executability gate — the rest of the layer assumes commands can be run.
+   - Failure modes: missing YAML → block merge; non-runnable command → block merge; baseline ≈ treatment within instrument noise → flag as "no observable effect, requires longer window or larger sample" and route to the weekly layer.
+   - Implementation: `ci-experiment-runner-v0` (in `TASKS.md`).
+
+2. **Weekly / monthly layer — the sustained-gain check.**
+   - A scheduled job re-runs each merged experiment's `Measurement` at +7 / +30 days (configurable per-experiment), compares against the declared `Success` and `Pivot` thresholds, and emits a verdict per experiment: `validated` / `regressed` / `inconclusive`.
+   - The 7-day floor is the sustained-gain discipline already cited in `mape-k-loop-v0` (Ries 2011 build–measure–learn, validated learning); the 30-day window catches mid-term regressions that disappear from short A/B windows (Kohavi/Tang/Xu 2020 ch. 5–7 "trustworthy" rather than "fast").
+   - `regressed` triggers an automated revert/pivot task in `TASKS.md` linking the experiment-id; `inconclusive` lengthens the window or asks for a re-design.
+   - Implementation: `experiment-tracker-v0` (in `TASKS.md`).
+
+3. **Quarterly layer — cross-experiment calibration.**
+   - The store accumulates `{predicted Δ, observed Δ at +7, observed Δ at +30, observed Δ at +90}` tuples. A periodic analysis (folded into `mape-k-loop-v0`'s Knowledge phase and into the existing `review-q3-2026` cadence) tests *meta*-questions: are predictions tracking observations? Which categories of hypothesis are systematically over-optimistic (e.g., "this refactor reduces tokens-per-story" claims that never show up)? Which thresholds are calibrated, which are theatre?
+   - The quarterly verdict feeds back into rule #9 itself: if a class of hypothesis cannot be calibrated after multiple iterations, the rule's pivot-threshold contract is wrong for that class and the rule must adapt (e.g., add a research-task exemption).
+   - Implementation: scope expansion of `mape-k-loop-v0` (Knowledge phase) and `review-q3-2026`.
+
+The three timescales together form a MAPE-K loop over the rule itself (Kephart & Chess 2003 applied recursively): the daily layer is Monitor, the weekly layer is Analyze, the quarterly layer is Knowledge + Plan. Without all three, rule #9 degrades to spec without an interpreter.
+
 Sources: Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of Software Engineering* 1994; Ries, *The Lean Startup*, 2011 (build-measure-learn; pivot-or-persevere); Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge University Press 2020 (statistical rigour in A/B testing); Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (pre-registration; the falsifiability discipline imported from open science); Fagerholm, Sanchez Guinea, Mäenpää, Münch, "Building Blocks for Continuous Experimentation", *RCoSE* 2014 (continuous experimentation in software); Kitchenham, Dybå, Jørgensen, "Evidence-Based Software Engineering", *ICSE* 2004; Forsgren, Humble, Kim, *Accelerate*, 2018 (DORA's four-key-metrics for software-delivery performance — deployment frequency, lead time, MTTR, change-fail rate); Manzi, *Uncontrolled*, 2012 (causal inference outside the lab); Doerr, *Measure What Matters*, 2018 (OKR discipline; outcomes not activities).
 
 ## Pattern conformance index
