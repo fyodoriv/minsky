@@ -42,6 +42,23 @@ I raise my wrist. I see three things and only three things: tokens-remaining (co
 - **Dashboard**: Web dashboard's "Watch payload" view shows current Watch JSON
 - **Behavioral**: Daily wrist-dwell metric reads ≤60s sustained over a week
 
+## Failure modes & chaos verification
+
+Per constitutional rule #7 (`vision.md` § 7).
+
+- **Steady-state hypothesis**: the Watch payload endpoint returns HTTP 200 with exactly 3 fields and refreshes within 60s of the underlying state change, sustained.
+- **Blast radius**: a single Shortcut request / a single Watch glance. Never affects the loop's tick cadence, the supervisor, or any task already claimed.
+- **Operator escape hatch**: a "fallback" Shortcut that pings `ntfy.sh` directly with the latest cached payload — bypasses the local web app entirely so the user can still see the three numbers if the dashboard is down.
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | Local web app down | `kill -9 $(pgrep -f minsky-dashboard-web)` (process death) | `circuit-break-and-notify` | Kill the web app; assert Shortcut returns the last-known-good cached payload + a `stale=true` flag, ntfy notification fires once. |
+| 2 | Tailscale routing degraded (high latency) | `tc qdisc add dev tailscale0 root netem delay 30s` (network latency) | `graceful-degrade` | Apply 30s delay; assert Shortcut times out at 5s with cached fallback, no spinning Watch UI. |
+| 3 | State backend stale (>60s old data) | Block dashboard data refresh path (dependency upstream-error) | `graceful-degrade` | Freeze the data refresh; assert `stale=true` flag set on Watch payload, three values still rendered with last known good. |
+| 4 | A 4th field is accidentally added to the payload | Code change adds a new key (upstream-malformed schema) | `loud-crash-supervisor-restart` of the response handler | Add a 4th key in a fixture; assert payload-shape test in CI fails (compile-time gate). If it ships, runtime validator throws and the response handler restarts; never serve a 4-field payload. |
+| 5 | Cached fallback has been stale for >2h | Set cache mtime to `now - 3h` (clock + cache decay) | `circuit-break-and-notify` | Backdate the cache; assert Shortcut still returns 200 (with `stale=true` and age) and a notification fires recommending the user check the laptop. |
+| 6 | Concurrent Shortcut requests (rapid wrist-raises) | Fire 10 requests in 1s (request flood) | `graceful-degrade` | Fire the burst; assert single shared backend fetch (debounced), no thundering herd hitting the data backend. |
+
 ## Status
 
 - **Phase**: Specification
