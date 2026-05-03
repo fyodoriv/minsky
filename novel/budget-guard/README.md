@@ -2,7 +2,7 @@
 
 Token-budget watchdog. Observes a `TokenMonitor`, decides which response category applies (`graceful-degrade` / `circuit-break-and-notify` / `weekly-cap-warn` / `normal`), and pushes the decision to a callback.
 
-Runtime envelopes ship incrementally. **HTTP envelope** (`localhost:9876/budget`, see [HTTP envelope](#http-envelope) below) and the flag-file envelope (`${MINSKY_HOME}/.minsky/budget.flag`, lands in `budget-guard-flag-file`) cover dashboard / Watch / shell consumers. The real `TokenMonitor` Strategy against Maciek's `claude-monitor` Python tool ships in `budget-guard-maciek-impl`.
+Two runtime envelopes ship: the **flag-file envelope** (`${MINSKY_HOME}/.minsky/budget.flag`, see [Flag-file envelope](#flag-file-envelope) below) for shell consumers, and the **HTTP envelope** (`localhost:9876/budget`, see [HTTP envelope](#http-envelope) below) for dashboard / Watch / ad-hoc consumers. The real `TokenMonitor` Strategy against Maciek's `claude-monitor` Python tool ships in follow-up task `budget-guard-maciek-impl`.
 
 ## Pattern conformance
 
@@ -27,8 +27,9 @@ Per constitutional rule #7 (vision.md § 7).
 | 3 | Window-reset edge causes `tokensRemainingInWindow > windowSizeTokens` | clock skew across a 5h boundary (clock) | `graceful-degrade` — clamp to 0 consumed | covered by clamp test |
 | 4 | `windowSizeTokens` is 0 | TokenMonitor returns a freshly-bootstrapped value (upstream-malformed) | `graceful-degrade` — return 0 consumed (avoid div / 0) | covered by zero-window test |
 | 5 | Guard started twice | misconfigured caller (process-state) | `graceful-degrade` — second `start()` is a no-op | covered by idempotency test |
-| 6 | `GET /budget` before any decision recorded | server started before guard's first tick (process-state) | `graceful-degrade` — HTTP 503 with `{ "error": "no decision recorded yet" }` so consumers can distinguish "not ready" from "broken" | covered by `HonoBudgetServer` 503 test |
-| 7 | Port collision on default 9876 | another process owns the port (resource-contention) | `loud-crash-supervisor-restart` — `serve()` rejects synchronously; supervisor restarts after the operator picks a free port via `MINSKY_BUDGET_GUARD_PORT` | covered manually; ephemeral-port `start({ port: 0 })` test exercises the bind path |
+| 6 | `writeBudgetFlag` fails partway (ENOSPC, EROFS) | disk full / read-only filesystem (resource-exhaustion) | `loud-crash-supervisor-restart` — the rejected promise propagates to the caller's `.catch`; supervisor restarts a misconfigured node | tmp-file `rename(2)` keeps the prior flag readable; covered by atomicity test (no `.tmp` left behind on success) |
+| 7 | `GET /budget` before any decision recorded | server started before guard's first tick (process-state) | `graceful-degrade` — HTTP 503 with `{ "error": "no decision recorded yet" }` so consumers can distinguish "not ready" from "broken" | covered by `HonoBudgetServer` 503 test |
+| 8 | Port collision on default 9876 | another process owns the port (resource-contention) | `loud-crash-supervisor-restart` — `serve()` rejects synchronously; supervisor restarts after the operator picks a free port via `MINSKY_BUDGET_GUARD_PORT` | covered manually; ephemeral-port `start({ port: 0 })` test exercises the bind path |
 
 ## Hypothesis-driven development (rule #9)
 
@@ -67,6 +68,39 @@ import { decide, DEFAULT_THRESHOLDS } from "@minsky/budget-guard";
 const action = decide(snapshot, DEFAULT_THRESHOLDS).action;
 ```
 
+## Flag-file envelope
+
+Shell consumers (`setup.sh`, supervisor unit-files, ad-hoc scripts) read the current decision by `cat`-ing a single file:
+
+```sh
+cat "${MINSKY_HOME}/.minsky/budget.flag"
+# → NORMAL | THROTTLE | PAUSE | WEEKLY_WARN
+```
+
+Wire it into a `BudgetGuard` like so:
+
+```ts
+import { BudgetGuard, writeBudgetFlag } from "@minsky/budget-guard";
+
+const guard = new BudgetGuard(monitor, (d) => {
+  void writeBudgetFlag(d, process.env.MINSKY_HOME ?? process.cwd());
+});
+guard.start();
+```
+
+Token mapping (matches the `BudgetAction` lattice):
+
+| `BudgetAction`              | flag token   |
+| --------------------------- | ------------ |
+| `normal`                    | `NORMAL`     |
+| `graceful-degrade`          | `THROTTLE`   |
+| `circuit-break-and-notify`  | `PAUSE`      |
+| `weekly-cap-warn`           | `WEEKLY_WARN`|
+
+Atomicity: the writer renders to a sibling `.budget.flag.tmp.<pid>.<rand>` and `rename(2)`-s over the destination. POSIX guarantees `rename(2)` is atomic within a single filesystem, so a concurrent reader sees either the old contents or the new — never partial.
+
+Path deviation: the original task brief specified `/var/run/minsky/budget.flag`, which would require root. v0 uses `${MINSKY_HOME}/.minsky/` instead — declared in `vision.md` § "Pattern conformance index" row 26.
+
 ## HTTP envelope
 
 Dashboard, Watch shortcut, and ad-hoc consumers poll a tiny Hono server at `localhost:9876/budget`:
@@ -104,14 +138,9 @@ The default port (9876) is overridden by `MINSKY_BUDGET_GUARD_PORT`, or by passi
 
 The Hono dependency is hidden behind the `BudgetServer` interface (Adapter, Gamma et al. 1994) — alternative implementations can be plugged in without touching callers.
 
-## Flag-file envelope
-
-> Ships in [`budget-guard-flag-file`](../../TASKS.md). Renders the same decision into `${MINSKY_HOME}/.minsky/budget.flag` for shell consumers (`setup.sh`, supervisor unit-files).
-
 ## Follow-up tasks
 
 The full `budget-guard-v0` epic decomposes into these P1 sub-tasks (tracked in `TASKS.md`):
 
-- **`budget-guard-flag-file`** — write `${MINSKY_HOME}/.minsky/budget.flag` so shell scripts can `cat` it. Path moved from `/var/run/minsky/` (which would need root) to the user-writable `.minsky/`; declared deviation per rule #8 — root-required paths are out of scope for solo-dev tier.
 - **`budget-guard-maciek-impl`** — real `TokenMonitor` Strategy against Maciek's Python `claude-monitor` cache file. Adapter test against a live Maciek install.
 - **`budget-guard-publish-dry-run`** — pre-publish smoke for `@minsky/budget-guard` and `@minsky/token-monitor`.
