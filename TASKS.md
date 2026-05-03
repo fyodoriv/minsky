@@ -88,19 +88,6 @@
   - **Acceptance**: Both packages dry-run cleanly; PR description records the published filenames + sizes.
   - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
-- [ ] Define `claude-handoff-spec` v0
-  - **ID**: handoff-spec-v0
-  - **Tags**: novel, extraction-target, spec
-  - **Estimate**: 6–8h
-  - **Details**: Small spec for structured persona-to-persona handoffs (status, summary, artifacts, blockers, suggested next personas, pushback) — anchored in Hewitt's actor-model message-passing. Reference parser. Validator. Modeled after AGENTS.md and tasks.md.
-  - **Files**: `novel/handoff-spec/spec.md`, `novel/handoff-spec/parser.ts`, `novel/handoff-spec/validator.ts`, `novel/handoff-spec/test/fixtures/*.md`
-  - **Verification**:
-    - 5 reference handoffs in `test/fixtures/` (status=ok, blocked, needs-rework, with pushback, with multiple suggested-next) parse without errors
-    - 3 deliberately invalid fixtures fail validation with specific error messages
-    - `npm publish --dry-run --workspace novel/handoff-spec` succeeds
-  - **Acceptance**: spec.md published; parser passes all 5 reference handoffs; validator rejects all 3 invalid fixtures; published as `@minsky/handoff-spec`; cross-link from `AGENTS.md`
-  - **Risk**: Spec evolves rapidly in early use. Pin at v0; allow breaking changes pre-1.0; document migration path in spec.md.
-
 - [ ] Decide MAPE-K loop cadence
   - **ID**: mape-k-cadence
   - **Tags**: research, design
@@ -116,7 +103,6 @@
   - **ID**: spec-monitor-skill
   - **Tags**: novel, extraction-target, skill
   - **Estimate**: 1d
-  - **Blocked by**: handoff-spec-v0
   - **Details**: Claude Skill implementing runtime specification monitoring (Havelund & Goldberg 2008). Reads `vision.md` + last N handoffs (via handoff-spec parser) + recent commits, produces structured drift report. Conforms to agentskills.io spec.
   - **Files**: `novel/spec-monitor/SKILL.md`, related scripts, `novel/spec-monitor/test/synthetic-drift/`
   - **Verification**:
