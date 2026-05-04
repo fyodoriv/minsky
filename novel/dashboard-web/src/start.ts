@@ -29,6 +29,7 @@ function loadSnapshot(): Snapshot | null {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
     if (parsed === null || typeof parsed !== "object") return null;
     return parsed as Snapshot;
+    // rule-6: handled-locally — unreadable/malformed snapshot is a graceful-degrade path (chaos row 1)
   } catch {
     return null;
   }

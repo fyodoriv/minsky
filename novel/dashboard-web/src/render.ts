@@ -20,7 +20,7 @@ import type { SuccessMetric } from "./metrics.js";
  */
 export type GetValue = (metric: SuccessMetric) => string | null;
 
-/** Backward-compatible default: every metric renders as `(stub)`. */
+/** Default: every row → `(stub)`. @otel-exempt pure constant function. */
 export const STUB_GET_VALUE: GetValue = () => null;
 
 /** HTML-escape every character that could break out of an attribute or text node. */
