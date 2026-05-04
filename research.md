@@ -336,6 +336,20 @@ The dependency-table row below (`Watch actions — WatchActions`) keeps Apple Sh
 - rule #1 (`vision.md` § 1 — don't reinvent the wheel: Apple Shortcuts first, native app only on a measured trigger; this section is the documented "when not").
 - rule #9 (`vision.md` § 9 — pre-registered hypothesis-driven development: the trigger threshold and its pivot conditions are committed before the metric is observed).
 
+## OMC handoff persistence
+
+- **Verdict**: parseable
+- **Path**: `<repoRoot>/.omc/state/team/<teamName>/tasks/<taskId>.json` (project-local, NOT `~/.claude/`).
+- **Format**: pretty-printed JSON written atomically (`writeAtomic(path, JSON.stringify(updated, null, 2))`).
+- **Source citations** (from PR #75 read-only inspection):
+  - `src/team/state-paths.ts` — `TeamPaths` constant, lines 17–100
+  - `src/team/types.ts:38-58, 195-213` — `TaskFile` / `TeamTask` shape
+  - `src/team/state/tasks.ts:90` — canonical write site (`claimTask`)
+  - `src/team/task-file-ops.ts:157, 210-243, 321-376` — read/write call sites
+- **Implication for `omc-tasksmd-bridge-v0`**: thin-reader hypothesis confirmed; no reverse engineering needed. v0 should be read-only OMC → tasks.md (avoids colliding with OMC's optimistic-concurrency `version` field on write-back). v1+ may add reverse direction once a CRDT story is sketched.
+- **Methodology note**: this verdict was reached read-only via the GitHub API + raw-content fetch (no local OMC install, no `/team` invocation). The task brief's invasive verification (`/team 2:executor` against a throwaway repo) is now optional — added as a P3 follow-up (`omc-tasksmd-bridge-runtime-verification`) for the next session if it becomes useful.
+- **Round-trip parseability check**: `scripts/omc-roundtrip.mjs` (Aho-Sethi-Ullman 1986 — round-trip property as the parseability test). Pure function `roundTripOmcTask(taskJson)` parses + re-emits with `JSON.stringify(parsed, null, 2)` and diffs against the original (whitespace-only differences allowed). Thin CLI takes `--omc-checkout=<path>` and walks `<path>/.omc/state/team/*/tasks/*.json`. Dormant by default (no flag, or no `.omc/state/team/` subdir → exit 0 with stderr advisory) — same precedent as `scripts/check-mape-k-budget-cap.mjs`. Pivot: if any sample diverges with a non-whitespace diff, the parseable-thin-reader hypothesis is disproved; restore the research task and re-investigate.
+
 ## How to read this file
 
 Each active dependency follows the same shape:

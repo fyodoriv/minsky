@@ -1,71 +1,66 @@
-id: lighthouse-threshold-pivot-085
+id: omc-roundtrip-and-close-research
 hypothesis: |
-  Dropping the Lighthouse Mobile CI gate's threshold from `>= 0.9` to
-  `>= 0.85` (`.github/workflows/lighthouse.yml`) eliminates the 67 %
-  false-positive rate observed on GH-hosted runners (3 observations:
-  0.91 / 0.83 / 0.89 — PR #66 first run passed at 0.91, PR #73 first
-  run failed at 0.83, PR #73 re-run failed at 0.89) while preserving
-  the gate's semantic — the gate still catches a real performance
-  regression that drops the dashboard-web SSR score below 0.85. The
-  pivot is environmental (GH-hosted runner CPU variance), not
-  implementation: the dashboard-web rendering path is unchanged in
-  this PR.
-
-  This is the documented Pivot from the original
-  `dashboard-web-lighthouse-ci` task ("if Lighthouse runs are flaky on
-  GH-hosted runners — >1 false-positive per 10 runs sustained over
-  30 days — pivot to a self-hosted runner per
-  `supervisor-integration-self-hosted-runner`'s precedent OR drop the
-  threshold to 0.85 with a documented deviation here"). The threshold
-  drop is the cheaper of the two pre-registered pivots; the
-  self-hosted-runner move is reserved as the next-tier pivot if 0.85
-  also proves flaky (filed as `lighthouse-self-hosted-runner-pivot`,
-  P3 in TASKS.md).
+  Lifting PR #75's TASKS.md `Research` field for
+  `research-omc-handoff-persistence` into a dedicated `research.md`
+  section + shipping the round-trip parseability check at
+  `scripts/omc-roundtrip.mjs` meets the research task's full
+  Acceptance criteria — both parts of it: (a) `research.md` has an
+  "OMC handoff persistence" subsection with a verdict line matching
+  `^- \*\*Verdict\*\*: parseable$`, and (b) the round-trip check
+  exists, exits 0 against the dormant default, and exits 0 against a
+  real OMC checkout's task JSON (round-trip diff is whitespace-only).
+  Three downstream consequences: (1) the research task block is
+  removed from TASKS.md (Acceptance met); (2) `omc-tasksmd-bridge-v0`
+  loses its `Blocked by` line and is unblocked for the next session;
+  (3) `omc-persistence-proposal` is itself disqualified — its trigger
+  was "non-parseable", and the verdict is parseable, so the task is
+  removed (not completed). The bridge's v0 is now a thin reader
+  OMC → tasks.md (the parseable verdict was the unblock).
 success: |
-  Two-part criterion. (a) Structural (the PR-time gate, runnable in
-  CI without `gh` / network access — this is the `measurement` field
-  below): the lowered threshold `>= 0.85` is checked into
-  `.github/workflows/lighthouse.yml` AND the original `>= 0.9`
-  threshold is no longer present. (b) Runtime (the runtime
-  observation, captured in this PR's body in the `## Hypothesis
-  self-grade` block, and re-runnable any time via
-  `gh run list --workflow lighthouse.yml --limit 1 --json conclusion
-  --jq '.[0].conclusion'`): this PR's `lighthouse` workflow run lands
-  as `success` — the new assertion passes against the rendered
-  dashboard-web SSR output. Exit 0 on the structural test = the
-  pivot is checked in; non-zero = the pivot was not applied (this PR
-  is incomplete).
+  Three-part criterion. (a) Structural — `research.md` § "OMC handoff
+  persistence" exists with the verdict line matching `parseable`:
+  `[ "$(grep -c '^## OMC handoff persistence' research.md)" = '1' ] &&
+  grep -q 'Verdict.*parseable' research.md`. (b) Tests — the new
+  round-trip check passes its paired test file:
+  `pnpm vitest run scripts/omc-roundtrip.test.mjs >/dev/null`.
+  (c) Unblock — `omc-tasksmd-bridge-v0`'s task block has no
+  `Blocked by:` line referencing `research-omc-handoff-persistence`,
+  and the research + proposal blocks are removed entirely from
+  TASKS.md. Exit 0 on the combined check = the close ships;
+  non-zero = the close is incomplete.
 pivot: |
-  Trigger: at least 2 false-positive failures per 10 runs at the new
-  threshold sustained over 30 days. On trigger, escalate to a
-  self-hosted runner per the documented next-tier pivot —
-  `lighthouse-self-hosted-runner-pivot` in TASKS.md (P3) is pre-filed
-  for exactly this case. If the variance band remains greater than
-  0.03 across runs even on a self-hosted runner, the Lighthouse gate
-  is non-deterministic at root and should be retired entirely;
-  dashboard-web's LoC-cap and chaos-table audits become the residual
-  `dashboard-web-v0` performance proxy. The abandon-the-approach
-  line: do not loop on threshold tweaks below the lowered value —
-  that is the rule-#9 fishing-expedition failure mode (post-hoc
-  metric shopping). Either move the runner, or retire the gate.
-measurement: "[ \"$(grep -c 'performance.score >= 0.85' .github/workflows/lighthouse.yml || true)\" -ge 1 ] && [ \"$(grep -c 'performance.score >= 0.9' .github/workflows/lighthouse.yml || true)\" = '0' ]"
+  Trigger: if the round-trip check, when pointed at a real OMC
+  checkout (`node scripts/omc-roundtrip.mjs --omc-checkout=<path>`),
+  reveals a non-whitespace diff against any sample task file —
+  i.e., OMC's serialization is not byte-deterministic at
+  `JSON.stringify(_, null, 2)` — the parseable-thin-reader hypothesis
+  is disproved. On trigger, restore the `research-omc-handoff-
+  persistence` task block in TASKS.md (with a 2026-05-04 amendment
+  noting the disproof), restore `omc-persistence-proposal`'s
+  conditional trigger (now active), and re-investigate. Do not
+  patch the diff comparison to ignore the divergence — that masks
+  the disproof. Abandon-the-approach line: if a second sample also
+  diverges with the same shape (e.g., key reordering), the bridge
+  shifts from "thin reader" to "full reverse-engineering"; raise
+  `omc-tasksmd-bridge-v0`'s estimate to ≥1 week and consider
+  deprioritising the bridge entirely (mirrors the original research
+  task's documented Pivot).
+measurement: "[ \"$(grep -c '^## OMC handoff persistence' research.md)\" = '1' ] && grep -q 'Verdict.*parseable' research.md && pnpm vitest run scripts/omc-roundtrip.test.mjs >/dev/null"
 anchor: |
-  rule #10 (vision.md § 10 — deterministic enforcement; the gate stays
-  deterministic, the threshold moves once with a documented Pivot);
-  Wilkie, T., "The RED Method: How To Instrument Your Services",
-  *Weave Works blog* / *USENIX SREcon EMEA* 2018 (the duration
-  component is the user-perceived metric — a 5-point Lighthouse score
-  drop preserves the same semantic at a noise-tolerant threshold);
-  Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018
-  (DORA — fast feedback that doesn't lie; a flaky gate teaches the
-  team to ignore failure, which is worse than a slightly-looser gate
-  that fires on real regressions); Munafò, Nosek, Bishop et al.,
+  Aho, Sethi, Ullman, *Compilers: Principles, Techniques, and Tools*,
+  Addison-Wesley, 1986 (round-trip property as the parseability
+  test — the load-bearing literature anchor for the new gate);
+  rule #2 (vision.md § 2 — every dep behind interface; the OMC
+  bridge is exactly that, and the parseability test gates the
+  interface contract before v0 ships); rule #7 (vision.md § 7 —
+  graceful-degrade dormant short-circuit when no `--omc-checkout=`
+  is supplied); rule #9 (vision.md § 9 — pre-registered Pivot: a
+  non-whitespace divergence on any sample disproves the parseable-
+  thin-reader hypothesis); rule #10 (vision.md § 10 — deterministic
+  enforcement; the original research task's prose Acceptance now has
+  a machine-readable counterpart); Munafò, Nosek, Bishop et al.,
   "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
-  0021, 2017 (rule-#9 pre-registration discipline — the original 0.9
-  was the pre-registered threshold; lowering it after observation
-  *per the documented Pivot* is the correct path, not bias, because
-  the pivot threshold itself was committed before the observations
-  were made); Ries, *The Lean Startup*, Crown Business 2011
-  (build-measure-learn / pivot-or-persevere — 67 % flake rate is far
-  above the documented `≥1 / 10` trigger, so the pivot fires).
+  0021, 2017 (rule-#9 pre-registration discipline — the Pivot is
+  committed before any real OMC checkout is round-tripped, so a
+  divergence cannot be retroactively explained away).
 replay_windows_days: [30]
