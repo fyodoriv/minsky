@@ -11,8 +11,11 @@
  *   7. Throws on `dryRun: false`.
  */
 
+import { BudgetGuard } from "@minsky/budget-guard";
+import { StubTokenMonitor } from "@minsky/token-monitor";
 import { describe, expect, it } from "vitest";
 
+import { fromRealBudgetGuard } from "./budget-guard-facade.js";
 import { type BudgetDecisionLike, type BudgetGuardLike, pickTask, runDaemon } from "./daemon.js";
 import { SpanRecorder, TestFakeMockAnthropic, type TickSpan } from "./index.js";
 
@@ -243,6 +246,58 @@ describe("tick-loop / daemon / runDaemon", () => {
         sleep: noSleep,
       }),
     ).rejects.toThrow(/real subprocess spawning is deferred/);
+  });
+
+  // Sub-task 2/3 (`tick-loop-daemon-budget-guard-real`): drives the real
+  // `BudgetGuard` from `@minsky/budget-guard` (wrapped via the facade
+  // pivot) against a fixture `StubTokenMonitor`. Asserts that a snapshot
+  // past the 85 % circuit-break threshold flips the daemon to
+  // `budget-paused`, while a fresh window keeps it on the happy path.
+  it("real BudgetGuard wired via facade: circuit-break flips iteration to budget-paused", async () => {
+    const monitor = new StubTokenMonitor({
+      tokensRemainingInWindow: 100_000,
+      windowSizeTokens: 1_000_000,
+      // 90 % consumed → ≥ 85 % → circuit-break-and-notify
+    });
+    const realGuard = new BudgetGuard(monitor, () => {
+      /* no-op */
+    });
+    const guard: BudgetGuardLike = fromRealBudgetGuard(realGuard);
+    const client = new TestFakeMockAnthropic();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: guard,
+      sleep: noSleep,
+    });
+    expect(result.iterations.every((i) => i.status === "budget-paused")).toBe(true);
+    expect(result.iterations[0]?.reason).toContain("circuit-break");
+    // Now the same daemon, same fixture, but a fresh window → normal action,
+    // tick proceeds to completion.
+    const freshMonitor = new StubTokenMonitor({
+      tokensRemainingInWindow: 1_000_000,
+      windowSizeTokens: 1_000_000,
+    });
+    const freshGuard = fromRealBudgetGuard(
+      new BudgetGuard(freshMonitor, () => {
+        /* no-op */
+      }),
+    );
+    const happy = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: freshGuard,
+      sleep: noSleep,
+    });
+    expect(happy.iterations[0]?.status).toBe("completed");
   });
 
   it("sleeps tickInterval between iterations (but not after the last)", async () => {
