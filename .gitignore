@@ -51,3 +51,8 @@ desktop.ini
 
 # Tailscale local state
 .tailscale/
+
+# rule-11 flake-detection auto-emitted patches. The .gitkeep is tracked;
+# the auto-emitted *-task-block.md + *-workflow.patch files are not.
+tmp/rule-11/*-task-block.md
+tmp/rule-11/*-workflow.patch

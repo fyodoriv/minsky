@@ -5,14 +5,22 @@
 // sample-size guard / pair ordering / empty) so a regression surfaces
 // as one targeted failure, not a vague suite-wide red.
 
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   FLAKE_RATE_THRESHOLD,
   MIN_PAIRS_FOR_REPORT,
   detectFlakeRate,
+  emitPatches,
   formatReportLine,
   parseCliArgs,
+  renderTaskBlock,
+  renderWorkflowPatch,
+  reportBasename,
   runCli,
 } from "./check-rule-11-no-flaky-gates.mjs";
 
@@ -256,5 +264,204 @@ describe("runCli", () => {
     const code = runCli([], (l) => lines.push(l));
     expect(code).toBe(2);
     expect(lines.join("\n")).toMatch(/^usage:/);
+  });
+});
+
+describe("reportBasename", () => {
+  test("slugifies workflow + job to lowercase kebab", () => {
+    expect(
+      reportBasename({
+        workflowName: "CI",
+        jobName: "lighthouse-mobile",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      }),
+    ).toBe("ci-lighthouse-mobile");
+  });
+
+  test("collapses non-alphanumerics into a single hyphen", () => {
+    expect(
+      reportBasename({
+        workflowName: "ci/build",
+        jobName: "test:unit",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      }),
+    ).toBe("ci-build-test-unit");
+  });
+});
+
+describe("renderTaskBlock", () => {
+  test("populates rule-#9 fields from FlakeReport metadata", () => {
+    const block = renderTaskBlock({
+      workflowName: "ci",
+      jobName: "lighthouse-mobile",
+      flakePairs: 2,
+      totalPairs: 7,
+      rate: 2 / 7,
+    });
+    expect(block).toMatch(/^- \[ \] `ci-lighthouse-mobile-flake-fix` —/);
+    expect(block).toMatch(/\*\*ID\*\*: ci-lighthouse-mobile-flake-fix/);
+    expect(block).toMatch(/2\/7 \(28\.6%\)/);
+    expect(block).toMatch(/\*\*Hypothesis\*\*:.*ci:lighthouse-mobile/);
+    // All five rule-#9 fields present
+    for (const field of ["Hypothesis", "Pivot", "Measurement", "Anchor"]) {
+      expect(block).toMatch(new RegExp(`\\*\\*${field}\\*\\*:`));
+    }
+  });
+});
+
+describe("renderWorkflowPatch", () => {
+  test("references the offending workflow + job and the continue-on-error addition", () => {
+    const patch = renderWorkflowPatch({
+      workflowName: "lighthouse",
+      jobName: "lighthouse-mobile",
+      flakePairs: 1,
+      totalPairs: 6,
+      rate: 1 / 6,
+    });
+    expect(patch).toMatch(/Open `\.github\/workflows\/lighthouse\.yml`/);
+    expect(patch).toMatch(/job named `lighthouse-mobile`/);
+    expect(patch).toMatch(/continue-on-error: true/);
+    // Operator-guidance preamble present
+    expect(patch).toMatch(/Don't apply this if you can fix the root cause/);
+  });
+});
+
+describe("emitPatches", () => {
+  /** @type {string} */
+  let outDir;
+
+  beforeEach(() => {
+    outDir = mkdtempSync(join(tmpdir(), "rule-11-emit-"));
+  });
+
+  afterEach(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  test("writes both files per report on first emit", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "flaky-job",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      },
+    ];
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toHaveLength(2);
+    expect(result.skipped).toHaveLength(0);
+    expect(readFileSync(join(outDir, "ci-flaky-job-task-block.md"), "utf-8")).toMatch(
+      /\*\*ID\*\*: ci-flaky-job-flake-fix/,
+    );
+    expect(readFileSync(join(outDir, "ci-flaky-job-workflow.patch"), "utf-8")).toMatch(
+      /continue-on-error: true/,
+    );
+  });
+
+  test("is idempotent: re-emit with the same reports skips both files", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "flaky-job",
+        flakePairs: 2,
+        totalPairs: 10,
+        rate: 0.2,
+      },
+    ];
+    emitPatches(reports, outDir);
+    const taskMtime = statSync(join(outDir, "ci-flaky-job-task-block.md")).mtimeMs;
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toHaveLength(0);
+    expect(result.skipped).toHaveLength(2);
+    // mtime preserved (no rewrite)
+    expect(statSync(join(outDir, "ci-flaky-job-task-block.md")).mtimeMs).toBe(taskMtime);
+  });
+
+  test("rewrites a file when its content drifted (e.g., operator-edited stub)", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "flaky-job",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      },
+    ];
+    emitPatches(reports, outDir);
+    // Operator partially edits the auto-emitted stub:
+    writeFileSync(join(outDir, "ci-flaky-job-task-block.md"), "operator-touched", "utf-8");
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toContain(join(outDir, "ci-flaky-job-task-block.md"));
+    expect(result.skipped).toContain(join(outDir, "ci-flaky-job-workflow.patch"));
+  });
+
+  test("emits one pair per report (multi-report fixture)", () => {
+    const reports = [
+      {
+        workflowName: "ci",
+        jobName: "a",
+        flakePairs: 1,
+        totalPairs: 5,
+        rate: 0.2,
+      },
+      {
+        workflowName: "lighthouse",
+        jobName: "b",
+        flakePairs: 1,
+        totalPairs: 6,
+        rate: 1 / 6,
+      },
+    ];
+    const result = emitPatches(reports, outDir);
+    expect(result.written).toHaveLength(4);
+  });
+});
+
+describe("runCli with --emit", () => {
+  /** @type {string} */
+  let outDir;
+
+  beforeEach(() => {
+    outDir = mkdtempSync(join(tmpdir(), "rule-11-cli-emit-"));
+  });
+
+  afterEach(() => {
+    rmSync(outDir, { recursive: true, force: true });
+  });
+
+  test("emits patches into --emit dir on a flaky fixture", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(
+      ["--fixture", "test/fixtures/rule-11-flake-detection/flaky.json", "--emit", outDir],
+      (l) => lines.push(l),
+    );
+    expect(code).toBe(1);
+    // Both artefacts written for the single flake report
+    expect(readFileSync(join(outDir, "ci-lighthouse-mobile-task-block.md"), "utf-8")).toMatch(
+      /flake-fix/,
+    );
+    expect(readFileSync(join(outDir, "ci-lighthouse-mobile-workflow.patch"), "utf-8")).toMatch(
+      /continue-on-error/,
+    );
+    // Last stdout line summarises the emit
+    expect(lines[lines.length - 1]).toMatch(/^rule-11: emitted 2 file\(s\), skipped 0/);
+  });
+
+  test("does not emit when there are no flaky reports", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(
+      ["--fixture", "test/fixtures/rule-11-flake-detection/clean.json", "--emit", outDir],
+      (l) => lines.push(l),
+    );
+    expect(code).toBe(0);
+    // No emit-summary line, only the clean message
+    expect(lines.find((l) => l.startsWith("rule-11: emitted"))).toBeUndefined();
   });
 });
