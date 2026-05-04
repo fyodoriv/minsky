@@ -104,18 +104,49 @@
 
 <!-- omc-tasksmd-bridge-v0 shipped read-only OMC → tasks.md (`@minsky/omc-tasksmd-bridge` at `novel/bridges/omc-tasksmd/`); see vision.md § "Pattern conformance index" row 62. The bidirectional / claim-propagation half is deferred to v1+ as `omc-tasksmd-bridge-v1-watcher` (P3 below) pending a CRDT story for OMC's optimistic-concurrency `version` field. -->
 
-- [ ] First user-story integration test passes (001)
+- [ ] First user-story integration test passes (001) — tracker
   - **ID**: first-integration-test
-  - **Tags**: testing, validation
-  - **Estimate**: 6h
-  - **Hypothesis**: A 60-minute compressed simulation reproduces the failure modes that matter for an 8h overnight run with ≥80 % coverage of the failure-mode rows declared in the user-story file, while keeping CI runtime under 10 minutes.
-  - **Details**: Implement integration test for `user-stories/001-loop-runs-overnight.md`. Compressed simulation, 60-minute window standing in for an 8h overnight run.
-  - **Verification**: `npm test user-stories/001-loop-runs-overnight.test.ts` passes locally and on CI; OTEL collector receives ≥1 span per task type; CI workflow shows green
-  - **Measurement**: `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts` exits 0; `gh run list --workflow ci.yml --status success --limit 1 --json durationMS --jq '.[0].durationMS'` < 600000 (10 min); OTEL collector replay shows ≥1 span per declared task type.
-  - **Pivot**: if the 60-min sim's CI runtime exceeds 10 min OR misses >2 of the user-story's failure modes → reframe as a pair (10-min smoke in CI + nightly self-hosted run that does the full 60-min). If neither works, the story's overnight assumption is wrong and the story needs splitting.
-  - **Acceptance**: Test passes; metrics emit valid OTEL; CI green
+  - **Tags**: testing, validation, tracker
+  - **Estimate**: 6h (decomposed across 3 sub-tasks)
+  - **Blocked by**: first-integration-test-mock-tick-loop, first-integration-test-nightly-self-hosted
+  - **Hypothesis**: A 60-minute compressed simulation reproduces the failure modes that matter for an 8h overnight run with ≥80 % coverage of the failure-mode rows declared in the user-story file, while keeping CI runtime under 10 minutes. Per the documented Pivot below (reframe as 10-min smoke + nightly self-hosted), the work is decomposed into three sub-tasks; this entry is the tracker that closes when all three ship.
+  - **Details**: Decomposed on 2026-05-04 per the parent task's documented Pivot. Sub-task 1 (`first-integration-test-coverage-manifest`) ships the coverage manifest test. Sub-task 2 (`first-integration-test-mock-tick-loop`) builds a mock daemon for the in-process 10-min smoke. Sub-task 3 (`first-integration-test-nightly-self-hosted`) wires the nightly self-hosted-runner workflow for the 7 OS-level chaos rows. This block remains as the coordination contract — Hypothesis / Success / Pivot / Measurement / Anchor are the parent-level invariants; the sub-tasks each carry their own rule-#9 fields scoped to their slice.
+  - **Verification**: `npm test user-stories/001-loop-runs-overnight.test.ts` passes locally and on CI; OTEL collector receives ≥1 span per task type; CI workflow shows green. (Each sub-task's own Verification cell is the load-bearing one; this tracker closes when all three pass.)
+  - **Measurement**: `pnpm vitest run user-stories/001-coverage-manifest.test.ts` exits 0 (sub-task 1) AND `pnpm vitest run novel/tick-loop` exits 0 (sub-task 2) AND `gh run list --workflow nightly-overnight-sim.yml --status success --limit 1 --json conclusion --jq '.[0].conclusion'` returns `success` (sub-task 3).
+  - **Pivot**: if the 60-min sim's CI runtime exceeds 10 min OR misses >2 of the user-story's failure modes → reframe as a pair (10-min smoke in CI + nightly self-hosted run that does the full 60-min). **Pivot fired 2026-05-04** — decomposition into 3 sub-tasks landed; this tracker now coordinates the sub-tasks. If even the sub-task path fails (sub-task 2's smoke can't fit in 10 min OR sub-task 3's self-hosted runner is unreachable), the story's overnight assumption is wrong and the story needs splitting.
+  - **Acceptance**: All three sub-tasks closed; coverage manifest's ≥80 % ratio holds; nightly self-hosted run lands at least once `success`.
   - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (steady-state hypothesis); Beck, *Extreme Programming Explained*, 1999 (CI keeps the build fast).
-  - **Risk**: 60min compressed sim may miss real overnight failure modes (memory leaks, log rotation, OS sleep). Document the gap; plan a quarterly real-overnight test.
+  - **Risk**: 60min compressed sim may miss real overnight failure modes (memory leaks, log rotation, OS sleep). Documented gap; sub-task 3's nightly self-hosted run is the mitigation.
+
+- [ ] Mock tick-loop daemon for in-process 10-min smoke
+  - **ID**: first-integration-test-mock-tick-loop
+  - **Parent**: first-integration-test
+  - **Tags**: testing, validation, novel
+  - **Estimate**: 1d
+  - **Hypothesis**: A mock daemon (`novel/tick-loop/`) that loops `claim → mock-anthropic-call → complete` on a configurable cadence reproduces the 4 user-story-001 P2-task-throughput Acceptance criteria within a 10-min in-process smoke, with ≥1 OTEL span per task type, while keeping CI wall-clock under 10 min.
+  - **Details**: New package `novel/tick-loop/` providing a deterministic mock-tick daemon used by the in-process smoke. Picks 4 P2 tasks from a synthetic TASKS.md fixture; "completes" them via mocked Anthropic responses (no network); emits OTEL spans through `@minsky/observability`. Used by sub-task 3 as the *unit* the self-hosted runner runs at full 60-min cadence; sub-task 2 itself is the 10-min smoke version that runs in CI.
+  - **Files**: `novel/tick-loop/{package.json, src/index.ts, src/index.test.ts, README.md, tsconfig.json}`
+  - **Verification**: `pnpm vitest run novel/tick-loop` passes; in-process 10-min smoke completes 4 mocked tasks; OTEL collector receives ≥1 span per task type; package README's failure-mode chaos table covers ≥3 rows (mock crash, lease expiry, mock-anthropic-error) per rule #7.
+  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0; `gh run list --workflow ci.yml --status success --limit 1 --json durationMS --jq '.[0].durationMS < 600000'` returns `true` (CI under 10 min).
+  - **Pivot**: if the 10-min smoke can't fit 4 mocked tasks even at compressed cadence (e.g., <2 tasks complete within budget), the cadence model is too coarse — pivot to a single-task smoke + nightly multi-task on self-hosted (i.e., move the multi-task assertion entirely to sub-task 3).
+  - **Acceptance**: package shipped; in-process smoke green; OTEL spans visible; package README's chaos table linked from `vision.md` § Pattern conformance index.
+  - **Anchor**: Liu & Layland, "Scheduling Algorithms for Multiprogramming in a Hard Real-Time Environment", *JACM* 20 (1), 1973 (periodic-task scheduling — the cadence model); Armstrong, *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash supervision — the mock-Anthropic-error path tests the supervisor-respawn boundary).
+  - **Risk**: a deterministic mock that always succeeds doesn't exercise the Restart=on-failure path; mitigation — the chaos table forces ≥3 rows, one of which is a mock-anthropic-error fixture that returns 5xx so the supervisor sees a real respawn signal.
+
+- [ ] Nightly overnight-sim workflow on a self-hosted runner
+  - **ID**: first-integration-test-nightly-self-hosted
+  - **Parent**: first-integration-test
+  - **Tags**: testing, infra, ci, dormant-until-self-hosted-runner
+  - **Estimate**: 4h (when self-hosted runner is available)
+  - **Hypothesis**: A nightly workflow (`.github/workflows/nightly-overnight-sim.yml`) running the full 60-min sim on a self-hosted runner — using the mock daemon from sub-task 2 — covers the 7 OS-level chaos rows (2, 5, 6, 7, 8, 11, 12) of user-story 001's failure-mode table that GH-hosted runners cannot exercise (libfaketime, iptables, tc qdisc, dd, pmset), without burning CI minutes on the hot per-PR path.
+  - **Details**: Triggers when sub-task 2's mock-tick-loop ships AND a self-hosted runner is available (mirrors the precedent of `supervisor-integration-self-hosted-runner` and `lighthouse-self-hosted-runner-pivot`). Workflow uses `runs-on: [self-hosted, linux]`, runs nightly at low-stakes UTC hours, and exercises one randomly-chosen OS-level chaos row per night per `user-stories/001-loop-runs-overnight.md`'s weekly-fault-injection prose. Failures escalate to a Watch-level notification per the user-story's chaos-verification section.
+  - **Files**: `.github/workflows/nightly-overnight-sim.yml`, `docs/self-hosted-runner.md` (shared with `supervisor-integration-self-hosted-runner` if it has fired)
+  - **Verification**: at least one nightly run lands `success`; the run touches at least one of rows 2, 5, 6, 7, 8, 11, 12 (the OS-fault rows in the manifest).
+  - **Measurement**: `gh run list --workflow nightly-overnight-sim.yml --branch main --status success --limit 5 --json conclusion --jq '[.[] | select(.conclusion=="success")] | length >= 1'` exits 0 with `true`.
+  - **Pivot**: if self-hosted-runner maintenance burden exceeds the empirical signal value (e.g., the runner needs >1 manual intervention per quarter) OR if no self-hosted runner becomes available within 90 days of sub-task 2 shipping, retire this dormant task and document the OS-level chaos rows as a permanent declared deviation in `user-stories/001-loop-runs-overnight.md`.
+  - **Acceptance**: this task fires only after sub-task 2 ships AND a self-hosted runner is available; otherwise it remains a dormant scout entry per the parent `first-integration-test` task's documented Pivot.
+  - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (the documented Pivot from `first-integration-test`'s rule-#9 block — coverage of OS-level rows belongs in a self-hosted runner with real OS primitives); Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018 (DORA test reliability — a CI gate that doesn't run reliably teaches the team to ignore failure; the nightly cadence is the reliability bound).
+  - **Risk**: self-hosted runners introduce supply-chain risk (a compromised runner can leak secrets). Mitigation: scope the runner to public-repo / non-secret jobs only; share infrastructure with `supervisor-integration-self-hosted-runner` if both fire (cost amortisation); standard GH guidance.
 
 - [ ] Apple Shortcuts JSON for Watch surface
   - **ID**: watch-shortcuts

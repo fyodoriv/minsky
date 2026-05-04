@@ -1,44 +1,47 @@
-id: pre-2026-q3-dep-audit-2026-05-04
+id: first-integration-test-coverage-manifest-2026-05-04
 hypothesis: |
-  Recording a 2026-05-04 dependency snapshot in research.md's
-  "Quarterly review log" gives the upcoming Q3 2026 review
-  (date-blocked, due 2026-08-03 per `review-q3-2026`) a 3-month-stable
-  baseline to compare against. Without this snapshot, the Q3 review's
-  first action would be a fresh `pnpm outdated` scan — losing the
-  before/after delta that makes the review's findings falsifiable.
-  Six dev deps are flagged today (biome, vitest, @vitest/coverage-v8,
-  lefthook, typescript major-version-behind; markdownlint-cli2 minor
-  drift); zero runtime deps are stale. The Q3 review should address
-  markdownlint-cli2 first (smallest blast radius), then plan biome
-  1→2 as a separate task before vitest/typescript.
+  A coverage manifest test mapping user-story 001's 12 chaos-table rows to
+  existing repo tests achieves the parent `first-integration-test` task's
+  Acceptance ("≥80 % coverage of failure-mode rows declared in the
+  user-story file") via the documented Pivot path — both `covered` (existing
+  repo test) and `self-hosted` (deferred to nightly self-hosted runner,
+  sub-task 3) statuses count toward the threshold. Inventory test runs
+  in <1 s on any CI runner; no OS-level fault injection.
 success: |
-  `### Pre-2026-Q3 audit findings (2026-05-04)` exists in research.md
-  under the "Quarterly review log" section, with the 6-package table
-  and a 2-3 sentence summary identifying the Q3 ordering recommendation.
+  4 vitest test cases pass; `COVERAGE_MANIFEST.length === 12`;
+  `(covered + self-hosted) / 12 >= 0.80` (today the ratio is 11/12 = 0.917);
+  2 sub-tasks (`first-integration-test-mock-tick-loop`,
+  `first-integration-test-nightly-self-hosted`) queued in TASKS.md with full
+  rule-#9 fields. Concretely: `pnpm vitest run user-stories/001-coverage-manifest.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0.
 pivot: |
-  If any of the 6 packages ships a critical security advisory before
-  2026-08-03, file an emergency-bump P1 task and skip the Q3 cadence
-  for that package — the audit's standing assumption (quarterly
-  cadence is sufficient) is falsified for that specific dep, not
-  for the cadence as a whole. If ≥2 of the 6 packages ship critical
-  CVEs in the same quarter, the cadence itself fails its purpose
-  (quarterly is too slow); raise to bi-monthly until the rate
-  normalises (mirrors the parent `review-q3-2026` task's pivot).
+  If <80 % of rows can be inventoried as covered+self-hosted (i.e., genuinely
+  uncovered with no OS-level deferral path), the user-story 001 spec is
+  over-broad and the *story* needs splitting — not the manifest reframed.
+  Numerically: ratio < 0.50 over the 12 rows fires the spec-split pivot;
+  0.50 ≤ ratio < 0.80 fires a milder pivot (file additional `ci-lint-*` or
+  smoke-test sub-tasks to cover the gap before re-asserting Acceptance).
 measurement: |
-  [ "$(grep -c '^### Pre-2026-Q3' research.md)" -ge 1 ] \
-    && pnpm typecheck && pnpm test && pnpm lint \
+  pnpm typecheck \
+    && pnpm vitest run user-stories/001-coverage-manifest.test.ts --reporter=json \
+       | jq -e '.numPassedTests >= 4 and .numFailedTests == 0' \
+    && pnpm lint \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude" \
+    && grep -c '\*\*ID\*\*: first-integration-test-mock-tick-loop' TASKS.md \
+    && grep -c '\*\*ID\*\*: first-integration-test-nightly-self-hosted' TASKS.md
 anchor: |
-  rule #1 (vision.md § 1 — don't reinvent; depend on stable upstream
-  and review the choice quarterly); ARCHITECTURE.md § "Versioning &
-  dependency evolution" (pin majors, batch minor/patch bumps);
-  Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018
-  (DORA — low-risk, frequent, small bumps over big-bang upgrades;
-  the Q3 ordering recommendation operationalises this for the 6
-  flagged deps); Munafò et al., "A Manifesto for Reproducible
-  Science", *Nature Human Behaviour* 1, 0021, 2017 (pre-registration —
-  the snapshot is committed *before* the Q3 review observes its
-  result, so the review's findings are falsifiable against today's
-  baseline).
+  Basiri, A., Blohowiak, A., Hosseini, L., et al., "Principles of Chaos
+  Engineering", *IEEE Software* 33 (3), 2016 (steady-state hypothesis —
+  coverage of declared failure modes is the precondition for fault-injection
+  itself; an uncovered row is a steady-state assumption that hasn't been
+  verified); Beck, K., *Extreme Programming Explained*, Addison-Wesley,
+  1999, Ch. 17 (CI as the constraint enforcer — the manifest's existence
+  is mechanically asserted on every PR, not honour-system); rule #7
+  (vision.md § 7 — failure-mode discipline); rule #10 (vision.md § 10 —
+  deterministic enforcement; the manifest is a vitest assertion suite,
+  not prose); Munafò et al., "A Manifesto for Reproducible Science",
+  *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 pre-registration —
+  the parent task's documented Pivot ("reframe as a pair: 10-min smoke
+  in CI + nightly self-hosted") is what justifies counting `self-hosted`
+  toward the ≥80 % Acceptance, not a post-hoc reframing).
 replay_windows_days: [90]
