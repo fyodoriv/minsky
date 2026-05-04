@@ -39,7 +39,7 @@
 # A reference template lives at distribution/state.example.json.
 #
 # selfTest() adapter contract (consumed by --doctor; defined in TS at
-# novel/adapters/observability/src/index.ts):
+# novel/adapters/types/src/index.ts):
 #   { status: "green" | "yellow" | "red", message: string, latencyMs: number, lastCheck: string }
 #   Aggregation: red dominates yellow dominates green. (See aggregateStatus.)
 
@@ -237,7 +237,7 @@ if [ "$MODE" = "doctor" ]; then
   if command -v jq     >/dev/null 2>&1; then ok "jq";     else warn "jq missing — ledger writes are skipped"; STATUS="${STATUS/green/yellow}"; fi
 
   # adapter selfTest aggregation: today there are no wired adapters; future P1 PRs add them.
-  # The contract is documented at novel/adapters/observability/src/index.ts.
+  # The contract is documented at novel/adapters/types/src/index.ts.
   echo
   dim "  adapters wired into doctor: 0 (each P1+ adapter PR registers its selfTest here)"
   echo
@@ -333,7 +333,7 @@ ok "GREEN — minsky setup complete (v0)"
 echo
 dim "Future P1+ adapter PRs (observability-adapter-v0, supervisor-setup, budget-guard-v0, etc.)"
 dim "wire their selfTest() into the --doctor aggregation per the contract documented at"
-dim "novel/adapters/observability/src/index.ts. Until then, --doctor only checks prerequisites."
+dim "novel/adapters/types/src/index.ts. Until then, --doctor only checks prerequisites."
 
 # Next-step suggestions (printed after the GREEN banner so the user sees them last).
 echo
