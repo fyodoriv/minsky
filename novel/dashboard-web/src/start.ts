@@ -48,9 +48,7 @@ async function resolveGetValue(): Promise<GetValue | undefined> {
           ? { baseUrl, basicAuth: { user, password } }
           : { baseUrl },
       );
-      // rule-6: handled-locally — backend unreachable at start is a graceful-degrade
-      // path (chaos row 3 in distribution/openobserve/README.md); cold-start `(stub)`
-      // is preferable to refusing to serve the dashboard.
+      // rule-6: handled-locally — backend down at start graceful-degrades to `(stub)` (chaos row 3)
     } catch {
       return undefined;
     }
