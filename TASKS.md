@@ -28,11 +28,13 @@
   - **Acceptance**: doc merged on a draft PR until the host-root-resolver prep PR opens; vision.md row added.
   - **Anchor**: Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (pre-registration — the classification result is recorded *before* the runner is built, so the runner's design can't post-hoc rationalise the threshold); Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly, 2016, Ch. 6 (every rule is a check; every check has a substrate; documenting the substrate is the first move); rule #10 (deterministic CI enforcement — the classification table is itself enforced by a tiny linter that fails when a new `check-*.mjs` ships without a row).
   - **Failure modes**:
+
     | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
     |---|---|---|---|
     | New `check-*.mjs` ships without a doc row | drift | loud-crash via `scripts/check-cross-repo-portability-doc-coverage.mjs` (a P3 follow-up; this task lands the doc, the linter is the ratchet) | (deferred — covered when `ci-lint-cross-repo-portability-doc-coverage` ships) |
     | Classification disagreed across two readings | epistemic / classifier-noise | pivot per the `Pivot` line above | manual two-classifier re-run scheduled at quarterly review (`review-q3-2026`) |
     | Sidecar architecture rejected by a host repo's policy (e.g., the host bans `.git/info/exclude` mutations) | host-policy | graceful-degrade; the host opts into `repo-local-only` mode and the cross-repo-runner skips the 8 sidecar-only rules for that host | document the per-host opt-out in `repo.yaml` schema (next task) |
+
   - **Risk**: classification drift over time — minsky's rule lints will evolve and the doc will rot. Mitigation: rule-10 lint (`ci-lint-cross-repo-portability-doc-coverage`) shipped as P3 follow-up; quarterly review re-runs the classifier subagent.
 
 - [ ] `host-root-resolver-prep` — refactor every rule lint to take `MINSKY_HOST_ROOT` (preparation PR; no behaviour change for minsky-on-itself)
@@ -50,11 +52,13 @@
   - **Acceptance**: every lint takes the env var; minsky-on-itself behaviour identical; cross-repo invocations have a working substrate hook to fill from `.minsky/`.
   - **Anchor**: Hewitt, "A Universal Modular ACTOR Formalism", *IJCAI* 1973 (every actor has a *root* — the substrate boundary is the actor's interface; making it parametric is the move that lets the same actor live in many systems); Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (the substrate-locality boundary defines the consistency boundary; making it explicit is the precondition for cross-system semantics); rule #2 (every external dependency through an interface — here the "external dependency" is the *filesystem root*, which we now interface explicitly).
   - **Failure modes**:
+
     | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
     |---|---|---|---|
     | `MINSKY_HOST_ROOT` set but path doesn't exist | env-misconfig | loud-crash with `host root not found: <path>` from `getHostRoot` | `scripts/lib/host-root.test.mjs` covers it |
     | Lint reads relative path from host root that is missing on cross-repo invocation (e.g., host has no `.minsky/vision.md`) | host-not-bootstrapped | loud-crash from the lint with `bootstrap host: minsky bootstrap <host-dir>` (the bootstrap command ships in `cross-repo-runner-v0`) | `scripts/check-rule-5-glossary-discipline.test.mjs` extended with a missing-host-vision case |
     | Two lints read different host roots in the same invocation | concurrency / leaky env | impossible — `getHostRoot()` is deterministic per process; chaos test runs N=100 concurrent lint invocations against same env and asserts identical resolution | `scripts/lib/host-root.test.mjs` covers (concurrent invocations are deterministic) |
+
   - **Risk**: lint refactors are usually safe but high-fanout — touching 12 scripts in one PR creates merge-conflict risk against in-flight rule-lint work. Mitigation: ship the `getHostRoot` helper + tests in commit 1; ship each lint's adoption as a separate commit on the same branch (12 small commits) so rebases are atomic; coordinate with any in-flight rule-lint PRs (none open at task-write time, 2026-05-04).
 
 - [ ] `minsky-sidecar-bootstrap` — `.minsky/` schema and `minsky bootstrap <host-dir>` command
@@ -72,12 +76,14 @@
   - **Acceptance**: bootstrap is idempotent; doctor mode catches drift; an arbitrary host repo can be onboarded in `<2 min`.
   - **Anchor**: Norman, *The Design of Everyday Things*, Basic Books, 1988 (affordances — the bootstrap command is the affordance that makes the cross-repo capability *visible*; without it, the sidecar architecture is invisible to the operator); Armstrong, *Programming Erlang*, Pragmatic Bookshelf, 2007 (idempotent supervisor restart — `minsky bootstrap` is the supervisor's "start" verb; second invocation must be a no-op, third with `--repair` must restore invariants); rule #6 (let-it-crash — bootstrap failure surfaces, doesn't degrade silently).
   - **Failure modes**:
+
     | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
     |---|---|---|---|
     | Host has no TASKS.md | host-not-onboardable-yet | bootstrap creates `.minsky/repo.yaml` with `tasks_md_path: TASKS.md` (default) and emits a YELLOW warning; runner deferred until host writes a TASKS.md | `novel/sidecar-bootstrap/src/bootstrap.test.ts` covers |
     | Host's `~/.config/git/ignore` is read-only | filesystem-permission | loud-crash with explicit error and link to runbook | `novel/sidecar-bootstrap/src/bootstrap.test.ts` covers (mock fs.writeFileSync to throw EACCES) |
     | Two `minsky bootstrap` runs race on the same host | concurrency | mkdir-based lock at `.minsky/.bootstrap.lock.d` (mirrors setup.sh's lock); second exits 75 (EX_TEMPFAIL) | `novel/sidecar-bootstrap/src/bootstrap.test.ts` covers (parallel invocations via `pnpm test`'s parallel runner against same fixture) |
     | Symlink to canonical vision.md breaks (user moves `~/apps/minsky/`) | host-config-drift | `--doctor` reports RED with the broken-symlink path; `--repair` re-anchors | covered |
+
   - **Risk**: divergence between bootstrap inference and host repo's actual conventions (e.g. inferring `lint: yarn lint` when the host actually uses `pnpm biome check`). Mitigation: inference is *advisory*; bootstrap always opens an interactive review of the inferred `repo.yaml` before writing (or a `--non-interactive` mode that exits 1 if any field is unconfident); doctor catches drift on every subsequent invocation.
 
 - [ ] `cross-repo-runner-v0` — `minsky run <task-id>` against any bootstrapped host
@@ -95,6 +101,7 @@
   - **Acceptance**: `minsky run <task-id> --host /path/to/iep-capabilities-3` against a bootstrapped host produces a `RunnerPlan`, an `EXPERIMENT.yaml`, a budget-gated spawn, and an experiment-store record. v0 ships dry-run-only by default; live-spawn requires explicit `--live` flag (rule #6 — let dry-run be the safe default).
   - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 2003 (MAPE-K — the runner is the *Plan + Execute* phase of cross-repo work; *Knowledge* lives in the experiment-store regardless of which repo the work happened in); Hewitt 1973 (each spawn is an actor; the host repo is the actor's universe; the constitution is the actor's contract); Armstrong 2007 (supervisor wrapping the spawn — budget cap is the SLA, let-it-crash on rule violations); rule #1 (we wrap Claude Code, don't replace it); rule #6 (dry-run default — failure surfaces in the plan, not the side-effect).
   - **Failure modes**:
+
     | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
     |---|---|---|---|
     | Host has no `.minsky/repo.yaml` | not-bootstrapped | loud-crash with `bootstrap host first: minsky bootstrap <host-dir>` | `novel/cross-repo-runner/src/repo-config.test.ts` covers |
@@ -103,6 +110,7 @@
     | BudgetGuard returns PAUSE during runner invocation | budget-circuit-break | runner exits with `budget paused — see /watch.json or .minsky/budget.flag`; experiment-store records the pause as a `paused-out` record | `novel/cross-repo-runner/src/runner.test.ts` covers (mocked BudgetGuard returning PAUSE) |
     | Host's pre-push hook conflicts with existing hook | hook-collision | runner detects existing hook (`test -x .git/hooks/pre-push`) and chains via lefthook-config OR wraps via `pre-push.minsky` + `pre-push.original`; never silently overwrites | `novel/sidecar-bootstrap` covers (bootstrap is responsible for the install) |
     | Host's tracked files modified by spawn (e.g., Claude edited `package.json` for a rule-9 metric instrumentation) | scope-leak | the runner doesn't gate this — that's the spawned Claude's contract via the constitution; rule #9's preparation-PR pattern is how the spawned agent handles instrumentation needs | covered by the constitution itself, not the runner |
+
   - **Risk**: silently regressing the supervisor + budget-guard semantics from minsky-on-itself. Mitigation: the runner reuses the existing `ProcessSpawnStrategy` and `BudgetGuard` adapters unchanged; cross-repo work is a *new caller* of the same primitives. The runner's own tests assert that the wrap is observably identical to minsky-on-itself's tick-loop's wrap.
 
 - [ ] `cross-repo-runner-aifn-840-integration-test` — first real host integration: ship AIFN-840 via `minsky run`
@@ -120,12 +128,14 @@
   - **Acceptance**: AIFN-840 ships on iep-capabilities via `minsky run`; experiment-store records it; minsky's MAPE-K loop ingests it; the framing change in vision.md is *demonstrated*, not just claimed.
   - **Anchor**: rule #9 (this is the experiment that closes the cross-repo hypothesis); Munafò 2017 (the prediction was made before AIFN-840 was attempted; the observation will be Match: yes / no / partial); rule #3 (test-first, metric-first — AIFN-840 is the *test*, not just an example).
   - **Failure modes**:
+
     | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
     |---|---|---|---|
     | iep-capabilities-3 has uncommitted work when runner starts | dirty-worktree | runner refuses to start; emits `host has uncommitted changes; commit or stash before running` | covered by the runner's pre-flight |
     | Spawned Claude writes a PR that violates iep-capabilities-3's *own* CLAUDE.md (e.g., header >72 chars, missing JIRA ticket) | host-contract-violation | host's pre-commit / commitlint rejects; runner observes the rejection and records `verdict: regressed` with the rejection message | covered by the iteration-record contract |
     | The 2-line fix exposes other consumers of `slashCommand.title` that *expected* lowercase | latent-coupling | spawned Claude's `grep` covers it (the AIFN-840 task block has an Acceptance line for this); test surface catches it | covered by the existing iep-capabilities-3 test suite |
     | Runner's pre-push hook lets a violating PR through | hook-bypass / runner-bug | minsky-side GitHub Action (next task, `cross-repo-ci-action`) catches the missing self-grade block out-of-band; PR check fails; reviewer informed | covered when `cross-repo-ci-action` ships |
+
   - **Risk**: this task is the moment the architecture meets a real-world host. Surprises are likely. Mitigation: the Pivot threshold (≥3 consecutive non-runner failures → fall back to fixture) is the explicit escape valve; any single failure surfaces a P1 follow-up; this task is *not blocked* on shipping zero-defect code on the first run — it's blocked on demonstrating the architecture works end-to-end *or* identifying the specific gap that needs closing.
 
 - [ ] `cross-repo-ci-action` — minsky-side GitHub Action posts constitution-check verdicts via the GitHub API (decision C2)
@@ -143,12 +153,14 @@
   - **Acceptance**: every cross-repo PR opened by `minsky run` shows a `minsky-constitution` check on its checks tab; reviewers can fail merge on a red check; runner-emitted dispatches are observably ≥99 % reliable.
   - **Anchor**: Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly, 2016, Ch. 6 (every internal state operator cares about must surface — the constitutional verdict surfaces on the host PR's checks tab, the place reviewers already look); Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (out-of-band check via API is an asynchronous boundary; the eventual-consistency window is bounded by the dispatch delivery + workflow run time); rule #4 (every novel function emits OTEL — the action's run emits a span per check); rule #10 (deterministic enforcement — same input, same output; no LLM in the chain).
   - **Failure modes**:
+
     | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
     |---|---|---|---|
     | repository_dispatch lost | network / GH-platform | check absent; reviewer sees "no minsky check"; runner re-emits on operator request via `minsky recheck <host-repo> <pr>` | `scripts/cross-repo-check-runner.test.mjs` covers (mocked dispatch failure) |
     | Host PR's branch is force-pushed mid-run | concurrency | check runs against the wrong SHA; result is `neutral` with note "head SHA mismatch — re-emit dispatch"; never `success` on a stale SHA | covered |
     | `EXPERIMENT.yaml` URL not accessible (host PR is private to a non-minsky-bot user) | auth | check is `neutral` with note "minsky-bot lacks read access to host PR; install `minsky-bot` on the host org"; runbook in `docs/cross-repo-ci-runbook.md` | covered |
     | minsky workflow itself flakes | infra | rerun-failed pattern (already used in 6f48cac) handles it; if flake is sustained ≥3 days → Pivot trigger | manual quarterly review |
+
   - **Risk**: this task is the most external-system-dependent of the stack (GitHub API rate limits, dispatch delivery, cross-repo auth). Mitigation: the Pivot to C3 is the explicit escape valve; the AIFN-840 integration test (previous task) ships under C3 *first*, and C2 is the upgrade. Operator never blocked on C2 — they always have C3.
 
 ## P1
