@@ -19,6 +19,7 @@ export default defineConfig({
       "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),
       "@minsky/handoff-spec": r("./novel/handoff-spec/src/index.ts"),
       "@minsky/mape-k-loop": r("./novel/mape-k-loop/src/index.ts"),
+      "@minsky/omc-tasksmd-bridge": r("./novel/bridges/omc-tasksmd/src/index.ts"),
     },
   },
   test: {
