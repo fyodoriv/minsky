@@ -14,7 +14,21 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 
 ## Failure modes & chaos verification
 
-Per constitutional rule #7. See [`spec.md` § "Failure modes & chaos verification"](./spec.md#failure-modes--chaos-verification) for the table; every row has a paired fixture in `test/fixtures/` or a unit test in `src/parse.test.ts`.
+Per constitutional rule #7 (vision.md § 7).
+
+- **Steady-state hypothesis**: `parse(yaml)` returns either a valid `ExperimentRecord` or a structured `ParseError[]` for every legitimate YAML input.
+- **Blast radius**: a single experiment record. Parser is pure (no I / O).
+- **Operator escape hatch**: bypass via `<!-- experiment: trivial — see exemption.md -->` comment in the PR description (handled by the runner, not by this parser).
+
+See [`spec.md` § "Failure modes & chaos verification"](./spec.md#failure-modes--chaos-verification) for the long-form discussion. The same table is inlined here so that the rule-#7 chaos-coverage CI lint can mechanically verify every row's "Chaos test" cell.
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 1 | Malformed YAML (unbalanced quotes, bad indent) | upstream-malformed | `graceful-degrade` — return `ParseError` with `kind: bad-yaml` and the line | covered by `invalid-bad-yaml.yaml` fixture + parse test |
+| 2 | Missing required field (e.g., `pivot`) | upstream-malformed | `graceful-degrade` — return `ParseError` with `kind: missing-required-field` | covered by `invalid-missing-pivot.yaml` fixture + parse test |
+| 3 | Vanity metric in `success` (e.g., "more commits") | rule-#9 anti-pattern | `graceful-degrade` — return `ParseError` with `kind: vanity-metric` | covered by `invalid-vanity-metric.yaml` fixture + parse test |
+| 4 | Unknown extra field | upstream-malformed | `graceful-degrade` — return `ParseError` with `kind: unknown-field` | covered by `additionalProperties: false` JSON-Schema assertion in the parse test |
+| 5 | `replay_windows_days: []` | edge case | `graceful-degrade` — return `ParseError` with `kind: empty-replay-windows` | covered by parser test (`empty-replay-windows` assertion) |
 
 ## Hypothesis-driven development (rule #9)
 
