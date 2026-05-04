@@ -151,6 +151,7 @@ function parseScalar(value: string): unknown {
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
     try {
       return JSON.parse(trimmed);
+      // rule-6: handled-locally — JSON.parse failure on a quoted scalar means the value contained an unsupported escape; fall back to literal-strip (host's repo.yaml is hand-editable, this is the graceful path)
     } catch {
       return trimmed.slice(1, -1);
     }
