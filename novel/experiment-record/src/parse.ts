@@ -22,6 +22,7 @@ export interface ExperimentRecord {
   readonly measurement: string;
   readonly anchor: string;
   readonly replay_windows_days: readonly number[];
+  readonly timeout_seconds: number;
 }
 
 export type ParseErrorKind =
@@ -33,7 +34,8 @@ export type ParseErrorKind =
   | "vanity-metric"
   | "unknown-field"
   | "empty-replay-windows"
-  | "bad-replay-window-value";
+  | "bad-replay-window-value"
+  | "bad-timeout-value";
 
 export interface ParseError {
   readonly kind: ParseErrorKind;
@@ -47,16 +49,27 @@ export type ParseResult =
   | { readonly ok: false; readonly errors: readonly ParseError[] };
 
 const REQUIRED_FIELDS = ["id", "hypothesis", "success", "pivot", "measurement", "anchor"] as const;
-const ALL_FIELDS = [...REQUIRED_FIELDS, "replay_windows_days"] as const;
+const ALL_FIELDS = [...REQUIRED_FIELDS, "replay_windows_days", "timeout_seconds"] as const;
 type FieldName = (typeof ALL_FIELDS)[number];
 
-const MIN_LENGTHS: Record<Exclude<FieldName, "replay_windows_days" | "id">, number> = {
+const MIN_LENGTHS: Record<
+  Exclude<FieldName, "replay_windows_days" | "timeout_seconds" | "id">,
+  number
+> = {
   hypothesis: 20,
   success: 5,
   pivot: 5,
   measurement: 5,
   anchor: 5,
 };
+
+/**
+ * Default per-experiment measurement timeout, in seconds. The ci-experiment-runner
+ * enforces this on both the gate (executability check) and the post-merge record
+ * step. Raise per-experiment via the `timeout_seconds` field when a measurement
+ * legitimately needs more time (e.g., integration suites).
+ */
+const DEFAULT_TIMEOUT_SECONDS = 60;
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 
@@ -226,7 +239,36 @@ function checkReplayWindows(obj: Record<string, unknown>): ReplayWindowsResult {
   };
 }
 
-function buildRecord(obj: Record<string, unknown>, windows: readonly number[]): ExperimentRecord {
+interface TimeoutResult {
+  readonly errors: readonly ParseError[];
+  readonly timeoutSeconds: number;
+}
+
+function checkTimeoutSeconds(obj: Record<string, unknown>): TimeoutResult {
+  if (!("timeout_seconds" in obj)) {
+    return { errors: [], timeoutSeconds: DEFAULT_TIMEOUT_SECONDS };
+  }
+  const v = obj["timeout_seconds"];
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 3600) {
+    return {
+      errors: [
+        {
+          kind: "bad-timeout-value",
+          message: `timeout_seconds must be an integer in [1, 3600]; got ${JSON.stringify(v)}.`,
+          field: "timeout_seconds",
+        },
+      ],
+      timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+    };
+  }
+  return { errors: [], timeoutSeconds: v };
+}
+
+function buildRecord(
+  obj: Record<string, unknown>,
+  windows: readonly number[],
+  timeoutSeconds: number,
+): ExperimentRecord {
   return {
     id: obj["id"] as string,
     hypothesis: obj["hypothesis"] as string,
@@ -235,6 +277,7 @@ function buildRecord(obj: Record<string, unknown>, windows: readonly number[]): 
     measurement: obj["measurement"] as string,
     anchor: obj["anchor"] as string,
     replay_windows_days: windows,
+    timeout_seconds: timeoutSeconds,
   };
 }
 
@@ -259,16 +302,18 @@ export function parse(input: string): ParseResult {
 
   const obj = raw as Record<string, unknown>;
   const replay = checkReplayWindows(obj);
+  const timeout = checkTimeoutSeconds(obj);
   const errors: ParseError[] = [
     ...checkUnknownFields(obj),
     ...checkRequiredFields(obj),
     ...checkFieldShapes(obj),
     ...checkVanityMetrics(obj),
     ...replay.errors,
+    ...timeout.errors,
   ];
 
   if (errors.length > 0) {
     return { ok: false, errors };
   }
-  return { ok: true, record: buildRecord(obj, replay.windows) };
+  return { ok: true, record: buildRecord(obj, replay.windows, timeout.timeoutSeconds) };
 }
