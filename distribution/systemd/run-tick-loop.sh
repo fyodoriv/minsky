@@ -56,4 +56,10 @@ fi
 
 # `MINSKY_TICK_DRY_RUN` (read by the CLI directly) is the env-var control
 # surface for dry-run; unset = real spawn (production default).
-exec node "${MINSKY_HOME}/novel/tick-loop/bin/tick-loop.mjs" "${EXTRA_ARGS[@]}" "$@"
+#
+# Bash quirk: under `set -u`, `"${EXTRA_ARGS[@]}"` triggers an unbound-
+# variable error when EXTRA_ARGS is empty (no env-var mappings hit
+# above). The `+"${EXTRA_ARGS[@]}"` parameter-substitution form expands
+# to nothing when the array is unset/empty and to the array contents
+# otherwise — portable across bash 3 (macOS default) and bash 5 (Linux).
+exec node "${MINSKY_HOME}/novel/tick-loop/bin/tick-loop.mjs" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} "$@"
