@@ -365,3 +365,5 @@ export {
   runDaemon,
   spawnTickDryRun,
 } from "./daemon.js";
+
+export { fromRealBudgetGuard } from "./budget-guard-facade.js";

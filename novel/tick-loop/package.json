@@ -31,6 +31,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@minsky/observability": "workspace:*"
+    "@minsky/budget-guard": "workspace:*",
+    "@minsky/observability": "workspace:*",
+    "@minsky/token-monitor": "workspace:*"
   }
 }

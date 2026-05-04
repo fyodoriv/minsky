@@ -25,11 +25,15 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { TestFakeMockAnthropic, runDaemon } from "../dist/index.js";
+import { BudgetGuard } from "@minsky/budget-guard";
+import { MaciekTokenMonitor, StubTokenMonitor } from "@minsky/token-monitor";
+
+import { TestFakeMockAnthropic, fromRealBudgetGuard, runDaemon } from "../dist/index.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PKG_ROOT = resolve(HERE, "..");
@@ -96,6 +100,20 @@ function applyArg(arg, out) {
 
 const args = parseArgs(process.argv.slice(2));
 
+// Sub-task 2/3 of `tick-loop-daemon-real-spawn`: wire the real
+// `BudgetGuard` from `@minsky/budget-guard`. For `--dry-run` we still use a
+// `StubTokenMonitor` (a fresh, full 5h window — no I/O against
+// `~/.claude/projects`) so the local smoke stays hermetic; production
+// (non-dry-run) uses `MaciekTokenMonitor` against the user's Claude Code
+// config dir, the same data source Maciek's `claude-monitor` reads.
+const tokenMonitor = args.dryRun
+  ? new StubTokenMonitor()
+  : new MaciekTokenMonitor({ configDir: resolve(homedir(), ".claude") });
+const realGuard = new BudgetGuard(tokenMonitor, () => {
+  /* push-decision side effects (flag-file, OTEL) live in a follow-up;
+     the daemon only branches on `decide()`'s return value. */
+});
+
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
   maxIterations: args.maxIterations,
@@ -103,9 +121,8 @@ const result = await runDaemon({
   mockClient: new TestFakeMockAnthropic(),
   tasksMdReader: () => readFileSync(args.tasksMdPath, "utf-8"),
   pausedSentinelReader: () => existsSync(args.pausedSentinelPath),
-  // v0: BudgetGuardLike stub. The real `BudgetGuard` (`@minsky/budget-guard`)
-  // wires in a TokenMonitor; that integration belongs with `tick-loop-daemon-real-spawn`.
-  budgetGuard: { decide: () => ({ action: "normal", reason: "v0 stub — always normal" }) },
+  // Real `BudgetGuard.tick()` wrapped behind the daemon's `BudgetGuardLike.decide()` shape.
+  budgetGuard: fromRealBudgetGuard(realGuard),
   emit: (event) => {
     // Plain-text span emission to stdout — operator can pipe to journalctl
     // (systemd) or `tail -f` (launchd). Real OTEL wiring is `tick-loop-daemon-real-spawn`.
