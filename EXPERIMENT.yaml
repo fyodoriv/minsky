@@ -1,21 +1,44 @@
-id: dashboard-web-lighthouse-ci
+id: dashboard-web-task-throughput-formula-drift
 hypothesis: |
-  A new `.github/workflows/lighthouse.yml` workflow — pinned `lighthouse@12.4.0`,
-  triggered on `pull_request` and `push: branches: [main]` — that builds
-  `@minsky/dashboard-web`, starts the SSR server via `distribution/run-dashboard-web.sh`,
-  waits for HTTP 200 on port 8080, runs Lighthouse Mobile against `/`, and
-  asserts `jq -e '.categories.performance.score >= 0.9' lighthouse.json`,
-  fails the merge gate when the dashboard's mobile performance score drops
-  below 0.9. This operationalises the parent `dashboard-web-v0` epic's
-  prose-only "Lighthouse Mobile score ≥90 in CI" verification cell into a
-  deterministic, machine-readable rule-#10 gate (Wilkie 2018 RED Method's
-  duration component; Forsgren-Humble-Kim 2018 DORA fast feedback). The
-  parent `dashboard-web-v0` tracker block is removed in this PR — all 4
-  sub-tasks are closed, and the parent's acceptance criteria are now
-  enforced mechanically (one criterion per shipped sub-task) rather than
-  prose-tracked.
-success: "The lighthouse workflow runs on this PR; the Lighthouse JSON is uploaded as a workflow artifact (`lighthouse-report`); the performance-score assertion passes (`jq -e '.categories.performance.score >= 0.9' lighthouse.json` exits 0); the parent `dashboard-web-v0` tracker block is removed (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-v0$' TASKS.md` returns 0); this sub-task's block is removed (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-lighthouse-ci$' TASKS.md` returns 0); `vision.md` § \"Pattern conformance index\" row 58 lands; the runner script `distribution/run-dashboard-web.sh` is executable (`test -x distribution/run-dashboard-web.sh` exits 0); the post-merge measurement `test \"$(gh run list --workflow lighthouse.yml --limit 1 --json conclusion --jq '.[0].conclusion')\" = 'success'` exits 0 (a missing run-id surfaces as empty-string ≠ 'success' rather than a false-pass)."
-pivot: "If Lighthouse runs are flaky on GH-hosted runners (>1 false-positive failure per 10 runs sustained over 30 days — i.e., the same commit on `main` flips between `success` and `failure` without intervening source change), pivot per the TASKS.md brief: (a) move the job to a self-hosted runner per `supervisor-integration-self-hosted-runner`'s precedent, OR (b) drop the threshold from 0.9 to 0.85 and document the deviation in `vision.md` § \"Pattern conformance index\" row 58. The 0.85 threshold is itself bounded — if it also proves flaky, the gate is the wrong shape (e.g., Lighthouse Mobile is unsuitable for shared CI infra) and we pivot to a synthetic-load-time check (Server-Timing header against a fixed budget) instead. The pivot's quantitative trigger (≥1 false-positive per 10 runs over 30 days) is materially distinct from the success threshold (a single first-run pass at ≥0.9), so the experiment is falsifiable in either direction."
-measurement: "test -x distribution/run-dashboard-web.sh && test -f .github/workflows/lighthouse.yml && grep -q 'lighthouse@12.4.0' .github/workflows/lighthouse.yml && grep -q 'jq -e' .github/workflows/lighthouse.yml && grep -q 'cpuSlowdownMultiplier=4' .github/workflows/lighthouse.yml && grep -q 'upload-artifact' .github/workflows/lighthouse.yml && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-v0$' TASKS.md)\" = '0' ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-lighthouse-ci$' TASKS.md)\" = '0' ] && grep -q '^| 58 |' vision.md && pnpm typecheck && pnpm exec vitest run novel/dashboard-web/ --reporter=json | jq -e '.numFailedTests == 0'"
-anchor: "rule #10 (vision.md § 10 — deterministic enforcement; the parent `dashboard-web-v0`'s prose-only Lighthouse verification cell now has a machine-readable counterpart); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (the duration component of RED is the user-perceived latency Lighthouse measures); Forsgren, N., Humble, J., Kim, G., *Accelerate*, IT Revolution Press, 2018 (DORA — fast feedback on performance regressions; the pre-merge cadence is the load-bearing property); Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999, Ch. 17 (CI as the constraint enforcer); ARCHITECTURE.md § \"Versioning & dependency evolution\" (Lighthouse pin)."
+  `vision.md` § "Success criteria" row 10 (Task throughput) specifies the
+  measurement command as `git log --since="30 days ago" --oneline
+  --grep='^feat\|^fix\|^docs\|^chore' | wc -l` divided by 30, with unit
+  `tasks/day`. `novel/dashboard-web/src/metrics.ts`'s `task-throughput`
+  entry previously omitted the `/ 30` divisor while keeping the
+  `tasks/day` unit — a silent 30× over-read once `dashboard-web-otel-wiring`'s
+  Strategy executes the formula. Aligning the formula string with the
+  spec (appending `/ 30`) prevents the over-read and restores rule-#4 /
+  rule-#8 spec-alignment. The renderer displays `(stub)` today, so the
+  hypothesis is observable structurally (string-match against the spec
+  row) rather than via a runtime number, until OTEL wiring lands.
+success: "`grep -F '/ 30' novel/dashboard-web/src/metrics.ts` matches the
+  `task-throughput` formula AND `pnpm vitest run
+  novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e
+  '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0 (the new
+  `task-throughput formula divides 30-day count by 30` test passes
+  alongside the three existing invariants); the
+  `dashboard-web-task-throughput-formula-drift` task block is removed
+  from `TASKS.md` (`grep -c '^  - \\*\\*ID\\*\\*:
+  dashboard-web-task-throughput-formula-drift$' TASKS.md` returns 0)."
+pivot: "If `vision.md` row 10 owners later decide the divisor should be
+  configurable (e.g., a future `/ N` parameter to support 7-day or
+  90-day lookback windows), refactor `SuccessMetric` to carry the
+  divisor as a separate numeric property rather than embedded in the
+  `formula` string; the divisor becomes data not string-substring, and
+  the renderer multiplies/divides explicitly. Quantitative trigger:
+  ≥1 row in vision.md § 'Success criteria' adopting a non-30 divisor
+  within the next 90 days."
+measurement: "grep -F '/ 30' novel/dashboard-web/src/metrics.ts | grep -q
+  task-throughput || grep -A2 'id: \"task-throughput\"'
+  novel/dashboard-web/src/metrics.ts | grep -q '/ 30'; pnpm vitest run
+  novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e
+  '.numPassedTests >= 4 and .numFailedTests == 0'; [
+  \"$(grep -c '^  - \\*\\*ID\\*\\*:
+  dashboard-web-task-throughput-formula-drift$' TASKS.md)\" = '0' ]"
+anchor: "rule #4 (vision.md § 4 — every constant in source; the formula
+  string is exactly such a constant and must match the spec row it
+  renders); rule #8 (vision.md § 8 — pattern conformance; the spec is
+  the source of truth and code conforms to it, never the inverse);
+  Aho-Sethi-Ullman, *Compilers*, 1986 (round-trip property — the
+  formula is round-trippable to the spec when the two strings agree)."
 replay_windows_days: [7, 30]
