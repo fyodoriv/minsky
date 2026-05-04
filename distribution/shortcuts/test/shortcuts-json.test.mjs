@@ -93,14 +93,34 @@ describe("distribution/shortcuts/*.shortcut.json — schema + URL invariants", (
     }
   });
 
-  it("post-control shortcuts target http(s)://<host>:8080/control with a JSON body", () => {
+  it("post-control shortcuts target http(s)://<host>:8080/control with a JSON body matching {paused: boolean} exactly", () => {
+    // Schema-tightening (watch-control-endpoint, PR #88): assert the
+    // post-control payload is *exactly* `{paused: boolean}` so the
+    // dashboard's pure `parseControlBody` validator cannot reject it. The
+    // endpoint enforces the same shape on the server side
+    // (`novel/dashboard-web/src/control.ts` — 400 on missing body,
+    // missing `paused` key, or non-boolean `paused`); this test enforces
+    // it on the client side so drift between Shortcut and server fails CI.
     const postKind = shortcuts
       .map((s) => ({ filename: s.filename, parsed: JSON.parse(s.raw) }))
       .filter((s) => s.parsed.shortcut_kind === KIND_POST);
     expect(postKind.length).toBeGreaterThanOrEqual(1);
-    for (const { parsed } of postKind) {
-      expect(parsed.endpoint.url).toMatch(/:8080\/control$/);
-      expect(typeof parsed.endpoint.request_body.paused).toBe("boolean");
+    for (const { filename, parsed } of postKind) {
+      expect(parsed.endpoint.url, `${filename}: endpoint.url`).toMatch(/:8080\/control$/);
+      expect(parsed.endpoint.method, `${filename}: endpoint.method`).toBe("POST");
+      expect(parsed.endpoint.request_content_type, `${filename}: request_content_type`).toMatch(
+        /application\/json/i,
+      );
+      const body = parsed.endpoint.request_body;
+      expect(body, `${filename}: endpoint.request_body must be an object`).toBeTypeOf("object");
+      expect(body, `${filename}: endpoint.request_body must not be null`).not.toBeNull();
+      // Exact key-set: only `paused` (no extra fields → server's validator
+      // accepts it; no missing fields → server returns 400 if absent).
+      expect(
+        Object.keys(body).sort(),
+        `${filename}: endpoint.request_body keys must be exactly ["paused"]`,
+      ).toEqual(["paused"]);
+      expect(typeof body.paused, `${filename}: endpoint.request_body.paused`).toBe("boolean");
     }
   });
 
