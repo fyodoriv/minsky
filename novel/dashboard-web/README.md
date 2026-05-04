@@ -26,6 +26,7 @@ Per constitutional rule #7 (vision.md § 7).
 | 2 | Configured port already bound by another process at `serve()` time | resource-contended (network) | `let-it-crash` — `@hono/node-server` surfaces an `EADDRINUSE` from `serve()`; the wrapping supervisor (one-for-one per ARCHITECTURE.md § "Process supervision tree") restarts on a configurable port | the v0 skeleton intentionally returns `{ app, fetch }` without binding a port so the failure mode is owned by the wrapping `distribution/run-dashboard-web.sh` runner (which `exec`s into `node novel/dashboard-web/dist/start.js`); the `server.test.ts` "returns 200 + HTML body for GET /" assertion exercises the in-process `fetch` path that has no port-binding concern |
 | 3 | HTML injection via a metric label containing `<script>` / `"` / `'` / `&` / `>` (upstream-malformed — a future OTEL label could carry attacker-influenced text) | upstream-malformed (XSS) | `graceful-degrade` — `escapeHtml` rewrites every metacharacter; the rendered string contains no live `<script>` tag and no broken-attribute boundary | covered by `novel/dashboard-web/test/render.test.ts` "escapes HTML in label / id / formula / unit (rule #7 — XSS guard)" assertion |
 | 4 | Unknown route requested (`GET /admin`, `GET /api/secret`) | adversarial input | `graceful-degrade` — Hono's default 404 handler returns `404 Not Found`; the SSR surface is intentionally minimal (one route) so there is no surface to enumerate | covered by `novel/dashboard-web/test/server.test.ts` "returns 404 for an unknown route (Hono default — let-it-crash equivalent)" assertion |
+| 5 | Malformed control payload (missing body, missing `paused` key, non-boolean `paused`, non-JSON body) on `POST /control` | upstream-malformed (adversarial / rule #7) | `graceful-degrade` — `parseControlBody` returns a discriminated `{ok:false, error}` and the route handler maps it to `400` with `{error}`; the `setPaused` Strategy is *never* called on the malformed branch (verified by call-counter assertions) | covered by `novel/dashboard-web/test/server.test.ts` "400 on missing body", "400 on body without `paused` key", "400 on non-boolean `paused`", and "400 on malformed JSON body (graceful-degrade per rule #7)" assertions |
 
 ## Hypothesis-driven development (rule #9)
 
@@ -89,6 +90,22 @@ createServer({ getValue }); // every row that has a PromQL mapping renders live
 ```
 
 Failed reads (network down, malformed response, non-2xx) graceful-degrade to `null` per metric → the dashboard then renders `(stub)` for those rows.
+
+### Sub-task 8 (`POST /control` — pause/resume Shortcut endpoint — shipped)
+
+`createServer({ ..., setPaused })` adds a third route `POST /control` that closes the round-trip on the Apple-Shortcuts pause/resume pair (`distribution/shortcuts/{pause,resume}.shortcut.json`). The handler validates `{paused: boolean}` (rule #7 — upstream-malformed graceful-degrade) and applies the value through the injected `setPaused: (v: boolean) => void` Strategy (rule #2 — adapter seam, mirroring the existing `getPauseState` shape).
+
+`parseControlBody(unknown) => {ok:true, paused} | {ok:false, error}` is the pure validator in `src/control.ts`; the route handler in `src/server.ts` is the I/O boundary. The default `getPauseState` + `setPaused` pair (`createMemoryPauseState`) closes over a single in-memory boolean so a `POST /control {paused:true}` round-trips into the next `GET /watch.json` body without any caller wiring — production supervisors that own the canonical sentinel inject their own pair.
+
+| Body | Status | Response |
+| --- | --- | --- |
+| `{paused: true}` | 200 | `{ok: true, paused: true}` (Strategy called once with `true`) |
+| `{paused: false}` | 200 | `{ok: true, paused: false}` (Strategy called once with `false`) |
+| missing / non-JSON | 400 | `{error: "missing body"}` |
+| `{}` / `{other:1}` | 400 | `{error: "missing paused field"}` |
+| `{paused: "true"}` / `{paused: 1}` / `{paused: null}` | 400 | `{error: "paused must be boolean"}` |
+
+The smoke test in `distribution/shortcuts/test/shortcuts-json.test.mjs` was tightened in the same PR to assert that every `post-control` shortcut targets `:8080/control` with a `request_body` whose `paused` field is a boolean — the schema half of the dashboard ⇄ Shortcut contract is now deterministically gated on both sides (the dashboard route returns 400 for anything else; the Shortcut JSON cannot ship anything else).
 
 ### Spec-alignment fix (`dashboard-web-task-throughput-formula-drift`)
 

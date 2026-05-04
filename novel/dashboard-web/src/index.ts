@@ -21,3 +21,10 @@ export {
   type WatchKey,
   watchEnvelope,
 } from "./watch.js";
+export {
+  STUB_SET_PAUSED,
+  createMemoryPauseState,
+  parseControlBody,
+  type ParseControlResult,
+  type SetPaused,
+} from "./control.js";
