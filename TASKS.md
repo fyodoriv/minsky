@@ -17,24 +17,6 @@
 
 <!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
 
-- [ ] `experiment-tracker-v0` — weekly / monthly sustained-gain verdicts (rule #9 weekly–monthly layer)
-  - **ID**: experiment-tracker-v0
-  - **Tags**: novel, conformance, scheduled
-  - **Estimate**: 1–2d
-  - **Hypothesis**: A scheduled job that re-runs each merged experiment's `measurement` at the configured `replay_windows_days` (default `[7, 30]`), compares against `success` / `pivot` thresholds, and emits a `validated`/`regressed`/`inconclusive` verdict per experiment closes the weekly–monthly layer of rule #9. Within 90 days of landing, ≥5 experiments carry a non-`inconclusive` verdict — proving the substrate works on real data, not just fixtures.
-  - **Details**: GitHub Actions `schedule` cron (daily 09:00 UTC) iterates `experiments/*.jsonl`; for each entry whose `ts` is older than the next replay-window boundary, checks out the recorded ref (or the latest `main` if `replay_against=current`), runs `measurement`, appends `{ts, ref, value, window_days}` to the experiment's record. Verdict logic: `validated` if value is at or beyond `success` threshold for ≥1 replay window post-merge AND has not regressed below `pivot` since; `regressed` if value crosses `pivot` (in the wrong direction); `inconclusive` otherwise. `regressed` opens an automated TASKS.md entry (`pivot-experiment-<id>`) at P1; `validated` writes a single line to `validated-learnings.md`.
-  - **Files**: `.github/workflows/experiment-tracker.yml`, `scripts/replay-experiment.mjs`, `scripts/replay-experiment.test.mjs`, `validated-learnings.md` (seeded with the rule-#9 PR's own experiment as the first entry), `docs/experiment-tracker.md`.
-  - **Verification**:
-    - Synthetic experiment record with `success: ≥10`, `pivot: <0`, observed values `[12, 11]` at +7d/+30d → emits `validated` and appends one line to `validated-learnings.md`.
-    - Synthetic record with same thresholds, observed values `[12, -1]` → emits `regressed` and creates `pivot-experiment-<id>` task in `TASKS.md`.
-    - Synthetic record with values `[5, 6]` (below success, above pivot) → emits `inconclusive` with reasoning.
-    - Re-running the tracker on already-resolved experiments is a no-op (idempotent).
-  - **Measurement**: `pnpm vitest run scripts/replay-experiment.test.mjs` exits 0 with ≥3 cases; 90 days post-landing, `grep -c '^- ' validated-learnings.md` ≥ 5; `grep -cE '^- \[ \] (Pivot|pivot)-experiment-' TASKS.md` ≥ 0 (no false-positive rollback tasks against synthetic-validated experiments).
-  - **Pivot**: if after 90 days every replay verdict is `inconclusive` (i.e., signal-to-noise is too low at the 7d/30d windows), shorten the windows AND require larger pre-declared `success` margins — OR raise the bar on which changes are eligible (gate by tag). If still inconclusive at 180 days, the daily-layer measurements are too noisy to support the weekly layer; pivot to declaration-only with quarterly batch review.
-  - **Acceptance**: Scheduled workflow runs daily; verdicts accumulate; pivot tasks auto-file; validated learnings accrue.
-  - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
-  - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
-
 - [ ] File OMC issue proposing native tasks.md integration
   - **ID**: omc-tasksmd-issue
   - **Tags**: community, integration
@@ -101,7 +83,6 @@
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 3–5d (largest novel layer)
-  - **Blocked by**: experiment-tracker-v0
   - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
   - **Files**: `novel/mape-k-loop/`
