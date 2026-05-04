@@ -6,5 +6,10 @@
     "composite": true
   },
   "include": ["src"],
-  "references": [{ "path": "../adapters/observability" }, { "path": "../adapters/types" }]
+  "references": [
+    { "path": "../adapters/observability" },
+    { "path": "../adapters/types" },
+    { "path": "../adapters/token-monitor" },
+    { "path": "../budget-guard" }
+  ]
 }

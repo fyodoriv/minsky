@@ -145,9 +145,15 @@ importers:
 
   novel/tick-loop:
     dependencies:
+      '@minsky/budget-guard':
+        specifier: workspace:*
+        version: link:../budget-guard
       '@minsky/observability':
         specifier: workspace:*
         version: link:../adapters/observability
+      '@minsky/token-monitor':
+        specifier: workspace:*
+        version: link:../adapters/token-monitor
 
 packages:
 
