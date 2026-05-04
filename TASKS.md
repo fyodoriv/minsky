@@ -177,6 +177,65 @@
 
 <!-- spec-monitor-skill (the prior P2 task) is superseded by `spec-monitor-deterministic-rewrite` in P1. Per rule #10 (deterministic enforcement), the previous shape — a Claude Skill as the *primary* enforcement of every constitutional rule — is incompatible with the iron-rule "enforcement is deterministic, not LLM-driven" clause. The replacement task splits the Skill's remit: deterministic linters (`ci-rule-1` … `ci-rule-7`) take the load-bearing share; the residual judgement scope ships as an advisory-only Claude Skill (`spec-monitor-deterministic-rewrite`). Removing this block is the ratchet-rule from rule #10 in action: the prior approach is *removed* in the same PR that introduces the deterministic replacement. -->
 
+<!-- The next four tasks are follow-ups from the parallel-agent batch that shipped #22-#26. Each addresses a real finding surfaced during the audit at the close of that batch. Filing here per rule #9's pre-registration discipline (the audit produced these predictions; if they don't pan out the *approach* — not the change — gets revisited). -->
+
+- [ ] `rule-5-tighten-regex` — narrow the rule-#5 linter's coined-term extraction to reject paths and filenames
+  - **ID**: rule-5-tighten-regex
+  - **Tags**: ci, conformance, rule-10, scout
+  - **Estimate**: 1–2h
+  - **Hypothesis**: The rule-5 glossary-discipline linter shipped in PR #26 over-extracts file paths (`AGENTS.md`, `tasks.md`), path fragments (`novel/adapters`, `user-stories`), and method-syntax tokens (`trace.setGlobalTracerProvider`) from vision.md's backticked spans. Tightening the regex to reject candidates containing `/`, ending in `.md`/`.ts`/`.sh`/`.yaml`/`.json`, or matching the dotted-method shape removes ~15 entries from `scripts/glossary-allowlist.txt` without losing any genuine rule-#5 violations.
+  - **Details**: Edit `scripts/check-rule-5-glossary-discipline.mjs`. Replace the candidate-extraction filter with: (a) reject if contains `/`; (b) reject if matches `\.[a-z]{1,5}$` (file extension); (c) reject if matches `[a-z][a-zA-Z]*\.[A-Z]` (dotted method like `obj.Method`); (d) keep PascalCase, camelCase, kebab-case, and standalone all-caps acronyms. Then prune the allowlist of entries the new regex no longer extracts; verify the lint still exits 0 against current vision.md.
+  - **Files**: `scripts/check-rule-5-glossary-discipline.mjs`, `scripts/check-rule-5-glossary-discipline.test.mjs`, `scripts/glossary-allowlist.txt`
+  - **Verification**: linter passes against current vision.md after pruning; new test cases assert the regex rejects each disallowed shape.
+  - **Measurement**: `node scripts/check-rule-5-glossary-discipline.mjs` exits 0; `wc -l scripts/glossary-allowlist.txt` decreases by ≥10 entries from current; `pnpm vitest run scripts/check-rule-5-glossary-discipline.test.mjs` exits 0 with the new shape-rejection cases.
+  - **Pivot**: if the tightened regex starts missing genuine coined identifiers (a future PR introduces `FrobnicatorLoop` and the linter doesn't catch the missing Glossary entry), the regex was over-narrowed; revert to the looser form and accept the allowlist bloat.
+  - **Acceptance**: allowlist shrinks; linter still mechanically enforces rule #5; no false negatives in synthetic fixtures.
+  - **Anchor**: rule #10 (the ratchet rule); Brooks, *No Silver Bullet*, 1986 (accidental complexity from over-broad regexes).
+  - **Risk**: regex-tightening is a moving target. Mitigation: document the four reject criteria as a comment block above the regex; future changes require updating the comment.
+
+- [ ] `rule-5-recognize-pattern-index` — extend rule-#5 linter to accept pattern-conformance-index rows as valid term anchors
+  - **ID**: rule-5-recognize-pattern-index
+  - **Tags**: ci, conformance, rule-10, scout
+  - **Estimate**: 2–3h
+  - **Blocked by**: rule-5-tighten-regex
+  - **Hypothesis**: ~11 of the current rule-5 allowlist entries (`BudgetGuard`, `BudgetServer`, `HonoBudgetServer`, `MapeKLoop`, `OtelObservability`, `PromptOptimizer`, `StubTokenMonitor`, `SupervisionTree`, `TokenMonitor`, `CircuitBreaker`, `aggregateStatus`) are class/interface/function names already anchored in `vision.md` § Pattern conformance index. They're coined-by-Minsky but their CS anchor lives in rule #8's index, not rule #5's Glossary. Extending the linter to recognize "term appears in the Artifact column of any pattern-conformance-index row" as a valid rule-#5 anchor cleans up the allowlist without weakening rule #5.
+  - **Details**: Parse `vision.md`'s pattern-conformance-index table (the `## Pattern conformance index` section). For each row, extract the artifact-column tokens. Treat a candidate as resolved if it appears either in the Glossary OR in any artifact-column entry. Update the linter; remove the ~11 class/interface entries from `scripts/glossary-allowlist.txt`; rerun. Document the dual-anchor logic in the script's header comment.
+  - **Files**: `scripts/check-rule-5-glossary-discipline.mjs`, `scripts/check-rule-5-glossary-discipline.test.mjs`, `scripts/glossary-allowlist.txt`, `scripts/check-rule-5-glossary-discipline.mjs` (header doc)
+  - **Verification**: synthetic vision.md introduces `WidgetCog` with no Glossary entry but a pattern-conformance-index row mentioning `\`WidgetCog\`` → 0 errors. Same `WidgetCog` with no Glossary AND no index row → 1 error.
+  - **Measurement**: `node scripts/check-rule-5-glossary-discipline.mjs` exits 0; allowlist shrinks by ≥10 additional entries; new tests cover the dual-anchor logic.
+  - **Pivot**: if the index-parser is fragile (table format changes break the linter), pivot to a strict `<coined>...</coined>` HTML-comment marker convention in vision.md (the original brief's pivot path) and remove the heuristic extraction entirely.
+  - **Acceptance**: allowlist contains only standard CS acronyms + third-party package names; class/interface names resolve via the pattern-conformance-index anchor.
+  - **Anchor**: rule #10; rule #8 (pattern conformance); Gabriel, *Patterns of Software*, 1996 (the index IS the catalogue).
+  - **Risk**: parsing markdown tables is brittle. Mitigation: same parser shape rule-7-chaos-coverage uses; share if possible.
+
+- [ ] `scripts-vitest-config-consolidate` — pick one path for running scripts/*.test.mjs
+  - **ID**: scripts-vitest-config-consolidate
+  - **Tags**: ci, hygiene, scout
+  - **Estimate**: 30m
+  - **Hypothesis**: After PRs #23-#26 landed, two mechanisms exist for running `scripts/**/*.test.mjs`: the root `vitest.config.ts` includes them (added by #24), AND a separate `scripts/vitest.config.mjs` exists (added by #23, used by #25). This is rule #10's anti-pattern — two competing enforcement paths. Removing `scripts/vitest.config.mjs` and updating the CI jobs that reference it (`rule-7-chaos-coverage` runs `pnpm exec vitest run --config scripts/vitest.config.mjs`) to use `pnpm test` (root config) collapses to one path without changing test coverage.
+  - **Details**: Delete `scripts/vitest.config.mjs`. Find every CI job that references `--config scripts/vitest.config.mjs` (currently `rule-7-chaos-coverage`) and switch to `pnpm exec vitest run scripts/`. Verify `pnpm test` from root still picks up the scripts tests via the existing root-config include.
+  - **Files**: `scripts/vitest.config.mjs` (delete), `.github/workflows/ci.yml`
+  - **Verification**: `find scripts -name vitest.config.mjs` returns nothing; `pnpm test 2>&1 | grep -c 'check-rule-'` ≥ 4 (one per rule-* test file); affected CI job still runs the scripts tests.
+  - **Measurement**: `find scripts -name vitest.config.mjs | wc -l` returns 0; `pnpm test` exit 0; `gh run list --workflow ci.yml --limit 1 --json conclusion --jq '.[0].conclusion'` returns "success" after the PR merges.
+  - **Pivot**: if root-config inclusion of scripts tests breaks workspace-coverage thresholds (the scripts tests don't have the same coverage shape as `novel/**`), revert and keep both — but document explicitly which is load-bearing.
+  - **Acceptance**: one config; CI still green; no test regression.
+  - **Anchor**: rule #10 (ratchet rule — never two enforcement mechanisms competing); Lampson 1983 (move the constraint to the cheapest possible point — the cheapest path is one config).
+  - **Risk**: removing scripts/vitest.config.mjs is a refactor; if a future contributor adds a script test that depends on per-config behavior, root-only might miss it. Mitigation: documented in commit message.
+
+- [ ] `parallel-agent-brief-discipline` — codify rules for orchestrator-launched parallel agents
+  - **ID**: parallel-agent-brief-discipline
+  - **Tags**: docs, process
+  - **Estimate**: 1h
+  - **Hypothesis**: The parallel-agent batch that shipped #22-#26 had two predictable problems: (a) 4 PRs all touched `.github/workflows/ci.yml` causing 3 forced rebases at merge time, and (b) no agent reported its hypothesis self-grade in PR body — they reported outcomes ("all gates pass"), not the predicted-vs-observed comparison rule #9 requires. Both are fixable by codifying two rules in `AGENTS.md`: (1) the orchestrator commits to ≤2 parallel agents touching any shared file; (2) every agent brief includes a `Hypothesis self-grade: predicted X / observed Y / matched? / lessons` block to be filled in the PR body.
+  - **Details**: Add a new section `## Orchestrator discipline (for sub-agent launches)` to `AGENTS.md` with the two rules. Reference rule #9 (self-grading) and rule #10 (deterministic enforcement — though the agent brief itself is process not CI, the spirit is the same). The new section sits next to `## How to claim and work a task`.
+  - **Files**: `AGENTS.md`
+  - **Verification**: `grep -c '^## Orchestrator discipline' AGENTS.md` returns 1; the section names both rules and cites rule #9 + rule #10.
+  - **Measurement**: future parallel-agent batches' PR bodies contain the `Hypothesis self-grade:` block (manual review by the orchestrator on each batch); shared-file conflict count drops to 0 per non-coordinator PR (measured by `git log --merges --grep="Merge.*main into"` count after a batch lands).
+  - **Pivot**: if codifying these rules in AGENTS.md doesn't change orchestrator behavior over the next two batches (because LLMs don't reliably read AGENTS.md mid-flight), promote them to the `/next-task` skill prompt OR add a CI lint that fails PRs without the self-grade block.
+  - **Acceptance**: AGENTS.md contains the new section; the next parallel-agent batch follows both rules.
+  - **Anchor**: rule #9 (pre-registered HDD — self-grading is the discipline that closes the loop); rule #10 (deterministic enforcement at the process layer, not just code).
+  - **Risk**: process discipline rules in markdown have low compliance leverage. Mitigation: if compliance is poor in two batches, ratchet to enforcement (a CI lint or a skill update).
+
 - [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager)
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
