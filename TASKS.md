@@ -75,38 +75,9 @@
   - **Anchor**: Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run; the published artifact is the release contract).
   - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
-- [ ] `claude-mape-k-loop` Knowledge phase + integration assembly
-  - **ID**: mape-k-knowledge-and-integration
-  - **Tags**: novel, extraction-target
-  - **Parent**: mape-k-loop-v0
-  - **Estimate**: 6–8h
-  - **Hypothesis**: The Knowledge phase — append-only writes to `constraints.md`, reads of the experiment-tracker verdicts, and emission of proposed rule-#9 amendments to `research.md` when calibration drifts past a configured threshold — closes the MAPE-K loop with the rule-#9 quarterly-automation layer (`vision.md` § 9). The integration test for user-story 003 (`user-stories/003-mape-k-improves-prompts.test.ts`) passes against the assembled package, validating that the four phases compose correctly and that the parent `mape-k-loop-v0` tracker can be removed.
-  - **Details**: `knowledge({ verdictLog, calibrationDriftThreshold }) => { constraintsAppend: string, researchMdAmendmentProposal: string | null }`. `index.ts` assembles Monitor → Analyze → Plan → Execute → Knowledge into one tick of the loop. `constraints.md` is the append-only knowledge store (Helland 2007 — immutable log).
-  - **Files**: `novel/mape-k-loop/src/knowledge.ts`, `novel/mape-k-loop/src/knowledge.test.ts`, `novel/mape-k-loop/src/index.ts`, `novel/mape-k-loop/src/index.test.ts`, `novel/mape-k-loop/constraints.md` (initial seed), `novel/mape-k-loop/README.md`, `user-stories/003-mape-k-improves-prompts.test.ts`.
-  - **Verification**: integration test for user-story 003 passes; `mape.knowledge.write` event fires on each `constraints.md` append (asserted via the test's OTEL recorder); rule-#9 amendment proposal fires only when the simulated calibration drift exceeds the configured threshold.
-  - **Measurement**: `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts` exits 0; the parent `mape-k-loop-v0` tracker block is removed in the same PR (`grep -c '^  - \*\*ID\*\*: mape-k-loop-v0$' TASKS.md` returns 0).
-  - **Pivot**: if `constraints.md` grows past 200 entries before the first calibration-drift amendment fires, the drift threshold is too tight; raise it and document in `research.md` § "DSPy fit". If the user-story-003 integration test cannot reach a green run within 60 s of compressed-simulation time on a GH-hosted runner, pivot to a self-hosted runner per `supervisor-integration-self-hosted-runner`'s precedent.
-  - **Acceptance**: Knowledge phase ships; integration test passes; tracker removed; published as `@minsky/mape-k-loop`.
-  - **Anchor**: Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (immutable log as the Knowledge substrate); Kephart & Chess 2003 (Knowledge phase of MAPE-K); Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (rule #9 calibration as a pre-registered audit).
-  - **Risk**: Calibration-drift threshold is itself a research question — a wrong default fires too often (noise) or never (theatre). Mitigation: ship a conservative default (drift >50 % across two consecutive replay windows), record every fire in `validated-learnings.md`, and revisit at the next quarterly review.
-
 ## P2
 
 <!-- spec-monitor-skill and its successor `spec-monitor-deterministic-rewrite` both shipped: the deterministic linters under `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` carry the load-bearing share of runtime verification (rule #10's enforcement model), and the residual judgement-heavy scope ships as the advisory-only Claude Skill at `novel/spec-monitor/SKILL.md` — capped at ≤5 advisory rules per the rule-#10 ratchet. See `vision.md` § "Pattern conformance index" rows 11 and 35. -->
-
-- [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager) — tracker
-  - **ID**: mape-k-loop-v0
-  - **Tags**: novel, extraction-target, parent
-  - **Estimate**: tracker — see sub-tasks
-  - **Blocked by**: mape-k-knowledge-and-integration
-  - **Hypothesis**: A MAPE-K loop that drives prompt A/Bs through the `@minsky/prompt-optimizer` adapter (the DSPy fallback per `research.md` § "DSPy fit"), gated by a sustained-gain check (≥7 days post-rollout before counting per Kohavi-Tang-Xu 2020) and an oscillation detector (refuses to revisit a prompt within 10 iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
-  - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). This tracker decomposes into four sub-tasks (filed below): the PromptOptimizer adapter (sub-task 1, shipped in PR feat: mape-k decompose + PromptOptimizer adapter), the Monitor + Analyze phases (sub-task 2), the Plan + Execute phases (sub-task 3), and the Knowledge phase + integration (sub-task 4). The `**Quarterly-layer scope**` lives in sub-task 4. The tracker itself is removed when sub-task 4 ships.
-  - **Verification**: all four sub-tasks ship; integration test for `user-stories/003-mape-k-improves-prompts.md` passes once sub-task 4 lands.
-  - **Measurement**: `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts` exits 0 (covered by sub-task 4); OTEL counter `sum(mape_rollout_total{result="sustained_gain"}[30d])` ≥ 4 (queried 60 days after sub-task 4 ships); coordination signal — `gh pr list --state merged --search 'in:title mape-k' --json number --jq length` ≥ 4.
-  - **Pivot**: if any sub-task discovers the original epic-level shape is wrong (e.g., the PromptOptimizer interface from sub-task 1 cannot host the Plan / Execute primitives in sub-task 3 without a Python sidecar after all), revisit the parent acceptance and split into a new epic before continuing the chain. If rollout count is <2/month sustained 3 months OR rollouts confidently regress success-criterion metrics ≥1 time → MAPE-K design is wrong; pivot per `vision.md` § Success criteria #4 (fall back to deterministic prompt-versioning + shadow-traffic + manual diff review).
-  - **Acceptance**: tracker removed once all four sub-tasks merge; published as `@minsky/mape-k-loop`.
-  - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003; Khattab et al., "DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines", *ICLR* 2024; Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020 (statistical rigour of A/B); `research.md` § "DSPy fit" (the rejected baseline + the PromptOptimizer fallback that sub-task 1 ships).
-  - **Risk**: Oscillation; confidently rolling out regressions; complexity creep into a research project. Set explicit guards: sustained-gain check (≥7 d post-rollout before counting), oscillation detector (refuses to revisit a prompt within 10 iterations).
 
 - [ ] Implement `omc-tasksmd-bridge` v0
   - **ID**: omc-tasksmd-bridge-v0
@@ -174,6 +145,48 @@
   - **Risk**: Scope creep into a "real" dashboard. Cap line count; refuse new features without removing one.
 
 ## P3
+
+- [ ] `traceparent-subagent-propagation-test` — chaos test for OTEL TRACEPARENT propagation across subagent boundaries
+  - **ID**: traceparent-subagent-propagation-test
+  - **Tags**: testing, observability, chaos
+  - **Estimate**: 3h
+  - **Hypothesis**: A subprocess that does not honour `OTEL_PROPAGATORS` breaks TRACEPARENT propagation silently — a single unit test that spawns such a subprocess and asserts the parent / child trace ids diverge would have surfaced this regression in <1 CI run, where today the failure is invisible until a manual trace-graph inspection.
+  - **Details**: Add a `test/traceparent-subagent.test.ts` file under `novel/adapters/observability/` that spawns a subprocess with `OTEL_PROPAGATORS=` (empty) and asserts the child span's `traceparent` differs from the parent's. The test fixture is a small Node script that emits one span via `@opentelemetry/api` and writes the resulting traceparent to stdout. Surfaced from the `mape-k-knowledge-and-integration` PR's resilience-scout pass — the observability README's row 4 now defers to this task.
+  - **Files**: `novel/adapters/observability/test/traceparent-subagent.test.ts`, `novel/adapters/observability/test/fixtures/emit-traceparent.mjs`
+  - **Verification**: `pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts` exits 0 with ≥1 assertion that proves divergence under the empty-propagator config and convergence under the default config.
+  - **Measurement**: `pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts --reporter=json | jq -e '.numPassedTests >= 1 and .numFailedTests == 0'`.
+  - **Pivot**: if the test cannot be made deterministic on GH-hosted runners (e.g., the subprocess inherits a propagator from the harness in some configurations), pivot to recording the OS-level env-var diff and asserting on that instead of on the trace ids.
+  - **Acceptance**: chaos test ships; the deferred row in `novel/adapters/observability/README.md` is updated to point at the test file.
+  - **Anchor**: rule #7 (vision.md § 7 — chaos engineering); Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (steady-state hypothesis); OpenTelemetry specification (CNCF 2020+, propagator contract).
+  - **Risk**: Subprocess-level env tests can be flaky on Windows / shared CI sandboxes. Mitigation: gate on `process.platform !== 'win32'` and document the carve-out.
+
+- [ ] `mape-k-cost-schedule-from-vision` — wire per-rule cost weights from vision.md into `analyze`'s `costs` argument
+  - **ID**: mape-k-cost-schedule-from-vision
+  - **Tags**: novel, mape-k, follow-up
+  - **Estimate**: 2h
+  - **Hypothesis**: Goldratt's flat product `violationCount × 1` over-collapses high-frequency low-cost rules (typo lints) against rare high-cost rules (rule-#9 misses). A per-rule cost schedule sourced from a numbered table in `vision.md` § "Pattern conformance index" — read once at startup by the CLI wrapper around `tick(...)` — restores the severity ordering without an API change (the `costs` arg is already the seam).
+  - **Details**: Add a small parser that reads a new `## Cost schedule` section in `vision.md`, validates the keys are known ruleIds, and produces the `CostSchedule` map `analyze` consumes. Pure function; CLI is the I/O boundary. Integration test asserts that with the schedule, a high-volume `rule-typo` cannot outrank a single `rule-9` violation. Surfaced from the `mape-k-knowledge-and-integration` PR.
+  - **Files**: `novel/mape-k-loop/src/cost-schedule.ts`, `novel/mape-k-loop/src/cost-schedule.test.ts`, `vision.md` (new `## Cost schedule` table)
+  - **Verification**: `pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts` exits 0; the integration test from user-story 003 still passes once the schedule is plumbed into `tick`.
+  - **Measurement**: `pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts user-stories/003-mape-k-improves-prompts.test.ts --reporter=json | jq -e '.numPassedTests >= 5 and .numFailedTests == 0'`.
+  - **Pivot**: if the schedule is too rigid (every PR adds a new rule, the table goes stale), pivot to a heuristic over rule severity ranges sourced from each rule's own README.
+  - **Acceptance**: schedule parser ships; `tick(...)` consumes it; vision.md row 54 notes column updated to mark `costEstimate` full-conformance.
+  - **Anchor**: Goldratt, *The Goal*, 1984 (Theory of Constraints); rule #4 (vision.md § 4 — every constant in source).
+  - **Risk**: Bikeshedding the weight numbers. Mitigation: ship a defensible v0 (rule-#9 = 100, rule-#7 = 50, rule-typo = 1) and revisit at the next quarterly review.
+
+- [ ] `mape-k-constraints-md-size-cap` — CI lint capping `constraints.md` size before it goes unreadable
+  - **ID**: mape-k-constraints-md-size-cap
+  - **Tags**: ci, mape-k, follow-up
+  - **Estimate**: 1h
+  - **Hypothesis**: `novel/mape-k-loop/constraints.md` is append-only — without a size cap it grows unbounded. A CI lint that fires when the file exceeds 200 entries (the brief's pivot threshold) forces an archive split before the live log becomes unreadable.
+  - **Details**: Add `scripts/check-mape-k-constraints-md-size.mjs` — a pure function `checkConstraintsMdSize({ content, capEntries })` that counts `## <date>` headings and exits 1 when the count exceeds the cap. CLI is the I/O boundary. Surfaced from the `mape-k-knowledge-and-integration` PR's resilience-scout pass.
+  - **Files**: `scripts/check-mape-k-constraints-md-size.mjs`, `scripts/check-mape-k-constraints-md-size.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic constraints.md with 199 entries → exit 0; with 201 entries → exit 1 with a clear "split into archive" suggestion.
+  - **Measurement**: `pnpm vitest run scripts/check-mape-k-constraints-md-size.test.mjs --reporter=json | jq -e '.numPassedTests >= 2 and .numFailedTests == 0'`.
+  - **Pivot**: if the 200 cap proves arbitrary (the file is still readable at 400), raise the cap rather than removing the lint.
+  - **Acceptance**: lint ships; CI runs it; the README's follow-up note is removed.
+  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (immutable-log archive split).
+  - **Risk**: Cap timing — too tight forces premature archive splits, too loose is theatre. Mitigation: ship the brief's documented 200 default; revisit if the archive cadence diverges from quarterly.
 
 - [ ] Quarterly dependency review (Q3 2026)
   - **ID**: review-q3-2026
