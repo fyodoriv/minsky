@@ -1,20 +1,17 @@
-id: linter-resilience-hardening
+id: spec-monitor-prose-sweep
 hypothesis: |
-  Two latent fragility classes in the rule-enforcer scripts can be closed
-  pre-emptively without changing externally-observable linter behaviour:
-  (a) `check-rule-7-chaos-coverage.mjs`'s `readGitClosedTaskIds` swaps the
-  unbounded `git log --all --format=%B` capture for a `--grep='closes '`-
-  filtered capture (10–100× smaller output), keeping the existing
-  `try/catch` fallback and side-stepping the 32 MB `maxBuffer` ceiling;
-  (b) `check-rule-2-dep-coverage.mjs`'s `walkTs` and
-  `check-rule-7-chaos-coverage.mjs`'s `walkDir` skip symlinks entirely and
-  track visited canonical paths via `realpath`/`realpathSync` so a
-  pathological `a -> b/`, `b -> a/` loop terminates instantly with no
-  output instead of inode-exhausting the linter. Both functions remain
-  pure where they were pure; `readGitClosedTaskIds` gains a runner-
-  injection seam so its branching logic is unit-testable.
-success: "pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs scripts/check-rule-7-chaos-coverage.test.mjs exits 0 with the new symlink-loop + git-log-runner fixtures; node scripts/check-rule-7-chaos-coverage.mjs and node scripts/check-rule-2-dep-coverage.mjs produce identical OK / clean output on the live repo as before the change."
-pivot: "if the `--grep='closes '` filter empties the result against a future commit-message convention that drops the literal `closes` prefix, revert and switch to streaming via `git log --format=%H | xargs git show -s --format=%B` through `spawn` (line-by-line, no maxBuffer) rather than `execFileSync`. If symlink loops in `novel/` turn out to be vanishingly rare (zero in 12 months of CI), drop the realpath/visited Set guard and document that contributors must not introduce symlinks under `novel/`."
-measurement: "pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs scripts/check-rule-7-chaos-coverage.test.mjs"
-anchor: "rule #6 (let-it-crash with a precise error — applied only when the crash is genuinely unrecoverable; both fragility classes are recoverable via bounded I/O); Lampson 1983 ('Hints for Computer System Design' — bound the worst case at the entry); Node.js docs `child_process.execFileSync` `maxBuffer` failure mode (ERR_CHILD_PROCESS_STDIO_MAXBUFFER)"
-replay_windows_days: [7, 30, 180]
+  Every remaining mention of `spec-monitor` / `claude-spec-monitor` in
+  vision.md and ARCHITECTURE.md now correctly attributes the deterministic
+  share to its actual linter (rule-6 -> `scripts/check-rule-6-let-it-crash.mjs`
+  for silent-retry; `@minsky/experiment-record`'s `VANITY_PHRASES` for vanity
+  metrics; the rule-#10 lint set for runtime specification monitoring) and
+  explicitly tags the residual judgement share as advisory-only `novel/spec-
+  monitor/` (vision.md row 35), never gating CI. Success-criterion #3
+  (`Specification alignment`) is rewired from the non-existent
+  `claude-spec-monitor --report --json` CLI to a deterministic linter
+  green-ratio over a 30-day window via `gh run list`, restoring the row to
+  rule-#9-compliant runnability.
+success: "grep -nE 'spec-monitor.*flag|spec-monitor.*report|spec-monitor.*runs find' vision.md ARCHITECTURE.md | wc -l returns 0; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md all green; pattern-index lint stays green."
+pivot: "if a spec-monitor mention cannot be cleanly mapped to either a deterministic linter or an advisory-only tag (i.e., the prose describes a load-bearing capability that no linter currently provides), file a follow-up `ci-rule-N-*` task to ship the missing deterministic linter rather than papering over with advisory framing; revert the prose change for that mention until the linter lands."
+measurement: "grep -nE 'spec-monitor.*flag|spec-monitor.*report|spec-monitor.*runs find' vision.md ARCHITECTURE.md | wc -l"
+anchor: "rule #10 (vision.md § 10 — deterministic enforcement, ratchet rule); Havelund & Goldberg, 'Verify Your Runs', VSTTE 2008 (runtime verification — split here by mechanisability per rule #10); Munafò et al. 2017 (pre-registration as the falsifiability discipline)."
