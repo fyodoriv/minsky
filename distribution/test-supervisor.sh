@@ -76,6 +76,16 @@ log() { printf '[test-supervisor:%s] %s\n' "$MODE" "$*"; }
 write_stub_runners() {
   local target_dir="$1"
   mkdir -p "$target_dir"
+  # If real runners exist at this path (post-#142 — `run-tick-loop.sh` is
+  # the production bash bootstrap; `run-budget-guard.sh` is the sleep-forever
+  # supervisor sentinel), back them up to `<name>.real-bak` so the cleanup
+  # step can restore them. Without the backup, the real tracked files are
+  # silently overwritten and `rm -f` at cleanup leaves the working tree dirty.
+  for name in run-tick-loop.sh run-budget-guard.sh; do
+    if [ -f "$target_dir/$name" ] && [ ! -f "$target_dir/$name.real-bak" ]; then
+      cp "$target_dir/$name" "$target_dir/$name.real-bak"
+    fi
+  done
   cat > "$target_dir/run-tick-loop.sh" <<'EOF'
 #!/bin/sh
 # Stub tick-loop runner — used only by distribution/test-supervisor.sh.
@@ -90,6 +100,21 @@ EOF
 exec sleep 86400
 EOF
   chmod +x "$target_dir/run-tick-loop.sh" "$target_dir/run-budget-guard.sh"
+}
+
+restore_stub_runners() {
+  local target_dir="$1"
+  # Restore the real tracked files if we backed them up; otherwise just rm
+  # the stubs we wrote (legacy behaviour for paths that didn't have real
+  # runners before — e.g., distribution/launchd/, which never had real
+  # files committed under it).
+  for name in run-tick-loop.sh run-budget-guard.sh; do
+    if [ -f "$target_dir/$name.real-bak" ]; then
+      mv "$target_dir/$name.real-bak" "$target_dir/$name"
+    else
+      rm -f "$target_dir/$name"
+    fi
+  done
 }
 
 # =============================================================================
@@ -147,7 +172,9 @@ run_linux() {
     envsubst '${MINSKY_HOME}' < "$f" > "$unit_dir/$(basename "$f")"
   done
 
-  # Install stub runners alongside the templates.
+  # Install stub runners alongside the templates. write_stub_runners backs up
+  # any real tracked files first; restore_stub_runners brings them back at
+  # cleanup so the working tree stays clean.
   write_stub_runners "$ROOT/systemd"
 
   cleanup_linux() {
@@ -159,8 +186,7 @@ run_linux() {
     rm -f "$LINUX_UNIT_DIR/minsky-supervisor.target" \
           "$LINUX_UNIT_DIR/minsky-tick-loop.service" \
           "$LINUX_UNIT_DIR/minsky-budget-guard.service"
-    rm -f "$ROOT/systemd/run-tick-loop.sh" \
-          "$ROOT/systemd/run-budget-guard.sh"
+    restore_stub_runners "$ROOT/systemd"
     systemctl --user daemon-reload 2>/dev/null || true
   }
   trap cleanup_linux EXIT
@@ -297,7 +323,14 @@ run_macos() {
     render "$f" "$agent_dir/$(basename "$f")"
   done
 
-  write_stub_runners "$ROOT/launchd"
+  # Both launchd plists' ProgramArguments now reference
+  # `${MINSKY_HOME}/distribution/systemd/run-{tick-loop,budget-guard}.sh`
+  # (post-#142 — the original `distribution/launchd/run-*.sh` paths
+  # didn't exist; the systemd-side scripts are the canonical bootstraps and
+  # the plists were updated to point at them). The test writes stubs at
+  # systemd/ to match; cleanup restores the real tracked files via
+  # restore_stub_runners.
+  write_stub_runners "$ROOT/systemd"
 
   # Ensure the .minsky log directory exists (the plist writes log files
   # to ${MINSKY_HOME}/.minsky/{tick-loop,budget-guard}.{out,err}.log).
@@ -311,13 +344,12 @@ run_macos() {
   MACOS_AGENT_DIR="$agent_dir"
 
   cleanup_macos() {
-    log "cleanup: bootout + remove plists + remove stubs"
+    log "cleanup: bootout + remove plists + restore stub-overridden runners"
     launchctl bootout "$MACOS_DOMAIN" "$MACOS_AGENT_DIR/com.minsky.tick-loop.plist" 2>/dev/null || true
     launchctl bootout "$MACOS_DOMAIN" "$MACOS_AGENT_DIR/com.minsky.budget-guard.plist" 2>/dev/null || true
     rm -f "$MACOS_AGENT_DIR/com.minsky.tick-loop.plist" \
           "$MACOS_AGENT_DIR/com.minsky.budget-guard.plist"
-    rm -f "$ROOT/launchd/run-tick-loop.sh" \
-          "$ROOT/launchd/run-budget-guard.sh"
+    restore_stub_runners "$ROOT/systemd"
   }
   trap cleanup_macos EXIT
   # Reuse the globals locally for readability in the rest of run_macos.
