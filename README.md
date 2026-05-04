@@ -48,18 +48,22 @@ The named patterns aren't decoration — they're the debuggability promise. When
 
 - ✅ Core decision logic + watchdog loop in `@minsky/budget-guard`
 - ✅ Flag-file envelope (`${MINSKY_HOME}/.minsky/budget.flag`) and HTTP envelope (`localhost:9876/budget`)
-- ✅ OpenTelemetry adapter with `selfTest()` (`@minsky/observability`)
+- ✅ OpenTelemetry adapter with `selfTest()` (`@minsky/observability`); OpenObserve install + dashboard `OpenObserveStrategy` (live PromQL read path)
 - ✅ Handoff record format + parser + validator (`@minsky/handoff-spec`)
 - ✅ Supervisor unit-file templates for systemd + launchd (`distribution/`)
 - ✅ Maciek `TokenMonitor` Strategy (`@minsky/token-monitor` — reads `~/.claude/projects/<cwd>/<session>.jsonl` directly)
-- ✅ MAPE-K autonomic loop v0 (`@minsky/mape-k-loop` — pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` + assembled `tick`; sustained-gain + oscillation guards)
+- ✅ MAPE-K autonomic loop v0 (`@minsky/mape-k-loop` — pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` + assembled `tick`; sustained-gain + oscillation guards) + `mape-k-orchestrator` (rule-#9 self-improvement loop wiring; experiment-tracker → orchestrator ingestion closes the quarterly-close path)
+- ✅ Tick-loop daemon v0 (`@minsky/tick-loop` — production default = `ProcessSpawnStrategy`; real `BudgetGuard` via facade; `MINSKY_TICK_DRY_RUN=1` opt-in dry-run for the rollout window)
+- ✅ Persona spawner v0 (`@minsky/persona-spawner` — Adapter over `omc /team <persona>`; dispatch table maps task tags to OMC personas)
+- ✅ Notifier v0 (`@minsky/notifier` — Adapter over push channels; `NtfyNotifier` Strategy + `StubNotifier` test fake)
 - ✅ Spec monitor — deterministic CI lints (load-bearing per rule #10, see `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` + `scripts/check-anchor-primary-source.mjs` + `scripts/check-pivot-success-margin.mjs` + `scripts/check-measurement-inspects-output.mjs` + `scripts/check-skill-rule-cap.mjs`) plus the residual-judgement advisory Claude Skill at `novel/spec-monitor/SKILL.md`
-- ✅ Web dashboard skeleton with Lighthouse Mobile ≥0.85 CI gate (`@minsky/dashboard-web`, `.github/workflows/lighthouse.yml`)
+- ✅ Web dashboard with Lighthouse Mobile ≥0.85 CI gate (`@minsky/dashboard-web`, `.github/workflows/lighthouse.yml`); `GET /watch.json` data surface + `POST /control` pause/resume control endpoint
+- ✅ Apple Shortcuts watch surface (`distribution/shortcuts/` — JSON manifests + on-device build runbook; pause/resume pair; host parameterized via Ask-Each-Time + Variable)
 - ✅ Rule #9 automation layer — per-PR experiment runner (`scripts/run-experiment.mjs` + `.github/workflows/experiment.yml`), weekly–monthly tracker (`@minsky/experiment-record` + `.github/workflows/experiment-tracker.yml`), and the experiment-record format
 - ✅ Read-only OMC → tasks.md bridge (`@minsky/omc-tasksmd-bridge` v0)
 - ✅ Iron rule #9 (pre-registered hypothesis-driven development) + rule #10 (deterministic CI enforcement) wired across `vision.md` / `AGENTS.md` / `TASKS.md` policy
 
-What doesn't work yet — see [`TASKS.md`](./TASKS.md): the first user-story integration test, the Apple Watch Shortcuts surface, the bidirectional OMC ↔ tasks.md watcher (`omc-tasksmd-bridge-v1-watcher`), and the quarterly MAPE-K calibration cycle (folded into `mape-k-loop-v0` and `review-q3-2026`).
+The 24/7-autonomy P0 path is end-to-end shippable: real-spawn daemon + real budget-guard gating + persona spawner + observability backend + Watch data surface + Watch control surface + push notifier + first user-story integration test driving the real daemon. What's still in flight — see [`TASKS.md`](./TASKS.md): the bidirectional OMC ↔ tasks.md watcher (`omc-tasksmd-bridge-v1-watcher`) and the next quarterly MAPE-K calibration cycle (`review-q3-2026`).
 
 ## Quickstart
 
