@@ -1,0 +1,21 @@
+{
+  "id": "task-001",
+  "subject": "Wire dashboard-web SSR endpoint",
+  "description": "Add /watch.json route returning the three-number Watch surface payload.",
+  "status": "in_progress",
+  "owner": "executor-a",
+  "blocks": [],
+  "blocked_by": [],
+  "depends_on": [],
+  "created_at": "2026-05-04T10:00:00.000Z",
+  "version": 3,
+  "claim": {
+    "owner": "executor-a",
+    "token": "tk-aaaa-1111",
+    "leased_until": "2026-05-04T10:30:00.000Z"
+  },
+  "requires_code_change": true,
+  "metadata": {
+    "tags": ["dashboard-web", "ssr"]
+  }
+}

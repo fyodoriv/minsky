@@ -6,6 +6,7 @@
     { "path": "./novel/adapters/prompt-optimizer" },
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/adapters/types" },
+    { "path": "./novel/bridges/omc-tasksmd" },
     { "path": "./novel/budget-guard" },
     { "path": "./novel/dashboard-web" },
     { "path": "./novel/experiment-record" },
