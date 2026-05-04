@@ -73,6 +73,26 @@ const FIXTURE_WITH_BLOCKED = `# Tasks
   - **Hypothesis**: ready.
 `;
 
+// Regression fixture for `tick-loop-picktask-honors-blocked-field`: the
+// `**Blocked**:` field (external-constraint blocker — distinct from
+// `**Blocked by**:`) must disqualify a task from autonomous pickup. This
+// is the safety surface that prevents the daemon from spawning claude
+// against tasks like `omc-tasksmd-issue` (Blocked: needs-user-approval),
+// which would file a public GitHub issue without user approval.
+const FIXTURE_WITH_BLOCKED_FIELD = `# Tasks
+
+## P0
+
+- [ ] \`needs-approval\` — has Blocked field, must be skipped
+  - **ID**: needs-approval
+  - **Blocked**: needs-user-approval — third-party action requires opt-in
+  - **Hypothesis**: blocked-by-default per /next-task skill.
+
+- [ ] \`ready\` — fully unblocked
+  - **ID**: ready
+  - **Hypothesis**: ready.
+`;
+
 const FIXTURE_WITH_CLAIMED = `# Tasks
 
 ## P0
@@ -407,6 +427,14 @@ describe("tick-loop / daemon / pickTask", () => {
 
   it("skips blocked tasks", () => {
     expect(pickTask(FIXTURE_WITH_BLOCKED)).toBe("second");
+  });
+
+  it("skips tasks with non-empty `**Blocked**:` field (external-constraint blocker)", () => {
+    // Regression for `tick-loop-picktask-honors-blocked-field`: the
+    // `**Blocked**:` field is the safety surface for blocked-by-default
+    // actions (e.g., needs-user-approval) — pickTask must skip these in
+    // addition to the dependency-style `**Blocked by**:` skip.
+    expect(pickTask(FIXTURE_WITH_BLOCKED_FIELD)).toBe("ready");
   });
 
   it("ignores P2 tasks", () => {
