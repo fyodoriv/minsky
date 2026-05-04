@@ -100,8 +100,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=high
 
+  maciek-smoke:
+    # rule #9 preparation-PR: pins Maciek's `claude-monitor` Python tool at a
+    # known-good version so the future `budget-guard-maciek-impl` adapter test
+    # has a reproducible upstream. Smoke = install + version invocation.
+    # Anchor: rule #9 (preparation-PR pattern); rule #7 (pin versions, no `@latest`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install claude-monitor (pinned)
+        run: pipx install claude-monitor==3.1.0
+      - name: verify version
+        run: |
+          version=$(claude-monitor --version 2>&1)
+          echo "$version"
+          # Fail loudly if the binary isn't on PATH or returns nothing.
+          test -n "$version"
+          # Fail loudly if the pinned version drifted (e.g., pipx resolved a
+          # newer minor due to a yanked release). 3.1.0 is the pin until the
+          # quarterly review explicitly bumps it.
+          echo "$version" | grep -q "3.1.0"
+
   ci:
-    needs: [markdownlint, tasks-lint, glossary-discipline, biome, typecheck, test, hygiene]
+    needs: [markdownlint, tasks-lint, glossary-discipline, biome, typecheck, test, hygiene, maciek-smoke]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -113,7 +137,8 @@ jobs:
               || [ "${{ needs.biome.result }}" != "success" ] \
               || [ "${{ needs.typecheck.result }}" != "success" ] \
               || [ "${{ needs.test.result }}" != "success" ] \
-              || [ "${{ needs.hygiene.result }}" != "success" ]; then
+              || [ "${{ needs.hygiene.result }}" != "success" ] \
+              || [ "${{ needs.maciek-smoke.result }}" != "success" ]; then
             echo "one or more required checks failed" >&2
             exit 1
           fi
