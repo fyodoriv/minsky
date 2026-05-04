@@ -10,6 +10,7 @@ export default defineConfig({
   // this alias is dev / CI only.
   resolve: {
     alias: {
+      "@minsky/adapter-types": r("./novel/adapters/types/src/index.ts"),
       "@minsky/observability": r("./novel/adapters/observability/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),
       "@minsky/budget-guard": r("./novel/budget-guard/src/index.ts"),
