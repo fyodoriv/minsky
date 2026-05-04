@@ -251,19 +251,47 @@
   - **Risk**: GitHub Actions Ubuntu runners run as a non-login user; user-systemd may need explicit `loginctl enable-linger`. Mitigation: document the workaround inline in the workflow.
   - **Literature anchor**: Forsgren et al., *Accelerate*, 2018 (test reliability as a DORA prerequisite).
 
-- [ ] `audit-spec-monitor-coverage` — quarterly audit that spec-monitor advisory rules don't drift into deterministic territory
-  - **ID**: audit-spec-monitor-coverage
+- [ ] `audit-spec-monitor-coverage-q3-2026` — Q3 2026 quarterly audit of spec-monitor advisory rules (due 2026-08-03)
+  - **ID**: audit-spec-monitor-coverage-q3-2026
   - **Tags**: audit, conformance, rule-10
   - **Estimate**: 30m / quarter
-  - **Hypothesis**: A quarterly read-through of `novel/spec-monitor/SKILL.md`'s 5 advisory rules, comparing each against the current `scripts/check-rule-*.mjs` lints, catches scope-creep before the Skill becomes load-bearing — preserving rule #10's "deterministic checks are authoritative" invariant.
-  - **Details**: Re-read SKILL.md. For each advisory rule, ask: "could this be a deterministic linter today?" If yes, file a follow-up `ci-rule-N-*` task and remove the advisory rule from SKILL.md. Also count: are there ≤5 rules?
-  - **Files**: `novel/spec-monitor/SKILL.md`
-  - **Verification**: SKILL.md has ≤5 rules; `spec-advisories/<latest>.md` exists if the Skill has been used; no advisory rule overlaps with a deterministic linter's scope.
-  - **Measurement**: `awk '/^## Rule [0-9]+:/' novel/spec-monitor/SKILL.md | wc -l` ≤ 5; manual diff against `scripts/check-rule-*.mjs` lints surfaces no deterministic overlap.
-  - **Pivot**: if every quarterly audit finds ≥1 advisory-to-deterministic conversion, the Skill is leaking scope; reduce to ≤3 rules.
-  - **Acceptance**: Audit run; SKILL.md compliant; any conversions filed.
-  - **Anchor**: rule #10 (vision.md § 10).
-  - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds.
+  - **Hypothesis**: A quarterly read-through of `novel/spec-monitor/SKILL.md`'s ≤5 advisory rules, comparing each against the current `scripts/check-rule-*.mjs` lints (and any newly-shipped `ci-lint-*` linters since the Q2 2026 audit), catches scope-creep before the Skill becomes load-bearing — preserving rule #10's "deterministic checks are authoritative" invariant. Quarterly cadence is the Risk-mitigation note from the original `audit-spec-monitor-coverage` task.
+  - **Details**: Re-read SKILL.md. For each advisory rule, ask: "could this be a deterministic linter today, given any new lints shipped since Q2 2026?" If yes, file a follow-up `ci-lint-*` task and (only after the linter ships) remove the advisory rule from SKILL.md per rule #10's ratchet. Confirm rule count ≤5. Compare against the previous audit at `spec-advisories/2026-05-03-quarterly-audit.md`: if the same rules promoted then are still open AND new ones promote now, fire the pivot (reduce cap to 3). After running the audit, file the next quarterly task (`audit-spec-monitor-coverage-q4-2026`).
+  - **Files**: `novel/spec-monitor/SKILL.md`, `spec-advisories/2026-08-03-quarterly-audit.md` (or whatever date the audit runs)
+  - **Verification**: SKILL.md has ≤5 rules (mechanically enforced by `scripts/check-skill-rule-cap.mjs`); `spec-advisories/<audit-date>.md` exists with rule count and per-rule decisions; any deterministic-candidate filed as a `ci-lint-*` task with full Hypothesis/Success/Pivot/Measurement/Anchor; the Q4 2026 audit task is filed.
+  - **Measurement**: `test -f spec-advisories/2026-08-03-quarterly-audit.md && grep -q 'Rule count' spec-advisories/2026-08-03-quarterly-audit.md && grep -q 'audit-spec-monitor-coverage-q4-2026' TASKS.md`
+  - **Pivot**: if this audit AND the Q2 2026 audit both promoted ≥1 rule AND the Q2 candidates are still open, the Skill is leaking scope — reduce cap from 5 to 3 in `novel/spec-monitor/SKILL.md` (and update `scripts/check-skill-rule-cap.mjs` accordingly).
+  - **Acceptance**: Audit run; SKILL.md compliant; any conversions filed; Q4 task scheduled.
+  - **Anchor**: rule #10 (vision.md § 10); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (pre-registration of audit pivot before result is observed).
+  - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds; the previous audit file at `spec-advisories/2026-05-03-quarterly-audit.md` records the cadence.
+
+- [ ] `ci-lint-pivot-success-margin` — CI lint flagging EXPERIMENT.yaml when pivot threshold has zero margin vs success threshold (spec-monitor A2 promotion)
+  - **ID**: ci-lint-pivot-success-margin
+  - **Tags**: ci, conformance, rule-10, spec-monitor-promotion
+  - **Estimate**: 2h
+  - **Hypothesis**: `novel/spec-monitor/SKILL.md` rule A2 ("pivot reuses success threshold or zero margin") flags 100 % of EXPERIMENT.yaml fixtures where the pivot's leading numeric token equals the success's leading numeric token, OR is within <1 % absolute distance, when fed those records. Today the rule is advisory; promoting it to a deterministic linter (per rule #10's ratchet, scoped by the 2026-05-03 quarterly audit) makes the check unmissable on every PR and lets A2 be removed from SKILL.md in the same shipping PR. Per Ries 2011 (build-measure-learn / pivot-or-persevere), a zero-margin pivot threshold is theatre — it carries no information and should fail CI mechanically, not advisorially.
+  - **Details**: Add `scripts/check-pivot-success-margin.mjs` (pure function `checkPivotSuccessMargin({ success, pivot }) => { ok: boolean, reason?: string }`, plus a thin CLI that reads EXPERIMENT.yaml records via `@minsky/experiment-record`'s parser at `novel/experiment-record/src/parse.ts`). Regex-extract the leading signed numeric token (with optional `%`/units) from each string. Flag (a) exact-equal numeric tokens, (b) absolute distance <1 % of the success value, (c) success/pivot pair where one side is "X" and the other is "not X" with no numeric (e.g., "tests pass" / "tests fail"). Allow an opt-out via an explicit `# rule: ci-lint-pivot-success-margin: skip <reason>` comment for legitimately-binary metrics, audited at quarterly review. Pair with `scripts/check-pivot-success-margin.test.mjs` covering: zero-margin (fail), 10-point margin (pass), exact equality (fail), binary-with-skip (pass), binary-without-skip (fail), no numeric token at all (advisory-only, exit 0 with warning).
+  - **Files**: `scripts/check-pivot-success-margin.mjs`, `scripts/check-pivot-success-margin.test.mjs`, `.github/workflows/ci.yml` (add a job step), `novel/spec-monitor/SKILL.md` (remove A2 in the SAME PR per ratchet — renumber A3–A5 or leave the gap, per existing convention)
+  - **Verification**: `pnpm vitest run scripts/check-pivot-success-margin.test.mjs` exits 0 with ≥6 cases; CI lint catches a synthetic `EXPERIMENT.yaml` with `success: ">= 95 %"` / `pivot: "< 95 %"` (zero-margin) and exits 1; lint passes on the repo's existing EXPERIMENT.yaml.
+  - **Measurement**: `pnpm vitest run scripts/check-pivot-success-margin.test.mjs && node scripts/check-pivot-success-margin.mjs EXPERIMENT.yaml`
+  - **Pivot**: if numeric-token extraction proves too brittle (>10 % false-positive rate against historical EXPERIMENT.yaml records in `experiments/`), the deterministic-candidate is wrong — keep A2 advisory in SKILL.md and close this task. The advisory layer continues to handle the residual judgement.
+  - **Acceptance**: lint shipped, CI job green on existing records, A2 removed from SKILL.md in the same PR per rule #10's ratchet.
+  - **Anchor**: rule #10 (vision.md § 10); Ries, *The Lean Startup*, 2011 (pivot-or-persevere; meaningful pivot threshold ≠ vanity threshold); spec-advisories/2026-05-03-quarterly-audit.md (audit decision).
+  - **Risk**: Numeric extraction false-positives on prose-heavy success/pivot strings. Mitigation: emit advisory exit 0 (warning only) when no numeric token is found on either side; only fail (exit 1) when both sides have numerics AND margin is sub-threshold.
+
+- [ ] `ci-lint-measurement-inspects-output` — CI lint flagging EXPERIMENT.yaml measurement commands that don't actually inspect output (spec-monitor A4 promotion)
+  - **ID**: ci-lint-measurement-inspects-output
+  - **Tags**: ci, conformance, rule-10, spec-monitor-promotion
+  - **Estimate**: 2h
+  - **Hypothesis**: `novel/spec-monitor/SKILL.md` rule A4 ("measurement runs but doesn't inspect output") flags 100 % of EXPERIMENT.yaml records whose `measurement` field matches a deterministic blacklist (`>/dev/null` redirects without a subsequent test, bare `curl`/`echo`/`true`/`node script.mjs` patterns) AND fails to match a recognised-inspector allowlist (`test`, `[`, `[[`, `jq -e`, `grep -q`, `grep -c`, `assert`, `vitest`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, `npx @tasks-md/lint`, `markdownlint-cli2`, `gh run list ... --jq`, etc.), when fed those records. Today the rule is advisory; promoting it (per the 2026-05-03 audit + rule #10 ratchet) makes the false-confidence trap (a measurement command that always exits 0 because it never inspects its output) unmissable.
+  - **Details**: Add `scripts/check-measurement-inspects-output.mjs` (pure function `checkMeasurementInspectsOutput(measurementCmd) => { ok: boolean, reason?: string }` plus thin CLI). Allowlist of inspector tokens (above) — if any token appears in the command, pass. Blacklist of degenerate forms (`echo done`, `true`, bare `curl URL` with no piped consumer, bare `node script.mjs` without a wrapping `test`/`[`). When neither list matches, emit advisory warning (exit 0) — pure advisory layer for the long tail. Pair with `scripts/check-measurement-inspects-output.test.mjs`: ≥8 cases covering allowlist hits, blacklist hits, ambiguous (warning), and the existing repo's EXPERIMENT.yaml.
+  - **Files**: `scripts/check-measurement-inspects-output.mjs`, `scripts/check-measurement-inspects-output.test.mjs`, `.github/workflows/ci.yml`, `novel/spec-monitor/SKILL.md` (remove A4 in the SAME PR per ratchet)
+  - **Verification**: `pnpm vitest run scripts/check-measurement-inspects-output.test.mjs` exits 0; lint exits 1 on `measurement: "echo done"` and exits 0 on `measurement: "test $(curl -s ... | jq -r ...) -lt 100"`; lint passes on repo's existing EXPERIMENT.yaml records.
+  - **Measurement**: `pnpm vitest run scripts/check-measurement-inspects-output.test.mjs && node scripts/check-measurement-inspects-output.mjs EXPERIMENT.yaml`
+  - **Pivot**: if the inspector allowlist proves too narrow (legitimate measurement commands consistently fall through to "advisory warning" and never to "pass"), the rule is judgement-bound and this task should be closed — A4 stays advisory in SKILL.md.
+  - **Acceptance**: lint shipped, CI job green on existing records, A4 removed from SKILL.md in the same PR per rule #10's ratchet.
+  - **Anchor**: rule #10 (vision.md § 10); Havelund & Goldberg, "Verify Your Runs", *VSTTE* 2008 (runtime verification — the inspect-output check is the deterministic-monitor layer); spec-advisories/2026-05-03-quarterly-audit.md (audit decision).
+  - **Risk**: Inspector allowlist drifts as new test runners are adopted. Mitigation: fall back to "advisory warning + exit 0" when neither list matches; reviewer escalates if the warning channel grows noisy.
 
 - [ ] `ci-lint-watch-surface-cap` — CI lint enforcing the 3-value cap on the Watch surface (story 005)
   - **ID**: ci-lint-watch-surface-cap
