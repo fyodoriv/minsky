@@ -42,20 +42,6 @@
   - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016; Beck, *Extreme Programming Explained*, 1999 (CI keeps the build fast).
   - **Risk**: real daemon spawning real subprocesses inflates CI cost. Mitigation: max-iterations cap + tight tick-interval ensure <5min wall-clock; the nightly self-hosted run (sub-task 3 of original first-integration-test) extends to full 60 min.
 
-- [ ] `persona-spawner-v0` — OMC `/team` invocation from queue items (society of specialists actually exists)
-  - **ID**: persona-spawner-v0
-  - **Tags**: novel, runtime, persona
-  - **Estimate**: 2–3d
-  - **Hypothesis**: A `PersonaSpawner.spawn({ taskId, persona })` Strategy that invokes `omc /team N:role` against a per-task working directory, captures the OMC session's stdout/stderr, and emits OTEL spans per persona iteration, lets the tick-loop daemon route different task types to different personas (engineer / reviewer / researcher) — actualising the "society of specialists" promise that single Claude Code can't fulfill.
-  - **Details**: Adapter (rule #2). Interface: `PersonaSpawner.spawn(opts) => Promise<{ exitCode, durationMs, omcStateDir }>`. v0 Strategy: `OmcPersonaSpawner` shells out to `omc /team <persona>` and reads the resulting `.omc/state/team/<teamName>/` (which `@minsky/omc-tasksmd-bridge` already parses, PR #78). Stub Strategy: `StubPersonaSpawner` for tests. Persona selection: a small dispatch table mapping task tags to personas (e.g., `bug` → `engineer`, `research` → `researcher`).
-  - **Files**: `novel/adapters/persona-spawner/{package.json, tsconfig.json, src/index.ts, src/index.test.ts, src/omc.ts, src/omc.test.ts, README.md}`
-  - **Verification**: stub spawner test asserts the dispatch table maps correctly; OMC integration test (skipped in CI without OMC installed) spawns a one-shot session and verifies the bridge picks up the resulting team-state JSON.
-  - **Measurement**: `pnpm vitest run novel/adapters/persona-spawner --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`.
-  - **Pivot**: if OMC's `/team` mode proves incompatible with the daemon's process-supervision model (e.g., refuses to detach), pivot to a thin `claude --resume` chain managed by the daemon directly + drop the multi-persona feature for v0; revisit when OMC stabilizes the spawn API.
-  - **Acceptance**: spawner adapter ships; tick-loop daemon's `--enable-personas` flag routes ≥1 task in the synthetic fixture to the engineer persona; the spawned OMC state appears in `.omc/state/team/...` and is read back by the bridge.
-  - **Anchor**: rule #2 (adapter pattern); Wooldridge, *Multi-Agent Systems*, 2009 (role-based agent orchestration); rule #1 (OMC is the existing tool — adapter, don't reinvent).
-  - **Risk**: OMC may not support being spawned non-interactively. Mitigation: v0 uses `--prompt-file` + `--non-interactive` flags if available; else file an upstream OMC issue (already drafted in TASKS.md `omc-tasksmd-issue` enrichment).
-
 (empty in P0 below — work the highest-priority unblocked item from the list above, then move to P1.)
 
 ## P1

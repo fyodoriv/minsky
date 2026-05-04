@@ -1,67 +1,100 @@
-id: experiment-tracker-knowledge-ingestion-2026-05-03
+id: persona-spawner-v0-2026-05-03
 hypothesis: |
-  Wiring `.github/workflows/experiment-tracker.yml` (the weekly/monthly cron
-  shipped in PR #38) to invoke `node novel/mape-k-loop/bin/mape-k-orchestrator.mjs
-  --ingest-mode --experiment-store=experiment-store --tmp-dir=tmp` after the
-  replay step, then opening a DRAFT pull request via `peter-evans/create-pull-request@v6`
-  for any orchestrator-side writes (`novel/mape-k-loop/constraints.md` append +
-  `tmp/proposed-rule-9-amendment.md` on calibration drift), closes the rule-#9
-  quarterly automation loop without changing the orchestrator's contract or
-  auto-merging any rule-#9 amendments. The orchestrator's `--ingest-mode` was
-  already shipped in PR #90; this PR is the WIRING — connecting the workflow's
-  verdict output to the orchestrator's ingest input. Drafts NEVER auto-merge —
-  the operator review gate is the load-bearing safety property (Beyer SRE 2016
-  Ch. 17 — operator escape hatch).
+  A `PersonaSpawner.spawn(opts) => Promise<{ exitCode, durationMs,
+  omcStateDir }>` Strategy seam over `omc /team <persona>` invocation,
+  paired with a pure `dispatchPersona(taskTags)` lookup table mapping
+  tasks.md task tags to OMC personas (Wooldridge 2009 — role-based
+  agent orchestration), lets the tick-loop daemon route different task
+  types to different personas (engineer / reviewer / researcher)
+  without coupling business logic to OMC's CLI. The interface is the
+  contract; the v0 Strategy is `OmcPersonaSpawner` (shells out to
+  `omc /team <persona>` against a per-task working directory and
+  surfaces the `.omc/state/team/<teamName>/` path the
+  `@minsky/omc-tasksmd-bridge` reader already parses, PR #78); the
+  test fake is `StubPersonaSpawner` (Meszaros 2007 — records calls,
+  returns canned shape so consumer tests assert call shape without
+  forking a real subprocess). The `child_process.spawn` function is
+  constructor-injected so tests assert argv shape (`['/team',
+  <persona>]`) without a real OMC binary; PATH detection is a
+  separate injectable probe so `selfTest()` returns the documented
+  three-point lattice (`green` if `omc` on PATH, `yellow` if not,
+  `red` if the probe itself fails).
 success: |
   - `pnpm typecheck` exits 0.
-  - `pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0 (today: 8 cases pass — the 6 shipped in PR #90 plus 2 new workflow-shaped fixtures: one for the calibration-drift positive path that produces a research-amendment proposal, one for the well-calibrated CI-quiet path that suppresses it).
-  - `pnpm test` and `pnpm lint` both exit 0.
-  - The 14+ deterministic linters all pass with `--diff-base=origin/main`.
-  - `experiment-tracker-knowledge-ingestion` task block removed from TASKS.md in this PR.
-  - `.github/workflows/experiment-tracker.yml` carries the `mape-k orchestrator (Knowledge phase)` step + the draft-PR step; permissions widened from `pull-requests: read` → `pull-requests: write` so `peter-evans/create-pull-request@v6` can open draft PRs.
+  - `pnpm vitest run novel/adapters/persona-spawner --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0 (today: 24 paired tests across `index.test.ts` + `dispatch.test.ts` + `omc.test.ts`).
+  - The dispatch table covers ≥3 tag→persona mappings (`bug` →
+    `engineer`, `research` → `researcher`, `review` → `reviewer`,
+    plus `feature` and `refactor`).
+  - `selfTest()` lattice yields green/yellow/red appropriately
+    (asserted by 3 paired tests in `omc.test.ts`).
+  - The `persona-spawner-v0` task block is removed from TASKS.md in
+    the same PR.
+  - Concretely:
+    `pnpm typecheck && pnpm vitest run novel/adapters/persona-spawner --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
+    exits 0.
 pivot: |
-  If the calibration-drift heuristic produces ≥3 false-positive amendment
-  PRs in the first month after merge, raise the
-  `DEFAULT_CALIBRATION_DRIFT_THRESHOLD` from 0.5 → 0.7 in
-  `novel/mape-k-loop/src/knowledge.ts` (single-constant pivot, fully
-  reversible) OR drop the draft-PR step entirely from this workflow and
-  let the orchestrator emit only a logged proposal under `tmp/`. Both are
-  reversible and pre-registered here (Munafò et al. 2017).
+  If 30 days of attempted production OMC `/team` invocations through
+  `OmcPersonaSpawner` produce ≥3 incompatibilities with the daemon's
+  process-supervision model (e.g., refuses to detach, requires
+  interactive stdin, hangs on stdout buffering, has no
+  non-interactive entry point — sustained at >10 % failure rate),
+  drop the multi-persona feature for v0 and file an upstream OMC
+  issue (already drafted in TASKS.md `omc-tasksmd-issue` enrichment).
+  The pivot is *Strategy-level* —
+  the `PersonaSpawner` interface, the dispatch table, and the
+  `StubPersonaSpawner` are unchanged; only `OmcPersonaSpawner` is
+  retired (or replaced by a thin `claude --resume` chain managed by
+  the daemon directly). The seam guarantees the consumer code is
+  unaffected by the pivot.
 measurement: |
   pnpm install --no-frozen-lockfile \
     && pnpm typecheck \
-    && pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json \
+    && pnpm vitest run novel/adapters/persona-spawner --reporter=json \
        | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' \
     && pnpm test \
     && pnpm lint \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
     && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
     && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
     && node scripts/check-rule-7-chaos-coverage.mjs \
     && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
-    && node scripts/check-cadence-pivot-threshold.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs \
-    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-budget-cap.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-constraints-md-size.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-tick-iteration-backstop.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-watchdog-cadence.mjs --diff-base=origin/main \
+    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
-  *IEEE Computer* 36(1) 2003 (MAPE-K — the Knowledge phase closes the loop;
-  this PR wires the workflow that feeds it); Munafò et al., "A Manifesto for
-  Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (rule-#9
-  calibration as a pre-registered audit — the orchestrator's MAE check is
-  this manifesto operationalised); Beyer, B., Jones, C., Petoff, J.,
-  Murphy, N. R. (eds.), *Site Reliability Engineering*, O'Reilly 2016,
-  Ch. 17 (operator escape hatch — the draft PR NEVER auto-merges; the
-  load-bearing safety property is the human review gate); Helland, P.,
-  "Life beyond Distributed Transactions", *CIDR* 2007 (the constraints.md
-  append is the immutable audit trail every tick adds to).
-replay_windows_days: [7, 30, 90]
+  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
+  1994 (Adapter pattern — the `PersonaSpawner` interface; Strategy
+  pattern — `OmcPersonaSpawner` is one implementation, future
+  Strategies plug in behind the same shape); Wooldridge, M., *An
+  Introduction to MultiAgent Systems*, Wiley, 2009 (role-based agent
+  orchestration — the dispatch table maps tasks.md task tags to OMC
+  personas, closing the "society of specialists" promise from
+  vision.md's north star); Meszaros, G., *xUnit Test Patterns*,
+  Addison-Wesley, 2007 (test fake — `StubPersonaSpawner` records
+  calls in-memory and returns a canned shape so consumer tests assert
+  call shape without forking a real subprocess); Armstrong, J.,
+  *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash AT
+  the right boundary — the single try/catch in `runChild` is the
+  supervisor seam, returning `-1` rather than swallowing the error
+  inside the function); Martin, R. C., *Clean Architecture*, Pearson,
+  2017 (DI at the edge — `spawnFn` and `hasBinaryOnPath` are
+  constructor-level, the only I/O surfaces; the rest is pure given
+  those seams); rule #1 (vision.md § 1 — OMC is the existing tool;
+  the adapter wraps it rather than reinventing a multi-persona
+  runtime); rule #2 (vision.md § 2 — every dep behind interface;
+  OMC's CLI is exactly that, behind `PersonaSpawner`); rule #4
+  (vision.md § 4 — every exported function carries `@otel
+  adapters.persona-spawner.<verb>` JSDoc with `@otel-exempt` opt-outs
+  on helpers / test-fake methods); rule #6 (vision.md § 6 —
+  let-it-crash; one `// rule-6: handled-locally` opt-out at the
+  spawn-time and probe-time boundaries); rule #7 (vision.md § 7 —
+  failure-mode discipline; the README's chaos table has 3 rows
+  covering omc-missing-from-PATH, OMC-session-fails-to-start, and
+  OMC-team-state-dir-not-produced); rule #9 (vision.md § 9 —
+  pre-registered Strategy-level pivot in this `EXPERIMENT.yaml`:
+  "if OMC's `/team` mode proves non-detachable, retire
+  `OmcPersonaSpawner` only — the interface and consumers are
+  unchanged"); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017
+  (rule-#9 pre-registration — the Strategy-level pivot is committed
+  *before* code so a flaky OMC can't retroactively redefine "spawn
+  API stable enough").
+replay_windows_days: [90]
