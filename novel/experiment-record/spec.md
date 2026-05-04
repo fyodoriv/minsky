@@ -32,8 +32,11 @@ Optional:
 | Field                 | Type       | Default   | Constraints           |
 |-----------------------|------------|-----------|-----------------------|
 | `replay_windows_days` | int[]      | `[7, 30]` | each ∈ `[1, 365]`     |
+| `timeout_seconds`     | int        | `60`      | ∈ `[1, 3600]`         |
 
 `additionalProperties: false` — unknown fields are rejected.
+
+`timeout_seconds` is the per-experiment wall-clock cap applied by the [ci-experiment-runner-v0](../../docs/experiment-runner.md) (rule #9 daily layer). The default 60 s suits unit-test-shaped measurements; raise it for legitimately heavier measurements (e.g., integration suites). The runner enforces the cap on both the gate (executability check) and the post-merge record step.
 
 ## Validator-only checks (beyond JSON Schema)
 

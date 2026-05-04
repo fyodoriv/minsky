@@ -1,0 +1,205 @@
+# ci-experiment-runner-v0 — rule #9 daily-layer enforcement.
+#
+# Pattern: continuous experimentation runner (Fagerholm 2014) + GitHub
+# Actions deterministic CI (Beck 1999). Source: vision.md § "Pattern
+# conformance index" row 30.
+#
+# Why this exists: rule #9 requires a pre-registered EXPERIMENT.yaml on
+# every non-trivial PR. This workflow closes the loop:
+#
+#   - Job `gate` (on every PR): validate that EXPERIMENT.yaml is present
+#     (or a valid `trivial` exemption is declared), parses cleanly via
+#     @minsky/experiment-record, AND its `measurement` command is
+#     runnable (exit-code 0 within `timeout_seconds`).
+#
+#   - Job `record` (on push to main): re-run the measurement against the
+#     merge-base ref → baseline; against current main → treatment;
+#     append `{experiment_id, baseline, treatment, ts, ref, base_ref}`
+#     to `experiment-store/<id>.jsonl`; commit back to `main` with
+#     `[skip ci]` to avoid recursive workflow runs.
+#
+# We commit to `main` directly rather than to a separate `experiments/`
+# branch because:
+#   1. The experiment store is read by `experiment-tracker-v0` (the
+#      weekly-monthly layer) which expects a single source of truth on
+#      `main` — a separate branch creates a second consistency boundary.
+#   2. The `[skip ci]` marker on the commit message prevents the push
+#      from triggering this workflow again, breaking the loop.
+#   3. Per rule #10's ratchet — never two enforcement mechanisms
+#      competing — one storage location.
+#
+# Don't touch .github/workflows/ci.yml from this workflow's territory.
+# Linting, typecheck, tests, and the rule-* gates live there; this
+# workflow is the rule-#9-daily-layer-only.
+
+name: experiment
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: experiment-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  gate:
+    # Job A: per-PR gate. Fails if EXPERIMENT.yaml is missing OR fails
+    # `experiment-record validate` OR if `measurement` is not a runnable
+    # command. Trivial-PR exemption is two-factor (label `trivial` AND
+    # the body comment `<!-- experiment: trivial — see exemption.md -->`).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the runner can resolve refs if a measurement
+          # command shells out to git.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: build @minsky/experiment-record
+        # The runner imports `parse` from the package; vitest tests use the
+        # source-alias path, but the .mjs runner needs the built dist.
+        run: pnpm --filter @minsky/experiment-record build
+
+      - name: detect trivial label
+        id: label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          labels=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          echo "labels: $labels"
+          if echo "$labels" | grep -qx 'trivial'; then
+            echo "trivial=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "trivial=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: fetch PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/experiment-pr-body.md
+
+      - name: validate EXPERIMENT.yaml schema (when present)
+        # Independent of the runner's own parsing — surfaces parse errors
+        # via the canonical CLI when the file exists. The runner re-parses
+        # the same file as part of its gate; this step gives a focused
+        # error message earlier in the log when the YAML is the problem.
+        run: |
+          if [ -f EXPERIMENT.yaml ]; then
+            pnpm exec experiment-record validate EXPERIMENT.yaml
+          else
+            echo "no EXPERIMENT.yaml at repo root (gate will accept iff trivial-exempt)"
+          fi
+
+      - name: run gate
+        run: |
+          set -euo pipefail
+          args=( gate --record EXPERIMENT.yaml --pr-body-file /tmp/experiment-pr-body.md )
+          if [ "${{ steps.label.outputs.trivial }}" = "true" ]; then
+            args+=( --trivial-label )
+          fi
+          node scripts/run-experiment.mjs "${args[@]}"
+
+  record:
+    # Job B: post-merge recorder. Computes the merge-base of HEAD vs the
+    # prior main commit, runs measurement against each, appends a JSONL
+    # record to experiment-store/<id>.jsonl, commits back to main with
+    # [skip ci]. No-op on commits without an EXPERIMENT.yaml at HEAD.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `fetch-depth: 0` so we have the merge-base reachable. Without
+          # full history, HEAD~1 may not exist on a shallow clone.
+          fetch-depth: 0
+          # Persist credentials so we can push the experiment-store update
+          # back to main from this same job.
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: build @minsky/experiment-record
+        run: pnpm --filter @minsky/experiment-record build
+
+      - name: compute refs
+        id: refs
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          # `HEAD~1` is the prior main commit. For a merge commit this is
+          # main before the merge; for a squash-merge it is main before
+          # the squash. The merge-base of HEAD vs HEAD~1 is HEAD~1 itself
+          # in both cases (linear history on main), so we use it directly.
+          base=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          if [ -z "$base" ]; then
+            echo "no prior commit (initial push?); skipping recorder"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: skip-ci-marker check
+        id: skipci
+        run: |
+          set -euo pipefail
+          msg=$(git log -1 --pretty=%B HEAD)
+          if echo "$msg" | grep -qF '[skip ci]'; then
+            echo "marker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "marker=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: run record
+        if: steps.refs.outputs.skip != 'true' && steps.skipci.outputs.marker != 'true'
+        run: |
+          set -euo pipefail
+          node scripts/run-experiment.mjs record \
+            --record EXPERIMENT.yaml \
+            --base-ref "${{ steps.refs.outputs.base }}" \
+            --head-ref "${{ steps.refs.outputs.head }}"
+
+      - name: commit + push experiment-store
+        if: steps.refs.outputs.skip != 'true' && steps.skipci.outputs.marker != 'true'
+        env:
+          HEAD_SHA: ${{ steps.refs.outputs.head }}
+        run: |
+          set -euo pipefail
+          # If the recorder added/changed files under experiment-store/, push
+          # them back to main. `[skip ci]` prevents the workflow re-trigger.
+          if [ -z "$(git status --porcelain experiment-store/)" ]; then
+            echo "no experiment-store changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add experiment-store/
+          git commit -m "chore(experiment-store): record run for $HEAD_SHA [skip ci]"
+          git push origin HEAD:main
