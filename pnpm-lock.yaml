@@ -143,6 +143,18 @@ importers:
         specifier: workspace:*
         version: link:../adapters/prompt-optimizer
 
+  novel/sidecar-bootstrap:
+    devDependencies:
+      '@types/node':
+        specifier: 25.6.0
+        version: 25.6.0
+      typescript:
+        specifier: 5.7.2
+        version: 5.7.2
+      vitest:
+        specifier: 2.1.9
+        version: 2.1.9(@types/node@25.6.0)
+
   novel/tick-loop:
     dependencies:
       '@minsky/budget-guard':
