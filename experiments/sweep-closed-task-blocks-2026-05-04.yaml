@@ -1,0 +1,60 @@
+id: sweep-closed-task-blocks-2026-05-04
+hypothesis: |
+  TASKS.md carries seven task blocks whose code shipped via #122/#126/
+  #127/#128/#129/#130/#131 but whose blocks were not removed in the
+  shipping PR (each merge stat shows zero TASKS.md lines changed). The
+  policy at the top of TASKS.md is unambiguous: "When closing a task,
+  remove its entire block. History lives in git log per the tasks.md
+  spec." Carrying closed-but-not-removed blocks creates two failure
+  modes: (a) `tasks-lint` errors when other tasks reference the closed
+  IDs in their `Blocked by` field (rule-11-flake-detection-lint and
+  cross-repo-ci-action both did), so the queue file is no longer
+  parseable by the lint that gates it; (b) the next-task skill walks
+  blocks the queue treats as actionable, then has to re-derive the
+  shipped status from git, wasting cycles per pick.
+
+  The fix is a single sweep PR: remove the seven closed blocks, drop
+  the two now-stale `Blocked by` lines (with their `Blocker rationale`),
+  and trim the cross-repo-runner roadmap header to reflect the
+  remaining 1-of-7 P0 step. No code change. The pre-registration here
+  is the audit shape itself — every block removed has a recorded
+  closing PR, and `tasks-lint` regains a clean exit.
+success: |
+  - `tasks-lint TASKS.md` exits 0 with `0 error(s)` (today: 2 errors —
+    the two unknown `Blocked by` references — plus 7 task blocks
+    duplicating shipped work).
+  - `npx markdownlint-cli2 TASKS.md` exits 0.
+  - `grep -cE "^- \[ \]" TASKS.md` returns 12 (down from 19 before the
+    sweep — 7 closed blocks removed; 12 actionable / dormant remain).
+  - For every block removed, `git log --grep=<id>` returns at least one
+    merged commit on `origin/main` whose message includes the literal
+    `Closes` (the audit trail confirming the block's shipped state).
+pivot: |
+  If a block this sweep removes turns out NOT to have shipped (e.g., a
+  partial implementation slipped through with a misleading `Closes`
+  line in its commit message), the recovery is `git revert` of this
+  sweep PR; the seven blocks reappear with their original metadata
+  intact. The pivot is operationally cheap because TASKS.md is the
+  only file this sweep touches and the removals are pure deletions.
+  No code, no tests, no lint configuration changes — the rollback is
+  a one-commit revert.
+measurement: |
+  node -e 'const {execSync} = require("child_process"); const out = execSync("tasks-lint TASKS.md 2>&1").toString(); require("assert").ok(/found 0 error/.test(out), "tasks-lint must report 0 errors after the sweep");'
+anchor: |
+  Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999,
+  Ch. 17 (CI as the constraint enforcer — `tasks-lint` is the
+  TASKS.md gate; carrying closed-block references through merge
+  defeats the constraint).
+  Hewitt, C., "A Universal Modular ACTOR Formalism for Artificial
+  Intelligence", *IJCAI* 1973 (TASKS.md is the actor message store —
+  closed messages must be retired, not archived in-band, or the queue
+  shape lies about what's actionable).
+  Munafò, M. R., Nosek, B. A., Bishop, D. V. M., et al., "A Manifesto
+  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (rule-#9 pre-registration — even a sweep PR declares its
+  hypothesis/success/pivot before the result; the audit shape itself
+  is the falsifiable claim).
+  Surfaced-by: 2026-05-04 — operator returned to a stale main and
+  found seven shipped tasks still occupying TASKS.md, plus two
+  `Blocked by` lines referencing IDs that no longer exist.
+timeout_seconds: 30
