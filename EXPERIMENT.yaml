@@ -1,44 +1,48 @@
-id: budget-guard-maciek-impl
+id: budget-guard-publish-dry-run
 hypothesis: |
-  MaciekTokenMonitor's parser + 5h SessionBlock aggregation + plan-cap
-  subtraction matches Maciek's `claude-monitor --view realtime` reported
-  value to within 1 % on a synthetic fixture, without invoking the
-  upstream CLI. Re-implementing the parser shape directly against
-  `~/.claude/projects/<cwd>/<session>.jsonl` (the file Claude Code writes;
-  the same data Maciek reads) is the only deterministic path because
-  `claude-monitor==3.1.0` has no `--json` mode (only `--view {realtime,
-  daily, monthly}` and `--version`).
+  `@minsky/budget-guard` and `@minsky/token-monitor` already declare the
+  correct release contract — `files`, `main`, `types`, `exports`, and a
+  matching `README.md` — so a publish dry-run produces tarballs whose
+  contents match the documented manifest (no `*.test.{js,d.ts}`, no
+  `*.map`, no `tsconfig.json`, no source files) and whose total size is
+  well under 100 KB each (rule of thumb: a Strategy/Adapter v0 with one
+  `dist/` tree, one README, and one `package.json` should land near
+  10 KB compressed).
 success: |
-  ≥6 tests pass against committed synthetic fixtures
-  (`single-block`, `two-blocks`, `empty`, `malformed`, `dedup`); parser
-  handles every fixture case; `PLAN_CAPS = { pro: 19_000, max5: 88_000,
-  max20: 220_000, custom: 44_000 }` is locked by paired plan-cap-variance
-  tests; `pnpm vitest run novel/adapters/token-monitor/src/maciek.test.ts
-  --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
-  exits 0.
+  Both packages produce exactly one `.tgz` per dry-run; both tarballs are
+  <102_400 bytes; neither tarball contains `*.test.js`, `*.test.d.ts`,
+  `*.map`, `tsconfig.json`, or anything under `src/`; both READMEs carry
+  a `Pre-publish dry-run` section that records tarball name, size, and
+  file list. Measured by:
+
+      cd novel/budget-guard && npm publish --dry-run --loglevel=info 2>&1 \
+        | grep -c 'package size: [0-9.]\+ kB'
+      cd novel/adapters/token-monitor && npm publish --dry-run --loglevel=info 2>&1 \
+        | grep -c 'package size: [0-9.]\+ kB'
+
+  Each must return ≥1.
 pivot: |
-  If Anthropic's JSONL format changes more than once in a 90-day window
-  (a structural break — new top-level field shapes, renamed
-  `message.usage` keys, or removed timestamps), file an upstream feature
-  request for a `--json` mode in `claude-monitor` (rule #1 — push
-  upstream first). Only as a last resort write our own cache-tap by
-  hooking the Claude Code API client. The pivot is an *abandon-the-
-  approach* line, not a one-line schema-update PR (rule #9 — Munafò
-  et al. 2017 pre-registration discipline).
+  If either package's tarball exceeds 100 KB or includes files outside
+  the documented manifest after a `files`-field audit, the package shape
+  is wrong (too coarse, accidentally bundling tests, missing `!`-negation
+  globs, or compiler emitting source maps) — split the package or
+  tighten `tsconfig.json` (`sourceMap: false`, `declarationMap: false`)
+  before re-running. The pivot is an *abandon-the-approach* line: don't
+  loop on `files` tweaks if the package itself is too big — it's a
+  decomposition signal (rule #9 — Munafò et al. 2017 pre-registration
+  discipline).
 measurement: |
-  pnpm vitest run novel/adapters/token-monitor/src/maciek.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'
+  cd novel/budget-guard && npm publish --dry-run --loglevel=info 2>&1 \
+    | awk '/package size:/ { sub(/kB/,""); if ($4*1024 < 102400) print "ok"; else print "fail" }'
+  cd novel/adapters/token-monitor && npm publish --dry-run --loglevel=info 2>&1 \
+    | awk '/package size:/ { sub(/kB/,""); if ($4*1024 < 102400) print "ok"; else print "fail" }'
+  Both must print "ok".
 anchor: |
-  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
-  1986 (Adapter / Strategy — `MaciekTokenMonitor` is a Strategy of
-  `TokenMonitor`); Aho, Sethi, Ullman, *Compilers: Principles,
-  Techniques, and Tools*, Addison-Wesley, 1986 (recursive-descent parser
-  shape over JSONL — line-by-line `JSON.parse` with graceful skip on
-  malformed input); Meszaros, *xUnit Test Patterns*, Addison-Wesley,
-  2007 (real-implementation contract test — the parser test verifies
-  determinism against committed fixtures rather than depending on a
-  live Maciek install at test time); Beyer, Jones, Petoff, Murphy
-  (eds.), *Site Reliability Engineering*, O'Reilly 2016, Ch. 3
-  (error-budget framing — token economy is the budget contract);
-  rule #2 (vision.md § 2 — every dep behind interface; the adapter
-  wraps the JSONL on-disk format Anthropic writes).
+  Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run;
+  the published artifact is the release contract, and `npm publish
+  --dry-run` is the smoke test for that contract before the registry
+  push); Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-
+  Wesley, 1994 (Adapter / Strategy — both packages are
+  Adapter/Strategy v0s whose published surface is intentionally
+  thinner than their source tree).
 replay_windows_days: [7, 30]
