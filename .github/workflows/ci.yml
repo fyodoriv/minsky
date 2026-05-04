@@ -21,7 +21,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npx -y markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+      # Pinned to 0.15.0 (matches the package.json devDependency). Rule #7
+      # (chaos engineering — trust no unverified dependency); ARCHITECTURE.md
+      # § "Versioning & dependency evolution".
+      - run: npx -y markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 
   tasks-lint:
     runs-on: ubuntu-latest
@@ -30,7 +33,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npx -y @tasks-md/lint@latest TASKS.md
+      # Pinned to the 0.7.x minor (matches the version validated locally as of
+      # 2026-05-03). Rule #7 (chaos engineering — trust no unverified
+      # dependency); ARCHITECTURE.md § "Versioning & dependency evolution".
+      - run: npx -y @tasks-md/lint@^0.7.0 TASKS.md
 
   glossary-discipline:
     # vision.md § rule #5: every Minsky-coined term in vision.md resolves
@@ -152,7 +158,7 @@ jobs:
     # rule #9 preparation-PR: pins Maciek's `claude-monitor` Python tool at a
     # known-good version so the future `budget-guard-maciek-impl` adapter test
     # has a reproducible upstream. Smoke = install + version invocation.
-    # Anchor: rule #9 (preparation-PR pattern); rule #7 (pin versions, no `@latest`).
+    # Anchor: rule #9 (preparation-PR pattern); rule #7 (pin versions, no floating tags).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
