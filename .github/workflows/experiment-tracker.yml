@@ -46,7 +46,7 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   replay:
@@ -89,3 +89,57 @@ jobs:
           git add experiment-store/ validated-learnings.md TASKS.md
           git commit -m "chore(experiment-tracker): record replay verdicts $(date -u +%Y-%m-%d) [skip ci]"
           git push origin HEAD:main
+
+      # ---- rule-#9 quarterly automation: Knowledge phase ingest --------------
+      # Wires the just-emitted verdicts into the MAPE-K orchestrator's
+      # Knowledge phase (Kephart-Chess 2003). `--ingest-mode` skips Plan/Execute
+      # entirely (rule #7 — separation of concerns); the orchestrator only
+      # appends to `constraints.md` and, on calibration drift > threshold,
+      # writes a draft amendment proposal under `tmp/`. NEVER auto-merges
+      # (rule #7 — operator review gate is the load-bearing safety property,
+      # Beyer SRE 2016 Ch. 17).
+
+      - name: build @minsky/mape-k-loop
+        # The CLI imports `orchestrate` from `../dist/orchestrator.js` — needs
+        # the built dist (same shape as the `@minsky/experiment-record` step).
+        run: pnpm --filter @minsky/mape-k-loop build
+
+      - name: ingest verdicts → mape-k orchestrator (Knowledge phase)
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          node novel/mape-k-loop/bin/mape-k-orchestrator.mjs \
+            --ingest-mode \
+            --experiment-store=experiment-store \
+            --tmp-dir=tmp
+
+      - name: open draft PR for orchestrator outputs
+        # Only fires when the orchestrator wrote new files (constraints.md
+        # append OR a tmp/ amendment proposal). The PR stays in DRAFT — never
+        # auto-merged. Industry-standard `peter-evans/create-pull-request@v6`
+        # handles branch + commit + PR open in one step.
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: mape-k-ingestion/${{ github.run_id }}
+          base: main
+          draft: true
+          commit-message: |
+            chore(mape-k): ingest verdicts $(date -u +%Y-%m-%d) [skip ci]
+          title: "chore(mape-k): rule-#9 ingestion — ${{ github.run_id }}"
+          body: |
+            Automated draft PR from `experiment-tracker.yml` →
+            `mape-k-orchestrator.mjs --ingest-mode`.
+
+            **DRAFT** — operator review required (rule #7 — operator escape
+            hatch; Beyer SRE 2016 Ch. 17). Do not auto-merge.
+
+            Files changed (review individually):
+            - `novel/mape-k-loop/constraints.md` — Knowledge-phase append
+              (every-tick audit trail per Helland 2007).
+            - `tmp/proposed-rule-9-amendment.md` — only present when
+              calibration MAE exceeded the rule-#9 threshold (Munafò et al.
+              2017). Promote to a `research.md` PR if the operator agrees.
+          add-paths: |
+            novel/mape-k-loop/constraints.md
+            tmp/proposed-rule-9-amendment.md
