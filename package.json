@@ -18,7 +18,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "pnpm lint && pnpm typecheck && pnpm test:coverage",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\""
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",
+    "dogfood": "./setup.sh --dogfood",
+    "dogfood:doctor": "./setup.sh --doctor"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
