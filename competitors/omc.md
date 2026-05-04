@@ -58,6 +58,13 @@ OMC explicitly does not address the long-running viability layer; Minsky exists 
 - **Native tasks.md integration upstream** — file an issue proposing OMC `/team` mode optionally reads from `TASKS.md`. Tracked as P1 `omc-tasksmd-issue`.
 - **Handoff persistence** — does OMC's shared task list persist to disk parseably? Determines bridge complexity. Tracked as P0 `research-omc-handoff-persistence`.
 
+## Pattern conformance
+
+- **Pattern OMC implements**: Multi-agent orchestration with a shared task list and a manager-agent dispatcher (Team mode); blackboard-style coordination — Hayes-Roth, "A Blackboard Architecture for Control", *Artificial Intelligence* 26(3) 1985 — combined with a generic role-based agent collective — Wooldridge, *An Introduction to MultiAgent Systems*, 2nd ed., Wiley, 2009
+- **Conformance level**: full (in the pattern OMC implements)
+- **How Minsky relates**: adopt — OMC is the `Orchestrator` dependency. The blackboard substrate maps directly to Minsky's `TASKS.md` (row 8). Minsky adds the layers OMC explicitly does not cover (24 / 7 supervision, token-economy homeostasis, MAPE-K self-improvement, mobile / Watch surface) but does not reimplement the orchestration layer.
+- **Index row**: vision.md § "Pattern conformance index" row 50
+
 ## Last reviewed
 
 2026-05-03

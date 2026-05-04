@@ -46,6 +46,13 @@ A full-automation orchestration system: multiple agents running in isolated Git 
 
 Not a dependency. No adapter. Worth periodic re-review for patterns to extract.
 
+## Pattern conformance
+
+- **Pattern AO implements**: Multi-agent orchestration with isolated workspaces and a central supervisor / dashboard — Wooldridge, *An Introduction to MultiAgent Systems*, 2nd ed., Wiley, 2009, Ch. 6 (cooperative distributed problem solving); Ousterhout et al., "Sprite Network Operating System", *IEEE Computer* 1988 (per-agent isolation as the workspace primitive)
+- **Conformance level**: full (in the pattern AO implements)
+- **How Minsky relates**: don't adopt — the objective function differs (PR-throughput vs years-long viability). Minsky's worktree-per-agent inspiration is taken from OMC (row 50), not from AO directly.
+- **Index row**: vision.md § "Pattern conformance index" row 46
+
 ## Last reviewed
 
 2026-05-03
