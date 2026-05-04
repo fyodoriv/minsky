@@ -62,7 +62,18 @@ if (result.ok) {
 }
 ```
 
+### Optional timeout
+
+Each record may carry a per-experiment wall-clock cap:
+
+```yaml
+timeout_seconds: 120  # int, [1, 3600], default 60
+```
+
+The runner (`ci-experiment-runner-v0`) consumes this when executing the `measurement` command — anything that overruns is killed and reported as a `bad-timeout-value` failure rather than blocking the gate forever. Default is 60 s; raise it explicitly when a measurement is genuinely slow (e.g., a coverage run that takes 90 s on cold cache).
+
+The schema enforces `[1, 3600]` integer values. Out-of-range or non-integer entries fail validation with `kind: bad-timeout-value`.
+
 ## Follow-up tasks
 
-- **`ci-experiment-runner-v0`** — daily layer: per-PR CI gate that uses this parser to validate `EXPERIMENT.yaml`, then executes the `measurement` against merge-base + post-merge `main`.
-- **`experiment-tracker-v0`** — weekly/monthly layer: scheduled cron re-runs the measurement at each `replay_windows_days` value, emits `validated` / `regressed` / `inconclusive` verdicts.
+- **`experiment-tracker-v0`** — weekly/monthly layer: scheduled cron re-runs the measurement at each `replay_windows_days` value, emits `validated` / `regressed` / `inconclusive` verdicts. (Daily layer `ci-experiment-runner-v0` ships in this PR.)
