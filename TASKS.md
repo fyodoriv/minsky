@@ -108,7 +108,7 @@
   - **ID**: first-integration-test
   - **Tags**: testing, validation, tracker
   - **Estimate**: 6h (decomposed across 3 sub-tasks)
-  - **Blocked by**: first-integration-test-mock-tick-loop, first-integration-test-nightly-self-hosted
+  - **Blocked by**: first-integration-test-nightly-self-hosted
   - **Hypothesis**: A 60-minute compressed simulation reproduces the failure modes that matter for an 8h overnight run with ≥80 % coverage of the failure-mode rows declared in the user-story file, while keeping CI runtime under 10 minutes. Per the documented Pivot below (reframe as 10-min smoke + nightly self-hosted), the work is decomposed into three sub-tasks; this entry is the tracker that closes when all three ship.
   - **Details**: Decomposed on 2026-05-04 per the parent task's documented Pivot. Sub-task 1 (`first-integration-test-coverage-manifest`) ships the coverage manifest test. Sub-task 2 (`first-integration-test-mock-tick-loop`) builds a mock daemon for the in-process 10-min smoke. Sub-task 3 (`first-integration-test-nightly-self-hosted`) wires the nightly self-hosted-runner workflow for the 7 OS-level chaos rows. This block remains as the coordination contract — Hypothesis / Success / Pivot / Measurement / Anchor are the parent-level invariants; the sub-tasks each carry their own rule-#9 fields scoped to their slice.
   - **Verification**: `npm test user-stories/001-loop-runs-overnight.test.ts` passes locally and on CI; OTEL collector receives ≥1 span per task type; CI workflow shows green. (Each sub-task's own Verification cell is the load-bearing one; this tracker closes when all three pass.)
@@ -117,21 +117,6 @@
   - **Acceptance**: All three sub-tasks closed; coverage manifest's ≥80 % ratio holds; nightly self-hosted run lands at least once `success`.
   - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (steady-state hypothesis); Beck, *Extreme Programming Explained*, 1999 (CI keeps the build fast).
   - **Risk**: 60min compressed sim may miss real overnight failure modes (memory leaks, log rotation, OS sleep). Documented gap; sub-task 3's nightly self-hosted run is the mitigation.
-
-- [ ] Mock tick-loop daemon for in-process 10-min smoke
-  - **ID**: first-integration-test-mock-tick-loop
-  - **Parent**: first-integration-test
-  - **Tags**: testing, validation, novel
-  - **Estimate**: 1d
-  - **Hypothesis**: A mock daemon (`novel/tick-loop/`) that loops `claim → mock-anthropic-call → complete` on a configurable cadence reproduces the 4 user-story-001 P2-task-throughput Acceptance criteria within a 10-min in-process smoke, with ≥1 OTEL span per task type, while keeping CI wall-clock under 10 min.
-  - **Details**: New package `novel/tick-loop/` providing a deterministic mock-tick daemon used by the in-process smoke. Picks 4 P2 tasks from a synthetic TASKS.md fixture; "completes" them via mocked Anthropic responses (no network); emits OTEL spans through `@minsky/observability`. Used by sub-task 3 as the *unit* the self-hosted runner runs at full 60-min cadence; sub-task 2 itself is the 10-min smoke version that runs in CI.
-  - **Files**: `novel/tick-loop/{package.json, src/index.ts, src/index.test.ts, README.md, tsconfig.json}`
-  - **Verification**: `pnpm vitest run novel/tick-loop` passes; in-process 10-min smoke completes 4 mocked tasks; OTEL collector receives ≥1 span per task type; package README's failure-mode chaos table covers ≥3 rows (mock crash, lease expiry, mock-anthropic-error) per rule #7.
-  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0; `gh run list --workflow ci.yml --status success --limit 1 --json durationMS --jq '.[0].durationMS < 600000'` returns `true` (CI under 10 min).
-  - **Pivot**: if the 10-min smoke can't fit 4 mocked tasks even at compressed cadence (e.g., <2 tasks complete within budget), the cadence model is too coarse — pivot to a single-task smoke + nightly multi-task on self-hosted (i.e., move the multi-task assertion entirely to sub-task 3).
-  - **Acceptance**: package shipped; in-process smoke green; OTEL spans visible; package README's chaos table linked from `vision.md` § Pattern conformance index.
-  - **Anchor**: Liu & Layland, "Scheduling Algorithms for Multiprogramming in a Hard Real-Time Environment", *JACM* 20 (1), 1973 (periodic-task scheduling — the cadence model); Armstrong, *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash supervision — the mock-Anthropic-error path tests the supervisor-respawn boundary).
-  - **Risk**: a deterministic mock that always succeeds doesn't exercise the Restart=on-failure path; mitigation — the chaos table forces ≥3 rows, one of which is a mock-anthropic-error fixture that returns 5xx so the supervisor sees a real respawn signal.
 
 - [ ] Nightly overnight-sim workflow on a self-hosted runner
   - **ID**: first-integration-test-nightly-self-hosted
