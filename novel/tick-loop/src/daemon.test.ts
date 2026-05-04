@@ -222,6 +222,103 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(result.iterations[0]?.reason).toContain("circuit-break");
   });
 
+  it("budget-paused fires exactly 1 notifier push across 3 paused iterations (debounce on transition)", async () => {
+    const pushCalls: Array<{ title: string; body: string; tags?: readonly string[] }> = [];
+    const stubNotifier = {
+      push: async (n: { title: string; body: string; tags?: readonly string[] }) => {
+        pushCalls.push(n);
+        return { ok: true };
+      },
+    };
+    const client = new TestFakeMockAnthropic();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 3,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      notifier: stubNotifier,
+      sleep: noSleep,
+    });
+    // All 3 iterations are budget-paused.
+    expect(result.iterations.every((i) => i.status === "budget-paused")).toBe(true);
+    // But the notifier fires EXACTLY ONCE — debounced on the entry transition.
+    // Without the debounce, the operator would get a push every 5 minutes
+    // for as long as the 5h budget window stays exhausted (catastrophic spam).
+    expect(pushCalls).toHaveLength(1);
+    expect(pushCalls[0]?.title).toContain("paused");
+    expect(pushCalls[0]?.body).toContain("circuit-break");
+    expect(pushCalls[0]?.tags).toEqual(["pause", "budget"]);
+  });
+
+  it("budget-paused → recovery → re-pause fires 2 notifier pushes (re-arm after exit)", async () => {
+    const pushCalls: Array<{ title: string }> = [];
+    const stubNotifier = {
+      push: async (n: { title: string; body: string }) => {
+        pushCalls.push({ title: n.title });
+        return { ok: true };
+      },
+    };
+    // Sequenced budget-guard: paused → normal → paused → normal.
+    let call = 0;
+    const sequencedGuard: BudgetGuardLike = {
+      decide: (): BudgetDecisionLike => {
+        const sequence: BudgetDecisionLike[] = [
+          { action: "circuit-break-and-notify", reason: "5h window 90% consumed (entry 1)" },
+          { action: "normal", reason: "within thresholds (recovery 1)" },
+          { action: "circuit-break-and-notify", reason: "5h window 90% consumed (entry 2)" },
+          { action: "normal", reason: "within thresholds (recovery 2)" },
+        ];
+        const decision = sequence[call] ?? { action: "normal", reason: "fallthrough" };
+        call += 1;
+        return decision;
+      },
+    };
+    const client = new TestFakeMockAnthropic();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 4,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: sequencedGuard,
+      notifier: stubNotifier,
+      sleep: noSleep,
+    });
+    // 2 distinct pause events → 2 pushes (the recovery in between re-arms
+    // the trigger; otherwise the second pause would silently coalesce).
+    expect(result.iterations[0]?.status).toBe("budget-paused");
+    expect(result.iterations[1]?.status).not.toBe("budget-paused");
+    expect(result.iterations[2]?.status).toBe("budget-paused");
+    expect(pushCalls).toHaveLength(2);
+  });
+
+  it("budget-paused with no notifier injected emits the span but does not throw", async () => {
+    const client = new TestFakeMockAnthropic();
+    const recorder = new SpanRecorder();
+    // No `notifier` field — the daemon must not throw and must still
+    // record the span. Pre-existing daemons predating this seam should
+    // keep working.
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      sleep: noSleep,
+      emit: (event) => recorder.record(event),
+    });
+    expect(result.iterations.every((i) => i.status === "budget-paused")).toBe(true);
+    expect(recorder.spans.some((e) => e.attributes["iteration.status"] === "budget-paused")).toBe(
+      true,
+    );
+  });
+
   it("mock-anthropic 5xx → iteration status: 'failed' (release-on-failure)", async () => {
     const client = new TestFakeMockAnthropic({ failureMode: "http-5xx" });
     const result = await runDaemon({

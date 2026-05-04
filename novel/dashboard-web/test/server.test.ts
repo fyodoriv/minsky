@@ -118,20 +118,29 @@ describe("createServer — GET /watch.json (Apple-Shortcuts surface)", () => {
     expect(ctype).toMatch(/application\/json/i);
   });
 
-  it("body is valid JSON with the 3 watch fields + paused boolean", async () => {
+  it("body is valid JSON with the 3 watch fields + paused boolean + pauseReason", async () => {
     const { fetch } = createServer();
     const res = await fetch(new Request("http://test.local/watch.json"));
     const body = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(
-      ["constraint-of-the-week", "last-task-status", "paused", "tokens-remaining"].sort(),
+      [
+        "constraint-of-the-week",
+        "last-task-status",
+        "paused",
+        "pauseReason",
+        "tokens-remaining",
+      ].sort(),
     );
     expect(typeof body["tokens-remaining"]).toBe("string");
     expect(typeof body["last-task-status"]).toBe("string");
     expect(typeof body["constraint-of-the-week"]).toBe("string");
     expect(typeof body.paused).toBe("boolean");
+    // pauseReason is "operator" | "budget" | null — null when unknown
+    // (stub default) or not paused. Tests below exercise the live values.
+    expect(body.pauseReason === null || typeof body.pauseReason === "string").toBe(true);
   });
 
-  it("default Strategy → all three readings are the (stub) sentinel, paused=false", async () => {
+  it("default Strategy → all three readings are the (stub) sentinel, paused=false, pauseReason=null", async () => {
     const { fetch } = createServer();
     const res = await fetch(new Request("http://test.local/watch.json"));
     const body = (await res.json()) as Record<string, unknown>;
@@ -139,6 +148,18 @@ describe("createServer — GET /watch.json (Apple-Shortcuts surface)", () => {
     expect(body["last-task-status"]).toBe("(stub)");
     expect(body["constraint-of-the-week"]).toBe("(stub)");
     expect(body.paused).toBe(false);
+    expect(body.pauseReason).toBeNull();
+  });
+
+  it("pauseReason Strategy='budget' surfaces on the envelope alongside paused:true", async () => {
+    const { fetch } = createServer({
+      getPauseState: () => true,
+      getPauseReason: () => "budget",
+    });
+    const res = await fetch(new Request("http://test.local/watch.json"));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.paused).toBe(true);
+    expect(body.pauseReason).toBe("budget");
   });
 
   it("live Strategy values flow through to the watch envelope", async () => {

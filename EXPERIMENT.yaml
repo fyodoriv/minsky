@@ -1,53 +1,63 @@
-id: tick-loop-spawn-args-fresh-session-2026-05-04
+id: daemon-budget-pause-observability-2026-05-04
 hypothesis: |
-  `ProcessSpawnStrategy` in `novel/tick-loop/src/spawn-strategy.ts` defaults
-  its args to `["--resume"]`. `claude --resume` opens an interactive session
-  picker (TTY) and resumes the previous conversation — it does NOT start a
-  fresh session reading the brief from stdin. The daemon's contract is
-  "feed the task brief in, get a result out"; `--resume` violates that.
-  Switching the default to `["--print"]` (Claude Code's documented headless
-  flag per `claude --help` — "Print response and exit (useful for pipes).
-  … workspace trust dialog is skipped when Claude is run in non-interactive
-  mode (via -p, or when stdout is not a TTY)") and continuing to write the
-  brief to stdin makes the contract honest. A new `it.skipIf(!hasClaude)`-
-  gated integration test in `novel/tick-loop/src/spawn-strategy.test.ts`
-  spawns the real binary with a 1-line brief and asserts the response is
-  non-empty and is NOT an interactive "Select a session to resume" UI
-  string. Closes `tick-loop-spawn-args-fresh-session`.
+  Surfaced by the first 2h live-on-itself run on 2026-05-04 11:13 local:
+  the daemon's `iteration.status: "budget-paused"` emitted an OTEL span and
+  log line, but no operator-facing signal — the user had to `tail` the log
+  to know the daemon was self-paused on budget exhaustion. Adding two
+  changes closes the operator-informing loop:
+    (a) `runDaemon` accepts an optional `notifier?: NotifierLike` (rule #2
+        — structural subset of `@minsky/notifier`'s `Notifier`) and fires
+        exactly ONE `push({ tags: ["pause", "budget"] })` per *transition*
+        into `budget-paused`. Recovery (any non-budget-paused status)
+        re-arms the trigger, so a second pause event fires a second push.
+        Without the debounce, the operator would get a push every 5min for
+        as long as the 5h budget window stays exhausted (catastrophic).
+    (b) `/watch.json` envelope grows a `pauseReason: "operator" | "budget"
+        | null` field alongside the existing `paused: boolean`. Apple
+        Shortcuts that don't care about the reason keep using `paused`;
+        richer renderers (the dashboard HTML route, future tiles) read the
+        new field. The boolean stays for backwards compat.
 success: |
-  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0
-    (one new test on top of the current 33 — the `tick-loop-spawn-args-fresh-session` integration smoke; gated on `claude` being on PATH so CI without `claude` skips cleanly while local runs assert the real wiring).
+  - `pnpm vitest run novel/tick-loop novel/dashboard-web --reporter=json
+    | jq -e '.numPassedTests >= 60 and .numFailedTests == 0'` exits 0.
+    Today: 38 in tick-loop (+3 new debounce tests on top of 35) + 28 in
+    dashboard-web (+2 new pauseReason tests). Total = 66.
+  - Full suite stays green: `pnpm vitest run` exits 0 with ≥737 passing.
   - `pnpm typecheck` exits 0.
-  - All pre-existing tick-loop tests pass UNCHANGED.
-  - Default args for `ProcessSpawnStrategy` are `["--print"]`; `--resume` is no longer the default.
+  - rule-N lints clean against `origin/main`.
 pivot: |
-  Pre-registered: if Claude Code had no non-interactive headless mode (no
-  flag found in `claude --help`), we would NOT ship a broken default;
-  instead `ProcessSpawnStrategy` would write the brief to
-  `state/inbox/<taskId>.md` and return immediately with `exitCode: 0` /
-  `stdoutTail: 'inbox-handoff'`, with a follow-up session consuming the
-  inbox. This pivot was NOT taken — `claude --help` documents `-p` /
-  `--print` as the headless flag and a smoke (`echo "reply: ok" | claude
-  --print --max-turns 1` → `ok`) confirmed it works, so we shipped the
-  real-spawn fix. Documented here so the pivot path is discoverable if a
-  future Claude Code release retires `--print`.
+  Two pivot paths pre-registered:
+    1. If Apple Shortcuts can't render the new `pauseReason` channel
+       cleanly given vision row 12's "three numbers, no chrome" calm-tech
+       cap, this PR ships just the Ntfy push + the JSON envelope field;
+       Shortcut visualization is deferred to a P3 follow-up
+       (`watch-paused-tile`). The push alone closes the operator-informing
+       gap (the wrist surface keeps the existing boolean tile).
+    2. If the structural `NotifierLike` subtype proves too narrow (the
+       daemon needs more than `push()` from a real `Notifier`), pivot to
+       importing `@minsky/notifier`'s full `Notifier` — at the cost of
+       coupling the daemon to the package directly. Today's narrow shape
+       is sufficient because the daemon only needs `push`.
 measurement: |
-  grep -q 'this.args = opts.args ?? \["--print"\]' novel/tick-loop/src/spawn-strategy.ts
+  grep -q 'inBudgetPause' novel/tick-loop/src/daemon.ts \
+    && grep -q 'pauseReason' novel/dashboard-web/src/watch.ts
 anchor: |
-  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-
-  crash AT the right boundary — the Strategy must produce a *correct*
-  result shape, not just any result; a `--resume` invocation that opens a
-  TTY picker is a wrong-shape result that the daemon cannot reason about);
-  rule #2 (vision.md § 2 — the Strategy seam is honest only when its real
-  implementation matches the contract the daemon expects); Munafò et al.,
-  "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
-  0021, 2017 (rule-#9 pre-registration — this experiment block was
-  committed before the test was written, so the success/pivot thresholds
-  are not retrofitted to the result; the pivot path was identified before
-  surveying `claude --help`, so a missing `--print` would have triggered
-  the file-based-handoff path instead of an ad-hoc kludge); Claude Code
-  CLI documentation (`claude --help`, 2026-05 — `-p, --print`: "Print
-  response and exit (useful for pipes). Note: The workspace trust dialog
-  is skipped when Claude is run in non-interactive mode (via -p, or when
-  stdout is not a TTY, e.g. piped or redirected output).").
-replay_windows_days: [7, 30, 90]
+  Card, S. K., Mackinlay, J., Shneiderman, B., *Readings in Information
+  Visualization*, Morgan Kaufmann, 1999 (3-number glanceable display
+  augmented with state-change indicators — the boolean+reason channel
+  preserves the calm-tech invariant).
+  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site
+  Reliability Engineering*, O'Reilly, 2016, Ch. 6 (monitoring distributed
+  systems — every internal state the operator cares about must surface;
+  silence is failure for state changes).
+  Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
+  *IEEE Computer* 36(1), 2003 (MAPE-K — the Monitor surface must be
+  honest about Plan-time gating, otherwise Knowledge phase reads wrong).
+risk: |
+  Push spam if the debounce is wrong. Mitigation: the new debounce test
+  fixes the count to exactly 1 across 3 paused iterations and to exactly
+  2 across a paused → recovery → paused sequence — mechanical, not
+  best-effort. Without the debounce being mechanical, this PR would be a
+  net regression (every-tick spam). The test pins the contract.
+  Surfaced-by: 2026-05-04 11:13 local self-run from main `4bdc2b7`.
+timeout_seconds: 60
