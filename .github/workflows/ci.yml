@@ -519,6 +519,36 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-mape-k-budget-cap.test.mjs
 
+  mape-k-constraints-md-size:
+    # rule #10 ratchet applied to `novel/mape-k-loop/constraints.md` — the
+    # 200-entry archive cap on the autonomic-manager's append-only Knowledge
+    # log. The README declares the cap in prose ("the supervisor's
+    # `constraints-md-size-cap` check fires when this file grows past 200
+    # entries") so an unattended loop could grow the live log unbounded
+    # without any CI signal. Counts `^## <YYYY-MM-DD>` heading lines and
+    # fails when the count exceeds 200; missing file is dormant (rule #7
+    # graceful degrade — same precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # Helland, "Life beyond Distributed Transactions", *CIDR* 2007
+    # (immutable log — archive-by-reissue rather than mutate); Beck,
+    # *Extreme Programming Explained*, 1999, Ch. 17 (CI as the constraint
+    # enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-constraints-md-size lint
+        run: node scripts/check-mape-k-constraints-md-size.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-constraints-md-size.test.mjs
+
   anchor-primary-source:
     # rule #10 ratchet applied to spec-monitor advisory rule A3 ("anchor
     # citation is not a primary source"): the deterministic gate promotes
@@ -562,6 +592,7 @@ jobs:
       - macos-supervisor-integration
       - maciek-smoke
       - mape-k-budget-cap
+      - mape-k-constraints-md-size
       - markdownlint
       - measurement-inspects-output
       - pattern-index
@@ -592,6 +623,7 @@ jobs:
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.mape-k-budget-cap.result }}" \
+                   "${{ needs.mape-k-constraints-md-size.result }}" \
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
