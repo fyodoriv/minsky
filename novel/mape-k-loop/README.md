@@ -27,10 +27,14 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
   (Goldratt, *The Goal*, 1984): top constraint = the rule whose
   `violationCount × costEstimate(ruleId)` is highest, tie broken
   alphabetically. **Conformance: full.**
-- **`costEstimate(...)`** — per-rule weight schedule. **Conformance: partial**
-  — v0 default is the identity (every rule = 1); the configurable
-  schedule sourced from `vision.md` arrives in a follow-up tracked as
-  `mape-k-cost-schedule-from-vision`.
+- **`costEstimate(...)`** — per-rule weight schedule. **Conformance: full**
+  — sourced from [vision.md § "Cost schedule"](../../vision.md#cost-schedule)
+  by [`parseCostSchedule(visionMdContent)`](./src/cost-schedule.ts);
+  the CLI wrapper around `tick(...)` reads the table once at startup and
+  threads it through `tick({ costs })` → `analyze({ snapshot, costs })`.
+  Rules absent from the table fall back to `DEFAULT_RULE_COST = 1`
+  (rule #7 graceful-degrade); non-finite / zero / negative weights are
+  dropped during parse with the same fallback.
 - **`HealthSnapshot` aggregate-counter shape** — USE method (Gregg,
   *Systems Performance*, 2014) applied to the constraint-detection
   substrate. **Conformance: partial** — counts only; the saturation +
@@ -211,17 +215,18 @@ if (result.knowledgeWrites.researchMdAmendmentProposal !== null) {
 ```
 
 The `costs` argument is the seam where a per-rule severity-weighted
-schedule sourced from `vision.md` plugs in:
+schedule sourced from [vision.md § "Cost schedule"](../../vision.md#cost-schedule)
+plugs in. Use `parseCostSchedule(visionMdContent)` to lift the markdown
+table into a `CostSchedule` map at the I/O boundary:
 
 ```ts
+import { parseCostSchedule, tick } from "@minsky/mape-k-loop";
+
+const visionMd = await readFile("vision.md", "utf8");
+const costs = parseCostSchedule(visionMd); // { "rule-9": 100, "rule-7": 50, "rule-typo": 1 }
+
 const result = await tick({
   // …
-  costs: { "rule-9": 100, "rule-7": 50 }, // rule-9 misses are >1 OOM more expensive than typos
+  costs, // rule-9 misses are >1 OOM more expensive than typos per vision.md
 });
 ```
-
-## Follow-up tasks
-
-- **`mape-k-cost-schedule-from-vision`** — wire the per-rule cost weight
-  schedule from `vision.md` into the `costs` argument of `analyze` so the
-  Goldratt ranking reflects the human-supplied severity ordering.
