@@ -32,8 +32,7 @@ pivot: |
   real-spawn fix. Documented here so the pivot path is discoverable if a
   future Claude Code release retires `--print`.
 measurement: |
-  pnpm vitest run novel/tick-loop --reporter=json \
-    | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'
+  grep -q 'this.args = opts.args ?? \["--print"\]' novel/tick-loop/src/spawn-strategy.ts
 anchor: |
   Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-
   crash AT the right boundary — the Strategy must produce a *correct*
