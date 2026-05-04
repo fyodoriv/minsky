@@ -1,3 +1,5 @@
+<!-- rule-1: existing sidecar-config tools (direnv, dotenv, devcontainer.json, mise, asdf) rejected because: those tools materialise per-repo *runtime config* (env vars, tool versions, dev-container shape) inside files the host *commits* to its tree. The cross-repo-runner needs the inverse: a per-host *agent-substrate* (rule-#9 experiments/, rule-#5 vision.md symlink, rule-#10 sub-checks the cross-repo CI action runs) that the host's own git history MUST NOT see. The sidecar pattern at `<host>/.minsky/` registered in `~/.config/git/ignore` (decision A2 in `docs/cross-repo-portability.md`) is novel because the existing tools all assume the config travels with the host's commits; we explicitly require the opposite. The bootstrap itself is the smallest viable shape — pure planner + thin CLI executor, no runtime, no daemon — so a third-party scaffolder (Yeoman, cookiecutter, plop) is over-engineering for the 6-action plan we ship. -->
+
 # `@minsky/sidecar-bootstrap`
 
 > `minsky bootstrap <host-dir>` — write a per-host gitignored `.minsky/` sidecar so the cross-repo-runner can govern any host repo.
