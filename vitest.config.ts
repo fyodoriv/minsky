@@ -15,6 +15,7 @@ export default defineConfig({
       "@minsky/prompt-optimizer": r("./novel/adapters/prompt-optimizer/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),
       "@minsky/budget-guard": r("./novel/budget-guard/src/index.ts"),
+      "@minsky/dashboard-web": r("./novel/dashboard-web/src/index.ts"),
       "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),
       "@minsky/handoff-spec": r("./novel/handoff-spec/src/index.ts"),
       "@minsky/mape-k-loop": r("./novel/mape-k-loop/src/index.ts"),
