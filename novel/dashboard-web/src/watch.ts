@@ -23,7 +23,13 @@ import type { GetValue } from "./render.js";
 /** Strategy: read pause state. `null` → unknown, defaults to `false`. */
 export type PauseState = () => boolean | null;
 
-/** Default: not paused (matches the supervisor's nominal state). */
+/**
+ * Default: not paused (matches the supervisor's nominal state).
+ *
+ * @otel-exempt pure constant function — no I/O, no state, the pause
+ *   state Strategy seam is itself instrumented at the route boundary
+ *   in `server.ts` (the `app.get("/watch.json", ...)` handler).
+ */
 export const STUB_PAUSE_STATE: PauseState = () => null;
 
 /**
