@@ -5,16 +5,16 @@
   "description": "Observability adapter — interface (Adapter pattern, Gamma 1994) for OpenTelemetry traces / metrics / logs.",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
     },
     "./otel": {
-      "import": "./dist/otel.js",
-      "types": "./dist/otel.d.ts"
+      "import": "./dist/src/otel.js",
+      "types": "./dist/src/otel.d.ts"
     }
   },
   "files": ["dist/**/*.js", "dist/**/*.d.ts"],
