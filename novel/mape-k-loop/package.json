@@ -19,6 +19,22 @@
     "./analyze": {
       "import": "./dist/analyze.js",
       "types": "./dist/analyze.d.ts"
+    },
+    "./plan": {
+      "import": "./dist/plan.js",
+      "types": "./dist/plan.d.ts"
+    },
+    "./execute": {
+      "import": "./dist/execute.js",
+      "types": "./dist/execute.d.ts"
+    },
+    "./sustained-gain": {
+      "import": "./dist/sustained-gain.js",
+      "types": "./dist/sustained-gain.d.ts"
+    },
+    "./oscillation": {
+      "import": "./dist/oscillation.js",
+      "types": "./dist/oscillation.d.ts"
     }
   },
   "files": ["dist/**/*.js", "dist/**/*.d.ts"],
@@ -29,6 +45,7 @@
   },
   "dependencies": {
     "@minsky/adapter-types": "workspace:*",
-    "@minsky/observability": "workspace:*"
+    "@minsky/observability": "workspace:*",
+    "@minsky/prompt-optimizer": "workspace:*"
   }
 }

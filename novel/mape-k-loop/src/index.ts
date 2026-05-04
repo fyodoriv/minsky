@@ -4,14 +4,16 @@
  * Computing", *IEEE Computer* 36(1) 2003 — the MAPE-K loop
  * (Monitor / Analyze / Plan / Execute over a Knowledge base).
  *
- * v0 ships sub-task 2/4: the M (Monitor) and A (Analyze) phases as pure
- * decision functions (Martin, *Clean Architecture*, 2017). The CLI
- * wrapper that owns I/O, the P/E phases (sustained-gain + oscillation
- * guards) and the K phase (constraints append + research.md amendment
- * proposals) ship in sub-tasks 3 and 4 — see `TASKS.md`.
+ * v0 ships sub-tasks 2/4 + 3/4: the M (Monitor), A (Analyze), P (Plan),
+ * and E (Execute) phases as pure decision functions (Martin, *Clean
+ * Architecture*, 2017), plus the two guards (sustained-gain per
+ * Kohavi-Tang-Xu 2020, oscillation per Ries 2011). The CLI wrapper that
+ * owns I/O and the K phase (constraints append + research.md amendment
+ * proposals) ship in sub-task 4 — see `TASKS.md`.
  *
  * Pattern conformance row: vision.md § "Pattern conformance index" row 54
- * (`@minsky/mape-k-loop`, partial — only M+A phases here).
+ * (`@minsky/mape-k-loop`, partial — M+A+P+E shipped; K + integration
+ * pending sub-task 4).
  *
  * @module mape-k-loop
  */
@@ -41,3 +43,31 @@ export {
   DEFAULT_RULE_COST,
   SEVERITY_THRESHOLDS,
 } from "./analyze.js";
+
+export { MAX_VARIANTS_PER_PLAN, plan, type PlanArgs, type Variant } from "./plan.js";
+
+export {
+  type EvalSetInput,
+  execute,
+  type ExecuteArgs,
+  type ExecuteDecision,
+  type ExecuteResult,
+  type VariantScore,
+} from "./execute.js";
+
+export {
+  DEFAULT_SCORE_THRESHOLD,
+  DEFAULT_WINDOW_DAYS,
+  type RolloutHistory,
+  type RolloutHistoryEntry,
+  sustainedGain,
+  type SustainedGainArgs,
+  type SustainedGainResult,
+} from "./sustained-gain.js";
+
+export {
+  DEFAULT_LOOKBACK_ITERATIONS,
+  oscillation,
+  type OscillationArgs,
+  type OscillationResult,
+} from "./oscillation.js";
