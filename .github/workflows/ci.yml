@@ -191,6 +191,36 @@ jobs:
       - name: rule-1 lint
         run: node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main
 
+  rule-3-doc-first:
+    # rule #3 (doc-first): every PR adding/modifying `novel/**/*.ts`
+    # (non-test) must touch a `user-stories/*.md` OR the affected
+    # package's README.md, OR include a deferral / refactor-exemption
+    # marker in the PR description.
+    # Anchor: rule #10 (deterministic enforcement); Knuth 1984
+    # (literate programming); Beck 1999 (CI as constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: fetch PR body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/rule-3-pr-body.md
+      - name: rule-3 lint
+        env:
+          RULE_3_DIFF_BASE: origin/main
+          RULE_3_PR_BODY_PATH: /tmp/rule-3-pr-body.md
+        run: node scripts/check-rule-3-doc-first.mjs
+
   pr-self-grade:
     # AGENTS.md § "Orchestrator discipline" rule (2): every PR's description
     # carries a `Hypothesis self-grade` block (Predicted / Observed / Match /
@@ -227,6 +257,7 @@ jobs:
       - pr-self-grade
       - rule-1-novel-justification
       - rule-2-dep-coverage
+      - rule-3-doc-first
       - rule-7-chaos-coverage
       - tasks-lint
       - test
@@ -247,6 +278,7 @@ jobs:
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
+                   "${{ needs.rule-3-doc-first.result }}" \
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \

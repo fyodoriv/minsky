@@ -54,19 +54,19 @@
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
 
-- [ ] `ci-rule-3-doc-first` — CI lint: PRs adding code under `novel/` also touch a `user-stories/*.md` or the package README
-  - **ID**: ci-rule-3-doc-first
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 2h
-  - **Hypothesis**: A CI lint that requires every PR adding ≥1 `novel/**/*.ts` (non-test) file to also touch ≥1 `user-stories/*.md` OR the affected package's `README.md` enforces rule #3's "doc-first" clause without requiring an LLM to judge "is this documented enough" — same-commit-as-code is the deterministic substitute for "first".
-  - **Details**: Build `scripts/check-rule-3-doc-first.mjs`. Diffs PR; if any added/modified file matches `novel/**/*.ts` (non-test), requires at least one of: a touched `user-stories/*.md`, a touched `novel/<pkg>/README.md`, or a `<!-- rule-3: doc-deferred-to-followup-task: <id> -->` comment in the PR description (with the follow-up already filed in TASKS.md).
-  - **Files**: `scripts/check-rule-3-doc-first.mjs`, `scripts/check-rule-3-doc-first.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic PR touching only code → fails; same PR also touching the package README → passes; PR with the deferral comment → passes only if the linked task ID exists in `TASKS.md`.
-  - **Measurement**: `node scripts/check-rule-3-doc-first.mjs --diff-base=main` exits 1 on code-only diffs and 0 on code+doc diffs; `pnpm vitest run scripts/check-rule-3-doc-first.test.mjs` exits 0.
-  - **Pivot**: if the lint produces ≥2 false positives in its first month from purely-internal refactors that legitimately need no doc change, add an explicit `<!-- rule-3: refactor-no-public-surface -->` exemption that the lint honours; reassess after another month.
-  - **Acceptance**: CI job runs on every PR; rule #3's doc-first clause is mechanically enforced.
-  - **Anchor**: rule #10; Beck 1999 (continuous integration); Knuth, *Literate Programming*, 1984 (doc as the primary artifact).
-  - **Risk**: Discourages tiny code-fix PRs by demanding doc churn. Mitigation: the deferral-comment escape hatch + the rule's iron-but-not-stupid framing.
+- [ ] `scripts-ts-check-migration` — add `// @ts-check` to existing scripts/*.mjs incrementally
+  - **ID**: scripts-ts-check-migration
+  - **Tags**: ci, hygiene, scout, rule-10
+  - **Estimate**: 2–3h (per script ~20–30 min × 5 scripts)
+  - **Hypothesis**: Adding `// @ts-check` + JSDoc types to each existing scripts/*.mjs (rule-1, rule-2, rule-5, rule-7, pr-self-grade) brings them under strict tsc enforcement. Total errors fixed: ~131 (counted at scripts/tsconfig.json setup time). Once all six scripts (rule-3 already migrated) opt in, flip `checkJs: true` in scripts/tsconfig.json and drop the per-file directive — single switch, no two-modes drift.
+  - **Details**: For each script + its test file: add `// @ts-check` at top, add JSDoc `@param` / `@returns` / `@typedef` annotations everywhere needed, fix the strict-null and noUncheckedIndexedAccess errors that surface, ensure tsc passes. Suggest one PR per script to keep diffs reviewable. Ratchet: when all 6 are checked, flip `checkJs: true` and remove all six `// @ts-check` directives (they become redundant).
+  - **Files**: `scripts/check-rule-1-novel-justification.mjs` (+ test), `scripts/check-rule-2-dep-coverage.mjs` (+ test), `scripts/check-rule-5-glossary-discipline.mjs` (+ test), `scripts/check-rule-7-chaos-coverage.mjs` (+ test), `scripts/check-pr-self-grade.mjs` (+ test), `scripts/tsconfig.json` (final flip)
+  - **Verification**: `pnpm typecheck` clean across `scripts/`; existing tests still pass; CI green.
+  - **Measurement**: post-migration, `grep -c '// @ts-check' scripts/*.mjs` returns 0 (the per-file directives have been retired); `cat scripts/tsconfig.json | grep -c '"checkJs": true'` returns 1.
+  - **Pivot**: if a script genuinely doesn't admit clean strict typing (e.g., heavy reliance on dynamic `process.env` shapes that fight `noUncheckedIndexedAccess`), keep the `// @ts-check` directive on it indefinitely AND add a one-line comment block above explaining why the global flip is deferred. Don't lower the strictness floor.
+  - **Acceptance**: All 6 scripts pass strict tsc; final PR flips `checkJs: true` and removes the per-file directives; CI green throughout.
+  - **Anchor**: rule #10 (deterministic enforcement — the linters that enforce constitutional rules must themselves be type-checked, otherwise the rules they enforce are only as stable as the linter's runtime behaviour); Microsoft TypeScript handbook on `// @ts-check` (the canonical incremental-strictness pattern).
+  - **Risk**: One script's strict-typing might surface a real bug. Mitigation: that's the point — if a bug is found, fix it in the same migration PR and note it in the commit. Don't paper over with `@ts-ignore`.
 
 - [ ] `ci-rule-4-otel-coverage` — CI lint: every exported public function in `novel/**` carries an `@otel` JSDoc tag
   - **ID**: ci-rule-4-otel-coverage
@@ -100,7 +100,7 @@
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-6-let-it-crash
+  - **Blocked by**: ci-rule-4-otel-coverage, ci-rule-6-let-it-crash
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
