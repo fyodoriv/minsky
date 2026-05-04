@@ -282,6 +282,38 @@ jobs:
           RULE_6_DIFF_BASE: origin/main
         run: node scripts/check-rule-6-let-it-crash.mjs
 
+  pattern-index:
+    # rule #10: deterministic enforcement of rule #8 (pattern conformance —
+    # every artefact maps to a published pattern). Diff-based: every newly-
+    # added top-level artefact (`novel/**`, root `*.md`, `setup.sh`,
+    # `distribution/**`, `.github/workflows/**`) on the PR must be mentioned
+    # by `vision.md` § "Pattern conformance index", unless the file carries
+    # `<!-- pattern: not-applicable — <reason> -->` in its first ~20 lines.
+    # Existing files are grandfathered until the file is renamed (same
+    # precedent as rule-1 / rule-3 / rule-4).
+    # Anchor: rule #10; rule #8 (pattern conformance); Beck 1999 (CI as
+    # constraint enforcer); Alexander et al. 1977 (pattern catalogue).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: pattern-index lint
+        run: node scripts/check-pattern-index.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-pattern-index.test.mjs
+
   pr-self-grade:
     # AGENTS.md § "Orchestrator discipline" rule (2): every PR's description
     # carries a `Hypothesis self-grade` block (Predicted / Observed / Match /
@@ -315,6 +347,7 @@ jobs:
       - hygiene
       - maciek-smoke
       - markdownlint
+      - pattern-index
       - pr-self-grade
       - rule-1-novel-justification
       - rule-2-dep-coverage
@@ -330,9 +363,9 @@ jobs:
     steps:
       - name: gate
         run: |
-          # `pr-self-grade` runs on pull_request events only; on push it is
-          # `skipped` — accept that, fail on `failure`/`cancelled`. All
-          # other jobs must be `success`.
+          # `pr-self-grade` and `pattern-index` run on pull_request events
+          # only; on push they are `skipped` — accept that, fail on
+          # `failure`/`cancelled`. All other jobs must be `success`.
           fail=0
           for r in "${{ needs.biome.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
@@ -350,12 +383,15 @@ jobs:
                    "${{ needs.typecheck.result }}"; do
             [ "$r" = "success" ] || fail=1
           done
-          # pr-self-grade may be `skipped` (push event) OR `success` (PR);
-          # only `failure` / `cancelled` should fail the gate.
-          case "${{ needs.pr-self-grade.result }}" in
-            success|skipped) ;;
-            *) fail=1 ;;
-          esac
+          # pr-self-grade and pattern-index may be `skipped` (push event)
+          # OR `success` (PR); only `failure` / `cancelled` should fail.
+          for r in "${{ needs.pr-self-grade.result }}" \
+                   "${{ needs.pattern-index.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
           if [ "$fail" = "1" ]; then
             echo "one or more required checks failed" >&2
             exit 1
