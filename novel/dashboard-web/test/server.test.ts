@@ -108,3 +108,58 @@ describe("createServer — Hono SSR scaffold", () => {
     expect(body).toContain(">0.99<");
   });
 });
+
+describe("createServer — GET /watch.json (Apple-Shortcuts surface)", () => {
+  it("returns 200 + application/json content-type", async () => {
+    const { fetch } = createServer();
+    const res = await fetch(new Request("http://test.local/watch.json"));
+    expect(res.status).toBe(200);
+    const ctype = res.headers.get("content-type") ?? "";
+    expect(ctype).toMatch(/application\/json/i);
+  });
+
+  it("body is valid JSON with the 3 watch fields + paused boolean", async () => {
+    const { fetch } = createServer();
+    const res = await fetch(new Request("http://test.local/watch.json"));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(
+      ["constraint-of-the-week", "last-task-status", "paused", "tokens-remaining"].sort(),
+    );
+    expect(typeof body["tokens-remaining"]).toBe("string");
+    expect(typeof body["last-task-status"]).toBe("string");
+    expect(typeof body["constraint-of-the-week"]).toBe("string");
+    expect(typeof body.paused).toBe("boolean");
+  });
+
+  it("default Strategy → all three readings are the (stub) sentinel, paused=false", async () => {
+    const { fetch } = createServer();
+    const res = await fetch(new Request("http://test.local/watch.json"));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["tokens-remaining"]).toBe("(stub)");
+    expect(body["last-task-status"]).toBe("(stub)");
+    expect(body["constraint-of-the-week"]).toBe("(stub)");
+    expect(body.paused).toBe(false);
+  });
+
+  it("live Strategy values flow through to the watch envelope", async () => {
+    const getValue = (m: SuccessMetric) => {
+      if (m.id === "token-budget-honoring") return "0";
+      if (m.id === "task-throughput") return "feat: shipped";
+      if (m.id === "self-improvement-velocity") return "rule-2";
+      return null;
+    };
+    const { fetch } = createServer({ getValue });
+    const res = await fetch(new Request("http://test.local/watch.json"));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["tokens-remaining"]).toBe("0");
+    expect(body["last-task-status"]).toBe("feat: shipped");
+    expect(body["constraint-of-the-week"]).toBe("rule-2");
+  });
+
+  it("pause-state Strategy=true surfaces paused:true on the envelope", async () => {
+    const { fetch } = createServer({ getPauseState: () => true });
+    const res = await fetch(new Request("http://test.local/watch.json"));
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.paused).toBe(true);
+  });
+});
