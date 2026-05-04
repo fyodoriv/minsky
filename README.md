@@ -76,6 +76,13 @@ cd minsky
 
 `./setup.sh` is idempotent and ends with a GREEN / YELLOW / RED self-test. Re-run any time. `./setup.sh --doctor` runs self-tests only; `./setup.sh --reset` rebuilds from scratch.
 
+To start Minsky **on this repo** (Minsky-on-itself; rule #12 / `user-stories/001-loop-runs-overnight.md`):
+
+```bash
+pnpm dogfood          # one-command supervisor start (renders + loads launchd / systemd units)
+pnpm dogfood:doctor   # read-only health probe
+```
+
 Then in [Claude Code](https://docs.claude.com/en/docs/claude-code) from this directory:
 
 ```text
