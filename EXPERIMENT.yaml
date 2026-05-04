@@ -1,80 +1,65 @@
-id: user-story-001-integration-test-real-2026-05-04
+id: openobserve-installer-version-pin-fix-2026-05-04
 hypothesis: |
-  A `user-stories/001-loop-runs-overnight.test.ts` that drives the real
-  daemon (via `runDaemon` with `DryRunSpawnStrategy` injected — the same
-  Strategy the production CLI selects when `MINSKY_TICK_DRY_RUN=1`,
-  per `bin/tick-loop.mjs` post-`tick-loop-daemon-real-spawn-flip`) closes
-  ≥4 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL
-  `tick-loop.iteration` span per task, and triggers exactly 1 morning
-  push, satisfying story 001's acceptance criteria within CI runtime
-  <5 min. Replaces the coverage-manifest-only test (PR #82) with a real
-  driver that exercises the same `runDaemon` orchestrator the bash
-  bootstrap (`distribution/systemd/run-tick-loop.sh`) invokes in
-  production. The bash bootstrap path itself isn't driven directly
-  because (a) the real `claude` binary isn't installed on GH-hosted
-  runners (would deadlock on stdin) and (b) the bash bootstrap targets
-  `dist/index.js` which CI doesn't pre-build — Option B (direct
-  `runDaemon` with the `DryRunSpawnStrategy` seam) is hermetic and
-  exercises the same pure orchestrator. Closes
-  `user-story-001-integration-test-real`.
+  `distribution/install-openobserve.sh` pins `OO_VERSION=v0.80.1` and
+  resolves to `https://github.com/openobserve/openobserve/releases/download/
+  v0.80.1/openobserve-v0.80.1-darwin-arm64.tar.gz`. Pre-flight on 2026-05-04
+  found this URL returns HTTP 404. Investigation: every recent
+  OpenObserve GitHub release (v0.80.0, v0.80.1, v0.80.2) has `assets: []`
+  — upstream ships binaries through their CloudFront-fronted S3 CDN at
+  `downloads.openobserve.ai/releases/o2-enterprise/${VERSION}/`, NOT via
+  GitHub Releases. The script's URL base was wrong from day one (the
+  script's own comment even noted this, but the variable was set to the
+  GitHub releases URL anyway). Bumping `OO_VERSION` to `v0.80.2` (latest
+  stable, 2026-04-30) and switching `OO_DOWNLOAD_BASE` to the CDN with
+  asset naming `openobserve-ee-${VERSION}-${TARGET}.tar.gz` restores the
+  install path. Upstream stopped publishing `darwin-amd64`; the script
+  errors with a focused message there. `darwin-arm64`, `linux-amd64`,
+  `linux-arm64` all return 200 from the CDN (verified via `curl -sIL`
+  for v0.80.2).
 success: |
-  - `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0
-    (numPassedTests counts the four assertion-bearing expectations: 4-task drain, ≥1 span per task, exactly 1 morning push, wall-clock <5 min — collapsed into a single vitest `it` block, so we instead require ≥1 passing test plus zero failures, which is a strict superset of the brief's bound).
-  - `pnpm typecheck` exits 0.
-  - All pre-existing user-stories tests + novel/tick-loop tests pass UNCHANGED.
-  - `vitest.config.ts` + `user-stories/tsconfig.json` add the
-    `@minsky/tick-loop` and `@minsky/notifier` aliases the new integration
-    test imports.
+  - `bash distribution/install-openobserve.sh --dry-run` prints a `url=`
+    line that resolves to HTTP 200 (the measurement command below).
+  - `bash distribution/install-openobserve.sh` (without `--dry-run`)
+    exits 0 on darwin-arm64, downloads + unpacks + writes the binary.
+  - `~/.local/bin/openobserve --version` prints `openobserve v0.80.2`.
+  - All rule-N lints pass against `--diff-base=origin/main`.
 pivot: |
-  Pre-registered: if compressed-sim coverage stays below the chaos
-  table's 80 % threshold even with the real daemon driving the tick
-  step, the user-story 001 spec needs splitting (per its own documented
-  Pivot). File a follow-up to the spec rather than retrofitting the
-  test. The Strategy seam (`DryRunSpawnStrategy` ↔ `ProcessSpawnStrategy`)
-  is the bounded change surface; the daemon and CLI never touch the
-  brief shape directly, so a future swap to the real `claude` subprocess
-  on a self-hosted runner is a one-line constructor change in the test
-  setup.
+  Pre-registered in TASKS.md and `research.md` § "Lighter OTEL backend":
+  if no OpenObserve version is reachable for two consecutive quarterly
+  reviews (extended outage / abandoned project), swap to the documented
+  runner-up VictoriaMetrics triad. The migration cost is low (MetricsQL
+  is a near-superset of PromQL). For this PR specifically, since v0.80.2
+  is reachable on the CDN, no pivot is triggered; the pivot remains
+  on-the-shelf for future drift.
 measurement: |
-  pnpm install --no-frozen-lockfile \
-    && pnpm typecheck \
-    && pnpm vitest run user-stories/001-loop-runs-overnight.test.ts --reporter=json \
-       | jq -e '.numPassedTests >= 1 and .numFailedTests == 0' \
-    && pnpm vitest run user-stories \
-    && pnpm vitest run novel/tick-loop \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
-    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
-    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs \
-    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
-    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+  bash distribution/install-openobserve.sh --dry-run | grep -q "url=" && \
+  curl -sfI "$(bash distribution/install-openobserve.sh --dry-run | grep '^install-openobserve: url=' | cut -d= -f2-)" | head -1 | grep -q "200" && \
+  node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main && \
+  node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main && \
+  node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main && \
+  node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main && \
+  node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main && \
+  node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main && \
+  node scripts/check-rule-7-chaos-coverage.mjs && \
+  node scripts/check-pattern-index.mjs --diff-base=origin/main && \
+  node scripts/check-anchor-primary-source.mjs --diff-base=origin/main && \
+  node scripts/check-pivot-success-margin.mjs && \
+  node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main && \
+  npx -y @tasks-md/lint@^0.7.0 TASKS.md && \
+  pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Basiri, A., Blohowiak, A., Hosseini, L., et al., "Principles of Chaos
-  Engineering", *IEEE Software* 33 (3), 2016 (steady-state hypothesis:
-  ≥1 task closed per scheduler iteration; coverage of declared failure
-  modes as the precondition for fault-injection); Beck, K., *Extreme
-  Programming Explained*, Addison-Wesley, 1999, Ch. 17 (CI as the
-  constraint enforcer — the integration test gates merges); Armstrong,
-  J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash
-  AT the right boundary — `DryRunSpawnStrategy.spawn()` returns a
-  structured result, the daemon never catches mid-iteration); rule #2
-  (vision.md § 2 — every dep behind interface; the `SpawnStrategy` and
-  `Notifier` are the seams the test composes); Munafò et al., "A
-  Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021,
-  2017 (rule-#9 pre-registration — this experiment block was committed
-  before the test was written, so the success/pivot thresholds are not
-  retrofitted to the result). Risk + mitigation: real daemon spawning
-  real subprocesses inflates CI cost; `DryRunSpawnStrategy` keeps the
-  test hermetic and `noSleep` collapses the 12 × 5 s simulated cadence
-  to <100 ms wall-clock; the nightly self-hosted runner
-  (`first-integration-test-nightly-self-hosted`, sub-task 3/3 of
-  `first-integration-test`) extends to the full 60-min cadence against
-  the real `claude` binary.
+  rule #1 (vision.md § 1 — don't reinvent the wheel: OpenObserve is the
+  chosen v0 OTLP receiver per `research.md` § "Lighter OTEL backend",
+  PR #43, 2026-05-03; a broken pin defeats the whole point of choosing
+  a dep); Munafò et al., "A Manifesto for Reproducible Science",
+  *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 pre-registration: the
+  hypothesis + measurement + success threshold are committed before the
+  smoke test runs against this PR's HEAD); OpenTelemetry specification
+  (CNCF 2020+) — the OTLP HTTP receiver contract OpenObserve implements
+  is the surface this installer makes reachable. Risk + mitigation:
+  pinning to the openobserve.ai CDN inherits availability from a
+  third-party (CloudFront + S3) — same risk as the GitHub Releases path
+  the broken pin was nominally pointing at, with the difference that
+  this URL actually returns 200; the documented VictoriaMetrics pivot
+  remains the escape hatch.
 replay_windows_days: [7, 30, 90]
