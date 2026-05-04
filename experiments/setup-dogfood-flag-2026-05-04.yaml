@@ -1,0 +1,91 @@
+id: setup-dogfood-flag-2026-05-04
+hypothesis: |
+  User-stories/001 (Minsky on itself) is the *side effect* surface
+  of the dual-purpose vision (rule #12 — vision.md § "Scope
+  discipline"). The supervisor unit-file templates (`distribution/
+  {systemd,launchd}/`) ship; the install snippet is documented at
+  `distribution/README.md` lines 47–66 — `mkdir` / `envsubst` /
+  `enable --now` for Linux + `mkdir` / `envsubst` /
+  `launchctl bootstrap` for macOS. Today the operator runs that
+  snippet manually — multi-line, OS-conditional, error-prone
+  (`envsubst` not on PATH on a fresh macOS, the
+  `launchctl bootstrap` step errors silently when a unit is already
+  loaded).
+
+  Consolidating into `./setup.sh --dogfood` makes "Minsky dogfoods
+  itself" a one-command invocation: detects OS via `uname -s`,
+  renders unit-file templates with `${MINSKY_HOME}` substitution
+  via `envsubst`, drops them in the user-scope unit dir
+  (`~/.config/systemd/user/` Linux,
+  `~/Library/LaunchAgents/` macOS), idempotently loads / reloads
+  the supervisor target (`launchctl bootout` then `bootstrap` on
+  macOS for idempotency; `systemctl --user enable --now minsky-
+  supervisor.target` on Linux), verifies it reports active, prints
+  the operator's tail-logs / pause-loop / status commands.
+
+  The flag closes the operator-onboarding gap that the 2026-05-04
+  user voice brief surfaced ("I will launch it separately") — the
+  launch should be one operator step, not a ritual.
+success: |
+  - `bash -n setup.sh` exits 0 (syntax valid).
+  - `./setup.sh --help | grep -- "--dogfood"` exits 0 (the flag
+    appears in the help-block usage).
+  - `grep -E 'MODE="dogfood"' setup.sh` returns ≥1 hit (the mode
+    is wired in the case-statement).
+  - The render step is verified pure-render (no side effects):
+    `MINSKY_HOME="$(pwd)" envsubst '${MINSKY_HOME}' <
+    distribution/launchd/com.minsky.tick-loop.plist | grep
+    -q "WorkingDirectory.*$(pwd)"` exits 0 (the placeholder
+    substitutes to the current repo's absolute path).
+  - `distribution/README.md` references `./setup.sh --dogfood` as
+    the canonical invocation; the multi-line snippet stays as the
+    under-the-hood reference (`grep -qE "setup\\.sh --dogfood"
+    distribution/README.md` exits 0).
+  - `npx markdownlint-cli2 distribution/README.md TASKS.md` exits
+    0; `tasks-lint TASKS.md` clean.
+pivot: |
+  Two pivot paths pre-registered:
+    1. If the OS-detection branching proves brittle (FreeBSD
+       operators hit the `unsupported OS` path; macOS launchctl
+       semantics shift in a future macOS), retire the conditional
+       branching and extract per-OS install scripts
+       (`distribution/launchd/install.sh` +
+       `distribution/systemd/install.sh`) that `setup.sh --dogfood`
+       shells out to. Splits the OS branches at the script-file
+       boundary instead of the Bash case-statement boundary; the
+       maintainer can ship per-OS shipping fixes without touching
+       `setup.sh`.
+    2. If `envsubst` proves consistently missing on enough hosts
+       (it ships with `gettext`; not on every fresh macOS), pivot
+       to a tiny inline sed-based substitution (single placeholder
+       `${MINSKY_HOME}` is straightforward to substitute without
+       a dedicated tool). Trade-off: lose the documented placeholder
+       hygiene the `lint-units.sh` smoke depends on, gain
+       installer-zero-dep portability.
+measurement: |
+  bash -c 'bash -n setup.sh && ./setup.sh --help 2>&1 | grep -q -- "--dogfood" && grep -qE "MODE=\"dogfood\"" setup.sh && grep -qE "setup\\.sh --dogfood" distribution/README.md && MINSKY_HOME="$(pwd)" envsubst "\${MINSKY_HOME}" < distribution/launchd/com.minsky.tick-loop.plist | grep -q "<string>$(pwd)</string>" && echo PASS || (echo FAIL; exit 1)'
+anchor: |
+  rule #12 (vision.md § "Scope discipline" — Minsky-on-itself is
+  the substrate the rule applies to; making the loop *easy to
+  start* is the rule's enabling step).
+  user-stories/001-loop-runs-overnight.md (the umbrella user story
+  for Minsky-on-itself; this PR's `--dogfood` flag is the
+  operator-side affordance the story's "Story" section assumes
+  is in place when the operator "closes my laptop at 11pm with
+  the loop running").
+  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
+  (supervision tree — `enable --now` is OTP's "start the
+  supervisor" verb; a one-command operator action mirrors OTP's
+  `application:start/1` boot semantic).
+  Cooper, A., *About Face: The Essentials of Interaction Design*,
+  4th ed., Wiley, 2014 (modal-vs-modeless interface — `--dogfood`
+  is a modeless one-step affordance, not a multi-step ritual; the
+  operator's intent is unambiguous from the flag name).
+  Hunt, A., Thomas, D., *The Pragmatic Programmer*, Addison-Wesley,
+  1999, Tip 8 ("Make it easy to reuse" — the install snippet is
+  *already* documented, but copy-paste-with-edits is not "reuse";
+  one-command flag is).
+  rule #1 (vision.md § 1 — don't reinvent: the unit-file templates
+  + the `lint-units.sh` smoke + the multi-line snippets all exist;
+  this PR is the one-line orchestration).
+timeout_seconds: 30

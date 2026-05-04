@@ -42,7 +42,17 @@ Templates use shell-style `${VAR}` placeholders that `setup.sh` (P0 `setup-sh-re
 
 Any new placeholder added to a template must be (a) added to the table above and (b) accepted by `lint-units.sh`'s placeholder-hygiene check (which allows only the documented set).
 
-## Install (Linux, systemd user units — no root needed)
+## Install (one command — Minsky dogfooding itself)
+
+```bash
+./setup.sh --dogfood
+```
+
+Detects the OS, renders the unit-file templates with `${MINSKY_HOME}` substituted, drops them in the user-scope unit dir (`~/.config/systemd/user/` on Linux, `~/Library/LaunchAgents/` on macOS), idempotently loads the supervisor target, and prints the operator's tail-logs / pause / status commands. Re-running `--dogfood` re-renders the templates (catches drift) and re-loads the supervisor — no-op on an already-active unit. This is the canonical "start Minsky on this repo" invocation per `vision.md` § "What Minsky is" + rule #12 (Scope discipline) + `user-stories/001-loop-runs-overnight.md`.
+
+The under-the-hood snippets below remain as the reference for operators who need to debug the install (e.g., custom unit dir, sandboxed shell without `setup.sh`'s lock).
+
+### Install (Linux, systemd user units — no root needed)
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -53,7 +63,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now minsky-supervisor.target
 ```
 
-## Install (macOS, launchd LaunchAgents)
+### Install (macOS, launchd LaunchAgents)
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
