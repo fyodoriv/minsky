@@ -100,6 +100,15 @@ importers:
         specifier: ^4.12.14
         version: 4.12.16
 
+  novel/dashboard-web:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.19.14
+        version: 1.19.14(hono@4.12.16)
+      hono:
+        specifier: ^4.12.14
+        version: 4.12.16
+
   novel/experiment-record:
     dependencies:
       yaml:

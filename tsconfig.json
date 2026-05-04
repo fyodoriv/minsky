@@ -7,6 +7,7 @@
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/adapters/types" },
     { "path": "./novel/budget-guard" },
+    { "path": "./novel/dashboard-web" },
     { "path": "./novel/experiment-record" },
     { "path": "./novel/handoff-spec" },
     { "path": "./novel/mape-k-loop" },
