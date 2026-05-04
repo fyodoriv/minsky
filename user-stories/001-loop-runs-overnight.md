@@ -73,8 +73,8 @@ The 12 failure-mode rows above are mapped to their existing tests (or the deferr
 
 ## Status
 
-- **Phase**: Coverage manifested (sub-task 1/3 of `first-integration-test`); 10/12 rows covered or deferred-to-self-hosted, 1 row deferred cross-repo (tasks-mcp lease — row 10), 1 row covered by `distribution/test-supervisor.sh` row-3 (handoff malformed) plus token-monitor (rows 1, 3, 4, 9). The 60-min compressed simulation itself is filed as `first-integration-test-mock-tick-loop` (sub-task 2/3) and `first-integration-test-nightly-self-hosted` (sub-task 3/3).
-- **Blocking**: P1 tasks `supervisor-setup`, `budget-guard-v0` (see `TASKS.md`)
+- **Phase**: Implemented. The integration test `user-stories/001-loop-runs-overnight.test.ts` drives the real `runDaemon` orchestrator (post-`tick-loop-daemon-real-spawn-flip`) against a synthetic TASKS.md fixture, with `DryRunSpawnStrategy` injected (the same Strategy the production CLI selects when `MINSKY_TICK_DRY_RUN=1`). It asserts 4-task drain, ≥1 OTEL `tick-loop.iteration` span per task, exactly 1 morning summary push, and wall-clock <5 min. The chaos-coverage manifest (`user-stories/001-coverage-manifest.test.ts`) keeps row classifications: rows whose failure axis is OS-level (process death, network partition, disk-full, NTP, OS-suspend) remain `self-hosted` because they cannot be exercised inside vitest; rows whose failure axis is in-process (handoff-malformed, budget-guard, 5xx upstream) stay `covered` against their existing in-process tests. The integration test itself does not change the manifest — it is the real-daemon driver the parent task brief calls for, exercising the same `runDaemon` orchestrator the supervisor invokes in production.
+- **Blocking**: none (test landed); the OS-level rows depend on `first-integration-test-nightly-self-hosted` (sub-task 3/3 of `first-integration-test`).
 - **Theoretical anchor**: Armstrong supervision tree pattern (let-it-crash + supervisor restart)
 
 ## Pattern conformance
