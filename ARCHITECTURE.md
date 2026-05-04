@@ -223,10 +223,9 @@ OpenTelemetry throughout. Claude Code natively emits OTEL and propagates `TRACEP
 
 Local stack:
 
-- **Loki** for logs
-- **Tempo** for traces
-- **Prometheus** for metrics
-- **Grafana** as the dashboard surface
+- **OpenObserve** as the single-binary backend for logs, traces, and metrics — primary recommendation per `research.md` § "Lighter OTEL backend" (resolved 2026-05-03). Smallest disk footprint, simplest install, satisfies all three query-shape constraints.
+- **Runner-up**: VictoriaMetrics + VictoriaLogs + VictoriaTraces triad — the first port of call if a pivot away from OpenObserve fires.
+- **Previously recommended** (kept for historical context until `observability-adapter-v0` ships against OpenObserve): Loki+Tempo+Prometheus+Grafana.
 
 Three dashboard tiers, each reading from the same OTEL backend through the `Observability` adapter:
 
@@ -281,7 +280,8 @@ Steps:
 1. Verify prerequisites: Claude Code CLI, brew (macOS) or apt (Linux), npm, tmux, systemd or launchd, gh
 2. Install dependencies:
    - `brew install` / `apt install` for system tools (Tailscale, jq, etc.)
-   - `npm install -g` for `@tasks-md/cli`, `tasks-mcp`, `claude-monitor`
+   - `npm install -g` for `@tasks-md/cli`, `tasks-mcp`
+   - `pip install claude-monitor==3.1.0` (Python tool, pinned per `research.md` § "Token monitor")
    - `claude plugin install oh-my-claudecode@v4.13.x` (pinned)
    - `claude plugin install ralph-wiggum`
 3. Configure:
@@ -324,7 +324,7 @@ These don't block writing `vision.md` and `ARCHITECTURE.md`, but they do block w
 3. **MAPE-K loop cadence** — every Nth scheduler iteration? Time-based (every 6h)? Event-triggered (when error budget below X)? Probably all three with priority. Test in production.
 4. **Multi-machine** — initial scope is single-developer-machine. Multi-machine / team scope deferred to v1+.
 5. **OMC version pinning strategy** — strict patch pin (v4.13.4 exactly) vs minor-floating (v4.13.x)? Recommend minor-floating with integration test gate, but verify their semver discipline first.
-6. **OTEL backend choice** — local Loki+Tempo+Prometheus+Grafana is heavier than necessary for a single-dev setup. Consider a lighter alternative (e.g., a single SQLite-backed exporter) for the default install, with the heavy stack as opt-in.
+6. **OTEL backend choice** — *Resolved 2026-05-03* (see `research.md` § "Lighter OTEL backend"): OpenObserve for v0 (single binary, smallest disk footprint, satisfies all three query-shape constraints); VictoriaMetrics triad as runner-up. The previously-considered Loki/Tempo/Prometheus/Grafana stack is heavier than necessary for a single-dev setup.
 
 ## Reading next
 
