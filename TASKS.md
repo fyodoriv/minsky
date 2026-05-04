@@ -17,29 +17,10 @@
 
 <!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
 
-- [ ] `ci-experiment-runner-v0` — daily/per-PR experiment execution (rule #9 daily layer)
-  - **ID**: ci-experiment-runner-v0
-  - **Tags**: novel, ci, conformance
-  - **Estimate**: 1–2d
-  - **Hypothesis**: A CI step that (a) requires every non-trivial PR to ship a parseable `EXPERIMENT.yaml`, (b) executes its `measurement` command against the merge-base ref, and (c) re-executes against the post-merge `main` ref, records both numbers tagged with the experiment-id into a local `experiment-store` — closing the daily layer of rule #9 — produces a tracked record on ≥95 % of merged PRs within 30 days of landing.
-  - **Details**: Two CI jobs. **Job A (gate)**: runs on every PR; fails if `EXPERIMENT.yaml` is missing OR fails `experiment-record validate` OR if `measurement` is not a runnable command. **Job B (record)**: runs after merge to `main` (post-push event); checks out merge-base, runs measurement → `baseline`; checks out current `main`, runs measurement → `treatment`; records `{experiment_id, baseline, treatment, ts, ref}` into `experiment-store/<id>.jsonl` (committed back to a `experiments/` branch OR pushed to OTEL once `otel-lite-backend` lands). The structural test the runner enforces is "the command is runnable and produces a number"; verdict-against-thresholds is the weekly layer's job. Trivial-change exemption: PRs labelled `trivial` skip Job A but must include `<!-- experiment: trivial — see exemption.md -->` whose presence is checked by the gate.
-  - **Files**: `.github/workflows/experiment.yml`, `scripts/run-experiment.mjs` (entry point invoked by both jobs), `scripts/run-experiment.test.mjs`, `experiments/.gitkeep`, `docs/experiment-runner.md`.
-  - **Verification**:
-    - Synthetic PR with valid `EXPERIMENT.yaml` and runnable measurement → Job A green; after merge, Job B records two numbers in `experiment-store/`.
-    - Synthetic PR with missing/malformed YAML → Job A red, merge blocked.
-    - Synthetic PR with non-runnable measurement → Job A red.
-    - Synthetic `trivial`-labelled PR with the exemption comment → Job A green; Job B no-op.
-  - **Measurement**: `gh run list --workflow experiment.yml --status success --limit 100 --json conclusion --jq length` ≥ 95 % of `gh run list --workflow experiment.yml --limit 100 --json conclusion --jq length` (within 30 days of landing); `find experiments/ -name '*.jsonl' | wc -l` ≥ count of merged non-trivial PRs in same window.
-  - **Pivot**: if the gate produces ≥3 false positives in its first month (e.g., misclassifying a trivial change as non-trivial, or a measurement command that's runnable locally but not in CI), tighten the trivial-detection heuristic OR drop the executability gate and treat the YAML as informational-only — landing the daily layer as soft-fail until the friction subsides.
-  - **Acceptance**: Both CI jobs run on every PR; experiment store accumulates records on every non-trivial merge; rule-#9 daily layer is now mechanically enforced.
-  - **Anchor**: Fagerholm et al., "Building Blocks for Continuous Experimentation", *RCoSE* 2014 (the per-change experiment runner is the first building block); Kohavi/Tang/Xu, *Trustworthy Online Controlled Experiments*, 2020, ch. 4 (running every change as an experiment); rule #7 (chaos: gate failures must be loud).
-  - **Risk**: CI runtime balloons if measurements are slow. Mitigation: enforce a per-experiment timeout (default 60s) with the option to mark slow-but-essential experiments `nightly` — those run on schedule, not on every PR.
-
 - [ ] `experiment-tracker-v0` — weekly / monthly sustained-gain verdicts (rule #9 weekly–monthly layer)
   - **ID**: experiment-tracker-v0
   - **Tags**: novel, conformance, scheduled
   - **Estimate**: 1–2d
-  - **Blocked by**: ci-experiment-runner-v0
   - **Hypothesis**: A scheduled job that re-runs each merged experiment's `measurement` at the configured `replay_windows_days` (default `[7, 30]`), compares against `success` / `pivot` thresholds, and emits a `validated`/`regressed`/`inconclusive` verdict per experiment closes the weekly–monthly layer of rule #9. Within 90 days of landing, ≥5 experiments carry a non-`inconclusive` verdict — proving the substrate works on real data, not just fixtures.
   - **Details**: GitHub Actions `schedule` cron (daily 09:00 UTC) iterates `experiments/*.jsonl`; for each entry whose `ts` is older than the next replay-window boundary, checks out the recorded ref (or the latest `main` if `replay_against=current`), runs `measurement`, appends `{ts, ref, value, window_days}` to the experiment's record. Verdict logic: `validated` if value is at or beyond `success` threshold for ≥1 replay window post-merge AND has not regressed below `pivot` since; `regressed` if value crosses `pivot` (in the wrong direction); `inconclusive` otherwise. `regressed` opens an automated TASKS.md entry (`pivot-experiment-<id>`) at P1; `validated` writes a single line to `validated-learnings.md`.
   - **Files**: `.github/workflows/experiment-tracker.yml`, `scripts/replay-experiment.mjs`, `scripts/replay-experiment.test.mjs`, `validated-learnings.md` (seeded with the rule-#9 PR's own experiment as the first entry), `docs/experiment-tracker.md`.

@@ -40,6 +40,13 @@
       "items": { "type": "integer", "minimum": 1, "maximum": 365 },
       "default": [7, 30],
       "description": "Days after merge at which experiment-tracker-v0 re-runs the measurement."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 60,
+      "description": "Per-experiment wall-clock timeout for the measurement command, in seconds. Enforced by ci-experiment-runner-v0. Default 60s; raise for measurements that legitimately require more time (e.g. integration suites)."
     }
   },
   "additionalProperties": false

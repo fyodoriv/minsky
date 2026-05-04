@@ -1,14 +1,16 @@
-id: markdownlint-nested-node-modules
+id: ci-experiment-runner-v0
 hypothesis: |
-  Replacing `#node_modules` with `#**/node_modules` in the `lint:md` script
-  (and the matching markdownlint invocation in `.github/workflows/ci.yml`)
-  ignores both top-level and workspace-nested `node_modules/`, taking the
-  markdownlint error count from N (currently ≥2 from vendored READMEs in
-  `novel/adapters/observability/node_modules/@opentelemetry/semantic-conventions`)
-  to 0 without silencing any in-tree docs. Anchor: rule #2 (every external
-  dep behind interface — vendor README content is not ours to lint);
-  markdownlint-cli2 docs (glob ignore semantics).
-success: "`pnpm lint:md` exits 0 on a clean `pnpm install` checkout; CI's markdownlint job stops failing on third-party READMEs; total .md files linted decreases by exactly the count of nested-`node_modules` README files (no in-tree docs silenced)"
-pivot: "if `**/node_modules` glob is honored differently across markdownlint-cli2 versions, pin the version (covered by `ci-pin-tooling-versions`) and codify the working glob in a comment"
-measurement: "pnpm lint:md exits 0; `markdownlint-cli2 ... | grep -E '^Linting: [0-9]+ file' | awk '{print $2}'` shows the same in-tree count as before (no false-negatives), Summary line reads `0 error(s)`"
-anchor: "rule #2 (every external dep behind interface); markdownlint-cli2 docs (glob ignore semantics)"
+  A CI gate that (a) requires every non-trivial PR to ship a parseable
+  EXPERIMENT.yaml, (b) executes its measurement command with a
+  per-experiment timeout (default 60s), AND a post-merge recorder that
+  re-runs the measurement against merge-base and current main, appending
+  a JSONL record per experiment-id, mechanically closes the daily layer of
+  rule #9. The runner's pure function (runExperiment) is referentially
+  transparent (no LLM in the chain, per rule #10) and is the deterministic
+  substrate the weekly-layer tracker reads from.
+success: "scripts/run-experiment.test.mjs exits 0 with ≥6 cases covering the brief's a–f checklist; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md all green; this PR's own EXPERIMENT.yaml passes the new gate against this PR"
+pivot: "if the gate produces ≥3 false positives in its first month (e.g., misclassifying a trivial change as non-trivial, or measurement commands that pass locally but fail in CI), tighten the trivial-detection heuristic OR drop the executability gate to soft-fail (treating EXPERIMENT.yaml as informational-only) until the friction subsides — landing the daily layer as best-effort rather than hard-block"
+measurement: "pnpm typecheck && pnpm vitest run scripts/run-experiment.test.mjs"
+anchor: "Fagerholm et al., 'Building Blocks for Continuous Experimentation', RCoSE 2014 (per-change experiment runner as the first building block); Kohavi/Tang/Xu 2020 ch. 4 (running every change as an experiment); rule #9 (vision.md § 9 — the iron pre-registration rule); rule #10 (deterministic enforcement); Beck 1999 (CI as constraint enforcer)"
+replay_windows_days: [7, 30]
+timeout_seconds: 120
