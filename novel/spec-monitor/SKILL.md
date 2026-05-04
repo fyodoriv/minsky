@@ -67,7 +67,7 @@ The deterministic linter checks `anchor.length >= 5`. It does NOT verify that th
 
 **Examples to flag:**
 
-- "https://medium.com/some-blog/post"
+- "<https://medium.com/some-blog/post>"
 - "Wikipedia: Watchdog timer"
 - "a tweet by …"
 - "ChatGPT said …"
