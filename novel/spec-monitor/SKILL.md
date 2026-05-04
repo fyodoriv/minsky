@@ -88,7 +88,7 @@ Append a markdown block to `spec-advisories/<YYYY-MM-DD>.md` (create the file if
 | rule_id | evidence | severity | suggested_repair |
 |---------|----------|----------|------------------|
 | A1 | "improves developer experience" (hypothesis L7) | medium | Restate as a measurable observable, e.g. "<metric> moves from X to Y over Z days". |
-| A3 | Anchor cites a Medium post | high | Replace with a peer-reviewed or textbook source per rule #5 / #8. |
+| A5 | Row says `full` but the file's docstring lists a deviation | high | Update the conformance level to `partial` or `deviation`, citing the deviating property in the row's Notes column. |
 ```
 
 `rule_id` ∈ {A1, A5} (A2, A3, and A4 are retired — emit no advisories for them; the deterministic CI lints `pivot-success-margin`, `anchor-primary-source`, and `measurement-inspects-output` are now the authority); `severity` ∈ {low, medium, high}. The Skill never claims authority — every line ends with "consider", "suggest", or "review" framing. The advisory file is human-readable; the orchestrator may surface it in a PR comment but must NOT auto-block a merge on its contents.
