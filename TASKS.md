@@ -54,19 +54,6 @@
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
 
-- [ ] `ci-rule-1-novel-justification` — CI lint: every `novel/<pkg>/` has a justification row in `research.md`
-  - **ID**: ci-rule-1-novel-justification
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 2–3h
-  - **Hypothesis**: A diff-based CI check that fails when a new directory under `novel/` is added without a corresponding "When the existing tools didn't fit: <pkg>" row in `research.md` mechanically enforces rule #1 (don't reinvent the wheel) — converting the quarterly human review into a per-PR gate without changing rule #1's substance.
-  - **Details**: Build `scripts/check-rule-1-novel-justification.mjs`. Diffs PR vs `main`; for each new top-level directory under `novel/` (excluding `novel/adapters/`), greps `research.md` for the package name in a "When the existing tools didn't fit" subsection; fails if missing. Wire as a required CI job. Allow opt-out via `<!-- rule-1: <existing-tool-considered> rejected because: <reason> -->` in the package's README.
-  - **Files**: `scripts/check-rule-1-novel-justification.mjs`, `scripts/check-rule-1-novel-justification.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic PR adding `novel/foo/` without a research-md entry fails; same PR with the entry passes; opt-out comment honoured.
-  - **Measurement**: `node scripts/check-rule-1-novel-justification.mjs --diff-base=main` exits 1 against the missing-entry fixture and 0 against the with-entry fixture; `pnpm vitest run scripts/check-rule-1-novel-justification.test.mjs` exits 0.
-  - **Pivot**: if false-positive rate exceeds 5 % in the first month (e.g., misclassifying `novel/adapters/` subpackages, or a refactor that splits an existing package), narrow the scope to truly-novel top-level directories AND require an explicit `<!-- rule-1: split-of-<existing-id> -->` annotation for splits.
-  - **Acceptance**: CI job fails fast on the synthetic missing-entry fixture; rule #1 is now mechanically enforced for every new package.
-  - **Anchor**: rule #10 (deterministic enforcement); Lampson 1983 ("move the constraint to the cheapest possible point").
-  - **Risk**: An overly broad regex matches subdirectories of an already-justified package. Mitigation: scope to *added* top-level dirs only; respect existing-package boundaries.
 
 - [ ] `ci-rule-3-doc-first` — CI lint: PRs adding code under `novel/` also touch a `user-stories/*.md` or the package README
   - **ID**: ci-rule-3-doc-first
@@ -142,7 +129,7 @@
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
+  - **Blocked by**: ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
@@ -215,19 +202,6 @@
   - **Anchor**: Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run; the published artifact is the release contract).
   - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
-- [ ] Decide MAPE-K loop cadence
-  - **ID**: mape-k-cadence
-  - **Tags**: research, design
-  - **Estimate**: 4h
-  - **Hypothesis**: A tiered cadence (time-based default + event-triggered overrides for spec-monitor findings) keeps `mape-k-loop`'s own token cost below 5 % of weekly budget while still detecting drift within 2 scheduler iterations.
-  - **Details**: Time-based vs scheduler-iteration-based vs event-triggered. Probably all three with priority. Define rules. Document in `research.md` and `ARCHITECTURE.md`. Anchor: control-loop period selection (Liu, *Real-Time Systems*).
-  - **Verification**: `research.md` has a "MAPE-K cadence" subsection with the chosen rule and rejected alternatives; `ARCHITECTURE.md` § "Process supervision tree" reflects the cadence
-  - **Measurement**: `grep -c '^## MAPE-K cadence' research.md` returns 1, and the section names ≥3 alternatives with one chosen + literature anchor; `grep -c 'MAPE-K cadence' ARCHITECTURE.md` returns ≥1 in the supervision-tree section.
-  - **Pivot**: if after 4h of investigation no candidate cadence satisfies the <5 %-budget constraint AND the 2-iteration drift-detection constraint simultaneously, the MAPE-K design itself is wrong and `mape-k-loop-v0` needs reframing — file a follow-up task and stop.
-  - **Acceptance**: Decision documented in research.md and ARCHITECTURE.md with rationale; rejected alternatives recorded
-  - **Anchor**: Liu, *Real-Time Systems*, 2000 (control-loop period selection); Kephart & Chess 2003 (MAPE-K reference architecture).
-  - **Risk**: Wrong cadence wastes tokens (too frequent) or misses signal (too rare). Pick conservative defaults; let the autonomic manager itself adjust them per success-metric #4.
-
 ## P2
 
 <!-- spec-monitor-skill (the prior P2 task) is superseded by `spec-monitor-deterministic-rewrite` in P1. Per rule #10 (deterministic enforcement), the previous shape — a Claude Skill as the *primary* enforcement of every constitutional rule — is incompatible with the iron-rule "enforcement is deterministic, not LLM-driven" clause. The replacement task splits the Skill's remit: deterministic linters (`ci-rule-1` … `ci-rule-7`) take the load-bearing share; the residual judgement scope ships as an advisory-only Claude Skill (`spec-monitor-deterministic-rewrite`). Removing this block is the ratchet-rule from rule #10 in action: the prior approach is *removed* in the same PR that introduces the deterministic replacement. -->
@@ -236,7 +210,7 @@
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 3–5d (largest novel layer)
-  - **Blocked by**: spec-monitor-deterministic-rewrite, mape-k-cadence
+  - **Blocked by**: spec-monitor-deterministic-rewrite
   - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
   - **Files**: `novel/mape-k-loop/`
