@@ -1,15 +1,17 @@
-id: multi-machine
+id: architecture-align-research-openobserve-claude-monitor
 hypothesis: |
-  A research-only document enumerating ≥4 multi-machine deltas (state
-  synchronization, identity, supervision, blast-radius scaling — plus
-  optional time/clocks) is sufficient framing for the next 12 months.
-  Actual multi-machine implementation is premature until single-machine
-  MAPE-K (`mape-k-loop-v0`) reaches steady state on one host. Each delta
-  names the single-machine assumption it breaks and carries a literature
-  anchor; scope is capped at "what would have to change", not "how to
-  build it" (per the task's Risk clause).
-success: "grep -c '^## Multi-machine scope' research.md returns 1 AND the section enumerates ≥4 deltas (state sync, identity, supervision, blast radius), each with a literature anchor and a current-single-machine-assumption-broken line; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm exec markdownlint-cli2 all green."
-pivot: "if writing the doc surfaces a single-machine assumption that *cannot* be relaxed without an architectural rewrite (e.g., process-local in-memory state in a critical path), file a follow-up architecture task and stop the research — the implementation is premature and the existing v0 design needs revision before multi-machine becomes tractable."
-measurement: "test \"$(grep -c '^## Multi-machine scope' research.md)\" = 1 && test \"$(awk '/^## Multi-machine scope/{flag=1; next} /^## /{flag=0} flag' research.md | grep -c '^### ')\" -ge 4"
-anchor: "Lamport, \"Time, Clocks, and the Ordering of Events in a Distributed System\", *CACM* 1978 (causal ordering as the precondition for any consistent replicated log); Helland, \"Life beyond Distributed Transactions\", *CIDR* 2007 (eventual consistency); Saltzer & Kaashoek, *Principles of Computer System Design*, 2009 (naming); Armstrong 2003 / Birman 1996 (supervision + process groups); Basiri et al. 2016 (chaos blast radius)."
+  Aligning ARCHITECTURE.md with research.md — naming OpenObserve as the
+  primary OTEL backend recommendation (with VictoriaMetrics as runner-up,
+  and Loki+Tempo+Prometheus+Grafana retained only as historical context),
+  and fixing the `claude-monitor` install command from `npm install -g`
+  to `pip install claude-monitor==3.1.0` — eliminates the doc drift
+  surfaced by the multi-machine research-scout pass (PR #45). This is a
+  glossary-discipline fix (rule #5 — same name across docs); the canonical
+  recommendations live in research.md § "Lighter OTEL backend" (resolved
+  2026-05-03) and § "Token monitor" (claude-monitor is a Python tool,
+  pinned at 3.1.0 on PyPI).
+success: "grep -c 'OpenObserve' ARCHITECTURE.md ≥ 1 AND grep -c 'pip install claude-monitor' ARCHITECTURE.md ≥ 1 AND grep -c 'Loki+Tempo' ARCHITECTURE.md ≤ 1 (allowed: historical-context note); pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm exec markdownlint-cli2 all green."
+pivot: "if a re-read of research.md reveals OpenObserve was a tentative recommendation rather than a decision, restore Loki+Tempo+Prometheus+Grafana as the primary in ARCHITECTURE.md and file a follow-up to make research.md's recommendation more authoritative."
+measurement: "test \"$(grep -c 'OpenObserve' ARCHITECTURE.md)\" -ge 1 && test \"$(grep -c 'pip install claude-monitor' ARCHITECTURE.md)\" -ge 1"
+anchor: "research.md § \"Lighter OTEL backend\" (resolved 2026-05-03; OpenObserve for v0, VictoriaMetrics triad as runner-up); research.md § \"Token monitor\" (`claude-monitor==3.1.0` on PyPI); constitutional rule #5 (glossary discipline — same name across docs)."
 replay_windows_days: [7, 30, 180]
