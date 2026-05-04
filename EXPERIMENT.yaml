@@ -13,6 +13,6 @@ hypothesis: |
   construction.
 success: "`grep -cE '@latest|markdownlint-cli2[^@]' .github/workflows/ci.yml` returns 0; `npx -y @tasks-md/lint@^0.7.0 TASKS.md` and `npx -y markdownlint-cli2@0.15.0 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"` both exit 0 against the live repo; CI tasks-lint + markdownlint jobs green on the PR."
 pivot: "if a pinned version blocks a bug-fix (e.g., a CVE in markdownlint-cli2 < 0.15.0 or @tasks-md/lint < 0.7.x), bump immediately and revisit the pin policy — likely switching to dependabot-driven auto-bumps for tooling minors. If pinning to a specific minor proves too noisy (≥3 manual bumps per quarter), pivot to lockfile-only pinning via `pnpm exec` for both tools (requires adding `@tasks-md/lint` as a devDependency)."
-measurement: "grep -cE '@latest|markdownlint-cli2[^@]' .github/workflows/ci.yml"
+measurement: "test \"$(grep -cE '@latest|markdownlint-cli2[^@]' .github/workflows/ci.yml || true)\" = '0'"
 anchor: "rule #7 (vision.md § 7 — chaos engineering, trust no unverified dependency); ARCHITECTURE.md § \"Versioning & dependency evolution\" (Pin major versions of all dependencies); Forsgren, Humble, Kim, *Accelerate*, 2018 (deployment reliability as a DORA prerequisite)."
 replay_windows_days: [7, 30, 180]
