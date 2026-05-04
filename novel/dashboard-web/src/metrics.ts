@@ -89,7 +89,7 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     id: "task-throughput",
     label: "Task throughput",
     formula:
-      "git log --since=\"30 days ago\" --oneline --grep='^feat\\|^fix\\|^docs\\|^chore' | wc -l",
+      "git log --since=\"30 days ago\" --oneline --grep='^feat\\|^fix\\|^docs\\|^chore' | wc -l / 30",
     unit: "tasks/day",
   },
 ];

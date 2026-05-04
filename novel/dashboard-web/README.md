@@ -53,6 +53,10 @@ The 10 vision.md success criteria are typed in `src/metrics.ts` as `SUCCESS_METR
 
 The parent `dashboard-web-v0` epic closes with this sub-task: all 4 sub-tasks shipped; the parent's prose-only "Lighthouse Mobile score ≥90 in CI" verification cell now has a machine-readable counterpart at `.github/workflows/lighthouse.yml`.
 
+### Spec-alignment fix (`dashboard-web-task-throughput-formula-drift`)
+
+`src/metrics.ts`'s `task-throughput` formula now matches `vision.md` § "Success criteria" row 10 exactly: the 30-day commit count is divided by 30 (`… | wc -l / 30`) to produce the unit `tasks/day`. Earlier the divisor was missing while the unit cell still read `tasks/day` — a silent 30× over-read once `dashboard-web-otel-wiring`'s Strategy executes the formula. A new test in `test/metrics.test.ts` string-matches `/ 30` against the formula so the drift cannot recur silently.
+
 ## Usage
 
 ```ts
