@@ -251,6 +251,20 @@
   - **Anchor**: rule #10 (vision.md § 10); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (pre-registration of audit pivot before result is observed).
   - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds; the previous audit file at `spec-advisories/2026-05-03-quarterly-audit.md` records the cadence.
 
+- [ ] `ci-lint-anchor-primary-source` — CI lint flagging EXPERIMENT.yaml `anchor` citations that point to non-primary sources (spec-monitor A3 promotion)
+  - **ID**: ci-lint-anchor-primary-source
+  - **Tags**: ci, conformance, rule-10, spec-monitor-promotion, p3
+  - **Estimate**: 2h
+  - **Hypothesis**: `novel/spec-monitor/SKILL.md` rule A3 ("anchor citation is not a primary source") flags 100 % of EXPERIMENT.yaml records whose `anchor` field matches a deny-list of known non-primary sources (`medium.com/`, `*.substack.com`, `wikipedia.org`, `twitter.com`, `x.com`, `reddit.com`, `stackoverflow.com`, `chatgpt.com`, `claude.ai`, "ChatGPT said", "tweet by", "blog post") AND fails to match the recognised primary-source allowlist patterns (italicised book/journal title `*…*`, `Ch. <n>`, `pp. <n>`, ISBN, DOI, conference proceedings names, `vision.md § <n>` internal cross-reference, `rule #<n>`). Today the rule is advisory; promoting it (per the 2026-05-03 audit + rule #10 ratchet) makes "blog-decay" anchor citations unmissable. Surfaces during `ci-lint-pivot-success-margin`'s resilience scout.
+  - **Details**: Add `scripts/check-anchor-primary-source.mjs` (pure function `checkAnchorPrimarySource(anchor) => { ok: boolean, reason?: string }` plus thin CLI). Deny-list of non-primary tokens (above) — if any token appears in the anchor, fail. Allowlist of primary-source patterns: italicised title (`\*[^*]+\*`), `Ch\. \d`, `pp?\. \d`, DOI prefix `10\.`, ISBN, the literal substrings `vision.md §` and `rule #`. When neither list matches and the anchor is short (<25 chars), emit advisory warning (exit 0) — long-tail prose stays advisory. Pair with `scripts/check-anchor-primary-source.test.mjs`: ≥8 cases covering deny-list hits (medium / wikipedia / tweet / chatgpt), allowlist hits (book / chapter / page / DOI / vision-cross-ref), ambiguous (warning), and the existing repo's EXPERIMENT.yaml.
+  - **Files**: `scripts/check-anchor-primary-source.mjs`, `scripts/check-anchor-primary-source.test.mjs`, `.github/workflows/ci.yml`, `novel/spec-monitor/SKILL.md` (retire A3 in the SAME PR per ratchet)
+  - **Verification**: `pnpm vitest run scripts/check-anchor-primary-source.test.mjs` exits 0 with ≥8 cases; CI lint catches a synthetic `anchor: "https://medium.com/some-blog/post"` and exits 1; lint passes on the repo's existing EXPERIMENT.yaml.
+  - **Measurement**: `pnpm vitest run scripts/check-anchor-primary-source.test.mjs && node scripts/check-anchor-primary-source.mjs EXPERIMENT.yaml`
+  - **Pivot**: if the deny-list grows past ~15 entries to cover legitimate variations (e.g., `arxiv.org` is sometimes primary, sometimes preprint-only), or if >10 % of historical anchors fall through to "advisory warning" rather than to a clear pass/fail, the rule is judgement-bound and this task should be closed — A3 stays advisory.
+  - **Acceptance**: lint shipped, CI job green on existing records, A3 retired from SKILL.md in the same PR per rule #10's ratchet (drops active advisory count by 1).
+  - **Anchor**: rule #10 (vision.md § 10); rule #5 / rule #8 (named, decades-tested pattern); spec-advisories/2026-05-03-quarterly-audit.md (audit decision).
+  - **Risk**: Deny-list / allowlist false-positives on edge cases (a Medium post that *quotes* a primary source verbatim; a Wikipedia article that is itself the primary source for a CS-coined term). Mitigation: opt-out comment `# rule: ci-lint-anchor-primary-source: skip <reason>` mirroring the pivot-success-margin pattern.
+
 - [ ] `ci-lint-watch-surface-cap` — CI lint enforcing the 3-value cap on the Watch surface (story 005)
   - **ID**: ci-lint-watch-surface-cap
   - **Tags**: ci, conformance, rule-10
