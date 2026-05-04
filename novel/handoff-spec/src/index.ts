@@ -36,7 +36,8 @@ export type ParseErrorKind =
   | "invalid-persona-id"
   | "invalid-created-at"
   | "blockers-required-when-blocked"
-  | "to-or-suggested-next-required";
+  | "to-or-suggested-next-required"
+  | "input-too-large";
 
 export interface ParseError {
   readonly kind: ParseErrorKind;
@@ -50,6 +51,14 @@ export interface ParseResult {
   readonly errors: readonly ParseError[];
 }
 
+export interface ParseOptions {
+  /** Maximum input size in bytes (UTF-8). Default 1 MB. */
+  readonly maxBytes?: number;
+}
+
+/** Default 1 MB cap; rejects larger inputs with `kind: "input-too-large"`. */
+const DEFAULT_MAX_BYTES = 1_048_576;
+
 const STATUS_VALUES: readonly HandoffStatus[] = ["ok", "blocked", "needs-rework"];
 const KEBAB_CASE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -57,7 +66,13 @@ const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\
 const REQUIRED_FIELDS = ["From", "Status", "Summary", "Created-at"] as const;
 type FieldMap = Record<string, string | string[]>;
 
-/** Convenience: did parsing produce any errors? */
+/**
+ * Convenience: did parsing produce any errors?
+ *
+ * @otel-exempt pure predicate — reads a single in-memory length, no I/O,
+ *   no side effects. A wrapping span on a one-line array-length check
+ *   would be empty noise; the calling code already has its own span.
+ */
 export function isValid(result: ParseResult): boolean {
   return result.errors.length === 0;
 }
@@ -66,11 +81,19 @@ export function isValid(result: ParseResult): boolean {
  * Parse a handoff document into structured records + accumulated errors.
  * One bad handoff doesn't abort the document — per-record errors are
  * collected so a UI can surface them.
+ *
+ * @otel-exempt pure function — string-in / value-out parser with no I/O,
+ *   no shared state, no async edges. Exception: the size-cap branch
+ *   returns early with `kind: "input-too-large"` (Armstrong 2007) without
+ *   doing any work. Callers that need observability wrap the call site
+ *   (file read + parse) in their own span; instrumenting here would
+ *   double-count and lose the file-path context.
  */
-export function parseHandoffs(source: string): ParseResult {
+export function parseHandoffs(source: string, options?: ParseOptions): ParseResult {
+  const tooLarge = checkSizeCap(source, options?.maxBytes ?? DEFAULT_MAX_BYTES);
+  if (tooLarge) return tooLarge;
   const lines = source.split("\n");
   const blockStarts = findBlockStarts(lines);
-
   if (blockStarts.length === 0) {
     return {
       handoffs: [],
@@ -79,7 +102,10 @@ export function parseHandoffs(source: string): ParseResult {
       ],
     };
   }
+  return parseBlocks(lines, blockStarts);
+}
 
+function parseBlocks(lines: readonly string[], blockStarts: readonly number[]): ParseResult {
   const handoffs: Handoff[] = [];
   const errors: ParseError[] = [];
   for (let b = 0; b < blockStarts.length; b++) {
@@ -91,6 +117,26 @@ export function parseHandoffs(source: string): ParseResult {
     for (const e of r.errors) errors.push(e);
   }
   return { handoffs, errors };
+}
+
+/**
+ * Enforce the byte cap at the parser entry. Armstrong 2007: let it crash,
+ * but with a precise error — return a structured `input-too-large` result
+ * instead of letting Node OOM on a multi-MB input.
+ */
+function checkSizeCap(source: string, maxBytes: number): ParseResult | undefined {
+  const byteLength = Buffer.byteLength(source, "utf-8");
+  if (byteLength <= maxBytes) return undefined;
+  return {
+    handoffs: [],
+    errors: [
+      {
+        kind: "input-too-large",
+        message: `document exceeds ${maxBytes} bytes cap`,
+        line: 0,
+      },
+    ],
+  };
 }
 
 function findBlockStarts(lines: readonly string[]): number[] {
