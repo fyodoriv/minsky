@@ -1,22 +1,37 @@
-id: ci-lint-pivot-success-margin
+id: pattern-conformance-audit-existing-docs
 hypothesis: |
-  Promoting spec-monitor advisory rule A2 ("pivot threshold reuses the
-  success threshold or has zero margin") to a deterministic CI lint at
-  `scripts/check-pivot-success-margin.mjs` makes the zero-margin failure
-  mode unmissable on every PR. The pure decision function reads `success`
-  and `pivot` from EXPERIMENT.yaml via `@minsky/experiment-record`'s
-  parser, regex-extracts the leading signed numeric token from each, and
-  fails when |Δ|/max(|success|,1) < 1 % (or when both sides are
-  identical binary prose). Per Ries 2011 (pivot-or-persevere), a
-  zero-margin pivot is theatre — it carries no information beyond the
-  success threshold and should fail mechanically, not advisorially.
-  Per rule #10's ratchet, A2 is retired from SKILL.md in the same PR;
-  the active advisory count drops by 1 (A4 already retired in PR #51).
-  If numeric-token extraction proves brittle (>10 % false-positive rate
-  on prose-heavy records), the approach is wrong and A2 stays advisory
-  — the deterministic candidate is abandoned, not iterated on.
-success: "≥19 unit tests pass in `scripts/check-pivot-success-margin.test.mjs` (covering the zero-margin / 10-pt-margin / exact-equality / binary-equal / binary-differing / mixed / skip-comment branches), the lint exits 0 against this PR's own EXPERIMENT.yaml (numeric margin ≥1 %), the lint exits 1 against a synthetic `success: \">= 95 %\"` / `pivot: \"< 95 %\"` fixture, AND `scripts/check-skill-rule-cap.mjs` reports ≤4 active advisory rules in `novel/spec-monitor/SKILL.md` (A2 retired)."
-pivot: "If the lint produces ≥1 false positive against any of the next 2 EXPERIMENT.yaml records merged into main (i.e., the numeric-token regex captures a non-threshold number — the leading `2` in '2024-01-01' or similar — and triggers a spurious zero-margin failure), revert the CI wiring on `pivot-success-margin`, keep `### A2.` as an active advisory heading in SKILL.md (raising the count back to its pre-PR value), and close the `ci-lint-pivot-success-margin` task as pivoted-not-validated."
-measurement: "pnpm exec vitest run scripts/check-pivot-success-margin.test.mjs && node scripts/check-pivot-success-margin.mjs EXPERIMENT.yaml && node scripts/check-skill-rule-cap.mjs"
-anchor: "Ries, *The Lean Startup*, 2011 (build-measure-learn / pivot-or-persevere — a meaningful pivot threshold must carry information distinct from the success threshold); rule #10 (vision.md § 10 — deterministic enforcement; ratchet rule: when an advisory rule is promoted to a deterministic linter, the advisory counterpart is removed in the same PR); `spec-advisories/2026-05-03-quarterly-audit.md` (audit decision to promote A2)."
+  Every existing `user-stories/*.md` (5 files) and `competitors/*.md`
+  (6 files) maps cleanly to ≥1 published pattern with a primary-source
+  citation (book, journal, conference proceedings) — i.e., zero
+  artifacts in the audited set need an `audit-pending` conformance
+  level for lack of a primary source. Annotating each file with a
+  "## Pattern conformance" subsection and adding the matching row to
+  `vision.md` § "Pattern conformance index" (rows 41–51, eleven new
+  rows) operationalises rule #8's "every artifact maps to a published
+  pattern" commitment for the full pre-existing corpus. Per Alexander
+  et al. 1977 (*A Pattern Language*), a pattern catalogue is only
+  load-bearing when it indexes *every* artifact, not just new ones;
+  the audit closes the corpus for user-stories and competitors. If
+  >30 % of files (≥4 of 11) genuinely cannot map to a primary source
+  the approach is wrong — rule #8's scope is over-broad and should
+  be narrowed to top-level architectural artifacts.
+success: |
+  All 11 audited files (5 user-stories + 6 competitors) carry a
+  "## Pattern conformance" subsection citing ≥1 primary source AND
+  `vision.md` § "Pattern conformance index" has ≥11 new rows
+  (numbered 41–51) AND zero rows carry the placeholder
+  `audit-pending` conformance level. Measured by the bracketed
+  shell command below; exit 0 means the conditions hold.
+pivot: |
+  If ≥4 of the 11 audited files cannot be mapped to a primary-source
+  pattern (best-faith mapping resolves only to a blog post, a
+  Wikipedia article, or fabricated framing), the audit reveals
+  rule #8's "every artifact" scope is over-broad. File follow-up
+  task `narrow-rule-8-scope-to-top-level` proposing rule #8 apply
+  only to top-level architectural artifacts (packages, scripts,
+  named decisions) and *not* to user-story / competitor narratives.
+  Threshold ≥4 of 11 sits well above the success threshold (0 of 11)
+  — non-trivial margin.
+measurement: '[ "$(for f in user-stories/*.md competitors/*.md; do grep -q ''^## Pattern conformance'' "$f" || echo "missing in $f"; done | wc -l | tr -d '' '')" = "0" ] && [ "$(grep -cE ''^\| (4[1-9]|5[01]) \|'' vision.md)" = "11" ]'
+anchor: "Alexander, Ishikawa, Silverstein, *A Pattern Language*, Oxford University Press, 1977 (a pattern catalogue is load-bearing only when it indexes every artifact, not a subset); Gabriel, *Patterns of Software*, Oxford University Press, 1996 (named-pattern catalogues in software architecture); rule #8 (vision.md § 8 — pattern conformance for every artifact); rule #10 (vision.md § 10 — the catalogue is the authoritative index)."
 replay_windows_days: [7, 30]

@@ -42,6 +42,13 @@ Open-source framework for orchestrating role-playing autonomous AI agents. Each 
 
 Not a dependency. No adapter. Cross-reference for memory pattern ideas.
 
+## Pattern conformance
+
+- **Pattern CrewAI implements**: Role-based multi-agent orchestration (role / goal / backstory / tools per agent; "crew" composition) — Wooldridge, *An Introduction to MultiAgent Systems*, 2nd ed., Wiley, 2009, Ch. 7 (methodologies for agent-oriented analysis and design)
+- **Conformance level**: full (in the pattern CrewAI implements)
+- **How Minsky relates**: don't adopt — Minsky is Claude-Code-native and coding-specific. CrewAI's role-play orchestration occupies the same surface as OMC (row 50) within the Anthropic stack; we delegate orchestration to OMC rather than wrap a generic LLM framework.
+- **Index row**: vision.md § "Pattern conformance index" row 47
+
 ## Last reviewed
 
 2026-05-03
