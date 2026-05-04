@@ -113,10 +113,11 @@ Per constitutional rule #7 (vision.md § 7).
   pivot is *Strategy-level*: the interface and consumers are unchanged.
 - **Measurement**:
   `pnpm vitest run novel/adapters/notifier --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
-- **Literature anchor**: Gamma et al., *Design Patterns*, 1994 (Adapter
-  + Strategy); Hunt-Thomas, *The Pragmatic Programmer*, 1999, Tip 32
-  ("Crash Early — but the crash needs to reach the operator");
-  Meszaros, *xUnit Test Patterns*, 2007 (test fake); rule #2.
+- **Literature anchor**: Gamma et al., *Design Patterns*, 1994
+  (Adapter and Strategy); Hunt-Thomas, *The Pragmatic Programmer*,
+  1999, Tip 32 ("Crash Early — but the crash needs to reach the
+  operator"); Meszaros, *xUnit Test Patterns*, 2007 (test fake);
+  rule #2.
 
 ## Manual smoke test against ntfy.sh
 
