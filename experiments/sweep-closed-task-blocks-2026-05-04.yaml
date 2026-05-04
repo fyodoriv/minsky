@@ -39,7 +39,7 @@ pivot: |
   No code, no tests, no lint configuration changes — the rollback is
   a one-commit revert.
 measurement: |
-  node -e 'const {execSync} = require("child_process"); const out = execSync("tasks-lint TASKS.md 2>&1").toString(); require("assert").ok(/found 0 error/.test(out), "tasks-lint must report 0 errors after the sweep");'
+  node -e 'const fs=require("fs"); const t=fs.readFileSync("TASKS.md","utf8"); const closed=["experiments-directory-migration","cross-repo-portability-doc","host-root-resolver-prep","minsky-sidecar-bootstrap","cross-repo-runner-v0","cross-repo-runner-aifn-840-integration-test","setup-doctor-ntfy-check"]; const a=require("assert"); for (const id of closed) a.ok(!new RegExp("\\\\*\\\\*ID\\\\*\\\\*: "+id+"\\\\b").test(t), "closed ID still present: "+id); const orphans=[...t.matchAll(/\\*\\*Blocked by\\*\\*: ([\\w-]+)/g)].map(m=>m[1]); for (const ref of orphans) a.ok(new RegExp("\\\\*\\\\*ID\\\\*\\\\*: "+ref+"\\\\b").test(t), "Blocked by references missing ID: "+ref);'
 anchor: |
   Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999,
   Ch. 17 (CI as the constraint enforcer — `tasks-lint` is the

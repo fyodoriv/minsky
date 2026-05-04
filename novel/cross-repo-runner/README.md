@@ -42,7 +42,7 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 4 | Task block missing rule-#9 fields (Hypothesis / Success / Pivot / Measurement / Anchor) | rule-#9 violation | `loud-crash-supervisor-restart` — runner exits 1 with all missing field names; `Rule #9 is iron — no exemption` message | covered by `experiment-synth.test.ts` (multi-missing assert test cases) |
 | 5 | Sidecar `experiment-store/cross-repo/` doesn't exist | filesystem | `graceful-degrade` — runner creates the directory recursively before append | manual smoke test verifies the runner creates the missing directory and appends the record |
 | 6 | Two `minsky-run` invocations race against the same task on the same host | concurrency | `graceful-degrade` — both runs produce the same dry-run plan; v0's append-only iteration-store records two `planned` lines instead of one (operator deduplicates manually); v1's live-spawn boundary will add a per-host file-lock | manual integration assert: parallel invocations both exit 0 with identical plans |
-| 7 | Spawned Claude Code modifies host tracked files outside the task scope | sandbox-leak (v1) | `circuit-break-and-notify` — runner re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` | (deferred — covered when `cross-repo-runner-aifn-840-integration-test` ships and the live-spawn path is exercised) |
+| 7 | Spawned Claude Code modifies host tracked files outside the task scope | sandbox-leak (v1) | `circuit-break-and-notify` — runner re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` | (deferred — covered when `cross-repo-runner-v1-live-spawn` ships and the live-spawn path is exercised) |
 
 ## Tests
 
