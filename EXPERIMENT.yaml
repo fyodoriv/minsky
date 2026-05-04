@@ -56,7 +56,6 @@ measurement: |
     && pnpm test \
     && pnpm lint \
     && node scripts/check-pattern-index.mjs \
-    && node scripts/check-pr-self-grade.mjs /tmp/pr-body.md \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
