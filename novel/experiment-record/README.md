@@ -1,0 +1,54 @@
+# `@minsky/experiment-record`
+
+Schema + parser + validator for `EXPERIMENT.yaml`, the per-PR pre-registration record carried by every non-trivial PR per [constitutional rule #9](../../vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes). The format and the parser are the *metric source* the rule-#9 automation layer (`ci-experiment-runner-v0`, `experiment-tracker-v0`) consumes.
+
+See [`spec.md`](./spec.md) for the format reference; [`schema.json`](./schema.json) for the JSON-Schema (draft-07) definition.
+
+## Pattern conformance
+
+Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index):
+
+- **Pre-registration record**: Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017. **Conformance: full.**
+- **DTO + JSON-Schema validation**: Fowler, *Patterns of Enterprise Application Architecture*, 2002. **Conformance: full.**
+- **Parser shape**: recursive-descent (Aho-Sethi-Ullman, *Compilers*, 1986) → schema check → semantic-rules pipeline. Same three-stage shape as [`@minsky/handoff-spec`](../handoff-spec/). **Conformance: full.**
+
+## Failure modes & chaos verification
+
+Per constitutional rule #7. See [`spec.md` § "Failure modes & chaos verification"](./spec.md#failure-modes--chaos-verification) for the table; every row has a paired fixture in `test/fixtures/` or a unit test in `src/parse.test.ts`.
+
+## Hypothesis-driven development (rule #9)
+
+- **Hypothesis**: A small declarative YAML schema (the five rule-#9 fields plus an experiment-id and replay windows) is sufficient to encode every PR's rule-#9 contract and produces a parser whose output the daily and weekly automation layers consume directly without further transformation.
+- **Success threshold**: `pnpm vitest run novel/experiment-record/src/parse.test.ts` exits 0 with ≥6 paired fixtures (3 valid + 3 invalid); `wc -l` of `src/parse.ts + src/cli.ts + schema.json` ≤ 300.
+- **Pivot threshold**: if YAML proves too rigid for the `measurement` field (shell commands with embedded YAML-unsafe characters), pivot to TOML or a fenced markdown block in `EXPERIMENT.md`. Reframe the parser; keep the schema intent.
+- **Measurement**: see "Success threshold" above.
+- **Literature anchor**: Munafò et al. 2017 (pre-registration); AsPredicted.org schema; Aho-Sethi-Ullman 1986; Gamma et al. 1994 (Adapter — schema is the interface).
+
+## Usage
+
+### Validate a file from the CLI
+
+```sh
+pnpm exec experiment-record validate path/to/EXPERIMENT.yaml
+# exits 0 on valid, 1 on validation errors, 2 on bad usage / I/O errors
+```
+
+### Parse from JS / TS
+
+```ts
+import { parse } from "@minsky/experiment-record";
+
+const result = parse(yamlString);
+if (result.ok) {
+  console.log(`experiment ${result.record.id}`);
+} else {
+  for (const err of result.errors) {
+    console.error(`${err.kind}${err.field ? ` (${err.field})` : ""}: ${err.message}`);
+  }
+}
+```
+
+## Follow-up tasks
+
+- **`ci-experiment-runner-v0`** — daily layer: per-PR CI gate that uses this parser to validate `EXPERIMENT.yaml`, then executes the `measurement` against merge-base + post-merge `main`.
+- **`experiment-tracker-v0`** — weekly/monthly layer: scheduled cron re-runs the measurement at each `replay_windows_days` value, emits `validated` / `regressed` / `inconclusive` verdicts.

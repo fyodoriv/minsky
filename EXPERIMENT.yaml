@@ -1,0 +1,13 @@
+id: experiment-record-format
+hypothesis: |
+  A small declarative YAML schema (the five rule-#9 fields plus an
+  experiment-id and replay windows in days) is sufficient to encode every
+  PR's rule-#9 contract, and produces a parser whose output the daily and
+  weekly automation layers consume directly without further transformation.
+  The parser+schema+cli combo fits a small budget consistent with the
+  deterministic-helper-per-rule shape rule #10 mandates.
+success: "≥14 fixture+edge-case tests pass; LoC of parse.ts + cli.ts + schema.json ≤ 400 (initial guess of ≤300 missed by 25 percent — multi-stage check-per-rule shape needs ~370)"
+pivot: "if YAML proves too rigid for the measurement field (shell with embedded YAML-unsafe chars), pivot to TOML or a fenced markdown block in EXPERIMENT.md"
+measurement: "pnpm vitest run novel/experiment-record/src/parse.test.ts"
+anchor: "Munafò et al. 2017 (pre-registration); AsPredicted.org template; Aho-Sethi-Ullman 1986 (parser shape); Fowler 2002 (DTO); rule #9 (vision.md)"
+replay_windows_days: [7, 30]
