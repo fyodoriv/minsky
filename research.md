@@ -272,6 +272,70 @@ export interface PromptOptimizer {
 - Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020, ch. 3 (offline-online divergence — the friction-3 hazard).
 - rule #1 (don't reinvent the wheel — DSPy was the existing-tool candidate; this section is the documented "why not"); rule #2 (every dep behind interface — the fallback interface is the operationalisation).
 
+## Native WatchOS app
+
+Resolves task `native-watchos-app`. The `WatchActions` row below currently names Apple Shortcuts as Minsky's Watch surface; this section evaluates *when* and *how* to escalate to a native WatchOS app, against `vision.md` § "Success criteria" row 6 (`wrist_dwell_seconds_per_day`). Story 005 (`user-stories/005-watch-three-numbers.md`) is the surface specification this section is parametric over.
+
+The framing is rule-#1-first: a native app is the *expensive* option; Apple Shortcuts is the cheap one. The job of this section is to pre-commit the threshold past which "cheap" stops being cheap *enough*, so the decision to go native is deterministic rather than vibes-driven.
+
+### Trigger condition
+
+Escalate to a native WatchOS app **only when** `wrist_dwell_seconds_per_day` exceeds **90 s/day** as a **7-day rolling average**, sustained across **two consecutive 7-day windows** (i.e., 14 consecutive days of >90 s/day average). Below this threshold the Shortcuts-based surface is meeting story 005's calm-tech invariant well enough; above it the surface (or the underlying system) is forcing the user to dwell on the Watch — exactly the failure mode the dwell metric is *inverted* to catch (`vision.md` § "Success criteria" row 6: pivot at >120 s/day for 14 d).
+
+The 90 s/day threshold sits between the success target (≤60 s/day) and the row-6 pivot threshold (>120 s/day) — a deliberate intermediate band. Below 60 s/day the cheap surface is fine; above 120 s/day the surface itself has failed and a redesign (not just a re-platform) is required; between those, a native app is the least-disruptive corrective step that preserves the three-number discipline.
+
+**Queryable as:** `count(http_get_total{path="/watch.json"}[7d]) * 2 > 630` over the OTEL Prometheus surface (one Shortcut HTTP fetch ≈ 2 s of dwell per the row-6 estimator constant; 90 s/day × 7 d = 630 s; the multiplier-2 yields the request-count floor of 316 hits/week). The same query shape appears in `vision.md` § "Success criteria" row 6's measurement cell.
+
+### Pivot conditions on the trigger itself
+
+Per task `native-watchos-app`'s rule-#9 block, the trigger threshold is itself adjustable on two well-defined signals:
+
+- **Lower to 75 s/day if** community boilerplate ships (e.g., a permissively-licensed `swift-package-watch-glance` template covering complications + App Intents) AND the wrist-dwell metric is borderline (sustained 75–90 s/day for 14 d). The "going native is materially cheaper than estimated" branch from the task brief.
+- **Raise to 120 s/day if** going native is materially more expensive than estimated — e.g., it requires Apple Developer Enterprise tier, paid-only entitlements, or background-refresh privileges that the solo-dev tier (one US$99/yr Developer Program seat) cannot justify. The "native is dramatically more expensive than estimated" branch.
+
+Either pivot is recorded as a quarterly-review entry against this section, not as a silent threshold change.
+
+### Scope sketch
+
+The native app inherits story 005's three-number discipline mechanically — anything else is feature creep that the rule-#1 framing forbids.
+
+- **One main watch face**, with **≤3 complications** wired to the same `/watch.json` endpoint that the Shortcut hits today. Each complication ≤1 metric. Mapping: complication 1 = tokens-remaining (color-coded), complication 2 = last-task-status (✓ / ✗ / ⏳ + truncated title), complication 3 = this-week's-constraint (≤2-word label). This mirrors story 005's payload shape exactly; the `ci-lint-watch-surface-cap` rule (TASKS.md P3) enforces the 3-field cap structurally, so the native app cannot drift past it without breaking CI.
+- **Tap-through to a single tokens-remaining detail view.** No multi-screen navigation; one `WKHostingController` over a `SwiftUI` view that re-fetches `/watch.json` and shows the same three values at a larger size. No charts, no history, no graph — those belong on the iPhone or laptop dashboard per story 005's "I almost never do, because the three numbers answer the question" framing.
+- **No interactive controls beyond pause/resume**, and even those stay in Shortcuts (the existing `pause-from-iphone` Shortcut already covers them — story 002). The native app is read-only-glance + Siri intent passthrough; control-plane mutations go through the existing surface.
+- **Apple Watch faces only.** No iOS companion app beyond the install vehicle (an empty `iOS app` target is required by Xcode for App Store / TestFlight delivery of the watch app, but ships an empty single-screen "Open the Watch" UI). No iPad / Mac variants.
+
+### Estimated effort
+
+**Target ≤2 weeks of solo-dev effort.** Break-down (calendar days, not story points; assumes one developer with prior Swift familiarity but no production WatchOS shipping experience):
+
+- **Day 1–2 — Project setup + signing.** Create Xcode WatchOS app target; sign with the existing Apple Developer Program seat (no new entitlements beyond the default `Network` + `WidgetKit` scopes); push a trivial "hello three numbers" build through TestFlight private distribution (≤25 internal testers — sufficient for solo-dev + family device pool).
+- **Day 3–7 — ComplicationKit / WidgetKit data flow.** Implement `WidgetKit` `TimelineProvider` that polls `/watch.json` over Tailscale at the existing endpoint; render three `WidgetFamily.accessoryCircular` / `accessoryRectangular` complications. Reuse the same JSON contract — no new server work. Cache the last-known-good payload locally per story 005's failure-mode #1.
+- **Day 8–10 — App Intents for Siri/Shortcuts hooks.** Expose the polled payload as an `AppIntent` so Siri ("Hey Siri, tokens remaining") and the existing Shortcuts library can read it. This preserves the iOS-side investment in story 002's pause Shortcut — Shortcuts can call into the app rather than going around it.
+- **Day 11–14 — Testing + private distribution.** Per-failure-mode integration tests against the story-005 chaos table (web app down → cached fallback; stale cache → red badge; concurrent fetches → debounced); TestFlight rollout to the personal device pool; observe `wrist_dwell_seconds_per_day` for one full 7-day window before retiring the Shortcuts-based surface.
+
+The **≤2 weeks ceiling is itself the pivot threshold** for the implementation task that *would* be filed once the trigger fires: if the build slips past 2 weeks of focused time (reasonable allowance for App Store review iterations excepted), the native-app approach is reconsidered against (a) a Wear OS port instead, (b) a richer Shortcuts surface with custom complication snippets, or (c) accepting the dwell metric as a structural problem with the underlying system that no surface can fix. The 2-week ceiling is *not* a vanity-effort estimate — it is the falsifiable horizon on the design's complexity budget.
+
+### Apple toolchain assumptions (primary sources)
+
+- **Xcode + Swift toolchain.** Xcode 16+ on macOS 14+; native WatchOS app development is macOS-only per Apple's developer documentation (<https://developer.apple.com/documentation/watchos-apps>). Linux/Windows hosts cannot build watchOS apps — a hard blocker that is a non-issue today (development host is macOS) but worth recording.
+- **App Store Connect / TestFlight.** Private distribution via TestFlight covers ≤100 external + ≤10,000 internal testers, refreshed every 90 days per <https://developer.apple.com/testflight/>. Solo-dev needs are well under this ceiling. App Store public distribution is *not* required and is explicitly out of scope.
+- **Signing certificates.** Standard Apple Developer Program membership (US$99/yr) provides the WatchOS distribution certificate; no Enterprise tier required for TestFlight private distribution. If a future capability (e.g., custom background-refresh windows) demands Enterprise, the Pivot-to-120 s/day clause above fires.
+- **watchOS 10+ APIs.** `WidgetKit` for at-glance reads (<https://developer.apple.com/documentation/widgetkit>), `App Intents` for Siri / Shortcuts integration that reuses the existing Shortcuts plumbing (<https://developer.apple.com/documentation/appintents>). Older `ClockKit` complications API is deprecated; new development uses `WidgetKit` per Apple's WWDC 2022 deprecation note in the WidgetKit docs.
+
+### Don't implement until the trigger fires
+
+This section is the **specification**, not the **implementation gate**. No `native-watchos-app-impl` task is filed today; one will be filed at the moment the OTEL query above returns true for two consecutive 7-day windows. The discipline is rule-#9's preparation pattern: pre-register the threshold before the result is observed, so that the decision to invest two weeks of native-app development is falsifiable rather than vibes-driven.
+
+The dependency-table row below (`Watch actions — WatchActions`) keeps Apple Shortcuts as the *current* tool; the row will move only when the implementation task lands. The "Open questions" list below is correspondingly updated to mark the Watch-surface question as conditionally resolved (cheap-path adopted; expensive-path pre-specified).
+
+**Anchors:**
+
+- Card, Mackinlay, Shneiderman, *Readings in Information Visualization*, Morgan Kaufmann, 1999, Ch. 1 (glanceable / ambient information display — the Watch surface as a calm-technology read-out; rule #1 explicitly cites this anchor for the row-12 Watch surface).
+- Weiser & Brown, "Designing Calm Technology", *PowerGrid Journal* 1995 (the inverted-dwell discipline: more attention to the read-out is a sign the surface or the system is failing).
+- Apple Developer Documentation: WatchOS Apps (<https://developer.apple.com/documentation/watchos-apps>); WidgetKit (<https://developer.apple.com/documentation/widgetkit>); App Intents (<https://developer.apple.com/documentation/appintents>); TestFlight (<https://developer.apple.com/testflight/>) — primary technical source for the toolchain assumptions above.
+- rule #1 (`vision.md` § 1 — don't reinvent the wheel: Apple Shortcuts first, native app only on a measured trigger; this section is the documented "when not").
+- rule #9 (`vision.md` § 9 — pre-registered hypothesis-driven development: the trigger threshold and its pivot conditions are committed before the metric is observed).
+
 ## How to read this file
 
 Each active dependency follows the same shape:
@@ -482,7 +546,7 @@ Each active dependency follows the same shape:
 
 ## Open questions for next research pass
 
-- Apple Watch surface — does Shortcuts + ntfy suffice long-term, or do we eventually need a native WatchOS app?
+- ~~Apple Watch surface — does Shortcuts + ntfy suffice long-term, or do we eventually need a native WatchOS app?~~ Resolved 2026-05-03; see § "Native WatchOS app". Cheap path (Shortcuts) stays current; expensive path (native app) is pre-specified with a metric-bound trigger (90 s/day wrist-dwell sustained 14 d) and a ≤2-week effort ceiling. No implementation task filed until the trigger fires.
 - ~~DSPy idiom fit with Claude Code's prompt model — needs first practical attempt~~ Resolved 2026-05-03; see § "DSPy fit". Recommendation: reject; ship fallback `PromptOptimizer` interface that calls Anthropic API directly.
 - ~~Lighter OTEL backend — Loki+Tempo+Prometheus+Grafana is heavy for single-dev installs; SQLite-backed alternative?~~ Resolved 2026-05-03; see § "Lighter OTEL backend".
 - Cross-language equivalent of tasks.md — can the spec be ported to Python/Rust ecosystems? (taskmd-driangle covers some of this with directory-of-files)
