@@ -2,32 +2,38 @@
 # Bash bootstrap for `minsky-tick-loop.service` (systemd) and the
 # `com.minsky.tick-loop` launchd LaunchAgent on macOS.
 #
-# v0 (sub-task `tick-loop-daemon-v0`): execs into `node bin/tick-loop.mjs
-# --dry-run …` so the supervisor sees the node PID directly. Real
-# subprocess spawning (`child_process.spawn('claude', …)`) is deferred to
-# the follow-up `tick-loop-daemon-real-spawn`; v0 only wires the
-# orchestrator + CLI + bash bootstrap + tests via the dry-run path.
+# Sub-task 3/3 of `tick-loop-daemon-real-spawn` (`tick-loop-daemon-real-spawn-flip`):
+# the production default is now `ProcessSpawnStrategy` — a real
+# `claude --resume` subprocess per iteration. The `--dry-run` argv flag has
+# been retired; dry-run is opt-in via the `MINSKY_TICK_DRY_RUN=1` env var
+# (set in the supervisor unit file's `Environment=` line during the safe
+# rollout window; an operator drops that line to flip to real spawn).
 #
 # Pattern: thin runner / process-launcher script — the I/O boundary that
 # binds the supervisor to the pure `runDaemon` constructor in
 # `novel/tick-loop/dist/daemon.js`. Anchors: Martin, *Clean Architecture*,
 # 2017 (I/O at the edge); rule #2 (every dep behind interface — the
-# `MockAnthropicClient` is the seam, the bootstrap doesn't reach
-# vendor SDKs); Beck 1999 (CI as the constraint enforcer).
+# `SpawnStrategy` is the seam, the bootstrap doesn't reach vendor SDKs);
+# Beck 1999 (CI as the constraint enforcer); Beyer SRE 2016 Ch. 17
+# (operator escape hatch — `MINSKY_TICK_DRY_RUN=1` is the env-var lever).
 #
-# Environment:
+# Environment (control surface):
 #   MINSKY_HOME                       (required by systemd unit; defaults
 #                                     to the repo checkout in launchd)
+#   MINSKY_TICK_DRY_RUN=1|true        (optional) flip from real spawn to
+#                                     synthetic `DryRunSpawnStrategy`. Unset =
+#                                     full real spawn (production default).
 #   MINSKY_TICK_INTERVAL_MS           (optional, default 300000 / 5 min)
 #   MINSKY_TICK_MAX_ITERATIONS        (optional, default unbounded)
 #
 # Args (forwarded to the CLI):
-#   --dry-run                         v0 mandatory; daemon throws otherwise
 #   --max-iterations=N                cap iteration count
 #   --tick-interval-ms=MS             override the 5-min cadence
+#   --tasks-md=PATH / --paused-sentinel=PATH (overrides defaults)
 #
 # Run as:
-#   bash distribution/systemd/run-tick-loop.sh --dry-run --max-iterations=4
+#   bash distribution/systemd/run-tick-loop.sh --max-iterations=4
+#   MINSKY_TICK_DRY_RUN=1 bash distribution/systemd/run-tick-loop.sh ...
 #
 # `exec node` so the supervisor (systemd-user / launchd) sees the node
 # PID directly and a SIGTERM reaches it without a shell-wrapper detour.
@@ -48,6 +54,6 @@ if [[ -n "${MINSKY_TICK_MAX_ITERATIONS:-}" ]]; then
   EXTRA_ARGS+=("--max-iterations=${MINSKY_TICK_MAX_ITERATIONS}")
 fi
 
-# v0 ALWAYS forwards `--dry-run`. The follow-up `tick-loop-daemon-real-spawn`
-# replaces this with a flag-driven gate.
-exec node "${MINSKY_HOME}/novel/tick-loop/bin/tick-loop.mjs" --dry-run "${EXTRA_ARGS[@]}" "$@"
+# `MINSKY_TICK_DRY_RUN` (read by the CLI directly) is the env-var control
+# surface for dry-run; unset = real spawn (production default).
+exec node "${MINSKY_HOME}/novel/tick-loop/bin/tick-loop.mjs" "${EXTRA_ARGS[@]}" "$@"
