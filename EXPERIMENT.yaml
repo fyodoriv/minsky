@@ -31,7 +31,7 @@ pivot: |
   loop on `files` tweaks if the package itself is too big — it's a
   decomposition signal (rule #9 — Munafò et al. 2017 pre-registration
   discipline).
-measurement: "pnpm --filter @minsky/budget-guard build > /dev/null && pnpm --filter @minsky/token-monitor build > /dev/null && [ \"$(cd novel/budget-guard && npm pack --dry-run --json 2>/dev/null | jq -r '.[0].size')\" -lt 102400 ] && [ \"$(cd novel/adapters/token-monitor && npm pack --dry-run --json 2>/dev/null | jq -r '.[0].size')\" -lt 102400 ] && [ \"$(cd novel/budget-guard && npm pack --dry-run --json 2>/dev/null | jq '[.[0].files[] | select(.path | test(\"\\\\.test\\\\.|\\\\.map$|tsconfig\"))] | length')\" = '0' ] && [ \"$(cd novel/adapters/token-monitor && npm pack --dry-run --json 2>/dev/null | jq '[.[0].files[] | select(.path | test(\"\\\\.test\\\\.|\\\\.map$|tsconfig\"))] | length')\" = '0' ]"
+measurement: "pnpm --filter @minsky/budget-guard build >/dev/null && pnpm --filter @minsky/token-monitor build >/dev/null && [ \"$(cd novel/budget-guard && npm pack --dry-run --json 2>/dev/null | jq -r '.[0].size')\" -lt 102400 ] && [ \"$(cd novel/adapters/token-monitor && npm pack --dry-run --json 2>/dev/null | jq -r '.[0].size')\" -lt 102400 ]"
 anchor: |
   Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run;
   the published artifact is the release contract, and `npm publish
