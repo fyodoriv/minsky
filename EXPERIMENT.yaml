@@ -1,67 +1,50 @@
-id: experiment-tracker-knowledge-ingestion-2026-05-03
+id: watch-shortcuts-tailscale-host-substitution-2026-05-04
 hypothesis: |
-  Wiring `.github/workflows/experiment-tracker.yml` (the weekly/monthly cron
-  shipped in PR #38) to invoke `node novel/mape-k-loop/bin/mape-k-orchestrator.mjs
-  --ingest-mode --experiment-store=experiment-store --tmp-dir=tmp` after the
-  replay step, then opening a DRAFT pull request via `peter-evans/create-pull-request@v6`
-  for any orchestrator-side writes (`novel/mape-k-loop/constraints.md` append +
-  `tmp/proposed-rule-9-amendment.md` on calibration drift), closes the rule-#9
-  quarterly automation loop without changing the orchestrator's contract or
-  auto-merging any rule-#9 amendments. The orchestrator's `--ingest-mode` was
-  already shipped in PR #90; this PR is the WIRING — connecting the workflow's
-  verdict output to the orchestrator's ingest input. Drafts NEVER auto-merge —
-  the operator review gate is the load-bearing safety property (Beyer SRE 2016
-  Ch. 17 — operator escape hatch).
+  The Shortcut runbook in `distribution/shortcuts/README.md` currently
+  asks the operator to substitute `<tailscale-host>` into each Shortcut's
+  URL field by hand (5 substitutions × 5 Shortcuts = 25 manual edits).
+  Apple Shortcuts' "Ask Each Time" / "Get Variable" actions can
+  parameterise the host once at first run and remember it, dropping
+  operator overhead from 25 substitutions to 1 input + 0-touch reuse.
+  This PR ships a 6th `setup-host.shortcut.json` whose only purpose is
+  "Ask for input" → "Set Variable: host", and rewires the 5 polling
+  Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week,
+  pause, resume) to read that variable at run time via Get-Variable +
+  Combine-Text instead of carrying a literal Tailscale host. A smoke-test
+  assertion enforces that no `*.shortcut.json` may contain a literal
+  Tailscale host in any URL field — it must be either the
+  `<tailscale-host>` placeholder OR a Get-Variable reference, so the
+  parameterisation cannot silently regress.
 success: |
-  - `pnpm typecheck` exits 0.
-  - `pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0 (today: 8 cases pass — the 6 shipped in PR #90 plus 2 new workflow-shaped fixtures: one for the calibration-drift positive path that produces a research-amendment proposal, one for the well-calibrated CI-quiet path that suppresses it).
-  - `pnpm test` and `pnpm lint` both exit 0.
-  - The 14+ deterministic linters all pass with `--diff-base=origin/main`.
-  - `experiment-tracker-knowledge-ingestion` task block removed from TASKS.md in this PR.
-  - `.github/workflows/experiment-tracker.yml` carries the `mape-k orchestrator (Knowledge phase)` step + the draft-PR step; permissions widened from `pull-requests: read` → `pull-requests: write` so `peter-evans/create-pull-request@v6` can open draft PRs.
+  - `pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0 (today: 16 cases; this PR brings it to ≥17 — 20 actual, +1 setup-host coverage, +1 no-literal-host assertion, +2 setup-host JSON-validity / schema-conformance checks).
+  - 0 literal Tailscale hosts (`*.tailscale.ts.net`, `*.tail-scale.ts.net`) in any `*.shortcut.json` URL field — enforced by the new smoke-test assertion.
+  - `setup-host.shortcut.json` ships and is documented in the runbook (`distribution/shortcuts/README.md` step 0); the 5 polling Shortcuts' runbook entries (steps A.2 and B.1) document the Get-Variable + Combine-Text prelude.
+  - `watch-shortcuts-tailscale-host-substitution` task block removed from TASKS.md in this PR.
 pivot: |
-  If the calibration-drift heuristic produces ≥3 false-positive amendment
-  PRs in the first month after merge, raise the
-  `DEFAULT_CALIBRATION_DRIFT_THRESHOLD` from 0.5 → 0.7 in
-  `novel/mape-k-loop/src/knowledge.ts` (single-constant pivot, fully
-  reversible) OR drop the draft-PR step entirely from this workflow and
-  let the orchestrator emit only a logged proposal under `tmp/`. Both are
-  reversible and pre-registered here (Munafò et al. 2017).
+  If the "Ask Each Time" / Variable actions don't compose across
+  separate Shortcuts (each Shortcut has its own scope on real hardware),
+  retire this task — the operator pays the 1-time substitution cost
+  once and the runbook stays as-is. The cap is bounded (5 substitutions,
+  5 minutes), so the cost-of-status-quo is not high. The fallback is
+  documented in `distribution/shortcuts/README.md` step 0 (Risk
+  section): hand-edit each polling Shortcut's "Get Contents of URL"
+  action to use a literal host, file a follow-up to retire the variable
+  approach.
 measurement: |
-  pnpm install --no-frozen-lockfile \
-    && pnpm typecheck \
-    && pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json \
-       | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' \
-    && pnpm test \
-    && pnpm lint \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
-    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
-    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
-    && node scripts/check-cadence-pivot-threshold.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs \
-    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-budget-cap.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-constraints-md-size.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-tick-iteration-backstop.mjs --diff-base=origin/main \
-    && node scripts/check-mape-k-watchdog-cadence.mjs --diff-base=origin/main \
-    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+  pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'
 anchor: |
-  Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
-  *IEEE Computer* 36(1) 2003 (MAPE-K — the Knowledge phase closes the loop;
-  this PR wires the workflow that feeds it); Munafò et al., "A Manifesto for
-  Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (rule-#9
-  calibration as a pre-registered audit — the orchestrator's MAE check is
-  this manifesto operationalised); Beyer, B., Jones, C., Petoff, J.,
-  Murphy, N. R. (eds.), *Site Reliability Engineering*, O'Reilly 2016,
-  Ch. 17 (operator escape hatch — the draft PR NEVER auto-merges; the
-  load-bearing safety property is the human review gate); Helland, P.,
-  "Life beyond Distributed Transactions", *CIDR* 2007 (the constraints.md
-  append is the immutable audit trail every tick adds to).
-replay_windows_days: [7, 30, 90]
+  Norman, *The Design of Everyday Things*, 1988 (affordance — make the
+  parameterisation visible); Card, S. K., Mackinlay, J., Shneiderman, B.,
+  *Readings in Information Visualization*, Morgan Kaufmann, 1999 (calm
+  tech — bounded operator cognitive load); Munafò et al., "A Manifesto
+  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (pre-registered acceptance gate — the smoke-test assertion is the
+  literal-host regression-prevention contract committed before merge).
+
+  Risk (per the parent task block, copied here for the audit trail):
+  Apple Shortcuts variables don't survive Shortcut deletion / reinstall;
+  the "Ask Each Time" UX may prompt every run if the variable doesn't
+  persist. Mitigation: test on a real device first; if persistence is
+  lost, fall back to the 25-substitution status quo and retire the task.
+  Fallback flow is documented in `distribution/shortcuts/README.md`
+  step 0.

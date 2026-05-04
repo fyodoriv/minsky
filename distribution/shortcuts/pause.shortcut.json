@@ -5,7 +5,13 @@
   "shortcut_kind": "post-control",
   "endpoint": {
     "method": "POST",
-    "url": "http://minsky.tail-scale.ts.net:8080/control",
+    "url": "http://<tailscale-host>:8080/control",
+    "url_assembly": {
+      "action": "Combine Text",
+      "parts": ["http://", "${host}", ":8080/control"],
+      "host_variable": "host",
+      "host_set_by": "setup-host.shortcut.json"
+    },
     "tailscale_host_var": "MINSKY_TAILSCALE_HOST",
     "port": 8080,
     "path": "/control",
