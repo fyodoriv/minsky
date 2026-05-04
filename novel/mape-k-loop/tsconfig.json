@@ -6,5 +6,9 @@
     "composite": true
   },
   "include": ["src"],
-  "references": [{ "path": "../adapters/types" }, { "path": "../adapters/observability" }]
+  "references": [
+    { "path": "../adapters/types" },
+    { "path": "../adapters/observability" },
+    { "path": "../adapters/prompt-optimizer" }
+  ]
 }

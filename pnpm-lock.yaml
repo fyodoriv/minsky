@@ -113,6 +113,9 @@ importers:
       '@minsky/observability':
         specifier: workspace:*
         version: link:../adapters/observability
+      '@minsky/prompt-optimizer':
+        specifier: workspace:*
+        version: link:../adapters/prompt-optimizer
 
 packages:
 
