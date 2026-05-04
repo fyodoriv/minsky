@@ -1,68 +1,55 @@
-id: wrist-dwell-named-constant-and-followups
+id: 4-dormant-ci-lints-tick-mape-k-cadence
 hypothesis: |
-  `vision.md` § "Success criteria" row 6 expresses the wrist-dwell formula
-  as `count(http_get_total{path="/watch.json"}[1d]) *
-  estimated_dwell_seconds_per_request` (constant ≈ 2 s), but
-  `novel/dashboard-web/src/metrics.ts:66` inlines the literal `* 2`. This
-  is the same drift class PR #67 fixed for task-throughput (vision.md row
-  10, `/ 30`). Replacing the literal with the named constant string in
-  `SUCCESS_METRICS[wrist-dwell].formula` brings metrics.ts back into
-  vision.md alignment without expanding the `SuccessMetric` interface
-  (option (a) for v0 simplicity; option (b) — adding the constant as a
-  separate property — is deferred to the follow-up
-  `dashboard-web-task-throughput-formula-drift`'s Pivot clause once a
-  second formula needs the same treatment).
-
-  Independently, ARCHITECTURE.md L215 ("5s → 30s → 5min" tick-loop
-  backoff), L218 (12 h MAPE-K watchdog cadence + 1000-tick backstop), and
-  research.md L92 (8 % MAPE-K cadence-pivot threshold) carry prose-only
-  numeric constants whose drift would currently surface only via human
-  re-reading. PR #59's resilience scout flagged the class; this PR files
-  4 P3 follow-up tasks (`ci-lint-tick-loop-backoff-schedule`,
-  `ci-lint-mape-k-tick-iteration-backstop`,
-  `ci-lint-mape-k-watchdog-cadence`, `ci-lint-cadence-pivot-threshold`),
-  each in the rule-#9 format used by `ci-lint-mape-k-token-budget-cap`
-  (PR #59) and `ci-lint-watch-surface-cap` (already in TASKS.md), each
-  dormant-by-default until the corresponding `config/<file>.json`
-  artifact lands. Filing the follow-ups closes the named-constant gap as
-  a tracked work-item set rather than as silent prose drift.
+  ARCHITECTURE.md L215 (`5s → 30s → 5min` tick-loop backoff), L218 (12 h
+  MAPE-K watchdog cadence + 1000-tick backstop), and research.md L92 (8 %
+  MAPE-K cadence-pivot threshold) carry prose-only numeric constants
+  whose drift currently surfaces only via human re-reading. Filing 4
+  dormant CI lints — same shape as PR #59
+  (`ci-lint-mape-k-token-budget-cap`) and PR #60
+  (`ci-lint-mape-k-constraints-md-size`) — extends rule-#10 ratchet
+  coverage to this prose-anchor class. Each lint exits 0 today (configs
+  missing — dormant by rule #7 graceful degrade) and activates the
+  moment its `config/<file>.json` artifact lands.
 success: |
-  `[ "$(grep -c estimated_dwell_seconds_per_request
-  novel/dashboard-web/src/metrics.ts)" -ge 1 ]` exits 0 (vision.md row 6
-  named-constant string is present in metrics.ts);
-  `[ "$(grep -cE '\*\*ID\*\*:
-  ci-lint-(tick-loop-backoff-schedule|mape-k-tick-iteration-backstop|mape-k-watchdog-cadence|cadence-pivot-threshold)'
-  TASKS.md)" -ge 4 ]` exits 0 (all 4 follow-up task blocks present with
-  the canonical `**ID**:` field); `pnpm typecheck && pnpm vitest run
-  novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e
-  '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0 (the new
-  wrist-dwell named-constant assertion passes alongside the existing 3);
-  `npx @tasks-md/lint TASKS.md` exits 0 (the 4 new P3 blocks satisfy the
-  tasks.md schema); `pnpm exec markdownlint-cli2 "**/*.md"
-  "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"` exits 0.
+  ≥16 tests pass (numPassedTests ≥ 16) and 0 tests fail across the 4
+  paired test files; `pnpm exec vitest run
+  scripts/check-tick-loop-backoff-schedule.test.mjs
+  scripts/check-mape-k-tick-iteration-backstop.test.mjs
+  scripts/check-mape-k-watchdog-cadence.test.mjs
+  scripts/check-cadence-pivot-threshold.test.mjs --reporter=json
+  | jq -e '.numPassedTests >= 16 and .numFailedTests == 0'`
+  exits 0; all 4 lint CLIs exit 0 against the current state (configs
+  missing — dormant); all 4 lints wired into `.github/workflows/ci.yml`
+  as separate jobs and into the `ci` gate's `needs:` + bash gate-loop.
 pivot: |
-  If any of the 4 prose anchors moves before its dormant linter ships
-  (e.g., the `5s → 30s → 5min` ladder is replaced by exponential
-  backoff, or the 12 h watchdog cadence is replaced by an adaptive
-  formula after `mape-k-loop`'s monthly self-calibration extends T to
-  18 h per ARCHITECTURE L218), retire the corresponding follow-up task
-  and write a new one against the replacement anchor — exactly the
-  Pivot clause each task block carries. If option (a) for the
-  wrist-dwell fix proves insufficient because a second formula develops
-  the same drift, escalate to option (b) (add the constant as a
-  separate property on `SuccessMetric`) per
-  `dashboard-web-task-throughput-formula-drift`'s standing Pivot
-  clause.
+  If any of the 4 prose anchors moves before its corresponding config
+  artifact lands (e.g., the `5s → 30s → 5min` ladder is replaced by
+  exponential backoff, or the 12 h watchdog cadence is replaced by an
+  adaptive formula after `mape-k-loop`'s monthly self-calibration
+  extends T to 18 h per ARCHITECTURE L218, or the 8 % cadence-pivot
+  threshold is replaced by a different overshoot envelope in
+  research.md), retire that specific lint and write a new one against
+  the replacement anchor — exactly the per-lint Pivot clause each
+  script header carries. The retire-the-lint shape is fork-with-
+  reissue per Helland 2007 (immutable log — derived data through
+  reissue, not mutation), the same precedent established by
+  `check-skill-rule-cap.mjs`'s retired-Skill terminal state.
 measurement: |
-  [ "$(grep -c estimated_dwell_seconds_per_request novel/dashboard-web/src/metrics.ts)" -ge 1 ] && [ "$(grep -cE '\*\*ID\*\*: ci-lint-(tick-loop-backoff-schedule|mape-k-tick-iteration-backstop|mape-k-watchdog-cadence|cadence-pivot-threshold)' TASKS.md)" -ge 4 ] && pnpm typecheck && pnpm vitest run novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'
+  pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs scripts/check-mape-k-tick-iteration-backstop.test.mjs scripts/check-mape-k-watchdog-cadence.test.mjs scripts/check-cadence-pivot-threshold.test.mjs --reporter=json | jq -e '.numPassedTests >= 16 and .numFailedTests == 0'
 anchor: |
-  rule #4 (vision.md § 4 — every constant in source, never inlined as a
-  literal where the spec gives it a name); rule #10 (vision.md § 10 —
-  deterministic enforcement; the 4 dormant linters extend rule #10's
-  ratchet to the prose-only constant class once the config artifacts
-  land); rule #5 (vision.md § 5 — glossary discipline; the named
-  constant `estimated_dwell_seconds_per_request` is the vocabulary the
-  formula points to); Beyer et al., *Site Reliability Engineering*,
-  O'Reilly 2016 (error-budget threshold discipline as the design pattern
-  the 4 follow-ups instantiate).
+  rule #10 (vision.md § 10 — deterministic enforcement; ratchet rule:
+  every prose-only invariant in ARCHITECTURE.md / vision.md /
+  research.md gets a deterministic linter as soon as the artefact it
+  guards becomes machine-readable); ARCHITECTURE.md L215 (tick-loop
+  backoff prose anchor); ARCHITECTURE.md L218 (1000-tick backstop +
+  12 h watchdog prose anchors); research.md L92 (8 % cadence-pivot
+  threshold prose anchor); Beyer, Jones, Petoff, Murphy (eds.), *Site
+  Reliability Engineering*, O'Reilly 2016, Ch. 3 (error-budget
+  enforcement — exceed-the-budget triggers a mechanical response, not
+  a discussion); Armstrong, *Programming Erlang*, Pragmatic Bookshelf
+  2007 (let-it-crash + supervised restart with backoff); Liu,
+  *Real-Time Systems*, Prentice Hall 2000, § 6.4 (activity-coupled
+  sampling bound); Ries, *The Lean Startup*, Crown Business 2011
+  (pivot-or-persevere — pivot threshold as the falsifiable
+  abandon-the-approach line).
 replay_windows_days: [7, 30]
