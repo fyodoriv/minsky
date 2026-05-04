@@ -79,3 +79,34 @@ const flaky = new TestFakeMockAnthropic({ failureMode: "http-5xx" });
 const result = await tick({ taskId: "x", prompt: "y", client: flaky });
 // result.status === 'failed'
 ```
+
+## Daemon (v0, dry-run only)
+
+`runDaemon(opts)` (in `src/daemon.ts`) is the production daemon orchestrator that the supervisor (systemd / launchd) actually supervises. v0 ships **dry-run only** — passing `dryRun: false` throws. Real subprocess spawning (`child_process.spawn('claude', …)`) is deferred to the follow-up `tick-loop-daemon-real-spawn` per the parent task's pre-registered scope guard.
+
+The bash bootstrap `distribution/systemd/run-tick-loop.sh` `exec`s into `node novel/tick-loop/bin/tick-loop.mjs --dry-run …` so the OS supervisor sees the node PID directly. The CLI is the I/O boundary; `runDaemon` itself is pure given the injected seams (`tasksMdReader`, `pausedSentinelReader`, `budgetGuard`, `mockClient`, `now`, `sleep`, `emit`).
+
+Run a 4-iteration dry-run:
+
+```sh
+bash distribution/systemd/run-tick-loop.sh --max-iterations=4 --tick-interval-ms=10
+```
+
+Architecture:
+
+- `runDaemon` — the I/O orchestrator. Delegates to `runOneIteration` (PAUSED check → TASKS.md read → budget check → pick) and `runClaimedIteration` (claim → dry-run spawn → complete) so each step is independently testable and the cognitive-complexity cap holds (rule #6, biome ≤10).
+- `pickTask` — pure parser; returns the first unblocked unclaimed P0/P1 task ID from a TASKS.md source string.
+- `claim` — pure helper that returns the lease shape `{ taskId, leasedBy: '@minsky-tick-loop' }`. v0 is in-memory only; persistence to TASKS.md is the documented follow-up.
+- `spawnTickDryRun` — the dry-run spawn step that calls the existing `tick(...)` with the injected `MockAnthropicClient`. v0's only spawn path.
+
+### Daemon failure modes
+
+The daemon extends the parent table above with three v0 rows:
+
+| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|---|
+| 6 | `state/PAUSED` sentinel present | operator-pause (operator escape hatch — Beyer SRE 2016 Ch. 17) | iteration short-circuits with `status: 'paused'`; loop continues so resume is automatic when sentinel disappears | `honors state/PAUSED sentinel within 1 iteration` test in `novel/tick-loop/src/daemon.test.ts` |
+| 7 | TASKS.md missing (ENOENT) | resource-absent (file-not-found) | one `status: 'missing-tasks-md'` iteration, then loop exits with `stoppedReason: 'missing-tasks-md'`; rule-6: handled-locally — graceful-exit at the read boundary; other read errors propagate up to the supervisor | `graceful exit on missing TASKS.md (ENOENT)` test in `novel/tick-loop/src/daemon.test.ts` |
+| 8 | Budget-guard circuit-break (`action: 'circuit-break-and-notify'`) | error-budget-exhaustion (Beyer SRE 2016 Ch. 3) | iteration short-circuits with `status: 'budget-paused'` and `reason` containing the budget-guard's diagnostic; loop continues so the daemon resumes when the 5h window rolls over | `budget-guard circuit-break skips iteration with logged advisory` test in `novel/tick-loop/src/daemon.test.ts` |
+
+Each row carries a deterministic vitest assertion in `novel/tick-loop/src/daemon.test.ts`. The 13 paired daemon tests run in <1 s on any CI runner.
