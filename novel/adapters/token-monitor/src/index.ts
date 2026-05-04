@@ -10,9 +10,10 @@
  *                            Secure Computing", *IEEE TDSC* 2004 (instantaneous
  *                            view of resource state). Conformance: full.
  *
- * v0 ships the interface + an in-memory `StubTokenMonitor` for tests. The
- * real Strategy implementation against Maciek's `claude-monitor` Python tool
- * is tracked as task `budget-guard-maciek-impl` (P1 follow-up).
+ * v0 ships the interface + an in-memory `StubTokenMonitor` for tests + the
+ * real {@link MaciekTokenMonitor} Strategy at `./maciek.ts` that derives
+ * the snapshot directly from `~/.claude/projects/<cwd>/<session>.jsonl`
+ * (the same data Maciek's `claude-monitor` reads).
  *
  * Anchors:
  *   - "Watchdog" terminology — hardware / OS watchdog timer literature.
@@ -60,11 +61,18 @@ export class StubTokenMonitor implements TokenMonitor {
     this.current = { ...defaultSnapshot(), ...initial };
   }
 
-  /** Programs the next snapshot. */
+  /**
+   * Programs the next snapshot.
+   *
+   * @otel-exempt test double — production callers never invoke this; spans here would be noise
+   */
   set(next: Partial<TokenSnapshot>): void {
     this.current = { ...this.current, ...next };
   }
 
+  /**
+   * @otel-exempt test double — returns programmed value with no I/O; covered by the caller's span
+   */
   async snapshot(): Promise<TokenSnapshot> {
     return this.current;
   }
@@ -85,6 +93,8 @@ function defaultSnapshot(): TokenSnapshot {
  * The threshold logic in `@minsky/budget-guard` uses this against the
  * configurable 70 % / 85 % cut-offs documented in `ARCHITECTURE.md` §
  * "Token economy".
+ *
+ * @otel-exempt pure arithmetic helper; spans here would dominate the work; caller's span suffices
  */
 export function consumedFraction(s: TokenSnapshot): number {
   if (s.windowSizeTokens <= 0) return 0;
@@ -94,3 +104,10 @@ export function consumedFraction(s: TokenSnapshot): number {
   if (fraction > 1) return 1;
   return fraction;
 }
+
+export {
+  MaciekTokenMonitor,
+  PLAN_CAPS,
+  type MaciekTokenMonitorOpts,
+  type PlanName,
+} from "./maciek.js";

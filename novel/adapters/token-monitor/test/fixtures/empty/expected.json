@@ -1,0 +1,10 @@
+{
+  "now": "2026-05-04T12:00:00.000Z",
+  "plan": "max5",
+  "tokensUsedInActiveBlock": 0,
+  "tokensRemainingInWindow": 88000,
+  "windowSizeTokens": 88000,
+  "secondsUntilWindowReset": 18000,
+  "maciekRealtimeReportedRemaining": 88000,
+  "note": "no active block — return full plan cap as remaining"
+}
