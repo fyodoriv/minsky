@@ -44,7 +44,7 @@ measurement: |
     && node scripts/check-pattern-index.mjs --diff-base=origin/main \
     && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
     && node scripts/check-cadence-pivot-threshold.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs --diff-base=origin/main \
+    && node scripts/check-pivot-success-margin.mjs \
     && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
     && node scripts/check-mape-k-budget-cap.mjs --diff-base=origin/main \
     && node scripts/check-mape-k-constraints-md-size.mjs --diff-base=origin/main \
