@@ -15,20 +15,16 @@
 
 const KIND_FETCH = "fetch-and-show";
 const KIND_POST = "post-control";
+const KIND_SETUP = "setup-variable";
 
 const EXPECTED_PORT = 8080;
 const EXPECTED_WATCH_PATH = "/watch.json";
 const EXPECTED_CONTROL_PATH = "/control";
 
-const TOP_LEVEL_REQUIRED = [
-  "name",
-  "description",
-  "shortcut_kind",
-  "endpoint",
-  "display",
-  "anchor",
-  "build_runbook",
-];
+const TOP_LEVEL_REQUIRED = ["name", "description", "shortcut_kind", "anchor", "build_runbook"];
+
+const HTTP_KIND_REQUIRED = ["endpoint", "display"];
+const SETUP_KIND_REQUIRED = ["prompt", "set_variable"];
 
 /**
  * @typedef {object} ValidatorContext
@@ -51,6 +47,11 @@ export function validateShortcut(filename, parsed, ctx) {
   /** @type {Record<string, unknown>} */
   const cfg = /** @type {Record<string, unknown>} */ (parsed);
   const violations = checkTopLevelRequired(filename, cfg);
+  if (cfg.shortcut_kind === KIND_SETUP) {
+    pushAll(violations, checkSetupKind(filename, cfg));
+    return violations;
+  }
+  pushAll(violations, checkRequiredKeys(filename, cfg, HTTP_KIND_REQUIRED));
   const ep = /** @type {Record<string, unknown> | undefined} */ (cfg.endpoint);
   if (ep === undefined || typeof ep !== "object") {
     violations.push(`${filename}: endpoint must be an object`);
@@ -62,9 +63,81 @@ export function validateShortcut(filename, parsed, ctx) {
   } else if (cfg.shortcut_kind === KIND_POST) {
     pushAll(violations, checkPostKind(filename, ep, cfg));
   } else {
-    violations.push(`${filename}: shortcut_kind must be "${KIND_FETCH}" or "${KIND_POST}"`);
+    violations.push(
+      `${filename}: shortcut_kind must be "${KIND_FETCH}", "${KIND_POST}", or "${KIND_SETUP}"`,
+    );
   }
   return violations;
+}
+
+/**
+ * @param {string} filename
+ * @param {Record<string, unknown>} cfg
+ * @param {readonly string[]} keys
+ * @returns {string[]}
+ */
+function checkRequiredKeys(filename, cfg, keys) {
+  /** @type {string[]} */
+  const v = [];
+  for (const key of keys) {
+    if (!(key in cfg)) v.push(`${filename}: missing required key "${key}"`);
+  }
+  return v;
+}
+
+/**
+ * @param {string} filename
+ * @param {Record<string, unknown>} cfg
+ * @returns {string[]}
+ */
+function checkSetupKind(filename, cfg) {
+  /** @type {string[]} */
+  const v = [];
+  pushAll(v, checkRequiredKeys(filename, cfg, SETUP_KIND_REQUIRED));
+  pushAll(
+    v,
+    checkActionBlock(
+      filename,
+      /** @type {Record<string, unknown> | undefined} */ (cfg.prompt),
+      "prompt",
+      "Ask for Input",
+    ),
+  );
+  pushAll(
+    v,
+    checkActionBlock(
+      filename,
+      /** @type {Record<string, unknown> | undefined} */ (cfg.set_variable),
+      "set_variable",
+      "Set Variable",
+    ),
+  );
+  return v;
+}
+
+/**
+ * Validate a setup-variable action block (`prompt` or `set_variable`):
+ * action matches the expected literal, and variable_name is a non-empty
+ * string. Empty array if the block is absent (the missing-key violation
+ * is reported by checkRequiredKeys).
+ *
+ * @param {string} filename
+ * @param {Record<string, unknown> | undefined} block
+ * @param {string} blockName
+ * @param {string} expectedAction
+ * @returns {string[]}
+ */
+function checkActionBlock(filename, block, blockName, expectedAction) {
+  if (!block || typeof block !== "object") return [];
+  /** @type {string[]} */
+  const v = [];
+  if (block.action !== expectedAction) {
+    v.push(`${filename}: setup-variable ${blockName}.action must be "${expectedAction}"`);
+  }
+  if (typeof block.variable_name !== "string" || block.variable_name.length === 0) {
+    v.push(`${filename}: setup-variable ${blockName}.variable_name must be a non-empty string`);
+  }
+  return v;
 }
 
 /**
