@@ -218,20 +218,6 @@
   - **Anchor**: rule #9 (vision.md § 9 — pre-registered pivot threshold; this is the next-tier pivot pre-registered in the original `dashboard-web-lighthouse-ci` task); Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018 (DORA test-reliability — a CI gate that doesn't run reliably teaches the team to ignore failure); Wilkie, "RED Method", *USENIX SREcon EMEA* 2018 (the duration component is the user-perceived metric — moving runners preserves the metric's semantic); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (pre-registration — the next-tier pivot was committed *before* the 0.85 threshold's behaviour was observed, in the same PR that lowered the threshold).
   - **Risk**: Self-hosted runners introduce supply-chain risk (a compromised runner can leak secrets). Mitigation: scope the runner to public-repo / non-secret jobs only; share infrastructure with `supervisor-integration-self-hosted-runner` if both fire (cost amortisation); standard GH guidance (Forsgren 2018 § DORA prerequisites; rule #7).
 
-- [ ] `readme-global-install-claim-fix` — README implies a global `minsky` CLI but none exists; reword for what setup.sh actually delivers
-  - **ID**: readme-global-install-claim-fix
-  - **Tags**: docs, onboarding, surfaced-by-fresh-install
-  - **Estimate**: 30m
-  - **Hypothesis**: The current README ("Quickstart" → `./setup.sh`) and the user-facing framing ("install minsky globally") suggest a top-level `minsky` binary on `PATH`. There is none — `setup.sh` only installs `@tasks-md/cli` + `@tasks-md/lint` + `tasks-mcp` globally, and the rest is repo-local config. A first-time user who types `minsky` after `./setup.sh` gets `command not found` and reasonably concludes the install failed. Adding one paragraph to README's "What this actually is" — explicitly stating "Minsky is a repo-rooted stack, not a global CLI; `setup.sh` installs three globals (`tasks`, `tasks-lint`, `tasks-mcp`) and bootstraps `.minsky/state.json`; the supervisor runs out of this repo via `bash distribution/systemd/run-tick-loop.sh` (or the launchd plist on macOS)" — closes the expectation gap without changing any code.
-  - **Details**: Edit `README.md`. Add the disambiguation paragraph above the "Quickstart" section. Confirm the `next-task` skill at `.claude/skills/next-task/SKILL.md` still works — it does, the README's `/next-task` line is correct. The fix is purely the framing of "install".
-  - **Files**: `README.md`
-  - **Verification**: `grep -c "not a global CLI" README.md` ≥ 1; `./setup.sh --doctor` still exits 0 GREEN; `command -v tasks tasks-lint tasks-mcp` resolves all three after `./setup.sh`.
-  - **Measurement**: `grep -E "(repo-rooted stack|not a global CLI)" README.md && command -v tasks >/dev/null && command -v tasks-lint >/dev/null && command -v tasks-mcp >/dev/null` — all four conditions exit 0.
-  - **Pivot**: if the README disambiguation gets reverted in a future docs-rewrite (the disambiguation is short enough to be lost in a rewrite), promote the disambiguation to a deterministic CI lint that fails when `README.md` adds the literal token `install minsky globally` without an adjacent "not a global CLI" paragraph (≤30 LoC linter).
-  - **Acceptance**: README disambiguates "install" within the first 200 words; first-time-install user runs `./setup.sh`, then `tasks --version` (succeeds), then `/next-task` in Claude Code (succeeds) — without ever expecting a `minsky` binary.
-  - **Anchor**: Norman, *The Design of Everyday Things*, Basic Books, 1988 (signifiers — the README is the affordance; "install" is a strong signifier of a CLI binary); rule #1 (don't reinvent — we don't ship a CLI, so the docs shouldn't claim one).
-  - **Risk**: low. Pure docs change; no behavior shift.
-  - **Surfaced-by**: 2026-05-04 fresh install on a new machine — operator typed `minsky --version` after `./setup.sh` and got `command not found`.
 
 - [ ] `setup-doctor-ntfy-check` — `setup.sh --doctor` should report `ntfy` CLI status (currently silent on it despite topic seeded in state.json)
   - **ID**: setup-doctor-ntfy-check

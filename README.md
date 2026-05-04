@@ -27,6 +27,7 @@ Everything is MIT, every dependency lives behind an interface (`novel/adapters/`
 
 ## What this is *not*
 
+- **Not a global CLI.** Minsky is a **repo-rooted stack**, not a single binary on your `PATH`. `./setup.sh` installs three globals — `tasks`, `tasks-lint`, `tasks-mcp` (the [tasks.md](https://github.com/tasksmd/tasks.md) toolchain) — and bootstraps `.minsky/state.json` in the repo. The supervisor runs out of this repo via `bash distribution/systemd/run-tick-loop.sh` (Linux) or the launchd plist (macOS). There is **no** `minsky` binary; if you typed `minsky --version` and got `command not found`, that's by design — pick up the loop with `/next-task` inside Claude Code instead.
 - **Not a framework.** No multi-agent runtime, no proprietary task queue, no proprietary loop driver. We adapt existing tools rather than rebuild them.
 - **Not for one-off quick fixes.** Every change in this repo carries the iron-rule overhead (hypothesis + measurement + pivot). If your fix can't justify that, it belongs in another repo.
 - **Not an IDE plugin** · **not a productivity tool** · **not a chatbot.** Minsky targets the supervisor layer, not the editor.
