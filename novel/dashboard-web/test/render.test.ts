@@ -22,6 +22,20 @@ describe("render — pure SSR HTML", () => {
     expect(html).toContain('data-metric-id="beta"');
   });
 
+  it("renders Strategy output in place of `(stub)` and HTML-escapes it", () => {
+    const metrics: SuccessMetric[] = [{ id: "alpha", label: "Alpha", formula: "x", unit: "%" }];
+    const html = render({ metrics, getValue: () => "<b>0.99</b>" });
+    expect(html).not.toContain("<b>0.99</b>");
+    expect(html).toContain("&lt;b&gt;0.99&lt;/b&gt;");
+    expect(html).not.toContain("(stub)");
+  });
+
+  it("falls back to `(stub)` when the Strategy returns null (graceful-degrade)", () => {
+    const metrics: SuccessMetric[] = [{ id: "alpha", label: "Alpha", formula: "x", unit: "%" }];
+    const html = render({ metrics, getValue: () => null });
+    expect(html).toContain("(stub)");
+  });
+
   it("escapes HTML in label / id / formula / unit (rule #7 — XSS guard)", () => {
     const metrics: SuccessMetric[] = [
       {
