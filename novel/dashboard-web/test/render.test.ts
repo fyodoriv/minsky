@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { SuccessMetric } from "./metrics.js";
-import { render } from "./render.js";
+import type { SuccessMetric } from "../src/metrics.js";
+import { render } from "../src/render.js";
 
 describe("render — pure SSR HTML", () => {
   it("returns a well-formed HTML document on cold start (empty metrics)", () => {

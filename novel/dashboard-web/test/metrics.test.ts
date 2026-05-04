@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PLACEHOLDER_METRICS } from "./metrics.js";
+import { PLACEHOLDER_METRICS } from "../src/metrics.js";
 
 describe("PLACEHOLDER_METRICS — v0 skeleton stub", () => {
   it("contains exactly one entry (sub-task 2 expands to 10)", () => {
