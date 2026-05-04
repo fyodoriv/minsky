@@ -27,20 +27,6 @@
   - **Anchor**: rule #2 (vision.md § 2 — every dep behind interface; the spawn step is now bound to a real Strategy that the v0 stubbed); Armstrong 2007 (let-it-crash — the supervisor `Restart=on-failure` boundary remains the respawn policy); Kephart & Chess 2003 (MAPE-K — full conformance only after a real monitor that produces real measurements); Beyer SRE 2016 Ch. 3 (error-budget gating with a real `BudgetGuard.decide()`).
   - **Risk**: spawning `claude` may not get the user's environment (`ANTHROPIC_API_KEY`, MCP servers); deadlocks on stdin/stdout under non-interactive mode. Mitigations: the daemon explicitly reads `~/.claude/` config + sources `~/.zshenv` before spawn; documented in `distribution/README.md`; the file-based-handoff pivot path is pre-registered above.
 
-- [ ] `mape-k-prompt-rollout-orchestrator` — wire MAPE-K Knowledge → PromptOptimizer.runABTest in production
-  - **ID**: mape-k-prompt-rollout-orchestrator
-  - **Tags**: novel, mape-k, runtime, blocker
-  - **Estimate**: 1d
-  - **Hypothesis**: A `mape-k-orchestrator.mjs` invoked once per scheduler iteration that reads `experiment-store/*.jsonl` verdicts + `constraints.md` history, calls `mape-k-loop.tick()`, and on `decision: 'rollout'` calls `PromptOptimizer.runABTest()` against the actual prompt files in `.claude/skills/`, makes success-criterion #4 (≥4 prompt rollouts/month with ≥10% sustained gain) structurally measurable. Today all 5 MAPE-K phases exist as pure functions; nothing fires them on a cadence.
-  - **Details**: Add `novel/mape-k-loop/src/orchestrator.ts` — the I/O orchestrator: reads experiment-tracker outputs + constraints.md tail, reads `.claude/skills/*/SKILL.md` for current prompts, calls `tick({...})`, on rollout writes the variant to a draft branch + opens a PR with `EXPERIMENT.yaml` carrying the predicted gain. Daemon (#tick-loop-daemon-v0) calls this on every Nth tick (default: every 12 ticks ≈ 1h). Sustained-gain check + oscillation guard already exist (PR #57); orchestrator just wires them.
-  - **Files**: `novel/mape-k-loop/src/orchestrator.ts` + `.test.ts`, `novel/mape-k-loop/bin/mape-k-orchestrator.mjs` (CLI), `distribution/systemd/run-tick-loop.sh` (call orchestrator every Nth tick)
-  - **Verification**: `pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts` ≥4 cases pass — happy-path rollout opens a synthetic draft branch; oscillation guard suppresses repeat variant within window; sustained-gain failure abstains; no-op when no experiment verdicts available.
-  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`.
-  - **Pivot**: if 90 days of orchestrator runs produce zero rollouts (the gain threshold is unreachable in practice), drop the sustained-gain check from 7 d → 3 d as the documented Pivot, OR widen the variant catalogue past the 3 v0 mutations.
-  - **Acceptance**: orchestrator tests pass; daemon fires it on the documented cadence; first rollout (real or synthetic) produces a draft branch + PR within 24h of activation.
-  - **Anchor**: Kephart & Chess 2003 (MAPE-K Knowledge → Plan → Execute); Khattab DSPy 2023 (rejected runtime, kept the cycle); Kohavi/Tang/Xu 2020 (sustained-gain discipline).
-  - **Risk**: Auto-opening PRs on the user's behalf could be noisy. Mitigation: orchestrator opens PRs as DRAFTS, never auto-merges, requires explicit operator review.
-
 - [ ] `user-story-001-integration-test-real` — actual integration test against the real daemon (not mock)
   - **ID**: user-story-001-integration-test-real
   - **Tags**: testing, validation, runtime
@@ -60,7 +46,6 @@
   - **ID**: experiment-tracker-knowledge-ingestion
   - **Tags**: novel, mape-k, conformance, runtime
   - **Estimate**: 4–6h
-  - **Blocked by**: mape-k-prompt-rollout-orchestrator
   - **Hypothesis**: Adding a step to `.github/workflows/experiment-tracker.yml` (the weekly/monthly cron — already shipped in PR #38) that pipes the just-emitted verdicts into `mape-k-orchestrator.mjs --ingest-mode` closes the rule-#9 quarterly automation layer (`vision.md` § 9 — "Pre-registration without execution is half a rule"). The orchestrator's Knowledge phase reads the verdicts, updates `constraints.md`, and on systematic miscalibration emits a research-task amendment proposal to research.md.
   - **Details**: New workflow step at the end of `experiment-tracker.yml` invokes `node novel/mape-k-loop/bin/mape-k-orchestrator.mjs --ingest-from=experiment-store/`. The orchestrator computes calibration drift (predicted Δ vs observed Δ by hypothesis category) and writes a one-line entry to `validated-learnings.md` for `validated`, opens a `pivot-experiment-<id>` task for `regressed`, appends to `constraints.md` for `inconclusive`. If drift > threshold, opens a draft PR amending rule #9.
   - **Files**: `.github/workflows/experiment-tracker.yml` (extend), `novel/mape-k-loop/src/orchestrator.ts` (add `--ingest-mode`), `novel/mape-k-loop/src/orchestrator.test.ts` (extend)

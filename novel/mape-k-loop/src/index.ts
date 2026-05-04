@@ -98,6 +98,15 @@ export {
   type VerdictLogEntry,
 } from "./knowledge.js";
 
+export {
+  DEFAULT_BRANCH_PREFIX,
+  orchestrate,
+  type OrchestrateArgs,
+  type OrchestrateResult,
+  type OrchestratorKnowledge,
+  type RolloutDraft,
+} from "./orchestrator.js";
+
 /** Argument bundle for `tick`. The CLI wrapper assembles this from I/O. */
 export interface TickArgs {
   /** Inputs to the Monitor phase (parsed CI runs / advisories / experiments). */
