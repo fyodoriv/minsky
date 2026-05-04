@@ -198,6 +198,80 @@ Constitutional rule #7 caps blast radius explicitly: "single tick / single user-
 
 v0 is single-machine. Multi-machine work is gated on `mape-k-loop-v0` reaching steady state on a single host first — the metrics that would justify a distributed substrate (sustained tokens-per-story across many hosts, MTTR distributions across host boundaries, throughput against the shared budget) do not exist until the single-machine loop produces a month of stable observations. Revisit this section when those metrics validate. No architectural blocker was surfaced while writing this enumeration: the single-machine assumptions broken above are *boundaries*, not *baked-in invariants* (the queue is a file, not an in-memory data structure; the supervisor is an OS service, not a process-local construct; identity is a string, not a pointer). If a future investigation surfaces an assumption that cannot be relaxed without a rewrite (e.g., process-local in-memory state in a critical path), file a follow-up architecture task per rule #9's pivot clause for `multi-machine` and stop the research.
 
+## DSPy fit
+
+Resolves task `dspy-fit-eval`. The `PromptOptimizer` row below currently names DSPy as Minsky's prompt-A/B optimizer; this section evaluates whether DSPy's `Module` + `Signature` + `Optimize` idiom (Khattab et al. 2023) maps cleanly onto Minsky's `PromptOptimizer` adapter shape (`ARCHITECTURE.md` § "The adapter pattern" — `interface PromptOptimizer { runABTest(variants, metric), … }`) across five canonical Minsky use cases:
+
+1. **Persona prompt tuning** (the Plan phase of `mape-k-loop` proposing variants of an OMC persona prompt).
+2. **MAPE-K rollout** (the Execute phase running an A/B test, picking a winner under a sustained-gain check).
+3. **Post-hoc fault explanation** (after a failed tick, generate a structured explanation of which constraint failed and why).
+4. **Drift-report rephrasing** (the advisory `novel/spec-monitor/` Skill emits a drift report; rephrase for the dashboard surface).
+5. **Persona handoff** (`@minsky/handoff-spec` records — fill the bold-labelled fields under a structured signature).
+
+**Pinned version evaluated:** DSPy `3.2.0` (latest stable as of 2026-04-21 per <https://github.com/stanfordnlp/dspy/releases/tag/3.2.0>). Sources are the upstream repository at that tag plus the Khattab et al. 2023 paper. No third-party blog citations per rule #5.
+
+### Wins
+
+1. **Signature-driven prompts replace string templating.** A `dspy.Signature` declares input/output fields with type hints and docstrings; the framework synthesises the user-facing prompt. For Minsky's *persona handoff* use case (`@minsky/handoff-spec` — Status / Summary / Artifacts / Blockers / Suggested-next), the signature shape is a near-1:1 mapping: each handoff field is a typed `dspy.OutputField`, and the signature's docstring is the persona's role description. Code reference: [`dspy/signatures/signature.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/signatures/signature.py) + [`dspy/signatures/field.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/signatures/field.py) define `Signature`, `InputField`, `OutputField`. This is a strict win over raw string templating: the field schema is mechanically inspectable, which the validator in `novel/handoff-spec/src/validate.ts` already wants.
+
+2. **MIPRO v2 + GEPA give a real optimizer over a labelled metric.** For the *persona prompt tuning* use case, DSPy's `MIPROv2` ([`dspy/teleprompt/mipro_optimizer_v2.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/teleprompt/mipro_optimizer_v2.py)) jointly optimises instructions and few-shot demonstrations against a user-supplied metric function — this is the "metric-as-reward" claim in the row above, made concrete. GEPA ([`dspy/teleprompt/gepa/`](https://github.com/stanfordnlp/dspy/tree/3.2.0/dspy/teleprompt/gepa)) extends to genetic-Pareto search. Either is a faithful Execute primitive for `mape-k-loop`'s Plan-then-Execute step, *if* the runtime constraint can be met (see frictions below).
+
+3. **`dspy.Evaluate` is a built-in evaluator harness.** For the *MAPE-K rollout* use case, DSPy ships its own multi-process evaluation runner at [`dspy/evaluate/evaluate.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/evaluate/evaluate.py) plus standard metrics at [`dspy/evaluate/metrics.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/evaluate/metrics.py). This overlaps usefully with Promptfoo (the `Orchestrator` row's eval harness) — wherever the optimizer's metric and the eval harness's metric must be the same function, DSPy's combined surface avoids the dual-source-of-truth hazard.
+
+4. **`dspy.ChainOfThought` as a deterministic structuring step.** For *post-hoc fault explanation* and *drift-report rephrasing*, [`dspy/predict/chain_of_thought.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/predict/chain_of_thought.py) wraps a Signature with a forced "reasoning" field before the answer fields — the structuring discipline matches Minsky's "every drift report has a *why* before the *what*" preference. Cheap composition; no optimizer required to use it.
+
+### Frictions
+
+1. **Python runtime requirement.** DSPy 3.2.0's `pyproject.toml` declares `requires-python = ">=3.10, <3.15"` (verified at <https://github.com/stanfordnlp/dspy/blob/3.2.0/pyproject.toml>). Minsky's runtime is TypeScript / Node + `pnpm` (`package.json`, `pnpm-workspace.yaml`). Adopting DSPy means shipping a Python sidecar that the supervision tree (`ARCHITECTURE.md` § "Process supervision tree") must keep alive alongside the existing Node services — same install-friction class that pushed `MobileDashboard` toward a custom web app, doubled. This is the single largest friction; per task `dspy-fit-eval`'s Pivot clause it alone is sufficient grounds to reject DSPy.
+
+2. **Module / Signature ceremony costs more than it returns for one-shot calls.** For *drift-report rephrasing* and *post-hoc fault explanation*, the call is one-shot — there is no training set, no optimizer, no metric. DSPy's `dspy.Module` (defined at [`dspy/primitives/module.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/primitives/module.py)) and `dspy.Predict` ([`dspy/predict/predict.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/predict/predict.py)) require declaring a class, a Signature, a forward method, and an LM client — for a call shape that's just `prompt → structured response`. Direct Anthropic SDK with a JSON-schema response format (Anthropic Messages API tool-use) is two function arguments. Net: ceremony exceeds value when the optimizer isn't used.
+
+3. **Optimizer assumes a labelled training set.** `MIPROv2.compile(student, trainset=...)` and the bootstrap optimizers ([`dspy/teleprompt/bootstrap.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/teleprompt/bootstrap.py)) all take a `trainset` — labelled `dspy.Example` records, not a stream of live A/B traffic. Minsky's *MAPE-K rollout* use case is on-demand A/B against live traffic with a sustained-gain check (`vision.md` § Success criteria #4), not "compile against a static benchmark and ship the winner". Adapting requires either (a) maintaining a synthetic trainset that drifts from real traffic — a known A/B-trustworthiness hazard (Kohavi/Tang/Xu 2020 ch. 3 on offline-online divergence) — or (b) shoehorning an online loop into a tool whose docs and `mipro_optimizer_v2.py` data flow are batch-shaped. Friction lands directly on the most load-bearing use case.
+
+4. **No first-class Anthropic-Messages cache-prefix discipline.** [`dspy/clients/lm.py`](https://github.com/stanfordnlp/dspy/blob/3.2.0/dspy/clients/lm.py) routes through LiteLLM, which does support Anthropic prompt caching but requires explicit `cache_control` block tagging in the message structure. DSPy's Signature → prompt synthesis owns the message shape; injecting `cache_control` markers on the system-prompt prefix (the Minsky token-economy invariant in `ARCHITECTURE.md` § "Token economy" — *protect the prompt-cache prefix*) requires reaching past Signature into LiteLLM's transport layer. Friction: a budget-relevant invariant that is one line in a direct SDK call becomes a layering concern in DSPy.
+
+5. **Signature mismatch with `@minsky/handoff-spec`'s explicit pushback / suggested-next semantics.** While `Signature` cleanly maps the *fields* of a handoff, the *control-flow* semantics (Suggested-next persona is the actor-model continuation per `vision.md` row #9; Pushback is non-acceptance of the previous handoff) are not naturally a "predict the next field" task. They are decisions whose validity is checked by the validator in `novel/handoff-spec/src/validate.ts`, not learned by an optimizer. Forcing them through a Module makes the validator post-hoc to a generated artifact, inverting the fail-loudly-and-early discipline (rule #6).
+
+### Verdict — friction outnumbers wins; DSPy assumes a Python runtime Minsky won't ship
+
+Friction count is **5**, win count is **4**. The 5:4 ratio is below the 2:1 pivot threshold from the task brief, but the *kind* of friction (#1, the Python runtime) is independently disqualifying per the same brief: **"if frictions outnumber wins ≥2:1 OR DSPy assumes a Python runtime we won't ship, drop DSPy and design a minimal `PromptOptimizer` interface that calls the Anthropic API directly with structured logging."** That clause fires.
+
+Recommendation: **reject DSPy as Minsky's `PromptOptimizer` implementation; ship the fallback below.** The dependency-table row above will be updated when the fallback adapter ships under `mape-k-loop-v0`'s implementation task. The single win that survives unconditionally — Signature-driven typed prompts — is reproducible in TypeScript with Anthropic's tool-use JSON schemas, so the rejection costs no novel capability.
+
+### Fallback `PromptOptimizer` interface
+
+```ts
+// novel/adapters/prompt-optimizer.ts
+export type Variant = { id: string; system: string; user: string };
+export type EvalResult = { variantId: string; score: number; tokens: number; traceId: string };
+export type ABResult = { winnerId: string; results: EvalResult[]; sustainedGainAt7d: boolean };
+
+export interface PromptOptimizer {
+  /** Run a one-shot A/B over `variants` against `metric`; emits one OTEL span per variant. */
+  runABTest(args: {
+    variants: Variant[];
+    inputs: Array<Record<string, unknown>>;
+    metric: (output: string, input: Record<string, unknown>) => Promise<number>;
+    sustainedGainWindowDays?: number; // default 7 per vision.md success #4
+  }): Promise<ABResult>;
+
+  /** Single structured call with a JSON-schema-typed response; the Signature analogue. */
+  structured<T>(args: { system: string; user: string; schema: object }): Promise<T>;
+
+  /** Self-test contract — required of every adapter per ARCHITECTURE.md § Bootstrap step 6. */
+  selfTest(): Promise<{ ok: boolean; details: string }>;
+}
+```
+
+**Why this shape (rule #2 — every dependency behind an interface; `vision.md` § 2):** the adapter pattern (Gamma et al. 1994; `vision.md` § "Pattern conformance index" row 3) requires the interface to be expressible without naming a vendor. DSPy's `dspy.Module` would have leaked its class hierarchy into the interface (any consumer would have to know what a Module is). The two-method shape — `runABTest` for the `mape-k-loop` Execute primitive, `structured` for one-shot calls — covers all five use cases without mentioning Anthropic, OpenAI, or DSPy. Implementations: `prompt-optimizer.anthropic.ts` (default; calls `@anthropic-ai/sdk` directly with `cache_control` on the system-prompt prefix per the token-economy invariant; logs each call as a structured OTEL span carrying `variant_id`, `tokens_in`, `tokens_out`, `score`); a future `prompt-optimizer.dspy.ts` would still be possible if a Python sidecar ever becomes acceptable, but is not the v0 path.
+
+**Anchors:**
+
+- Khattab et al., "DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines", ICLR 2024 (the Module / Signature / Optimize idiom this section evaluates).
+- Gamma, Helm, Johnson, Vlissides, *Design Patterns*, 1994 (Adapter as the shape rule #2 demands).
+- Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020, ch. 3 (offline-online divergence — the friction-3 hazard).
+- rule #1 (don't reinvent the wheel — DSPy was the existing-tool candidate; this section is the documented "why not"); rule #2 (every dep behind interface — the fallback interface is the operationalisation).
+
 ## How to read this file
 
 Each active dependency follows the same shape:
@@ -347,6 +421,7 @@ Each active dependency follows the same shape:
 - **Risks**: DSPy still evolving; idiom may not perfectly fit Claude Code's prompt model — open question for first practical attempt
 - **Adapter**: `novel/adapters/prompt-optimizer.dspy.ts` (forthcoming)
 - **Last reviewed**: 2026-05-03
+- **Open question — resolved 2026-05-03**: DSPy idiom fit? See § "DSPy fit" above. Recommendation: reject DSPy (Python-only runtime + 5:4 friction-to-win ratio); ship the fallback TypeScript `PromptOptimizer` interface defined in that section against the Anthropic SDK directly. Row's `Current` cell will move when `mape-k-loop-v0`'s implementation task lands the fallback adapter.
 
 ### Specification monitor — `SpecMonitor`
 
@@ -408,7 +483,7 @@ Each active dependency follows the same shape:
 ## Open questions for next research pass
 
 - Apple Watch surface — does Shortcuts + ntfy suffice long-term, or do we eventually need a native WatchOS app?
-- DSPy idiom fit with Claude Code's prompt model — needs first practical attempt
+- ~~DSPy idiom fit with Claude Code's prompt model — needs first practical attempt~~ Resolved 2026-05-03; see § "DSPy fit". Recommendation: reject; ship fallback `PromptOptimizer` interface that calls Anthropic API directly.
 - ~~Lighter OTEL backend — Loki+Tempo+Prometheus+Grafana is heavy for single-dev installs; SQLite-backed alternative?~~ Resolved 2026-05-03; see § "Lighter OTEL backend".
 - Cross-language equivalent of tasks.md — can the spec be ported to Python/Rust ecosystems? (taskmd-driangle covers some of this with directory-of-files)
 - OMC handoff persistence — do they parseably persist their internal task list to disk? Determines bridge complexity.
