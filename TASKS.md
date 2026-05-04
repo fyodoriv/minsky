@@ -133,23 +133,6 @@
   - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (the documented Pivot from `first-integration-test`'s rule-#9 block — coverage of OS-level rows belongs in a self-hosted runner with real OS primitives); Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018 (DORA test reliability — a CI gate that doesn't run reliably teaches the team to ignore failure; the nightly cadence is the reliability bound).
   - **Risk**: self-hosted runners introduce supply-chain risk (a compromised runner can leak secrets). Mitigation: scope the runner to public-repo / non-secret jobs only; share infrastructure with `supervisor-integration-self-hosted-runner` if both fire (cost amortisation); standard GH guidance.
 
-- [ ] Apple Shortcuts JSON for Watch surface
-  - **ID**: watch-shortcuts
-  - **Tags**: novel, ux
-  - **Estimate**: 4–6h
-  - **Hypothesis**: Three Apple Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week) polling the local Tailscale-reachable JSON API render in <2 s p95 on Watch and keep the user's wrist-dwell metric (success #6) at ≤60 s/day average over a 7-day window.
-  - **Details**: Three Shortcuts: tokens-remaining, last-task-status, constraint-of-the-week. Each polls the local Tailscale-reachable JSON API. Plus a pause/resume Shortcut.
-  - **Files**: `distribution/shortcuts/`
-  - **Verification**:
-    - Shortcuts JSON imports cleanly via iCloud/AirDrop on iOS 17+
-    - Each Shortcut, run on Watch, completes in <2s end-to-end
-    - Pause Shortcut writes a sentinel file the supervisor honors within 1 scheduler iteration
-  - **Measurement**: `pnpm vitest run user-stories/005-three-numbers-watch.test.ts` exits 0; user-story 002 pause integration test exits 0; manual measurement on real Watch over 7 days: `count(http_get_total{path="/watch.json"}[7d]) * 2` (constant ≈ 2 s/poll) ≤ 420 (avg ≤60 s/day).
-  - **Pivot**: if Watch p95 latency exceeds 2 s sustained 7 days OR wrist-dwell exceeds 90 s/day for 14 consecutive days → Apple Shortcuts has hit its complexity ceiling; escalate to `native-watchos-app`.
-  - **Acceptance**: Shortcuts importable on iPhone; visible on Watch; integration test for user-story 002 (pause from iPhone) passes; integration test for user-story 005 (three-numbers Watch) passes
-  - **Anchor**: Card & Mackinlay, *Readings in Information Visualization*, 1999 (glanceable display: three numbers, no chrome); Weiser & Brown, "Calm Technology", 1995.
-  - **Risk**: Apple Shortcuts complexity ceiling — track wrist-dwell metric (success #6); if it climbs, escalate to `native-watchos-app`.
-
 ## P3
 
 - [ ] `omc-tasksmd-bridge-v1-watcher` — reverse-sync + filesystem watcher for the OMC ↔ tasks.md bridge

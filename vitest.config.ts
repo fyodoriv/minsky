@@ -30,6 +30,7 @@ export default defineConfig({
       "novel/**/test/**/*.test.ts",
       "scripts/**/*.test.mjs",
       "user-stories/**/*.test.ts",
+      "distribution/shortcuts/test/**/*.test.mjs",
     ],
     coverage: {
       provider: "v8",
