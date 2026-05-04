@@ -123,10 +123,11 @@ Per constitutional rule #7 (vision.md § 7).
   Code API client.
 - **Measurement**:
   `pnpm vitest run novel/adapters/token-monitor/src/maciek.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
-- **Literature anchor**: Gamma et al., *Design Patterns*, 1994 (Adapter
-  + Strategy); Meszaros, *xUnit Test Patterns*, 2007 (real-implementation
-  contract test against committed fixtures); Aho-Sethi-Ullman,
-  *Compilers*, 1986 (recursive-descent parser); rule #2.
+- **Literature anchor**: Gamma et al., *Design Patterns*, 1994
+  (Adapter / Strategy); Meszaros, *xUnit Test Patterns*, 2007
+  (real-implementation contract test against committed fixtures);
+  Aho-Sethi-Ullman, *Compilers*, 1986 (recursive-descent parser);
+  rule #2.
 
 ## Synthetic fixtures
 
