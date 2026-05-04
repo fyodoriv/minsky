@@ -350,3 +350,18 @@ export function parseFixtureTaskIds(source: string): readonly string[] {
   }
   return ids;
 }
+
+// ---- Daemon re-exports ----------------------------------------------------
+
+export {
+  type BudgetDecisionLike,
+  type BudgetGuardLike,
+  type DaemonIterationResult,
+  type DaemonIterationStatus,
+  type DaemonRunResult,
+  type RunDaemonOpts,
+  claim,
+  pickTask,
+  runDaemon,
+  spawnTickDryRun,
+} from "./daemon.js";
