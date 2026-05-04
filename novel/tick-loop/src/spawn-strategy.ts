@@ -83,10 +83,13 @@ export interface SpawnStrategy {
  * The synthetic Strategy: returns a deterministic success result without
  * touching the OS. Mirrors v0's pre-existing dry-run behaviour so existing
  * tests pass unchanged when this is the injected Strategy.
- *
- * @otel tick-loop.spawn-strategy.dry-run
  */
 export class DryRunSpawnStrategy implements SpawnStrategy {
+  /**
+   * Resolve with a synthetic success result — no subprocess, no I/O.
+   *
+   * @otel tick-loop.spawn-strategy.dry-run.spawn
+   */
   spawn(input: SpawnInput): Promise<SpawnResult> {
     const stdoutTail = `daemon dry-run prompt for ${input.taskId}`;
     return Promise.resolve({
@@ -138,8 +141,6 @@ export interface ProcessSpawnStrategyOptions {
  * subprocess surfaces as a non-zero `exitCode` in the result, not a thrown
  * exception. The daemon iterates over results; the supervisor handles the
  * respawn.
- *
- * @otel tick-loop.spawn-strategy.process
  */
 export class ProcessSpawnStrategy implements SpawnStrategy {
   private readonly command: string;
@@ -152,6 +153,13 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
   }
 
+  /**
+   * Spawn the child process via `node:child_process.spawn`, write the
+   * brief to stdin, capture bounded stdout/stderr tails, and resolve
+   * with the result on close.
+   *
+   * @otel tick-loop.spawn-strategy.process.spawn
+   */
   spawn(input: SpawnInput): Promise<SpawnResult> {
     const startedAt = Date.now();
     return new Promise<SpawnResult>((resolve, reject) => {
