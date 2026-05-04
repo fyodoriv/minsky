@@ -1,14 +1,13 @@
-id: phase-2-rule-3-and-script-stability
+id: extract-adapter-types
 hypothesis: |
-  Adding rule-#3 as a deterministic gate (doc-first enforcement on every
-  PR diff) plus opt-in `// @ts-check` strict typing on the rule-3 source
-  brings the script's failure mode under static-type enforcement: the
-  linter that enforces a constitutional rule is itself type-checked.
-  An incremental migration path (file-by-file `// @ts-check`, flip global
-  switch when all six scripts opt in) avoids the 131-error cliff that
-  flipping `checkJs: true` globally would produce.
-success: "rule-3 lint passes against this PR; rule-3 task block removed; tsconfig allows opt-in checking; rule-3 source + test both pass strict tsc; 19 tests for rule-3 logic; 167 total tests green"
-pivot: "if the per-file `// @ts-check` directives drift (some scripts opt out and stay opted out for ≥30 days), the incremental approach has stalled — flip `checkJs: true` globally and absorb the migration cost as a single big PR (rule #10's ratchet rule applied)"
-measurement: "pnpm typecheck && pnpm test && node scripts/check-rule-3-doc-first.mjs"
-anchor: "rule #3 (test/metric/doc-first); rule #10 (deterministic enforcement); Knuth 1984 (literate programming); Beck 1999 (CI as constraint enforcer); Microsoft TypeScript handbook on `// @ts-check`"
-replay_windows_days: [7, 30]
+  Hoisting `SelfTestStatus`, `SelfTestResult`, and `aggregateStatus()` into
+  a leaf `@minsky/adapter-types` package eliminates the latent dependency
+  cycle (`@minsky/budget-guard → @minsky/observability` for a base type)
+  without breaking observability's public API; future adapter packages then
+  depend on `@minsky/adapter-types` directly. Per Martin's acyclic
+  dependency principle (*Clean Architecture*, 2017) and Wiggins' factor II
+  (*The Twelve-Factor App*, 2011 — explicit dependencies).
+success: "pnpm typecheck && pnpm test && pnpm lint && pnpm publish --dry-run --filter @minsky/adapter-types all exit 0; new types-package tests cover aggregateStatus 100%; existing observability tests pass unchanged; the runtime smoke check `aggregateStatus([{status:'green',...},{status:'red',...}])` returns 'red'"
+pivot: "if extraction breaks observability's downstream consumers (the @minsky/observability re-export turns out not to preserve type identity across declaration files, e.g., consumers see two distinct SelfTestStatus types and refuse to unify them), revert and instead inline the contract per-adapter with a CI lint that asserts the inline copies are byte-equal"
+measurement: "pnpm typecheck && pnpm test && pnpm lint && pnpm publish --dry-run --filter @minsky/adapter-types"
+anchor: "Martin, *Clean Architecture*, 2017 (acyclic dependency principle); Wiggins, *The Twelve-Factor App*, 2011 (factor II — explicit dependencies); Avizienis et al., *IEEE TDSC* 2004 (status-lattice meet)"
