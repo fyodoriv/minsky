@@ -1,8 +1,14 @@
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   checkChaosCoverage,
+  parseClosesIdsFromGitLog,
   parseFirstTable,
   parseTaskIds,
+  readGitClosedTaskIds,
+  walkDir,
 } from "./check-rule-7-chaos-coverage.mjs";
 
 const HEADER_ROW = "| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |";
@@ -243,5 +249,89 @@ describe("checkChaosCoverage", () => {
     });
     expect(errors).toHaveLength(1);
     expect(errors[0]?.readme).toBe("novel/bar/README.md");
+  });
+});
+
+describe("parseClosesIdsFromGitLog", () => {
+  it("extracts every closes <task-id> reference, lower-cased and deduped", () => {
+    const log = [
+      "feat: do stuff",
+      "",
+      "closes some-task",
+      "Closes Other-Task",
+      "fix: things",
+      "",
+      "closes some-task", // duplicate
+      "closes third-task-id-2",
+    ].join("\n");
+    expect(parseClosesIdsFromGitLog(log)).toEqual(
+      new Set(["some-task", "other-task", "third-task-id-2"]),
+    );
+  });
+
+  it("returns an empty set for a log with no `closes` references", () => {
+    expect(parseClosesIdsFromGitLog("feat: things\n\nno markers here\n")).toEqual(new Set());
+  });
+});
+
+describe("readGitClosedTaskIds — runner injection", () => {
+  it("invokes git with --grep='closes ' and parses the synthetic log", () => {
+    /** @type {{ file: string, args: string[] } | null} */
+    let captured = null;
+    /** @type {(file: string, args: string[]) => string} */
+    const fakeRunner = (file, args) => {
+      captured = { file, args };
+      return "feat: x\n\ncloses synthetic-task\ncloses another-id\n";
+    };
+    const ids = readGitClosedTaskIds("/tmp/no-such-repo", fakeRunner);
+    expect(ids).toEqual(new Set(["synthetic-task", "another-id"]));
+    expect(captured).not.toBeNull();
+    if (captured === null) return;
+    /** @type {{ file: string, args: string[] }} */
+    const c = captured;
+    expect(c.file).toBe("git");
+    expect(c.args).toContain("--grep=closes ");
+    expect(c.args).toContain("--all");
+    expect(c.args[0]).toBe("log");
+  });
+
+  it("returns an empty set when the runner throws (git unavailable)", () => {
+    /** @type {(file: string, args: string[]) => string} */
+    const throwingRunner = () => {
+      throw new Error("git: command not found");
+    };
+    expect(readGitClosedTaskIds("/tmp/no-such-repo", throwingRunner)).toEqual(new Set());
+  });
+});
+
+describe("walkDir — symlink-loop guard", () => {
+  it("terminates on a pathological a->b/, b->a/ loop within 100ms with no files", () => {
+    const root = mkdtempSync(join(tmpdir(), "rule-7-walk-loop-"));
+    const a = join(root, "a");
+    const b = join(root, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    symlinkSync(b, join(a, "loop"), "dir");
+    symlinkSync(a, join(b, "loop"), "dir");
+
+    const t0 = Date.now();
+    const collected = [];
+    for (const f of walkDir(root)) collected.push(f);
+    const elapsedMs = Date.now() - t0;
+
+    expect(elapsedMs).toBeLessThan(100);
+    expect(collected).toEqual([]);
+  });
+
+  it("still yields regular files when no loops are present", () => {
+    const root = mkdtempSync(join(tmpdir(), "rule-7-walk-ok-"));
+    const sub = join(root, "sub");
+    mkdirSync(sub);
+    writeFileSync(join(root, "a.ts"), "export {};\n");
+    writeFileSync(join(sub, "b.test.ts"), "export {};\n");
+
+    const collected = [];
+    for (const f of walkDir(root)) collected.push(f);
+    expect(collected.sort()).toEqual([join(root, "a.ts"), join(sub, "b.test.ts")].sort());
   });
 });

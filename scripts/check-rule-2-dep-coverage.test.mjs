@@ -2,9 +2,12 @@
 // is exercised against synthetic ARCHITECTURE.md fragments and synthetic file
 // lists; no I/O.
 
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { checkDepCoverage, extractVendors } from "./check-rule-2-dep-coverage.mjs";
+import { checkDepCoverage, extractVendors, walkTs } from "./check-rule-2-dep-coverage.mjs";
 
 const ARCH_WITH_HONO = `
 # Header
@@ -181,5 +184,41 @@ describe("checkDepCoverage — edge cases", () => {
     expect(violations).toHaveLength(2);
     expect(violations[0]).toEqual({ file: "novel/foo/leaks.ts", line: 2, vendor: "hono" });
     expect(violations[1]).toEqual({ file: "novel/foo/leaks.ts", line: 4, vendor: "sqlite" });
+  });
+});
+
+describe("walkTs — symlink-loop guard", () => {
+  it("terminates on a pathological a->b/, b->a/ loop within 100ms with no output", async () => {
+    // Build a temp dir with `a -> b/`, `b -> a/`. A naive recursive walker
+    // would loop forever (or until inode exhaustion / EMFILE).
+    const root = mkdtempSync(join(tmpdir(), "rule-2-walk-loop-"));
+    const a = join(root, "a");
+    const b = join(root, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    // a/loop -> b, b/loop -> a — each side links into the other, forming a
+    // cycle through symlinks (the dirs themselves are not loops, but
+    // a/loop/loop/loop/... resolves indefinitely).
+    symlinkSync(b, join(a, "loop"), "dir");
+    symlinkSync(a, join(b, "loop"), "dir");
+
+    const t0 = Date.now();
+    const files = await walkTs(root);
+    const elapsedMs = Date.now() - t0;
+
+    expect(elapsedMs).toBeLessThan(100);
+    expect(files).toEqual([]);
+  });
+
+  it("still finds .ts files when no loops are present", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rule-2-walk-ok-"));
+    const sub = join(root, "sub");
+    mkdirSync(sub);
+    writeFileSync(join(root, "a.ts"), "export {};\n");
+    writeFileSync(join(sub, "b.ts"), "export {};\n");
+    writeFileSync(join(root, "ignore.md"), "no\n");
+
+    const files = await walkTs(root);
+    expect(files.sort()).toEqual([join(root, "a.ts"), join(sub, "b.ts")].sort());
   });
 });

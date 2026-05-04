@@ -24,7 +24,7 @@
 // can drive it deterministically.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -378,44 +378,117 @@ function walkTestFiles(rootDir) {
 }
 
 /**
+ * Resolve `dir` to its canonical path. Returns null if the path can't be
+ * stat'd (deleted under us, permission denied, etc.).
+ *
  * @param {string} dir
+ * @returns {string | null}
+ */
+function safeRealpath(dir) {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the directory entries, returning [] on any I/O error rather than
+ * propagating — the linter is best-effort, not transactional.
+ *
+ * @param {string} dir
+ * @returns {import("node:fs").Dirent[]}
+ */
+function safeReaddir(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @param {import("node:fs").Dirent} entry
+ * @returns {boolean}
+ */
+function shouldSkipEntry(entry) {
+  const name = entry.name;
+  if (name === "node_modules" || name.startsWith(".")) return true;
+  if (entry.isSymbolicLink()) return true; // skip symlinks to avoid loops
+  return false;
+}
+
+/**
+ * Recursively walk `dir`, yielding every regular-file path. Symlinks are
+ * skipped entirely (rather than followed) so that pathological loops like
+ * `a -> b/`, `b -> a/` cannot inode-exhaust the linter. The walker is also
+ * defensive against multiple paths into the same canonical directory by
+ * tracking visited canonical paths via `realpathSync`.
+ *
+ * @param {string} dir
+ * @param {Set<string>} [visited]
  * @returns {Generator<string, void, void>}
  */
-function* walkDir(dir) {
-  for (const name of readdirSync(dir)) {
-    if (name === "node_modules" || name.startsWith(".")) continue;
-    const full = join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      yield* walkDir(full);
-    } else if (st.isFile()) {
+export function* walkDir(dir, visited = new Set()) {
+  const canonical = safeRealpath(dir);
+  if (canonical === null || visited.has(canonical)) return;
+  visited.add(canonical);
+
+  for (const entry of safeReaddir(dir)) {
+    if (shouldSkipEntry(entry)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      yield* walkDir(full, visited);
+    } else if (entry.isFile()) {
       yield full;
     }
   }
 }
 
 /**
- * @param {string} rootDir
+ * Parse a `git log` text blob and return every `closes <task-id>` reference
+ * as a lower-cased Set. Pure helper — exported for tests.
+ *
+ * @param {string} gitLogText
  * @returns {Set<string>}
  */
-function readGitClosedTaskIds(rootDir) {
+export function parseClosesIdsFromGitLog(gitLogText) {
   /** @type {Set<string>} */
   const ids = new Set();
+  const re = /closes\s+([a-z][a-z0-9-]*[a-z0-9])\b/gi;
+  for (const m of gitLogText.matchAll(re)) {
+    const id = m[1];
+    if (id !== undefined) ids.add(id.toLowerCase());
+  }
+  return ids;
+}
+
+/**
+ * Read every `closes <task-id>` reference from the repo's git log. Uses
+ * `--grep='closes '` to filter at the git layer (10–100× smaller output than
+ * an unfiltered `--format=%B` capture), avoiding the
+ * `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` ceiling on large repos.
+ *
+ * The default `runner` is `execFileSync`; tests may inject a stub. The
+ * try/catch fallback is preserved — git failures still yield an empty Set.
+ *
+ * @param {string} rootDir
+ * @param {(file: string, args: string[], opts: { cwd: string, encoding: "utf-8", maxBuffer: number }) => string} [runner]
+ * @returns {Set<string>}
+ */
+export function readGitClosedTaskIds(rootDir, runner = execFileSync) {
   try {
-    const out = execFileSync("git", ["log", "--all", "--format=%B"], {
+    const out = runner("git", ["log", "--all", "--grep=closes ", "--format=%s%n%b"], {
       cwd: rootDir,
       encoding: "utf-8",
       maxBuffer: 32 * 1024 * 1024,
     });
-    const re = /closes\s+([a-z][a-z0-9-]*[a-z0-9])\b/gi;
-    for (const m of out.matchAll(re)) {
-      const id = m[1];
-      if (id !== undefined) ids.add(id.toLowerCase());
-    }
+    return parseClosesIdsFromGitLog(out);
   } catch {
-    // Git not available — fine; the linter still works against TASKS.md only.
+    // Git not available or grep filter failed — fine; the linter still works
+    // against TASKS.md alone.
+    return new Set();
   }
-  return ids;
 }
 
 // ---- main ------------------------------------------------------------------

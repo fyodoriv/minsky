@@ -1,14 +1,20 @@
-id: experiment-tracker-v0
+id: linter-resilience-hardening
 hypothesis: |
-  A scheduled job that re-runs each merged experiment's `measurement` at the
-  configured `replay_windows_days` (default `[7, 30]`), compares against the
-  declared `success` / `pivot` thresholds, and emits a verdict (validated /
-  regressed / inconclusive) closes the weekly–monthly layer of rule #9.
-  Within 90 days of landing, ≥1 experiment carries a non-`inconclusive`
-  verdict against a real recorded measurement, proving the substrate works
-  on production data not just synthetic fixtures.
-success: "pnpm typecheck && pnpm vitest run scripts/replay-experiment.test.mjs exits 0 with ≥4 verdict cases (validated / regressed / inconclusive / idempotent re-run); the workflow YAML is parseable by GitHub Actions; ≥1 non-inconclusive verdict accrues within 90 days post-landing"
-pivot: "if 90 days post-landing every replay verdict is `inconclusive` (signal-to-noise too low at 7d/30d), shorten the windows AND raise pre-declared success margins, OR gate eligibility by tag — pivot to declaration-only with quarterly batch review at 180 days if still all-inconclusive"
-measurement: "pnpm typecheck && pnpm vitest run scripts/replay-experiment.test.mjs"
-anchor: "rule #9 (vision.md § 9 — pre-registered hypothesis-driven development; weekly–monthly layer); Ries 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 ch. 5–7 (trustworthy over fast; mid-term regressions); Kephart & Chess 2003 (MAPE-K Analyze phase scoped to rule #9)"
-replay_windows_days: [7, 30]
+  Two latent fragility classes in the rule-enforcer scripts can be closed
+  pre-emptively without changing externally-observable linter behaviour:
+  (a) `check-rule-7-chaos-coverage.mjs`'s `readGitClosedTaskIds` swaps the
+  unbounded `git log --all --format=%B` capture for a `--grep='closes '`-
+  filtered capture (10–100× smaller output), keeping the existing
+  `try/catch` fallback and side-stepping the 32 MB `maxBuffer` ceiling;
+  (b) `check-rule-2-dep-coverage.mjs`'s `walkTs` and
+  `check-rule-7-chaos-coverage.mjs`'s `walkDir` skip symlinks entirely and
+  track visited canonical paths via `realpath`/`realpathSync` so a
+  pathological `a -> b/`, `b -> a/` loop terminates instantly with no
+  output instead of inode-exhausting the linter. Both functions remain
+  pure where they were pure; `readGitClosedTaskIds` gains a runner-
+  injection seam so its branching logic is unit-testable.
+success: "pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs scripts/check-rule-7-chaos-coverage.test.mjs exits 0 with the new symlink-loop + git-log-runner fixtures; node scripts/check-rule-7-chaos-coverage.mjs and node scripts/check-rule-2-dep-coverage.mjs produce identical OK / clean output on the live repo as before the change."
+pivot: "if the `--grep='closes '` filter empties the result against a future commit-message convention that drops the literal `closes` prefix, revert and switch to streaming via `git log --format=%H | xargs git show -s --format=%B` through `spawn` (line-by-line, no maxBuffer) rather than `execFileSync`. If symlink loops in `novel/` turn out to be vanishingly rare (zero in 12 months of CI), drop the realpath/visited Set guard and document that contributors must not introduce symlinks under `novel/`."
+measurement: "pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs scripts/check-rule-7-chaos-coverage.test.mjs"
+anchor: "rule #6 (let-it-crash with a precise error — applied only when the crash is genuinely unrecoverable; both fragility classes are recoverable via bounded I/O); Lampson 1983 ('Hints for Computer System Design' — bound the worst case at the entry); Node.js docs `child_process.execFileSync` `maxBuffer` failure mode (ERR_CHILD_PROCESS_STDIO_MAXBUFFER)"
+replay_windows_days: [7, 30, 180]
