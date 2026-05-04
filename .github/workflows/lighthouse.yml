@@ -91,14 +91,18 @@ jobs:
 
       - name: run lighthouse mobile
         # Pinned to 12.4.0 per ARCHITECTURE.md § "Versioning & dependency
-        # evolution". `--throttling.cpuSlowdownMultiplier=4` is the
-        # Lighthouse Mobile default — making it explicit pins the
+        # evolution". Mobile is the *default* form factor in Lighthouse
+        # 12.x — `--preset` only takes `perf` / `experimental` / `desktop`,
+        # so we make the form-factor explicit via `--form-factor=mobile`
+        # and pin the screen-emulation envelope. `--throttling.cpuSlowdownMultiplier=4`
+        # is the Lighthouse Mobile default — making it explicit pins the
         # throttling envelope so a future Lighthouse default change does
         # not silently move the gate. `--chrome-flags` are required on
         # GH-hosted runners (no display, sandbox restrictions).
         run: |
           npx -y lighthouse@12.4.0 http://localhost:8080/ \
-            --preset=mobile \
+            --form-factor=mobile \
+            --only-categories=performance \
             --quiet \
             --output=json \
             --output-path=lighthouse.json \

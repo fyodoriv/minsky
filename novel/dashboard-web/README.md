@@ -45,9 +45,13 @@ The 10 vision.md success criteria are typed in `src/metrics.ts` as `SUCCESS_METR
 
 `createServer()` now defaults `metrics` to `SUCCESS_METRICS`, so `GET /` renders all 10 vision.md success criteria as `<li data-metric-id="…">` rows. Each row's value is rendered as the `(stub)` sentinel — the operator-visible signal that the OTEL backend is not yet wired (rule #7 graceful-degrade, explicit not silent). The follow-up `dashboard-web-otel-wiring` (P3 in TASKS.md) replaces the sentinel with `@minsky/observability` reads.
 
-### Sub-task 4 (Lighthouse CI — filed, blocked)
+### Sub-task 4 (Lighthouse CI — shipped)
 
-See TASKS.md `dashboard-web-lighthouse-ci`.
+`.github/workflows/lighthouse.yml` runs Lighthouse Mobile against `http://localhost:8080/` on every PR + `push: branches: [main]`. Pinned `lighthouse@12.4.0`; explicit `--throttling.cpuSlowdownMultiplier=4` (Lighthouse Mobile default — making it explicit pins the throttling envelope so a future upstream default change does not silently move the gate). Asserts `jq -e '.categories.performance.score >= 0.9' lighthouse.json`; uploads `lighthouse.json` as the `lighthouse-report` workflow artifact (`if: always()` survives the assertion's non-zero exit so a regression carries an inspectable `.audits` payload).
+
+`distribution/run-dashboard-web.sh` is the runner the workflow invokes — it builds the package idempotently and `exec`s into `node novel/dashboard-web/dist/start.js` so the OS supervisor / Lighthouse harness sees the node PID directly (a SIGTERM reaches it without a shell-wrapper detour). The runner forwards `OTEL_*` env vars unmodified, opening the seam for `dashboard-web-otel-wiring` (P3) to wire real backend reads at start-time without touching this script.
+
+The parent `dashboard-web-v0` epic closes with this sub-task: all 4 sub-tasks shipped; the parent's prose-only "Lighthouse Mobile score ≥90 in CI" verification cell now has a machine-readable counterpart at `.github/workflows/lighthouse.yml`.
 
 ## Usage
 
