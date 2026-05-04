@@ -83,7 +83,6 @@
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 3–5d (largest novel layer)
-  - **Blocked by**: experiment-tracker-v0
   - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
   - **Files**: `novel/mape-k-loop/`
