@@ -1,15 +1,16 @@
-id: dspy-fit-eval
+id: spec-monitor-q2-2026-audit
 hypothesis: |
-  DSPy's compiler/optimizer idiom (`dspy.Module` + `dspy.Signature` +
-  `dspy.MIPROv2` / GEPA) maps cleanly onto Minsky's `PromptOptimizer`
-  adapter shape across ≥3 of 5 canonical Minsky use cases (persona prompt
-  tuning, MAPE-K rollout, post-hoc fault explanation, drift-report
-  rephrasing, persona handoff) without contortion. If frictions
-  outnumber wins ≥2:1, OR DSPy assumes a Python runtime Minsky won't
-  ship, the fallback minimal `PromptOptimizer` TypeScript interface
-  ships in the same doc instead.
-success: "grep -c '^## DSPy fit' research.md returns 1 AND the section enumerates ≥3 wins AND ≥3 frictions (each with a code citation linked to a specific file in stanfordnlp/dspy at tag 3.2.0) AND ends with an explicit recommendation (adopt / partial-adopt / reject + fallback); pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm exec markdownlint-cli2 all green."
-pivot: "if DSPy turns out to be a perfect fit (>4 wins AND no Python-runtime disqualifier), upgrade the recommendation from `reject` to `adopt DSPy` and file a follow-up `mape-k-prompt-optimizer-impl` task wrapping DSPy in a Python sidecar with a TypeScript-side adapter. If, conversely, the fallback interface itself surfaces a use case it cannot serve in ≤20 lines (e.g., online-learning loop that doesn't fit `runABTest` + `structured`), the adapter shape is wrong and rule-#2's interface design needs revision before any implementation lands."
-measurement: "test \"$(grep -c '^## DSPy fit' research.md)\" = 1 && test \"$(awk '/^## DSPy fit/{flag=1; next} /^## /{flag=0} flag' research.md | grep -c '^### ')\" -ge 3 && test \"$(awk '/^### Wins/{flag=1; next} /^### /{flag=0} flag' research.md | grep -cE '^[0-9]+\\.')\" -ge 3 && test \"$(awk '/^### Frictions/{flag=1; next} /^### /{flag=0} flag' research.md | grep -cE '^[0-9]+\\.')\" -ge 3"
-anchor: "Khattab et al., \"DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines\", ICLR 2024 (the Module/Signature/Optimize idiom evaluated); Gamma et al., *Design Patterns*, 1994 (Adapter — the shape rule #2 demands of the fallback); Kohavi/Tang/Xu 2020 ch. 3 (offline-online divergence — friction #3); rule #1 (don't reinvent the wheel — DSPy was the existing-tool candidate; this section is the documented \"why not\")."
-replay_windows_days: [7, 30, 180]
+  The Q2 2026 quarterly audit of `novel/spec-monitor/SKILL.md`'s 5 advisory
+  rules (per the `audit-spec-monitor-coverage` task and rule #10's ratchet)
+  either confirms compliance or produces actionable follow-ups. Specifically:
+  rule count is mechanically verified ≤5 by `scripts/check-skill-rule-cap.mjs`;
+  each of A1–A5 receives a kept-advisory or promoted-to-deterministic-candidate
+  decision with a written rationale; any promoted candidates are filed as P3
+  `ci-lint-*` follow-up tasks with full Hypothesis/Success/Pivot/Measurement/
+  Anchor; and the next-quarter (Q3 2026, due 2026-08-03) audit task is filed
+  to preserve the cadence per the original task's Risk-mitigation note.
+success: "test -f spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'Rule count' spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'audit-spec-monitor-coverage-q3-2026' TASKS.md"
+pivot: "if every quarterly audit (this one and prior, once a baseline of ≥2 audits exists) finds ≥1 advisory-to-deterministic candidate AND the candidates filed in earlier audits remain open at the next audit, the Skill is leaking scope — reduce the hard cap from 5 to 3 in `novel/spec-monitor/SKILL.md` AND update `scripts/check-skill-rule-cap.mjs`'s threshold in the SAME PR. Q2 2026 is the first audit, so the cap-reduction does not fire yet — but if Q3 2026 also promotes ≥1 rule with the Q2 candidates still open, fire it then."
+measurement: "test -f spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'Rule count' spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'audit-spec-monitor-coverage-q3-2026' TASKS.md"
+anchor: "rule #10 (vision.md § 10 — deterministic enforcement; the ratchet rule that drives the audit's promote-or-keep decision); Munafò et al., \"A Manifesto for Reproducible Science\", Nature Human Behaviour 1, 0021, 2017 (pre-registration: this audit's pivot threshold is committed BEFORE the result is observed, not chosen post-hoc); Ries, *The Lean Startup*, 2011 (pivot-or-persevere — the cap-reduction trigger)."
+replay_windows_days: [90, 180]
