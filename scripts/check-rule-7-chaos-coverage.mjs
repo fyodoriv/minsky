@@ -114,6 +114,7 @@ function checkOneReadme({ path, content }, ctx) {
     ];
   }
 
+  /** @type {{ readme: string, row: number | null, message: string }[]} */
   const errors = [];
   for (const [i, row] of table.rows.entries()) {
     const cell = (row[chaosColIdx] ?? "").trim();
@@ -125,25 +126,53 @@ function checkOneReadme({ path, content }, ctx) {
 }
 
 /**
+ * @typedef {{ ok: true } | { ok: false, reason: string }} ChaosCellVerdict
+ */
+
+/**
+ * @param {string} cell
+ * @param {Set<string>} knownTaskIds
+ * @param {Set<string>} gitClosedTaskIds
+ * @returns {ChaosCellVerdict | null}
+ */
+function classifyDeferred(cell, knownTaskIds, gitClosedTaskIds) {
+  const deferredMatch = cell.match(DEFERRED_RE);
+  if (!deferredMatch) return null;
+  const taskId = deferredMatch[1];
+  if (taskId !== undefined && (knownTaskIds.has(taskId) || gitClosedTaskIds.has(taskId))) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    reason: `"Chaos test" cell defers to unknown task-id "${taskId ?? ""}" (not in TASKS.md or git log)`,
+  };
+}
+
+/**
+ * @param {string} cell
+ * @param {Set<string>} testFiles
+ * @returns {ChaosCellVerdict | null}
+ */
+function classifyTestPath(cell, testFiles) {
+  const pathMatch = cell.match(TEST_PATH_RE);
+  if (!pathMatch) return null;
+  const path = pathMatch[1];
+  if (path !== undefined && testFiles.has(path)) return { ok: true };
+  return {
+    ok: false,
+    reason: `"Chaos test" cell names test file "${path ?? ""}" but it does not exist`,
+  };
+}
+
+/**
  * @param {{ cell: string, knownTaskIds: Set<string>, gitClosedTaskIds: Set<string>, testFiles: Set<string> }} args
- * @returns {{ ok: true } | { ok: false, reason: string }}
+ * @returns {ChaosCellVerdict}
  */
 function classifyChaosCell({ cell, knownTaskIds, gitClosedTaskIds, testFiles }) {
-  if (cell === "") {
-    return { ok: false, reason: `"Chaos test" cell is empty` };
-  }
+  if (cell === "") return { ok: false, reason: `"Chaos test" cell is empty` };
 
-  const deferredMatch = cell.match(DEFERRED_RE);
-  if (deferredMatch) {
-    const taskId = deferredMatch[1];
-    if (knownTaskIds.has(taskId) || gitClosedTaskIds.has(taskId)) {
-      return { ok: true };
-    }
-    return {
-      ok: false,
-      reason: `"Chaos test" cell defers to unknown task-id "${taskId}" (not in TASKS.md or git log)`,
-    };
-  }
+  const deferred = classifyDeferred(cell, knownTaskIds, gitClosedTaskIds);
+  if (deferred !== null) return deferred;
 
   // Cells that *start* with `(deferred` but don't match the strict form are
   // rejected — the deferral substrate must be machine-readable so an external
@@ -155,21 +184,10 @@ function classifyChaosCell({ cell, knownTaskIds, gitClosedTaskIds, testFiles }) 
     };
   }
 
-  const pathMatch = cell.match(TEST_PATH_RE);
-  if (pathMatch) {
-    const path = pathMatch[1];
-    if (testFiles.has(path)) {
-      return { ok: true };
-    }
-    return {
-      ok: false,
-      reason: `"Chaos test" cell names test file "${path}" but it does not exist`,
-    };
-  }
+  const pathVerdict = classifyTestPath(cell, testFiles);
+  if (pathVerdict !== null) return pathVerdict;
 
-  if (LENIENT_TOKENS.test(cell)) {
-    return { ok: true };
-  }
+  if (LENIENT_TOKENS.test(cell)) return { ok: true };
 
   return {
     ok: false,
@@ -185,11 +203,13 @@ function classifyChaosCell({ cell, knownTaskIds, gitClosedTaskIds, testFiles }) 
  * @returns {Set<string>}
  */
 export function parseTaskIds(content) {
+  /** @type {Set<string>} */
   const ids = new Set();
   // Match "  - **ID**: my-task-id" or "**ID**: my-task-id".
   const re = /\*\*ID\*\*:\s*`?([a-z][a-z0-9-]*[a-z0-9])`?/g;
   for (const m of content.matchAll(re)) {
-    ids.add(m[1]);
+    const id = m[1];
+    if (id !== undefined) ids.add(id);
   }
   return ids;
 }
@@ -199,6 +219,10 @@ export function parseTaskIds(content) {
 /**
  * Returns the byte offset of the heading line, or -1.
  * Matches a level-2 heading with the exact title (allowing trailing spaces).
+ *
+ * @param {string} content
+ * @param {string} heading
+ * @returns {number}
  */
 function findHeadingIndex(content, heading) {
   const lines = content.split(/\r?\n/);
@@ -215,6 +239,11 @@ function findHeadingIndex(content, heading) {
 /**
  * Find the next heading at the given level or shallower (i.e., for level=2,
  * the next `^# ` or `^## `). Returns content.length if none.
+ *
+ * @param {string} content
+ * @param {number} startOffset
+ * @param {number} level
+ * @returns {number}
  */
 function findNextHeadingAtOrBelow(content, startOffset, level) {
   const tail = content.slice(startOffset);
@@ -223,15 +252,34 @@ function findNextHeadingAtOrBelow(content, startOffset, level) {
   // Skip the first line (the heading itself).
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (line === undefined) continue;
     if (i > 0) {
       const m = line.match(/^(#{1,6})\s/);
-      if (m && m[1].length <= level) {
+      if (m !== null && m[1] !== undefined && m[1].length <= level) {
         return startOffset + offset;
       }
     }
     offset += line.length + 1;
   }
   return content.length;
+}
+
+/**
+ * Collect contiguous pipe-rows starting at `startIdx` in `lines`.
+ *
+ * @param {string[]} lines
+ * @param {number} startIdx
+ * @returns {string[][]}
+ */
+function collectTableRows(lines, startIdx) {
+  /** @type {string[][]} */
+  const rows = [];
+  for (let j = startIdx; j < lines.length; j++) {
+    const r = lines[j];
+    if (r === undefined || !isPipeRow(r)) break;
+    rows.push(splitPipeRow(r));
+  }
+  return rows;
 }
 
 /**
@@ -246,20 +294,17 @@ export function parseFirstTable(text) {
   for (let i = 0; i < lines.length - 1; i++) {
     const header = lines[i];
     const sep = lines[i + 1];
-    if (!isPipeRow(header)) continue;
-    if (!isSeparatorRow(sep)) continue;
-    const headers = splitPipeRow(header);
-    const rows = [];
-    for (let j = i + 2; j < lines.length; j++) {
-      const r = lines[j];
-      if (!isPipeRow(r)) break;
-      rows.push(splitPipeRow(r));
-    }
-    return { headers, rows };
+    if (header === undefined || sep === undefined) continue;
+    if (!isPipeRow(header) || !isSeparatorRow(sep)) continue;
+    return { headers: splitPipeRow(header), rows: collectTableRows(lines, i + 2) };
   }
   return null;
 }
 
+/**
+ * @param {string} line
+ * @returns {boolean}
+ */
 function isPipeRow(line) {
   // A line that contains at least one `|` and isn't a fenced-code line.
   if (!line.includes("|")) return false;
@@ -267,6 +312,10 @@ function isPipeRow(line) {
   return true;
 }
 
+/**
+ * @param {string} line
+ * @returns {boolean}
+ */
 function isSeparatorRow(line) {
   // `| --- | --- |` or `|---|---|`. Each cell is hyphens with optional `:`.
   if (!isPipeRow(line)) return false;
@@ -275,6 +324,10 @@ function isSeparatorRow(line) {
   return cells.every((c) => /^:?-+:?$/.test(c.trim()));
 }
 
+/**
+ * @param {string} line
+ * @returns {string[]}
+ */
 function splitPipeRow(line) {
   // Trim outer whitespace and outer pipes, then split on unescaped pipes.
   let s = line.trim();
@@ -287,6 +340,10 @@ function splitPipeRow(line) {
 
 // ---- CLI walker -------------------------------------------------------------
 
+/**
+ * @param {string} rootDir
+ * @returns {{ path: string, content: string }[]}
+ */
 function walkReadmes(rootDir) {
   /** @type {{ path: string, content: string }[]} */
   const out = [];
@@ -303,6 +360,10 @@ function walkReadmes(rootDir) {
   return out;
 }
 
+/**
+ * @param {string} rootDir
+ * @returns {Set<string>}
+ */
 function walkTestFiles(rootDir) {
   /** @type {Set<string>} */
   const out = new Set();
@@ -316,6 +377,10 @@ function walkTestFiles(rootDir) {
   return out;
 }
 
+/**
+ * @param {string} dir
+ * @returns {Generator<string, void, void>}
+ */
 function* walkDir(dir) {
   for (const name of readdirSync(dir)) {
     if (name === "node_modules" || name.startsWith(".")) continue;
@@ -329,6 +394,10 @@ function* walkDir(dir) {
   }
 }
 
+/**
+ * @param {string} rootDir
+ * @returns {Set<string>}
+ */
 function readGitClosedTaskIds(rootDir) {
   /** @type {Set<string>} */
   const ids = new Set();
@@ -340,7 +409,8 @@ function readGitClosedTaskIds(rootDir) {
     });
     const re = /closes\s+([a-z][a-z0-9-]*[a-z0-9])\b/gi;
     for (const m of out.matchAll(re)) {
-      ids.add(m[1].toLowerCase());
+      const id = m[1];
+      if (id !== undefined) ids.add(id.toLowerCase());
     }
   } catch {
     // Git not available — fine; the linter still works against TASKS.md only.

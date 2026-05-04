@@ -1,14 +1,13 @@
 {
-  // Per-file opt-in TypeScript checking for scripts/. A script gets
-  // type-checked when it adds `// @ts-check` at the top. Migration plan:
-  //   1. New scripts MUST add `// @ts-check` from day one.
-  //   2. Existing scripts get migrated one at a time (filed as
-  //      `scripts-ts-check-migration` task).
-  //   3. Once all files are checked, flip `checkJs: true` globally and
-  //      drop the per-file directive.
+  // Global TypeScript checking for scripts/*.mjs. The migration is
+  // complete: every script in this directory passes strict tsc. New
+  // scripts MUST also pass — no per-file opt-out is supported. If a
+  // script genuinely cannot be typed strictly, document the reason in
+  // a one-line comment and add a follow-up TASKS.md entry; do NOT
+  // re-introduce a per-file directive.
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "checkJs": false,
+    "checkJs": true,
     "allowJs": true,
     "noEmit": true,
     "rootDir": ".",

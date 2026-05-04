@@ -1,4 +1,3 @@
-// @ts-check
 // Tests for the pure function in check-rule-3-doc-first.mjs.
 // Pattern: rule #10 deterministic gate; xUnit paired fixtures (Meszaros 2007).
 

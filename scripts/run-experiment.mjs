@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
 // Pattern: continuous experimentation runner over per-PR pre-registration
 //   records (rule #9 daily layer enforcement) + GitHub Actions deterministic CI.
 // Source: Fagerholm et al., "Building Blocks for Continuous Experimentation",

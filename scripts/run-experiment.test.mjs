@@ -1,4 +1,3 @@
-// @ts-check
 // Tests for the pure function in run-experiment.mjs. The pure function is
 // `runExperiment(...)` — no real shelling out; the test injects an `exec`
 // stub and inspects the returned record / errors.
