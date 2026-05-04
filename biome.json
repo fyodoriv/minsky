@@ -1,7 +1,16 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["dist", "coverage", "node_modules", ".minsky", ".obsidian", ".claude", "**/*.d.ts"]
+    "ignore": [
+      "dist",
+      "coverage",
+      "node_modules",
+      ".minsky",
+      ".obsidian",
+      ".claude",
+      "**/*.d.ts",
+      "novel/bridges/omc-tasksmd/test/fixtures/.omc/state/team/fixture-team/tasks/malformed.json"
+    ]
   },
   "formatter": {
     "enabled": true,

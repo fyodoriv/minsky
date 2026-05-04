@@ -1,66 +1,82 @@
-id: omc-roundtrip-and-close-research
+id: omc-tasksmd-bridge-v0
 hypothesis: |
-  Lifting PR #75's TASKS.md `Research` field for
-  `research-omc-handoff-persistence` into a dedicated `research.md`
-  section + shipping the round-trip parseability check at
-  `scripts/omc-roundtrip.mjs` meets the research task's full
-  Acceptance criteria — both parts of it: (a) `research.md` has an
-  "OMC handoff persistence" subsection with a verdict line matching
-  `^- \*\*Verdict\*\*: parseable$`, and (b) the round-trip check
-  exists, exits 0 against the dormant default, and exits 0 against a
-  real OMC checkout's task JSON (round-trip diff is whitespace-only).
-  Three downstream consequences: (1) the research task block is
-  removed from TASKS.md (Acceptance met); (2) `omc-tasksmd-bridge-v0`
-  loses its `Blocked by` line and is unblocked for the next session;
-  (3) `omc-persistence-proposal` is itself disqualified — its trigger
-  was "non-parseable", and the verdict is parseable, so the task is
-  removed (not completed). The bridge's v0 is now a thin reader
-  OMC → tasks.md (the parseable verdict was the unblock).
+  A read-only OMC → tasks.md bridge against synthetic fixtures parses,
+  maps, and syncs deterministically — validating PR #77's parseable
+  verdict (research.md § "OMC handoff persistence"). The bridge ships
+  as `@minsky/omc-tasksmd-bridge` at `novel/bridges/omc-tasksmd/`,
+  with three layers: `OmcReader.list({ repoRoot, teamName? })` (the
+  only I/O boundary), `mapOmcToTasksMd(task)` (pure projection to a
+  tasks.md task block), and `syncOmcToTasksMd({ omcTasks,
+  existingTasksMd, mode: 'replace-section' })` (pure section-replace
+  idempotency over a TASKS.md document). v0 is intentionally read-only
+  — the reverse direction (tasks.md → OMC) is deferred to v1+ as
+  `omc-tasksmd-bridge-v1-watcher` because OMC's optimistic-concurrency
+  `version` field needs a CRDT story (Shapiro et al. 2011) before
+  reverse-sync is safe.
 success: |
-  Three-part criterion. (a) Structural — `research.md` § "OMC handoff
-  persistence" exists with the verdict line matching `parseable`:
-  `[ "$(grep -c '^## OMC handoff persistence' research.md)" = '1' ] &&
-  grep -q 'Verdict.*parseable' research.md`. (b) Tests — the new
-  round-trip check passes its paired test file:
-  `pnpm vitest run scripts/omc-roundtrip.test.mjs >/dev/null`.
-  (c) Unblock — `omc-tasksmd-bridge-v0`'s task block has no
-  `Blocked by:` line referencing `research-omc-handoff-persistence`,
-  and the research + proposal blocks are removed entirely from
-  TASKS.md. Exit 0 on the combined check = the close ships;
-  non-zero = the close is incomplete.
+  Three-part criterion. (a) Tests — ≥11 paired tests pass under the
+  bridge's three modules: `pnpm vitest run novel/bridges/omc-tasksmd/`
+  exits 0 with ≥11 cases. (b) Determinism — `syncOmcToTasksMd` is
+  byte-equal idempotent: re-running with the same input produces
+  byte-equal output (the load-bearing property for a bridge that may
+  run on a v1+ watch loop). (c) Chaos coverage — the reader handles
+  the four declared failure modes (cold-start missing
+  `.omc/state/team/`, malformed JSON skip with stderr advisory,
+  unknown-team filter, forward-compat unknown fields drop) per the
+  rule-#7 chaos table in `novel/bridges/omc-tasksmd/README.md`.
+  Combined check: `pnpm typecheck && pnpm vitest run
+  novel/bridges/omc-tasksmd/` exits 0 — the test count + idempotency
+  asserts + chaos-row-paired tests are all in the same vitest run.
 pivot: |
-  Trigger: if the round-trip check, when pointed at a real OMC
-  checkout (`node scripts/omc-roundtrip.mjs --omc-checkout=<path>`),
-  reveals a non-whitespace diff against any sample task file —
-  i.e., OMC's serialization is not byte-deterministic at
-  `JSON.stringify(_, null, 2)` — the parseable-thin-reader hypothesis
-  is disproved. On trigger, restore the `research-omc-handoff-
-  persistence` task block in TASKS.md (with a 2026-05-04 amendment
-  noting the disproof), restore `omc-persistence-proposal`'s
-  conditional trigger (now active), and re-investigate. Do not
-  patch the diff comparison to ignore the divergence — that masks
-  the disproof. Abandon-the-approach line: if a second sample also
-  diverges with the same shape (e.g., key reordering), the bridge
-  shifts from "thin reader" to "full reverse-engineering"; raise
-  `omc-tasksmd-bridge-v0`'s estimate to ≥1 week and consider
-  deprioritising the bridge entirely (mirrors the original research
-  task's documented Pivot).
-measurement: "[ \"$(grep -c '^## OMC handoff persistence' research.md)\" = '1' ] && grep -q 'Verdict.*parseable' research.md && pnpm vitest run scripts/omc-roundtrip.test.mjs >/dev/null"
+  Trigger: if any field in the OMC schema cannot be losslessly mapped
+  to the documented tasks.md projection (e.g., `metadata` is arbitrary
+  JSON; `claim.token` and `claim.leased_until` are not naturally
+  surfaceable as a single bold-labelled line), the parseable-thin-
+  reader hypothesis is partially disproved. On trigger, document the
+  lossy projection in `novel/bridges/omc-tasksmd/README.md` § "Lossy
+  projection" with the explicit field-by-field map and ship anyway
+  with a "lossy v0" note in vision.md row 62. Abandon-the-approach
+  line: if a *required* field (`id` / `subject` / `status` /
+  `created_at`) cannot be mapped — i.e., the OMC schema has drifted
+  from the read-only verdict — restore the `research-omc-handoff-
+  persistence` task block in TASKS.md, restore `omc-persistence-
+  proposal`'s conditional trigger (now active), and re-investigate.
+  Pivot pre-fired: the lossy projection is already declared (claim
+  token, claim leased_until, blocks, depends_on, result, error,
+  requires_code_change, metadata are all dropped in v0), with the
+  field-by-field map in `novel/bridges/omc-tasksmd/README.md` —
+  rule-#9 pre-registration discipline (Munafò 2017).
+measurement: "pnpm typecheck && pnpm vitest run novel/bridges/omc-tasksmd/"
 anchor: |
+  research.md § "OMC handoff persistence" (the parseable verdict that
+  unblocked v0; the canonical OMC write site `src/team/state/tasks.ts:90`
+  is `writeAtomic(path, JSON.stringify(updated, null, 2))`); Helland,
+  P., "Life beyond Distributed Transactions", *CIDR* 2007 (the
+  load-bearing pattern: a bridge converges through eventual
+  consistency; v0 ships only the read direction because that's the
+  safe half until the write-side has a CRDT story); Hewitt, Bishop,
+  Steiger, "A Universal Modular Actor Formalism for Artificial
+  Intelligence", *IJCAI* 1973 (TASKS.md as the message store; each
+  emitted block is one message addressed to whoever picks it next);
   Aho, Sethi, Ullman, *Compilers: Principles, Techniques, and Tools*,
-  Addison-Wesley, 1986 (round-trip property as the parseability
-  test — the load-bearing literature anchor for the new gate);
-  rule #2 (vision.md § 2 — every dep behind interface; the OMC
-  bridge is exactly that, and the parseability test gates the
-  interface contract before v0 ships); rule #7 (vision.md § 7 —
-  graceful-degrade dormant short-circuit when no `--omc-checkout=`
-  is supplied); rule #9 (vision.md § 9 — pre-registered Pivot: a
-  non-whitespace divergence on any sample disproves the parseable-
-  thin-reader hypothesis); rule #10 (vision.md § 10 — deterministic
-  enforcement; the original research task's prose Acceptance now has
-  a machine-readable counterpart); Munafò, Nosek, Bishop et al.,
-  "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
-  0021, 2017 (rule-#9 pre-registration discipline — the Pivot is
-  committed before any real OMC checkout is round-tripped, so a
-  divergence cannot be retroactively explained away).
+  Addison-Wesley, 1986 (parser shape — `JSON.parse` is the only
+  parser; the format is the round-trip-parseable verdict from
+  `scripts/omc-roundtrip.mjs` per vision.md row 61); Martin, R. C.,
+  *Clean Architecture*, Pearson, 2017 (I/O at the edge — `OmcReader.
+  list` is the only filesystem touch; mapper + sync are pure);
+  Shapiro et al., "Conflict-free Replicated Data Types", *SSS* 2011
+  (the CRDT story `omc-tasksmd-bridge-v1-watcher` waits on); Munafò
+  et al., *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 pre-
+  registration — the lossy-projection pivot was declared *before*
+  code so a fielddrop cannot retroactively redefine "lossless");
+  rule #2 (vision.md § 2 — every dep behind interface; OMC's task
+  store is exactly that, behind `OmcReader.list`); rule #6 (vision.md
+  § 6 — let-it-crash; the v1+ `merge-by-id` mode throws with a `v1+`
+  reference so the caller decides next step); rule #7 (vision.md § 7
+  — graceful-degrade on missing `.omc/state/team/`, on malformed
+  JSON, on unknown `teamName` filter); rule #10 (vision.md § 10 —
+  deterministic enforcement; the read-only-first pattern is gated by
+  the existing `scripts/omc-roundtrip.mjs` parseability check at
+  vision.md row 61, so the bridge ships only after the gate is
+  green).
 replay_windows_days: [30]
