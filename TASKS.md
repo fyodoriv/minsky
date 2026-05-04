@@ -56,25 +56,11 @@
   - **Anchor**: Kephart & Chess 2003 (MAPE-K Knowledge → Plan → Execute); Khattab DSPy 2023 (rejected runtime, kept the cycle); Kohavi/Tang/Xu 2020 (sustained-gain discipline).
   - **Risk**: Auto-opening PRs on the user's behalf could be noisy. Mitigation: orchestrator opens PRs as DRAFTS, never auto-merges, requires explicit operator review.
 
-- [ ] `notifier-adapter-v0` — ntfy push channel for morning summary + chaos alerts
-  - **ID**: notifier-adapter-v0
-  - **Tags**: novel, adapter, ux, blocker
-  - **Estimate**: 4–6h
-  - **Hypothesis**: A thin `Notifier` interface + `NtfyNotifier` Strategy (HTTP POST to `https://ntfy.sh/<topic>` or self-hosted) lets the tick-loop daemon emit (a) one morning push summarising overnight throughput + tokens, (b) circuit-break-and-notify alerts per the rule-#7 chaos table. Today story 001 acceptance #6 ("a morning notification summarizes work done") has no implementation — there's no push channel at all.
-  - **Details**: Adapter pattern (rule #2). Interface: `Notifier.push({ title, body, priority: 'low' | 'high' })`. Strategy: `NtfyNotifier` (HTTP), `StubNotifier` (in-memory for tests). Topic configured via `MINSKY_NTFY_TOPIC` env var. Token via macOS Keychain (mirror jira-token pattern in zshrc). Tick-loop daemon emits one morning push when crossing 07:00 local with a roll-up of the last N ticks; budget-guard PAUSE state emits an immediate high-priority push.
-  - **Files**: `novel/adapters/notifier/{package.json, tsconfig.json, src/index.ts, src/index.test.ts, src/ntfy.ts, src/ntfy.test.ts, README.md}`
-  - **Verification**: `pnpm vitest run novel/adapters/notifier` ≥6 tests pass; manual smoke against ntfy.sh sends a real push to the configured topic.
-  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/adapters/notifier --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`.
-  - **Pivot**: if ntfy.sh proves unreliable (rate limits, downtime), pivot to APNs or self-hosted ntfy on the user's Tailnet. Document the deviation.
-  - **Acceptance**: morning push fires on real overnight runs (verified manually); chaos-table circuit-break-and-notify rows have a live `notifier.push(...)` callsite.
-  - **Anchor**: rule #2 (adapter pattern); Hunt-Thomas 1999 Pragmatic Programmer Tip 32 (crash early — but the crash needs to reach the operator).
-  - **Risk**: push fatigue if too noisy. Mitigation: priority schedule (`low` for daily summary, `high` only for budget-guard PAUSE / crash); max 3 pushes/day at default settings.
-
 - [ ] `user-story-001-integration-test-real` — actual integration test against the real daemon (not mock)
   - **ID**: user-story-001-integration-test-real
   - **Tags**: testing, validation, runtime
   - **Estimate**: 1d
-  - **Blocked by**: tick-loop-daemon-v0, notifier-adapter-v0, observability-backend-deploy
+  - **Blocked by**: tick-loop-daemon-v0, observability-backend-deploy
   - **Hypothesis**: A `user-stories/001-loop-runs-overnight.test.ts` that drives the real daemon (via `bash distribution/systemd/run-tick-loop.sh --max-iterations=12 --tick-interval-s=5` — 1-min compressed sim of 12 ticks) closes ≥4 P2 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL span per phase, and triggers exactly 1 morning push, satisfying story 001's acceptance criteria within CI runtime <10 min.
   - **Details**: Replaces the coverage-manifest test (PR #82) with a real driver. Fixture: synthetic TASKS.md with 4 P2 tasks designed to complete deterministically. Mock Anthropic client (reuse `@minsky/tick-loop`'s `MockAnthropicClient`). Real OpenObserve (started + torn down in test setup). StubNotifier asserts 1 push call.
   - **Files**: `user-stories/001-loop-runs-overnight.test.ts`, `user-stories/001-loop-runs-overnight.md` (mark Phase: Implemented)
