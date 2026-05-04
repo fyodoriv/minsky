@@ -21,7 +21,7 @@ A **curated stack + small custom layers** that wires together existing tools —
 - **`@minsky/observability`** — three-signal OpenTelemetry adapter (traces / metrics / logs) with health-probe `selfTest()`.
 - **`@minsky/handoff-spec`** — parseable record format for handoffs between agents (subject / from / to / status / blockers / suggested next).
 - **`@minsky/token-monitor`** — interface + planned Strategy against [Maciek-roboblog/Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) (the Python tool that actually surfaces Anthropic's hidden usage numbers).
-- **`@minsky/mape-k-loop`** *(planned, largest novel layer)* — the autonomic manager that runs a spec monitor, identifies the bottleneck, A/Bs prompt variants, and rolls out winners.
+- **`@minsky/mape-k-loop`** — the autonomic manager that runs a spec monitor, identifies the bottleneck, A/Bs prompt variants, and rolls out winners. v0 ships pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` decision functions plus the assembled `tick` cycle (sustained-gain + oscillation guards) — see [`novel/mape-k-loop/`](./novel/mape-k-loop/).
 
 Everything is MIT, every dependency lives behind an interface (`novel/adapters/`), every rule traces to a published source, and every code change in this repo carries a [pre-registered hypothesis + measurement](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes).
 
@@ -51,9 +51,15 @@ The named patterns aren't decoration — they're the debuggability promise. When
 - ✅ OpenTelemetry adapter with `selfTest()` (`@minsky/observability`)
 - ✅ Handoff record format + parser + validator (`@minsky/handoff-spec`)
 - ✅ Supervisor unit-file templates for systemd + launchd (`distribution/`)
+- ✅ Maciek `TokenMonitor` Strategy (`@minsky/token-monitor` — reads `~/.claude/projects/<cwd>/<session>.jsonl` directly)
+- ✅ MAPE-K autonomic loop v0 (`@minsky/mape-k-loop` — pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` + assembled `tick`; sustained-gain + oscillation guards)
+- ✅ Spec monitor — deterministic CI lints (load-bearing per rule #10, see `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` + `scripts/check-anchor-primary-source.mjs` + `scripts/check-pivot-success-margin.mjs` + `scripts/check-measurement-inspects-output.mjs` + `scripts/check-skill-rule-cap.mjs`) plus the residual-judgement advisory Claude Skill at `novel/spec-monitor/SKILL.md`
+- ✅ Web dashboard skeleton with Lighthouse Mobile ≥0.85 CI gate (`@minsky/dashboard-web`, `.github/workflows/lighthouse.yml`)
+- ✅ Rule #9 automation layer — per-PR experiment runner (`scripts/run-experiment.mjs` + `.github/workflows/experiment.yml`), weekly–monthly tracker (`@minsky/experiment-record` + `.github/workflows/experiment-tracker.yml`), and the experiment-record format
+- ✅ Read-only OMC → tasks.md bridge (`@minsky/omc-tasksmd-bridge` v0)
 - ✅ Iron rule #9 (pre-registered hypothesis-driven development) + rule #10 (deterministic CI enforcement) wired across `vision.md` / `AGENTS.md` / `TASKS.md` policy
 
-What doesn't work yet — see [`TASKS.md`](./TASKS.md): the Maciek `TokenMonitor` Strategy, the MAPE-K loop, the spec monitor (deterministic linters first, advisory Skill second), the Watch dashboard, and the rule #9 automation layer (per-PR experiment runner, weekly tracker, quarterly calibration).
+What doesn't work yet — see [`TASKS.md`](./TASKS.md): the first user-story integration test, the Apple Watch Shortcuts surface, the bidirectional OMC ↔ tasks.md watcher (`omc-tasksmd-bridge-v1-watcher`), and the quarterly MAPE-K calibration cycle (folded into `mape-k-loop-v0` and `review-q3-2026`).
 
 ## Quickstart
 
