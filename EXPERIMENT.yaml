@@ -1,20 +1,18 @@
-id: dashboard-web-skeleton
+id: dashboard-web-metrics-enum
 hypothesis: |
-  A Hono v4 SSR skeleton at ≤100 LoC of TypeScript source under
-  `novel/dashboard-web/src/` provides a deterministic substrate that
-  unblocks the 3 remaining sub-tasks of `dashboard-web-v0`
-  (`dashboard-web-metrics-enum`, `dashboard-web-render-all-10`,
-  `dashboard-web-lighthouse-ci`) without exceeding the parent's 300-LoC
-  pivot threshold. The renderer is a pure function over `{ metrics }` —
-  no I/O, no global state — so the Lighthouse Mobile gate landing in
-  sub-task 4 measures static-render performance, not runtime variance.
-  The single placeholder `data-metric-id="placeholder"` is the
-  contract sub-task 3 expands to 10 entries; the cold-start path
-  (`render({ metrics: [] })`) returns a well-formed document so the
-  dashboard never crashes on a missing OTEL backend (rule #7 graceful-
-  degrade — chaos table row 1 of the package README).
-success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0; `[ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 100 ]` exits 0; rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-6 / rule-7 / skill-rule-cap / pattern-index) pass on this PR's diff; the `dashboard-web-skeleton` block is removed from `TASKS.md` in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-skeleton$' TASKS.md` returns 0); vision.md row 57 records partial conformance for the skeleton."
-pivot: "If Hono cold-start adds significant complexity (the 100-LoC cap is breached >50 % to satisfy the SSR contract — i.e., >150 LoC of TS source under `novel/dashboard-web/src/`), pivot to plain `node:http` + template literals. The `createServer` Adapter shape is the seam: only `server.ts` would change. If the skeleton fails to unblock sub-task 2 within the same week (the renderer needs a non-trivial change to accept the 10-entry array), the pure-function shape is wrong; pivot to a class-based renderer with named methods per metric category."
-measurement: "pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0' && [ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 100 ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-skeleton$' TASKS.md)\" = '0' ]"
-anchor: "Card, S. K., Mackinlay, J. D., & Shneiderman, B. (eds.), *Readings in Information Visualization: Using Vision to Think*, Morgan Kaufmann, 1999, Ch. 1 (the dashboard-as-glanceable-display pattern — the 10-metric set is the dashboard's information atom); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (rate / errors / duration as the right service-level lens); Gamma, E., Helm, R., Johnson, R., & Vlissides, J., *Design Patterns: Elements of Reusable Object-Oriented Software*, Addison-Wesley, 1994 (Adapter — `createServer` is the Hono adapter shape so a pivot to plain `node:http` only changes `server.ts`); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure decision module + thin I/O boundary — `render` is pure, the Hono server is the I/O); rule #2 (vision.md § 2 — every dep behind interface); rule #7 (vision.md § 7 — graceful-degrade and chaos engineering); vision.md § \"Pattern conformance index\" row 57 (this PR adds the row)."
+  Lifting the 10 rows of `vision.md` § "Success criteria" into a typed
+  `SUCCESS_METRICS: readonly SuccessMetric[]` constant under
+  `novel/dashboard-web/src/metrics.ts` (each row: `{ id: kebab-case
+  string, label, formula, unit }`) provides a deterministic substrate
+  that sub-task 3 (`dashboard-web-render-all-10`) can iterate without
+  re-parsing markdown at request time. Per rule #4 ("every constant in
+  source") the enumeration lives next to the renderer; the renderer
+  reads the constant — the constant never reaches back into the
+  renderer (Martin 2017 dependency direction). Three invariants — count
+  = 10, all kebab-case, no duplicate ids — guard against drift between
+  the dashboard and vision.md.
+success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0 (the 3 new metrics invariants + the 4 prior skeleton tests, less the dropped placeholder-id assertion that was rewritten to assert `loop-uptime`); `SUCCESS_METRICS.length === 10` enforced by the count test; all 10 ids match `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/` and are unique; `[ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 200 ]` exits 0; the `dashboard-web-metrics-enum` block is removed from `TASKS.md` in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-metrics-enum$' TASKS.md` returns 0); the parent `dashboard-web-v0` tracker's `Blocked by` list no longer references this sub-task."
+pivot: "If the kebab-case constraint forces awkward ids (two vision.md rows collide on the same root noun, or a row's natural slug exceeds readable length), allow a numbered suffix (`token-budget-honoring-1` etc.) and document the deviation in `novel/dashboard-web/README.md`. If the 10-row count drifts (vision.md adds an 11th row before sub-task 3 lands), update both files in the same PR — never let the dashboard and the spec disagree. If the typed constant fails to unblock sub-task 3 within the same week (the renderer needs structural changes beyond a `for` loop over the array), the `SuccessMetric` shape is wrong; pivot to a richer shape with explicit unit-typing or a per-row anchor field."
+measurement: "pnpm typecheck && pnpm vitest run novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e '.numPassedTests >= 3 and .numFailedTests == 0' && [ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 200 ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-metrics-enum$' TASKS.md)\" = '0' ]"
+anchor: "rule #4 (vision.md § 4 — every constant in source; the 10 success-criteria rows are constants and so live in source, not in re-parsed markdown); Card, S. K., Mackinlay, J. D., & Shneiderman, B. (eds.), *Readings in Information Visualization: Using Vision to Think*, Morgan Kaufmann, 1999, Ch. 1 (the 10-metric set is the dashboard's information atom — id + label + formula + unit is the minimum viable visualization atom); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (dependency direction — the renderer reads the constant; the constant does not import the renderer); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (rate / errors / duration as the right service-level lens — the 10 metrics span exactly this surface)."
 replay_windows_days: [7, 30]

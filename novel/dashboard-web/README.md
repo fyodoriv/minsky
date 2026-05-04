@@ -10,7 +10,7 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 
 - **`createServer({ metrics })`** — Adapter shape (Gamma et al. 1994) over Hono v4. The HTTP runtime is one Strategy; native `http.createServer` or Fastify would be alternatives. **Conformance: full** for the routing contract.
 - **`render({ metrics })`** — Pure-function HTML renderer (Martin, *Clean Architecture*, 2017). Every input is data; output is a string. Cold-start safe (empty `metrics` yields a well-formed document with an empty `<ul>`). **Conformance: full**.
-- **`SuccessMetric`** — Information-visualization atom (Card & Mackinlay, *Readings in Information Visualization*, 1999): id + label + formula + unit; nothing else. Glanceable per Wilkie 2018 (RED Method) at the service-level lens. **Conformance: partial** — the v0 ships one placeholder; sub-task 2 (`dashboard-web-metrics-enum`) lifts the 10 from vision.md.
+- **`SuccessMetric`** — Information-visualization atom (Card & Mackinlay, *Readings in Information Visualization*, 1999): id + label + formula + unit; nothing else. Glanceable per Wilkie 2018 (RED Method) at the service-level lens. **Conformance: full** — the 10 vision.md success criteria are typed as `SUCCESS_METRICS: readonly SuccessMetric[]` (sub-task 2/4 — `dashboard-web-metrics-enum`).
 
 ## Failure modes & chaos verification
 
@@ -37,9 +37,9 @@ Per constitutional rule #7 (vision.md § 7).
 - **Measurement**: `pnpm typecheck && pnpm vitest run novel/dashboard-web/ && [ "$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')" -le 100 ]`.
 - **Literature anchor**: Card & Mackinlay, *Readings in Information Visualization*, Morgan Kaufmann, 1999 (the dashboard-as-glanceable-display pattern); Wilkie, "RED Method", 2018 (rate / errors / duration as the service-level lens); Martin, *Clean Architecture*, Pearson, 2017 (pure decision module + thin I/O boundary — the renderer is pure, the server is the I/O); rule #2 (vision.md § 2 — every dep behind interface; `createServer` is the Hono adapter).
 
-### Sub-task 2 (metrics-enum — filed)
+### Sub-task 2 (metrics-enum — shipped)
 
-See TASKS.md `dashboard-web-metrics-enum`.
+The 10 vision.md success criteria are typed in `src/metrics.ts` as `SUCCESS_METRICS: readonly SuccessMetric[]`. Three invariants are enforced in `test/metrics.test.ts`: count = 10, all kebab-case, no duplicate ids. Renamed from `PLACEHOLDER_METRICS` (sub-task 1's stub).
 
 ### Sub-task 3 (render-all-10 — filed, blocked)
 
@@ -52,9 +52,9 @@ See TASKS.md `dashboard-web-lighthouse-ci`.
 ## Usage
 
 ```ts
-import { createServer, PLACEHOLDER_METRICS } from "@minsky/dashboard-web";
+import { createServer, SUCCESS_METRICS } from "@minsky/dashboard-web";
 import { serve } from "@hono/node-server";
 
-const { fetch } = createServer({ metrics: PLACEHOLDER_METRICS });
+const { fetch } = createServer({ metrics: SUCCESS_METRICS });
 serve({ fetch, port: 8080 }); // distribution/run-dashboard-web.sh owns the port choice
 ```
