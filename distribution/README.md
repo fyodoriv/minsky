@@ -21,6 +21,11 @@ distribution/
 ├── launchd/                                 # macOS LaunchAgents
 │   ├── com.minsky.tick-loop.plist           # transient (KeepAlive: SuccessfulExit=false)
 │   └── com.minsky.budget-guard.plist        # permanent (KeepAlive=true)
+├── openobserve/                             # OTLP receiver (v0 backend per research.md PR #43)
+│   ├── com.openobserve.daemon.plist         # macOS LaunchAgent (permanent restart)
+│   ├── openobserve.service                  # Linux systemd user unit (permanent restart)
+│   └── README.md                            # install + verify runbook
+├── install-openobserve.sh                   # one-shot installer (downloads pinned binary)
 ├── lint-units.sh                            # smoke-tests templates pre-deploy
 └── state.example.json                       # reference schema for setup.sh
 ```
@@ -59,6 +64,31 @@ for f in ~/Library/LaunchAgents/com.minsky.*.plist; do
   launchctl bootstrap gui/"$(id -u)" "$f"
 done
 ```
+
+## Install the observability backend (OpenObserve)
+
+Per [`research.md` § "Lighter OTEL backend"](../research.md#lighter-otel-backend) (resolved 2026-05-03, PR #43), Minsky's v0 OTLP receiver is OpenObserve — single binary, parquet-on-disk, PromQL-compatible read API. The installer + per-platform unit-file templates live in [`distribution/openobserve/`](openobserve/README.md); the short version:
+
+```bash
+# 1. Download + install the pinned OpenObserve binary into ~/.local/bin/.
+bash distribution/install-openobserve.sh
+
+# 2. Register the daemon with launchd (macOS) or systemctl --user (Linux).
+#    Full commands in distribution/openobserve/README.md § "Register the daemon".
+
+# 3. Verify: health probe + a sample PromQL query.
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5080/healthz
+```
+
+Wire the OTEL adapter at the OTLP HTTP endpoint:
+
+```ts
+import { OtelObservability } from "@minsky/observability/otel";
+const obs = new OtelObservability({ endpoint: "http://127.0.0.1:5080/api/default/v1" });
+await obs.selfTest(); // → { status: "green", … }
+```
+
+Wire the dashboard at the PromQL read endpoint by setting `OBSERVABILITY_BACKEND=openobserve` + `OPENOBSERVE_BASE_URL=http://127.0.0.1:5080`. See [`distribution/openobserve/README.md`](openobserve/README.md) for the verify runbook + chaos-table failure modes.
 
 ## Smoke-test the templates locally
 

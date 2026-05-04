@@ -5,7 +5,7 @@ import { AggregationTemporality, InMemoryMetricExporter } from "@opentelemetry/s
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 
 import { aggregateStatus } from "./index.js";
-import { OtelObservability } from "./otel.js";
+import { OtelObservability, resolveOtlpEndpoints } from "./otel.js";
 
 describe("OtelObservability.selfTest", () => {
   let traceExporter: InMemorySpanExporter;
@@ -77,6 +77,39 @@ describe("OtelObservability.selfTest", () => {
 
     expect(result.status).toBe("red");
     expect(result.message).toContain("primitive-throw");
+  });
+
+  it("flows the endpoint opt through resolveOtlpEndpoints to per-signal URLs (observability-backend-deploy)", () => {
+    // Pure-helper white-box test: the constructor wires `endpoint` →
+    // `{traces,metrics,logs}` per the OTLP/HTTP convention by routing
+    // through `resolveOtlpEndpoints`.
+    const endpoints = resolveOtlpEndpoints("http://127.0.0.1:5080/api/default/v1");
+    expect(endpoints).toEqual({
+      traces: "http://127.0.0.1:5080/api/default/v1/traces",
+      metrics: "http://127.0.0.1:5080/api/default/v1/metrics",
+      logs: "http://127.0.0.1:5080/api/default/v1/logs",
+    });
+  });
+
+  it("trailing-slash endpoint is normalised so per-signal URLs do not double-slash", () => {
+    const endpoints = resolveOtlpEndpoints("http://127.0.0.1:5080/api/default/v1/");
+    for (const url of [endpoints.traces, endpoints.metrics, endpoints.logs]) {
+      expect(url).toBeDefined();
+      expect(url).not.toContain("//traces");
+      expect(url).not.toContain("//metrics");
+      expect(url).not.toContain("//logs");
+    }
+    expect(endpoints.traces).toBe("http://127.0.0.1:5080/api/default/v1/traces");
+  });
+
+  it("resolveOtlpEndpoints returns empty object when endpoint is undefined (env-var fallback)", () => {
+    expect(resolveOtlpEndpoints(undefined)).toEqual({});
+  });
+
+  it("OtelObservability constructs without throwing when endpoint opt is supplied", async () => {
+    const wired = new OtelObservability({ endpoint: "http://127.0.0.1:5080/api/default/v1" });
+    expect(wired).toBeDefined();
+    await wired.shutdown();
   });
 
   it("returns red SelfTestResult when an internal call throws", async () => {
