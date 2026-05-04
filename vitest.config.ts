@@ -19,12 +19,17 @@ export default defineConfig({
   },
   test: {
     globals: false,
-    include: ["novel/**/src/**/*.test.ts"],
+    include: ["novel/**/src/**/*.test.ts", "scripts/**/*.test.mjs"],
     coverage: {
       provider: "v8",
       all: true,
+      // Coverage thresholds apply to novel/ packages only — that is where
+      // the constitutional 90 %/85 % discipline lives. Scripts under
+      // scripts/ are CI lints (rule #10): their correctness is enforced by
+      // their paired test files plus the lint's own exit-code contract,
+      // not by a coverage gate over a single .mjs file.
       include: ["novel/**/src/**/*.ts"],
-      exclude: ["**/*.test.ts", "**/*.d.ts"],
+      exclude: ["**/*.test.ts", "**/*.test.mjs", "**/*.d.ts"],
       reporter: process.env["CI"] ? ["text", "lcov", "json-summary"] : ["text"],
       thresholds: {
         lines: 90,

@@ -32,15 +32,21 @@ jobs:
       - run: npx -y @tasks-md/lint@latest TASKS.md
 
   glossary-discipline:
-    # vision.md § 5: every coined term has a glossary anchor.
+    # vision.md § rule #5: every Minsky-coined term in vision.md resolves
+    # to a Glossary entry. Implements rule #10 (deterministic enforcement)
+    # for rule #5 — replaces the earlier section-header-only check.
+    # Source: scripts/check-rule-5-glossary-discipline.mjs +
+    #   scripts/glossary-allowlist.txt; paired tests under
+    #   scripts/check-rule-5-glossary-discipline.test.mjs.
+    # Ratchet (rule #10 § 5): the prior section-header grep is removed
+    # in this job — never run two enforcement mechanisms competing.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          if ! grep -q '## Glossary — every term has a CS anchor' vision.md; then
-            echo "vision.md is missing the Glossary section required by constitutional rule #5" >&2
-            exit 1
-          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node scripts/check-rule-5-glossary-discipline.mjs
 
   biome:
     runs-on: ubuntu-latest
