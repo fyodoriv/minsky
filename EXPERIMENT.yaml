@@ -1,47 +1,61 @@
-id: first-integration-test-coverage-manifest-2026-05-04
+id: first-integration-test-mock-tick-loop-2026-05-03
 hypothesis: |
-  A coverage manifest test mapping user-story 001's 12 chaos-table rows to
-  existing repo tests achieves the parent `first-integration-test` task's
-  Acceptance ("≥80 % coverage of failure-mode rows declared in the
-  user-story file") via the documented Pivot path — both `covered` (existing
-  repo test) and `self-hosted` (deferred to nightly self-hosted runner,
-  sub-task 3) statuses count toward the threshold. Inventory test runs
-  in <1 s on any CI runner; no OS-level fault injection.
+  A deterministic mock-tick daemon (`@minsky/tick-loop`) with 3+ chaos-mode
+  mocks (5xx, network-timeout, malformed-output, plus the lease-expiry
+  rejection-boundary chaos row) reproduces the user-story-001
+  P2-task-throughput Acceptance in <10 min CI wall-clock — sub-task 2/3 of
+  `first-integration-test`. The daemon loops `claim → mock-anthropic-call
+  → complete` on a configurable cadence; `tick(...)` is pure given a
+  deterministic client + clock; `runSmoke(...)` is the I/O orchestrator.
+  The chaos branches return failure shapes (`status: 'failed'`) rather than
+  throw, so the supervisor (the caller of `runSmoke`) sees the respawn
+  signal — Armstrong 2007 "let it crash AT the right boundary".
 success: |
-  4 vitest test cases pass; `COVERAGE_MANIFEST.length === 12`;
-  `(covered + self-hosted) / 12 >= 0.80` (today the ratio is 11/12 = 0.917);
-  2 sub-tasks (`first-integration-test-mock-tick-loop`,
-  `first-integration-test-nightly-self-hosted`) queued in TASKS.md with full
-  rule-#9 fields. Concretely: `pnpm vitest run user-stories/001-coverage-manifest.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0.
+  ≥4 vitest tests pass + the 4-task smoke runs within budget +
+  ≥1 OTEL span per task type (in-memory `SpanRecorder`) +
+  chaos table has ≥3 rows in `novel/tick-loop/README.md` § "Failure modes
+  & chaos verification" (today the table has 5 rows — exceeds the brief).
+  Concretely: `pnpm vitest run novel/tick-loop --reporter=json |
+  jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0
+  (today: 11 passed, 0 failed).
 pivot: |
-  If <80 % of rows can be inventoried as covered+self-hosted (i.e., genuinely
-  uncovered with no OS-level deferral path), the user-story 001 spec is
-  over-broad and the *story* needs splitting — not the manifest reframed.
-  Numerically: ratio < 0.50 over the 12 rows fires the spec-split pivot;
-  0.50 ≤ ratio < 0.80 fires a milder pivot (file additional `ci-lint-*` or
-  smoke-test sub-tasks to cover the gap before re-asserting Acceptance).
+  If the 4-task budget can't fit in a 10-min in-process smoke (e.g.,
+  <2 tasks complete within budget under deterministic clock),
+  the cadence model is too coarse — drop to single-task smoke +
+  multi-task on self-hosted (sub-task 3); move the multi-task assertion
+  entirely to `first-integration-test-nightly-self-hosted`.
 measurement: |
   pnpm typecheck \
-    && pnpm vitest run user-stories/001-coverage-manifest.test.ts --reporter=json \
+    && pnpm vitest run novel/tick-loop --reporter=json \
        | jq -e '.numPassedTests >= 4 and .numFailedTests == 0' \
     && pnpm lint \
+    && node scripts/check-rule-4-otel-coverage.mjs \
+    && node scripts/check-rule-6-let-it-crash.mjs \
+    && node scripts/check-rule-7-chaos-coverage.mjs \
+    && node scripts/check-pattern-index.mjs \
+    && node scripts/check-rule-1-novel-justification.mjs \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude" \
-    && grep -c '\*\*ID\*\*: first-integration-test-mock-tick-loop' TASKS.md \
-    && grep -c '\*\*ID\*\*: first-integration-test-nightly-self-hosted' TASKS.md
+    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Basiri, A., Blohowiak, A., Hosseini, L., et al., "Principles of Chaos
-  Engineering", *IEEE Software* 33 (3), 2016 (steady-state hypothesis —
-  coverage of declared failure modes is the precondition for fault-injection
-  itself; an uncovered row is a steady-state assumption that hasn't been
-  verified); Beck, K., *Extreme Programming Explained*, Addison-Wesley,
-  1999, Ch. 17 (CI as the constraint enforcer — the manifest's existence
-  is mechanically asserted on every PR, not honour-system); rule #7
-  (vision.md § 7 — failure-mode discipline); rule #10 (vision.md § 10 —
-  deterministic enforcement; the manifest is a vitest assertion suite,
-  not prose); Munafò et al., "A Manifesto for Reproducible Science",
-  *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 pre-registration —
-  the parent task's documented Pivot ("reframe as a pair: 10-min smoke
-  in CI + nightly self-hosted") is what justifies counting `self-hosted`
-  toward the ≥80 % Acceptance, not a post-hoc reframing).
+  Liu, C. L., Layland, J. W., "Scheduling Algorithms for Multiprogramming
+  in a Hard Real-Time Environment", *JACM* 20 (1), 1973 (periodic-task
+  scheduling — the cadence model: N ticks within a wall-clock budget,
+  per-tick deadlines, halt at budget-exhaustion); Armstrong, J.,
+  *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash supervision
+  — the chaos table forces ≥3 rows including a 5xx fixture so the supervisor
+  sees a real respawn signal; the mock-client rejection path is mapped at
+  the `tick` boundary); Gamma, Helm, Johnson, Vlissides, *Design Patterns*,
+  Addison-Wesley, 1994 (Adapter — `MockAnthropicClient` interface, test
+  fake is one implementation, production plugs a real Anthropic-SDK adapter
+  behind the same shape); Basiri et al., "Principles of Chaos Engineering",
+  *IEEE Software* 2016 (steady-state hypothesis — every tick produces a
+  `TickResult` with `status` ∈ `{completed, failed}` and exactly one span);
+  rule #7 (vision.md § 7 — failure-mode discipline); rule #9 (vision.md § 9
+  — pre-registered pivot threshold + measurement before code); rule #10
+  (vision.md § 10 — deterministic enforcement; the chaos table is a vitest
+  assertion suite, not prose); Munafò et al., *Nature Human Behaviour* 1,
+  0021, 2017 (rule-#9 pre-registration — the parent `first-integration-test`
+  task's documented Pivot ("reframe as a pair: 10-min smoke in CI + nightly
+  self-hosted") is what justifies counting `self-hosted` toward the ≥80 %
+  Acceptance, not a post-hoc reframing).
 replay_windows_days: [90]

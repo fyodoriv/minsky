@@ -131,6 +131,12 @@ importers:
         specifier: workspace:*
         version: link:../adapters/prompt-optimizer
 
+  novel/tick-loop:
+    dependencies:
+      '@minsky/observability':
+        specifier: workspace:*
+        version: link:../adapters/observability
+
 packages:
 
   '@ampproject/remapping@2.3.0':
