@@ -124,8 +124,36 @@ jobs:
           # quarterly review explicitly bumps it.
           echo "$version" | grep -q "3.1.0"
 
+  rule-1-novel-justification:
+    # rule #10: deterministic enforcement of rule #1 (don't reinvent the wheel).
+    # Fails when a PR adds `novel/<pkg>/` (excluding `novel/adapters/`) without
+    # either a `research.md` entry under a "When the existing tools didn't fit"
+    # heading mentioning <pkg>, or an opt-out comment in the package README.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the merge-base with main reachable for `git diff main...HEAD`.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: rule-1 lint
+        run: node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main
+
   ci:
-    needs: [markdownlint, tasks-lint, glossary-discipline, biome, typecheck, test, hygiene, maciek-smoke]
+    needs:
+      - biome
+      - glossary-discipline
+      - hygiene
+      - maciek-smoke
+      - markdownlint
+      - rule-1-novel-justification
+      - tasks-lint
+      - test
+      - typecheck
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -138,7 +166,8 @@ jobs:
               || [ "${{ needs.typecheck.result }}" != "success" ] \
               || [ "${{ needs.test.result }}" != "success" ] \
               || [ "${{ needs.hygiene.result }}" != "success" ] \
-              || [ "${{ needs.maciek-smoke.result }}" != "success" ]; then
+              || [ "${{ needs.maciek-smoke.result }}" != "success" ] \
+              || [ "${{ needs.rule-1-novel-justification.result }}" != "success" ]; then
             echo "one or more required checks failed" >&2
             exit 1
           fi

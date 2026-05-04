@@ -54,20 +54,6 @@
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
 
-- [ ] `ci-rule-1-novel-justification` — CI lint: every `novel/<pkg>/` has a justification row in `research.md`
-  - **ID**: ci-rule-1-novel-justification
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 2–3h
-  - **Hypothesis**: A diff-based CI check that fails when a new directory under `novel/` is added without a corresponding "When the existing tools didn't fit: <pkg>" row in `research.md` mechanically enforces rule #1 (don't reinvent the wheel) — converting the quarterly human review into a per-PR gate without changing rule #1's substance.
-  - **Details**: Build `scripts/check-rule-1-novel-justification.mjs`. Diffs PR vs `main`; for each new top-level directory under `novel/` (excluding `novel/adapters/`), greps `research.md` for the package name in a "When the existing tools didn't fit" subsection; fails if missing. Wire as a required CI job. Allow opt-out via `<!-- rule-1: <existing-tool-considered> rejected because: <reason> -->` in the package's README.
-  - **Files**: `scripts/check-rule-1-novel-justification.mjs`, `scripts/check-rule-1-novel-justification.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic PR adding `novel/foo/` without a research-md entry fails; same PR with the entry passes; opt-out comment honoured.
-  - **Measurement**: `node scripts/check-rule-1-novel-justification.mjs --diff-base=main` exits 1 against the missing-entry fixture and 0 against the with-entry fixture; `pnpm vitest run scripts/check-rule-1-novel-justification.test.mjs` exits 0.
-  - **Pivot**: if false-positive rate exceeds 5 % in the first month (e.g., misclassifying `novel/adapters/` subpackages, or a refactor that splits an existing package), narrow the scope to truly-novel top-level directories AND require an explicit `<!-- rule-1: split-of-<existing-id> -->` annotation for splits.
-  - **Acceptance**: CI job fails fast on the synthetic missing-entry fixture; rule #1 is now mechanically enforced for every new package.
-  - **Anchor**: rule #10 (deterministic enforcement); Lampson 1983 ("move the constraint to the cheapest possible point").
-  - **Risk**: An overly broad regex matches subdirectories of an already-justified package. Mitigation: scope to *added* top-level dirs only; respect existing-package boundaries.
-
 - [ ] `ci-rule-2-dep-coverage` — CI lint: every external dep is accessed only through `novel/adapters/`
   - **ID**: ci-rule-2-dep-coverage
   - **Tags**: ci, conformance, rule-10
@@ -156,7 +142,7 @@
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-2-dep-coverage, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
+  - **Blocked by**: ci-rule-2-dep-coverage, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
