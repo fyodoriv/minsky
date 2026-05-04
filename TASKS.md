@@ -15,10 +15,11 @@
 
 <!-- Cross-repo-runner roadmap (vision: "minsky governs any repo, not just itself", user-approved 2026-05-04): steps 0–6 of 7 shipped via #126/#122/#127/#128/#129/#131. Only `cross-repo-ci-action` (decision C2 — minsky-side GitHub Action posts check-runs via the GitHub API) remains in P0; local pre-push (C3) is the v0 fallback already shipped with the runner. See user-stories/006-runner-on-any-repo.md for the umbrella user story. -->
 
-- [ ] `rule-11-flake-detection-lint` — auto-detect flaky CI gates and downgrade them per rule #11
+- [ ] `rule-11-flake-detection-lint` — tracker — auto-detect flaky CI gates and downgrade them per rule #11
   - **ID**: rule-11-flake-detection-lint
-  - **Tags**: ci, rule-11, ratchet, rule-10
-  - **Estimate**: 1d
+  - **Tags**: ci, rule-11, ratchet, rule-10, tracker
+  - **Estimate**: 1d (decomposed into 4 sub-tasks)
+  - **Decomposed-into**: rule-11-flake-detection-pure-fn, rule-11-flake-detection-cli, rule-11-flake-detection-patch-emit, rule-11-flake-detection-ci-wire (each one-commit-sized; this tracker closes when all four ship).
   - **Hypothesis**: Rule #11 (vision.md § 11) declares that no flaky metric is a load-bearing claim and mandates a structural response (stop-the-world / fix-metric-not-change / pre-register-fix / land-proof / auto-detect). Steps 1–4 are honoured by operator discipline; step 5 (auto-detection) requires a deterministic CI lint that can't drift back to "we tolerate it for now" by silent attrition. `scripts/check-rule-11-no-flaky-gates.mjs` reads the last 30 days of CI runs across all minsky workflows (via `gh run list --workflow <name> --json conclusion,headSha,event` per workflow), computes a per-job false-positive rate (failed-then-passed-on-rerun-without-code-change — same `headSha` across two runs, first failure / second success), and surfaces any job whose rate is ≥10 %. For each surfaced flake, the lint emits two patches to a `tmp/rule-11/` directory: (a) a TASKS.md task-block draft pre-registering the flake-fix as `experiments/<job>-flake-fix.yaml`, (b) a workflow-file diff downgrading the gate to informational-only (matching the lighthouse-mobile shape shipped 2026-05-04). Operator merges the patches; the lint's job is detection + scaffolding, not decision-making.
   - **Details**:
     1. Implement the pure decision function `detectFlakeRate(runs: WorkflowRun[]): FlakeReport[]` in `scripts/check-rule-11-no-flaky-gates.mjs` (returns one entry per job whose ≥10 % rate triggered). Same-SHA-reruns identified by grouping runs by `headSha` + `name` and finding pairs where conclusion sequence is `failure → success` without intervening pushes (CI re-run signal).
@@ -44,6 +45,69 @@
 
   - **Risk**: introducing a CI job whose verdict shapes other jobs' status creates an enforcement-coupling chain — if the rule-#11 lint mis-detects a flake, it could cause unnecessary downgrades. Mitigation: the lint *emits patches but never applies them*; operator merges the patch only after reading the report; the human-in-the-loop step is the safety property (rule #6 — let-it-crash, where "crash" surfaces the patch artifact rather than auto-modifies CI config).
   - **Surfaced-by**: 2026-05-04 — operator on user-story-006 PR #123 observed lighthouse-mobile fail-then-pass on identical SHA. User explicitly stated rule-#11 ("any time a flaky test is detected, it must be fixed right away + added a measurement as an experiment proof"). The lighthouse fix shipped in this same PR (downgrade-to-informational); the auto-detection lint shipping later is what makes rule #11 a *mechanical* invariant, not just an operator-discipline one.
+
+- [ ] `rule-11-flake-detection-pure-fn` — pure `detectFlakeRate(runs)` decision function + paired tests
+  - **ID**: rule-11-flake-detection-pure-fn
+  - **Parent**: rule-11-flake-detection-lint
+  - **Tags**: ci, rule-11, pure-function
+  - **Estimate**: 2h
+  - **Hypothesis**: The decision boundary for "this CI job is flaky" is the same-SHA failed→success pair detection over a sliding window. Encoding it as a pure function `detectFlakeRate(runs: WorkflowRun[]): FlakeReport[]` (no I/O, no `gh` shell-out) is the smallest deterministic seam — every later sub-task (CLI ingestion, patch emission, CI wiring) imports this function and tests against fixture data. Per rule #2 (every external dep behind an interface), the pure function is the seam; `gh run list` is a separate I/O boundary in sub-task 2. The pure function uses two thresholds: ≥10% per-job rate over the windowed runs AND ≥5 same-SHA pair observations as the minimum-sample-size guard (a 1-in-3 coincidence at ≥10% rate is not signal). Returns one `FlakeReport` per offending job naming the workflow, job, rate (numerator / denominator), and the windowing interval observed.
+  - **Details**: (a) Define `WorkflowRun` shape mirroring `gh run list --json conclusion,headSha,event,name,workflowName,createdAt`. (b) `detectFlakeRate(runs)` groups by `(workflowName, name, headSha)`, finds pairs with conclusion sequence `failure → success`, computes per-job rate as `flake-pairs / total-pairs`, returns rows where rate ≥ 0.10 AND total-pairs ≥ 5. (c) Paired tests: 11% rate with 10 pairs → surfaces; 9% with 10 pairs → no surface; 11% with 4 pairs → no surface (sample-size guard); empty input → empty output; mixed-job input → only flaky job surfaces.
+  - **Files**: `scripts/check-rule-11-no-flaky-gates.mjs` (pure function exports only; CLI shim added in sub-task 2), `scripts/check-rule-11-no-flaky-gates.test.mjs` (≥6 paired vitest cases).
+  - **Verification**: `pnpm vitest run scripts/check-rule-11-no-flaky-gates.test.mjs --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0.
+  - **Measurement**: `node -e 'const {detectFlakeRate}=require("./scripts/check-rule-11-no-flaky-gates.mjs"); const a=require("assert"); const fixt=[{workflowName:"ci",name:"flaky",headSha:"a",conclusion:"failure"},{workflowName:"ci",name:"flaky",headSha:"a",conclusion:"success"}]; a.ok(Array.isArray(detectFlakeRate(fixt)));'` exits 0 (smoke + shape check; full coverage in vitest above).
+  - **Pivot**: if the pair-detection algorithm misses real flakes because GitHub's `gh run list` event ordering doesn't reliably show `failure → success` for re-runs (e.g. because the API returns the latest conclusion only and overwrites the prior failure record), pivot to the GitHub Checks API which preserves both conclusions on a single SHA. Sub-task 2's I/O boundary is the only place the pivot lands; the pure function shape stays unchanged.
+  - **Acceptance**: pure function exports + ≥6 paired tests; no I/O imports (no `gh`, no `fs` outside test fixtures); other sub-tasks import this function unchanged.
+  - **Anchor**: Memon, A., et al., "Taming Google-Scale Continuous Testing", *ICSE-SEIP* 2017 (the per-job same-SHA pair primitive is exactly the mechanism Google's DETECTOR uses); Martin, R. C., *Clean Architecture*, Pearson, 2017, Ch. 22 ("The Clean Architecture" — pure-function seam at the centre, I/O at the edge); rule #2 (every external dep behind an interface — `gh` is the dep, `detectFlakeRate` is the seam); rule #10 (deterministic enforcement — pure function is the simplest deterministic shape).
+  - **Risk**: low. Pure function with no side effects; rollback is `git revert`.
+
+- [ ] `rule-11-flake-detection-cli` — `gh run list` ingestion + CLI wrapper
+  - **ID**: rule-11-flake-detection-cli
+  - **Parent**: rule-11-flake-detection-lint
+  - **Blocked by**: rule-11-flake-detection-pure-fn
+  - **Tags**: ci, rule-11, io-boundary
+  - **Estimate**: 2h
+  - **Hypothesis**: A thin CLI (`scripts/check-rule-11-no-flaky-gates.mjs` invoked directly) shells out to `gh run list --workflow <name> --limit 100 --json conclusion,headSha,event,name,workflowName,createdAt --created '>=' <30d-ago>`, parses JSON to the `WorkflowRun` shape, and calls `detectFlakeRate`. A `--fixture <path>` flag reads a JSON file instead, for hermetic CI testing. The CLI prints one line per FlakeReport to stdout (`<workflow>:<job> rate=<n>/<d> over <m>d`) and exits 1 if any reports surface; exits 0 when clean.
+  - **Details**: (a) Argparse for `--fixture` and `--workflows`. (b) `gh run list` ingestion with rule-#9 30s timeout cap. (c) JSON parsing → `WorkflowRun[]`. (d) Stdout reporting. (e) Test: invoke CLI with `--fixture` against the same fixtures sub-task 1 used; assert exit 0/1 + stdout shape.
+  - **Files**: `scripts/check-rule-11-no-flaky-gates.mjs` (extend with CLI shim), `scripts/check-rule-11-no-flaky-gates.test.mjs` (extend with 2 CLI cases), test fixture(s) under `test/fixtures/rule-11-flake-detection/`.
+  - **Verification**: `node scripts/check-rule-11-no-flaky-gates.mjs --fixture=test/fixtures/rule-11-flake-detection/clean.json` exits 0; `--fixture=.../flaky.json` exits 1 with the report on stdout.
+  - **Measurement**: `node scripts/check-rule-11-no-flaky-gates.mjs --fixture=test/fixtures/rule-11-flake-detection/flaky.json | grep -qE '^[a-z-]+:[a-z-]+ rate='` exits 0.
+  - **Pivot**: if `gh run list`'s JSON shape changes (Cromwell renames a field) or the rate-limit blocks the 30-day window, pivot to a cached-ingestion model — sub-task 4's CI workflow runs `gh run list` nightly, writes to `flake-stats/<workflow>-30d.json`, and the lint reads from disk.
+  - **Acceptance**: CLI invocable with `--fixture` for hermetic tests; live `gh` invocation gated behind a flag so CI doesn't burn API quota.
+  - **Anchor**: Martin, *Clean Architecture*, 2017, Ch. 22 (I/O at the edge — the CLI is the boundary, the function from sub-task 1 is the core); rule #2 (interface-first); rule #9 (timeout cap on every external call).
+  - **Risk**: low. The CLI is opt-in; the pure function from sub-task 1 stays the source of truth.
+
+- [ ] `rule-11-flake-detection-patch-emit` — emit `tmp/rule-11/<job>-task-block.md` + `<job>-workflow.patch` per FlakeReport
+  - **ID**: rule-11-flake-detection-patch-emit
+  - **Parent**: rule-11-flake-detection-lint
+  - **Blocked by**: rule-11-flake-detection-cli
+  - **Tags**: ci, rule-11, patch-emission
+  - **Estimate**: 2h
+  - **Hypothesis**: When `detectFlakeRate` surfaces a FlakeReport, the lint emits two artifacts to `tmp/rule-11/<job>-*` so the operator can review and merge the fix without the lint mutating CI config directly (rule #6 — let-it-crash; the human is the supervisor). The TASKS.md task-block draft pre-registers the flake-fix per rule #9; the workflow patch downgrades the gate to `continue-on-error: true` matching the lighthouse-mobile shape shipped in #125. Idempotent: re-running when `tmp/rule-11/<job>-*.{md,patch}` already exists is a no-op.
+  - **Details**: (a) `emitPatches(reports: FlakeReport[], outDir: string)` — pure-ish function (writes files, no other side effects). (b) Task-block template: rule-#9 fields populated from the report's metadata (workflow, job, rate). (c) Workflow patch: locate the offending job's `runs-on:` block in `.github/workflows/<workflow>.yml`, render a unified-diff patch that adds `continue-on-error: true`. (d) Test: synthetic 2-report input → 4 files emitted; re-run → exact same 4 files (idempotent assertion via mtime/inode comparison).
+  - **Files**: `scripts/check-rule-11-no-flaky-gates.mjs` (extend with `emitPatches`), test extends, `tmp/rule-11/.gitkeep` (kept; output dir).
+  - **Verification**: ≥4 paired tests covering the patch shape + idempotency.
+  - **Measurement**: `node scripts/check-rule-11-no-flaky-gates.mjs --fixture=...flaky.json --emit=tmp/rule-11-test/ && test -f tmp/rule-11-test/flaky-task-block.md && test -f tmp/rule-11-test/flaky-workflow.patch` exits 0.
+  - **Pivot**: if the workflow-patch generation proves brittle across YAML formatting variations (different indentation, anchors, multi-doc files), pivot to emitting a *human-readable instruction file* instead of a unified-diff patch — operators apply manually with line-number references.
+  - **Acceptance**: patches emit to `tmp/rule-11/`; idempotent on re-run; no auto-apply.
+  - **Anchor**: rule #6 (let-it-crash — the lint surfaces the patch, the human merges it; never auto-mutate CI config); Beck, *Extreme Programming Explained*, 1999 Ch. 17 (CI as the constraint enforcer — the patch IS the constraint, the human is the enforcer).
+  - **Risk**: medium. Patch generation against arbitrary workflow YAML is fragile; mitigation is the Pivot above.
+
+- [ ] `rule-11-flake-detection-ci-wire` — wire the lint as a CI job + ship the vision.md row + canonical-example doc
+  - **ID**: rule-11-flake-detection-ci-wire
+  - **Parent**: rule-11-flake-detection-lint
+  - **Blocked by**: rule-11-flake-detection-patch-emit
+  - **Tags**: ci, rule-11, vision-conformance
+  - **Estimate**: 1h
+  - **Hypothesis**: The final sub-task wires the lint into `.github/workflows/ci.yml` as a read-only job that uploads `tmp/rule-11/*` as workflow artifacts when patches surface. Adds a vision.md pattern-conformance index row per rule #8. Documents the lighthouse-mobile downgrade shipped in #125 as the canonical "what the lint emits" example so operators know what success looks like.
+  - **Details**: (a) New `ci.yml` job `rule-11-flake-detection` running `node scripts/check-rule-11-no-flaky-gates.mjs --fixture=test/fixtures/rule-11-flake-detection/last-30-days.json` (CI uses cached fixture; live ingestion gated behind a separate `flake-stats-collector.yml` if the 30d ingest proves heavy). (b) `actions/upload-artifact@v4` for `tmp/rule-11/*`. (c) vision.md row. (d) `docs/rule-11-flake-detection.md` with the lighthouse-mobile downgrade as the canonical example.
+  - **Files**: `.github/workflows/ci.yml`, `vision.md`, `docs/rule-11-flake-detection.md`.
+  - **Verification**: CI job runs on every PR; uploads artifacts only when patches surface.
+  - **Measurement**: `gh run list --workflow ci.yml --limit 1 --json jobs --jq '[.[] | .jobs[] | select(.name == "rule-11-flake-detection")] | length' >= 1` after the first post-merge CI run.
+  - **Pivot**: if uploading artifacts proves noisy (every PR shows "no flakes" empty artifacts), gate the upload step on `tmp/rule-11/` being non-empty — a one-line conditional.
+  - **Acceptance**: CI job ships; vision.md row added; docs include the lighthouse-mobile canonical example.
+  - **Anchor**: rule #8 (pattern-conformance index — every novel artefact gets a row); rule #11 (the lint becomes part of the ratchet; not just discipline).
+  - **Risk**: low. Read-only CI job; rollback is one revert.
 
 - [ ] `cross-repo-ci-action` — minsky-side GitHub Action posts constitution-check verdicts via the GitHub API (decision C2)
   - **ID**: cross-repo-ci-action
