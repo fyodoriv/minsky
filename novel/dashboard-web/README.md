@@ -55,7 +55,7 @@ The parent `dashboard-web-v0` epic closes with this sub-task: all 4 sub-tasks sh
 
 ### Spec-alignment fix (`dashboard-web-task-throughput-formula-drift`)
 
-`src/metrics.ts`'s `task-throughput` formula now matches `vision.md` § "Success criteria" row 10 exactly: the 30-day commit count is divided by 30 (`… | wc -l / 30`) to produce the unit `tasks/day`. Earlier the divisor was missing while the unit cell still read `tasks/day` — a silent 30× over-read once `dashboard-web-otel-wiring`'s Strategy executes the formula. A new test in `test/metrics.test.ts` (`task-throughput formula divides 30-day count by 30 (vision.md row 10 — \`tasks/day\`)`) string-matches `/ 30` so the drift cannot recur silently.
+`src/metrics.ts`'s `task-throughput` formula now matches `vision.md` § "Success criteria" row 10 exactly: the 30-day commit count is divided by 30 (`… | wc -l / 30`) to produce the unit `tasks/day`. Earlier the divisor was missing while the unit cell still read `tasks/day` — a silent 30× over-read once `dashboard-web-otel-wiring`'s Strategy executes the formula. A new test in `test/metrics.test.ts` string-matches `/ 30` against the formula so the drift cannot recur silently.
 
 ## Usage
 
