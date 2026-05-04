@@ -1,37 +1,29 @@
-id: pattern-conformance-audit-existing-docs
+id: ci-lint-anchor-primary-source
 hypothesis: |
-  Every existing `user-stories/*.md` (5 files) and `competitors/*.md`
-  (6 files) maps cleanly to ≥1 published pattern with a primary-source
-  citation (book, journal, conference proceedings) — i.e., zero
-  artifacts in the audited set need an `audit-pending` conformance
-  level for lack of a primary source. Annotating each file with a
-  "## Pattern conformance" subsection and adding the matching row to
-  `vision.md` § "Pattern conformance index" (rows 41–51, eleven new
-  rows) operationalises rule #8's "every artifact maps to a published
-  pattern" commitment for the full pre-existing corpus. Per Alexander
-  et al. 1977 (*A Pattern Language*), a pattern catalogue is only
-  load-bearing when it indexes *every* artifact, not just new ones;
-  the audit closes the corpus for user-stories and competitors. If
-  >30 % of files (≥4 of 11) genuinely cannot map to a primary source
-  the approach is wrong — rule #8's scope is over-broad and should
-  be narrowed to top-level architectural artifacts.
-success: |
-  All 11 audited files (5 user-stories + 6 competitors) carry a
-  "## Pattern conformance" subsection citing ≥1 primary source AND
-  `vision.md` § "Pattern conformance index" has ≥11 new rows
-  (numbered 41–51) AND zero rows carry the placeholder
-  `audit-pending` conformance level. Measured by the bracketed
-  shell command below; exit 0 means the conditions hold.
-pivot: |
-  If ≥4 of the 11 audited files cannot be mapped to a primary-source
-  pattern (best-faith mapping resolves only to a blog post, a
-  Wikipedia article, or fabricated framing), the audit reveals
-  rule #8's "every artifact" scope is over-broad. File follow-up
-  task `narrow-rule-8-scope-to-top-level` proposing rule #8 apply
-  only to top-level architectural artifacts (packages, scripts,
-  named decisions) and *not* to user-story / competitor narratives.
-  Threshold ≥4 of 11 sits well above the success threshold (0 of 11)
-  — non-trivial margin.
-measurement: '[ "$(for f in user-stories/*.md competitors/*.md; do grep -q ''^## Pattern conformance'' "$f" || echo "missing in $f"; done | wc -l | tr -d '' '')" = "0" ] && [ "$(grep -cE ''^\| (4[1-9]|5[01]) \|'' vision.md)" = "11" ]'
-anchor: "Alexander, Ishikawa, Silverstein, *A Pattern Language*, Oxford University Press, 1977 (a pattern catalogue is load-bearing only when it indexes every artifact, not a subset); Gabriel, *Patterns of Software*, Oxford University Press, 1996 (named-pattern catalogues in software architecture); rule #8 (vision.md § 8 — pattern conformance for every artifact); rule #10 (vision.md § 10 — the catalogue is the authoritative index)."
+  Promoting spec-monitor advisory rule A3 ("anchor citation is not a
+  primary source") to a deterministic CI lint at
+  `scripts/check-anchor-primary-source.mjs` makes blog-decay anchor
+  citations unmissable on every PR. The pure decision function reads the
+  `anchor` field from EXPERIMENT.yaml via `@minsky/experiment-record`'s
+  parser and runs an allowlist + deny-list classifier: deny-list of known
+  non-primary sources (`medium.com`, `*.substack.com`, `wikipedia.org`,
+  `twitter.com`, `x.com`, `reddit.com`, `stackoverflow.com`, `chatgpt.com`,
+  `claude.ai`, "ChatGPT said", "tweet by", "blog post") fails when matched
+  and no allowlist token is present; allowlist of primary-source patterns
+  (italicised book/journal title `*…*`, `Ch. <n>`, `pp. <n>`, ISBN, DOI,
+  conference `<VENUE> <YEAR>`, internal cross-ref `vision.md §` / `rule
+  #<n>` / `spec-advisories/<date>.md`) passes when matched. Three-way
+  verdict — pass / fail / advisory-warn (short prose without signal). Per
+  rule #5 / rule #8 the constitution must outlive any single source —
+  blog URLs rot, Wikipedia edits, tweets vanish. Per rule #10's ratchet,
+  A3 is retired from SKILL.md in the same PR; the active advisory count
+  drops by 1 (only A1 and A5 remain advisory; A2 and A4 already retired).
+  If the deny-list grows past 15 entries to cover legitimate variations
+  (arxiv preprints sometimes primary, sometimes not) OR >10 % of historical
+  anchors fall through to `warn`, the rule is judgement-bound and this
+  lint is retired — A3 stays advisory in SKILL.md.
+success: "≥8 unit tests pass in `scripts/check-anchor-primary-source.test.mjs` (covering the deny-list cases medium / wikipedia / tweet / chatgpt, the allowlist cases book+chapter / cross-ref / DOI, and the short-prose warn case), the lint exits 0 against this PR's own EXPERIMENT.yaml (allowlist hit on `*The Lean Startup*` / `rule #10` / `vision.md §` / `spec-advisories/`), the lint exits 1 against a synthetic `anchor: \"https://medium.com/some-blog/post\"` fixture, AND `scripts/check-skill-rule-cap.mjs` reports ≤2 active advisory rules in `novel/spec-monitor/SKILL.md` (A3 retired, only A1 and A5 remaining)."
+pivot: "If the deny-list grows past 15 entries to cover legitimate variations (e.g., `arxiv.org` is sometimes primary, sometimes preprint-only) OR >10 % of historical anchors fall through to the `warn` channel within 30 days of merge (i.e., the lint is producing noise rather than signal), revert the CI wiring on `anchor-primary-source`, restore `### A3.` as an active advisory heading in SKILL.md (raising the count back to its pre-PR value), and close the `ci-lint-anchor-primary-source` task as pivoted-not-validated."
+measurement: "pnpm exec vitest run scripts/check-anchor-primary-source.test.mjs && node scripts/check-anchor-primary-source.mjs EXPERIMENT.yaml && node scripts/check-skill-rule-cap.mjs"
+anchor: "rule #10 (vision.md § 10 — deterministic enforcement; ratchet rule: when an advisory rule is promoted to a deterministic linter, the advisory counterpart is removed in the same PR); rule #5 / rule #8 (vision.md § 5 / § 8 — named, decades-tested pattern; the constitution must outlive any single source); Havelund & Goldberg, *VSTTE* 2008 (runtime verification — the primary-source check is the deterministic-monitor layer carved out from the residual advisory share); `spec-advisories/2026-05-03-quarterly-audit.md` (audit decision to admit a deterministic deny-list + allowlist for A3)."
 replay_windows_days: [7, 30]
