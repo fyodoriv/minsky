@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { PLACEHOLDER_METRICS } from "../src/metrics.js";
+import { SUCCESS_METRICS } from "../src/metrics.js";
 
-describe("PLACEHOLDER_METRICS — v0 skeleton stub", () => {
-  it("contains exactly one entry (sub-task 2 expands to 10)", () => {
-    expect(PLACEHOLDER_METRICS).toHaveLength(1);
+describe("SUCCESS_METRICS — 10 vision.md success criteria", () => {
+  it("contains exactly 10 entries (one per vision.md § 'Success criteria' row)", () => {
+    expect(SUCCESS_METRICS).toHaveLength(10);
   });
 
-  it("its id is the literal `placeholder` (the contract the test harness asserts)", () => {
-    expect(PLACEHOLDER_METRICS[0]?.id).toBe("placeholder");
-  });
-
-  it("every id is kebab-case (anticipates the sub-task 2 invariant)", () => {
-    const KEBAB = /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/;
-    for (const m of PLACEHOLDER_METRICS) {
+  it("every id is kebab-case (lowercase, digits, single hyphens, no leading/trailing dash)", () => {
+    const KEBAB = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+    for (const m of SUCCESS_METRICS) {
       expect(m.id).toMatch(KEBAB);
     }
+  });
+
+  it("has no duplicate ids (Set comparison)", () => {
+    const ids = SUCCESS_METRICS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
