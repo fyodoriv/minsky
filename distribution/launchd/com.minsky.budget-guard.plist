@@ -27,8 +27,8 @@ Placeholders substituted by setup.sh via envsubst:
 
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/sh</string>
-        <string>${MINSKY_HOME}/distribution/launchd/run-budget-guard.sh</string>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-budget-guard.sh</string>
     </array>
 
     <key>KeepAlive</key>

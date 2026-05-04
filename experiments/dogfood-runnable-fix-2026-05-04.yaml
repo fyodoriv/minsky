@@ -1,0 +1,110 @@
+id: dogfood-runnable-fix-2026-05-04
+hypothesis: |
+  Smoke-testing PR #141's `pnpm dogfood` shortcut surfaced two real
+  gaps that prevented the dogfood loop from actually running:
+
+  1. The launchd plists referenced
+     `${MINSKY_HOME}/distribution/launchd/run-tick-loop.sh` and
+     `${MINSKY_HOME}/distribution/launchd/run-budget-guard.sh` — but
+     neither file exists in `distribution/launchd/`. The actual
+     tick-loop bootstrap is `distribution/systemd/run-tick-loop.sh`,
+     and `run-budget-guard.sh` did not exist anywhere in the repo.
+     Both supervisor units failed at exec time with
+     `No such file or directory` (visible in `.minsky/*.err.log`).
+  2. The architectural evolution from a *standalone*
+     `@minsky/budget-guard` process to an *in-tick* `BudgetGuard`
+     facade (`novel/tick-loop/src/budget-guard-facade.ts` —
+     `fromRealBudgetGuard(guard)` wires the real BudgetGuard into
+     the tick-loop daemon's `decide()` call per iteration) left the
+     `minsky-budget-guard` supervisor unit vestigial. The unit-file
+     architecture stays — the chaos table rows 3 + 4 in
+     `distribution/README.md` document the supervisor restart
+     policy, which the `linux-supervisor-integration` /
+     `macos-supervisor-integration` CI jobs assert empirically with
+     their own stub runners.
+
+  This PR closes both gaps with the smallest viable changes:
+
+  (a) The launchd `com.minsky.tick-loop.plist` `ProgramArguments`
+      line is fixed to point at the existing `distribution/systemd/
+      run-tick-loop.sh` (the script's header already documents that
+      it serves both systemd and launchd).
+  (b) The launchd `com.minsky.budget-guard.plist` likewise points at
+      the new `distribution/systemd/run-budget-guard.sh`.
+  (c) `distribution/systemd/run-budget-guard.sh` ships as a sleep-
+      forever supervisor sentinel (Borg/Burns/Hightower 2017,
+      "Designing Distributed Systems" — the Sidecar pattern's
+      `pause`-container shape; a placeholder process that exists to
+      anchor lifecycle, not compute). The script's header documents
+      the architectural-evolution context and what would replace the
+      stub if budget-guard ever moves back to a standalone process.
+
+  After this PR ships, `pnpm dogfood` (or `./setup.sh --dogfood`)
+  produces a *running* supervisor topology — not a stack of plists
+  that exec-fail. Minsky-on-itself becomes dogfood-able for real.
+success: |
+  - `./distribution/lint-units.sh` exits 0 (structural lint over the
+    unit-file templates: every plist is well-formed XML; every
+    systemd unit has the required directives; placeholder hygiene
+    only allows `${MINSKY_HOME}`).
+  - `MINSKY_HOME="$(pwd)" envsubst '${MINSKY_HOME}' <
+    distribution/launchd/com.minsky.tick-loop.plist | plutil -lint
+    -` exits 0 AND the rendered file references
+    `distribution/systemd/run-tick-loop.sh` (path resolves on disk).
+  - `MINSKY_HOME="$(pwd)" envsubst '${MINSKY_HOME}' <
+    distribution/launchd/com.minsky.budget-guard.plist | plutil
+    -lint -` exits 0 AND the rendered file references
+    `distribution/systemd/run-budget-guard.sh` (path resolves on
+    disk).
+  - `[ -x distribution/systemd/run-budget-guard.sh ]` exits 0 (the
+    new stub is executable).
+  - `pnpm typecheck` and `pnpm exec biome check` exit 0 (no code
+    changes — config + shell only).
+pivot: |
+  Two pivot paths pre-registered:
+    1. If the in-tick `BudgetGuard` facade proves insufficient
+       (e.g., the daemon's per-iteration `decide()` call has too
+       coarse a cadence to catch a budget-burn before the API rate-
+       limits), restore a standalone budget-guard process: replace
+       the sleep-forever stub in `run-budget-guard.sh` with a real
+       polling loop (probably a small `node` runner that imports
+       `@minsky/budget-guard` and `@minsky/token-monitor` and emits
+       an OTEL gauge every 60s). The supervisor unit's `Restart=
+       always` / `KeepAlive=true` policies are already correct for
+       a real-runner workload; only the script body changes.
+    2. If a future macOS launchd revision treats absolute paths in
+       `ProgramArguments` strictly (e.g., refuses cross-directory
+       script references for security), pivot to symlinks at
+       `distribution/launchd/run-*.sh -> ../systemd/run-*.sh` so
+       the plist's `distribution/launchd/` reference resolves
+       within the launchd directory. `git`-tracked symlinks are
+       portable and the `lint-units.sh` placeholder check is path-
+       blind.
+measurement: |
+  bash -c './distribution/lint-units.sh && [ -x distribution/systemd/run-budget-guard.sh ] && [ -x distribution/systemd/run-tick-loop.sh ] && grep -q "distribution/systemd/run-tick-loop.sh" distribution/launchd/com.minsky.tick-loop.plist && grep -q "distribution/systemd/run-budget-guard.sh" distribution/launchd/com.minsky.budget-guard.plist && echo PASS || (echo FAIL; exit 1)'
+anchor: |
+  Burns, B., Beda, J., Hightower, K., *Kubernetes Up & Running*,
+  O'Reilly, 2017, ch. on the Sidecar pattern (the sleep-forever
+  supervisor sentinel mirrors Kubernetes's `pause` container — a
+  placeholder process that exists to anchor lifecycle without
+  compute). Also Burns, B., *Designing Distributed Systems*,
+  O'Reilly, 2017 (single-node patterns — sidecar / ambassador /
+  adapter; the supervisor target's `Wants=` graph is the topology
+  this stub anchors).
+  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
+  (let-it-crash supervision — `exec sleep` means SIGTERM kills
+  cleanly; the supervisor's restart policy is what carries the
+  reliability guarantee, not the stub).
+  rule #1 (vision.md § 1 — don't reinvent: the supervisor topology
+  already exists; this PR is the smallest viable runner that
+  respects it).
+  rule #12 (vision.md § "Scope discipline" — Minsky-on-itself is
+  the substrate the rule applies to; this PR fixes a stability
+  gap so dogfooding actually runs, doesn't add scope).
+  rule #6 (vision.md § 6 — let-it-crash AT the boundary; the
+  in-tick `BudgetGuard.decide()` call is the *real* watchdog seam,
+  not the standalone supervisor unit; making the unit a stub
+  matches the architecture).
+  user-stories/001-loop-runs-overnight.md (the umbrella user story
+  for Minsky-on-itself; this PR is the runnability prerequisite).
+timeout_seconds: 30
