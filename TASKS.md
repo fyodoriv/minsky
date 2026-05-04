@@ -30,6 +30,73 @@
   - **Acceptance**: Issue filed; URLs linked from `research.md` and `competitors/omc.md`
   - **Anchor**: Raymond, *The Cathedral and the Bazaar*, 1999 (community contribution as scaling lever); rule #1 (don't reinvent the wheel — push upstream when possible).
   - **Risk**: Maintainer may reject if framed as a Minsky-specific need. Frame as "ecosystem alignment with the tasks.md spec" with concrete code-level changes pinned to specific OMC files.
+  - **Research**: 2026-05-04 — exact issue text drafted (ready to paste). Read-only research only; no `gh issue create` was run. Source code citations re-use the read-only findings PR #75 landed under `research-omc-handoff-persistence`'s Research field (path layout in `src/team/state-paths.ts`, task shape in `src/team/types.ts:38-58, 195-213`, write site `src/team/state/tasks.ts:90`, read/write call sites `src/team/task-file-ops.ts:157,210-243,321-376`). Maintainer tone sampled from recent OMC issues (`gh issue list --repo Yeachan-Heo/oh-my-claudecode --limit 5 --state all`): they use `## Summary` / `## Environment` / `## Reproduction` / code-fenced file paths and line numbers; technical, structured, deferential to `claude-code` upstream conventions. No prior declined proposal for tasks.md found in the issue tracker. Recipient surface: <https://github.com/Yeachan-Heo/oh-my-claudecode/issues/new>. Ping: maintainer `@Yeachan-Heo` (no other co-maintainers visible). Draft below — paste title in title field, paste body (between the fences, not including them) in the body field.
+
+    ````markdown
+    Title: Proposal: optional TASKS.md adapter for /team mode (ecosystem alignment with tasks.md spec)
+
+    ## Summary
+
+    Hi @Yeachan-Heo — proposing an optional adapter so `/team` mode can read its task list from a `TASKS.md` at repo root following the [tasks.md spec](https://github.com/tasksmd/tasks.md), with full backward compatibility (current behaviour is the default).
+
+    The tasks.md spec is a minimal, plain-Markdown task-board format maintained by [tasksmd/tasks.md](https://github.com/tasksmd/tasks.md) (kanban-style board renderer + linter). Multiple tools are converging on it as a portable task substrate: the upstream `tasksmd` toolchain itself, the Minsky project (constitutional rule: TASKS.md is the actor message store — Hewitt 1973), and any tool that wants its task list to be human-editable and version-controlled in the same file plain-text editors and `gh` already understand.
+
+    OMC's `/team` mode already has a well-shaped persisted task store — this proposal is just to let users point that store at a Markdown file when they want a portable substrate.
+
+    ## Where the integration would land (code-level)
+
+    From a read of `Yeachan-Heo/oh-my-claudecode@main`:
+
+    - `src/team/state-paths.ts` — `TeamPaths` declares the canonical layout (`.omc/state/team/<teamName>/tasks/task-<id>.json`, `config.json`, `events.jsonl`, etc.). An adapter would add an alternate source resolver: when `config.json` carries `tasks_source: "tasks.md"`, the adapter reads `<repoRoot>/TASKS.md` instead of the per-task JSON files. Default unchanged.
+    - `src/team/types.ts` (lines ~38-58, ~195-213) — `TaskFile` / `TeamTask` shape: `id`, `subject`, `description`, `status`, `owner?`, `blocks[]`, `blocked_by?`, `created_at`, `version?`, `claim?`, etc. Maps cleanly to tasks.md fields:
+      - `id` ↔ tasks.md `**ID**`
+      - `subject` ↔ task title (the `- [ ]` / `- [x]` line)
+      - `description` ↔ tasks.md `**Details**`
+      - `status` (`pending | in_progress | completed | blocked`) ↔ `[ ]` / `[x]` checkbox + an extension `**Status**` field for the non-binary states
+      - `owner` / `claim.owner` ↔ tasks.md `**Owner**`
+      - `blocked_by` / `depends_on` ↔ tasks.md `**Blocked by**`
+      - `created_at` ↔ provenance comment
+      - `version` (optimistic concurrency) ↔ idempotency key in a hidden HTML comment, preserved on round-trip
+    - `src/team/state/tasks.ts:90` — `writeAtomic(taskFilePath, JSON.stringify(updated, null, 2))` is the single canonical write site for `claimTask`. An adapter parallel to this would re-render the relevant tasks.md block (write-back is the harder direction; could ship in a v2).
+    - `src/team/task-file-ops.ts:157, 210-243, 321-376` — read/write call sites; the read side is where the adapter reads tasks.md when `tasks_source: "tasks.md"` is set.
+
+    The richer OMC v2 fields (`TeamTaskV2`'s `delegation_compliance`, `claim.token`, `claim.leased_until`) don't have natural tasks.md equivalents; the adapter would lossy-project them on read and preserve them in a hidden comment block on write so round-trips are non-destructive.
+
+    ## Why this is ecosystem alignment, not a single-project request
+
+    Three independent adopters of the tasks.md spec today:
+
+    1. The spec maintainers themselves at [tasksmd/tasks.md](https://github.com/tasksmd/tasks.md) (board renderer + linter — `npx @tasks-md/lint`).
+    2. Minsky (long-running orchestration substrate; uses TASKS.md as its actor message store).
+    3. Any tool that wants tasks to be `git`-diffable, plain-Markdown, editable in a plain-text editor without a runtime — a non-trivial superset given how many devs already keep a `TASKS.md` or `TODO.md` by convention.
+
+    For OMC users specifically, this would mean: a team member without OMC installed can still read and edit the task list as plain Markdown; `gh` PR diffs show task changes in a human-readable format; the task list survives independently of `.omc/state/`.
+
+    ## Concrete proposal
+
+    Add an optional `tasks_source` field to `config.json`:
+
+    ```json
+    {
+      "name": "my-team",
+      "tasks_source": "tasks.md"
+    }
+    ```
+
+    - When unset (default): current behaviour — read/write `.omc/state/team/<teamName>/tasks/task-<id>.json`.
+    - When `"tasks.md"`: read `<repoRoot>/TASKS.md` per the [tasks.md spec](https://github.com/tasksmd/tasks.md); fall back to current behaviour if absent or malformed (with a warning).
+    - v0 scope: read-only OMC ← TASKS.md (so OMC's optimistic-concurrency `version` field stays authoritative). Write-back can land in a v1 once the round-trip semantics are settled.
+
+    No breaking changes to existing teams; no new required dependencies (a small Markdown parser would suffice, or `@tasks-md/lint`'s parser if you want to share the spec's reference implementation).
+
+    ## Open question
+
+    Does this fit `/team` mode's design intent — i.e., is the canonical task store something `/team` would want to be pluggable — or would you prefer this live as a separate plugin / adapter package (e.g., `@oh-my-claudecode/tasks-md-adapter`) so the core stays minimal? Happy to draft the PR either way; just want to follow your design preference before writing code.
+
+    Thanks for OMC — `/team` mode's blackboard model is exactly the substrate this is trying to align with.
+    ````
+
+  - **Last-enriched**: 2026-05-04
 
 ## P2
 
