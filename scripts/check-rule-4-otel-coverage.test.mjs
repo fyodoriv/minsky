@@ -1,4 +1,3 @@
-// @ts-check
 import { describe, expect, it } from "vitest";
 import { checkOtelCoverage } from "./check-rule-4-otel-coverage.mjs";
 

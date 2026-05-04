@@ -8,6 +8,11 @@ import {
 const HEADER_ROW = "| # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |";
 const SEP_ROW = "|---|---|---|---|---|";
 
+/**
+ * @param {string[]} rows
+ * @param {{ withSection?: boolean, prose?: string }} [opts]
+ * @returns {string}
+ */
 function readme(rows, opts = {}) {
   const { withSection = true, prose = "Per constitutional rule #7." } = opts;
   const sectionHeader = withSection
@@ -76,8 +81,8 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/does not exist/);
-    expect(errors[0].row).toBe(1);
+    expect(errors[0]?.message).toMatch(/does not exist/);
+    expect(errors[0]?.row).toBe(1);
   });
 
   it("(c) deferred form pointing to a real TASKS.md ID → 0 errors", () => {
@@ -102,7 +107,7 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/unknown task-id/);
+    expect(errors[0]?.message).toMatch(/unknown task-id/);
   });
 
   it("(e) README missing the section entirely → 1 error", () => {
@@ -113,8 +118,8 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].row).toBeNull();
-    expect(errors[0].message).toMatch(/missing/);
+    expect(errors[0]?.row).toBeNull();
+    expect(errors[0]?.message).toMatch(/missing/);
   });
 
   it("(f) row with empty Chaos test cell → 1 error", () => {
@@ -125,7 +130,7 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/empty/);
+    expect(errors[0]?.message).toMatch(/empty/);
   });
 
   it("rejects malformed deferred prose (no task-id)", () => {
@@ -138,7 +143,7 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/strict form/);
+    expect(errors[0]?.message).toMatch(/strict form/);
   });
 
   it("accepts lenient prose that mentions a test", () => {
@@ -173,7 +178,7 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/no recognizable/);
+    expect(errors[0]?.message).toMatch(/no recognizable/);
   });
 
   it("flags a section without a markdown table", () => {
@@ -191,7 +196,7 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/no markdown table/);
+    expect(errors[0]?.message).toMatch(/no markdown table/);
   });
 
   it("flags a table missing a Chaos test column", () => {
@@ -209,7 +214,7 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toMatch(/Chaos test/);
+    expect(errors[0]?.message).toMatch(/Chaos test/);
   });
 
   it("accepts a deferred form whose task-id is in git log (closes <id>)", () => {
@@ -237,6 +242,6 @@ describe("checkChaosCoverage", () => {
       testFiles,
     });
     expect(errors).toHaveLength(1);
-    expect(errors[0].readme).toBe("novel/bar/README.md");
+    expect(errors[0]?.readme).toBe("novel/bar/README.md");
   });
 });

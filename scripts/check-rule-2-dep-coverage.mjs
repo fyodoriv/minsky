@@ -17,6 +17,11 @@ import { readFile, readdir } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** @typedef {import("node:fs").Dirent} Dirent */
+/** @typedef {{ path: string, source: string }} CandidateFile */
+/** @typedef {{ file: string, line: number, vendor: string }} Violation */
+/** @typedef {{ line: number, vendor: string }} VendorHit */
+
 // --- vendor-name extraction --------------------------------------------------
 
 // Common English / framing words the cell-tokeniser surfaces but that are
@@ -94,13 +99,19 @@ export function extractVendors(archMd) {
   return [...new Set(vendors)].sort();
 }
 
+/**
+ * @param {string} archMd
+ * @returns {string[]}
+ */
 function sliceDependencyTable(archMd) {
   const lines = archMd.split("\n");
   const headerIdx = lines.findIndex((l) => /^##\s+The dependency table\b/i.test(l));
   if (headerIdx === -1) return [];
+  /** @type {string[]} */
   const rows = [];
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = lines[i];
+    if (line === undefined) continue;
     if (line.startsWith("## ")) break; // next H2 ends the table
     if (!line.startsWith("|")) continue;
     if (/^\|[\s|:-]+\|\s*$/.test(line)) continue; // separator row
@@ -113,6 +124,10 @@ function sliceDependencyTable(archMd) {
 // Extract the "Current implementation" (col 4) and "Replacement candidates"
 // (col 5) cells from a pipe-row. Column indices are 1-based after the leading
 // pipe, matching the table schema in ARCHITECTURE.md.
+/**
+ * @param {string} row
+ * @returns {string[]}
+ */
 function extractRowCells(row) {
   const cols = row.split("|").map((c) => c.trim());
   // cols: ["", "#", "Layer", "Interface", "Current impl", "Replacement", "Risk", ""]
@@ -124,6 +139,10 @@ function extractRowCells(row) {
 // A cell looks like: "DSPy (Stanford) + Promptfoo" or "Claude Code OTEL → local
 // Loki/Tempo/Grafana". Strip parenthesised prose, then split on common
 // separators: comma, slash, plus, arrow, "and", whitespace.
+/**
+ * @param {string} cell
+ * @returns {string[]}
+ */
 function tokeniseCell(cell) {
   const stripped = cell
     .replace(/\([^)]*\)/g, " ") // drop parenthesised asides
@@ -135,6 +154,10 @@ function tokeniseCell(cell) {
     .filter((t) => t.length > 0);
 }
 
+/**
+ * @param {string} token
+ * @returns {boolean}
+ */
 function isLikelyVendorName(token) {
   if (!VENDOR_TOKEN_RE.test(token)) return false;
   if (NON_VENDOR_TOKENS.has(token.toLowerCase())) return false;
@@ -151,11 +174,12 @@ function isLikelyVendorName(token) {
  *
  * @param {object} params
  * @param {string} params.archMd - the full ARCHITECTURE.md text
- * @param {{path: string, source: string}[]} params.files - candidate files to scan
- * @returns {{violations: {file: string, line: number, vendor: string}[], vendors: string[]}}
+ * @param {CandidateFile[]} params.files - candidate files to scan
+ * @returns {{violations: Violation[], vendors: string[]}}
  */
 export function checkDepCoverage({ archMd, files }) {
   const vendors = extractVendors(archMd);
+  /** @type {Violation[]} */
   const violations = [];
   for (const file of files) {
     if (!isScannable(file.path)) continue;
@@ -168,6 +192,10 @@ export function checkDepCoverage({ archMd, files }) {
 
 // A file is in scope iff it's under `novel/` (but not `novel/adapters/`),
 // ends in `.ts`, and is neither a test fixture nor a unit test.
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
 function isScannable(path) {
   const norm = path.replace(/\\/g, "/");
   if (!norm.endsWith(".ts")) return false;
@@ -182,13 +210,21 @@ function isScannable(path) {
 // Returns one entry per vendor-import occurrence in the file source. The
 // regex matches both `from "<vendor>"` (ES modules) and `require("<vendor>")`
 // (CommonJS), and tolerates single or double quotes.
+/**
+ * @param {string} source
+ * @param {string[]} vendors
+ * @returns {VendorHit[]}
+ */
 function findVendorImports(source, vendors) {
   if (vendors.length === 0) return [];
   const lookup = new Set(vendors.map((v) => v.toLowerCase()));
   const lines = source.split("\n");
+  /** @type {VendorHit[]} */
   const hits = [];
   for (let i = 0; i < lines.length; i++) {
-    for (const spec of extractImportSpecifiers(lines[i])) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    for (const spec of extractImportSpecifiers(line)) {
       if (lookup.has(spec.toLowerCase())) {
         hits.push({ line: i + 1, vendor: spec });
       }
@@ -202,10 +238,16 @@ function findVendorImports(source, vendors) {
 // leading dot would never match anyway.
 const IMPORT_RE = /(?:from|require\s*\(\s*)\s*["']([^"']+)["']/g;
 
+/**
+ * @param {string} line
+ * @returns {string[]}
+ */
 function extractImportSpecifiers(line) {
+  /** @type {string[]} */
   const specs = [];
   for (const match of line.matchAll(IMPORT_RE)) {
     const spec = match[1];
+    if (spec === undefined) continue;
     if (spec.startsWith(".") || spec.startsWith("/")) continue;
     // Strip any `npm:` / `node:` prefix and subpath; vendors may be reached as
     // `hono/middleware`, which still counts as an import of `hono`.
@@ -215,18 +257,26 @@ function extractImportSpecifiers(line) {
   return specs;
 }
 
+/**
+ * @param {string} specifier
+ * @returns {string}
+ */
 function rootSegment(specifier) {
   if (specifier.startsWith("@")) {
     // scoped package: @scope/name
     return specifier.split("/").slice(0, 2).join("/");
   }
-  return specifier.split("/")[0];
+  return specifier.split("/")[0] ?? specifier;
 }
 
 // --- CLI ---------------------------------------------------------------------
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", ".git"]);
 
+/**
+ * @param {string} dir
+ * @returns {Promise<Dirent[]>}
+ */
 async function readdirSafe(dir) {
   try {
     return await readdir(dir, { withFileTypes: true });
@@ -235,6 +285,13 @@ async function readdirSafe(dir) {
   }
 }
 
+/**
+ * @param {Dirent} entry
+ * @param {string} full
+ * @param {string[]} stack
+ * @param {string[]} out
+ * @returns {void}
+ */
 function classifyEntry(entry, full, stack, out) {
   if (entry.isDirectory()) {
     if (!SKIP_DIRS.has(entry.name)) stack.push(full);
@@ -245,11 +302,18 @@ function classifyEntry(entry, full, stack, out) {
   }
 }
 
+/**
+ * @param {string} root
+ * @returns {Promise<string[]>}
+ */
 async function walkTs(root) {
+  /** @type {string[]} */
   const out = [];
+  /** @type {string[]} */
   const stack = [root];
   while (stack.length > 0) {
     const dir = stack.pop();
+    if (dir === undefined) break;
     const entries = await readdirSafe(dir);
     for (const entry of entries) {
       classifyEntry(entry, join(dir, entry.name), stack, out);

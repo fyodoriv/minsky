@@ -15,7 +15,11 @@ const GLOSSARY_HEADING = "## Glossary — every term has a CS anchor";
 const PATTERN_INDEX_HEADING = "## Pattern conformance index";
 
 /** Build a minimal vision.md fixture wrapping a constitution body and a
- * glossary body. Optional pattern-index body. */
+ * glossary body. Optional pattern-index body.
+ *
+ * @param {{ constitution: string, glossary: string, patternIndex?: string }} input
+ * @returns {string}
+ */
 function buildVision({ constitution, glossary, patternIndex }) {
   const parts = [
     "# Vision",
