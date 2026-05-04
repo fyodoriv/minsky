@@ -1,0 +1,72 @@
+id: experiments-directory-migration-2026-05-04
+hypothesis: |
+  Today's `EXPERIMENT.yaml` singleton at the repo root forces every PR to
+  ship at most one pre-registered experiment. This collides with two real
+  workflows: (a) multi-experiment PRs in minsky-on-itself (a runner PR
+  may ship its own EXPERIMENT.yaml AND update an umbrella user-story
+  experiment's status), and (b) cross-repo `minsky run` invocations,
+  where two parallel runs against different host repos must produce two
+  records simultaneously. Moving from `EXPERIMENT.yaml` (singleton) to
+  `experiments/<id>.yaml` (directory of records) is a behaviour-preserving
+  refactor for current minsky-on-itself work (the in-flight
+  readme-global-install-claim-fix-2026-05-04 becomes the first plural
+  file) and unblocks plural-experiment workflows. The pattern fit is
+  also better: AsPredicted (Munafò 2017, the literature anchor for rule-9
+  pre-registration) is one record per pre-registration, not one per
+  researcher; the plural shape matches the source pattern more faithfully
+  than the singleton. This migration is itself the eat-own-dogfood test:
+  this very file exists in the new directory, parses cleanly via
+  @minsky/experiment-record, passes the three rule-9 lints
+  (anchor-primary-source / measurement-inspects-output /
+  pivot-success-margin) under the new directory-walker shape, and is
+  the proof that the migration didn't break the substrate.
+success: |
+  - `test ! -f EXPERIMENT.yaml` (singleton removed at repo root).
+  - `test -d experiments` AND `test -f experiments/readme-global-install-claim-fix-2026-05-04.yaml`
+    AND `test -f experiments/experiments-directory-migration.yaml`
+    (the migrated in-flight + this migration's own pre-registration).
+  - `node scripts/check-anchor-primary-source.mjs` (no path arg) walks
+    the directory and exits 0 (every file's anchor passes or warns).
+  - `node scripts/check-measurement-inspects-output.mjs` (no path arg)
+    walks the directory and exits 0.
+  - `node scripts/check-pivot-success-margin.mjs` (no path arg) walks
+    the directory and exits 0.
+  - `node scripts/check-no-singleton-experiment.mjs` exits 0 (the
+    ratchet asserts the singleton stays gone).
+  - `pnpm vitest run scripts/` exits 0 with all pre-existing tests
+    plus the new directory-walker tests passing.
+pivot: |
+  If the directory-walker shape proves brittle in CI — defined as one
+  bad experiment file blocking lint runs against all *other*
+  experiments, producing too-loud failures over multi-PR sequences
+  (≥3 instances within 14 days where a single bad file gated 3+
+  unrelated PRs simultaneously) — pivot to a *per-experiment-id PR-diff
+  scope*: every PR that touches `experiments/<id>.yaml` runs the lint
+  *only* against the touched files (PR-diff-scoped). The walker stays
+  as the post-merge / nightly path for catching cross-experiment drift.
+  This pivot keeps plural-experiment support without making one bad
+  file gate every other PR. The walker remains the load-bearing path
+  for catching latent bad records on main; the per-PR scope is the
+  fast-feedback layer.
+measurement: |
+  test ! -f EXPERIMENT.yaml && test -f experiments/readme-global-install-claim-fix-2026-05-04.yaml && test -f experiments/experiments-directory-migration.yaml && node scripts/check-anchor-primary-source.mjs >/dev/null 2>&1 && node scripts/check-measurement-inspects-output.mjs >/dev/null 2>&1 && node scripts/check-pivot-success-margin.mjs >/dev/null 2>&1 && node scripts/check-no-singleton-experiment.mjs >/dev/null 2>&1
+anchor: |
+  Munafò, M. R., Nosek, B. A., Bishop, D. V. M., et al., "A manifesto for
+  reproducible science", *Nature Human Behaviour* 1, 0021, 2017
+  (the singular-record-per-pre-registration shape — `experiments/<id>.yaml`
+  matches the source pattern; the singleton was a Minsky-coined deviation
+  this migration retires).
+  Fagerholm, F., Guinea, A. S., Mäenpää, H., Münch, J., "Building Blocks
+  for Continuous Experimentation", *RCoSE* 2014 (the per-change experiment
+  runner is the first building block — and it must support plural
+  concurrent experiments per the paper's "multiple A/B tests in flight"
+  design).
+  Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999, Ch. 17
+  (CI as the constraint enforcer — the directory-walker is the smallest
+  deterministic substrate that supports plural experiments).
+  Rule #1 (vision.md § 1 — don't reinvent: the data layer at
+  `experiment-store/<id>.jsonl` is already plural; the migration matches
+  the pre-registration layer to it, not building a new substrate).
+  Rule #9 (vision.md § 9 — this very file is itself a pre-registration;
+  the eat-own-dogfood test).
+timeout_seconds: 30

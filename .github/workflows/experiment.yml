@@ -97,14 +97,43 @@ jobs:
         run: |
           gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/experiment-pr-body.md
 
-      - name: run gate
+      - name: run gate (per experiments/*.yaml)
+        # Per experiments-directory-migration: walk experiments/*.yaml
+        # and gate each pre-registration record. Backward-compat: if a
+        # legacy EXPERIMENT.yaml exists at the root (it shouldn't —
+        # check-no-singleton-experiment guards this — but defensive), it
+        # is also gated so PRs that revert the migration are surfaced
+        # at the gate, not just at the singleton ratchet.
         run: |
           set -euo pipefail
-          args=( gate --record EXPERIMENT.yaml --pr-body-file /tmp/experiment-pr-body.md )
-          if [ "${{ steps.label.outputs.trivial }}" = "true" ]; then
-            args+=( --trivial-label )
+          shopt -s nullglob
+          files=( experiments/*.yaml experiments/*.yml )
+          if [ -f EXPERIMENT.yaml ]; then
+            files+=( EXPERIMENT.yaml )
           fi
-          node scripts/run-experiment.mjs "${args[@]}"
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no experiments/*.yaml found; relying on the run-experiment script's own missing-record handling"
+            args=( gate --record experiments --pr-body-file /tmp/experiment-pr-body.md )
+            if [ "${{ steps.label.outputs.trivial }}" = "true" ]; then
+              args+=( --trivial-label )
+            fi
+            node scripts/run-experiment.mjs "${args[@]}"
+            exit 0
+          fi
+          fail=0
+          for f in "${files[@]}"; do
+            echo "::group::gate $f"
+            args=( gate --record "$f" --pr-body-file /tmp/experiment-pr-body.md )
+            if [ "${{ steps.label.outputs.trivial }}" = "true" ]; then
+              args+=( --trivial-label )
+            fi
+            node scripts/run-experiment.mjs "${args[@]}" || fail=1
+            echo "::endgroup::"
+          done
+          if [ "$fail" = "1" ]; then
+            echo "one or more experiments/*.yaml failed the gate"
+            exit 1
+          fi
 
   record:
     # Job B: post-merge recorder. Computes the merge-base of HEAD vs the
@@ -165,14 +194,30 @@ jobs:
             echo "marker=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: run record
+      - name: run record (per experiments/*.yaml)
+        # Per experiments-directory-migration: record each experiment
+        # individually so multi-experiment PRs append to multiple
+        # experiment-store/<id>.jsonl files in one push.
         if: steps.refs.outputs.skip != 'true' && steps.skipci.outputs.marker != 'true'
         run: |
           set -euo pipefail
-          node scripts/run-experiment.mjs record \
-            --record EXPERIMENT.yaml \
-            --base-ref "${{ steps.refs.outputs.base }}" \
-            --head-ref "${{ steps.refs.outputs.head }}"
+          shopt -s nullglob
+          files=( experiments/*.yaml experiments/*.yml )
+          if [ -f EXPERIMENT.yaml ]; then
+            files+=( EXPERIMENT.yaml )
+          fi
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no experiments/*.yaml at HEAD; nothing to record"
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "::group::record $f"
+            node scripts/run-experiment.mjs record \
+              --record "$f" \
+              --base-ref "${{ steps.refs.outputs.base }}" \
+              --head-ref "${{ steps.refs.outputs.head }}"
+            echo "::endgroup::"
+          done
 
       - name: commit + push experiment-store
         if: steps.refs.outputs.skip != 'true' && steps.skipci.outputs.marker != 'true'

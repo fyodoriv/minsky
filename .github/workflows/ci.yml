@@ -424,9 +424,38 @@ jobs:
       - name: build @minsky/experiment-record
         run: pnpm --filter @minsky/experiment-record build
       - name: measurement-inspects-output lint
-        run: node scripts/check-measurement-inspects-output.mjs EXPERIMENT.yaml
+        # No path arg: walks experiments/*.yaml per
+        # experiments-directory-migration. Backward-compat: passing an
+        # explicit path (file) still works for explicit single-file lint.
+        run: node scripts/check-measurement-inspects-output.mjs
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-measurement-inspects-output.test.mjs
+
+  no-singleton-experiment:
+    # rule #10 ratchet applied to experiments-directory-migration: the
+    # singleton EXPERIMENT.yaml at the repo root was retired in favour
+    # of plural `experiments/<id>.yaml` so concurrent experiments (cross-
+    # repo runs, multi-PR work) don't collide. This job is the structural
+    # one-way guarantee: it fails if the singleton reappears at the root.
+    # Anchor: rule #10 (deterministic enforcement); rule #1 (don't reinvent
+    # — the data layer at experiment-store/<id>.jsonl is plural; the
+    # migration matches the pre-registration layer to it); Munafò 2017
+    # (one record per pre-registration).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: no-singleton-experiment lint
+        run: node scripts/check-no-singleton-experiment.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-singleton-experiment.test.mjs
 
   skill-rule-cap:
     # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
@@ -487,7 +516,9 @@ jobs:
         # directly via vitest.config.ts, but the CLI import does not.
         run: pnpm --filter @minsky/experiment-record build
       - name: pivot-success-margin lint
-        run: node scripts/check-pivot-success-margin.mjs EXPERIMENT.yaml
+        # No path arg: walks experiments/*.yaml per
+        # experiments-directory-migration.
+        run: node scripts/check-pivot-success-margin.mjs
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-pivot-success-margin.test.mjs
 
@@ -683,7 +714,9 @@ jobs:
       - name: build @minsky/experiment-record
         run: pnpm --filter @minsky/experiment-record build
       - name: anchor-primary-source lint
-        run: node scripts/check-anchor-primary-source.mjs EXPERIMENT.yaml
+        # No path arg: walks experiments/*.yaml per
+        # experiments-directory-migration.
+        run: node scripts/check-anchor-primary-source.mjs
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-anchor-primary-source.test.mjs
 
@@ -703,6 +736,7 @@ jobs:
       - mape-k-watchdog-cadence
       - markdownlint
       - measurement-inspects-output
+      - no-singleton-experiment
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
@@ -738,6 +772,7 @@ jobs:
                    "${{ needs.mape-k-watchdog-cadence.result }}" \
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
+                   "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \

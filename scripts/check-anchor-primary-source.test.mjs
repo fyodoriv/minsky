@@ -3,13 +3,18 @@
 // rule A3 ("anchor citation is not a primary source"). Paired
 // positive/negative fixtures (Meszaros 2007).
 
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   ALLOWLIST,
   DENYLIST,
   checkAnchorPrimarySource,
   detectSkipComment,
+  mainDirectory,
 } from "./check-anchor-primary-source.mjs";
 
 describe("checkAnchorPrimarySource — deny-list hits → fail", () => {
@@ -256,5 +261,73 @@ describe("DENYLIST + ALLOWLIST shape (locked for review)", () => {
   test("DENYLIST stays under the 15-entry pivot threshold", () => {
     // The task's pivot triggers if the deny-list grows past ~15 entries.
     expect(DENYLIST.length).toBeLessThanOrEqual(15);
+  });
+});
+
+describe("mainDirectory — experiments-directory-migration walker", () => {
+  /** @type {string} */
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "anchor-walker-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** @param {string} id @param {string} anchor */
+  const validRecord = (id, anchor) => `id: ${id}
+hypothesis: |
+  This is a test hypothesis with at least twenty characters of substantive content.
+success: ">= 10 percent"
+pivot: "< 5 percent"
+measurement: "test -f foo && grep something"
+anchor: |
+  ${anchor}
+`;
+
+  test("returns 0 when directory does not exist", async () => {
+    const code = await mainDirectory(join(dir, "nonexistent-subdir"));
+    expect(code).toBe(0);
+  });
+
+  test("returns 0 when directory has no *.yaml files", async () => {
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
+  });
+
+  test("returns 0 when all yaml files have valid anchors", async () => {
+    writeFileSync(
+      join(dir, "a.yaml"),
+      validRecord("test-a", "*Site Reliability Engineering*, Beyer SRE 2016, Ch. 6"),
+    );
+    writeFileSync(
+      join(dir, "b.yaml"),
+      validRecord("test-b", "rule #9 (vision.md § 9 — pre-registration)"),
+    );
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
+  });
+
+  test("returns 1 when ANY file has a deny-list anchor (max wins)", async () => {
+    writeFileSync(
+      join(dir, "good.yaml"),
+      validRecord("test-good", "*Site Reliability Engineering*, Beyer SRE 2016, Ch. 6"),
+    );
+    writeFileSync(
+      join(dir, "bad.yaml"),
+      validRecord("test-bad", "https://medium.com/@someone/blog-post-2026"),
+    );
+    const code = await mainDirectory(dir);
+    expect(code).toBe(1);
+  });
+
+  test("ignores non-yaml files in the directory", async () => {
+    writeFileSync(join(dir, "README.md"), "# notes");
+    writeFileSync(
+      join(dir, "good.yaml"),
+      validRecord("test-good", "*Site Reliability Engineering*, Beyer SRE 2016, Ch. 6"),
+    );
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
   });
 });

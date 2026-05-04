@@ -3,12 +3,17 @@
 // advisory rule A4 ("measurement runs but doesn't actually inspect output").
 // Paired positive/negative fixtures (Meszaros 2007).
 
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   ALLOWLIST,
   BLACKLIST,
   checkMeasurementInspectsOutput,
+  mainDirectory,
 } from "./check-measurement-inspects-output.mjs";
 
 describe("checkMeasurementInspectsOutput — allowlist hits → pass", () => {
@@ -181,5 +186,55 @@ describe("ALLOWLIST + BLACKLIST shape (locked for review)", () => {
     for (const required of ["echo", "true", "curl (bare)", "node (bare)"]) {
       expect(names.has(required)).toBe(true);
     }
+  });
+});
+
+describe("mainDirectory — experiments-directory-migration walker", () => {
+  /** @type {string} */
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "measurement-walker-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** @param {string} id @param {string} measurement */
+  const validRecord = (id, measurement) => `id: ${id}
+hypothesis: |
+  This is a test hypothesis with at least twenty characters of substantive content.
+success: ">= 10 percent"
+pivot: "< 5 percent"
+measurement: |
+  ${measurement}
+anchor: |
+  *Site Reliability Engineering*, Beyer SRE 2016, Ch. 6
+`;
+
+  test("returns 0 when directory does not exist", async () => {
+    const code = await mainDirectory(join(dir, "nonexistent-subdir"));
+    expect(code).toBe(0);
+  });
+
+  test("returns 0 when directory has no *.yaml files", async () => {
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
+  });
+
+  test("returns 0 when all measurements pass (allowlist hits)", async () => {
+    writeFileSync(join(dir, "a.yaml"), validRecord("test-a", "test -f /tmp/foo && grep -q bar"));
+    writeFileSync(join(dir, "b.yaml"), validRecord("test-b", "node scripts/check-foo.mjs"));
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
+  });
+
+  test("ignores non-yaml files", async () => {
+    writeFileSync(join(dir, "README.md"), "# notes");
+    writeFileSync(
+      join(dir, "good.yaml"),
+      validRecord("test-good", "test -f /tmp/foo && grep -q bar"),
+    );
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
   });
 });
