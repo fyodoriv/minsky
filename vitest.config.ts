@@ -13,6 +13,7 @@ export default defineConfig({
       "@minsky/observability": r("./novel/adapters/observability/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),
       "@minsky/budget-guard": r("./novel/budget-guard/src/index.ts"),
+      "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),
       "@minsky/handoff-spec": r("./novel/handoff-spec/src/index.ts"),
     },
   },

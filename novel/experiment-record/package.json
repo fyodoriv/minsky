@@ -1,0 +1,28 @@
+{
+  "name": "@minsky/experiment-record",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Schema + parser + validator for the EXPERIMENT.yaml record carried by every PR per constitutional rule #9 (pre-registered hypothesis-driven development).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "experiment-record": "./dist/cli.js"
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts", "schema.json", "spec.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "yaml": "^2.6.0"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExperimentRecord",
+  "description": "The five rule-#9 fields every PR pre-registers, plus an experiment id and replay windows.",
+  "type": "object",
+  "required": ["id", "hypothesis", "success", "pivot", "measurement", "anchor"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+      "description": "kebab-case experiment id; same shape as a TASKS.md task id."
+    },
+    "hypothesis": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Falsifiable prediction: which observable will move, by how much, why."
+    },
+    "success": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Numeric (or rubric) threshold at or above which the change is kept."
+    },
+    "pivot": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Threshold below which the *approach* is abandoned (not just the change reverted)."
+    },
+    "measurement": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Exact runnable shell / OTEL / CI command. No English instructions."
+    },
+    "anchor": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Literature citation justifying the metric's choice and threshold's defensibility."
+    },
+    "replay_windows_days": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1, "maximum": 365 },
+      "default": [7, 30],
+      "description": "Days after merge at which experiment-tracker-v0 re-runs the measurement."
+    }
+  },
+  "additionalProperties": false
+}
