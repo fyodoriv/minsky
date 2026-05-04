@@ -16,10 +16,17 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** @otel-exempt pure helper of `render`. */
+/**
+ * @otel-exempt pure helper of `render`.
+ *
+ * The metric value is rendered as `(stub)` per the parent task's risk
+ * mitigation — operators must distinguish placeholder from live readings
+ * until `dashboard-web-otel-wiring` lands the `@minsky/observability` feed
+ * (rule #7 graceful-degrade: explicit, not silent).
+ */
 function renderRow(m: SuccessMetric): string {
   const id = escapeHtml(m.id);
-  return `<li data-metric-id="${id}"><span class="label">${escapeHtml(m.label)}</span> <span class="unit">${escapeHtml(m.unit)}</span><br><small>${escapeHtml(m.formula)}</small></li>`;
+  return `<li data-metric-id="${id}"><span class="label">${escapeHtml(m.label)}</span> <span class="value">(stub)</span> <span class="unit">${escapeHtml(m.unit)}</span><br><small>${escapeHtml(m.formula)}</small></li>`;
 }
 
 /**

@@ -23,7 +23,7 @@ Per constitutional rule #7 (vision.md § 7).
 | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|---|
 | 1 | Missing OTEL backend at the upstream `@minsky/observability` boundary (no metric data available yet — sub-tasks 2-3 wire the real signals) | missing-input (resource) | `graceful-degrade` — `createServer({ metrics: [] })` still returns 200 on `/` with a well-formed document; the dashboard shows an empty list rather than crashing | covered by `novel/dashboard-web/test/server.test.ts` "renders zero metric rows when given an empty array (cold-start contract)" assertion |
-| 2 | Configured port already bound by another process at `serve()` time | resource-contended (network) | `let-it-crash` — `@hono/node-server` surfaces an `EADDRINUSE` from `serve()`; the wrapping supervisor (one-for-one per ARCHITECTURE.md § "Process supervision tree") restarts on a configurable port | the v0 skeleton intentionally returns `{ app, fetch }` without binding a port so the failure mode is owned by the wrapping `distribution/run-dashboard-web.sh` (deferred — covered when `dashboard-web-render-all-10` ships); meanwhile the `server.test.ts` "returns 200 + HTML body for GET /" assertion exercises the in-process `fetch` path that has no port-binding concern |
+| 2 | Configured port already bound by another process at `serve()` time | resource-contended (network) | `let-it-crash` — `@hono/node-server` surfaces an `EADDRINUSE` from `serve()`; the wrapping supervisor (one-for-one per ARCHITECTURE.md § "Process supervision tree") restarts on a configurable port | the v0 skeleton intentionally returns `{ app, fetch }` without binding a port so the failure mode is owned by the wrapping `distribution/run-dashboard-web.sh` (deferred — covered when `dashboard-web-otel-wiring` ships its runner); meanwhile the `server.test.ts` "returns 200 + HTML body for GET /" assertion exercises the in-process `fetch` path that has no port-binding concern |
 | 3 | HTML injection via a metric label containing `<script>` / `"` / `'` / `&` / `>` (upstream-malformed — a future OTEL label could carry attacker-influenced text) | upstream-malformed (XSS) | `graceful-degrade` — `escapeHtml` rewrites every metacharacter; the rendered string contains no live `<script>` tag and no broken-attribute boundary | covered by `novel/dashboard-web/test/render.test.ts` "escapes HTML in label / id / formula / unit (rule #7 — XSS guard)" assertion |
 | 4 | Unknown route requested (`GET /admin`, `GET /api/secret`) | adversarial input | `graceful-degrade` — Hono's default 404 handler returns `404 Not Found`; the SSR surface is intentionally minimal (one route) so there is no surface to enumerate | covered by `novel/dashboard-web/test/server.test.ts` "returns 404 for an unknown route (Hono default — let-it-crash equivalent)" assertion |
 
@@ -41,9 +41,9 @@ Per constitutional rule #7 (vision.md § 7).
 
 The 10 vision.md success criteria are typed in `src/metrics.ts` as `SUCCESS_METRICS: readonly SuccessMetric[]`. Three invariants are enforced in `test/metrics.test.ts`: count = 10, all kebab-case, no duplicate ids. Renamed from `PLACEHOLDER_METRICS` (sub-task 1's stub).
 
-### Sub-task 3 (render-all-10 — filed, blocked)
+### Sub-task 3 (render-all-10 — shipped)
 
-See TASKS.md `dashboard-web-render-all-10`.
+`createServer()` now defaults `metrics` to `SUCCESS_METRICS`, so `GET /` renders all 10 vision.md success criteria as `<li data-metric-id="…">` rows. Each row's value is rendered as the `(stub)` sentinel — the operator-visible signal that the OTEL backend is not yet wired (rule #7 graceful-degrade, explicit not silent). The follow-up `dashboard-web-otel-wiring` (P3 in TASKS.md) replaces the sentinel with `@minsky/observability` reads.
 
 ### Sub-task 4 (Lighthouse CI — filed, blocked)
 
