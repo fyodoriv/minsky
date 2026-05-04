@@ -17,6 +17,8 @@
  *      subprocess (the tail-cap invariant).
  */
 
+import { execSync } from "node:child_process";
+
 import { describe, expect, it } from "vitest";
 
 import { DryRunSpawnStrategy, ProcessSpawnStrategy, type SpawnInput } from "./spawn-strategy.js";
@@ -82,6 +84,45 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
     expect(result.stdoutTail).toContain("hello-stdout");
     expect(result.stderrTail).toContain("hello-stderr");
   });
+
+  // `tick-loop-spawn-args-fresh-session` integration test: gated on the
+  // real `claude` binary being on PATH (skipped in CI hosts without it,
+  // mirroring the gate convention introduced for the daemon-side test
+  // in `daemon.test.ts`). Asserts the *new* default args (`["--print"]`)
+  // produce a fresh-session response — NOT a "Select a session to resume"
+  // interactive picker prompt that the old `["--resume"]` default emitted.
+  const hasClaude = (() => {
+    try {
+      execSync("which claude", { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  it.skipIf(!hasClaude)(
+    "default args spawn a fresh non-interactive Claude session that consumes stdin",
+    async () => {
+      // Default args (no `args` override) → `["--print"]` per the fix.
+      const strat = new ProcessSpawnStrategy({ command: "claude" });
+      const result = await strat.spawn(
+        emptyInput({
+          taskId: "spawn-args-smoke",
+          // Minimal 1-line brief — Claude should respond with at least one
+          // non-empty token, and the response MUST NOT be an interactive
+          // session-picker UI string.
+          brief: "Reply with the single word: ok",
+        }),
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdoutTail.length).toBeGreaterThan(0);
+      // The interactive session picker prints "Select a session to resume"
+      // (and "resume" UI strings); a fresh `--print` invocation does not.
+      const lower = result.stdoutTail.toLowerCase();
+      expect(lower).not.toContain("select a session");
+      expect(lower).not.toContain("resume previous");
+    },
+    60_000,
+  );
 
   it("bounds stdout to the last 4KB (tail-cap invariant)", async () => {
     // Emit 5KB of 'A' followed by a unique marker so we can verify the

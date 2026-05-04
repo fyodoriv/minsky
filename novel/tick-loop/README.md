@@ -82,7 +82,7 @@ const result = await tick({ taskId: "x", prompt: "y", client: flaky });
 
 ## Daemon (real spawn after `tick-loop-daemon-real-spawn-flip`)
 
-`runDaemon(opts)` (in `src/daemon.ts`) is the production daemon orchestrator that the supervisor (systemd / launchd) actually supervises. After sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`), the production default is `ProcessSpawnStrategy` (real `claude --resume` subprocess per iteration); dry-run is opt-in via the `MINSKY_TICK_DRY_RUN=1` env-var control surface.
+`runDaemon(opts)` (in `src/daemon.ts`) is the production daemon orchestrator that the supervisor (systemd / launchd) actually supervises. After sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`), the production default is `ProcessSpawnStrategy` (real `claude --print` headless subprocess per iteration — brief on stdin, response on stdout per Claude Code's documented non-interactive flag; the earlier `--resume` default opened the interactive session picker and was fixed by `tick-loop-spawn-args-fresh-session`); dry-run is opt-in via the `MINSKY_TICK_DRY_RUN=1` env-var control surface.
 
 The bash bootstrap `distribution/systemd/run-tick-loop.sh` `exec`s into `node novel/tick-loop/bin/tick-loop.mjs …` so the OS supervisor sees the node PID directly. The CLI reads `MINSKY_TICK_DRY_RUN` and picks `DryRunSpawnStrategy` (when `1` / `true`) or `ProcessSpawnStrategy` (default — real spawn). The CLI is the I/O boundary; `runDaemon` itself is pure given the injected seams (`tasksMdReader`, `pausedSentinelReader`, `budgetGuard`, `spawnStrategy`, `mockClient`, `now`, `sleep`, `emit`).
 

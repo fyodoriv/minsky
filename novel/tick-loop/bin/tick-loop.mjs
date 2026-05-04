@@ -7,9 +7,11 @@
  *
  * Sub-task 3/3 of `tick-loop-daemon-real-spawn` (`tick-loop-daemon-real-spawn-flip`):
  * the production default is now `ProcessSpawnStrategy` — a real
- * `node:child_process.spawn('claude', ['--resume'])` per iteration. Dry-run
- * is opt-in via the `MINSKY_TICK_DRY_RUN=1` env var (the new control
- * surface; the old `--dry-run` argv flag has been retired).
+ * `node:child_process.spawn('claude', ['--print'])` per iteration (headless;
+ * brief on stdin, response on stdout). Dry-run is opt-in via the
+ * `MINSKY_TICK_DRY_RUN=1` env var (the new control surface; the old
+ * `--dry-run` argv flag has been retired). The `--print` default replaced
+ * the legacy `--resume` default per `tick-loop-spawn-args-fresh-session`.
  *
  *   $ node bin/tick-loop.mjs --max-iterations=4         # real spawn
  *   $ MINSKY_TICK_DRY_RUN=1 node bin/tick-loop.mjs ...   # safe dry-run
@@ -131,12 +133,17 @@ const realGuard = new BudgetGuard(tokenMonitor, () => {
 });
 
 // Sub-task 3/3: production default is `ProcessSpawnStrategy` (real
-// `claude --resume` subprocess); `MINSKY_TICK_DRY_RUN=1` opts back to
+// `claude --print` headless subprocess — brief on stdin, response on stdout
+// per `claude --help`); `MINSKY_TICK_DRY_RUN=1` opts back to
 // `DryRunSpawnStrategy`. The Strategy is the spawn-step seam (rule #2,
-// Gamma 1994) so the flip is a one-line constructor swap.
+// Gamma 1994) so the flip is a one-line constructor swap. The legacy
+// `--resume` default opened an interactive session picker (TTY) and
+// resumed the previous conversation — fixed by
+// `tick-loop-spawn-args-fresh-session`; default args come from
+// `ProcessSpawnStrategyOptions` (currently `["--print"]`).
 const spawnStrategy = dryRun
   ? new DryRunSpawnStrategy()
-  : new ProcessSpawnStrategy({ command: "claude", args: ["--resume"] });
+  : new ProcessSpawnStrategy({ command: "claude" });
 
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
