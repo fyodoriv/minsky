@@ -235,6 +235,15 @@ if [ "$MODE" = "doctor" ]; then
   if command -v npx    >/dev/null 2>&1; then ok "npx";    else warn "npx missing";    STATUS="red";    fi
   if command -v claude >/dev/null 2>&1; then ok "claude"; else warn "claude CLI missing"; STATUS="${STATUS/green/yellow}"; fi
   if command -v jq     >/dev/null 2>&1; then ok "jq";     else warn "jq missing — ledger writes are skipped"; STATUS="${STATUS/green/yellow}"; fi
+  # Push-channel deps: NtfyNotifier (novel/adapters/notifier) shells out to either
+  # `curl` (the HTTP fallback that hits https://ntfy.sh/<topic>) or the `ntfy`
+  # CLI. With state.json seeded with `ntfy.topic` on first install, a host that
+  # has neither will silently drop budget-paused pushes (the daemon's exactly-
+  # once notify hook lands a no-op). Surface that as YELLOW per
+  # `setup-doctor-ntfy-check` so --doctor matches the actual fault axis (Beyer
+  # SRE 2016 ch. 6 — health checks must cover the real failure surface).
+  if command -v curl   >/dev/null 2>&1; then ok "curl";   else warn "curl missing — push notifications disabled"; STATUS="${STATUS/green/yellow}"; fi
+  if command -v ntfy   >/dev/null 2>&1; then ok "ntfy";   else warn "ntfy CLI missing — pushes fall back to curl"; STATUS="${STATUS/green/yellow}"; fi
 
   # adapter selfTest aggregation: today there are no wired adapters; future P1 PRs add them.
   # The contract is documented at novel/adapters/types/src/index.ts.
@@ -269,6 +278,10 @@ if ! ledger_has "$CURRENT_STEP"; then
     || warn "claude CLI not found — install: https://docs.claude.com/en/docs/claude-code/overview"
   command -v jq >/dev/null 2>&1 \
     || warn "jq not found — install for setup ledger to work (brew install jq / apt install jq)"
+  command -v curl >/dev/null 2>&1 \
+    || warn "curl not found — push notifications disabled (NtfyNotifier shells out to curl by default)"
+  command -v ntfy >/dev/null 2>&1 \
+    || warn "ntfy CLI not found — pushes fall back to curl (graceful-degrade per @minsky/notifier)"
   ok "prerequisites OK"
   ledger_done "$CURRENT_STEP"
 else
