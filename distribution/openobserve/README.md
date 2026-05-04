@@ -24,11 +24,11 @@ bash distribution/install-openobserve.sh
 This:
 
 1. Detects platform (`darwin-arm64` / `darwin-amd64` / `linux-amd64` / `linux-arm64`).
-2. Downloads OpenObserve `v0.80.1` (pinned) from the upstream GitHub release.
+2. Downloads OpenObserve `v0.80.2` (pinned) from the upstream openobserve.ai CDN (`downloads.openobserve.ai/releases/o2-enterprise/v0.80.2/`).
 3. Installs the binary at `${HOME}/.local/bin/openobserve`.
 4. Creates the data directory at `${HOME}/.openobserve/data`.
 
-To pick a different version: `OO_VERSION=v0.81.0 bash distribution/install-openobserve.sh` — but the **pinned** version is what the chaos-coverage / measurement claims are anchored to; bumping is a deliberate quarterly-review act, not a drive-by.
+To pick a different version: `OO_VERSION=v0.81.0 bash distribution/install-openobserve.sh` — but the **pinned** version is what the chaos-coverage / measurement claims are anchored to; bumping is a deliberate quarterly-review act, not a drive-by. Note: upstream stopped publishing `darwin-amd64` binaries; the installer errors with a focused message on Intel macOS.
 
 To smoke-test the script without downloading: `bash distribution/install-openobserve.sh --dry-run`.
 

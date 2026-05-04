@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Minsky observability backend — OpenObserve single-binary installer.
 #
-# Hypothesis (rule #9): pinning OpenObserve v0.80.1 (latest stable as of
-# 2026-04-28) and laying it down as a per-user daemon under
-# `${HOME}/.local/bin/openobserve` + `${HOME}/.openobserve/data` makes the 5
-# OTEL-backed success-criteria queries (vision.md rows 1, 2, 5, 6, 9)
-# measurable today instead of rendering `(stub)`.
+# Hypothesis (rule #9): pinning OpenObserve v0.80.2 (latest stable as of
+# 2026-04-30, verified reachable on the openobserve.ai CDN at
+# `downloads.openobserve.ai/releases/o2-enterprise/${VERSION}/`) and laying it
+# down as a per-user daemon under `${HOME}/.local/bin/openobserve` +
+# `${HOME}/.openobserve/data` makes the 5 OTEL-backed success-criteria queries
+# (vision.md rows 1, 2, 5, 6, 9) measurable today instead of rendering `(stub)`.
 #
 # Pattern: thin shell wrapper around OpenObserve's official tarball release;
 # binary is *not* bundled in the repo (size + license). Per
@@ -30,15 +31,21 @@ set -euo pipefail
 
 # --- pinned configuration -----------------------------------------------------
 
-OO_VERSION="${OO_VERSION:-v0.80.1}"
+OO_VERSION="${OO_VERSION:-v0.80.2}"
 OO_PORT_DEFAULT="5080"
 OO_BIN_DIR="${HOME}/.local/bin"
 OO_BIN_PATH="${OO_BIN_DIR}/openobserve"
 OO_DATA_DIR="${HOME}/.openobserve/data"
-# OpenObserve hosts release tarballs at openobserve.ai/downloads/ (the GitHub
-# Releases page intentionally lists no asset binaries — OO ships through their
-# CDN). The tarball naming is `openobserve-${VERSION}-${TARGET}.tar.gz`.
-OO_DOWNLOAD_BASE="${OO_DOWNLOAD_BASE:-https://github.com/openobserve/openobserve/releases/download}"
+# OpenObserve ships binaries through their CloudFront-fronted S3 CDN, NOT via
+# GitHub Releases (the Releases page intentionally has no asset binaries —
+# verified 2026-05-04: every release tag returns `assets: []` from
+# `gh api repos/openobserve/openobserve/releases`). The canonical CDN path is
+# `${BASE}/${VERSION}/openobserve-ee-${VERSION}-${TARGET}.tar.gz`. The
+# `o2-enterprise` namespace is OpenObserve's current release channel for the
+# self-hostable binary (the open-source distribution; "ee" is OpenObserve's
+# binary-naming convention, not a license tier — see
+# `https://openobserve.ai/downloads`).
+OO_DOWNLOAD_BASE="${OO_DOWNLOAD_BASE:-https://downloads.openobserve.ai/releases/o2-enterprise}"
 
 # --- argument parsing ---------------------------------------------------------
 
@@ -67,7 +74,13 @@ uname_m="$(uname -m)"
 
 case "${uname_s}-${uname_m}" in
   Darwin-arm64)  target="darwin-arm64" ;;
-  Darwin-x86_64) target="darwin-amd64" ;;
+  Darwin-x86_64)
+    # Upstream stopped publishing darwin-amd64 binaries (verified 2026-05-04
+    # against v0.80.2 / v0.80.1: only darwin-arm64 is available on the CDN).
+    # Fall through to the unsupported branch with a focused error.
+    printf 'install-openobserve: darwin-amd64 is not published by upstream OpenObserve as of %s; use darwin-arm64 or run via Linux\n' "$OO_VERSION" >&2
+    exit 1
+    ;;
   Linux-x86_64)  target="linux-amd64" ;;
   Linux-aarch64) target="linux-arm64" ;;
   *)
@@ -76,7 +89,7 @@ case "${uname_s}-${uname_m}" in
     ;;
 esac
 
-archive="openobserve-${OO_VERSION}-${target}.tar.gz"
+archive="openobserve-ee-${OO_VERSION}-${target}.tar.gz"
 url="${OO_DOWNLOAD_BASE}/${OO_VERSION}/${archive}"
 
 # --- plan summary -------------------------------------------------------------
