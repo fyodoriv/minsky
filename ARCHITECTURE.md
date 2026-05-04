@@ -213,7 +213,9 @@ Restart policies:
 
 - `budget-guard` and `dashboard-web` use `one-for-one` — if they crash, only they restart
 - `tick-loop` uses backoff (5s → 30s → 5min) to avoid hammering on systematic failures
-- `mape-k-loop` is fire-and-forget per invocation; cron handles scheduling
+- `mape-k-loop` is fire-and-forget per invocation; cron handles the watchdog schedule
+
+**MAPE-K cadence (the schedule cron drives `mape-k-loop` on):** a three-priority hybrid — event-triggered overrides > time-based watchdog > tick-iteration backstop. The supervisor wakes `mape-k-loop` via `SIGUSR1` on event triggers (spec-monitor red, `budget-guard` at 85 %); cron fires the time-based watchdog every 12 h regardless; a tick-iteration backstop forces a pass every 1000 ticks. The full rationale, rejected alternatives (pure time-based, pure scheduler-iteration-based, pure event-triggered), token-cost estimate (≤ 5.7 % of weekly Max5 budget — itself adaptive per `mape-k-loop`'s monthly self-calibration), and literature anchors (Liu 2000, Kephart & Chess 2003, Astrom & Wittenmark 1997, Beyer SRE 2016) live in `research.md` § "MAPE-K cadence". Numeric thresholds are configurable via `config/mape-k.json`; they are not constants in code, matching the same adaptive-threshold discipline used by `budget-guard` (above, `## Token economy`).
 
 ## Observability
 
