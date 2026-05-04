@@ -60,6 +60,8 @@ export {
   SEVERITY_THRESHOLDS,
 } from "./analyze.js";
 
+export { parseCostSchedule } from "./cost-schedule.js";
+
 export { MAX_VARIANTS_PER_PLAN, plan, type PlanArgs, type Variant } from "./plan.js";
 
 export {

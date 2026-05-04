@@ -1,21 +1,28 @@
-id: traceparent-subagent-propagation-test
+id: mape-k-cost-schedule-from-vision
 hypothesis: |
-  A propagation chaos test that spawns a Node subprocess with
-  `OTEL_PROPAGATORS=""` (empty — installs a no-op propagator) and asserts
-  the child span's W3C `traceparent` trace-id diverges from the parent's,
-  *plus* a paired test that asserts convergence under the default
-  W3C-tracecontext propagator, surfaces the "subprocess that doesn't
-  honour `OTEL_PROPAGATORS` breaks TRACEPARENT silently" failure mode in
-  <1 CI run. Today this regression is invisible until a manual
-  trace-graph inspection — exactly the rule-#7 ratchet condition (failure
-  modes that don't trip an automated alarm). The test wraps `spawnSync`
-  (not `exec`, to avoid shell escaping), emits one span per spawn from a
-  small `.mjs` fixture, and parses the W3C `00-<trace-id>-<span-id>-<flags>`
-  carrier directly so the assertion is structural rather than implementation
-  -coupled. Closes the deferred row 4 in
-  `novel/adapters/observability/README.md`'s failure-mode-and-chaos table.
-success: "`pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts --reporter=json | jq -e '.numPassedTests >= 2 and .numFailedTests == 0'` is true; ≥1 assertion proves trace-id divergence under `OTEL_PROPAGATORS=\"\"` (the failure mode) and ≥1 proves trace-id convergence under the default propagator (the steady state); rule-7-chaos-coverage CI lint is green (the README's row 4 now points at an existing `.test.ts` path); `pnpm typecheck && pnpm test && pnpm lint` all exit 0."
-pivot: "If the test is non-deterministic on GH-hosted runners (e.g., the runner harness pre-installs a propagator that the subprocess inherits regardless of `OTEL_PROPAGATORS=\"\"`, defeating the divergence assertion), pivot to an env-var-diff-based assertion: spawn the fixture twice — once with the override, once without — and assert that the *recorded subprocess env block* differs on the `OTEL_PROPAGATORS` key, surfacing the configuration drift even when the in-process behaviour is masked by the harness. The chaos-coverage signal is preserved; only the assertion shape changes."
-measurement: "pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts --reporter=json | jq -e '.numPassedTests >= 2 and .numFailedTests == 0'"
-anchor: "Basiri, A., Behnam, N., de Rooij, R., Hochstein, L., Kosewski, L., Reynolds, J., Rosenthal, C., \"Principles of Chaos Engineering\", *IEEE Software* 33(3), pp. 35-41, 2016 (steady-state hypothesis + fault axis + blast radius — the four-part frame this test slots into); OpenTelemetry specification, CNCF 2020+ (the propagator contract — `OTEL_PROPAGATORS` env var as the install seam); W3C, *Trace Context*, Recommendation, 23 November 2021 (the `traceparent` carrier format `00-<trace-id>-<span-id>-<flags>` this test parses); rule #7 (vision.md § 7 — chaos engineering / failure-mode-table-with-chaos-test discipline); rule #10 (vision.md § 10 — deterministic enforcement; the deferred-row-4 prose anchor becomes a CI-gated test path)."
+  Goldratt's flat product `violationCount × 1` over-collapses
+  high-frequency low-severity rules (typo lints) against rare
+  high-severity rules (rule-#9 pre-registration misses). A per-rule
+  cost schedule sourced from a new `## Cost schedule` table in
+  `vision.md` — parsed by `parseCostSchedule(visionMdContent)`
+  (`novel/mape-k-loop/src/cost-schedule.ts`) and threaded through
+  `tick({ ..., costs })` into `analyze({ snapshot, costs })` —
+  restores the severity ordering without an API change. The `costs`
+  seam was already designed in `mape-k-loop-v0` sub-task 2; this PR
+  is the upstream parser plus the integration plumbing in `tick`.
+  v0 weights (defensible, revisitable at the next quarterly review):
+  `rule-9 = 100`, `rule-7 = 50`, `rule-typo = 1`. Rules absent from
+  the schedule fall back to `DEFAULT_RULE_COST = 1` (rule #7
+  graceful-degrade). The integration test asserts a 50× rule-typo
+  violation count cannot outrank a single rule-#9 violation under
+  the schedule (50 × 1 = 50 < 1 × 100 = 100), and that without the
+  schedule the same input picks rule-typo (regression baseline).
+  This PR is rule-#4 ratchet ("every constant in source") applied
+  to the cost-weight schedule: the prose-only "use 100 / 50 / 1"
+  recommendation in the task block becomes a numbered, parseable,
+  deterministically-consumed table.
+success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts user-stories/003-mape-k-improves-prompts.test.ts --reporter=json | jq -e '.numPassedTests >= 5 and .numFailedTests == 0'` exits 0; rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / mape-k-budget-cap / mape-k-constraints-md-size) pass on this PR's diff; the `mape-k-cost-schedule-from-vision` task block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-cost-schedule-from-vision$' TASKS.md` returns 0); vision.md row 54 marks `costEstimate` full-conformance."
+pivot: "If the schedule goes stale faster than expected (>5 % of PRs need to add a new ruleId row, i.e. the table cannot keep pace with new rules being introduced), pivot to a heuristic over rule severity ranges sourced from each rule's own README — the same long-tail-prose escape hatch the original task block called out. If the v0 weights (100 / 50 / 1) prove arbitrary in practice (the loop's first month of rollouts shows the per-rule rankings disagree with operator exampleion >25 % of ticks), recalibrate at the next quarterly review (`review-q3-2026`) rather than removing the schedule — removing it re-opens the high-volume-low-severity over-collapse failure mode this gate exists to close."
+measurement: "pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts user-stories/003-mape-k-improves-prompts.test.ts --reporter=json | jq -e '.numPassedTests >= 5 and .numFailedTests == 0' && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-cost-schedule-from-vision$' TASKS.md)\" = '0' ]"
+anchor: "Goldratt, E. M., *The Goal: A Process of Ongoing Improvement*, North River Press, 1984 (Theory of Constraints — `topConstraint = max(violationCount × cost)`); rule #4 (vision.md § 4 — every constant in source; the schedule's literal numbers live in the markdown table, not in code); rule #7 (vision.md § 7 — graceful-degrade; missing schedule → identity, misconfigured weight → fallback to `DEFAULT_RULE_COST`); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K Analyze phase whose cost-weight upstream this lint is); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure-function decision module + thin I/O boundary — the parser is pure, the CLI wrapper is the I/O); vision.md § \"Cost schedule\" (the new table this PR adds); vision.md § \"Pattern conformance index\" row 54 (updated to mark `costEstimate` full-conformance)."
 replay_windows_days: [7, 30]
