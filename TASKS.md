@@ -102,23 +102,7 @@
 
 <!-- spec-monitor-skill and its successor `spec-monitor-deterministic-rewrite` both shipped: the deterministic linters under `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` carry the load-bearing share of runtime verification (rule #10's enforcement model), and the residual judgement-heavy scope ships as the advisory-only Claude Skill at `novel/spec-monitor/SKILL.md` — capped at ≤5 advisory rules per the rule-#10 ratchet. See `vision.md` § "Pattern conformance index" rows 11 and 35. -->
 
-- [ ] Implement `omc-tasksmd-bridge` v0
-  - **ID**: omc-tasksmd-bridge-v0
-  - **Tags**: novel, extraction-target, bridge
-  - **Estimate**: 1–2d (scales with the persistence answer)
-  - **Last-enriched**: 2026-05-04
-  - **Hypothesis**: Bidirectional sync between tasks.md (canonical) and OMC's internal task list survives a 100-trial round-trip property test (random TASKS.md → push to OMC → pull back → byte-equal modulo whitespace) and propagates a claim in either direction within 1 scheduler iteration.
-  - **Details**: Bidirectional sync between tasks.md (canonical) and OMC's internal task list. Goes away when OMC adopts tasks.md upstream — the success metric for this package is "this package becomes unnecessary."
-  - **Research**: 2026-05-04 — verdict: parseable; see research.md § "OMC handoff persistence" + scripts/omc-roundtrip.mjs (round-trip parseability check, dormant-by-default, fires on `--omc-checkout=<path>`). Bridge can ship as a thin reader OMC → tasks.md per the parseable verdict; reverse direction deferred to v1+ pending a CRDT story for OMC's optimistic-concurrency `version` field.
-  - **Files**: `novel/bridges/omc-tasksmd/`
-  - **Verification**:
-    - Round-trip property test: arbitrary `TASKS.md` → push to OMC → pull back → diff against original is empty (modulo whitespace)
-    - End-to-end: claim a task in OMC; observe it claimed in `TASKS.md` within 1 scheduler iteration; vice versa
-  - **Measurement**: `pnpm vitest run novel/bridges/omc-tasksmd/src/round-trip.property.test.ts` exits 0 with ≥100 passed property cases; `pnpm vitest run novel/bridges/omc-tasksmd/src/claim-propagation.e2e.test.ts` exits 0.
-  - **Pivot**: if the round-trip property test cannot reach 95 % pass rate at 100 trials due to OMC field shape divergence (lossy fields, encoding incompatibilities), the bridge isn't viable; pivot to one-way sync (TASKS.md → OMC only) and document the asymmetry, OR escalate `omc-tasksmd-issue` to push spec adoption upstream.
-  - **Acceptance**: Round-trip preserves all task fields; integration test for both directions passes; published as `@minsky/omc-tasksmd-bridge`
-  - **Anchor**: Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (eventual consistency / convergence under bidirectional sync); Hewitt 1973 (actor model — TASKS.md as the message store).
-  - **Risk**: Bridge becomes unnecessary upstream — keep scope minimal; don't over-engineer for features OMC may absorb.
+<!-- omc-tasksmd-bridge-v0 shipped read-only OMC → tasks.md (`@minsky/omc-tasksmd-bridge` at `novel/bridges/omc-tasksmd/`); see vision.md § "Pattern conformance index" row 62. The bidirectional / claim-propagation half is deferred to v1+ as `omc-tasksmd-bridge-v1-watcher` (P3 below) pending a CRDT story for OMC's optimistic-concurrency `version` field. -->
 
 - [ ] First user-story integration test passes (001)
   - **ID**: first-integration-test
@@ -151,6 +135,20 @@
   - **Risk**: Apple Shortcuts complexity ceiling — track wrist-dwell metric (success #6); if it climbs, escalate to `native-watchos-app`.
 
 ## P3
+
+- [ ] `omc-tasksmd-bridge-v1-watcher` — reverse-sync + filesystem watcher for the OMC ↔ tasks.md bridge
+  - **ID**: omc-tasksmd-bridge-v1-watcher
+  - **Tags**: novel, bridge, follow-up, dormant-until-crdt-story
+  - **Estimate**: 1–2w (CRDT story + watcher + reverse-sync)
+  - **Hypothesis**: Once a CRDT story is sketched for OMC's optimistic-concurrency `version` field (`src/team/state/tasks.ts:90`), a chokidar / `fs.watch`-driven reverse path (tasks.md edits → OMC `claim` / `complete` calls) can propagate a claim in either direction within 1 scheduler iteration without lost-update collisions across 100 random concurrent-edit trials. v0 (read-only) shipped as `@minsky/omc-tasksmd-bridge`; this task closes the deferred half of the original `omc-tasksmd-bridge-v0` Acceptance ("claim propagation in either direction").
+  - **Details**: Add `OmcWriter.{claim,complete,update}` mirroring OMC's persisted shape; integrate `chokidar` (or `fs.watch` if portable enough) on both `<repoRoot>/.omc/state/team/**/tasks/*.json` and `<repoRoot>/TASKS.md`; resolve conflicts via OMC's `version` field (compare-and-set). Lossy fields documented in `novel/bridges/omc-tasksmd/README.md` § "Lossy projection" must be addressed before reverse-sync is safe — either widen the tasks.md spec or extend the bridge to a sidecar JSON.
+  - **Files**: `novel/bridges/omc-tasksmd/src/{watcher,writer,conflict-resolution}.{ts,test.ts}`, `novel/bridges/omc-tasksmd/README.md` (chaos-table additions for the new failure modes)
+  - **Verification**: Round-trip property test (random TASKS.md ↔ OMC trials, ≥95 % pass at 100 trials); claim-propagation E2E (claim in either side observed in the other within 1 scheduler iteration).
+  - **Measurement**: `pnpm vitest run novel/bridges/omc-tasksmd/src/round-trip.property.test.ts` exits 0 with ≥95 passed property cases; `pnpm vitest run novel/bridges/omc-tasksmd/src/claim-propagation.e2e.test.ts` exits 0.
+  - **Pivot**: if the CRDT story for `version` cannot reach lost-update-free convergence at 100 random concurrent-edit trials (≥1 lost update detected), the reverse path isn't viable; pivot to a *write-throttled* reverse direction (single-writer assumption, scheduler-iteration-rate-limited) and document the asymmetry, OR escalate `omc-tasksmd-issue` to push tasks.md adoption upstream so the bridge can retire entirely.
+  - **Acceptance**: Round-trip property test passes ≥95 / 100 trials; claim propagates in either direction within 1 scheduler iteration; bridge published as v1.
+  - **Anchor**: Shapiro et al., "Conflict-free Replicated Data Types", *SSS* 2011 (the CRDT story this task waits on); Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (the bridge's eventual-consistency frame); Hewitt 1973 (TASKS.md as the message store).
+  - **Risk**: OMC adopts tasks.md upstream before this task lands → the bridge retires entirely (the Goldratt TOC win); track via `omc-tasksmd-issue` in TASKS.md.
 
 - [ ] Quarterly dependency review (Q3 2026)
   - **ID**: review-q3-2026

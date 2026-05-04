@@ -88,6 +88,8 @@ importers:
 
   novel/adapters/types: {}
 
+  novel/bridges/omc-tasksmd: {}
+
   novel/budget-guard:
     dependencies:
       '@hono/node-server':
