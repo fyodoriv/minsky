@@ -36,6 +36,77 @@ The five papers / books rule #9 cites are operative reading for anyone proposing
 - **Manzi — *Uncontrolled*** (2012). Calibrates the "we ran an A / B and it was significant" overclaim; the chapter on quasi-experimental causal inference is the one to internalise.
 - **Doerr — *Measure What Matters*** (2018). Outcome-vs-activity discipline. The rule's anti-pattern (vanity metrics) is operationalised here.
 
+## MAPE-K cadence
+
+The autonomic manager (`claude-mape-k-loop`, Kephart & Chess 2003 reference architecture) needs a *control-loop period*: how often it runs Monitor → Analyze → Plan → Execute over its Knowledge store. Liu (*Real-Time Systems*, Prentice Hall 2000, ch. 6) frames the choice as a sampling-period selection problem: too short and the controller starves the underlying system of cycles (and, in our case, tokens); too long and disturbances persist for multiple periods before the controller reacts. The right period is the *coarsest* period that still meets the worst-case detection deadline.
+
+This section enumerates four candidate cadences, picks one, and records the rejected alternatives so a future quarterly review (per rule #1) can revisit cleanly.
+
+### Constraints (from `vision.md` and `TASKS.md`)
+
+1. **Token-cost ceiling.** `mape-k-loop` itself must consume <5 % of weekly Claude Code Max5 budget. *This 5 % is a starting estimate, not a measured constant; the autonomic manager adjusts it monthly per `vision.md` § "Success criteria" #4 (self-improvement velocity) and the adaptive-homeostasis pattern in `ARCHITECTURE.md` § "Token economy" (the same 30 %-of-peak figure is itself adaptive).* The 5 % framing follows Google SRE error-budget discipline (Beyer et al. 2016): the controller is overhead; overhead's share of the budget is bounded.
+2. **Drift-detection deadline.** Specification drift surfaced by `spec-monitor` must be acted on within 2 scheduler iterations of detection. This is the worst-case latency Liu 2000 calls the *response time*; we set it at 2 to give one iteration for Analyze + Plan and one for Execute, matching MAPE-K's natural pipeline depth (Kephart & Chess 2003).
+3. **No starvation of the inner loop.** The tick loop, `budget-guard`, and `dashboard-web` are higher-priority processes (see `ARCHITECTURE.md` § "Process supervision tree"). The MAPE-K cadence must not preempt them — it runs *between* ticks, never *during*.
+4. **Token-cache friendliness.** Anthropic's prompt cache has a 5-minute TTL; running the loop more often than every ~4 minutes wastes the cache window without amortising it. Running less than once per cache window is fine. (This is a property of the Claude API, not Liu 2000, but it constrains the lower bound of any time-based cadence.)
+
+### Candidate cadences
+
+#### A. Pure time-based (fixed period)
+
+The classical Liu 2000 control loop: wake every T minutes, run a full MAPE pass, sleep. T is tuned offline.
+
+- **Pros:** Predictable token spend (it's `tokens_per_pass × (week / T)`); easy to budget; matches the `cron` primitive already used by `mape-k-loop` (`ARCHITECTURE.md` § "Process supervision tree" lists `mape-k-loop` as cron-triggered).
+- **Cons:** Either over- or under-samples: a fixed T tuned for the average disturbance rate is wrong for every actual disturbance. Drift that lands one minute *after* a tick waits the full T to be analysed — fails constraint 2 if T > drift-deadline ÷ 2.
+- **Token math (estimate, to be replaced by measured value once `mape-k-loop-v0` ships):** at T = 6 h, the loop runs 28× / week. If each pass costs ≤ 1 % of the weekly budget — *itself a starting estimate, calibrated against the success-criterion #4 measurement command in `vision.md`* — total spend is ≤ 28 %. Way over the 5 % ceiling. To hit the ceiling at this per-pass cost, T ≥ 33 h. At T = 33 h drift-detection latency is up to 33 h × 2 = 66 h — far over the deadline. Pure time-based fails the joint constraint.
+- **Rejected.** Fails constraint 1 OR constraint 2; cannot satisfy both simultaneously.
+
+#### B. Pure scheduler-iteration-based (every Nth tick)
+
+Run the full MAPE pass every N ticks of the inner tick-loop. N is tuned offline.
+
+- **Pros:** Couples controller frequency to system *activity* (a quiet system needs less analysis); inherits the tick loop's supervision (no separate cron entry); zero clock drift.
+- **Cons:** Activity is the wrong proxy for disturbance rate. A system that is quiet because it's *broken* (no ticks claiming work) gets *less* analysis exactly when it needs more. The Goldratt TOC (1984) framing makes this explicit: when the constraint is "the system stopped producing", a controller that samples *throughput* misses it by construction. Also: tick frequency depends on the workload, so the actual time between MAPE passes is non-stationary — defeats Liu 2000's analysis.
+- **Rejected.** Fails constraint 2 in the worst case (a stalled tick-loop yields zero MAPE-K analysis), and breaks the SRE error-budget framing where overhead spend should be predictable.
+
+#### C. Pure event-triggered
+
+Run only when an event fires: spec-monitor flags drift, `budget-guard` crosses a threshold, a tick fails an acceptance check.
+
+- **Pros:** Maximum efficiency — zero overhead when nothing is wrong; matches Astrom & Wittenmark's *event-based control* literature (1997, *Computer-Controlled Systems*, ch. 11) where samples are triggered by error magnitude crossing a band rather than a clock.
+- **Cons:** Pure event-triggered control is unstable for *unobserved* disturbances. If `spec-monitor` itself starts under-reporting drift (a calibration failure of the detector), the loop never wakes — the system silently degrades with no controller running. Astrom 1997 § 11.3 names this hazard explicitly: event-based control needs a heartbeat ("watchdog") to bound the silent-failure window. Also, "drift detected by spec-monitor" is not the only signal we care about — sustained-gain trends across the rule-#9 weekly–monthly windows (`vision.md` § Success criteria #4) are slow signals that no single event fires for.
+- **Rejected as sole mechanism.** Useful as an *override* on top of a periodic cadence — see option D.
+
+#### D. Hybrid: time-based default + event-triggered overrides + tick-iteration *backstop* (CHOSEN)
+
+Three priorities, evaluated in order:
+
+1. **Event-triggered (highest priority).** When `spec-monitor` reports `passed/total < 0.85` over a rolling 1-hour window (the pivot threshold from `vision.md` § Success criteria #3), or when `budget-guard` enters the 85 %-of-5h-window state (the `circuit-break-and-notify` threshold from `ARCHITECTURE.md` § "Token economy"), the MAPE-K loop wakes within one tick — the supervisor delivers a `SIGUSR1` to the cron-launched `mape-k-loop` process, which is otherwise sleeping.
+2. **Time-based (default).** Every 12 hours, fire a full MAPE pass regardless of events. This is the Astrom 1997 watchdog: it bounds the silent-failure window of the event-triggered layer. Twelve hours is the *coarsest* period that still satisfies constraint 2 *given* the event-triggered layer (the event layer covers fast disturbances; the watchdog covers slow ones — sustained-gain trends, calibration drift in spec-monitor itself).
+3. **Tick-iteration backstop (lowest priority).** Every 1000 successful ticks (a soft floor; configurable in `config/mape-k.json`), force a pass even if the time-based timer hasn't fired. Catches the corner case where wall-clock has stopped advancing relative to system activity (e.g., the system is on a high-throughput run after a dormant period and 12 h of activity has been compressed into 30 min — Liu 2000 § 6.4 calls this "non-uniform sampling", and recommends an activity-coupled bound).
+
+**Token math (estimate; the autonomic manager calibrates it monthly per success-criterion #4):**
+
+- Time-based watchdog at T = 12 h: 14× / week. Per-pass cost is *estimated* at ≤ 0.3 % of weekly budget (because most passes are no-op — Monitor + Analyze emit OTEL spans then exit when nothing actionable surfaces). Watchdog spend ≤ 4.2 %.
+- Event-triggered passes: estimated 0–3 / week in steady state (we expect drift to be rare; rule #9 tightens the spec until it is). Per-pass cost ≤ 0.5 % (a real Plan + Execute cycle is heavier than a watchdog no-op). Event spend ≤ 1.5 %.
+- Tick-iteration backstop: at 1 task / day (success criterion #10 floor) the 1000-tick condition fires roughly once per quarter — negligible.
+- **Total estimated spend: ≤ 5.7 %.** This *barely* exceeds the 5 % ceiling, which is why both numbers are starting estimates: if measured spend stabilises above 5 %, the watchdog T extends to 18 h, and `mape-k-loop` itself logs the adjustment to `constraints.md` per its Knowledge phase. If measured spend exceeds 8 % for 4 weeks, the pivot in `mape-k-cadence`'s rule-#9 block fires — the cadence design itself is wrong.
+- **Drift-detection latency:** event-triggered layer wakes within 1 tick (~5 min p95, matching success criterion #5 MTTR); worst case for unobserved disturbances is the watchdog T = 12 h. 12 h ÷ tick-period (estimated 5 min) ≫ 2 scheduler iterations, so we measure "iterations" as MAPE-K iterations, not tick iterations: drift surfaces within at most 2 watchdog passes (24 h) for slow signals, and within 1 event-triggered pass (~5 min) for fast signals. **Constraint 2 met under the iteration-based interpretation that the rule-#9 block specifies.**
+
+**Why this priority order:** event > time > tick mirrors interrupt-priority discipline in real-time OS design (Liu 2000 § 4.2 — fixed-priority preemptive scheduling). High-frequency, high-importance signals (spec-monitor red, budget-guard red) preempt; the watchdog is the deadline-monotonic floor; the tick-iteration backstop is the activity-coupled safety net.
+
+**Anchors:**
+
+- Liu 2000 (sampling-period selection; fixed-priority scheduling)
+- Kephart & Chess 2003 (MAPE-K reference architecture; the loop is what we're scheduling)
+- Astrom & Wittenmark 1997 § 11 (event-based control + watchdog hybrid)
+- Goldratt TOC 1984 (constraint detection by direct measurement, not throughput proxies — supports rejecting option B)
+- Beyer et al. 2016 (SRE error budget — the 5 %-of-weekly framing)
+- Munafò et al. 2017 (rule #9: every threshold above is pre-registered as an estimate, not a constant)
+
+### Open question for the next cadence review
+
+Once `mape-k-loop-v0` ships and we have a month of measured per-pass cost, replace every "*estimate*" annotation above with the observed value. If the watchdog T = 12 h proves the wrong order of magnitude (off by ≥ 2×), file a follow-up research task; per rule-#9's pivot clause for `mape-k-cadence`, an inability to satisfy both constraints simultaneously means the MAPE-K design itself is wrong, not just the cadence.
+
 ## How to read this file
 
 Each active dependency follows the same shape:
