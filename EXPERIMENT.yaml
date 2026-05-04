@@ -54,11 +54,11 @@ measurement: |
          --reporter=json \
        | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' \
     && pnpm lint \
-    && node scripts/check-rule-4-otel-coverage.mjs \
-    && node scripts/check-rule-6-let-it-crash.mjs \
+    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
+    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
     && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs \
-    && node scripts/check-rule-1-novel-justification.mjs \
+    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
+    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
