@@ -53,6 +53,19 @@ The 10 vision.md success criteria are typed in `src/metrics.ts` as `SUCCESS_METR
 
 The parent `dashboard-web-v0` epic closes with this sub-task: all 4 sub-tasks shipped; the parent's prose-only "Lighthouse Mobile score ≥90 in CI" verification cell now has a machine-readable counterpart at `.github/workflows/lighthouse.yml`.
 
+### Sub-task 5 (otel-wiring Strategy seam — shipped)
+
+`createServer({ getValue })` and `render({ getValue })` accept an optional synchronous Strategy `getValue: (m: SuccessMetric) => string | null` (rule #2 — value source is data, not a hard import). `null` renders the existing `(stub)` sentinel (backward-compatible default — `STUB_GET_VALUE`); a returned string is HTML-escaped (rule #7 XSS guard) and shown in place of `(stub)`. Async backend reads happen upstream of `render`: the runner pre-fetches a JSON snapshot, `start.ts` reads it once, `snapshotGetValue` does in-memory lookup per request — the per-render hot-path stays synchronous and well within the 500-ms budget.
+
+Property name is `getValue`, not `valueOf`: `valueOf` is inherited from `Object.prototype`, so `args.valueOf ?? defaultFn` would silently pick up `Object.prototype.valueOf` and crash with "Cannot convert undefined or null to object" at call time. The deliberate rename costs four characters and avoids a class of latent bug.
+
+`distribution/run-dashboard-web.sh` exposes two opt-in env-vars:
+
+- `DASHBOARD_METRICS_SNAPSHOT` — path to a JSON file shaped `Record<metric-id, string>`. When present and readable at start-time, `start.ts` constructs a `snapshotGetValue` Strategy and `(stub)` count drops to 0.
+- `DASHBOARD_METRICS_SNAPSHOT_CMD` — shell command producing the snapshot file before `exec`. Async I/O lives here; failure is non-fatal (the runner falls back to the null Strategy → `(stub)` per rule #7 graceful-degrade).
+
+Concrete Strategies live in `src/strategy.ts`: `snapshotGetValue(snapshot)` (the production shape) and `constantGetValue(value)` (a smoke-test Strategy for end-to-end seam validation without a backend). Real OTEL-backed live-query Strategies (Prometheus / OpenObserve adapters) are a follow-up — the snapshot indirection is the simplest shape that satisfies the parent task's per-render budget.
+
 ### Spec-alignment fix (`dashboard-web-task-throughput-formula-drift`)
 
 `src/metrics.ts`'s `task-throughput` formula now matches `vision.md` § "Success criteria" row 10 exactly: the 30-day commit count is divided by 30 (`… | wc -l / 30`) to produce the unit `tasks/day`. Earlier the divisor was missing while the unit cell still read `tasks/day` — a silent 30× over-read once `dashboard-web-otel-wiring`'s Strategy executes the formula. A new test in `test/metrics.test.ts` string-matches `/ 30` against the formula so the drift cannot recur silently.
@@ -60,9 +73,15 @@ The parent `dashboard-web-v0` epic closes with this sub-task: all 4 sub-tasks sh
 ## Usage
 
 ```ts
-import { createServer, SUCCESS_METRICS } from "@minsky/dashboard-web";
+import { createServer, snapshotGetValue, SUCCESS_METRICS } from "@minsky/dashboard-web";
 import { serve } from "@hono/node-server";
 
+// Default: every row renders `(stub)` (backward-compatible).
 const { fetch } = createServer({ metrics: SUCCESS_METRICS });
 serve({ fetch, port: 8080 }); // distribution/run-dashboard-web.sh owns the port choice
+
+// With a snapshot Strategy: `(stub)` count drops to 0 for every metric
+// the snapshot covers; uncovered metrics fall back to `(stub)` per row.
+const snapshot = { "loop-uptime": "0.99", "tokens-per-story": "12345" };
+createServer({ getValue: snapshotGetValue(snapshot) });
 ```

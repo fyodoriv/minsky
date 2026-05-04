@@ -1,29 +1,44 @@
 /**
  * `@minsky/dashboard-web` — bin entry. Starts the SSR server on
  * `process.env.PORT` (default `8080`) so `distribution/run-dashboard-web.sh`
- * has a stable command to invoke. The server itself is `createServer()`
- * from `./server.js` (sub-task 3 wired the 10 vision.md success metrics
- * as the default); this module is the I/O boundary that binds a port.
+ * has a stable command to invoke. This module is the I/O boundary that
+ * binds a port; `createServer` from `./server.js` is the in-process app.
  *
- * Sub-task 4 (`dashboard-web-lighthouse-ci`) targets this entry point
- * when running Lighthouse Mobile against `http://localhost:8080/`. The
- * follow-up `dashboard-web-otel-wiring` (P3) will pass an OTEL-backed
- * value Strategy in here — opening the seam now keeps that change
- * additive (a new `args` field, not a new entry).
+ * `dashboard-web-otel-wiring` opens a snapshot-based value Strategy: if
+ * `DASHBOARD_METRICS_SNAPSHOT` points at a JSON file shaped
+ * `Record<metric-id, string>`, the file is read once at start-time and
+ * fed to `createServer({ getValue })` via `snapshotGetValue`. Async
+ * pre-fetch belongs to the runner — the render path stays synchronous
+ * within the 500-ms per-render budget. Unset env / unreadable file →
+ * default null Strategy, `(stub)` rendered (rule #7 graceful-degrade).
  *
- * @otel-exempt thin I/O boundary — `createServer` carries the OTEL span
- * (`dashboard-web.create-server`) and `render` carries `dashboard-web.render`.
+ * @otel-exempt thin I/O boundary — `createServer` carries the OTEL span.
  */
+
+import { readFileSync } from "node:fs";
 
 import { serve } from "@hono/node-server";
 
 import { createServer } from "./server.js";
+import { type Snapshot, snapshotGetValue } from "./strategy.js";
+
+function loadSnapshot(): Snapshot | null {
+  const path = process.env["DASHBOARD_METRICS_SNAPSHOT"];
+  if (path === undefined || path === "") return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object") return null;
+    return parsed as Snapshot;
+  } catch {
+    return null;
+  }
+}
 
 const port = Number.parseInt(process.env["PORT"] ?? "8080", 10);
-const { fetch } = createServer();
+const snapshot = loadSnapshot();
+const args = snapshot === null ? undefined : { getValue: snapshotGetValue(snapshot) };
+const { fetch } = createServer(args);
 
 serve({ fetch, port }, (info) => {
-  // Single line on stdout so the runner script's wait-for-port loop can
-  // pivot to log-tailing if the curl probe proves flaky.
   process.stdout.write(`dashboard-web listening on http://localhost:${info.port}/\n`);
 });

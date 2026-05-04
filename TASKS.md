@@ -130,24 +130,6 @@
 
 ## P3
 
-- [ ] `dashboard-web-otel-wiring` — replace stub metric values with `@minsky/observability` reads
-  - **ID**: dashboard-web-otel-wiring
-  - **Parent**: dashboard-web-v0
-  - **Tags**: novel, ux, observability
-  - **Estimate**: 2–4h
-  - **Hypothesis**: Replacing the `(stub)` sentinel in `renderRow` (sub-task 3) with a per-metric read through `@minsky/observability`'s OTEL-backed query Strategy reduces the count of `(stub)` tokens in the rendered HTML from 10 to 0 while leaving the 10 `data-metric-id=` invariant intact, so the dashboard moves from "structural placeholder" to "live reading" in one step. The renderer remains pure (the metric-value lookup happens at server-construction time and is passed in as data); rule #2 (every dep behind interface) holds because the value source is a Strategy parameter, not a direct OTEL client.
-  - **Details**: Extend `createServer` to accept an optional `valueOf: (m: SuccessMetric) => string | null` Strategy (default: `() => null`, which renders `(stub)` as today — backward-compatible). Wire the production runner (`distribution/run-dashboard-web.sh`, opened by sub-task 4) to pass a Strategy implementation reading `@minsky/observability`'s query API. Each `SuccessMetric.formula` is the OTEL/PromQL/journalctl command run through the Strategy at request time, with a per-render timeout (≤500 ms) so a slow backend graceful-degrades to `(stub)` rather than blocking the page.
-  - **Files**: `novel/dashboard-web/src/server.ts`, `novel/dashboard-web/src/render.ts`, `novel/dashboard-web/test/server.test.ts`, `distribution/run-dashboard-web.sh`
-  - **Verification**:
-    - `pnpm vitest run novel/dashboard-web/` exits 0 with the new "live values replace `(stub)`" assertion green when a fake Strategy returns numeric strings
-    - The default-Strategy path still emits 10 `(stub)` tokens (backward-compatibility regression guard)
-    - `wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}'` ≤ 300 (parent's pivot threshold)
-  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 9 and .numFailedTests == 0'` exits 0; `[ "$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')" -le 300 ]`; against a running dashboard with a real Strategy: `curl -s localhost:8080/ | grep -c '(stub)'` returns 0.
-  - **Pivot**: if the per-metric Strategy at request time exceeds the 500-ms budget on >5 % of requests over 24 h sustained operation, pivot to a server-side cache layer (refresh once per minute) — the dashboard becomes a read-through over a refreshed snapshot rather than a per-request fan-out. If the Strategy shape needs ≥3 distinct backends (Prometheus + journalctl + GH API), keep it as a Strategy but add a per-row dispatch table; do not collapse into a single backend client.
-  - **Acceptance**: 0 `(stub)` tokens when the live Strategy is wired; backward-compat default still emits 10; 300-LoC cap holds; sub-task 4 (`dashboard-web-lighthouse-ci`) closes against the live HTML.
-  - **Anchor**: rule #2 (vision.md § 2 — every dep behind interface; the value source is a Strategy, not a hard dependency on Prometheus/OpenObserve); Card & Mackinlay 1999 (live readings are the dashboard's purpose; placeholder is a transitional state); Wilkie 2018 (RED Method — duration / errors / rate is what the live values surface); rule #7 (graceful-degrade — Strategy timeouts fall back to `(stub)` rather than blocking the page).
-  - **Risk**: Strategy errors (network blip, OTEL backend down) silently render `(stub)` — operators may misread "real but degraded" as "still wired up". Mitigation: the rendered token differentiates: `(stub)` for the never-wired default, `(stale)` for a Strategy that returned `null` after a real attempt; surface the distinction in a follow-up if it proves load-bearing.
-
 - [ ] Quarterly dependency review (Q3 2026)
   - **ID**: review-q3-2026
   - **Tags**: governance
