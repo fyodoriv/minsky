@@ -146,20 +146,6 @@
 
 ## P3
 
-- [ ] `traceparent-subagent-propagation-test` — chaos test for OTEL TRACEPARENT propagation across subagent boundaries
-  - **ID**: traceparent-subagent-propagation-test
-  - **Tags**: testing, observability, chaos
-  - **Estimate**: 3h
-  - **Hypothesis**: A subprocess that does not honour `OTEL_PROPAGATORS` breaks TRACEPARENT propagation silently — a single unit test that spawns such a subprocess and asserts the parent / child trace ids diverge would have surfaced this regression in <1 CI run, where today the failure is invisible until a manual trace-graph inspection.
-  - **Details**: Add a `test/traceparent-subagent.test.ts` file under `novel/adapters/observability/` that spawns a subprocess with `OTEL_PROPAGATORS=` (empty) and asserts the child span's `traceparent` differs from the parent's. The test fixture is a small Node script that emits one span via `@opentelemetry/api` and writes the resulting traceparent to stdout. Surfaced from the `mape-k-knowledge-and-integration` PR's resilience-scout pass — the observability README's row 4 now defers to this task.
-  - **Files**: `novel/adapters/observability/test/traceparent-subagent.test.ts`, `novel/adapters/observability/test/fixtures/emit-traceparent.mjs`
-  - **Verification**: `pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts` exits 0 with ≥1 assertion that proves divergence under the empty-propagator config and convergence under the default config.
-  - **Measurement**: `pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts --reporter=json | jq -e '.numPassedTests >= 1 and .numFailedTests == 0'`.
-  - **Pivot**: if the test cannot be made deterministic on GH-hosted runners (e.g., the subprocess inherits a propagator from the harness in some configurations), pivot to recording the OS-level env-var diff and asserting on that instead of on the trace ids.
-  - **Acceptance**: chaos test ships; the deferred row in `novel/adapters/observability/README.md` is updated to point at the test file.
-  - **Anchor**: rule #7 (vision.md § 7 — chaos engineering); Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (steady-state hypothesis); OpenTelemetry specification (CNCF 2020+, propagator contract).
-  - **Risk**: Subprocess-level env tests can be flaky on Windows / shared CI sandboxes. Mitigation: gate on `process.platform !== 'win32'` and document the carve-out.
-
 - [ ] `mape-k-cost-schedule-from-vision` — wire per-rule cost weights from vision.md into `analyze`'s `costs` argument
   - **ID**: mape-k-cost-schedule-from-vision
   - **Tags**: novel, mape-k, follow-up

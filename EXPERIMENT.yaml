@@ -1,30 +1,21 @@
-id: ci-lint-mape-k-constraints-md-size
+id: traceparent-subagent-propagation-test
 hypothesis: |
-  Shipping `scripts/check-mape-k-constraints-md-size.mjs` + paired tests +
-  the `mape-k-constraints-md-size` CI job promotes
-  `novel/mape-k-loop/constraints.md`'s prose-only 200-entry archive cap
-  into a deterministic CI gate. Today the cap is enforced only by the
-  preamble's prose ("the supervisor's `constraints-md-size-cap` check
-  fires when this file grows past 200 entries"); an unattended MAPE-K
-  loop appends one `## <date>` section per tick (Helland 2007 immutable
-  log substrate; Kephart-Chess 2003 Knowledge phase) and could grow the
-  live log to 500+ entries before any human noticed — the same "did
-  anyone notice?" failure mode rule-#6 closes mechanically. The pure
-  function `checkConstraintsMdSize({ content, capEntries }) => { ok,
-  count, reason? }` (default `capEntries = 200`) counts strict
-  `^## YYYY-MM-DD` headings and fails when the count exceeds the cap;
-  the CLI reads the live file and short-circuits to a stderr advisory +
-  exit 0 when the file is absent (the dormant state — same precedent as
-  `check-skill-rule-cap`'s retired-Skill terminal state and
-  `check-mape-k-budget-cap`'s missing-config short-circuit). Boundary
-  semantics: the cap is *inclusive* per Beyer SRE 2016 Ch. 3 — exactly
-  200 entries passes; only 201+ fails. This PR adds the lint without
-  modifying any `novel/` package's source — the rule-#10 ratchet stays
-  scoped to scripts/ + .github/workflows/ + vision.md (one row) +
-  TASKS.md (one removal) + novel/mape-k-loop/README.md (one follow-up
-  note removal).
-success: "`pnpm typecheck` exits 0; `pnpm vitest run scripts/check-mape-k-constraints-md-size.test.mjs` exits 0 with ≥10 tests passing collectively (≥9 in the pure-function describe block, ≥4 in the I/O-boundary describe block — including the four mandatory cases: 199 → exit 0, exactly 200 → exit 0, 201 → exit 1 with `archive` in stderr, missing file → exit 0); `node scripts/check-mape-k-constraints-md-size.mjs` exits 0 against the current repo (`constraints.md` has 1 entry today — well under cap); the `mape-k-constraints-md-size-cap` task block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-constraints-md-size-cap$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source / mape-k-budget-cap) all pass on this PR's diff."
-pivot: "If 200 proves arbitrary (the live `constraints.md` is still readable at 400 entries — operator review during incident response remains tractable), raise the `DEFAULT_CAP_ENTRIES` constant rather than removing the lint. Removing the lint would re-open the unbounded-growth failure mode the gate exists to close. If MAPE-K loop cadence stabilises so low that the cap is unreachable for >12 months, retire this lint — the dormant-state precedent applies (the gate cannot fail if the underlying invariant is no longer load-bearing)."
-measurement: "pnpm typecheck && pnpm vitest run scripts/check-mape-k-constraints-md-size.test.mjs --reporter=json | jq -e '.numPassedTests >= 10 and .numFailedTests == 0' && node scripts/check-mape-k-constraints-md-size.mjs && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-constraints-md-size-cap$' TASKS.md)\" = '0' ]"
-anchor: "Helland, P., \"Life beyond Distributed Transactions: an Apostate's Opinion\", *CIDR* 2007 (immutable log — derived data through reissue rather than mutation; the archive-split discipline this lint enforces); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K reference architecture whose Knowledge phase substrate is `constraints.md`); Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability Engineering: How Google Runs Production Systems*, O'Reilly, 2016, Ch. 3 (the inclusive-at-cap boundary semantics — \"used the budget\" ≠ \"exceeded the budget\"); Beck, K., *Extreme Programming Explained: Embrace Change*, Addison-Wesley, 1999, Ch. 17 (CI as the constraint enforcer — the prose-only-cap-becomes-deterministic-gate ratchet); rule #10 (vision.md § 10 — deterministic enforcement; the constitutional ratchet that mandates this promotion); rule #6 (vision.md § 6 — failure-mode discipline; closes the \"did anyone notice?\" failure mode mechanically); `novel/mape-k-loop/constraints.md` preamble (the prose anchor for the 200-entry cap); vision.md § \"Pattern conformance index\" row 56 (added in this PR)."
+  A propagation chaos test that spawns a Node subprocess with
+  `OTEL_PROPAGATORS=""` (empty — installs a no-op propagator) and asserts
+  the child span's W3C `traceparent` trace-id diverges from the parent's,
+  *plus* a paired test that asserts convergence under the default
+  W3C-tracecontext propagator, surfaces the "subprocess that doesn't
+  honour `OTEL_PROPAGATORS` breaks TRACEPARENT silently" failure mode in
+  <1 CI run. Today this regression is invisible until a manual
+  trace-graph inspection — exactly the rule-#7 ratchet condition (failure
+  modes that don't trip an automated alarm). The test wraps `spawnSync`
+  (not `exec`, to avoid shell escaping), emits one span per spawn from a
+  small `.mjs` fixture, and parses the W3C `00-<trace-id>-<span-id>-<flags>`
+  carrier directly so the assertion is structural rather than implementation
+  -coupled. Closes the deferred row 4 in
+  `novel/adapters/observability/README.md`'s failure-mode-and-chaos table.
+success: "`pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts --reporter=json | jq -e '.numPassedTests >= 2 and .numFailedTests == 0'` is true; ≥1 assertion proves trace-id divergence under `OTEL_PROPAGATORS=\"\"` (the failure mode) and ≥1 proves trace-id convergence under the default propagator (the steady state); rule-7-chaos-coverage CI lint is green (the README's row 4 now points at an existing `.test.ts` path); `pnpm typecheck && pnpm test && pnpm lint` all exit 0."
+pivot: "If the test is non-deterministic on GH-hosted runners (e.g., the runner harness pre-installs a propagator that the subprocess inherits regardless of `OTEL_PROPAGATORS=\"\"`, defeating the divergence assertion), pivot to an env-var-diff-based assertion: spawn the fixture twice — once with the override, once without — and assert that the *recorded subprocess env block* differs on the `OTEL_PROPAGATORS` key, surfacing the configuration drift even when the in-process behaviour is masked by the harness. The chaos-coverage signal is preserved; only the assertion shape changes."
+measurement: "pnpm vitest run novel/adapters/observability/test/traceparent-subagent.test.ts --reporter=json | jq -e '.numPassedTests >= 2 and .numFailedTests == 0'"
+anchor: "Basiri, A., Behnam, N., de Rooij, R., Hochstein, L., Kosewski, L., Reynolds, J., Rosenthal, C., \"Principles of Chaos Engineering\", *IEEE Software* 33(3), pp. 35-41, 2016 (steady-state hypothesis + fault axis + blast radius — the four-part frame this test slots into); OpenTelemetry specification, CNCF 2020+ (the propagator contract — `OTEL_PROPAGATORS` env var as the install seam); W3C, *Trace Context*, Recommendation, 23 November 2021 (the `traceparent` carrier format `00-<trace-id>-<span-id>-<flags>` this test parses); rule #7 (vision.md § 7 — chaos engineering / failure-mode-table-with-chaos-test discipline); rule #10 (vision.md § 10 — deterministic enforcement; the deferred-row-4 prose anchor becomes a CI-gated test path)."
 replay_windows_days: [7, 30]
