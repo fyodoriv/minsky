@@ -35,24 +35,6 @@
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
 
-- [ ] `spec-monitor-deterministic-rewrite` — split `spec-monitor-skill` into deterministic linters + a thin LLM advisory layer
-  - **ID**: spec-monitor-deterministic-rewrite
-  - **Tags**: novel, conformance, rule-10
-  - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
-  - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
-  - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
-  - **Verification**:
-    - The Skill loads in a Claude Code session: `claude --skill ./novel/spec-monitor/`
-    - Run against synthetic *judgement-only* fixtures (a hypothesis that's syntactically valid but semantically vacuous): produces an advisory entry with `rule_id`, `evidence`, `severity`, `suggested_repair`.
-    - Run against deterministic-rule-violating fixtures (a hypothesis that should be caught by `ci-experiment-runner-v0`): the Skill is silent — *not* its job. The `ci-rule-*` linters catch it.
-    - The CI never gates merges on the Skill's verdict.
-  - **Measurement**: `pnpm vitest run novel/spec-monitor/test/judgement-only/` exits 0 with ≥3 fixtures; `grep -RE 'spec-monitor.*required' .github/workflows/` returns no matches (the Skill is never a required check).
-  - **Pivot**: if the residual judgement scope turns out to be empty (i.e., every plausible rule-violation can be deterministically caught), drop the Skill entirely — rule #10 says "whatever cannot be deterministically checked is not a constitutional rule", which means the Skill has no remit.
-  - **Acceptance**: Skill ships, advisory-only; the prior `spec-monitor-skill` task is closed by this one (this task is its replacement); `vision.md` § 10 is referenced in the Skill's SKILL.md as the framing rule.
-  - **Anchor**: rule #10 (vision.md § 10); Havelund & Goldberg 2008 (runtime verification — but split into deterministic-monitor + advisory-judgement); Hunt & Thomas 1999 Tip 32 ("crash early") — applied here as "fail deterministically".
-  - **Risk**: The Skill's residual scope drifts upward over time as contributors add "informal" rules that don't fit any linter. Mitigation: the Skill's SKILL.md has a hard cap on scope (≤5 advisory rules at any time); adding a sixth requires either retiring one or shipping a deterministic linter for it.
-
 - [ ] File OMC issue proposing native tasks.md integration
   - **ID**: omc-tasksmd-issue
   - **Tags**: community, integration
@@ -113,13 +95,13 @@
 
 ## P2
 
-<!-- spec-monitor-skill (the prior P2 task) is superseded by `spec-monitor-deterministic-rewrite` in P1. Per rule #10 (deterministic enforcement), the previous shape — a Claude Skill as the *primary* enforcement of every constitutional rule — is incompatible with the iron-rule "enforcement is deterministic, not LLM-driven" clause. The replacement task splits the Skill's remit: deterministic linters (`ci-rule-1` … `ci-rule-7`) take the load-bearing share; the residual judgement scope ships as an advisory-only Claude Skill (`spec-monitor-deterministic-rewrite`). Removing this block is the ratchet-rule from rule #10 in action: the prior approach is *removed* in the same PR that introduces the deterministic replacement. -->
+<!-- spec-monitor-skill and its successor `spec-monitor-deterministic-rewrite` both shipped: the deterministic linters under `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` carry the load-bearing share of runtime verification (rule #10's enforcement model), and the residual judgement-heavy scope ships as the advisory-only Claude Skill at `novel/spec-monitor/SKILL.md` — capped at ≤5 advisory rules per the rule-#10 ratchet. See `vision.md` § "Pattern conformance index" rows 11 and 35. -->
 
 - [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager)
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 3–5d (largest novel layer)
-  - **Blocked by**: spec-monitor-deterministic-rewrite
+  - **Blocked by**: experiment-tracker-v0
   - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
   - **Files**: `novel/mape-k-loop/`
@@ -226,6 +208,20 @@
   - **Acceptance**: CI green; both scripts handle the synthetic worst-case inputs; no regression in linter runtime on the live repo (<5% slowdown).
   - **Anchor**: rule #6 (let-it-crash with a precise error — but only when the crash is genuinely unrecoverable; both fragility classes are recoverable via bounded I/O); Lampson 1983 ("hint: bound the worst case at the entry"); Node.js docs `child_process.execFileSync` `maxBuffer` failure mode.
   - **Risk**: The `--grep='closes '` filter is more brittle than the unfiltered capture — a future commit-message convention that drops the literal `closes` prefix would silently empty the result. Mitigation: the existing `try/catch` already returns an empty Set on git failure; the `closes` literal is the same regex the consumer (`/closes\s+([a-z][a-z0-9-]*[a-z0-9])/gi`) requires anyway, so the filter cannot drop a commit the consumer would have matched.
+
+- [ ] Sweep `claude-spec-monitor` legacy prose for rule-#10 alignment
+  - **ID**: spec-monitor-prose-sweep
+  - **Tags**: docs, hygiene, scout, rule-10
+  - **Estimate**: 30–60 min
+  - **Hypothesis**: A doc-only sweep of vision.md and ARCHITECTURE.md that updates legacy "the spec-monitor flags it" prose (vision.md L91, L134, L262, L307, L334; ARCHITECTURE.md `### claude-spec-monitor`) to attribute the deterministic share to its actual linter (rule-6 catches "silent retry", experiment-record's `VANITY_PHRASES` catches vanity metrics, etc.) and the residual judgement share to `novel/spec-monitor/` (advisory-only) makes the reframe in rule #10 fully consistent across the spec — currently the prose still implies the Skill is load-bearing in places, which contradicts the row-11 + row-35 update shipped by `spec-monitor-skill`.
+  - **Details**: Found by the resilience-scout pass while shipping `spec-monitor-skill` (PR <TBD-AFTER: spec-monitor-skill PR>). The success-criteria row #3 (`Specification alignment`) still names `claude-spec-monitor --report --json` as its measurement command — the Skill has no such CLI now. Either retire the row entirely (the deterministic linters together carry that signal) or rewrite the measurement to count clean linter runs over a window.
+  - **Files**: `vision.md`, `ARCHITECTURE.md`
+  - **Verification**: every remaining mention of `spec-monitor` / `claude-spec-monitor` either (a) accurately names the deterministic linter that does the work, or (b) explicitly tags advisory-only output. No surviving prose claims the Skill is load-bearing.
+  - **Measurement**: `grep -nE 'spec-monitor.*flag|spec-monitor.*report|spec-monitor.*runs find' vision.md ARCHITECTURE.md | wc -l` returns 0 after the sweep.
+  - **Pivot**: if the rewrite reveals that vision.md success-criterion #3 cannot be operationalised without a single named monitor (i.e., counting "passed/total < 0.85" requires one tool emitting one number), reconsider whether to ship a deterministic aggregator over the per-rule linter outputs — potentially as `scripts/aggregate-rule-status.mjs`.
+  - **Acceptance**: Prose sweep merged; success-criterion #3 either retired with rationale or rewired to a deterministic aggregate.
+  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); resilience-scout heuristic (Hunt & Thomas 1999 Tip 32 "crash early" — applied here as "fix prose drift early").
+  - **Risk**: Touching vision.md text invites bikeshedding. Mitigation: scope strictly to swapping subjects (Skill → linter where deterministic), not rewriting paragraphs.
 
 - [ ] Multi-machine scope investigation
   - **ID**: multi-machine
@@ -354,3 +350,31 @@
   - **Acceptance**: Both invocations pinned to a specific minor or via the lockfile; ARCHITECTURE.md § "Versioning & dependency evolution" referenced in the PR description; CI green.
   - **Anchor**: rule #7 (chaos engineering — trust no unverified dependency); ARCHITECTURE.md § "Versioning & dependency evolution".
   - **Risk**: Pinning means we miss security patches if we forget to bump. Mitigation: dependabot or a quarterly bump task (covered by `review-q3-2026`).
+
+- [ ] `audit-spec-monitor-coverage` — quarterly audit that spec-monitor advisory rules don't drift into deterministic territory
+  - **ID**: audit-spec-monitor-coverage
+  - **Tags**: audit, conformance, rule-10
+  - **Estimate**: 30m / quarter
+  - **Hypothesis**: A quarterly read-through of `novel/spec-monitor/SKILL.md`'s 5 advisory rules, comparing each against the current `scripts/check-rule-*.mjs` lints, catches scope-creep before the Skill becomes load-bearing — preserving rule #10's "deterministic checks are authoritative" invariant.
+  - **Details**: Re-read SKILL.md. For each advisory rule, ask: "could this be a deterministic linter today?" If yes, file a follow-up `ci-rule-N-*` task and remove the advisory rule from SKILL.md. Also count: are there ≤5 rules?
+  - **Files**: `novel/spec-monitor/SKILL.md`
+  - **Verification**: SKILL.md has ≤5 rules; `spec-advisories/<latest>.md` exists if the Skill has been used; no advisory rule overlaps with a deterministic linter's scope.
+  - **Measurement**: `awk '/^## Rule [0-9]+:/' novel/spec-monitor/SKILL.md | wc -l` ≤ 5; manual diff against `scripts/check-rule-*.mjs` lints surfaces no deterministic overlap.
+  - **Pivot**: if every quarterly audit finds ≥1 advisory-to-deterministic conversion, the Skill is leaking scope; reduce to ≤3 rules.
+  - **Acceptance**: Audit run; SKILL.md compliant; any conversions filed.
+  - **Anchor**: rule #10 (vision.md § 10).
+  - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds.
+
+- [ ] `ci-lint-skill-rule-cap` — CI lint enforcing the ≤5 advisory-rule cap in spec-monitor SKILL.md
+  - **ID**: ci-lint-skill-rule-cap
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 1h
+  - **Hypothesis**: A CI check that counts `## Rule N:` headings in `novel/spec-monitor/SKILL.md` and fails the build if >5 mechanically prevents scope-creep past the cap, eliminating the audit-spec-monitor-coverage task's "did anyone notice?" failure mode.
+  - **Details**: Add a small node script `scripts/check-skill-rule-cap.mjs`. Read SKILL.md, count `^## Rule \d+:` headings (or the agreed marker shape), exit 1 if >5. Wire into `.github/workflows/ci.yml` as `skill-rule-cap` job; add to gate's needs.
+  - **Files**: `scripts/check-skill-rule-cap.mjs`, `scripts/check-skill-rule-cap.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic SKILL.md with 6 rules → exit 1; same with 5 → exit 0; same with 0 → exit 0 (the Skill may be retired without rules).
+  - **Measurement**: `pnpm vitest run scripts/check-skill-rule-cap.test.mjs` exits 0 with ≥3 cases.
+  - **Pivot**: if the Skill is deprecated entirely (rule #10's "if everything is deterministic, the Skill has no remit" terminal state), retire this lint along with it.
+  - **Acceptance**: CI job runs on every PR touching SKILL.md; rule-cap is mechanically enforced.
+  - **Anchor**: rule #10; rule #6 (failure-mode discipline).
+  - **Risk**: Skill heading style drift breaks the count. Mitigation: lock the marker shape in SKILL.md's body and make the regex explicit.
