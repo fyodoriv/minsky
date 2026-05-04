@@ -1,16 +1,14 @@
 id: ci-rule-4-otel-coverage
 hypothesis: |
-  A TypeScript-compiler-API AST walk that, for every newly-added or
-  modified novel/**/*.ts file on a PR branch, requires every exported
-  function / method / arrow / default export to carry a leading JSDoc
-  `@otel <span-name>` or `@otel-exempt <reason>` annotation enforces
-  rule #4 ("everything measurable, everything visible") at PR time —
-  before runtime traces would reveal the gap. Diff-based scoping
-  (origin/main…HEAD, --diff-filter=AM) grandfathers existing
-  un-annotated code, mirroring rule-1 and rule-3, so adoption is
-  incremental without retroactive audit churn.
-success: "node scripts/check-rule-4-otel-coverage.mjs --diff-base=<base> exits 0 when no novel/**/*.ts file is changed; exits 0 when every changed novel/**/*.ts export carries @otel <span> or @otel-exempt <reason ≥3 chars>; exits 1 with file:line:name diagnostics when any export is missing both annotations. pnpm exec vitest run scripts/check-rule-4-otel-coverage.test.mjs exits 0 with 21/21 tests passing covering all top-level export shapes (function declaration, default export, export const = arrow, export const = function expression, exported class methods including private and #name, constructors-exempt, multi-export aggregation, line-number anchoring, missing-reason variants). pnpm typecheck exits 0 with the new // @ts-check'd .mjs files included in scripts/tsconfig.json's // @ts-check opt-in cohort."
-pivot: "if more than 30% of currently-exported functions across all novel/ packages need @otel-exempt to satisfy the lint once the next batch of PRs touches them — i.e., the rule is over-broad for low-level helpers — narrow the scope to public-API surface only (functions exported from a package's top-level index.ts, not from internal modules) per the task brief. If the diff-based scoping itself proves wrong (e.g., novel/ files frequently re-touched in trivial ways generating churn), pivot to running on a fixed allowlist of packages declared in research.md."
-measurement: "node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main && pnpm exec vitest run scripts/check-rule-4-otel-coverage.test.mjs && pnpm typecheck && pnpm lint && npx -y @tasks-md/lint@latest TASKS.md"
-anchor: "OpenTelemetry specification (CNCF 2020+, semantic conventions for spans); Gregg, *Systems Performance*, 2014 (USE method — instrumentation is a structural property, not a runtime afterthought); Lampson, 'Hints for Computer System Design', *SOSP* 1983 (move the constraint to the cheapest possible point — CI is cheaper than runtime trace audit); rule #10 (deterministic enforcement — every constitutional rule needs a CI lint, not a Skill, in the load-bearing path)"
+  A TypeScript-AST diff-based lint that requires every newly-added or
+  modified `export`-ed function/method/class-method/arrow under
+  `novel/**/*.ts` (non-test) to carry a JSDoc `@otel <span-name>` OR
+  `@otel-exempt <reason>` annotation enforces rule #4 ("everything
+  measurable, everything visible") at PR time, before the runtime trace
+  reveals the gap. Existing un-annotated code is grandfathered until the
+  file is touched again — same rule-1 / rule-3 precedent.
+success: "scripts/check-rule-4-otel-coverage.test.mjs exits 0 with ≥21 cases covering every export shape (function decl, default export, arrow, function expr, class method, accessors); the script exits 1 on the synthetic-missing fixture and 0 on the synthetic-annotated fixture; the new CI job is wired into the ci gate; pnpm typecheck && pnpm lint && pnpm test all exit 0"
+pivot: "if more than 30% of currently-exported functions need @otel-exempt to pass (i.e., the rule is over-broad for low-level helpers), narrow the scope to public-API surface only — functions exported from a package's top-level index.ts, not from internal modules"
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-rule-4-otel-coverage.test.mjs"
+anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); OpenTelemetry specification (CNCF 2020+); Gregg Systems Performance 2014 (USE method — instrumentation as a structural property)"
 replay_windows_days: [7, 30]

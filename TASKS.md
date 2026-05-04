@@ -17,29 +17,10 @@
 
 <!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
 
-- [ ] `ci-experiment-runner-v0` — daily/per-PR experiment execution (rule #9 daily layer)
-  - **ID**: ci-experiment-runner-v0
-  - **Tags**: novel, ci, conformance
-  - **Estimate**: 1–2d
-  - **Hypothesis**: A CI step that (a) requires every non-trivial PR to ship a parseable `EXPERIMENT.yaml`, (b) executes its `measurement` command against the merge-base ref, and (c) re-executes against the post-merge `main` ref, records both numbers tagged with the experiment-id into a local `experiment-store` — closing the daily layer of rule #9 — produces a tracked record on ≥95 % of merged PRs within 30 days of landing.
-  - **Details**: Two CI jobs. **Job A (gate)**: runs on every PR; fails if `EXPERIMENT.yaml` is missing OR fails `experiment-record validate` OR if `measurement` is not a runnable command. **Job B (record)**: runs after merge to `main` (post-push event); checks out merge-base, runs measurement → `baseline`; checks out current `main`, runs measurement → `treatment`; records `{experiment_id, baseline, treatment, ts, ref}` into `experiment-store/<id>.jsonl` (committed back to a `experiments/` branch OR pushed to OTEL once `otel-lite-backend` lands). The structural test the runner enforces is "the command is runnable and produces a number"; verdict-against-thresholds is the weekly layer's job. Trivial-change exemption: PRs labelled `trivial` skip Job A but must include `<!-- experiment: trivial — see exemption.md -->` whose presence is checked by the gate.
-  - **Files**: `.github/workflows/experiment.yml`, `scripts/run-experiment.mjs` (entry point invoked by both jobs), `scripts/run-experiment.test.mjs`, `experiments/.gitkeep`, `docs/experiment-runner.md`.
-  - **Verification**:
-    - Synthetic PR with valid `EXPERIMENT.yaml` and runnable measurement → Job A green; after merge, Job B records two numbers in `experiment-store/`.
-    - Synthetic PR with missing/malformed YAML → Job A red, merge blocked.
-    - Synthetic PR with non-runnable measurement → Job A red.
-    - Synthetic `trivial`-labelled PR with the exemption comment → Job A green; Job B no-op.
-  - **Measurement**: `gh run list --workflow experiment.yml --status success --limit 100 --json conclusion --jq length` ≥ 95 % of `gh run list --workflow experiment.yml --limit 100 --json conclusion --jq length` (within 30 days of landing); `find experiments/ -name '*.jsonl' | wc -l` ≥ count of merged non-trivial PRs in same window.
-  - **Pivot**: if the gate produces ≥3 false positives in its first month (e.g., misclassifying a trivial change as non-trivial, or a measurement command that's runnable locally but not in CI), tighten the trivial-detection heuristic OR drop the executability gate and treat the YAML as informational-only — landing the daily layer as soft-fail until the friction subsides.
-  - **Acceptance**: Both CI jobs run on every PR; experiment store accumulates records on every non-trivial merge; rule-#9 daily layer is now mechanically enforced.
-  - **Anchor**: Fagerholm et al., "Building Blocks for Continuous Experimentation", *RCoSE* 2014 (the per-change experiment runner is the first building block); Kohavi/Tang/Xu, *Trustworthy Online Controlled Experiments*, 2020, ch. 4 (running every change as an experiment); rule #7 (chaos: gate failures must be loud).
-  - **Risk**: CI runtime balloons if measurements are slow. Mitigation: enforce a per-experiment timeout (default 60s) with the option to mark slow-but-essential experiments `nightly` — those run on schedule, not on every PR.
-
 - [ ] `experiment-tracker-v0` — weekly / monthly sustained-gain verdicts (rule #9 weekly–monthly layer)
   - **ID**: experiment-tracker-v0
   - **Tags**: novel, conformance, scheduled
   - **Estimate**: 1–2d
-  - **Blocked by**: ci-experiment-runner-v0
   - **Hypothesis**: A scheduled job that re-runs each merged experiment's `measurement` at the configured `replay_windows_days` (default `[7, 30]`), compares against `success` / `pivot` thresholds, and emits a `validated`/`regressed`/`inconclusive` verdict per experiment closes the weekly–monthly layer of rule #9. Within 90 days of landing, ≥5 experiments carry a non-`inconclusive` verdict — proving the substrate works on real data, not just fixtures.
   - **Details**: GitHub Actions `schedule` cron (daily 09:00 UTC) iterates `experiments/*.jsonl`; for each entry whose `ts` is older than the next replay-window boundary, checks out the recorded ref (or the latest `main` if `replay_against=current`), runs `measurement`, appends `{ts, ref, value, window_days}` to the experiment's record. Verdict logic: `validated` if value is at or beyond `success` threshold for ≥1 replay window post-merge AND has not regressed below `pivot` since; `regressed` if value crosses `pivot` (in the wrong direction); `inconclusive` otherwise. `regressed` opens an automated TASKS.md entry (`pivot-experiment-<id>`) at P1; `validated` writes a single line to `validated-learnings.md`.
   - **Files**: `.github/workflows/experiment-tracker.yml`, `scripts/replay-experiment.mjs`, `scripts/replay-experiment.test.mjs`, `validated-learnings.md` (seeded with the rule-#9 PR's own experiment as the first entry), `docs/experiment-tracker.md`.
@@ -402,20 +383,6 @@
   - **Acceptance**: matrix passes; failure-mode table rows 1–4 in `distribution/README.md` are demonstrably exercised by the test.
   - **Risk**: GitHub Actions Ubuntu runners run as a non-login user; user-systemd may need explicit `loginctl enable-linger`. Mitigation: document the workaround inline in the workflow.
   - **Literature anchor**: Forsgren et al., *Accelerate*, 2018 (test reliability as a DORA prerequisite).
-
-- [ ] Exclude nested `node_modules/` from `markdownlint-cli2` glob
-  - **ID**: markdownlint-nested-node-modules
-  - **Tags**: ci, hygiene, scout
-  - **Estimate**: 15m
-  - **Hypothesis**: Replacing `#node_modules` with `#**/node_modules` in the `lint:md` script ignores both top-level and workspace-nested `node_modules/`, taking the markdownlint error count from N (currently ≥2 from vendored READMEs) to 0 without silencing any in-tree docs.
-  - **Details**: `package.json`'s `lint:md` script ignores only top-level `node_modules` (`#node_modules`). When a workspace package installs its own deps (e.g., `novel/adapters/observability/node_modules/@opentelemetry/semantic-conventions/README.md`), markdownlint scans those vendored READMEs and fails on third-party formatting (currently 2 errors in `@opentelemetry/semantic-conventions`). Surfaced while shipping `budget-guard-flag-file` — the failure is unrelated to local edits and unactionable in this repo. Fix: change `#node_modules` to `#**/node_modules` in the script's ignore list.
-  - **Anchor**: rule #2 (every external dep behind interface — vendor README content is not ours to lint); markdownlint-cli2 docs (glob ignore semantics).
-  - **Files**: `package.json`
-  - **Verification**: `pnpm lint:md` exits 0 on a clean main checkout with workspace deps installed.
-  - **Measurement**: `pnpm lint:md 2>&1 | grep -c 'node_modules'` returns 0.
-  - **Pivot**: if `**/node_modules` glob is honored differently across markdownlint-cli2 versions, pin the version (covered by `ci-pin-tooling-versions`) and codify the working glob in a comment.
-  - **Acceptance**: `pnpm lint:md` is green on a fresh `pnpm install`; CI markdownlint job stops failing on third-party READMEs.
-  - **Risk**: An overly broad ignore could silence local docs in nested workspace packages. Mitigation: glob is scoped to `node_modules/` directory names only, never matches workspace source.
 
 - [ ] Pin tooling versions in CI workflow (`@tasks-md/lint`, `markdownlint-cli2`)
   - **ID**: ci-pin-tooling-versions
