@@ -204,19 +204,6 @@
   - **Anchor**: Card & Mackinlay 1999; rule #1 (don't reinvent — Apple Shortcuts first).
   - **Risk**: Jumping to native too early eats scope. Pin trigger to a specific metric threshold, not a hunch.
 
-- [ ] DSPy idiom fit evaluation
-  - **ID**: dspy-fit-eval
-  - **Tags**: research
-  - **Estimate**: 4–6h
-  - **Hypothesis**: DSPy's compiler / optimizer idiom maps cleanly onto Minsky's `PromptOptimizer` adapter shape — at least 3 of the 5 typical Minsky use cases (persona prompt tuning, MAPE-K rollout, post-hoc fault explanation, drift-report rephrasing, persona handoff) fit the DSPy `dspy.Module` + `dspy.Optimize` signature without contortion.
-  - **Details**: First practical attempt at using DSPy for prompt A/B in `mape-k-loop-v0`. Document where the idiom fits vs where it forces awkward shape.
-  - **Verification**: `research.md` "DSPy fit" entry contains 3 wins + 3 frictions with concrete code references; if poor fit, alternative `PromptOptimizer` implementation proposed in the same entry
-  - **Measurement**: `grep -c '^## DSPy fit' research.md` returns 1; the section enumerates ≥3 wins + ≥3 frictions with code-block citations; if friction count > 3, the section names a fallback (e.g., direct API + manual A/B harness).
-  - **Pivot**: if frictions outnumber wins ≥2:1 OR the friction is "DSPy assumes a Python runtime we won't ship", drop DSPy and design a minimal `PromptOptimizer` interface that calls the Anthropic API directly with structured logging.
-  - **Acceptance**: research.md updated; if poor fit, alternative `PromptOptimizer` implementation proposed
-  - **Anchor**: Khattab et al., "DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines", 2023; rule #1 (use the existing tool when possible).
-  - **Risk**: DSPy idiom is a moving target — pin the version evaluated; revisit on new minor releases.
-
 - [ ] Resolve OMC handoff persistence question
   - **ID**: research-omc-handoff-persistence
   - **Tags**: research
