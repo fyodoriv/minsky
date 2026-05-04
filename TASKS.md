@@ -191,19 +191,6 @@
   - **Anchor**: Raymond, *The Cathedral and the Bazaar*, 1999.
   - **Risk**: Conditional — only fires if P0 research finds non-parseable. If parseable, this task is removed instead of completed.
 
-- [ ] Native WatchOS app evaluation
-  - **ID**: native-watchos-app
-  - **Tags**: future, research, ux
-  - **Estimate**: 4h (research only)
-  - **Hypothesis**: A native WatchOS app would lower the wrist-dwell metric (success #6) below 60 s/day average IF Apple Shortcuts have hit their complexity ceiling — but the cost of going native (Swift toolchain, App Store review, signing) is only justified once the dwell metric crosses 90 s/day for two consecutive 7-day windows.
-  - **Details**: Apple Shortcuts may eventually hit complexity ceiling. Evaluate building a native WatchOS app. **Don't implement until story 005's wrist-dwell metric trends wrong** (specifically: 7-day rolling average exceeds 90s/day for two consecutive weeks).
-  - **Verification**: `research.md` "Native WatchOS app" section documents trigger condition + scope sketch + estimated effort
-  - **Measurement**: `grep -c '^## Native WatchOS app' research.md` returns 1; section explicitly cites the 90 s/day-for-2-weeks trigger and an effort estimate ≤2 weeks; the trigger is queryable as `count(http_get_total{path="/watch.json"}[7d]) * 2 > 630` (90 s/day × 7 days).
-  - **Pivot**: if research reveals that going native is materially cheaper than estimated (e.g., a community boilerplate ships) AND the wrist-dwell metric is borderline, lower the trigger threshold to 75 s/day. If native is dramatically more expensive than estimated, raise the trigger to 120 s/day.
-  - **Acceptance**: research.md section added; trigger condition documented
-  - **Anchor**: Card & Mackinlay 1999; rule #1 (don't reinvent — Apple Shortcuts first).
-  - **Risk**: Jumping to native too early eats scope. Pin trigger to a specific metric threshold, not a hunch.
-
 - [ ] Resolve OMC handoff persistence question
   - **ID**: research-omc-handoff-persistence
   - **Tags**: research
