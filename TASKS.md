@@ -30,7 +30,7 @@
   - **Acceptance**: Issue filed; URLs linked from `research.md` and `competitors/omc.md`
   - **Anchor**: Raymond, *The Cathedral and the Bazaar*, 1999 (community contribution as scaling lever); rule #1 (don't reinvent the wheel — push upstream when possible).
   - **Risk**: Maintainer may reject if framed as a Minsky-specific need. Frame as "ecosystem alignment with the tasks.md spec" with concrete code-level changes pinned to specific OMC files.
-  - **Research**: 2026-05-04 — exact issue text drafted (ready to paste). Read-only research only; no `gh issue create` was run. Source code citations re-use the read-only findings PR #75 landed under `research-omc-handoff-persistence`'s Research field (path layout in `src/team/state-paths.ts`, task shape in `src/team/types.ts:38-58, 195-213`, write site `src/team/state/tasks.ts:90`, read/write call sites `src/team/task-file-ops.ts:157,210-243,321-376`). Maintainer tone sampled from recent OMC issues (`gh issue list --repo Yeachan-Heo/oh-my-claudecode --limit 5 --state all`): they use `## Summary` / `## Environment` / `## Reproduction` / code-fenced file paths and line numbers; technical, structured, deferential to `claude-code` upstream conventions. No prior declined proposal for tasks.md found in the issue tracker. Recipient surface: <https://github.com/Yeachan-Heo/oh-my-claudecode/issues/new>. Ping: maintainer `@Yeachan-Heo` (no other co-maintainers visible). Draft below — paste title in title field, paste body (between the fences, not including them) in the body field.
+  - **Research**: 2026-05-04 — exact issue text drafted (ready to paste). Read-only research only; no `gh issue create` was run. Source code citations re-use the read-only findings PR #75 landed (now lifted into `research.md` § "OMC handoff persistence" and gated by `scripts/omc-roundtrip.mjs`) (path layout in `src/team/state-paths.ts`, task shape in `src/team/types.ts:38-58, 195-213`, write site `src/team/state/tasks.ts:90`, read/write call sites `src/team/task-file-ops.ts:157,210-243,321-376`). Maintainer tone sampled from recent OMC issues (`gh issue list --repo Yeachan-Heo/oh-my-claudecode --limit 5 --state all`): they use `## Summary` / `## Environment` / `## Reproduction` / code-fenced file paths and line numbers; technical, structured, deferential to `claude-code` upstream conventions. No prior declined proposal for tasks.md found in the issue tracker. Recipient surface: <https://github.com/Yeachan-Heo/oh-my-claudecode/issues/new>. Ping: maintainer `@Yeachan-Heo` (no other co-maintainers visible). Draft below — paste title in title field, paste body (between the fences, not including them) in the body field.
 
     ````markdown
     Title: Proposal: optional TASKS.md adapter for /team mode (ecosystem alignment with tasks.md spec)
@@ -106,9 +106,10 @@
   - **ID**: omc-tasksmd-bridge-v0
   - **Tags**: novel, extraction-target, bridge
   - **Estimate**: 1–2d (scales with the persistence answer)
-  - **Blocked by**: research-omc-handoff-persistence
+  - **Last-enriched**: 2026-05-04
   - **Hypothesis**: Bidirectional sync between tasks.md (canonical) and OMC's internal task list survives a 100-trial round-trip property test (random TASKS.md → push to OMC → pull back → byte-equal modulo whitespace) and propagates a claim in either direction within 1 scheduler iteration.
   - **Details**: Bidirectional sync between tasks.md (canonical) and OMC's internal task list. Goes away when OMC adopts tasks.md upstream — the success metric for this package is "this package becomes unnecessary."
+  - **Research**: 2026-05-04 — verdict: parseable; see research.md § "OMC handoff persistence" + scripts/omc-roundtrip.mjs (round-trip parseability check, dormant-by-default, fires on `--omc-checkout=<path>`). Bridge can ship as a thin reader OMC → tasks.md per the parseable verdict; reverse direction deferred to v1+ pending a CRDT story for OMC's optimistic-concurrency `version` field.
   - **Files**: `novel/bridges/omc-tasksmd/`
   - **Verification**:
     - Round-trip property test: arbitrary `TASKS.md` → push to OMC → pull back → diff against original is empty (modulo whitespace)
@@ -163,42 +164,6 @@
   - **Acceptance**: research.md updated with findings; any dep changes filed as separate P1/P2 tasks
   - **Anchor**: rule #1 (don't reinvent the wheel); Fowler, *Refactoring*, 1999 (review cadence as a refactoring discipline at the architectural scale).
   - **Risk**: Skipped if no calendar reminder set. Add a calendar event before this task is due.
-
-- [ ] OMC handoff persistence proposal upstream (conditional)
-  - **ID**: omc-persistence-proposal
-  - **Tags**: community
-  - **Estimate**: 1–2h
-  - **Blocked by**: research-omc-handoff-persistence
-  - **Blocked**: needs-user-approval — `gh issue create` / `gh pr create` against a third-party repo is blocked-by-default per the `/next-task` skill. Conditional task: only unblocks if `research-omc-handoff-persistence` finds non-parseable AND the user pre-approves the upstream filing.
-  - **Hypothesis**: An upstream proposal for a parseable handoff artifact in OMC is accepted (or seriously discussed) within 30 days of filing, removing the need for `omc-tasksmd-bridge`'s reverse-engineering layer.
-  - **Details**: If P0 research finds OMC handoffs are not parseable, file upstream issue/PR adding parseable artifact.
-  - **Verification**: `gh issue view` / `gh pr view` returns the filed item; URL recorded in `research.md`
-  - **Measurement**: `gh issue view <url> --repo Yeachan-Heo/oh-my-claudecode --json state,comments --jq '.state, (.comments | length)'` — first line "OPEN" within 30 days, second line ≥1 (maintainer engagement).
-  - **Pivot**: if the issue is closed `not-planned` or stays at zero engagement for 30 days → reverse-engineer in `omc-tasksmd-bridge-v0` and accept the maintenance burden until OMC absorbs the spec organically.
-  - **Acceptance**: Issue/PR filed; linked from research.md
-  - **Anchor**: Raymond, *The Cathedral and the Bazaar*, 1999.
-  - **Risk**: Conditional — only fires if P0 research finds non-parseable. If parseable, this task is removed instead of completed.
-
-- [ ] Resolve OMC handoff persistence question
-  - **ID**: research-omc-handoff-persistence
-  - **Tags**: research
-  - **Estimate**: 2–3h (read source + experiment)
-  - **Blocked**: needs-user-approval — task involves running OMC plugin commands locally (invasive machine state) and, conditionally, filing a GitHub issue at `Yeachan-Heo/oh-my-claudecode` (`gh issue create` is blocked-by-default per `/next-task` skill). User to either confirm in-session approval and unblock, or perform the public-surface action themselves and record the URL in research.md.
-  - **Hypothesis**: OMC persists handoffs to disk in a parseable enough format (JSON / YAML / structured markdown) that `omc-tasksmd-bridge-v0` can be a thin reader rather than a reverse-engineered scraper.
-  - **Details**: Determine whether OMC's "shared task list" persists to disk in a parseable format, or only in process memory. Read OMC source; experiment by running `/team N:role` and checking the working tree + `~/.claude/` for new artifacts. Determines complexity of `omc-tasksmd-bridge`.
-  - **Files**: `research.md`, `competitors/omc.md`, OMC source: `src/team/state-paths.ts`, `src/team/types.ts`, `src/team/task-file-ops.ts`, `src/team/state/tasks.ts` (all under <https://github.com/Yeachan-Heo/oh-my-claudecode>)
-  - **Verification**:
-    - `grep -RInE 'writeFileSync|saveTo|persist|JSON\.stringify' <omc-checkout>/` and triage hits
-    - Run OMC `/team 2:executor` against a throwaway repo, then `find . ~/.claude -newer /tmp/.start_marker` to spot any artifacts
-  - **Acceptance**:
-    - `research.md` has a "OMC handoff persistence" subsection: yes/no/partial, file path(s), format, parseability assessment
-    - If not parseable: GitHub issue filed at `Yeachan-Heo/oh-my-claudecode` requesting a parseable artifact, URL recorded in research.md
-  - **Measurement**: `grep -c '^## OMC handoff persistence' research.md` returns 1; the section's verdict line matches `^- \*\*Verdict\*\*: (parseable|partial|not-parseable)$`. Round-trip check: if "parseable", `node scripts/omc-roundtrip.mjs --omc-checkout=<path>` exits 0 (parses an OMC artifact, re-emits, and the diff is whitespace-only).
-  - **Pivot**: if the verdict is "not-parseable" and the parseable-by-construction route fails (`omc-persistence-proposal` rejected), the bridge work shifts from "thin reader" to "full reverse-engineering"; raise `omc-tasksmd-bridge-v0`'s estimate to ≥1 week and consider deprioritising the bridge entirely.
-  - **Anchor**: Aho-Sethi-Ullman, *Compilers*, 1986 (round-trip property as the parseability test); rule #2 (every dep behind interface — bridge is exactly that).
-  - **Risk**: OMC may persist in an opaque format (e.g., serialized in-process state) that only resembles parseable on the surface — verify with a round-trip parse, not eyeballing.
-  - **Research**: 2026-05-04 — OMC handoff-persistence shape (read-only via GitHub API; no local OMC install, no `/team` invocation). **Verdict: parseable.** OMC's `/team` mode persists every coordination artifact to disk under `.omc/state/team/<teamName>/` (project-local, not `~/.claude/`). Canonical layout is declared in `src/team/state-paths.ts` (`TeamPaths` constant): `config.json` (team manifest), `tasks/task-<id>.json` (one file per task), `workers/<name>/heartbeat.json`, `workers/<name>/inbox.md` + `outbox.jsonl` (worker mailbox), `mailbox/<name>.json`, `events.jsonl` (team event log), `manifest.json`, `monitor-snapshot.json`, `summary-snapshot.json`, `phase-state.json`, plus `approvals/<taskId>.json`. Legacy path (deprecated) was `~/.claude/tasks/<teamName>/<taskId>.json`. Format is pretty-printed JSON written atomically (`writeAtomic(..., JSON.stringify(updated, null, 2))` — see `src/team/state/tasks.ts:90` in `claimTask`). Task entry shape (`TaskFile` / `TeamTask` in `src/team/types.ts:38-58, 195-213`): top-level keys `id: string`, `subject: string`, `description: string`, `status: TeamTaskStatus`, `owner?: string`, `blocks: string[]`, `blocked_by?: string[]` (also `depends_on?: string[]`), `created_at: string` (ISO), `completed_at?: string`, `version?: number` (optimistic concurrency), `claim?: { owner, token, leased_until }`, `result?: string`, `error?: string`, `requires_code_change?: boolean`, `delegation?: TeamTaskDelegationPlan`, `metadata?: Record<string, unknown>`. Status enum lives in `src/team/contracts.ts` (`TeamTaskStatus`) — typical values include `pending | in_progress | completed | blocked` (terminal vs non-terminal gated by `isTerminalTaskStatus`). Persistence decision points to re-verify next session: `src/team/state-paths.ts` (path layout, lines 17-100), `src/team/task-file-ops.ts:157,210-243,321-376` (read/write call sites — uses `readFileSync` + `JSON.parse` and `writeFileSync` via `writeAtomic`), `src/team/state/tasks.ts:90` (canonical `writeAtomic(taskFilePath, JSON.stringify(updated, null, 2))` in `claimTask`). **Bridge sketch (cheap-reader path is viable)**: `omc-tasksmd-bridge-v0` watches `<repoRoot>/.omc/state/team/*/tasks/*.json` (e.g., via `fs.watch` or `chokidar`); on change, parse JSON; map `id`→tasks.md `**ID**`, `subject`→title, `description`→`**Details**`, `status`→tasks.md `[ ]`/`[x]` checkbox + (extension) `**Status**` field, `owner`/`claim.owner`→`**Owner**`, `blocked_by`/`depends_on`→`**Blocked by**`, `created_at`→provenance comment, `version`→idempotency key. Reverse direction (tasks.md→OMC) is also feasible because the schema is fully documented in `types.ts` — but write-back collides with OMC's optimistic-concurrency `version` field, so the v0 bridge should be read-only OMC→tasks.md. No reverse-engineering, no scraping, no hooks. Hypothesis confirmed; `omc-tasksmd-bridge-v0` can ship as the thin-reader it was scoped for. Side-finding: OMC has its own internal v2 task model (`TeamTaskV2` with `version`, `claim`, `delegation_compliance`) that is richer than tasks.md spec — bridge must lossy-project rather than full-fidelity-mirror.
-  - **Last-enriched**: 2026-05-04
 
 - [ ] `audit-spec-monitor-coverage-q3-2026` — Q3 2026 quarterly audit of spec-monitor advisory rules (due 2026-08-03)
   - **ID**: audit-spec-monitor-coverage-q3-2026
