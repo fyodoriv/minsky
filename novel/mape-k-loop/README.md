@@ -225,6 +225,3 @@ const result = await tick({
 - **`mape-k-cost-schedule-from-vision`** — wire the per-rule cost weight
   schedule from `vision.md` into the `costs` argument of `analyze` so the
   Goldratt ranking reflects the human-supplied severity ordering.
-- **`mape-k-constraints-md-size-cap`** — add a CI lint that fires when
-  `novel/mape-k-loop/constraints.md` grows past 200 entries without an
-  archive split.
