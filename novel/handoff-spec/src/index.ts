@@ -66,7 +66,13 @@ const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\
 const REQUIRED_FIELDS = ["From", "Status", "Summary", "Created-at"] as const;
 type FieldMap = Record<string, string | string[]>;
 
-/** Convenience: did parsing produce any errors? */
+/**
+ * Convenience: did parsing produce any errors?
+ *
+ * @otel-exempt pure predicate — reads a single in-memory length, no I/O,
+ *   no side effects. A wrapping span on a one-line array-length check
+ *   would be empty noise; the calling code already has its own span.
+ */
 export function isValid(result: ParseResult): boolean {
   return result.errors.length === 0;
 }
@@ -75,6 +81,13 @@ export function isValid(result: ParseResult): boolean {
  * Parse a handoff document into structured records + accumulated errors.
  * One bad handoff doesn't abort the document — per-record errors are
  * collected so a UI can surface them.
+ *
+ * @otel-exempt pure function — string-in / value-out parser with no I/O,
+ *   no shared state, no async edges. Exception: the size-cap branch
+ *   returns early with `kind: "input-too-large"` (Armstrong 2007) without
+ *   doing any work. Callers that need observability wrap the call site
+ *   (file read + parse) in their own span; instrumenting here would
+ *   double-count and lose the file-path context.
  */
 export function parseHandoffs(source: string, options?: ParseOptions): ParseResult {
   const tooLarge = checkSizeCap(source, options?.maxBytes ?? DEFAULT_MAX_BYTES);
