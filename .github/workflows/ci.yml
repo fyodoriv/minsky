@@ -549,6 +549,111 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-mape-k-constraints-md-size.test.mjs
 
+  tick-loop-backoff-schedule:
+    # rule #10 ratchet applied to ARCHITECTURE.md L215 — the
+    # `5s → 30s → 5min` tick-loop restart-backoff ladder. Reads the
+    # future `config/tick-loop.json` artefact and asserts its
+    # `backoff_schedule` (or `backoff_schedule_seconds`) equals
+    # `[5, 30, 300]`. Dormant until the config artefact lands (same
+    # precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md L215; Armstrong, *Programming Erlang*, Pragmatic
+    # Bookshelf 2007 (let-it-crash + supervised restart with backoff);
+    # Beyer et al., *Site Reliability Engineering*, O'Reilly 2016, Ch. 3.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: tick-loop-backoff-schedule lint
+        run: node scripts/check-tick-loop-backoff-schedule.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs
+
+  mape-k-tick-iteration-backstop:
+    # rule #10 ratchet applied to ARCHITECTURE.md L218 — the 1000-tick
+    # tick-iteration backstop on the MAPE-K cadence. Reads the future
+    # `config/mape-k.json` artefact and asserts its
+    # `tick_iteration_backstop` equals 1000. Dormant until the config
+    # artefact lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md L218; Liu, *Real-Time Systems*, Prentice Hall
+    # 2000, § 6.4 (activity-coupled sampling bound); Beyer et al.,
+    # *Site Reliability Engineering*, O'Reilly 2016, Ch. 3.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-tick-iteration-backstop lint
+        run: node scripts/check-mape-k-tick-iteration-backstop.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-tick-iteration-backstop.test.mjs
+
+  mape-k-watchdog-cadence:
+    # rule #10 ratchet applied to ARCHITECTURE.md L218 — the 12 h
+    # time-based watchdog cadence on the MAPE-K loop. Reads the future
+    # `config/mape-k.json` artefact and asserts its `watchdog_hours`
+    # equals 12. Dormant until the config artefact lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md L218; Liu, *Real-Time Systems*, Prentice Hall 2000
+    # (sampling-period selection); Beyer et al., *Site Reliability
+    # Engineering*, O'Reilly 2016, Ch. 3.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-watchdog-cadence lint
+        run: node scripts/check-mape-k-watchdog-cadence.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-watchdog-cadence.test.mjs
+
+  cadence-pivot-threshold:
+    # rule #10 ratchet applied to research.md L92 — the 8 % MAPE-K
+    # cadence-pivot threshold ("If measured spend exceeds 8 % for 4
+    # weeks, the pivot in `mape-k-cadence`'s rule-#9 block fires").
+    # Reads the future `config/mape-k.json` artefact and asserts its
+    # `cadence_pivot_threshold_pct` (or `cadence_pivot_spend_fraction`)
+    # equals 8 % == 0.08. Dormant until the config artefact lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # research.md L92; Beyer et al., *Site Reliability Engineering*,
+    # O'Reilly 2016, Ch. 3 (error-budget enforcement); Ries, *The Lean
+    # Startup*, Crown Business 2011 (pivot-or-persevere).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: cadence-pivot-threshold lint
+        run: node scripts/check-cadence-pivot-threshold.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-cadence-pivot-threshold.test.mjs
+
   anchor-primary-source:
     # rule #10 ratchet applied to spec-monitor advisory rule A3 ("anchor
     # citation is not a primary source"): the deterministic gate promotes
@@ -586,6 +691,7 @@ jobs:
     needs:
       - anchor-primary-source
       - biome
+      - cadence-pivot-threshold
       - glossary-discipline
       - hygiene
       - linux-supervisor-integration
@@ -593,6 +699,8 @@ jobs:
       - maciek-smoke
       - mape-k-budget-cap
       - mape-k-constraints-md-size
+      - mape-k-tick-iteration-backstop
+      - mape-k-watchdog-cadence
       - markdownlint
       - measurement-inspects-output
       - pattern-index
@@ -607,6 +715,7 @@ jobs:
       - rule-7-chaos-coverage
       - tasks-lint
       - test
+      - tick-loop-backoff-schedule
       - typecheck
     runs-on: ubuntu-latest
     if: always()
@@ -619,11 +728,14 @@ jobs:
           fail=0
           for r in "${{ needs.anchor-primary-source.result }}" \
                    "${{ needs.biome.result }}" \
+                   "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.mape-k-budget-cap.result }}" \
                    "${{ needs.mape-k-constraints-md-size.result }}" \
+                   "${{ needs.mape-k-tick-iteration-backstop.result }}" \
+                   "${{ needs.mape-k-watchdog-cadence.result }}" \
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
@@ -635,6 +747,7 @@ jobs:
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
+                   "${{ needs.tick-loop-backoff-schedule.result }}" \
                    "${{ needs.typecheck.result }}"; do
             [ "$r" = "success" ] || fail=1
           done
