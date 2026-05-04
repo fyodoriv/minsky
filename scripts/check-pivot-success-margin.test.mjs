@@ -5,12 +5,17 @@
 // decision branch (numeric / binary / mixed / opt-out) so a regression
 // surfaces as a single targeted failure, not a vague suite-wide red.
 
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   checkPivotSuccessMargin,
   detectSkipComment,
   extractLeadingNumber,
+  mainDirectory,
 } from "./check-pivot-success-margin.mjs";
 
 describe("extractLeadingNumber", () => {
@@ -123,5 +128,62 @@ describe("detectSkipComment", () => {
 
   test("absence of skip comment → skip:false", () => {
     expect(detectSkipComment('id: foo\nsuccess: "x"\npivot: "y"\n').skip).toBe(false);
+  });
+});
+
+describe("mainDirectory — experiments-directory-migration walker", () => {
+  /** @type {string} */
+  let dir;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "pivot-walker-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * @param {string} id
+   * @param {string} success
+   * @param {string} pivot
+   */
+  const recordYaml = (id, success, pivot) => `id: ${id}
+hypothesis: |
+  This is a test hypothesis with at least twenty characters of substantive content.
+success: "${success}"
+pivot: "${pivot}"
+measurement: "test -f /tmp/foo && grep -q bar"
+anchor: |
+  *Site Reliability Engineering*, Beyer SRE 2016, Ch. 6
+`;
+
+  test("returns 0 when directory does not exist", async () => {
+    const code = await mainDirectory(join(dir, "nonexistent-subdir"));
+    expect(code).toBe(0);
+  });
+
+  test("returns 0 when directory has no *.yaml files", async () => {
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
+  });
+
+  test("returns 0 when all margins are meaningful (≥1 %)", async () => {
+    writeFileSync(join(dir, "a.yaml"), recordYaml("test-a", "≥10 percent", "<5 percent"));
+    writeFileSync(join(dir, "b.yaml"), recordYaml("test-b", "≥99 percent", "<50 percent"));
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
+  });
+
+  test("returns 1 when ANY file has zero margin (max wins)", async () => {
+    writeFileSync(join(dir, "good.yaml"), recordYaml("test-good", "≥10 percent", "<5 percent"));
+    writeFileSync(join(dir, "bad.yaml"), recordYaml("test-bad", "≥95 percent", "<95 percent"));
+    const code = await mainDirectory(dir);
+    expect(code).toBe(1);
+  });
+
+  test("ignores non-yaml files", async () => {
+    writeFileSync(join(dir, "README.md"), "# notes");
+    writeFileSync(join(dir, "good.yaml"), recordYaml("test-good", "≥10 percent", "<5 percent"));
+    const code = await mainDirectory(dir);
+    expect(code).toBe(0);
   });
 });

@@ -52,14 +52,14 @@
 // to `warn`, the rule is judgement-bound and this lint is retired — A3
 // stays advisory in SKILL.md.
 
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parse as parseExperimentRecord } from "@minsky/experiment-record";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_EXPERIMENT_PATH = resolve(HERE, "..", "EXPERIMENT.yaml");
+const DEFAULT_EXPERIMENTS_DIR = resolve(HERE, "..", "experiments");
 
 const SKIP_COMMENT_RE =
   /^[ \t]*#[ \t]*rule:[ \t]*ci-lint-anchor-primary-source:[ \t]*skip[ \t]+(\S.{2,})$/m;
@@ -289,11 +289,66 @@ async function main(experimentPath) {
   return 1;
 }
 
+/**
+ * Walk a directory of `experiments/*.yaml` files, run `main(file)` per file,
+ * and aggregate exit codes (max wins). Per `experiments-directory-migration`:
+ * the singleton EXPERIMENT.yaml at the repo root was retired in favour of
+ * plural `experiments/<id>.yaml`. The walker is the directory-mode entry;
+ * per-file `main(file)` remains for explicit single-file invocation.
+ *
+ * @param {string} directoryPath
+ * @returns {Promise<number>}
+ */
+export async function mainDirectory(directoryPath) {
+  let entries;
+  try {
+    entries = readdirSync(directoryPath);
+  } catch (err) {
+    const e = /** @type {NodeJS.ErrnoException} */ (err);
+    if (e.code === "ENOENT") {
+      process.stdout.write(
+        `anchor-primary-source ok: ${directoryPath} not found (handled by ci-experiment-runner gate).\n`,
+      );
+      return 0;
+    }
+    throw err;
+  }
+  const yamlFiles = entries
+    .filter((name) => name.endsWith(".yaml") || name.endsWith(".yml"))
+    .map((name) => join(directoryPath, name))
+    .filter((path) => {
+      try {
+        return statSync(path).isFile();
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+  if (yamlFiles.length === 0) {
+    process.stdout.write(
+      `anchor-primary-source ok: ${directoryPath} has no *.yaml files (nothing to check).\n`,
+    );
+    return 0;
+  }
+  let maxExitCode = 0;
+  for (const file of yamlFiles) {
+    const code = await main(file);
+    if (code > maxExitCode) maxExitCode = code;
+  }
+  return maxExitCode;
+}
+
 const invokedDirectly =
   import.meta.url === `file://${process.argv[1]}` ||
   process.argv[1]?.endsWith("check-anchor-primary-source.mjs");
 if (invokedDirectly) {
-  const path = process.argv[2] ?? DEFAULT_EXPERIMENT_PATH;
-  const code = await main(path);
+  const arg = process.argv[2] ?? DEFAULT_EXPERIMENTS_DIR;
+  let isDir = false;
+  try {
+    isDir = statSync(arg).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  const code = isDir ? await mainDirectory(arg) : await main(arg);
   process.exit(code);
 }
