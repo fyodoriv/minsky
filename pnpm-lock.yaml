@@ -11,6 +11,9 @@ importers:
       '@biomejs/biome':
         specifier: 1.9.4
         version: 1.9.4
+      '@minsky/experiment-record':
+        specifier: workspace:*
+        version: link:novel/experiment-record
       '@types/node':
         specifier: 25.6.0
         version: 25.6.0
