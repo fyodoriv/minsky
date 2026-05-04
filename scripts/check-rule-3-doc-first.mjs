@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
 // Pattern: deterministic gate over a PR diff (rule #10).
 // Source: rule #3 (test-first / metric-first / doc-first); Knuth 1984
 //   (literate programming — doc and code are the same artifact);

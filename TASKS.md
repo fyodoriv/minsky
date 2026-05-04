@@ -35,20 +35,6 @@
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
 
-- [ ] `scripts-ts-check-migration` — add `// @ts-check` to existing scripts/*.mjs incrementally
-  - **ID**: scripts-ts-check-migration
-  - **Tags**: ci, hygiene, scout, rule-10
-  - **Estimate**: 2–3h (per script ~20–30 min × 5 scripts)
-  - **Hypothesis**: Adding `// @ts-check` + JSDoc types to each existing scripts/*.mjs (rule-1, rule-2, rule-5, rule-7, pr-self-grade) brings them under strict tsc enforcement. Total errors fixed: ~131 (counted at scripts/tsconfig.json setup time). Once all six scripts (rule-3 already migrated) opt in, flip `checkJs: true` in scripts/tsconfig.json and drop the per-file directive — single switch, no two-modes drift.
-  - **Details**: For each script + its test file: add `// @ts-check` at top, add JSDoc `@param` / `@returns` / `@typedef` annotations everywhere needed, fix the strict-null and noUncheckedIndexedAccess errors that surface, ensure tsc passes. Suggest one PR per script to keep diffs reviewable. Ratchet: when all 6 are checked, flip `checkJs: true` and remove all six `// @ts-check` directives (they become redundant).
-  - **Files**: `scripts/check-rule-1-novel-justification.mjs` (+ test), `scripts/check-rule-2-dep-coverage.mjs` (+ test), `scripts/check-rule-5-glossary-discipline.mjs` (+ test), `scripts/check-rule-7-chaos-coverage.mjs` (+ test), `scripts/check-pr-self-grade.mjs` (+ test), `scripts/tsconfig.json` (final flip)
-  - **Verification**: `pnpm typecheck` clean across `scripts/`; existing tests still pass; CI green.
-  - **Measurement**: post-migration, `grep -c '// @ts-check' scripts/*.mjs` returns 0 (the per-file directives have been retired); `cat scripts/tsconfig.json | grep -c '"checkJs": true'` returns 1.
-  - **Pivot**: if a script genuinely doesn't admit clean strict typing (e.g., heavy reliance on dynamic `process.env` shapes that fight `noUncheckedIndexedAccess`), keep the `// @ts-check` directive on it indefinitely AND add a one-line comment block above explaining why the global flip is deferred. Don't lower the strictness floor.
-  - **Acceptance**: All 6 scripts pass strict tsc; final PR flips `checkJs: true` and removes the per-file directives; CI green throughout.
-  - **Anchor**: rule #10 (deterministic enforcement — the linters that enforce constitutional rules must themselves be type-checked, otherwise the rules they enforce are only as stable as the linter's runtime behaviour); Microsoft TypeScript handbook on `// @ts-check` (the canonical incremental-strictness pattern).
-  - **Risk**: One script's strict-typing might surface a real bug. Mitigation: that's the point — if a bug is found, fix it in the same migration PR and note it in the commit. Don't paper over with `@ts-ignore`.
-
 - [ ] `spec-monitor-deterministic-rewrite` — split `spec-monitor-skill` into deterministic linters + a thin LLM advisory layer
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
@@ -226,6 +212,20 @@
   - **Risk**: Scope creep into a "real" dashboard. Cap line count; refuse new features without removing one.
 
 ## P3
+
+- [ ] `linter-resilience-hardening` — bound git-log buffer + symlink-loop guard in linter walkers
+  - **ID**: linter-resilience-hardening
+  - **Tags**: ci, hygiene, scout, rule-10, hardening
+  - **Estimate**: 1–2h
+  - **Hypothesis**: Two latent fragility classes in the rule-enforcer scripts will cause a CI failure within 12 months on a sufficiently old / pathological repo, and pre-empting them is cheaper than diagnosing post-mortem: (a) `check-rule-7-chaos-coverage.mjs`'s `execFileSync("git", ["log", "--all", "--format=%B"], { maxBuffer: 32 * 1024 * 1024 })` will hit `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` once `git log --all --format=%B` exceeds 32 MB (today the repo is ~0.5 MB; growth rate suggests crossing 32 MB in 18–36 months without an exclusion strategy); (b) `check-rule-2-dep-coverage.mjs`'s `walkTs` and `check-rule-7-chaos-coverage.mjs`'s `walkDir` recurse via `readdirSync` / `readdir` without symlink-loop detection — a future symlink within `novel/` (e.g., a worktree symlink, a developer's `tmp -> /tmp` shortcut) outside the SKIP_DIRS allowlist would loop until inode exhaustion. Replacing the `--format=%B` capture with a streaming `git log --all --grep='closes ' --format='%H %s'` filter (10–100× smaller output) AND adding an `inode`-keyed `Set<string>` guard around the directory walks closes both fragility classes without changing the linters' externally-observable behaviour.
+  - **Details**: Surfaced by the resilience-scout pass during `scripts-ts-check-migration`. Two changes: (1) in `readGitClosedTaskIds`, switch to `execFileSync("git", ["log", "--all", "--grep=closes ", "--format=%s%n%b"], …)` so only commits matching the pattern are streamed; this typically reduces output 10–100×. Keep the existing `try/catch` fallback. (2) in both walkers, convert from `readdirSync` to `readdirSync(dir, { withFileTypes: true })`, skip `entry.isSymbolicLink()` entries entirely (or follow once via `realpathSync` and check membership in a `Set<string>` of already-visited canonical paths). Add a test fixture: a temp directory with a symlink loop (`a -> b/`, `b -> a/`) and assert the walker terminates and emits no output.
+  - **Files**: `scripts/check-rule-7-chaos-coverage.mjs`, `scripts/check-rule-2-dep-coverage.mjs`, `scripts/check-rule-7-chaos-coverage.test.mjs`, `scripts/check-rule-2-dep-coverage.test.mjs`
+  - **Verification**: synthetic symlink-loop fixture terminates the walker in <100ms with zero infinite-loop / EMFILE failures; `git log --all --format=%B` output captured against a synthetic 64 MB log raises `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` against the *old* code path and succeeds against the *new* code path (filtered to <1 MB).
+  - **Measurement**: `pnpm vitest run scripts/check-rule-7-chaos-coverage.test.mjs scripts/check-rule-2-dep-coverage.test.mjs` exits 0 with the two new fixtures; `wc -c < <(git log --all --grep='closes ' --format='%s%n%b')` < 1 MB on the live repo.
+  - **Pivot**: if `git log --grep` is itself slow (>2s on a 100k-commit repo), pivot to a one-shot `git log --all --format=%H | xargs -I{} git show -s --format='%B' {}` streamed line-by-line via `spawn` rather than `execFileSync`. If symlink loops in `novel/` turn out to be vanishingly rare (zero in 12 months across all CI runs), drop the inode-Set guard and document that contributors must not introduce symlinks under `novel/`.
+  - **Acceptance**: CI green; both scripts handle the synthetic worst-case inputs; no regression in linter runtime on the live repo (<5% slowdown).
+  - **Anchor**: rule #6 (let-it-crash with a precise error — but only when the crash is genuinely unrecoverable; both fragility classes are recoverable via bounded I/O); Lampson 1983 ("hint: bound the worst case at the entry"); Node.js docs `child_process.execFileSync` `maxBuffer` failure mode.
+  - **Risk**: The `--grep='closes '` filter is more brittle than the unfiltered capture — a future commit-message convention that drops the literal `closes` prefix would silently empty the result. Mitigation: the existing `try/catch` already returns an empty Set on git failure; the `closes` literal is the same regex the consumer (`/closes\s+([a-z][a-z0-9-]*[a-z0-9])/gi`) requires anyway, so the filter cannot drop a commit the consumer would have matched.
 
 - [ ] Multi-machine scope investigation
   - **ID**: multi-machine
