@@ -63,7 +63,7 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
   {
     id: "wrist-dwell",
     label: "Wrist dwell (inverted)",
-    formula: 'count(http_get_total{path="/watch.json"}[1d]) * 2',
+    formula: 'count(http_get_total{path="/watch.json"}[1d]) * estimated_dwell_seconds_per_request',
     unit: "seconds/day",
   },
   {
