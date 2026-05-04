@@ -230,3 +230,38 @@ const result = await tick({
   costs, // rule-9 misses are >1 OOM more expensive than typos per vision.md
 });
 ```
+
+## `orchestrate(...)` — pure orchestrator above `tick(...)`
+
+`novel/mape-k-loop/src/orchestrator.ts` exposes `orchestrate(args)` — the
+layer that turns a `tick(...)` outcome into operator-actionable artefacts:
+a `RolloutDraft` (`{variantId, branchSlug, experimentYaml}`) the CLI
+materialises as a draft branch + draft `EXPERIMENT.yaml`, plus the
+Knowledge-side `constraintsAppend` and conditional
+`researchAmendmentProposal`. The orchestrator never opens a PR — drafts
+are written to disk for a human reviewer (Beyer SRE 2016 Ch. 17 —
+operator escape hatch; the load-bearing safety property is that drafts
+NEVER auto-merge).
+
+The CLI at [`bin/mape-k-orchestrator.mjs`](./bin/mape-k-orchestrator.mjs)
+is the I/O boundary:
+
+```sh
+node novel/mape-k-loop/bin/mape-k-orchestrator.mjs --dry-run \
+  --experiment-store=experiment-store \
+  --constraints-md=novel/mape-k-loop/constraints.md \
+  --skills-dir=.claude/skills
+```
+
+Flags:
+
+- `--dry-run` — read inputs but write nothing; print a one-line summary.
+- `--ingest-mode` — skip Plan/Execute (no rollout draft); used by the
+  experiment-tracker workflow to ingest verdicts into `constraints.md`
+  without proposing a rollout.
+- `--max-rollouts=N` — cap rollout drafts per invocation (default `1`).
+
+The orchestrator is pure given an injected `PromptOptimizer` Strategy
+(see `@minsky/prompt-optimizer`); production wires
+`AnthropicPromptOptimizer`, tests use `StubPromptOptimizer`. Pattern
+conformance row: vision.md § "Pattern conformance index" row 69.
