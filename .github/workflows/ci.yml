@@ -221,6 +221,35 @@ jobs:
           RULE_3_PR_BODY_PATH: /tmp/rule-3-pr-body.md
         run: node scripts/check-rule-3-doc-first.mjs
 
+  rule-6-let-it-crash:
+    # rule #10: deterministic enforcement of rule #6 (let-it-crash). Walks
+    # every novel/**/*.ts file added/modified in the PR; flags try/catch
+    # blocks nested deeper than 1 level (`nested-try`) or catch clauses
+    # whose body neither re-throws nor calls `supervise(...)`
+    # (`swallowing-catch`). Per-catch opt-out: the line immediately above
+    # the `catch` keyword is `// rule-6: handled-locally — <reason>`.
+    # Anchor: rule #10; Armstrong, *Programming Erlang*, 2007 (let it
+    # crash); Lampson 1983 (use exceptions only for exceptional conditions).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: rule-6 lint
+        env:
+          RULE_6_DIFF_BASE: origin/main
+        run: node scripts/check-rule-6-let-it-crash.mjs
+
   pr-self-grade:
     # AGENTS.md § "Orchestrator discipline" rule (2): every PR's description
     # carries a `Hypothesis self-grade` block (Predicted / Observed / Match /
@@ -258,6 +287,7 @@ jobs:
       - rule-1-novel-justification
       - rule-2-dep-coverage
       - rule-3-doc-first
+      - rule-6-let-it-crash
       - rule-7-chaos-coverage
       - tasks-lint
       - test
@@ -279,6 +309,7 @@ jobs:
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
                    "${{ needs.rule-3-doc-first.result }}" \
+                   "${{ needs.rule-6-let-it-crash.result }}" \
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
