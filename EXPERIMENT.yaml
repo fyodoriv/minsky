@@ -1,50 +1,43 @@
-id: watch-control-endpoint-2026-05-03
+id: mape-k-prompt-rollout-orchestrator-2026-05-03
 hypothesis: |
-  Adding a `POST /control` route to `@minsky/dashboard-web` with a pure
-  `parseControlBody` validator + a `setPaused: (v: boolean) => void`
-  Strategy seam (mirroring the existing `getPauseState` shape from PR
-  #68) closes the round-trip on the Apple-Shortcuts pause/resume pair
-  shipped by `watch-shortcuts` (PR #84): a `POST /control {paused:true}`
-  is observed in the next `GET /watch.json` body's `paused` field within
-  one HTTP round-trip. This closes the parent `watch-shortcuts` task's
-  verification cell ("Pause Shortcut writes a sentinel file the
-  supervisor honors within 1 scheduler iteration") on the dashboard
-  side; supervisor-side wiring (the *consumer* of the paused sentinel)
-  remains a follow-up. The `setPaused` Strategy is the seam (rule #2)
-  the supervisor will plug into in the next task — v0 ships an
-  in-memory pair (`createMemoryPauseState`) so tests + dev round-trip
-  end-to-end without any external state.
+  Adding `novel/mape-k-loop/src/orchestrator.ts` (pure orchestrator above
+  `tick(...)` that emits a `RolloutDraft` shape: `{variantId, branchSlug,
+  experimentYaml}`) + the CLI `novel/mape-k-loop/bin/mape-k-orchestrator.mjs`
+  (reads `experiment-store/*.jsonl` + `constraints.md` tail + `.claude/skills/*/SKILL.md`,
+  writes results to disk, NEVER auto-merges) + the daemon-integration seam
+  (optional `mapeKOrchestratorIntervalTicks` parameter on `runDaemon`) closes
+  the rule-#9 self-improvement-velocity loop without auto-merging anything.
+  The orchestrator wraps the existing `tick(...)` cycle (PR #58 — sub-task 4
+  of mape-k-loop-v0) and produces the operator-actionable surfaces a human
+  reviewer needs (a draft branch + a draft EXPERIMENT.yaml + the
+  constraints.md append + the conditional research.md amendment).
+  The injected `PromptOptimizer` Strategy is the seam (rule #2) — tests use
+  `StubPromptOptimizer`; production uses `AnthropicPromptOptimizer` (PR #58
+  row 53). Drafts NEVER auto-merge — the operator review gate is the
+  load-bearing safety property (Beyer SRE 2016 Ch. 17).
 success: |
   - `pnpm typecheck` exits 0.
-  - `pnpm vitest run novel/dashboard-web/test/server.test.ts --reporter=json | jq -e '.numPassedTests >= 21 and .numFailedTests == 0'` exits 0 (today: 17 → 24, +7 new server-test cases for `POST /control`).
-  - `pnpm vitest run novel/dashboard-web/test/control.test.ts` adds ≥4 cases for the pure validator + memory-pair Strategy (today: 12).
-  - Round-trip: a `POST /control {paused:true}` against `createServer()` (default in-memory pair) is observed as `paused: true` in the next `GET /watch.json` body; the inverse round-trip (POST `{paused:false}` → `paused: false` on the next GET) is also asserted.
-  - 400 graceful-degrade on (a) missing body, (b) body without `paused`, (c) non-boolean `paused`, (d) non-JSON body — verified by call-counter assertions that `setPaused` is NEVER called on the malformed branch.
-  - `distribution/shortcuts/test/shortcuts-json.test.mjs` is tightened: post-control shortcuts must have `request_body` whose key-set is exactly `["paused"]` and whose `paused` value is a boolean (closing drift between Shortcut and server).
-  - The chaos table in `novel/dashboard-web/README.md` carries a new row 5 for "Malformed control payload" → `graceful-degrade` 400.
-  - The `watch-control-endpoint` task block is removed from TASKS.md in the same PR.
-  - Concretely: `pnpm typecheck && pnpm vitest run novel/dashboard-web/test/server.test.ts --reporter=json | jq -e '.numPassedTests >= 21 and .numFailedTests == 0'` exits 0.
+  - `pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0 (today: 6 cases pass — happy-path rollout draft, oscillation guard suppression, sustained-gain failure abstention, no-op cold-start, --ingest-mode skip-rollout, --max-rollouts=0 cap).
+  - The CLI `node novel/mape-k-loop/bin/mape-k-orchestrator.mjs --dry-run --experiment-store=<synthetic-dir>` exits 0 against a synthetic verdict store and prints the rollout state.
+  - Draft-rollout shape recorded: `RolloutDraft.experimentYaml` includes top-level `id` / `hypothesis` / `success` / `pivot` / `measurement` / `anchor` / `replay_windows_days` keys; the predicted gain (mean A/B score) is rendered at 4-decimal precision.
+  - The `mape-k-prompt-rollout-orchestrator` task block is removed from TASKS.md in this PR; the `experiment-tracker-knowledge-ingestion`'s `Blocked by` field is removed (this task was its only blocker).
+  - vision.md row 69 added pointing at `novel/mape-k-loop/src/orchestrator.ts` + `.test.ts` + `bin/mape-k-orchestrator.mjs` with `full` conformance.
 pivot: |
-  If supervisor-side wiring (the *consumer* of the paused sentinel — a
-  file the tick loop honors) proves materially harder than the
-  dashboard-web side (>1d of integration work), retire `/control`
-  entirely and ship pause/resume as a launchctl-only operator action
-  documented in `distribution/launchd/README.md`. The Watch surface
-  stays read-only — the user-story 002 Acceptance is preserved by the
-  iPhone Shortcut still working at the OS level (`launchctl stop` /
-  `launchctl start` on the supervisor unit). The `setPaused` Strategy
-  seam is the migration boundary: the dashboard route + tests stay
-  intact; only the production wiring in `start.ts` flips from the
-  in-memory pair to a no-op + supervisor-managed unit-file flag.
+  If 90 days of orchestrator runs produce zero rollouts (the gain threshold
+  is unreachable in practice), drop the sustained-gain check from 7 d → 3 d
+  OR widen the variant catalogue past v0's 3 mutations
+  (`enumerate-failure-modes`, `direct-answer`, `tighten-scope`). Both pivots
+  are reversible — the sustained-gain window is a single
+  `DEFAULT_WINDOW_DAYS` constant in `novel/mape-k-loop/src/sustained-gain.ts`,
+  and the catalogue is the `MUTATIONS` array in `novel/mape-k-loop/src/plan.ts`.
+  If THAT still produces zero rollouts after another 90 d, the orchestrator
+  itself is wrong — escalate to the rule-#9 quarterly review and reconsider
+  the MAPE-K Plan + Execute primitives (rule-#9 itself is the meta-pivot).
 measurement: |
   pnpm install --no-frozen-lockfile \
     && pnpm typecheck \
-    && pnpm vitest run \
-         novel/dashboard-web/test/server.test.ts \
-         --reporter=json \
-       | jq -e '.numPassedTests >= 21 and .numFailedTests == 0' \
-    && pnpm vitest run novel/dashboard-web/test/control.test.ts \
-    && pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs \
+    && pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json \
+       | jq -e '.numPassedTests >= 4 and .numFailedTests == 0' \
     && pnpm test \
     && pnpm lint \
     && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
@@ -55,20 +48,22 @@ measurement: |
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly,
-  2016 — Ch. 17 (operator escape hatch / kill switch: a pause-able loop
-  is a load-bearing safety property of any autonomous system, especially
-  one that mutates a code repository); Gamma, Helm, Johnson, Vlissides,
-  *Design Patterns*, Addison-Wesley, 1994 — Strategy: the `setPaused`
-  Strategy is the writer half of the pause seam, mirroring the existing
-  `getPauseState` (reader) shape — a single in-memory cell backs both in
-  v0 (`createMemoryPauseState`); rule #2 (every dep behind interface —
-  `setPaused` is the supervisor seam, not a hard import); rule #7
-  (chaos engineering — malformed payload is the upstream fault axis;
-  `parseControlBody` returns a discriminated `{ok:false, error}` and the
-  route maps it to a 400, never crashing); Munafò et al., *Nature Human
-  Behaviour* 1, 0021, 2017 — pre-registration (the pivot to a
-  launchctl-only operator action is committed *before* supervisor-side
-  wiring is observed in the field, so a failure cannot be retroactively
-  explained away as the chosen mechanism).
-replay_windows_days: [90]
+  Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
+  *IEEE Computer* 36(1) 2003 (MAPE-K loop — the orchestrator is the layer
+  that turns a tick into operator-actionable artefacts: a draft branch +
+  a constraints.md append + a research.md amendment proposal); Khattab,
+  O., et al., "DSPy: Compiling Declarative Language Model Calls into
+  Self-Improving Pipelines", *ICLR* 2024 (the rejected baseline whose
+  "compile-time variant catalogue → A/B → winner picks" cycle survives
+  in this orchestrator's flow, minus DSPy's runtime); Kohavi, R., Tang,
+  D., Xu, Y., *Trustworthy Online Controlled Experiments*, Cambridge UP
+  2020, Ch. 3 (sustained-gain window — the rollout-draft only fires when
+  the underlying `execute()` passes the 7 d sustained-gain guard); Beyer,
+  B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability
+  Engineering*, O'Reilly 2016, Ch. 17 (operator escape hatch — drafts
+  never auto-merge); Munafò et al., "A Manifesto for Reproducible
+  Science", *Nature Human Behaviour* 1, 0021, 2017 (rule-#9
+  pre-registration — the predicted gain is committed in the draft
+  EXPERIMENT.yaml *before* merge so a future replay window can falsify
+  or confirm it).
+replay_windows_days: [7, 30, 90]
