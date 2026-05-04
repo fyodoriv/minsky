@@ -237,20 +237,6 @@
   - **Anchor**: Alexander et al., *A Pattern Language*, 1977 (a pattern catalogue maps every artifact to its pattern); Gabriel, *Patterns of Software*, 1996.
   - **Risk**: Pattern misattribution. Mitigation: every row cites a primary literature source (paper / book chapter), not a blog post or wiki.
 
-- [ ] Supervisor integration tests across systemd + launchd
-  - **ID**: supervisor-integration-tests
-  - **Tags**: infra, testing, scout
-  - **Estimate**: 1d
-  - **Hypothesis**: A CI matrix of `linux-supervisor-integration` + `macos-supervisor-integration` jobs exercising `systemctl --user` and `launchctl` against the shipped unit templates demonstrably restarts a SIGKILL'd `minsky-tick-loop` within 10 s — proving rows 1–4 of the failure-mode table in `distribution/README.md` empirically rather than by inspection.
-  - **Details**: Validate the supervisor unit-file templates (shipped under `distribution/systemd/`, `distribution/launchd/`) against real OS supervisors. Linux: spin a Linux runner in CI (or matrix-ed GitHub Actions runner) that exercises `systemctl --user enable --now minsky-supervisor.target`, then SIGKILLs `minsky-tick-loop` and asserts respawn within 10 s. macOS: a separate runner that bootstraps the LaunchAgents and asserts the same on launchctl. Both back the failure-mode rows 1–4 in `distribution/README.md`. Deferred from `supervisor-setup` per the "documented why not" clause.
-  - **Files**: `.github/workflows/ci.yml` (add a Linux integration job + a macOS one); `distribution/test-supervisor.sh` (a portable test driver invoked by both)
-  - **Verification**: CI matrix has linux-supervisor-integration and macos-supervisor-integration jobs that pass against the templates from `distribution/`; the smoke test in `distribution/lint-units.sh` continues to run on every PR.
-  - **Measurement**: `gh run list --workflow ci.yml --json conclusion,name --jq '.[] | select(.name | test("supervisor-integration"))'` returns conclusion=success.
-  - **Pivot**: if the Linux runner can't run `systemctl --user` (CI sandboxes may lack a user-systemd instance) → drop to a `dbus-run-session` workaround OR move integration tests to a self-hosted runner; if both fail, keep the smoke-only path and rely on the per-platform manual run documented in `distribution/README.md`.
-  - **Acceptance**: matrix passes; failure-mode table rows 1–4 in `distribution/README.md` are demonstrably exercised by the test.
-  - **Risk**: GitHub Actions Ubuntu runners run as a non-login user; user-systemd may need explicit `loginctl enable-linger`. Mitigation: document the workaround inline in the workflow.
-  - **Literature anchor**: Forsgren et al., *Accelerate*, 2018 (test reliability as a DORA prerequisite).
-
 - [ ] `audit-spec-monitor-coverage-q3-2026` — Q3 2026 quarterly audit of spec-monitor advisory rules (due 2026-08-03)
   - **ID**: audit-spec-monitor-coverage-q3-2026
   - **Tags**: audit, conformance, rule-10
@@ -320,3 +306,17 @@
   - **Acceptance**: CI job runs once `claude-mape-k-loop` v0 ships.
   - **Anchor**: rule #10; ARCHITECTURE.md § "MAPE-K cadence"; Beyer SRE 2016 (error budget enforcement).
   - **Risk**: Cap is dependent on `claude-mape-k-loop` v0 — implement only after that ships. Mitigation: defer until prerequisite lands.
+
+- [ ] `supervisor-integration-self-hosted-runner` — Pivot escape hatch for supervisor integration tests
+  - **ID**: supervisor-integration-self-hosted-runner
+  - **Tags**: infra, testing, ci, pivot-followup
+  - **Estimate**: 4h
+  - **Hypothesis**: If `linux-supervisor-integration` consistently lands as `failure` (not `success` / `skipped`) on GH-hosted Ubuntu runners — i.e. neither `loginctl enable-linger` nor `dbus-run-session` produces a usable user-bus inside the sandbox — moving the Linux job to a self-hosted runner with a real systemd-user session is the documented Pivot in `supervisor-integration-tests`'s EXPERIMENT.yaml.
+  - **Details**: Document the self-hosted-runner setup needed (Ubuntu LTS host with `loginctl enable-linger` already on for the runner user; `actions-runner.service` configured to run under that user). Update `.github/workflows/ci.yml` to gate the Linux job on `runs-on: [self-hosted, linux]`. Keep macOS as GH-hosted (launchd works there). File the cost / ownership question (who hosts the runner; is the maintenance overhead worth the empirical signal). This task only fires if the v0 integration jobs prove unworkable on GH-hosted infra.
+  - **Files**: `.github/workflows/ci.yml`, `distribution/README.md`, `docs/self-hosted-runner.md` (new)
+  - **Verification**: 3 consecutive PRs see `linux-supervisor-integration` land as `success` (not `skipped`) on the self-hosted runner.
+  - **Measurement**: `gh run list --workflow ci.yml --branch main --limit 10 --json conclusion,name --jq '[.[] | select(.name == "linux-supervisor-integration") | .conclusion] | map(select(. == "success")) | length' >= 3`.
+  - **Pivot**: if self-hosted-runner maintenance burden exceeds the empirical signal value (e.g., the runner needs >1 manual intervention per quarter), retire the Linux integration job entirely and rely on `lint-units.sh` + the macOS integration job alone — document the asymmetry as a declared deviation in `distribution/README.md`.
+  - **Acceptance**: This task fires only if `supervisor-integration-tests` v0's Pivot threshold is hit; otherwise it remains a dormant scout entry.
+  - **Anchor**: Forsgren et al., *Accelerate*, 2018 (test reliability — a CI gate that doesn't run reliably teaches the team to ignore failure); rule #7 (failure-mode discipline).
+  - **Risk**: Self-hosted runners introduce supply-chain risk (a compromised runner can leak secrets). Mitigation: scope the runner to public-repo / non-secret jobs only; standard GH guidance (Forsgren 2018 § DORA prerequisites; rule #7).

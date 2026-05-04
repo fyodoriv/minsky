@@ -1,16 +1,21 @@
-id: spec-monitor-q2-2026-audit
+id: supervisor-integration-tests
 hypothesis: |
-  The Q2 2026 quarterly audit of `novel/spec-monitor/SKILL.md`'s 5 advisory
-  rules (per the `audit-spec-monitor-coverage` task and rule #10's ratchet)
-  either confirms compliance or produces actionable follow-ups. Specifically:
-  rule count is mechanically verified ≤5 by `scripts/check-skill-rule-cap.mjs`;
-  each of A1–A5 receives a kept-advisory or promoted-to-deterministic-candidate
-  decision with a written rationale; any promoted candidates are filed as P3
-  `ci-lint-*` follow-up tasks with full Hypothesis/Success/Pivot/Measurement/
-  Anchor; and the next-quarter (Q3 2026, due 2026-08-03) audit task is filed
-  to preserve the cadence per the original task's Risk-mitigation note.
-success: "test -f spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'Rule count' spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'audit-spec-monitor-coverage-q3-2026' TASKS.md"
-pivot: "if every quarterly audit (this one and prior, once a baseline of ≥2 audits exists) finds ≥1 advisory-to-deterministic candidate AND the candidates filed in earlier audits remain open at the next audit, the Skill is leaking scope — reduce the hard cap from 5 to 3 in `novel/spec-monitor/SKILL.md` AND update `scripts/check-skill-rule-cap.mjs`'s threshold in the SAME PR. Q2 2026 is the first audit, so the cap-reduction does not fire yet — but if Q3 2026 also promotes ≥1 rule with the Q2 candidates still open, fire it then."
-measurement: "test -f spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'Rule count' spec-advisories/2026-05-03-quarterly-audit.md && grep -q 'audit-spec-monitor-coverage-q3-2026' TASKS.md"
-anchor: "rule #10 (vision.md § 10 — deterministic enforcement; the ratchet rule that drives the audit's promote-or-keep decision); Munafò et al., \"A Manifesto for Reproducible Science\", Nature Human Behaviour 1, 0021, 2017 (pre-registration: this audit's pivot threshold is committed BEFORE the result is observed, not chosen post-hoc); Ries, *The Lean Startup*, 2011 (pivot-or-persevere — the cap-reduction trigger)."
-replay_windows_days: [90, 180]
+  Shipping a portable test driver (`distribution/test-supervisor.sh`) plus
+  two CI matrix jobs (`linux-supervisor-integration` /
+  `macos-supervisor-integration`) wired into the `ci` aggregator gate
+  closes the "Integration test (deferred)" clause in
+  `distribution/README.md` by exercising rows 1–4 of the failure-mode
+  table empirically against real systemd / launchd primitives, rather
+  than by inspection. The driver renders the templates with `envsubst`,
+  drops them into the user-level supervisor, SIGKILLs `minsky-tick-loop`,
+  and asserts respawn within 10 s; cleanup is unconditional. If the
+  Linux user-systemd plumbing in GH-hosted Ubuntu runners is unworkable
+  (no user-bus reachable even under `dbus-run-session`), the driver
+  exits 77 and the gate accepts the skip; the `linux-supervisor-integration`
+  job consistently landing as `failure` (not `success` / `skipped`)
+  triggers the documented Pivot to a self-hosted runner.
+success: "All five artefacts ship in this PR — `distribution/test-supervisor.sh` (executable), `linux-supervisor-integration` job, `macos-supervisor-integration` job, both wired into the `ci` aggregator's `needs:`, and the row in `vision.md` § Pattern conformance index — AND `distribution/lint-units.sh` continues to pass on every PR. The driver's row-1 assertion (SIGKILL respawn within 10 s) is what the merged jobs verify on every PR."
+pivot: "If `linux-supervisor-integration` lands as `failure` (not `success` / `skipped`) on this PR or on the next 2 PRs, set the Linux job to `if: false`, file `supervisor-integration-self-hosted-runner` (already in TASKS.md as a dormant scout entry), and rely on `distribution/lint-units.sh` plus the macOS integration job alone until the self-hosted runner ships. The escape clause is committed in `distribution/README.md` § Integration test so the Pivot is operational, not aspirational."
+measurement: "test -x distribution/test-supervisor.sh && grep -q 'linux-supervisor-integration:' .github/workflows/ci.yml && grep -q 'macos-supervisor-integration:' .github/workflows/ci.yml && grep -q 'linux-supervisor-integration' .github/workflows/ci.yml && bash distribution/lint-units.sh >/dev/null"
+anchor: "Forsgren, Humble, Kim, *Accelerate*, 2018 (test reliability as a DORA prerequisite — a CI gate that doesn't run reliably teaches the team to ignore failure); Armstrong, *Programming Erlang*, 2007 (OTP supervision tree — the pattern under empirical test); Basiri et al., \"Principles of Chaos Engineering\", *IEEE Software*, 2016 (controlled-fault chaos test methodology); rule #7 (failure-mode discipline)."
+replay_windows_days: [7, 30]
