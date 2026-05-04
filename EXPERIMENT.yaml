@@ -1,43 +1,62 @@
-id: readme-global-install-claim-fix-2026-05-04
+id: setup-doctor-ntfy-check-2026-05-04
 hypothesis: |
-  The current README's "What this is *not*" section + Quickstart frames
-  Minsky as if `./setup.sh` installs a `minsky` binary on `PATH` (the
-  reasonable expectation a first-time user has from "install"). It does
-  not — `setup.sh` installs three globals (`tasks`, `tasks-lint`,
-  `tasks-mcp` from the tasks.md toolchain) and bootstraps
-  `.minsky/state.json` repo-locally. A first-time-install user surfaced
-  the gap on 2026-05-04 by typing `minsky --version` after `./setup.sh`
-  and getting `command not found` — reasonably concluding the install
-  failed. Adding one bullet to "What this is *not*" — "Not a global CLI.
-  Minsky is a **repo-rooted stack**, not a single binary on your PATH" —
-  closes the expectation gap without any code change. The fix is purely
-  the framing of "install": signifier (Norman 1988) → affordance
-  (the actual repo-rooted stack).
+  `./setup.sh --doctor` checks `git`, `node`, `npx`, `claude`, `jq` — but
+  not `curl` and not `ntfy`, even though `setup.sh` seeds `ntfy.topic`
+  into `.minsky/state.json` on first install and `@minsky/notifier`'s
+  `NtfyNotifier` shells out to either `curl` (HTTP POST to
+  `https://ntfy.sh/<topic>`) or the `ntfy` CLI to deliver the
+  budget-paused push (P1 `daemon-budget-pause-observability`). A
+  first-time operator with neither tool on PATH gets a silent failure:
+  `--doctor` prints GREEN, then the daemon's exactly-once notify hook
+  lands a no-op the first time the budget gets paused.
+
+  Adding two `command -v` lines to the `--doctor` block (and matching
+  warnings in the install-mode prereqs) closes the silent-failure path.
+  Both fall back to YELLOW (graceful-degrade) — neither tool is
+  critical, since the channel is opt-in via `MINSKY_NTFY_TOPIC`. The
+  fix is purely additive: callers with both tools see two new ✓ lines;
+  callers with neither see two new ⚠ lines and the existing YELLOW
+  bucket; nobody sees a behavioural regression.
 success: |
-  - `grep -E "(repo-rooted stack|not a global CLI)" README.md` exits 0
-    with at least one match (the disambiguation bullet).
-  - `command -v tasks` AND `command -v tasks-lint` AND
-    `command -v tasks-mcp` all exit 0 (the three globals `setup.sh`
-    actually installs — the bullet's claim is true).
-  - `./setup.sh --doctor` still exits 0 GREEN (the docs change doesn't
-    break the self-test).
+  - `./setup.sh --doctor 2>&1 | grep -E "(curl|ntfy)" | wc -l` ≥ 2 on
+    any host (the two new lines are present).
+  - `./setup.sh --doctor` exits 0 GREEN on a host with `curl` AND
+    `ntfy` AND all existing GREEN deps; exits 0 YELLOW on a host with
+    `curl` but without `ntfy` (the surfaced-by case — fresh install on
+    macOS without `brew install ntfy`).
+  - `pnpm typecheck` exits 0 (no TS regressions; this PR is shell-only
+    + docs).
+  - `pnpm vitest run --reporter=json | jq -e '.numFailedTests == 0'`
+    exits 0 (no test regressions).
 pivot: |
-  If the disambiguation bullet gets reverted in a future docs-rewrite
-  (it's short enough to lose in a wholesale rewrite), promote the
-  disambiguation to a deterministic CI lint that fails when README.md
-  adds the literal token "install minsky globally" without an adjacent
-  "not a global CLI" paragraph (≤30 LoC linter — a one-time docs gate
-  is cheaper than a recurring expectation gap).
+  Two pivot paths pre-registered:
+    1. If curl proves to be universally present on every supported
+       host AND `ntfy` CLI is never the fallback we actually invoke
+       (curl-only is sufficient for ntfy.sh's HTTP API), drop the
+       `ntfy` check and only verify `curl`. The `ntfy` CLI check is a
+       YAGNI candidate per Beck *Extreme Programming Explained* 1999
+       once the empirical data shows curl-only is complete.
+    2. If a future `NtfyNotifier` revision drops the curl shell-out
+       in favour of `node:fetch` (no external dep), retire BOTH
+       checks. The `--doctor` surface tracks the actual fault axis,
+       not historical artefacts (Beyer SRE 2016 ch. 6 — health checks
+       must cover the real failure surface, not the convenient one).
 measurement: |
-  grep -qE "(repo-rooted stack|not a global CLI)" README.md
+  node -e 'const o=require("child_process").execSync("./setup.sh --doctor 2>&1").toString(); require("assert").ok(/curl/.test(o) && /ntfy/.test(o), "doctor output must mention both curl and ntfy");'
 anchor: |
+  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site
+  Reliability Engineering*, O'Reilly, 2016, Ch. 6 ("Monitoring
+  Distributed Systems" — health checks must cover the actual fault
+  axes, not just the convenient ones; a silent push-failure is the
+  exact gap this rule warns about).
+  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
+  (let-it-crash discipline only works when the failure surfaces;
+  silent push-channel failure is the opposite of let-it-crash —
+  --doctor must make the dependency visible).
   Norman, D. A., *The Design of Everyday Things*, Basic Books, 1988
-  (signifiers — the README is the affordance; "install" is a strong
-  signifier of a CLI binary, so the docs need to disambiguate when
-  there isn't one).
-  Rule #1 (vision.md § 1 — don't reinvent the wheel; we don't ship a
-  CLI, so the docs shouldn't claim one).
-  Surfaced-by: 2026-05-04 fresh install — operator typed
-  `minsky --version` after `./setup.sh`, got `command not found`,
-  reasonably concluded the install failed.
+  (signifiers — `--doctor`'s output is the affordance; an unchecked
+  dependency teaches the operator the channel is wired when it isn't).
+  Surfaced-by: 2026-05-04 fresh install — operator ran
+  `./setup.sh --doctor` GREEN, then noticed `ntfy` not on PATH and
+  state.json's ntfy.topic was seeded but unverified end-to-end.
 timeout_seconds: 30
