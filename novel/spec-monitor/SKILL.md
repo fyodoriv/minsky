@@ -22,14 +22,14 @@ Rules #1–#10 each ship at least one deterministic CI lint:
 | #6 let-it-crash | `scripts/check-rule-6-let-it-crash.mjs` |
 | #7 chaos coverage | `scripts/check-rule-7-chaos-coverage.mjs` |
 | #8 pattern conformance index | `scripts/check-pattern-index.mjs` |
-| #9 pre-registration shape + vanity-metric phrase list + self-grade + pivot-vs-success margin + measurement-inspects-output | `scripts/check-pr-self-grade.mjs` + `@minsky/experiment-record` parse-time validation + `scripts/check-pivot-success-margin.mjs` + `scripts/check-measurement-inspects-output.mjs` |
+| #9 pre-registration shape + vanity-metric phrase list + self-grade + pivot-vs-success margin + measurement-inspects-output + anchor-primary-source | `scripts/check-pr-self-grade.mjs` + `@minsky/experiment-record` parse-time validation + `scripts/check-pivot-success-margin.mjs` + `scripts/check-measurement-inspects-output.mjs` + `scripts/check-anchor-primary-source.mjs` |
 | #10 (meta) | the existence of the linters above is rule #10's evidence |
 
 Together those gates catch ~90 % of constitutional-rule violations mechanically. The residual ≤10 % — the prose-quality of a hypothesis, the *meaning* of a pattern-conformance level, the smell-test of a pivot threshold — is what this Skill addresses, advisorially.
 
-## Residual judgement scope (≤5 advisory rules — hard cap; currently 3 active)
+## Residual judgement scope (≤5 advisory rules — hard cap; currently 2 active)
 
-Adding a sixth rule requires either retiring one or shipping a deterministic linter for the new concern. This cap is the rule-#10 ratchet applied to this Skill. Retired rules (currently: A2 → `scripts/check-pivot-success-margin.mjs`; A4 → `scripts/check-measurement-inspects-output.mjs`) do not consume scope-cap budget; their slots are kept as tombstones so historical advisory entries that name "A2" / "A4" remain readable.
+Adding a sixth rule requires either retiring one or shipping a deterministic linter for the new concern. This cap is the rule-#10 ratchet applied to this Skill. Retired rules (currently: A2 → `scripts/check-pivot-success-margin.mjs`; A3 → `scripts/check-anchor-primary-source.mjs`; A4 → `scripts/check-measurement-inspects-output.mjs`) do not consume scope-cap budget; their slots are kept as tombstones so historical advisory entries that name "A2" / "A3" / "A4" remain readable.
 
 ### A1. Hypothesis vagueness
 
@@ -54,22 +54,11 @@ The pivot-vs-success zero-margin check used to live here as an advisory rule. Pe
 
 The slot is left as a tombstone (rather than renumbering A3–A5) so that historical references to "A2" in `spec-advisories/*.md` keep their meaning. The slot's heading shape (`### A2 (retired …)`, no period after the digit) is intentionally NOT one that `scripts/check-skill-rule-cap.mjs`'s regex (`/^###[ \t]+A\d+\.\s/`) counts — retired rules do not consume scope-cap budget.
 
-### A3. Anchor citation is not a primary source
+### A3 (retired — see ci-lint-anchor-primary-source)
 
-The deterministic linter checks `anchor.length >= 5`. It does NOT verify that the citation points to a peer-reviewed paper, a recognised textbook, or an established standards document, as required by rule #5 / rule #8 ("named, decades-tested pattern"). Blog posts and wikis decay; the constitution is supposed to outlive any single source.
+The anchor-primary-source check was promoted to a deterministic CI lint at `scripts/check-anchor-primary-source.mjs` per the rule-#10 ratchet (PR `ci-lint-anchor-primary-source`). The lint reads `anchor` from `EXPERIMENT.yaml` via the `@minsky/experiment-record` parser and runs an allowlist + deny-list classifier: deny-list of non-primary tokens (`medium.com`, `*.substack.com`, `wikipedia.org`, `twitter.com`, `x.com`, `reddit.com`, `stackoverflow.com`, `chatgpt.com`, `claude.ai`, "ChatGPT said", "tweet by", "blog post") fails when matched without an allowlist token; allowlist of primary-source patterns (italicised title `*…*`, `Ch. <n>`, `pp. <n>`, ISBN, DOI, `<VENUE> <YEAR>`, internal cross-ref `vision.md §` / `rule #<n>` / `spec-advisories/<date>.md`) wins on conflicts. Three-way verdict — pass / fail / advisory-warn (short prose without signal). Opt-out: a top-level YAML comment line `# rule: ci-lint-anchor-primary-source: skip <reason ≥3 chars>`. Promotion decision recorded in `spec-advisories/2026-05-03-quarterly-audit.md`.
 
-**Examples to flag:**
-
-- "<https://medium.com/some-blog/post>"
-- "Wikipedia: Watchdog timer"
-- "a tweet by …"
-- "ChatGPT said …"
-
-**Not to flag:**
-
-- "Beyer et al., *Site Reliability Engineering*, 2016, Ch. 3"
-- "Munafò et al., *Nature Human Behaviour* 1, 0021, 2017"
-- "rule #9 (vision.md § 9)"  — internal cross-references to constitutional rules are valid because the rules themselves carry primary citations
+The slot is left as a tombstone (rather than renumbering) so historical references to "A3" in `spec-advisories/*.md` keep their meaning. The slot's heading shape (`### A3 (retired …)`, no period after the digit) is intentionally NOT one that `scripts/check-skill-rule-cap.mjs`'s regex (`/^###[ \t]+A\d+\.\s/`) counts.
 
 ### A4 (retired — see ci-lint-measurement-inspects-output)
 
@@ -102,9 +91,9 @@ Append a markdown block to `spec-advisories/<YYYY-MM-DD>.md` (create the file if
 | A3 | Anchor cites a Medium post | high | Replace with a peer-reviewed or textbook source per rule #5 / #8. |
 ```
 
-`rule_id` ∈ {A1, A3, A5} (A2 and A4 are retired — emit no advisories for them; the deterministic CI lints `pivot-success-margin` and `measurement-inspects-output` are now the authority); `severity` ∈ {low, medium, high}. The Skill never claims authority — every line ends with "consider", "suggest", or "review" framing. The advisory file is human-readable; the orchestrator may surface it in a PR comment but must NOT auto-block a merge on its contents.
+`rule_id` ∈ {A1, A5} (A2, A3, and A4 are retired — emit no advisories for them; the deterministic CI lints `pivot-success-margin`, `anchor-primary-source`, and `measurement-inspects-output` are now the authority); `severity` ∈ {low, medium, high}. The Skill never claims authority — every line ends with "consider", "suggest", or "review" framing. The advisory file is human-readable; the orchestrator may surface it in a PR comment but must NOT auto-block a merge on its contents.
 
-A2 was retired in PR `ci-lint-pivot-success-margin` (deterministic gate: `scripts/check-pivot-success-margin.mjs`); A4 was retired in PR `ci-lint-measurement-inspects-output` (deterministic gate: `scripts/check-measurement-inspects-output.mjs`). Both slots are reserved (do not reuse for unrelated rules) so historical advisory entries that name "A2" / "A4" remain readable.
+A2 was retired in PR `ci-lint-pivot-success-margin` (deterministic gate: `scripts/check-pivot-success-margin.mjs`); A3 was retired in PR `ci-lint-anchor-primary-source` (deterministic gate: `scripts/check-anchor-primary-source.mjs`); A4 was retired in PR `ci-lint-measurement-inspects-output` (deterministic gate: `scripts/check-measurement-inspects-output.mjs`). All three slots are reserved (do not reuse for unrelated rules) so historical advisory entries that name "A2" / "A3" / "A4" remain readable.
 
 ## What this Skill does NOT do
 
@@ -119,20 +108,21 @@ The deterministic linters already cover, and this Skill is silent on, the follow
 - **Missing `## Failure modes` table per rule #7** — caught by `scripts/check-rule-7-chaos-coverage.mjs`.
 - **Retired-glossary terms** (`CTO loop`, `TPM`, `constitutional review`) — caught by `scripts/check-rule-5-glossary-discipline.mjs`.
 - **Pivot threshold equals success threshold (zero numeric margin) or binary-equal prose** — caught by `scripts/check-pivot-success-margin.mjs` (was advisory rule A2; promoted per rule-#10 ratchet, 2026-05-03 quarterly audit).
+- **Anchor citation is not a primary source** (deny-list of `medium.com` / `*.substack.com` / `wikipedia.org` / `twitter.com` / `x.com` / `reddit.com` / `stackoverflow.com` / `chatgpt.com` / `claude.ai` / "ChatGPT said" / "tweet by" / "blog post"; allowlist of italicised title / `Ch. <n>` / `pp. <n>` / DOI / ISBN / `<VENUE> <YEAR>` / `rule #<n>` / `vision.md §` / `spec-advisories/<date>.md`) — caught by `scripts/check-anchor-primary-source.mjs` (was advisory rule A3; promoted per rule-#10 ratchet, 2026-05-03 quarterly audit).
 - **Measurement command runs but doesn't actually inspect output** — caught by `scripts/check-measurement-inspects-output.mjs` (was advisory rule A4; promoted per rule-#10 ratchet, 2026-05-03 quarterly audit).
 
-If a new violation class is identified that *doesn't* fit any of the deterministic linters above and isn't one of A1, A3, A5, the response per rule #10's ratchet is: **write the deterministic linter, not a sixth advisory rule**.
+If a new violation class is identified that *doesn't* fit any of the deterministic linters above and isn't one of A1, A5, the response per rule #10's ratchet is: **write the deterministic linter, not a sixth advisory rule**.
 
 ## Fixtures
 
-- `test/judgement-only/` — fixtures that exercise the active advisory rules (A1, A3, A5). The Skill should produce ≥1 advisory entry per fixture.
-- `test/deterministic-overlap/` — fixtures that violate a *deterministic* rule (e.g., the experiment-record parser would already reject them, OR `scripts/check-pivot-success-margin.mjs` already catches a zero-margin pivot, OR `scripts/check-measurement-inspects-output.mjs` already catches an uninspected-output measurement). The Skill should be silent — the deterministic linter is the authority, not this Skill.
+- `test/judgement-only/` — fixtures that exercise the active advisory rules (A1, A5). The Skill should produce ≥1 advisory entry per fixture.
+- `test/deterministic-overlap/` — fixtures that violate a *deterministic* rule (e.g., the experiment-record parser would already reject them, OR `scripts/check-pivot-success-margin.mjs` already catches a zero-margin pivot, OR `scripts/check-anchor-primary-source.mjs` already catches a non-primary anchor, OR `scripts/check-measurement-inspects-output.mjs` already catches an uninspected-output measurement). The Skill should be silent — the deterministic linter is the authority, not this Skill.
 
 ## Hard cap on scope
 
-≤5 advisory rules. The active count is currently 3 (A2 + A4 retired, see above). Adding a sixth requires either:
+≤5 advisory rules. The active count is currently 2 (A2 + A3 + A4 retired, see above). Adding a sixth requires either:
 
-1. Retiring one of A1, A3, A5 because the residual judgement-scope it claimed turned out empty, OR
+1. Retiring one of A1, A5 because the residual judgement-scope it claimed turned out empty, OR
 2. Shipping a deterministic linter for the new concern in the same PR (rule #10 ratchet).
 
 Drift above 5 is itself a constitutional-violation against rule #10 and should be flagged by reviewers.
