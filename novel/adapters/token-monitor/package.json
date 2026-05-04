@@ -2,7 +2,7 @@
   "name": "@minsky/token-monitor",
   "version": "0.0.0",
   "private": true,
-  "description": "TokenMonitor adapter — interface (Adapter pattern, Gamma 1994) over Claude token-usage trackers.",
+  "description": "TokenMonitor adapter — interface (Adapter pattern, Gamma 1994) + MaciekTokenMonitor Strategy reading ~/.claude/projects/<cwd>/<session>.jsonl.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
