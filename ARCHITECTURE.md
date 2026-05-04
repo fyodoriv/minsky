@@ -302,6 +302,16 @@ Steps:
 
 Pin major versions of all dependencies. Test integration on every dep update. The bridges layer (especially `omc-tasksmd-bridge`) absorbs breaking changes upstream so business logic doesn't see them.
 
+Currently pinned (index — pins live in `package.json` / `.github/workflows/*.yml`; this list is the *index*, not a duplicate state):
+
+- `@tasks-md/lint@^0.7.0` — `.github/workflows/ci.yml:39` (per PR #44)
+- `markdownlint-cli2@0.15.0` — `.github/workflows/ci.yml:27` + `package.json:29` (per PR #44)
+- `lighthouse@12.4.0` — `.github/workflows/lighthouse.yml:108` (per PR #66)
+- `@anthropic-ai/sdk@^0.92.0` — `novel/adapters/prompt-optimizer/package.json` (per PR #55)
+- `@opentelemetry/core@^1.30.0` — `novel/adapters/observability/package.json` (per PR #62)
+- `@biomejs/biome@1.9.4`, `typescript@5.7.2`, `vitest@2.1.9`, `lefthook@1.10.10`, `@vitest/coverage-v8@2.1.9`, `@types/node@25.6.0` — `package.json` devDependencies
+- `pnpm@9.12.0` — `packageManager` field, `package.json`
+
 Quarterly review (recorded in `research.md`):
 
 - For each dep: is there a better replacement now?
@@ -317,12 +327,12 @@ Replacement procedure:
 
 ## Open questions to resolve before implementation
 
-These don't block writing `vision.md` and `ARCHITECTURE.md`, but they do block writing code. They go into `TASKS.md` as P1 research tasks.
+These don't block writing `vision.md` and `ARCHITECTURE.md`, but they do block writing code. They go into `TASKS.md` as P1 research tasks. *Items struck through have been resolved by subsequent PRs — kept here as historical anchors per `AGENTS.md` § "Documentation rules".*
 
-1. **OMC handoff persistence** — does OMC's "shared task list" persist to disk in a parseable format, or only in process memory? Determines the complexity of `omc-tasksmd-bridge`.
-2. **Apple Watch surface** — does Shortcut + ntfy suffice, or do we eventually need a real WatchOS app? Defer; start with Shortcuts and measure dwell time (success metric #6).
-3. **MAPE-K loop cadence** — every Nth scheduler iteration? Time-based (every 6h)? Event-triggered (when error budget below X)? Probably all three with priority. Test in production.
-4. **Multi-machine** — initial scope is single-developer-machine. Multi-machine / team scope deferred to v1+.
+1. ~~**OMC handoff persistence** — does OMC's "shared task list" persist to disk in a parseable format, or only in process memory? Determines the complexity of `omc-tasksmd-bridge`.~~ **Resolved**: PRs #75/#77 — parseable on-disk persistence confirmed; `scripts/omc-roundtrip.mjs` enforces round-trip; see `research.md` § "OMC handoff persistence".
+2. ~~**Apple Watch surface** — does Shortcut + ntfy suffice, or do we eventually need a real WatchOS app? Defer; start with Shortcuts and measure dwell time (success metric #6).~~ **Resolved**: PR #54 — native WatchOS app evaluated, deferred behind 90 s/day wrist-dwell trigger sustained 14 d; see `research.md` § "Native WatchOS app".
+3. ~~**MAPE-K loop cadence** — every Nth scheduler iteration? Time-based (every 6h)? Event-triggered (when error budget below X)? Probably all three with priority. Test in production.~~ **Resolved**: PRs #59 + #70 — cadence-lint quartet (5.7% token-budget cap, tick-loop backoff, MAPE-K backstop/watchdog, cadence-pivot) enforces deterministic prose-anchored CI lints; see `ARCHITECTURE.md` § "MAPE-K cadence" + vision.md row 59.
+4. ~~**Multi-machine** — initial scope is single-developer-machine. Multi-machine / team scope deferred to v1+.~~ **Resolved**: PR #45 — multi-machine scope deltas documented; see `research.md` § "Multi-machine scope".
 5. **OMC version pinning strategy** — strict patch pin (v4.13.4 exactly) vs minor-floating (v4.13.x)? Recommend minor-floating with integration test gate, but verify their semver discipline first.
 6. **OTEL backend choice** — *Resolved 2026-05-03* (see `research.md` § "Lighter OTEL backend"): OpenObserve for v0 (single binary, smallest disk footprint, satisfies all three query-shape constraints); VictoriaMetrics triad as runner-up. The previously-considered Loki/Tempo/Prometheus/Grafana stack is heavier than necessary for a single-dev setup.
 
