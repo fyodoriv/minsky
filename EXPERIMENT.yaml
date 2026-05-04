@@ -1,58 +1,51 @@
-id: observability-backend-deploy-2026-05-04
+id: watch-control-endpoint-2026-05-03
 hypothesis: |
-  Shipping `distribution/install-openobserve.sh` (pinned at OpenObserve
-  v0.80.1, downloads the upstream binary into `${HOME}/.local/bin/`) +
-  per-platform unit-file templates (`distribution/openobserve/{plist,
-  service}`) + the `OtelObservability.endpoint` opt + the read-only
-  `OpenObserveStrategy` (`fetchOpenObserveSnapshot` /
-  `queryOpenObservePromql` / `parsePromqlInstantResponse` /
-  `openObserveGetValue` over the Prometheus instant-query API) +
-  `OBSERVABILITY_BACKEND=openobserve` wiring in `dashboard-web/start.ts`
-  unblocks 5 of 10 vision.md success-criteria queries (rows 1, 2, 5, 6, 9
-  — uptime, tokens/story, MTTR, wrist-dwell, token-budget) so the
-  dashboard `/watch.json` route returns live values instead of `(stub)`.
-  Per `research.md` § "Lighter OTEL backend" (PR #43, 2026-05-03),
-  OpenObserve is the chosen v0 backend — single binary, parquet-on-disk,
-  PromQL-compatible read API, ~250-800 MB / month at v0 emission rates.
+  Adding a `POST /control` route to `@minsky/dashboard-web` with a pure
+  `parseControlBody` validator + a `setPaused: (v: boolean) => void`
+  Strategy seam (mirroring the existing `getPauseState` shape from PR
+  #68) closes the round-trip on the Apple-Shortcuts pause/resume pair
+  shipped by `watch-shortcuts` (PR #84): a `POST /control {paused:true}`
+  is observed in the next `GET /watch.json` body's `paused` field within
+  one HTTP round-trip. This closes the parent `watch-shortcuts` task's
+  verification cell ("Pause Shortcut writes a sentinel file the
+  supervisor honors within 1 scheduler iteration") on the dashboard
+  side; supervisor-side wiring (the *consumer* of the paused sentinel)
+  remains a follow-up. The `setPaused` Strategy is the seam (rule #2)
+  the supervisor will plug into in the next task — v0 ships an
+  in-memory pair (`createMemoryPauseState`) so tests + dev round-trip
+  end-to-end without any external state.
 success: |
-  - `bash -n distribution/install-openobserve.sh` exits 0 (syntax valid).
-  - `[ -x distribution/install-openobserve.sh ]` (executable bit set).
-  - The 18 dashboard-web Strategy tests + the 9 OTEL adapter tests pass
-    (≥6 dashboard-web Strategy tests + ≥3 endpoint-opt OTEL tests are
-    new; total 27 passing in the two relevant files).
-  - The dashboard's `/watch.json` route returns `OpenObserveStrategy`
-    results when `OBSERVABILITY_BACKEND=openobserve` env var is set
-    (verified by `start.ts`'s `resolveGetValue` returning the
-    `openObserveGetValue` Strategy on that env-var branch).
-  - The integration test `novel/adapters/observability/test/openobserve.integration.test.ts`
-    is properly skipped in CI (no `OPENOBSERVE_INTEGRATION=1` set).
-  - Concretely: `bash -n distribution/install-openobserve.sh && \
-    pnpm vitest run novel/dashboard-web/test/strategy.test.ts \
-      novel/adapters/observability/src/otel.test.ts \
-      --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
-    exits 0 (today: 27 passed, 0 failed).
+  - `pnpm typecheck` exits 0.
+  - `pnpm vitest run novel/dashboard-web/test/server.test.ts --reporter=json | jq -e '.numPassedTests >= 21 and .numFailedTests == 0'` exits 0 (today: 17 → 24, +7 new server-test cases for `POST /control`).
+  - `pnpm vitest run novel/dashboard-web/test/control.test.ts` adds ≥4 cases for the pure validator + memory-pair Strategy (today: 12).
+  - Round-trip: a `POST /control {paused:true}` against `createServer()` (default in-memory pair) is observed as `paused: true` in the next `GET /watch.json` body; the inverse round-trip (POST `{paused:false}` → `paused: false` on the next GET) is also asserted.
+  - 400 graceful-degrade on (a) missing body, (b) body without `paused`, (c) non-boolean `paused`, (d) non-JSON body — verified by call-counter assertions that `setPaused` is NEVER called on the malformed branch.
+  - `distribution/shortcuts/test/shortcuts-json.test.mjs` is tightened: post-control shortcuts must have `request_body` whose key-set is exactly `["paused"]` and whose `paused` value is a boolean (closing drift between Shortcut and server).
+  - The chaos table in `novel/dashboard-web/README.md` carries a new row 5 for "Malformed control payload" → `graceful-degrade` 400.
+  - The `watch-control-endpoint` task block is removed from TASKS.md in the same PR.
+  - Concretely: `pnpm typecheck && pnpm vitest run novel/dashboard-web/test/server.test.ts --reporter=json | jq -e '.numPassedTests >= 21 and .numFailedTests == 0'` exits 0.
 pivot: |
-  If OpenObserve's single-binary install proves unreliable on macOS
-  Sequoia (signing / sandbox policies refuse the binary) OR if the
-  upstream tarball naming changes such that `install-openobserve.sh`
-  cannot fetch a working binary for two consecutive quarterly reviews
-  (`review-q3-2026` etc.) → fall back to **VictoriaMetrics triad** per
-  `research.md` § "Lighter OTEL backend" (PR #43 — named runner-up).
-  Migration cost is low: MetricsQL is a near-superset of PromQL, so the
-  Strategy code requires only a base-URL + per-signal-endpoint swap;
-  the OTEL adapter requires a per-signal endpoint swap on the
-  `OtelObservability` constructor's `endpoint` opt. If both flake, ship
-  the bare OTLP collector + Honeycomb-compatible exporter and document
-  the cloud dependency in `research.md`.
+  If supervisor-side wiring (the *consumer* of the paused sentinel — a
+  file the tick loop honors) proves materially harder than the
+  dashboard-web side (>1d of integration work), retire `/control`
+  entirely and ship pause/resume as a launchctl-only operator action
+  documented in `distribution/launchd/README.md`. The Watch surface
+  stays read-only — the user-story 002 Acceptance is preserved by the
+  iPhone Shortcut still working at the OS level (`launchctl stop` /
+  `launchctl start` on the supervisor unit). The `setPaused` Strategy
+  seam is the migration boundary: the dashboard route + tests stay
+  intact; only the production wiring in `start.ts` flips from the
+  in-memory pair to a no-op + supervisor-managed unit-file flag.
 measurement: |
-  bash -n distribution/install-openobserve.sh \
-    && [ -x distribution/install-openobserve.sh ] \
+  pnpm install --no-frozen-lockfile \
     && pnpm typecheck \
     && pnpm vitest run \
-         novel/dashboard-web/test/strategy.test.ts \
-         novel/adapters/observability/src/otel.test.ts \
+         novel/dashboard-web/test/server.test.ts \
          --reporter=json \
-       | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' \
+       | jq -e '.numPassedTests >= 21 and .numFailedTests == 0' \
+    && pnpm vitest run novel/dashboard-web/test/control.test.ts \
+    && pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs \
+    && pnpm test \
     && pnpm lint \
     && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
     && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
@@ -62,27 +55,20 @@ measurement: |
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  research.md § "Lighter OTEL backend" (PR #43, 2026-05-03) — the v0
-  backend selection, OpenObserve chosen over VictoriaMetrics + the
-  SQLite-bespoke option; OpenTelemetry specification, CNCF (2020+) — the
-  OTLP HTTP receiver contract OpenObserve implements (three-signal
-  traces / metrics / logs); Prometheus HTTP API (Prometheus 2.x docs) —
-  the read-side query contract OpenObserve mirrors (`status`,
-  `data.resultType` ∈ `{scalar, vector, matrix}`, `data.result[].value =
-  [ts, "value"]`); Armstrong, J., *Programming Erlang*, Pragmatic
-  Bookshelf, 2007 — OTP supervision: the OpenObserve daemon is
-  "permanent" restart, mirroring `minsky-budget-guard.service`'s policy;
-  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
-  1994 — Adapter / Strategy: `OpenObserveStrategy` is one implementation
-  behind the `GetValue` seam shipped by `dashboard-web-otel-wiring`;
-  rule #2 (every dep behind interface), rule #4 (every measurement
-  queryable — the PromQL endpoint is the queryability surface), rule #7
-  (graceful-degrade on backend down: `OpenObserveStrategy` returns
-  `null` → `(stub)`), rule #9 (pre-registered pivot to VictoriaMetrics),
-  rule #10 (deterministic enforcement — install-script shape verified by
-  `bash -n` + executable-bit check, no actual install runs in CI);
-  Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 —
-  pre-registration (the pivot to VictoriaMetrics is committed *before*
-  OpenObserve's install reliability is observed in the field, so a
-  failure cannot be retroactively explained away as the chosen backend).
+  Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly,
+  2016 — Ch. 17 (operator escape hatch / kill switch: a pause-able loop
+  is a load-bearing safety property of any autonomous system, especially
+  one that mutates a code repository); Gamma, Helm, Johnson, Vlissides,
+  *Design Patterns*, Addison-Wesley, 1994 — Strategy: the `setPaused`
+  Strategy is the writer half of the pause seam, mirroring the existing
+  `getPauseState` (reader) shape — a single in-memory cell backs both in
+  v0 (`createMemoryPauseState`); rule #2 (every dep behind interface —
+  `setPaused` is the supervisor seam, not a hard import); rule #7
+  (chaos engineering — malformed payload is the upstream fault axis;
+  `parseControlBody` returns a discriminated `{ok:false, error}` and the
+  route maps it to a 400, never crashing); Munafò et al., *Nature Human
+  Behaviour* 1, 0021, 2017 — pre-registration (the pivot to a
+  launchctl-only operator action is committed *before* supervisor-side
+  wiring is observed in the field, so a failure cannot be retroactively
+  explained away as the chosen mechanism).
 replay_windows_days: [90]

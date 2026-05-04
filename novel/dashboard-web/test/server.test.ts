@@ -163,3 +163,101 @@ describe("createServer — GET /watch.json (Apple-Shortcuts surface)", () => {
     expect(body.paused).toBe(true);
   });
 });
+
+describe("createServer — POST /control (pause/resume Shortcut endpoint)", () => {
+  function postControl(
+    fetch: ReturnType<typeof createServer>["fetch"],
+    body: unknown,
+  ): Promise<Response> {
+    const init: RequestInit =
+      body === undefined
+        ? { method: "POST" }
+        : {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: typeof body === "string" ? body : JSON.stringify(body),
+          };
+    return fetch(new Request("http://test.local/control", init)) as Promise<Response>;
+  }
+
+  it("POST /control {paused:true} → 200 {ok:true, paused:true} and Strategy is called once with true", async () => {
+    const calls: boolean[] = [];
+    const setPaused = (v: boolean) => calls.push(v);
+    const { fetch } = createServer({ setPaused });
+    const res = await postControl(fetch, { paused: true });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ ok: true, paused: true });
+    expect(calls).toEqual([true]);
+  });
+
+  it("POST /control {paused:false} → 200 {ok:true, paused:false} and Strategy is called once with false", async () => {
+    const calls: boolean[] = [];
+    const setPaused = (v: boolean) => calls.push(v);
+    const { fetch } = createServer({ setPaused });
+    const res = await postControl(fetch, { paused: false });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, paused: false });
+    expect(calls).toEqual([false]);
+  });
+
+  it("round-trip: POST /control {paused:true} mutates the next GET /watch.json `paused` field (default in-memory pair)", async () => {
+    const { fetch } = createServer();
+    const before = (await (
+      await fetch(new Request("http://test.local/watch.json"))
+    ).json()) as Record<string, unknown>;
+    expect(before.paused).toBe(false);
+    const post = await postControl(fetch, { paused: true });
+    expect(post.status).toBe(200);
+    const after = (await (
+      await fetch(new Request("http://test.local/watch.json"))
+    ).json()) as Record<string, unknown>;
+    expect(after.paused).toBe(true);
+    // And the inverse: a second POST flips back.
+    await postControl(fetch, { paused: false });
+    const last = (await (
+      await fetch(new Request("http://test.local/watch.json"))
+    ).json()) as Record<string, unknown>;
+    expect(last.paused).toBe(false);
+  });
+
+  it("400 on missing body (no JSON payload)", async () => {
+    const calls: boolean[] = [];
+    const setPaused = (v: boolean) => calls.push(v);
+    const { fetch } = createServer({ setPaused });
+    const res = await postControl(fetch, undefined);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "missing body" });
+    expect(calls).toEqual([]);
+  });
+
+  it("400 on body without `paused` key", async () => {
+    const calls: boolean[] = [];
+    const setPaused = (v: boolean) => calls.push(v);
+    const { fetch } = createServer({ setPaused });
+    const res = await postControl(fetch, { other: true });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "missing paused field" });
+    expect(calls).toEqual([]);
+  });
+
+  it("400 on non-boolean `paused`", async () => {
+    const calls: boolean[] = [];
+    const setPaused = (v: boolean) => calls.push(v);
+    const { fetch } = createServer({ setPaused });
+    const res = await postControl(fetch, { paused: "true" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "paused must be boolean" });
+    expect(calls).toEqual([]);
+  });
+
+  it("400 on malformed JSON body (graceful-degrade per rule #7)", async () => {
+    const calls: boolean[] = [];
+    const setPaused = (v: boolean) => calls.push(v);
+    const { fetch } = createServer({ setPaused });
+    const res = await postControl(fetch, "{not-json");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "missing body" });
+    expect(calls).toEqual([]);
+  });
+});
