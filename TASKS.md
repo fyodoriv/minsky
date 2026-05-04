@@ -13,21 +13,6 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `tick-loop-daemon-spawn-strategy` — introduce SpawnStrategy interface + DryRun + Process Strategies (sub-task 1/3 of real-spawn)
-  - **ID**: tick-loop-daemon-spawn-strategy
-  - **Parent**: tick-loop-daemon-real-spawn
-  - **Tags**: novel, runtime, supervision
-  - **Estimate**: 1d
-  - **Hypothesis**: Introducing a `SpawnStrategy` interface (rule #2 adapter pattern — Wirfs-Brock & McKean 2003) with two v0 implementations (`DryRunSpawnStrategy` mirroring v0's synthetic dry-run output; `ProcessSpawnStrategy` wrapping `node:child_process.spawn` with bounded stdout/stderr tails + AbortSignal) decouples the daemon from `child_process` and gives sub-tasks 2/3 a clean dispatch boundary. Production stays defaulted to dry-run (no Strategy injected → legacy `tick(...)` path) so behaviour is unchanged.
-  - **Details**: 1) `novel/tick-loop/src/spawn-strategy.ts` — interface + both Strategies; the Process variant captures last 4KB tails and never throws on non-zero exit (let-it-crash AT the Strategy boundary, exitCode in result). 2) `novel/tick-loop/src/spawn-strategy.test.ts` — ≥4 cases (Stub: synthetic result; Process: spawn `node -e 'process.exit(0)'`, exit 7 propagates as result.exitCode, stdout/stderr capture, 4KB tail-cap). 3) Refactor `runDaemon` to accept `spawnStrategy?: SpawnStrategy`; when injected, dispatch via the Strategy (sub-task 2/3 use case). When not injected, the v0 `dryRun: false → throw` guard stands.
-  - **Files**: `novel/tick-loop/src/spawn-strategy.ts` (new), `novel/tick-loop/src/spawn-strategy.test.ts` (new), `novel/tick-loop/src/daemon.ts` (add `spawnStrategy?` opt + dispatch in `runClaimedIteration`), `vision.md` (annotate row 254 partial-real-spawn boundary), `EXPERIMENT.yaml` (sub-task block)
-  - **Verification**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` — the 13 daemon dry-run tests pass UNCHANGED + the 11 index tests + ≥4 new spawn-strategy tests.
-  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0.
-  - **Pivot**: if `node:child_process.spawn` proves unable to forward stdin without a TTY (deadlock), drop `ProcessSpawnStrategy` and pivot to a temp-file-based `claude --resume` chain — already pre-registered in the parent task's Pivot field.
-  - **Acceptance**: interface + both Strategies ship; ≥4 new tests pass; existing 13 dry-run tests pass UNCHANGED; production default = dry-run (vision row 254 stays `partial`).
-  - **Anchor**: rule #2 (vision.md § 2 — every dep behind interface); Wirfs-Brock & McKean, *Object Design*, 2003 (Strategy boundary); Armstrong 2007 (let-it-crash AT the right boundary — the Strategy returns failure shapes, never throws on subprocess exit).
-  - **Risk**: lowest of the three sub-tasks — the interface is dormant production-side until sub-task 3 flips the default.
-
 - [ ] `tick-loop-daemon-budget-guard-real` — wire real BudgetGuard.decide() into the daemon (sub-task 2/3 of real-spawn)
   - **ID**: tick-loop-daemon-budget-guard-real
   - **Parent**: tick-loop-daemon-real-spawn
