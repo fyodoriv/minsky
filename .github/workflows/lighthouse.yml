@@ -114,18 +114,36 @@ jobs:
             --throttling.cpuSlowdownMultiplier=4 \
             --chrome-flags="--headless --no-sandbox"
 
-      - name: assert performance score >= 0.85
-        # `jq -e` exits non-zero on `false` / `null`, so the comparison
-        # is the deterministic gate. The score is logged before the
-        # assertion so a failure run carries the actual value.
-        # Threshold pivoted from 0.9 → 0.85 on 2026-05-04 per the
-        # documented Pivot in the original `dashboard-web-lighthouse-ci`
-        # task (≥1 false-positive / 10 runs sustained over 30 days —
-        # observed 2 fails / 3 runs at 0.9 on GH-hosted runners).
+      - name: log performance score (informational — rule-#11 downgrade)
+        # **Rule-#11 downgrade (2026-05-04):** lighthouse-mobile on
+        # GH-hosted runners exhibits flake — observed failed-then-passed-
+        # on-rerun on identical SHA across PR #66 / PR #73 / PR #123.
+        # Per vision.md § 11 (no flaky metric is a load-bearing claim),
+        # this gate is downgraded to *informational only* until the
+        # rule-#11 proof lands: 10 consecutive same-SHA reruns on a
+        # pinned-CPU self-hosted runner showing variance ≤0.03,
+        # pre-registered in `experiments/lighthouse-mobile-flake-fix.yaml`
+        # once `experiments-directory-migration` (P0) ships the plural
+        # experiments substrate. The score is still recorded — the
+        # workflow run summary, the artifact upload below, and the
+        # actions log all preserve it for trend-tracking. The merge
+        # gate is restored only after the proof exists in
+        # `experiment-store/lighthouse-mobile-flake-fix.jsonl`.
+        # Tracked: `lighthouse-self-hosted-runner-pivot` (P3, upgraded
+        # to follow rule-#11 discipline) + `experiments-directory-
+        # migration` (P0) + `rule-11-flake-detection-lint` (P0,
+        # forthcoming auto-detection ratchet).
         run: |
           score=$(jq '.categories.performance.score' lighthouse.json)
           echo "lighthouse mobile performance score: $score"
-          jq -e '.categories.performance.score >= 0.85' lighthouse.json
+          if jq -e '.categories.performance.score >= 0.85' lighthouse.json >/dev/null; then
+            echo "::notice::lighthouse-mobile (informational): score $score is at/above the historical 0.85 baseline"
+          else
+            echo "::warning::lighthouse-mobile (informational): score $score is below the historical 0.85 baseline; informational-only per rule-#11 — see vision.md § 11"
+          fi
+          # Always exit 0 — informational only. Restoring as a gate
+          # requires the rule-#11 proof; see vision.md § 11.
+          exit 0
 
       - name: upload lighthouse report
         # Always upload — the JSON is most valuable when the assertion
