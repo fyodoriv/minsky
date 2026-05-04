@@ -22,7 +22,12 @@ export default defineConfig({
   },
   test: {
     globals: false,
-    include: ["novel/**/src/**/*.test.ts", "scripts/**/*.test.mjs", "user-stories/**/*.test.ts"],
+    include: [
+      "novel/**/src/**/*.test.ts",
+      "novel/**/test/**/*.test.ts",
+      "scripts/**/*.test.mjs",
+      "user-stories/**/*.test.ts",
+    ],
     coverage: {
       provider: "v8",
       all: true,
