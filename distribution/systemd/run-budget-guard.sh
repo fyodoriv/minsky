@@ -1,4 +1,5 @@
 #!/bin/bash
+# <!-- pattern: not-applicable — sleep-forever supervisor sentinel; the substantive Sidecar-pattern row is the supervisor topology itself (vision.md row 4) which already covers the supervisor unit-files; this stub is the runner the supervisor exec's. The architectural-evolution context is documented in the script body below. -->
 # Bash bootstrap for `minsky-budget-guard.service` (systemd) and the
 # `com.minsky.budget-guard` launchd LaunchAgent (macOS).
 #
