@@ -80,11 +80,17 @@ const ENGLISH_NOISE = new Set([
  * Split markdown into top-level sections keyed by `## …` heading.
  * Returns { [heading: string]: string } where the value is the body
  * (excluding the heading line itself).
+ *
+ * @param {string} md
+ * @returns {Record<string, string>}
  */
 function splitSections(md) {
+  /** @type {Record<string, string>} */
   const out = {};
   const lines = md.split("\n");
+  /** @type {string | null} */
   let current = null;
+  /** @type {string[]} */
   let buf = [];
   for (const line of lines) {
     if (line.startsWith("## ")) {
@@ -107,6 +113,9 @@ function splitSections(md) {
  *
  * Single all-lowercase words like `cost`, `main`, `null` fall through
  * (filtered separately via ENGLISH_NOISE).
+ *
+ * @param {string} token
+ * @returns {boolean}
  */
 function looksCoined(token) {
   if (token.length < 2) return false;
@@ -125,11 +134,15 @@ function looksCoined(token) {
  * Parse the allowlist file. Format: one term per line; blank lines and
  * `#`-prefixed comment lines ignored. Inline comments (`term  # why`) are
  * supported.
+ *
+ * @param {string} text
+ * @returns {Set<string>}
  */
 export function parseAllowlist(text) {
+  /** @type {Set<string>} */
   const out = new Set();
   for (const raw of text.split("\n")) {
-    const stripped = raw.split("#")[0].trim();
+    const stripped = (raw.split("#")[0] ?? "").trim();
     if (stripped.length === 0) continue;
     out.add(stripped);
   }
@@ -138,11 +151,17 @@ export function parseAllowlist(text) {
 
 /**
  * Harvest backticked coined-shape tokens from a single section body.
+ *
+ * @param {string} body
+ * @returns {Set<string>}
  */
 function harvestCandidates(body) {
+  /** @type {Set<string>} */
   const out = new Set();
   for (const match of body.matchAll(BACKTICK_TOKEN_RE)) {
-    const token = match[1].replace(/\/$/, "");
+    const captured = match[1];
+    if (captured === undefined) continue;
+    const token = captured.replace(/\/$/, "");
     if (token.length === 0) continue;
     if (ENGLISH_NOISE.has(token)) continue;
     if (!looksCoined(token)) continue;
@@ -160,12 +179,20 @@ function harvestCandidates(body) {
  * spirit ("every coined term resolves to published literature") is
  * satisfied via the index, not just the Glossary.
  */
+/**
+ * @param {string} line
+ * @returns {boolean}
+ */
 function isDataRow(line) {
   if (!line.trimStart().startsWith("|")) return false;
   if (line.includes("---")) return false;
   return true;
 }
 
+/**
+ * @param {string} line
+ * @returns {string[]}
+ */
 function parseRowCells(line) {
   return line
     .split("|")
@@ -173,22 +200,51 @@ function parseRowCells(line) {
     .map((c) => c.trim());
 }
 
+/**
+ * Try to extract the artifact-cell token set from one row. Returns an empty
+ * iterable when the row is not a valid numbered data row.
+ *
+ * @param {string} line
+ * @returns {string[]}
+ */
+function rowArtifactTokens(line) {
+  if (!isDataRow(line)) return [];
+  const cells = parseRowCells(line);
+  if (cells.length < 2) return [];
+  const first = cells[0];
+  const second = cells[1];
+  if (first === undefined || second === undefined) return [];
+  if (!/^\d+$/.test(first)) return [];
+  return second.match(TOKEN_RE) ?? [];
+}
+
+/**
+ * @param {string} body
+ * @returns {Set<string>}
+ */
 export function harvestPatternIndexTokens(body) {
+  /** @type {Set<string>} */
   const out = new Set();
   for (const line of body.split("\n")) {
-    if (!isDataRow(line)) continue;
-    const cells = parseRowCells(line);
-    if (cells.length < 2) continue;
-    if (!/^\d+$/.test(cells[0])) continue;
-    for (const token of cells[1].match(TOKEN_RE) ?? []) out.add(token);
+    for (const token of rowArtifactTokens(line)) out.add(token);
   }
   return out;
 }
 
 /**
+ * @typedef {object} GlossaryCheckResult
+ * @property {string[]} missing
+ * @property {string[]} candidates
+ * @property {boolean} glossarySectionMissing
+ */
+
+/**
  * Pure function: given vision.md text + allowlist, return missing /
  * candidates. `missing` is the sorted list of candidate terms that were
  * neither allowlisted nor resolved in the Glossary or Pattern index.
+ *
+ * @param {{ visionMd: string, allowlist: Set<string> }} input
+ * @returns {GlossaryCheckResult}
  */
 export function checkGlossaryDiscipline({ visionMd, allowlist }) {
   const sections = splitSections(visionMd);
@@ -201,6 +257,7 @@ export function checkGlossaryDiscipline({ visionMd, allowlist }) {
   const indexResolved =
     typeof indexBody === "string" ? harvestPatternIndexTokens(indexBody) : new Set();
 
+  /** @type {Set<string>} */
   const candidates = new Set();
   for (const [heading, body] of Object.entries(sections)) {
     if (heading === GLOSSARY_HEADER) continue;

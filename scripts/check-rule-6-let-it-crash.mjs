@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
 // Pattern: deterministic gate over a PR diff (rule #10) — TS-AST visitor.
 // Source: rule #6 (let-it-crash discipline); Armstrong, *Programming Erlang*,
 //   2007 ("let it crash"); Lampson 1983 hint "use exceptions only for

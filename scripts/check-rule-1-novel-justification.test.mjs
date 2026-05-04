@@ -29,7 +29,7 @@ describe("checkAdditions", () => {
       readReadme: () => null,
     });
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].pkg).toBe("foo");
+    expect(result.errors[0]?.pkg).toBe("foo");
   });
 
   it("passes when research.md has the package under the required heading", () => {
@@ -78,7 +78,7 @@ describe("checkAdditions", () => {
       readReadme: () => null,
     });
     expect(result.errors).toHaveLength(1);
-    expect(result.errors[0].pkg).toBe("foo");
+    expect(result.errors[0]?.pkg).toBe("foo");
   });
 
   it("requires the mention to live inside the named section, not just anywhere", () => {

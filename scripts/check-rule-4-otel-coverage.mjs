@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
 // Rule #4 ("everything measurable, everything visible") deterministic CI lint.
 //
 // For every newly-added or modified `novel/**/*.ts` file (non-test, non-fixture,

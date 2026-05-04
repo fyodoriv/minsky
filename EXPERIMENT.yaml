@@ -1,16 +1,17 @@
-id: ci-lint-pattern-index
+id: scripts-ts-check-migration
 hypothesis: |
-  A diff-based CI lint that fails when a PR adds a new top-level artefact
-  (under `novel/**`, root `*.md`, `setup.sh`, `distribution/**`, or
-  `.github/workflows/**`) without a corresponding row in `vision.md`
-  § "Pattern conformance index" mechanically prevents row-less merges.
-  Scope is narrow on purpose (test files, fixtures, node_modules excluded;
-  modifications grandfathered) so the false-positive rate stays ≤2 % —
-  same precedent as rule-1 / rule-3 / rule-4. Per-file opt-out is
-  `<!-- pattern: not-applicable — <reason> -->` (≥3-char reason) within
-  the first ~20 lines of the new file.
-success: "scripts/check-pattern-index.test.mjs exits 0 with ≥8 cases (we ship 19); the new CI job is wired into the `ci` gate's `needs:` and bash loop; this PR's own scripts/check-pattern-index.mjs is mentioned by vision.md row 34 so the gate doesn't trip on its own diff; pnpm typecheck && pnpm lint && pnpm test all exit 0"
-pivot: "if the gate produces ≥3 false positives in its first month from legitimate-but-unmentioned tooling artefacts, tighten path scope (drop `distribution/**` or `.github/workflows/**`) rather than widen the opt-out; if it fires on ≥30 % of PRs, the index format is too coarse — switch to machine-readable annotations in source files instead"
-measurement: "pnpm typecheck && pnpm vitest run scripts/check-pattern-index.test.mjs"
-anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); rule #8 (vision.md § 8 — pattern conformance); Beck, *Extreme Programming Explained*, 1999 (CI as constraint enforcer); Alexander et al., *A Pattern Language*, 1977 (pattern catalogue indexed by artefact)"
+  Adding `// @ts-check` + JSDoc types to each remaining `scripts/*.mjs`
+  rule-enforcer (rule-1, rule-2, rule-5, rule-7, pr-self-grade) brings
+  them under strict tsc enforcement (strict + noUncheckedIndexedAccess
+  + exactOptionalPropertyTypes), so that the linters that enforce the
+  constitutional rules are themselves type-checked at PR time. Once all
+  scripts pass, flipping `scripts/tsconfig.json` from `checkJs: false`
+  to `checkJs: true` and dropping the per-file `// @ts-check` directives
+  catches type errors at PR time across all 7 `.mjs` scripts uniformly,
+  hardening rule enforcement (rule #10 stability — "if rules checkers
+  aren't stable then rules aren't stable as well").
+success: "pnpm typecheck exits 0 with `checkJs: true` globally and zero `// @ts-check` directives across `scripts/*.mjs`; pnpm test exits 0 (231 tests pass); pnpm lint exits 0; npx @tasks-md/lint TASKS.md exits 0; `grep -c '// @ts-check' scripts/*.mjs` returns 0; `grep -c '\"checkJs\": true' scripts/tsconfig.json` returns 1"
+pivot: "if any one script genuinely cannot pass strict typing in <30 minutes of typing work (e.g., heavy reliance on dynamic shapes that fight noUncheckedIndexedAccess), file a follow-up `scripts-ts-check-${name}-revert` task and revert that script's `// @ts-check` directive only — leave the global `checkJs: true` flip in place. Don't lower the strictness floor, don't fall back to `@ts-ignore`."
+measurement: "pnpm typecheck && pnpm test && pnpm lint && grep -c '// @ts-check' scripts/*.mjs"
+anchor: "rule #10 (deterministic enforcement — the linters that enforce constitutional rules must themselves be type-checked, otherwise the rules they enforce are only as stable as the linter's runtime behaviour); Microsoft TypeScript handbook on `// @ts-check` (the canonical incremental-strictness pattern)"
 replay_windows_days: [7, 30]

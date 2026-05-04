@@ -43,10 +43,45 @@ const FIELD_RES = {
 const MIN_VALUE_LEN = 3;
 
 /**
+ * @typedef {{ ok: true } | { ok: false, errors: string[] }} CheckResult
+ */
+
+/**
+ * Check one named field's regex against the body. Returns null if OK,
+ * else a human-readable error string.
+ *
+ * @param {string} name
+ * @param {RegExp} re
+ * @param {string} body
+ * @returns {string | null}
+ */
+function checkField(name, re, body) {
+  const m = body.match(re);
+  if (!m) return `missing or malformed line: \`${name}: …\``;
+  // `Match` is an enum (yes / no / partial) — the regex already
+  // constrains the value, so the min-length check is N/A.
+  if (name === "Match") return null;
+  const captured = m[1];
+  if (captured === undefined) return `missing or malformed line: \`${name}: …\``;
+  const value = captured
+    .trim()
+    .replace(/^\*+|\*+$/g, "")
+    .trim();
+  if (value.length < MIN_VALUE_LEN) {
+    return `\`${name}:\` value is too short (≥${MIN_VALUE_LEN} chars required); got "${value}"`;
+  }
+  return null;
+}
+
+/**
  * Pure function: given a PR body (string), return either { ok: true }
  * or { ok: false, errors: string[] }. Errors are human-readable lines.
+ *
+ * @param {string} body
+ * @returns {CheckResult}
  */
 export function checkPrSelfGrade(body) {
+  /** @type {string[]} */
   const errors = [];
   if (!HEADER_RE.test(body)) {
     errors.push(
@@ -56,23 +91,8 @@ export function checkPrSelfGrade(body) {
     // Keep them — the contributor benefits from seeing the full shape.
   }
   for (const [name, re] of Object.entries(FIELD_RES)) {
-    const m = body.match(re);
-    if (!m) {
-      errors.push(`missing or malformed line: \`${name}: …\``);
-      continue;
-    }
-    // `Match` is an enum (yes / no / partial) — the regex already
-    // constrains the value, so the min-length check is N/A.
-    if (name === "Match") continue;
-    const value = m[1]
-      .trim()
-      .replace(/^\*+|\*+$/g, "")
-      .trim();
-    if (value.length < MIN_VALUE_LEN) {
-      errors.push(
-        `\`${name}:\` value is too short (≥${MIN_VALUE_LEN} chars required); got "${value}"`,
-      );
-    }
+    const err = checkField(name, re, body);
+    if (err !== null) errors.push(err);
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
@@ -81,14 +101,18 @@ export function checkPrSelfGrade(body) {
  * CLI: reads PR body from a file path passed as the first argument, OR
  * from stdin if no argument is given. The CI workflow writes the PR body
  * to a file and passes its path.
+ *
+ * @returns {Promise<number>}
  */
 async function main() {
   const arg = process.argv[2];
+  /** @type {string} */
   let body;
   if (arg !== undefined && arg !== "-") {
     const { readFile } = await import("node:fs/promises");
     body = await readFile(arg, "utf8");
   } else {
+    /** @type {Buffer[]} */
     const chunks = [];
     for await (const chunk of process.stdin) chunks.push(chunk);
     body = Buffer.concat(chunks).toString("utf8");
