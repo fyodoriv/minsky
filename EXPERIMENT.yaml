@@ -1,21 +1,21 @@
-id: dashboard-web-render-all-10
+id: dashboard-web-lighthouse-ci
 hypothesis: |
-  Wiring the 10-entry `SUCCESS_METRICS: readonly SuccessMetric[]` constant
-  from sub-task 2 (`novel/dashboard-web/src/metrics.ts`) into `createServer`
-  as the default `metrics` argument — and rendering one `<li
-  data-metric-id="…">` per entry through the existing pure `render`
-  function — produces SSR HTML containing exactly 10 `data-metric-id=`
-  attributes and exactly 10 `(stub)` value sentinels (rule #7
-  graceful-degrade: explicit placeholder, not silent). The `(stub)` token
-  is the operator-visible signal that the OTEL backend is not yet wired;
-  the follow-up `dashboard-web-otel-wiring` (P3, filed in this PR) replaces
-  it with `@minsky/observability` reads. Sub-task 3 leaves `render` itself
-  unchanged at the iteration level (it already supports an arbitrary
-  `metrics` array — the change is at the server's wiring layer + the
-  per-row sentinel) so the parent `dashboard-web-v0`'s 300-LoC pivot cap
-  is preserved with significant headroom.
-success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 7 and .numFailedTests == 0'` exits 0 (the 4 prior tests + ≥3 new sub-task-3 integration tests: default-to-SUCCESS_METRICS, exact-10-count, set-equality of all 10 ids, and `(stub)` sentinel count); `[ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 300 ]` exits 0; the `dashboard-web-render-all-10` block is removed from `TASKS.md` (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-render-all-10$' TASKS.md` returns 0); the parent `dashboard-web-v0` tracker's `Blocked by` list and `dashboard-web-lighthouse-ci`'s `Blocked by` list no longer reference this sub-task; the follow-up `dashboard-web-otel-wiring` task block is added under P3 with full rule-#9 fields."
-pivot: "If the 10-row render pushes total `novel/dashboard-web/src/*.ts` LoC above the parent's 300-LoC cap — i.e., if the `wc -l` total exceeds 300 — Hono is the wrong shape for `≤300 LoC and 10 metrics + a sentinel`; pivot per the parent's pivot rule to a template-literal approach without Hono (only `server.ts` changes — the renderer is already pure). If the `(stub)` sentinel proves indistinguishable from real readings during operator review (e.g., `0` is the correct stub value for a metric that legitimately measures `0`), pivot to a richer sentinel (a banner or a per-row `data-stub=\"true\"` attribute) and tighten `dashboard-web-otel-wiring`'s priority from P3 to P2. The pivot triggers are quantitatively distinct from the success thresholds (300 LoC vs ≥7 passing tests; sentinel-mistakes count vs 0/10 distinguishability) so the experiment is falsifiable in either direction."
-measurement: "pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 7 and .numFailedTests == 0' && [ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 300 ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-render-all-10$' TASKS.md)\" = '0' ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-otel-wiring$' TASKS.md)\" = '1' ]"
-anchor: "Card, S. K., Mackinlay, J. D., & Shneiderman, B. (eds.), *Readings in Information Visualization: Using Vision to Think*, Morgan Kaufmann, 1999, Ch. 1 (the 10-metric set is the dashboard's information atom; rendering all 10 simultaneously is the glanceable-display pattern); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (rate / errors / duration as the right service-level lens — the 10 metrics span exactly this surface); rule #4 (vision.md § 4 — every constant in source; `SUCCESS_METRICS` is the constant the renderer iterates, not a re-parsed markdown table); rule #7 (vision.md § 7 — graceful-degrade with explicit operator-visible state; `(stub)` is the explicit sentinel until OTEL wiring lands)."
+  A new `.github/workflows/lighthouse.yml` workflow — pinned `lighthouse@12.4.0`,
+  triggered on `pull_request` and `push: branches: [main]` — that builds
+  `@minsky/dashboard-web`, starts the SSR server via `distribution/run-dashboard-web.sh`,
+  waits for HTTP 200 on port 8080, runs Lighthouse Mobile against `/`, and
+  asserts `jq -e '.categories.performance.score >= 0.9' lighthouse.json`,
+  fails the merge gate when the dashboard's mobile performance score drops
+  below 0.9. This operationalises the parent `dashboard-web-v0` epic's
+  prose-only "Lighthouse Mobile score ≥90 in CI" verification cell into a
+  deterministic, machine-readable rule-#10 gate (Wilkie 2018 RED Method's
+  duration component; Forsgren-Humble-Kim 2018 DORA fast feedback). The
+  parent `dashboard-web-v0` tracker block is removed in this PR — all 4
+  sub-tasks are closed, and the parent's acceptance criteria are now
+  enforced mechanically (one criterion per shipped sub-task) rather than
+  prose-tracked.
+success: "The lighthouse workflow runs on this PR; the Lighthouse JSON is uploaded as a workflow artifact (`lighthouse-report`); the performance-score assertion passes (`jq -e '.categories.performance.score >= 0.9' lighthouse.json` exits 0); the parent `dashboard-web-v0` tracker block is removed (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-v0$' TASKS.md` returns 0); this sub-task's block is removed (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-lighthouse-ci$' TASKS.md` returns 0); `vision.md` § \"Pattern conformance index\" row 58 lands; the runner script `distribution/run-dashboard-web.sh` is executable (`test -x distribution/run-dashboard-web.sh` exits 0); the post-merge measurement `test \"$(gh run list --workflow lighthouse.yml --limit 1 --json conclusion --jq '.[0].conclusion')\" = 'success'` exits 0 (a missing run-id surfaces as empty-string ≠ 'success' rather than a false-pass)."
+pivot: "If Lighthouse runs are flaky on GH-hosted runners (>1 false-positive failure per 10 runs sustained over 30 days — i.e., the same commit on `main` flips between `success` and `failure` without intervening source change), pivot per the TASKS.md brief: (a) move the job to a self-hosted runner per `supervisor-integration-self-hosted-runner`'s precedent, OR (b) drop the threshold from 0.9 to 0.85 and document the deviation in `vision.md` § \"Pattern conformance index\" row 58. The 0.85 threshold is itself bounded — if it also proves flaky, the gate is the wrong shape (e.g., Lighthouse Mobile is unsuitable for shared CI infra) and we pivot to a synthetic-load-time check (Server-Timing header against a fixed budget) instead. The pivot's quantitative trigger (≥1 false-positive per 10 runs over 30 days) is materially distinct from the success threshold (a single first-run pass at ≥0.9), so the experiment is falsifiable in either direction."
+measurement: "test \"$(gh run list --workflow lighthouse.yml --limit 1 --json conclusion --jq '.[0].conclusion')\" = 'success' && test -x distribution/run-dashboard-web.sh && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-v0$' TASKS.md)\" = '0' ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-lighthouse-ci$' TASKS.md)\" = '0' ] && grep -q '^| 58 |' vision.md"
+anchor: "rule #10 (vision.md § 10 — deterministic enforcement; the parent `dashboard-web-v0`'s prose-only Lighthouse verification cell now has a machine-readable counterpart); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (the duration component of RED is the user-perceived latency Lighthouse measures); Forsgren, N., Humble, J., Kim, G., *Accelerate*, IT Revolution Press, 2018 (DORA — fast feedback on performance regressions; the pre-merge cadence is the load-bearing property); Beck, K., *Extreme Programming Explained*, Addison-Wesley, 1999, Ch. 17 (CI as the constraint enforcer); ARCHITECTURE.md § \"Versioning & dependency evolution\" (Lighthouse pin)."
 replay_windows_days: [7, 30]
