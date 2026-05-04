@@ -138,9 +138,29 @@ The default port (9876) is overridden by `MINSKY_BUDGET_GUARD_PORT`, or by passi
 
 The Hono dependency is hidden behind the `BudgetServer` interface (Adapter, Gamma et al. 1994) — alternative implementations can be plugged in without touching callers.
 
+## Pre-publish dry-run
+
+The package is `private: true` in v0 (not yet published to the npm registry); the dry-run is the release-contract smoke test (Wiggins 2011, Twelve-Factor App, factor V).
+
+- **Tarball**: `minsky-budget-guard-0.0.0.tgz`
+- **Package size**: 8.4 kB (well under the 100 kB budget)
+- **Unpacked size**: 29.4 kB
+- **File list (8 entries)**:
+  - `README.md`
+  - `dist/flag-file.{js,d.ts}`
+  - `dist/http-server.{js,d.ts}`
+  - `dist/index.{js,d.ts}`
+  - `package.json`
+- **Excluded** (asserted by `files` field with `!` negation): `dist/**/*.test.{js,d.ts}`, `dist/**/*.map`, `tsconfig.json`, source.
+
+Verification command (run from this directory after `pnpm build`):
+
+```sh
+npm publish --dry-run --loglevel=info
+```
+
 ## Follow-up tasks
 
 The full `budget-guard-v0` epic decomposes into these P1 sub-tasks (tracked in `TASKS.md`):
 
 - **`MaciekTokenMonitor` Strategy** — shipped in `@minsky/token-monitor` (`novel/adapters/token-monitor/src/maciek.ts`); reads `~/.claude/projects/<cwd>/<session>.jsonl` directly.
-- **`budget-guard-publish-dry-run`** — pre-publish smoke for `@minsky/budget-guard` and `@minsky/token-monitor`.

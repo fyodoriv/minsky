@@ -31,34 +31,6 @@
   - **Anchor**: Raymond, *The Cathedral and the Bazaar*, 1999 (community contribution as scaling lever); rule #1 (don't reinvent the wheel — push upstream when possible).
   - **Risk**: Maintainer may reject if framed as a Minsky-specific need. Frame as "ecosystem alignment with the tasks.md spec" with concrete code-level changes pinned to specific OMC files.
 
-- [ ] `claude-budget-guard` v0 — full package shipped + extracted
-  - **ID**: budget-guard-v0
-  - **Tags**: novel, extraction-target, parent
-  - **Estimate**: tracker — see sub-tasks
-  - **Blocked by**: budget-guard-publish-dry-run
-  - **Hypothesis**: The decomposed sub-tasks (core decision logic, flag-file envelope, HTTP envelope, Maciek strategy, dry-run) compose into a working budget-guard that user-story 004 (`budget-auto-pause`) drives end-to-end without further integration glue.
-  - **Details**: This PR (the core decision logic + watchdog loop + tests) shipped under the same name; sub-tasks below ship the runtime envelopes (flag file, HTTP API, real Maciek Strategy) plus the npm dry-run. When the last sub-task lands, the full package is shipped and this tracker is removed.
-  - **Verification**: all four sub-tasks below complete; integration test for `user-stories/004-budget-auto-pause.md` passes against the assembled package.
-  - **Measurement**: `pnpm vitest run user-stories/004-budget-auto-pause.test.ts` exits 0 once the prerequisite sub-tasks ship; before that, count of merged PRs with title prefix `feat: @minsky/budget-guard` should be ≥4 — `gh pr list --state merged --search 'in:title @minsky/budget-guard' --json number --jq length` ≥ 4.
-  - **Pivot**: if any sub-task discovers the original epic-level shape is wrong (e.g., flag-file model is too coarse for the dashboard, or the Maciek cache format makes the Strategy interface unworkable), revisit the parent acceptance and split into a new epic before continuing the chain.
-  - **Acceptance**: tracker task removed once all four sub-tasks merge.
-  - **Anchor**: Beyer et al., *Site Reliability Engineering*, 2016, Ch. 3 (error budgets); watchdog-timer literature (hardware / OS).
-
-- [ ] `@minsky/budget-guard` + `@minsky/token-monitor` — npm publish dry-run + extraction
-  - **ID**: budget-guard-publish-dry-run
-  - **Tags**: extraction, publish
-  - **Parent**: budget-guard-v0
-  - **Estimate**: 1h
-  - **Hypothesis**: The two packages already declare correct `files`, `main`, `types`, and `exports`; a dry-run produces tarballs whose contents match the documented manifest (no source maps, no tsconfig, no test files) and whose total size is <100 KB each.
-  - **Details**: Run `pnpm publish --dry-run --workspace novel/budget-guard` and the same for `@minsky/token-monitor`; ensure the published artifact has the right `files`, `main`, `types`, and a matching `README.md`. Publish under the `@minsky/*` scope when ready (separate manual step — `npm publish` is blocked-by-default per the `/next-task` skill, so this task only does the dry-run).
-  - **Files**: `novel/budget-guard/package.json`, `novel/adapters/token-monitor/package.json`
-  - **Verification**: dry-run output lists the documented files only (no `dist/*.d.ts.map`, no `tsconfig.json`); `gh pr` description records the dry-run output.
-  - **Measurement**: `pnpm publish --dry-run --workspace novel/budget-guard 2>&1 | grep -c '\.tgz'` returns 1; `pnpm publish --dry-run --workspace novel/adapters/token-monitor 2>&1 | grep -c '\.tgz'` returns 1; `pnpm publish --dry-run --workspace novel/budget-guard 2>&1 | awk '/package size/{print $3}'` < 102400.
-  - **Pivot**: if either package's dry-run tarball exceeds 100 KB or includes files outside the manifest, the `files` field is misconfigured — audit and tighten before publishing under `@minsky/*`. If after audit the size still exceeds 100 KB, the package is too coarse and should be split.
-  - **Acceptance**: Both packages dry-run cleanly; PR description records the published filenames + sizes.
-  - **Anchor**: Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run; the published artifact is the release contract).
-  - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
-
 ## P2
 
 <!-- spec-monitor-skill and its successor `spec-monitor-deterministic-rewrite` both shipped: the deterministic linters under `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` carry the load-bearing share of runtime verification (rule #10's enforcement model), and the residual judgement-heavy scope ships as the advisory-only Claude Skill at `novel/spec-monitor/SKILL.md` — capped at ≤5 advisory rules per the rule-#10 ratchet. See `vision.md` § "Pattern conformance index" rows 11 and 35. -->
@@ -84,7 +56,6 @@
   - **ID**: first-integration-test
   - **Tags**: testing, validation
   - **Estimate**: 6h
-  - **Blocked by**: budget-guard-v0
   - **Hypothesis**: A 60-minute compressed simulation reproduces the failure modes that matter for an 8h overnight run with ≥80 % coverage of the failure-mode rows declared in the user-story file, while keeping CI runtime under 10 minutes.
   - **Details**: Implement integration test for `user-stories/001-loop-runs-overnight.md`. Compressed simulation, 60-minute window standing in for an 8h overnight run.
   - **Verification**: `npm test user-stories/001-loop-runs-overnight.test.ts` passes locally and on CI; OTEL collector receives ≥1 span per task type; CI workflow shows green
@@ -98,7 +69,6 @@
   - **ID**: watch-shortcuts
   - **Tags**: novel, ux
   - **Estimate**: 4–6h
-  - **Blocked by**: budget-guard-v0
   - **Hypothesis**: Three Apple Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week) polling the local Tailscale-reachable JSON API render in <2 s p95 on Watch and keep the user's wrist-dwell metric (success #6) at ≤60 s/day average over a 7-day window.
   - **Details**: Three Shortcuts: tokens-remaining, last-task-status, constraint-of-the-week. Each polls the local Tailscale-reachable JSON API. Plus a pause/resume Shortcut.
   - **Files**: `distribution/shortcuts/`

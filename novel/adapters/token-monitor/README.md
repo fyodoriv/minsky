@@ -159,3 +159,23 @@ kill $MACIEK_PID
 The two `tokensRemainingInWindow` values should be within ±1 % at any
 single tick (the difference is the sub-second drift between the two
 reads of the same JSONL files).
+
+## Pre-publish dry-run
+
+The package is `private: true` in v0 (not yet published to the npm registry); the dry-run is the release-contract smoke test (Wiggins 2011, Twelve-Factor App, factor V).
+
+- **Tarball**: `minsky-token-monitor-0.0.0.tgz`
+- **Package size**: 9.9 kB (well under the 100 kB budget)
+- **Unpacked size**: 34.8 kB
+- **File list (6 entries)**:
+  - `README.md`
+  - `dist/index.{js,d.ts}`
+  - `dist/maciek.{js,d.ts}`
+  - `package.json`
+- **Excluded** (asserted by `files` field with `!` negation): `dist/**/*.test.{js,d.ts}`, `dist/**/*.map`, `tsconfig.json`, source, `test/fixtures/`.
+
+Verification command (run from this directory after `pnpm build`):
+
+```sh
+npm publish --dry-run --loglevel=info
+```
