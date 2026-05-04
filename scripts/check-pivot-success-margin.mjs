@@ -66,9 +66,12 @@ import { fileURLToPath } from "node:url";
 // `src/` directly via `vitest.config.ts`, so tests don't need a pre-build.
 import { parse as parseExperimentRecord } from "@minsky/experiment-record";
 
+import { getHostRoot } from "./lib/host-root.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
-const DEFAULT_EXPERIMENTS_DIR = resolve(REPO_ROOT, "experiments");
+// Per `host-root-resolver-prep`: parametric experiments root via MINSKY_HOST_ROOT.
+const DEFAULT_EXPERIMENTS_DIR = resolve(getHostRoot(REPO_ROOT), "experiments");
 
 // Regex matches the first signed-numeric token in a string. Allows an
 // optional leading `+` / `-`, requires at least one digit, allows an
