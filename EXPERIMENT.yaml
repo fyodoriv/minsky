@@ -1,100 +1,50 @@
-id: persona-spawner-v0-2026-05-03
+id: watch-shortcuts-tailscale-host-substitution-2026-05-04
 hypothesis: |
-  A `PersonaSpawner.spawn(opts) => Promise<{ exitCode, durationMs,
-  omcStateDir }>` Strategy seam over `omc /team <persona>` invocation,
-  paired with a pure `dispatchPersona(taskTags)` lookup table mapping
-  tasks.md task tags to OMC personas (Wooldridge 2009 — role-based
-  agent orchestration), lets the tick-loop daemon route different task
-  types to different personas (engineer / reviewer / researcher)
-  without coupling business logic to OMC's CLI. The interface is the
-  contract; the v0 Strategy is `OmcPersonaSpawner` (shells out to
-  `omc /team <persona>` against a per-task working directory and
-  surfaces the `.omc/state/team/<teamName>/` path the
-  `@minsky/omc-tasksmd-bridge` reader already parses, PR #78); the
-  test fake is `StubPersonaSpawner` (Meszaros 2007 — records calls,
-  returns canned shape so consumer tests assert call shape without
-  forking a real subprocess). The `child_process.spawn` function is
-  constructor-injected so tests assert argv shape (`['/team',
-  <persona>]`) without a real OMC binary; PATH detection is a
-  separate injectable probe so `selfTest()` returns the documented
-  three-point lattice (`green` if `omc` on PATH, `yellow` if not,
-  `red` if the probe itself fails).
+  The Shortcut runbook in `distribution/shortcuts/README.md` currently
+  asks the operator to substitute `<tailscale-host>` into each Shortcut's
+  URL field by hand (5 substitutions × 5 Shortcuts = 25 manual edits).
+  Apple Shortcuts' "Ask Each Time" / "Get Variable" actions can
+  parameterise the host once at first run and remember it, dropping
+  operator overhead from 25 substitutions to 1 input + 0-touch reuse.
+  This PR ships a 6th `setup-host.shortcut.json` whose only purpose is
+  "Ask for input" → "Set Variable: host", and rewires the 5 polling
+  Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week,
+  pause, resume) to read that variable at run time via Get-Variable +
+  Combine-Text instead of carrying a literal Tailscale host. A smoke-test
+  assertion enforces that no `*.shortcut.json` may contain a literal
+  Tailscale host in any URL field — it must be either the
+  `<tailscale-host>` placeholder OR a Get-Variable reference, so the
+  parameterisation cannot silently regress.
 success: |
-  - `pnpm typecheck` exits 0.
-  - `pnpm vitest run novel/adapters/persona-spawner --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0 (today: 24 paired tests across `index.test.ts` + `dispatch.test.ts` + `omc.test.ts`).
-  - The dispatch table covers ≥3 tag→persona mappings (`bug` →
-    `engineer`, `research` → `researcher`, `review` → `reviewer`,
-    plus `feature` and `refactor`).
-  - `selfTest()` lattice yields green/yellow/red appropriately
-    (asserted by 3 paired tests in `omc.test.ts`).
-  - The `persona-spawner-v0` task block is removed from TASKS.md in
-    the same PR.
-  - Concretely:
-    `pnpm typecheck && pnpm vitest run novel/adapters/persona-spawner --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
-    exits 0.
+  - `pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0 (today: 16 cases; this PR brings it to ≥17 — 20 actual, +1 setup-host coverage, +1 no-literal-host assertion, +2 setup-host JSON-validity / schema-conformance checks).
+  - 0 literal Tailscale hosts (`*.tailscale.ts.net`, `*.tail-scale.ts.net`) in any `*.shortcut.json` URL field — enforced by the new smoke-test assertion.
+  - `setup-host.shortcut.json` ships and is documented in the runbook (`distribution/shortcuts/README.md` step 0); the 5 polling Shortcuts' runbook entries (steps A.2 and B.1) document the Get-Variable + Combine-Text prelude.
+  - `watch-shortcuts-tailscale-host-substitution` task block removed from TASKS.md in this PR.
 pivot: |
-  If 30 days of attempted production OMC `/team` invocations through
-  `OmcPersonaSpawner` produce ≥3 incompatibilities with the daemon's
-  process-supervision model (e.g., refuses to detach, requires
-  interactive stdin, hangs on stdout buffering, has no
-  non-interactive entry point — sustained at >10 % failure rate),
-  drop the multi-persona feature for v0 and file an upstream OMC
-  issue (already drafted in TASKS.md `omc-tasksmd-issue` enrichment).
-  The pivot is *Strategy-level* —
-  the `PersonaSpawner` interface, the dispatch table, and the
-  `StubPersonaSpawner` are unchanged; only `OmcPersonaSpawner` is
-  retired (or replaced by a thin `claude --resume` chain managed by
-  the daemon directly). The seam guarantees the consumer code is
-  unaffected by the pivot.
+  If the "Ask Each Time" / Variable actions don't compose across
+  separate Shortcuts (each Shortcut has its own scope on real hardware),
+  retire this task — the operator pays the 1-time substitution cost
+  once and the runbook stays as-is. The cap is bounded (5 substitutions,
+  5 minutes), so the cost-of-status-quo is not high. The fallback is
+  documented in `distribution/shortcuts/README.md` step 0 (Risk
+  section): hand-edit each polling Shortcut's "Get Contents of URL"
+  action to use a literal host, file a follow-up to retire the variable
+  approach.
 measurement: |
-  pnpm install --no-frozen-lockfile \
-    && pnpm typecheck \
-    && pnpm vitest run novel/adapters/persona-spawner --reporter=json \
-       | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' \
-    && pnpm test \
-    && pnpm lint \
-    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+  pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'
 anchor: |
-  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
-  1994 (Adapter pattern — the `PersonaSpawner` interface; Strategy
-  pattern — `OmcPersonaSpawner` is one implementation, future
-  Strategies plug in behind the same shape); Wooldridge, M., *An
-  Introduction to MultiAgent Systems*, Wiley, 2009 (role-based agent
-  orchestration — the dispatch table maps tasks.md task tags to OMC
-  personas, closing the "society of specialists" promise from
-  vision.md's north star); Meszaros, G., *xUnit Test Patterns*,
-  Addison-Wesley, 2007 (test fake — `StubPersonaSpawner` records
-  calls in-memory and returns a canned shape so consumer tests assert
-  call shape without forking a real subprocess); Armstrong, J.,
-  *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash AT
-  the right boundary — the single try/catch in `runChild` is the
-  supervisor seam, returning `-1` rather than swallowing the error
-  inside the function); Martin, R. C., *Clean Architecture*, Pearson,
-  2017 (DI at the edge — `spawnFn` and `hasBinaryOnPath` are
-  constructor-level, the only I/O surfaces; the rest is pure given
-  those seams); rule #1 (vision.md § 1 — OMC is the existing tool;
-  the adapter wraps it rather than reinventing a multi-persona
-  runtime); rule #2 (vision.md § 2 — every dep behind interface;
-  OMC's CLI is exactly that, behind `PersonaSpawner`); rule #4
-  (vision.md § 4 — every exported function carries `@otel
-  adapters.persona-spawner.<verb>` JSDoc with `@otel-exempt` opt-outs
-  on helpers / test-fake methods); rule #6 (vision.md § 6 —
-  let-it-crash; one `// rule-6: handled-locally` opt-out at the
-  spawn-time and probe-time boundaries); rule #7 (vision.md § 7 —
-  failure-mode discipline; the README's chaos table has 3 rows
-  covering omc-missing-from-PATH, OMC-session-fails-to-start, and
-  OMC-team-state-dir-not-produced); rule #9 (vision.md § 9 —
-  pre-registered Strategy-level pivot in this `EXPERIMENT.yaml`:
-  "if OMC's `/team` mode proves non-detachable, retire
-  `OmcPersonaSpawner` only — the interface and consumers are
-  unchanged"); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017
-  (rule-#9 pre-registration — the Strategy-level pivot is committed
-  *before* code so a flaky OMC can't retroactively redefine "spawn
-  API stable enough").
-replay_windows_days: [90]
+  Norman, *The Design of Everyday Things*, 1988 (affordance — make the
+  parameterisation visible); Card, S. K., Mackinlay, J., Shneiderman, B.,
+  *Readings in Information Visualization*, Morgan Kaufmann, 1999 (calm
+  tech — bounded operator cognitive load); Munafò et al., "A Manifesto
+  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (pre-registered acceptance gate — the smoke-test assertion is the
+  literal-host regression-prevention contract committed before merge).
+
+  Risk (per the parent task block, copied here for the audit trail):
+  Apple Shortcuts variables don't survive Shortcut deletion / reinstall;
+  the "Ask Each Time" UX may prompt every run if the variable doesn't
+  persist. Mitigation: test on a real device first; if persistence is
+  lost, fall back to the 25-substitution status quo and retire the task.
+  Fallback flow is documented in `distribution/shortcuts/README.md`
+  step 0.
