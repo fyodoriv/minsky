@@ -5,14 +5,19 @@
 
 import { describe, expect, test } from "vitest";
 
-import { checkGlossaryDiscipline, parseAllowlist } from "./check-rule-5-glossary-discipline.mjs";
+import {
+  checkGlossaryDiscipline,
+  harvestPatternIndexTokens,
+  parseAllowlist,
+} from "./check-rule-5-glossary-discipline.mjs";
 
 const GLOSSARY_HEADING = "## Glossary — every term has a CS anchor";
+const PATTERN_INDEX_HEADING = "## Pattern conformance index";
 
 /** Build a minimal vision.md fixture wrapping a constitution body and a
- * glossary body. */
-function buildVision({ constitution, glossary }) {
-  return [
+ * glossary body. Optional pattern-index body. */
+function buildVision({ constitution, glossary, patternIndex }) {
+  const parts = [
     "# Vision",
     "",
     "## The constitution",
@@ -23,11 +28,12 @@ function buildVision({ constitution, glossary }) {
     "",
     glossary,
     "",
-    "## What Minsky is not",
-    "",
-    "- not a framework",
-    "",
-  ].join("\n");
+  ];
+  if (patternIndex !== undefined) {
+    parts.push(PATTERN_INDEX_HEADING, "", patternIndex, "");
+  }
+  parts.push("## What Minsky is not", "", "- not a framework", "");
+  return parts.join("\n");
 }
 
 describe("checkGlossaryDiscipline", () => {
@@ -64,8 +70,6 @@ describe("checkGlossaryDiscipline", () => {
   });
 
   test("(d) backticked term used inside the Glossary section is not double-reported", () => {
-    // The candidate `WidgetEngine` appears ONLY inside the Glossary body —
-    // the script must not extract it as a candidate from outside.
     const visionMd = buildVision({
       constitution: "Plain prose with no coined identifiers.",
       glossary:
@@ -77,7 +81,7 @@ describe("checkGlossaryDiscipline", () => {
       allowlist: new Set(),
     });
     expect(missing).toEqual([]);
-    expect(candidates).toEqual([]); // Glossary is not scanned for candidates
+    expect(candidates).toEqual([]);
   });
 
   test("(e) common English in backticks like `if` is filtered as non-identifier", () => {
@@ -95,32 +99,123 @@ describe("checkGlossaryDiscipline", () => {
 
   test("PascalCase / camelCase / kebab-case are all extracted as coined-shaped", () => {
     const visionMd = buildVision({
-      constitution: "Coined: `PascalThing`, `camelThing`, `kebab-thing`, `dotted.thing`.",
+      constitution: "Coined: `PascalThing`, `camelThing`, `kebab-thing`.",
       glossary: "| Term in use | Anchor | Source |\n|---|---|---|\n",
     });
     const { missing } = checkGlossaryDiscipline({ visionMd, allowlist: new Set() });
-    // All four are coined-shaped and unresolved → all reported.
-    expect(missing.sort()).toEqual(["PascalThing", "camelThing", "dotted.thing", "kebab-thing"]);
+    expect(missing.sort()).toEqual(["PascalThing", "camelThing", "kebab-thing"]);
   });
 
-  test("trailing slash on path-like backticked tokens is stripped before lookup", () => {
-    // `competitors/` should be normalized to `competitors` for allowlist /
-    // glossary lookup, otherwise paths-with-trailing-slash never resolve.
+  test("file paths (containing `/`) are NOT extracted as coined terms", () => {
     const visionMd = buildVision({
-      constitution: "See `competitors/` for the analyses.",
+      constitution: "See `novel/adapters` and `user-stories/001.md` for examples.",
       glossary: "| Term in use | Anchor | Source |\n|---|---|---|\n",
     });
-    const { missing } = checkGlossaryDiscipline({
+    const { missing, candidates } = checkGlossaryDiscipline({
       visionMd,
-      allowlist: new Set(["competitors"]),
+      allowlist: new Set(),
     });
     expect(missing).toEqual([]);
+    expect(candidates).toEqual([]);
+  });
+
+  test("filenames (ending in .md/.ts/.sh/.yaml/.json) are NOT extracted", () => {
+    const visionMd = buildVision({
+      constitution: "Read `vision.md`, `setup.sh`, `pnpm-lock.yaml`, `tsconfig.json`, `parse.ts`.",
+      glossary: "| Term in use | Anchor | Source |\n|---|---|---|\n",
+    });
+    const { missing, candidates } = checkGlossaryDiscipline({
+      visionMd,
+      allowlist: new Set(),
+    });
+    expect(missing).toEqual([]);
+    expect(candidates).toEqual([]);
+  });
+
+  test("dotted-method tokens (`foo.bar`) are NOT extracted as coined terms", () => {
+    const visionMd = buildVision({
+      constitution:
+        "Calls like `trace.setGlobalTracerProvider` and `obj.method` are not coined terms.",
+      glossary: "| Term in use | Anchor | Source |\n|---|---|---|\n",
+    });
+    const { missing, candidates } = checkGlossaryDiscipline({
+      visionMd,
+      allowlist: new Set(),
+    });
+    expect(missing).toEqual([]);
+    expect(candidates).toEqual([]);
+  });
+
+  test("Pattern-index artifact tokens resolve a candidate (rule #8 anchor satisfies rule #5)", () => {
+    const visionMd = buildVision({
+      constitution: "We use a `WidgetCog` to drive ticks.",
+      glossary: "| Term in use | Anchor | Source |\n|---|---|---|\n",
+      patternIndex: [
+        "| # | Artifact | Pattern | Source | Conformance | Notes |",
+        "|---|---|---|---|---|---|",
+        "| 1 | `@minsky/widget` (`WidgetCog` driver) | Watchdog | Liu 2000 | full | — |",
+      ].join("\n"),
+    });
+    const { missing } = checkGlossaryDiscipline({ visionMd, allowlist: new Set() });
+    expect(missing).toEqual([]);
+  });
+
+  test("Pattern-index header / separator rows are not mistaken for artifact rows", () => {
+    // The header row has cells like `# | Artifact | Pattern …`. The separator
+    // row `|---|---|…` must not contribute tokens. Only data rows contribute.
+    const visionMd = buildVision({
+      constitution: "Coined: `WidgetCog`.",
+      glossary: "| Term in use | Anchor | Source |\n|---|---|---|\n",
+      patternIndex: [
+        "| # | Artifact | Pattern | Source | Conformance | Notes |",
+        "|---|---|---|---|---|---|",
+        // No data rows: WidgetCog is unresolved.
+      ].join("\n"),
+    });
+    const { missing } = checkGlossaryDiscipline({ visionMd, allowlist: new Set() });
+    expect(missing).toEqual(["WidgetCog"]);
   });
 
   test("missing Glossary section is reported as glossarySectionMissing", () => {
     const visionMd = "# Vision\n\n## The constitution\n\nNo glossary here.\n";
     const result = checkGlossaryDiscipline({ visionMd, allowlist: new Set() });
     expect(result.glossarySectionMissing).toBe(true);
+  });
+});
+
+describe("harvestPatternIndexTokens", () => {
+  test("extracts identifiers from artifact column of data rows only", () => {
+    const indexBody = [
+      "| # | Artifact | Pattern | Source | Conformance | Notes |",
+      "|---|---|---|---|---|---|",
+      "| 1 | `BudgetGuard` watchdog + `decide()` function | Watchdog | Liu 2000 | full | — |",
+      "| 2 | `@minsky/handoff-spec` parser | Recursive-descent | Aho 1986 | full | — |",
+    ].join("\n");
+    const tokens = harvestPatternIndexTokens(indexBody);
+    expect(tokens.has("BudgetGuard")).toBe(true);
+    expect(tokens.has("decide")).toBe(true);
+    // `@minsky/handoff-spec` contributes the path-shape `minsky/handoff-spec`
+    // (the `@` is not part of an identifier-start). That's fine — it's a
+    // valid resolution token even though such tokens are not extracted as
+    // *candidates* (paths are filtered in harvestCandidates).
+    expect(tokens.has("minsky/handoff-spec")).toBe(true);
+    // The Pattern column ("Watchdog") must not bleed into the artifact set.
+    expect(tokens.has("Watchdog")).toBe(false);
+  });
+
+  test("non-table lines are ignored", () => {
+    const indexBody = [
+      "Some prose before the table.",
+      "",
+      "| # | Artifact | Pattern | Source | Conformance | Notes |",
+      "|---|---|---|---|---|---|",
+      "| 1 | `Foo` | Bar | Baz | full | — |",
+      "",
+      "Some prose after the table.",
+    ].join("\n");
+    const tokens = harvestPatternIndexTokens(indexBody);
+    expect(tokens.has("Foo")).toBe(true);
+    expect(tokens.has("prose")).toBe(false);
   });
 });
 

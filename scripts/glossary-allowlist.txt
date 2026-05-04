@@ -4,162 +4,45 @@
 # comments (`term  # justification`) supported.
 #
 # Discipline (rule #10 ratchet rule + rule #1):
-#   - Add a term here ONLY when it is a standard CS / web acronym or
-#     a third-party package / file name we did NOT coin.
-#   - Coined-by-Minsky terms belong in the Glossary table in vision.md,
-#     not here.
-#   - Every entry must carry a one-line `#` justification on the line
-#     above it (or as an inline comment) explaining why the term is
-#     "ours-by-reference, not ours-by-coinage".
+#   - Add a term here ONLY when it is a standard CS / web acronym, a
+#     third-party package / file name we did NOT coin, or a kebab-case
+#     identifier in a system that has its own anchor (a TASKS.md task ID
+#     anchored in TASKS.md itself; a folder name).
+#   - Coined-by-Minsky class / interface / function names belong in
+#     `vision.md` § Pattern conformance index (rule #8 anchor → resolves
+#     rule #5 via the index). The lint accepts pattern-index hits as a
+#     valid anchor.
+#   - Coined-by-Minsky prose terms belong in the Glossary (rule #5 anchor).
+#   - Every entry must carry a one-line `#` justification.
 #
-# When in doubt: add the Glossary row. The allowlist is the escape
-# hatch, not the default.
+# When in doubt: add the Glossary row OR the Pattern-index row. The
+# allowlist is the escape hatch, not the default.
 
-# --- Standard web / OS / network acronyms ---
-# IBM autonomic computing canonical acronym (Kephart & Chess 2003)
-MAPE-K
-# Open Telemetry — CNCF observability standard (vendor-neutral)
-OTEL
-# HyperText Transfer Protocol
-HTTP
-# JavaScript Object Notation — RFC 8259
-JSON
-# YAML Ain't Markup Language — yaml.org
-YAML
-# Tom's Obvious, Minimal Language — toml.io
-TOML
-# Command-Line Interface
-CLI
-# Application Programming Interface
-API
-# Continuous Integration
-CI
-# Operating System
-OS
-# Large Language Model
-LLM
-# Open-Source Software
-OSS
-# Erlang BEAM virtual machine
-BEAM
-# Open Telecom Platform — Erlang's stdlib
-OTP
-# Test-Driven Development (rule-#3 grounding term, not coined here)
-TDD
-# Service-Level Objective — Beyer et al., SRE 2016
-SLO
-# Site Reliability Engineering — Beyer et al. 2016
-SRE
-
-# --- Third-party packages / projects we depend on (not coined by us) ---
-# Maciek Dymarczyk's Python token monitor (PyPI: claude-monitor)
-claude-monitor
-# Hono — TypeScript web framework (honojs)
-Hono
-# Open Multi-agent Coordinator — third-party orchestrator we adapt to
-OMC
-# DSPy — Stanford's prompt-program optimizer
-DSPy
-
-# --- File names we reference but did not coin ---
-# the markdown file at repo root for agent guidance (Anthropic convention)
-AGENTS.md
-# the per-task tasks-md spec file at repo root (tasks-md/lint convention)
-TASKS.md
-# tasks-md spec file (lower-case form when referenced as the spec, not our file)
-tasks.md
-# the architecture doc; standard repo-root naming
-ARCHITECTURE.md
-# repo's research log
-research.md
-# the constitutional spec itself
-vision.md
-# bash bootstrap script (POSIX convention)
-setup.sh
-# pre-registration record file (rule #9 — canonical-by-Munafò et al. 2017)
-EXPERIMENT.yaml
-
-# --- Persona prompt files referenced as path examples (rule #8 § Code conventions) ---
-# example BDI rational-agent persona
-architect.md
-# example property-based-testing persona
-qa-tester.md
-# example Hoare-style pre/post persona
-verifier.md
-
-# --- Repo-relative directory references (paths, not coined terms) ---
-# top-level directory for adapter packages
-novel/adapters
-# top-level directory for user stories
-user-stories
-# top-level directory for competitor analyses
-competitors
-# observability adapter source entry — file path, not coined term
-novel/adapters/observability/src/index.ts
-
-# --- Standard library / runtime symbols ---
-# OpenTelemetry JS API global setter — third-party API name
-trace.setGlobalTracerProvider
-# libfaketime — Linux clock-skew testing tool
-libfaketime
-
-# --- Code identifiers anchored in the Pattern conformance index ---
-# Rule #5 targets *prose vocabulary*; class / interface / function names
-# are anchored by rule #8 (the Pattern conformance index — vision.md §
-# "Pattern conformance index"). Each entry below cites the row of that
-# index where the symbol's pattern + literature anchor lives. Adding a
-# new code identifier to vision.md without a Pattern-index row is a
-# rule-#8 violation handled by `ci-rule-8-pattern-conformance-coverage`
-# (future task) — not a rule-#5 Glossary miss.
-
-# Pattern index row 26 — Watchdog + error-budget burn-rate alerting.
-BudgetGuard
-# Pattern index row 28 — Adapter + Strategy + DTO; HTTP envelope.
-BudgetServer
-# Pattern index row 28 — Hono Strategy implementation of BudgetServer.
-HonoBudgetServer
-# Pattern index row 28 — JSON DTO renderer for the budget endpoint.
-budgetResponse
-# Pattern index row 5 (planned) — MAPE-K reference architecture.
-MapeKLoop
-# Pattern index row 24 — Adapter + Strategy; OTEL three-signal observability.
-OtelObservability
-# Constitution § rule #6 source citation — DSPy-anchored adapter.
-PromptOptimizer
-# Pattern index row 25 — test-double / fake for TokenMonitor.
-StubTokenMonitor
-# Constitution § rule #8 example — OTP supervision behaviour (Pattern row 4).
+# --- Class / interface / function names planned but not yet in the
+#     pattern-conformance index. Move to the index when they ship. ---
+# Future class — supervisor primitive (Armstrong 2007).
 SupervisionTree
-# Pattern index row 25 — Adapter + Strategy for token measurement.
-TokenMonitor
-# Constitution § rule #8 example — Nygard, Release It! 2007 circuit-breaker.
+# Future class — circuit-breaker primitive (Nygard 2007).
 CircuitBreaker
-# Pattern index row 15 — worst-status aggregation in observability adapter.
-aggregateStatus
+# Future class — autonomic loop (Kephart & Chess 2003).
+MapeKLoop
 
-# --- TASKS.md task IDs (rule #9 / TASKS.md spec — not coined prose) ---
-# Rule #5 is about prose vocabulary. Task IDs are governed by the
-# `tasks.md` spec (kebab-case identifier, validated by `tasks-md/lint`)
-# and represent a follow-up unit of work, not a coined term. Each entry
-# below is a backticked task ID referenced in vision.md prose.
-budget-guard-flag-file
-budget-guard-maciek-impl
+# --- TASKS.md task IDs (kebab-case). Anchored in TASKS.md itself; the
+#     index would never name them. Allowlisted as identifiers we own
+#     but coin within the task system, not the constitution. ---
+# Task: rule-#9 daily-layer per-PR experiment runner.
 ci-experiment-runner-v0
+# Task: rule-#9 weekly/monthly sustained-gain tracker.
 experiment-tracker-v0
+# Task: MAPE-K loop v0 (largest novel layer; future).
 mape-k-loop-v0
-register-otel-globals-at-bootstrap
+# Task: quarterly dependency review for Q3 2026.
 review-q3-2026
-
-# --- Planned package / file names anchored in Pattern conformance index ---
-# These are package or service identifiers whose literature anchor lives
-# in the Pattern conformance index, not the Glossary. Rule #5's prose-
-# level vocabulary intent is satisfied by their anchor row.
-
-# Pattern index row 9 (planned) — actor message-passing with continuation.
-claude-handoff-spec
-# Pattern index row 5 (planned) — MAPE-K reference architecture.
-claude-mape-k-loop
-# Constitution § rule #9 — interim store before OTEL backend lands.
-experiment-store
-# Constitution § rule #9 — placeholder name for the OTEL backend service.
+# Task: lighter OTEL backend evaluation.
 otel-lite-backend
+# Concept used in rule-#9 daily layer; the directory the runner writes to.
+experiment-store
+
+# --- Folder names. Anchored in the filesystem layout, not in prose. ---
+# Top-level folder: one file per user story (rule #3 / Cohn 2004).
+user-stories
