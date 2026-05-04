@@ -279,17 +279,18 @@ async function defaultHasBinaryOnPath(name: string): Promise<boolean> {
 }
 
 /**
- * One try/catch at the boundary (rule #6). Returns `true` iff the file
- * is accessible; any error means "not present here, keep looking".
+ * Returns `true` iff the file is accessible; any error means "not
+ * present here, keep looking". Uses Promise `.then/.catch` rather than
+ * `try/catch` so the supervisor boundary stays at the caller (rule #6
+ * — `access` rejects on ENOENT / EACCES per the PATH walk; per rule #7
+ * chaos-table row "omc missing from PATH", each individual miss is
+ * graceful — only "no PATH entry has it" is the surfaced result).
  *
  * @otel-exempt access-probe helper; one fs call inside a tight loop, covered by the caller's span
  */
-async function accessSafe(access: (path: string) => Promise<void>, path: string): Promise<boolean> {
-  try {
-    await access(path);
-    // rule-6: handled-locally — `access` rejects on ENOENT / EACCES per the PATH walk; per rule #7 (chaos table row "omc missing from PATH"), each individual miss is graceful — only "no PATH entry has it" is the surfaced result.
-    return true;
-  } catch {
-    return false;
-  }
+function accessSafe(access: (path: string) => Promise<void>, path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  );
 }
