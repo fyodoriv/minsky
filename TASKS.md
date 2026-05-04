@@ -75,27 +75,11 @@
   - **Anchor**: Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run; the published artifact is the release contract).
   - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
-- [ ] `claude-mape-k-loop` Monitor + Analyze phases
-  - **ID**: mape-k-monitor-analyze-phases
-  - **Tags**: novel, extraction-target
-  - **Parent**: mape-k-loop-v0
-  - **Estimate**: 6–8h
-  - **Hypothesis**: Pure Monitor + Analyze phase functions (Kephart-Chess 2003) — Monitor reads recent CI run conclusions, `spec-advisories/`, and `experiment-store/*.jsonl` to emit a single aggregate health snapshot; Analyze identifies the top constraint per Goldratt TOC (constraint = highest-frequency × highest-cost rule violation) — give the rest of the MAPE-K loop a deterministic substrate to plan against. The phases are pure functions (I/O happens in a thin CLI wrapper) so the same fixture-based test harness used by `scripts/check-rule-*.test.mjs` works here.
-  - **Details**: Monitor: `monitor({ ciRuns, advisoriesDir, experimentStoreDir }) => HealthSnapshot`. Reads recent CI run conclusions (`gh run list --workflow ci.yml --json conclusion,name,createdAt` is the *adapter*-level shape; the pure function takes the parsed JSON), spec-advisories/, experiment-store/*.jsonl. Analyze: `analyze(snapshot) => { topConstraint, evidence, severity }`. CLI wrapper is the I/O boundary.
-  - **Files**: `novel/mape-k-loop/src/monitor.ts`, `novel/mape-k-loop/src/monitor.test.ts`, `novel/mape-k-loop/src/analyze.ts`, `novel/mape-k-loop/src/analyze.test.ts`, `novel/mape-k-loop/package.json`, `novel/mape-k-loop/tsconfig.json`, `novel/mape-k-loop/README.md`.
-  - **Verification**: each public function carries a `@otel mape-k-loop.<verb>` JSDoc; ≥6 paired tests across both phases; rule-7 chaos table in the README enumerates upstream-malformed CI JSON, missing experiment-store, and constraint-evidence ties.
-  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/monitor.test.ts novel/mape-k-loop/src/analyze.test.ts` exits 0; coverage on `monitor.ts` + `analyze.ts` ≥ 90 % per the project's existing thresholds.
-  - **Pivot**: if Goldratt's "highest-frequency × highest-cost" framing collapses too many distinct violations into one (e.g., a high-frequency typo lint dominates the constraint over rare but expensive rule-#9 misses), pivot to a per-rule severity-weighted constraint metric and document the weight schedule in `vision.md`.
-  - **Acceptance**: monitor + analyze phases ship as pure functions with paired tests; pattern-conformance row added; rule-#9 EXPERIMENT.yaml lands with the PR.
-  - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003 (the MAPE-K reference architecture); Goldratt, *The Goal*, 1984 (Theory of Constraints); Martin, *Clean Architecture*, 2017 (pure function + thin I/O boundary).
-  - **Risk**: CI-run JSON shape changes upstream and breaks Monitor's parser. Mitigation: pin a fixture under `novel/mape-k-loop/test/fixtures/` and gate updates with the test (rule #7 chaos discipline).
-
 - [ ] `claude-mape-k-loop` Plan + Execute phases (with sustained-gain + oscillation guards)
   - **ID**: mape-k-plan-execute-phases
   - **Tags**: novel, extraction-target
   - **Parent**: mape-k-loop-v0
   - **Estimate**: 1–1.5d
-  - **Blocked by**: mape-k-monitor-analyze-phases
   - **Hypothesis**: Plan (proposes ≤3 prompt variants for the top constraint emitted by Analyze) and Execute (runs the A/B via the shipped `@minsky/prompt-optimizer` adapter, applies the sustained-gain check ≥7 d per Kohavi-Tang-Xu 2020, and refuses to revisit a prompt within 10 iterations per the oscillation guard) are sufficient as pure decision functions to drive prompt rollouts without a separate orchestration runtime. The two guards (sustained-gain, oscillation) are independently testable; both fire on synthetic histories crafted to trip them.
   - **Details**: `plan(constraint) => Variant[]` (≤3 variants). `execute({ variants, evalSet, optimizer, history }) => { winner, decision: "rollout" | "abstain", reason }`. `sustainedGain({ winnerVariantId, history, windowDays }) => boolean`. `oscillation({ proposedVariantId, history, lookbackIterations }) => boolean`. The `optimizer` argument is a `PromptOptimizer` (sub-task 1 contract); tests inject `StubPromptOptimizer`.
   - **Files**: `novel/mape-k-loop/src/plan.ts`, `novel/mape-k-loop/src/execute.ts`, `novel/mape-k-loop/src/oscillation.ts`, `novel/mape-k-loop/src/sustained-gain.ts`, paired `*.test.ts` for each.
@@ -111,7 +95,7 @@
   - **Tags**: novel, extraction-target
   - **Parent**: mape-k-loop-v0
   - **Estimate**: 6–8h
-  - **Blocked by**: mape-k-monitor-analyze-phases, mape-k-plan-execute-phases
+  - **Blocked by**: mape-k-plan-execute-phases
   - **Hypothesis**: The Knowledge phase — append-only writes to `constraints.md`, reads of the experiment-tracker verdicts, and emission of proposed rule-#9 amendments to `research.md` when calibration drifts past a configured threshold — closes the MAPE-K loop with the rule-#9 quarterly-automation layer (`vision.md` § 9). The integration test for user-story 003 (`user-stories/003-mape-k-improves-prompts.test.ts`) passes against the assembled package, validating that the four phases compose correctly and that the parent `mape-k-loop-v0` tracker can be removed.
   - **Details**: `knowledge({ verdictLog, calibrationDriftThreshold }) => { constraintsAppend: string, researchMdAmendmentProposal: string | null }`. `index.ts` assembles Monitor → Analyze → Plan → Execute → Knowledge into one tick of the loop. `constraints.md` is the append-only knowledge store (Helland 2007 — immutable log).
   - **Files**: `novel/mape-k-loop/src/knowledge.ts`, `novel/mape-k-loop/src/knowledge.test.ts`, `novel/mape-k-loop/src/index.ts`, `novel/mape-k-loop/src/index.test.ts`, `novel/mape-k-loop/constraints.md` (initial seed), `novel/mape-k-loop/README.md`, `user-stories/003-mape-k-improves-prompts.test.ts`.
@@ -130,7 +114,7 @@
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target, parent
   - **Estimate**: tracker — see sub-tasks
-  - **Blocked by**: mape-k-monitor-analyze-phases, mape-k-plan-execute-phases, mape-k-knowledge-and-integration
+  - **Blocked by**: mape-k-plan-execute-phases, mape-k-knowledge-and-integration
   - **Hypothesis**: A MAPE-K loop that drives prompt A/Bs through the `@minsky/prompt-optimizer` adapter (the DSPy fallback per `research.md` § "DSPy fit"), gated by a sustained-gain check (≥7 days post-rollout before counting per Kohavi-Tang-Xu 2020) and an oscillation detector (refuses to revisit a prompt within 10 iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). This tracker decomposes into four sub-tasks (filed below): the PromptOptimizer adapter (sub-task 1, shipped in PR feat: mape-k decompose + PromptOptimizer adapter), the Monitor + Analyze phases (sub-task 2), the Plan + Execute phases (sub-task 3), and the Knowledge phase + integration (sub-task 4). The `**Quarterly-layer scope**` lives in sub-task 4. The tracker itself is removed when sub-task 4 ships.
   - **Verification**: all four sub-tasks ship; integration test for `user-stories/003-mape-k-improves-prompts.md` passes once sub-task 4 lands.
