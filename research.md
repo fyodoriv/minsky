@@ -563,8 +563,8 @@ Each active dependency follows the same shape:
 - ~~Apple Watch surface — does Shortcuts + ntfy suffice long-term, or do we eventually need a native WatchOS app?~~ Resolved 2026-05-03; see § "Native WatchOS app". Cheap path (Shortcuts) stays current; expensive path (native app) is pre-specified with a metric-bound trigger (90 s/day wrist-dwell sustained 14 d) and a ≤2-week effort ceiling. No implementation task filed until the trigger fires.
 - ~~DSPy idiom fit with Claude Code's prompt model — needs first practical attempt~~ Resolved 2026-05-03; see § "DSPy fit". Recommendation: reject; ship fallback `PromptOptimizer` interface that calls Anthropic API directly.
 - ~~Lighter OTEL backend — Loki+Tempo+Prometheus+Grafana is heavy for single-dev installs; SQLite-backed alternative?~~ Resolved 2026-05-03; see § "Lighter OTEL backend".
-- Cross-language equivalent of tasks.md — can the spec be ported to Python/Rust ecosystems? (taskmd-driangle covers some of this with directory-of-files)
-- OMC handoff persistence — do they parseably persist their internal task list to disk? Determines bridge complexity.
+- Cross-language equivalent of tasks.md — can the spec be ported to Python/Rust ecosystems? (taskmd-driangle covers some of this with directory-of-files) — **No cross-language port as of 2026-05-04** (PyPI search: only generic markdown-task parsers like `markdown-analysis`, `minchin.md-it.fancy-tasklists`; crates.io: no `tasks-md` crate, only generic markdown parsers). Node-only via `@tasks-md/lint`. Defer to `review-q3-2026`; trigger: file an upstream issue if ≥2 downstream tools request a Python/Rust port.
+- ~~OMC-handoff parseability on disk — do they parseably persist their internal task list?~~ Resolved 2026-05-03; see the dedicated section above (PRs #75 / #77). Bridge v0 shipped as `@minsky/omc-tasksmd-bridge` per vision.md row 62; round-trip parseability check landed in `scripts/omc-roundtrip.mjs`.
 
 ---
 
