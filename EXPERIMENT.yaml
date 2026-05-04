@@ -1,18 +1,13 @@
-id: ci-pin-tooling-versions
+id: otel-lite-backend
 hypothesis: |
-  Pinning `@tasks-md/lint` (to `^0.7.0`) and `markdownlint-cli2` (to `0.15.0`)
-  in `.github/workflows/ci.yml` eliminates the "Friday-release-breaks-Monday-CI"
-  failure mode for these two tools without sacrificing security-patch agility
-  (the quarterly review in `research.md` is the bump cadence). Today both jobs
-  invoke a floating version (`@tasks-md/lint@latest`, `npx -y markdownlint-cli2`
-  with no specifier), so a silent upstream release can red-bar trunk on a
-  schedule we don't control — directly contradicting `ARCHITECTURE.md` §
-  "Versioning & dependency evolution" ("Pin major versions of all dependencies")
-  and constitutional rule #7 (chaos engineering — trust no unverified
-  dependency). With the pin the CI invocations are reproducible by
-  construction.
-success: "`grep -cE '@latest|markdownlint-cli2[^@]' .github/workflows/ci.yml` returns 0; `npx -y @tasks-md/lint@^0.7.0 TASKS.md` and `npx -y markdownlint-cli2@0.15.0 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"` both exit 0 against the live repo; CI tasks-lint + markdownlint jobs green on the PR."
-pivot: "if a pinned version blocks a bug-fix (e.g., a CVE in markdownlint-cli2 < 0.15.0 or @tasks-md/lint < 0.7.x), bump immediately and revisit the pin policy — likely switching to dependabot-driven auto-bumps for tooling minors. If pinning to a specific minor proves too noisy (≥3 manual bumps per quarter), pivot to lockfile-only pinning via `pnpm exec` for both tools (requires adding `@tasks-md/lint` as a devDependency)."
-measurement: "test \"$(grep -cE '@latest|markdownlint-cli2[^@]' .github/workflows/ci.yml || true)\" = '0'"
-anchor: "rule #7 (vision.md § 7 — chaos engineering, trust no unverified dependency); ARCHITECTURE.md § \"Versioning & dependency evolution\" (Pin major versions of all dependencies); Forsgren, Humble, Kim, *Accelerate*, 2018 (deployment reliability as a DORA prerequisite)."
+  A lightweight OTEL-compatible backend exists that satisfies (a) on-disk
+  footprint <1 GB / month at the v0 emission rate, (b) install steps ≤3
+  commands from a clean machine, and (c) the three success-criteria query
+  shapes from vision.md (rows 2, 5, 9) — making it preferable to the
+  current Loki+Tempo+Prometheus+Grafana stack for the solo-dev tier.
+  Evaluate ≥3 candidates and recommend one in research.md.
+success: "grep -c '^## Lighter OTEL backend' research.md returns 1 AND the section contains a 4-column markdown table (Backend | Disk/month | Install steps | Query) with ≥3 candidates evaluated and exactly one recommended; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && npx markdownlint-cli2 all green."
+pivot: "if no candidate satisfies <1 GB/month AND ≤3 install commands AND can answer the success-criteria queries from vision.md, keep Loki+Tempo+Prometheus+Grafana and file a follow-up `otel-signal-volume-reduction` task to lower OTEL signal volume instead."
+measurement: "test \"$(grep -c '^## Lighter OTEL backend' research.md)\" = 1 && test \"$(awk '/^## Lighter OTEL backend/,/^## How to read this file/' research.md | grep -c '^|.*|.*|.*|.*|')\" -ge 5"
+anchor: "OpenTelemetry specification (CNCF 2020+); Gregg, Systems Performance, 2014 (USE method as the lens for what a backend must support); rule #1 (vision.md § 1, don't reinvent the wheel)."
 replay_windows_days: [7, 30, 180]

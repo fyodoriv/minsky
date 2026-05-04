@@ -127,19 +127,6 @@
   - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (steady-state hypothesis); Beck, *Extreme Programming Explained*, 1999 (CI keeps the build fast).
   - **Risk**: 60min compressed sim may miss real overnight failure modes (memory leaks, log rotation, OS sleep). Document the gap; plan a quarterly real-overnight test.
 
-- [ ] Lighter OTEL backend evaluation
-  - **ID**: otel-lite-backend
-  - **Tags**: research
-  - **Estimate**: 4–6h
-  - **Hypothesis**: A SQLite-backed (or comparably lightweight) OTEL store covers the three signals (traces / metrics / logs) needed by Minsky's success metrics with on-disk footprint <1 GB / month and install steps ≤3 commands — making it preferable to Loki+Tempo+Prometheus+Grafana for the solo-dev tier.
-  - **Details**: Loki+Tempo+Prometheus+Grafana is heavy for single-dev install. Evaluate SQLite-backed exporter or similar. Document pros/cons.
-  - **Verification**: `research.md` has a "Lighter OTEL backend" comparison table (size, install steps, query language, dashboard support); recommendation stated; if SQLite path chosen, P1 task created
-  - **Measurement**: `grep -c '^## Lighter OTEL backend' research.md` returns 1 and the section contains a 4-column table (Backend | Disk/month | Install steps | Query) with ≥3 candidates evaluated and one recommended.
-  - **Pivot**: if no candidate satisfies <1 GB/month AND ≤3 install commands AND can answer the success-criteria queries from `vision.md`, keep Loki+Tempo+Prometheus+Grafana and file a follow-up to lower the OTEL signal volume instead.
-  - **Acceptance**: research.md updated with comparison and recommendation; if SQLite path chosen, follow-up P1 task filed
-  - **Anchor**: OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method as the lens for "what does this backend need to support").
-  - **Risk**: Lighter backend may lack features needed later (distributed traces, long retention). Decide on a defined feature set; revisit when missing features bite.
-
 - [ ] Apple Shortcuts JSON for Watch surface
   - **ID**: watch-shortcuts
   - **Tags**: novel, ux
