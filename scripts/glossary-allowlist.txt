@@ -46,3 +46,17 @@ experiment-store
 # --- Folder names. Anchored in the filesystem layout, not in prose. ---
 # Top-level folder: one file per user story (rule #3 / Cohn 2004).
 user-stories
+
+# --- Task IDs and workflow names introduced 2026-05-04. ---
+# TASKS.md task ID — substrate-migration ahead of the cross-repo-runner stack
+# (vision.md § 11; rule-#9 pre-registration of the migration's own EXPERIMENT.yaml
+# is the eat-own-dogfood acceptance test).
+experiments-directory-migration
+# CI workflow name + product (Google Lighthouse, the third-party performance
+# auditor; Lighthouse Mobile is its mobile-throttling-default profile). The
+# `lighthouse-mobile` job in `.github/workflows/lighthouse.yml` was downgraded
+# to informational on 2026-05-04 per rule #11 — see vision.md § 11.
+lighthouse-mobile
+# TASKS.md task ID — pre-registered next-tier pivot for the lighthouse-mobile
+# self-hosted runner move (rule-#11 proof). Anchored in TASKS.md.
+lighthouse-self-hosted-runner-pivot
