@@ -138,25 +138,11 @@
   - **Anchor**: rule #10; Armstrong, *Programming Erlang*, 2007 (let it crash); Lampson 1983 hint "use exceptions only for exceptional conditions".
   - **Risk**: TS-AST visitor maintenance burden. Mitigation: keep the rule narrow — depth threshold + missing-rethrow are both single-pass checks.
 
-- [ ] `ci-rule-7-chaos-coverage` — CI lint: every novel package's failure-mode table row has a chaos test
-  - **ID**: ci-rule-7-chaos-coverage
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 3–4h
-  - **Hypothesis**: A CI lint that parses each `novel/**/README.md`'s "Failure modes & chaos verification" table and verifies every row's "Chaos test" cell either names a runnable test file OR is explicitly marked `(deferred — covered when <task-id> ships)` enforces rule #7 mechanically — converting "the table exists" into "the table is real".
-  - **Details**: Build `scripts/check-rule-7-chaos-coverage.mjs`. For each `novel/**/README.md`: (a) requires a `## Failure modes & chaos verification` section per the file-level policy in TASKS.md; (b) parses the markdown table; (c) for each row, parses the "Chaos test" column for either a path matching `novel/**/*.test.ts` (which must exist) or the literal pattern `(deferred — covered when <task-id> ships)` (where `<task-id>` must exist in TASKS.md or git log); (d) fails on any row without a satisfying chaos-test reference.
-  - **Files**: `scripts/check-rule-7-chaos-coverage.mjs`, `scripts/check-rule-7-chaos-coverage.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic README with a table row whose Chaos test cell is empty → fails; same row referencing an existing test file → passes; same row with the deferred-task syntax pointing to a real TASKS.md ID → passes.
-  - **Measurement**: `node scripts/check-rule-7-chaos-coverage.mjs` exits 1 against the synthetic-empty-cell fixture and 0 against the with-test fixture; `pnpm vitest run scripts/check-rule-7-chaos-coverage.test.mjs` exits 0.
-  - **Pivot**: if parsing the markdown table proves too brittle (e.g., contributors forget the pipe-separator format), pivot to a structured `failure-modes.yaml` per package, with the README rendered from it.
-  - **Acceptance**: CI job runs on every PR; rule #7's chaos-test contract is mechanically enforced.
-  - **Anchor**: rule #10; Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016; rule #7 (vision.md § 7).
-  - **Risk**: Markdown-table parsing is brittle. Mitigation: use a permissive parser and require the columns by header name, not by position.
-
 - [ ] `spec-monitor-deterministic-rewrite` — split `spec-monitor-skill` into deterministic linters + a thin LLM advisory layer
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-2-dep-coverage, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
+  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-2-dep-coverage, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
@@ -355,6 +341,20 @@
   - **Acceptance**: All 10 vision.md success metrics visible; loads in <1s on iPhone over Tailscale; passes Lighthouse mobile usability
   - **Anchor**: Card & Mackinlay 1999 (information visualization); Wilkie, "RED Method", 2018 (rate / errors / duration as the right service-level lens).
   - **Risk**: Scope creep into a "real" dashboard. Cap line count; refuse new features without removing one.
+
+- [ ] `handoff-spec-size-cap` — enforce a per-document size cap in the handoff parser
+  - **ID**: handoff-spec-size-cap
+  - **Tags**: novel, hardening
+  - **Estimate**: 1–2h
+  - **Hypothesis**: A 1 MB hard cap enforced at the entry of `parseHandoffs()` (rejecting larger inputs with a structured `ParseError` of `kind: input-too-large`) covers the row-6 failure mode in `novel/handoff-spec/README.md`'s chaos-verification table without changing the parser's algorithmic shape — converting "let it OOM" into "let it crash with a precise error".
+  - **Details**: Add a length check at the top of `parseHandoffs(source)`. If `Buffer.byteLength(source, "utf-8") > 1_048_576`, return `{ handoffs: [], errors: [{ kind: "input-too-large", line: 0, message: "document exceeds 1 MB cap" }] }`. Add a test fixture (synthetic 2 MB string built by repetition; do not commit the literal bytes — the test generates them) that asserts the structured error path. The cap is configurable via a second `parseHandoffs(source, { maxBytes })` overload defaulting to `1_048_576`. Surfaced by the rule-#7 chaos-coverage CI lint when row 6 of the failure-mode table needed a real follow-up task.
+  - **Files**: `novel/handoff-spec/src/index.ts`, `novel/handoff-spec/src/index.test.ts`
+  - **Verification**: synthetic 2 MB input → returns one `ParseError` with `kind: "input-too-large"`; 1 MB - 1 byte input parses normally; cap override (`{ maxBytes: 1024 }`) rejects a 2 KB input.
+  - **Measurement**: `pnpm vitest run novel/handoff-spec/src/index.test.ts` exits 0 with the three new assertions; `wc -l novel/handoff-spec/src/index.ts` increases by ≤15 lines (i.e., the cap doesn't bloat the parser).
+  - **Pivot**: if 1 MB proves too tight in real handoffs (any legitimate handoff record exceeds 1 MB in the first 90 days), bump the cap to 4 MB and revisit; if even 4 MB is hit, the parser is the wrong shape for the workload — pivot to a streaming parser per `parsimmon` / `chevrotain`.
+  - **Acceptance**: Row 6 of `novel/handoff-spec/README.md`'s failure-mode table is no longer deferred — the chaos test exists; the rule-#7 chaos-coverage lint passes against a live test reference.
+  - **Anchor**: Armstrong, *Programming Erlang*, 2007 (let it crash, but with a precise error); rule #7 (chaos engineering); rule #6 (let-it-crash discipline).
+  - **Risk**: Real-world handoff documents could legitimately exceed 1 MB (e.g., embedded base64 attachments). Mitigation: the override option lets callers raise the cap at the call site; the default is conservative.
 
 ## P3
 
