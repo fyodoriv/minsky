@@ -1,55 +1,44 @@
-id: 4-dormant-ci-lints-tick-mape-k-cadence
+id: budget-guard-maciek-impl
 hypothesis: |
-  ARCHITECTURE.md L215 (`5s → 30s → 5min` tick-loop backoff), L218 (12 h
-  MAPE-K watchdog cadence + 1000-tick backstop), and research.md L92 (8 %
-  MAPE-K cadence-pivot threshold) carry prose-only numeric constants
-  whose drift currently surfaces only via human re-reading. Filing 4
-  dormant CI lints — same shape as PR #59
-  (`ci-lint-mape-k-token-budget-cap`) and PR #60
-  (`ci-lint-mape-k-constraints-md-size`) — extends rule-#10 ratchet
-  coverage to this prose-anchor class. Each lint exits 0 today (configs
-  missing — dormant by rule #7 graceful degrade) and activates the
-  moment its `config/<file>.json` artifact lands.
+  MaciekTokenMonitor's parser + 5h SessionBlock aggregation + plan-cap
+  subtraction matches Maciek's `claude-monitor --view realtime` reported
+  value to within 1 % on a synthetic fixture, without invoking the
+  upstream CLI. Re-implementing the parser shape directly against
+  `~/.claude/projects/<cwd>/<session>.jsonl` (the file Claude Code writes;
+  the same data Maciek reads) is the only deterministic path because
+  `claude-monitor==3.1.0` has no `--json` mode (only `--view {realtime,
+  daily, monthly}` and `--version`).
 success: |
-  ≥16 tests pass (numPassedTests ≥ 16) and 0 tests fail across the 4
-  paired test files; `pnpm exec vitest run
-  scripts/check-tick-loop-backoff-schedule.test.mjs
-  scripts/check-mape-k-tick-iteration-backstop.test.mjs
-  scripts/check-mape-k-watchdog-cadence.test.mjs
-  scripts/check-cadence-pivot-threshold.test.mjs --reporter=json
-  | jq -e '.numPassedTests >= 16 and .numFailedTests == 0'`
-  exits 0; all 4 lint CLIs exit 0 against the current state (configs
-  missing — dormant); all 4 lints wired into `.github/workflows/ci.yml`
-  as separate jobs and into the `ci` gate's `needs:` + bash gate-loop.
+  ≥6 tests pass against committed synthetic fixtures
+  (`single-block`, `two-blocks`, `empty`, `malformed`, `dedup`); parser
+  handles every fixture case; `PLAN_CAPS = { pro: 19_000, max5: 88_000,
+  max20: 220_000, custom: 44_000 }` is locked by paired plan-cap-variance
+  tests; `pnpm vitest run novel/adapters/token-monitor/src/maciek.test.ts
+  --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
+  exits 0.
 pivot: |
-  If any of the 4 prose anchors moves before its corresponding config
-  artifact lands (e.g., the `5s → 30s → 5min` ladder is replaced by
-  exponential backoff, or the 12 h watchdog cadence is replaced by an
-  adaptive formula after `mape-k-loop`'s monthly self-calibration
-  extends T to 18 h per ARCHITECTURE L218, or the 8 % cadence-pivot
-  threshold is replaced by a different overshoot envelope in
-  research.md), retire that specific lint and write a new one against
-  the replacement anchor — exactly the per-lint Pivot clause each
-  script header carries. The retire-the-lint shape is fork-with-
-  reissue per Helland 2007 (immutable log — derived data through
-  reissue, not mutation), the same precedent established by
-  `check-skill-rule-cap.mjs`'s retired-Skill terminal state.
+  If Anthropic's JSONL format changes more than once in a 90-day window
+  (a structural break — new top-level field shapes, renamed
+  `message.usage` keys, or removed timestamps), file an upstream feature
+  request for a `--json` mode in `claude-monitor` (rule #1 — push
+  upstream first). Only as a last resort write our own cache-tap by
+  hooking the Claude Code API client. The pivot is an *abandon-the-
+  approach* line, not a one-line schema-update PR (rule #9 — Munafò
+  et al. 2017 pre-registration discipline).
 measurement: |
-  pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs scripts/check-mape-k-tick-iteration-backstop.test.mjs scripts/check-mape-k-watchdog-cadence.test.mjs scripts/check-cadence-pivot-threshold.test.mjs --reporter=json | jq -e '.numPassedTests >= 16 and .numFailedTests == 0'
+  pnpm vitest run novel/adapters/token-monitor/src/maciek.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'
 anchor: |
-  rule #10 (vision.md § 10 — deterministic enforcement; ratchet rule:
-  every prose-only invariant in ARCHITECTURE.md / vision.md /
-  research.md gets a deterministic linter as soon as the artefact it
-  guards becomes machine-readable); ARCHITECTURE.md L215 (tick-loop
-  backoff prose anchor); ARCHITECTURE.md L218 (1000-tick backstop +
-  12 h watchdog prose anchors); research.md L92 (8 % cadence-pivot
-  threshold prose anchor); Beyer, Jones, Petoff, Murphy (eds.), *Site
-  Reliability Engineering*, O'Reilly 2016, Ch. 3 (error-budget
-  enforcement — exceed-the-budget triggers a mechanical response, not
-  a discussion); Armstrong, *Programming Erlang*, Pragmatic Bookshelf
-  2007 (let-it-crash + supervised restart with backoff); Liu,
-  *Real-Time Systems*, Prentice Hall 2000, § 6.4 (activity-coupled
-  sampling bound); Ries, *The Lean Startup*, Crown Business 2011
-  (pivot-or-persevere — pivot threshold as the falsifiable
-  abandon-the-approach line).
+  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
+  1986 (Adapter / Strategy — `MaciekTokenMonitor` is a Strategy of
+  `TokenMonitor`); Aho, Sethi, Ullman, *Compilers: Principles,
+  Techniques, and Tools*, Addison-Wesley, 1986 (recursive-descent parser
+  shape over JSONL — line-by-line `JSON.parse` with graceful skip on
+  malformed input); Meszaros, *xUnit Test Patterns*, Addison-Wesley,
+  2007 (real-implementation contract test — the parser test verifies
+  determinism against committed fixtures rather than depending on a
+  live Maciek install at test time); Beyer, Jones, Petoff, Murphy
+  (eds.), *Site Reliability Engineering*, O'Reilly 2016, Ch. 3
+  (error-budget framing — token economy is the budget contract);
+  rule #2 (vision.md § 2 — every dep behind interface; the adapter
+  wraps the JSONL on-disk format Anthropic writes).
 replay_windows_days: [7, 30]

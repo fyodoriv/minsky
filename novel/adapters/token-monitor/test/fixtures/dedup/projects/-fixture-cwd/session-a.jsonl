@@ -1,0 +1,1 @@
+{"type":"assistant","timestamp":"2026-05-04T12:00:00.000Z","message":{"id":"msg_dup_001","usage":{"input_tokens":1000,"output_tokens":2000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"}},"requestId":"req_dup_001"}
