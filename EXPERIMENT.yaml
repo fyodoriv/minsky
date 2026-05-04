@@ -1,29 +1,32 @@
-id: ci-lint-anchor-primary-source
+id: native-watchos-app
 hypothesis: |
-  Promoting spec-monitor advisory rule A3 ("anchor citation is not a
-  primary source") to a deterministic CI lint at
-  `scripts/check-anchor-primary-source.mjs` makes blog-decay anchor
-  citations unmissable on every PR. The pure decision function reads the
-  `anchor` field from EXPERIMENT.yaml via `@minsky/experiment-record`'s
-  parser and runs an allowlist + deny-list classifier: deny-list of known
-  non-primary sources (`medium.com`, `*.substack.com`, `wikipedia.org`,
-  `twitter.com`, `x.com`, `reddit.com`, `stackoverflow.com`, `chatgpt.com`,
-  `claude.ai`, "ChatGPT said", "tweet by", "blog post") fails when matched
-  and no allowlist token is present; allowlist of primary-source patterns
-  (italicised book/journal title `*…*`, `Ch. <n>`, `pp. <n>`, ISBN, DOI,
-  conference `<VENUE> <YEAR>`, internal cross-ref `vision.md §` / `rule
-  #<n>` / `spec-advisories/<date>.md`) passes when matched. Three-way
-  verdict — pass / fail / advisory-warn (short prose without signal). Per
-  rule #5 / rule #8 the constitution must outlive any single source —
-  blog URLs rot, Wikipedia edits, tweets vanish. Per rule #10's ratchet,
-  A3 is retired from SKILL.md in the same PR; the active advisory count
-  drops by 1 (only A1 and A5 remain advisory; A2 and A4 already retired).
-  If the deny-list grows past 15 entries to cover legitimate variations
-  (arxiv preprints sometimes primary, sometimes not) OR >10 % of historical
-  anchors fall through to `warn`, the rule is judgement-bound and this
-  lint is retired — A3 stays advisory in SKILL.md.
-success: "≥8 unit tests pass in `scripts/check-anchor-primary-source.test.mjs` (covering the deny-list cases medium / wikipedia / tweet / chatgpt, the allowlist cases book+chapter / cross-ref / DOI, and the short-prose warn case), the lint exits 0 against this PR's own EXPERIMENT.yaml (allowlist hit on `*The Lean Startup*` / `rule #10` / `vision.md §` / `spec-advisories/`), the lint exits 1 against a synthetic `anchor: \"https://medium.com/some-blog/post\"` fixture, AND `scripts/check-skill-rule-cap.mjs` reports ≤2 active advisory rules in `novel/spec-monitor/SKILL.md` (A3 retired, only A1 and A5 remaining)."
-pivot: "If the deny-list grows past 15 entries to cover legitimate variations (e.g., `arxiv.org` is sometimes primary, sometimes preprint-only) OR >10 % of historical anchors fall through to the `warn` channel within 30 days of merge (i.e., the lint is producing noise rather than signal), revert the CI wiring on `anchor-primary-source`, restore `### A3.` as an active advisory heading in SKILL.md (raising the count back to its pre-PR value), and close the `ci-lint-anchor-primary-source` task as pivoted-not-validated."
-measurement: "pnpm exec vitest run scripts/check-anchor-primary-source.test.mjs && node scripts/check-anchor-primary-source.mjs EXPERIMENT.yaml && node scripts/check-skill-rule-cap.mjs"
-anchor: "rule #10 (vision.md § 10 — deterministic enforcement; ratchet rule: when an advisory rule is promoted to a deterministic linter, the advisory counterpart is removed in the same PR); rule #5 / rule #8 (vision.md § 5 / § 8 — named, decades-tested pattern; the constitution must outlive any single source); Havelund & Goldberg, *VSTTE* 2008 (runtime verification — the primary-source check is the deterministic-monitor layer carved out from the residual advisory share); `spec-advisories/2026-05-03-quarterly-audit.md` (audit decision to admit a deterministic deny-list + allowlist for A3)."
+  Adding a `## Native WatchOS app` section to `research.md` — documenting
+  (a) a metric-bound trigger condition (90 s/day wrist-dwell sustained
+  across two consecutive 7-day windows, queryable as
+  `count(http_get_total{path="/watch.json"}[7d]) * 2 > 630` against the
+  OTEL Prometheus surface per `vision.md` § "Success criteria" row 6),
+  (b) a scope sketch (≤3 complications, one main face, tap-through to a
+  single tokens-remaining detail view, no interactive controls beyond
+  pause/resume), (c) a calendar-time effort ceiling (≤2 weeks of solo-dev
+  effort, broken down day-by-day), and (d) two pre-committed pivot
+  conditions on the trigger itself (lower to 75 s/day if community
+  boilerplate ships AND wrist-dwell is borderline; raise to 120 s/day if
+  native requires entitlements the solo-dev tier can't justify) — is
+  sufficient to defer the native-app implementation cost until the dwell
+  metric measurably justifies it. The framing is rule-#1-first: Apple
+  Shortcuts is the cheap surface, the native app is the expensive
+  alternative, and the section pre-registers the threshold past which
+  "cheap" stops being cheap enough so the escalation decision is
+  deterministic rather than vibes-driven (rule #9). No implementation
+  task is filed today; one will be filed at the moment the OTEL query
+  above returns true for two consecutive 7-day windows. If the trigger
+  never fires (Shortcuts surface remains within story 005's ≤60 s/day
+  target), the cost of writing this section is bounded at one PR's
+  worth of doc work — and the section's existence still provides a
+  pre-committed, falsifiable answer to the standing "do we need a
+  native app?" research question.
+success: "`grep -c '^## Native WatchOS app' research.md` returns 1; the section explicitly cites the 90 s/day trigger sustained across two consecutive 7-day windows, the queryable form `count(http_get_total{path=\"/watch.json\"}[7d]) * 2 > 630`, an effort ceiling ≤2 weeks broken down by calendar-day phases (project setup / signing / TestFlight, ComplicationKit + WidgetKit data flow, App Intents for Siri+Shortcuts hooks, testing + private distribution), and the two pivot conditions on the trigger itself; the `native-watchos-app` task block is removed from TASKS.md (`grep -c '^- \\[ \\] Native WatchOS app' TASKS.md` returns 0); the Open-questions list in research.md is updated to mark the Watch-surface question as conditionally resolved."
+pivot: "If community WatchOS boilerplate ships during the deferral window (e.g., a permissively-licensed `swift-package-watch-glance` template covering complications + App Intents) AND `wrist_dwell_seconds_per_day` lands in the borderline 75–90 s/day band sustained 14 d, lower the trigger threshold to 75 s/day in this section and re-evaluate. If, conversely, native turns out to require Apple Developer Enterprise tier or paid-only entitlements that the solo-dev tier (US$99/yr Developer Program) cannot justify, raise the trigger to 120 s/day. Either pivot is recorded as a quarterly-review entry against this section, not as a silent threshold change. If neither pivot fires AND the trigger never fires in 12 months of MAPE-K-loop steady state, the section is reviewed as a candidate for retirement (the cheap surface is structurally sufficient and the expensive alternative is no longer worth pre-specifying)."
+measurement: "[ \"$(grep -c '^## Native WatchOS app' research.md)\" = '1' ] && grep -q '90 s/day' research.md && grep -q '2 weeks' research.md && grep -q 'count(http_get_total{path=\"/watch.json\"}\\[7d\\]) \\* 2 > 630' research.md && [ \"$(grep -c '^- \\[ \\] Native WatchOS app' TASKS.md)\" = '0' ]"
+anchor: "Card, Mackinlay, Shneiderman, *Readings in Information Visualization*, Morgan Kaufmann, 1999, Ch. 1 (glanceable / ambient information display — the Watch surface as a calm-technology read-out; rule #1 explicitly cites this anchor for the row-12 Watch surface in `vision.md` § \"Pattern conformance index\"); Weiser & Brown, \"Designing Calm Technology\", *PowerGrid Journal* 1995 (the inverted-dwell discipline operationalised by `vision.md` § \"Success criteria\" row 6); rule #1 (`vision.md` § 1 — don't reinvent the wheel: Apple Shortcuts first, native app only on a measured trigger); rule #9 (`vision.md` § 9 — pre-registered hypothesis-driven development; the trigger threshold and its pivot conditions are committed before the metric is observed)."
 replay_windows_days: [7, 30]
