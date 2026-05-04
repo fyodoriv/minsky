@@ -32,7 +32,7 @@ import { type SetPaused, parseControlBody } from "./control.js";
 import { createMemoryPauseState } from "./control.js";
 import { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
 import { type GetValue, STUB_GET_VALUE, render } from "./render.js";
-import { type PauseState, watchEnvelope } from "./watch.js";
+import { type PauseReasonState, type PauseState, watchEnvelope } from "./watch.js";
 
 /** Server handle: `app` for tests, `fetch` for embedding. */
 export interface DashboardServer {
@@ -57,15 +57,25 @@ export function createServer(args?: {
   readonly getValue?: GetValue;
   readonly getPauseState?: PauseState;
   readonly setPaused?: SetPaused;
+  readonly getPauseReason?: PauseReasonState;
 }): DashboardServer {
   const metrics = args?.metrics ?? SUCCESS_METRICS;
   const getValue = args?.getValue ?? STUB_GET_VALUE;
   const memory = createMemoryPauseState();
   const getPauseState = args?.getPauseState ?? memory.getPauseState;
   const setPaused = args?.setPaused ?? memory.setPaused;
+  const getPauseReason = args?.getPauseReason;
   const app = new Hono();
   app.get("/", (c) => c.html(render({ metrics, getValue })));
-  app.get("/watch.json", (c) => c.json(watchEnvelope({ metrics, getValue, getPauseState })));
+  app.get("/watch.json", (c) =>
+    c.json(
+      watchEnvelope(
+        getPauseReason === undefined
+          ? { metrics, getValue, getPauseState }
+          : { metrics, getValue, getPauseState, getPauseReason },
+      ),
+    ),
+  );
   app.post("/control", async (c) => {
     const body = await readJsonBody(c.req.raw);
     const parsed = parseControlBody(body);

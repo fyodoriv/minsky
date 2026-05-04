@@ -125,6 +125,34 @@ export interface RunDaemonOpts {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Optional span sink — one event per phase. */
   readonly emit?: (event: TickSpan) => void;
+  /**
+   * Optional push-notification seam (rule #2). When injected, the daemon
+   * fires exactly one `push` per *transition* into `budget-paused` —
+   * debounced across consecutive paused iterations so the operator gets
+   * one alert per event, not one per tick. Recovery (any non-`budget-paused`
+   * status) re-arms the trigger; the next budget-paused transition fires
+   * a fresh push. Pattern: edge-triggered notification per Beyer SRE 2016
+   * Ch. 6 (silence is failure for state changes operators care about).
+   * `null` (the default) disables the channel — the daemon still records
+   * the budget-paused span, it just doesn't push anywhere.
+   */
+  readonly notifier?: NotifierLike;
+}
+
+/**
+ * Structural subset of `@minsky/notifier`'s `Notifier` shape — the daemon
+ * only calls `push`, so depending on the full interface would force
+ * tests + the daemon to import the whole package. The `@minsky/notifier`
+ * `Notifier` and `StubNotifier` both satisfy this shape (rule #2 — every
+ * dep behind an interface; the structural subtype IS the seam).
+ */
+export interface NotifierLike {
+  push(n: {
+    title: string;
+    body: string;
+    tags?: readonly string[];
+    priority?: "low" | "normal" | "high";
+  }): Promise<{ ok: boolean }>;
 }
 
 // ---- runDaemon ------------------------------------------------------------
@@ -162,10 +190,13 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
   }
   const sleep = opts.sleep ?? defaultSleep;
   const iterations: DaemonIterationResult[] = [];
+  // Edge-triggered debounce for budget-paused pushes — see `notifyOnPauseTransition`.
+  const pauseState = { inBudgetPause: false };
 
   for (let i = 0; i < opts.maxIterations; i++) {
     const outcome = await runOneIteration({ opts, iteration: i });
     iterations.push(outcome.result);
+    notifyOnPauseTransition(opts, outcome.result, pauseState);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -176,6 +207,43 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     totalIterations: iterations.length,
     stoppedReason: "max-iterations",
   };
+}
+
+/**
+ * Edge-triggered debounce for `budget-paused` pushes. Stays `false` while
+ * we're outside budget-paused state; flips to `true` on entry; resets on
+ * ANY non-budget-paused status (recovery OR transition to a different
+ * failure mode like supervisor-pause). One push per entry, full stop.
+ *
+ * Extracted from `runDaemon` to keep the orchestrator under the
+ * cognitive-complexity cap (rule #6, biome ≤10). Mutates `state.inBudgetPause`
+ * in place as the loop's only side effect on the closed-over scope.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function notifyOnPauseTransition(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+  state: { inBudgetPause: boolean },
+): void {
+  if (result.status !== "budget-paused") {
+    state.inBudgetPause = false;
+    return;
+  }
+  if (state.inBudgetPause || opts.notifier === undefined) {
+    state.inBudgetPause = true;
+    return;
+  }
+  // Fire-and-forget; rule #7 graceful-degrade — a missed push must never
+  // crash the daemon, and the notifier itself promises not to throw on
+  // transport errors.
+  void opts.notifier.push({
+    title: "Minsky paused — budget exhausted",
+    body: result.reason ?? "budget-guard circuit-break",
+    tags: ["pause", "budget"],
+    priority: "high",
+  });
+  state.inBudgetPause = true;
 }
 
 /**

@@ -24,13 +24,36 @@ import type { GetValue } from "./render.js";
 export type PauseState = () => boolean | null;
 
 /**
- * Default: not paused (matches the supervisor's nominal state).
+ * Why the daemon is paused, when it is. Surfaced alongside the boolean
+ * `paused` so the operator can distinguish "I tapped pause from my watch"
+ * (`operator`) from "the daemon paused itself because the 5h Anthropic
+ * budget hit the circuit-break threshold" (`budget`). The boolean stays
+ * for backwards compat with the v0 Apple Shortcuts; the reason field is
+ * additive (rule-#8 conformance: stable WatchEnvelope shape, field-add
+ * only). `null` → either not paused, or pause reason unknown — a future
+ * Strategy should narrow this; today's stub returns `null` explicitly.
+ *
+ * Surfaced by `daemon-budget-pause-observability` (P1, 2026-05-04).
+ */
+export type PauseReason = "operator" | "budget" | null;
+
+/** Strategy: read pause reason. `null` → unknown / not paused. */
+export type PauseReasonState = () => PauseReason;
+
+/**
+ * Default: pause reason unknown. The supervisor's nominal state is
+ * `paused: false` AND `pauseReason: null` — only one of those needs to
+ * be present for an Apple Shortcut to render the green tile, but having
+ * both keeps the JSON envelope stable across consumers.
  *
  * @otel-exempt pure constant function — no I/O, no state, the pause
- *   state Strategy seam is itself instrumented at the route boundary
+ *   reason Strategy seam is itself instrumented at the route boundary
  *   in `server.ts` (the `app.get("/watch.json", ...)` handler).
  */
 export const STUB_PAUSE_STATE: PauseState = () => null;
+
+/** @otel-exempt pure constant — see `STUB_PAUSE_STATE`. */
+export const STUB_PAUSE_REASON: PauseReasonState = () => null;
 
 /**
  * The three metric ids fed to the Watch surface. Order is the
@@ -64,6 +87,15 @@ export interface WatchEnvelope {
   readonly "last-task-status": string;
   readonly "constraint-of-the-week": string;
   readonly paused: boolean;
+  /**
+   * Why the daemon is paused, when it is. `null` when not paused OR when
+   * the reason is unknown (stub). Added by P1 `daemon-budget-pause-observability`
+   * to surface daemon-internal pauses (budget circuit-break) on the
+   * watch surface. Apple Shortcuts that don't care about the reason
+   * keep using `paused`; richer renderers (a future tile, the dashboard
+   * HTML route) read this.
+   */
+  readonly pauseReason: PauseReason;
 }
 
 /** Stub sentinel when the Strategy returns `null`. Operator-visible. */
@@ -84,6 +116,7 @@ export function watchEnvelope(args: {
   readonly metrics: readonly SuccessMetric[];
   readonly getValue: GetValue;
   readonly getPauseState: PauseState;
+  readonly getPauseReason?: PauseReasonState;
 }): WatchEnvelope {
   const byId = new Map(args.metrics.map((m) => [m.id, m]));
   const lookup = (key: WatchKey): string => {
@@ -94,10 +127,12 @@ export function watchEnvelope(args: {
     return v === null ? STUB : v;
   };
   const paused = args.getPauseState();
+  const pauseReason = (args.getPauseReason ?? STUB_PAUSE_REASON)();
   return {
     "tokens-remaining": lookup("tokens-remaining"),
     "last-task-status": lookup("last-task-status"),
     "constraint-of-the-week": lookup("constraint-of-the-week"),
     paused: paused === null ? false : paused,
+    pauseReason,
   };
 }
