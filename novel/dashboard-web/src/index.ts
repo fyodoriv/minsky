@@ -10,5 +10,5 @@
  */
 
 export { createServer, type DashboardServer } from "./server.js";
-export { PLACEHOLDER_METRICS, type SuccessMetric } from "./metrics.js";
+export { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
 export { render } from "./render.js";
