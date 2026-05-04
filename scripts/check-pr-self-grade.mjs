@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+// Pattern: deterministic gate over a PR-body convention.
+// Source: AGENTS.md § "Orchestrator discipline" rule (2);
+//   rule #9 (pre-registered HDD — pre-registration *plus* observation
+//   is what closes the loop, per Munafò et al. 2017).
+// Conformance: full — pure shape check on the PR body, no LLM in the chain.
+//
+// Why this gate exists: the post-batch audit of #22-#26 found that 5 of 5
+// sub-agent PRs reported "validated" without comparing predicted-vs-observed.
+// That is rule #9's "post-hoc metrics" anti-pattern in soft form: the
+// hypothesis was declared, but the closing comparison was skipped. This
+// gate makes the comparison structurally unavoidable.
+//
+// Required PR-body shape (case-insensitive, must appear in this order
+// inside a single contiguous block, headed by "Hypothesis self-grade"):
+//
+//   Hypothesis self-grade
+//   Predicted: …
+//   Observed: …
+//   Match: yes | no | partial
+//   Lesson: …
+//
+// All four cell values must be non-empty (≥3 characters of substantive
+// text). Missing block, missing line, or empty cell → exit 1 with a
+// pointer to AGENTS.md § "Orchestrator discipline".
+//
+// Pivot (rule #9): if this gate produces ≥3 false positives in its first
+// month (e.g., multi-line `Predicted:` values that span paragraphs), pivot
+// to a YAML-block convention (a fenced ```self-grade YAML``` block parsed
+// by a structured parser).
+
+// `[ \t]*` (NOT `\s*`) to keep matches on a single line — `\s*` would span
+// newlines and accidentally match the *next* line's value when the current
+// line's value is empty.
+const HEADER_RE = /^#+[ \t]*hypothesis self-grade\b/im;
+const FIELD_RES = {
+  Predicted: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?predicted(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+  Observed: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?observed(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+  Match: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?match(?:\*\*)?[ \t]*[:\-][ \t]*(yes|no|partial)\b/im,
+  Lesson: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?lesson(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+};
+
+const MIN_VALUE_LEN = 3;
+
+/**
+ * Pure function: given a PR body (string), return either { ok: true }
+ * or { ok: false, errors: string[] }. Errors are human-readable lines.
+ */
+export function checkPrSelfGrade(body) {
+  const errors = [];
+  if (!HEADER_RE.test(body)) {
+    errors.push(
+      "missing `Hypothesis self-grade` header. Add the block per AGENTS.md § Orchestrator discipline.",
+    );
+    // Without a header, the field-level checks below would all fire too.
+    // Keep them — the contributor benefits from seeing the full shape.
+  }
+  for (const [name, re] of Object.entries(FIELD_RES)) {
+    const m = body.match(re);
+    if (!m) {
+      errors.push(`missing or malformed line: \`${name}: …\``);
+      continue;
+    }
+    // `Match` is an enum (yes / no / partial) — the regex already
+    // constrains the value, so the min-length check is N/A.
+    if (name === "Match") continue;
+    const value = m[1]
+      .trim()
+      .replace(/^\*+|\*+$/g, "")
+      .trim();
+    if (value.length < MIN_VALUE_LEN) {
+      errors.push(
+        `\`${name}:\` value is too short (≥${MIN_VALUE_LEN} chars required); got "${value}"`,
+      );
+    }
+  }
+  return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+/**
+ * CLI: reads PR body from a file path passed as the first argument, OR
+ * from stdin if no argument is given. The CI workflow writes the PR body
+ * to a file and passes its path.
+ */
+async function main() {
+  const arg = process.argv[2];
+  let body;
+  if (arg !== undefined && arg !== "-") {
+    const { readFile } = await import("node:fs/promises");
+    body = await readFile(arg, "utf8");
+  } else {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    body = Buffer.concat(chunks).toString("utf8");
+  }
+  const result = checkPrSelfGrade(body);
+  if (result.ok) {
+    process.stdout.write("pr-self-grade ok: all four fields present and non-empty.\n");
+    return 0;
+  }
+  process.stderr.write("pr-self-grade violation:\n");
+  for (const err of result.errors) process.stderr.write(`  - ${err}\n`);
+  process.stderr.write(
+    [
+      "",
+      "Required block (paste into PR description):",
+      "",
+      "  ## Hypothesis self-grade",
+      "",
+      "  - Predicted: <re-state the hypothesis from the EXPERIMENT.yaml or PR body>",
+      "  - Observed: <the actual measurement output>",
+      "  - Match: yes | no | partial",
+      "  - Lesson: <one-sentence takeaway; what changes for the next experiment>",
+      "",
+      'See AGENTS.md § "Orchestrator discipline" for the rule and rule #9 for the anchor.',
+      "",
+    ].join("\n"),
+  );
+  return 1;
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("check-pr-self-grade.mjs");
+if (invokedDirectly) {
+  const code = await main();
+  process.exit(code);
+}
