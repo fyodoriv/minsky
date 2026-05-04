@@ -1,65 +1,65 @@
-id: tick-loop-picktask-honors-blocked-field-2026-05-04
+id: openobserve-installer-version-pin-fix-2026-05-04
 hypothesis: |
-  The v0 daemon's `pickTask` (`novel/tick-loop/src/daemon.ts`) only
-  respects `**Blocked by**: <id>` (the dependency variant). Tasks marked
-  `**Blocked**: <reason>` (the external-constraint variant — e.g.,
-  `needs-user-approval`) are picked anyway. Pre-flight on 2026-05-04
-  surfaced this: with the queue's only entries being `omc-tasksmd-issue`
-  (Blocked: needs-user-approval) and dormant P3s, the daemon picked
-  `omc-tasksmd-issue` in dry-run and would have spawned `claude --resume`
-  to file a public GitHub issue once the safety guard flips. Adding the
-  parallel skip rule for `**Blocked**:` in `pickTask` mechanically
-  prevents the failure mode that `**Blocked**:` exists to prevent. Closes
-  `tick-loop-picktask-honors-blocked-field`.
+  `distribution/install-openobserve.sh` pins `OO_VERSION=v0.80.1` and
+  resolves to `https://github.com/openobserve/openobserve/releases/download/
+  v0.80.1/openobserve-v0.80.1-darwin-arm64.tar.gz`. Pre-flight on 2026-05-04
+  found this URL returns HTTP 404. Investigation: every recent
+  OpenObserve GitHub release (v0.80.0, v0.80.1, v0.80.2) has `assets: []`
+  — upstream ships binaries through their CloudFront-fronted S3 CDN at
+  `downloads.openobserve.ai/releases/o2-enterprise/${VERSION}/`, NOT via
+  GitHub Releases. The script's URL base was wrong from day one (the
+  script's own comment even noted this, but the variable was set to the
+  GitHub releases URL anyway). Bumping `OO_VERSION` to `v0.80.2` (latest
+  stable, 2026-04-30) and switching `OO_DOWNLOAD_BASE` to the CDN with
+  asset naming `openobserve-ee-${VERSION}-${TARGET}.tar.gz` restores the
+  install path. Upstream stopped publishing `darwin-amd64`; the script
+  errors with a focused message there. `darwin-arm64`, `linux-amd64`,
+  `linux-arm64` all return 200 from the CDN (verified via `curl -sIL`
+  for v0.80.2).
 success: |
-  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0
-    (one new pickTask test on top of the prior 33 in `novel/tick-loop`).
-  - `pnpm typecheck` exits 0.
-  - All pre-existing tests pass UNCHANGED.
-  - A synthetic queue containing only `**Blocked**: needs-user-approval`
-    items resolves to `pickTask(...) === undefined` (the daemon would
-    return iteration status `no-task` and not spawn claude).
+  - `bash distribution/install-openobserve.sh --dry-run` prints a `url=`
+    line that resolves to HTTP 200 (the measurement command below).
+  - `bash distribution/install-openobserve.sh` (without `--dry-run`)
+    exits 0 on darwin-arm64, downloads + unpacks + writes the binary.
+  - `~/.local/bin/openobserve --version` prints `openobserve v0.80.2`.
+  - All rule-N lints pass against `--diff-base=origin/main`.
 pivot: |
-  Pre-registered: if `pickTask` is split across multiple parsers
-  (`TasksMdReader` vs daemon-side filter) such that a single regex change
-  cannot cover the failure mode, file a follow-up to centralise the skip
-  rule in one parser; ship the immediate fix on the path the daemon
-  actually walks. Today (post-PR-#103 daemon flip) `pickTask` in
-  `novel/tick-loop/src/daemon.ts` is the sole consumer — `index.ts`
-  re-exports symbols but does not duplicate parser logic — so the single
-  regex addition is sufficient.
+  Pre-registered in TASKS.md and `research.md` § "Lighter OTEL backend":
+  if no OpenObserve version is reachable for two consecutive quarterly
+  reviews (extended outage / abandoned project), swap to the documented
+  runner-up VictoriaMetrics triad. The migration cost is low (MetricsQL
+  is a near-superset of PromQL). For this PR specifically, since v0.80.2
+  is reachable on the CDN, no pivot is triggered; the pivot remains
+  on-the-shelf for future drift.
 measurement: |
-  pnpm install --no-frozen-lockfile \
-    && pnpm typecheck \
-    && pnpm vitest run novel/tick-loop --reporter=json \
-       | jq -e '.numPassedTests >= 34 and .numFailedTests == 0' \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
-    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
-    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs \
-    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
-    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+  bash distribution/install-openobserve.sh --dry-run | grep -q "url=" && \
+  curl -sfI "$(bash distribution/install-openobserve.sh --dry-run | grep '^install-openobserve: url=' | cut -d= -f2-)" | head -1 | grep -q "200" && \
+  node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main && \
+  node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main && \
+  node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main && \
+  node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main && \
+  node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main && \
+  node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main && \
+  node scripts/check-rule-7-chaos-coverage.mjs && \
+  node scripts/check-pattern-index.mjs --diff-base=origin/main && \
+  node scripts/check-anchor-primary-source.mjs --diff-base=origin/main && \
+  node scripts/check-pivot-success-margin.mjs && \
+  node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main && \
+  npx -y @tasks-md/lint@^0.7.0 TASKS.md && \
+  pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Beyer, B., Jones, C., Petoff, J., Murphy, N. R., *Site Reliability
-  Engineering*, O'Reilly, 2016, Ch. 17 (operator escape hatches — the
-  `**Blocked**:` field IS the operator's escape hatch from autonomous
-  pickup; honoring it is the difference between safe automation and a
-  runaway loop). Vision.md rule #2 (the `**Blocked**:` field is the
-  documented safety surface for blocked-by-default actions per the
-  `/next-task` skill — the daemon was the lagging implementation).
-  Munafò et al., "A Manifesto for Reproducible Science", *Nature Human
-  Behaviour* 1, 0021, 2017 (rule-#9 pre-registration — this experiment
-  block was committed before the fix landed, so the success/pivot
-  thresholds are not retrofitted). Risk + mitigation: a too-broad regex
-  could match unrelated lines (e.g., `**Blocked by**:` overlaps the
-  string "Blocked"); the chosen pattern `\*\*Blocked\*\*:` requires the
-  closing asterisks before the colon, which `**Blocked by**:` does not
-  satisfy, so the two skip rules are disjoint.
+  rule #1 (vision.md § 1 — don't reinvent the wheel: OpenObserve is the
+  chosen v0 OTLP receiver per `research.md` § "Lighter OTEL backend",
+  PR #43, 2026-05-03; a broken pin defeats the whole point of choosing
+  a dep); Munafò et al., "A Manifesto for Reproducible Science",
+  *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 pre-registration: the
+  hypothesis + measurement + success threshold are committed before the
+  smoke test runs against this PR's HEAD); OpenTelemetry specification
+  (CNCF 2020+) — the OTLP HTTP receiver contract OpenObserve implements
+  is the surface this installer makes reachable. Risk + mitigation:
+  pinning to the openobserve.ai CDN inherits availability from a
+  third-party (CloudFront + S3) — same risk as the GitHub Releases path
+  the broken pin was nominally pointing at, with the difference that
+  this URL actually returns 200; the documented VictoriaMetrics pivot
+  remains the escape hatch.
 replay_windows_days: [7, 30, 90]
