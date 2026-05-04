@@ -28,4 +28,15 @@ describe("SUCCESS_METRICS — 10 vision.md success criteria", () => {
     expect(taskThroughput?.unit).toBe("tasks/day");
     expect(taskThroughput?.formula).toContain("/ 30");
   });
+
+  it("wrist-dwell formula uses the named constant `estimated_dwell_seconds_per_request` (vision.md row 6)", () => {
+    // vision.md § "Success criteria" row 6 expresses the dwell estimate as
+    // `count(...) * estimated_dwell_seconds_per_request` (constant ≈ 2 s).
+    // Inlining the literal `* 2` drifts silently from the spec — same drift
+    // pattern as PR #67 (task-throughput formula alignment).
+    const wristDwell = SUCCESS_METRICS.find((m) => m.id === "wrist-dwell");
+    expect(wristDwell).toBeDefined();
+    expect(wristDwell?.unit).toBe("seconds/day");
+    expect(wristDwell?.formula).toContain("estimated_dwell_seconds_per_request");
+  });
 });

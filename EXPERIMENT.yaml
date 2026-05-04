@@ -1,65 +1,68 @@
-id: dashboard-web-otel-wiring
+id: wrist-dwell-named-constant-and-followups
 hypothesis: |
-  Adding an optional synchronous Strategy seam `getValue?: (m:
-  SuccessMetric) => string | null` to `createServer` / `render` (default
-  `() => null`) reduces the count of `(stub)` tokens in the rendered
-  HTML from 10 to 0 when a live Strategy is wired, while the no-arg
-  default still renders 10 `(stub)` tokens (backward-compatible). Per
-  rule #2 the value source is data passed in, not a hard import; per
-  rule #7 the renderer HTML-escapes Strategy output (XSS guard) and
-  falls back to `(stub)` on a `null` return (graceful-degrade, explicit
-  not silent). Async I/O is moved off the per-render hot-path: the
-  runner pre-fetches a JSON snapshot
-  (`DASHBOARD_METRICS_SNAPSHOT`) and `start.ts` constructs
-  `snapshotGetValue` once at boot, so the per-render path stays
-  synchronous and within the parent task's 500-ms budget without any
-  per-request fan-out. Property name is `getValue` (not `valueOf`)
-  deliberately — `valueOf` is inherited from `Object.prototype`, so
-  `args.valueOf ?? defaultFn` would silently pick up
-  `Object.prototype.valueOf` and crash with "Cannot convert undefined or
-  null to object" at call time; the rename costs four characters and
-  avoids a class of latent bug.
+  `vision.md` § "Success criteria" row 6 expresses the wrist-dwell formula
+  as `count(http_get_total{path="/watch.json"}[1d]) *
+  estimated_dwell_seconds_per_request` (constant ≈ 2 s), but
+  `novel/dashboard-web/src/metrics.ts:66` inlines the literal `* 2`. This
+  is the same drift class PR #67 fixed for task-throughput (vision.md row
+  10, `/ 30`). Replacing the literal with the named constant string in
+  `SUCCESS_METRICS[wrist-dwell].formula` brings metrics.ts back into
+  vision.md alignment without expanding the `SuccessMetric` interface
+  (option (a) for v0 simplicity; option (b) — adding the constant as a
+  separate property — is deferred to the follow-up
+  `dashboard-web-task-throughput-formula-drift`'s Pivot clause once a
+  second formula needs the same treatment).
+
+  Independently, ARCHITECTURE.md L215 ("5s → 30s → 5min" tick-loop
+  backoff), L218 (12 h MAPE-K watchdog cadence + 1000-tick backstop), and
+  research.md L92 (8 % MAPE-K cadence-pivot threshold) carry prose-only
+  numeric constants whose drift would currently surface only via human
+  re-reading. PR #59's resilience scout flagged the class; this PR files
+  4 P3 follow-up tasks (`ci-lint-tick-loop-backoff-schedule`,
+  `ci-lint-mape-k-tick-iteration-backstop`,
+  `ci-lint-mape-k-watchdog-cadence`, `ci-lint-cadence-pivot-threshold`),
+  each in the rule-#9 format used by `ci-lint-mape-k-token-budget-cap`
+  (PR #59) and `ci-lint-watch-surface-cap` (already in TASKS.md), each
+  dormant-by-default until the corresponding `config/<file>.json`
+  artifact lands. Filing the follow-ups closes the named-constant gap as
+  a tracked work-item set rather than as silent prose drift.
 success: |
-  `pnpm typecheck && pnpm vitest run novel/dashboard-web/
-  --reporter=json | jq -e '.numPassedTests >= 9 and .numFailedTests
-  == 0'` exits 0 (today: 25 tests pass, 0 fail across `render`,
-  `metrics`, `server`, `strategy`); the new "live values replace
-  `(stub)` when Strategy returns strings" test renders 0 `(stub)`
-  tokens and 10 `>42<` value-cells; the default-Strategy path still
-  renders exactly 10 `(stub)` tokens (backward-compat regression
-  guard); the HTML-escape test ensures Strategy output cannot inject
-  `<script>`; the partial-Strategy test renders 1 live value + 9
-  `(stub)` tokens (mixed fallback); `wc -l
-  novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}'` ≤ 300
-  (today: 297); the `dashboard-web-otel-wiring` task block is removed
-  from `TASKS.md` (`grep -c '^  - \\*\\*ID\\*\\*:
-  dashboard-web-otel-wiring$' TASKS.md` returns 0).
+  `[ "$(grep -c estimated_dwell_seconds_per_request
+  novel/dashboard-web/src/metrics.ts)" -ge 1 ]` exits 0 (vision.md row 6
+  named-constant string is present in metrics.ts);
+  `[ "$(grep -cE '\*\*ID\*\*:
+  ci-lint-(tick-loop-backoff-schedule|mape-k-tick-iteration-backstop|mape-k-watchdog-cadence|cadence-pivot-threshold)'
+  TASKS.md)" -ge 4 ]` exits 0 (all 4 follow-up task blocks present with
+  the canonical `**ID**:` field); `pnpm typecheck && pnpm vitest run
+  novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e
+  '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0 (the new
+  wrist-dwell named-constant assertion passes alongside the existing 3);
+  `npx @tasks-md/lint TASKS.md` exits 0 (the 4 new P3 blocks satisfy the
+  tasks.md schema); `pnpm exec markdownlint-cli2 "**/*.md"
+  "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"` exits 0.
 pivot: |
-  If a per-metric Strategy at request time exceeds 500 ms on >5 % of
-  requests over 24 h sustained operation, pivot to a server-side cache
-  snapshot refreshed once per minute — the dashboard becomes a
-  read-through over a refreshed snapshot rather than a per-request
-  fan-out. Quantitative trigger: `histogram_quantile(0.95,
-  dashboard_render_duration_seconds_bucket[24h]) > 0.5` for >5 % of
-  requests. If the Strategy shape needs ≥3 distinct backends
-  (Prometheus + journalctl + GH API), keep it as a Strategy but add a
-  per-row dispatch table; do not collapse into a single backend client.
+  If any of the 4 prose anchors moves before its dormant linter ships
+  (e.g., the `5s → 30s → 5min` ladder is replaced by exponential
+  backoff, or the 12 h watchdog cadence is replaced by an adaptive
+  formula after `mape-k-loop`'s monthly self-calibration extends T to
+  18 h per ARCHITECTURE L218), retire the corresponding follow-up task
+  and write a new one against the replacement anchor — exactly the
+  Pivot clause each task block carries. If option (a) for the
+  wrist-dwell fix proves insufficient because a second formula develops
+  the same drift, escalate to option (b) (add the constant as a
+  separate property on `SuccessMetric`) per
+  `dashboard-web-task-throughput-formula-drift`'s standing Pivot
+  clause.
 measurement: |
-  pnpm typecheck && pnpm vitest run novel/dashboard-web/
-  --reporter=json | jq -e '.numPassedTests >= 9 and .numFailedTests
-  == 0'; [ "$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk
-  '{print $1}')" -le 300 ]; [ "$(grep -c '^  - \\*\\*ID\\*\\*:
-  dashboard-web-otel-wiring$' TASKS.md)" = '0' ]
+  [ "$(grep -c estimated_dwell_seconds_per_request novel/dashboard-web/src/metrics.ts)" -ge 1 ] && [ "$(grep -cE '\*\*ID\*\*: ci-lint-(tick-loop-backoff-schedule|mape-k-tick-iteration-backstop|mape-k-watchdog-cadence|cadence-pivot-threshold)' TASKS.md)" -ge 4 ] && pnpm typecheck && pnpm vitest run novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'
 anchor: |
-  rule #2 (vision.md § 2 — every dep behind interface; the value
-  source is a Strategy parameter, not a hard dependency on
-  Prometheus/OpenObserve); Wilkie, "RED Method", *Weave Works blog* /
-  *USENIX SREcon EMEA* 2018 (rate / errors / duration as the
-  service-level lens — live values surface the duration/rate
-  components); Card, Mackinlay, Shneiderman, *Readings in Information
-  Visualization*, Morgan Kaufmann, 1999 (live readings are the
-  dashboard's purpose; placeholder is a transitional state); rule #7
-  (vision.md § 7 — graceful-degrade: Strategy returning `null` falls
-  back to `(stub)` rather than crashing; HTML-escape guards against a
-  hostile backend).
+  rule #4 (vision.md § 4 — every constant in source, never inlined as a
+  literal where the spec gives it a name); rule #10 (vision.md § 10 —
+  deterministic enforcement; the 4 dormant linters extend rule #10's
+  ratchet to the prose-only constant class once the config artifacts
+  land); rule #5 (vision.md § 5 — glossary discipline; the named
+  constant `estimated_dwell_seconds_per_request` is the vocabulary the
+  formula points to); Beyer et al., *Site Reliability Engineering*,
+  O'Reilly 2016 (error-budget threshold discipline as the design pattern
+  the 4 follow-ups instantiate).
 replay_windows_days: [7, 30]
