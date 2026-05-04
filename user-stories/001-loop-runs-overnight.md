@@ -1,5 +1,7 @@
 # Story 001 — Loop runs overnight without intervention
 
+> **Dual-purpose framing.** This story is **Minsky on itself** — the tick-loop supervisor (`distribution/systemd/minsky-tick-loop.service`, `distribution/launchd/com.minsky.tick-loop.plist`) reads `TASKS.md` at the Minsky repo root, picks the next unblocked task, and ships work against this repo. The cross-repo counterpart is [`user-stories/006-runner-on-any-repo.md`](006-runner-on-any-repo.md) — the *same* supervisor parameterised by `MINSKY_HOST_ROOT` runs against any host repo via `minsky bootstrap` + `minsky run`. Both stories describe one loop on two substrates; vision.md § "What Minsky is" frames this dual-purpose surface as the original Minsky vision. Both stories are gated by **rule #12** (vision.md § "Scope discipline") — when the queue empties, the next move is stability work, not new functionality, unless human-approved / market-research-only / pre-registered as a rule-#9 experiment.
+
 ## Story
 
 As a solo developer, I close my laptop at 11pm with the loop running, sleep through the night, and find my `TASKS.md` drained of P1+ tasks and meaningful commits in my git log when I open the laptop at 7am. I never had to wake up to handle anything.
