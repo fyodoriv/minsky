@@ -148,6 +148,9 @@ importers:
       '@minsky/budget-guard':
         specifier: workspace:*
         version: link:../budget-guard
+      '@minsky/notifier':
+        specifier: workspace:*
+        version: link:../adapters/notifier
       '@minsky/observability':
         specifier: workspace:*
         version: link:../adapters/observability
