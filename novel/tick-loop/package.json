@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@minsky/budget-guard": "workspace:*",
+    "@minsky/notifier": "workspace:*",
     "@minsky/observability": "workspace:*",
     "@minsky/token-monitor": "workspace:*"
   }
