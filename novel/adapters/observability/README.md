@@ -61,6 +61,22 @@ const logExporter = new InMemoryLogRecordExporter();
 const obs = new OtelObservability({ traceExporter, metricExporter, logExporter });
 ```
 
+## Pointing the adapter at a deployed backend (`endpoint` opt)
+
+Constructor accepts an `endpoint` opt — when set, the OTLP HTTP exporters target `<endpoint>/{traces,metrics,logs}` per OpenTelemetry's OTLP/HTTP convention. When omitted, exporters fall back to `OTEL_EXPORTER_OTLP_ENDPOINT` per the OpenTelemetry specification.
+
+```ts
+import { OtelObservability } from "@minsky/observability/otel";
+
+// Local OpenObserve installed via `bash distribution/install-openobserve.sh`.
+const obs = new OtelObservability({
+  endpoint: "http://127.0.0.1:5080/api/default/v1",
+});
+await obs.selfTest(); // → { status: "green", … }
+```
+
+See [`distribution/openobserve/README.md`](../../../distribution/openobserve/README.md) for the install + verify runbook. The env-gated integration test at `test/openobserve.integration.test.ts` round-trips a span through OpenObserve when `OPENOBSERVE_INTEGRATION=1` is set; skipped in CI by default.
+
 ## Manual integration test against a real collector
 
 ```bash

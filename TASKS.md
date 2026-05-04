@@ -11,7 +11,7 @@
 
 ## P0
 
-<!-- These 7 P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. Order: 1 unblocks 2-7; 2 unblocks 3,5; 3 unblocks 5; 4 unblocks 5; 6 closes the rule-#9 quarterly loop; 7 actualises the "society of specialists" promise. -->
+<!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
 - [ ] `tick-loop-daemon-v0` — production tick-loop daemon that the supervisor actually supervises
   - **ID**: tick-loop-daemon-v0
@@ -26,20 +26,6 @@
   - **Acceptance**: daemon runs via `systemctl --user start minsky-supervisor.target` on Linux + `launchctl bootstrap` on macOS; survives a `kill -9` mid-tick and respawns within MTTR <5 min (story 001 acceptance); `tick.iteration` OTEL spans visible.
   - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003 (the MAPE-K loop assumes a running monitor); Armstrong, *Programming Erlang*, 2007 (let-it-crash + supervisor restart); Beyer et al., *SRE* 2016, Ch. 3 (error-budget gating before each tick).
   - **Risk**: spawning a child `claude` process inside a service may not get the user's environment (ANTHROPIC_API_KEY, MCP servers). Mitigation: the daemon explicitly reads `~/.claude/` config + sources `~/.zshenv` before spawn; documented in the daemon's README.
-
-- [ ] `observability-backend-deploy` — deploy OpenObserve so success-criteria queries actually return numbers
-  - **ID**: observability-backend-deploy
-  - **Tags**: novel, observability, runtime, blocker
-  - **Estimate**: 4–6h
-  - **Hypothesis**: Installing OpenObserve as a single-binary local daemon (per `research.md` § "Lighter OTEL backend" — chosen v0 backend in PR #43) and pointing `@minsky/observability`'s OTLP exporter at `http://127.0.0.1:5080/api/default/` makes 5 of vision.md's 10 success criteria measurable today (rows 1, 2, 5, 6, 9 — uptime, tokens/story, MTTR, wrist-dwell, token-budget). Today the dashboard renders `(stub)` for all 10; the OTEL adapter exists but no backend ingests its spans.
-  - **Details**: Add `distribution/install-openobserve.sh` (downloads the OpenObserve binary + writes a launchd/systemd unit). Add `OTEL_EXPORTER_OTLP_ENDPOINT` env-var documentation. Update `@minsky/observability`'s `OtelObservability` constructor to accept the endpoint via opts (currently may not — check `novel/adapters/observability/src/`). Update `novel/dashboard-web/src/server.ts`'s Strategy seam (PR #68) to read OpenObserve via PromQL. Document the install flow in `distribution/README.md`.
-  - **Files**: `distribution/install-openobserve.sh` (new), `distribution/openobserve/com.openobserve.daemon.plist` (new — macOS), `distribution/openobserve/openobserve.service` (new — systemd), `novel/adapters/observability/src/otel.ts` (endpoint opts), `novel/dashboard-web/src/strategy.ts` (PromQL Strategy implementation), `distribution/README.md`
-  - **Verification**: `bash distribution/install-openobserve.sh --port=5080` exits 0; `curl -s http://127.0.0.1:5080/api/default/_health` returns 200; `node -e 'import(\"@minsky/observability\").then(m => new m.OtelObservability({endpoint: \"http://127.0.0.1:5080/api/default/v1/traces\"}).selfTest())'` returns `green` within 5 s; dashboard's `/watch.json` returns at least 1 non-`(stub)` value.
-  - **Measurement**: `[ -x distribution/install-openobserve.sh ]`; integration test `novel/adapters/observability/test/openobserve.integration.test.ts` (skipped in CI without local OpenObserve, runs locally) round-trips a span through OpenObserve and reads it back.
-  - **Pivot**: if OpenObserve's single-binary install proves flaky on macOS (Sequoia signing, sandbox policies), fall back to VictoriaMetrics triad (named in PR #43 as the runner-up); if both flake, ship the bare OTLP collector + Honeycomb-compatible exporter and document the cloud dependency.
-  - **Acceptance**: 5 of 10 success-criteria queries return non-stub values; dashboard renders live data; OTEL three-signal selfTest green against local OpenObserve.
-  - **Anchor**: research.md § "Lighter OTEL backend" (PR #43 — OpenObserve recommended); OpenTelemetry specification (CNCF 2020+); Wilkie, "RED Method", 2018.
-  - **Risk**: OpenObserve may discontinue free single-binary distribution. Mitigation: pin binary version in install script; document migration path to VictoriaMetrics in `research.md`.
 
 - [ ] `mape-k-prompt-rollout-orchestrator` — wire MAPE-K Knowledge → PromptOptimizer.runABTest in production
   - **ID**: mape-k-prompt-rollout-orchestrator
@@ -60,7 +46,7 @@
   - **ID**: user-story-001-integration-test-real
   - **Tags**: testing, validation, runtime
   - **Estimate**: 1d
-  - **Blocked by**: tick-loop-daemon-v0, observability-backend-deploy
+  - **Blocked by**: tick-loop-daemon-v0
   - **Hypothesis**: A `user-stories/001-loop-runs-overnight.test.ts` that drives the real daemon (via `bash distribution/systemd/run-tick-loop.sh --max-iterations=12 --tick-interval-s=5` — 1-min compressed sim of 12 ticks) closes ≥4 P2 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL span per phase, and triggers exactly 1 morning push, satisfying story 001's acceptance criteria within CI runtime <10 min.
   - **Details**: Replaces the coverage-manifest test (PR #82) with a real driver. Fixture: synthetic TASKS.md with 4 P2 tasks designed to complete deterministically. Mock Anthropic client (reuse `@minsky/tick-loop`'s `MockAnthropicClient`). Real OpenObserve (started + torn down in test setup). StubNotifier asserts 1 push call.
   - **Files**: `user-stories/001-loop-runs-overnight.test.ts`, `user-stories/001-loop-runs-overnight.md` (mark Phase: Implemented)

@@ -55,9 +55,48 @@ import type { Observability, SelfTestResult } from "./index.js";
 export interface OtelObservabilityConfig {
   readonly serviceName?: string;
   readonly serviceVersion?: string;
+  /**
+   * Base URL of the OTLP HTTP receiver (e.g.,
+   * `http://127.0.0.1:5080/api/default/v1` against a local OpenObserve daemon
+   * installed via `distribution/install-openobserve.sh`). Per signal, the
+   * adapter appends `/traces`, `/metrics`, `/logs` — matching OpenTelemetry's
+   * OTLP/HTTP convention. When omitted (and no exporter is injected), the
+   * exporters fall back to their standard env-var resolution
+   * (`OTEL_EXPORTER_OTLP_ENDPOINT` per the OpenTelemetry specification).
+   * Endpoint is ignored for any signal whose exporter is supplied directly
+   * (test path — `InMemorySpanExporter` etc. take precedence).
+   */
+  readonly endpoint?: string;
   readonly traceExporter?: SpanExporter;
   readonly metricExporter?: PushMetricExporter;
   readonly logExporter?: LogRecordExporter;
+}
+
+/**
+ * Trim a single trailing slash so the per-signal suffix concatenation
+ * produces a canonical URL without double slashes. Pure helper.
+ *
+ * @otel-exempt pure string transform, no I/O.
+ */
+function stripTrailingSlash(s: string): string {
+  return s.endsWith("/") ? s.slice(0, -1) : s;
+}
+
+/**
+ * Resolve the per-signal OTLP HTTP URLs from a configured base endpoint.
+ * Pure helper exposed for tests so the constructor's URL-routing shape
+ * is verifiable without poking at private exporter internals.
+ *
+ * @otel-exempt pure string transform, no I/O.
+ */
+export function resolveOtlpEndpoints(endpoint: string | undefined): {
+  traces?: string;
+  metrics?: string;
+  logs?: string;
+} {
+  if (endpoint === undefined) return {};
+  const base = stripTrailingSlash(endpoint);
+  return { traces: `${base}/traces`, metrics: `${base}/metrics`, logs: `${base}/logs` };
 }
 
 /** Strategy implementation of {@link Observability} backed by OpenTelemetry. */
@@ -77,14 +116,24 @@ export class OtelObservability implements Observability {
       [ATTR_SERVICE_VERSION]: serviceVersion,
     });
 
-    const traceExporter = config.traceExporter ?? new OTLPTraceExporter();
+    const endpoints = resolveOtlpEndpoints(config.endpoint);
+
+    const traceExporter =
+      config.traceExporter ??
+      (endpoints.traces === undefined
+        ? new OTLPTraceExporter()
+        : new OTLPTraceExporter({ url: endpoints.traces }));
     this.tracerProvider = new BasicTracerProvider({
       resource,
       spanProcessors: [new SimpleSpanProcessor(traceExporter)],
     });
     this.tracer = this.tracerProvider.getTracer(serviceName);
 
-    const metricExporter = config.metricExporter ?? new OTLPMetricExporter();
+    const metricExporter =
+      config.metricExporter ??
+      (endpoints.metrics === undefined
+        ? new OTLPMetricExporter()
+        : new OTLPMetricExporter({ url: endpoints.metrics }));
     this.meterProvider = new MeterProvider({
       resource,
       readers: [
@@ -96,7 +145,11 @@ export class OtelObservability implements Observability {
     });
     this.meter = this.meterProvider.getMeter(serviceName);
 
-    const logExporter = config.logExporter ?? new OTLPLogExporter();
+    const logExporter =
+      config.logExporter ??
+      (endpoints.logs === undefined
+        ? new OTLPLogExporter()
+        : new OTLPLogExporter({ url: endpoints.logs }));
     this.loggerProvider = new LoggerProvider({ resource });
     this.loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
     this.logger = this.loggerProvider.getLogger(serviceName);
@@ -108,6 +161,8 @@ export class OtelObservability implements Observability {
    *
    * Health-probe contract per {@link SelfTestResult}; setup.sh's `--doctor`
    * mode aggregates across adapters via {@link aggregateStatus}.
+   *
+   * @otel observability.self-test
    */
   async selfTest(): Promise<SelfTestResult> {
     const start = Date.now();
@@ -144,6 +199,7 @@ export class OtelObservability implements Observability {
         latencyMs,
         lastCheck: new Date().toISOString(),
       };
+      // rule-6: handled-locally — health-probe contract returns `red` on internal failure
     } catch (err) {
       const latencyMs = Date.now() - start;
       return {
@@ -155,7 +211,11 @@ export class OtelObservability implements Observability {
     }
   }
 
-  /** Cleanly shut down all providers. Idempotent. */
+  /**
+   * Cleanly shut down all providers. Idempotent.
+   *
+   * @otel observability.shutdown
+   */
   async shutdown(): Promise<void> {
     await Promise.all([
       this.tracerProvider.shutdown(),
