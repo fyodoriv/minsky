@@ -13,21 +13,7 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `user-story-001-integration-test-real` — actual integration test against the real daemon (not mock)
-  - **ID**: user-story-001-integration-test-real
-  - **Tags**: testing, validation, runtime
-  - **Estimate**: 1d
-  - **Hypothesis**: A `user-stories/001-loop-runs-overnight.test.ts` that drives the real daemon (via `bash distribution/systemd/run-tick-loop.sh --max-iterations=12 --tick-interval-s=5` — 1-min compressed sim of 12 ticks) closes ≥4 P2 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL span per phase, and triggers exactly 1 morning push, satisfying story 001's acceptance criteria within CI runtime <10 min.
-  - **Details**: Replaces the coverage-manifest test (PR #82) with a real driver. Fixture: synthetic TASKS.md with 4 P2 tasks designed to complete deterministically. Mock Anthropic client (reuse `@minsky/tick-loop`'s `MockAnthropicClient`). Real OpenObserve (started + torn down in test setup). StubNotifier asserts 1 push call.
-  - **Files**: `user-stories/001-loop-runs-overnight.test.ts`, `user-stories/001-loop-runs-overnight.md` (mark Phase: Implemented)
-  - **Verification**: `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts` exits 0 within 5 min; chaos-coverage manifest re-checks (rows now `covered` instead of `self-hosted`).
-  - **Measurement**: `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`.
-  - **Pivot**: if compressed-sim coverage stays below the chaos table's 80% threshold even with the real daemon, the user-story 001 spec needs splitting (per its own documented Pivot). File a follow-up to the spec.
-  - **Acceptance**: integration test green on every CI run; chaos coverage re-classified as `covered` for ≥10/12 rows in the manifest.
-  - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016; Beck, *Extreme Programming Explained*, 1999 (CI keeps the build fast).
-  - **Risk**: real daemon spawning real subprocesses inflates CI cost. Mitigation: max-iterations cap + tight tick-interval ensure <5min wall-clock; the nightly self-hosted run (sub-task 3 of original first-integration-test) extends to full 60 min.
-
-(empty in P0 below — work the highest-priority unblocked item from the list above, then move to P1.)
+(empty in P0 — work the highest-priority unblocked item from P1 below.)
 
 ## P1
 
