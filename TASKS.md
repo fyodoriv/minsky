@@ -13,20 +13,6 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `openobserve-installer-version-pin-fix` — installer pinned to v0.80.1 returns 404 from the official GitHub releases
-  - **ID**: openobserve-installer-version-pin-fix
-  - **Tags**: distribution, bug, observability
-  - **Estimate**: 1h
-  - **Hypothesis**: `distribution/install-openobserve.sh` pins `OO_VERSION=v0.80.1` and downloads `https://github.com/openobserve/openobserve/releases/download/v0.80.1/openobserve-v0.80.1-darwin-arm64.tar.gz`. Pre-flight on 2026-05-04 found this URL returns HTTP 404. Either the release was deleted, the asset name format changed, or v0.80.1 was never published. Bumping to a version that actually exists (verify via `curl -sI https://github.com/openobserve/openobserve/releases/latest` first) restores the install path. The dashboard Strategy degrades gracefully when OpenObserve is down, so this is non-blocking but should be fixed for the observability surface to actually surface.
-  - **Details**: 1) `curl -sI https://github.com/openobserve/openobserve/releases/latest` to find the current latest tag. 2) Verify the per-platform asset names still match the script's `${target}` template. 3) Bump `OO_VERSION` in the installer. 4) If the asset naming changed, update the URL template too. 5) Smoke-test the install on darwin-arm64 (this machine).
-  - **Files**: `distribution/install-openobserve.sh`
-  - **Verification**: `bash distribution/install-openobserve.sh` exits 0 (downloads, unpacks, writes the binary) on darwin-arm64; the binary at `~/.local/bin/openobserve --version` returns the pinned version.
-  - **Measurement**: `bash distribution/install-openobserve.sh --dry-run` prints a URL that responds `200 OK`, AND running without `--dry-run` exits 0.
-  - **Pivot**: if no pinnable version is reachable (extended outage), the documented research.md pivot is VictoriaMetrics; file a follow-up for that swap.
-  - **Acceptance**: installer succeeds on darwin-arm64; OpenObserve daemon starts and serves `localhost:5080/healthz` 200.
-  - **Anchor**: rule #1 (don't reinvent the wheel — OpenObserve is the dep, but a broken pin defeats the purpose); research.md § "Lighter OTEL backend" (PR #43, 2026-05-03 — OpenObserve is the chosen v0 OTLP receiver).
-  - **Risk**: pinning to "latest" loses reproducibility; pin to a verified specific version, not `latest`.
-
 ## P1
 
 <!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
