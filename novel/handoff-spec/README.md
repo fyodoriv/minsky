@@ -25,7 +25,7 @@ Per constitutional rule #7 (vision.md § 7).
 | 3 | Status=blocked without Blockers | upstream-malformed (logical) | `circuit-break-and-notify` | covered by `invalid-02-blocked-without-blockers` fixture |
 | 4 | Persona ID is not kebab-case | upstream-malformed (style) | `circuit-break-and-notify` | covered by `invalid-03-bad-persona-id` fixture |
 | 5 | Created-at is not ISO-8601 | upstream-malformed | `circuit-break-and-notify` | covered by structural-error test |
-| 6 | Document is enormous (>10 MB) | resource exhaustion | `loud-crash-supervisor-restart` (Node OOMs; let-it-crash) | (deferred — covered when `handoff-spec-size-cap` ships) |
+| 6 | Document exceeds the 1 MB cap | resource exhaustion | `circuit-break-and-notify` (return `kind: "input-too-large"` error, no parsing) | covered by parser test "input-too-large" in `novel/handoff-spec/src/index.test.ts` |
 
 ## Hypothesis-driven development (rule #9)
 

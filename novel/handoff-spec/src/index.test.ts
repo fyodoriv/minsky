@@ -136,6 +136,45 @@ describe("parseHandoffs — structural error cases", () => {
     expect(isValid(result)).toBe(false);
   });
 
+  it("rejects input larger than the 1 MB default cap with kind input-too-large", () => {
+    // Build a synthetic ~2 MB input by repetition; never commit literal bytes.
+    const chunk = "a".repeat(1024);
+    const source = chunk.repeat(2 * 1024); // 2 MB
+    const result = parseHandoffs(source);
+    expect(result.handoffs).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.kind).toBe("input-too-large");
+    expect(result.errors[0]?.line).toBe(0);
+    expect(result.errors[0]?.message).toContain("1048576");
+  });
+
+  it("parses normally when input is just under the 1 MB cap", () => {
+    // Construct a valid handoff and pad its summary so total bytes < 1 MB.
+    const padding = "x".repeat(1_048_576 - 4096);
+    const src = `# Handoff: under cap
+
+- **From**: executor
+- **To**: qa-tester
+- **Status**: ok
+- **Summary**: ${padding}
+- **Created-at**: 2026-05-03T18:00:00Z
+`;
+    expect(Buffer.byteLength(src, "utf-8")).toBeLessThan(1_048_576);
+    const result = parseHandoffs(src);
+    expect(result.errors).toHaveLength(0);
+    expect(result.handoffs).toHaveLength(1);
+    expect(result.handoffs[0]?.status).toBe("ok");
+  });
+
+  it("honours a maxBytes override (1024 byte cap rejects a 2 KB input)", () => {
+    const source = "a".repeat(2048);
+    const result = parseHandoffs(source, { maxBytes: 1024 });
+    expect(result.handoffs).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.kind).toBe("input-too-large");
+    expect(result.errors[0]?.message).toContain("1024");
+  });
+
   it("rejects non-kebab-case IDs inside Suggested-next", () => {
     const src = `# Handoff: bad suggested-next id
 

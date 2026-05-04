@@ -36,7 +36,8 @@ export type ParseErrorKind =
   | "invalid-persona-id"
   | "invalid-created-at"
   | "blockers-required-when-blocked"
-  | "to-or-suggested-next-required";
+  | "to-or-suggested-next-required"
+  | "input-too-large";
 
 export interface ParseError {
   readonly kind: ParseErrorKind;
@@ -49,6 +50,14 @@ export interface ParseResult {
   readonly handoffs: readonly Handoff[];
   readonly errors: readonly ParseError[];
 }
+
+export interface ParseOptions {
+  /** Maximum input size in bytes (UTF-8). Default 1 MB. */
+  readonly maxBytes?: number;
+}
+
+/** Default 1 MB cap; rejects larger inputs with `kind: "input-too-large"`. */
+const DEFAULT_MAX_BYTES = 1_048_576;
 
 const STATUS_VALUES: readonly HandoffStatus[] = ["ok", "blocked", "needs-rework"];
 const KEBAB_CASE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -67,10 +76,11 @@ export function isValid(result: ParseResult): boolean {
  * One bad handoff doesn't abort the document — per-record errors are
  * collected so a UI can surface them.
  */
-export function parseHandoffs(source: string): ParseResult {
+export function parseHandoffs(source: string, options?: ParseOptions): ParseResult {
+  const tooLarge = checkSizeCap(source, options?.maxBytes ?? DEFAULT_MAX_BYTES);
+  if (tooLarge) return tooLarge;
   const lines = source.split("\n");
   const blockStarts = findBlockStarts(lines);
-
   if (blockStarts.length === 0) {
     return {
       handoffs: [],
@@ -79,7 +89,10 @@ export function parseHandoffs(source: string): ParseResult {
       ],
     };
   }
+  return parseBlocks(lines, blockStarts);
+}
 
+function parseBlocks(lines: readonly string[], blockStarts: readonly number[]): ParseResult {
   const handoffs: Handoff[] = [];
   const errors: ParseError[] = [];
   for (let b = 0; b < blockStarts.length; b++) {
@@ -91,6 +104,26 @@ export function parseHandoffs(source: string): ParseResult {
     for (const e of r.errors) errors.push(e);
   }
   return { handoffs, errors };
+}
+
+/**
+ * Enforce the byte cap at the parser entry. Armstrong 2007: let it crash,
+ * but with a precise error — return a structured `input-too-large` result
+ * instead of letting Node OOM on a multi-MB input.
+ */
+function checkSizeCap(source: string, maxBytes: number): ParseResult | undefined {
+  const byteLength = Buffer.byteLength(source, "utf-8");
+  if (byteLength <= maxBytes) return undefined;
+  return {
+    handoffs: [],
+    errors: [
+      {
+        kind: "input-too-large",
+        message: `document exceeds ${maxBytes} bytes cap`,
+        line: 0,
+      },
+    ],
+  };
 }
 
 function findBlockStarts(lines: readonly string[]): number[] {
