@@ -68,20 +68,6 @@
   - **Anchor**: rule #10 (deterministic enforcement); Lampson 1983 ("move the constraint to the cheapest possible point").
   - **Risk**: An overly broad regex matches subdirectories of an already-justified package. Mitigation: scope to *added* top-level dirs only; respect existing-package boundaries.
 
-- [ ] `ci-rule-2-dep-coverage` — CI lint: every external dep is accessed only through `novel/adapters/`
-  - **ID**: ci-rule-2-dep-coverage
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 3–4h
-  - **Hypothesis**: A CI lint that greps every `novel/**/*.ts` file outside `novel/adapters/` for vendor-name imports listed in `ARCHITECTURE.md`'s dependency table catches every direct vendor coupling — closing the rule #2 enforcement gap (today only the dependency table itself is reviewed by humans).
-  - **Details**: Build `scripts/check-rule-2-dep-coverage.mjs`. Reads `ARCHITECTURE.md`'s dependency-table column "vendor name(s)"; for each, greps `novel/**/*.ts` (excluding `novel/adapters/**`) for `from "<vendor>"` or `require("<vendor>")`; fails on any hit. Already named in `vision.md` § Success criteria #8 — this is the implementation task.
-  - **Files**: `scripts/check-rule-2-dep-coverage.mjs`, `scripts/check-rule-2-dep-coverage.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic file `novel/foo/leaks.ts` importing `from "hono"` (a listed vendor) fails the lint; same file removed passes; the lint runs in <2 s on a 100-file repo.
-  - **Measurement**: `node scripts/check-rule-2-dep-coverage.mjs` exits 1 against the synthetic-leak fixture and 0 against the clean fixture; `pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs` exits 0; success-criterion #8 in `vision.md` § "Success criteria" gains a queryable command (was `<TBD-AFTER: ci-lint-pattern-index>`).
-  - **Pivot**: if the dependency-table format proves too informal to parse reliably (e.g., vendor names spelled inconsistently), pivot to an explicit machine-readable manifest (`adapters.json`) committed alongside the table; the lint reads the manifest, the human-readable table is a regenerated artifact.
-  - **Acceptance**: CI job runs on every PR; rule #2 is mechanically enforced; success-criterion #8's measurement command is no longer tagged TBD.
-  - **Anchor**: rule #10; Martin, *Clean Architecture*, 2017 (dependency rule); Wiggins, *The Twelve-Factor App*, 2011 (factor II).
-  - **Risk**: False positives if a test fixture imports a vendor for legitimate test reasons. Mitigation: scope is `novel/**/*.ts` excluding `**/*.test.ts` and `**/*.fixture.ts`.
-
 - [ ] `ci-rule-3-doc-first` — CI lint: PRs adding code under `novel/` also touch a `user-stories/*.md` or the package README
   - **ID**: ci-rule-3-doc-first
   - **Tags**: ci, conformance, rule-10
@@ -156,7 +142,7 @@
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-2-dep-coverage, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
+  - **Blocked by**: ci-rule-1-novel-justification, ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash, ci-rule-7-chaos-coverage
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
