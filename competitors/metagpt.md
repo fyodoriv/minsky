@@ -49,6 +49,13 @@ Adopting MetaGPT would mean rebuilding our orchestration, observability, and eco
 
 Not a dependency. No adapter.
 
+## Pattern conformance
+
+- **Pattern MetaGPT implements**: Simulated software company / Standard Operating Procedure role-play across PM / Architect / Engineer / QA roles — Hong et al., "MetaGPT: Meta Programming for a Multi-Agent Collaborative Framework", *ICLR* 2024 (the primary paper) — anchored in the older organisational-design pattern of the chief-programmer team — Brooks, *The Mythical Man-Month*, Addison-Wesley, 1975, Ch. 3 ("The Surgical Team")
+- **Conformance level**: full (in the pattern MetaGPT implements)
+- **How Minsky relates**: don't adopt — Minsky shares the persona-driven paradigm but binds it to Claude Code via OMC (row 50) rather than to a Python+GPT runtime. The conceptual lineage is acknowledged; the substrate is incompatible.
+- **Index row**: vision.md § "Pattern conformance index" row 48
+
 ## Last reviewed
 
 2026-05-03
