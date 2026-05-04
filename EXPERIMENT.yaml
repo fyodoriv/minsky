@@ -1,62 +1,69 @@
-id: daemon-budget-pause-observability-2026-05-04
+id: daemon-otel-pipe-2026-05-04
 hypothesis: |
-  Surfaced by the first 2h live-on-itself run on 2026-05-04 11:13 local:
-  the daemon's `iteration.status: "budget-paused"` emitted an OTEL span and
-  log line, but no operator-facing signal — the user had to `tail` the log
-  to know the daemon was self-paused on budget exhaustion. Adding two
-  changes closes the operator-informing loop:
-    (a) `runDaemon` accepts an optional `notifier?: NotifierLike` (rule #2
-        — structural subset of `@minsky/notifier`'s `Notifier`) and fires
-        exactly ONE `push({ tags: ["pause", "budget"] })` per *transition*
-        into `budget-paused`. Recovery (any non-budget-paused status)
-        re-arms the trigger, so a second pause event fires a second push.
-        Without the debounce, the operator would get a push every 5min for
-        as long as the 5h budget window stays exhausted (catastrophic).
-    (b) `/watch.json` envelope grows a `pauseReason: "operator" | "budget"
-        | null` field alongside the existing `paused: boolean`. Apple
-        Shortcuts that don't care about the reason keep using `paused`;
-        richer renderers (the dashboard HTML route, future tiles) read the
-        new field. The boolean stays for backwards compat.
+  Surfaced by the 2026-05-04 standing-audit-gap-loop pass: the daemon's
+  `emit` callback in `novel/tick-loop/bin/tick-loop.mjs` writes plain-text
+  spans to `process.stdout` instead of forwarding them to the configured
+  OTEL backend. OpenObserve is installed and serves `:5080/healthz`
+  (post-#110), but the daemon emits zero spans there — every
+  `tick-loop.iteration` event lives only in the operator's terminal. The
+  dashboard's `OpenObserveStrategy` (PR #87) reads PromQL from OpenObserve
+  and gets `(stub)` for every metric because the publisher side is
+  missing.
+
+  Two changes close the publisher half of the publish-then-read MAPE-K
+  loop:
+    (a) `Observability` interface grows `emitTickSpan(event)` (rule #2 —
+        every external dep behind an interface; the OTEL SDK is the dep,
+        the interface is the seam). `OtelObservability` implements it via
+        `tracer.startSpan(name) → setAttribute → end` synchronously; the
+        OTLP exporter ships asynchronously, so the call returns
+        immediately. Fire-and-forget per rule #7 graceful-degrade.
+    (b) `bin/tick-loop.mjs` constructs `OtelObservability({ endpoint:
+        MINSKY_OTEL_ENDPOINT })` when the env var is set; the daemon's
+        `emit` callback now writes the stdout line AND forwards the event
+        through the adapter. When unset, the seam is `undefined` and only
+        the stdout line fires — graceful-degrade.
 success: |
-  - `pnpm vitest run novel/tick-loop novel/dashboard-web --reporter=json
-    | jq -e '.numPassedTests >= 60 and .numFailedTests == 0'` exits 0.
-    Today: 38 in tick-loop (+3 new debounce tests on top of 35) + 28 in
-    dashboard-web (+2 new pauseReason tests). Total = 66.
-  - Full suite stays green: `pnpm vitest run` exits 0 with ≥737 passing.
+  - `pnpm vitest run --reporter=json | jq -e '.numPassedTests >= 737 and
+    .numFailedTests == 0'` exits 0 (no regressions to the 737 existing
+    tests; the new gate path is exercised by the `MINSKY_OTEL_ENDPOINT`
+    env in the smoke).
   - `pnpm typecheck` exits 0.
-  - rule-N lints clean against `origin/main`.
+  - Smoke: `MINSKY_TICK_DRY_RUN=1 MINSKY_OTEL_ENDPOINT=http://localhost:5080
+    bash distribution/systemd/run-tick-loop.sh --max-iterations=1
+    --tick-interval-ms=1000` exits 0 AND prints
+    `[tick-loop] OTEL wired (endpoint=http://localhost:5080)` AND does
+    NOT throw on the `emitTickSpan` call.
 pivot: |
   Two pivot paths pre-registered:
-    1. If Apple Shortcuts can't render the new `pauseReason` channel
-       cleanly given vision row 12's "three numbers, no chrome" calm-tech
-       cap, this PR ships just the Ntfy push + the JSON envelope field;
-       Shortcut visualization is deferred to a P3 follow-up
-       (`watch-paused-tile`). The push alone closes the operator-informing
-       gap (the wrist surface keeps the existing boolean tile).
-    2. If the structural `NotifierLike` subtype proves too narrow (the
-       daemon needs more than `push()` from a real `Notifier`), pivot to
-       importing `@minsky/notifier`'s full `Notifier` — at the cost of
-       coupling the daemon to the package directly. Today's narrow shape
-       is sufficient because the daemon only needs `push`.
+    1. If `OtelObservability`'s span shape doesn't match the daemon's
+       `TickSpan` cleanly (different attribute restrictions, async
+       semantics that block the loop), pivot to a thin adapter in the
+       CLI that maps `TickSpan` → OTEL Span before forwarding. Don't
+       touch `@minsky/observability` itself.
+    2. If `MINSKY_OTEL_ENDPOINT` is set but OpenObserve is unreachable
+       (transport error), the OTEL SDK swallows the failure (graceful-
+       degrade per rule #7) and the daemon keeps running with stdout-only
+       output. The pivot is "no-op fallback to stdout" which is what
+       happens already when `MINSKY_OTEL_ENDPOINT` is unset.
 measurement: |
-  grep -q 'inBudgetPause' novel/tick-loop/src/daemon.ts \
-    && grep -q 'pauseReason' novel/dashboard-web/src/watch.ts
+  grep -q 'observability\.emitTickSpan' novel/tick-loop/bin/tick-loop.mjs \
+    && grep -q 'emitTickSpan(event: ObservabilityEvent)' novel/adapters/observability/src/otel.ts
 anchor: |
-  Card, S. K., Mackinlay, J., Shneiderman, B., *Readings in Information
-  Visualization*, Morgan Kaufmann, 1999 (3-number glanceable display
-  augmented with state-change indicators — the boolean+reason channel
-  preserves the calm-tech invariant).
-  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site
-  Reliability Engineering*, O'Reilly, 2016, Ch. 6 (monitoring distributed
-  systems — every internal state the operator cares about must surface;
-  silence is failure for state changes).
   Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
-  *IEEE Computer* 36(1), 2003 (MAPE-K — the Monitor surface must be
-  honest about Plan-time gating, otherwise Knowledge phase reads wrong).
-  Risk: push spam if the debounce is wrong. Mitigation: the new debounce
-  test fixes the count to exactly 1 across 3 paused iterations and to
-  exactly 2 across a paused → recovery → paused sequence — mechanical,
-  not best-effort. Without the debounce being mechanical, this PR would
-  be a net regression (every-tick spam). The test pins the contract.
-  Surfaced-by: 2026-05-04 11:13 local self-run from main `4bdc2b7`.
+  *IEEE Computer* 36(1), 2003 (MAPE-K — the *Monitor* surface must
+  publish where the *Analyze* phase reads; this PR closes the publisher
+  half).
+  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site
+  Reliability Engineering*, O'Reilly, 2016, Ch. 6 (every emitted metric
+  must be read; every read must have a publisher — today the publisher
+  half is missing).
+  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
+  1994 (Adapter — `OtelObservability` is the OTEL SDK's adapter; the
+  daemon never imports `@opentelemetry/*` directly).
+  Surfaced-by: 2026-05-04 standing-audit-gap-loop pass — the daemon's
+  `emit` callback wrote to `process.stdout` instead of OpenObserve;
+  OpenObserve was installed via #110 but received nothing; the
+  dashboard's `OpenObserveStrategy` read `(stub)` because the publisher
+  side never wired up. This PR closes the publisher half.
 timeout_seconds: 60
