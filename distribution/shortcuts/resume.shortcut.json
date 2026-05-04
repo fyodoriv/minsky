@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema/minsky-shortcut.schema.json",
+  "name": "Minsky · resume",
+  "description": "Resume the autonomous loop. POSTs {\"paused\": false} to /control on the local Tailscale-reachable dashboard. Mirrors pause.shortcut.json.",
+  "shortcut_kind": "post-control",
+  "endpoint": {
+    "method": "POST",
+    "url": "http://minsky.tail-scale.ts.net:8080/control",
+    "tailscale_host_var": "MINSKY_TAILSCALE_HOST",
+    "port": 8080,
+    "path": "/control",
+    "request_body": {
+      "paused": false
+    },
+    "request_content_type": "application/json"
+  },
+  "display": {
+    "action": "Show Result",
+    "format": "Resumed"
+  },
+  "watch_surface": false,
+  "anchor": "Beyer et al., SRE 2016, Ch. 17 (operator escape hatch / kill switch); user-story 002 (pause from iPhone).",
+  "build_runbook": "../README.md"
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "./schema/minsky-shortcut.schema.json",
+  "name": "Minsky · tokens remaining",
+  "description": "Glanceable token-budget headroom from the local Tailscale-reachable dashboard. Polls /watch.json and shows the tokens-remaining field.",
+  "shortcut_kind": "fetch-and-show",
+  "endpoint": {
+    "method": "GET",
+    "url": "http://minsky.tail-scale.ts.net:8080/watch.json",
+    "tailscale_host_var": "MINSKY_TAILSCALE_HOST",
+    "port": 8080,
+    "path": "/watch.json"
+  },
+  "extract": {
+    "action": "Get Dictionary Value",
+    "key": "tokens-remaining",
+    "metric_id": "token-budget-honoring",
+    "vision_md_success_row": 9
+  },
+  "display": {
+    "action": "Show Result",
+    "format": "{value}"
+  },
+  "watch_surface": true,
+  "anchor": "Card & Mackinlay 1999 (glanceable display); Weiser & Brown 1995 (calm tech); user-story 005 (three-numbers Watch).",
+  "build_runbook": "../README.md"
+}

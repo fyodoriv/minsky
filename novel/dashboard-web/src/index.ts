@@ -13,3 +13,11 @@ export { createServer, type DashboardServer } from "./server.js";
 export { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
 export { render, STUB_GET_VALUE, type GetValue } from "./render.js";
 export { constantGetValue, snapshotGetValue, type Snapshot } from "./strategy.js";
+export {
+  STUB_PAUSE_STATE,
+  WATCH_METRIC_IDS,
+  type PauseState,
+  type WatchEnvelope,
+  type WatchKey,
+  watchEnvelope,
+} from "./watch.js";
