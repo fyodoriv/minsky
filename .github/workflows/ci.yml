@@ -346,6 +346,55 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  linux-supervisor-integration:
+    # supervisor-integration-tests (TASKS.md): empirically exercise rows
+    # 1–4 of `distribution/README.md` § "Failure modes & chaos verification"
+    # against systemd's user-mode supervisor. The driver SIGKILLs the
+    # tick-loop and asserts respawn within 10 s; rows 2 / 3 / 4 are also
+    # exercised. Anchors: Forsgren-Humble-Kim 2018 (Accelerate — test
+    # reliability as DORA prerequisite); Armstrong 2007 (OTP supervision).
+    #
+    # Caveat (per TASKS.md "Risk" line): GitHub Actions Ubuntu runners run
+    # as a non-login user, and `systemctl --user` requires either a
+    # lingering session OR a wrapping `dbus-run-session`. The driver tries
+    # both fallbacks; if neither produces a usable user-bus, it exits 77
+    # (skipped). The job below installs `dbus-user-session` to maximise
+    # the chance the driver finds one.
+    #
+    # Escape hatch: if the user-systemd plumbing in CI sandboxes proves
+    # unfixable (>2 unrecoverable issues per the task brief), follow up
+    # with `supervisor-integration-self-hosted-runner` and gate this job
+    # behind `if: false` here. v0 ships with the gate ON to surface the
+    # signal — drift to OFF is a deliberate Pivot, not a default.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install dbus-user-session + gettext (for envsubst)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dbus-user-session gettext-base
+      - name: enable user lingering (best-effort)
+        run: |
+          # Linger lets systemd --user run without an active login session.
+          # On GH-hosted runners this usually succeeds via passwordless sudo.
+          sudo loginctl enable-linger "$USER" || true
+      - name: run supervisor integration test (linux)
+        # The driver itself decides whether to use dbus-run-session as the
+        # final fallback; see distribution/test-supervisor.sh.
+        run: bash distribution/test-supervisor.sh linux
+
+  macos-supervisor-integration:
+    # supervisor-integration-tests (TASKS.md): launchd half of the matrix.
+    # macOS GH-hosted runners boot a per-user launchd LaunchAgent domain by
+    # default (the runner's session has a usable `gui/$(id -u)` bootstrap),
+    # so unlike Linux this side does not need a workaround.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: run supervisor integration test (macos)
+        run: bash distribution/test-supervisor.sh macos
+
   skill-rule-cap:
     # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
     # `novel/spec-monitor/SKILL.md` declares a hard cap of ≤5 advisory
@@ -379,6 +428,8 @@ jobs:
       - biome
       - glossary-discipline
       - hygiene
+      - linux-supervisor-integration
+      - macos-supervisor-integration
       - maciek-smoke
       - markdownlint
       - pattern-index
@@ -417,6 +468,17 @@ jobs:
                    "${{ needs.test.result }}" \
                    "${{ needs.typecheck.result }}"; do
             [ "$r" = "success" ] || fail=1
+          done
+          # Supervisor-integration jobs may legitimately exit 77 (skipped)
+          # if the runner's user-bus / launchd plumbing isn't usable. We
+          # accept `success` and `skipped` (the GH Actions exit-77 maps to
+          # skipped); only `failure` / `cancelled` should fail the gate.
+          for r in "${{ needs.linux-supervisor-integration.result }}" \
+                   "${{ needs.macos-supervisor-integration.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
           done
           # pr-self-grade, pattern-index, and skill-rule-cap may be
           # `skipped` (push event) OR `success` (PR); only `failure` /

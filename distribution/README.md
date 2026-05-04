@@ -85,9 +85,23 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 5 | machine reboot mid-tick | `reboot` (cold restart) | `loud-crash-supervisor-restart` — supervisor target re-enabled by `WantedBy=default.target` on next login | reboot test machine; assert services come up; in-flight tick recovered via lease (`tasks-mcp`) |
 | 6 | placeholder substitution fails (e.g., MINSKY_HOME unset) | mis-installed template (config drift) | `loud-crash-supervisor-restart` — service fails to start; clear journal log | unset MINSKY_HOME and reinstall; assert `journalctl --user -u minsky-tick-loop` shows the missing-path error |
 
-## Integration test (deferred)
+## Integration test
 
-Full end-to-end "kill-and-respawn" tests across both platforms require an OS-level fixture (Linux VM in CI for systemd; macOS runner with launchctl unload privileges for launchd) that this repo's CI does not yet provide. Tracked as scout task `supervisor-integration-tests` in `TASKS.md`. Until then, `./distribution/lint-units.sh` is the closest mechanical check; this README's failure-mode table is the contract those tests will satisfy.
+`./distribution/test-supervisor.sh [linux|macos]` is the empirical driver for rows 1–4 of the failure-mode table above. It runs in two CI matrix jobs (`linux-supervisor-integration` / `macos-supervisor-integration` in `.github/workflows/ci.yml`) and can be run locally with the same arguments.
+
+What it does, per platform:
+
+- **Linux (`systemctl --user`)**: renders the templates with `envsubst`, drops them under `~/.config/systemd/user/`, writes stub `run-tick-loop.sh` / `run-budget-guard.sh` runners (an `exec sleep 86400` is sufficient because we're testing the supervisor's restart policy, not the runner's logic), then `enable --now minsky-supervisor.target`. Asserts: row 1 (SIGKILL respawn ≤ 10 s), row 3 (budget-guard permanent restart), row 2 weak form (clean stop deactivates), row 4 (rapid kill loop trips the start-limit and budget-guard survives).
+- **macOS (`launchctl bootstrap gui/$(id -u)`)**: same shape with the launchd LaunchAgents.
+
+CI workaround for the user-bus on Ubuntu runners. GitHub Actions Ubuntu runners run as a non-login user; `systemctl --user` requires either lingering (`loginctl enable-linger`) or a wrapping ephemeral bus (`dbus-run-session`). The driver tries linger first, then re-execs itself under `dbus-run-session` if needed; the CI job also installs `dbus-user-session` so the second fallback exists. If neither works, the driver exits **77** (skipped) — the CI gate accepts `skipped` to preserve the merge path while still surfacing the signal when the runner cooperates. The escape-hatch follow-up is `supervisor-integration-self-hosted-runner` in `TASKS.md`.
+
+Caveats per row:
+
+- **Row 2** (graceful SIGTERM / no respawn). systemd's transient policy keys off the unit's exit code; `sleep` interrupted by SIGTERM exits non-zero, which would still respawn under `Restart=on-failure`. The driver verifies the weaker but unambiguous property: `systemctl stop` (which sends SIGTERM and waits) cleanly deactivates the unit. The behavioural intent in the table is preserved by the policy choice itself, not by this assertion.
+- **Row 4** (StartLimitBurst). systemd's start-limit accounting is kernel-rate-limited; some CI sandboxes relax it. The load-bearing assertion for row 4 is the **blast-radius** check — budget-guard remains active when tick-loop circuit-breaks. The driver logs a warning (not a failure) if the start-limit doesn't trip in the 10 s observation window.
+
+The pre-deploy structural lint (`./distribution/lint-units.sh`) is the cheaper check that runs on every PR; this driver complements it with empirical behaviour verification.
 
 ## Hypothesis-driven development (rule #9)
 
