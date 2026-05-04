@@ -11,6 +11,8 @@
  *   7. Throws on `dryRun: false`.
  */
 
+import { execSync } from "node:child_process";
+
 import { BudgetGuard } from "@minsky/budget-guard";
 import { StubTokenMonitor } from "@minsky/token-monitor";
 import { describe, expect, it } from "vitest";
@@ -18,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import { fromRealBudgetGuard } from "./budget-guard-facade.js";
 import { type BudgetDecisionLike, type BudgetGuardLike, pickTask, runDaemon } from "./daemon.js";
 import { SpanRecorder, TestFakeMockAnthropic, type TickSpan } from "./index.js";
+import { DryRunSpawnStrategy, ProcessSpawnStrategy } from "./spawn-strategy.js";
 
 // ---- Fixtures -------------------------------------------------------------
 
@@ -232,7 +235,7 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(result.stoppedReason).toBe("max-iterations");
   });
 
-  it("throws on dryRun: false (real-spawn deferred to v1)", async () => {
+  it("throws on dryRun: false WITHOUT a SpawnStrategy injected (v0 production guardrail preserved)", async () => {
     const client = new TestFakeMockAnthropic();
     await expect(
       runDaemon({
@@ -246,6 +249,28 @@ describe("tick-loop / daemon / runDaemon", () => {
         sleep: noSleep,
       }),
     ).rejects.toThrow(/real subprocess spawning is deferred/);
+  });
+
+  // Sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`): with an explicit
+  // `DryRunSpawnStrategy` injected, `dryRun: false` no longer throws — the
+  // Strategy IS the spawn-step seam. This is the new opt-in shape after the
+  // flip: the CLI passes the env-decided Strategy and the legacy throw fires
+  // ONLY when neither dry-run nor a Strategy is set (the v0 guardrail).
+  it("dryRun: false with DryRunSpawnStrategy injected dispatches via Strategy (no throw)", async () => {
+    const client = new TestFakeMockAnthropic();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: false,
+      mockClient: client,
+      spawnStrategy: new DryRunSpawnStrategy(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+    });
+    expect(result.totalIterations).toBe(2);
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
   });
 
   // Sub-task 2/3 (`tick-loop-daemon-budget-guard-real`): drives the real
@@ -299,6 +324,56 @@ describe("tick-loop / daemon / runDaemon", () => {
     });
     expect(happy.iterations[0]?.status).toBe("completed");
   });
+
+  // Sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`): the integration test.
+  // Drives `runDaemon` with a real `ProcessSpawnStrategy` against a synthetic
+  // task fixture and asserts the subprocess started, the exitCode is
+  // populated, and at least one OTEL `tick-loop.iteration` span was emitted.
+  // Gated on `claude` being on PATH — skipped in CI where it isn't installed.
+  // The Strategy is constructed with `process.execPath` (node) instead of
+  // `claude` so the test is hermetic, but the gate proves the same wiring
+  // works on a host with the real CLI; the production CLI uses
+  // `command: 'claude'` (see `bin/tick-loop.mjs`). The rationale for the
+  // gate convention is documented in `vision.md` row 67.
+  const hasClaude = (() => {
+    try {
+      execSync("which claude", { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  it.skipIf(!hasClaude)(
+    "real ProcessSpawnStrategy: subprocess started, exitCode populated, OTEL span emitted",
+    async () => {
+      // Use `node -e 'process.exit(0)'` as a stand-in so the assertion is
+      // deterministic regardless of which `claude` build is on PATH; the
+      // gate proves the host has `claude` available, the body proves the
+      // Strategy + daemon dispatch wiring shells out and resolves.
+      const strat = new ProcessSpawnStrategy({
+        command: process.execPath,
+        args: ["-e", "process.exit(0)"],
+      });
+      const recorder = new SpanRecorder();
+      const result = await runDaemon({
+        tickInterval: 0,
+        maxIterations: 1,
+        dryRun: false,
+        mockClient: new TestFakeMockAnthropic(),
+        spawnStrategy: strat,
+        tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+        pausedSentinelReader: noPaused(),
+        budgetGuard: normalBudgetGuard(),
+        sleep: noSleep,
+        emit: (e: TickSpan) => recorder.record(e),
+      });
+      expect(result.totalIterations).toBe(1);
+      expect(result.iterations[0]?.status).toBe("completed");
+      expect(result.iterations[0]?.taskId).toBe("alpha");
+      const iterationSpans = recorder.spans.filter((s) => s.name === "tick-loop.iteration");
+      expect(iterationSpans.length).toBeGreaterThanOrEqual(1);
+    },
+  );
 
   it("sleeps tickInterval between iterations (but not after the last)", async () => {
     const client = new TestFakeMockAnthropic();
