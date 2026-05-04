@@ -1,0 +1,86 @@
+[
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha0",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:00:00Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha0",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:00:01Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha1",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:01:00Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha1",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:01:01Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha2",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:02:00Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha2",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:02:01Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha3",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:03:00Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha3",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:03:01Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha4",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:04:00Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha4",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:04:01Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha5",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:05:00Z"
+  },
+  {
+    "workflowName": "ci",
+    "name": "stable",
+    "headSha": "sha5",
+    "conclusion": "success",
+    "createdAt": "2026-05-04T00:05:01Z"
+  }
+]
