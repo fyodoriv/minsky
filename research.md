@@ -573,3 +573,20 @@ Each active dependency follows the same shape:
 (Empty at start; entries added each quarter per `vision.md` § "License & openness".)
 
 - **2026-05-03 — Initial pass.** Dependency table established. Each row first-time-reviewed. OMC adopted. tasks.md confirmed as substrate. Constitutional review identified as the single wholly-novel layer. Five extraction targets named.
+
+### Pre-2026-Q3 audit findings (2026-05-04)
+
+A 3-month-early snapshot of `pnpm outdated` against the Q3 2026 review (date-blocked, due 2026-08-03 per `review-q3-2026`). The intent is *not* to bump anything now — that is the Q3 review's job. The intent is to give the Q3 review a stable baseline to compare against, so the review can ship with concrete before/after numbers rather than a fresh dependency scan as its first step.
+
+| Package                  | Current | Latest | Notes                                                          |
+|--------------------------|---------|--------|----------------------------------------------------------------|
+| `@biomejs/biome` (dev)   | 1.9.4   | 2.4.14 | Major: 1→2 (config schema breaking changes); plan migration.   |
+| `@vitest/coverage-v8` (dev) | 2.1.9 | 4.1.5  | Tied to vitest version.                                        |
+| `lefthook` (dev)         | 1.10.10 | 2.1.6  | Major: 1→2; verify pre-commit hooks survive.                   |
+| `typescript` (dev)       | 5.7.2   | 6.0.3  | Major: 5→6; check `tsc -b` semantics.                          |
+| `vitest` (dev)           | 2.1.9   | 4.1.5  | Major skip 3.x; review breaking changes per release notes.     |
+| `markdownlint-cli2` (dev)| 0.15.0  | 0.22.1 | Pre-1.x; minor delta but several minor bumps; safe for solo-dev tier. |
+
+**Summary.** Six dev deps are major-version behind (biome, vitest, `@vitest/coverage-v8`, lefthook, typescript) plus the pre-1.x `markdownlint-cli2` minor drift. **All are tooling — no runtime deps are out of date** (the runtime side of the dep table in this document remains stable as of 2026-05-04).
+
+**Recommendation for the Q3 review.** Address `markdownlint-cli2` first (smallest risk delta — pre-1.x, lint-only, no semantic surface area). Then plan the `@biomejs/biome` 1→2 migration as a separate task before bumping `vitest`/`typescript` (which have larger blast radii: vitest's coverage tooling and TS's `tsc -b` project-references behaviour respectively). The Lighthouse pin (`12.4.0`, vision.md row 58) is filed for Q3 in line with the existing cadence — current latest is `12.6.0`, a minor delta that does not justify an emergency bump.

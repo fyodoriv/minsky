@@ -1,54 +1,44 @@
-id: docs-drift-fixes-batch-2026-05-04
+id: pre-2026-q3-dep-audit-2026-05-04
 hypothesis: |
-  Four small docs-only fixes (research.md OMC handoff entry strikethrough,
-  research.md cross-language-port answer, ARCHITECTURE.md open-questions
-  resolution annotations, ARCHITECTURE.md versioning sub-list) close
-  4 P3 tasks without code change. Each fix is independently verifiable
-  via grep; total PR diff < 100 lines; no scripts/CI/code touched.
+  Recording a 2026-05-04 dependency snapshot in research.md's
+  "Quarterly review log" gives the upcoming Q3 2026 review
+  (date-blocked, due 2026-08-03 per `review-q3-2026`) a 3-month-stable
+  baseline to compare against. Without this snapshot, the Q3 review's
+  first action would be a fresh `pnpm outdated` scan — losing the
+  before/after delta that makes the review's findings falsifiable.
+  Six dev deps are flagged today (biome, vitest, @vitest/coverage-v8,
+  lefthook, typescript major-version-behind; markdownlint-cli2 minor
+  drift); zero runtime deps are stale. The Q3 review should address
+  markdownlint-cli2 first (smallest blast radius), then plan biome
+  1→2 as a separate task before vitest/typescript.
 success: |
-  All 4 P3 tasks removed from TASKS.md and the 4 measurement assertions
-  pass:
-  (a) `grep -c 'OMC handoff persistence' research.md` ≤ 1 (only the
-      canonical § "OMC handoff persistence" header remains; the
-      open-questions duplicate is struck).
-  (b) ARCHITECTURE.md § "Versioning & dependency evolution" contains
-      the sub-list with `@tasks-md/lint@^0.7.0`, `markdownlint-cli2@0.15.0`,
-      `lighthouse@12.4.0`.
-  (c) ARCHITECTURE.md open-questions items 1–4 each carry a
-      `**Resolved**: PR #N — <one-line>` annotation.
-  (d) research.md cross-language entry has a one-line answer
-      ("no cross-language port as of 2026-05-04").
+  `### Pre-2026-Q3 audit findings (2026-05-04)` exists in research.md
+  under the "Quarterly review log" section, with the 6-package table
+  and a 2-3 sentence summary identifying the Q3 ordering recommendation.
 pivot: |
-  If ≥1 of the "resolved" claims turns out to be wrong (e.g., a PR
-  cited as resolving an open question did not in fact resolve it on
-  inspection), file a follow-up task to re-investigate that specific
-  claim and revert the strikethrough for the affected item.
-  Abandon-the-approach: if more than 25 % (i.e., ≥2 of the 4)
-  claimed-resolutions fail verification on read, the underlying audit
-  (PR #79) was wrong shape — switch to a deterministic CI lint that
-  machine-checks "resolved by PR #N" annotations against
-  `gh pr view N` titles before allowing the strikethrough to land.
+  If any of the 6 packages ships a critical security advisory before
+  2026-08-03, file an emergency-bump P1 task and skip the Q3 cadence
+  for that package — the audit's standing assumption (quarterly
+  cadence is sufficient) is falsified for that specific dep, not
+  for the cadence as a whole. If ≥2 of the 6 packages ship critical
+  CVEs in the same quarter, the cadence itself fails its purpose
+  (quarterly is too slow); raise to bi-monthly until the rate
+  normalises (mirrors the parent `review-q3-2026` task's pivot).
 measurement: |
-  [ "$(grep -c 'OMC handoff persistence' research.md)" -le 1 ] \
-    && [ "$(grep -c '@tasks-md/lint@\^0\.7\.0' ARCHITECTURE.md)" -ge 1 ] \
-    && [ "$(grep -c 'markdownlint-cli2@0\.15\.0' ARCHITECTURE.md)" -ge 1 ] \
-    && [ "$(grep -c 'lighthouse@12\.4\.0' ARCHITECTURE.md)" -ge 1 ] \
-    && ! grep -q 'docs-drift-research-md-open-questions' TASKS.md \
-    && ! grep -q 'docs-drift-architecture-md-open-questions' TASKS.md \
-    && ! grep -q 'docs-drift-architecture-md-versioning-pins' TASKS.md \
-    && ! grep -q 'docs-drift-tasksmd-cross-language-followup' TASKS.md \
+  [ "$(grep -c '^### Pre-2026-Q3' research.md)" -ge 1 ] \
     && pnpm typecheck && pnpm test && pnpm lint \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Hunt, A., Thomas, D., *The Pragmatic Programmer*, Addison-Wesley,
-  1999, Ch. 2 (DRY — a question resolved by shipped code should not
-  remain "open" in two doc surfaces; the strikethrough + resolution
-  pointer is the canonical reconciliation); rule #5 (vision.md § 5 —
-  glossary discipline; "open" / "resolved" are status fields whose
-  value is empirical); rule #8 (vision.md § 8 — pattern conformance;
-  shipped state must be reflected back into the architecture doc);
-  Munafò et al., "A Manifesto for Reproducible Science", *Nature
-  Human Behaviour* 1, 0021, 2017 (pre-registration — the hypothesis
-  that all 4 fixes are mechanical was declared before the read).
-replay_windows_days: [30]
+  rule #1 (vision.md § 1 — don't reinvent; depend on stable upstream
+  and review the choice quarterly); ARCHITECTURE.md § "Versioning &
+  dependency evolution" (pin majors, batch minor/patch bumps);
+  Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018
+  (DORA — low-risk, frequent, small bumps over big-bang upgrades;
+  the Q3 ordering recommendation operationalises this for the 6
+  flagged deps); Munafò et al., "A Manifesto for Reproducible
+  Science", *Nature Human Behaviour* 1, 0021, 2017 (pre-registration —
+  the snapshot is committed *before* the Q3 review observes its
+  result, so the review's findings are falsifiable against today's
+  baseline).
+replay_windows_days: [90]
