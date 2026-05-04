@@ -1,14 +1,16 @@
-id: ci-rule-4-otel-coverage
+id: ci-lint-pattern-index
 hypothesis: |
-  A TypeScript-AST diff-based lint that requires every newly-added or
-  modified `export`-ed function/method/class-method/arrow under
-  `novel/**/*.ts` (non-test) to carry a JSDoc `@otel <span-name>` OR
-  `@otel-exempt <reason>` annotation enforces rule #4 ("everything
-  measurable, everything visible") at PR time, before the runtime trace
-  reveals the gap. Existing un-annotated code is grandfathered until the
-  file is touched again — same rule-1 / rule-3 precedent.
-success: "scripts/check-rule-4-otel-coverage.test.mjs exits 0 with ≥21 cases covering every export shape (function decl, default export, arrow, function expr, class method, accessors); the script exits 1 on the synthetic-missing fixture and 0 on the synthetic-annotated fixture; the new CI job is wired into the ci gate; pnpm typecheck && pnpm lint && pnpm test all exit 0"
-pivot: "if more than 30% of currently-exported functions need @otel-exempt to pass (i.e., the rule is over-broad for low-level helpers), narrow the scope to public-API surface only — functions exported from a package's top-level index.ts, not from internal modules"
-measurement: "pnpm typecheck && pnpm vitest run scripts/check-rule-4-otel-coverage.test.mjs"
-anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); OpenTelemetry specification (CNCF 2020+); Gregg Systems Performance 2014 (USE method — instrumentation as a structural property)"
+  A diff-based CI lint that fails when a PR adds a new top-level artefact
+  (under `novel/**`, root `*.md`, `setup.sh`, `distribution/**`, or
+  `.github/workflows/**`) without a corresponding row in `vision.md`
+  § "Pattern conformance index" mechanically prevents row-less merges.
+  Scope is narrow on purpose (test files, fixtures, node_modules excluded;
+  modifications grandfathered) so the false-positive rate stays ≤2 % —
+  same precedent as rule-1 / rule-3 / rule-4. Per-file opt-out is
+  `<!-- pattern: not-applicable — <reason> -->` (≥3-char reason) within
+  the first ~20 lines of the new file.
+success: "scripts/check-pattern-index.test.mjs exits 0 with ≥8 cases (we ship 19); the new CI job is wired into the `ci` gate's `needs:` and bash loop; this PR's own scripts/check-pattern-index.mjs is mentioned by vision.md row 34 so the gate doesn't trip on its own diff; pnpm typecheck && pnpm lint && pnpm test all exit 0"
+pivot: "if the gate produces ≥3 false positives in its first month from legitimate-but-unmentioned tooling artefacts, tighten path scope (drop `distribution/**` or `.github/workflows/**`) rather than widen the opt-out; if it fires on ≥30 % of PRs, the index format is too coarse — switch to machine-readable annotations in source files instead"
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-pattern-index.test.mjs"
+anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); rule #8 (vision.md § 8 — pattern conformance); Beck, *Extreme Programming Explained*, 1999 (CI as constraint enforcer); Alexander et al., *A Pattern Language*, 1977 (pattern catalogue indexed by artefact)"
 replay_windows_days: [7, 30]
