@@ -54,7 +54,6 @@
   - **Anchor**: Ries, *The Lean Startup*, 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 (statistical rigour and "novelty effect" — value at +1d is misleading; +7d is the floor); Kephart & Chess 2003 (this layer is MAPE-K's Analyze phase, scoped to rule #9).
   - **Risk**: A `regressed` verdict mid-replay opens a TASKS.md entry — risk of churn if the regression is itself noise. Mitigation: require regression to persist across 2 consecutive replay windows before opening the pivot task.
 
-
 - [ ] `ci-rule-3-doc-first` — CI lint: PRs adding code under `novel/` also touch a `user-stories/*.md` or the package README
   - **ID**: ci-rule-3-doc-first
   - **Tags**: ci, conformance, rule-10
