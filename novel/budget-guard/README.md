@@ -2,7 +2,7 @@
 
 Token-budget watchdog. Observes a `TokenMonitor`, decides which response category applies (`graceful-degrade` / `circuit-break-and-notify` / `weekly-cap-warn` / `normal`), and pushes the decision to a callback.
 
-Two runtime envelopes ship: the **flag-file envelope** (`${MINSKY_HOME}/.minsky/budget.flag`, see [Flag-file envelope](#flag-file-envelope) below) for shell consumers, and the **HTTP envelope** (`localhost:9876/budget`, see [HTTP envelope](#http-envelope) below) for dashboard / Watch / ad-hoc consumers. The real `TokenMonitor` Strategy against Maciek's `claude-monitor` Python tool ships in follow-up task `budget-guard-maciek-impl`.
+Two runtime envelopes ship: the **flag-file envelope** (`${MINSKY_HOME}/.minsky/budget.flag`, see [Flag-file envelope](#flag-file-envelope) below) for shell consumers, and the **HTTP envelope** (`localhost:9876/budget`, see [HTTP envelope](#http-envelope) below) for dashboard / Watch / ad-hoc consumers. The real `TokenMonitor` Strategy against Maciek's data source ships as `MaciekTokenMonitor` in `@minsky/token-monitor`.
 
 ## Pattern conformance
 
@@ -22,7 +22,7 @@ Per constitutional rule #7 (vision.md § 7).
 
 | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|---|
-| 1 | TokenMonitor.snapshot() throws | Strategy returns rejected promise (upstream-error) | `loud-crash-supervisor-restart` (the unhandled rejection bubbles to the supervisor) | (deferred — covered when `budget-guard-maciek-impl` ships and integration tests exist) |
+| 1 | TokenMonitor.snapshot() throws | Strategy returns rejected promise (upstream-error) | `loud-crash-supervisor-restart` (the unhandled rejection bubbles to the supervisor) | covered manually; the `MaciekTokenMonitor` adapter test exercises the cold-start / malformed-input paths that catch readdir/JSON.parse rejections rather than re-throwing |
 | 2 | Snapshot has malformed numbers (NaN / Infinity / negative) | corrupted Maciek cache file (upstream-malformed) | `graceful-degrade` — `consumedFraction` clamps to `[0, 1]`; `decide()` still returns a defined action | covered by `consumedFraction` clamp tests |
 | 3 | Window-reset edge causes `tokensRemainingInWindow > windowSizeTokens` | clock skew across a 5h boundary (clock) | `graceful-degrade` — clamp to 0 consumed | covered by clamp test |
 | 4 | `windowSizeTokens` is 0 | TokenMonitor returns a freshly-bootstrapped value (upstream-malformed) | `graceful-degrade` — return 0 consumed (avoid div / 0) | covered by zero-window test |
@@ -134,7 +134,7 @@ Returns HTTP 503 (`{ "error": "no decision recorded yet" }`) until the guard has
 
 The default port (9876) is overridden by `MINSKY_BUDGET_GUARD_PORT`, or by passing `start({ port })` directly. Pass `port: 0` to bind an ephemeral port (used by tests).
 
-`cost` is `null` until `budget-guard-maciek-impl` lands the real `TokenMonitor` strategy that surfaces Maciek's cost prediction.
+`cost` is `null` in v0 because the real `MaciekTokenMonitor` Strategy leaves `weeklyHeadroomFraction` at `0` — Maciek's P90 ML predictor is not exposed without invoking the upstream CLI, and `claude-monitor==3.1.0` has no `--json` mode.
 
 The Hono dependency is hidden behind the `BudgetServer` interface (Adapter, Gamma et al. 1994) — alternative implementations can be plugged in without touching callers.
 
@@ -142,5 +142,5 @@ The Hono dependency is hidden behind the `BudgetServer` interface (Adapter, Gamm
 
 The full `budget-guard-v0` epic decomposes into these P1 sub-tasks (tracked in `TASKS.md`):
 
-- **`budget-guard-maciek-impl`** — real `TokenMonitor` Strategy against Maciek's Python `claude-monitor` cache file. Adapter test against a live Maciek install.
+- **`MaciekTokenMonitor` Strategy** — shipped in `@minsky/token-monitor` (`novel/adapters/token-monitor/src/maciek.ts`); reads `~/.claude/projects/<cwd>/<session>.jsonl` directly.
 - **`budget-guard-publish-dry-run`** — pre-publish smoke for `@minsky/budget-guard` and `@minsky/token-monitor`.

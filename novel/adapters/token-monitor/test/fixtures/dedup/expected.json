@@ -1,0 +1,8 @@
+{
+  "now": "2026-05-04T12:00:00.000Z",
+  "plan": "max5",
+  "tokensUsedInActiveBlock": 3000,
+  "tokensRemainingInWindow": 85000,
+  "windowSizeTokens": 88000,
+  "note": "same (message.id, requestId) appears in both session-a.jsonl and session-b.jsonl; counted once"
+}
