@@ -191,6 +191,38 @@ jobs:
       - name: rule-1 lint
         run: node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main
 
+  rule-4-otel-coverage:
+    # rule #4 (everything measurable, everything visible) deterministic
+    # enforcement, per rule #10. Diff-based: walks `novel/**/*.ts` files
+    # newly added or modified relative to `origin/main` on the PR branch
+    # and requires every exported function / method / arrow / default
+    # export to carry a leading JSDoc `@otel <span-name>` or
+    # `@otel-exempt <reason>` (≥3 chars). Existing un-annotated code is
+    # grandfathered until each file is touched again — same precedent as
+    # rule-1 and rule-3.
+    # Anchor: rule #10 (deterministic enforcement); OpenTelemetry
+    # specification (CNCF 2020+); Gregg, *Systems Performance*, 2014
+    # (USE method — instrumentation as a structural property).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: rule-4 lint
+        run: node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-4-otel-coverage.test.mjs
+
   rule-3-doc-first:
     # rule #3 (doc-first): every PR adding/modifying `novel/**/*.ts`
     # (non-test) must touch a `user-stories/*.md` OR the affected
@@ -287,6 +319,7 @@ jobs:
       - rule-1-novel-justification
       - rule-2-dep-coverage
       - rule-3-doc-first
+      - rule-4-otel-coverage
       - rule-6-let-it-crash
       - rule-7-chaos-coverage
       - tasks-lint
@@ -309,6 +342,7 @@ jobs:
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
                    "${{ needs.rule-3-doc-first.result }}" \
+                   "${{ needs.rule-4-otel-coverage.result }}" \
                    "${{ needs.rule-6-let-it-crash.result }}" \
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.tasks-lint.result }}" \

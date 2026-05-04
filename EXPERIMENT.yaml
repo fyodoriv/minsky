@@ -1,15 +1,14 @@
-id: ci-rule-6-let-it-crash
+id: ci-rule-4-otel-coverage
 hypothesis: |
-  A TypeScript-AST lint that flags two narrow shapes — `try/catch` blocks
-  nested deeper than 1 level, and catch handlers whose body lacks both a
-  `throw` and a bare-identifier `supervise(...)` call — converts rule #6's
-  let-it-crash discipline from prose into a deterministic CI failure
-  (Armstrong, *Programming Erlang*, 2007; Lampson 1983; rule #10). The
-  lint is diff-based — only PR-touched `novel/**/*.ts` files are inspected
-  — so existing chains are grandfathered until next-touched, matching the
-  rule-1 / rule-3 precedent.
-success: "pnpm vitest run scripts/check-rule-6-let-it-crash.test.mjs exits 0; the script exits 1 on the deep-nest fixture and 0 on the same fixture with the opt-out comment above the inner catch; the new CI job is wired into the ci gate; pnpm typecheck && pnpm lint && pnpm test all exit 0"
-pivot: "if the lint flags ≥3 false positives per month from genuine system-boundary catches (process-edge stdin parsing, shutdown handlers, framework error boundaries), broaden the opt-out to whole-file via // rule-6-file: boundary-handler AND add an explicit boundary catalogue in research.md"
-measurement: "pnpm typecheck && pnpm vitest run scripts/check-rule-6-let-it-crash.test.mjs"
-anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); Armstrong Programming Erlang 2007 (let it crash); Lampson 1983 Hints for Computer System Design (use exceptions only for exceptional conditions); Hunt and Thomas 1999 The Pragmatic Programmer Tip 32 (crash early)"
+  A TypeScript-AST diff-based lint that requires every newly-added or
+  modified `export`-ed function/method/class-method/arrow under
+  `novel/**/*.ts` (non-test) to carry a JSDoc `@otel <span-name>` OR
+  `@otel-exempt <reason>` annotation enforces rule #4 ("everything
+  measurable, everything visible") at PR time, before the runtime trace
+  reveals the gap. Existing un-annotated code is grandfathered until the
+  file is touched again — same rule-1 / rule-3 precedent.
+success: "scripts/check-rule-4-otel-coverage.test.mjs exits 0 with ≥21 cases covering every export shape (function decl, default export, arrow, function expr, class method, accessors); the script exits 1 on the synthetic-missing fixture and 0 on the synthetic-annotated fixture; the new CI job is wired into the ci gate; pnpm typecheck && pnpm lint && pnpm test all exit 0"
+pivot: "if more than 30% of currently-exported functions need @otel-exempt to pass (i.e., the rule is over-broad for low-level helpers), narrow the scope to public-API surface only — functions exported from a package's top-level index.ts, not from internal modules"
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-rule-4-otel-coverage.test.mjs"
+anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); OpenTelemetry specification (CNCF 2020+); Gregg Systems Performance 2014 (USE method — instrumentation as a structural property)"
 replay_windows_days: [7, 30]
