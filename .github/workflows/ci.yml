@@ -340,6 +340,34 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  skill-rule-cap:
+    # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
+    # `novel/spec-monitor/SKILL.md` declares a hard cap of ≤5 advisory
+    # rules (`### A<N>.` headings). Without a deterministic gate, a future
+    # PR could silently grow the Skill back into a primary enforcement
+    # mechanism. This job counts the headings and fails if the count
+    # exceeds 5. Runs on pull_request only — push-to-main is skipped
+    # (matching pr-self-grade / pattern-index precedent).
+    # Anchor: rule #10 (deterministic enforcement); rule #6 (failure-mode
+    # discipline — close "did anyone notice?" mechanically); Beck 1999
+    # (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: skill-rule-cap lint
+        run: node scripts/check-skill-rule-cap.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-skill-rule-cap.test.mjs
+
   ci:
     needs:
       - biome
@@ -349,6 +377,7 @@ jobs:
       - markdownlint
       - pattern-index
       - pr-self-grade
+      - skill-rule-cap
       - rule-1-novel-justification
       - rule-2-dep-coverage
       - rule-3-doc-first
@@ -383,10 +412,12 @@ jobs:
                    "${{ needs.typecheck.result }}"; do
             [ "$r" = "success" ] || fail=1
           done
-          # pr-self-grade and pattern-index may be `skipped` (push event)
-          # OR `success` (PR); only `failure` / `cancelled` should fail.
+          # pr-self-grade, pattern-index, and skill-rule-cap may be
+          # `skipped` (push event) OR `success` (PR); only `failure` /
+          # `cancelled` should fail.
           for r in "${{ needs.pr-self-grade.result }}" \
-                   "${{ needs.pattern-index.result }}"; do
+                   "${{ needs.pattern-index.result }}" \
+                   "${{ needs.skill-rule-cap.result }}"; do
             case "$r" in
               success|skipped) ;;
               *) fail=1 ;;

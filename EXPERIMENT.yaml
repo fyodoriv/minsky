@@ -1,17 +1,15 @@
-id: spec-monitor-prose-sweep
+id: ci-lint-skill-rule-cap
 hypothesis: |
-  Every remaining mention of `spec-monitor` / `claude-spec-monitor` in
-  vision.md and ARCHITECTURE.md now correctly attributes the deterministic
-  share to its actual linter (rule-6 -> `scripts/check-rule-6-let-it-crash.mjs`
-  for silent-retry; `@minsky/experiment-record`'s `VANITY_PHRASES` for vanity
-  metrics; the rule-#10 lint set for runtime specification monitoring) and
-  explicitly tags the residual judgement share as advisory-only `novel/spec-
-  monitor/` (vision.md row 35), never gating CI. Success-criterion #3
-  (`Specification alignment`) is rewired from the non-existent
-  `claude-spec-monitor --report --json` CLI to a deterministic linter
-  green-ratio over a 30-day window via `gh run list`, restoring the row to
-  rule-#9-compliant runnability.
-success: "grep -nE 'spec-monitor.*flag|spec-monitor.*report|spec-monitor.*runs find' vision.md ARCHITECTURE.md | wc -l returns 0; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md all green; pattern-index lint stays green."
-pivot: "if a spec-monitor mention cannot be cleanly mapped to either a deterministic linter or an advisory-only tag (i.e., the prose describes a load-bearing capability that no linter currently provides), file a follow-up `ci-rule-N-*` task to ship the missing deterministic linter rather than papering over with advisory framing; revert the prose change for that mention until the linter lands."
-measurement: "grep -nE 'spec-monitor.*flag|spec-monitor.*report|spec-monitor.*runs find' vision.md ARCHITECTURE.md | wc -l"
-anchor: "rule #10 (vision.md § 10 — deterministic enforcement, ratchet rule); Havelund & Goldberg, 'Verify Your Runs', VSTTE 2008 (runtime verification — split here by mechanisability per rule #10); Munafò et al. 2017 (pre-registration as the falsifiability discipline)."
+  A deterministic CI check that counts `### A<N>.` advisory-rule headings
+  in `novel/spec-monitor/SKILL.md` and fails when the count exceeds 5
+  eliminates the `audit-spec-monitor-coverage` task's "did anyone notice?"
+  failure mode. Without this gate the ≤5 cap is prose-only and a future
+  PR can silently grow A6, A7, … re-broadening the advisory Skill back
+  into a primary enforcement mechanism — directly contradicting rule #10's
+  ratchet (vision.md § 10). With the gate the cap is mechanically
+  unviolable and the Skill stays bounded by construction.
+success: "pnpm vitest run scripts/check-skill-rule-cap.test.mjs exits 0 with all 8 cases passing (0 / 3 / 5 rules pass; 6 rules fail; missing file passes; empty content passes; live SKILL.md (5 rules) passes; non-rule headings are not miscounted); node scripts/check-skill-rule-cap.mjs against the live novel/spec-monitor/SKILL.md exits 0 with output `skill-rule-cap ok: 5 advisory rule(s) declared (cap 5).`"
+pivot: "if the spec-monitor Skill is retired entirely — the rule-#10 terminal state where `everything that can be deterministically checked is, and the Skill has no remit` — retire this lint along with it (the missing-file branch already returns pass, but the linter wiring + ci.yml job should be removed in the same PR that deletes SKILL.md). If contributors hit ≥3 false positives in the first month from the locked `### A<N>.` heading shape (e.g., a refactor changes the marker to `## A<N>:`), pivot to a YAML-block convention: a fenced ```spec-monitor-rules``` block listing the rule IDs, parsed deterministically."
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-skill-rule-cap.test.mjs"
+anchor: "rule #10 (vision.md § 10 — deterministic enforcement; ratchet rule keeps the Skill bounded so it cannot grow back into a primary enforcement mechanism); rule #6 (vision.md § 6 — failure-mode discipline; closes the audit-spec-monitor-coverage 'did anyone notice?' failure mode mechanically); Beck, *Extreme Programming Explained*, 1999 (CI as the constraint enforcer)"
+replay_windows_days: [7, 30, 180]
