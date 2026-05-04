@@ -1,13 +1,16 @@
-id: extract-adapter-types
+id: ci-rule-4-otel-coverage
 hypothesis: |
-  Hoisting `SelfTestStatus`, `SelfTestResult`, and `aggregateStatus()` into
-  a leaf `@minsky/adapter-types` package eliminates the latent dependency
-  cycle (`@minsky/budget-guard → @minsky/observability` for a base type)
-  without breaking observability's public API; future adapter packages then
-  depend on `@minsky/adapter-types` directly. Per Martin's acyclic
-  dependency principle (*Clean Architecture*, 2017) and Wiggins' factor II
-  (*The Twelve-Factor App*, 2011 — explicit dependencies).
-success: "pnpm typecheck && pnpm test && pnpm lint && pnpm publish --dry-run --filter @minsky/adapter-types all exit 0; new types-package tests cover aggregateStatus 100%; existing observability tests pass unchanged; the runtime smoke check `aggregateStatus([{status:'green',...},{status:'red',...}])` returns 'red'"
-pivot: "if extraction breaks observability's downstream consumers (the @minsky/observability re-export turns out not to preserve type identity across declaration files, e.g., consumers see two distinct SelfTestStatus types and refuse to unify them), revert and instead inline the contract per-adapter with a CI lint that asserts the inline copies are byte-equal"
-measurement: "pnpm typecheck && pnpm test && pnpm lint && pnpm publish --dry-run --filter @minsky/adapter-types"
-anchor: "Martin, *Clean Architecture*, 2017 (acyclic dependency principle); Wiggins, *The Twelve-Factor App*, 2011 (factor II — explicit dependencies); Avizienis et al., *IEEE TDSC* 2004 (status-lattice meet)"
+  A TypeScript-compiler-API AST walk that, for every newly-added or
+  modified novel/**/*.ts file on a PR branch, requires every exported
+  function / method / arrow / default export to carry a leading JSDoc
+  `@otel <span-name>` or `@otel-exempt <reason>` annotation enforces
+  rule #4 ("everything measurable, everything visible") at PR time —
+  before runtime traces would reveal the gap. Diff-based scoping
+  (origin/main…HEAD, --diff-filter=AM) grandfathers existing
+  un-annotated code, mirroring rule-1 and rule-3, so adoption is
+  incremental without retroactive audit churn.
+success: "node scripts/check-rule-4-otel-coverage.mjs --diff-base=<base> exits 0 when no novel/**/*.ts file is changed; exits 0 when every changed novel/**/*.ts export carries @otel <span> or @otel-exempt <reason ≥3 chars>; exits 1 with file:line:name diagnostics when any export is missing both annotations. pnpm exec vitest run scripts/check-rule-4-otel-coverage.test.mjs exits 0 with 21/21 tests passing covering all top-level export shapes (function declaration, default export, export const = arrow, export const = function expression, exported class methods including private and #name, constructors-exempt, multi-export aggregation, line-number anchoring, missing-reason variants). pnpm typecheck exits 0 with the new // @ts-check'd .mjs files included in scripts/tsconfig.json's // @ts-check opt-in cohort."
+pivot: "if more than 30% of currently-exported functions across all novel/ packages need @otel-exempt to satisfy the lint once the next batch of PRs touches them — i.e., the rule is over-broad for low-level helpers — narrow the scope to public-API surface only (functions exported from a package's top-level index.ts, not from internal modules) per the task brief. If the diff-based scoping itself proves wrong (e.g., novel/ files frequently re-touched in trivial ways generating churn), pivot to running on a fixed allowlist of packages declared in research.md."
+measurement: "node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main && pnpm exec vitest run scripts/check-rule-4-otel-coverage.test.mjs && pnpm typecheck && pnpm lint && npx -y @tasks-md/lint@latest TASKS.md"
+anchor: "OpenTelemetry specification (CNCF 2020+, semantic conventions for spans); Gregg, *Systems Performance*, 2014 (USE method — instrumentation is a structural property, not a runtime afterthought); Lampson, 'Hints for Computer System Design', *SOSP* 1983 (move the constraint to the cheapest possible point — CI is cheaper than runtime trace audit); rule #10 (deterministic enforcement — every constitutional rule needs a CI lint, not a Skill, in the load-bearing path)"
+replay_windows_days: [7, 30]

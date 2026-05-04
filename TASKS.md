@@ -68,20 +68,6 @@
   - **Anchor**: rule #10 (deterministic enforcement — the linters that enforce constitutional rules must themselves be type-checked, otherwise the rules they enforce are only as stable as the linter's runtime behaviour); Microsoft TypeScript handbook on `// @ts-check` (the canonical incremental-strictness pattern).
   - **Risk**: One script's strict-typing might surface a real bug. Mitigation: that's the point — if a bug is found, fix it in the same migration PR and note it in the commit. Don't paper over with `@ts-ignore`.
 
-- [ ] `ci-rule-4-otel-coverage` — CI lint: every exported public function in `novel/**` carries an `@otel` JSDoc tag
-  - **ID**: ci-rule-4-otel-coverage
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 4–6h
-  - **Hypothesis**: A TypeScript-AST-walking lint that requires every `export`-ed function/method in `novel/**/*.ts` (non-test) to carry a JSDoc `@otel <span-name>` annotation OR an `@otel-exempt <reason>` annotation enforces rule #4 ("everything measurable, everything visible") at PR time, without waiting for runtime traces to reveal gaps.
-  - **Details**: Build `scripts/check-rule-4-otel-coverage.mjs` using the TypeScript compiler API. Walks every `novel/**/*.ts` (non-test); for each exported function/method, requires the JSDoc to contain `@otel <span-name>` (matching the OTEL naming convention `<package>.<verb>`) OR `@otel-exempt <one-line-reason>`. Reports missing annotations with file:line. The implementation may not actually emit the span (that's a runtime concern), but the *contract* is checked.
-  - **Files**: `scripts/check-rule-4-otel-coverage.mjs`, `scripts/check-rule-4-otel-coverage.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic file with an exported function lacking both annotations → fails with file:line; same file with `@otel <span>` → passes; same file with `@otel-exempt pure-function` → passes.
-  - **Measurement**: `node scripts/check-rule-4-otel-coverage.mjs` exits 1 against the synthetic-missing fixture and 0 against the annotated fixture; `pnpm vitest run scripts/check-rule-4-otel-coverage.test.mjs` exits 0.
-  - **Pivot**: if more than 30 % of currently-exported functions need `@otel-exempt` (i.e., the rule is over-broad for low-level helpers), narrow the scope to public-API surface only — functions exported from a package's top-level `index.ts`, not from internal modules.
-  - **Acceptance**: CI job runs on every PR; rule #4's contract is mechanically enforced; the spec-monitor doesn't need to "look for missing OTEL".
-  - **Anchor**: rule #10; OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method — instrumentation as a structural property).
-  - **Risk**: TS-AST traversal is heavier than grep. Mitigation: cache by content-hash; run on diff-base only when feasible.
-
 - [ ] `ci-rule-6-let-it-crash` — CI lint: no nested `try/catch` deeper than 1 level; every catch re-throws or supervises explicitly
   - **ID**: ci-rule-6-let-it-crash
   - **Tags**: ci, conformance, rule-10
@@ -100,7 +86,7 @@
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-4-otel-coverage, ci-rule-6-let-it-crash
+  - **Blocked by**: ci-rule-6-let-it-crash
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
