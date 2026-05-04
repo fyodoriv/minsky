@@ -77,6 +77,12 @@ await obs.selfTest(); // → { status: "green", … }
 
 See [`distribution/openobserve/README.md`](../../../distribution/openobserve/README.md) for the install + verify runbook. The env-gated integration test at `test/openobserve.integration.test.ts` round-trips a span through OpenObserve when `OPENOBSERVE_INTEGRATION=1` is set; skipped in CI by default.
 
+### `emitTickSpan(event)` — per-event publish
+
+The `Observability` interface carries an `emitTickSpan(event: ObservabilityEvent): void` method (added by `daemon-otel-pipe`, 2026-05-04). `OtelObservability` implements it via `tracer.startSpan(name) → setAttribute → end` synchronously; the OTLP exporter ships asynchronously, so the call returns immediately. Fire-and-forget per rule #7 graceful-degrade — a missed span never blocks the caller's hot loop.
+
+This is the seam the `@minsky/tick-loop` daemon's CLI uses (`bin/tick-loop.mjs`) to forward every per-iteration `TickSpan` to OpenObserve when `MINSKY_OTEL_ENDPOINT` is set. Without the seam being callable through the `Observability` interface, the daemon would have had to import `@opentelemetry/*` directly — a rule-#2 violation. Closes the publisher half of the publish-then-read MAPE-K loop (Kephart & Chess 2003 — the *Monitor* surface must publish where the *Analyze* phase reads).
+
 ## Manual integration test against a real collector
 
 ```bash
