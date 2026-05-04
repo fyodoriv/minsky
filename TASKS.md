@@ -18,7 +18,6 @@
   - **Parent**: tick-loop-daemon-real-spawn
   - **Tags**: novel, runtime, supervision
   - **Estimate**: 4–6h
-  - **Blocked by**: tick-loop-daemon-spawn-strategy
   - **Hypothesis**: Replacing the v0 stub `BudgetGuardLike` with the real `BudgetGuard.decide()` from `@minsky/budget-guard` makes the daemon's behaviour under real budget pressure observable (Beyer SRE 2016 Ch. 3 — error-budget gating). Touches `novel/tick-loop/src/daemon.ts` (constructor + import) + `novel/tick-loop/package.json` (add `@minsky/budget-guard` dep). Tests assert the daemon still runs against a fixture token-monitor.
   - **Details**: 1) Add `@minsky/budget-guard` as a workspace dep in `novel/tick-loop/package.json`. 2) Update `novel/tick-loop/bin/tick-loop.mjs` to construct a real `BudgetGuard` from a `MaciekTokenMonitor` (or stub for `--dry-run`). 3) Add a daemon test that drives the real `BudgetGuard` against a fixture monitor (no SDK dep — the structural type stays).
   - **Files**: `novel/tick-loop/src/daemon.ts`, `novel/tick-loop/package.json`, `novel/tick-loop/bin/tick-loop.mjs`, `novel/tick-loop/src/daemon.test.ts`
