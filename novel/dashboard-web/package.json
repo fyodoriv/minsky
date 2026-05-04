@@ -16,6 +16,7 @@
   "files": ["dist/**/*.js", "dist/**/*.d.ts"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/start.js",
     "test": "vitest run --root .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

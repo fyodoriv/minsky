@@ -1,0 +1,136 @@
+# dashboard-web-lighthouse-ci — Lighthouse Mobile ≥0.9 CI gate
+# (sub-task 4/4 of `dashboard-web-v0`).
+#
+# Pattern: deterministic CI gate over a runtime performance budget — the
+# duration component of Wilkie's RED Method (2018) operationalised as a
+# pre-merge fast-feedback check (Forsgren-Humble-Kim 2018, *Accelerate* —
+# DORA fast feedback). Source: vision.md § "Pattern conformance index"
+# row 58.
+#
+# Why a separate workflow file (rather than another job in `ci.yml`):
+# Lighthouse needs Chromium and an authentic page load against a started
+# server, which is materially heavier than the rest of the deterministic
+# linters. Keeping it in its own file avoids polluting `ci.yml`'s gate
+# loop and lets the cache strategy diverge if the Chromium installation
+# proves slow. The TASKS.md entry called this out ("least disruptive").
+#
+# Why pinned `lighthouse@12.4.0`: ARCHITECTURE.md § "Versioning &
+# dependency evolution" requires every CI tool to be pinned to a specific
+# version (rule #7 — chaos engineering: trust no unverified dependency).
+# Pinning isolates this gate from upstream Lighthouse semver drift; the
+# quarterly review (`review-q3-2026`) reconsiders the pin.
+#
+# Risk mitigation (TASKS.md § Risk): Lighthouse Mobile scoring is
+# CPU-throttling-sensitive on shared GH-hosted runners. We pass the
+# Lighthouse Mobile-default `--throttling.cpuSlowdownMultiplier=4`
+# explicitly so the score is reproducible across runners. The pivot
+# (1 false-positive per 10 runs over 30 days → self-hosted runner OR
+# threshold drop to 0.85) is recorded in TASKS.md and the
+# EXPERIMENT.yaml shipped in this PR.
+#
+# Don't touch `ci.yml` from this workflow's territory. Linting,
+# typecheck, tests, and the rule-* gates live there; this workflow is
+# the dashboard-web-lighthouse-ci-only.
+
+name: lighthouse
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: lighthouse-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse-mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: build dashboard-web
+        run: pnpm --filter @minsky/dashboard-web build
+
+      - name: start dashboard-web
+        # The runner script exec's into node so the PID we background
+        # below is the actual server process (no shell-wrapper detour).
+        run: |
+          bash distribution/run-dashboard-web.sh > /tmp/dashboard-web.log 2>&1 &
+          echo "$!" > /tmp/dashboard-web.pid
+
+      - name: wait for port 8080
+        # Poll for HTTP 200 from `/` with a hard ceiling. If the server
+        # never comes up, fail loudly with the captured stdout/stderr
+        # (the alternative — a long curl timeout — buries the cause).
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            code=$(curl --max-time 1 -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "dashboard-web is up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "dashboard-web did not respond on :8080 within 30s" >&2
+          echo "----- /tmp/dashboard-web.log -----" >&2
+          cat /tmp/dashboard-web.log >&2 || true
+          exit 1
+
+      - name: run lighthouse mobile
+        # Pinned to 12.4.0 per ARCHITECTURE.md § "Versioning & dependency
+        # evolution". Mobile is the *default* form factor in Lighthouse
+        # 12.x — `--preset` only takes `perf` / `experimental` / `desktop`,
+        # so we make the form-factor explicit via `--form-factor=mobile`
+        # and pin the screen-emulation envelope. `--throttling.cpuSlowdownMultiplier=4`
+        # is the Lighthouse Mobile default — making it explicit pins the
+        # throttling envelope so a future Lighthouse default change does
+        # not silently move the gate. `--chrome-flags` are required on
+        # GH-hosted runners (no display, sandbox restrictions).
+        run: |
+          npx -y lighthouse@12.4.0 http://localhost:8080/ \
+            --form-factor=mobile \
+            --only-categories=performance \
+            --quiet \
+            --output=json \
+            --output-path=lighthouse.json \
+            --throttling.cpuSlowdownMultiplier=4 \
+            --chrome-flags="--headless --no-sandbox"
+
+      - name: assert performance score >= 0.9
+        # `jq -e` exits non-zero on `false` / `null`, so the comparison
+        # is the deterministic gate. The score is logged before the
+        # assertion so a failure run carries the actual value.
+        run: |
+          score=$(jq '.categories.performance.score' lighthouse.json)
+          echo "lighthouse mobile performance score: $score"
+          jq -e '.categories.performance.score >= 0.9' lighthouse.json
+
+      - name: upload lighthouse report
+        # Always upload — the JSON is most valuable when the assertion
+        # *fails* (operators inspect `.audits` to find the regressing
+        # metric). `if: always()` survives the prior step's non-zero exit.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: lighthouse.json
+
+      - name: stop dashboard-web
+        if: always()
+        run: |
+          if [ -f /tmp/dashboard-web.pid ]; then
+            kill "$(cat /tmp/dashboard-web.pid)" 2>/dev/null || true
+          fi
