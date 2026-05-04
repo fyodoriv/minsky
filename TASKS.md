@@ -82,20 +82,6 @@
   - **Anchor**: rule #10; OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method — instrumentation as a structural property).
   - **Risk**: TS-AST traversal is heavier than grep. Mitigation: cache by content-hash; run on diff-base only when feasible.
 
-- [ ] `ci-rule-5-glossary-discipline` — CI lint: every Minsky-coined term in `vision.md` resolves to a Glossary entry
-  - **ID**: ci-rule-5-glossary-discipline
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 3–4h
-  - **Hypothesis**: A CI lint that extracts every backticked identifier under sections marked as "coined" (or every PascalCase identifier in code-blocks within `vision.md`) and verifies each appears in `## Glossary — every term has a CS anchor` strengthens rule #5 from "the section header exists" (today's check) to "every term resolves" — without an LLM in the loop.
-  - **Details**: Today's `glossary-discipline` job in `.github/workflows/ci.yml` only checks the section header is present (line ~37 of ci.yml). Replace with a script that extracts coined terms (heuristic: backticked identifiers in `## The constitution` and the rest of `vision.md` outside the Glossary itself, minus a pre-declared allowlist of standard CS terms), then checks each appears in the Glossary's term list. Fails the job on any missing term. The current job header check stays as a fallback.
-  - **Files**: `scripts/check-rule-5-glossary-discipline.mjs`, `scripts/check-rule-5-glossary-discipline.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic vision.md introducing a backticked `FrobnicatorLoop` without a Glossary entry → fails with the term name; same file with the entry → passes; allowlisted standard terms (e.g., `OTEL`, `HTTP`) don't trigger the lint.
-  - **Measurement**: `node scripts/check-rule-5-glossary-discipline.mjs` exits 1 against the missing-entry fixture and 0 against the with-entry fixture; `pnpm vitest run scripts/check-rule-5-glossary-discipline.test.mjs` exits 0.
-  - **Pivot**: if the heuristic produces ≥3 false positives per PR, switch from "extract every backtick'd identifier" to "extract terms explicitly tagged with `<coined>…</coined>` HTML comments" — narrower scope but zero false positives.
-  - **Acceptance**: CI job replaces the section-header-only check; rule #5 is mechanically enforced; ratchet-rule applied (Skill-based glossary checks, if any, are removed in the same PR).
-  - **Anchor**: rule #10; rule #5 (theoretical grounding); Gabriel, *Patterns of Software*, 1996 (named patterns are deterministic by construction).
-  - **Risk**: Allowlist drift — every new standard term needs an explicit allowlist update. Mitigation: the allowlist is a single committed file; updating it is part of any PR that legitimately introduces a new standard term.
-
 - [ ] `ci-rule-6-let-it-crash` — CI lint: no nested `try/catch` deeper than 1 level; every catch re-throws or supervises explicitly
   - **ID**: ci-rule-6-let-it-crash
   - **Tags**: ci, conformance, rule-10
@@ -114,7 +100,7 @@
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-5-glossary-discipline, ci-rule-6-let-it-crash
+  - **Blocked by**: ci-rule-3-doc-first, ci-rule-4-otel-coverage, ci-rule-6-let-it-crash
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
