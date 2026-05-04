@@ -10,6 +10,7 @@
     { "path": "./novel/experiment-record" },
     { "path": "./novel/handoff-spec" },
     { "path": "./novel/mape-k-loop" },
-    { "path": "./scripts" }
+    { "path": "./scripts" },
+    { "path": "./user-stories" }
   ]
 }

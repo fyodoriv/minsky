@@ -3,12 +3,14 @@
 # `@minsky/mape-k-loop`
 
 MAPE-K reference architecture (Kephart & Chess, "The Vision of Autonomic
-Computing", *IEEE Computer* 2003) for Minsky's autonomic manager. Sub-tasks
-2 + 3 of 4 of the [`mape-k-loop-v0`](../../TASKS.md) decomposition — ships
-the **Monitor**, **Analyze**, **Plan**, and **Execute** phases as pure
-decision functions, plus the two guards (sustained-gain per Kohavi-Tang-Xu
-2020, oscillation per Ries 2011); the Knowledge phase + integration
-assembly (sub-task 4) follows.
+Computing", *IEEE Computer* 2003) for Minsky's autonomic manager. v0 ships
+all four MAPE phases (**Monitor**, **Analyze**, **Plan**, **Execute**) as
+pure decision functions, the Knowledge phase as an append-only log writer
+over `constraints.md` (Helland 2007 — immutable log), the two guards
+(sustained-gain per Kohavi-Tang-Xu 2020, oscillation per Ries 2011), and a
+`tick(...)` assembly that runs one full cycle. The integration test under
+[`user-stories/003-mape-k-improves-prompts.test.ts`](../../user-stories/003-mape-k-improves-prompts.test.ts)
+exercises the full loop end-to-end against a synthetic fixture.
 
 ## Pattern conformance
 
@@ -19,15 +21,16 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
   already-parsed inputs (CI runs, advisories, experiment records) and
   emits a `HealthSnapshot`. **Conformance: full** for the parsed-input
   contract; the I/O boundary (the CLI wrapper that runs `gh run list`,
-  reads `spec-advisories/*.md`, tails `experiment-store/*.jsonl`) ships
-  in sub-task 4.
+  reads `spec-advisories/*.md`, tails `experiment-store/*.jsonl`) is
+  the user-supplied wrapper around `tick(...)`.
 - **`analyze(...)`** — MAPE-K Analyze phase + Theory of Constraints
   (Goldratt, *The Goal*, 1984): top constraint = the rule whose
   `violationCount × costEstimate(ruleId)` is highest, tie broken
   alphabetically. **Conformance: full.**
 - **`costEstimate(...)`** — per-rule weight schedule. **Conformance: partial**
   — v0 default is the identity (every rule = 1); the configurable
-  schedule sourced from `vision.md` arrives in sub-task 3 (Plan).
+  schedule sourced from `vision.md` arrives in a follow-up tracked as
+  `mape-k-cost-schedule-from-vision`.
 - **`HealthSnapshot` aggregate-counter shape** — USE method (Gregg,
   *Systems Performance*, 2014) applied to the constraint-detection
   substrate. **Conformance: partial** — counts only; the saturation +
@@ -36,8 +39,7 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
   pure decision function that proposes ≤3 prompt {@link Variant}s
   per top constraint from a fixed v0 catalogue. **Conformance: full**
   for the variant-proposal contract; the catalogue is a v0 fixed
-  triple (`enumerate-failure-modes`, `direct-answer`, `tighten-scope`)
-  until sub-task 4 sources mutation templates from `vision.md`.
+  triple (`enumerate-failure-modes`, `direct-answer`, `tighten-scope`).
 - **`execute(...)`** — MAPE-K Execute phase per Kephart-Chess 2003;
   hands variants to a `PromptOptimizer` (sub-task 1's adapter), picks
   the winner, then applies the two guards before deciding `rollout`
@@ -47,6 +49,16 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 - **`oscillation(...)`** — oscillation guard per Ries 2011 (build–
   measure–learn — don't re-pivot to a previously-rejected variant);
   default lookback 10 iterations. **Conformance: full**.
+- **`knowledge(...)`** — MAPE-K Knowledge phase per Kephart-Chess 2003
+  over an append-only log (Helland, "Life beyond Distributed
+  Transactions", *CIDR* 2007). Emits a markdown block to append to
+  `constraints.md` and (when calibration drift exceeds threshold) a
+  proposed amendment to `research.md` § "DSPy fit" per Munafò et al.
+  2017 pre-registration manifesto. **Conformance: full**.
+- **`tick(...)`** — Assembly of M → A → P → E → K into one tick of the
+  loop. Pure: every input is data, every output is data; the optional
+  `emit` seam carries OTEL events when wired to `@minsky/observability`.
+  **Conformance: full**.
 
 ## Failure modes & chaos verification
 
@@ -56,17 +68,22 @@ Per constitutional rule #7 (vision.md § 7).
   `monitor(input)` emits a `HealthSnapshot` whose `violations` aggregate
   is sorted by `ruleId` and whose `warnings` array is empty;
   `analyze({ snapshot })` emits the rule with the highest
-  `violationCount × costEstimate` product, tie broken alphabetically.
-- **Blast radius**: a single function call. Both `monitor` and `analyze`
-  are pure — no shared state across calls, no I/O.
+  `violationCount × costEstimate` product, tie broken alphabetically;
+  `tick(...)` runs to completion and writes a non-empty
+  `constraintsAppend` regardless of whether a constraint was detected.
+- **Blast radius**: a single function call. `monitor`, `analyze`, `plan`,
+  `knowledge` are pure — no shared state across calls, no I/O. `execute`
+  is pure relative to its `optimizer` argument; `tick` composes them.
 - **Operator escape hatch**: corrupt input rows are dropped with a
   `warnings` entry instead of throwing — the caller decides whether to
-  surface the warning, retry, or continue.
+  surface the warning, retry, or continue. Every tick writes a
+  `constraintsAppend` entry (even no-ops) so the audit trail records the
+  loop's full history per Helland 2007.
 
 | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|---|
 | 1 | Upstream-malformed CI JSON (missing `conclusion` field; `gh run list` schema drift) | upstream-malformed | `graceful-degrade` — the row is dropped with a `monitor: skipping malformed ci-run …` warning; valid rows still aggregate | covered by `monitor.test.ts` "gracefully skips corrupt rows with a warning instead of crashing" assertion |
-| 2 | Missing `experiment-store/` directory at I/O boundary | missing-input (resource) | `graceful-degrade` — Monitor consumes `experimentRecords: []`; the snapshot has `experiments: { validated: 0, regressed: 0, inconclusive: 0 }` and zero violations | (deferred — covered when `mape-k-knowledge-and-integration` ships the I/O wrapper test) |
+| 2 | Missing `experiment-store/` directory at I/O boundary | missing-input (resource) | `graceful-degrade` — Monitor consumes `experimentRecords: []`; the snapshot has `experiments: { validated: 0, regressed: 0, inconclusive: 0 }` and zero violations | covered by `novel/mape-k-loop/src/index.test.ts` "degrades gracefully when there is no constraint" assertion (the empty-inputs path passes through `tick(...)` without throwing) |
 | 3 | Constraint-evidence ties (two rules with equal `violationCount × cost`) | edge case (analyze) | `graceful-degrade` — alphabetical tie-break by `ruleId` produces a deterministic `topConstraint` | covered by `analyze.test.ts` "breaks ties alphabetically by ruleId" assertion |
 | 4 | Misconfigured cost weight (NaN / Infinity / 0 / negative) | upstream-malformed (cost-schedule) | `graceful-degrade` — `costEstimate` falls back to `DEFAULT_RULE_COST = 1` so a real constraint cannot be silently zeroed out | covered by `analyze.test.ts` "falls back to DEFAULT_RULE_COST for non-finite or non-positive weights" assertion |
 | 5 | Empty snapshot fed to Analyze (no violations recorded yet) | edge case (cold start) | `graceful-degrade` — `topConstraint` / `evidence` / `severity` all `null`; downstream Plan must check before consuming | covered by `analyze.test.ts` "returns null constraint for an empty snapshot" assertion |
@@ -75,6 +92,8 @@ Per constitutional rule #7 (vision.md § 7).
 | 8 | Empty rollout history fed to sustained-gain (cold start; no prior iterations to count from) | edge case (cold start) | `graceful-degrade` — `sustainedGain` returns `{ ok: false, reason: 'no rollout history within last 7d' }`; Execute downgrades the decision to `abstain` (no division by zero, no crash) | covered by `novel/mape-k-loop/src/sustained-gain.test.ts` "returns false when there is no history within the window (cold start)" assertion |
 | 9 | Optimizer rejects all variants by scoring every one to 0 (synthetic eval-set degeneracy) | upstream-malformed (adapter contract) | `graceful-degrade` — `execute` still resolves a winner via the deterministic tie-break in `pickWinner` (Variant order); the sustained-gain guard then refuses unless prior history exists, so the loop abstains rather than ships a zero-score rollout | covered by `novel/mape-k-loop/src/execute.test.ts` "abstains when sustained-gain fails (insufficient history)" assertion (zero-score path triggers the same abstain branch) |
 | 10 | Empty variants list fed to Execute (Plan exhausted the catalogue) | edge case (variant-pool exhaustion) | `graceful-degrade` — `execute` returns `{ winner: null, decision: 'abstain', reason: 'execute: variants is empty …' }` so the loop driver logs a no-op and continues | covered by `novel/mape-k-loop/src/execute.test.ts` "returns null winner gracefully when variants is empty" assertion |
+| 11 | Verdict log entries with non-finite `predicted` or `value` fed to Knowledge (upstream-malformed calibration data) | upstream-malformed | `graceful-degrade` — `knowledge` skips the bad rows; calibration MAE is computed only over the well-formed remainder; the per-tick `constraintsAppend` is still written | covered by `novel/mape-k-loop/src/knowledge.test.ts` "ignores entries with non-finite predicted or value (rule #7)" assertion |
+| 12 | Calibration drift exceeds the configured threshold (predicted Δ vs observed Δ MAE >50 % default) | observable signal (rule-#9 quarterly layer) | `circuit-break-and-notify` — `knowledge` emits a `researchMdAmendmentProposal` text the operator pastes into a preparation PR; the live log keeps the audit trail | covered by `novel/mape-k-loop/src/knowledge.test.ts` "emits an amendment proposal text when calibration drift exceeds threshold" assertion + `user-stories/003-mape-k-improves-prompts.test.ts` "fires the calibration-drift amendment only when drift exceeds threshold" assertion |
 
 ## Hypothesis-driven development (rule #9)
 
@@ -129,38 +148,83 @@ Per constitutional rule #7 (vision.md § 7).
   (build-measure-learn — the oscillation guard is the "don't re-pivot
   to a previously-rejected variant" guardrail).
 
+### Sub-task 4 (Knowledge phase + assembly + integration test)
+
+- **Hypothesis**: a pure `knowledge(...)` function that emits a markdown
+  append for `constraints.md` (Helland 2007 immutable log) plus a
+  conditional `research.md` amendment proposal when calibration drift
+  exceeds 50 % MAE (Munafò et al. 2017 pre-registration manifesto)
+  closes the MAPE-K loop with the rule-#9 quarterly automation layer.
+  The `tick(...)` assembly runs M → A → P → E → K against a synthetic
+  fixture in <60 s of compressed-simulation time, validating that the
+  four phases compose correctly without an orchestration runtime.
+- **Success threshold**: `pnpm typecheck && pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts`
+  exits 0; the parent `mape-k-loop-v0` tracker block is removed from
+  `TASKS.md` in this same PR
+  (`grep -c '^  - \*\*ID\*\*: mape-k-loop-v0$' TASKS.md` returns 0).
+- **Pivot threshold**: if `constraints.md` grows past 200 entries
+  before the first calibration-drift amendment fires, the drift
+  threshold is too tight; raise it and document in `research.md` §
+  "DSPy fit". If the integration test cannot reach a green run within
+  60 s of compressed-simulation time on a GH-hosted runner, pivot to a
+  self-hosted runner per `supervisor-integration-self-hosted-runner`'s
+  precedent.
+- **Measurement**: `pnpm typecheck && pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts`.
+- **Literature anchor**: Helland, "Life beyond Distributed Transactions",
+  *CIDR* 2007 (immutable log as the Knowledge substrate); Kephart & Chess,
+  "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003
+  (Knowledge phase of MAPE-K); Munafò et al., "A Manifesto for
+  Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (rule-#9 calibration as a pre-registered audit).
+
 ## Usage
 
 ```ts
-import { monitor, analyze } from "@minsky/mape-k-loop";
+import { tick } from "@minsky/mape-k-loop";
+import { StubPromptOptimizer } from "@minsky/prompt-optimizer";
 
 // Inputs: CLI wrapper has already parsed `gh run list --json …`,
 // `spec-advisories/*.md`, and `experiment-store/*.jsonl` into the shapes
 // declared in `monitor.ts`.
-const snapshot = monitor({ ciRuns, advisories, experimentRecords });
-const analysis = analyze({ snapshot });
+const result = await tick({
+  monitorInput: { ciRuns, advisories, experimentRecords },
+  verdictLog,
+  history,
+  evalSet,
+  optimizer: new StubPromptOptimizer(),
+  metric: async (output) => (output.includes("good") ? 1.0 : 0.5),
+  basePrompt: "you are a helpful assistant",
+  now: new Date(),
+});
 
-if (analysis.topConstraint !== null) {
-  console.log(
-    `Top constraint: ${analysis.topConstraint.ruleId} ` +
-      `(severity=${analysis.severity}, ` +
-      `violations=${analysis.evidence?.violationCount}, ` +
-      `cost=${analysis.evidence?.costEstimate})`,
-  );
+if (result.rolloutDecision?.decision === "rollout") {
+  console.log(`Rolled out ${result.rolloutDecision.winner?.id}`);
+}
+
+// Append the audit trail (CLI wrapper does the I/O):
+await appendFile("novel/mape-k-loop/constraints.md", result.knowledgeWrites.constraintsAppend);
+
+// Optional: open a preparation PR draft if the calibration drifted.
+if (result.knowledgeWrites.researchMdAmendmentProposal !== null) {
+  await draftPreparationPr(result.knowledgeWrites.researchMdAmendmentProposal);
 }
 ```
 
-The `costs` argument is the seam where sub-task 3 (Plan) plugs in a
-per-rule severity-weighted schedule sourced from `vision.md`:
+The `costs` argument is the seam where a per-rule severity-weighted
+schedule sourced from `vision.md` plugs in:
 
 ```ts
-const analysis = analyze({
-  snapshot,
+const result = await tick({
+  // …
   costs: { "rule-9": 100, "rule-7": 50 }, // rule-9 misses are >1 OOM more expensive than typos
 });
 ```
 
 ## Follow-up tasks
 
-- **`mape-k-knowledge-and-integration`** (sub-task 4) — Knowledge phase,
-  CLI wrapper (the I/O boundary), and the user-story-003 integration test.
+- **`mape-k-cost-schedule-from-vision`** — wire the per-rule cost weight
+  schedule from `vision.md` into the `costs` argument of `analyze` so the
+  Goldratt ranking reflects the human-supplied severity ordering.
+- **`mape-k-constraints-md-size-cap`** — add a CI lint that fires when
+  `novel/mape-k-loop/constraints.md` grows past 200 entries without an
+  archive split.

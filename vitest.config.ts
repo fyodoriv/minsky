@@ -17,11 +17,12 @@ export default defineConfig({
       "@minsky/budget-guard": r("./novel/budget-guard/src/index.ts"),
       "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),
       "@minsky/handoff-spec": r("./novel/handoff-spec/src/index.ts"),
+      "@minsky/mape-k-loop": r("./novel/mape-k-loop/src/index.ts"),
     },
   },
   test: {
     globals: false,
-    include: ["novel/**/src/**/*.test.ts", "scripts/**/*.test.mjs"],
+    include: ["novel/**/src/**/*.test.ts", "scripts/**/*.test.mjs", "user-stories/**/*.test.ts"],
     coverage: {
       provider: "v8",
       all: true,
