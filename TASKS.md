@@ -13,26 +13,10 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `tick-loop-daemon-real-spawn-flip` — drop --dry-run, gate via env var; integration test against real claude (sub-task 3/3 of real-spawn)
-  - **ID**: tick-loop-daemon-real-spawn-flip
-  - **Parent**: tick-loop-daemon-real-spawn
-  - **Tags**: novel, runtime, supervision, blocker
-  - **Estimate**: 4h
-  - **Hypothesis**: Once the SpawnStrategy interface (sub-task 1) and the real BudgetGuard (sub-task 2) have landed, flipping the default Strategy from `DryRunSpawnStrategy` to `ProcessSpawnStrategy` is a one-line constructor swap. The flip lands together with: dropping the hard-coded `--dry-run` arg from `bin/tick-loop.mjs` + `distribution/systemd/run-tick-loop.sh`; gating dry-run via `MINSKY_TICK_DRY_RUN=1` env var instead; one integration test that spawns a real `claude --resume` against a synthetic task (gated on `claude` presence; skipped in CI). Closes user-story-001-integration-test-real's blocker.
-  - **Details**: 1) `bin/tick-loop.mjs` — read `MINSKY_TICK_DRY_RUN` env; default `false`; pick `DryRunSpawnStrategy` vs `ProcessSpawnStrategy` accordingly. 2) `distribution/systemd/run-tick-loop.sh` — drop `--dry-run` flag; the env-var path is the new control surface. 3) `novel/tick-loop/src/daemon.test.ts` — one integration test gated on `which claude` (skip in CI). 4) Vision row 254 collapses to `partial-real-spawn` (the dry-run guard is now an opt-in, not the default).
-  - **Files**: `novel/tick-loop/bin/tick-loop.mjs`, `distribution/systemd/run-tick-loop.sh`, `novel/tick-loop/src/daemon.test.ts`, `vision.md`, `EXPERIMENT.yaml`
-  - **Verification**: `bash distribution/systemd/run-tick-loop.sh --max-iterations=1` (with `MINSKY_TICK_DRY_RUN=1` for CI safety) exits 0; integration test green on self-hosted runner; existing tests still pass.
-  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 19 and .numFailedTests == 0'` exits 0; `gh run list --workflow ci.yml --limit 30 --json conclusion --jq '[.[] | select(.conclusion=="success")] | length' >= 28` (≥93 % green over 30 runs after merge).
-  - **Pivot**: if `claude --resume` deadlocks on stdin without a TTY, pivot to a temp-file-based brief handoff (pre-registered in parent task's Pivot field).
-  - **Acceptance**: daemon runs against real `claude` end-to-end on self-hosted runner; story-001's MTTR <5 min claim becomes measurable; vision row 254 raises to `partial-real-spawn`.
-  - **Anchor**: rule #2; Armstrong 2007 (let-it-crash — supervisor `Restart=on-failure` is the respawn policy); Kephart & Chess 2003 (MAPE-K — partial-real-spawn after this flip); Beyer SRE 2016 Ch. 3.
-  - **Risk**: highest of the three; mitigated by the prior two sub-tasks shipping the interface + real budget independently. The integration test is gated on `claude` presence so CI is unaffected.
-
 - [ ] `user-story-001-integration-test-real` — actual integration test against the real daemon (not mock)
   - **ID**: user-story-001-integration-test-real
   - **Tags**: testing, validation, runtime
   - **Estimate**: 1d
-  - **Blocked by**: tick-loop-daemon-real-spawn-flip
   - **Hypothesis**: A `user-stories/001-loop-runs-overnight.test.ts` that drives the real daemon (via `bash distribution/systemd/run-tick-loop.sh --max-iterations=12 --tick-interval-s=5` — 1-min compressed sim of 12 ticks) closes ≥4 P2 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL span per phase, and triggers exactly 1 morning push, satisfying story 001's acceptance criteria within CI runtime <10 min.
   - **Details**: Replaces the coverage-manifest test (PR #82) with a real driver. Fixture: synthetic TASKS.md with 4 P2 tasks designed to complete deterministically. Mock Anthropic client (reuse `@minsky/tick-loop`'s `MockAnthropicClient`). Real OpenObserve (started + torn down in test setup). StubNotifier asserts 1 push call.
   - **Files**: `user-stories/001-loop-runs-overnight.test.ts`, `user-stories/001-loop-runs-overnight.md` (mark Phase: Implemented)

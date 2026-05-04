@@ -1,45 +1,44 @@
-id: tick-loop-daemon-budget-guard-real-2026-05-04
+id: tick-loop-daemon-real-spawn-flip-2026-05-04
 hypothesis: |
-  Replacing the v0 stub `BudgetGuardLike` with the real `BudgetGuard` from
-  `@minsky/budget-guard` (wrapped behind the daemon's structural
-  `BudgetGuardLike.decide()` shape via a thin facade —
-  `novel/tick-loop/src/budget-guard-facade.ts`) makes the daemon's
-  behaviour under real budget pressure observable (Beyer SRE 2016 Ch. 3 —
-  error-budget gating is now the production gate, not a stub). Sub-task
-  2/3 of `tick-loop-daemon-real-spawn`'s decomposition: wires the real
-  `BudgetGuard` into both the CLI (`bin/tick-loop.mjs` — `MaciekTokenMonitor`
-  in production, `StubTokenMonitor` for `--dry-run`) and a new daemon test
-  that drives the real `BudgetGuard.tick()` against a fixture
-  `StubTokenMonitor` and asserts the circuit-break (≥85 %) flips the
-  iteration to `budget-paused`, while a fresh window completes normally.
-  Pivot was pre-registered: the real `BudgetGuard`'s public surface is
-  `tick(): Promise<BudgetDecision>`, not `decide()`, so the facade is the
-  pre-registered Pivot path (rule #9, Munafò et al. 2017).
+  Once the `SpawnStrategy` interface (sub-task 1) and the real `BudgetGuard`
+  (sub-task 2) have landed, flipping the daemon's default Strategy from
+  `DryRunSpawnStrategy` to `ProcessSpawnStrategy` is a one-line constructor
+  swap. The flip ships together with: dropping the hard-coded `--dry-run`
+  argv flag from `bin/tick-loop.mjs` + `distribution/systemd/run-tick-loop.sh`;
+  gating dry-run via the `MINSKY_TICK_DRY_RUN=1` env-var control surface
+  instead; one integration test that drives `runDaemon` against a real
+  subprocess via `ProcessSpawnStrategy` (gated on `which claude`; skipped
+  on hosts where `claude` isn't installed). The supervisor unit files
+  (`distribution/systemd/minsky-tick-loop.service`,
+  `distribution/launchd/com.minsky.tick-loop.plist`) ship with
+  `MINSKY_TICK_DRY_RUN=1` set during the safe rollout window — an operator
+  must drop that line to flip to full real spawn (the production default).
+  Closes `tick-loop-daemon-real-spawn` and unblocks
+  `user-story-001-integration-test-real`.
 success: |
-  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 18 and .numFailedTests == 0'` exits 0
-    (today: 31 tests pass — 14 daemon + 11 index + 6 spawn-strategy).
+  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 19 and .numFailedTests == 0'` exits 0
+    (today: 33 tests pass — 16 daemon (incl. 2 new + 1 gated integration) + 11 index + 6 spawn-strategy).
   - `pnpm typecheck` exits 0.
-  - All pre-existing daemon dry-run tests (13) + spawn-strategy tests (6) +
-    `tick-loop` index tests (11) pass UNCHANGED — the facade is observably
-    equivalent to the prior stub on the happy path.
-  - `bin/tick-loop.mjs` constructs a real `BudgetGuard` (production:
-    `MaciekTokenMonitor`; `--dry-run`: `StubTokenMonitor`) and the daemon's
-    `BudgetGuardLike` consumer is unchanged structurally (rule #2).
+  - All pre-existing daemon dry-run tests + spawn-strategy tests +
+    `tick-loop` index tests pass UNCHANGED — the dry-run path is now
+    opt-in via env, the env-default-false test was rewritten to inject
+    `DryRunSpawnStrategy` explicitly, and the v0 production guardrail
+    (`dryRun: false` without a Strategy throws) is preserved.
+  - `bin/tick-loop.mjs` reads `MINSKY_TICK_DRY_RUN`; `--dry-run` argv flag
+    is retired; `ProcessSpawnStrategy` is the production default.
 pivot: |
-  Pre-registered in the task block: if the real `BudgetGuard` constructor
-  signature drifts mid-flight, pivot to a thin facade in
-  `novel/tick-loop/src/budget-guard-facade.ts` wrapping the real
-  `BudgetGuard.tick()` behind the existing `BudgetGuardLike.decide()`
-  shape. EXECUTED: the real `BudgetGuard` exposes `tick()` (the watchdog
-  idiom — Beyer SRE 2016 Ch. 3) rather than `decide()`, so the facade
-  ships. The pure `decide(snapshot, thresholds)` function from
-  `@minsky/budget-guard` is invoked transitively inside `BudgetGuard.tick()`
-  — the daemon never imports it directly, keeping rule #2's seam intact.
+  Pre-registered in the parent task block: if `claude --resume` deadlocks
+  on stdin without a TTY (the brief is written to stdin and the child is
+  expected to consume it), pivot to a temp-file-based brief handoff
+  (`spawn('claude', ['--resume', '--brief-file', tmpPath])` with the
+  brief written to a `mktemp` path). The Strategy interface is the
+  bounded change surface; the daemon and CLI never touch the brief
+  shape directly.
 measurement: |
   pnpm install --no-frozen-lockfile \
     && pnpm typecheck \
     && pnpm vitest run novel/tick-loop --reporter=json \
-       | jq -e '.numPassedTests >= 18 and .numFailedTests == 0' \
+       | jq -e '.numPassedTests >= 19 and .numFailedTests == 0' \
     && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
     && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
     && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
@@ -54,22 +53,21 @@ measurement: |
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability
-  Engineering*, O'Reilly, 2016, Ch. 3 (error-budget gating with a real
-  monitor — burn-rate alerting against a token budget is the canonical
-  application of SRE error-budget thresholding to a non-availability
-  signal); Gamma, Helm, Johnson, Vlissides, *Design Patterns*,
-  Addison-Wesley, 1994 (Adapter — the facade adapts the real
-  `BudgetGuard.tick()` surface to the daemon's `BudgetGuardLike.decide()`
-  surface without coupling either side to the other's evolution); Munafò
-  et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour*
-  1, 0021, 2017 (rule-#9 pre-registration — the Pivot to a facade was
-  declared in the task block *before* the real `BudgetGuard`'s public
-  surface was inspected, so the swap is not post-hoc); rule #2 (vision.md
-  § 2 — every dep behind interface; the daemon depends on `BudgetGuardLike`,
-  the facade is the one-line bridge to `@minsky/budget-guard`); Armstrong,
-  J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash AT the
-  right boundary — the facade does not catch; if `monitor.snapshot()`
-  rejects, the rejection bubbles to the daemon's per-iteration boundary
-  and onto the supervisor's `Restart=on-failure` policy).
+  rule #2 (vision.md § 2 — every dep behind interface; the `SpawnStrategy`
+  is the seam, the flip swaps one implementation for another with no
+  consumer-side change); Armstrong, J., *Programming Erlang*, Pragmatic
+  Bookshelf, 2007 (let-it-crash AT the right boundary — `ProcessSpawnStrategy`
+  surfaces non-zero exit codes in the result; the daemon's supervisor
+  `Restart=on-failure` is the respawn policy, not the Strategy); Kephart,
+  J. O., Chess, D. M., "The Vision of Autonomic Computing", *IEEE Computer*
+  36 (1), 2003 (MAPE-K — after this flip the daemon's Execute phase runs
+  against a real subprocess, raising the row-67 conformance from `partial`
+  to `partial-real-spawn`); Beyer, B., Jones, C., Petoff, J., Murphy, N. R.
+  (eds.), *Site Reliability Engineering*, O'Reilly, 2016, Ch. 3 (the
+  burn-rate budget gate stays in place across the flip; the env-var
+  control surface is the operator escape hatch — Ch. 17); Munafò et al.,
+  "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
+  0021, 2017 (rule-#9 pre-registration — the env-var rollout default
+  `MINSKY_TICK_DRY_RUN=1` was committed in the parent task block *before*
+  implementation, so the safety net is mechanical, not policy).
 replay_windows_days: [7, 30, 90]

@@ -21,6 +21,11 @@ Requires=minsky-budget-guard.service
 Type=simple
 WorkingDirectory=${MINSKY_HOME}
 Environment=MINSKY_HOME=${MINSKY_HOME}
+# Safe-rollout default per `tick-loop-daemon-real-spawn-flip` — keeps the
+# first prod run on the synthetic `DryRunSpawnStrategy` (no real `claude`
+# subprocess fork). An operator MUST drop this line to flip to full real
+# spawn (production default = unset = `ProcessSpawnStrategy`).
+Environment=MINSKY_TICK_DRY_RUN=1
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
 # Erlang-style "transient" restart: only on non-zero exit (let-it-crash

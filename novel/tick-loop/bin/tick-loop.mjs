@@ -5,22 +5,26 @@
  * dependencies and invokes `runDaemon` from the compiled
  * `@minsky/tick-loop/dist/daemon.js`.
  *
- * v0 ships ONLY the dry-run path (per the brief — `tick-loop-daemon-v0`):
- *   $ node bin/tick-loop.mjs --dry-run --max-iterations=4
+ * Sub-task 3/3 of `tick-loop-daemon-real-spawn` (`tick-loop-daemon-real-spawn-flip`):
+ * the production default is now `ProcessSpawnStrategy` — a real
+ * `node:child_process.spawn('claude', ['--resume'])` per iteration. Dry-run
+ * is opt-in via the `MINSKY_TICK_DRY_RUN=1` env var (the new control
+ * surface; the old `--dry-run` argv flag has been retired).
  *
- * Real subprocess spawning is deferred to `tick-loop-daemon-real-spawn`;
- * passing `--dry-run=false` (or omitting `--dry-run` and not setting the
- * env-var override) makes the daemon throw before any I/O.
+ *   $ node bin/tick-loop.mjs --max-iterations=4         # real spawn
+ *   $ MINSKY_TICK_DRY_RUN=1 node bin/tick-loop.mjs ...   # safe dry-run
  *
  * Args:
- *   --dry-run                          (required in v0; v0 throws otherwise)
  *   --max-iterations=N                 (default: Infinity)
  *   --tick-interval-ms=MS              (default: 300_000 — 5 min)
  *   --tasks-md=PATH                    (default: ${MINSKY_HOME}/TASKS.md)
  *   --paused-sentinel=PATH             (default: ${MINSKY_HOME}/state/PAUSED)
  *
+ * Env:
+ *   MINSKY_TICK_DRY_RUN=1|true         opt-in dry-run (DryRunSpawnStrategy)
+ *
  * Pattern: thin runner / I/O boundary (Martin, *Clean Architecture*, 2017).
- * The CLI does the file-reads and constructs the budget-guard stub;
+ * The CLI does the file-reads and constructs the budget-guard + Strategy;
  * `runDaemon` is the pure orchestrator above.
  */
 
@@ -33,7 +37,13 @@ import { fileURLToPath } from "node:url";
 import { BudgetGuard } from "@minsky/budget-guard";
 import { MaciekTokenMonitor, StubTokenMonitor } from "@minsky/token-monitor";
 
-import { TestFakeMockAnthropic, fromRealBudgetGuard, runDaemon } from "../dist/index.js";
+import {
+  DryRunSpawnStrategy,
+  ProcessSpawnStrategy,
+  TestFakeMockAnthropic,
+  fromRealBudgetGuard,
+  runDaemon,
+} from "../dist/index.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PKG_ROOT = resolve(HERE, "..");
@@ -49,9 +59,21 @@ function valueAfter(arg, prefix) {
 }
 
 /**
+ * Decide dry-run from `MINSKY_TICK_DRY_RUN` env. `1` or `true` (case-insensitive)
+ * → dry-run. Anything else (unset, `0`, `false`, …) → real spawn.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {boolean}
+ */
+function readDryRunEnv(env) {
+  const raw = env.MINSKY_TICK_DRY_RUN;
+  if (raw === undefined) return false;
+  const normalised = raw.trim().toLowerCase();
+  return normalised === "1" || normalised === "true";
+}
+
+/**
  * @param {readonly string[]} argv
  * @returns {{
- *   dryRun: boolean,
  *   maxIterations: number,
  *   tickIntervalMs: number,
  *   tasksMdPath: string,
@@ -61,7 +83,6 @@ function valueAfter(arg, prefix) {
 function parseArgs(argv) {
   const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
   const out = {
-    dryRun: false,
     maxIterations: Number.POSITIVE_INFINITY,
     tickIntervalMs: 300_000, // 5 min
     tasksMdPath: resolve(minskyHome, "TASKS.md"),
@@ -76,7 +97,6 @@ function parseArgs(argv) {
 /**
  * @param {string} arg
  * @param {{
- *   dryRun: boolean,
  *   maxIterations: number,
  *   tickIntervalMs: number,
  *   tasksMdPath: string,
@@ -84,10 +104,6 @@ function parseArgs(argv) {
  * }} out
  */
 function applyArg(arg, out) {
-  if (arg === "--dry-run") {
-    out.dryRun = true;
-    return;
-  }
   const max = valueAfter(arg, "--max-iterations=");
   if (max !== undefined) out.maxIterations = Number(max);
   const interval = valueAfter(arg, "--tick-interval-ms=");
@@ -99,14 +115,14 @@ function applyArg(arg, out) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+const dryRun = readDryRunEnv(process.env);
 
-// Sub-task 2/3 of `tick-loop-daemon-real-spawn`: wire the real
-// `BudgetGuard` from `@minsky/budget-guard`. For `--dry-run` we still use a
-// `StubTokenMonitor` (a fresh, full 5h window — no I/O against
+// Sub-task 2/3: wire the real `BudgetGuard` from `@minsky/budget-guard`.
+// Dry-run uses a `StubTokenMonitor` (a fresh, full 5h window — no I/O against
 // `~/.claude/projects`) so the local smoke stays hermetic; production
-// (non-dry-run) uses `MaciekTokenMonitor` against the user's Claude Code
+// (real spawn) uses `MaciekTokenMonitor` against the user's Claude Code
 // config dir, the same data source Maciek's `claude-monitor` reads.
-const tokenMonitor = args.dryRun
+const tokenMonitor = dryRun
   ? new StubTokenMonitor()
   : new MaciekTokenMonitor({ configDir: resolve(homedir(), ".claude") });
 const realGuard = new BudgetGuard(tokenMonitor, () => {
@@ -114,11 +130,24 @@ const realGuard = new BudgetGuard(tokenMonitor, () => {
      the daemon only branches on `decide()`'s return value. */
 });
 
+// Sub-task 3/3: production default is `ProcessSpawnStrategy` (real
+// `claude --resume` subprocess); `MINSKY_TICK_DRY_RUN=1` opts back to
+// `DryRunSpawnStrategy`. The Strategy is the spawn-step seam (rule #2,
+// Gamma 1994) so the flip is a one-line constructor swap.
+const spawnStrategy = dryRun
+  ? new DryRunSpawnStrategy()
+  : new ProcessSpawnStrategy({ command: "claude", args: ["--resume"] });
+
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
   maxIterations: args.maxIterations,
-  dryRun: args.dryRun,
+  // `dryRun` here is the legacy v0 guard inside `runDaemon`; setting it to
+  // `true` keeps `runDaemon`'s legacy throw-on-misuse semantics quiet for
+  // the dry-run Strategy, while injecting `spawnStrategy` makes the daemon
+  // dispatch via the Strategy (real spawn or dry-run, decided above).
+  dryRun,
   mockClient: new TestFakeMockAnthropic(),
+  spawnStrategy,
   tasksMdReader: () => readFileSync(args.tasksMdPath, "utf-8"),
   pausedSentinelReader: () => existsSync(args.pausedSentinelPath),
   // Real `BudgetGuard.tick()` wrapped behind the daemon's `BudgetGuardLike.decide()` shape.

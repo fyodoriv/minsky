@@ -367,3 +367,15 @@ export {
 } from "./daemon.js";
 
 export { fromRealBudgetGuard } from "./budget-guard-facade.js";
+
+// Sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`): expose the Strategies
+// so the CLI (`bin/tick-loop.mjs`) can pick between real spawn and dry-run
+// from the `MINSKY_TICK_DRY_RUN` env-var without reaching past `dist/`.
+export {
+  DryRunSpawnStrategy,
+  ProcessSpawnStrategy,
+  type ProcessSpawnStrategyOptions,
+  type SpawnInput,
+  type SpawnResult,
+  type SpawnStrategy,
+} from "./spawn-strategy.js";
