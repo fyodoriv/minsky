@@ -1,92 +1,54 @@
-id: docs-drift-audit-2026-05-04
+id: docs-drift-fixes-batch-2026-05-04
 hypothesis: |
-  After 46 PRs touching multiple docs (most recently #75 / #77 closing
-  the OMC-handoff-persistence research thread, and #58 closing the
-  MAPE-K-loop epic), at least one concrete drift exists across
-  README.md / AGENTS.md / vision.md / ARCHITECTURE.md / research.md —
-  i.e., a doc claim ("planned", "doesn't work yet", "open question")
-  that has been falsified by shipped artifacts. A Tier-3 read-and-
-  cross-check of the five surfaces will surface ≥1 fixable drift; the
-  highest-priority drift will be fixed in this PR; the rest will be
-  filed as P3 follow-up tasks (capped at 4) so the queue does not
-  balloon.
+  Four small docs-only fixes (research.md OMC handoff entry strikethrough,
+  research.md cross-language-port answer, ARCHITECTURE.md open-questions
+  resolution annotations, ARCHITECTURE.md versioning sub-list) close
+  4 P3 tasks without code change. Each fix is independently verifiable
+  via grep; total PR diff < 100 lines; no scripts/CI/code touched.
 success: |
-  Three-part criterion, all measurable on the merged PR:
-  (a) ≥1 doc-drift fixed in this PR. The README "Status" block at
-      lines 47-65 is the highest-priority surface (most-read entry
-      doc, primarily stale): the "What doesn't work yet" line falsely
-      claims Maciek TokenMonitor (PR #72), MAPE-K loop (PR #58),
-      spec-monitor deterministic share + advisory Skill (PRs #39
-      / #50–#53 / #58 / #59–#60 / #70), and the rule-#9 automation
-      layer (per-PR runner PR #31, weekly tracker PR #38) all
-      "don't work yet". Updated to the post-46-PR truth.
-  (b) ≤4 P3 follow-up tasks filed for the remaining drifts:
-      `docs-drift-research-md-open-questions`,
-      `docs-drift-architecture-md-open-questions`,
-      `docs-drift-architecture-md-versioning-pins`,
-      `docs-drift-tasksmd-cross-language-followup`.
-  (c) All 14+ deterministic CI lints stay green (`pnpm typecheck &&
-      pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm
-      exec markdownlint-cli2 …`).
-  Combined check:
-    grep -q '✅ Maciek `TokenMonitor` Strategy' README.md \
-      && grep -q '✅ MAPE-K autonomic loop v0' README.md \
-      && grep -q 'docs-drift-research-md-open-questions' TASKS.md \
-      && grep -q 'docs-drift-architecture-md-open-questions' TASKS.md \
-      && grep -q 'docs-drift-architecture-md-versioning-pins' TASKS.md \
-      && grep -q 'docs-drift-tasksmd-cross-language-followup' TASKS.md
+  All 4 P3 tasks removed from TASKS.md and the 4 measurement assertions
+  pass:
+  (a) `grep -c 'OMC handoff persistence' research.md` ≤ 1 (only the
+      canonical § "OMC handoff persistence" header remains; the
+      open-questions duplicate is struck).
+  (b) ARCHITECTURE.md § "Versioning & dependency evolution" contains
+      the sub-list with `@tasks-md/lint@^0.7.0`, `markdownlint-cli2@0.15.0`,
+      `lighthouse@12.4.0`.
+  (c) ARCHITECTURE.md open-questions items 1–4 each carry a
+      `**Resolved**: PR #N — <one-line>` annotation.
+  (d) research.md cross-language entry has a one-line answer
+      ("no cross-language port as of 2026-05-04").
 pivot: |
-  Trigger: zero drift surfaces across all five doc surfaces — i.e.,
-  the audit reads as "all docs are current" against the last 46 PRs.
-  On trigger, skip the in-PR fix; record the clean pass with a
-  one-line dated entry in `research.md` § "Quarterly review log"
-  (today's date, "Tier-3 doc-drift audit — clean pass against the
-  46-PR window"); commit + ship as a chore PR
-  (`chore: docs-drift audit 2026-05-04 — clean`); add the trivial-
-  marker `<!-- experiment: trivial — docs-only audit pass, no code
-  change -->` to the PR body so `pr-self-grade` permits the
-  observed-equals-zero case. This pivot path was NOT taken: ≥4
-  drifts surfaced, of which 1 is fixed in-PR and 3 are filed as P3.
-  Abandon-the-approach line: if the audit cycle costs >1h of agent
-  wall-clock per pass and surfaces <1 drift on average across 3
-  passes, the audit-as-PR pattern is wrong shape — switch to a
-  deterministic CI lint that compares prose claims against shipped
-  artifacts (e.g., a "no `(planned)` token in README.md after a
-  shipped row in vision.md § Pattern conformance index" gate),
-  matching rule-#10's deterministic-enforcement discipline.
+  If ≥1 of the "resolved" claims turns out to be wrong (e.g., a PR
+  cited as resolving an open question did not in fact resolve it on
+  inspection), file a follow-up task to re-investigate that specific
+  claim and revert the strikethrough for the affected item.
+  Abandon-the-approach: if more than 25 % (i.e., ≥2 of the 4)
+  claimed-resolutions fail verification on read, the underlying audit
+  (PR #79) was wrong shape — switch to a deterministic CI lint that
+  machine-checks "resolved by PR #N" annotations against
+  `gh pr view N` titles before allowing the strikethrough to land.
 measurement: |
-  grep -q '✅ Maciek `TokenMonitor` Strategy' README.md \
-    && grep -q '✅ MAPE-K autonomic loop v0' README.md \
-    && grep -q '✅ Read-only OMC → tasks.md bridge' README.md \
-    && grep -q 'docs-drift-research-md-open-questions' TASKS.md \
-    && grep -q 'docs-drift-architecture-md-open-questions' TASKS.md \
-    && grep -q 'docs-drift-architecture-md-versioning-pins' TASKS.md \
-    && grep -q 'docs-drift-tasksmd-cross-language-followup' TASKS.md \
+  [ "$(grep -c 'OMC handoff persistence' research.md)" -le 1 ] \
+    && [ "$(grep -c '@tasks-md/lint@\^0\.7\.0' ARCHITECTURE.md)" -ge 1 ] \
+    && [ "$(grep -c 'markdownlint-cli2@0\.15\.0' ARCHITECTURE.md)" -ge 1 ] \
+    && [ "$(grep -c 'lighthouse@12\.4\.0' ARCHITECTURE.md)" -ge 1 ] \
+    && ! grep -q 'docs-drift-research-md-open-questions' TASKS.md \
+    && ! grep -q 'docs-drift-architecture-md-open-questions' TASKS.md \
+    && ! grep -q 'docs-drift-architecture-md-versioning-pins' TASKS.md \
+    && ! grep -q 'docs-drift-tasksmd-cross-language-followup' TASKS.md \
     && pnpm typecheck && pnpm test && pnpm lint \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
   Hunt, A., Thomas, D., *The Pragmatic Programmer*, Addison-Wesley,
-  1999, Ch. 2 (DRY — duplicated prose between docs and shipped
-  artifacts drifts; the audit is the periodic reconciliation that
-  closes the duplication-introduced gap); Parnas, D. L., "On the
-  Criteria To Be Used in Decomposing Systems into Modules", *CACM*
-  15(12) 1972 (information hiding — README is the entry-doc
-  abstraction over the implementation; staleness is the abstraction
-  decaying); rule #5 (vision.md § 5 — glossary discipline; "planned"
-  and "doesn't work yet" are status fields; their value is empirical,
-  not aspirational); rule #8 (vision.md § 8 — pattern conformance;
-  every shipped artifact has a row in vision.md § "Pattern
-  conformance index", which is the canonical source of truth the
-  README's status-block must align with); rule #9 (vision.md § 9 —
-  pre-registered HDD; this audit's hypothesis was committed before
-  the read; the pre-registered Pivot path lives above);
+  1999, Ch. 2 (DRY — a question resolved by shipped code should not
+  remain "open" in two doc surfaces; the strikethrough + resolution
+  pointer is the canonical reconciliation); rule #5 (vision.md § 5 —
+  glossary discipline; "open" / "resolved" are status fields whose
+  value is empirical); rule #8 (vision.md § 8 — pattern conformance;
+  shipped state must be reflected back into the architecture doc);
   Munafò et al., "A Manifesto for Reproducible Science", *Nature
-  Human Behaviour* 1, 0021, 2017 (pre-registration — drift-fix
-  hypothesis declared before the read so a "no drift found" outcome
-  cannot be retroactively redefined as a fishing expedition); Beck,
-  K., *Extreme Programming Explained*, Addison-Wesley, 1999, Ch. 17
-  (CI as the long-run successor to manual audits — the Pivot's
-  abandon-the-approach line ties this audit to a future
-  deterministic prose-vs-artifact lint).
+  Human Behaviour* 1, 0021, 2017 (pre-registration — the hypothesis
+  that all 4 fixes are mechanical was declared before the read).
 replay_windows_days: [30]
