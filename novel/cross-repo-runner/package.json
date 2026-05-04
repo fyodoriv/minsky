@@ -1,0 +1,40 @@
+{
+  "name": "@minsky/cross-repo-runner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cross-repo runner v0 — `minsky run <task-id>` reads a host's `.minsky/repo.yaml`, finds the task, synthesises an EXPERIMENT.yaml, spawns Claude Code wrapped in BudgetGuard, and writes the iteration record (rule #1 — wraps existing tools, doesn't replace them).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "minsky-run": "./bin/minsky-run.mjs"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "bin/minsky-run.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minsky/sidecar-bootstrap": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "typescript": "5.7.2",
+    "vitest": "2.1.9"
+  }
+}
