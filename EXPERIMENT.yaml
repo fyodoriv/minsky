@@ -53,11 +53,10 @@ anchor: |
   Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
   *IEEE Computer* 36(1), 2003 (MAPE-K — the Monitor surface must be
   honest about Plan-time gating, otherwise Knowledge phase reads wrong).
-risk: |
-  Push spam if the debounce is wrong. Mitigation: the new debounce test
-  fixes the count to exactly 1 across 3 paused iterations and to exactly
-  2 across a paused → recovery → paused sequence — mechanical, not
-  best-effort. Without the debounce being mechanical, this PR would be a
-  net regression (every-tick spam). The test pins the contract.
+  Risk: push spam if the debounce is wrong. Mitigation: the new debounce
+  test fixes the count to exactly 1 across 3 paused iterations and to
+  exactly 2 across a paused → recovery → paused sequence — mechanical,
+  not best-effort. Without the debounce being mechanical, this PR would
+  be a net regression (every-tick spam). The test pins the contract.
   Surfaced-by: 2026-05-04 11:13 local self-run from main `4bdc2b7`.
 timeout_seconds: 60
