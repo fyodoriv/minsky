@@ -19,7 +19,7 @@ export default defineConfig({
   },
   test: {
     globals: false,
-    include: ["novel/**/src/**/*.test.ts"],
+    include: ["novel/**/src/**/*.test.ts", "scripts/**/*.test.mjs"],
     coverage: {
       provider: "v8",
       all: true,
