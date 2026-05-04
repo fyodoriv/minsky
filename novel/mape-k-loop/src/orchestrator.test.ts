@@ -185,6 +185,92 @@ describe("orchestrate — ingest-mode skips rollout entirely", () => {
   });
 });
 
+describe("orchestrate — experiment-tracker ingestion shape (workflow contract)", () => {
+  // Mirrors the `.github/workflows/experiment-tracker.yml` final-step
+  // invocation: the CLI reads `experiment-store/<id>.jsonl` (verdicts with
+  // `predicted` carried over from EXPERIMENT.yaml), passes them as the
+  // `verdictLog`, and runs in `ingestMode: true`. When the calibration MAE
+  // exceeds the threshold, a research-amendment proposal must land in the
+  // `knowledge.researchAmendmentProposal` slot — that's the slot the CLI
+  // serialises to `tmp/proposed-rule-9-amendment.md`.
+  it("produces a research-amendment proposal when verdicts show calibration drift > threshold", async () => {
+    // Synthetic verdict log shaped exactly like what the workflow's
+    // `replay-experiment.mjs` step appends: predicted 1.0, observed 0.0
+    // → MAE 1.0, well above the 0.5 default threshold.
+    const verdictLog = [
+      {
+        id: "exp-drift-a",
+        verdict: "regressed" as const,
+        value: 0.0,
+        ts: "2026-05-08T00:00:00Z",
+        predicted: 1.0,
+      },
+      {
+        id: "exp-drift-b",
+        verdict: "regressed" as const,
+        value: 0.05,
+        ts: "2026-05-09T00:00:00Z",
+        predicted: 1.0,
+      },
+      {
+        id: "exp-drift-c",
+        verdict: "regressed" as const,
+        value: 0.1,
+        ts: "2026-05-09T12:00:00Z",
+        predicted: 0.95,
+      },
+    ];
+    const result = await orchestrate({
+      verdictLog,
+      constraintsMdTail: "",
+      currentPrompts: { default: "you are a helpful assistant" },
+      optimizer: new StubPromptOptimizer(),
+      history: [],
+      now: NOW,
+      ingestMode: true,
+    });
+    // Plan/Execute skipped — no rollout, no draft.
+    expect(result.rolloutDraft).toBeUndefined();
+    expect(result.tickResult.rolloutDecision).toBeNull();
+    // Knowledge-side: amendment proposal populated (the CLI writes this to
+    // `tmp/proposed-rule-9-amendment.md`).
+    expect(result.knowledge.researchAmendmentProposal).not.toBeNull();
+    expect(result.knowledge.researchAmendmentProposal).toMatch(/Calibration drift exceeded/);
+    // Constraints append always populated (Helland 2007 audit trail).
+    expect(result.knowledge.constraintsAppend.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT produce an amendment proposal when verdicts are well-calibrated (CI-quiet path)", async () => {
+    const verdictLog = [
+      {
+        id: "exp-quiet-a",
+        verdict: "validated" as const,
+        value: 0.95,
+        ts: "2026-05-08T00:00:00Z",
+        predicted: 1.0,
+      },
+      {
+        id: "exp-quiet-b",
+        verdict: "validated" as const,
+        value: 1.0,
+        ts: "2026-05-09T00:00:00Z",
+        predicted: 1.0,
+      },
+    ];
+    const result = await orchestrate({
+      verdictLog,
+      constraintsMdTail: "",
+      currentPrompts: { default: "you are a helpful assistant" },
+      optimizer: new StubPromptOptimizer(),
+      history: [],
+      now: NOW,
+      ingestMode: true,
+    });
+    expect(result.rolloutDraft).toBeUndefined();
+    expect(result.knowledge.researchAmendmentProposal).toBeNull();
+  });
+});
+
 describe("orchestrate — maxRollouts cap suppresses draft", () => {
   it("returns no rolloutDraft when maxRollouts is 0, even on a passing rollout decision", async () => {
     const winnerId = "rule-9-enumerate-failure-modes";
