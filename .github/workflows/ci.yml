@@ -456,6 +456,41 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-skill-rule-cap.test.mjs
 
+  pivot-success-margin:
+    # rule #10 ratchet applied to spec-monitor advisory rule A2: a pivot
+    # threshold that equals (or sits within <1 % of) the success threshold
+    # is theatre per Ries 2011 (pivot-or-persevere). The lint reads
+    # `success` and `pivot` from EXPERIMENT.yaml via the
+    # `@minsky/experiment-record` parser, regex-extracts the leading signed
+    # numeric token from each, and fails on zero-margin / sub-1 % margin /
+    # binary-equal prose. Promotion decision recorded in
+    # `spec-advisories/2026-05-03-quarterly-audit.md`. Runs on every event
+    # (push and pull_request) — the EXPERIMENT.yaml is checked-in state,
+    # not a PR-relative diff, so the gate is universally applicable.
+    # Anchor: rule #10 (deterministic enforcement); Ries, *The Lean
+    # Startup*, 2011 (build-measure-learn / pivot-or-persevere); Beck 1999
+    # (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build @minsky/experiment-record
+        # The lint imports the parser from @minsky/experiment-record's
+        # built `dist/` (workspace-resolved). vitest reads the source
+        # directly via vitest.config.ts, but the CLI import does not.
+        run: pnpm --filter @minsky/experiment-record build
+      - name: pivot-success-margin lint
+        run: node scripts/check-pivot-success-margin.mjs EXPERIMENT.yaml
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-pivot-success-margin.test.mjs
+
   ci:
     needs:
       - biome
@@ -467,6 +502,7 @@ jobs:
       - markdownlint
       - measurement-inspects-output
       - pattern-index
+      - pivot-success-margin
       - pr-self-grade
       - skill-rule-cap
       - rule-1-novel-justification
@@ -493,6 +529,7 @@ jobs:
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
+                   "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
                    "${{ needs.rule-3-doc-first.result }}" \
