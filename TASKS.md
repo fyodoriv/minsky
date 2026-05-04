@@ -215,19 +215,6 @@
   - **Anchor**: Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run; the published artifact is the release contract).
   - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
-- [ ] Decide MAPE-K loop cadence
-  - **ID**: mape-k-cadence
-  - **Tags**: research, design
-  - **Estimate**: 4h
-  - **Hypothesis**: A tiered cadence (time-based default + event-triggered overrides for spec-monitor findings) keeps `mape-k-loop`'s own token cost below 5 % of weekly budget while still detecting drift within 2 scheduler iterations.
-  - **Details**: Time-based vs scheduler-iteration-based vs event-triggered. Probably all three with priority. Define rules. Document in `research.md` and `ARCHITECTURE.md`. Anchor: control-loop period selection (Liu, *Real-Time Systems*).
-  - **Verification**: `research.md` has a "MAPE-K cadence" subsection with the chosen rule and rejected alternatives; `ARCHITECTURE.md` § "Process supervision tree" reflects the cadence
-  - **Measurement**: `grep -c '^## MAPE-K cadence' research.md` returns 1, and the section names ≥3 alternatives with one chosen + literature anchor; `grep -c 'MAPE-K cadence' ARCHITECTURE.md` returns ≥1 in the supervision-tree section.
-  - **Pivot**: if after 4h of investigation no candidate cadence satisfies the <5 %-budget constraint AND the 2-iteration drift-detection constraint simultaneously, the MAPE-K design itself is wrong and `mape-k-loop-v0` needs reframing — file a follow-up task and stop.
-  - **Acceptance**: Decision documented in research.md and ARCHITECTURE.md with rationale; rejected alternatives recorded
-  - **Anchor**: Liu, *Real-Time Systems*, 2000 (control-loop period selection); Kephart & Chess 2003 (MAPE-K reference architecture).
-  - **Risk**: Wrong cadence wastes tokens (too frequent) or misses signal (too rare). Pick conservative defaults; let the autonomic manager itself adjust them per success-metric #4.
-
 ## P2
 
 <!-- spec-monitor-skill (the prior P2 task) is superseded by `spec-monitor-deterministic-rewrite` in P1. Per rule #10 (deterministic enforcement), the previous shape — a Claude Skill as the *primary* enforcement of every constitutional rule — is incompatible with the iron-rule "enforcement is deterministic, not LLM-driven" clause. The replacement task splits the Skill's remit: deterministic linters (`ci-rule-1` … `ci-rule-7`) take the load-bearing share; the residual judgement scope ships as an advisory-only Claude Skill (`spec-monitor-deterministic-rewrite`). Removing this block is the ratchet-rule from rule #10 in action: the prior approach is *removed* in the same PR that introduces the deterministic replacement. -->
@@ -236,7 +223,7 @@
   - **ID**: mape-k-loop-v0
   - **Tags**: novel, extraction-target
   - **Estimate**: 3–5d (largest novel layer)
-  - **Blocked by**: spec-monitor-deterministic-rewrite, mape-k-cadence
+  - **Blocked by**: spec-monitor-deterministic-rewrite
   - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
   - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
   - **Files**: `novel/mape-k-loop/`
