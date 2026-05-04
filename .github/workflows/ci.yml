@@ -491,6 +491,34 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-pivot-success-margin.test.mjs
 
+  mape-k-budget-cap:
+    # rule #10 ratchet applied to ARCHITECTURE.md § "MAPE-K cadence" — the
+    # ≤5.7 % weekly Max5 budget cap on the autonomic-manager loop. Reads
+    # `config/mape-k.json` (the future machine-readable artefact) and
+    # asserts `weeklyProjectedTokens / weeklyBudgetTokens ≤ 0.057`. If the
+    # config is not yet present (v0 ships dormant — TASKS.md
+    # `ci-lint-mape-k-token-budget-cap` "Risk" line), the lint exits 0
+    # with a stderr advisory and re-arms the moment the config lands.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # ARCHITECTURE.md § "MAPE-K cadence"; research.md § "MAPE-K cadence";
+    # Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering*,
+    # O'Reilly 2016, Ch. 3 (error-budget enforcement).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: mape-k-budget-cap lint
+        run: node scripts/check-mape-k-budget-cap.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-mape-k-budget-cap.test.mjs
+
   anchor-primary-source:
     # rule #10 ratchet applied to spec-monitor advisory rule A3 ("anchor
     # citation is not a primary source"): the deterministic gate promotes
@@ -533,6 +561,7 @@ jobs:
       - linux-supervisor-integration
       - macos-supervisor-integration
       - maciek-smoke
+      - mape-k-budget-cap
       - markdownlint
       - measurement-inspects-output
       - pattern-index
@@ -562,6 +591,7 @@ jobs:
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
+                   "${{ needs.mape-k-budget-cap.result }}" \
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
