@@ -191,6 +191,62 @@
   - **Anchor**: rule #10 (vision.md § 10); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (pre-registration of audit pivot before result is observed).
   - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds; the previous audit file at `spec-advisories/2026-05-03-quarterly-audit.md` records the cadence.
 
+- [ ] `ci-lint-cadence-pivot-threshold` — CI lint asserting the 8 % MAPE-K cadence-pivot threshold matches `config/mape-k.json`
+  - **ID**: ci-lint-cadence-pivot-threshold
+  - **Tags**: ci, conformance, rule-10, follow-up
+  - **Estimate**: 1h
+  - **Hypothesis**: `research.md` § "MAPE-K cadence" (current L92) anchors the 8 % weekly-spend pivot threshold ("If measured spend exceeds 8 % for 4 weeks, the pivot in `mape-k-cadence`'s rule-#9 block fires — the cadence design itself is wrong"). Today the constant is prose-only. Once the future `config/mape-k.json` artifact lands, a deterministic linter that reads its `cadence_pivot_spend_fraction` (or equivalent) field and asserts it matches the 8 % prose anchor mechanically prevents silent drift between research.md and the runtime config — the same drift class PR #59 surfaced for the 5 % cap. Surfaces during PR #59's resilience scout pass.
+  - **Details**: A CI lint that reads the future `config/mape-k.json` artifact and asserts its cadence-pivot field equals 0.08. Missing config → exit 0 (dormant, until `mape-k-loop-v0` ships the artifact). Pure function + CLI wrapper + paired tests + CI job, mirroring `check-skill-rule-cap.mjs`.
+  - **Files**: `scripts/check-cadence-pivot-threshold.mjs`, `scripts/check-cadence-pivot-threshold.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: ≥4 cases — under (0.05 → exit 1), at (0.08 → exit 0), over (0.10 → exit 1), missing-config (no `config/mape-k.json` → exit 0 dormant).
+  - **Measurement**: `pnpm vitest run scripts/check-cadence-pivot-threshold.test.mjs --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`
+  - **Pivot**: if the prose anchor itself is moved (e.g., the 8 % fraction is replaced by a different overshoot envelope in research.md), retire this lint and write a new one against the replacement anchor.
+  - **Acceptance**: lint ships once `config/mape-k.json` lands; until then this task remains dormant.
+  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); research.md § "MAPE-K cadence" (8 % prose anchor); Beyer et al., *Site Reliability Engineering*, O'Reilly 2016 (error-budget threshold discipline).
+  - **Risk**: Dependent on `config/mape-k.json` landing first. Defer until then; the dormant linter ships in the same PR as the config artifact.
+
+- [ ] `ci-lint-mape-k-tick-iteration-backstop` — CI lint asserting the 1000-tick MAPE-K backstop matches `config/mape-k.json`
+  - **ID**: ci-lint-mape-k-tick-iteration-backstop
+  - **Tags**: ci, conformance, rule-10, follow-up
+  - **Estimate**: 1h
+  - **Hypothesis**: `ARCHITECTURE.md` § "Process supervision tree" (current L218) specifies the MAPE-K cadence's tick-iteration backstop as "every 1000 ticks". Today the constant is prose-only. Once the future `config/mape-k.json` artifact lands, a deterministic linter that reads its `tick_iteration_backstop` (or equivalent) field and asserts it matches the 1000-tick prose anchor mechanically prevents silent drift between ARCHITECTURE.md and the runtime config. Surfaces during PR #59's resilience scout pass.
+  - **Details**: A CI lint that reads the future `config/mape-k.json` artifact and asserts its tick-iteration-backstop field equals 1000. Missing config → exit 0 (dormant, until `mape-k-loop-v0` ships the artifact). Pure function + CLI wrapper + paired tests + CI job, mirroring `check-skill-rule-cap.mjs`.
+  - **Files**: `scripts/check-mape-k-tick-iteration-backstop.mjs`, `scripts/check-mape-k-tick-iteration-backstop.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: ≥4 cases — under (500 → exit 1), at (1000 → exit 0), over (5000 → exit 1), missing-config (no `config/mape-k.json` → exit 0 dormant).
+  - **Measurement**: `pnpm vitest run scripts/check-mape-k-tick-iteration-backstop.test.mjs --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`
+  - **Pivot**: if the prose anchor itself is moved (e.g., the 1000-tick floor is replaced by an activity-coupled formula instead of a fixed integer), retire this lint and write a new one against the replacement anchor.
+  - **Acceptance**: lint ships once `config/mape-k.json` lands; until then this task remains dormant.
+  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); ARCHITECTURE.md § "Process supervision tree" (1000-tick prose anchor); Liu, *Real-Time Systems*, Prentice Hall 2000, § 6.4 (activity-coupled sampling bound); Beyer et al., *Site Reliability Engineering*, O'Reilly 2016 (error-budget threshold discipline).
+  - **Risk**: Dependent on `config/mape-k.json` landing first. Defer until then; the dormant linter ships in the same PR as the config artifact.
+
+- [ ] `ci-lint-mape-k-watchdog-cadence` — CI lint asserting the 12 h MAPE-K watchdog cadence matches `config/mape-k.json`
+  - **ID**: ci-lint-mape-k-watchdog-cadence
+  - **Tags**: ci, conformance, rule-10, follow-up
+  - **Estimate**: 1h
+  - **Hypothesis**: `ARCHITECTURE.md` § "Process supervision tree" (current L218) specifies the MAPE-K time-based watchdog cadence as "every 12 h regardless". Today the constant is prose-only. Once the future `config/mape-k.json` artifact lands, a deterministic linter that reads its `watchdog_period_hours` (or equivalent) field and asserts it matches the 12 h prose anchor mechanically prevents silent drift between ARCHITECTURE.md and the runtime config. Surfaces during PR #59's resilience scout pass.
+  - **Details**: A CI lint that reads the future `config/mape-k.json` artifact and asserts its watchdog-period-hours field equals 12. Missing config → exit 0 (dormant, until `mape-k-loop-v0` ships the artifact). Pure function + CLI wrapper + paired tests + CI job, mirroring `check-skill-rule-cap.mjs`.
+  - **Files**: `scripts/check-mape-k-watchdog-cadence.mjs`, `scripts/check-mape-k-watchdog-cadence.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: ≥4 cases — under (6 → exit 1), at (12 → exit 0), over (24 → exit 1), missing-config (no `config/mape-k.json` → exit 0 dormant).
+  - **Measurement**: `pnpm vitest run scripts/check-mape-k-watchdog-cadence.test.mjs --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`
+  - **Pivot**: if the prose anchor itself is moved (e.g., the 12 h watchdog is replaced by exponential / adaptive cadence after `mape-k-loop`'s monthly self-calibration extends T to 18 h per ARCHITECTURE L218), retire this lint and write a new one against the replacement anchor.
+  - **Acceptance**: lint ships once `config/mape-k.json` lands; until then this task remains dormant.
+  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); ARCHITECTURE.md § "Process supervision tree" (12 h prose anchor); Liu, *Real-Time Systems*, Prentice Hall 2000 (sampling-period selection); Beyer et al., *Site Reliability Engineering*, O'Reilly 2016 (error-budget threshold discipline).
+  - **Risk**: Dependent on `config/mape-k.json` landing first. Defer until then; the dormant linter ships in the same PR as the config artifact.
+
+- [ ] `ci-lint-tick-loop-backoff-schedule` — CI lint asserting the `5s → 30s → 5min` tick-loop backoff schedule matches `config/tick-loop.json`
+  - **ID**: ci-lint-tick-loop-backoff-schedule
+  - **Tags**: ci, conformance, rule-10, follow-up
+  - **Estimate**: 1h
+  - **Hypothesis**: `ARCHITECTURE.md` § "Process supervision tree" (current L215) specifies the tick-loop restart-backoff schedule as "5s → 30s → 5min". Today the constant is prose-only. Once the future `config/tick-loop.json` artifact lands, a deterministic linter that reads its `backoff_schedule_seconds` (or equivalent) array and asserts it matches `[5, 30, 300]` mechanically prevents silent drift between ARCHITECTURE.md and the supervisor unit-file template. Surfaces during PR #59's resilience scout pass.
+  - **Details**: A CI lint that reads the future `config/tick-loop.json` artifact and asserts its backoff-schedule field equals `[5, 30, 300]`. Missing config → exit 0 (dormant, until `tick-loop-v0` ships the artifact). Pure function + CLI wrapper + paired tests + CI job, mirroring `check-skill-rule-cap.mjs`.
+  - **Files**: `scripts/check-tick-loop-backoff-schedule.mjs`, `scripts/check-tick-loop-backoff-schedule.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: ≥4 cases — under (`[1, 5, 60]` → exit 1), at (`[5, 30, 300]` → exit 0), over (`[10, 60, 600]` → exit 1), missing-config (no `config/tick-loop.json` → exit 0 dormant).
+  - **Measurement**: `pnpm vitest run scripts/check-tick-loop-backoff-schedule.test.mjs --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`
+  - **Pivot**: if the prose anchor itself is moved (e.g., the fixed `5s → 30s → 5min` ladder is replaced by exponential backoff or a different ramp shape), retire this lint and write a new one against the replacement anchor.
+  - **Acceptance**: lint ships once `config/tick-loop.json` lands; until then this task remains dormant.
+  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); ARCHITECTURE.md § "Process supervision tree" (5s → 30s → 5min prose anchor); Armstrong, *Programming Erlang*, Pragmatic Bookshelf 2007 (let-it-crash + supervised restart with backoff); Beyer et al., *Site Reliability Engineering*, O'Reilly 2016 (error-budget threshold discipline).
+  - **Risk**: Dependent on `config/tick-loop.json` landing first. Defer until then; the dormant linter ships in the same PR as the config artifact.
+
 - [ ] `ci-lint-watch-surface-cap` — CI lint enforcing the 3-value cap on the Watch surface (story 005)
   - **ID**: ci-lint-watch-surface-cap
   - **Tags**: ci, conformance, rule-10
