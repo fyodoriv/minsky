@@ -1,0 +1,9 @@
+id: budget-guard-flag-file
+hypothesis: |
+  Atomic write of NORMAL/THROTTLE/PAUSE/WEEKLY_WARN to
+  ${MINSKY_HOME}/.minsky/budget.flag via tmp-file + rename(2) lets shell
+  consumers read the current decision without parsing JSON.
+success: "flag-file tests at 100% coverage; integration test passes within 10s"
+pivot: "if shell consumers ever need atomic multi-field state, pivot to .minsky/budget.json"
+measurement: "pnpm vitest run novel/budget-guard/src/flag-file.test.ts"
+anchor: "POSIX rename(2) atomicity guarantee; setup.sh's atomic-lock pattern"

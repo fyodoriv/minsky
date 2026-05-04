@@ -1,0 +1,11 @@
+id: experiment-record-format
+hypothesis: |
+  A small declarative YAML schema (the five rule-#9 fields plus an
+  experiment-id and replay windows) is sufficient to encode every PR's
+  rule-#9 contract and produces a parser whose output the daily and
+  weekly automation layers consume directly.
+success: "≥6 paired fixture tests pass; schema+parser+cli total ≤300 LoC"
+pivot: "if YAML proves too rigid for the measurement field, pivot to TOML or a fenced markdown block in EXPERIMENT.md"
+measurement: "pnpm vitest run novel/experiment-record/src/parse.test.ts"
+anchor: "Munafò 2017 (pre-registration); AsPredicted.org template; Aho-Sethi-Ullman 1986 (parser shape)"
+replay_windows_days: [7]

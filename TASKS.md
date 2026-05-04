@@ -17,29 +17,10 @@
 
 <!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
 
-- [ ] `experiment-record-format` — `EXPERIMENT.yaml` schema + parser (preparation PR for rule #9 automation layer)
-  - **ID**: experiment-record-format
-  - **Tags**: novel, conformance, preparation
-  - **Estimate**: 4–6h
-  - **Hypothesis**: A small declarative YAML schema (the five rule-#9 fields, plus an experiment-id, plus replay windows in days) is sufficient to encode the contract every PR carries today as prose, *and* produces a parser whose output the daily and weekly layers consume directly without further transformation. The parser+schema combo is <300 LoC.
-  - **Details**: Define `EXPERIMENT.yaml` (fields: `id`, `hypothesis`, `success`, `pivot`, `measurement`, `anchor`, optional `replay_windows_days: [7, 30]`). Schema lives in `novel/experiment-record/schema.json` (JSON Schema draft-07, machine-checkable). TypeScript parser in `novel/experiment-record/src/parse.ts` returns either an `ExperimentRecord` or a structured `ParseError[]`. Includes a CLI `pnpm exec experiment-record validate <path>` for both pre-commit hooks and CI use. Pattern: same shape as `@minsky/handoff-spec` — schema + parser + validator with paired positive/negative fixtures (rule #7). The schema is intentionally tiny — every field is rule #9's already-declared contract; nothing new is invented.
-  - **Files**: `novel/experiment-record/package.json`, `novel/experiment-record/schema.json`, `novel/experiment-record/src/parse.ts`, `novel/experiment-record/src/parse.test.ts`, `novel/experiment-record/src/cli.ts`, `novel/experiment-record/test/fixtures/{valid-{1..3},invalid-{missing-pivot,vanity-metric,bad-yaml}}.yaml`, `novel/experiment-record/README.md`, `vision.md` (pattern-conformance row), `pnpm-workspace.yaml` if needed.
-  - **Verification**:
-    - 3 valid fixtures parse to `ExperimentRecord` with no errors.
-    - 3 invalid fixtures (missing pivot, vanity metric, malformed YAML) produce structured `ParseError` with `kind` + line number.
-    - Parser is offline (no network).
-    - `pnpm exec experiment-record validate <path>` exits 0 on valid, non-zero on invalid.
-  - **Measurement**: `pnpm vitest run novel/experiment-record/src/parse.test.ts` exits 0 with ≥6 cases (3 valid + 3 invalid); `wc -l novel/experiment-record/src/parse.ts novel/experiment-record/src/cli.ts novel/experiment-record/schema.json | tail -1` total ≤ 300.
-  - **Pivot**: if YAML proves too rigid for the `measurement` field (which is a shell command and may contain embedded YAML-unsafe characters), pivot to TOML or a fenced markdown block in `EXPERIMENT.md`. Reframe the parser; keep the schema intent.
-  - **Acceptance**: Package compiles, tests pass, dry-run publishable; `vision.md` § "Pattern conformance index" gains a row for `@minsky/experiment-record`.
-  - **Anchor**: Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (pre-registration); AsPredicted.org schema (a concrete pre-registration template); Aho-Sethi-Ullman, *Compilers*, 1986 (parser shape); Gamma et al. 1994 (Adapter — schema is the interface).
-  - **Risk**: Over-engineering the schema. Mitigation: schema is intentionally tiny — every field already exists as a rule-#9 declaration; nothing new invented.
-
 - [ ] `ci-experiment-runner-v0` — daily/per-PR experiment execution (rule #9 daily layer)
   - **ID**: ci-experiment-runner-v0
   - **Tags**: novel, ci, conformance
   - **Estimate**: 1–2d
-  - **Blocked by**: experiment-record-format
   - **Hypothesis**: A CI step that (a) requires every non-trivial PR to ship a parseable `EXPERIMENT.yaml`, (b) executes its `measurement` command against the merge-base ref, and (c) re-executes against the post-merge `main` ref, records both numbers tagged with the experiment-id into a local `experiment-store` — closing the daily layer of rule #9 — produces a tracked record on ≥95 % of merged PRs within 30 days of landing.
   - **Details**: Two CI jobs. **Job A (gate)**: runs on every PR; fails if `EXPERIMENT.yaml` is missing OR fails `experiment-record validate` OR if `measurement` is not a runnable command. **Job B (record)**: runs after merge to `main` (post-push event); checks out merge-base, runs measurement → `baseline`; checks out current `main`, runs measurement → `treatment`; records `{experiment_id, baseline, treatment, ts, ref}` into `experiment-store/<id>.jsonl` (committed back to a `experiments/` branch OR pushed to OTEL once `otel-lite-backend` lands). The structural test the runner enforces is "the command is runnable and produces a number"; verdict-against-thresholds is the weekly layer's job. Trivial-change exemption: PRs labelled `trivial` skip Job A but must include `<!-- experiment: trivial — see exemption.md -->` whose presence is checked by the gate.
   - **Files**: `.github/workflows/experiment.yml`, `scripts/run-experiment.mjs` (entry point invoked by both jobs), `scripts/run-experiment.test.mjs`, `experiments/.gitkeep`, `docs/experiment-runner.md`.

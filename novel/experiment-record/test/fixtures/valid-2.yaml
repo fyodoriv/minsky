@@ -1,0 +1,7 @@
+id: ci-rule-2-dep-coverage
+hypothesis: A grep-based CI lint over novel/**/*.ts excluding novel/adapters/** catches every direct vendor coupling listed in ARCHITECTURE.md's dependency table, closing rule #2's enforcement gap.
+success: "lint exits 1 against synthetic-leak fixture, 0 against clean fixture; runs in <2s on 100-file repo"
+pivot: "if dependency-table format is too informal to parse, pivot to a machine-readable adapters.json manifest"
+measurement: "node scripts/check-rule-2-dep-coverage.mjs && pnpm vitest run scripts/check-rule-2-dep-coverage.test.mjs"
+anchor: "rule #10 (deterministic enforcement); Martin Clean Architecture 2017 (dependency rule); Wiggins 2011 12-factor II"
+replay_windows_days: [7, 30, 90]

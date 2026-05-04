@@ -1,0 +1,6 @@
+id: bad-vanity-task
+hypothesis: "This refactor will produce more commits per week and increase developer activity."
+success: "≥10 commits made per developer per week"
+pivot: "if commits made stays flat, the refactor failed to motivate"
+measurement: "git log --since='30 days ago' --oneline | wc -l"
+anchor: "no anchor — vanity metrics are forbidden by rule #9"
