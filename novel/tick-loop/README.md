@@ -103,7 +103,7 @@ The supervisor unit files (`distribution/systemd/minsky-tick-loop.service`, `dis
 Architecture:
 
 - `runDaemon` — the I/O orchestrator. Delegates to `runOneIteration` (PAUSED check → TASKS.md read → budget check → pick) and `runClaimedIteration` (claim → dry-run spawn → complete) so each step is independently testable and the cognitive-complexity cap holds (rule #6, biome ≤10).
-- `pickTask` — pure parser; returns the first unblocked unclaimed P0/P1 task ID from a TASKS.md source string.
+- `pickTask` — pure parser; returns the first unblocked unclaimed P0/P1 task ID from a TASKS.md source string. A task is treated as blocked (and skipped) when its block contains either `**Blocked by**: <id>` (dependency blocker) OR `**Blocked**: <reason>` (external-constraint blocker — the operator's escape hatch per Beyer SRE 2016 Ch. 17, used for blocked-by-default actions like `needs-user-approval`). Both spellings are honored as of `tick-loop-picktask-honors-blocked-field` (closed PR landed 2026-05-04).
 - `claim` — pure helper that returns the lease shape `{ taskId, leasedBy: '@minsky-tick-loop' }`. v0 is in-memory only; persistence to TASKS.md is the documented follow-up.
 - `spawnTickDryRun` — the dry-run spawn step that calls the existing `tick(...)` with the injected `MockAnthropicClient`. v0's only spawn path.
 
