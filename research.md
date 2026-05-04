@@ -102,6 +102,11 @@ Each active dependency follows the same shape:
 - **Risks**: Python dep adds install complexity for JS-first users; verify cache file format is stable across versions
 - **Adapter**: `novel/adapters/token-monitor.maciek.ts` (forthcoming)
 - **Last reviewed**: 2026-05-03
+- **Pinned CI version**: `claude-monitor==3.1.0` (PyPI). Wired in `.github/workflows/ci.yml` under the `maciek-smoke` job per the rule-#9 preparation-PR pattern. Bumps go through `review-q3-2026` (quarterly dependency review).
+- **2026-05-03 finding (preparation PR for `budget-guard-maciek-impl`)**: claude-monitor 3.1.0 has *no* documented JSON output flag (`--json` doesn't exist in the public CLI surface; the public flags are `--view {realtime,daily,monthly}` plus `--version` per the upstream README). The `budget-guard-maciek-impl` task brief assumed `claude-monitor --json` would yield a parseable `TokenSnapshot`; that assumption is wrong. Two options for the adapter:
+  1. **Read upstream's data source directly.** Maciek reads `~/.config/claude/` (Anthropic's own config dir for Claude Code). The adapter parses the same files; Maciek's CLI is bypassed. Pros: no dependency on Maciek's stdout format; less brittle. Cons: we re-implement Maciek's ML predictor for `weeklyHeadroomFraction`, OR drop the predictor and surface only deterministic counts.
+  2. **Push a `--json` mode upstream.** File a feature request / PR at <https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor>. Pros: aligns with rule #1 (don't reinvent — push upstream). Cons: gates our adapter on a third-party merge timeline.
+  Decision (provisional, to be revisited when `budget-guard-maciek-impl` is implemented): start with option 1 for the deterministic counts (5h-window remaining, observed-at timestamp); leave the ML-predicted weekly headroom as `null` in the `TokenSnapshot` until either Maciek ships JSON output or we ship our own predictor. The maciek-impl task's hypothesis and measurement command have been updated to reflect this.
 
 ### TUI dashboard — `LocalDashboard`
 
