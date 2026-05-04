@@ -13,20 +13,6 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `tick-loop-spawn-args-fresh-session` — drop default `--resume`; spawn fresh non-interactive Claude with brief on stdin
-  - **ID**: tick-loop-spawn-args-fresh-session
-  - **Tags**: novel, runtime, supervision, blocker, bug
-  - **Estimate**: 2–3h
-  - **Hypothesis**: `ProcessSpawnStrategy` in `novel/tick-loop/src/spawn-strategy.ts` defaults its args to `["--resume"]`. `claude --resume` opens an interactive session picker (TTY) and resumes the previous conversation — it does NOT start a fresh session reading the brief from stdin. The daemon's contract is "feed the task brief in, get a result out"; `--resume` violates that. Switching the default to a non-interactive flag set (e.g., `["--print", "--no-tty"]` or whatever Claude Code's documented headless invocation is) and writing the brief to stdin makes the contract honest.
-  - **Details**: 1) Survey Claude Code's CLI flags for non-interactive mode (`claude --help` or the upstream docs — pre-flight saw `claude` at `/Users/cbrwizard/.local/bin/claude`). 2) Update `ProcessSpawnStrategyOptions.args` default. 3) Add an integration test (gated on `which claude`, skip in CI) that spawns the real binary against a 1-line task brief and asserts: process started fresh, exitCode 0, stdoutTail contains the response (not a session-picker UI prompt). 4) Update vision.md row 67 if it mentions `--resume` as the spawn target.
-  - **Files**: `novel/tick-loop/src/spawn-strategy.ts`, `novel/tick-loop/src/spawn-strategy.test.ts`, possibly `vision.md` (row 67)
-  - **Verification**: gated integration test shows the spawned claude consumed the brief from stdin and produced a fresh response (no "select a session to resume" prompt).
-  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0; locally with `claude` installed: `node -e "import('./novel/tick-loop/dist/spawn-strategy.js').then(m=>new m.ProcessSpawnStrategy().spawn({taskId:'smoke',brief:'echo hello',env:process.env})).then(r=>console.log(r.exitCode,r.stdoutTail.slice(0,80)))"` prints `0` and a fresh-session-shaped output, NOT a TTY prompt.
-  - **Pivot**: if Claude Code has no non-interactive headless mode, pivot to a temp-file-based handoff (write the brief to `state/inbox/<id>.md`, expect operator/script to consume — pre-registered in the parent `tick-loop-daemon-real-spawn` Pivot field).
-  - **Acceptance**: `ProcessSpawnStrategy` default args invoke a fresh Claude session that consumes stdin and emits a response on stdout; `--resume` is no longer the default.
-  - **Anchor**: Armstrong 2007 (let-it-crash AT the right boundary — the Strategy must produce a *correct* result shape, not just a *result*); rule #2 (the Strategy seam is honest only if its real implementation matches the contract the daemon expects).
-  - **Risk**: 2nd-highest pre-flight bug; without this fix, the daemon spawns claude but feeds it the wrong input. Mitigation: integration test gated on `claude` presence so CI doesn't depend on Anthropic auth; the dry-run path is unaffected.
-
 - [ ] `openobserve-installer-version-pin-fix` — installer pinned to v0.80.1 returns 404 from the official GitHub releases
   - **ID**: openobserve-installer-version-pin-fix
   - **Tags**: distribution, bug, observability
