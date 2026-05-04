@@ -12,7 +12,11 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 
 ## File location
 
-`EXPERIMENT.yaml` lives at the **root of the PR** (not committed long-term — the per-PR runner reads it from the diff and stores the parsed record under `experiment-store/<id>.jsonl` once `ci-experiment-runner-v0` ships).
+Experiment records live at `experiments/<id>.yaml` at the repo root (one file per pre-registered experiment). Per [`experiments-directory-migration`](../../TASKS.md), the singleton `EXPERIMENT.yaml` shape was retired in favour of plural records: a single PR may carry multiple experiments, and cross-repo `minsky run` invocations each produce their own record without colliding on a singleton path.
+
+The filename matches the record's `id:` field (e.g. `experiments/tick-loop-spawn-args-fresh-session-2026-05-04.yaml` for `id: tick-loop-spawn-args-fresh-session-2026-05-04`). The `id:` is the canonical identifier; the filename is a convenience for filesystem discovery. The per-PR runner walks `experiments/*.yaml`, gates each, and stores the parsed records under `experiment-store/<id>.jsonl` after merge.
+
+The legacy singleton `EXPERIMENT.yaml` at the repo root is forbidden by the `check-no-singleton-experiment` ratchet (`scripts/check-no-singleton-experiment.mjs`). Restoring it requires retiring the migration — recorded explicitly in `vision.md` § Pattern conformance index, not via a workaround.
 
 ## Schema
 
