@@ -35,6 +35,9 @@ importers:
 
   novel/adapters/observability:
     dependencies:
+      '@minsky/adapter-types':
+        specifier: workspace:*
+        version: link:../types
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
@@ -70,6 +73,8 @@ importers:
         version: 1.40.0
 
   novel/adapters/token-monitor: {}
+
+  novel/adapters/types: {}
 
   novel/budget-guard:
     dependencies:

@@ -1,0 +1,22 @@
+{
+  "name": "@minsky/adapter-types",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Leaf types package — shared adapter health-probe contract (SelfTestStatus / SelfTestResult / aggregateStatus). Adapter pattern (Gamma 1994) + status lattice (Avizienis 2004).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
