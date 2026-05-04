@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..", "..", "..");
@@ -138,6 +138,32 @@ function runNode(
 describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
   /** @type {FixtureHost} */
   let host: FixtureHost;
+
+  // Build the two workspace packages once before the suite runs. The CLIs
+  // load from `dist/` per their package.json `main`; without this build,
+  // CI fresh checkouts hit `node:internal/modules/esm/resolve` errors.
+  // Local dev typically has the build cached, but CI doesn't, so we make
+  // it explicit here (rule #6 — let-it-crash AT the boundary; the test's
+  // first job is to make sure the artefacts under test exist).
+  //
+  // We use `tsc --force` (via `--force` flag) to defeat the
+  // `tsconfig.tsbuildinfo` incremental cache — without `--force`, a stale
+  // cache pointing at a `dist/` we've wiped reports a no-op success.
+  beforeAll(() => {
+    const tsc = resolve(REPO_ROOT, "node_modules/.bin/tsc");
+    // `tsc -b` is the build-mode entry that respects `composite: true` and
+    // walks the project references; `--force` defeats the
+    // `tsconfig.tsbuildinfo` incremental cache so a fresh CI checkout (or
+    // a `dist/`-wiped local) actually rebuilds.
+    execFileSync(tsc, ["-b", "novel/sidecar-bootstrap/tsconfig.json", "--force"], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+    });
+    execFileSync(tsc, ["-b", "novel/cross-repo-runner/tsconfig.json", "--force"], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+    });
+  }, 60_000);
 
   beforeEach(() => {
     host = createFixtureHost();
