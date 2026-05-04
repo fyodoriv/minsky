@@ -78,22 +78,6 @@ The deterministic linter checks `anchor.length >= 5`. It does NOT verify that th
 - "Munafò et al., *Nature Human Behaviour* 1, 0021, 2017"
 - "rule #9 (vision.md § 9)"  — internal cross-references to constitutional rules are valid because the rules themselves carry primary citations
 
-### A4. Measurement command runs but doesn't actually inspect output
-
-The deterministic CI runner (`scripts/run-experiment.mjs`) executes the command and records its exit code. It does NOT check whether the command's *stdout* is consumed against a threshold. A measurement that shells out to a tool but never inspects the value (e.g., `curl http://example/api` instead of `curl http://example/api | jq -e '.value < 100'`) gives false confidence — it always exits 0 as long as the network call succeeds.
-
-**Examples to flag:**
-
-- `measurement: "curl https://api/usage"` (no threshold check)
-- `measurement: "node count.mjs"` (script reports a number but exit code is always 0)
-- `measurement: "echo done"` (literally degenerate)
-
-**Not to flag:**
-
-- `measurement: "test $(curl -s https://api/usage | jq -r '.tokens') -lt 100000"`
-- `measurement: "pnpm vitest run path/to/file"` (vitest exits non-zero on failure)
-- `measurement: "node scripts/uptime.mjs"` if `uptime.mjs` itself exits non-zero on regression
-
 ### A5. Pattern-conformance level doesn't match the source code
 
 The deterministic linter (`scripts/check-pattern-index.mjs`) verifies that every newly-added top-level file is *mentioned* in the index. It does NOT verify that the declared conformance level (`full` / `partial` / `deviation`) matches what the code actually does. A row that says `full` next to source code that obviously deviates is silent rule-#8 violation.
@@ -121,7 +105,9 @@ Append a markdown block to `spec-advisories/<YYYY-MM-DD>.md` (create the file if
 | A3 | Anchor cites a Medium post | high | Replace with a peer-reviewed or textbook source per rule #5 / #8. |
 ```
 
-`rule_id` ∈ {A1, A2, A3, A4, A5}; `severity` ∈ {low, medium, high}. The Skill never claims authority — every line ends with "consider", "suggest", or "review" framing. The advisory file is human-readable; the orchestrator may surface it in a PR comment but must NOT auto-block a merge on its contents.
+`rule_id` ∈ {A1, A2, A3, A5}; `severity` ∈ {low, medium, high}. The Skill never claims authority — every line ends with "consider", "suggest", or "review" framing. The advisory file is human-readable; the orchestrator may surface it in a PR comment but must NOT auto-block a merge on its contents.
+
+A4 ("measurement command runs but doesn't actually inspect output") was retired in PR `ci-lint-measurement-inspects-output` per the rule-#10 ratchet — the deterministic gate is `scripts/check-measurement-inspects-output.mjs`. A4 is reserved (do not reuse the slot for an unrelated rule).
 
 ## What this Skill does NOT do
 

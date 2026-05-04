@@ -395,6 +395,39 @@ jobs:
       - name: run supervisor integration test (macos)
         run: bash distribution/test-supervisor.sh macos
 
+  measurement-inspects-output:
+    # rule #10 ratchet applied to spec-monitor advisory rule A4 ("measurement
+    # runs but doesn't actually inspect output"): the deterministic gate
+    # promotes the allowlist (`test`, `[`, `[[`, `jq -e`, `grep -q`/`-c`,
+    # `assert`, `vitest`, `pnpm test`/`typecheck`/`lint`, `@tasks-md/lint`,
+    # `markdownlint-cli2`, `gh run list ... --jq`, `node scripts/check-*.mjs`)
+    # and blacklist (`echo`, bare `true`, bare `curl`, bare `node`) from
+    # SKILL.md into a CI lint over EXPERIMENT.yaml's `measurement` field.
+    # Three-way verdict — pass / fail / advisory-warn. The matching
+    # advisory rule (A4) is removed from `novel/spec-monitor/SKILL.md`
+    # in the same PR.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # Havelund & Goldberg, "Verify Your Runs", *VSTTE* 2008 (runtime
+    # verification — the inspect-output check is the deterministic-monitor
+    # layer); Beck 1999 (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build @minsky/experiment-record
+        run: pnpm --filter @minsky/experiment-record build
+      - name: measurement-inspects-output lint
+        run: node scripts/check-measurement-inspects-output.mjs EXPERIMENT.yaml
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-measurement-inspects-output.test.mjs
+
   skill-rule-cap:
     # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
     # `novel/spec-monitor/SKILL.md` declares a hard cap of ≤5 advisory
@@ -432,6 +465,7 @@ jobs:
       - macos-supervisor-integration
       - maciek-smoke
       - markdownlint
+      - measurement-inspects-output
       - pattern-index
       - pr-self-grade
       - skill-rule-cap
@@ -458,6 +492,7 @@ jobs:
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.markdownlint.result }}" \
+                   "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
                    "${{ needs.rule-3-doc-first.result }}" \
