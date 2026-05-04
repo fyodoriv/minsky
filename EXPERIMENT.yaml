@@ -1,17 +1,18 @@
-id: scripts-ts-check-migration
+id: spec-monitor-skill
 hypothesis: |
-  Adding `// @ts-check` + JSDoc types to each remaining `scripts/*.mjs`
-  rule-enforcer (rule-1, rule-2, rule-5, rule-7, pr-self-grade) brings
-  them under strict tsc enforcement (strict + noUncheckedIndexedAccess
-  + exactOptionalPropertyTypes), so that the linters that enforce the
-  constitutional rules are themselves type-checked at PR time. Once all
-  scripts pass, flipping `scripts/tsconfig.json` from `checkJs: false`
-  to `checkJs: true` and dropping the per-file `// @ts-check` directives
-  catches type errors at PR time across all 7 `.mjs` scripts uniformly,
-  hardening rule enforcement (rule #10 stability — "if rules checkers
-  aren't stable then rules aren't stable as well").
-success: "pnpm typecheck exits 0 with `checkJs: true` globally and zero `// @ts-check` directives across `scripts/*.mjs`; pnpm test exits 0 (231 tests pass); pnpm lint exits 0; npx @tasks-md/lint TASKS.md exits 0; `grep -c '// @ts-check' scripts/*.mjs` returns 0; `grep -c '\"checkJs\": true' scripts/tsconfig.json` returns 1"
-pivot: "if any one script genuinely cannot pass strict typing in <30 minutes of typing work (e.g., heavy reliance on dynamic shapes that fight noUncheckedIndexedAccess), file a follow-up `scripts-ts-check-${name}-revert` task and revert that script's `// @ts-check` directive only — leave the global `checkJs: true` flip in place. Don't lower the strictness floor, don't fall back to `@ts-ignore`."
-measurement: "pnpm typecheck && pnpm test && pnpm lint && grep -c '// @ts-check' scripts/*.mjs"
-anchor: "rule #10 (deterministic enforcement — the linters that enforce constitutional rules must themselves be type-checked, otherwise the rules they enforce are only as stable as the linter's runtime behaviour); Microsoft TypeScript handbook on `// @ts-check` (the canonical incremental-strictness pattern)"
-replay_windows_days: [7, 30]
+  Shipping `claude-spec-monitor` as an advisory-only Claude Skill at
+  `novel/spec-monitor/` (with SKILL.md, ≥3 judgement-only fixtures, and
+  a deterministic-overlap fixture demonstrating Skill silence) closes
+  the rule-#10 ratchet: the deterministic linters under
+  `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs`
+  + `scripts/check-pr-self-grade.mjs` carry every load-bearing share of
+  runtime verification, and the Skill scopes the residual ≤10 % to a
+  hard-capped set of 5 prose-quality concerns (A1 vagueness, A2 zero-
+  margin pivot, A3 non-primary anchor, A4 unchecked output, A5
+  conformance-level mismatch). No CI workflow lists `spec-monitor` as
+  a required check.
+success: "grep -c '^name: spec-monitor' novel/spec-monitor/SKILL.md returns 1; grep -RE 'spec-monitor.*required' .github/workflows/ returns no matches; ls novel/spec-monitor/test/judgement-only/ shows ≥3 fixtures; ls novel/spec-monitor/test/deterministic-overlap/ shows ≥1 fixture; vision.md row 35 mentions novel/spec-monitor/"
+pivot: "if 6 months in nobody references the Skill in a PR review or `spec-advisories/` is still empty, the residual judgement scope was empty after all and rule #10's claim 'whatever cannot be deterministically checked is not a constitutional rule' applies — drop the Skill entirely."
+measurement: "test $(grep -c '^name: spec-monitor' novel/spec-monitor/SKILL.md) -eq 1 && test $(grep -RE 'spec-monitor.*required' .github/workflows/ 2>/dev/null | wc -l) -eq 0 && test $(ls novel/spec-monitor/test/judgement-only/ | wc -l) -ge 3 && test $(ls novel/spec-monitor/test/deterministic-overlap/ | wc -l) -ge 1"
+anchor: "rule #10 (vision.md § 10 — deterministic enforcement; what cannot be deterministically checked is not a constitutional rule); Havelund & Goldberg, 'Verify Your Runs', *VSTTE* 2008 (runtime verification — split here into deterministic + advisory layers); Hunt & Thomas, *The Pragmatic Programmer*, 1999, Tip 32 ('crash early')"
+replay_windows_days: [7, 30, 180]
