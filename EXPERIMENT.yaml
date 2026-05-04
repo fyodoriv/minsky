@@ -1,28 +1,30 @@
-id: ci-lint-mape-k-token-budget-cap
+id: ci-lint-mape-k-constraints-md-size
 hypothesis: |
-  Shipping `scripts/check-mape-k-budget-cap.mjs` + paired tests + the
-  `mape-k-budget-cap` CI job promotes ARCHITECTURE.md § "MAPE-K cadence"'s
-  prose-only ≤5.7 % weekly Max5 budget cap into a deterministic CI gate.
-  Today the cap is enforced only by careful reading of ARCHITECTURE.md and
-  research.md § "MAPE-K cadence" (the cost-math derivation: 14 watchdog
-  passes/week × ≤0.3 % + 0–3 event passes/week × ≤0.5 % + a quarterly
-  tick-iteration backstop ≤5.7 % of weekly budget). When the
-  `mape-k-loop` v0 lands its `config/mape-k.json` artefact, any future
-  PR that retunes the watchdog T (currently 12 h), per-pass cost
-  estimate, or backstop frequency will silently breach 5.7 % without any
-  CI signal. The pure function `checkMapeKBudgetCap({ config,
-  weeklyBudgetTokens, capFraction })` (default `capFraction = 0.057`)
-  asserts `weeklyProjectedTokens / weeklyBudgetTokens ≤ capFraction`; the
-  CLI reads `config/mape-k.json` and short-circuits to a stderr
-  advisory + exit 0 when the file is absent (the dormant state mandated
-  by the `ci-lint-mape-k-token-budget-cap` task brief — v0 ships before
-  the config artefact lands). Boundary semantics: the cap is *inclusive*
-  per Beyer SRE 2016 Ch. 3 — exactly 5.7 % passes; only `> 5.7 %` fails.
-  This PR adds the lint without modifying any `novel/` package — the
-  rule-#10 ratchet stays scoped to scripts/ + .github/workflows/ +
-  vision.md (one row) + TASKS.md (one removal).
-success: "`pnpm typecheck` exits 0; `pnpm vitest run scripts/check-mape-k-budget-cap.test.mjs` exits 0 with ≥14 tests passing collectively (≥9 in the pure-function describe block, ≥5 in the I/O-boundary describe block); `node scripts/check-mape-k-budget-cap.mjs` exits 0 against the current repo (no `config/mape-k.json` yet — dormant); the `ci-lint-mape-k-token-budget-cap` task block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: ci-lint-mape-k-token-budget-cap$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source) all pass on this PR's diff."
-pivot: "If the 5.7 % cap itself moves to a per-tier adaptive threshold (per `mape-k-loop`'s monthly self-calibration, research.md § \"MAPE-K cadence\"), retire this lint and replace it with one that reads the calibrated value from the `mape-k-loop` Knowledge log — the constant `DEFAULT_CAP_FRACTION = 0.057` becomes a moving target and a fixed-constant linter teaches the team to ignore it. If projected weekly cost stabilises >8 % for 4 weeks (the threshold from research.md § \"MAPE-K cadence\"'s cost-math block), the cadence design itself is wrong — fire the cadence pivot, not this lint's pivot."
-measurement: "pnpm typecheck && pnpm vitest run scripts/check-mape-k-budget-cap.test.mjs --reporter=json | jq -e '.numPassedTests >= 14 and .numFailedTests == 0' && node scripts/check-mape-k-budget-cap.mjs && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: ci-lint-mape-k-token-budget-cap$' TASKS.md)\" = '0' ]"
-anchor: "Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability Engineering: How Google Runs Production Systems*, O'Reilly, 2016, Ch. 3 (error-budget enforcement — exceeding the budget triggers a mechanical response, not a discussion; the inclusive-at-cap boundary semantics come from this chapter); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K reference architecture whose cadence this lint guards); Beck, K., *Extreme Programming Explained: Embrace Change*, Addison-Wesley, 1999, Ch. 17 (CI as the constraint enforcer — the prose-only-cap-becomes-deterministic-gate ratchet); rule #10 (vision.md § 10 — deterministic enforcement; the constitutional ratchet that mandates this promotion); ARCHITECTURE.md § \"MAPE-K cadence\" (the prose anchor for the 5.7 % cap); research.md § \"MAPE-K cadence\" (the cost-math derivation that the cap is constructed from); vision.md § \"Pattern conformance index\" row 55 (added in this PR)."
+  Shipping `scripts/check-mape-k-constraints-md-size.mjs` + paired tests +
+  the `mape-k-constraints-md-size` CI job promotes
+  `novel/mape-k-loop/constraints.md`'s prose-only 200-entry archive cap
+  into a deterministic CI gate. Today the cap is enforced only by the
+  preamble's prose ("the supervisor's `constraints-md-size-cap` check
+  fires when this file grows past 200 entries"); an unattended MAPE-K
+  loop appends one `## <date>` section per tick (Helland 2007 immutable
+  log substrate; Kephart-Chess 2003 Knowledge phase) and could grow the
+  live log to 500+ entries before any human noticed — the same "did
+  anyone notice?" failure mode rule-#6 closes mechanically. The pure
+  function `checkConstraintsMdSize({ content, capEntries }) => { ok,
+  count, reason? }` (default `capEntries = 200`) counts strict
+  `^## YYYY-MM-DD` headings and fails when the count exceeds the cap;
+  the CLI reads the live file and short-circuits to a stderr advisory +
+  exit 0 when the file is absent (the dormant state — same precedent as
+  `check-skill-rule-cap`'s retired-Skill terminal state and
+  `check-mape-k-budget-cap`'s missing-config short-circuit). Boundary
+  semantics: the cap is *inclusive* per Beyer SRE 2016 Ch. 3 — exactly
+  200 entries passes; only 201+ fails. This PR adds the lint without
+  modifying any `novel/` package's source — the rule-#10 ratchet stays
+  scoped to scripts/ + .github/workflows/ + vision.md (one row) +
+  TASKS.md (one removal) + novel/mape-k-loop/README.md (one follow-up
+  note removal).
+success: "`pnpm typecheck` exits 0; `pnpm vitest run scripts/check-mape-k-constraints-md-size.test.mjs` exits 0 with ≥10 tests passing collectively (≥9 in the pure-function describe block, ≥4 in the I/O-boundary describe block — including the four mandatory cases: 199 → exit 0, exactly 200 → exit 0, 201 → exit 1 with `archive` in stderr, missing file → exit 0); `node scripts/check-mape-k-constraints-md-size.mjs` exits 0 against the current repo (`constraints.md` has 1 entry today — well under cap); the `mape-k-constraints-md-size-cap` task block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-constraints-md-size-cap$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source / mape-k-budget-cap) all pass on this PR's diff."
+pivot: "If 200 proves arbitrary (the live `constraints.md` is still readable at 400 entries — operator review during incident response remains tractable), raise the `DEFAULT_CAP_ENTRIES` constant rather than removing the lint. Removing the lint would re-open the unbounded-growth failure mode the gate exists to close. If MAPE-K loop cadence stabilises so low that the cap is unreachable for >12 months, retire this lint — the dormant-state precedent applies (the gate cannot fail if the underlying invariant is no longer load-bearing)."
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-mape-k-constraints-md-size.test.mjs --reporter=json | jq -e '.numPassedTests >= 10 and .numFailedTests == 0' && node scripts/check-mape-k-constraints-md-size.mjs && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-constraints-md-size-cap$' TASKS.md)\" = '0' ]"
+anchor: "Helland, P., \"Life beyond Distributed Transactions: an Apostate's Opinion\", *CIDR* 2007 (immutable log — derived data through reissue rather than mutation; the archive-split discipline this lint enforces); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K reference architecture whose Knowledge phase substrate is `constraints.md`); Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability Engineering: How Google Runs Production Systems*, O'Reilly, 2016, Ch. 3 (the inclusive-at-cap boundary semantics — \"used the budget\" ≠ \"exceeded the budget\"); Beck, K., *Extreme Programming Explained: Embrace Change*, Addison-Wesley, 1999, Ch. 17 (CI as the constraint enforcer — the prose-only-cap-becomes-deterministic-gate ratchet); rule #10 (vision.md § 10 — deterministic enforcement; the constitutional ratchet that mandates this promotion); rule #6 (vision.md § 6 — failure-mode discipline; closes the \"did anyone notice?\" failure mode mechanically); `novel/mape-k-loop/constraints.md` preamble (the prose anchor for the 200-entry cap); vision.md § \"Pattern conformance index\" row 56 (added in this PR)."
 replay_windows_days: [7, 30]
