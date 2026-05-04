@@ -132,7 +132,7 @@
   - **ID**: dashboard-web-v0
   - **Tags**: tracker, novel, ux
   - **Estimate**: 1–2d
-  - **Blocked by**: dashboard-web-render-all-10, dashboard-web-lighthouse-ci
+  - **Blocked by**: dashboard-web-lighthouse-ci
   - **Hypothesis**: A ≤300-line Hono SSR web app reading the OTEL backend through `@minsky/observability` renders all 10 success metrics from `vision.md` with first-paint <1 s on iPhone over Tailscale and Lighthouse Mobile score ≥90.
   - **Details**: Hono or similar minimal web app, ~300 lines. Reads OTEL backend through Observability adapter. Mobile-friendly. Reachable via Tailscale. Shows the 10 success metrics from `vision.md`. Decomposed into 4 one-commit-sized sub-tasks per the next-task skill's decomposition rule. Sub-task 1 (`dashboard-web-skeleton`) shipped in PR adding `novel/dashboard-web/` (SSR scaffold, ≤100 LoC); the 3 remaining sub-tasks below are this tracker's `Blocked by` set.
   - **Verification**:
@@ -145,29 +145,11 @@
   - **Anchor**: Card & Mackinlay 1999 (information visualization); Wilkie, "RED Method", 2018 (rate / errors / duration as the right service-level lens).
   - **Risk**: Scope creep into a "real" dashboard. Cap line count; refuse new features without removing one.
 
-- [ ] Wire the 10 metrics into SSR (stub data values)
-  - **ID**: dashboard-web-render-all-10
-  - **Parent**: dashboard-web-v0
-  - **Tags**: novel, ux
-  - **Estimate**: 1–2h
-  - **Hypothesis**: Iterating the 10-entry `SuccessMetric[]` from sub-task 2 (now the `SUCCESS_METRICS` constant) inside `render({ metrics })` produces SSR HTML containing exactly 10 `data-metric-id=` attributes — the parent `dashboard-web-v0` task's verification cell. Stub data values land here; the real OTEL-backend wiring through `@minsky/observability` follows in a separate task (`dashboard-web-otel-wiring`, filed at this sub-task's close — see research.md § "OpenObserve choice" / PR #43).
-  - **Details**: Update `createServer` to read the 10-entry constant from sub-task 2; update `render` to render one `<li>` per entry (already supports an arbitrary `metrics` array — the change is at the server's wiring layer, not the renderer). Keep total `novel/dashboard-web/src/*.ts` LoC ≤ 300 (parent's pivot threshold). Add an integration test that asserts `data-metric-id=` count equals 10 against `app.fetch(GET /)`.
-  - **Files**: `novel/dashboard-web/src/server.ts`, `novel/dashboard-web/src/server.test.ts`
-  - **Verification**:
-    - `pnpm vitest run novel/dashboard-web/` exits 0; the new integration test asserts `data-metric-id=` count is exactly 10
-    - `wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}'` ≤ 300
-  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 7 and .numFailedTests == 0'` exits 0; `[ "$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')" -le 300 ]`.
-  - **Pivot**: if the 10-row render exceeds the 300-LoC cap (>450 LoC after the parent's "breached >50 %" rule), pivot per the parent's pivot threshold to a template-literal approach without Hono. If the stub data values mislead operators (the dashboard appears "live" when the OTEL backend is missing), add a banner / sentinel value and file the follow-up to wire OpenObserve sooner.
-  - **Acceptance**: 10 `data-metric-id=` attributes in the rendered HTML; ≥7 tests passing across the package; LoC cap holds.
-  - **Anchor**: Card & Mackinlay, *Readings in Information Visualization*, 1999 (the 10-metric glanceable display); Wilkie, "RED Method", 2018 (service-level lens); rule #4 (every constant in source); rule #7 (graceful-degrade — stub values are explicit, not silent).
-  - **Risk**: silent stub values look indistinguishable from real measurements. Mitigation: render the stub label visibly (e.g., `(stub)` suffix) until OTEL wiring lands.
-
 - [ ] Lighthouse Mobile ≥0.9 CI gate
   - **ID**: dashboard-web-lighthouse-ci
   - **Parent**: dashboard-web-v0
   - **Tags**: novel, ux
   - **Estimate**: 1–2h
-  - **Blocked by**: dashboard-web-render-all-10
   - **Hypothesis**: A Lighthouse Mobile run against a started local server (the dashboard from sub-task 3) producing a JSON with `categories.performance.score >= 0.9` operationalises the parent's "Lighthouse Mobile score ≥90 in CI" verification cell. The job runs in the same CI workflow as the rest of the deterministic linters so a regression fails the merge gate, not a separate cadence.
   - **Details**: Either a new job inside `.github/workflows/ci.yml` or a new workflow file (`.github/workflows/lighthouse.yml`) — match whichever shape is least disruptive to existing concurrency / caching. The job: pnpm install → start the dashboard via `node novel/dashboard-web/dist/server.js` (or an equivalent runner) → run `npx -y lighthouse@12 http://localhost:8080/ --preset=mobile --quiet --output=json --output-path=lighthouse.json` → assert `jq -e '.categories.performance.score >= 0.9' lighthouse.json`. Pin the Lighthouse version per ARCHITECTURE.md § "Versioning & dependency evolution".
   - **Files**: `.github/workflows/ci.yml` (or `.github/workflows/lighthouse.yml`), `distribution/run-dashboard-web.sh` (the runner — also opens the seam for sub-task 2 of `dashboard-web-otel-wiring` to start the server with real OTEL config)
@@ -181,6 +163,41 @@
   - **Risk**: Lighthouse Mobile score is environment-sensitive (CPU throttling on GH-hosted runners). Mitigation: run with a fixed throttling profile (`--throttling.cpuSlowdownMultiplier=4`, the Lighthouse Mobile default) and average over multiple runs if a single-shot proves too noisy.
 
 ## P3
+
+- [ ] `dashboard-web-otel-wiring` — replace stub metric values with `@minsky/observability` reads
+  - **ID**: dashboard-web-otel-wiring
+  - **Parent**: dashboard-web-v0
+  - **Tags**: novel, ux, observability
+  - **Estimate**: 2–4h
+  - **Hypothesis**: Replacing the `(stub)` sentinel in `renderRow` (sub-task 3) with a per-metric read through `@minsky/observability`'s OTEL-backed query Strategy reduces the count of `(stub)` tokens in the rendered HTML from 10 to 0 while leaving the 10 `data-metric-id=` invariant intact, so the dashboard moves from "structural placeholder" to "live reading" in one step. The renderer remains pure (the metric-value lookup happens at server-construction time and is passed in as data); rule #2 (every dep behind interface) holds because the value source is a Strategy parameter, not a direct OTEL client.
+  - **Details**: Extend `createServer` to accept an optional `valueOf: (m: SuccessMetric) => string | null` Strategy (default: `() => null`, which renders `(stub)` as today — backward-compatible). Wire the production runner (`distribution/run-dashboard-web.sh`, opened by sub-task 4) to pass a Strategy implementation reading `@minsky/observability`'s query API. Each `SuccessMetric.formula` is the OTEL/PromQL/journalctl command run through the Strategy at request time, with a per-render timeout (≤500 ms) so a slow backend graceful-degrades to `(stub)` rather than blocking the page.
+  - **Files**: `novel/dashboard-web/src/server.ts`, `novel/dashboard-web/src/render.ts`, `novel/dashboard-web/test/server.test.ts`, `distribution/run-dashboard-web.sh`
+  - **Verification**:
+    - `pnpm vitest run novel/dashboard-web/` exits 0 with the new "live values replace `(stub)`" assertion green when a fake Strategy returns numeric strings
+    - The default-Strategy path still emits 10 `(stub)` tokens (backward-compatibility regression guard)
+    - `wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}'` ≤ 300 (parent's pivot threshold)
+  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 9 and .numFailedTests == 0'` exits 0; `[ "$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')" -le 300 ]`; against a running dashboard with a real Strategy: `curl -s localhost:8080/ | grep -c '(stub)'` returns 0.
+  - **Pivot**: if the per-metric Strategy at request time exceeds the 500-ms budget on >5 % of requests over 24 h sustained operation, pivot to a server-side cache layer (refresh once per minute) — the dashboard becomes a read-through over a refreshed snapshot rather than a per-request fan-out. If the Strategy shape needs ≥3 distinct backends (Prometheus + journalctl + GH API), keep it as a Strategy but add a per-row dispatch table; do not collapse into a single backend client.
+  - **Acceptance**: 0 `(stub)` tokens when the live Strategy is wired; backward-compat default still emits 10; 300-LoC cap holds; sub-task 4 (`dashboard-web-lighthouse-ci`) closes against the live HTML.
+  - **Anchor**: rule #2 (vision.md § 2 — every dep behind interface; the value source is a Strategy, not a hard dependency on Prometheus/OpenObserve); Card & Mackinlay 1999 (live readings are the dashboard's purpose; placeholder is a transitional state); Wilkie 2018 (RED Method — duration / errors / rate is what the live values surface); rule #7 (graceful-degrade — Strategy timeouts fall back to `(stub)` rather than blocking the page).
+  - **Risk**: Strategy errors (network blip, OTEL backend down) silently render `(stub)` — operators may misread "real but degraded" as "still wired up". Mitigation: the rendered token differentiates: `(stub)` for the never-wired default, `(stale)` for a Strategy that returned `null` after a real attempt; surface the distinction in a follow-up if it proves load-bearing.
+
+- [ ] `dashboard-web-task-throughput-formula-drift` — align `task-throughput` formula with vision.md § Success criteria row 10
+  - **ID**: dashboard-web-task-throughput-formula-drift
+  - **Parent**: dashboard-web-v0
+  - **Tags**: novel, ux, spec-alignment
+  - **Estimate**: 15–30m
+  - **Hypothesis**: `vision.md` § "Success criteria" row 10 specifies `git log … | wc -l` *divided by 30* to convert a 30-day commit count into a `tasks/day` rate, but `novel/dashboard-web/src/metrics.ts`'s `task-throughput` formula omits the `/ 30` divisor. The unit cell on both sides reads `tasks/day` so the dashboard would render a value 30× too large once OTEL wiring lands. Adding `/ 30` (or rendering the count and labelling the unit as `tasks / 30 d` to match) restores spec alignment and prevents an operator misread.
+  - **Details**: Either (a) extend the formula string to include the `/ 30` post-processing step (the renderer just displays the string today, but `dashboard-web-otel-wiring`'s Strategy will execute it — so the divisor matters), or (b) update vision.md row 10 to drop the divisor and align the unit cell on `tasks / 30 d`. Resilience-scout finding from the `dashboard-web-render-all-10` PR.
+  - **Files**: `novel/dashboard-web/src/metrics.ts`, `vision.md` (only one of the two — pick the canonical side)
+  - **Verification**:
+    - The `task-throughput` row in `metrics.ts` and the row in vision.md § "Success criteria" agree on both formula and unit
+    - `pnpm test` stays green (existing kebab-case + count + dedup invariants still hold)
+  - **Measurement**: `diff <(grep -A1 'task-throughput' novel/dashboard-web/src/metrics.ts | grep formula | head -1) <(awk '/^\| 10 \|/{print}' vision.md | head -1)` exits 0 once the two strings represent the same expression (modulo escaping); `pnpm vitest run novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e '.numPassedTests >= 3 and .numFailedTests == 0'` exits 0.
+  - **Pivot**: if vision.md row 10 owners decide the unit should remain `tasks/day` but the measurement window is in flux (e.g., a future `/ N` adapts to a configurable lookback), make the divisor a property on `SuccessMetric` rather than embedded in `formula`; the divisor becomes data, not string-substring.
+  - **Acceptance**: spec alignment restored; resolved by editing one side of the divergence, not both; resilience-scout finding closed.
+  - **Anchor**: rule #4 (vision.md § 4 — every constant in source; the constant must match the spec row it claims to render); Aho-Sethi-Ullman, *Compilers*, 1986 (round-trip property — the formula is round-trippable to the spec when the strings agree).
+  - **Risk**: silent until OTEL wiring lands (today the value renders as `(stub)` regardless), then a 30× over-read once live. Mitigation: file this task explicitly so `dashboard-web-otel-wiring` either resolves it first or fails loudly when the unit-vs-formula mismatch is observed.
 
 - [ ] Quarterly dependency review (Q3 2026)
   - **ID**: review-q3-2026

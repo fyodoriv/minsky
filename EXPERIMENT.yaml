@@ -1,18 +1,21 @@
-id: dashboard-web-metrics-enum
+id: dashboard-web-render-all-10
 hypothesis: |
-  Lifting the 10 rows of `vision.md` § "Success criteria" into a typed
-  `SUCCESS_METRICS: readonly SuccessMetric[]` constant under
-  `novel/dashboard-web/src/metrics.ts` (each row: `{ id: kebab-case
-  string, label, formula, unit }`) provides a deterministic substrate
-  that sub-task 3 (`dashboard-web-render-all-10`) can iterate without
-  re-parsing markdown at request time. Per rule #4 ("every constant in
-  source") the enumeration lives next to the renderer; the renderer
-  reads the constant — the constant never reaches back into the
-  renderer (Martin 2017 dependency direction). Three invariants — count
-  = 10, all kebab-case, no duplicate ids — guard against drift between
-  the dashboard and vision.md.
-success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0 (the 3 new metrics invariants + the 4 prior skeleton tests, less the dropped placeholder-id assertion that was rewritten to assert `loop-uptime`); `SUCCESS_METRICS.length === 10` enforced by the count test; all 10 ids match `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/` and are unique; `[ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 200 ]` exits 0; the `dashboard-web-metrics-enum` block is removed from `TASKS.md` in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-metrics-enum$' TASKS.md` returns 0); the parent `dashboard-web-v0` tracker's `Blocked by` list no longer references this sub-task."
-pivot: "If the kebab-case constraint forces awkward ids (two vision.md rows collide on the same root noun, or a row's natural slug exceeds readable length), allow a numbered suffix (`token-budget-honoring-1` etc.) and document the deviation in `novel/dashboard-web/README.md`. If the 10-row count drifts (vision.md adds an 11th row before sub-task 3 lands), update both files in the same PR — never let the dashboard and the spec disagree. If the typed constant fails to unblock sub-task 3 within the same week (the renderer needs structural changes beyond a `for` loop over the array), the `SuccessMetric` shape is wrong; pivot to a richer shape with explicit unit-typing or a per-row anchor field."
-measurement: "pnpm typecheck && pnpm vitest run novel/dashboard-web/test/metrics.test.ts --reporter=json | jq -e '.numPassedTests >= 3 and .numFailedTests == 0' && [ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 200 ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-metrics-enum$' TASKS.md)\" = '0' ]"
-anchor: "rule #4 (vision.md § 4 — every constant in source; the 10 success-criteria rows are constants and so live in source, not in re-parsed markdown); Card, S. K., Mackinlay, J. D., & Shneiderman, B. (eds.), *Readings in Information Visualization: Using Vision to Think*, Morgan Kaufmann, 1999, Ch. 1 (the 10-metric set is the dashboard's information atom — id + label + formula + unit is the minimum viable visualization atom); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (dependency direction — the renderer reads the constant; the constant does not import the renderer); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (rate / errors / duration as the right service-level lens — the 10 metrics span exactly this surface)."
+  Wiring the 10-entry `SUCCESS_METRICS: readonly SuccessMetric[]` constant
+  from sub-task 2 (`novel/dashboard-web/src/metrics.ts`) into `createServer`
+  as the default `metrics` argument — and rendering one `<li
+  data-metric-id="…">` per entry through the existing pure `render`
+  function — produces SSR HTML containing exactly 10 `data-metric-id=`
+  attributes and exactly 10 `(stub)` value sentinels (rule #7
+  graceful-degrade: explicit placeholder, not silent). The `(stub)` token
+  is the operator-visible signal that the OTEL backend is not yet wired;
+  the follow-up `dashboard-web-otel-wiring` (P3, filed in this PR) replaces
+  it with `@minsky/observability` reads. Sub-task 3 leaves `render` itself
+  unchanged at the iteration level (it already supports an arbitrary
+  `metrics` array — the change is at the server's wiring layer + the
+  per-row sentinel) so the parent `dashboard-web-v0`'s 300-LoC pivot cap
+  is preserved with significant headroom.
+success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 7 and .numFailedTests == 0'` exits 0 (the 4 prior tests + ≥3 new sub-task-3 integration tests: default-to-SUCCESS_METRICS, exact-10-count, set-equality of all 10 ids, and `(stub)` sentinel count); `[ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 300 ]` exits 0; the `dashboard-web-render-all-10` block is removed from `TASKS.md` (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-render-all-10$' TASKS.md` returns 0); the parent `dashboard-web-v0` tracker's `Blocked by` list and `dashboard-web-lighthouse-ci`'s `Blocked by` list no longer reference this sub-task; the follow-up `dashboard-web-otel-wiring` task block is added under P3 with full rule-#9 fields."
+pivot: "If the 10-row render pushes total `novel/dashboard-web/src/*.ts` LoC above the parent's 300-LoC cap — i.e., if the `wc -l` total exceeds 300 — Hono is the wrong shape for `≤300 LoC and 10 metrics + a sentinel`; pivot per the parent's pivot rule to a template-literal approach without Hono (only `server.ts` changes — the renderer is already pure). If the `(stub)` sentinel proves indistinguishable from real readings during operator review (e.g., `0` is the correct stub value for a metric that legitimately measures `0`), pivot to a richer sentinel (a banner or a per-row `data-stub=\"true\"` attribute) and tighten `dashboard-web-otel-wiring`'s priority from P3 to P2. The pivot triggers are quantitatively distinct from the success thresholds (300 LoC vs ≥7 passing tests; sentinel-mistakes count vs 0/10 distinguishability) so the experiment is falsifiable in either direction."
+measurement: "pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 7 and .numFailedTests == 0' && [ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 300 ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-render-all-10$' TASKS.md)\" = '0' ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-otel-wiring$' TASKS.md)\" = '1' ]"
+anchor: "Card, S. K., Mackinlay, J. D., & Shneiderman, B. (eds.), *Readings in Information Visualization: Using Vision to Think*, Morgan Kaufmann, 1999, Ch. 1 (the 10-metric set is the dashboard's information atom; rendering all 10 simultaneously is the glanceable-display pattern); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (rate / errors / duration as the right service-level lens — the 10 metrics span exactly this surface); rule #4 (vision.md § 4 — every constant in source; `SUCCESS_METRICS` is the constant the renderer iterates, not a re-parsed markdown table); rule #7 (vision.md § 7 — graceful-degrade with explicit operator-visible state; `(stub)` is the explicit sentinel until OTEL wiring lands)."
 replay_windows_days: [7, 30]
