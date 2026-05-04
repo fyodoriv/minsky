@@ -121,16 +121,16 @@ A small spec, modeled after AGENTS.md and tasks.md, for structured persona-to-pe
 
 Reference parser. Validator. Could be adopted by OMC, claude-flow, MetaGPT, or any multi-agent system. **A community-effort play to make handoff format the way tasks.md is becoming the way for queues.**
 
-### `claude-spec-monitor`
+### `claude-spec-monitor` (advisory-only Skill)
 
-A Claude Skill implementing runtime specification monitoring (Havelund & Goldberg 2008): reads a behavioral-specification document (defaults to `vision.md`, pluggable via skill input) plus the most recent N actions / handoffs from any source, and produces a structured specification-drift report. Reusable in any Claude Code project.
+The runtime-specification-monitoring layer is split per rule #10 (vision.md § 10). The *load-bearing* share lives in the deterministic CI linters at `scripts/check-rule-{1..7}-*.mjs`, `scripts/check-pattern-index.mjs`, and `scripts/check-pr-self-grade.mjs` — each a required status check, each runnable locally, no LLM in the verdict chain. The *residual judgement* share — concerns that genuinely resist mechanisation (hypothesis vagueness, pivot=success collisions, non-primary anchors, measurement-output unchecked, conformance-level mismatch) — lives in `novel/spec-monitor/` as an advisory-only Claude Skill (vision.md row 35), capped at ≤5 advisory rules, never gating CI. Adding a deterministic linter retires the matching Skill check (rule-#10 ratchet).
 
 ### `claude-mape-k-loop`
 
 The autonomic manager (Kephart & Chess 2003): the meta-supervisor implementing the MAPE-K reference architecture (Monitor → Analyze → Plan → Execute over Knowledge). Periodically (configurable: every Nth scheduler iteration, every 6h, on-demand, or when budget below threshold) it:
 
 1. **Monitor**: observes via the `Observability` adapter
-2. **Analyze**: runs `claude-spec-monitor` (the runtime specification monitor) and identifies the top constraint via Theory-of-Constraints discipline
+2. **Analyze**: reads the deterministic-linter status (rule-#10 lint set: `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs`) and the advisory output of the `novel/spec-monitor/` Skill (advisory-only — never gates), then identifies the top constraint via Theory-of-Constraints discipline
 3. **Plan**: if a persona prompt is implicated, proposes variants
 4. **Execute**: runs an A/B test via `PromptOptimizer` adapter and rolls out the winner
 5. **Knowledge**: logs the change to `constraints.md`; commits
@@ -160,7 +160,7 @@ Bidirectional sync between tasks.md (canonical) and OMC's internal task list. Tr
         └────────┬───────┘    └──────────────┘
                  │
         ┌────────▼─────────────┐
-        │ spec-monitor         │  (light every tick, deep every Nth)
+        │ spec-monitor         │  (advisory Skill — never gates; deterministic share runs in CI per rule #10)
         └────────┬─────────────┘
                  │
         ┌────────▼─────────────┐
@@ -215,7 +215,7 @@ Restart policies:
 - `tick-loop` uses backoff (5s → 30s → 5min) to avoid hammering on systematic failures
 - `mape-k-loop` is fire-and-forget per invocation; cron handles the watchdog schedule
 
-**MAPE-K cadence (the schedule cron drives `mape-k-loop` on):** a three-priority hybrid — event-triggered overrides > time-based watchdog > tick-iteration backstop. The supervisor wakes `mape-k-loop` via `SIGUSR1` on event triggers (spec-monitor red, `budget-guard` at 85 %); cron fires the time-based watchdog every 12 h regardless; a tick-iteration backstop forces a pass every 1000 ticks. The full rationale, rejected alternatives (pure time-based, pure scheduler-iteration-based, pure event-triggered), token-cost estimate (≤ 5.7 % of weekly Max5 budget — itself adaptive per `mape-k-loop`'s monthly self-calibration), and literature anchors (Liu 2000, Kephart & Chess 2003, Astrom & Wittenmark 1997, Beyer SRE 2016) live in `research.md` § "MAPE-K cadence". Numeric thresholds are configurable via `config/mape-k.json`; they are not constants in code, matching the same adaptive-threshold discipline used by `budget-guard` (above, `## Token economy`).
+**MAPE-K cadence (the schedule cron drives `mape-k-loop` on):** a three-priority hybrid — event-triggered overrides > time-based watchdog > tick-iteration backstop. The supervisor wakes `mape-k-loop` via `SIGUSR1` on event triggers (any rule-#10 deterministic linter going red on `main`, `budget-guard` at 85 %); cron fires the time-based watchdog every 12 h regardless; a tick-iteration backstop forces a pass every 1000 ticks. The full rationale, rejected alternatives (pure time-based, pure scheduler-iteration-based, pure event-triggered), token-cost estimate (≤ 5.7 % of weekly Max5 budget — itself adaptive per `mape-k-loop`'s monthly self-calibration), and literature anchors (Liu 2000, Kephart & Chess 2003, Astrom & Wittenmark 1997, Beyer SRE 2016) live in `research.md` § "MAPE-K cadence". Numeric thresholds are configurable via `config/mape-k.json`; they are not constants in code, matching the same adaptive-threshold discipline used by `budget-guard` (above, `## Token economy`).
 
 ## Observability
 
