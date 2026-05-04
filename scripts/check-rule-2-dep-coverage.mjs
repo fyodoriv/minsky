@@ -13,7 +13,7 @@
 // rule #10 (every constitutional rule has a deterministic CI lint);
 // Martin, *Clean Architecture*, 2017 (dependency rule).
 
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -293,6 +293,9 @@ async function readdirSafe(dir) {
  * @returns {void}
  */
 function classifyEntry(entry, full, stack, out) {
+  // Skip symlinks entirely. Following them risks loops (`a -> b/`, `b -> a/`)
+  // and the linter has no requirement to traverse outside the working tree.
+  if (entry.isSymbolicLink()) return;
   if (entry.isDirectory()) {
     if (!SKIP_DIRS.has(entry.name)) stack.push(full);
     return;
@@ -303,17 +306,33 @@ function classifyEntry(entry, full, stack, out) {
 }
 
 /**
+ * Walk `root` and return every `.ts` file beneath it. Skips symlinks (loop
+ * guard) and tracks visited canonical paths via `realpath` so that two
+ * physical paths into the same directory are not scanned twice.
+ *
+ * Exported for tests.
+ *
  * @param {string} root
  * @returns {Promise<string[]>}
  */
-async function walkTs(root) {
+export async function walkTs(root) {
   /** @type {string[]} */
   const out = [];
   /** @type {string[]} */
   const stack = [root];
+  /** @type {Set<string>} */
+  const visited = new Set();
   while (stack.length > 0) {
     const dir = stack.pop();
     if (dir === undefined) break;
+    let canonical;
+    try {
+      canonical = await realpath(dir);
+    } catch {
+      continue;
+    }
+    if (visited.has(canonical)) continue;
+    visited.add(canonical);
     const entries = await readdirSafe(dir);
     for (const entry of entries) {
       classifyEntry(entry, join(dir, entry.name), stack, out);
