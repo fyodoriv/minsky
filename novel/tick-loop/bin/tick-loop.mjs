@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 
 import { BudgetGuard } from "@minsky/budget-guard";
 import { NtfyNotifier } from "@minsky/notifier";
+import { OtelObservability } from "@minsky/observability/otel";
 import { MaciekTokenMonitor, StubTokenMonitor } from "@minsky/token-monitor";
 
 import {
@@ -155,6 +156,19 @@ const spawnStrategy = dryRun
 // dependency is absent). `MINSKY_NTFY_SERVER` overrides the public ntfy.sh
 // default for self-hosted; `MINSKY_NTFY_AUTH_TOKEN` is the bearer for
 // authenticated topics. None of these are required for the daemon to run.
+// Wire the OTEL publisher half of the publish-then-read MAPE-K loop
+// (P1 `daemon-otel-pipe`). When `MINSKY_OTEL_ENDPOINT` is set, every
+// per-iteration `TickSpan` is forwarded to the OTLP backend (OpenObserve
+// out of the box, post-#110); when unset, the daemon still writes the
+// stdout line — graceful-degrade per rule #7. Without this, the
+// dashboard's `OpenObserveStrategy` reads `(stub)` for every metric
+// because the publisher side never wired up.
+const otelEndpoint = process.env.MINSKY_OTEL_ENDPOINT;
+const observability =
+  otelEndpoint === undefined || otelEndpoint.trim() === ""
+    ? undefined
+    : new OtelObservability({ endpoint: otelEndpoint, serviceName: "minsky-tick-loop" });
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -186,10 +200,14 @@ const result = await runDaemon({
   // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
   ...(notifier !== undefined ? { notifier } : {}),
   emit: (event) => {
-    // Plain-text span emission to stdout — operator can pipe to journalctl
-    // (systemd) or `tail -f` (launchd). Real OTEL wiring deferred to
-    // `daemon-otel-pipe` (filed below as a P1 follow-up).
+    // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
+    // Forward to OTEL when wired; the SDK ships to OpenObserve / whatever
+    // OTLP backend MINSKY_OTEL_ENDPOINT points at — fire-and-forget per
+    // rule #7 graceful-degrade (the OTEL SDK swallows transport errors).
+    if (observability !== undefined) {
+      observability.emitTickSpan(event);
+    }
   },
 });
 
@@ -198,6 +216,13 @@ if (notifier !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no notifier wired (set MINSKY_NTFY_TOPIC to enable budget-paused pushes)\n",
+  );
+}
+if (observability !== undefined) {
+  process.stdout.write(`[tick-loop] OTEL wired (endpoint=${otelEndpoint})\n`);
+} else {
+  process.stdout.write(
+    "[tick-loop] no OTEL wired (set MINSKY_OTEL_ENDPOINT to publish spans to OpenObserve)\n",
   );
 }
 

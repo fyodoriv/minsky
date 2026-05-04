@@ -50,7 +50,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
-import type { Observability, SelfTestResult } from "./index.js";
+import type { Observability, ObservabilityEvent, SelfTestResult } from "./index.js";
 
 export interface OtelObservabilityConfig {
   readonly serviceName?: string;
@@ -153,6 +153,28 @@ export class OtelObservability implements Observability {
     this.loggerProvider = new LoggerProvider({ resource });
     this.loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
     this.logger = this.loggerProvider.getLogger(serviceName);
+  }
+
+  /**
+   * @otel observability.emit-tick-span — synchronous per-event publish;
+   *   exporter ships asynchronously, caller returns immediately.
+   *
+   * Closes the publisher half of the publish-then-read MAPE-K loop: the
+   * daemon's `runDaemon({ emit })` callback can be `obs.emitTickSpan.bind(obs)`,
+   * so every `tick-loop.iteration` event lands in OpenObserve (or whatever
+   * OTLP backend the `endpoint` config points at) instead of just the
+   * operator's terminal.
+   *
+   * Errors swallowed by the OTEL SDK's exporter — fire-and-forget per rule
+   * #7 graceful-degrade; a missed span must never block the daemon's hot
+   * loop.
+   */
+  emitTickSpan(event: ObservabilityEvent): void {
+    const span = this.tracer.startSpan(event.name);
+    for (const [k, v] of Object.entries(event.attributes)) {
+      span.setAttribute(k, v);
+    }
+    span.end();
   }
 
   /**
