@@ -19,11 +19,13 @@ success: |
   jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0
   (today: 11 passed, 0 failed).
 pivot: |
-  If the 4-task budget can't fit in a 10-min in-process smoke (e.g.,
-  <2 tasks complete within budget under deterministic clock),
-  the cadence model is too coarse — drop to single-task smoke +
-  multi-task on self-hosted (sub-task 3); move the multi-task assertion
-  entirely to `first-integration-test-nightly-self-hosted`.
+  <2 tasks complete within the 10-min smoke budget (under deterministic
+  clock) — the cadence model is too coarse: drop to single-task smoke
+  on the in-process side and move the multi-task assertion entirely to
+  sub-task 3 (`first-integration-test-nightly-self-hosted`). The 2-task
+  pivot threshold is meaningfully distant from the 4-task success
+  threshold (50 % margin), so a pivot signal carries information rather
+  than triggering at the same instant the success criterion fails.
 measurement: |
   pnpm typecheck \
     && pnpm vitest run novel/tick-loop --reporter=json \
