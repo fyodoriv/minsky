@@ -1,16 +1,15 @@
-id: ci-experiment-runner-v0
+id: ci-rule-6-let-it-crash
 hypothesis: |
-  A CI gate that (a) requires every non-trivial PR to ship a parseable
-  EXPERIMENT.yaml, (b) executes its measurement command with a
-  per-experiment timeout (default 60s), AND a post-merge recorder that
-  re-runs the measurement against merge-base and current main, appending
-  a JSONL record per experiment-id, mechanically closes the daily layer of
-  rule #9. The runner's pure function (runExperiment) is referentially
-  transparent (no LLM in the chain, per rule #10) and is the deterministic
-  substrate the weekly-layer tracker reads from.
-success: "scripts/run-experiment.test.mjs exits 0 with ≥6 cases covering the brief's a–f checklist; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md all green; this PR's own EXPERIMENT.yaml passes the new gate against this PR"
-pivot: "if the gate produces ≥3 false positives in its first month (e.g., misclassifying a trivial change as non-trivial, or measurement commands that pass locally but fail in CI), tighten the trivial-detection heuristic OR drop the executability gate to soft-fail (treating EXPERIMENT.yaml as informational-only) until the friction subsides — landing the daily layer as best-effort rather than hard-block"
-measurement: "pnpm typecheck && pnpm vitest run scripts/run-experiment.test.mjs"
-anchor: "Fagerholm et al., 'Building Blocks for Continuous Experimentation', RCoSE 2014 (per-change experiment runner as the first building block); Kohavi/Tang/Xu 2020 ch. 4 (running every change as an experiment); rule #9 (vision.md § 9 — the iron pre-registration rule); rule #10 (deterministic enforcement); Beck 1999 (CI as constraint enforcer)"
+  A TypeScript-AST lint that flags two narrow shapes — `try/catch` blocks
+  nested deeper than 1 level, and catch handlers whose body lacks both a
+  `throw` and a bare-identifier `supervise(...)` call — converts rule #6's
+  let-it-crash discipline from prose into a deterministic CI failure
+  (Armstrong, *Programming Erlang*, 2007; Lampson 1983; rule #10). The
+  lint is diff-based — only PR-touched `novel/**/*.ts` files are inspected
+  — so existing chains are grandfathered until next-touched, matching the
+  rule-1 / rule-3 precedent.
+success: "pnpm vitest run scripts/check-rule-6-let-it-crash.test.mjs exits 0; the script exits 1 on the deep-nest fixture and 0 on the same fixture with the opt-out comment above the inner catch; the new CI job is wired into the ci gate; pnpm typecheck && pnpm lint && pnpm test all exit 0"
+pivot: "if the lint flags ≥3 false positives per month from genuine system-boundary catches (process-edge stdin parsing, shutdown handlers, framework error boundaries), broaden the opt-out to whole-file via // rule-6-file: boundary-handler AND add an explicit boundary catalogue in research.md"
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-rule-6-let-it-crash.test.mjs"
+anchor: "rule #10 (vision.md § 10 — every constitutional rule has a deterministic CI lint); Armstrong Programming Erlang 2007 (let it crash); Lampson 1983 Hints for Computer System Design (use exceptions only for exceptional conditions); Hunt and Thomas 1999 The Pragmatic Programmer Tip 32 (crash early)"
 replay_windows_days: [7, 30]
-timeout_seconds: 120
