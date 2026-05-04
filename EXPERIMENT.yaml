@@ -1,28 +1,28 @@
-id: mape-k-knowledge-and-integration
+id: ci-lint-mape-k-token-budget-cap
 hypothesis: |
-  Shipping the Knowledge phase (`knowledge(...)`), the assembled `tick(...)`
-  cycle, an append-only `constraints.md` seed (Helland, "Life beyond
-  Distributed Transactions", *CIDR* 2007 — the immutable log), and the
-  user-story-003 integration test (`user-stories/003-mape-k-improves-prompts.test.ts`)
-  closes the MAPE-K loop with the rule-#9 quarterly automation layer
-  (`vision.md` § 9). The pure `knowledge(...)` function emits a
-  `constraintsAppend` markdown block on every tick (audit trail) and a
-  conditional `researchMdAmendmentProposal` text when the verdict-log MAE
-  between predicted Δ and observed Δ exceeds the configured
-  `calibrationDriftThreshold` (default 0.5 — 50 % MAE per Munafò et al.
-  2017's pre-registration discipline). `tick(...)` runs Monitor → Analyze →
-  Plan → Execute → Knowledge as one composed cycle, threading an optional
-  `emit` seam so the wrapping CLI can carry OTEL spans (`mape.<phase>.<verb>`)
-  without coupling the pure functions to `@minsky/observability`. The
-  integration test exercises the full loop against a synthetic fixture
-  using `StubPromptOptimizer` (sub-task 1's test fake) — no network — and
-  asserts (a) `mape.knowledge.write` fires on each constraints append,
-  (b) the calibration-drift amendment fires only when drift exceeds the
-  threshold, and (c) the sustained-gain + oscillation guards each fire on
-  synthetic histories crafted to trip them. With this PR the parent
-  `mape-k-loop-v0` tracker can be removed.
-success: "`pnpm typecheck` exits 0 and `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts` exits 0 with ≥15 tests passing collectively (≥3 in `knowledge.test.ts`, ≥2 in `index.test.ts`, ≥4 in the user-story-003 integration test); the parent `mape-k-loop-v0` tracker block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-loop-v0$' TASKS.md` returns 0); the `mape-k-knowledge-and-integration` sub-task block is also removed (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-knowledge-and-integration$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source) all pass on this PR's diff."
-pivot: "If `constraints.md` grows past 200 entries before the first calibration-drift amendment fires on real (non-fixture) verdict logs, the drift threshold is too tight — raise it from 0.5 to 0.75 and document the deviation in `research.md` § \"DSPy fit\". If the user-story-003 integration test exceeds 60 s of compressed-simulation wall-clock on a GH-hosted runner sustained 3 consecutive PRs, pivot to a self-hosted runner per `supervisor-integration-self-hosted-runner`'s precedent. If `mape.knowledge.write` events fire but the `researchMdAmendmentProposal` is never emitted across 3 quarterly reviews, the calibration check is theatre — re-anchor the threshold against the observed MAE distribution (Munafò 2017 — pre-registration is meant to falsify, not validate-by-default)."
-measurement: "pnpm typecheck && pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts --reporter=json | jq -e '.numPassedTests >= 15 and .numFailedTests == 0' && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-loop-v0$' TASKS.md)\" = '0' ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-knowledge-and-integration$' TASKS.md)\" = '0' ]"
-anchor: "Helland, P., \"Life beyond Distributed Transactions: an Apostate's Opinion\", *CIDR* 2007 (the immutable append-only log as the Knowledge substrate — `constraints.md` is its concrete realisation here); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K loop — this PR ships the K phase + the assembled `tick(...)` cycle); Munafò et al., \"A Manifesto for Reproducible Science\", *Nature Human Behaviour* 1, 0021, 2017 (pre-registration manifesto — the calibration-drift amendment is the rule-#9 quarterly-layer automation); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure decision module + thin I/O boundary — `tick(...)` takes inputs as data and returns outputs as data; the `emit` seam is the only coupling point, and it's optional); rule #2 (vision.md § 2 — every dep behind an interface; the integration test consumes `@minsky/prompt-optimizer`'s `StubPromptOptimizer` rather than a vendor SDK); vision.md § \"Pattern conformance index\" row 54 (updated to mark the loop full-conformance now that all 4 sub-tasks have shipped)."
+  Shipping `scripts/check-mape-k-budget-cap.mjs` + paired tests + the
+  `mape-k-budget-cap` CI job promotes ARCHITECTURE.md § "MAPE-K cadence"'s
+  prose-only ≤5.7 % weekly Max5 budget cap into a deterministic CI gate.
+  Today the cap is enforced only by careful reading of ARCHITECTURE.md and
+  research.md § "MAPE-K cadence" (the cost-math derivation: 14 watchdog
+  passes/week × ≤0.3 % + 0–3 event passes/week × ≤0.5 % + a quarterly
+  tick-iteration backstop ≤5.7 % of weekly budget). When the
+  `mape-k-loop` v0 lands its `config/mape-k.json` artefact, any future
+  PR that retunes the watchdog T (currently 12 h), per-pass cost
+  estimate, or backstop frequency will silently breach 5.7 % without any
+  CI signal. The pure function `checkMapeKBudgetCap({ config,
+  weeklyBudgetTokens, capFraction })` (default `capFraction = 0.057`)
+  asserts `weeklyProjectedTokens / weeklyBudgetTokens ≤ capFraction`; the
+  CLI reads `config/mape-k.json` and short-circuits to a stderr
+  advisory + exit 0 when the file is absent (the dormant state mandated
+  by the `ci-lint-mape-k-token-budget-cap` task brief — v0 ships before
+  the config artefact lands). Boundary semantics: the cap is *inclusive*
+  per Beyer SRE 2016 Ch. 3 — exactly 5.7 % passes; only `> 5.7 %` fails.
+  This PR adds the lint without modifying any `novel/` package — the
+  rule-#10 ratchet stays scoped to scripts/ + .github/workflows/ +
+  vision.md (one row) + TASKS.md (one removal).
+success: "`pnpm typecheck` exits 0; `pnpm vitest run scripts/check-mape-k-budget-cap.test.mjs` exits 0 with ≥14 tests passing collectively (≥9 in the pure-function describe block, ≥5 in the I/O-boundary describe block); `node scripts/check-mape-k-budget-cap.mjs` exits 0 against the current repo (no `config/mape-k.json` yet — dormant); the `ci-lint-mape-k-token-budget-cap` task block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: ci-lint-mape-k-token-budget-cap$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source) all pass on this PR's diff."
+pivot: "If the 5.7 % cap itself moves to a per-tier adaptive threshold (per `mape-k-loop`'s monthly self-calibration, research.md § \"MAPE-K cadence\"), retire this lint and replace it with one that reads the calibrated value from the `mape-k-loop` Knowledge log — the constant `DEFAULT_CAP_FRACTION = 0.057` becomes a moving target and a fixed-constant linter teaches the team to ignore it. If projected weekly cost stabilises >8 % for 4 weeks (the threshold from research.md § \"MAPE-K cadence\"'s cost-math block), the cadence design itself is wrong — fire the cadence pivot, not this lint's pivot."
+measurement: "pnpm typecheck && pnpm vitest run scripts/check-mape-k-budget-cap.test.mjs --reporter=json | jq -e '.numPassedTests >= 14 and .numFailedTests == 0' && node scripts/check-mape-k-budget-cap.mjs && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: ci-lint-mape-k-token-budget-cap$' TASKS.md)\" = '0' ]"
+anchor: "Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability Engineering: How Google Runs Production Systems*, O'Reilly, 2016, Ch. 3 (error-budget enforcement — exceeding the budget triggers a mechanical response, not a discussion; the inclusive-at-cap boundary semantics come from this chapter); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K reference architecture whose cadence this lint guards); Beck, K., *Extreme Programming Explained: Embrace Change*, Addison-Wesley, 1999, Ch. 17 (CI as the constraint enforcer — the prose-only-cap-becomes-deterministic-gate ratchet); rule #10 (vision.md § 10 — deterministic enforcement; the constitutional ratchet that mandates this promotion); ARCHITECTURE.md § \"MAPE-K cadence\" (the prose anchor for the 5.7 % cap); research.md § \"MAPE-K cadence\" (the cost-math derivation that the cap is constructed from); vision.md § \"Pattern conformance index\" row 55 (added in this PR)."
 replay_windows_days: [7, 30]
