@@ -97,18 +97,6 @@ jobs:
         run: |
           gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/experiment-pr-body.md
 
-      - name: validate EXPERIMENT.yaml schema (when present)
-        # Independent of the runner's own parsing — surfaces parse errors
-        # via the canonical CLI when the file exists. The runner re-parses
-        # the same file as part of its gate; this step gives a focused
-        # error message earlier in the log when the YAML is the problem.
-        run: |
-          if [ -f EXPERIMENT.yaml ]; then
-            pnpm exec experiment-record validate EXPERIMENT.yaml
-          else
-            echo "no EXPERIMENT.yaml at repo root (gate will accept iff trivial-exempt)"
-          fi
-
       - name: run gate
         run: |
           set -euo pipefail
