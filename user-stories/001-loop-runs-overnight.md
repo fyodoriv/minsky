@@ -67,9 +67,13 @@ Per constitutional rule #7 (`vision.md` § 7).
 
 Weekly production fault injection: `supervisor-setup` (P1) wires a low-stakes Sunday timer that picks one row at random and runs its chaos test against the live loop; failures escalate to a Watch-level notification.
 
+## Coverage manifest
+
+The 12 failure-mode rows above are mapped to their existing tests (or the deferred-self-hosted path) by `user-stories/001-coverage-manifest.test.ts`. The manifest is the load-bearing decomposition of the original `first-integration-test` task — sub-task 1/3 — and asserts ≥80 % of rows are either `covered` (existing test in repo) or `self-hosted` (deferred to the nightly self-hosted runner declared in sub-task 3). See `TASKS.md` `**ID**: first-integration-test-coverage-manifest`.
+
 ## Status
 
-- **Phase**: Specification (not yet implemented)
+- **Phase**: Coverage manifested (sub-task 1/3 of `first-integration-test`); 10/12 rows covered or deferred-to-self-hosted, 1 row deferred cross-repo (tasks-mcp lease — row 10), 1 row covered by `distribution/test-supervisor.sh` row-3 (handoff malformed) plus token-monitor (rows 1, 3, 4, 9). The 60-min compressed simulation itself is filed as `first-integration-test-mock-tick-loop` (sub-task 2/3) and `first-integration-test-nightly-self-hosted` (sub-task 3/3).
 - **Blocking**: P1 tasks `supervisor-setup`, `budget-guard-v0` (see `TASKS.md`)
 - **Theoretical anchor**: Armstrong supervision tree pattern (let-it-crash + supervisor restart)
 
