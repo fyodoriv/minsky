@@ -13,27 +13,11 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `tick-loop-daemon-budget-guard-real` — wire real BudgetGuard.decide() into the daemon (sub-task 2/3 of real-spawn)
-  - **ID**: tick-loop-daemon-budget-guard-real
-  - **Parent**: tick-loop-daemon-real-spawn
-  - **Tags**: novel, runtime, supervision
-  - **Estimate**: 4–6h
-  - **Hypothesis**: Replacing the v0 stub `BudgetGuardLike` with the real `BudgetGuard.decide()` from `@minsky/budget-guard` makes the daemon's behaviour under real budget pressure observable (Beyer SRE 2016 Ch. 3 — error-budget gating). Touches `novel/tick-loop/src/daemon.ts` (constructor + import) + `novel/tick-loop/package.json` (add `@minsky/budget-guard` dep). Tests assert the daemon still runs against a fixture token-monitor.
-  - **Details**: 1) Add `@minsky/budget-guard` as a workspace dep in `novel/tick-loop/package.json`. 2) Update `novel/tick-loop/bin/tick-loop.mjs` to construct a real `BudgetGuard` from a `MaciekTokenMonitor` (or stub for `--dry-run`). 3) Add a daemon test that drives the real `BudgetGuard` against a fixture monitor (no SDK dep — the structural type stays).
-  - **Files**: `novel/tick-loop/src/daemon.ts`, `novel/tick-loop/package.json`, `novel/tick-loop/bin/tick-loop.mjs`, `novel/tick-loop/src/daemon.test.ts`
-  - **Verification**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 18 and .numFailedTests == 0'` exits 0 (one new test on top of sub-task 1/3's 17).
-  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 18 and .numFailedTests == 0'` exits 0.
-  - **Pivot**: if the real `BudgetGuard` constructor signature drifts mid-flight, pivot to a thin facade in `novel/tick-loop/src/budget-guard-facade.ts` that wraps the real one behind the existing `BudgetGuardLike` shape; revisit when `@minsky/budget-guard` stabilises.
-  - **Acceptance**: real `BudgetGuard.decide()` runs in the daemon's hot loop; the structural `BudgetGuardLike` either stays for tests or is dropped if the real one is cheap to instantiate.
-  - **Anchor**: Beyer SRE 2016 Ch. 3 (error-budget gating with a real monitor); rule #2 (every dep behind interface); Munafò et al. 2017 (rule #9 — the budget-pressure-causes-pause assertion is now testable, not aspirational).
-  - **Risk**: `@minsky/budget-guard` may pull in `@minsky/token-monitor` runtime — if it does, the daemon's bin must source `~/.zshenv` before spawn (already documented in distribution README).
-
 - [ ] `tick-loop-daemon-real-spawn-flip` — drop --dry-run, gate via env var; integration test against real claude (sub-task 3/3 of real-spawn)
   - **ID**: tick-loop-daemon-real-spawn-flip
   - **Parent**: tick-loop-daemon-real-spawn
   - **Tags**: novel, runtime, supervision, blocker
   - **Estimate**: 4h
-  - **Blocked by**: tick-loop-daemon-budget-guard-real
   - **Hypothesis**: Once the SpawnStrategy interface (sub-task 1) and the real BudgetGuard (sub-task 2) have landed, flipping the default Strategy from `DryRunSpawnStrategy` to `ProcessSpawnStrategy` is a one-line constructor swap. The flip lands together with: dropping the hard-coded `--dry-run` arg from `bin/tick-loop.mjs` + `distribution/systemd/run-tick-loop.sh`; gating dry-run via `MINSKY_TICK_DRY_RUN=1` env var instead; one integration test that spawns a real `claude --resume` against a synthetic task (gated on `claude` presence; skipped in CI). Closes user-story-001-integration-test-real's blocker.
   - **Details**: 1) `bin/tick-loop.mjs` — read `MINSKY_TICK_DRY_RUN` env; default `false`; pick `DryRunSpawnStrategy` vs `ProcessSpawnStrategy` accordingly. 2) `distribution/systemd/run-tick-loop.sh` — drop `--dry-run` flag; the env-var path is the new control surface. 3) `novel/tick-loop/src/daemon.test.ts` — one integration test gated on `which claude` (skip in CI). 4) Vision row 254 collapses to `partial-real-spawn` (the dry-run guard is now an opt-in, not the default).
   - **Files**: `novel/tick-loop/bin/tick-loop.mjs`, `distribution/systemd/run-tick-loop.sh`, `novel/tick-loop/src/daemon.test.ts`, `vision.md`, `EXPERIMENT.yaml`
