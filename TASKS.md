@@ -318,16 +318,30 @@
   - **Anchor**: rule #10 (vision.md § 10).
   - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds.
 
-- [ ] `ci-lint-skill-rule-cap` — CI lint enforcing the ≤5 advisory-rule cap in spec-monitor SKILL.md
-  - **ID**: ci-lint-skill-rule-cap
+- [ ] `ci-lint-watch-surface-cap` — CI lint enforcing the 3-value cap on the Watch surface (story 005)
+  - **ID**: ci-lint-watch-surface-cap
   - **Tags**: ci, conformance, rule-10
   - **Estimate**: 1h
-  - **Hypothesis**: A CI check that counts `## Rule N:` headings in `novel/spec-monitor/SKILL.md` and fails the build if >5 mechanically prevents scope-creep past the cap, eliminating the audit-spec-monitor-coverage task's "did anyone notice?" failure mode.
-  - **Details**: Add a small node script `scripts/check-skill-rule-cap.mjs`. Read SKILL.md, count `^## Rule \d+:` headings (or the agreed marker shape), exit 1 if >5. Wire into `.github/workflows/ci.yml` as `skill-rule-cap` job; add to gate's needs.
-  - **Files**: `scripts/check-skill-rule-cap.mjs`, `scripts/check-skill-rule-cap.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic SKILL.md with 6 rules → exit 1; same with 5 → exit 0; same with 0 → exit 0 (the Skill may be retired without rules).
-  - **Measurement**: `pnpm vitest run scripts/check-skill-rule-cap.test.mjs` exits 0 with ≥3 cases.
-  - **Pivot**: if the Skill is deprecated entirely (rule #10's "if everything is deterministic, the Skill has no remit" terminal state), retire this lint along with it.
-  - **Acceptance**: CI job runs on every PR touching SKILL.md; rule-cap is mechanically enforced.
-  - **Anchor**: rule #10; rule #6 (failure-mode discipline).
-  - **Risk**: Skill heading style drift breaks the count. Mitigation: lock the marker shape in SKILL.md's body and make the regex explicit.
+  - **Hypothesis**: `vision.md` row 12 says the Watch surface is "three values, no chrome; design discipline forbids a fourth" (story 005, anchored to Card & Mackinlay 1999 + Weiser & Brown 1995). Today the cap is prose-only — a future change to the watch JSON contract or the dashboard renderer can silently grow a fourth metric. A tiny linter that counts the value-fields in the watch contract (or the watch JSON fixture) and fails if `> 3` mechanically preserves the calm-tech invariant. Surfaces during `ci-lint-skill-rule-cap`'s resilience scout (PR #ci-lint-skill-rule-cap).
+  - **Details**: Locate the canonical watch contract (likely `user-stories/005-*.md` and/or the dashboard adapter when it ships). Count the declared value-fields. Fail if `> 3`. Mirror the `check-skill-rule-cap.mjs` shape: pure function + thin CLI wrapper + paired tests + CI job.
+  - **Files**: `scripts/check-watch-surface-cap.mjs`, `scripts/check-watch-surface-cap.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic contract with 4 fields → exit 1; same with 3 → exit 0; missing contract → exit 0 (story not yet implemented).
+  - **Measurement**: `pnpm vitest run scripts/check-watch-surface-cap.test.mjs` exits 0 with ≥4 cases.
+  - **Pivot**: if story 005's ship-shape changes such that the "three numbers" become a single composite gauge (different cap shape), retire this lint and write the new one against the shipped artefact.
+  - **Acceptance**: CI job runs; the 3-value cap is mechanically enforced on every PR.
+  - **Anchor**: rule #10; vision.md row 12 (Card & Mackinlay 1999; Weiser & Brown 1995).
+  - **Risk**: The watch contract's exact location / shape isn't fixed yet (story 005 is not shipped). Mitigation: defer until the contract lands; the linter ships in the same PR as the contract.
+
+- [ ] `ci-lint-mape-k-token-budget-cap` — CI lint enforcing the ≤5.7% MAPE-K weekly token budget cap (ARCHITECTURE.md)
+  - **ID**: ci-lint-mape-k-token-budget-cap
+  - **Tags**: ci, conformance, rule-10, observability
+  - **Estimate**: 2h
+  - **Hypothesis**: `ARCHITECTURE.md` § "MAPE-K cadence" caps the loop's token cost at ≤5.7% of the weekly Max5 budget. Today the cap is prose-only — when `claude-mape-k-loop` v0 ships, drift past 5.7% will be invisible without a linter. A linter that reads `config/mape-k.json` (or the live `mape-k-loop` self-calibration record) and asserts the projected weekly cost / weekly budget ≤ 0.057 mechanically prevents budget creep. Surfaces during `ci-lint-skill-rule-cap`'s resilience scout.
+  - **Details**: Add `scripts/check-mape-k-budget-cap.mjs` keyed off the post-`claude-mape-k-loop` artefact (likely `config/mape-k.json` plus the budget snapshot). Pure function `checkMapeKBudgetCap({ config, weeklyBudgetTokens })`; CLI is the I/O boundary. Pivot if the cap moves to an adaptive threshold per-config rather than a fixed 5.7%.
+  - **Files**: `scripts/check-mape-k-budget-cap.mjs`, `scripts/check-mape-k-budget-cap.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic config at 5.5% → exit 0; 5.8% → exit 1; missing config → exit 0 (loop not yet shipped).
+  - **Measurement**: `pnpm vitest run scripts/check-mape-k-budget-cap.test.mjs` exits 0.
+  - **Pivot**: if the 5.7% number itself is replaced by a per-tier adaptive cap (per `mape-k-loop`'s monthly self-calibration), retire this lint and replace with a linter against the calibrated value.
+  - **Acceptance**: CI job runs once `claude-mape-k-loop` v0 ships.
+  - **Anchor**: rule #10; ARCHITECTURE.md § "MAPE-K cadence"; Beyer SRE 2016 (error budget enforcement).
+  - **Risk**: Cap is dependent on `claude-mape-k-loop` v0 — implement only after that ships. Mitigation: defer until prerequisite lands.
