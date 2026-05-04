@@ -1,75 +1,50 @@
-id: tick-loop-daemon-budget-guard-real-2026-05-04
+id: watch-shortcuts-tailscale-host-substitution-2026-05-04
 hypothesis: |
-  Replacing the v0 stub `BudgetGuardLike` with the real `BudgetGuard` from
-  `@minsky/budget-guard` (wrapped behind the daemon's structural
-  `BudgetGuardLike.decide()` shape via a thin facade —
-  `novel/tick-loop/src/budget-guard-facade.ts`) makes the daemon's
-  behaviour under real budget pressure observable (Beyer SRE 2016 Ch. 3 —
-  error-budget gating is now the production gate, not a stub). Sub-task
-  2/3 of `tick-loop-daemon-real-spawn`'s decomposition: wires the real
-  `BudgetGuard` into both the CLI (`bin/tick-loop.mjs` — `MaciekTokenMonitor`
-  in production, `StubTokenMonitor` for `--dry-run`) and a new daemon test
-  that drives the real `BudgetGuard.tick()` against a fixture
-  `StubTokenMonitor` and asserts the circuit-break (≥85 %) flips the
-  iteration to `budget-paused`, while a fresh window completes normally.
-  Pivot was pre-registered: the real `BudgetGuard`'s public surface is
-  `tick(): Promise<BudgetDecision>`, not `decide()`, so the facade is the
-  pre-registered Pivot path (rule #9, Munafò et al. 2017).
+  The Shortcut runbook in `distribution/shortcuts/README.md` currently
+  asks the operator to substitute `<tailscale-host>` into each Shortcut's
+  URL field by hand (5 substitutions × 5 Shortcuts = 25 manual edits).
+  Apple Shortcuts' "Ask Each Time" / "Get Variable" actions can
+  parameterise the host once at first run and remember it, dropping
+  operator overhead from 25 substitutions to 1 input + 0-touch reuse.
+  This PR ships a 6th `setup-host.shortcut.json` whose only purpose is
+  "Ask for input" → "Set Variable: host", and rewires the 5 polling
+  Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week,
+  pause, resume) to read that variable at run time via Get-Variable +
+  Combine-Text instead of carrying a literal Tailscale host. A smoke-test
+  assertion enforces that no `*.shortcut.json` may contain a literal
+  Tailscale host in any URL field — it must be either the
+  `<tailscale-host>` placeholder OR a Get-Variable reference, so the
+  parameterisation cannot silently regress.
 success: |
-  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 18 and .numFailedTests == 0'` exits 0
-    (today: 31 tests pass — 14 daemon + 11 index + 6 spawn-strategy).
-  - `pnpm typecheck` exits 0.
-  - All pre-existing daemon dry-run tests (13) + spawn-strategy tests (6) +
-    `tick-loop` index tests (11) pass UNCHANGED — the facade is observably
-    equivalent to the prior stub on the happy path.
-  - `bin/tick-loop.mjs` constructs a real `BudgetGuard` (production:
-    `MaciekTokenMonitor`; `--dry-run`: `StubTokenMonitor`) and the daemon's
-    `BudgetGuardLike` consumer is unchanged structurally (rule #2).
+  - `pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0 (today: 16 cases; this PR brings it to ≥17 — 20 actual, +1 setup-host coverage, +1 no-literal-host assertion, +2 setup-host JSON-validity / schema-conformance checks).
+  - 0 literal Tailscale hosts (`*.tailscale.ts.net`, `*.tail-scale.ts.net`) in any `*.shortcut.json` URL field — enforced by the new smoke-test assertion.
+  - `setup-host.shortcut.json` ships and is documented in the runbook (`distribution/shortcuts/README.md` step 0); the 5 polling Shortcuts' runbook entries (steps A.2 and B.1) document the Get-Variable + Combine-Text prelude.
+  - `watch-shortcuts-tailscale-host-substitution` task block removed from TASKS.md in this PR.
 pivot: |
-  Pre-registered in the task block: if the real `BudgetGuard` constructor
-  signature drifts mid-flight, pivot to a thin facade in
-  `novel/tick-loop/src/budget-guard-facade.ts` wrapping the real
-  `BudgetGuard.tick()` behind the existing `BudgetGuardLike.decide()`
-  shape. EXECUTED: the real `BudgetGuard` exposes `tick()` (the watchdog
-  idiom — Beyer SRE 2016 Ch. 3) rather than `decide()`, so the facade
-  ships. The pure `decide(snapshot, thresholds)` function from
-  `@minsky/budget-guard` is invoked transitively inside `BudgetGuard.tick()`
-  — the daemon never imports it directly, keeping rule #2's seam intact.
+  If the "Ask Each Time" / Variable actions don't compose across
+  separate Shortcuts (each Shortcut has its own scope on real hardware),
+  retire this task — the operator pays the 1-time substitution cost
+  once and the runbook stays as-is. The cap is bounded (5 substitutions,
+  5 minutes), so the cost-of-status-quo is not high. The fallback is
+  documented in `distribution/shortcuts/README.md` step 0 (Risk
+  section): hand-edit each polling Shortcut's "Get Contents of URL"
+  action to use a literal host, file a follow-up to retire the variable
+  approach.
 measurement: |
-  pnpm install --no-frozen-lockfile \
-    && pnpm typecheck \
-    && pnpm vitest run novel/tick-loop --reporter=json \
-       | jq -e '.numPassedTests >= 18 and .numFailedTests == 0' \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
-    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
-    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs \
-    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
-    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+  pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'
 anchor: |
-  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability
-  Engineering*, O'Reilly, 2016, Ch. 3 (error-budget gating with a real
-  monitor — burn-rate alerting against a token budget is the canonical
-  application of SRE error-budget thresholding to a non-availability
-  signal); Gamma, Helm, Johnson, Vlissides, *Design Patterns*,
-  Addison-Wesley, 1994 (Adapter — the facade adapts the real
-  `BudgetGuard.tick()` surface to the daemon's `BudgetGuardLike.decide()`
-  surface without coupling either side to the other's evolution); Munafò
-  et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour*
-  1, 0021, 2017 (rule-#9 pre-registration — the Pivot to a facade was
-  declared in the task block *before* the real `BudgetGuard`'s public
-  surface was inspected, so the swap is not post-hoc); rule #2 (vision.md
-  § 2 — every dep behind interface; the daemon depends on `BudgetGuardLike`,
-  the facade is the one-line bridge to `@minsky/budget-guard`); Armstrong,
-  J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash AT the
-  right boundary — the facade does not catch; if `monitor.snapshot()`
-  rejects, the rejection bubbles to the daemon's per-iteration boundary
-  and onto the supervisor's `Restart=on-failure` policy).
-replay_windows_days: [7, 30, 90]
+  Norman, *The Design of Everyday Things*, 1988 (affordance — make the
+  parameterisation visible); Card, S. K., Mackinlay, J., Shneiderman, B.,
+  *Readings in Information Visualization*, Morgan Kaufmann, 1999 (calm
+  tech — bounded operator cognitive load); Munafò et al., "A Manifesto
+  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (pre-registered acceptance gate — the smoke-test assertion is the
+  literal-host regression-prevention contract committed before merge).
+
+  Risk (per the parent task block, copied here for the audit trail):
+  Apple Shortcuts variables don't survive Shortcut deletion / reinstall;
+  the "Ask Each Time" UX may prompt every run if the variable doesn't
+  persist. Mitigation: test on a real device first; if persistence is
+  lost, fall back to the 25-substitution status quo and retire the task.
+  Fallback flow is documented in `distribution/shortcuts/README.md`
+  step 0.
