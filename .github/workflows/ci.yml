@@ -491,8 +491,42 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-pivot-success-margin.test.mjs
 
+  anchor-primary-source:
+    # rule #10 ratchet applied to spec-monitor advisory rule A3 ("anchor
+    # citation is not a primary source"): the deterministic gate promotes
+    # the deny-list (`medium.com`, `*.substack.com`, `wikipedia.org`,
+    # `twitter.com`, `x.com`, `reddit.com`, `stackoverflow.com`,
+    # `chatgpt.com`, `claude.ai`, "ChatGPT said", "tweet by", "blog post")
+    # and allowlist (italicised title `*…*`, `Ch. <n>`, `pp. <n>`, ISBN,
+    # DOI, `<VENUE> <YEAR>`, internal cross-ref `vision.md §` / `rule
+    # #<n>` / `spec-advisories/<date>.md`) from SKILL.md into a CI lint
+    # over EXPERIMENT.yaml's `anchor` field. Three-way verdict — pass /
+    # fail / advisory-warn. The matching advisory rule (A3) is removed
+    # from `novel/spec-monitor/SKILL.md` in the same PR.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #5 / rule #8 (named, decades-tested pattern; constitution must
+    # outlive any single source); Beck 1999 (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build @minsky/experiment-record
+        run: pnpm --filter @minsky/experiment-record build
+      - name: anchor-primary-source lint
+        run: node scripts/check-anchor-primary-source.mjs EXPERIMENT.yaml
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-anchor-primary-source.test.mjs
+
   ci:
     needs:
+      - anchor-primary-source
       - biome
       - glossary-discipline
       - hygiene
@@ -523,7 +557,8 @@ jobs:
           # only; on push they are `skipped` — accept that, fail on
           # `failure`/`cancelled`. All other jobs must be `success`.
           fail=0
-          for r in "${{ needs.biome.result }}" \
+          for r in "${{ needs.anchor-primary-source.result }}" \
+                   "${{ needs.biome.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
