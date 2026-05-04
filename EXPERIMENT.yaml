@@ -1,68 +1,50 @@
-id: tick-loop-daemon-spawn-strategy-2026-05-04
+id: watch-shortcuts-tailscale-host-substitution-2026-05-04
 hypothesis: |
-  Introducing a `SpawnStrategy` interface (`novel/tick-loop/src/spawn-strategy.ts`)
-  with two implementations — `DryRunSpawnStrategy` (synthetic, mirrors v0)
-  and `ProcessSpawnStrategy` (`node:child_process.spawn` with bounded
-  last-4KB stdout/stderr tails + AbortSignal) — decouples the daemon from
-  `child_process` (rule #2 — every dep behind interface, Wirfs-Brock &
-  McKean 2003 Strategy boundary). The interface is the seam that test-mode
-  + production-mode share. Sub-task 1/3 of `tick-loop-daemon-real-spawn`'s
-  decomposition: this PR ships ONLY the interface + both Strategies +
-  dispatch wiring in `runDaemon`. Production stays defaulted to the legacy
-  dry-run `tick(...)` path (no Strategy injected → `dryRun: false` still
-  throws) so the existing 13 dry-run tests pass UNCHANGED and ≥4 new
-  spawn-strategy tests pass. The flag-flip to make `ProcessSpawnStrategy`
-  the default is the explicit Pivot of sub-task 3
-  (`tick-loop-daemon-real-spawn-flip`).
+  The Shortcut runbook in `distribution/shortcuts/README.md` currently
+  asks the operator to substitute `<tailscale-host>` into each Shortcut's
+  URL field by hand (5 substitutions × 5 Shortcuts = 25 manual edits).
+  Apple Shortcuts' "Ask Each Time" / "Get Variable" actions can
+  parameterise the host once at first run and remember it, dropping
+  operator overhead from 25 substitutions to 1 input + 0-touch reuse.
+  This PR ships a 6th `setup-host.shortcut.json` whose only purpose is
+  "Ask for input" → "Set Variable: host", and rewires the 5 polling
+  Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week,
+  pause, resume) to read that variable at run time via Get-Variable +
+  Combine-Text instead of carrying a literal Tailscale host. A smoke-test
+  assertion enforces that no `*.shortcut.json` may contain a literal
+  Tailscale host in any URL field — it must be either the
+  `<tailscale-host>` placeholder OR a Get-Variable reference, so the
+  parameterisation cannot silently regress.
 success: |
-  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0
-    (13 daemon dry-run tests + 11 index tests + ≥4 new spawn-strategy tests; today: 30 tests pass).
-  - `pnpm typecheck` exits 0.
-  - All 13 pre-existing daemon dry-run tests pass UNCHANGED — the dispatch
-    wiring is observably equivalent when no Strategy is injected.
-  - `ProcessSpawnStrategy` is reachable via the `spawnStrategy?` opt but
-    NOT wired as the daemon's production default.
+  - `pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0 (today: 16 cases; this PR brings it to ≥17 — 20 actual, +1 setup-host coverage, +1 no-literal-host assertion, +2 setup-host JSON-validity / schema-conformance checks).
+  - 0 literal Tailscale hosts (`*.tailscale.ts.net`, `*.tail-scale.ts.net`) in any `*.shortcut.json` URL field — enforced by the new smoke-test assertion.
+  - `setup-host.shortcut.json` ships and is documented in the runbook (`distribution/shortcuts/README.md` step 0); the 5 polling Shortcuts' runbook entries (steps A.2 and B.1) document the Get-Variable + Combine-Text prelude.
+  - `watch-shortcuts-tailscale-host-substitution` task block removed from TASKS.md in this PR.
 pivot: |
-  If `node:child_process.spawn` proves unable to forward stdin to the
-  child without a controlling TTY (deadlock — e.g. `claude --resume`
-  refuses non-interactive stdin), drop `ProcessSpawnStrategy` and pivot
-  to a temp-file-based `claude --resume` chain (write the brief to
-  `state/inbox/<id>.md`, spawn `claude --resume <file>` on it). This
-  Pivot is already pre-registered in the parent task's Pivot field
-  (Munafò et al. 2017 — the Pivot was committed *before* the experiment).
+  If the "Ask Each Time" / Variable actions don't compose across
+  separate Shortcuts (each Shortcut has its own scope on real hardware),
+  retire this task — the operator pays the 1-time substitution cost
+  once and the runbook stays as-is. The cap is bounded (5 substitutions,
+  5 minutes), so the cost-of-status-quo is not high. The fallback is
+  documented in `distribution/shortcuts/README.md` step 0 (Risk
+  section): hand-edit each polling Shortcut's "Get Contents of URL"
+  action to use a literal host, file a follow-up to retire the variable
+  approach.
 measurement: |
-  pnpm install --no-frozen-lockfile \
-    && pnpm typecheck \
-    && pnpm vitest run novel/tick-loop --reporter=json \
-       | jq -e '.numPassedTests >= 17 and .numFailedTests == 0' \
-    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
-    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
-    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
-    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
-    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
-    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
-    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
-    && node scripts/check-pivot-success-margin.mjs \
-    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
-    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
-    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+  pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'
 anchor: |
-  Wirfs-Brock, R., McKean, A., *Object Design: Roles, Responsibilities,
-  and Collaborations*, Addison-Wesley, 2003 (the Strategy boundary; the
-  spawn step is now bound to a Strategy whose two implementations swap
-  in without touching `runDaemon`); Gamma, Helm, Johnson, Vlissides,
-  *Design Patterns*, Addison-Wesley, 1994 (Strategy pattern; Adapter for
-  the structural shape); Armstrong, J., *Programming Erlang*, Pragmatic
-  Bookshelf, 2007 (let-it-crash AT the right boundary — the
-  `ProcessSpawnStrategy` returns failure shapes via non-zero `exitCode`
-  rather than throwing; the daemon's supervisor `Restart=on-failure` is
-  the respawn unit, not the Strategy); rule #2 (vision.md § 2 — every
-  dep behind interface; the spawn step is now seam'd, sub-task 2 will
-  do the same for budget-guard); Munafò et al., "A Manifesto for
-  Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (rule-#9
-  pre-registration — the production-stays-dry-run invariant is committed
-  before the change, and the Pivot to temp-file-based handoff is
-  pre-registered in the parent task).
-replay_windows_days: [7, 30, 90]
+  Norman, *The Design of Everyday Things*, 1988 (affordance — make the
+  parameterisation visible); Card, S. K., Mackinlay, J., Shneiderman, B.,
+  *Readings in Information Visualization*, Morgan Kaufmann, 1999 (calm
+  tech — bounded operator cognitive load); Munafò et al., "A Manifesto
+  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
+  (pre-registered acceptance gate — the smoke-test assertion is the
+  literal-host regression-prevention contract committed before merge).
+
+  Risk (per the parent task block, copied here for the audit trail):
+  Apple Shortcuts variables don't survive Shortcut deletion / reinstall;
+  the "Ask Each Time" UX may prompt every run if the variable doesn't
+  persist. Mitigation: test on a real device first; if persistence is
+  lost, fall back to the 25-substitution status quo and retire the task.
+  Fallback flow is documented in `distribution/shortcuts/README.md`
+  step 0.
