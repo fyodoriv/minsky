@@ -11,7 +11,111 @@
 
 ## P0
 
-(empty — work the highest-priority unblocked item from P1.)
+<!-- These 7 P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. Order: 1 unblocks 2-7; 2 unblocks 3,5; 3 unblocks 5; 4 unblocks 5; 6 closes the rule-#9 quarterly loop; 7 actualises the "society of specialists" promise. -->
+
+- [ ] `tick-loop-daemon-v0` — production tick-loop daemon that the supervisor actually supervises
+  - **ID**: tick-loop-daemon-v0
+  - **Tags**: novel, runtime, supervision, blocker
+  - **Estimate**: 2–3d
+  - **Hypothesis**: A `distribution/systemd/run-tick-loop.sh` Node entry-point that loops `pickTask → checkBudget → claim → spawnChild(claude or omc) → emitOtelSpans → complete` (or `release-on-failure`) on a configurable cadence (default 5 min) lets `minsky-tick-loop.service` (already shipped) actually supervise something. Today the unit references a non-existent script — every restart/lease/MTTR claim in `vision.md` § "Success criteria" is theatre until the daemon exists. Kephart-Chess 2003 MAPE-K's autonomic-manager assumes a *running* monitor; without the daemon the entire MAPE pipeline is dormant data.
+  - **Details**: The daemon is the I/O orchestrator that wraps three pure functions already shipped: `tasks-mcp pick_task` → `budget-guard.decide()` → spawn child process (`claude` or `omc /team`) with the task's brief → on exit, call `tasks-mcp claim_task` (lease) before spawn, `complete_task` after success or release-on-failure on non-zero exit. Cadence: default 5 min between iterations (configurable via `MINSKY_TICK_INTERVAL_S`). Honors `state/PAUSED` sentinel file (story 002 pause). Emits one OTEL span per phase (`tick.pick`, `tick.budget`, `tick.claim`, `tick.spawn`, `tick.complete`) plus the parent `tick.iteration` span. `Restart=on-failure` from systemd handles let-it-crash (rule #6). Fixture: a `--dry-run` mode that uses `MockAnthropicClient` from `@minsky/tick-loop` to validate the orchestrator without spawning real children.
+  - **Files**: `distribution/systemd/run-tick-loop.sh` (new — bash bootstrap), `novel/tick-loop/src/daemon.ts` (new — orchestrator), `novel/tick-loop/src/daemon.test.ts` (new — ≥6 tests via dry-run), `novel/tick-loop/bin/tick-loop.mjs` (new — CLI entry), `novel/tick-loop/package.json` (`bin` field), `vision.md` (row addition)
+  - **Verification**: `bash distribution/systemd/run-tick-loop.sh --dry-run --max-iterations=4` exits 0 with 4 mock tasks completed; OTEL spans visible in stdout; `state/PAUSED` honored within 1 iteration; `pnpm vitest run novel/tick-loop/src/daemon.test.ts` exits 0 with ≥6 cases.
+  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/tick-loop/src/daemon.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'` exits 0; `[ -x distribution/systemd/run-tick-loop.sh ]`.
+  - **Pivot**: if spawning `claude` as a subprocess deadlocks on stdin/stdout (interactive mode), fall back to file-based handoff: write task brief to `state/inbox/<id>.md`, expect operator (or a separate harness) to consume; document the asymmetry in `distribution/README.md`. If the lease-then-spawn ordering loses tasks under crash, switch to spawn-then-lease with idempotent claim semantics.
+  - **Acceptance**: daemon runs via `systemctl --user start minsky-supervisor.target` on Linux + `launchctl bootstrap` on macOS; survives a `kill -9` mid-tick and respawns within MTTR <5 min (story 001 acceptance); `tick.iteration` OTEL spans visible.
+  - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003 (the MAPE-K loop assumes a running monitor); Armstrong, *Programming Erlang*, 2007 (let-it-crash + supervisor restart); Beyer et al., *SRE* 2016, Ch. 3 (error-budget gating before each tick).
+  - **Risk**: spawning a child `claude` process inside a service may not get the user's environment (ANTHROPIC_API_KEY, MCP servers). Mitigation: the daemon explicitly reads `~/.claude/` config + sources `~/.zshenv` before spawn; documented in the daemon's README.
+
+- [ ] `observability-backend-deploy` — deploy OpenObserve so success-criteria queries actually return numbers
+  - **ID**: observability-backend-deploy
+  - **Tags**: novel, observability, runtime, blocker
+  - **Estimate**: 4–6h
+  - **Hypothesis**: Installing OpenObserve as a single-binary local daemon (per `research.md` § "Lighter OTEL backend" — chosen v0 backend in PR #43) and pointing `@minsky/observability`'s OTLP exporter at `http://127.0.0.1:5080/api/default/` makes 5 of vision.md's 10 success criteria measurable today (rows 1, 2, 5, 6, 9 — uptime, tokens/story, MTTR, wrist-dwell, token-budget). Today the dashboard renders `(stub)` for all 10; the OTEL adapter exists but no backend ingests its spans.
+  - **Details**: Add `distribution/install-openobserve.sh` (downloads the OpenObserve binary + writes a launchd/systemd unit). Add `OTEL_EXPORTER_OTLP_ENDPOINT` env-var documentation. Update `@minsky/observability`'s `OtelObservability` constructor to accept the endpoint via opts (currently may not — check `novel/adapters/observability/src/`). Update `novel/dashboard-web/src/server.ts`'s Strategy seam (PR #68) to read OpenObserve via PromQL. Document the install flow in `distribution/README.md`.
+  - **Files**: `distribution/install-openobserve.sh` (new), `distribution/openobserve/com.openobserve.daemon.plist` (new — macOS), `distribution/openobserve/openobserve.service` (new — systemd), `novel/adapters/observability/src/otel.ts` (endpoint opts), `novel/dashboard-web/src/strategy.ts` (PromQL Strategy implementation), `distribution/README.md`
+  - **Verification**: `bash distribution/install-openobserve.sh --port=5080` exits 0; `curl -s http://127.0.0.1:5080/api/default/_health` returns 200; `node -e 'import(\"@minsky/observability\").then(m => new m.OtelObservability({endpoint: \"http://127.0.0.1:5080/api/default/v1/traces\"}).selfTest())'` returns `green` within 5 s; dashboard's `/watch.json` returns at least 1 non-`(stub)` value.
+  - **Measurement**: `[ -x distribution/install-openobserve.sh ]`; integration test `novel/adapters/observability/test/openobserve.integration.test.ts` (skipped in CI without local OpenObserve, runs locally) round-trips a span through OpenObserve and reads it back.
+  - **Pivot**: if OpenObserve's single-binary install proves flaky on macOS (Sequoia signing, sandbox policies), fall back to VictoriaMetrics triad (named in PR #43 as the runner-up); if both flake, ship the bare OTLP collector + Honeycomb-compatible exporter and document the cloud dependency.
+  - **Acceptance**: 5 of 10 success-criteria queries return non-stub values; dashboard renders live data; OTEL three-signal selfTest green against local OpenObserve.
+  - **Anchor**: research.md § "Lighter OTEL backend" (PR #43 — OpenObserve recommended); OpenTelemetry specification (CNCF 2020+); Wilkie, "RED Method", 2018.
+  - **Risk**: OpenObserve may discontinue free single-binary distribution. Mitigation: pin binary version in install script; document migration path to VictoriaMetrics in `research.md`.
+
+- [ ] `mape-k-prompt-rollout-orchestrator` — wire MAPE-K Knowledge → PromptOptimizer.runABTest in production
+  - **ID**: mape-k-prompt-rollout-orchestrator
+  - **Tags**: novel, mape-k, runtime, blocker
+  - **Estimate**: 1d
+  - **Blocked by**: tick-loop-daemon-v0
+  - **Hypothesis**: A `mape-k-orchestrator.mjs` invoked once per scheduler iteration that reads `experiment-store/*.jsonl` verdicts + `constraints.md` history, calls `mape-k-loop.tick()`, and on `decision: 'rollout'` calls `PromptOptimizer.runABTest()` against the actual prompt files in `.claude/skills/`, makes success-criterion #4 (≥4 prompt rollouts/month with ≥10% sustained gain) structurally measurable. Today all 5 MAPE-K phases exist as pure functions; nothing fires them on a cadence.
+  - **Details**: Add `novel/mape-k-loop/src/orchestrator.ts` — the I/O orchestrator: reads experiment-tracker outputs + constraints.md tail, reads `.claude/skills/*/SKILL.md` for current prompts, calls `tick({...})`, on rollout writes the variant to a draft branch + opens a PR with `EXPERIMENT.yaml` carrying the predicted gain. Daemon (#tick-loop-daemon-v0) calls this on every Nth tick (default: every 12 ticks ≈ 1h). Sustained-gain check + oscillation guard already exist (PR #57); orchestrator just wires them.
+  - **Files**: `novel/mape-k-loop/src/orchestrator.ts` + `.test.ts`, `novel/mape-k-loop/bin/mape-k-orchestrator.mjs` (CLI), `distribution/systemd/run-tick-loop.sh` (call orchestrator every Nth tick)
+  - **Verification**: `pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts` ≥4 cases pass — happy-path rollout opens a synthetic draft branch; oscillation guard suppresses repeat variant within window; sustained-gain failure abstains; no-op when no experiment verdicts available.
+  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`.
+  - **Pivot**: if 90 days of orchestrator runs produce zero rollouts (the gain threshold is unreachable in practice), drop the sustained-gain check from 7 d → 3 d as the documented Pivot, OR widen the variant catalogue past the 3 v0 mutations.
+  - **Acceptance**: orchestrator tests pass; daemon fires it on the documented cadence; first rollout (real or synthetic) produces a draft branch + PR within 24h of activation.
+  - **Anchor**: Kephart & Chess 2003 (MAPE-K Knowledge → Plan → Execute); Khattab DSPy 2023 (rejected runtime, kept the cycle); Kohavi/Tang/Xu 2020 (sustained-gain discipline).
+  - **Risk**: Auto-opening PRs on the user's behalf could be noisy. Mitigation: orchestrator opens PRs as DRAFTS, never auto-merges, requires explicit operator review.
+
+- [ ] `notifier-adapter-v0` — ntfy push channel for morning summary + chaos alerts
+  - **ID**: notifier-adapter-v0
+  - **Tags**: novel, adapter, ux, blocker
+  - **Estimate**: 4–6h
+  - **Hypothesis**: A thin `Notifier` interface + `NtfyNotifier` Strategy (HTTP POST to `https://ntfy.sh/<topic>` or self-hosted) lets the tick-loop daemon emit (a) one morning push summarising overnight throughput + tokens, (b) circuit-break-and-notify alerts per the rule-#7 chaos table. Today story 001 acceptance #6 ("a morning notification summarizes work done") has no implementation — there's no push channel at all.
+  - **Details**: Adapter pattern (rule #2). Interface: `Notifier.push({ title, body, priority: 'low' | 'high' })`. Strategy: `NtfyNotifier` (HTTP), `StubNotifier` (in-memory for tests). Topic configured via `MINSKY_NTFY_TOPIC` env var. Token via macOS Keychain (mirror jira-token pattern in zshrc). Tick-loop daemon emits one morning push when crossing 07:00 local with a roll-up of the last N ticks; budget-guard PAUSE state emits an immediate high-priority push.
+  - **Files**: `novel/adapters/notifier/{package.json, tsconfig.json, src/index.ts, src/index.test.ts, src/ntfy.ts, src/ntfy.test.ts, README.md}`
+  - **Verification**: `pnpm vitest run novel/adapters/notifier` ≥6 tests pass; manual smoke against ntfy.sh sends a real push to the configured topic.
+  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/adapters/notifier --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`.
+  - **Pivot**: if ntfy.sh proves unreliable (rate limits, downtime), pivot to APNs or self-hosted ntfy on the user's Tailnet. Document the deviation.
+  - **Acceptance**: morning push fires on real overnight runs (verified manually); chaos-table circuit-break-and-notify rows have a live `notifier.push(...)` callsite.
+  - **Anchor**: rule #2 (adapter pattern); Hunt-Thomas 1999 Pragmatic Programmer Tip 32 (crash early — but the crash needs to reach the operator).
+  - **Risk**: push fatigue if too noisy. Mitigation: priority schedule (`low` for daily summary, `high` only for budget-guard PAUSE / crash); max 3 pushes/day at default settings.
+
+- [ ] `user-story-001-integration-test-real` — actual integration test against the real daemon (not mock)
+  - **ID**: user-story-001-integration-test-real
+  - **Tags**: testing, validation, runtime
+  - **Estimate**: 1d
+  - **Blocked by**: tick-loop-daemon-v0, notifier-adapter-v0, observability-backend-deploy
+  - **Hypothesis**: A `user-stories/001-loop-runs-overnight.test.ts` that drives the real daemon (via `bash distribution/systemd/run-tick-loop.sh --max-iterations=12 --tick-interval-s=5` — 1-min compressed sim of 12 ticks) closes ≥4 P2 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL span per phase, and triggers exactly 1 morning push, satisfying story 001's acceptance criteria within CI runtime <10 min.
+  - **Details**: Replaces the coverage-manifest test (PR #82) with a real driver. Fixture: synthetic TASKS.md with 4 P2 tasks designed to complete deterministically. Mock Anthropic client (reuse `@minsky/tick-loop`'s `MockAnthropicClient`). Real OpenObserve (started + torn down in test setup). StubNotifier asserts 1 push call.
+  - **Files**: `user-stories/001-loop-runs-overnight.test.ts`, `user-stories/001-loop-runs-overnight.md` (mark Phase: Implemented)
+  - **Verification**: `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts` exits 0 within 5 min; chaos-coverage manifest re-checks (rows now `covered` instead of `self-hosted`).
+  - **Measurement**: `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'`.
+  - **Pivot**: if compressed-sim coverage stays below the chaos table's 80% threshold even with the real daemon, the user-story 001 spec needs splitting (per its own documented Pivot). File a follow-up to the spec.
+  - **Acceptance**: integration test green on every CI run; chaos coverage re-classified as `covered` for ≥10/12 rows in the manifest.
+  - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016; Beck, *Extreme Programming Explained*, 1999 (CI keeps the build fast).
+  - **Risk**: real daemon spawning real subprocesses inflates CI cost. Mitigation: max-iterations cap + tight tick-interval ensure <5min wall-clock; the nightly self-hosted run (sub-task 3 of original first-integration-test) extends to full 60 min.
+
+- [ ] `experiment-tracker-knowledge-ingestion` — close rule-#9 quarterly automation loop
+  - **ID**: experiment-tracker-knowledge-ingestion
+  - **Tags**: novel, mape-k, conformance, runtime
+  - **Estimate**: 4–6h
+  - **Blocked by**: mape-k-prompt-rollout-orchestrator
+  - **Hypothesis**: Adding a step to `.github/workflows/experiment-tracker.yml` (the weekly/monthly cron — already shipped in PR #38) that pipes the just-emitted verdicts into `mape-k-orchestrator.mjs --ingest-mode` closes the rule-#9 quarterly automation layer (`vision.md` § 9 — "Pre-registration without execution is half a rule"). The orchestrator's Knowledge phase reads the verdicts, updates `constraints.md`, and on systematic miscalibration emits a research-task amendment proposal to research.md.
+  - **Details**: New workflow step at the end of `experiment-tracker.yml` invokes `node novel/mape-k-loop/bin/mape-k-orchestrator.mjs --ingest-from=experiment-store/`. The orchestrator computes calibration drift (predicted Δ vs observed Δ by hypothesis category) and writes a one-line entry to `validated-learnings.md` for `validated`, opens a `pivot-experiment-<id>` task for `regressed`, appends to `constraints.md` for `inconclusive`. If drift > threshold, opens a draft PR amending rule #9.
+  - **Files**: `.github/workflows/experiment-tracker.yml` (extend), `novel/mape-k-loop/src/orchestrator.ts` (add `--ingest-mode`), `novel/mape-k-loop/src/orchestrator.test.ts` (extend)
+  - **Verification**: synthetic experiment fixture with calibration drift > threshold → orchestrator writes a draft PR file under `tmp/proposed-rule-9-amendment.md`; `validated-learnings.md` count grows for `validated` verdicts; `constraints.md` count grows per ingestion.
+  - **Measurement**: `pnpm vitest run novel/mape-k-loop/src/orchestrator.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`; post-merge, `gh run list --workflow experiment-tracker.yml --limit 30 --json conclusion --jq '[.[] | select(.conclusion=="success")] | length' >= 28` (≥93% green).
+  - **Pivot**: if the calibration-drift heuristic produces ≥3 false-positive amendment PRs in the first month, raise the threshold OR drop the auto-PR step (orchestrator emits a logged proposal but doesn't open a PR).
+  - **Acceptance**: experiment-tracker workflow's success-criterion-4 path is wired end-to-end; first calibration-drift event opens a draft amendment PR.
+  - **Anchor**: Kephart & Chess 2003 (Knowledge phase closes the loop); Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 calibration as a pre-registered audit).
+  - **Risk**: noisy auto-amendments. Mitigation: threshold > 50% drift across 2 consecutive replay windows before the amendment fires (already in `mape-k-loop.knowledge`).
+
+- [ ] `persona-spawner-v0` — OMC `/team` invocation from queue items (society of specialists actually exists)
+  - **ID**: persona-spawner-v0
+  - **Tags**: novel, runtime, persona
+  - **Estimate**: 2–3d
+  - **Blocked by**: tick-loop-daemon-v0
+  - **Hypothesis**: A `PersonaSpawner.spawn({ taskId, persona })` Strategy that invokes `omc /team N:role` against a per-task working directory, captures the OMC session's stdout/stderr, and emits OTEL spans per persona iteration, lets the tick-loop daemon route different task types to different personas (engineer / reviewer / researcher) — actualising the "society of specialists" promise that single Claude Code can't fulfill.
+  - **Details**: Adapter (rule #2). Interface: `PersonaSpawner.spawn(opts) => Promise<{ exitCode, durationMs, omcStateDir }>`. v0 Strategy: `OmcPersonaSpawner` shells out to `omc /team <persona>` and reads the resulting `.omc/state/team/<teamName>/` (which `@minsky/omc-tasksmd-bridge` already parses, PR #78). Stub Strategy: `StubPersonaSpawner` for tests. Persona selection: a small dispatch table mapping task tags to personas (e.g., `bug` → `engineer`, `research` → `researcher`).
+  - **Files**: `novel/adapters/persona-spawner/{package.json, tsconfig.json, src/index.ts, src/index.test.ts, src/omc.ts, src/omc.test.ts, README.md}`
+  - **Verification**: stub spawner test asserts the dispatch table maps correctly; OMC integration test (skipped in CI without OMC installed) spawns a one-shot session and verifies the bridge picks up the resulting team-state JSON.
+  - **Measurement**: `pnpm vitest run novel/adapters/persona-spawner --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`.
+  - **Pivot**: if OMC's `/team` mode proves incompatible with the daemon's process-supervision model (e.g., refuses to detach), pivot to a thin `claude --resume` chain managed by the daemon directly + drop the multi-persona feature for v0; revisit when OMC stabilizes the spawn API.
+  - **Acceptance**: spawner adapter ships; tick-loop daemon's `--enable-personas` flag routes ≥1 task in the synthetic fixture to the engineer persona; the spawned OMC state appears in `.omc/state/team/...` and is read back by the bridge.
+  - **Anchor**: rule #2 (adapter pattern); Wooldridge, *Multi-Agent Systems*, 2009 (role-based agent orchestration); rule #1 (OMC is the existing tool — adapter, don't reinvent).
+  - **Risk**: OMC may not support being spawned non-interactively. Mitigation: v0 uses `--prompt-file` + `--non-interactive` flags if available; else file an upstream OMC issue (already drafted in TASKS.md `omc-tasksmd-issue` enrichment).
+
+(empty in P0 below — work the highest-priority unblocked item from the list above, then move to P1.)
 
 ## P1
 
