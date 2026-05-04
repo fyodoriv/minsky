@@ -82,25 +82,11 @@
   - **Anchor**: rule #10; OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method — instrumentation as a structural property).
   - **Risk**: TS-AST traversal is heavier than grep. Mitigation: cache by content-hash; run on diff-base only when feasible.
 
-- [ ] `ci-rule-6-let-it-crash` — CI lint: no nested `try/catch` deeper than 1 level; every catch re-throws or supervises explicitly
-  - **ID**: ci-rule-6-let-it-crash
-  - **Tags**: ci, conformance, rule-10
-  - **Estimate**: 4–5h
-  - **Hypothesis**: A TypeScript-AST lint that flags `try/catch` blocks nested deeper than 1 level OR catch-handlers that swallow without re-throwing OR calling a `supervise(…)` helper enforces rule #6's "let-it-crash" discipline — converting "long try-catch chains are a smell" from prose into a CI failure.
-  - **Details**: Build `scripts/check-rule-6-let-it-crash.mjs` using the TS compiler API. Walks every `novel/**/*.ts` (non-test); flags `try/catch` blocks deeper than 1 level (configurable via comment annotation); flags `catch` blocks whose body lacks a `throw` *or* a call to a registered supervisor helper (defined in `@minsky/adapter-types` or similar). Allow opt-out per catch with `// rule-6: handled-locally — <reason>` immediately above.
-  - **Files**: `scripts/check-rule-6-let-it-crash.mjs`, `scripts/check-rule-6-let-it-crash.test.mjs`, `.github/workflows/ci.yml`
-  - **Verification**: synthetic file with a 2-level-nested try/catch → fails; same file with one level + re-throw → passes; same file with `// rule-6: handled-locally — boundary-with-stdin` → passes.
-  - **Measurement**: `node scripts/check-rule-6-let-it-crash.mjs` exits 1 against the deep-nest fixture and 0 against the clean fixture; `pnpm vitest run scripts/check-rule-6-let-it-crash.test.mjs` exits 0.
-  - **Pivot**: if the lint flags ≥3 false positives per month from genuine system-boundary catches (e.g., process-edge stdin parsing), broaden the opt-out to whole-file via `// rule-6-file: boundary-handler` AND add an explicit "boundary catalogue" in research.md naming each.
-  - **Acceptance**: CI job runs on every PR; rule #6's let-it-crash discipline is mechanically enforced.
-  - **Anchor**: rule #10; Armstrong, *Programming Erlang*, 2007 (let it crash); Lampson 1983 hint "use exceptions only for exceptional conditions".
-  - **Risk**: TS-AST visitor maintenance burden. Mitigation: keep the rule narrow — depth threshold + missing-rethrow are both single-pass checks.
-
 - [ ] `spec-monitor-deterministic-rewrite` — split `spec-monitor-skill` into deterministic linters + a thin LLM advisory layer
   - **ID**: spec-monitor-deterministic-rewrite
   - **Tags**: novel, conformance, rule-10
   - **Estimate**: 1d (assumes ci-rule-1..7 land first)
-  - **Blocked by**: ci-rule-4-otel-coverage, ci-rule-6-let-it-crash
+  - **Blocked by**: ci-rule-4-otel-coverage
   - **Hypothesis**: Once rules #1–7 + #9 each have a deterministic CI lint, the residual scope of `claude-spec-monitor` is purely advisory (prose-quality of hypotheses, smell-test of pivot thresholds, narrative drift) — and it can be rewritten as a thin Claude Skill that *augments* the deterministic linters with judgement-heavy questions, never substitutes for them. The deterministic linters catch ≥90 % of what today's spec-monitor-skill is meant to catch; the Skill handles the remaining ≤10 %.
   - **Details**: Reframes the prior `spec-monitor-skill` task. Steps: (1) audit the deterministic linters that ship in the seven `ci-rule-*` tasks; (2) enumerate the rule-violation classes they cannot catch (the residual judgement scope); (3) ship `@minsky/spec-monitor` as a Claude Skill whose remit is *only* that residual scope, declared in its own `SKILL.md`; (4) the Skill never fails CI — its output is a structured advisory report committed to `spec-advisories/<date>.md`; (5) the ratchet-rule applies — any rule the Skill currently checks that has a deterministic linter is *removed* from the Skill's scope in the same PR.
   - **Files**: supersedes `novel/spec-monitor/` from the prior task; `novel/spec-monitor/SKILL.md`, `novel/spec-monitor/test/synthetic-drift/`, `spec-advisories/.gitkeep`
