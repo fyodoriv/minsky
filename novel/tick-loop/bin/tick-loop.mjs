@@ -37,6 +37,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { BudgetGuard } from "@minsky/budget-guard";
+import { NtfyNotifier } from "@minsky/notifier";
 import { MaciekTokenMonitor, StubTokenMonitor } from "@minsky/token-monitor";
 
 import {
@@ -145,6 +146,29 @@ const spawnStrategy = dryRun
   ? new DryRunSpawnStrategy()
   : new ProcessSpawnStrategy({ command: "claude" });
 
+// Wire the push channel for `runDaemon`'s edge-triggered budget-paused
+// notifier (P1 `daemon-budget-pause-observability`, shipped #113). The seam
+// is optional in `RunDaemonOpts`; if `MINSKY_NTFY_TOPIC` isn't set the
+// daemon still records the budget-paused span — it just doesn't push
+// anywhere. This makes opt-in deliberate (rule #2 — every external
+// dependency behind an interface; rule #7 — graceful-degrade when the
+// dependency is absent). `MINSKY_NTFY_SERVER` overrides the public ntfy.sh
+// default for self-hosted; `MINSKY_NTFY_AUTH_TOKEN` is the bearer for
+// authenticated topics. None of these are required for the daemon to run.
+const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
+const notifier =
+  ntfyTopic === undefined || ntfyTopic.trim() === ""
+    ? undefined
+    : new NtfyNotifier({
+        topic: ntfyTopic,
+        ...(process.env.MINSKY_NTFY_SERVER
+          ? { serverBaseUrl: process.env.MINSKY_NTFY_SERVER }
+          : {}),
+        ...(process.env.MINSKY_NTFY_AUTH_TOKEN
+          ? { authToken: process.env.MINSKY_NTFY_AUTH_TOKEN }
+          : {}),
+      });
+
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
   maxIterations: args.maxIterations,
@@ -159,12 +183,23 @@ const result = await runDaemon({
   pausedSentinelReader: () => existsSync(args.pausedSentinelPath),
   // Real `BudgetGuard.tick()` wrapped behind the daemon's `BudgetGuardLike.decide()` shape.
   budgetGuard: fromRealBudgetGuard(realGuard),
+  // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
+  ...(notifier !== undefined ? { notifier } : {}),
   emit: (event) => {
     // Plain-text span emission to stdout — operator can pipe to journalctl
-    // (systemd) or `tail -f` (launchd). Real OTEL wiring is `tick-loop-daemon-real-spawn`.
+    // (systemd) or `tail -f` (launchd). Real OTEL wiring deferred to
+    // `daemon-otel-pipe` (filed below as a P1 follow-up).
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
   },
 });
+
+if (notifier !== undefined) {
+  process.stdout.write(`[tick-loop] notifier wired (ntfy topic=${ntfyTopic})\n`);
+} else {
+  process.stdout.write(
+    "[tick-loop] no notifier wired (set MINSKY_NTFY_TOPIC to enable budget-paused pushes)\n",
+  );
+}
 
 process.stdout.write(
   `[tick-loop] ${result.totalIterations} iteration(s) (${result.stoppedReason})\n`,
