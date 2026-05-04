@@ -1,28 +1,20 @@
-id: mape-k-cost-schedule-from-vision
+id: dashboard-web-skeleton
 hypothesis: |
-  Goldratt's flat product `violationCount × 1` over-collapses
-  high-frequency low-severity rules (typo lints) against rare
-  high-severity rules (rule-#9 pre-registration misses). A per-rule
-  cost schedule sourced from a new `## Cost schedule` table in
-  `vision.md` — parsed by `parseCostSchedule(visionMdContent)`
-  (`novel/mape-k-loop/src/cost-schedule.ts`) and threaded through
-  `tick({ ..., costs })` into `analyze({ snapshot, costs })` —
-  restores the severity ordering without an API change. The `costs`
-  seam was already designed in `mape-k-loop-v0` sub-task 2; this PR
-  is the upstream parser plus the integration plumbing in `tick`.
-  v0 weights (defensible, revisitable at the next quarterly review):
-  `rule-9 = 100`, `rule-7 = 50`, `rule-typo = 1`. Rules absent from
-  the schedule fall back to `DEFAULT_RULE_COST = 1` (rule #7
-  graceful-degrade). The integration test asserts a 50× rule-typo
-  violation count cannot outrank a single rule-#9 violation under
-  the schedule (50 × 1 = 50 < 1 × 100 = 100), and that without the
-  schedule the same input picks rule-typo (regression baseline).
-  This PR is rule-#4 ratchet ("every constant in source") applied
-  to the cost-weight schedule: the prose-only "use 100 / 50 / 1"
-  recommendation in the task block becomes a numbered, parseable,
-  deterministically-consumed table.
-success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts user-stories/003-mape-k-improves-prompts.test.ts --reporter=json | jq -e '.numPassedTests >= 5 and .numFailedTests == 0'` exits 0; rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / mape-k-budget-cap / mape-k-constraints-md-size) pass on this PR's diff; the `mape-k-cost-schedule-from-vision` task block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-cost-schedule-from-vision$' TASKS.md` returns 0); vision.md row 54 marks `costEstimate` full-conformance."
-pivot: "If the schedule goes stale faster than expected (>5 % of PRs need to add a new ruleId row, i.e. the table cannot keep pace with new rules being introduced), pivot to a heuristic over rule severity ranges sourced from each rule's own README — the same long-tail-prose escape hatch the original task block called out. If the v0 weights (100 / 50 / 1) prove arbitrary in practice (the loop's first month of rollouts shows the per-rule rankings disagree with operator exampleion >25 % of ticks), recalibrate at the next quarterly review (`review-q3-2026`) rather than removing the schedule — removing it re-opens the high-volume-low-severity over-collapse failure mode this gate exists to close."
-measurement: "pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts user-stories/003-mape-k-improves-prompts.test.ts --reporter=json | jq -e '.numPassedTests >= 5 and .numFailedTests == 0' && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-cost-schedule-from-vision$' TASKS.md)\" = '0' ]"
-anchor: "Goldratt, E. M., *The Goal: A Process of Ongoing Improvement*, North River Press, 1984 (Theory of Constraints — `topConstraint = max(violationCount × cost)`); rule #4 (vision.md § 4 — every constant in source; the schedule's literal numbers live in the markdown table, not in code); rule #7 (vision.md § 7 — graceful-degrade; missing schedule → identity, misconfigured weight → fallback to `DEFAULT_RULE_COST`); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K Analyze phase whose cost-weight upstream this lint is); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure-function decision module + thin I/O boundary — the parser is pure, the CLI wrapper is the I/O); vision.md § \"Cost schedule\" (the new table this PR adds); vision.md § \"Pattern conformance index\" row 54 (updated to mark `costEstimate` full-conformance)."
+  A Hono v4 SSR skeleton at ≤100 LoC of TypeScript source under
+  `novel/dashboard-web/src/` provides a deterministic substrate that
+  unblocks the 3 remaining sub-tasks of `dashboard-web-v0`
+  (`dashboard-web-metrics-enum`, `dashboard-web-render-all-10`,
+  `dashboard-web-lighthouse-ci`) without exceeding the parent's 300-LoC
+  pivot threshold. The renderer is a pure function over `{ metrics }` —
+  no I/O, no global state — so the Lighthouse Mobile gate landing in
+  sub-task 4 measures static-render performance, not runtime variance.
+  The single placeholder `data-metric-id="placeholder"` is the
+  contract sub-task 3 expands to 10 entries; the cold-start path
+  (`render({ metrics: [] })`) returns a well-formed document so the
+  dashboard never crashes on a missing OTEL backend (rule #7 graceful-
+  degrade — chaos table row 1 of the package README).
+success: "`pnpm typecheck` exits 0; `pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0; `[ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 100 ]` exits 0; rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-6 / rule-7 / skill-rule-cap / pattern-index) pass on this PR's diff; the `dashboard-web-skeleton` block is removed from `TASKS.md` in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-skeleton$' TASKS.md` returns 0); vision.md row 57 records partial conformance for the skeleton."
+pivot: "If Hono cold-start adds significant complexity (the 100-LoC cap is breached >50 % to satisfy the SSR contract — i.e., >150 LoC of TS source under `novel/dashboard-web/src/`), pivot to plain `node:http` + template literals. The `createServer` Adapter shape is the seam: only `server.ts` would change. If the skeleton fails to unblock sub-task 2 within the same week (the renderer needs a non-trivial change to accept the 10-entry array), the pure-function shape is wrong; pivot to a class-based renderer with named methods per metric category."
+measurement: "pnpm typecheck && pnpm vitest run novel/dashboard-web/ --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0' && [ \"$(wc -l novel/dashboard-web/src/*.ts | tail -1 | awk '{print $1}')\" -le 100 ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: dashboard-web-skeleton$' TASKS.md)\" = '0' ]"
+anchor: "Card, S. K., Mackinlay, J. D., & Shneiderman, B. (eds.), *Readings in Information Visualization: Using Vision to Think*, Morgan Kaufmann, 1999, Ch. 1 (the dashboard-as-glanceable-display pattern — the 10-metric set is the dashboard's information atom); Wilkie, T., \"The RED Method: How To Instrument Your Services\", *Weave Works blog* / *USENIX SREcon EMEA* 2018 (rate / errors / duration as the right service-level lens); Gamma, E., Helm, R., Johnson, R., & Vlissides, J., *Design Patterns: Elements of Reusable Object-Oriented Software*, Addison-Wesley, 1994 (Adapter — `createServer` is the Hono adapter shape so a pivot to plain `node:http` only changes `server.ts`); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure decision module + thin I/O boundary — `render` is pure, the Hono server is the I/O); rule #2 (vision.md § 2 — every dep behind interface); rule #7 (vision.md § 7 — graceful-degrade and chaos engineering); vision.md § \"Pattern conformance index\" row 57 (this PR adds the row)."
 replay_windows_days: [7, 30]
