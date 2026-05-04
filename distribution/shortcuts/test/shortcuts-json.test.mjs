@@ -36,6 +36,26 @@ const SHORTCUTS_DIR = resolve(HERE, "..");
 
 const KIND_FETCH = "fetch-and-show";
 const KIND_POST = "post-control";
+const KIND_SETUP = "setup-variable";
+
+// watch-shortcuts-tailscale-host-substitution: no `*.shortcut.json` may
+// carry a literal Tailscale hostname in any URL field. The host is
+// captured once at first run by `setup-host.shortcut.json` (kind
+// `setup-variable`) and read at run time via Get-Variable + Combine-Text.
+// Allowed forms in `endpoint.url`:
+//   1. the `<tailscale-host>` placeholder (so the URL still parses /
+//      validates URL-shape and includes the canonical port + path);
+//   2. a Get-Variable reference (e.g., `${host}` or `{{host}}`).
+// Anything literal-looking (`*.tailscale.ts.net`, `*.tail-scale.ts.net`,
+// `mac-mini-*`, etc.) is forbidden — the runbook would once again ask
+// the operator to hand-substitute the host into 5 Shortcuts.
+const LITERAL_TAILSCALE_HOST_PATTERNS = [
+  /[A-Za-z0-9-]+\.tailscale\.ts\.net/,
+  /[A-Za-z0-9-]+\.tail-scale\.ts\.net/,
+  /[A-Za-z0-9-]+\.ts\.net/,
+];
+const HOST_PLACEHOLDER = "<tailscale-host>";
+const HOST_VARIABLE_PATTERNS = [/\$\{host\}/, /\{\{host\}\}/];
 
 const VALIDATOR_CTX = {
   successMetricIds: new Set(SUCCESS_METRICS.map((m) => m.id)),
@@ -50,6 +70,40 @@ function readShortcuts() {
       filename: f,
       raw: readFileSync(resolve(SHORTCUTS_DIR, f), "utf8"),
     }));
+}
+
+/**
+ * Inspect a single shortcut's endpoint.url for the
+ * watch-shortcuts-tailscale-host-substitution invariants. Returns the
+ * list of violations for that file (empty = pass).
+ *
+ * Two checks:
+ *   (a) the URL must NOT match any literal-Tailscale-host pattern
+ *       (`*.tailscale.ts.net`, `*.tail-scale.ts.net`, `*.ts.net`); a
+ *       literal would mean the operator is back to hand-substitution.
+ *   (b) the URL must carry the `<tailscale-host>` placeholder OR a
+ *       Get-Variable reference (`${host}` / `{{host}}`) OR a sibling
+ *       `url_assembly` block (the Get-Variable + Combine-Text recipe).
+ */
+function checkUrlHostInvariants(filename, ep) {
+  if (ep === undefined) return []; // setup-variable kind has no endpoint
+  const url = typeof ep.url === "string" ? ep.url : "";
+  /** @type {string[]} */
+  const violations = [];
+  for (const pat of LITERAL_TAILSCALE_HOST_PATTERNS) {
+    if (pat.test(url)) {
+      violations.push(`${filename}: endpoint.url contains literal host ${pat.source}: ${url}`);
+    }
+  }
+  const hasPlaceholder = url.includes(HOST_PLACEHOLDER);
+  const hasVariableRef = HOST_VARIABLE_PATTERNS.some((p) => p.test(url));
+  const hasUrlAssembly = ep.url_assembly !== undefined && typeof ep.url_assembly === "object";
+  if (!hasPlaceholder && !hasVariableRef && !hasUrlAssembly) {
+    violations.push(
+      `${filename}: endpoint.url must contain "${HOST_PLACEHOLDER}" placeholder or a Get-Variable reference (\${host} / {{host}}) or carry a url_assembly block: ${url}`,
+    );
+  }
+  return violations;
 }
 
 describe("distribution/shortcuts/*.shortcut.json — schema + URL invariants", () => {
@@ -69,6 +123,33 @@ describe("distribution/shortcuts/*.shortcut.json — schema + URL invariants", (
     ]) {
       expect(names).toContain(required);
     }
+  });
+
+  it("ships exactly one setup-variable manifest (`setup-host.shortcut.json`) that captures the `host` variable for the polling Shortcuts (watch-shortcuts-tailscale-host-substitution)", () => {
+    const names = shortcuts.map((s) => s.filename);
+    expect(names).toContain("setup-host.shortcut.json");
+    const setupKind = shortcuts
+      .map((s) => ({ filename: s.filename, parsed: JSON.parse(s.raw) }))
+      .filter((s) => s.parsed.shortcut_kind === KIND_SETUP);
+    expect(setupKind.length).toBe(1);
+    const [{ parsed }] = setupKind;
+    expect(parsed.prompt.action).toBe("Ask for Input");
+    expect(parsed.set_variable.action).toBe("Set Variable");
+    expect(parsed.set_variable.variable_name).toBe("host");
+  });
+
+  it("no `*.shortcut.json` carries a literal Tailscale host in any URL field — must be the `<tailscale-host>` placeholder OR a Get-Variable reference (watch-shortcuts-tailscale-host-substitution)", () => {
+    // Hypothesis: parameterising the host once at first run drops operator
+    // overhead from 5×5=25 manual substitutions to 1 input + 0-touch reuse.
+    // This test is the deterministic gate: any literal host re-introduced
+    // into the JSON would silently revert to the 25-substitution status quo.
+    /** @type {string[]} */
+    const offenders = [];
+    for (const { filename, raw } of shortcuts) {
+      const parsed = JSON.parse(raw);
+      for (const v of checkUrlHostInvariants(filename, parsed.endpoint)) offenders.push(v);
+    }
+    expect(offenders).toEqual([]);
   });
 
   for (const { filename, raw } of shortcuts) {

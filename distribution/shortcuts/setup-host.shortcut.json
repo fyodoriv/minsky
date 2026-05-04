@@ -1,0 +1,20 @@
+{
+  "$schema": "./schema/minsky-shortcut.schema.json",
+  "name": "Minsky · setup host",
+  "description": "First-run setup. Prompts once for the dashboard's Tailscale hostname (e.g., mac-mini-1.tailscale.ts.net) and stores it as a shared `host` variable that the 5 polling Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week, pause, resume) read at run time via Get-Variable + Combine-Text. Drops operator overhead from 25 manual URL substitutions to 1 input + 0-touch reuse.",
+  "shortcut_kind": "setup-variable",
+  "prompt": {
+    "action": "Ask for Input",
+    "prompt": "Enter the Tailscale hostname for the Minsky dashboard (e.g., mac-mini-1.tailscale.ts.net)",
+    "input_type": "Text",
+    "variable_name": "host_input",
+    "default_answer": "mac-mini-1.tailscale.ts.net"
+  },
+  "set_variable": {
+    "action": "Set Variable",
+    "variable_name": "host"
+  },
+  "watch_surface": false,
+  "anchor": "Norman, The Design of Everyday Things, 1988 (affordance — make the parameterisation visible); Card & Mackinlay 1999 (calm tech — bounded operator cognitive load); user-story 005 (three-numbers Watch).",
+  "build_runbook": "../README.md"
+}

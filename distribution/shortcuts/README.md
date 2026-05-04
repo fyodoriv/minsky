@@ -14,10 +14,13 @@
 
 ## What is here
 
-Five JSON config files — one per Shortcut:
+Six JSON config files — five Shortcuts that talk to the dashboard plus a
+one-time `setup-host` Shortcut that captures the Tailscale host as a
+shared `host` variable (no more 25 manual URL substitutions):
 
 | File | Kind | Endpoint | Surface |
 |------|------|----------|---------|
+| `setup-host.shortcut.json` | setup-variable | "Ask for Input" → "Set Variable: host" | iPhone (one-time) |
 | `tokens-remaining.shortcut.json` | fetch-and-show | `GET :8080/watch.json` | Watch |
 | `last-task-status.shortcut.json` | fetch-and-show | `GET :8080/watch.json` | Watch |
 | `constraint-of-the-week.shortcut.json` | fetch-and-show | `GET :8080/watch.json` | Watch |
@@ -41,9 +44,44 @@ Prerequisites:
    Mobile Safari first — you should see a JSON body with the four keys
    `tokens-remaining` / `last-task-status` / `constraint-of-the-week` /
    `paused`).
-3. The `<tailscale-host>` substituted into each Shortcut's URL — the
-   default placeholder is `minsky.tail-scale.ts.net`. Whatever you pick
-   must match the host that `novel/dashboard-web` is listening on.
+3. The Tailscale hostname (e.g., `mac-mini-1.tailscale.ts.net`) is
+   captured **once** by the `setup-host` Shortcut (step 0 below) and
+   stored as a shared `host` variable. The 5 polling Shortcuts read
+   that variable at run time via Get-Variable + Combine-Text instead of
+   the old hand-substituted `<tailscale-host>` literal. This drops
+   operator overhead from 5 substitutions × 5 Shortcuts = **25 manual
+   edits** to **1 input + 0-touch reuse**.
+
+### Step 0 — first-run host capture (`setup-host`, one-time, ~1 min)
+
+Build this Shortcut **before** the polling Shortcuts in steps A and B —
+they all read the variable it sets.
+
+1. **Open Shortcuts.app on iPhone → tap `+` (new Shortcut).**
+2. **Add 2 actions, in order:**
+   - **`Ask for Input`** → *Question* = the `prompt.prompt` field of
+     `setup-host.shortcut.json` (e.g., "Enter the Tailscale hostname for
+     the Minsky dashboard"). *Input Type* = `Text`. *Default Answer* =
+     the `prompt.default_answer` field (e.g., `mac-mini-1.tailscale.ts.net`).
+   - **`Set Variable`** → *Variable Name* = `host`. *Input* = the output
+     of "Ask for Input".
+3. **Set the Shortcut name** to `Minsky · setup host`. **Run it once.**
+   Apple Shortcuts persists the variable across Shortcut runs in the
+   same app on the same device, so the 5 polling Shortcuts can read it.
+
+**Fallback if the variable doesn't persist** (Risk per the parent task —
+Apple Shortcuts variables don't always survive app restarts / reinstalls
+/ iCloud sync). If `host` is undefined when a polling Shortcut runs,
+the polling Shortcut will fail with "no value for host":
+
+- *Short-term*: re-run `setup-host` (it takes ~1 input).
+- *If persistence is unreliable across reboots* (the documented Risk):
+  fall back to the 25-substitution status quo by hand-editing each
+  polling Shortcut's "Get Contents of URL" action — replace the
+  Get-Variable input with a literal `http://<your-host>:8080/watch.json`
+  (or `/control`). At that point this task's pivot is triggered: file a
+  follow-up to retire the variable approach (see Pivot in the task
+  block of `TASKS.md` history).
 
 ### A. Build a fetch-and-show Shortcut (steps 1–3 build all 3 Watch readings)
 
@@ -51,10 +89,23 @@ Repeat for each of `tokens-remaining`, `last-task-status`,
 `constraint-of-the-week`:
 
 1. **Open Shortcuts.app on iPhone → tap `+` (new Shortcut).**
-2. **Add 3 actions, in order:**
-   - **`Get Contents of URL`** → URL = the `endpoint.url` field from the
-     matching `*.shortcut.json` (substitute `<tailscale-host>`). Method =
-     `GET` (default). No headers, no body.
+2. **Add 5 actions, in order** (the `Get Variable` + `Combine Text`
+   prelude is the host-parameterisation flow set up by step 0; the
+   `endpoint.url_assembly` block in each JSON config documents the
+   exact `parts` array for "Combine Text"):
+   - **`Get Variable`** → *Variable* = `host` (set by `setup-host`).
+   - **`Combine Text`** → *Text* = `http://`, then *Magic Variable* of
+     the previous step's output, then `:8080/watch.json` — exactly
+     mirroring the `endpoint.url_assembly.parts` array in the matching
+     `*.shortcut.json`. Use *Combine With* = `(no separator)`.
+   - **`Get Contents of URL`** → URL = the *Magic Variable* output of
+     "Combine Text" (NOT a hand-typed literal). Method = `GET`
+     (default). No headers, no body. The `endpoint.url` field in the
+     JSON config still carries the canonical
+     `http://<tailscale-host>:8080/watch.json` form for documentation
+     and for the smoke test's URL/port/path-shape gate; the on-device
+     Shortcut substitutes `<tailscale-host>` at run time via the
+     Get-Variable + Combine-Text prelude above.
    - **`Get Dictionary Value`** → set the *Dictionary* input to the
      output of "Get Contents of URL". Set *Key* = the `extract.key`
      field from the JSON config (e.g., `tokens-remaining`).
@@ -69,11 +120,16 @@ Repeat for each of `tokens-remaining`, `last-task-status`,
 
 Repeat for `pause` and `resume`:
 
-1. **New Shortcut → 2 actions:**
-   - **`Get Contents of URL`** → URL = `http://<tailscale-host>:8080/control`
-     (or whatever the JSON config's `endpoint.url` says). Tap *Show More*
-     → Method = `POST`. **Request Body** = JSON. Add a key `paused` of
-     type Boolean = `true` (for `pause`) or `false` (for `resume`).
+1. **New Shortcut → 4 actions** (same Get-Variable + Combine-Text
+   host-parameterisation prelude as section A — read the `host`
+   variable set by step 0; the `endpoint.url_assembly` block of each
+   JSON config documents the exact `parts` array):
+   - **`Get Variable`** → *Variable* = `host`.
+   - **`Combine Text`** → *Text* = `http://` + *Magic Variable* + `:8080/control`.
+   - **`Get Contents of URL`** → URL = the *Magic Variable* output of
+     "Combine Text". Tap *Show More* → Method = `POST`. **Request Body**
+     = JSON. Add a key `paused` of type Boolean = `true` (for `pause`)
+     or `false` (for `resume`).
    - **`Show Result`** → input = "Paused" (literal text — see `display.format`).
 2. Name it `Minsky · pause` / `Minsky · resume`. **No Watch toggle** for
    these (they live on the iPhone; running them from a wrist tap is
