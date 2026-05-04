@@ -107,6 +107,54 @@ Three priorities, evaluated in order:
 
 Once `mape-k-loop-v0` ships and we have a month of measured per-pass cost, replace every "*estimate*" annotation above with the observed value. If the watchdog T = 12 h proves the wrong order of magnitude (off by ≥ 2×), file a follow-up research task; per rule-#9's pivot clause for `mape-k-cadence`, an inability to satisfy both constraints simultaneously means the MAPE-K design itself is wrong, not just the cadence.
 
+## Lighter OTEL backend
+
+Resolves task `otel-lite-backend`. The current `Observability` row above ships against Loki + Tempo + Prometheus + Grafana — four services for a single-developer install. The brief: evaluate whether a *lighter* OTEL-compatible backend can satisfy `vision.md` § "Success criteria" rows 2, 5, 9 (the rows whose `Measurement method` cells encode OTEL-PromQL queries) at on-disk footprint <1 GB / month and install ≤3 commands, and recommend one.
+
+### Constraints (operational, derived from `vision.md` § "Success criteria")
+
+The backend must answer the following query shapes (paraphrased from rows 2, 5, 9 above):
+
+1. **Trace-derived rate over a histogram** — `sum(token_count{event="user_story.complete"}[30d]) / count(span{name="user_story.complete"}[30d])` (success #2).
+2. **Histogram quantile over a counter** — `histogram_quantile(0.95, supervisor_restart_to_claim_latency_seconds[7d])` (success #5).
+3. **Counter rate over a labelled metric** — `sum(rate(claude_code_api_errors_total{status="429"}[7d]))` (success #9).
+
+Disk-footprint ceiling: **<1 GB / month** at the v0 emission rate (one tick-loop instance, ≤10 spans / s steady state — a starting estimate; revisited monthly per success-criterion #4). Install ceiling: **≤3 commands** from a clean machine to a queryable backend.
+
+### Candidates evaluated
+
+Sources: vendor README at the repo root of each project (primary). No blog-post citations per rule #5/#8.
+
+| Backend | Disk/month | Install steps | Query |
+|---|---|---|---|
+| **SigNoz (single-binary)** [github.com/SigNoz/signoz](https://github.com/SigNoz/signoz) | ~3–6 GB at default retention (ClickHouse, 15-day default; configurable down to 7 d → ~1.5 GB; below 1 GB requires retention <5 d, cutting success-#2's 30-d window) | 3 (`docker compose -f deploy/docker/clickhouse-setup/docker-compose.yaml up -d` is one command but compose pulls 6+ images; the "single binary" referenced in the README is SigNoz collector only — the storage tier is still ClickHouse) | PromQL (metrics) + ClickHouse SQL (traces, logs); supports all three query shapes |
+| **Uptrace (PostgreSQL backend)** [github.com/uptrace/uptrace](https://github.com/uptrace/uptrace) | ~2–4 GB / mo at v0 rate; PostgreSQL backend honours `--retention=7d` cleanly. ClickHouse backend matches SigNoz. | 3 (`docker compose up`, with bundled `postgres` + `uptrace` services; PG mode is a one-flag switch in `config/uptrace.yml`) | UQL (Uptrace Query Language, PromQL-like) + SQL escape hatch; supports all three query shapes per the README's "metrics queries" section |
+| **OpenObserve** [github.com/openobservehq/openobserve](https://github.com/openobservehq/openobserve) | ~250–800 MB / mo (parquet-on-disk with native compression; the README's "140× cheaper than Elasticsearch" claim derives from this columnar format). Single-binary mode writes to local disk; S3 is optional. | 2 (`curl -L https://github.com/openobservehq/openobserve/releases/...; ./openobserve` — one binary, no DB) | PromQL (metrics) + SQL (logs, traces) + a Lucene-style filter; supports all three query shapes |
+| **VictoriaMetrics + VictoriaLogs + VictoriaTraces** [github.com/VictoriaMetrics/VictoriaMetrics](https://github.com/VictoriaMetrics/VictoriaMetrics) | ~400 MB–1 GB / mo combined (VM is widely benchmarked as the densest TSDB on disk; VictoriaLogs ships the same columnar trick; VictoriaTraces is in beta as of 2026-Q2 per upstream) | 3 (one binary per signal — `victoria-metrics-prod`, `victoria-logs-prod`, `victoria-traces-prod`; or one `vmsingle` for metrics-only) | MetricsQL (PromQL-superset) + LogsQL + TraceQL-equivalent; supports all three query shapes |
+| **Jaeger + Prometheus** (the OSS-triad baseline) [github.com/jaegertracing/jaeger](https://github.com/jaegertracing/jaeger) | ~1.5–3 GB / mo (Jaeger Badger / ES + Prometheus TSDB); no native log store — logs go elsewhere (Loki / file) | 4+ (Jaeger collector + Jaeger query + Prometheus + storage backend; the README's all-in-one is for *demo only* per its own warning) | PromQL (metrics) + Jaeger search DSL (traces); **logs not covered** — fails query-shape #1 unless paired with a log store |
+
+### SQLite-backed bespoke
+
+A custom `@opentelemetry/exporter-sqlite` adapter is *theoretically* the smallest possible backend (a single file on disk, queryable with `sqlite3` shell). The OpenTelemetry SDK does not ship one; the closest upstream artifacts are `@opentelemetry/exporter-trace-otlp-http` plus a community-maintained SQLite log exporter that doesn't cover metrics or traces in v0.
+
+- **Disk/month**: estimated <500 MB (SQLite's row-format is heavier than columnar parquet, but at v0 emission rate the absolute number stays small).
+- **Install steps**: 1 (the npm package, once written).
+- **Query**: SQL only; no PromQL surface — every success-criterion query above has to be re-expressed as SQL window functions. Query-shape #2 (histogram quantile) is non-trivial in SQLite (requires a UDF or repeated `percentile_cont`-style CTE) and query-shape #3 (counter rate) needs a self-join across timestamps.
+- **Risk**: ships zero existing code; *significant* integration cost (estimate: 2–3 weeks); no dashboard surface.
+- **Verdict**: the smallest possible footprint, but the largest implementation cost. Not viable for v0.
+
+### Recommendation
+
+**Choose OpenObserve for v0; revisit if/when the v0 emission rate exceeds 100 spans / s sustained or the parquet on-disk format proves brittle in a chaos-restart scenario.** The trade-off: OpenObserve gives the smallest disk footprint *and* the simplest install (one binary, two commands) *and* satisfies all three query-shape constraints, at the cost of a less-mature dashboard ecosystem than Grafana — acceptable since `dashboard-web-v0` (TASKS.md P2) renders the success metrics directly from the backend rather than via Grafana panels.
+
+VictoriaMetrics's three-binary triad is the close runner-up; if a future pivot away from OpenObserve fires, VM is the first port of call (one vendor, one disk format, MetricsQL is a near-superset of PromQL — the migration cost is low).
+
+The SQLite-bespoke path is rejected on integration cost; a dedicated `otel-sqlite-backend-impl` task is *not* filed because the recommended path (OpenObserve) clears the constraints. If OpenObserve fails the chaos verification on restart-time-to-readiness within the next quarterly review, the SQLite path may be reconsidered then.
+
+The current dependency-table row above (`Observability`) keeps Loki+Tempo+Prometheus+Grafana as the *documented current state* until `observability-adapter-v0` ships against the lighter backend — the row will move once the swap lands. No follow-up `otel-signal-volume-reduction` task is filed, since at least one candidate (OpenObserve) cleanly satisfies the constraints.
+
+**Anchors:** OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method as the lens for what a backend must support); rule #1 (don't reinvent — pick the existing tool first; SQLite-bespoke is rejected on this ground).
+
 ## How to read this file
 
 Each active dependency follows the same shape:
@@ -245,7 +293,7 @@ Each active dependency follows the same shape:
 - **Risks**: Local stack is heavy for single-dev install (~4 services); install friction may push us to a lighter alternative
 - **Adapter**: `novel/adapters/observability.otel.ts` (forthcoming)
 - **Last reviewed**: 2026-05-03
-- **Open question**: Lighter backend? See P2 task `otel-lite-backend`.
+- **Open question — resolved 2026-05-03**: Lighter backend? See § "Lighter OTEL backend" above. Recommendation: OpenObserve for v0; the row's `Current` cell will be updated when `observability-adapter-v0` ships against the lighter backend.
 
 ### Prompt optimization — `PromptOptimizer`
 
@@ -318,7 +366,7 @@ Each active dependency follows the same shape:
 
 - Apple Watch surface — does Shortcuts + ntfy suffice long-term, or do we eventually need a native WatchOS app?
 - DSPy idiom fit with Claude Code's prompt model — needs first practical attempt
-- Lighter OTEL backend — Loki+Tempo+Prometheus+Grafana is heavy for single-dev installs; SQLite-backed alternative?
+- ~~Lighter OTEL backend — Loki+Tempo+Prometheus+Grafana is heavy for single-dev installs; SQLite-backed alternative?~~ Resolved 2026-05-03; see § "Lighter OTEL backend".
 - Cross-language equivalent of tasks.md — can the spec be ported to Python/Rust ecosystems? (taskmd-driangle covers some of this with directory-of-files)
 - Multi-machine scope — initial scope is single-developer-machine; what changes for distributed setups?
 - OMC handoff persistence — do they parseably persist their internal task list to disk? Determines bridge complexity.
