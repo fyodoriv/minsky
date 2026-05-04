@@ -1,7 +1,11 @@
 /**
  * `@minsky/dashboard-web` — Hono SSR server scaffold.
- * Single route: `GET /` returns the HTML produced by `render({ metrics, getValue })`.
- * Returns `app.fetch` so tests can drive the route without a real port.
+ * Two routes: `GET /` returns the HTML produced by `render(...)`, and
+ * `GET /watch.json` returns a small JSON envelope shaped for the iOS /
+ * watchOS Apple-Shortcuts surface (`distribution/shortcuts/`). The JSON
+ * route reuses the same `getValue` Strategy as the HTML route — a
+ * single value source feeds both surfaces (rule #2 — adapter seam).
+ * Returns `app.fetch` so tests can drive routes without a real port.
  *
  * `getValue` is the Strategy seam (rule #2) opened by
  * `dashboard-web-otel-wiring`: callers inject a synchronous lookup
@@ -17,6 +21,7 @@ import { Hono } from "hono";
 
 import { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
 import { type GetValue, STUB_GET_VALUE, render } from "./render.js";
+import { type PauseState, STUB_PAUSE_STATE, watchEnvelope } from "./watch.js";
 
 /** Server handle: `app` for tests, `fetch` for embedding. */
 export interface DashboardServer {
@@ -36,10 +41,13 @@ export interface DashboardServer {
 export function createServer(args?: {
   readonly metrics?: readonly SuccessMetric[];
   readonly getValue?: GetValue;
+  readonly getPauseState?: PauseState;
 }): DashboardServer {
   const metrics = args?.metrics ?? SUCCESS_METRICS;
   const getValue = args?.getValue ?? STUB_GET_VALUE;
+  const getPauseState = args?.getPauseState ?? STUB_PAUSE_STATE;
   const app = new Hono();
   app.get("/", (c) => c.html(render({ metrics, getValue })));
+  app.get("/watch.json", (c) => c.json(watchEnvelope({ metrics, getValue, getPauseState })));
   return { app, fetch: app.fetch };
 }

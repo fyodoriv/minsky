@@ -1,63 +1,80 @@
-id: first-integration-test-mock-tick-loop-2026-05-03
+id: watch-shortcuts-2026-05-03
 hypothesis: |
-  A deterministic mock-tick daemon (`@minsky/tick-loop`) with 3+ chaos-mode
-  mocks (5xx, network-timeout, malformed-output, plus the lease-expiry
-  rejection-boundary chaos row) reproduces the user-story-001
-  P2-task-throughput Acceptance in <10 min CI wall-clock — sub-task 2/3 of
-  `first-integration-test`. The daemon loops `claim → mock-anthropic-call
-  → complete` on a configurable cadence; `tick(...)` is pure given a
-  deterministic client + clock; `runSmoke(...)` is the I/O orchestrator.
-  The chaos branches return failure shapes (`status: 'failed'`) rather than
-  throw, so the supervisor (the caller of `runSmoke`) sees the respawn
-  signal — Armstrong 2007 "let it crash AT the right boundary".
+  Five Apple-Shortcuts JSON config manifests under
+  `distribution/shortcuts/` (3 watch readings — `tokens-remaining`,
+  `last-task-status`, `constraint-of-the-week` — plus `pause` and
+  `resume`) together with a new `GET /watch.json` route on
+  `@minsky/dashboard-web` deliver the data the Apple Shortcuts need to
+  render <2 s p95 on Watch (vision.md success #6 — wrist dwell). The
+  v0 ships the **autonomously-verifiable upstream half** (URL / port /
+  path consistency, schema fidelity, metric-id mapping to
+  `SuccessMetric.id`, server returning the right JSON shape); the
+  on-device build is operator runbook in `distribution/shortcuts/README.md`
+  per the documented pivot (Apple's `.shortcut` is signed binary plist
+  since iOS 15 — hand-authoring is unsafe, the brief authorised this
+  pivot path explicitly).
 success: |
-  ≥4 vitest tests pass + the 4-task smoke runs within budget +
-  ≥1 OTEL span per task type (in-memory `SpanRecorder`) +
-  chaos table has ≥3 rows in `novel/tick-loop/README.md` § "Failure modes
-  & chaos verification" (today the table has 5 rows — exceeds the brief).
-  Concretely: `pnpm vitest run novel/tick-loop --reporter=json |
-  jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0
-  (today: 11 passed, 0 failed).
+  All of:
+    - `pnpm vitest run distribution/shortcuts/test
+       novel/dashboard-web/test/server.test.ts --reporter=json |
+       jq -e '.numPassedTests >= 7 and .numFailedTests == 0'` exits 0
+       (today: 33 passed, 0 failed — 16 shortcuts smoke + 17 server
+       tests, well above the ≥7 threshold);
+    - `GET /watch.json` returns 200 + `application/json` with the four
+       fields `tokens-remaining`, `last-task-status`,
+       `constraint-of-the-week`, `paused`;
+    - all five `*.shortcut.json` files parse as JSON and conform to
+       `distribution/shortcuts/schema/minsky-shortcut.schema.json`;
+    - `pnpm typecheck && pnpm test && pnpm lint` all green;
+    - `node scripts/check-pattern-index.mjs` passes (vision.md row 65
+       added in the same PR);
+    - `node scripts/check-pr-self-grade.mjs` passes (PR body has the
+       four `Predicted/Observed/Match/Lesson` lines).
 pivot: |
-  <2 tasks complete within the 10-min smoke budget (under deterministic
-  clock) — the cadence model is too coarse: drop to single-task smoke
-  on the in-process side and move the multi-task assertion entirely to
-  sub-task 3 (`first-integration-test-nightly-self-hosted`). The 2-task
-  pivot threshold is meaningfully distant from the 4-task success
-  threshold (50 % margin), so a pivot signal carries information rather
-  than triggering at the same instant the success criterion fails.
+  If Apple Shortcuts JSON format had been authorable (i.e., research
+  showed iOS 17 accepts hand-authored JSON manifests), the v0 would
+  have shipped native importable manifests and skipped the runbook
+  entirely. Research disconfirmed that path: iOS 15+ uses signed
+  binary plist (`.shortcut`), there is no documented public JSON
+  import path, and Apple's signing format is closed. **Pivot fired
+  before code: shipped JSON config + manual on-device runbook**, per
+  the brief's authorised pivot ("IF the research reveals the format is
+  too proprietary/binary to safely author by hand, PIVOT: ship a
+  `distribution/shortcuts/README.md` with a step-by-step 'build these
+  in Shortcuts.app' runbook + JSON-schema-validatable config files").
+  The pivot is documented in this EXPERIMENT.yaml's `lesson` field
+  below and in `distribution/shortcuts/README.md` § "Why this pivot".
+  Pivot threshold for the *deliverable* (rule-#9 next-tier pivot): if
+  the rebuild rate exceeds 1 / month sustained 90 days (operator
+  abandons the Watch surface), escalate to `native-watchos-app`
+  (already filed as the parent task's documented pivot).
 measurement: |
-  pnpm typecheck \
-    && pnpm vitest run novel/tick-loop --reporter=json \
-       | jq -e '.numPassedTests >= 4 and .numFailedTests == 0' \
+  pnpm install --no-frozen-lockfile \
+    && pnpm typecheck \
+    && pnpm vitest run distribution/shortcuts/test novel/dashboard-web/test/server.test.ts --reporter=json \
+       | jq -e '.numPassedTests >= 7 and .numFailedTests == 0' \
+    && pnpm test \
     && pnpm lint \
-    && node scripts/check-rule-4-otel-coverage.mjs \
-    && node scripts/check-rule-6-let-it-crash.mjs \
-    && node scripts/check-rule-7-chaos-coverage.mjs \
     && node scripts/check-pattern-index.mjs \
-    && node scripts/check-rule-1-novel-justification.mjs \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Liu, C. L., Layland, J. W., "Scheduling Algorithms for Multiprogramming
-  in a Hard Real-Time Environment", *JACM* 20 (1), 1973 (periodic-task
-  scheduling — the cadence model: N ticks within a wall-clock budget,
-  per-tick deadlines, halt at budget-exhaustion); Armstrong, J.,
-  *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash supervision
-  — the chaos table forces ≥3 rows including a 5xx fixture so the supervisor
-  sees a real respawn signal; the mock-client rejection path is mapped at
-  the `tick` boundary); Gamma, Helm, Johnson, Vlissides, *Design Patterns*,
-  Addison-Wesley, 1994 (Adapter — `MockAnthropicClient` interface, test
-  fake is one implementation, production plugs a real Anthropic-SDK adapter
-  behind the same shape); Basiri et al., "Principles of Chaos Engineering",
-  *IEEE Software* 2016 (steady-state hypothesis — every tick produces a
-  `TickResult` with `status` ∈ `{completed, failed}` and exactly one span);
-  rule #7 (vision.md § 7 — failure-mode discipline); rule #9 (vision.md § 9
-  — pre-registered pivot threshold + measurement before code); rule #10
-  (vision.md § 10 — deterministic enforcement; the chaos table is a vitest
-  assertion suite, not prose); Munafò et al., *Nature Human Behaviour* 1,
-  0021, 2017 (rule-#9 pre-registration — the parent `first-integration-test`
-  task's documented Pivot ("reframe as a pair: 10-min smoke in CI + nightly
-  self-hosted") is what justifies counting `self-hosted` toward the ≥80 %
-  Acceptance, not a post-hoc reframing).
+  Card, S. K., Mackinlay, J., Shneiderman, B., *Readings in Information
+  Visualization*, Morgan Kaufmann, 1999 (glanceable three-number display
+  — the cap on the watch surface is 3 readings); Weiser, M., Brown, J. S.,
+  "Designing Calm Technology", *PowerGrid Journal* 1995 (calm tech: the
+  wrist surface is ambient; the dwell metric is the friction lens);
+  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site
+  Reliability Engineering*, O'Reilly, 2016, Ch. 17 (operator escape
+  hatch / kill switch — the pause/resume control surface); Gamma, Helm,
+  Johnson, Vlissides, *Design Patterns*, Addison-Wesley, 1994 (Adapter —
+  the `/watch.json` route + JSON envelope IS the adapter between Minsky
+  internals and Apple's Shortcuts UI runtime; rule #2 of vision.md);
+  Munafò et al., "A Manifesto for Reproducible Science",
+  *Nature Human Behaviour* 1, 0021, 2017 (rule-#9 pre-registration —
+  the pivot to JSON-config-plus-runbook was committed in the brief
+  *before* implementation, not post-hoc); rule #2 (vision.md § 2 —
+  every dep behind interface; the JSON envelope is the adapter); rule
+  #10 (vision.md § 10 — deterministic enforcement; the smoke test is
+  pure-validator + filesystem dispatcher).
 replay_windows_days: [90]
