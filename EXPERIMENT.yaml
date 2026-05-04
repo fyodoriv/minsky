@@ -1,18 +1,14 @@
-id: spec-monitor-skill
+id: experiment-tracker-v0
 hypothesis: |
-  Shipping `claude-spec-monitor` as an advisory-only Claude Skill at
-  `novel/spec-monitor/` (with SKILL.md, ≥3 judgement-only fixtures, and
-  a deterministic-overlap fixture demonstrating Skill silence) closes
-  the rule-#10 ratchet: the deterministic linters under
-  `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs`
-  + `scripts/check-pr-self-grade.mjs` carry every load-bearing share of
-  runtime verification, and the Skill scopes the residual ≤10 % to a
-  hard-capped set of 5 prose-quality concerns (A1 vagueness, A2 zero-
-  margin pivot, A3 non-primary anchor, A4 unchecked output, A5
-  conformance-level mismatch). No CI workflow lists `spec-monitor` as
-  a required check.
-success: "grep -c '^name: spec-monitor' novel/spec-monitor/SKILL.md returns 1; grep -RE 'spec-monitor.*required' .github/workflows/ returns no matches; ls novel/spec-monitor/test/judgement-only/ shows ≥3 fixtures; ls novel/spec-monitor/test/deterministic-overlap/ shows ≥1 fixture; vision.md row 35 mentions novel/spec-monitor/"
-pivot: "if 6 months in nobody references the Skill in a PR review or `spec-advisories/` is still empty, the residual judgement scope was empty after all and rule #10's claim 'whatever cannot be deterministically checked is not a constitutional rule' applies — drop the Skill entirely."
-measurement: "test $(grep -c '^name: spec-monitor' novel/spec-monitor/SKILL.md) -eq 1 && test $(grep -RE 'spec-monitor.*required' .github/workflows/ 2>/dev/null | wc -l) -eq 0 && test $(ls novel/spec-monitor/test/judgement-only/ | wc -l) -ge 3 && test $(ls novel/spec-monitor/test/deterministic-overlap/ | wc -l) -ge 1"
-anchor: "rule #10 (vision.md § 10 — deterministic enforcement; what cannot be deterministically checked is not a constitutional rule); Havelund & Goldberg, 'Verify Your Runs', *VSTTE* 2008 (runtime verification — split here into deterministic + advisory layers); Hunt & Thomas, *The Pragmatic Programmer*, 1999, Tip 32 ('crash early')"
-replay_windows_days: [7, 30, 180]
+  A scheduled job that re-runs each merged experiment's `measurement` at the
+  configured `replay_windows_days` (default `[7, 30]`), compares against the
+  declared `success` / `pivot` thresholds, and emits a verdict (validated /
+  regressed / inconclusive) closes the weekly–monthly layer of rule #9.
+  Within 90 days of landing, ≥1 experiment carries a non-`inconclusive`
+  verdict against a real recorded measurement, proving the substrate works
+  on production data not just synthetic fixtures.
+success: "pnpm typecheck && pnpm vitest run scripts/replay-experiment.test.mjs exits 0 with ≥4 verdict cases (validated / regressed / inconclusive / idempotent re-run); the workflow YAML is parseable by GitHub Actions; ≥1 non-inconclusive verdict accrues within 90 days post-landing"
+pivot: "if 90 days post-landing every replay verdict is `inconclusive` (signal-to-noise too low at 7d/30d), shorten the windows AND raise pre-declared success margins, OR gate eligibility by tag — pivot to declaration-only with quarterly batch review at 180 days if still all-inconclusive"
+measurement: "pnpm typecheck && pnpm vitest run scripts/replay-experiment.test.mjs"
+anchor: "rule #9 (vision.md § 9 — pre-registered hypothesis-driven development; weekly–monthly layer); Ries 2011 (build-measure-learn; sustained-gain discipline); Kohavi/Tang/Xu 2020 ch. 5–7 (trustworthy over fast; mid-term regressions); Kephart & Chess 2003 (MAPE-K Analyze phase scoped to rule #9)"
+replay_windows_days: [7, 30]
