@@ -19,15 +19,15 @@ success: |
   (d) research.md cross-language entry has a one-line answer
       ("no cross-language port as of 2026-05-04").
 pivot: |
-  If any of the 4 "resolved" claims turns out to be wrong (e.g., a PR
+  If ≥1 of the "resolved" claims turns out to be wrong (e.g., a PR
   cited as resolving an open question did not in fact resolve it on
   inspection), file a follow-up task to re-investigate that specific
   claim and revert the strikethrough for the affected item.
-  Abandon-the-approach: if more than 1 of the 4 claimed-resolutions
-  fail verification on read, the underlying audit (PR #79) was wrong
-  shape — switch to a deterministic CI lint that machine-checks
-  "resolved by PR #N" annotations against `gh pr view N` titles
-  before allowing the strikethrough to land.
+  Abandon-the-approach: if more than 25 % (i.e., ≥2 of the 4)
+  claimed-resolutions fail verification on read, the underlying audit
+  (PR #79) was wrong shape — switch to a deterministic CI lint that
+  machine-checks "resolved by PR #N" annotations against
+  `gh pr view N` titles before allowing the strikethrough to land.
 measurement: |
   [ "$(grep -c 'OMC handoff persistence' research.md)" -le 1 ] \
     && [ "$(grep -c '@tasks-md/lint@\^0\.7\.0' ARCHITECTURE.md)" -ge 1 ] \
