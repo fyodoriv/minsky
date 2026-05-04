@@ -38,6 +38,7 @@
  */
 
 import { type MockAnthropicClient, type TickSpan, tick } from "./index.js";
+import type { SpawnStrategy } from "./spawn-strategy.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -92,13 +93,26 @@ export interface RunDaemonOpts {
    */
   readonly maxIterations: number;
   /**
-   * MUST be `true` in v0. The real-spawn path (`child_process.spawn`) is
-   * deferred to `tick-loop-daemon-real-spawn`; passing `false` throws
-   * synchronously before any I/O.
+   * Controls the v0 dry-run guard. When `true` (default production wiring
+   * in v0 + sub-task 1/3) the dry-run path is taken via the dry-run
+   * spawn-step `tick(...)` against the injected `mockClient`. When `false`,
+   * dispatch is delegated to the injected `spawnStrategy` (if any); if the
+   * Strategy is `DryRunSpawnStrategy`, behaviour is still synthetic — the
+   * real flip lives in sub-task 3 (`tick-loop-daemon-real-spawn-flip`).
+   *
+   * Pre-existing `dryRun: false → throw` semantics are preserved when no
+   * `spawnStrategy` is injected (the ProcessSpawnStrategy default would
+   * shell out, which v0 must NOT do silently).
    */
   readonly dryRun: boolean;
   /** The mock client used by the dry-run spawn step. */
   readonly mockClient: MockAnthropicClient;
+  /**
+   * Optional spawn-step Strategy seam (rule #2, Gamma 1994). v0 does NOT
+   * inject this — the daemon falls through to the original dry-run
+   * `tick(...)` path. Sub-tasks 2/3 use this seam.
+   */
+  readonly spawnStrategy?: SpawnStrategy;
   /** I/O seam — reads TASKS.md content. May throw `ENOENT`. */
   readonly tasksMdReader: () => string;
   /** I/O seam — returns `true` when the `state/PAUSED` sentinel exists. */
@@ -116,9 +130,20 @@ export interface RunDaemonOpts {
 // ---- runDaemon ------------------------------------------------------------
 
 /**
- * Run the daemon loop. v0 dry-run only — passing `dryRun: false` throws.
+ * Run the daemon loop. v0 + sub-task 1/3 default to the dry-run path.
  *
- * The loop body delegates to four pure helpers (`pickTask`, `claim`,
+ * Strategy dispatch (sub-task 1/3 of `tick-loop-daemon-real-spawn`):
+ *   - When `spawnStrategy` is injected, the daemon delegates the per-tick
+ *     spawn step to it (used by sub-tasks 2/3 + tests). The
+ *     `DryRunSpawnStrategy` mirrors v0's existing synthetic behaviour
+ *     exactly, so injecting it is observably equivalent to the v0 path.
+ *   - When `spawnStrategy` is NOT injected, the legacy dispatch holds:
+ *     `dryRun: true` runs the v0 `tick(...)` path against the injected
+ *     `mockClient`; `dryRun: false` throws synchronously before any I/O
+ *     (the v0 production guardrail). This is the "production default =
+ *     dry-run" invariant the brief preserves.
+ *
+ * The loop body delegates to pure helpers (`pickTask`, `claim`,
  * `spawnTickDryRun`, `completeIteration`) so each step is independently
  * testable and `runDaemon` itself stays under the cognitive-complexity
  * cap (rule #6, biome ≤10).
@@ -130,7 +155,7 @@ export interface RunDaemonOpts {
  * @otel tick-loop.run-daemon
  */
 export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
-  if (!opts.dryRun) {
+  if (!opts.dryRun && opts.spawnStrategy === undefined) {
     throw new Error(
       "tick-loop-daemon v0 supports only dry-run mode; real subprocess spawning is deferred to follow-up `tick-loop-daemon-real-spawn`",
     );
@@ -230,6 +255,23 @@ async function runClaimedIteration(args: {
   // claim() is in-memory only in v0 (persistence in follow-up); we still
   // call it so the contract surface is exercised.
   claim({ taskId });
+  // Strategy dispatch: when an explicit `spawnStrategy` is injected
+  // (sub-task 2/3 use case + spawn-strategy tests), delegate to it. When
+  // no Strategy is injected, fall through to v0's legacy `tick(...)` path
+  // so the 13 dry-run tests keep their existing observable behaviour.
+  if (opts.spawnStrategy !== undefined) {
+    const stratResult = await opts.spawnStrategy.spawn({
+      taskId,
+      brief: `daemon brief for ${taskId}`,
+      env: process.env,
+    });
+    return {
+      iteration,
+      status: stratResult.exitCode === 0 ? "completed" : "failed",
+      taskId,
+      reason: stratResult.exitCode === 0 ? stratResult.stdoutTail : stratResult.stderrTail,
+    };
+  }
   const tickResult = await spawnTickDryRun({ taskId, opts });
   return {
     iteration,
