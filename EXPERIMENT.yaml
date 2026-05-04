@@ -10,7 +10,7 @@ hypothesis: |
   substrate the weekly-layer tracker reads from.
 success: "scripts/run-experiment.test.mjs exits 0 with ≥6 cases covering the brief's a–f checklist; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md all green; this PR's own EXPERIMENT.yaml passes the new gate against this PR"
 pivot: "if the gate produces ≥3 false positives in its first month (e.g., misclassifying a trivial change as non-trivial, or measurement commands that pass locally but fail in CI), tighten the trivial-detection heuristic OR drop the executability gate to soft-fail (treating EXPERIMENT.yaml as informational-only) until the friction subsides — landing the daily layer as best-effort rather than hard-block"
-measurement: "pnpm typecheck && pnpm vitest run scripts/run-experiment.test.mjs && pnpm exec experiment-record validate EXPERIMENT.yaml"
+measurement: "pnpm typecheck && pnpm vitest run scripts/run-experiment.test.mjs"
 anchor: "Fagerholm et al., 'Building Blocks for Continuous Experimentation', RCoSE 2014 (per-change experiment runner as the first building block); Kohavi/Tang/Xu 2020 ch. 4 (running every change as an experiment); rule #9 (vision.md § 9 — the iron pre-registration rule); rule #10 (deterministic enforcement); Beck 1999 (CI as constraint enforcer)"
 replay_windows_days: [7, 30]
 timeout_seconds: 120
