@@ -1,0 +1,24 @@
+{
+  // Typechecks user-stories integration tests under strict tsc. The .test.ts
+  // files exercise the assembled MAPE-K loop end-to-end (and may exercise
+  // other novel/* packages as future stories ship). Pure typecheck — no emit.
+  // Path mappings resolve `@minsky/<pkg>` to the package's source `.ts` so
+  // tsc -b can typecheck without a pre-build step (mirroring `vitest.config.ts`).
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@minsky/mape-k-loop": ["../novel/mape-k-loop/src/index.ts"],
+      "@minsky/prompt-optimizer": ["../novel/adapters/prompt-optimizer/src/index.ts"],
+      "@minsky/adapter-types": ["../novel/adapters/types/src/index.ts"]
+    }
+  },
+  "include": ["**/*.test.ts"],
+  "references": [
+    { "path": "../novel/adapters/prompt-optimizer" },
+    { "path": "../novel/mape-k-loop" }
+  ]
+}

@@ -1,25 +1,28 @@
-id: mape-k-plan-execute-phases
+id: mape-k-knowledge-and-integration
 hypothesis: |
-  Shipping pure `plan(...)` and `execute(...)` decision functions plus two
-  independently-testable guards (`sustainedGain(...)` per Kohavi-Tang-Xu 2020
-  Ch. 3, default 7-day window; `oscillation(...)` per Ries 2011, default
-  10-iteration lookback) under `novel/mape-k-loop/` — implementing the P
-  (Plan) and E (Execute) phases of the MAPE-K reference architecture
-  (Kephart & Chess, *IEEE Computer* 2003) — drives prompt rollouts
-  deterministically through the `@minsky/prompt-optimizer` adapter (sub-task
-  1's `PromptOptimizer` interface) without a separate orchestration runtime.
-  Pure-function decision module + thin I/O boundary (Martin, *Clean
-  Architecture*, 2017): `execute` takes the optimizer + an injected `now: Date`
-  + the rollout history as named arguments, allowing tests to drive the guards
-  with deterministic clocks and synthetic histories. Plan emits ≤3 variants
-  from a fixed v0 mutation catalogue (`enumerate-failure-modes`,
-  `direct-answer`, `tighten-scope`); Execute applies both guards and returns
-  `decision: 'rollout' | 'abstain'` with a reason. Empty/blank `ruleId` →
-  `plan` throws (let-it-crash on caller-contract violation per rule #6); empty
-  variants list / unknown winner / cold-start history → `execute` returns a
-  graceful `abstain` (rule #7).
-success: "`pnpm typecheck` exits 0 and `pnpm vitest run novel/mape-k-loop/src/plan.test.ts novel/mape-k-loop/src/execute.test.ts novel/mape-k-loop/src/oscillation.test.ts novel/mape-k-loop/src/sustained-gain.test.ts` exits 0 with ≥10 tests passing collectively; the parent `mape-k-loop-v0` tracker's `Blocked by` list drops by 1 — the `mape-k-plan-execute-phases` block is removed from `TASKS.md` in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-plan-execute-phases$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source) all pass on this PR's diff."
-pivot: "If `oscillation`-guard refusal rate exceeds 50 % over 30 iterations on synthetic histories (the v0 variant pool of 3 mutations is too small to satisfy a 10-iteration lookback — every third proposal would necessarily revisit a previously-rejected variant), pivot the v0 mutation catalogue from 3 templates to ≥6 — OR shorten `DEFAULT_LOOKBACK_ITERATIONS` from 10 to 5. Declare the deviation in `research.md` § \"DSPy fit\" so the calibration trail stays auditable. Lower-bound trip: if the 7-day sustained-gain default emits <1 winner per month sustained 3 months even with valid candidates on the Max5 personal-tier cadence, pivot to a per-tier configurable `windowDays` (the seam already exists — `sustainedGainWindowDays` is a named argument on `execute`)."
-measurement: "pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/plan.test.ts novel/mape-k-loop/src/execute.test.ts novel/mape-k-loop/src/oscillation.test.ts novel/mape-k-loop/src/sustained-gain.test.ts --reporter=json | jq -e '.numPassedTests >= 10 and .numFailedTests == 0'"
-anchor: "Kohavi, R., Tang, D., & Xu, Y., *Trustworthy Online Controlled Experiments: A Practical Guide to A/B Testing*, Cambridge University Press, 2020, Ch. 3 (the sustained-gain window — 7-day default — operationalised by `sustainedGain`); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K reference architecture — this PR ships the P+E phases); Ries, E., *The Lean Startup: How Today's Entrepreneurs Use Continuous Innovation to Create Radically Successful Businesses*, Crown Business, 2011 (build-measure-learn — the oscillation guard is the \"don't re-pivot to a previously-rejected variant\" guardrail); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure decision module + thin I/O boundary — `execute` takes `now: Date` as a named argument so tests inject deterministic clocks); rule #2 (vision.md § 2 — every dep behind an interface; reuses `@minsky/prompt-optimizer`'s `PromptOptimizer` interface); vision.md § \"Pattern conformance index\" row 54 (updated to mark M+A+P+E shipped, K phase + integration deferred to sub-task 4)."
+  Shipping the Knowledge phase (`knowledge(...)`), the assembled `tick(...)`
+  cycle, an append-only `constraints.md` seed (Helland, "Life beyond
+  Distributed Transactions", *CIDR* 2007 — the immutable log), and the
+  user-story-003 integration test (`user-stories/003-mape-k-improves-prompts.test.ts`)
+  closes the MAPE-K loop with the rule-#9 quarterly automation layer
+  (`vision.md` § 9). The pure `knowledge(...)` function emits a
+  `constraintsAppend` markdown block on every tick (audit trail) and a
+  conditional `researchMdAmendmentProposal` text when the verdict-log MAE
+  between predicted Δ and observed Δ exceeds the configured
+  `calibrationDriftThreshold` (default 0.5 — 50 % MAE per Munafò et al.
+  2017's pre-registration discipline). `tick(...)` runs Monitor → Analyze →
+  Plan → Execute → Knowledge as one composed cycle, threading an optional
+  `emit` seam so the wrapping CLI can carry OTEL spans (`mape.<phase>.<verb>`)
+  without coupling the pure functions to `@minsky/observability`. The
+  integration test exercises the full loop against a synthetic fixture
+  using `StubPromptOptimizer` (sub-task 1's test fake) — no network — and
+  asserts (a) `mape.knowledge.write` fires on each constraints append,
+  (b) the calibration-drift amendment fires only when drift exceeds the
+  threshold, and (c) the sustained-gain + oscillation guards each fire on
+  synthetic histories crafted to trip them. With this PR the parent
+  `mape-k-loop-v0` tracker can be removed.
+success: "`pnpm typecheck` exits 0 and `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts` exits 0 with ≥15 tests passing collectively (≥3 in `knowledge.test.ts`, ≥2 in `index.test.ts`, ≥4 in the user-story-003 integration test); the parent `mape-k-loop-v0` tracker block is removed in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-loop-v0$' TASKS.md` returns 0); the `mape-k-knowledge-and-integration` sub-task block is also removed (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-knowledge-and-integration$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-5 / rule-6 / rule-7 / skill-rule-cap / pattern-index / pivot-success-margin / measurement-inspects-output / anchor-primary-source) all pass on this PR's diff."
+pivot: "If `constraints.md` grows past 200 entries before the first calibration-drift amendment fires on real (non-fixture) verdict logs, the drift threshold is too tight — raise it from 0.5 to 0.75 and document the deviation in `research.md` § \"DSPy fit\". If the user-story-003 integration test exceeds 60 s of compressed-simulation wall-clock on a GH-hosted runner sustained 3 consecutive PRs, pivot to a self-hosted runner per `supervisor-integration-self-hosted-runner`'s precedent. If `mape.knowledge.write` events fire but the `researchMdAmendmentProposal` is never emitted across 3 quarterly reviews, the calibration check is theatre — re-anchor the threshold against the observed MAE distribution (Munafò 2017 — pre-registration is meant to falsify, not validate-by-default)."
+measurement: "pnpm typecheck && pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts --reporter=json | jq -e '.numPassedTests >= 15 and .numFailedTests == 0' && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-loop-v0$' TASKS.md)\" = '0' ] && [ \"$(grep -c '^  - \\*\\*ID\\*\\*: mape-k-knowledge-and-integration$' TASKS.md)\" = '0' ]"
+anchor: "Helland, P., \"Life beyond Distributed Transactions: an Apostate's Opinion\", *CIDR* 2007 (the immutable append-only log as the Knowledge substrate — `constraints.md` is its concrete realisation here); Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K loop — this PR ships the K phase + the assembled `tick(...)` cycle); Munafò et al., \"A Manifesto for Reproducible Science\", *Nature Human Behaviour* 1, 0021, 2017 (pre-registration manifesto — the calibration-drift amendment is the rule-#9 quarterly-layer automation); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure decision module + thin I/O boundary — `tick(...)` takes inputs as data and returns outputs as data; the `emit` seam is the only coupling point, and it's optional); rule #2 (vision.md § 2 — every dep behind an interface; the integration test consumes `@minsky/prompt-optimizer`'s `StubPromptOptimizer` rather than a vendor SDK); vision.md § \"Pattern conformance index\" row 54 (updated to mark the loop full-conformance now that all 4 sub-tasks have shipped)."
 replay_windows_days: [7, 30]
