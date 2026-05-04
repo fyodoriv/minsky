@@ -1,0 +1,91 @@
+# experiment-tracker-v0 — rule #9 weekly–monthly layer enforcement.
+#
+# Pattern: scheduled batch job + verdict ladder over an append-only
+# per-experiment store; MAPE-K's Analyze phase scoped to rule #9.
+# Source: Ries 2011 (build–measure–learn; sustained-gain discipline);
+# Kohavi/Tang/Xu 2020 (trustworthy over fast; mid-term regressions);
+# Kephart & Chess 2003 (Analyze phase). Vision § Pattern conformance index
+# row 35.
+#
+# Why this exists: rule #9 declares pre-registration; the daily layer
+# (`ci-experiment-runner-v0`) records baseline + treatment per merged PR.
+# Pre-registration without execution is half a rule — this tracker closes
+# the weekly–monthly layer:
+#
+#   - Daily 09:00 UTC (cron) and on workflow_dispatch, walk every
+#     `experiment-store/*.jsonl`, find the merge boundary (most recent
+#     record line), and for any replay window whose boundary is past,
+#     re-run the recorded `measurement` command.
+#   - Append a `replay-result` JSONL line tagged
+#     `{ts, ref, value, window_days, verdict}`.
+#   - On `validated`, write a single line to `validated-learnings.md`.
+#   - On `regressed` (only after two consecutive crossings — see
+#     `scripts/replay-experiment.mjs`), append a `pivot-experiment-<id>`
+#     task to TASKS.md.
+#
+# Commits any updates to `experiment-store/`, `validated-learnings.md`,
+# `TASKS.md` directly back to main with a `[skip ci]` marker so the
+# recorder's own push doesn't trigger the daily-layer workflow.
+#
+# Don't touch ci.yml or experiment.yml from this workflow's territory —
+# those live in their own files; this workflow is the
+# rule-9-weekly-monthly-layer-only.
+
+name: experiment-tracker
+
+on:
+  schedule:
+    # 09:00 UTC every day. Replay windows are coarse-grained (7d / 30d),
+    # so daily ticks suffice; we'd hit nothing 23 hours out of 24 anyway.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: experiment-tracker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: build @minsky/experiment-record
+        # The runner imports `parse` from the workspace package; vitest tests
+        # use the source-alias path, but the .mjs runner needs the built dist.
+        run: pnpm --filter @minsky/experiment-record build
+
+      - name: replay due experiments
+        run: node scripts/replay-experiment.mjs
+
+      - name: commit + push tracker updates
+        run: |
+          set -euo pipefail
+          # If the tracker added/changed files, push them back to main.
+          # `[skip ci]` prevents recursive workflow runs (matches the daily
+          # recorder's discipline).
+          if [ -z "$(git status --porcelain experiment-store/ validated-learnings.md TASKS.md)" ]; then
+            echo "no tracker updates to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add experiment-store/ validated-learnings.md TASKS.md
+          git commit -m "chore(experiment-tracker): record replay verdicts $(date -u +%Y-%m-%d) [skip ci]"
+          git push origin HEAD:main
