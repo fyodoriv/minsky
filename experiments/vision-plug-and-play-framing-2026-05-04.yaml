@@ -1,0 +1,93 @@
+id: vision-plug-and-play-framing-2026-05-04
+hypothesis: |
+  The 2026-05-04 user brief restated the original Minsky vision in
+  terms vision.md's current headline does not surface clearly: Minsky
+  is a *plug-and-play repo transformer* that you attach to any
+  repository (host or itself) and runs 24/7 to make medium-to-long
+  -term improvements aligned with Minsky principles (strict lint /
+  tests, observability, chaos engineering, experiment-based
+  development). The Minsky-on-itself loop is a *side effect* of the
+  same supervisor that runs Minsky-on-any-host.
+
+  The current headline (vision.md § "What Minsky is") frames Minsky
+  as "an integration distribution that produces software 24/7 on a
+  Claude Code Max subscription". True but doesn't surface the dual-
+  purpose framing — readers parse "produces software" as Minsky-on-
+  itself only and miss the cross-repo surface that
+  `minsky bootstrap` + `minsky run` already implement (#128 / #129 /
+  #131).
+
+  This PR rewrites the headline to lead with the dual-purpose
+  framing, cross-references both flagship user stories
+  (`user-stories/001-loop-runs-overnight.md` for itself,
+  `user-stories/006-runner-on-any-repo.md` for any host), and adds
+  rule #12 (Scope discipline — *iron rule*): when the queue empties,
+  the next move is always to make the existing surface perform
+  better, not to add new functionality. New scope requires
+  human-approval / market-research-only / pre-registered experiment.
+  Rule #12's mechanical enforcement lands as `scope-discipline-
+  policy-lint` (P0 follow-up filed in this same PR).
+
+  Three follow-up P0 tasks ship with this PR's TASKS.md hunk:
+  `scope-discipline-policy-lint` (CI lint), `user-stories-dual-
+  purpose-refresh` (cross-link 001 ↔ 006), `host-transformation-
+  checklist` (`docs/host-transformation-checklist.md`).
+success: |
+  - `npx markdownlint-cli2 vision.md TASKS.md` exits 0.
+  - `node scripts/check-pattern-index.mjs` exits 0 (the new rule
+    #12 is in vision.md's prose; no new top-level artefact in this
+    PR — pattern-conformance discipline already accepts the change).
+  - `tasks-lint TASKS.md` exits 0 with the 3 new P0 task blocks
+    parsing cleanly.
+  - `pnpm typecheck` and `pnpm exec biome check` exit 0 (pure docs +
+    TASKS.md change; no code touched).
+  - Rule #12 is named in vision.md (`grep -c "rule #12" vision.md` ≥
+    2) — once in the headline section, once in the constitution
+    cross-reference.
+  - Both flagship user stories are explicitly referenced in
+    vision.md's headline.
+pivot: |
+  Two pivot paths pre-registered:
+    1. If readers find the dual-purpose framing confusing (two
+       surfaces / one loop is harder to grasp than two independent
+       tools), retire the unified framing in favour of two
+       independent vision docs — `vision-on-itself.md` and
+       `vision-on-host.md`. The unified rule #12 stays the iron
+       rule across both.
+    2. If rule #12 proves too restrictive in practice (legitimate
+       new scope gets pre-emptively gated by the lint that ships in
+       the follow-up task), relax the gate to *advisory* (warns
+       but doesn't fail) until the false-positive rate stabilises;
+       the deterministic gate becomes a Pareto-frontier opt-in.
+       This trades enforcement strictness for adoption velocity.
+measurement: |
+  bash -c 'count=$(grep -c "rule #12" vision.md); test "$count" -ge 2 && echo "PASS: $count rule-12 mentions" || (echo "FAIL: only $count rule-12 mentions in vision.md" && exit 1)'
+anchor: |
+  Ries, E., *The Lean Startup*, Crown Business, 2011 (validated
+  learning — "vanity features without hypotheses", the iron-rule
+  scope discipline rule #12 imports; new functionality without a
+  pre-registered hypothesis is the build-trap that Ries names).
+  Doerr, J., *Measure What Matters*, Portfolio, 2018 (OKR
+  discipline — outcomes not activities; rule #12's "make existing
+  surface perform better" is the OKR translation: stability
+  improvements are observable outcomes, scope expansions are
+  activities masquerading as outcomes until paired with a
+  hypothesis).
+  Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site
+  Reliability Engineering*, O'Reilly, 2016, Ch. 3 (error-budget
+  discipline — when error budget is healthy, the team's job is to
+  consume it on *known* improvements, not invent new ones; rule
+  #12's idle-loop default of stability work is the SRE-anchored
+  shape).
+  rule #1 (vision.md § 1 — don't reinvent the wheel; rule #12 is
+  the operator-side discipline that complements rule #1's
+  build-side discipline — even if you'd build something new,
+  pre-register the hypothesis first).
+  rule #9 (vision.md § 9 — pre-registered hypothesis-driven
+  development; rule #12's "new scope only via experiments" is the
+  cross-repo restatement of rule #9 — same iron rule, broader
+  surface).
+  user-stories/001-loop-runs-overnight.md + user-stories/006-
+  runner-on-any-repo.md (the dual-purpose framing's two flagship
+  acceptance specifications).
+timeout_seconds: 30

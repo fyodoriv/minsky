@@ -4,11 +4,30 @@
 
 ## What Minsky is
 
-Minsky is an **integration distribution**. It connects existing tools into a viable cybernetic system that produces software 24/7 on a Claude Code Max subscription, and stays alive — on-budget, on-mission, getting better — indefinitely.
+Minsky is a **plug-and-play repo transformer**. You attach it to any git repository and it runs 24/7 to transform the repo into one that follows Minsky principles — strict linting, strict tests, observability, chaos engineering, experiment-based development, pattern-conformance discipline. The repo it transforms can be a host (a third-party project — `minsky bootstrap <host-dir>` materialises a per-host gitignored `.minsky/` sidecar; `minsky run <task-id> --host <host-dir>` ships work against it) or Minsky's own repo as a side effect (the supervisor unit at `distribution/systemd/minsky-tick-loop.service` runs the same loop against `~/apps/minsky` so the toolchain self-improves).
 
-Minsky is **not** a framework. It does not contain a multi-agent runtime. It does not own the task queue, the personas, the loop driver, the dashboard, or the mobile surface. Each of those is provided by an existing tool that someone else maintains. Minsky's job is to **choose them, configure them, wire them together through versioned interfaces, and add the small layers nobody else is building**.
+The two surfaces are deliberately the same loop:
 
-Minsky is also explicitly **not** a vehicle for one-off quick fixes. Its scope is the long-tail viability of a cybernetic system that runs for years on a Claude Code subscription. Every change in this repo is a pre-registered experiment under rule #9 (hypothesis-driven development) — including bugfixes, including refactors, including docs. If a candidate change cannot state its expected metric movement in advance, either the metric source is missing (in which case ship a preparation PR first) or the change does not justify the discipline overhead and belongs elsewhere. See rule #9 below and `## What Minsky is not` for the explicit out-of-scope statement.
+- **`user-stories/001-loop-runs-overnight.md` — Minsky on itself.** The MAPE-K supervisor wakes up, picks the next task from `TASKS.md`, claims it, ships it (or files a sub-task to ship it), and goes back to sleep. Minsky improves Minsky.
+- **`user-stories/006-runner-on-any-repo.md` — Minsky on any host.** The same supervisor, parameterised by `MINSKY_HOST_ROOT`, reads the host's `.minsky/repo.yaml` overlay, locates a task in the host's `TASKS.md`, synthesises an `EXPERIMENT.yaml` per rule #9, and ships work against the host repo. Minsky improves the host.
+
+Both surfaces aim at **medium-to-long-term improvements**. Minsky is not a one-off fixer; it is the durable, slow, principle-respecting improvement loop a repo runs on indefinitely.
+
+Minsky is **not** a framework. It does not contain a multi-agent runtime. It does not own the task queue, the personas, the loop driver, the dashboard, or the mobile surface. Each of those is provided by an existing tool that someone else maintains. Minsky's job is to **choose them, configure them, wire them together through versioned interfaces, and add the small layers nobody else is building** — the same job whether the substrate is Minsky's own repo or a host's.
+
+Minsky is also explicitly **not** a vehicle for one-off quick fixes. Its scope is the long-tail viability of a cybernetic system that runs for years on a Claude Code subscription. Every change in any repo Minsky governs is a pre-registered experiment under rule #9 (hypothesis-driven development) — including bugfixes, including refactors, including docs. If a candidate change cannot state its expected metric movement in advance, either the metric source is missing (in which case ship a preparation PR first) or the change does not justify the discipline overhead and belongs elsewhere. See rule #9 below and `## What Minsky is not` for the explicit out-of-scope statement.
+
+### Scope discipline — rule #12 — *iron rule; no exemption*
+
+When Minsky is running on any repo (its own or a host's) and the task queue empties, **the next move is always to make the existing surface perform better, not to add new functionality**. New scope is added only when:
+
+1. A human explicitly approves it (a maintainer commit / PR / issue / explicit instruction in-session); OR
+2. The change is a *market-research read-only investigation* (no code shipped, only findings); OR
+3. The change is a *pre-registered experiment* under rule #9 — hypothesis, success threshold, pivot threshold, measurement command, and literature anchor declared *before* code, in `experiments/<id>.yaml` for Minsky-on-itself or in the host's `.minsky/experiments/<id>.yaml` for cross-repo runs.
+
+Without these three explicit gates, the loop's default is **stability work**: closing failure-mode-table rows, hardening chaos verification, raising observability coverage, lowering MTTR, lowering p99 latency, removing dead code, retiring stale dependencies, modernising test fixtures. Operator discipline alone is not the gate — `/next-task`'s audit cascade is the structural ratchet (Tier 4 is dependency modernisation, Tier 5 is DX polish; tiers 1–3 close existing gaps before touching anything new). The terminal state of an idle Minsky is a fully-stable repo that ships only experiments and the corrections they validate.
+
+This rule applies equally to Minsky-on-itself and Minsky-on-any-host. A host repo's `.minsky/repo.yaml` may *narrow* the experiment surface (e.g., disable `--live` spawn for safety) but cannot *widen* the scope-discipline rule. Sources: Ries, *The Lean Startup*, 2011 (validated learning — features without hypotheses are vanity); Doerr, *Measure What Matters*, 2018 (outcomes not activities); Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly, 2016, Ch. 3 (error-budget discipline — when error budget is healthy, the team's job is to consume it on *known* improvements, not invent new ones). The full constitution including rule #12's mechanical enforcement (a CI lint that fails when a non-trivial PR introduces new public API without an `experiments/<id>.yaml` referencing it as a pre-registered experiment) is documented in `scope-discipline-policy-lint` in [`TASKS.md`](./TASKS.md) (P0 follow-up task).
 
 ## The reframe: a distribution, not a framework
 
