@@ -163,19 +163,6 @@
 
 ## P3
 
-- [ ] Multi-machine scope investigation
-  - **ID**: multi-machine
-  - **Tags**: future, research
-  - **Estimate**: 4h (research only)
-  - **Hypothesis**: A research-only document enumerating the multi-machine deltas (state sync, identity, supervision, blast-radius scaling) is sufficient for the next 12 months — actual implementation is premature until single-machine MAPE-K is stable.
-  - **Details**: Initial scope is single-dev-machine. Document what changes for multi-machine / team setups. Don't implement.
-  - **Verification**: `research.md` "Multi-machine scope" section enumerates the deltas (state synchronization, identity, supervision)
-  - **Measurement**: `grep -c '^## Multi-machine scope' research.md` returns 1; the section enumerates ≥4 deltas (state sync, identity, supervision, blast radius), each with a literature anchor.
-  - **Pivot**: if writing the doc reveals that the single-machine architecture has assumptions that prevent multi-machine evolution (e.g., process-local in-memory state that can't be split), file a follow-up architecture task and stop the research — implementation premature.
-  - **Acceptance**: research.md section added
-  - **Anchor**: Lamport, "Time, Clocks, and the Ordering of Events", *CACM* 1978 (distributed-systems baseline); Helland 2007 (eventual consistency).
-  - **Risk**: Research drifts into design before single-machine works. Cap scope at "what would have to change," not "how to build it."
-
 - [ ] Quarterly dependency review (Q3 2026)
   - **ID**: review-q3-2026
   - **Tags**: governance

@@ -1,13 +1,15 @@
-id: otel-lite-backend
+id: multi-machine
 hypothesis: |
-  A lightweight OTEL-compatible backend exists that satisfies (a) on-disk
-  footprint <1 GB / month at the v0 emission rate, (b) install steps ≤3
-  commands from a clean machine, and (c) the three success-criteria query
-  shapes from vision.md (rows 2, 5, 9) — making it preferable to the
-  current Loki+Tempo+Prometheus+Grafana stack for the solo-dev tier.
-  Evaluate ≥3 candidates and recommend one in research.md.
-success: "grep -c '^## Lighter OTEL backend' research.md returns 1 AND the section contains a 4-column markdown table (Backend | Disk/month | Install steps | Query) with ≥3 candidates evaluated and exactly one recommended; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && npx markdownlint-cli2 all green."
-pivot: "if no candidate satisfies <1 GB/month AND ≤3 install commands AND can answer the success-criteria queries from vision.md, keep Loki+Tempo+Prometheus+Grafana and file a follow-up `otel-signal-volume-reduction` task to lower OTEL signal volume instead."
-measurement: "test \"$(grep -c '^## Lighter OTEL backend' research.md)\" = 1 && test \"$(awk '/^## Lighter OTEL backend/,/^## How to read this file/' research.md | grep -c '^|.*|.*|.*|.*|')\" -ge 5"
-anchor: "OpenTelemetry specification (CNCF 2020+); Gregg, Systems Performance, 2014 (USE method as the lens for what a backend must support); rule #1 (vision.md § 1, don't reinvent the wheel)."
+  A research-only document enumerating ≥4 multi-machine deltas (state
+  synchronization, identity, supervision, blast-radius scaling — plus
+  optional time/clocks) is sufficient framing for the next 12 months.
+  Actual multi-machine implementation is premature until single-machine
+  MAPE-K (`mape-k-loop-v0`) reaches steady state on one host. Each delta
+  names the single-machine assumption it breaks and carries a literature
+  anchor; scope is capped at "what would have to change", not "how to
+  build it" (per the task's Risk clause).
+success: "grep -c '^## Multi-machine scope' research.md returns 1 AND the section enumerates ≥4 deltas (state sync, identity, supervision, blast radius), each with a literature anchor and a current-single-machine-assumption-broken line; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm exec markdownlint-cli2 all green."
+pivot: "if writing the doc surfaces a single-machine assumption that *cannot* be relaxed without an architectural rewrite (e.g., process-local in-memory state in a critical path), file a follow-up architecture task and stop the research — the implementation is premature and the existing v0 design needs revision before multi-machine becomes tractable."
+measurement: "test \"$(grep -c '^## Multi-machine scope' research.md)\" = 1 && test \"$(awk '/^## Multi-machine scope/{flag=1; next} /^## /{flag=0} flag' research.md | grep -c '^### ')\" -ge 4"
+anchor: "Lamport, \"Time, Clocks, and the Ordering of Events in a Distributed System\", *CACM* 1978 (causal ordering as the precondition for any consistent replicated log); Helland, \"Life beyond Distributed Transactions\", *CIDR* 2007 (eventual consistency); Saltzer & Kaashoek, *Principles of Computer System Design*, 2009 (naming); Armstrong 2003 / Birman 1996 (supervision + process groups); Basiri et al. 2016 (chaos blast radius)."
 replay_windows_days: [7, 30, 180]

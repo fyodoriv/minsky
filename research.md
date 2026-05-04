@@ -155,6 +155,49 @@ The current dependency-table row above (`Observability`) keeps Loki+Tempo+Promet
 
 **Anchors:** OpenTelemetry specification (CNCF 2020+); Gregg, *Systems Performance*, 2014 (USE method as the lens for what a backend must support); rule #1 (don't reinvent — pick the existing tool first; SQLite-bespoke is rejected on this ground).
 
+## Multi-machine scope
+
+Minsky v0 is single-developer-machine by design (`ARCHITECTURE.md` § "Open questions to resolve before implementation" #4; `vision.md` row 17 — `setup.sh` ledger explicitly defers durability across machine death). This section enumerates the deltas that change when the substrate moves from one developer's laptop to a multi-machine / team setup. Scope is "what would have to change", not "how to build it" — the design space stays open until single-machine MAPE-K (`mape-k-loop-v0`) reaches steady state and the metrics that would justify multi-machine work exist.
+
+### State synchronization
+
+`TASKS.md` is the canonical work-queue, edited in-place and committed to git. The claim convention `(@agent-id)` (vision.md row 21) is a *local* lease: the file is mutated, the next git commit serialises the mutation, and concurrent edits surface as merge conflicts that a human resolves. On a single machine the implicit serialiser is the local filesystem plus the developer's editor — two agents on the same machine race through the file lock; the loser retries. Across machines this disappears: two agents on different hosts can each pull, claim the same task, and push — git's last-writer-wins rebase semantics produce a malformed `TASKS.md` rather than a queue with one winner. The lease becomes a distributed-mutex problem; the canonical state becomes a replicated log. What changes: the queue needs an external arbiter (a coordination service holding the lease, e.g. CRDT-backed log, etcd, or a single writer behind a queue) or the `TASKS.md` file format needs causal-history metadata so concurrent claims commute. Either path replaces "git is the database" with "git is one replica of the database".
+
+- **Current single-machine assumption broken:** the local filesystem + git commit serialise all writes to `TASKS.md`; conflicts are rare and human-resolvable.
+- **Anchor:** Lamport, "Time, Clocks, and the Ordering of Events in a Distributed System", *CACM* 1978 (causal ordering as the precondition for any consistent replicated log); Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (eventual consistency + immutable activity records as the realistic substrate when ACID is unavailable).
+
+### Identity
+
+Agent identifiers today are local strings: `@architect`, `@executor`, `@qa-tester` etc., minted by OMC inside one process tree, stable only within a single host. The `(@agent-id)` claim in `TASKS.md` is unique because there is exactly one OMC instance writing to that file. Across machines the namespace collides: two laptops both run `@executor`, both claim the same task, and the file records `(@executor)` twice with no way to tell which host's executor is which. Identity must become globally-unique and verifiable: a `host:agent` tuple at minimum, an asymmetric-key-signed claim at maximum (so that a malicious or compromised host cannot forge another host's claims in the shared log). The `RoamCoordinator` that scans `~/apps/*/TASKS.md` across repos is single-host today; multi-machine roaming compounds the identity problem because the `(@agent-id)` strings appear in every repo's queue without cross-repo collision avoidance. What changes: identifier minting moves from "any string OMC happens to use" to "a structured, machine-scoped, collision-free name", with the binding (which host is `host-A`) recorded somewhere outside any individual `TASKS.md`.
+
+- **Current single-machine assumption broken:** the OMC orchestrator is the sole minter of agent IDs within one process tree; uniqueness is a side-effect of there being one tree.
+- **Anchor:** Saltzer & Kaashoek, *Principles of Computer System Design*, 2009, ch. 2-3 (naming systems: binding, scope, collision avoidance); Lampson, "Designing a Global Name Service", *PODC* 1986.
+
+### Supervision
+
+Process supervision today is systemd (Linux) / launchd (macOS) — built into the OS, restarting the local tick loop, `budget-guard`, `mape-k-loop`, `dashboard-web` if any of them die (`ARCHITECTURE.md` § "Process supervision tree"). The supervisor's authority ends at the host boundary: if the laptop is closed, runs out of battery, or panics, every supervised process stops and there is nothing to restart them. On a single dev machine that is acceptable — the developer is the operator and reopens the lid. In a multi-machine team setup the workload is expected to make progress while any one host is down; that requires cross-host failover. What changes: the supervision tree (Armstrong's let-it-crash with hierarchical restart) extends one level — a *cluster supervisor* that watches the host-level supervisors and re-schedules their workloads onto surviving hosts when one dies. This is the gap between Erlang/OTP's local supervisor and Birman's process-group membership service: detecting host death (vs. process death) requires a failure-detector with bounded false-positive rate, plus a way to fence the suspected-dead host so it cannot resurrect and double-execute work after its claims have been reassigned.
+
+- **Current single-machine assumption broken:** systemd / launchd is the entire supervision tree; "the host died" is treated as "the developer is unavailable", not as a failure to recover from.
+- **Anchor:** Armstrong, *Making reliable distributed systems in the presence of software errors*, PhD thesis, KTH 2003 (let-it-crash; supervision trees in OTP); Birman, *Building Secure and Reliable Network Applications*, 1996, ch. 13-14 (process groups; failure detectors; virtual synchrony).
+
+### Blast radius scaling
+
+Constitutional rule #7 caps blast radius explicitly: "single tick / single user-story / single dependency / whole system" (`vision.md` line 85). On a single dev machine "whole system" is one host, and the operator-escape-hatch is one kill switch the developer types into one terminal. Chaos tests inject faults locally — kill the supervisor, drop a task, exhaust tokens — and the steady-state hypothesis (Basiri et al. 2016) is restored within the host's recovery SLO. Multi-machine scaling changes the unit of "whole system": a chaos test on host A that exhausts a shared budget, corrupts the shared `TASKS.md` log, or floods the shared notification channel propagates to host B and host C. The operator escape hatch must reach across hosts — one kill switch that fences the misbehaving host — and the blast-radius taxonomy gains a new tier: "single host / single team / whole fleet". Without that tier, every chaos test that was bounded on one machine is unbounded on many; rule #7's pre-condition "explicit upper bound on what one failure can damage" becomes false by default rather than true by default.
+
+- **Current single-machine assumption broken:** "whole system" = one host; the operator escape hatch is one local kill command; shared resources (budget, queue, notifications) have exactly one consumer.
+- **Anchor:** Basiri, Behnam, de Rooij, Hochstein, Kosewski, Reynolds, Rosenthal, "Chaos Engineering", *IEEE Software* 2016 (the principles document — "minimize blast radius" is principle #5; the multi-machine version requires the principle to be re-asserted at the fleet tier).
+
+### Time and clocks (optional fifth)
+
+`vision.md` § "Success criteria" rolls metrics over `replay_windows_days` boundaries (rule #9 declares 7-/30-/90-day verification windows). On a single machine the boundary is whatever wall-clock time the host reports — drift is bounded by the host's NTP sync and is uniform across all measurements taken on that host. Across machines drift is no longer uniform: host A's "30-day window" can include events host B has not yet observed, and verdicts disagree depending on which host computes them. The pragmatic fix is logical or hybrid clocks (Lamport 1978, Kulkarni et al. 2014) so that the *order* of `predicted Δ` and `observed Δ` events is consistent even when wall-clock skew is non-trivial; the more conservative fix is a single coordinator that timestamps verdicts. Either way the experiment-store schema (`experiment-store/`) gains a clock-source field so a future quarterly review can audit which verdicts were rendered against which clock.
+
+- **Current single-machine assumption broken:** the host's wall clock defines all rule-#9 measurement windows; there is no other clock to disagree with it.
+- **Anchor:** Lamport, "Time, Clocks, and the Ordering of Events in a Distributed System", *CACM* 1978 (logical clocks); Kulkarni, Demirbas, Madeppa, Avva, Leone, "Logical Physical Clocks", *OPODIS* 2014 (HLCs as the practical hybrid).
+
+### Implementation status
+
+v0 is single-machine. Multi-machine work is gated on `mape-k-loop-v0` reaching steady state on a single host first — the metrics that would justify a distributed substrate (sustained tokens-per-story across many hosts, MTTR distributions across host boundaries, throughput against the shared budget) do not exist until the single-machine loop produces a month of stable observations. Revisit this section when those metrics validate. No architectural blocker was surfaced while writing this enumeration: the single-machine assumptions broken above are *boundaries*, not *baked-in invariants* (the queue is a file, not an in-memory data structure; the supervisor is an OS service, not a process-local construct; identity is a string, not a pointer). If a future investigation surfaces an assumption that cannot be relaxed without a rewrite (e.g., process-local in-memory state in a critical path), file a follow-up architecture task per rule #9's pivot clause for `multi-machine` and stop the research.
+
 ## How to read this file
 
 Each active dependency follows the same shape:
@@ -368,7 +411,6 @@ Each active dependency follows the same shape:
 - DSPy idiom fit with Claude Code's prompt model — needs first practical attempt
 - ~~Lighter OTEL backend — Loki+Tempo+Prometheus+Grafana is heavy for single-dev installs; SQLite-backed alternative?~~ Resolved 2026-05-03; see § "Lighter OTEL backend".
 - Cross-language equivalent of tasks.md — can the spec be ported to Python/Rust ecosystems? (taskmd-driangle covers some of this with directory-of-files)
-- Multi-machine scope — initial scope is single-developer-machine; what changes for distributed setups?
 - OMC handoff persistence — do they parseably persist their internal task list to disk? Determines bridge complexity.
 
 ---
