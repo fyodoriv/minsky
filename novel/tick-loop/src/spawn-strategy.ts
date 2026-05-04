@@ -111,14 +111,31 @@ export class DryRunSpawnStrategy implements SpawnStrategy {
 const TAIL_CAP_BYTES = 4096;
 
 /**
- * Configuration for `ProcessSpawnStrategy`. Defaults pick `claude --resume`
- * — the parent task's primary path — but a test or operator can override
- * the command + args (e.g. `omc /team <persona>`).
+ * Configuration for `ProcessSpawnStrategy`. Defaults pick `claude --print` —
+ * Claude Code's documented headless / non-interactive flag (`claude --help`:
+ * "Print response and exit (useful for pipes). … workspace trust dialog is
+ * skipped when Claude is run in non-interactive mode (via -p, or when stdout
+ * is not a TTY)"). The brief is written to the child's stdin and the child
+ * exits when the response is complete — that matches the daemon's contract
+ * "feed the brief in, get the result out".
+ *
+ * The legacy `--resume` default opened an interactive session picker (TTY)
+ * and resumed the previous conversation rather than reading the brief; that
+ * default was the bug fixed by `tick-loop-spawn-args-fresh-session`.
+ *
+ * A test or operator can still override the command + args (e.g.
+ * `omc /team <persona>`).
  */
 export interface ProcessSpawnStrategyOptions {
   /** Command to spawn. Default `claude`. */
   readonly command?: string;
-  /** Arguments to pass to the command. Default `["--resume"]`. */
+  /**
+   * Arguments to pass to the command. Default `["--print"]` — Claude Code's
+   * documented headless flag (`claude -p` / `claude --print`). The brief
+   * is fed to the child's stdin; the child writes the response to stdout
+   * and exits. Use `["--resume"]` ONLY if the operator explicitly wants
+   * the interactive session picker (NOT the daemon's contract).
+   */
   readonly args?: readonly string[];
   /**
    * Optional spawn override — a seam tests can use to inject a fake
@@ -149,7 +166,7 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
 
   constructor(opts: ProcessSpawnStrategyOptions = {}) {
     this.command = opts.command ?? "claude";
-    this.args = opts.args ?? ["--resume"];
+    this.args = opts.args ?? ["--print"];
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
   }
 
@@ -192,8 +209,9 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
         });
       });
 
-      // Write the brief to stdin and close — `claude --resume`'s
-      // non-interactive path reads the brief from stdin then exits.
+      // Write the brief to stdin and close — `claude --print`'s headless
+      // path reads the brief from stdin and exits when the response is
+      // complete (per `claude --help`: "Print response and exit").
       if (child.stdin !== null && child.stdin !== undefined) {
         child.stdin.end(input.brief);
       }

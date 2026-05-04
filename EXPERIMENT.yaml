@@ -1,47 +1,41 @@
-id: user-story-001-integration-test-real-2026-05-04
+id: tick-loop-spawn-args-fresh-session-2026-05-04
 hypothesis: |
-  A `user-stories/001-loop-runs-overnight.test.ts` that drives the real
-  daemon (via `runDaemon` with `DryRunSpawnStrategy` injected — the same
-  Strategy the production CLI selects when `MINSKY_TICK_DRY_RUN=1`,
-  per `bin/tick-loop.mjs` post-`tick-loop-daemon-real-spawn-flip`) closes
-  ≥4 tasks from a synthetic TASKS.md fixture, emits ≥1 OTEL
-  `tick-loop.iteration` span per task, and triggers exactly 1 morning
-  push, satisfying story 001's acceptance criteria within CI runtime
-  <5 min. Replaces the coverage-manifest-only test (PR #82) with a real
-  driver that exercises the same `runDaemon` orchestrator the bash
-  bootstrap (`distribution/systemd/run-tick-loop.sh`) invokes in
-  production. The bash bootstrap path itself isn't driven directly
-  because (a) the real `claude` binary isn't installed on GH-hosted
-  runners (would deadlock on stdin) and (b) the bash bootstrap targets
-  `dist/index.js` which CI doesn't pre-build — Option B (direct
-  `runDaemon` with the `DryRunSpawnStrategy` seam) is hermetic and
-  exercises the same pure orchestrator. Closes
-  `user-story-001-integration-test-real`.
+  `ProcessSpawnStrategy` in `novel/tick-loop/src/spawn-strategy.ts` defaults
+  its args to `["--resume"]`. `claude --resume` opens an interactive session
+  picker (TTY) and resumes the previous conversation — it does NOT start a
+  fresh session reading the brief from stdin. The daemon's contract is
+  "feed the task brief in, get a result out"; `--resume` violates that.
+  Switching the default to `["--print"]` (Claude Code's documented headless
+  flag per `claude --help` — "Print response and exit (useful for pipes).
+  … workspace trust dialog is skipped when Claude is run in non-interactive
+  mode (via -p, or when stdout is not a TTY)") and continuing to write the
+  brief to stdin makes the contract honest. A new `it.skipIf(!hasClaude)`-
+  gated integration test in `novel/tick-loop/src/spawn-strategy.test.ts`
+  spawns the real binary with a 1-line brief and asserts the response is
+  non-empty and is NOT an interactive "Select a session to resume" UI
+  string. Closes `tick-loop-spawn-args-fresh-session`.
 success: |
-  - `pnpm vitest run user-stories/001-loop-runs-overnight.test.ts --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0
-    (numPassedTests counts the four assertion-bearing expectations: 4-task drain, ≥1 span per task, exactly 1 morning push, wall-clock <5 min — collapsed into a single vitest `it` block, so we instead require ≥1 passing test plus zero failures, which is a strict superset of the brief's bound).
+  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0
+    (one new test on top of the current 33 — the `tick-loop-spawn-args-fresh-session` integration smoke; gated on `claude` being on PATH so CI without `claude` skips cleanly while local runs assert the real wiring).
   - `pnpm typecheck` exits 0.
-  - All pre-existing user-stories tests + novel/tick-loop tests pass UNCHANGED.
-  - `vitest.config.ts` + `user-stories/tsconfig.json` add the
-    `@minsky/tick-loop` and `@minsky/notifier` aliases the new integration
-    test imports.
+  - All pre-existing tick-loop tests pass UNCHANGED.
+  - Default args for `ProcessSpawnStrategy` are `["--print"]`; `--resume` is no longer the default.
 pivot: |
-  Pre-registered: if compressed-sim coverage stays below the chaos
-  table's 80 % threshold even with the real daemon driving the tick
-  step, the user-story 001 spec needs splitting (per its own documented
-  Pivot). File a follow-up to the spec rather than retrofitting the
-  test. The Strategy seam (`DryRunSpawnStrategy` ↔ `ProcessSpawnStrategy`)
-  is the bounded change surface; the daemon and CLI never touch the
-  brief shape directly, so a future swap to the real `claude` subprocess
-  on a self-hosted runner is a one-line constructor change in the test
-  setup.
+  Pre-registered: if Claude Code had no non-interactive headless mode (no
+  flag found in `claude --help`), we would NOT ship a broken default;
+  instead `ProcessSpawnStrategy` would write the brief to
+  `state/inbox/<taskId>.md` and return immediately with `exitCode: 0` /
+  `stdoutTail: 'inbox-handoff'`, with a follow-up session consuming the
+  inbox. This pivot was NOT taken — `claude --help` documents `-p` /
+  `--print` as the headless flag and a smoke (`echo "reply: ok" | claude
+  --print --max-turns 1` → `ok`) confirmed it works, so we shipped the
+  real-spawn fix. Documented here so the pivot path is discoverable if a
+  future Claude Code release retires `--print`.
 measurement: |
   pnpm install --no-frozen-lockfile \
     && pnpm typecheck \
-    && pnpm vitest run user-stories/001-loop-runs-overnight.test.ts --reporter=json \
-       | jq -e '.numPassedTests >= 1 and .numFailedTests == 0' \
-    && pnpm vitest run user-stories \
-    && pnpm vitest run novel/tick-loop \
+    && pnpm vitest run novel/tick-loop --reporter=json \
+       | jq -e '.numPassedTests >= 34 and .numFailedTests == 0' \
     && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
     && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
     && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
@@ -56,25 +50,20 @@ measurement: |
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Basiri, A., Blohowiak, A., Hosseini, L., et al., "Principles of Chaos
-  Engineering", *IEEE Software* 33 (3), 2016 (steady-state hypothesis:
-  ≥1 task closed per scheduler iteration; coverage of declared failure
-  modes as the precondition for fault-injection); Beck, K., *Extreme
-  Programming Explained*, Addison-Wesley, 1999, Ch. 17 (CI as the
-  constraint enforcer — the integration test gates merges); Armstrong,
-  J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-crash
-  AT the right boundary — `DryRunSpawnStrategy.spawn()` returns a
-  structured result, the daemon never catches mid-iteration); rule #2
-  (vision.md § 2 — every dep behind interface; the `SpawnStrategy` and
-  `Notifier` are the seams the test composes); Munafò et al., "A
-  Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021,
-  2017 (rule-#9 pre-registration — this experiment block was committed
-  before the test was written, so the success/pivot thresholds are not
-  retrofitted to the result). Risk + mitigation: real daemon spawning
-  real subprocesses inflates CI cost; `DryRunSpawnStrategy` keeps the
-  test hermetic and `noSleep` collapses the 12 × 5 s simulated cadence
-  to <100 ms wall-clock; the nightly self-hosted runner
-  (`first-integration-test-nightly-self-hosted`, sub-task 3/3 of
-  `first-integration-test`) extends to the full 60-min cadence against
-  the real `claude` binary.
+  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007 (let-it-
+  crash AT the right boundary — the Strategy must produce a *correct*
+  result shape, not just any result; a `--resume` invocation that opens a
+  TTY picker is a wrong-shape result that the daemon cannot reason about);
+  rule #2 (vision.md § 2 — the Strategy seam is honest only when its real
+  implementation matches the contract the daemon expects); Munafò et al.,
+  "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
+  0021, 2017 (rule-#9 pre-registration — this experiment block was
+  committed before the test was written, so the success/pivot thresholds
+  are not retrofitted to the result; the pivot path was identified before
+  surveying `claude --help`, so a missing `--print` would have triggered
+  the file-based-handoff path instead of an ad-hoc kludge); Claude Code
+  CLI documentation (`claude --help`, 2026-05 — `-p, --print`: "Print
+  response and exit (useful for pipes). Note: The workspace trust dialog
+  is skipped when Claude is run in non-interactive mode (via -p, or when
+  stdout is not a TTY, e.g. piped or redirected output).").
 replay_windows_days: [7, 30, 90]
