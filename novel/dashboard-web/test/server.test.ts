@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { PLACEHOLDER_METRICS } from "./metrics.js";
-import { createServer } from "./server.js";
+import { PLACEHOLDER_METRICS } from "../src/metrics.js";
+import { createServer } from "../src/server.js";
 
 describe("createServer — Hono SSR scaffold", () => {
   it("returns 200 + HTML body for GET /", async () => {
