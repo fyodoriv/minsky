@@ -1,32 +1,21 @@
-id: native-watchos-app
+id: mape-k-prompt-optimizer-adapter
 hypothesis: |
-  Adding a `## Native WatchOS app` section to `research.md` — documenting
-  (a) a metric-bound trigger condition (90 s/day wrist-dwell sustained
-  across two consecutive 7-day windows, queryable as
-  `count(http_get_total{path="/watch.json"}[7d]) * 2 > 630` against the
-  OTEL Prometheus surface per `vision.md` § "Success criteria" row 6),
-  (b) a scope sketch (≤3 complications, one main face, tap-through to a
-  single tokens-remaining detail view, no interactive controls beyond
-  pause/resume), (c) a calendar-time effort ceiling (≤2 weeks of solo-dev
-  effort, broken down day-by-day), and (d) two pre-committed pivot
-  conditions on the trigger itself (lower to 75 s/day if community
-  boilerplate ships AND wrist-dwell is borderline; raise to 120 s/day if
-  native requires entitlements the solo-dev tier can't justify) — is
-  sufficient to defer the native-app implementation cost until the dwell
-  metric measurably justifies it. The framing is rule-#1-first: Apple
-  Shortcuts is the cheap surface, the native app is the expensive
-  alternative, and the section pre-registers the threshold past which
-  "cheap" stops being cheap enough so the escalation decision is
-  deterministic rather than vibes-driven (rule #9). No implementation
-  task is filed today; one will be filed at the moment the OTEL query
-  above returns true for two consecutive 7-day windows. If the trigger
-  never fires (Shortcuts surface remains within story 005's ≤60 s/day
-  target), the cost of writing this section is bounded at one PR's
-  worth of doc work — and the section's existence still provides a
-  pre-committed, falsifiable answer to the standing "do we need a
-  native app?" research question.
-success: "`grep -c '^## Native WatchOS app' research.md` returns 1; the section explicitly cites the 90 s/day trigger sustained across two consecutive 7-day windows, the queryable form `count(http_get_total{path=\"/watch.json\"}[7d]) * 2 > 630`, an effort ceiling ≤2 weeks broken down by calendar-day phases (project setup / signing / TestFlight, ComplicationKit + WidgetKit data flow, App Intents for Siri+Shortcuts hooks, testing + private distribution), and the two pivot conditions on the trigger itself; the `native-watchos-app` task block is removed from TASKS.md (`grep -c '^- \\[ \\] Native WatchOS app' TASKS.md` returns 0); the Open-questions list in research.md is updated to mark the Watch-surface question as conditionally resolved."
-pivot: "If community WatchOS boilerplate ships during the deferral window (e.g., a permissively-licensed `swift-package-watch-glance` template covering complications + App Intents) AND `wrist_dwell_seconds_per_day` lands in the borderline 75–90 s/day band sustained 14 d, lower the trigger threshold to 75 s/day in this section and re-evaluate. If, conversely, native turns out to require Apple Developer Enterprise tier or paid-only entitlements that the solo-dev tier (US$99/yr Developer Program) cannot justify, raise the trigger to 120 s/day. Either pivot is recorded as a quarterly-review entry against this section, not as a silent threshold change. If neither pivot fires AND the trigger never fires in 12 months of MAPE-K-loop steady state, the section is reviewed as a candidate for retirement (the cheap surface is structurally sufficient and the expensive alternative is no longer worth pre-specifying)."
-measurement: "[ \"$(grep -c '^## Native WatchOS app' research.md)\" = '1' ] && grep -q '90 s/day' research.md && grep -q '2 weeks' research.md && grep -q 'count(http_get_total{path=\"/watch.json\"}\\[7d\\]) \\* 2 > 630' research.md && [ \"$(grep -c '^- \\[ \\] Native WatchOS app' TASKS.md)\" = '0' ]"
-anchor: "Card, Mackinlay, Shneiderman, *Readings in Information Visualization*, Morgan Kaufmann, 1999, Ch. 1 (glanceable / ambient information display — the Watch surface as a calm-technology read-out; rule #1 explicitly cites this anchor for the row-12 Watch surface in `vision.md` § \"Pattern conformance index\"); Weiser & Brown, \"Designing Calm Technology\", *PowerGrid Journal* 1995 (the inverted-dwell discipline operationalised by `vision.md` § \"Success criteria\" row 6); rule #1 (`vision.md` § 1 — don't reinvent the wheel: Apple Shortcuts first, native app only on a measured trigger); rule #9 (`vision.md` § 9 — pre-registered hypothesis-driven development; the trigger threshold and its pivot conditions are committed before the metric is observed)."
+  Shipping `@minsky/prompt-optimizer` as a new novel adapter package
+  under `novel/adapters/prompt-optimizer/` — exposing a `PromptOptimizer`
+  interface (Adapter + Strategy per Gamma 1994), a `StubPromptOptimizer`
+  fake (Meszaros 2007), and an `AnthropicPromptOptimizer` Strategy
+  backed by `@anthropic-ai/sdk` with `cache_control` on the system
+  prefix per ARCHITECTURE.md § "Token economy" — unblocks MAPE-K
+  sub-tasks 2 / 3 / 4 (Monitor + Analyze, Plan + Execute, Knowledge +
+  integration) and confirms `research.md` § "DSPy fit"'s
+  fallback-interface shape is implementable in TypeScript without a
+  Python sidecar. The two-method shape (`runABTest`, `structured`)
+  covers the five canonical use cases listed in that section without
+  any vendor mention in the interface, satisfying rule #2 (every dep
+  behind an adapter). The interface is the DSPy fallback the research
+  note pre-registered; this PR is the implementation step.
+success: "≥8 tests pass against the new package (`pnpm vitest run novel/adapters/prompt-optimizer/` exits 0 with ≥8 cases); the package builds (`pnpm typecheck` exits 0 across the workspace); `AnthropicPromptOptimizer.selfTest()` returns `yellow` (graceful-degrade per rule #7) when no `ANTHROPIC_API_KEY` is set and no client is injected — verified by the `returns yellow when no API key is set` test case; rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-6 / rule-7 / pattern-index) all pass on this PR's diff."
+pivot: "If the Anthropic SDK shape doesn't fit the `runABTest` signature cleanly — i.e., `messages.create`'s request / response contract diverges materially from the `MessagesClient` interface declared in `anthropic.ts` (e.g., the SDK migrates to a streaming-only or tool-use-only call shape that cannot be inverted to the simple text-in / text-out contract `runABTest` consumes) — revisit `research.md` § \"DSPy fit\"'s fallback-interface specification, file an amendment that names the divergence concretely, and gate sub-task 3 (Plan + Execute) on the revised shape. Lower-bound trip: if implementing the strategy required >50 lines of impedance-matching code (counted in `anthropic.ts` excluding the public-API surface), the `MessagesClient` shape is wrong and the interface needs a redesign before sub-task 3."
+measurement: "pnpm typecheck && pnpm vitest run novel/adapters/prompt-optimizer/ --reporter=json | jq '.numPassedTests' | grep -qE '^[0-9]+$' && [ \"$(pnpm vitest run novel/adapters/prompt-optimizer/ --reporter=json 2>/dev/null | jq '.numPassedTests')\" -ge 8 ]"
+anchor: "Khattab et al., \"DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines\", *ICLR* 2024 (the rejected baseline whose optimizer-shape lessons survive in the interface); Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley, 1994 (Adapter + Strategy); Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020, Ch. 3 (sustained-gain window operationalised by `ABResult.sustainedGainAt7d`); Meszaros, *xUnit Test Patterns*, Addison-Wesley, 2007 (`StubPromptOptimizer` as a fake with the contract-test discipline); `research.md` § \"DSPy fit\" (the pre-registered fallback shape this PR ships); rule #2 (`vision.md` § 2 — every dep behind an interface; the adapter IS the wrapping for `@anthropic-ai/sdk`)."
 replay_windows_days: [7, 30]

@@ -75,26 +75,70 @@
   - **Anchor**: Wiggins, *The Twelve-Factor App*, 2011 (factor V — build, release, run; the published artifact is the release contract).
   - **Risk**: TS declaration files reference cross-package types. Mitigation: ensure `composite: true` + `references` is set everywhere (already done for token-monitor / budget-guard).
 
+- [ ] `claude-mape-k-loop` Monitor + Analyze phases
+  - **ID**: mape-k-monitor-analyze-phases
+  - **Tags**: novel, extraction-target
+  - **Parent**: mape-k-loop-v0
+  - **Estimate**: 6–8h
+  - **Hypothesis**: Pure Monitor + Analyze phase functions (Kephart-Chess 2003) — Monitor reads recent CI run conclusions, `spec-advisories/`, and `experiment-store/*.jsonl` to emit a single aggregate health snapshot; Analyze identifies the top constraint per Goldratt TOC (constraint = highest-frequency × highest-cost rule violation) — give the rest of the MAPE-K loop a deterministic substrate to plan against. The phases are pure functions (I/O happens in a thin CLI wrapper) so the same fixture-based test harness used by `scripts/check-rule-*.test.mjs` works here.
+  - **Details**: Monitor: `monitor({ ciRuns, advisoriesDir, experimentStoreDir }) => HealthSnapshot`. Reads recent CI run conclusions (`gh run list --workflow ci.yml --json conclusion,name,createdAt` is the *adapter*-level shape; the pure function takes the parsed JSON), spec-advisories/, experiment-store/*.jsonl. Analyze: `analyze(snapshot) => { topConstraint, evidence, severity }`. CLI wrapper is the I/O boundary.
+  - **Files**: `novel/mape-k-loop/src/monitor.ts`, `novel/mape-k-loop/src/monitor.test.ts`, `novel/mape-k-loop/src/analyze.ts`, `novel/mape-k-loop/src/analyze.test.ts`, `novel/mape-k-loop/package.json`, `novel/mape-k-loop/tsconfig.json`, `novel/mape-k-loop/README.md`.
+  - **Verification**: each public function carries a `@otel mape-k-loop.<verb>` JSDoc; ≥6 paired tests across both phases; rule-7 chaos table in the README enumerates upstream-malformed CI JSON, missing experiment-store, and constraint-evidence ties.
+  - **Measurement**: `pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/monitor.test.ts novel/mape-k-loop/src/analyze.test.ts` exits 0; coverage on `monitor.ts` + `analyze.ts` ≥ 90 % per the project's existing thresholds.
+  - **Pivot**: if Goldratt's "highest-frequency × highest-cost" framing collapses too many distinct violations into one (e.g., a high-frequency typo lint dominates the constraint over rare but expensive rule-#9 misses), pivot to a per-rule severity-weighted constraint metric and document the weight schedule in `vision.md`.
+  - **Acceptance**: monitor + analyze phases ship as pure functions with paired tests; pattern-conformance row added; rule-#9 EXPERIMENT.yaml lands with the PR.
+  - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003 (the MAPE-K reference architecture); Goldratt, *The Goal*, 1984 (Theory of Constraints); Martin, *Clean Architecture*, 2017 (pure function + thin I/O boundary).
+  - **Risk**: CI-run JSON shape changes upstream and breaks Monitor's parser. Mitigation: pin a fixture under `novel/mape-k-loop/test/fixtures/` and gate updates with the test (rule #7 chaos discipline).
+
+- [ ] `claude-mape-k-loop` Plan + Execute phases (with sustained-gain + oscillation guards)
+  - **ID**: mape-k-plan-execute-phases
+  - **Tags**: novel, extraction-target
+  - **Parent**: mape-k-loop-v0
+  - **Estimate**: 1–1.5d
+  - **Blocked by**: mape-k-monitor-analyze-phases
+  - **Hypothesis**: Plan (proposes ≤3 prompt variants for the top constraint emitted by Analyze) and Execute (runs the A/B via the shipped `@minsky/prompt-optimizer` adapter, applies the sustained-gain check ≥7 d per Kohavi-Tang-Xu 2020, and refuses to revisit a prompt within 10 iterations per the oscillation guard) are sufficient as pure decision functions to drive prompt rollouts without a separate orchestration runtime. The two guards (sustained-gain, oscillation) are independently testable; both fire on synthetic histories crafted to trip them.
+  - **Details**: `plan(constraint) => Variant[]` (≤3 variants). `execute({ variants, evalSet, optimizer, history }) => { winner, decision: "rollout" | "abstain", reason }`. `sustainedGain({ winnerVariantId, history, windowDays }) => boolean`. `oscillation({ proposedVariantId, history, lookbackIterations }) => boolean`. The `optimizer` argument is a `PromptOptimizer` (sub-task 1 contract); tests inject `StubPromptOptimizer`.
+  - **Files**: `novel/mape-k-loop/src/plan.ts`, `novel/mape-k-loop/src/execute.ts`, `novel/mape-k-loop/src/oscillation.ts`, `novel/mape-k-loop/src/sustained-gain.ts`, paired `*.test.ts` for each.
+  - **Verification**: each public function carries a `@otel mape-k-loop.<verb>` JSDoc; oscillation guard refuses to repropose the same variant id within the configured iteration window; sustained-gain check returns `false` for windows shorter than 7 d and `true` for ≥7 d with consistent winner.
+  - **Measurement**: `pnpm vitest run novel/mape-k-loop/src/plan.test.ts novel/mape-k-loop/src/execute.test.ts novel/mape-k-loop/src/oscillation.test.ts novel/mape-k-loop/src/sustained-gain.test.ts` exits 0 with ≥10 cases collectively.
+  - **Pivot**: if the 7 d sustained-gain window is too long for the Max5 personal-tier cadence (rollouts so rare that the loop emits <1 winner / month even with valid candidates), pivot to a per-tier configurable window — declare the deviation in `research.md` § "DSPy fit" so the calibration trail stays auditable.
+  - **Acceptance**: Plan + Execute phases ship as pure functions; both guards have paired tests; pattern-conformance row added; rule-#9 EXPERIMENT.yaml lands with the PR.
+  - **Anchor**: Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020, Ch. 3 (sustained-gain window); Kephart & Chess 2003 (Plan / Execute phases of MAPE-K); Ries, *The Lean Startup*, 2011 (build-measure-learn — the oscillation guard is the "don't re-pivot to a previously-rejected variant" guardrail).
+  - **Risk**: Oscillation guard miscounts when the variant id space is small (3 variants over 30 iterations may be unavoidable revisits). Mitigation: when guard refusal rate >50 % over 30 iterations, raise the variant-pool cap or shorten the lookback window — file as a sub-task pivot.
+
+- [ ] `claude-mape-k-loop` Knowledge phase + integration assembly
+  - **ID**: mape-k-knowledge-and-integration
+  - **Tags**: novel, extraction-target
+  - **Parent**: mape-k-loop-v0
+  - **Estimate**: 6–8h
+  - **Blocked by**: mape-k-monitor-analyze-phases, mape-k-plan-execute-phases
+  - **Hypothesis**: The Knowledge phase — append-only writes to `constraints.md`, reads of the experiment-tracker verdicts, and emission of proposed rule-#9 amendments to `research.md` when calibration drifts past a configured threshold — closes the MAPE-K loop with the rule-#9 quarterly-automation layer (`vision.md` § 9). The integration test for user-story 003 (`user-stories/003-mape-k-improves-prompts.test.ts`) passes against the assembled package, validating that the four phases compose correctly and that the parent `mape-k-loop-v0` tracker can be removed.
+  - **Details**: `knowledge({ verdictLog, calibrationDriftThreshold }) => { constraintsAppend: string, researchMdAmendmentProposal: string | null }`. `index.ts` assembles Monitor → Analyze → Plan → Execute → Knowledge into one tick of the loop. `constraints.md` is the append-only knowledge store (Helland 2007 — immutable log).
+  - **Files**: `novel/mape-k-loop/src/knowledge.ts`, `novel/mape-k-loop/src/knowledge.test.ts`, `novel/mape-k-loop/src/index.ts`, `novel/mape-k-loop/src/index.test.ts`, `novel/mape-k-loop/constraints.md` (initial seed), `novel/mape-k-loop/README.md`, `user-stories/003-mape-k-improves-prompts.test.ts`.
+  - **Verification**: integration test for user-story 003 passes; `mape.knowledge.write` event fires on each `constraints.md` append (asserted via the test's OTEL recorder); rule-#9 amendment proposal fires only when the simulated calibration drift exceeds the configured threshold.
+  - **Measurement**: `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts novel/mape-k-loop/src/knowledge.test.ts novel/mape-k-loop/src/index.test.ts` exits 0; the parent `mape-k-loop-v0` tracker block is removed in the same PR (`grep -c '^  - \*\*ID\*\*: mape-k-loop-v0$' TASKS.md` returns 0).
+  - **Pivot**: if `constraints.md` grows past 200 entries before the first calibration-drift amendment fires, the drift threshold is too tight; raise it and document in `research.md` § "DSPy fit". If the user-story-003 integration test cannot reach a green run within 60 s of compressed-simulation time on a GH-hosted runner, pivot to a self-hosted runner per `supervisor-integration-self-hosted-runner`'s precedent.
+  - **Acceptance**: Knowledge phase ships; integration test passes; tracker removed; published as `@minsky/mape-k-loop`.
+  - **Anchor**: Helland, "Life beyond Distributed Transactions", *CIDR* 2007 (immutable log as the Knowledge substrate); Kephart & Chess 2003 (Knowledge phase of MAPE-K); Munafò et al., "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017 (rule #9 calibration as a pre-registered audit).
+  - **Risk**: Calibration-drift threshold is itself a research question — a wrong default fires too often (noise) or never (theatre). Mitigation: ship a conservative default (drift >50 % across two consecutive replay windows), record every fire in `validated-learnings.md`, and revisit at the next quarterly review.
+
 ## P2
 
 <!-- spec-monitor-skill and its successor `spec-monitor-deterministic-rewrite` both shipped: the deterministic linters under `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` carry the load-bearing share of runtime verification (rule #10's enforcement model), and the residual judgement-heavy scope ships as the advisory-only Claude Skill at `novel/spec-monitor/SKILL.md` — capped at ≤5 advisory rules per the rule-#10 ratchet. See `vision.md` § "Pattern conformance index" rows 11 and 35. -->
 
-- [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager)
+- [ ] Implement `claude-mape-k-loop` v0 (the autonomic manager) — tracker
   - **ID**: mape-k-loop-v0
-  - **Tags**: novel, extraction-target
-  - **Estimate**: 3–5d (largest novel layer)
-  - **Hypothesis**: A MAPE-K loop that drives DSPy-style prompt A/Bs, gated by a sustained-gain check (≥7 days post-rollout before counting) and an oscillation detector (refuses to revisit a prompt within N iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
-  - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). Runs spec-monitor periodically; identifies top constraint per Goldratt TOC; proposes prompt variants; runs A/B via DSPy adapter; rolls out winners. Itself a Claude Code subagent for inherited supervision. **Quarterly-layer scope:** the Knowledge phase ingests `experiment-tracker-v0`'s verdict log; the Analyze phase tests rule #9's calibration (predicted Δ vs observed Δ at +7/+30/+90d, by hypothesis category); persistent miscalibration triggers a research task to amend rule #9 (e.g., add a research-task exemption clause).
-  - **Files**: `novel/mape-k-loop/`
-  - **Verification**:
-    - Each MAPE phase emits a named OTEL span (`mape.monitor`, `mape.analyze`, `mape.plan`, `mape.execute`); `mape.knowledge.write` events on each `constraints.md` append
-    - Integration test for user-story 003 (`user-stories/003-mape-k-improves-prompts.test.ts`) passes
-    - Oscillation guard: synthetic test where the same prompt is proposed twice in 10 iterations — second is refused
-  - **Measurement**: `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts` exits 0; OTEL counter `sum(mape_rollout_total{result="sustained_gain"}[30d])` ≥ 4 (queried 60 days after `mape-k-loop-v0` ships).
-  - **Pivot**: if rollout count is <2/month sustained 3 months OR rollouts confidently regress success-criterion metrics ≥1 time → MAPE-K design or DSPy choice is wrong; pivot per `vision.md` § Success criteria #4. Specifically, fall back to a deterministic prompt-versioning scheme (shadow-traffic + manual diff review) and remove the autonomous rollout step.
-  - **Acceptance**: Integration test for user-story 003 passes; oscillation + sustained-gain guards verified; published as `@minsky/mape-k-loop`
-  - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 2003; Khattab et al., "DSPy", 2023; Kohavi/Tang/Xu 2020 (statistical rigour of A/B).
-  - **Risk**: Oscillation; confidently rolling out regressions; complexity creep into a research project. Set explicit guards: sustained-gain check (≥7 days post-rollout before counting), oscillation detector (refuses to revisit a prompt within N iterations).
+  - **Tags**: novel, extraction-target, parent
+  - **Estimate**: tracker — see sub-tasks
+  - **Blocked by**: mape-k-monitor-analyze-phases, mape-k-plan-execute-phases, mape-k-knowledge-and-integration
+  - **Hypothesis**: A MAPE-K loop that drives prompt A/Bs through the `@minsky/prompt-optimizer` adapter (the DSPy fallback per `research.md` § "DSPy fit"), gated by a sustained-gain check (≥7 days post-rollout before counting per Kohavi-Tang-Xu 2020) and an oscillation detector (refuses to revisit a prompt within 10 iterations), produces ≥4 prompt rollouts/month with ≥10 % sustained gain (p<0.05) — meeting success criterion #4 in `vision.md`. Additionally, the loop's Knowledge phase consumes the experiment-tracker's verdicts (the rule-#9 weekly–monthly layer) and feeds calibration findings back into rule #9 itself — closing the quarterly automation layer (`vision.md` § 9 "Pre-registration without execution is half a rule" — quarterly layer).
+  - **Details**: The autonomic manager (Kephart & Chess 2003 MAPE-K reference architecture). This tracker decomposes into four sub-tasks (filed below): the PromptOptimizer adapter (sub-task 1, shipped in PR feat: mape-k decompose + PromptOptimizer adapter), the Monitor + Analyze phases (sub-task 2), the Plan + Execute phases (sub-task 3), and the Knowledge phase + integration (sub-task 4). The `**Quarterly-layer scope**` lives in sub-task 4. The tracker itself is removed when sub-task 4 ships.
+  - **Verification**: all four sub-tasks ship; integration test for `user-stories/003-mape-k-improves-prompts.md` passes once sub-task 4 lands.
+  - **Measurement**: `pnpm vitest run user-stories/003-mape-k-improves-prompts.test.ts` exits 0 (covered by sub-task 4); OTEL counter `sum(mape_rollout_total{result="sustained_gain"}[30d])` ≥ 4 (queried 60 days after sub-task 4 ships); coordination signal — `gh pr list --state merged --search 'in:title mape-k' --json number --jq length` ≥ 4.
+  - **Pivot**: if any sub-task discovers the original epic-level shape is wrong (e.g., the PromptOptimizer interface from sub-task 1 cannot host the Plan / Execute primitives in sub-task 3 without a Python sidecar after all), revisit the parent acceptance and split into a new epic before continuing the chain. If rollout count is <2/month sustained 3 months OR rollouts confidently regress success-criterion metrics ≥1 time → MAPE-K design is wrong; pivot per `vision.md` § Success criteria #4 (fall back to deterministic prompt-versioning + shadow-traffic + manual diff review).
+  - **Acceptance**: tracker removed once all four sub-tasks merge; published as `@minsky/mape-k-loop`.
+  - **Anchor**: Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003; Khattab et al., "DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines", *ICLR* 2024; Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020 (statistical rigour of A/B); `research.md` § "DSPy fit" (the rejected baseline + the PromptOptimizer fallback that sub-task 1 ships).
+  - **Risk**: Oscillation; confidently rolling out regressions; complexity creep into a research project. Set explicit guards: sustained-gain check (≥7 d post-rollout before counting), oscillation detector (refuses to revisit a prompt within 10 iterations).
 
 - [ ] Implement `omc-tasksmd-bridge` v0
   - **ID**: omc-tasksmd-bridge-v0
