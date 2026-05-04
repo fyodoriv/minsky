@@ -3,6 +3,7 @@
   "files": [],
   "references": [
     { "path": "./novel/adapters/observability" },
+    { "path": "./novel/adapters/prompt-optimizer" },
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/adapters/types" },
     { "path": "./novel/budget-guard" },

@@ -12,6 +12,7 @@ export default defineConfig({
     alias: {
       "@minsky/adapter-types": r("./novel/adapters/types/src/index.ts"),
       "@minsky/observability": r("./novel/adapters/observability/src/index.ts"),
+      "@minsky/prompt-optimizer": r("./novel/adapters/prompt-optimizer/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),
       "@minsky/budget-guard": r("./novel/budget-guard/src/index.ts"),
       "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),

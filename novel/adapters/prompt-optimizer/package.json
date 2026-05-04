@@ -1,0 +1,30 @@
+{
+  "name": "@minsky/prompt-optimizer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PromptOptimizer adapter — interface (Adapter pattern, Gamma 1994) + AnthropicPromptOptimizer Strategy implementation. The DSPy fallback per research.md § \"DSPy fit\".",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./anthropic": {
+      "import": "./dist/anthropic.js",
+      "types": "./dist/anthropic.d.ts"
+    }
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@minsky/adapter-types": "workspace:*"
+  }
+}
