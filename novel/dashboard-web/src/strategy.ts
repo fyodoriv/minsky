@@ -120,9 +120,7 @@ function parsePromqlSuccessData(
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
-    // rule-6: handled-locally — malformed PromQL response is a graceful-degrade
-    // boundary (chaos row 4 in distribution/openobserve/README.md); we return
-    // null so the dashboard falls back to `(stub)` rather than crash.
+    // rule-6: handled-locally — malformed PromQL JSON graceful-degrades to `(stub)` (chaos row 4)
   } catch {
     return null;
   }
@@ -175,9 +173,7 @@ export async function queryOpenObservePromql(
   let res: Awaited<ReturnType<FetchLike>>;
   try {
     res = await fetchImpl(url, { headers });
-    // rule-6: handled-locally — network failure is a graceful-degrade boundary
-    // (chaos row 3 in distribution/openobserve/README.md); we return null so
-    // the dashboard falls back to `(stub)` rather than crash.
+    // rule-6: handled-locally — network failure graceful-degrades to `(stub)` (chaos row 3)
   } catch {
     return null;
   }

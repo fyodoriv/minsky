@@ -161,6 +161,8 @@ export class OtelObservability implements Observability {
    *
    * Health-probe contract per {@link SelfTestResult}; setup.sh's `--doctor`
    * mode aggregates across adapters via {@link aggregateStatus}.
+   *
+   * @otel observability.self-test
    */
   async selfTest(): Promise<SelfTestResult> {
     const start = Date.now();
@@ -197,6 +199,7 @@ export class OtelObservability implements Observability {
         latencyMs,
         lastCheck: new Date().toISOString(),
       };
+      // rule-6: handled-locally — health-probe contract returns `red` on internal failure
     } catch (err) {
       const latencyMs = Date.now() - start;
       return {
@@ -208,7 +211,11 @@ export class OtelObservability implements Observability {
     }
   }
 
-  /** Cleanly shut down all providers. Idempotent. */
+  /**
+   * Cleanly shut down all providers. Idempotent.
+   *
+   * @otel observability.shutdown
+   */
   async shutdown(): Promise<void> {
     await Promise.all([
       this.tracerProvider.shutdown(),
