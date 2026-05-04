@@ -105,6 +105,15 @@ importers:
 
   novel/handoff-spec: {}
 
+  novel/mape-k-loop:
+    dependencies:
+      '@minsky/adapter-types':
+        specifier: workspace:*
+        version: link:../adapters/types
+      '@minsky/observability':
+        specifier: workspace:*
+        version: link:../adapters/observability
+
 packages:
 
   '@ampproject/remapping@2.3.0':

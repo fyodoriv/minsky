@@ -1,21 +1,26 @@
-id: mape-k-prompt-optimizer-adapter
+id: mape-k-monitor-analyze-phases
 hypothesis: |
-  Shipping `@minsky/prompt-optimizer` as a new novel adapter package
-  under `novel/adapters/prompt-optimizer/` — exposing a `PromptOptimizer`
-  interface (Adapter + Strategy per Gamma 1994), a `StubPromptOptimizer`
-  fake (Meszaros 2007), and an `AnthropicPromptOptimizer` Strategy
-  backed by `@anthropic-ai/sdk` with `cache_control` on the system
-  prefix per ARCHITECTURE.md § "Token economy" — unblocks MAPE-K
-  sub-tasks 2 / 3 / 4 (Monitor + Analyze, Plan + Execute, Knowledge +
-  integration) and confirms `research.md` § "DSPy fit"'s
-  fallback-interface shape is implementable in TypeScript without a
-  Python sidecar. The two-method shape (`runABTest`, `structured`)
-  covers the five canonical use cases listed in that section without
-  any vendor mention in the interface, satisfying rule #2 (every dep
-  behind an adapter). The interface is the DSPy fallback the research
-  note pre-registered; this PR is the implementation step.
-success: "≥8 tests pass against the new package (`pnpm vitest run novel/adapters/prompt-optimizer/` exits 0 with ≥8 cases); the package builds (`pnpm typecheck` exits 0 across the workspace); `AnthropicPromptOptimizer.selfTest()` returns `yellow` (graceful-degrade per rule #7) when no `ANTHROPIC_API_KEY` is set and no client is injected — verified by the `returns yellow when no API key is set` test case; rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-6 / rule-7 / pattern-index) all pass on this PR's diff."
-pivot: "If the Anthropic SDK shape doesn't fit the `runABTest` signature cleanly — i.e., `messages.create`'s request / response contract diverges materially from the `MessagesClient` interface declared in `anthropic.ts` (e.g., the SDK migrates to a streaming-only or tool-use-only call shape that cannot be inverted to the simple text-in / text-out contract `runABTest` consumes) — revisit `research.md` § \"DSPy fit\"'s fallback-interface specification, file an amendment that names the divergence concretely, and gate sub-task 3 (Plan + Execute) on the revised shape. Lower-bound trip: if implementing the strategy required >50 lines of impedance-matching code (counted in `anthropic.ts` excluding the public-API surface), the `MessagesClient` shape is wrong and the interface needs a redesign before sub-task 3."
-measurement: "pnpm typecheck && pnpm vitest run novel/adapters/prompt-optimizer/ --reporter=json | jq '.numPassedTests' | grep -qE '^[0-9]+$' && [ \"$(pnpm vitest run novel/adapters/prompt-optimizer/ --reporter=json 2>/dev/null | jq '.numPassedTests')\" -ge 8 ]"
-anchor: "Khattab et al., \"DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines\", *ICLR* 2024 (the rejected baseline whose optimizer-shape lessons survive in the interface); Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley, 1994 (Adapter + Strategy); Kohavi, Tang, Xu, *Trustworthy Online Controlled Experiments*, Cambridge UP 2020, Ch. 3 (sustained-gain window operationalised by `ABResult.sustainedGainAt7d`); Meszaros, *xUnit Test Patterns*, Addison-Wesley, 2007 (`StubPromptOptimizer` as a fake with the contract-test discipline); `research.md` § \"DSPy fit\" (the pre-registered fallback shape this PR ships); rule #2 (`vision.md` § 2 — every dep behind an interface; the adapter IS the wrapping for `@anthropic-ai/sdk`)."
+  Shipping pure `monitor(...)` and `analyze(...)` decision functions under
+  `novel/mape-k-loop/` — implementing the M (Monitor) and A (Analyze) phases
+  of the MAPE-K reference architecture (Kephart & Chess, *IEEE Computer* 2003)
+  with Goldratt's Theory of Constraints (*The Goal*, 1984) as the
+  constraint-ranking primitive (top constraint = max
+  `violationCount × costEstimate(ruleId)`, alphabetical tie-break by ruleId)
+  — provides a deterministic substrate for sub-tasks 3 (Plan + Execute) and 4
+  (Knowledge + integration) of `mape-k-loop-v0` to plan against. Pure decision
+  module + thin I/O boundary (Martin, *Clean Architecture*, 2017): the CLI
+  wrapper that runs `gh run list --json …`, reads `spec-advisories/*.md`, and
+  tails `experiment-store/*.jsonl` ships in sub-task 4; the pure functions
+  ship now and accept already-parsed inputs (`MonitorInput.ciRuns`,
+  `MonitorInput.advisories`, `MonitorInput.experimentRecords`). Corrupt input
+  rows are dropped with `warnings` entries (graceful-degrade per rule #7)
+  rather than thrown — keeping the contract narrow per rule #2 and surfacing
+  the upstream-malformed signal explicitly. The `costs` argument to `analyze`
+  is the seam for the documented pivot (per-rule severity-weighted schedule)
+  if Goldratt's flat product over-collapses distinct violations once
+  sub-task 3 starts feeding non-test snapshots through the function.
+success: "`pnpm typecheck` exits 0 and `pnpm vitest run novel/mape-k-loop/src/monitor.test.ts novel/mape-k-loop/src/analyze.test.ts` exits 0 with ≥6 tests passing across both files; `vision.md` § \"Pattern conformance index\" gains row 54 for `@minsky/mape-k-loop` (MAPE-K + ToC + pure-function decision module, conformance: partial — only M+A phases shipped); the parent `mape-k-loop-v0` tracker's `Blocked by` list drops by 1 — the `mape-k-monitor-analyze-phases` block is removed from `TASKS.md` in the same PR (`grep -c '^  - \\*\\*ID\\*\\*: mape-k-monitor-analyze-phases$' TASKS.md` returns 0); rule-N CI lints (rule-1 / rule-2 / rule-3 / rule-4 / rule-6 / rule-7 / pattern-index / skill-rule-cap / pivot-success-margin / measurement-inspects-output / anchor-primary-source) all pass on this PR's diff."
+pivot: "If Goldratt's flat `violationCount × cost` framing over-collapses distinct violations on the first non-test snapshot fed through `analyze` in sub-task 3 — concretely, if a high-frequency typo / formatting-lint cluster ends up dominating `topConstraint` over rare but expensive rule-#9 misses across ≥3 consecutive snapshots from real CI runs — pivot the `costs` argument's default schedule from identity (every rule = 1) to a per-rule severity-weighted schedule sourced from `vision.md` § \"Pattern conformance index\" (rule-#9 weight ≥10× a typo-lint rule). The seam already exists (the `costs` parameter on `analyze`); the API does not change — only the default. Document the weight schedule in `vision.md` § Pattern conformance index row 54 notes column. Lower-bound trip: if implementing the schedule requires changing the `analyze` signature (i.e., the `costs` argument cannot host the schedule cleanly), the M+A phase contract is wrong and the interface needs a redesign before sub-task 3."
+measurement: "pnpm typecheck && pnpm vitest run novel/mape-k-loop/src/monitor.test.ts novel/mape-k-loop/src/analyze.test.ts --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'"
+anchor: "Kephart, J. O., & Chess, D. M., \"The Vision of Autonomic Computing\", *IEEE Computer* 36(1), pp. 41-50, 2003 (the MAPE-K reference architecture — Monitor / Analyze / Plan / Execute over a Knowledge base; this PR ships the M+A phases); Goldratt, E. M., *The Goal: A Process of Ongoing Improvement*, North River Press, 1984 (Theory of Constraints — the constraint is whatever currently bottlenecks throughput; operationalised as `topConstraint` in `analyze`); Martin, R. C., *Clean Architecture: A Craftsman's Guide to Software Structure and Design*, Pearson, 2017 (pure decision module + thin I/O boundary — the M+A phases are pure, the CLI wrapper that ships in sub-task 4 owns I/O); Gregg, B., *Systems Performance: Enterprise and the Cloud*, Prentice Hall, 2014 (USE method — the per-rule aggregate-counter shape carries the *utilisation* column; saturation + errors arrive in sub-task 3); rule #2 (vision.md § 2 — every dep behind an interface; the parsed-input contract IS the wrapping for `gh`/filesystem); vision.md § \"Pattern conformance index\" row 54 (this PR's row)."
 replay_windows_days: [7, 30]

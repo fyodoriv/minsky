@@ -1,0 +1,34 @@
+{
+  "name": "@minsky/mape-k-loop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MAPE-K reference architecture (Kephart-Chess 2003) for Minsky's autonomic manager. Sub-task 2/4 of mape-k-loop-v0 — pure Monitor + Analyze phases (Goldratt 1984 Theory of Constraints).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./monitor": {
+      "import": "./dist/monitor.js",
+      "types": "./dist/monitor.d.ts"
+    },
+    "./analyze": {
+      "import": "./dist/analyze.js",
+      "types": "./dist/analyze.d.ts"
+    }
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minsky/adapter-types": "workspace:*",
+    "@minsky/observability": "workspace:*"
+  }
+}
