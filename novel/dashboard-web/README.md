@@ -76,6 +76,20 @@ Concrete Strategies live in `src/strategy.ts`: `snapshotGetValue(snapshot)` (the
 
 The pivot path here is documented in `distribution/shortcuts/README.md` § "Why this pivot": Apple's `.shortcut` is signed binary plist since iOS 15, so the brief's authorised pivot was taken — JSON config files + on-device build runbook, not native importable manifests. The autonomously-verifiable upstream half (URL / port / path consistency, schema fidelity, metric-id mapping, server route shape) is enforced by the smoke test + the 5 new server tests (`/watch.json` returns 200 + JSON, exposes the four canonical keys, the live `getValue` Strategy flows through, the `paused` Strategy=true surfaces on the envelope).
 
+### Sub-task 7 (`OpenObserveStrategy` — live PromQL read path — shipped)
+
+`OpenObserveStrategy` (`fetchOpenObserveSnapshot` / `queryOpenObservePromql` / `parsePromqlInstantResponse` / `openObserveGetValue` in `src/strategy.ts`) is the live-read implementation of the `GetValue` seam — issues read-only HTTP GETs against an OpenObserve daemon's PromQL instant-query endpoint (`/api/<org>/prometheus/api/v1/query`). Closes the P0 task `observability-backend-deploy`; vision.md row 66.
+
+When `OBSERVABILITY_BACKEND=openobserve` is set, `start.ts` plumbs the Strategy in and `/watch.json` returns live values for the OTEL-backed success criteria (rows 1, 2, 5, 6, 9 — uptime, tokens/story, MTTR, wrist-dwell, token-budget) instead of `(stub)`. **Read-only by construction**: the Strategy never POSTs to OpenObserve — the OTLP write side is handled by `@minsky/observability` via OTLP HTTP exporters. `OPENOBSERVE_BASE_URL` (default `http://127.0.0.1:5080`), `OPENOBSERVE_USER` + `OPENOBSERVE_PASSWORD` (optional HTTP Basic auth) configure the connection. See [`distribution/openobserve/README.md`](../../distribution/openobserve/README.md) for install + verify.
+
+```ts
+import { openObserveGetValue, createServer } from "@minsky/dashboard-web";
+const getValue = await openObserveGetValue({ baseUrl: "http://127.0.0.1:5080" });
+createServer({ getValue }); // every row that has a PromQL mapping renders live
+```
+
+Failed reads (network down, malformed response, non-2xx) graceful-degrade to `null` per metric → the dashboard then renders `(stub)` for those rows.
+
 ### Spec-alignment fix (`dashboard-web-task-throughput-formula-drift`)
 
 `src/metrics.ts`'s `task-throughput` formula now matches `vision.md` § "Success criteria" row 10 exactly: the 30-day commit count is divided by 30 (`… | wc -l / 30`) to produce the unit `tasks/day`. Earlier the divisor was missing while the unit cell still read `tasks/day` — a silent 30× over-read once `dashboard-web-otel-wiring`'s Strategy executes the formula. A new test in `test/metrics.test.ts` string-matches `/ 30` against the formula so the drift cannot recur silently.

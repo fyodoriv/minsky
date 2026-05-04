@@ -1,80 +1,88 @@
-id: notifier-adapter-v0-2026-05-04
+id: observability-backend-deploy-2026-05-04
 hypothesis: |
-  A thin `Notifier` interface (Adapter pattern, Gamma 1994) + a stub-backed
-  test fake (Meszaros 2007) + a single `NtfyNotifier` HTTP Strategy
-  (POST `https://ntfy.sh/<topic>` with Title / Priority / Tags headers)
-  gives the (future) tick-loop daemon a push channel without coupling
-  business logic to ntfy.sh. Today story-001 acceptance #6 ("a morning
-  notification summarizes work done") has no implementation — there's no
-  push channel at all. The Strategy seam keeps APNs / Pushover / webhook
-  open as future Strategies (rule #1: don't reinvent the wheel — the
-  daemon never owns push-channel infrastructure). A constructor-injected
-  `fetch` is the only I/O; tests assert request shape against a fetch-mock
-  so no network is touched in CI (Martin 2017 — DI at the edge).
+  Shipping `distribution/install-openobserve.sh` (pinned at OpenObserve
+  v0.80.1, downloads the upstream binary into `${HOME}/.local/bin/`) +
+  per-platform unit-file templates (`distribution/openobserve/{plist,
+  service}`) + the `OtelObservability.endpoint` opt + the read-only
+  `OpenObserveStrategy` (`fetchOpenObserveSnapshot` /
+  `queryOpenObservePromql` / `parsePromqlInstantResponse` /
+  `openObserveGetValue` over the Prometheus instant-query API) +
+  `OBSERVABILITY_BACKEND=openobserve` wiring in `dashboard-web/start.ts`
+  unblocks 5 of 10 vision.md success-criteria queries (rows 1, 2, 5, 6, 9
+  — uptime, tokens/story, MTTR, wrist-dwell, token-budget) so the
+  dashboard `/watch.json` route returns live values instead of `(stub)`.
+  Per `research.md` § "Lighter OTEL backend" (PR #43, 2026-05-03),
+  OpenObserve is the chosen v0 backend — single binary, parquet-on-disk,
+  PromQL-compatible read API, ~250-800 MB / month at v0 emission rates.
 success: |
-  ≥6 paired tests pass across stub + ntfy (today: 18 passed —
-  5 stub + 13 ntfy);
-  selfTest() returns `green` against a mock 200, `yellow` on rate-limit
-  (429 — service is up but throttled), `red` on a network error;
-  README chaos table has ≥3 rows (today: 4 — ntfy.sh down,
-  network partition, rate-limited, auth token revoked);
-  measurement command exits 0:
-  `pnpm vitest run novel/adapters/notifier --reporter=json |
-   jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`.
+  - `bash -n distribution/install-openobserve.sh` exits 0 (syntax valid).
+  - `[ -x distribution/install-openobserve.sh ]` (executable bit set).
+  - The 18 dashboard-web Strategy tests + the 9 OTEL adapter tests pass
+    (≥6 dashboard-web Strategy tests + ≥3 endpoint-opt OTEL tests are
+    new; total 27 passing in the two relevant files).
+  - The dashboard's `/watch.json` route returns `OpenObserveStrategy`
+    results when `OBSERVABILITY_BACKEND=openobserve` env var is set
+    (verified by `start.ts`'s `resolveGetValue` returning the
+    `openObserveGetValue` Strategy on that env-var branch).
+  - The integration test `novel/adapters/observability/test/openobserve.integration.test.ts`
+    is properly skipped in CI (no `OPENOBSERVE_INTEGRATION=1` set).
+  - Concretely: `bash -n distribution/install-openobserve.sh && \
+    pnpm vitest run novel/dashboard-web/test/strategy.test.ts \
+      novel/adapters/observability/src/otel.test.ts \
+      --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0'`
+    exits 0 (today: 27 passed, 0 failed).
 pivot: |
-  If ntfy.sh proves unreliable in production — ≥1 outage / week sustained
-  over 4 weeks, OR free-tier rate-limits the minsky topic within the
-  documented 3-pushes/day budget, OR the iOS client adds friction the
-  operator does not accept — pivot the *Strategy* to APNs (via a webhook
-  bridge) or self-hosted ntfy on the user's Tailnet. The pivot is
-  Strategy-level: the `Notifier` interface and consumers are unchanged
-  (Munafò 2017 — the pivot threshold is pre-registered before code so
-  a flaky ntfy can't retroactively redefine "reliable enough").
+  If OpenObserve's single-binary install proves unreliable on macOS
+  Sequoia (signing / sandbox policies refuse the binary) OR if the
+  upstream tarball naming changes such that `install-openobserve.sh`
+  cannot fetch a working binary for two consecutive quarterly reviews
+  (`review-q3-2026` etc.) → fall back to **VictoriaMetrics triad** per
+  `research.md` § "Lighter OTEL backend" (PR #43 — named runner-up).
+  Migration cost is low: MetricsQL is a near-superset of PromQL, so the
+  Strategy code requires only a base-URL + per-signal-endpoint swap;
+  the OTEL adapter requires a per-signal endpoint swap on the
+  `OtelObservability` constructor's `endpoint` opt. If both flake, ship
+  the bare OTLP collector + Honeycomb-compatible exporter and document
+  the cloud dependency in `research.md`.
 measurement: |
-  pnpm install --no-frozen-lockfile \
+  bash -n distribution/install-openobserve.sh \
+    && [ -x distribution/install-openobserve.sh ] \
     && pnpm typecheck \
-    && pnpm vitest run novel/adapters/notifier --reporter=json \
+    && pnpm vitest run \
+         novel/dashboard-web/test/strategy.test.ts \
+         novel/adapters/observability/src/otel.test.ts \
+         --reporter=json \
        | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' \
-    && pnpm test \
     && pnpm lint \
-    && node scripts/check-rule-6-let-it-crash.mjs \
+    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
+    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
     && node scripts/check-rule-7-chaos-coverage.mjs \
     && node scripts/check-pattern-index.mjs --diff-base=origin/main \
+    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
     && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
     && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Gamma, E., Helm, R., Johnson, R., Vlissides, J., *Design Patterns:
-  Elements of Reusable Object-Oriented Software*, Addison-Wesley, 1994
-  (Adapter — interface over an external dependency; Strategy —
-  swap-in-able implementations behind a stable seam); Hunt, A., Thomas, D.,
-  *The Pragmatic Programmer*, Addison-Wesley, 1999, Tip 32 ("Crash Early
-  — but the crash needs to reach the operator"; the notifier is the
-  operator-facing channel that turns a let-it-crash event into actionable
-  feedback); Meszaros, G., *xUnit Test Patterns*, Addison-Wesley, 2007
-  (test fake — `StubNotifier` records calls in-memory and returns a fixed
-  shape so tests assert the daemon's request behaviour without a network);
-  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
-  (let-it-crash AT the right boundary — `push()`'s try/catch is the
-  supervisor seam, returning a failure shape rather than swallowing the
-  error inside the function); Martin, R. C., *Clean Architecture*,
-  Pearson, 2017 (DI at the edge — the `fetch` seam is constructor-level,
-  the only I/O); Basiri et al., "Principles of Chaos Engineering",
-  *IEEE Software* 33 (3), 2016 (the README's failure-mode table —
-  steady-state hypothesis, blast radius, operator escape hatch, 4 rows);
-  rule #2 (vision.md § 2 — every dep behind interface; ntfy.sh is exactly
-  that, behind `Notifier`); rule #4 (vision.md § 4 — every exported
-  function carries `@otel adapters.notifier.<verb>` JSDoc, with
-  `@otel-exempt <reason>` opt-outs on helpers); rule #6 (vision.md § 6 —
-  let-it-crash; one `// rule-6: handled-locally —` opt-out at the fetch
-  rejection boundary, the supervisor seam); rule #7 (vision.md § 7 —
-  failure-mode discipline; the README's chaos table has 4 rows, exceeds
-  the brief's ≥3); rule #9 (vision.md § 9 — pre-registered pivot
-  threshold, success threshold, measurement command before code);
-  rule #10 (vision.md § 10 — deterministic enforcement; the chaos table
-  is checked by `scripts/check-rule-7-chaos-coverage.mjs`, the pattern
-  index by `scripts/check-pattern-index.mjs`); Munafò et al., "A Manifesto
-  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
-  (rule-#9 pre-registration — the Strategy-level pivot was declared in
-  this file *before* code so a flaky ntfy can't retroactively redefine
-  "reliable enough").
+  research.md § "Lighter OTEL backend" (PR #43, 2026-05-03) — the v0
+  backend selection, OpenObserve chosen over VictoriaMetrics + the
+  SQLite-bespoke option; OpenTelemetry specification, CNCF (2020+) — the
+  OTLP HTTP receiver contract OpenObserve implements (three-signal
+  traces / metrics / logs); Prometheus HTTP API (Prometheus 2.x docs) —
+  the read-side query contract OpenObserve mirrors (`status`,
+  `data.resultType` ∈ `{scalar, vector, matrix}`, `data.result[].value =
+  [ts, "value"]`); Armstrong, J., *Programming Erlang*, Pragmatic
+  Bookshelf, 2007 — OTP supervision: the OpenObserve daemon is
+  "permanent" restart, mirroring `minsky-budget-guard.service`'s policy;
+  Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
+  1994 — Adapter / Strategy: `OpenObserveStrategy` is one implementation
+  behind the `GetValue` seam shipped by `dashboard-web-otel-wiring`;
+  rule #2 (every dep behind interface), rule #4 (every measurement
+  queryable — the PromQL endpoint is the queryability surface), rule #7
+  (graceful-degrade on backend down: `OpenObserveStrategy` returns
+  `null` → `(stub)`), rule #9 (pre-registered pivot to VictoriaMetrics),
+  rule #10 (deterministic enforcement — install-script shape verified by
+  `bash -n` + executable-bit check, no actual install runs in CI);
+  Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 —
+  pre-registration (the pivot to VictoriaMetrics is committed *before*
+  OpenObserve's install reliability is observed in the field, so a
+  failure cannot be retroactively explained away as the chosen backend).
 replay_windows_days: [90]
