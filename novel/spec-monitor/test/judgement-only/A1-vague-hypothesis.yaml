@@ -1,0 +1,15 @@
+# Fixture for advisory rule A1 — hypothesis vagueness.
+# This EXPERIMENT.yaml *passes* the deterministic schema validator
+# (`@minsky/experiment-record`): every required field is present and
+# meets `min_length: 20`. But the hypothesis is non-falsifiable prose —
+# it names no observable, no current value, no target value. The Skill
+# should emit an advisory with rule_id=A1, severity≥medium, and a
+# suggested_repair that asks for a concrete observable.
+id: vague-hypothesis-example
+hypothesis: |
+  This change will make the system better and improve the developer
+  experience. Users will be happier and the code becomes cleaner.
+success: "the team feels good about it"
+pivot: "if the team feels bad we revert"
+measurement: "git log --oneline | head -5"
+anchor: "internal team discussion"
