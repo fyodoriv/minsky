@@ -80,17 +80,25 @@ const result = await tick({ taskId: "x", prompt: "y", client: flaky });
 // result.status === 'failed'
 ```
 
-## Daemon (v0, dry-run only)
+## Daemon (real spawn after `tick-loop-daemon-real-spawn-flip`)
 
-`runDaemon(opts)` (in `src/daemon.ts`) is the production daemon orchestrator that the supervisor (systemd / launchd) actually supervises. v0 ships **dry-run only** — passing `dryRun: false` throws. Real subprocess spawning (`child_process.spawn('claude', …)`) is deferred to the follow-up `tick-loop-daemon-real-spawn` per the parent task's pre-registered scope guard.
+`runDaemon(opts)` (in `src/daemon.ts`) is the production daemon orchestrator that the supervisor (systemd / launchd) actually supervises. After sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`), the production default is `ProcessSpawnStrategy` (real `claude --resume` subprocess per iteration); dry-run is opt-in via the `MINSKY_TICK_DRY_RUN=1` env-var control surface.
 
-The bash bootstrap `distribution/systemd/run-tick-loop.sh` `exec`s into `node novel/tick-loop/bin/tick-loop.mjs --dry-run …` so the OS supervisor sees the node PID directly. The CLI is the I/O boundary; `runDaemon` itself is pure given the injected seams (`tasksMdReader`, `pausedSentinelReader`, `budgetGuard`, `mockClient`, `now`, `sleep`, `emit`).
+The bash bootstrap `distribution/systemd/run-tick-loop.sh` `exec`s into `node novel/tick-loop/bin/tick-loop.mjs …` so the OS supervisor sees the node PID directly. The CLI reads `MINSKY_TICK_DRY_RUN` and picks `DryRunSpawnStrategy` (when `1` / `true`) or `ProcessSpawnStrategy` (default — real spawn). The CLI is the I/O boundary; `runDaemon` itself is pure given the injected seams (`tasksMdReader`, `pausedSentinelReader`, `budgetGuard`, `spawnStrategy`, `mockClient`, `now`, `sleep`, `emit`).
 
-Run a 4-iteration dry-run:
+Run a 4-iteration tick (real spawn — requires `claude` on PATH):
 
 ```sh
 bash distribution/systemd/run-tick-loop.sh --max-iterations=4 --tick-interval-ms=10
 ```
+
+Run a 4-iteration dry-run (no subprocess fork — safe on any host):
+
+```sh
+MINSKY_TICK_DRY_RUN=1 bash distribution/systemd/run-tick-loop.sh --max-iterations=4 --tick-interval-ms=10
+```
+
+The supervisor unit files (`distribution/systemd/minsky-tick-loop.service`, `distribution/launchd/com.minsky.tick-loop.plist`) ship with `MINSKY_TICK_DRY_RUN=1` set during the safe rollout window. An operator drops that line / dict entry to flip to full real spawn — the production default is unset.
 
 Architecture:
 
@@ -118,7 +126,7 @@ Each row carries a deterministic vitest assertion in `novel/tick-loop/src/daemon
 - **`DryRunSpawnStrategy`** — synthetic, mirrors v0's existing dry-run output. Production stays defaulted to this (no Strategy injected → `runDaemon` falls back to the legacy `tick(...)` path, so all 13 daemon tests pass UNCHANGED).
 - **`ProcessSpawnStrategy`** — `node:child_process.spawn` with the brief written to stdin, last-4KB stdout/stderr tails captured (bounded log capture per rule #7), and `AbortSignal` honoured. Never throws on non-zero exit; the `exitCode` surfaces in the result so the daemon's supervisor (`Restart=on-failure`) is the let-it-crash boundary (Armstrong 2007), NOT the Strategy.
 
-The Strategy is reachable via `runDaemon`'s optional `spawnStrategy?` opt; sub-task 3 (`tick-loop-daemon-real-spawn-flip`) flips the production default. Until then, `dryRun: false` without an injected Strategy still throws — the v0 production guardrail.
+The Strategy is reachable via `runDaemon`'s optional `spawnStrategy?` opt; sub-task 3 (`tick-loop-daemon-real-spawn-flip`) **flipped the production default** so `bin/tick-loop.mjs` now constructs `ProcessSpawnStrategy` by default and `DryRunSpawnStrategy` when `MINSKY_TICK_DRY_RUN=1` is set. The v0 production guardrail (`dryRun: false` without an injected Strategy throws) is preserved — the CLI always injects a Strategy, but a misconfigured caller of `runDaemon` directly still hits the throw.
 
 ### Real `BudgetGuard` facade (sub-task 2/3 of `tick-loop-daemon-real-spawn`)
 

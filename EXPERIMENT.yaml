@@ -1,50 +1,73 @@
-id: watch-shortcuts-tailscale-host-substitution-2026-05-04
+id: tick-loop-daemon-real-spawn-flip-2026-05-04
 hypothesis: |
-  The Shortcut runbook in `distribution/shortcuts/README.md` currently
-  asks the operator to substitute `<tailscale-host>` into each Shortcut's
-  URL field by hand (5 substitutions × 5 Shortcuts = 25 manual edits).
-  Apple Shortcuts' "Ask Each Time" / "Get Variable" actions can
-  parameterise the host once at first run and remember it, dropping
-  operator overhead from 25 substitutions to 1 input + 0-touch reuse.
-  This PR ships a 6th `setup-host.shortcut.json` whose only purpose is
-  "Ask for input" → "Set Variable: host", and rewires the 5 polling
-  Shortcuts (tokens-remaining, last-task-status, constraint-of-the-week,
-  pause, resume) to read that variable at run time via Get-Variable +
-  Combine-Text instead of carrying a literal Tailscale host. A smoke-test
-  assertion enforces that no `*.shortcut.json` may contain a literal
-  Tailscale host in any URL field — it must be either the
-  `<tailscale-host>` placeholder OR a Get-Variable reference, so the
-  parameterisation cannot silently regress.
+  Once the `SpawnStrategy` interface (sub-task 1) and the real `BudgetGuard`
+  (sub-task 2) have landed, flipping the daemon's default Strategy from
+  `DryRunSpawnStrategy` to `ProcessSpawnStrategy` is a one-line constructor
+  swap. The flip ships together with: dropping the hard-coded `--dry-run`
+  argv flag from `bin/tick-loop.mjs` + `distribution/systemd/run-tick-loop.sh`;
+  gating dry-run via the `MINSKY_TICK_DRY_RUN=1` env-var control surface
+  instead; one integration test that drives `runDaemon` against a real
+  subprocess via `ProcessSpawnStrategy` (gated on `which claude`; skipped
+  on hosts where `claude` isn't installed). The supervisor unit files
+  (`distribution/systemd/minsky-tick-loop.service`,
+  `distribution/launchd/com.minsky.tick-loop.plist`) ship with
+  `MINSKY_TICK_DRY_RUN=1` set during the safe rollout window — an operator
+  must drop that line to flip to full real spawn (the production default).
+  Closes `tick-loop-daemon-real-spawn` and unblocks
+  `user-story-001-integration-test-real`.
 success: |
-  - `pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'` exits 0 (today: 16 cases; this PR brings it to ≥17 — 20 actual, +1 setup-host coverage, +1 no-literal-host assertion, +2 setup-host JSON-validity / schema-conformance checks).
-  - 0 literal Tailscale hosts (`*.tailscale.ts.net`, `*.tail-scale.ts.net`) in any `*.shortcut.json` URL field — enforced by the new smoke-test assertion.
-  - `setup-host.shortcut.json` ships and is documented in the runbook (`distribution/shortcuts/README.md` step 0); the 5 polling Shortcuts' runbook entries (steps A.2 and B.1) document the Get-Variable + Combine-Text prelude.
-  - `watch-shortcuts-tailscale-host-substitution` task block removed from TASKS.md in this PR.
+  - `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 19 and .numFailedTests == 0'` exits 0
+    (today: 33 tests pass — 16 daemon (incl. 2 new + 1 gated integration) + 11 index + 6 spawn-strategy).
+  - `pnpm typecheck` exits 0.
+  - All pre-existing daemon dry-run tests + spawn-strategy tests +
+    `tick-loop` index tests pass UNCHANGED — the dry-run path is now
+    opt-in via env, the env-default-false test was rewritten to inject
+    `DryRunSpawnStrategy` explicitly, and the v0 production guardrail
+    (`dryRun: false` without a Strategy throws) is preserved.
+  - `bin/tick-loop.mjs` reads `MINSKY_TICK_DRY_RUN`; `--dry-run` argv flag
+    is retired; `ProcessSpawnStrategy` is the production default.
 pivot: |
-  If the "Ask Each Time" / Variable actions don't compose across
-  separate Shortcuts (each Shortcut has its own scope on real hardware),
-  retire this task — the operator pays the 1-time substitution cost
-  once and the runbook stays as-is. The cap is bounded (5 substitutions,
-  5 minutes), so the cost-of-status-quo is not high. The fallback is
-  documented in `distribution/shortcuts/README.md` step 0 (Risk
-  section): hand-edit each polling Shortcut's "Get Contents of URL"
-  action to use a literal host, file a follow-up to retire the variable
-  approach.
+  Pre-registered in the parent task block: if `claude --resume` deadlocks
+  on stdin without a TTY (the brief is written to stdin and the child is
+  expected to consume it), pivot to a temp-file-based brief handoff
+  (`spawn('claude', ['--resume', '--brief-file', tmpPath])` with the
+  brief written to a `mktemp` path). The Strategy interface is the
+  bounded change surface; the daemon and CLI never touch the brief
+  shape directly.
 measurement: |
-  pnpm vitest run distribution/shortcuts/test/shortcuts-json.test.mjs --reporter=json | jq -e '.numPassedTests >= 17 and .numFailedTests == 0'
+  pnpm install --no-frozen-lockfile \
+    && pnpm typecheck \
+    && pnpm vitest run novel/tick-loop --reporter=json \
+       | jq -e '.numPassedTests >= 19 and .numFailedTests == 0' \
+    && node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main \
+    && node scripts/check-rule-2-dep-coverage.mjs --diff-base=origin/main \
+    && node scripts/check-rule-3-doc-first.mjs --diff-base=origin/main \
+    && node scripts/check-rule-4-otel-coverage.mjs --diff-base=origin/main \
+    && node scripts/check-rule-5-glossary-discipline.mjs --diff-base=origin/main \
+    && node scripts/check-rule-6-let-it-crash.mjs --diff-base=origin/main \
+    && node scripts/check-rule-7-chaos-coverage.mjs \
+    && node scripts/check-pattern-index.mjs --diff-base=origin/main \
+    && node scripts/check-anchor-primary-source.mjs --diff-base=origin/main \
+    && node scripts/check-pivot-success-margin.mjs \
+    && node scripts/check-measurement-inspects-output.mjs --diff-base=origin/main \
+    && npx -y @tasks-md/lint@^0.7.0 TASKS.md \
+    && pnpm exec markdownlint-cli2 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
 anchor: |
-  Norman, *The Design of Everyday Things*, 1988 (affordance — make the
-  parameterisation visible); Card, S. K., Mackinlay, J., Shneiderman, B.,
-  *Readings in Information Visualization*, Morgan Kaufmann, 1999 (calm
-  tech — bounded operator cognitive load); Munafò et al., "A Manifesto
-  for Reproducible Science", *Nature Human Behaviour* 1, 0021, 2017
-  (pre-registered acceptance gate — the smoke-test assertion is the
-  literal-host regression-prevention contract committed before merge).
-
-  Risk (per the parent task block, copied here for the audit trail):
-  Apple Shortcuts variables don't survive Shortcut deletion / reinstall;
-  the "Ask Each Time" UX may prompt every run if the variable doesn't
-  persist. Mitigation: test on a real device first; if persistence is
-  lost, fall back to the 25-substitution status quo and retire the task.
-  Fallback flow is documented in `distribution/shortcuts/README.md`
-  step 0.
+  rule #2 (vision.md § 2 — every dep behind interface; the `SpawnStrategy`
+  is the seam, the flip swaps one implementation for another with no
+  consumer-side change); Armstrong, J., *Programming Erlang*, Pragmatic
+  Bookshelf, 2007 (let-it-crash AT the right boundary — `ProcessSpawnStrategy`
+  surfaces non-zero exit codes in the result; the daemon's supervisor
+  `Restart=on-failure` is the respawn policy, not the Strategy); Kephart,
+  J. O., Chess, D. M., "The Vision of Autonomic Computing", *IEEE Computer*
+  36 (1), 2003 (MAPE-K — after this flip the daemon's Execute phase runs
+  against a real subprocess, raising the row-67 conformance from `partial`
+  to `partial-real-spawn`); Beyer, B., Jones, C., Petoff, J., Murphy, N. R.
+  (eds.), *Site Reliability Engineering*, O'Reilly, 2016, Ch. 3 (the
+  burn-rate budget gate stays in place across the flip; the env-var
+  control surface is the operator escape hatch — Ch. 17); Munafò et al.,
+  "A Manifesto for Reproducible Science", *Nature Human Behaviour* 1,
+  0021, 2017 (rule-#9 pre-registration — the env-var rollout default
+  `MINSKY_TICK_DRY_RUN=1` was committed in the parent task block *before*
+  implementation, so the safety net is mechanical, not policy).
+replay_windows_days: [7, 30, 90]
