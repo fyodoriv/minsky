@@ -19,8 +19,9 @@ import { readFileSync } from "node:fs";
 
 import { serve } from "@hono/node-server";
 
+import type { GetValue } from "./render.js";
 import { createServer } from "./server.js";
-import { type Snapshot, snapshotGetValue } from "./strategy.js";
+import { type Snapshot, openObserveGetValue, snapshotGetValue } from "./strategy.js";
 
 function loadSnapshot(): Snapshot | null {
   const path = process.env["DASHBOARD_METRICS_SNAPSHOT"];
@@ -35,9 +36,34 @@ function loadSnapshot(): Snapshot | null {
   }
 }
 
+async function resolveGetValue(): Promise<GetValue | undefined> {
+  // Live OpenObserve PromQL Strategy (observability-backend-deploy).
+  if (process.env["OBSERVABILITY_BACKEND"] === "openobserve") {
+    const baseUrl = process.env["OPENOBSERVE_BASE_URL"] ?? "http://127.0.0.1:5080";
+    const user = process.env["OPENOBSERVE_USER"];
+    const password = process.env["OPENOBSERVE_PASSWORD"];
+    try {
+      return await openObserveGetValue(
+        user !== undefined && password !== undefined
+          ? { baseUrl, basicAuth: { user, password } }
+          : { baseUrl },
+      );
+      // rule-6: handled-locally — backend unreachable at start is a graceful-degrade
+      // path (chaos row 3 in distribution/openobserve/README.md); cold-start `(stub)`
+      // is preferable to refusing to serve the dashboard.
+    } catch {
+      return undefined;
+    }
+  }
+  // Snapshot-from-file fallback (shipped by dashboard-web-otel-wiring).
+  const snapshot = loadSnapshot();
+  if (snapshot !== null) return snapshotGetValue(snapshot);
+  return undefined;
+}
+
 const port = Number.parseInt(process.env["PORT"] ?? "8080", 10);
-const snapshot = loadSnapshot();
-const args = snapshot === null ? undefined : { getValue: snapshotGetValue(snapshot) };
+const getValue = await resolveGetValue();
+const args = getValue === undefined ? undefined : { getValue };
 const { fetch } = createServer(args);
 
 serve({ fetch, port }, (info) => {
