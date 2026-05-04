@@ -350,3 +350,31 @@
   - **Acceptance**: Both invocations pinned to a specific minor or via the lockfile; ARCHITECTURE.md § "Versioning & dependency evolution" referenced in the PR description; CI green.
   - **Anchor**: rule #7 (chaos engineering — trust no unverified dependency); ARCHITECTURE.md § "Versioning & dependency evolution".
   - **Risk**: Pinning means we miss security patches if we forget to bump. Mitigation: dependabot or a quarterly bump task (covered by `review-q3-2026`).
+
+- [ ] `audit-spec-monitor-coverage` — quarterly audit that spec-monitor advisory rules don't drift into deterministic territory
+  - **ID**: audit-spec-monitor-coverage
+  - **Tags**: audit, conformance, rule-10
+  - **Estimate**: 30m / quarter
+  - **Hypothesis**: A quarterly read-through of `novel/spec-monitor/SKILL.md`'s 5 advisory rules, comparing each against the current `scripts/check-rule-*.mjs` lints, catches scope-creep before the Skill becomes load-bearing — preserving rule #10's "deterministic checks are authoritative" invariant.
+  - **Details**: Re-read SKILL.md. For each advisory rule, ask: "could this be a deterministic linter today?" If yes, file a follow-up `ci-rule-N-*` task and remove the advisory rule from SKILL.md. Also count: are there ≤5 rules?
+  - **Files**: `novel/spec-monitor/SKILL.md`
+  - **Verification**: SKILL.md has ≤5 rules; `spec-advisories/<latest>.md` exists if the Skill has been used; no advisory rule overlaps with a deterministic linter's scope.
+  - **Measurement**: `awk '/^## Rule [0-9]+:/' novel/spec-monitor/SKILL.md | wc -l` ≤ 5; manual diff against `scripts/check-rule-*.mjs` lints surfaces no deterministic overlap.
+  - **Pivot**: if every quarterly audit finds ≥1 advisory-to-deterministic conversion, the Skill is leaking scope; reduce to ≤3 rules.
+  - **Acceptance**: Audit run; SKILL.md compliant; any conversions filed.
+  - **Anchor**: rule #10 (vision.md § 10).
+  - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds.
+
+- [ ] `ci-lint-skill-rule-cap` — CI lint enforcing the ≤5 advisory-rule cap in spec-monitor SKILL.md
+  - **ID**: ci-lint-skill-rule-cap
+  - **Tags**: ci, conformance, rule-10
+  - **Estimate**: 1h
+  - **Hypothesis**: A CI check that counts `## Rule N:` headings in `novel/spec-monitor/SKILL.md` and fails the build if >5 mechanically prevents scope-creep past the cap, eliminating the audit-spec-monitor-coverage task's "did anyone notice?" failure mode.
+  - **Details**: Add a small node script `scripts/check-skill-rule-cap.mjs`. Read SKILL.md, count `^## Rule \d+:` headings (or the agreed marker shape), exit 1 if >5. Wire into `.github/workflows/ci.yml` as `skill-rule-cap` job; add to gate's needs.
+  - **Files**: `scripts/check-skill-rule-cap.mjs`, `scripts/check-skill-rule-cap.test.mjs`, `.github/workflows/ci.yml`
+  - **Verification**: synthetic SKILL.md with 6 rules → exit 1; same with 5 → exit 0; same with 0 → exit 0 (the Skill may be retired without rules).
+  - **Measurement**: `pnpm vitest run scripts/check-skill-rule-cap.test.mjs` exits 0 with ≥3 cases.
+  - **Pivot**: if the Skill is deprecated entirely (rule #10's "if everything is deterministic, the Skill has no remit" terminal state), retire this lint along with it.
+  - **Acceptance**: CI job runs on every PR touching SKILL.md; rule-cap is mechanically enforced.
+  - **Anchor**: rule #10; rule #6 (failure-mode discipline).
+  - **Risk**: Skill heading style drift breaks the count. Mitigation: lock the marker shape in SKILL.md's body and make the regex explicit.
