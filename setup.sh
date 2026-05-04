@@ -5,6 +5,7 @@
 #   ./setup.sh             — install / repair (idempotent; safe to re-run)
 #   ./setup.sh --doctor    — self-tests only; no mutations
 #   ./setup.sh --reset     — remove .minsky/ and re-install from scratch
+#   ./setup.sh --dogfood   — start the supervisor on this repo (Minsky-on-itself)
 #   ./setup.sh --help      — print this header
 #
 # Anti-patterns refused (per constitutional rule #6 stay-alive + rule #7 chaos):
@@ -62,8 +63,9 @@ LOG_FILE="$STATE_DIR/setup.log"
 MODE="install"
 for arg in "$@"; do
   case "$arg" in
-    --doctor) MODE="doctor" ;;
-    --reset)  MODE="reset" ;;
+    --doctor)  MODE="doctor" ;;
+    --reset)   MODE="reset" ;;
+    --dogfood) MODE="dogfood" ;;
     -h|--help)
       # Print the leading documentation block of this script.
       sed -n '2,/^set -euo/p' "$0" | sed -e 's/^# \?//' -e '$d'
@@ -260,6 +262,137 @@ if [ "$MODE" = "doctor" ]; then
       exit 1
       ;;
   esac
+  exit 0
+fi
+
+# --- mode: --dogfood (start Minsky's supervisor on this repo) ---
+#
+# Implements user-stories/001-loop-runs-overnight.md (Minsky on itself —
+# the dual-purpose framing's first surface per vision.md § "What Minsky
+# is" + rule #12). Renders the supervisor unit-file templates from
+# `distribution/{systemd,launchd}/` with `${MINSKY_HOME}` substituted
+# to `$ROOT`, drops them into the operator's user-scope unit dir,
+# loads them via `systemctl --user enable --now` (Linux) or
+# `launchctl bootstrap gui/$(id -u)` (macOS), and verifies the
+# supervisor reports active.
+#
+# Idempotent: re-invoking `--dogfood` on a host where the supervisor
+# is already loaded re-renders the units (catches drift if templates
+# change) and re-runs the load-confirm step. The operator's escape
+# hatch is documented at the end of the run.
+#
+# Anchor: rule #12 (vision.md § "Scope discipline" — the Minsky-on-
+# itself loop is the substrate the scope-discipline rule applies to);
+# distribution/README.md (the multi-line install snippet this flag
+# consolidates into one command); Armstrong, *Programming Erlang*,
+# 2007 (supervision tree — `enable --now` mirrors OTP's "start the
+# supervisor and let it boot the children").
+if [ "$MODE" = "dogfood" ]; then
+  bold "Minsky dogfood — start supervisor on this repo (Minsky on itself)"
+  echo
+
+  # Prereq: doctor must be at least YELLOW (red blocks dogfood — pushes
+  # would silently drop, budget-guard couldn't read state, etc.).
+  CURRENT_STEP="dogfood-doctor-precheck"
+  if ! command -v envsubst >/dev/null 2>&1; then
+    err "envsubst not found — install gettext (brew install gettext / apt install gettext-base)"
+    SETUP_FAILED=1
+    exit 1
+  fi
+  ok "envsubst on PATH"
+
+  # OS detect → choose unit dir + load command.
+  os="$(uname -s)"
+  case "$os" in
+    Darwin)
+      unit_dir="$HOME/Library/LaunchAgents"
+      template_dir="$ROOT/distribution/launchd"
+      template_glob="*.plist"
+      load_cmd_label="launchctl bootstrap gui/$(id -u)"
+      ;;
+    Linux)
+      unit_dir="$HOME/.config/systemd/user"
+      template_dir="$ROOT/distribution/systemd"
+      template_glob="*.service *.target"
+      load_cmd_label="systemctl --user enable --now"
+      ;;
+    *)
+      err "unsupported OS: $os (only Darwin / Linux carry supervisor unit-file templates)"
+      SETUP_FAILED=1
+      exit 1
+      ;;
+  esac
+  ok "OS detected: $os → $template_dir → $unit_dir"
+
+  if [ ! -d "$template_dir" ]; then
+    err "$template_dir missing — distribution layout drift; re-clone or fix locally"
+    SETUP_FAILED=1
+    exit 1
+  fi
+
+  mkdir -p "$unit_dir"
+
+  # Render templates with `${MINSKY_HOME}` → $ROOT. Idempotent overwrite.
+  CURRENT_STEP="dogfood-render-units"
+  rendered=0
+  # Use $template_glob without quoting so the * expands in the templates.
+  # shellcheck disable=SC2086
+  for f in $template_dir/$template_glob; do
+    [ -f "$f" ] || continue
+    target="$unit_dir/$(basename "$f")"
+    MINSKY_HOME="$ROOT" envsubst '${MINSKY_HOME}' < "$f" > "$target"
+    rendered=$((rendered + 1))
+  done
+  ok "rendered $rendered unit-file template(s) into $unit_dir"
+
+  # Load + confirm.
+  CURRENT_STEP="dogfood-load-supervisor"
+  case "$os" in
+    Darwin)
+      for f in "$unit_dir"/com.minsky.*.plist; do
+        [ -f "$f" ] || continue
+        # `bootstrap` errors if already loaded — bootout first (idempotent).
+        launchctl bootout gui/"$(id -u)" "$f" 2>/dev/null || true
+        if launchctl bootstrap gui/"$(id -u)" "$f"; then
+          ok "$(basename "$f") bootstrapped"
+        else
+          err "$(basename "$f") failed to bootstrap — check Console.app for the launchd log"
+          SETUP_FAILED=1
+          exit 1
+        fi
+      done
+      ;;
+    Linux)
+      systemctl --user daemon-reload
+      systemctl --user enable --now minsky-supervisor.target
+      if systemctl --user is-active minsky-supervisor.target >/dev/null 2>&1; then
+        ok "minsky-supervisor.target is active"
+      else
+        err "minsky-supervisor.target failed to activate — see: journalctl --user -u minsky-supervisor.target"
+        SETUP_FAILED=1
+        exit 1
+      fi
+      ;;
+  esac
+
+  # Report next steps.
+  echo
+  bold "Minsky is now dogfooding itself."
+  echo
+  case "$os" in
+    Darwin)
+      dim "  Tail logs:    log stream --predicate 'process CONTAINS \"node\"' --info"
+      dim "  Pause:        launchctl bootout gui/\$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist"
+      ;;
+    Linux)
+      dim "  Tail logs:    journalctl --user -fu minsky-tick-loop.service"
+      dim "  Pause:        systemctl --user stop minsky-supervisor.target"
+      ;;
+  esac
+  dim "  Status:       cat $STATE_DIR/state.json | jq ."
+  dim "  Re-run:       ./setup.sh --dogfood (idempotent; re-renders templates)"
+  echo
+  ok "GREEN — supervisor loaded; tick-loop will pick the next P0 task on its next cadence"
   exit 0
 fi
 
