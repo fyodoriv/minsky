@@ -13,20 +13,6 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-- [ ] `tick-loop-picktask-honors-blocked-field` — pickTask must skip tasks whose `**Blocked**:` line is non-empty (currently only skips `**Blocked by**`)
-  - **ID**: tick-loop-picktask-honors-blocked-field
-  - **Tags**: novel, runtime, supervision, blocker, bug
-  - **Estimate**: 1–2h
-  - **Hypothesis**: The v0 daemon's `pickTask` (`novel/tick-loop/src/daemon.ts`) only respects `**Blocked by**: <id>` (the dependency variant). Tasks marked `**Blocked**: <reason>` (the external-constraint variant — e.g., `needs-user-approval`) are picked anyway. Pre-flight on 2026-05-04 surfaced this: with the queue's only entries being `omc-tasksmd-issue` (Blocked: needs-user-approval) and dormant P3s, the daemon picked `omc-tasksmd-issue` in dry-run and would have spawned `claude --resume` to file a public GitHub issue once the safety guard flips. Adding the parallel skip rule for `**Blocked**:` in `pickTask` mechanically prevents the failure mode that `**Blocked**:` exists to prevent.
-  - **Details**: 1) Update `pickTask` in `novel/tick-loop/src/daemon.ts` (or wherever the parser lives) to skip any task whose block has a non-empty `**Blocked**:` line, in addition to the existing `**Blocked by**` skip. 2) Mirror the rule in any other consumer of TASKS.md task-pick logic (`novel/tick-loop/src/index.ts` if separate). 3) Add a pure-function test fixture: synthetic TASKS.md with one `**Blocked**: needs-user-approval` task + one unblocked task → asserts pickTask returns the unblocked one. 4) Audit the `next-task` skill — it already documents the `**Blocked**:` rule; the daemon was the lagging implementation.
-  - **Files**: `novel/tick-loop/src/daemon.ts`, `novel/tick-loop/src/daemon.test.ts`, possibly `novel/tick-loop/src/index.ts`
-  - **Verification**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0 (one new test on top of the current 33).
-  - **Measurement**: same as Verification.
-  - **Pivot**: if `pickTask` is split across multiple parsers (TasksMdReader vs daemon-side filter), file a follow-up to centralise the skip rule in one place; ship the immediate fix on the path the daemon actually walks.
-  - **Acceptance**: a synthetic queue with only `**Blocked**: needs-user-approval` items resolves to "no actionable task" (status: `idle` / `no-task`); the daemon does not spawn claude.
-  - **Anchor**: rule #2 (the `**Blocked**:` field is the safety surface for blocked-by-default actions per `/next-task` skill); Beyer SRE 2016 Ch. 17 (operator escape hatch — the field is one of the operator's escape hatches).
-  - **Risk**: highest-impact bug surfaced by pre-flight; without this fix, the autonomous run files unauthorised public issues.
-
 - [ ] `tick-loop-spawn-args-fresh-session` — drop default `--resume`; spawn fresh non-interactive Claude with brief on stdin
   - **ID**: tick-loop-spawn-args-fresh-session
   - **Tags**: novel, runtime, supervision, blocker, bug

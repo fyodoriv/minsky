@@ -314,9 +314,15 @@ function isEnoent(err: unknown): boolean {
  * Pick the first unblocked, unclaimed P0/P1 task from a TASKS.md source.
  *
  * Heuristic (v0): scan top-down, find a `**ID**: <kebab-id>` line whose
- * preceding `- [ ] …` task heading does NOT contain `(@minsky-tick-loop)`
- * and whose subsequent `**Blocked by**:` line (if any) is absent. Stops
- * scanning at the `## P2` header so only P0/P1 tasks are considered.
+ * preceding `- [ ] …` task heading does NOT contain `(@minsky-tick-loop)`,
+ * whose subsequent `**Blocked by**:` line (if any) is absent (dependency
+ * blocker), AND whose `**Blocked**:` line (if any) is absent (external-
+ * constraint blocker — the safety surface for blocked-by-default actions
+ * per the `/next-task` skill; see TASKS.md task
+ * `tick-loop-picktask-honors-blocked-field`). The `**Blocked**` field
+ * match is case-sensitive on the field name and triggers regardless of
+ * the reason text — its mere presence means "do not pick autonomously".
+ * Stops scanning at the `## P2` header so only P0/P1 tasks are considered.
  *
  * Pure function — no I/O.
  *
@@ -330,6 +336,12 @@ export function pickTask(tasksMd: string): string | undefined {
     if (id === undefined) continue;
     if (block.includes("(@minsky-tick-loop)")) continue;
     if (/\*\*Blocked by\*\*:/i.test(block)) continue;
+    // `**Blocked**:` (closing asterisks before the colon) is the external-
+    // constraint blocker — distinct from `**Blocked by**:` above. Match is
+    // case-sensitive on the field name. Any non-empty reason after the
+    // colon disqualifies the task; an empty reason still disqualifies (the
+    // field's presence is the signal).
+    if (/\*\*Blocked\*\*:/.test(block)) continue;
     return id;
   }
   return undefined;
