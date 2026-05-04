@@ -77,6 +77,16 @@ Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-fligh
 
 Every constitutional rule must be enforced by a deterministic CI check — not a Skill, not an LLM, not "the agent will remember". Same input, same output, no model call in the chain. LLM-driven checks (Claude Skills like `claude-spec-monitor`) are *advisory only* and useful for *discovering* rule gaps; they are never load-bearing for *enforcing* rules. When a rule resists mechanisation, split it into a deterministic substrate (the lint catches presence/shape) plus an explicit human-judgement layer — never quietly delegated to a Skill. When a deterministic linter ships for a rule, any prior Skill-based enforcement is *removed* in the same PR (the ratchet rule — never two enforcement mechanisms competing). See `vision.md` § 10 for the full rule + sources.
 
+## Orchestrator discipline (sub-agent launches)
+
+When the harness launches sub-agents in parallel (worktree-isolated PRs), two rules are non-negotiable. Both came from the post-batch audit of the #22-#26 cycle and are now mechanically enforced.
+
+1. **At most two parallel agents may touch any shared file.** Specifically `.github/workflows/ci.yml`, `TASKS.md`, root `vitest.config.ts`, root `tsconfig.json`, and any `vision.md` / `AGENTS.md` / `README.md` are shared. If a batch needs to ship N>2 PRs that all add a CI job, batch their job-additions into a single coordinator PR (one agent ships all N scripts; one PR wires them all into ci.yml at the end). The orchestrator must verify file-set disjointness before launch; this check is itself part of the brief.
+
+2. **Every sub-agent's PR body must include a `Hypothesis self-grade` block.** The block carries four lines: `Predicted: …` (re-states the hypothesis), `Observed: …` (the actual measurement output), `Match: yes / no / partial`, `Lesson: …`. This closes the loop on rule #9's pre-registered HDD discipline — pre-registration without observation-vs-prediction is half a rule. The deterministic CI gate (`pr-self-grade`, runs on `pull_request` events) reads the PR body and fails the merge if any of the four lines is missing or empty. The orchestrator's brief template MUST instruct the sub-agent to fill the block; failures here are an orchestrator bug, not a sub-agent bug.
+
+These rules apply to every Agent-tool-launched sub-agent. Human-authored PRs are subject to rule (2) only — the same self-grade block, enforced by the same gate.
+
 ## How to claim and work a task
 
 Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasksmd/tasks.md).

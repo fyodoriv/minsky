@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   markdownlint:
@@ -145,7 +146,7 @@ jobs:
       - name: lint chaos-test coverage
         run: node scripts/check-rule-7-chaos-coverage.mjs
       - name: unit tests for the linter
-        run: pnpm exec vitest run --config scripts/vitest.config.mjs
+        run: pnpm exec vitest run scripts/check-rule-7-chaos-coverage.test.mjs
 
   maciek-smoke:
     # rule #9 preparation-PR: pins Maciek's `claude-monitor` Python tool at a
@@ -190,6 +191,32 @@ jobs:
       - name: rule-1 lint
         run: node scripts/check-rule-1-novel-justification.mjs --diff-base=origin/main
 
+  pr-self-grade:
+    # AGENTS.md § "Orchestrator discipline" rule (2): every PR's description
+    # carries a `Hypothesis self-grade` block (Predicted / Observed / Match /
+    # Lesson). Closes the loop on rule #9 — pre-registration without
+    # observation-vs-prediction is half a rule. Runs on pull_request events
+    # only; on push-to-main this job is skipped (no PR to inspect).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: fetch PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/pr-body.md
+          test -s /tmp/pr-body.md
+      - name: lint self-grade block
+        run: node scripts/check-pr-self-grade.mjs /tmp/pr-body.md
+        # Unit tests for this script run in the broader `test` job (root
+        # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
+        # narrow: read the PR body, lint the block, exit.
+
   ci:
     needs:
       - biome
@@ -197,6 +224,7 @@ jobs:
       - hygiene
       - maciek-smoke
       - markdownlint
+      - pr-self-grade
       - rule-1-novel-justification
       - rule-2-dep-coverage
       - rule-7-chaos-coverage
@@ -208,17 +236,30 @@ jobs:
     steps:
       - name: gate
         run: |
-          if [ "${{ needs.biome.result }}" != "success" ] \
-              || [ "${{ needs.glossary-discipline.result }}" != "success" ] \
-              || [ "${{ needs.hygiene.result }}" != "success" ] \
-              || [ "${{ needs.maciek-smoke.result }}" != "success" ] \
-              || [ "${{ needs.markdownlint.result }}" != "success" ] \
-              || [ "${{ needs.rule-1-novel-justification.result }}" != "success" ] \
-              || [ "${{ needs.rule-2-dep-coverage.result }}" != "success" ] \
-              || [ "${{ needs.rule-7-chaos-coverage.result }}" != "success" ] \
-              || [ "${{ needs.tasks-lint.result }}" != "success" ] \
-              || [ "${{ needs.test.result }}" != "success" ] \
-              || [ "${{ needs.typecheck.result }}" != "success" ]; then
+          # `pr-self-grade` runs on pull_request events only; on push it is
+          # `skipped` — accept that, fail on `failure`/`cancelled`. All
+          # other jobs must be `success`.
+          fail=0
+          for r in "${{ needs.biome.result }}" \
+                   "${{ needs.glossary-discipline.result }}" \
+                   "${{ needs.hygiene.result }}" \
+                   "${{ needs.maciek-smoke.result }}" \
+                   "${{ needs.markdownlint.result }}" \
+                   "${{ needs.rule-1-novel-justification.result }}" \
+                   "${{ needs.rule-2-dep-coverage.result }}" \
+                   "${{ needs.rule-7-chaos-coverage.result }}" \
+                   "${{ needs.tasks-lint.result }}" \
+                   "${{ needs.test.result }}" \
+                   "${{ needs.typecheck.result }}"; do
+            [ "$r" = "success" ] || fail=1
+          done
+          # pr-self-grade may be `skipped` (push event) OR `success` (PR);
+          # only `failure` / `cancelled` should fail the gate.
+          case "${{ needs.pr-self-grade.result }}" in
+            success|skipped) ;;
+            *) fail=1 ;;
+          esac
+          if [ "$fail" = "1" ]; then
             echo "one or more required checks failed" >&2
             exit 1
           fi
