@@ -1,17 +1,15 @@
-id: architecture-align-research-openobserve-claude-monitor
+id: dspy-fit-eval
 hypothesis: |
-  Aligning ARCHITECTURE.md with research.md — naming OpenObserve as the
-  primary OTEL backend recommendation (with VictoriaMetrics as runner-up,
-  and Loki+Tempo+Prometheus+Grafana retained only as historical context),
-  and fixing the `claude-monitor` install command from `npm install -g`
-  to `pip install claude-monitor==3.1.0` — eliminates the doc drift
-  surfaced by the multi-machine research-scout pass (PR #45). This is a
-  glossary-discipline fix (rule #5 — same name across docs); the canonical
-  recommendations live in research.md § "Lighter OTEL backend" (resolved
-  2026-05-03) and § "Token monitor" (claude-monitor is a Python tool,
-  pinned at 3.1.0 on PyPI).
-success: "grep -c 'OpenObserve' ARCHITECTURE.md ≥ 1 AND grep -c 'pip install claude-monitor' ARCHITECTURE.md ≥ 1 AND grep -c 'Loki+Tempo' ARCHITECTURE.md ≤ 1 (allowed: historical-context note); pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm exec markdownlint-cli2 all green."
-pivot: "if a re-read of research.md reveals OpenObserve was a tentative recommendation rather than a decision, restore Loki+Tempo+Prometheus+Grafana as the primary in ARCHITECTURE.md and file a follow-up to make research.md's recommendation more authoritative."
-measurement: "test \"$(grep -c 'OpenObserve' ARCHITECTURE.md)\" -ge 1 && test \"$(grep -c 'pip install claude-monitor' ARCHITECTURE.md)\" -ge 1"
-anchor: "research.md § \"Lighter OTEL backend\" (resolved 2026-05-03; OpenObserve for v0, VictoriaMetrics triad as runner-up); research.md § \"Token monitor\" (`claude-monitor==3.1.0` on PyPI); constitutional rule #5 (glossary discipline — same name across docs)."
+  DSPy's compiler/optimizer idiom (`dspy.Module` + `dspy.Signature` +
+  `dspy.MIPROv2` / GEPA) maps cleanly onto Minsky's `PromptOptimizer`
+  adapter shape across ≥3 of 5 canonical Minsky use cases (persona prompt
+  tuning, MAPE-K rollout, post-hoc fault explanation, drift-report
+  rephrasing, persona handoff) without contortion. If frictions
+  outnumber wins ≥2:1, OR DSPy assumes a Python runtime Minsky won't
+  ship, the fallback minimal `PromptOptimizer` TypeScript interface
+  ships in the same doc instead.
+success: "grep -c '^## DSPy fit' research.md returns 1 AND the section enumerates ≥3 wins AND ≥3 frictions (each with a code citation linked to a specific file in stanfordnlp/dspy at tag 3.2.0) AND ends with an explicit recommendation (adopt / partial-adopt / reject + fallback); pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md && pnpm exec markdownlint-cli2 all green."
+pivot: "if DSPy turns out to be a perfect fit (>4 wins AND no Python-runtime disqualifier), upgrade the recommendation from `reject` to `adopt DSPy` and file a follow-up `mape-k-prompt-optimizer-impl` task wrapping DSPy in a Python sidecar with a TypeScript-side adapter. If, conversely, the fallback interface itself surfaces a use case it cannot serve in ≤20 lines (e.g., online-learning loop that doesn't fit `runABTest` + `structured`), the adapter shape is wrong and rule-#2's interface design needs revision before any implementation lands."
+measurement: "test \"$(grep -c '^## DSPy fit' research.md)\" = 1 && test \"$(awk '/^## DSPy fit/{flag=1; next} /^## /{flag=0} flag' research.md | grep -c '^### ')\" -ge 3 && test \"$(awk '/^### Wins/{flag=1; next} /^### /{flag=0} flag' research.md | grep -cE '^[0-9]+\\.')\" -ge 3 && test \"$(awk '/^### Frictions/{flag=1; next} /^### /{flag=0} flag' research.md | grep -cE '^[0-9]+\\.')\" -ge 3"
+anchor: "Khattab et al., \"DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines\", ICLR 2024 (the Module/Signature/Optimize idiom evaluated); Gamma et al., *Design Patterns*, 1994 (Adapter — the shape rule #2 demands of the fallback); Kohavi/Tang/Xu 2020 ch. 3 (offline-online divergence — friction #3); rule #1 (don't reinvent the wheel — DSPy was the existing-tool candidate; this section is the documented \"why not\")."
 replay_windows_days: [7, 30, 180]
