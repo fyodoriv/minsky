@@ -100,6 +100,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=high
 
+  rule-7-chaos-coverage:
+    # Rule #7 (chaos engineering) deterministic enforcement, per rule #10.
+    # Verifies that every `novel/**/README.md`'s failure-mode table row has a
+    # chaos-test reference that resolves to either a real `*.test.ts` path or
+    # the literal `(deferred — covered when <task-id> ships)` form whose
+    # task-id exists in TASKS.md or the git log.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the linter can resolve `closes <task-id>` task
+          # references from past commits.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: lint chaos-test coverage
+        run: node scripts/check-rule-7-chaos-coverage.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run --config scripts/vitest.config.mjs
+
   maciek-smoke:
     # rule #9 preparation-PR: pins Maciek's `claude-monitor` Python tool at a
     # known-good version so the future `budget-guard-maciek-impl` adapter test
@@ -125,20 +151,21 @@ jobs:
           echo "$version" | grep -q "3.1.0"
 
   ci:
-    needs: [markdownlint, tasks-lint, glossary-discipline, biome, typecheck, test, hygiene, maciek-smoke]
+    needs: [biome, glossary-discipline, hygiene, maciek-smoke, markdownlint, rule-7-chaos-coverage, tasks-lint, test, typecheck]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: gate
         run: |
-          if [ "${{ needs.markdownlint.result }}" != "success" ] \
-              || [ "${{ needs.tasks-lint.result }}" != "success" ] \
+          if [ "${{ needs.biome.result }}" != "success" ] \
               || [ "${{ needs.glossary-discipline.result }}" != "success" ] \
-              || [ "${{ needs.biome.result }}" != "success" ] \
-              || [ "${{ needs.typecheck.result }}" != "success" ] \
-              || [ "${{ needs.test.result }}" != "success" ] \
               || [ "${{ needs.hygiene.result }}" != "success" ] \
-              || [ "${{ needs.maciek-smoke.result }}" != "success" ]; then
+              || [ "${{ needs.maciek-smoke.result }}" != "success" ] \
+              || [ "${{ needs.markdownlint.result }}" != "success" ] \
+              || [ "${{ needs.rule-7-chaos-coverage.result }}" != "success" ] \
+              || [ "${{ needs.tasks-lint.result }}" != "success" ] \
+              || [ "${{ needs.test.result }}" != "success" ] \
+              || [ "${{ needs.typecheck.result }}" != "success" ]; then
             echo "one or more required checks failed" >&2
             exit 1
           fi

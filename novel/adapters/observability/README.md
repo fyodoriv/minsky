@@ -24,7 +24,7 @@ Per constitutional rule #7 (vision.md § 7).
 | 1 | OTEL collector unreachable (default OTLP exporters have no live endpoint) | `iptables -A OUTPUT -p tcp --dport 4318 -j DROP` (network) | `graceful-degrade` — `selfTest()` still returns `green` because the SDK queues + drops async; future `WARN` log from the SDK is the surface signal | apply DROP; assert `selfTest()` resolves within 5 s with `status="green"`; SDK warns to stderr |
 | 2 | Provider already shut down | call `selfTest()` after `shutdown()` (process-state) | `loud-crash-supervisor-restart` *or* `red` SelfTestResult | covered by `otel.test.ts` — assert `result.message` is informative |
 | 3 | Out-of-memory while exporting | inject a large attributes payload (resource exhaustion) | `loud-crash-supervisor-restart` | (manual) attach 10 MiB attribute; assert process crashes loudly, supervisor restarts |
-| 4 | TRACEPARENT propagation broken across subagent boundary | run a subprocess that doesn't honor `OTEL_PROPAGATORS` (upstream-malformed) | `circuit-break-and-notify` (future) | (deferred to budget-guard / mape-k integration tests) |
+| 4 | TRACEPARENT propagation broken across subagent boundary | run a subprocess that doesn't honor `OTEL_PROPAGATORS` (upstream-malformed) | `circuit-break-and-notify` (future) | (deferred — covered when `mape-k-loop-v0` ships) |
 | 5 | Exporter throws synchronously on a malformed metric value (e.g., `Number.NaN`) | `counter.add(Number.NaN, ...)` (upstream-malformed) | `red` SelfTestResult — caught by the try / catch in `selfTest()` | unit test injects a stub exporter that throws on add |
 
 ## Hypothesis-driven development (rule #9)
