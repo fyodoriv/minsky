@@ -65,3 +65,10 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Blocking**: P2 `watch-shortcuts`; depends on web app
 - **Theoretical anchors**: Brendan Gregg USE / Tom Wilkie RED methodology (a small fixed set of vital signs); Beer's VSM (the wrist is System 5's read-out — Identity, the slowest-changing surface)
 - **Design discipline**: A 4th number is forbidden by lint. If a new metric matters that much, one of the three must be replaced — not added. This is principled UX scarcity.
+
+## Pattern conformance
+
+- **Pattern**: Glanceable / ambient information display — Card, Mackinlay, Shneiderman, *Readings in Information Visualization*, Morgan Kaufmann, 1999, Ch. 1 — combined with Calm Technology — Weiser & Brown, "Designing Calm Technology", *PowerGrid Journal* 1995 (also Weiser, "The Computer for the 21st Century", *Scientific American* 265(3) 1991)
+- **Conformance level**: full
+- **Index row**: vision.md § "Pattern conformance index" row 45
+- **Notes**: Three values, no chrome; the surface stays at the periphery of attention until needed. Inverted dwell metric (`wrist_dwell_seconds_per_day` ≤ 60 s) operationalises the calm-tech invariant: more attention to the read-out is a sign the surface or the system is failing. Cross-references row 12 (the Watch surface as the implementation locus); this row anchors the user-story specification.

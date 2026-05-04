@@ -67,3 +67,10 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Blocking**: P1 `handoff-spec-v0`; P2 `spec-monitor-skill`; P2 `mape-k-loop-v0` (forthcoming)
 - **Theoretical anchors**: Kephart & Chess MAPE-K (the loop structure itself), Goldratt TOC (constraint discipline), Khattab DSPy (prompt-as-program), Hofstadter (the strange loop of a system improving itself), Shinn et al. Reflexion (agent verbal memory of failures)
 - **Risk**: This is the most novel layer. Failure mode is the autonomic manager either oscillating (changing the same prompt repeatedly) or confidently rolling out regressions. Both have explicit guards: sustained-gain check (≥7 days post-rollout), oscillation detector (refuses to revisit a prompt within N iterations of a recent change).
+
+## Pattern conformance
+
+- **Pattern**: MAPE-K reference architecture for autonomic computing — Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003 — combined with Goal-Question-Metric for the rollout decision — Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of Software Engineering*, 1994
+- **Conformance level**: full
+- **Index row**: vision.md § "Pattern conformance index" row 43
+- **Notes**: Each phase (Monitor / Analyze / Plan / Execute) emits one OTEL span, and the Knowledge base is `constraints.md`. Cross-references the planned implementation at row 5 (`claude-mape-k-loop`); this row anchors the user-story specification, row 5 anchors the implementation contract.

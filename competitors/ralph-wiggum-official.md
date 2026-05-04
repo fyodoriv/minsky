@@ -56,6 +56,13 @@ The loop happens inside the current session — no external bash loop required.
 - How does `--max-iterations` interact with token-budget pause? (The supervisor may interrupt mid-iteration.) Probably fine — Stop hook just won't fire again — but verify.
 - Does the plugin's prompt re-feed protect or invalidate the prompt cache prefix? Affects token economy. Test in practice.
 
+## Pattern conformance
+
+- **Pattern Ralph implements**: Read-Eval-Print Loop / fixed-point iteration with a bounded termination predicate — McCarthy, "Recursive Functions of Symbolic Expressions and Their Computation by Machine, Part I", *Communications of the ACM* 3(4) 1960 (the REPL and fixed-point iteration as the substrate of LISP); Knuth, *The Art of Computer Programming*, Addison-Wesley, 1968, Vol. 1 § 1.2.1 (bounded iteration discipline)
+- **Conformance level**: full (in the pattern Ralph implements)
+- **How Minsky relates**: adopt — Ralph is the `InnerLoop` primitive (`novel/adapters/inner-loop.ts`). The outer Minsky supervisor (row 4) wraps Ralph's per-session loop with cross-session continuity, token-budget awareness, and the MAPE-K self-improvement loop (row 5).
+- **Index row**: vision.md § "Pattern conformance index" row 51
+
 ## Last reviewed
 
 2026-05-03

@@ -72,3 +72,10 @@ Weekly production fault injection: `supervisor-setup` (P1) wires a low-stakes Su
 - **Phase**: Specification (not yet implemented)
 - **Blocking**: P1 tasks `supervisor-setup`, `budget-guard-v0` (see `TASKS.md`)
 - **Theoretical anchor**: Armstrong supervision tree pattern (let-it-crash + supervisor restart)
+
+## Pattern conformance
+
+- **Pattern**: OTP supervision behaviour (one-for-one supervisor / let-it-crash) — Armstrong, *Programming Erlang*, 2007 — composed with periodic-task scheduling — Liu & Layland, "Scheduling Algorithms for Multiprogramming in a Hard Real-Time Environment", *JACM* 1973
+- **Conformance level**: partial
+- **Index row**: vision.md § "Pattern conformance index" row 41
+- **Notes**: The supervisor primitive is systemd / launchd (POSIX), not BEAM — same deviation already declared at row 4. Tick cadence is minutes-to-hours, so respawn latency (~100 ms vs Erlang's microseconds) is invisible at the user-story's success threshold (`overnight_uptime_pct` ≥ 99 %).

@@ -65,3 +65,10 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Blocking**: P1 task `supervisor-setup`; P2 task `watch-shortcuts`
 - **Theoretical anchor**: Cybernetic feedback (Wiener) — the Watch is the user's nervous-system extension into the organism
 - **Open question**: Does pausing-during-Ralph-mode wait for architect verification or interrupt? Default: wait. Document in `ARCHITECTURE.md` once implemented.
+
+## Pattern conformance
+
+- **Pattern**: Remote procedure call as the control surface — Birrell & Nelson, "Implementing Remote Procedure Calls", *ACM TOCS* 2(1) 1984 — combined with cooperative cancellation via a flag-file checkpoint per Stevens, *Advanced Programming in the UNIX Environment*, Addison-Wesley, 1992, Ch. 10 (signals, graceful shutdown)
+- **Conformance level**: partial
+- **Index row**: vision.md § "Pattern conformance index" row 42
+- **Notes**: Pause is delivered as an HTTPS request over Tailscale (RPC at the wire) but consumed as a flag-file rather than a synchronous RPC return — the in-flight tick checks the flag at the next safe point and self-suspends. Birrell-Nelson's transparency property is intentionally weakened: the caller does not block until the loop has paused; the Watch surface is the eventual-consistency read-back.

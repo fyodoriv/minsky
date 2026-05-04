@@ -50,6 +50,13 @@ The opportunity cost is enormous. MAF is great for the use case it serves; we se
 
 Not a dependency. No adapter. Watch their OTEL span schemas for compatibility.
 
+## Pattern conformance
+
+- **Pattern MAF implements**: Graph-based workflow orchestration of agents (declarative pipelines, checkpointing, human-in-the-loop) — van der Aalst & van Hee, *Workflow Management: Models, Methods, and Systems*, MIT Press, 2002 (workflow nets and the four perspectives) — combined with three-signal observability — OpenTelemetry specification, CNCF (2020+)
+- **Conformance level**: full (in the pattern MAF implements)
+- **How Minsky relates**: don't adopt — wrong stack (.NET / Python) and enterprise framing. Minsky borrows the OTEL-as-first-class-concern lesson (already row 24, `@minsky/observability`) but rejects the graph-workflow runtime in favour of MAPE-K (row 5) and OMC handoffs.
+- **Index row**: vision.md § "Pattern conformance index" row 49
+
 ## Last reviewed
 
 2026-05-03

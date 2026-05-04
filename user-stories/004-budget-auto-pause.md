@@ -65,3 +65,10 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Blocking**: P1 `budget-guard-v0`; depends on `Observability` adapter
 - **Theoretical anchor**: Google SRE error budgets (token-budget = error-budget); Maturana & Varela autopoiesis (homeostasis — the organism throttles its own metabolism to stay alive)
 - **Risk**: Threshold values may need tuning based on observed reality; the first month should be conservative.
+
+## Pattern conformance
+
+- **Pattern**: Error-budget burn-rate alerting + graceful degradation — Beyer, Jones, Petoff, Murphy (eds.), *Site Reliability Engineering*, O'Reilly, 2016, Ch. 3 (error budgets) and Ch. 24 (overload / load-shedding)
+- **Conformance level**: full
+- **Index row**: vision.md § "Pattern conformance index" row 44
+- **Notes**: The 70 % / 85 % / weekly-cap thresholds map directly to SRE burn-rate ladder; the model-downgrade (Sonnet to Haiku) is the load-shedding response. Cross-references the implementation at rows 10 and 26 (`@minsky/budget-guard` watchdog and `decide()` decision function); this row anchors the user-story specification.
