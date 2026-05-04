@@ -60,3 +60,7 @@ lighthouse-mobile
 # TASKS.md task ID — pre-registered next-tier pivot for the lighthouse-mobile
 # self-hosted runner move (rule-#11 proof). Anchored in TASKS.md.
 lighthouse-self-hosted-runner-pivot
+# TASKS.md task ID — P0 follow-up for vision.md § "Scope discipline" (rule #12);
+# the lint that mechanically enforces rule #12 on every PR. Anchored in
+# TASKS.md as `**ID**: scope-discipline-policy-lint`.
+scope-discipline-policy-lint
