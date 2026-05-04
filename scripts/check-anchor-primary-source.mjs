@@ -58,8 +58,15 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseExperimentRecord } from "@minsky/experiment-record";
 
+import { getHostRoot } from "./lib/host-root.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_EXPERIMENTS_DIR = resolve(HERE, "..", "experiments");
+const REPO_ROOT = resolve(HERE, "..");
+// Per `host-root-resolver-prep` (TASKS.md): the experiments substrate root
+// is parametric via `MINSKY_HOST_ROOT`. Defaults to repo root for
+// minsky-on-itself; cross-repo invocations point at a host's `.minsky/`
+// sidecar where the layout mirrors the minsky repo root.
+const DEFAULT_EXPERIMENTS_DIR = resolve(getHostRoot(REPO_ROOT), "experiments");
 
 const SKIP_COMMENT_RE =
   /^[ \t]*#[ \t]*rule:[ \t]*ci-lint-anchor-primary-source:[ \t]*skip[ \t]+(\S.{2,})$/m;

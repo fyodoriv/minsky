@@ -55,8 +55,12 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseExperimentRecord } from "@minsky/experiment-record";
 
+import { getHostRoot } from "./lib/host-root.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_EXPERIMENTS_DIR = resolve(HERE, "..", "experiments");
+const REPO_ROOT = resolve(HERE, "..");
+// Per `host-root-resolver-prep`: parametric experiments root via MINSKY_HOST_ROOT.
+const DEFAULT_EXPERIMENTS_DIR = resolve(getHostRoot(REPO_ROOT), "experiments");
 
 // ---- allowlist / blacklist -------------------------------------------------
 //
