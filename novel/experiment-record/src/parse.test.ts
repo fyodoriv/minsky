@@ -144,6 +144,58 @@ anchor: "rule #9"
     expect(result.errors[0]?.kind).toBe("not-a-mapping");
   });
 
+  it("defaults timeout_seconds to 60 when omitted", () => {
+    const result = parse(fx("valid-1.yaml"));
+    if (!result.ok) throw new Error("expected valid");
+    expect(result.record.timeout_seconds).toBe(60);
+  });
+
+  it("preserves explicit timeout_seconds when provided", () => {
+    const result = parse(`
+id: example
+hypothesis: "Some forty-character hypothesis lorem ipsum"
+success: "≥1 unit"
+pivot: "<0 units"
+measurement: "echo 1"
+anchor: "rule #9"
+timeout_seconds: 120
+`);
+    if (!result.ok) throw new Error(`expected valid; got ${JSON.stringify(result.errors)}`);
+    expect(result.record.timeout_seconds).toBe(120);
+  });
+
+  it("rejects out-of-range timeout_seconds", () => {
+    const result = parse(`
+id: example
+hypothesis: "Some forty-character hypothesis lorem ipsum"
+success: "≥1 unit"
+pivot: "<0 units"
+measurement: "echo 1"
+anchor: "rule #9"
+timeout_seconds: 0
+`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(
+      result.errors.some((e) => e.kind === "bad-timeout-value" && e.field === "timeout_seconds"),
+    ).toBe(true);
+  });
+
+  it("rejects non-integer timeout_seconds", () => {
+    const result = parse(`
+id: example
+hypothesis: "Some forty-character hypothesis lorem ipsum"
+success: "≥1 unit"
+pivot: "<0 units"
+measurement: "echo 1"
+anchor: "rule #9"
+timeout_seconds: "60s"
+`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.some((e) => e.kind === "bad-timeout-value")).toBe(true);
+  });
+
   it("rejects too-short hypothesis", () => {
     const result = parse(`
 id: example

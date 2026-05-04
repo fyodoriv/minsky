@@ -1,14 +1,16 @@
-id: phase-2-rule-3-and-script-stability
+id: ci-experiment-runner-v0
 hypothesis: |
-  Adding rule-#3 as a deterministic gate (doc-first enforcement on every
-  PR diff) plus opt-in `// @ts-check` strict typing on the rule-3 source
-  brings the script's failure mode under static-type enforcement: the
-  linter that enforces a constitutional rule is itself type-checked.
-  An incremental migration path (file-by-file `// @ts-check`, flip global
-  switch when all six scripts opt in) avoids the 131-error cliff that
-  flipping `checkJs: true` globally would produce.
-success: "rule-3 lint passes against this PR; rule-3 task block removed; tsconfig allows opt-in checking; rule-3 source + test both pass strict tsc; 19 tests for rule-3 logic; 167 total tests green"
-pivot: "if the per-file `// @ts-check` directives drift (some scripts opt out and stay opted out for ≥30 days), the incremental approach has stalled — flip `checkJs: true` globally and absorb the migration cost as a single big PR (rule #10's ratchet rule applied)"
-measurement: "pnpm typecheck && pnpm test && node scripts/check-rule-3-doc-first.mjs"
-anchor: "rule #3 (test/metric/doc-first); rule #10 (deterministic enforcement); Knuth 1984 (literate programming); Beck 1999 (CI as constraint enforcer); Microsoft TypeScript handbook on `// @ts-check`"
+  A CI gate that (a) requires every non-trivial PR to ship a parseable
+  EXPERIMENT.yaml, (b) executes its measurement command with a
+  per-experiment timeout (default 60s), AND a post-merge recorder that
+  re-runs the measurement against merge-base and current main, appending
+  a JSONL record per experiment-id, mechanically closes the daily layer of
+  rule #9. The runner's pure function (runExperiment) is referentially
+  transparent (no LLM in the chain, per rule #10) and is the deterministic
+  substrate the weekly-layer tracker reads from.
+success: "scripts/run-experiment.test.mjs exits 0 with ≥6 cases covering the brief's a–f checklist; pnpm typecheck && pnpm test && pnpm lint && npx @tasks-md/lint TASKS.md all green; this PR's own EXPERIMENT.yaml passes the new gate against this PR"
+pivot: "if the gate produces ≥3 false positives in its first month (e.g., misclassifying a trivial change as non-trivial, or measurement commands that pass locally but fail in CI), tighten the trivial-detection heuristic OR drop the executability gate to soft-fail (treating EXPERIMENT.yaml as informational-only) until the friction subsides — landing the daily layer as best-effort rather than hard-block"
+measurement: "pnpm typecheck && pnpm vitest run scripts/run-experiment.test.mjs && pnpm exec experiment-record validate EXPERIMENT.yaml"
+anchor: "Fagerholm et al., 'Building Blocks for Continuous Experimentation', RCoSE 2014 (per-change experiment runner as the first building block); Kohavi/Tang/Xu 2020 ch. 4 (running every change as an experiment); rule #9 (vision.md § 9 — the iron pre-registration rule); rule #10 (deterministic enforcement); Beck 1999 (CI as constraint enforcer)"
 replay_windows_days: [7, 30]
+timeout_seconds: 120
