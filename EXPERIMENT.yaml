@@ -1,13 +1,14 @@
-id: extract-adapter-types
+id: markdownlint-nested-node-modules
 hypothesis: |
-  Hoisting `SelfTestStatus`, `SelfTestResult`, and `aggregateStatus()` into
-  a leaf `@minsky/adapter-types` package eliminates the latent dependency
-  cycle (`@minsky/budget-guard → @minsky/observability` for a base type)
-  without breaking observability's public API; future adapter packages then
-  depend on `@minsky/adapter-types` directly. Per Martin's acyclic
-  dependency principle (*Clean Architecture*, 2017) and Wiggins' factor II
-  (*The Twelve-Factor App*, 2011 — explicit dependencies).
-success: "pnpm typecheck && pnpm test && pnpm lint && pnpm publish --dry-run --filter @minsky/adapter-types all exit 0; new types-package tests cover aggregateStatus 100%; existing observability tests pass unchanged; the runtime smoke check `aggregateStatus([{status:'green',...},{status:'red',...}])` returns 'red'"
-pivot: "if extraction breaks observability's downstream consumers (the @minsky/observability re-export turns out not to preserve type identity across declaration files, e.g., consumers see two distinct SelfTestStatus types and refuse to unify them), revert and instead inline the contract per-adapter with a CI lint that asserts the inline copies are byte-equal"
-measurement: "pnpm typecheck && pnpm test && pnpm lint && pnpm publish --dry-run --filter @minsky/adapter-types"
-anchor: "Martin, *Clean Architecture*, 2017 (acyclic dependency principle); Wiggins, *The Twelve-Factor App*, 2011 (factor II — explicit dependencies); Avizienis et al., *IEEE TDSC* 2004 (status-lattice meet)"
+  Replacing `#node_modules` with `#**/node_modules` in the `lint:md` script
+  (and the matching markdownlint invocation in `.github/workflows/ci.yml`)
+  ignores both top-level and workspace-nested `node_modules/`, taking the
+  markdownlint error count from N (currently ≥2 from vendored READMEs in
+  `novel/adapters/observability/node_modules/@opentelemetry/semantic-conventions`)
+  to 0 without silencing any in-tree docs. Anchor: rule #2 (every external
+  dep behind interface — vendor README content is not ours to lint);
+  markdownlint-cli2 docs (glob ignore semantics).
+success: "`pnpm lint:md` exits 0 on a clean `pnpm install` checkout; CI's markdownlint job stops failing on third-party READMEs; total .md files linted decreases by exactly the count of nested-`node_modules` README files (no in-tree docs silenced)"
+pivot: "if `**/node_modules` glob is honored differently across markdownlint-cli2 versions, pin the version (covered by `ci-pin-tooling-versions`) and codify the working glob in a comment"
+measurement: "pnpm lint:md exits 0; `markdownlint-cli2 ... | grep -E '^Linting: [0-9]+ file' | awk '{print $2}'` shows the same in-tree count as before (no false-negatives), Summary line reads `0 error(s)`"
+anchor: "rule #2 (every external dep behind interface); markdownlint-cli2 docs (glob ignore semantics)"
