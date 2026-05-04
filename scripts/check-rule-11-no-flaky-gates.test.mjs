@@ -11,6 +11,9 @@ import {
   FLAKE_RATE_THRESHOLD,
   MIN_PAIRS_FOR_REPORT,
   detectFlakeRate,
+  formatReportLine,
+  parseCliArgs,
+  runCli,
 } from "./check-rule-11-no-flaky-gates.mjs";
 
 /**
@@ -186,5 +189,72 @@ describe("detectFlakeRate", () => {
     if (r === undefined) throw new Error("unreachable: length 1");
     expect(r.workflowName).toBe("ci");
     expect(r.jobName).toBe("build");
+  });
+});
+
+describe("parseCliArgs", () => {
+  test("parses --fixture <space> value", () => {
+    expect(parseCliArgs(["--fixture", "/tmp/x.json"])).toEqual({
+      fixturePath: "/tmp/x.json",
+      workflowNames: [],
+    });
+  });
+
+  test("parses --fixture=value", () => {
+    expect(parseCliArgs(["--fixture=/tmp/x.json"])).toEqual({
+      fixturePath: "/tmp/x.json",
+      workflowNames: [],
+    });
+  });
+
+  test("parses --workflows ci,lighthouse", () => {
+    expect(parseCliArgs(["--workflows", "ci,lighthouse"])).toEqual({
+      fixturePath: undefined,
+      workflowNames: ["ci", "lighthouse"],
+    });
+  });
+});
+
+describe("formatReportLine", () => {
+  test("renders <workflow>:<job> rate=<n>/<d> (<pct>%)", () => {
+    expect(
+      formatReportLine({
+        workflowName: "ci",
+        jobName: "lighthouse-mobile",
+        flakePairs: 2,
+        totalPairs: 7,
+        rate: 2 / 7,
+      }),
+    ).toBe("ci:lighthouse-mobile rate=2/7 (28.6%)");
+  });
+});
+
+describe("runCli", () => {
+  test("prints clean message and exits 0 on a non-flaky fixture", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(["--fixture", "test/fixtures/rule-11-flake-detection/clean.json"], (l) =>
+      lines.push(l),
+    );
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toMatch(/^rule-11 ok:/);
+  });
+
+  test("prints one report line per flaky job and exits 1", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli(["--fixture", "test/fixtures/rule-11-flake-detection/flaky.json"], (l) =>
+      lines.push(l),
+    );
+    expect(code).toBe(1);
+    expect(lines).toEqual(["ci:lighthouse-mobile rate=2/7 (28.6%)"]);
+  });
+
+  test("prints usage and exits 2 when neither --fixture nor --workflows is provided", () => {
+    /** @type {string[]} */
+    const lines = [];
+    const code = runCli([], (l) => lines.push(l));
+    expect(code).toBe(2);
+    expect(lines.join("\n")).toMatch(/^usage:/);
   });
 });
