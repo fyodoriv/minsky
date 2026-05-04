@@ -1,8 +1,8 @@
 /**
- * `@minsky/dashboard-web` — package entry. Sub-task 1/4 of `dashboard-web-v0`:
- * SSR shell (`createServer`) + pure renderer (`render`) + `SuccessMetric`
- * shape with one placeholder. Sub-tasks 2-4 wire the 10 vision.md metrics,
- * the OTEL backend, and the Lighthouse Mobile ≥0.9 CI gate.
+ * `@minsky/dashboard-web` — package entry. SSR shell (`createServer`) +
+ * pure renderer (`render`) + `SuccessMetric` shape + 10-row
+ * `SUCCESS_METRICS` constant + `GetValue` Strategy seam (rule #2)
+ * with `snapshotGetValue` / `constantGetValue` Adapter implementations.
  *
  * Pattern conformance: vision.md § "Pattern conformance index" row 57.
  *
@@ -11,4 +11,5 @@
 
 export { createServer, type DashboardServer } from "./server.js";
 export { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
-export { render } from "./render.js";
+export { render, STUB_GET_VALUE, type GetValue } from "./render.js";
+export { constantGetValue, snapshotGetValue, type Snapshot } from "./strategy.js";

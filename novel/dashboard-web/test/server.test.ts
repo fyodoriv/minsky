@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SUCCESS_METRICS } from "../src/metrics.js";
+import { SUCCESS_METRICS, type SuccessMetric } from "../src/metrics.js";
 import { createServer } from "../src/server.js";
 
 describe("createServer — Hono SSR scaffold", () => {
@@ -72,5 +72,39 @@ describe("createServer — Hono SSR scaffold", () => {
     const body = await res.text();
     // One (stub) per row; 10 rows.
     expect(body.match(/\(stub\)/g) ?? []).toHaveLength(10);
+  });
+
+  it("live values replace `(stub)` when Strategy returns strings (otel-wiring seam)", async () => {
+    const { fetch } = createServer({ getValue: () => "42" });
+    const res = await fetch(new Request("http://test.local/"));
+    const body = await res.text();
+    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(0);
+    expect(body).toContain(">42<");
+    expect((body.match(/>42</g) ?? []).length).toBe(10);
+  });
+
+  it("default Strategy preserves backward compat (no getValue arg → 10 stubs)", async () => {
+    const { fetch } = createServer();
+    const res = await fetch(new Request("http://test.local/"));
+    const body = await res.text();
+    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(10);
+  });
+
+  it("HTML-escapes Strategy output so a hostile backend cannot inject `<script>` (rule #7 XSS guard)", async () => {
+    const { fetch } = createServer({ getValue: () => "<script>alert(1)</script>" });
+    const res = await fetch(new Request("http://test.local/"));
+    const body = await res.text();
+    expect(body).not.toContain("<script>alert(1)</script>");
+    expect(body).toContain("&lt;script&gt;");
+  });
+
+  it("partial Strategy preserves stub fallback on null returns (mixed live + placeholder)", async () => {
+    const getValue = (m: SuccessMetric) => (m.id === "loop-uptime" ? "0.99" : null);
+    const { fetch } = createServer({ getValue });
+    const res = await fetch(new Request("http://test.local/"));
+    const body = await res.text();
+    // 10 metrics − 1 live = 9 stubs.
+    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(9);
+    expect(body).toContain(">0.99<");
   });
 });
