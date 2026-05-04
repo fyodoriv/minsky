@@ -50,4 +50,8 @@ export MINSKY_HOME
 # Sleep-forever sentinel. SIGTERM exits cleanly (default `sleep` behaviour);
 # the supervisor's Restart=always (systemd) / KeepAlive=true (launchd) brings
 # us back per the chaos-table policy.
-exec sleep infinity
+#
+# `sleep infinity` is a GNU coreutils extension, NOT in BSD sleep — macOS
+# rejects it with "usage: sleep number[unit] [...]". The portable idiom is
+# a tail-on-/dev/null which blocks indefinitely on every Unix.
+exec tail -f /dev/null
