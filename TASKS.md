@@ -176,20 +176,6 @@
 
 ## P3
 
-- [ ] Sweep `claude-spec-monitor` legacy prose for rule-#10 alignment
-  - **ID**: spec-monitor-prose-sweep
-  - **Tags**: docs, hygiene, scout, rule-10
-  - **Estimate**: 30–60 min
-  - **Hypothesis**: A doc-only sweep of vision.md and ARCHITECTURE.md that updates legacy "the spec-monitor flags it" prose (vision.md L91, L134, L262, L307, L334; ARCHITECTURE.md `### claude-spec-monitor`) to attribute the deterministic share to its actual linter (rule-6 catches "silent retry", experiment-record's `VANITY_PHRASES` catches vanity metrics, etc.) and the residual judgement share to `novel/spec-monitor/` (advisory-only) makes the reframe in rule #10 fully consistent across the spec — currently the prose still implies the Skill is load-bearing in places, which contradicts the row-11 + row-35 update shipped by `spec-monitor-skill`.
-  - **Details**: Found by the resilience-scout pass while shipping `spec-monitor-skill` (PR <TBD-AFTER: spec-monitor-skill PR>). The success-criteria row #3 (`Specification alignment`) still names `claude-spec-monitor --report --json` as its measurement command — the Skill has no such CLI now. Either retire the row entirely (the deterministic linters together carry that signal) or rewrite the measurement to count clean linter runs over a window.
-  - **Files**: `vision.md`, `ARCHITECTURE.md`
-  - **Verification**: every remaining mention of `spec-monitor` / `claude-spec-monitor` either (a) accurately names the deterministic linter that does the work, or (b) explicitly tags advisory-only output. No surviving prose claims the Skill is load-bearing.
-  - **Measurement**: `grep -nE 'spec-monitor.*flag|spec-monitor.*report|spec-monitor.*runs find' vision.md ARCHITECTURE.md | wc -l` returns 0 after the sweep.
-  - **Pivot**: if the rewrite reveals that vision.md success-criterion #3 cannot be operationalised without a single named monitor (i.e., counting "passed/total < 0.85" requires one tool emitting one number), reconsider whether to ship a deterministic aggregator over the per-rule linter outputs — potentially as `scripts/aggregate-rule-status.mjs`.
-  - **Acceptance**: Prose sweep merged; success-criterion #3 either retired with rationale or rewired to a deterministic aggregate.
-  - **Anchor**: rule #10 (vision.md § 10 — deterministic enforcement); resilience-scout heuristic (Hunt & Thomas 1999 Tip 32 "crash early" — applied here as "fix prose drift early").
-  - **Risk**: Touching vision.md text invites bikeshedding. Mitigation: scope strictly to swapping subjects (Skill → linter where deterministic), not rewriting paragraphs.
-
 - [ ] Multi-machine scope investigation
   - **ID**: multi-machine
   - **Tags**: future, research
