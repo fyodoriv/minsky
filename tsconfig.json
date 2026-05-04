@@ -6,6 +6,7 @@
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/budget-guard" },
     { "path": "./novel/experiment-record" },
-    { "path": "./novel/handoff-spec" }
+    { "path": "./novel/handoff-spec" },
+    { "path": "./scripts" }
   ]
 }
