@@ -36,6 +36,27 @@ import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+// Force synchronous (line-buffered) stdout/stderr writes when the daemon
+// runs under launchd / systemd-user. Both supervisors redirect stdout to a
+// regular file (`StandardOutPath` / `StandardOutput=file`), and Node block-
+// buffers writes to a non-TTY file by default — so live `tail -f` against
+// the supervisor log shows nothing for minutes at a time even though the
+// daemon is iterating. `setBlocking(true)` is the documented Node API for
+// this case (since Node 12; see the docs for `tty.WriteStream.setBlocking`,
+// which `process.stdout` becomes when its handle supports it). The
+// `?.setBlocking?.(true)` chain is defensive — the handle exists in normal
+// runtimes but the API may be stripped in some embeds.
+/** @type {{ setBlocking?: (b: boolean) => void } | undefined} */
+const stdoutHandle = /** @type {{ _handle?: { setBlocking?: (b: boolean) => void } }} */ (
+  process.stdout
+)._handle;
+stdoutHandle?.setBlocking?.(true);
+/** @type {{ setBlocking?: (b: boolean) => void } | undefined} */
+const stderrHandle = /** @type {{ _handle?: { setBlocking?: (b: boolean) => void } }} */ (
+  process.stderr
+)._handle;
+stderrHandle?.setBlocking?.(true);
+
 import { BudgetGuard } from "@minsky/budget-guard";
 import { NtfyNotifier } from "@minsky/notifier";
 import { OtelObservability } from "@minsky/observability/otel";
