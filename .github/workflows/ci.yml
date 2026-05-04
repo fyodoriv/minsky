@@ -720,6 +720,66 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-anchor-primary-source.test.mjs
 
+  rule-11-flake-detection:
+    # rule #11's auto-detect ratchet (vision.md § 11). The lint reads
+    # the trailing 100 runs of `ci.yml` via `gh run list`, looks for
+    # same-SHA failure→success pairs (Memon 2017 § 3, DETECTOR), and
+    # surfaces any job whose pair-rate clears 10% over ≥5 same-SHA
+    # pairs. When one surfaces, it auto-emits a TASKS.md task-block
+    # draft + a workflow-patch instruction file to `tmp/rule-11/`,
+    # uploaded as a workflow artifact for the operator to review.
+    #
+    # `continue-on-error: true` keeps the rule-#11 detector itself
+    # informational — paradox-aware: an enforcement-coupling chain
+    # where the detector fails the build on every detection would
+    # itself become a flaky-feeling gate. Per the parent task's Pivot
+    # ("the lint is detection + scaffolding, not decision-making"),
+    # the human-in-the-loop reviews the artifact and merges the patch.
+    #
+    # Runs on pull_request only — `gh run list` requires auth and the
+    # 30-day window per workflow is heavy; on push to main it would
+    # double-burn API quota.
+    #
+    # Anchor: rule #11 (vision.md § 11); Memon, A., et al., "Taming
+    # Google-Scale Continuous Testing", *ICSE-SEIP* 2017 (the per-job
+    # same-SHA pair primitive); Forsgren, Humble, Kim, *Accelerate*,
+    # 2018 Ch. 3 (DORA test-reliability — flaky gates teach the team
+    # to ignore failure); Beck, *Extreme Programming Explained*, 1999
+    # Ch. 17 (CI as the constraint enforcer).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-11-no-flaky-gates.test.mjs
+      - name: rule-11 flake-detection (auto-emit on flake)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p tmp/rule-11
+          # `--workflows ci` reads the trailing 100 ci.yml runs in this
+          # repo; `--emit tmp/rule-11/` writes per-flake artefacts.
+          # Exit code 1 (flakes surfaced) is allowed by
+          # continue-on-error: true above; the artifact upload step
+          # below carries the signal.
+          node scripts/check-rule-11-no-flaky-gates.mjs --workflows ci --emit tmp/rule-11/ || true
+      - name: upload rule-11 patches
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rule-11-flake-patches
+          path: tmp/rule-11/*-task-block.md tmp/rule-11/*-workflow.patch
+          if-no-files-found: ignore
+
   ci:
     needs:
       - anchor-primary-source
