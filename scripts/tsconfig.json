@@ -1,0 +1,18 @@
+{
+  // Per-file opt-in TypeScript checking for scripts/. A script gets
+  // type-checked when it adds `// @ts-check` at the top. Migration plan:
+  //   1. New scripts MUST add `// @ts-check` from day one.
+  //   2. Existing scripts get migrated one at a time (filed as
+  //      `scripts-ts-check-migration` task).
+  //   3. Once all files are checked, flip `checkJs: true` globally and
+  //      drop the per-file directive.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "checkJs": false,
+    "allowJs": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["**/*.mjs"]
+}

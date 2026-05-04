@@ -1,14 +1,14 @@
-id: phase-1-finding-gates
+id: phase-2-rule-3-and-script-stability
 hypothesis: |
-  The four findings from the #22-#26 audit (rule-5 over-extraction, rule-5
-  pattern-index recognition, vitest-config inconsistency, missing self-grade
-  discipline) can each be converted to a deterministic gate or a clean
-  delete-redundant-config. Bundled into one PR they ship without the
-  shared-file conflict tax that broke the prior batch — the new
-  pr-self-grade gate makes the orchestrator-discipline rule (2)
-  mechanically unavoidable, not advisory.
-success: "rule-5 lint exits 0; allowlist drops from 61 to ~10 entries; pr-self-grade gate fails on a synthetic missing-block PR; CI gate accepts skipped pr-self-grade on push events; 148 tests pass"
-pivot: "if the pr-self-grade regex produces ≥3 false positives in its first month (PRs that reasonably skip the block — e.g., dependabot bumps), pivot to a YAML-block convention (fenced ```self-grade YAML``` parsed by a structured parser) or carve out an explicit auto-PR exemption"
-measurement: "node scripts/check-rule-5-glossary-discipline.mjs && node scripts/check-pr-self-grade.mjs <(echo 'no block') ; test $? -eq 1 ; pnpm test"
-anchor: "rule #9 (Munafò et al. 2017 — pre-registration plus observation closes the loop); rule #10 (Lampson 1983 — move the constraint to the cheapest point); AGENTS.md § Orchestrator discipline"
-replay_windows_days: [7, 30, 90]
+  Adding rule-#3 as a deterministic gate (doc-first enforcement on every
+  PR diff) plus opt-in `// @ts-check` strict typing on the rule-3 source
+  brings the script's failure mode under static-type enforcement: the
+  linter that enforces a constitutional rule is itself type-checked.
+  An incremental migration path (file-by-file `// @ts-check`, flip global
+  switch when all six scripts opt in) avoids the 131-error cliff that
+  flipping `checkJs: true` globally would produce.
+success: "rule-3 lint passes against this PR; rule-3 task block removed; tsconfig allows opt-in checking; rule-3 source + test both pass strict tsc; 19 tests for rule-3 logic; 167 total tests green"
+pivot: "if the per-file `// @ts-check` directives drift (some scripts opt out and stay opted out for ≥30 days), the incremental approach has stalled — flip `checkJs: true` globally and absorb the migration cost as a single big PR (rule #10's ratchet rule applied)"
+measurement: "pnpm typecheck && pnpm test && node scripts/check-rule-3-doc-first.mjs"
+anchor: "rule #3 (test/metric/doc-first); rule #10 (deterministic enforcement); Knuth 1984 (literate programming); Beck 1999 (CI as constraint enforcer); Microsoft TypeScript handbook on `// @ts-check`"
+replay_windows_days: [7, 30]
