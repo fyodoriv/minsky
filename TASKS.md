@@ -13,7 +13,47 @@
 
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
-(empty in P0 — work the highest-priority unblocked item from P1 below.)
+- [ ] `tick-loop-picktask-honors-blocked-field` — pickTask must skip tasks whose `**Blocked**:` line is non-empty (currently only skips `**Blocked by**`)
+  - **ID**: tick-loop-picktask-honors-blocked-field
+  - **Tags**: novel, runtime, supervision, blocker, bug
+  - **Estimate**: 1–2h
+  - **Hypothesis**: The v0 daemon's `pickTask` (`novel/tick-loop/src/daemon.ts`) only respects `**Blocked by**: <id>` (the dependency variant). Tasks marked `**Blocked**: <reason>` (the external-constraint variant — e.g., `needs-user-approval`) are picked anyway. Pre-flight on 2026-05-04 surfaced this: with the queue's only entries being `omc-tasksmd-issue` (Blocked: needs-user-approval) and dormant P3s, the daemon picked `omc-tasksmd-issue` in dry-run and would have spawned `claude --resume` to file a public GitHub issue once the safety guard flips. Adding the parallel skip rule for `**Blocked**:` in `pickTask` mechanically prevents the failure mode that `**Blocked**:` exists to prevent.
+  - **Details**: 1) Update `pickTask` in `novel/tick-loop/src/daemon.ts` (or wherever the parser lives) to skip any task whose block has a non-empty `**Blocked**:` line, in addition to the existing `**Blocked by**` skip. 2) Mirror the rule in any other consumer of TASKS.md task-pick logic (`novel/tick-loop/src/index.ts` if separate). 3) Add a pure-function test fixture: synthetic TASKS.md with one `**Blocked**: needs-user-approval` task + one unblocked task → asserts pickTask returns the unblocked one. 4) Audit the `next-task` skill — it already documents the `**Blocked**:` rule; the daemon was the lagging implementation.
+  - **Files**: `novel/tick-loop/src/daemon.ts`, `novel/tick-loop/src/daemon.test.ts`, possibly `novel/tick-loop/src/index.ts`
+  - **Verification**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0 (one new test on top of the current 33).
+  - **Measurement**: same as Verification.
+  - **Pivot**: if `pickTask` is split across multiple parsers (TasksMdReader vs daemon-side filter), file a follow-up to centralise the skip rule in one place; ship the immediate fix on the path the daemon actually walks.
+  - **Acceptance**: a synthetic queue with only `**Blocked**: needs-user-approval` items resolves to "no actionable task" (status: `idle` / `no-task`); the daemon does not spawn claude.
+  - **Anchor**: rule #2 (the `**Blocked**:` field is the safety surface for blocked-by-default actions per `/next-task` skill); Beyer SRE 2016 Ch. 17 (operator escape hatch — the field is one of the operator's escape hatches).
+  - **Risk**: highest-impact bug surfaced by pre-flight; without this fix, the autonomous run files unauthorised public issues.
+
+- [ ] `tick-loop-spawn-args-fresh-session` — drop default `--resume`; spawn fresh non-interactive Claude with brief on stdin
+  - **ID**: tick-loop-spawn-args-fresh-session
+  - **Tags**: novel, runtime, supervision, blocker, bug
+  - **Estimate**: 2–3h
+  - **Hypothesis**: `ProcessSpawnStrategy` in `novel/tick-loop/src/spawn-strategy.ts` defaults its args to `["--resume"]`. `claude --resume` opens an interactive session picker (TTY) and resumes the previous conversation — it does NOT start a fresh session reading the brief from stdin. The daemon's contract is "feed the task brief in, get a result out"; `--resume` violates that. Switching the default to a non-interactive flag set (e.g., `["--print", "--no-tty"]` or whatever Claude Code's documented headless invocation is) and writing the brief to stdin makes the contract honest.
+  - **Details**: 1) Survey Claude Code's CLI flags for non-interactive mode (`claude --help` or the upstream docs — pre-flight saw `claude` at `/Users/cbrwizard/.local/bin/claude`). 2) Update `ProcessSpawnStrategyOptions.args` default. 3) Add an integration test (gated on `which claude`, skip in CI) that spawns the real binary against a 1-line task brief and asserts: process started fresh, exitCode 0, stdoutTail contains the response (not a session-picker UI prompt). 4) Update vision.md row 67 if it mentions `--resume` as the spawn target.
+  - **Files**: `novel/tick-loop/src/spawn-strategy.ts`, `novel/tick-loop/src/spawn-strategy.test.ts`, possibly `vision.md` (row 67)
+  - **Verification**: gated integration test shows the spawned claude consumed the brief from stdin and produced a fresh response (no "select a session to resume" prompt).
+  - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 34 and .numFailedTests == 0'` exits 0; locally with `claude` installed: `node -e "import('./novel/tick-loop/dist/spawn-strategy.js').then(m=>new m.ProcessSpawnStrategy().spawn({taskId:'smoke',brief:'echo hello',env:process.env})).then(r=>console.log(r.exitCode,r.stdoutTail.slice(0,80)))"` prints `0` and a fresh-session-shaped output, NOT a TTY prompt.
+  - **Pivot**: if Claude Code has no non-interactive headless mode, pivot to a temp-file-based handoff (write the brief to `state/inbox/<id>.md`, expect operator/script to consume — pre-registered in the parent `tick-loop-daemon-real-spawn` Pivot field).
+  - **Acceptance**: `ProcessSpawnStrategy` default args invoke a fresh Claude session that consumes stdin and emits a response on stdout; `--resume` is no longer the default.
+  - **Anchor**: Armstrong 2007 (let-it-crash AT the right boundary — the Strategy must produce a *correct* result shape, not just a *result*); rule #2 (the Strategy seam is honest only if its real implementation matches the contract the daemon expects).
+  - **Risk**: 2nd-highest pre-flight bug; without this fix, the daemon spawns claude but feeds it the wrong input. Mitigation: integration test gated on `claude` presence so CI doesn't depend on Anthropic auth; the dry-run path is unaffected.
+
+- [ ] `openobserve-installer-version-pin-fix` — installer pinned to v0.80.1 returns 404 from the official GitHub releases
+  - **ID**: openobserve-installer-version-pin-fix
+  - **Tags**: distribution, bug, observability
+  - **Estimate**: 1h
+  - **Hypothesis**: `distribution/install-openobserve.sh` pins `OO_VERSION=v0.80.1` and downloads `https://github.com/openobserve/openobserve/releases/download/v0.80.1/openobserve-v0.80.1-darwin-arm64.tar.gz`. Pre-flight on 2026-05-04 found this URL returns HTTP 404. Either the release was deleted, the asset name format changed, or v0.80.1 was never published. Bumping to a version that actually exists (verify via `curl -sI https://github.com/openobserve/openobserve/releases/latest` first) restores the install path. The dashboard Strategy degrades gracefully when OpenObserve is down, so this is non-blocking but should be fixed for the observability surface to actually surface.
+  - **Details**: 1) `curl -sI https://github.com/openobserve/openobserve/releases/latest` to find the current latest tag. 2) Verify the per-platform asset names still match the script's `${target}` template. 3) Bump `OO_VERSION` in the installer. 4) If the asset naming changed, update the URL template too. 5) Smoke-test the install on darwin-arm64 (this machine).
+  - **Files**: `distribution/install-openobserve.sh`
+  - **Verification**: `bash distribution/install-openobserve.sh` exits 0 (downloads, unpacks, writes the binary) on darwin-arm64; the binary at `~/.local/bin/openobserve --version` returns the pinned version.
+  - **Measurement**: `bash distribution/install-openobserve.sh --dry-run` prints a URL that responds `200 OK`, AND running without `--dry-run` exits 0.
+  - **Pivot**: if no pinnable version is reachable (extended outage), the documented research.md pivot is VictoriaMetrics; file a follow-up for that swap.
+  - **Acceptance**: installer succeeds on darwin-arm64; OpenObserve daemon starts and serves `localhost:5080/healthz` 200.
+  - **Anchor**: rule #1 (don't reinvent the wheel — OpenObserve is the dep, but a broken pin defeats the purpose); research.md § "Lighter OTEL backend" (PR #43, 2026-05-03 — OpenObserve is the chosen v0 OTLP receiver).
+  - **Risk**: pinning to "latest" loses reproducibility; pin to a verified specific version, not `latest`.
 
 ## P1
 
