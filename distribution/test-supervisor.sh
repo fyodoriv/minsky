@@ -135,7 +135,11 @@ run_linux() {
     exit 77
   fi
 
-  local unit_dir="$HOME/.config/systemd/user"
+  # Global (no `local`) so the EXIT trap can see it after run_linux
+  # returns; matches the macOS-side fix for `set -u` unbound-var crashes
+  # in cleanup.
+  LINUX_UNIT_DIR="$HOME/.config/systemd/user"
+  unit_dir="$LINUX_UNIT_DIR"
   mkdir -p "$unit_dir"
 
   # Render templates with envsubst.
@@ -152,9 +156,9 @@ run_linux() {
     systemctl --user stop minsky-tick-loop.service 2>/dev/null || true
     systemctl --user stop minsky-budget-guard.service 2>/dev/null || true
     systemctl --user disable minsky-supervisor.target 2>/dev/null || true
-    rm -f "$unit_dir/minsky-supervisor.target" \
-          "$unit_dir/minsky-tick-loop.service" \
-          "$unit_dir/minsky-budget-guard.service"
+    rm -f "$LINUX_UNIT_DIR/minsky-supervisor.target" \
+          "$LINUX_UNIT_DIR/minsky-tick-loop.service" \
+          "$LINUX_UNIT_DIR/minsky-budget-guard.service"
     rm -f "$ROOT/systemd/run-tick-loop.sh" \
           "$ROOT/systemd/run-budget-guard.sh"
     systemctl --user daemon-reload 2>/dev/null || true
@@ -299,20 +303,25 @@ run_macos() {
   # to ${MINSKY_HOME}/.minsky/{tick-loop,budget-guard}.{out,err}.log).
   mkdir -p "$REPO_ROOT/.minsky"
 
-  local uid
-  uid=$(id -u)
-  local domain="gui/$uid"
+  # Globals (no `local`) so the EXIT trap can see them after run_macos
+  # returns. With `set -u`, an unset variable referenced from the trap
+  # crashes the cleanup — observed in the first PR run on macos-latest.
+  MACOS_UID=$(id -u)
+  MACOS_DOMAIN="gui/$MACOS_UID"
+  MACOS_AGENT_DIR="$agent_dir"
 
   cleanup_macos() {
     log "cleanup: bootout + remove plists + remove stubs"
-    launchctl bootout "$domain" "$agent_dir/com.minsky.tick-loop.plist" 2>/dev/null || true
-    launchctl bootout "$domain" "$agent_dir/com.minsky.budget-guard.plist" 2>/dev/null || true
-    rm -f "$agent_dir/com.minsky.tick-loop.plist" \
-          "$agent_dir/com.minsky.budget-guard.plist"
+    launchctl bootout "$MACOS_DOMAIN" "$MACOS_AGENT_DIR/com.minsky.tick-loop.plist" 2>/dev/null || true
+    launchctl bootout "$MACOS_DOMAIN" "$MACOS_AGENT_DIR/com.minsky.budget-guard.plist" 2>/dev/null || true
+    rm -f "$MACOS_AGENT_DIR/com.minsky.tick-loop.plist" \
+          "$MACOS_AGENT_DIR/com.minsky.budget-guard.plist"
     rm -f "$ROOT/launchd/run-tick-loop.sh" \
           "$ROOT/launchd/run-budget-guard.sh"
   }
   trap cleanup_macos EXIT
+  # Reuse the globals locally for readability in the rest of run_macos.
+  local domain="$MACOS_DOMAIN"
 
   log "bootstrap LaunchAgents"
   # Bootstrap budget-guard first so tick-loop's start order matches.
