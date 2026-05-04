@@ -146,20 +146,6 @@
 
 ## P3
 
-- [ ] `mape-k-cost-schedule-from-vision` — wire per-rule cost weights from vision.md into `analyze`'s `costs` argument
-  - **ID**: mape-k-cost-schedule-from-vision
-  - **Tags**: novel, mape-k, follow-up
-  - **Estimate**: 2h
-  - **Hypothesis**: Goldratt's flat product `violationCount × 1` over-collapses high-frequency low-cost rules (typo lints) against rare high-cost rules (rule-#9 misses). A per-rule cost schedule sourced from a numbered table in `vision.md` § "Pattern conformance index" — read once at startup by the CLI wrapper around `tick(...)` — restores the severity ordering without an API change (the `costs` arg is already the seam).
-  - **Details**: Add a small parser that reads a new `## Cost schedule` section in `vision.md`, validates the keys are known ruleIds, and produces the `CostSchedule` map `analyze` consumes. Pure function; CLI is the I/O boundary. Integration test asserts that with the schedule, a high-volume `rule-typo` cannot outrank a single `rule-9` violation. Surfaced from the `mape-k-knowledge-and-integration` PR.
-  - **Files**: `novel/mape-k-loop/src/cost-schedule.ts`, `novel/mape-k-loop/src/cost-schedule.test.ts`, `vision.md` (new `## Cost schedule` table)
-  - **Verification**: `pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts` exits 0; the integration test from user-story 003 still passes once the schedule is plumbed into `tick`.
-  - **Measurement**: `pnpm vitest run novel/mape-k-loop/src/cost-schedule.test.ts user-stories/003-mape-k-improves-prompts.test.ts --reporter=json | jq -e '.numPassedTests >= 5 and .numFailedTests == 0'`.
-  - **Pivot**: if the schedule is too rigid (every PR adds a new rule, the table goes stale), pivot to a heuristic over rule severity ranges sourced from each rule's own README.
-  - **Acceptance**: schedule parser ships; `tick(...)` consumes it; vision.md row 54 notes column updated to mark `costEstimate` full-conformance.
-  - **Anchor**: Goldratt, *The Goal*, 1984 (Theory of Constraints); rule #4 (vision.md § 4 — every constant in source).
-  - **Risk**: Bikeshedding the weight numbers. Mitigation: ship a defensible v0 (rule-#9 = 100, rule-#7 = 50, rule-typo = 1) and revisit at the next quarterly review.
-
 - [ ] Quarterly dependency review (Q3 2026)
   - **ID**: review-q3-2026
   - **Tags**: governance
