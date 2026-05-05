@@ -78,6 +78,14 @@ describe("cross-repo-check-runner end-to-end (gh stub)", () => {
     const r = runRunner("happy");
     expect(r.exitCode).toBe(0);
     expect(r.verdict).not.toBeNull();
+    if (r.verdict.conclusion !== "success") {
+      console.error(
+        "happy-path diagnostic — checks:",
+        JSON.stringify(r.verdict.checks, null, 2),
+        "\nstderr:\n",
+        r.stderr,
+      );
+    }
     expect(r.verdict.conclusion).toBe("success");
     expect(r.verdict.head_sha).toBe("AAA");
     const ids = r.verdict.checks.map(
