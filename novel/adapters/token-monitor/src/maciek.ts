@@ -40,18 +40,43 @@ import { join } from "node:path";
 import type { TokenMonitor, TokenSnapshot } from "./index.js";
 
 /**
- * Plan token caps mirrored from `claude_monitor/core/plans.py` `PLAN_LIMITS`.
+ * Plan token caps — heuristic 5h-window chargeable-token ceilings per
+ * Anthropic plan tier. Diverges from Maciek upstream `PLAN_LIMITS`,
+ * which still reflects 2024 estimates calibrated against ~500-1500-token
+ * messages. On 1M-context Claude Code, per-message chargeable averages
+ * ~3k tokens, so an active 5h dogfood block burns 4M+ chargeable tokens
+ * (empirical: 4,107,313 on the operator's session 2026-05-04).
  *
- * - `pro`     — 19 000 tokens / 5 h window
- * - `max5`    — 88 000 tokens / 5 h window (default — most common Anthropic tier)
- * - `max20`   — 220 000 tokens / 5 h window
- * - `custom`  — 44 000 tokens / 5 h window (Maciek's escape hatch)
+ * Numbers below are derived from:
+ *   (a) the empirical 4.1M-chargeable-in-5h observation on a Max-tier
+ *       1M-context session that wasn't being throttled,
+ *   (b) Anthropic's public messaging that Max20 is "~20× a typical
+ *       Pro user" (https://www.anthropic.com/pricing — ratios, not
+ *       absolute numbers, since absolutes aren't published),
+ *   (c) headroom of ~10× over the empirical observation so that
+ *       BudgetGuard's 85% circuit-break threshold (≈ 34M for max20)
+ *       still leaves room for genuine over-spend signals.
+ *
+ * Override per-deployment with the `cap` constructor opt or, for
+ * supervisor wiring, the `MINSKY_PLAN_CAP_OVERRIDE` env var (parsed by
+ * the CLI bootstrap, not by this module).
+ *
+ * Pivot (rule #9): if heuristic caps still cause false circuit-breaks
+ * during normal operator usage (≥10% iterations budget-paused over a
+ * 7-day window), pivot to a separate `TokenMonitor` Strategy that
+ * reads `anthropic-ratelimit-tokens-remaining` from response headers
+ * — the principled solution. Heuristic-caps is the v0 unblock.
+ *
+ * - `pro`     —  2 000 000 chargeable tokens / 5 h window
+ * - `max5`    — 10 000 000 chargeable tokens / 5 h window (default — most common Max tier)
+ * - `max20`   — 40 000 000 chargeable tokens / 5 h window
+ * - `custom`  —  5 000 000 chargeable tokens / 5 h window (operator's escape hatch)
  */
 export const PLAN_CAPS = {
-  pro: 19_000,
-  max5: 88_000,
-  max20: 220_000,
-  custom: 44_000,
+  pro: 2_000_000,
+  max5: 10_000_000,
+  max20: 40_000_000,
+  custom: 5_000_000,
 } as const;
 
 export type PlanName = keyof typeof PLAN_CAPS;
@@ -77,6 +102,15 @@ export interface MaciekTokenMonitorOpts {
    * Anthropic plan tier. Defaults to `'max5'` — the most common paid tier.
    */
   readonly plan?: PlanName;
+  /**
+   * Optional override for the 5h-window token cap. When set, ignores
+   * {@link PLAN_CAPS}[plan] and uses this number instead. Operators wire
+   * this from `MINSKY_PLAN_CAP_OVERRIDE` when the heuristic defaults
+   * don't match their account's actual rate-limit (rule #2 escape hatch
+   * + Beyer SRE 2016 Ch. 17 operator-control surface). Must be a
+   * positive integer; non-integer / non-positive values are ignored.
+   */
+  readonly cap?: number;
 }
 
 /**
@@ -113,11 +147,14 @@ export class MaciekTokenMonitor implements TokenMonitor {
   private readonly configDir: string;
   private readonly nowFn: () => Date;
   private readonly plan: PlanName;
+  private readonly capOverride: number | null;
 
   constructor(opts: MaciekTokenMonitorOpts) {
     this.configDir = opts.configDir;
     this.nowFn = opts.now ?? (() => new Date());
     this.plan = opts.plan ?? "max5";
+    this.capOverride =
+      typeof opts.cap === "number" && Number.isInteger(opts.cap) && opts.cap > 0 ? opts.cap : null;
   }
 
   /**
@@ -129,7 +166,7 @@ export class MaciekTokenMonitor implements TokenMonitor {
    */
   async snapshot(): Promise<TokenSnapshot> {
     const now = this.nowFn();
-    const cap = PLAN_CAPS[this.plan];
+    const cap = this.capOverride ?? PLAN_CAPS[this.plan];
 
     const entries = await collectUsageEntries(this.configDir);
     const deduped = dedupEntries(entries);
