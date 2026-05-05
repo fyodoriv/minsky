@@ -27,6 +27,7 @@ import {
   type MetricsRenderSeam,
   type SnapshotSeam,
   buildDaemonBrief,
+  extractOpenP0TaskIds,
   extractTaskBlock,
   pickTask,
   runDaemon,
@@ -1467,6 +1468,7 @@ describe("buildDaemonBrief", () => {
 
 - [ ] \`real-task\` — load-bearing
   - **ID**: real-task
+  - **Tags**: p0, supervisor
   - **Hypothesis**: ship something
   - **Acceptance**: green CI on PR
 `;
@@ -1493,5 +1495,165 @@ describe("buildDaemonBrief", () => {
   it("falls back to a graceful message when the task block isn't found", () => {
     const brief = buildDaemonBrief({ taskId: "missing-id", tasksMdContent: sample });
     expect(brief).toContain("(task block not found in TASKS.md");
+  });
+
+  it("includes the priority-discipline gate listing open p0-tagged tasks", () => {
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    expect(brief).toContain("## Priority-discipline gate");
+    expect(brief).toContain("Open P0 tasks");
+    expect(brief).toContain("`real-task`");
+  });
+
+  it("emits PROCEED when the picked task is in the open P0 set", () => {
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    expect(brief).toContain("IS in the open P0 set");
+    expect(brief).not.toContain("**STOP.**");
+  });
+
+  it("emits STOP + noop directive when the picked task is a P1 in the P0 section", () => {
+    const mixedSample = `# Tasks
+
+## P0
+
+- [ ] \`fake-p0\` — physically positioned in P0 but tagged p1 (the bug)
+  - **ID**: fake-p0
+  - **Tags**: p1, observability
+  - **Hypothesis**: H
+
+- [ ] \`real-p0\` — actually p0
+  - **ID**: real-p0
+  - **Tags**: p0, security
+  - **Hypothesis**: H
+`;
+    const brief = buildDaemonBrief({ taskId: "fake-p0", tasksMdContent: mixedSample });
+    expect(brief).toContain("**STOP.**");
+    expect(brief).toContain("priority discipline");
+    expect(brief).toContain("'fake-p0' is not the highest-priority unclaimed P0");
+    expect(brief).toContain("should pick 'real-p0' instead");
+  });
+
+  it("notes the operator override when picked task carries Pick-next: yes", () => {
+    const overrideSample = `# Tasks
+
+## P0
+
+- [ ] \`real-p0\` — genuine p0 with no Pick-next
+  - **ID**: real-p0
+  - **Tags**: p0
+  - **Hypothesis**: H
+
+## P1
+
+- [ ] \`override-task\` — operator-promoted p1
+  - **ID**: override-task
+  - **Tags**: p1
+  - **Pick-next**: yes
+  - **Hypothesis**: H
+`;
+    const brief = buildDaemonBrief({ taskId: "override-task", tasksMdContent: overrideSample });
+    expect(brief).toContain("**STOP.**");
+    expect(brief).toContain("Pick-next");
+    expect(brief).toContain("operator has explicitly overridden");
+  });
+
+  it("emits PROCEED when there are no open P0 tasks at all", () => {
+    const noP0Sample = `# Tasks
+
+## P0
+
+## P1
+
+- [ ] \`only-p1\` — load-bearing
+  - **ID**: only-p1
+  - **Tags**: p1
+  - **Hypothesis**: H
+`;
+    const brief = buildDaemonBrief({ taskId: "only-p1", tasksMdContent: noP0Sample });
+    expect(brief).toContain("No open P0 tasks");
+    expect(brief).not.toContain("**STOP.**");
+  });
+
+  it("excludes claimed and blocked tasks from the open P0 list", () => {
+    const sampleWithSkips = `# Tasks
+
+## P0
+
+- [ ] \`claimed-p0\` (@minsky-tick-loop) — already in flight
+  - **ID**: claimed-p0
+  - **Tags**: p0
+  - **Hypothesis**: H
+
+- [ ] \`blocked-p0\` — externally blocked
+  - **ID**: blocked-p0
+  - **Tags**: p0
+  - **Blocked**: needs operator approval
+  - **Hypothesis**: H
+
+- [ ] \`actionable-p0\` — clean
+  - **ID**: actionable-p0
+  - **Tags**: p0
+  - **Hypothesis**: H
+`;
+    const brief = buildDaemonBrief({ taskId: "actionable-p0", tasksMdContent: sampleWithSkips });
+    expect(brief).toContain("`actionable-p0`");
+    expect(brief).not.toMatch(/Open P0 tasks[^\n]*claimed-p0/);
+    expect(brief).not.toMatch(/Open P0 tasks[^\n]*blocked-p0/);
+  });
+});
+
+describe("extractOpenP0TaskIds", () => {
+  it("returns only tasks tagged p0 inside the P0 section", () => {
+    const sample = `# Tasks
+
+## P0
+
+- [ ] \`p0-real\` — true p0
+  - **ID**: p0-real
+  - **Tags**: p0, security
+
+- [ ] \`mistagged\` — p1 mistakenly placed in P0 section
+  - **ID**: mistagged
+  - **Tags**: p1, observability
+
+## P1
+
+- [ ] \`p1-elsewhere\` — actual p1
+  - **ID**: p1-elsewhere
+  - **Tags**: p1
+`;
+    const ids = extractOpenP0TaskIds(sample);
+    expect(ids).toEqual(["p0-real"]);
+  });
+
+  it("returns empty when no P0 section exists", () => {
+    const sample = `# Tasks
+
+## P1
+
+- [ ] \`p1-only\` — only p1
+  - **ID**: p1-only
+  - **Tags**: p1
+`;
+    expect(extractOpenP0TaskIds(sample)).toEqual([]);
+  });
+
+  it("preserves file order so the first id is the highest-priority pick suggestion", () => {
+    const sample = `# Tasks
+
+## P0
+
+- [ ] \`first\` — alpha
+  - **ID**: first
+  - **Tags**: p0
+
+- [ ] \`second\` — beta
+  - **ID**: second
+  - **Tags**: p0
+
+- [ ] \`third\` — gamma
+  - **ID**: third
+  - **Tags**: p0
+`;
+    expect(extractOpenP0TaskIds(sample)).toEqual(["first", "second", "third"]);
   });
 });
