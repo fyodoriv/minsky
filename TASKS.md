@@ -355,6 +355,151 @@
   - **Anchor**: Basiri et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (the documented Pivot from `first-integration-test`'s rule-#9 block — coverage of OS-level rows belongs in a self-hosted runner with real OS primitives); Forsgren, Humble, Kim, *Accelerate*, IT Revolution Press, 2018 (DORA test reliability — a CI gate that doesn't run reliably teaches the team to ignore failure; the nightly cadence is the reliability bound).
   - **Risk**: self-hosted runners introduce supply-chain risk (a compromised runner can leak secrets). Mitigation: scope the runner to public-repo / non-secret jobs only; share infrastructure with `supervisor-integration-self-hosted-runner` if both fire (cost amortisation); standard GH guidance.
 
+<!-- Replace-or-relocate research backfill (operator directive 2026-05-05) — vision.md rule #1 now requires this for every feature. Each block below evaluates one shipped novel/* module against (a) does an existing tool replace it? and (b) should it be relocated to agentbrew, dotfiles, or tasks.md? Output: <module>/REPLACE_OR_RELOCATE.md with a single Decision: line. Tasks intentionally tight — these are research, not engineering. -->
+
+- [ ] `research-replace-or-relocate-tick-loop` — replace-or-relocate research for `novel/tick-loop`
+  - **ID**: research-replace-or-relocate-tick-loop
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: Per vision.md rule #1's per-feature mandate (2026-05-05), the supervisor daemon (`tick-loop`: pickTask + runCtoAudit + runChangelog + runSnapshot + runMetricsRender + budget-guard wiring) should be evaluated for: (a) replacement by an existing tool — candidates: temporal.io, n8n, Camunda for the workflow engine; bullmq, agenda for the periodic-task scheduler; (b) relocation to `agentbrew` (most likely host since it's about Claude Code automation). The supervisor concept is highly Minsky-specific but the periodic-task scheduling + adapter pattern around `claude --print` could plausibly live elsewhere. Pre-registration: research lands a Decision: line within 14 days; if "replace", a swap PR is filed.
+  - **Files**: `novel/tick-loop/REPLACE_OR_RELOCATE.md` (research note + Decision: line).
+  - **Verification**: `[ -f novel/tick-loop/REPLACE_OR_RELOCATE.md ]` exits 0 AND `grep -c '^Decision: ' novel/tick-loop/REPLACE_OR_RELOCATE.md` returns 1.
+  - **Measurement**: same as Verification.
+  - **Pivot**: if no clean replacement exists, write the keep-as-is justification (1 paragraph max) and move on. Don't engineer an artificial extraction.
+  - **Acceptance**: (1) `REPLACE_OR_RELOCATE.md` with explicit `Decision: keep | replace-by-<x> | relocate-to-<x>`; (2) follow-up PR filed within 14 days if Decision != keep.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05); operator 2026-05-05 — "for every feature now".
+  - **Surfaced-by**: 2026-05-05 operator backfill — vision update + research tasks for every feature.
+
+- [ ] `research-replace-or-relocate-dashboard-web` — replace-or-relocate research for `novel/dashboard-web`
+  - **ID**: research-replace-or-relocate-dashboard-web
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: The operator dashboard (server-rendered metrics + activity feed) is a thin Express app over `SUCCESS_METRICS` + `getActivity`. Replacement candidates: Grafana (already an OTEL backend candidate), Datasette over a SQLite span store, plain `gh` + shell aliases. Relocation candidate: `agentbrew` (operator-facing operator-tools surface). The rendered HTML is small enough that replacement is realistic. Pre-registration: Decision: line in 14 days.
+  - **Files**: `novel/dashboard-web/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: `[ -f novel/dashboard-web/REPLACE_OR_RELOCATE.md ]` exits 0 AND grep finds Decision line.
+  - **Measurement**: same as Verification.
+  - **Pivot**: if Grafana over OTEL spans wins, file the swap PR. If no candidate matches the dashboard's specific pattern (rendered-HTML, no JS, glanceable), keep + note why.
+  - **Acceptance**: same shape as `tick-loop` block.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-budget-guard` — replace-or-relocate research for `novel/budget-guard`
+  - **ID**: research-replace-or-relocate-budget-guard
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: The 5h-window budget guard is currently a wrapper over `MaciekTokenMonitor` + `PLAN_CAPS`. Replacement candidates: Anthropic's own 429-with-retry logic (now adopted post-#171 cap raise), shadcn's vercel/ai-sdk usage, claude-monitor stand-alone. Relocation: `agentbrew` (token economics is broadly applicable). Pre-registration: research evaluates whether trusting Anthropic's 429 is enough and budget-guard becomes a thin observability wrapper.
+  - **Files**: `novel/budget-guard/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file present + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if "trust the 429" wins, the guard reduces to OTEL-emit-only.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-cross-repo-runner` — replace-or-relocate research for `novel/cross-repo-runner`
+  - **ID**: research-replace-or-relocate-cross-repo-runner
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: The cross-repo runner spawns Minsky against arbitrary host repos. Replacement candidates: GitHub Actions reusable workflows, dagger.io, Bazel rules. Relocation: `agentbrew` (clear fit — operator-tooling). Pre-registration: Decision in 14 days; "extract the runner-as-CLI as a separate npm package even if we keep it here" is also a valid Decision.
+  - **Files**: `novel/cross-repo-runner/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if dagger.io fits, plan the swap; otherwise document the why-keep.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-mape-k-loop` — replace-or-relocate research for `novel/mape-k-loop`
+  - **ID**: research-replace-or-relocate-mape-k-loop
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: MAPE-K Monitor-Analyze-Plan-Execute scaffolding. Replacement candidates: Akka actors, Erlang/OTP supervision trees, Temporal workflows. Relocation: unlikely (the pattern is generic-software-engineering, not Claude-specific). Pre-registration: most likely Decision is keep + cite the pattern lineage; if so, document why no off-the-shelf MAPE-K runtime fits.
+  - **Files**: `novel/mape-k-loop/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if Akka or OTP fits, the supervisor pattern can absorb the daemon.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05); Kephart & Chess 2003 (MAPE-K).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-handoff-spec` — replace-or-relocate research for `novel/handoff-spec`
+  - **ID**: research-replace-or-relocate-handoff-spec
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: Handoff-spec records agent-to-agent state transitions. Replacement candidates: OpenTelemetry trace context, A2A protocol drafts, MCP spec. Relocation: `tasks.md` (handoff IS a tasks.md extension in spirit) or `agentbrew`. Pre-registration: research either (a) folds handoff-spec into OTEL trace context as a span attribute, (b) proposes it as a tasks.md spec extension, or (c) keeps standalone.
+  - **Files**: `novel/handoff-spec/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if OTEL absorbs it, propose the merge upstream.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-experiment-record` — replace-or-relocate research for `novel/experiment-record`
+  - **ID**: research-replace-or-relocate-experiment-record
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: Experiment record stores hypothesis/result pairs per rule #9. Replacement candidates: GrowthBook (already cited), Statsig, mlflow, Weights & Biases. Relocation: less clear — closest fit is `agentbrew` if it grows an experiments surface. Pre-registration: GrowthBook integration may already obviate the local store; Decision likely "replace-by-GrowthBook" given vision.md anchor.
+  - **Files**: `novel/experiment-record/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if GrowthBook integration shipped (per existing P0 task), this becomes a deletion PR.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05); rule #9 (HDD).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-sidecar-bootstrap` — replace-or-relocate research for `novel/sidecar-bootstrap`
+  - **ID**: research-replace-or-relocate-sidecar-bootstrap
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: Sidecar bootstrap installs the supervisor unit files. Replacement candidates: ansible playbooks, dotfiles install scripts (chezmoi, yadm), nix home-manager. Relocation: `dotfiles` (very strong fit — sidecar-bootstrap IS a dotfiles concern). Pre-registration: Decision likely "relocate-to-dotfiles".
+  - **Files**: `novel/sidecar-bootstrap/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if dotfiles already covers the case (even partially), file the relocation PR.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-spec-monitor` — replace-or-relocate research for `novel/spec-monitor`
+  - **ID**: research-replace-or-relocate-spec-monitor
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: Spec-monitor's deterministic linters live in `scripts/check-rule-*.mjs`; the residual judgement-heavy advisory shipped as a Claude Skill. Replacement candidates: existing CI lint frameworks (eslint plugins, danger.js, spectral). Relocation: `agentbrew` (skill artifact is a clean fit). Pre-registration: Decision likely "relocate-skill-to-agentbrew, keep determinstic linters here".
+  - **Files**: `novel/spec-monitor/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if danger.js provides equivalent surface, the .mjs scripts can be ported.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-bridges-omc-tasksmd` — replace-or-relocate research for `novel/bridges/omc-tasksmd`
+  - **ID**: research-replace-or-relocate-bridges-omc-tasksmd
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: The OMC ↔ tasks.md bridge is by definition a relocation candidate (one of its endpoints IS `tasks.md`). Replacement: file the upstream issue with OMC proposing native tasks.md support (already filed as `omc-tasksmd-issue` P1 task). Pre-registration: Decision is likely "relocate-to-tasks.md or merge-to-omc-upstream once issue lands".
+  - **Files**: `novel/bridges/omc-tasksmd/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: track the OMC upstream issue; when it lands, this whole bridge gets deleted.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
+- [ ] `research-replace-or-relocate-adapters-token-monitor` — replace-or-relocate research for `novel/adapters/token-monitor`
+  - **ID**: research-replace-or-relocate-adapters-token-monitor
+  - **Tags**: p2, research, replace-or-relocate
+  - **Estimate**: 0.5d
+  - **Hypothesis**: The token-monitor adapter wraps Maciek's upstream `claude-monitor` Python package. Replacement candidates: vendor it as-is (skip the wrapper), use Anthropic's billing API directly. Relocation: `agentbrew` (token economics is broadly applicable, same as budget-guard). Pre-registration: Decision likely "keep + relocate to agentbrew" since the wrapper is small and load-bearing.
+  - **Files**: `novel/adapters/token-monitor/REPLACE_OR_RELOCATE.md`.
+  - **Verification**: file + Decision line.
+  - **Measurement**: same.
+  - **Pivot**: if Anthropic's billing API covers the snapshot shape, drop claude-monitor altogether.
+  - **Acceptance**: same shape.
+  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
+  - **Surfaced-by**: 2026-05-05 operator backfill.
+
 ## P3
 
 - [ ] `demo-pr-generator` — `minsky run --target=<oss-repo> --output-mode=pr-only` produces a single high-quality demo PR per OSS repo (the funnel)
