@@ -33,6 +33,13 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
              `ProcessSpawnStrategy`). -->
         <key>MINSKY_TICK_DRY_RUN</key>
         <string>1</string>
+        <!-- Anthropic plan tier (sets the 5h-window token cap). Default is
+             max5 (88k tokens). Operators on Max20 (220k) or Pro (19k) MUST
+             set this to match their actual subscription, otherwise the
+             BudgetGuard in-tick decide() will emit spurious budget-paused
+             iterations. Valid: pro / max5 / max20 / custom. -->
+        <!-- <key>MINSKY_PLAN</key>
+             <string>max20</string> -->
     </dict>
 
     <key>ProgramArguments</key>
