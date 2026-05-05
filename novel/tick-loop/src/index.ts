@@ -420,10 +420,9 @@ export {
 // Sub-task of `canonical-metric-list-per-repo` Acceptance (3) — daily
 // metrics-render I/O wrapper. Pure gate (`shouldRunMetricsRender`) +
 // injected last-rendered-date probe + render seams; the daemon wire-in
-// (`MetricsRenderSeam` on `RunDaemonOpts`) ships in the same slice.
+// (`MetricsRenderSeam` on `RunDaemonOpts`) shipped in slice 4/N.
 // CLI-side construction (file-backed METRICS.md mtime probe + `pnpm
-// metrics:render --date <date>` capture) lives in a follow-up
-// `metrics-render-cli-wiring` module.
+// metrics:render --date <date>` capture) lives in `metrics-render-cli-wiring`.
 export {
   type GetLastRenderedDate,
   type MetricsRender,
@@ -433,6 +432,16 @@ export {
   runMetricsRender,
   shouldRunMetricsRender,
 } from "./metrics-render-runner.js";
+
+// CLI-side construction of the `MetricsRenderSeam` (file-backed METRICS.md
+// mtime probe + pnpm-backed render). Twin of `snapshot-cli-wiring` — keeps
+// `bin/tick-loop.mjs` thin: the bin only decides whether to opt-in (env
+// var) and forwards the METRICS.md path / repo root here.
+export {
+  type PnpmMetricsRenderOptions,
+  createFileBackedLastRenderedDate,
+  createPnpmMetricsRender,
+} from "./metrics-render-cli-wiring.js";
 
 // Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
 // so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past
