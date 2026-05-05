@@ -361,6 +361,7 @@ export {
   type DaemonIterationResult,
   type DaemonIterationStatus,
   type DaemonRunResult,
+  type MetricsRenderSeam,
   type RunDaemonOpts,
   type SnapshotSeam,
   claim,
@@ -415,6 +416,23 @@ export {
   createFileBackedSnapshotExists,
   createPnpmSnapshotCapture,
 } from "./snapshot-cli-wiring.js";
+
+// Sub-task of `canonical-metric-list-per-repo` Acceptance (3) — daily
+// metrics-render I/O wrapper. Pure gate (`shouldRunMetricsRender`) +
+// injected last-rendered-date probe + render seams; the daemon wire-in
+// (`MetricsRenderSeam` on `RunDaemonOpts`) ships in the same slice.
+// CLI-side construction (file-backed METRICS.md mtime probe + `pnpm
+// metrics:render --date <date>` capture) lives in a follow-up
+// `metrics-render-cli-wiring` module.
+export {
+  type GetLastRenderedDate,
+  type MetricsRender,
+  type MetricsRenderSkipReason,
+  type RunMetricsRenderArgs,
+  type RunMetricsRenderOutcome,
+  runMetricsRender,
+  shouldRunMetricsRender,
+} from "./metrics-render-runner.js";
 
 // Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
 // so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past

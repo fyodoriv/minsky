@@ -24,6 +24,7 @@ import {
   type BudgetGuardLike,
   type ChangelogSeam,
   type CtoAuditSeam,
+  type MetricsRenderSeam,
   type SnapshotSeam,
   buildDaemonBrief,
   extractTaskBlock,
@@ -31,6 +32,7 @@ import {
   runDaemon,
 } from "./daemon.js";
 import { SpanRecorder, TestFakeMockAnthropic, type TickSpan } from "./index.js";
+import type { GetLastRenderedDate, MetricsRender } from "./metrics-render-runner.js";
 import type {
   CompletedIterationSignals,
   CtoAuditLock,
@@ -1149,6 +1151,234 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(cl.spawnCalls).toHaveLength(0);
     // …but the snapshot still fired.
     expect(snap.captureCalls).toHaveLength(1);
+  });
+
+  // ---- daily metrics-render wire-in --------------------------------------
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunMetricsRender`.
+  // The runner's own gate / dispatch semantics are tested in
+  // `metrics-render-runner.test.ts`; here we only verify that the daemon
+  // dispatches into `runMetricsRender` for the right iteration shapes,
+  // skips for the operator-quiet states, and emits the
+  // `tick-loop.metrics-render` span. Substrate for
+  // `canonical-metric-list-per-repo` Acceptance (3) "daemon refreshes daily".
+
+  /**
+   * Build a `MetricsRenderSeam` whose `render` and `getLastRenderedDate`
+   * record their calls. `lastRenderedDate` defaults to `null` (genesis case
+   * — `METRICS.md` not yet authored, so the gate fires).
+   */
+  function makeMetricsRenderSeam(opts: { lastRenderedDate?: string | null } = {}): {
+    readonly seam: MetricsRenderSeam;
+    readonly renderCalls: Array<{ date: string }>;
+    readonly probeCalls: { count: number };
+  } {
+    const probeCalls = { count: 0 };
+    const renderCalls: Array<{ date: string }> = [];
+    const last = opts.lastRenderedDate ?? null;
+    const getLastRenderedDate: GetLastRenderedDate = async () => {
+      probeCalls.count++;
+      return last;
+    };
+    const render: MetricsRender = {
+      render: async (input) => {
+        renderCalls.push({ date: input.date });
+        return { exitCode: 0, durationMs: 13, stdoutTail: "metrics ran", stderrTail: "" };
+      },
+    };
+    return { seam: { render, getLastRenderedDate }, renderCalls, probeCalls };
+  }
+
+  it("metrics-render wire-in: missing METRICS.md (genesis) triggers render + emits a ran span tagged with today's UTC date", async () => {
+    const recorder = new SpanRecorder();
+    const mr = makeMetricsRenderSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      emit: (e: TickSpan) => recorder.record(e),
+      metricsRender: mr.seam,
+    });
+    expect(mr.probeCalls.count).toBe(1);
+    expect(mr.renderCalls).toEqual([{ date: "2026-05-05" }]);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.metrics-render");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["metrics-render.outcome"]).toBe("ran");
+    expect(spans[0]?.attributes["metrics-render.date"]).toBe("2026-05-05");
+    expect(spans[0]?.attributes["metrics-render.exit_code"]).toBe(0);
+  });
+
+  it("metrics-render wire-in: today's render already done skips with already-rendered span", async () => {
+    const recorder = new SpanRecorder();
+    const mr = makeMetricsRenderSeam({ lastRenderedDate: "2026-05-05" });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      emit: (e: TickSpan) => recorder.record(e),
+      metricsRender: mr.seam,
+    });
+    expect(mr.probeCalls.count).toBe(1);
+    expect(mr.renderCalls).toHaveLength(0);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.metrics-render");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["metrics-render.outcome"]).toBe("skipped");
+    expect(spans[0]?.attributes["metrics-render.skip_reason"]).toBe("already-rendered");
+  });
+
+  it("metrics-render wire-in: omitted seam (production daemons predating this seam) keeps working unchanged", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.metrics-render");
+    expect(spans).toHaveLength(0);
+  });
+
+  it("metrics-render wire-in: paused iteration does NOT fire (operator-quiet)", async () => {
+    const mr = makeMetricsRenderSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: pausedNow(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      metricsRender: mr.seam,
+    });
+    expect(mr.probeCalls.count).toBe(0);
+    expect(mr.renderCalls).toHaveLength(0);
+  });
+
+  it("metrics-render wire-in: budget-paused iteration does NOT fire (don't burn the cap on a daily-fire)", async () => {
+    const mr = makeMetricsRenderSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      metricsRender: mr.seam,
+    });
+    expect(mr.probeCalls.count).toBe(0);
+    expect(mr.renderCalls).toHaveLength(0);
+  });
+
+  it("metrics-render wire-in: failed iteration STILL fires (the render IS the always-visible operator-glance surface)", async () => {
+    // Acceptance contract for `canonical-metric-list-per-repo`:
+    // "every minsky repo … always be visible and updated". Even on a failed
+    // iteration, that contract holds — same rationale as `maybeRunSnapshot`
+    // firing on failed.
+    const mr = makeMetricsRenderSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic({ failureMode: "http-5xx" }),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      metricsRender: mr.seam,
+    });
+    expect(mr.probeCalls.count).toBe(1);
+    expect(mr.renderCalls).toHaveLength(1);
+  });
+
+  it("metrics-render wire-in: multi-iteration same day probes every tick but renders only once (gate idempotency)", async () => {
+    // The first iteration's render would update METRICS.md mtime; the
+    // second iteration's probe returns today's date and the gate skips.
+    let lastRenderedDate: string | null = null;
+    const probeCalls = { count: 0 };
+    const renderCalls: Array<{ date: string }> = [];
+    const getLastRenderedDate: GetLastRenderedDate = async () => {
+      probeCalls.count++;
+      return lastRenderedDate;
+    };
+    const render: MetricsRender = {
+      render: async (input) => {
+        renderCalls.push({ date: input.date });
+        // Mirror the side effect of the real `pnpm metrics:render`:
+        // METRICS.md is rewritten with mtime === today.
+        lastRenderedDate = input.date;
+        return { exitCode: 0, durationMs: 13, stdoutTail: "ran", stderrTail: "" };
+      },
+    };
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 3,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      metricsRender: { render, getLastRenderedDate },
+    });
+    expect(probeCalls.count).toBe(3);
+    expect(renderCalls).toHaveLength(1);
+  });
+
+  it("metrics-render wire-in: independent of the snapshot seam — snapshot-capture failure does NOT suppress today's render", async () => {
+    // Critical contract: a snapshot-capture failure (gh rate-limit, network)
+    // must NOT suppress today's render. Yesterday's snapshot still produces
+    // a usable METRICS.md (visible-not-silent, Helland 2007). This test
+    // asserts the two gates are truly independent.
+    const failingCapture: SnapshotCapture = {
+      capture: async () => ({
+        exitCode: 1,
+        durationMs: 5,
+        stdoutTail: "",
+        stderrTail: "gh: rate-limited",
+      }),
+    };
+    const snapshotExists: SnapshotExists = async () => false;
+    const mr = makeMetricsRenderSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      snapshot: { capture: failingCapture, snapshotExists },
+      metricsRender: mr.seam,
+    });
+    // metrics render fired despite the snapshot-capture failure.
+    expect(mr.renderCalls).toHaveLength(1);
   });
 });
 
