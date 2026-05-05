@@ -69,18 +69,7 @@ pivot: |
   4-week window (per rule #11's flake-rate envelope, applied to
   policy lints). Below that, the lint is working as intended.
 measurement: |
-  - `pnpm vitest run scripts/check-rule-12-scope-discipline.test.mjs
-    --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests
-    == 0'` exits 0.
-  - `node scripts/check-rule-12-scope-discipline.mjs
-    --diff=test/fixtures/rule-12/new-feature-without-experiment.diff`
-    exits 1.
-  - `node scripts/check-rule-12-scope-discipline.mjs
-    --diff=test/fixtures/rule-12/new-feature-with-experiment.diff`
-    exits 0.
-  - `grep -c "rule-12-scope-discipline" .github/workflows/ci.yml`
-    returns ≥3.
-  - `grep -q "check-rule-12-scope-discipline" vision.md` exits 0.
+  pnpm vitest run scripts/check-rule-12-scope-discipline.test.mjs --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests == 0' && ! node scripts/check-rule-12-scope-discipline.mjs --diff=test/fixtures/rule-12/new-feature-without-experiment.diff && node scripts/check-rule-12-scope-discipline.mjs --diff=test/fixtures/rule-12/new-feature-with-experiment.diff && [ "$(grep -c rule-12-scope-discipline .github/workflows/ci.yml)" -ge 3 ] && grep -q check-rule-12-scope-discipline vision.md
 anchor: |
   rule #12 (vision.md § "Scope discipline" — iron rule, no
   exemption); rule #10 (vision.md § 10 — deterministic
