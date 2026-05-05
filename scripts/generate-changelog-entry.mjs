@@ -223,9 +223,9 @@ export function buildChangelogJson(input) {
 //
 // Reads a JSON BuildChangelogEntryInput from `--input <path>` or stdin and
 // writes either the markdown section (default) or the structured JSON
-// (`--json`) to stdout. Exit code is 0 on success. The daemon's
-// `changelog-runner.ts` (next iteration) supplies the gh-PR-fetching seam
-// and writes to CHANGELOG.md.
+// (`--json`) to stdout. Exit code is 0 on success. The operator-side
+// pipeline `pnpm changelog:today` (`scripts/changelog-today.mjs`) supplies
+// the gh-PR-fetching seam and pipes through this renderer.
 
 /**
  * @param {string[]} argv

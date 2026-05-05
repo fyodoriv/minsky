@@ -30,9 +30,7 @@
  * Conformance: full — pure decision (`shouldRunSnapshot`) tested
  * deterministically; the I/O wrapper takes injected `snapshotExists`
  * and `capture` seams so tests drive it without filesystem or
- * subprocess. The CLI binding lands in a follow-up iteration alongside
- * the daemon wire-in (analog of #181 → #182 → #183 split for
- * `runChangelog`).
+ * subprocess.
  *
  * Pivot (rule #9): if the daemon fires capture-spawn more than once per
  * UTC date despite the gate (e.g., the snapshot file is created mid-fire
@@ -45,7 +43,8 @@
 /**
  * Gate seam: does `date`'s snapshot already exist on disk?
  *
- * Production binding (a follow-up iteration) wraps a `fs.stat` against
+ * Production binding (`createFileBackedSnapshotExists` in
+ * `snapshot-cli-wiring.ts`) wraps a `fs.stat` against
  * `<rootDir>/.minsky/metric-snapshots/<date>.json` returning `true` on
  * success and `false` on ENOENT. Other errors (EACCES, EISDIR, …)
  * propagate so the supervisor sees them — rule #6 let-it-crash at the
@@ -55,12 +54,13 @@ export type SnapshotExists = (date: string) => Promise<boolean>;
 
 /**
  * Capture seam: write `date`'s snapshot to disk, returning the spawn-result
- * shape. Production binding (a follow-up iteration) spawns
- * `pnpm changelog:snapshot --date <date>` via the daemon's existing
- * `SpawnStrategy`; tests inject a stub that records the call. The shape is
- * deliberately compatible with `ChangelogSpawn` / `CtoAuditSpawn` so the
- * daemon can pass its already-constructed strategy through (with a
- * different command-line) without an adapter.
+ * shape. Production binding (`createPnpmSnapshotCapture` in
+ * `snapshot-cli-wiring.ts`) spawns `pnpm changelog:snapshot --date <date>`
+ * via the daemon's existing `SpawnStrategy`; tests inject a stub that
+ * records the call. The shape is deliberately compatible with
+ * `ChangelogSpawn` / `CtoAuditSpawn` so the daemon can pass its
+ * already-constructed strategy through (with a different command-line)
+ * without an adapter.
  */
 export interface SnapshotCapture {
   capture(input: {
