@@ -15,8 +15,7 @@
  * Conformance: full — pure decision functions (`hasDateSection`,
  * `shouldRunChangelog`) tested deterministically; the I/O wrapper takes
  * injected `read` / `spawn` seams so tests drive it without filesystem
- * or subprocess. The CLI binding lands in a follow-up iteration alongside
- * the metric-snapshot file format.
+ * or subprocess.
  *
  * Pivot (rule #9): if the per-day gate fires too aggressively (>1
  * spawn/day on the same date) OR misses days (the daemon iterates on
