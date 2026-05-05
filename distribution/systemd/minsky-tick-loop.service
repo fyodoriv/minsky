@@ -21,11 +21,14 @@ Requires=minsky-budget-guard.service
 Type=simple
 WorkingDirectory=${MINSKY_HOME}
 Environment=MINSKY_HOME=${MINSKY_HOME}
-# Safe-rollout default per `tick-loop-daemon-real-spawn-flip` — keeps the
-# first prod run on the synthetic `DryRunSpawnStrategy` (no real `claude`
-# subprocess fork). An operator MUST drop this line to flip to full real
-# spawn (production default = unset = `ProcessSpawnStrategy`).
-Environment=MINSKY_TICK_DRY_RUN=1
+# Safe-rollout window closed 2026-05-04 — Minsky-on-itself validated
+# end-to-end (launchd plist paths fixed #143; macOS portability fixes
+# #144; node-PATH-resolution #145; stdout flush #146). Production
+# default is `ProcessSpawnStrategy` (real `claude --print` per
+# iteration). To re-enter dry-run temporarily (e.g., for a chaos
+# test or a fresh-install smoke), uncomment the Environment= line
+# below, `pnpm dogfood` to reload, then re-comment it.
+# Environment=MINSKY_TICK_DRY_RUN=1
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
 # Erlang-style "transient" restart: only on non-zero exit (let-it-crash
