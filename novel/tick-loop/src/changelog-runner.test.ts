@@ -220,7 +220,11 @@ describe("runChangelog", () => {
 });
 
 describe("CHANGELOG_PROMPT_HEADER", () => {
-  it("references the renderer script by path", () => {
+  it("references the operator CLI by name (canonical pipeline)", () => {
+    expect(CHANGELOG_PROMPT_HEADER).toContain("pnpm changelog:today");
+  });
+
+  it("references the renderer script for narrative-override path", () => {
     expect(CHANGELOG_PROMPT_HEADER).toContain("scripts/generate-changelog-entry.mjs");
   });
 
@@ -230,5 +234,9 @@ describe("CHANGELOG_PROMPT_HEADER", () => {
 
   it("specifies the noop-exit shape (matching the daemon brief contract)", () => {
     expect(CHANGELOG_PROMPT_HEADER).toContain("noop, exiting");
+  });
+
+  it("does not duplicate the gh-fetch step inline (collapsed into pnpm changelog:today)", () => {
+    expect(CHANGELOG_PROMPT_HEADER).not.toContain('gh pr list --state merged --search "merged:>=');
   });
 });
