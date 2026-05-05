@@ -38,6 +38,13 @@
  */
 
 import { type MockAnthropicClient, type TickSpan, tick } from "./index.js";
+import {
+  type CompletedIterationSignals,
+  type CtoAuditLock,
+  type CtoAuditSpawn,
+  type RunCtoAuditOutcome,
+  runCtoAudit,
+} from "./post-task-cto-audit.js";
 import type { SpawnStrategy } from "./spawn-strategy.js";
 
 // ---- Types ----------------------------------------------------------------
@@ -137,6 +144,14 @@ export interface RunDaemonOpts {
    * the budget-paused span, it just doesn't push anywhere.
    */
   readonly notifier?: NotifierLike;
+  /**
+   * Optional CTO-audit seam (rule #2). When injected, the daemon fires
+   * `runCtoAudit` after every `completed` iteration; the audit's own
+   * gate (`shouldRunCtoAudit`) filters no-op + budget-paused + the
+   * audit's own iteration. When omitted, audits never run — pre-existing
+   * supervisor daemons predating this seam keep working unchanged.
+   */
+  readonly ctoAudit?: CtoAuditSeam;
 }
 
 /**
@@ -153,6 +168,35 @@ export interface NotifierLike {
     tags?: readonly string[];
     priority?: "low" | "normal" | "high";
   }): Promise<{ ok: boolean }>;
+}
+
+/**
+ * Optional CTO-audit seam (rule #2). When injected, the daemon fires a
+ * post-task CTO audit after every iteration that completes a real change
+ * (the gate inside `runCtoAudit` filters no-op + budget-paused + failed
+ * + the audit's own iteration — see `shouldRunCtoAudit`). When omitted,
+ * the daemon never invokes the audit; supervisor pre-existing daemons
+ * predating this seam keep working unchanged.
+ *
+ * Three sub-seams:
+ *   - `spawn` — the I/O surface the audit shells out to (production:
+ *     `ProcessSpawnStrategy` re-used; tests: in-memory stub). Structurally
+ *     compatible with `SpawnStrategy` so the daemon can hand its existing
+ *     spawn strategy in without an adapter.
+ *   - `lock` — the per-task idempotency record (production: file-backed at
+ *     `.minsky/cto-audit-lock/<taskId>`; tests: in-memory `Set`).
+ *   - `buildSignals` — collects `CompletedIterationSignals` from external
+ *     state (git/gh) for the just-completed iteration. Async because real
+ *     collectors call `git log` / `gh pr list`. The daemon ONLY invokes
+ *     this when `result.status === "completed"`, so the I/O is bounded.
+ */
+export interface CtoAuditSeam {
+  readonly spawn: CtoAuditSpawn;
+  readonly lock: CtoAuditLock;
+  readonly buildSignals: (args: {
+    readonly taskId: string;
+    readonly spawnStdoutTail: string;
+  }) => Promise<CompletedIterationSignals>;
 }
 
 // ---- runDaemon ------------------------------------------------------------
@@ -197,6 +241,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     const outcome = await runOneIteration({ opts, iteration: i });
     iterations.push(outcome.result);
     notifyOnPauseTransition(opts, outcome.result, pauseState);
+    await maybeRunCtoAudit(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -244,6 +289,72 @@ function notifyOnPauseTransition(
     priority: "high",
   });
   state.inBudgetPause = true;
+}
+
+/**
+ * Wire-in for the post-task CTO audit (rule #2 — the daemon orchestrates,
+ * `runCtoAudit` decides + spawns). Skip-fast when:
+ *   - the seam isn't injected (production daemons predating this seam),
+ *   - the iteration didn't `complete` (the gate inside `runCtoAudit` would
+ *     also skip, but checking here avoids a spurious `buildSignals` call
+ *     with its git/gh I/O),
+ *   - the iteration has no `taskId` (no-task / paused / missing-tasks-md).
+ *
+ * Otherwise build signals (`spawnStdoutTail` is the spawn's tail captured
+ * in `result.reason` for the completed-via-strategy path) and invoke
+ * `runCtoAudit`. Outcome is emitted as a `tick-loop.cto-audit` span so the
+ * dashboard can chart audit firing-rate + skip-reason distribution.
+ *
+ * The audit's spawn is fire-and-await within the iteration: a long audit
+ * delays the next tick, but rule #9's pivot threshold (>5 audits/day or
+ * 0/week sustained) is the operator-side back-pressure, not a circuit
+ * inside the daemon. Audit failures (non-zero exitCode) surface in the
+ * span attributes; the daemon does NOT retry — the operator review surface
+ * (the audit's PR) is the success boundary, not the spawn's exitCode.
+ *
+ * Extracted so `runDaemon` stays dispatch-only (rule #6, biome ≤10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunCtoAudit(opts: RunDaemonOpts, result: DaemonIterationResult): Promise<void> {
+  if (opts.ctoAudit === undefined) return;
+  if (result.status !== "completed") return;
+  if (result.taskId === undefined) return;
+
+  const signals = await opts.ctoAudit.buildSignals({
+    taskId: result.taskId,
+    spawnStdoutTail: result.reason ?? "",
+  });
+  const outcome = await runCtoAudit({
+    signals,
+    status: result.status,
+    env: process.env,
+    spawn: opts.ctoAudit.spawn,
+    lock: opts.ctoAudit.lock,
+  });
+  emitCtoAuditSpan(opts, result.taskId, outcome);
+}
+
+/**
+ * Emit a `tick-loop.cto-audit` span describing the audit's outcome. One
+ * span per audit invocation (skipped or ran), so the dashboard can chart
+ * firing-rate + skip-reason distribution + exit-code distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitCtoAuditSpan(opts: RunDaemonOpts, taskId: string, outcome: RunCtoAuditOutcome): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "task.id": taskId,
+    "audit.outcome": outcome.outcome,
+  };
+  if (outcome.outcome === "skipped") {
+    base["audit.skip_reason"] = outcome.reason;
+  } else {
+    base["audit.exit_code"] = outcome.exitCode;
+    base["audit.duration_ms"] = outcome.durationMs;
+  }
+  opts.emit({ name: "tick-loop.cto-audit", attributes: base });
 }
 
 /**
