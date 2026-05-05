@@ -70,7 +70,9 @@ import {
   TestFakeMockAnthropic,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
+  createFileBackedSnapshotExists,
   createGitGhSignalsBuilder,
+  createPnpmSnapshotCapture,
   fromRealBudgetGuard,
   runDaemon,
 } from "../dist/index.js";
@@ -272,6 +274,30 @@ const changelogSeam = (() => {
   };
 })();
 
+// Daily-changelog acceptance criterion (3) — CLI-side construction of the
+// `SnapshotSeam` (the per-day snapshot-writer leg of `daily-changelog-for-humans`).
+// Wires under the same umbrella opt-in as the changelog seam: snapshots are
+// the data substrate `pnpm changelog:today` reads via `loadSnapshot`, so it
+// would be incoherent to wire the changelog author without also wiring the
+// per-day writer (the next-day Δ rendering would have nothing to diff
+// against). When `MINSKY_CHANGELOG_ENABLE=1` is set, the CLI constructs:
+//   - `snapshotExists` — file-backed probe at `<MINSKY_HOME>/.minsky/metric-snapshots/<date>.json`
+//     (the snapshot file IS the per-day "this happened" record; rule #2
+//     data-not-code, one source of truth);
+//   - `capture` — spawns `pnpm changelog:snapshot --date <date>` (the
+//     producer CLI shipped #188) with bounded stdout/stderr tails.
+// Both seams' per-iteration gates still respect `MINSKY_CHANGELOG=off`
+// for ad-hoc skips; idempotency comes from the snapshot file presence,
+// not a separate lock dir (rule #2 — one source of truth).
+const snapshotSeam = (() => {
+  if (!changelogEnabled) return undefined;
+  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
+  return {
+    snapshotExists: createFileBackedSnapshotExists(minskyHome),
+    capture: createPnpmSnapshotCapture({ cwd: minskyHome }),
+  };
+})();
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -306,6 +332,9 @@ const result = await runDaemon({
   ...(ctoAuditSeam !== undefined ? { ctoAudit: ctoAuditSeam } : {}),
   // Optional daily-changelog seam; `undefined` when MINSKY_CHANGELOG_ENABLE isn't 1/true.
   ...(changelogSeam !== undefined ? { changelog: changelogSeam } : {}),
+  // Optional daily-snapshot seam; same opt-in as the changelog seam (the two
+  // share the daily-changelog umbrella — see SnapshotSeam construction above).
+  ...(snapshotSeam !== undefined ? { snapshot: snapshotSeam } : {}),
   emit: (event) => {
     // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
@@ -344,6 +373,15 @@ if (changelogSeam !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no daily changelog wired (set MINSKY_CHANGELOG_ENABLE=1 to fire daily entries)\n",
+  );
+}
+if (snapshotSeam !== undefined) {
+  process.stdout.write(
+    "[tick-loop] daily snapshot wired (file-backed existence probe + pnpm changelog:snapshot capture)\n",
+  );
+} else {
+  process.stdout.write(
+    "[tick-loop] no daily snapshot wired (set MINSKY_CHANGELOG_ENABLE=1 to capture per-day metric snapshots)\n",
   );
 }
 
