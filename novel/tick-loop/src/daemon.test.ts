@@ -18,7 +18,14 @@ import { StubTokenMonitor } from "@minsky/token-monitor";
 import { describe, expect, it } from "vitest";
 
 import { fromRealBudgetGuard } from "./budget-guard-facade.js";
-import { type BudgetDecisionLike, type BudgetGuardLike, pickTask, runDaemon } from "./daemon.js";
+import {
+  type BudgetDecisionLike,
+  type BudgetGuardLike,
+  buildDaemonBrief,
+  extractTaskBlock,
+  pickTask,
+  runDaemon,
+} from "./daemon.js";
 import { SpanRecorder, TestFakeMockAnthropic, type TickSpan } from "./index.js";
 import { DryRunSpawnStrategy, ProcessSpawnStrategy } from "./spawn-strategy.js";
 
@@ -541,5 +548,88 @@ describe("tick-loop / daemon / pickTask", () => {
 
   it("returns undefined when nothing is pickable", () => {
     expect(pickTask("# Tasks\n\n## P0\n\n")).toBeUndefined();
+  });
+});
+
+describe("extractTaskBlock", () => {
+  const sample = `# Tasks
+
+## P0
+
+- [ ] \`task-a\` — first
+  - **ID**: task-a
+  - **Hypothesis**: H
+
+- [ ] \`task-b\` — second
+  - **ID**: task-b
+  - **Hypothesis**: H
+
+## P1
+
+- [ ] \`task-c\` — third
+  - **ID**: task-c
+`;
+
+  it("extracts a P0 task block bounded by the next heading", () => {
+    const block = extractTaskBlock(sample, "task-a");
+    expect(block).toContain("`task-a`");
+    expect(block).toContain("**Hypothesis**: H");
+    expect(block).not.toContain("`task-b`");
+  });
+
+  it("extracts the last P0 task bounded by the section heading", () => {
+    const block = extractTaskBlock(sample, "task-b");
+    expect(block).toContain("`task-b`");
+    expect(block).not.toContain("## P1");
+    expect(block).not.toContain("`task-c`");
+  });
+
+  it("extracts a P1 task block bounded by EOF", () => {
+    const block = extractTaskBlock(sample, "task-c");
+    expect(block).toContain("`task-c`");
+  });
+
+  it("returns undefined for an unknown id", () => {
+    expect(extractTaskBlock(sample, "task-missing")).toBeUndefined();
+  });
+
+  it("does not match a similarly-named id (exact-match only)", () => {
+    expect(extractTaskBlock(sample, "task-")).toBeUndefined();
+  });
+});
+
+describe("buildDaemonBrief", () => {
+  const sample = `# Tasks
+
+## P0
+
+- [ ] \`real-task\` — load-bearing
+  - **ID**: real-task
+  - **Hypothesis**: ship something
+  - **Acceptance**: green CI on PR
+`;
+
+  it("includes the task block content when found", () => {
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    expect(brief).toContain("`real-task`");
+    expect(brief).toContain("**Acceptance**: green CI on PR");
+  });
+
+  it("includes the iteration directive section", () => {
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    expect(brief).toContain("## Iteration directive");
+    expect(brief).toContain("Ship the smallest meaningful next iteration");
+  });
+
+  it("includes the anti-noop guard against brief-refresh-only PRs", () => {
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    expect(brief).toContain("FORBIDDEN — anti-noop guard");
+    expect(brief).toContain("brief refresh");
+    expect(brief).toContain("noop, exiting");
+  });
+
+  it("falls back to a graceful message when the task block isn't found", () => {
+    const brief = buildDaemonBrief({ taskId: "missing-id", tasksMdContent: sample });
+    expect(brief).toContain("(task block not found in TASKS.md");
   });
 });
