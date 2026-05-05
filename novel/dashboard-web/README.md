@@ -6,6 +6,10 @@ SSR web dashboard for Minsky's 10 success metrics (vision.md § "Success criteri
 
 The HTML carries an inlined `<style>` block (Card & Mackinlay 1999 — glanceable display): system font stack, dark slate background, responsive grid of metric cards (`auto-fill, minmax(280px, 1fr)`), muted styling for the `(stub)` not-wired-yet state so an unwired backend is visibly distinct from a real value. Inlined CSS keeps the dashboard a single SSR response (no extra fetch round-trip; works offline) and stays well within the parent `dashboard-web-v0` 300-LoC pivot cap.
 
+## Recent activity feed
+
+Below the metric grid, a "Recent activity" section streams the latest 20 tick-loop iteration spans from `.minsky/tick-loop.out.log` (youngest-first), each rendered as a colored status pill (completed = green; budget-paused = amber; failed = red; no-task / missing-tasks-md = slate-grey) plus the task ID or daemon reason. The page auto-refreshes every 5s. Source: pure `parseSpan` / `takeRecentSpans` in `src/activity.ts`; I/O at the edge in `loadRecentSpans` (the `dashboard-web.activity.load-recent` OTEL span). Surfaces the supervisor's live state without requiring `tail -f` against the log file.
+
 ## Pattern conformance
 
 Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index) row 57:
