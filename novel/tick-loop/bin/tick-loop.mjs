@@ -147,9 +147,21 @@ const dryRun = readDryRunEnv(process.env);
 // `~/.claude/projects`) so the local smoke stays hermetic; production
 // (real spawn) uses `MaciekTokenMonitor` against the user's Claude Code
 // config dir, the same data source Maciek's `claude-monitor` reads.
+//
+// Plan tier is operator-controlled via `MINSKY_PLAN`. Anthropic's 5h-window
+// cap differs per tier: `pro` = 19k, `max5` = 88k (default — most common),
+// `max20` = 220k, `custom` = 44k. An operator on Max20 who runs the daemon
+// with the default `max5` cap will see spurious budget-paused iterations
+// even when their actual budget has plenty of room. Set the env var in the
+// plist's `EnvironmentVariables` (or systemd `Environment=`) to match the
+// operator's actual subscription tier.
+/** @type {"pro" | "max5" | "max20" | "custom"} */
+const planEnv = /** @type {"pro" | "max5" | "max20" | "custom"} */ (
+  process.env.MINSKY_PLAN ?? "max5"
+);
 const tokenMonitor = dryRun
   ? new StubTokenMonitor()
-  : new MaciekTokenMonitor({ configDir: resolve(homedir(), ".claude") });
+  : new MaciekTokenMonitor({ configDir: resolve(homedir(), ".claude"), plan: planEnv });
 const realGuard = new BudgetGuard(tokenMonitor, () => {
   /* push-decision side effects (flag-file, OTEL) live in a follow-up;
      the daemon only branches on `decide()`'s return value. */

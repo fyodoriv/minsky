@@ -26,6 +26,11 @@ Environment=MINSKY_HOME=${MINSKY_HOME}
 # subprocess fork). An operator MUST drop this line to flip to full real
 # spawn (production default = unset = `ProcessSpawnStrategy`).
 Environment=MINSKY_TICK_DRY_RUN=1
+# Anthropic plan tier (sets the 5h-window token cap). Default is max5 (88k
+# tokens). Operators on Max20 (220k) or Pro (19k) MUST set this to match
+# their actual subscription, otherwise the BudgetGuard in-tick decide() will
+# emit spurious budget-paused iterations. Valid: pro / max5 / max20 / custom.
+# Environment=MINSKY_PLAN=max20
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
 # Erlang-style "transient" restart: only on non-zero exit (let-it-crash
