@@ -362,6 +362,7 @@ export {
   type DaemonIterationStatus,
   type DaemonRunResult,
   type RunDaemonOpts,
+  type SnapshotSeam,
   claim,
   pickTask,
   runDaemon,
