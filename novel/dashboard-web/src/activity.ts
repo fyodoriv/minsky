@@ -38,6 +38,12 @@ const SPAN_PREFIX = "[span] tick-loop.iteration ";
  * the line isn't a `tick-loop.iteration` span. Tolerates malformed
  * JSON / missing fields — corrupt lines yield `null` rather than
  * throwing (rule #7 graceful-degrade for upstream-malformed input).
+ *
+ * @otel-exempt pure parser — called per-line by `takeRecentSpans`,
+ *   which itself is the @otel-exempt sibling of `loadRecentSpans` (the
+ *   I/O boundary that carries the `dashboard-web.activity.load` span).
+ *   A per-line span on parsing would explode cardinality without
+ *   adding signal.
  */
 export function parseSpan(line: string): ActivityEntry | null {
   if (!line.startsWith(SPAN_PREFIX)) return null;
@@ -68,6 +74,10 @@ export function parseSpan(line: string): ActivityEntry | null {
  * Pure: take a flat array of log lines, parse each, return the
  * **last `n`** entries that parsed successfully, **youngest-first**
  * (most recent at index 0). Caller does the I/O.
+ *
+ * @otel-exempt pure helper — `loadRecentSpans` is the I/O boundary
+ *   and carries the `dashboard-web.activity.load` span; instrumenting
+ *   the pure tail-walker here is double-counting.
  */
 export function takeRecentSpans(lines: readonly string[], n: number): ActivityEntry[] {
   const out: ActivityEntry[] = [];
