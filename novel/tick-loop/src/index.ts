@@ -356,6 +356,7 @@ export function parseFixtureTaskIds(source: string): readonly string[] {
 export {
   type BudgetDecisionLike,
   type BudgetGuardLike,
+  type ChangelogSeam,
   type CtoAuditSeam,
   type DaemonIterationResult,
   type DaemonIterationStatus,
@@ -366,6 +367,27 @@ export {
   runDaemon,
   spawnTickDryRun,
 } from "./daemon.js";
+
+// Sub-task of `daily-changelog-for-humans` — expose the changelog-runner
+// primitives so the CLI (`bin/tick-loop.mjs`) can wire the seam without
+// reaching past `dist/`. Mirrors the post-task-cto-audit re-export block.
+export {
+  CHANGELOG_PROMPT_HEADER,
+  type ChangelogSkipReason,
+  type ChangelogSpawn,
+  type ReadChangelog,
+  type RunChangelogArgs,
+  type RunChangelogOutcome,
+  hasDateSection,
+  runChangelog,
+  shouldRunChangelog,
+} from "./changelog-runner.js";
+
+// CLI-side construction of the `ChangelogSeam` (file-backed reader). Twin
+// of `cto-audit-cli-wiring`'s `createFileBackedCtoAuditLock` — keeps the
+// bin script (`bin/tick-loop.mjs`) thin: the bin only decides whether to
+// opt-in (env var) and forwards the CHANGELOG.md path here.
+export { createFileBackedChangelogReader } from "./changelog-cli-wiring.js";
 
 // Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
 // so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past
