@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CTO_AUDIT_PR_LABEL,
   CTO_PROMPT_HEADER,
   type CompletedIterationSignals,
   type CtoAuditLock,
@@ -80,6 +81,37 @@ describe("buildCtoBrief", () => {
     const brief = buildCtoBrief(signals());
     expect(brief).toContain("## Your task now");
     expect(brief).toContain("highest-leverage next task");
+  });
+});
+
+describe("CTO_AUDIT_PR_LABEL — measurement contract", () => {
+  it("matches the exact label the pre-registered measurement command queries", () => {
+    // The TASKS.md `Measurement` line for `post-task-cto-audit` runs:
+    //   gh pr list --label minsky:cto-audit --state all ...
+    // If this constant drifts, the metric silently returns 0 forever.
+    expect(CTO_AUDIT_PR_LABEL).toBe("minsky:cto-audit");
+  });
+
+  it("is referenced in the prompt header so the spawned audit applies it", () => {
+    expect(CTO_PROMPT_HEADER).toContain(CTO_AUDIT_PR_LABEL);
+  });
+});
+
+describe("CTO_PROMPT_HEADER — branch + PR conventions", () => {
+  it("instructs the spawned audit to use the audit/<date>-<task-id> branch convention", () => {
+    expect(CTO_PROMPT_HEADER).toContain("audit/<UTC-date>-<completed-task-id>");
+  });
+
+  it("instructs the spawned audit to label its PR with the canonical label", () => {
+    expect(CTO_PROMPT_HEADER).toContain(`Label the PR \`${CTO_AUDIT_PR_LABEL}\``);
+  });
+
+  it("includes the bootstrap snippet that creates the label if missing", () => {
+    expect(CTO_PROMPT_HEADER).toContain("gh label create minsky:cto-audit");
+  });
+
+  it("instructs the audit to apply the label at PR-create time (not retroactively)", () => {
+    expect(CTO_PROMPT_HEADER).toContain("gh pr create --label");
   });
 });
 
