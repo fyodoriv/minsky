@@ -88,13 +88,19 @@ const VALID_DIFF = [
   "",
 ].join("\n");
 
+// Flush before exiting. On Linux, `process.exit()` immediately after
+// `process.stdout.write()` can drop buffered data when stdout is a pipe:
+// the parent's `spawnSync` then sees a truncated body, the runner's
+// JSON.parse catches and writes an empty PR body, and pr-self-grade
+// fails on the empty body — flipping the happy path's verdict from
+// `success` to `failure`. macOS pipe semantics flush in time, which
+// hid the race locally.
 /**
  * @param {string} stdout
- * @returns {never}
+ * @returns {void}
  */
 function emit(stdout) {
-  process.stdout.write(stdout);
-  process.exit(0);
+  process.stdout.write(stdout, () => process.exit(0));
 }
 
 // `gh pr view --repo X N --json body,headRefOid --jq .` (first call, fetch step).
