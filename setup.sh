@@ -379,17 +379,17 @@ if [ "$MODE" = "dogfood" ]; then
   echo
   bold "Minsky is now dogfooding itself."
   echo
+  dim "  Web UI:       pnpm dogfood:ui   →   open http://localhost:8181/"
+  dim "  Stream logs:  tail -F $STATE_DIR/tick-loop.out.log $STATE_DIR/tick-loop.err.log"
   case "$os" in
     Darwin)
-      dim "  Tail logs:    log stream --predicate 'process CONTAINS \"node\"' --info"
       dim "  Pause:        launchctl bootout gui/\$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist"
       ;;
     Linux)
-      dim "  Tail logs:    journalctl --user -fu minsky-tick-loop.service"
       dim "  Pause:        systemctl --user stop minsky-supervisor.target"
       ;;
   esac
-  dim "  Status:       cat $STATE_DIR/state.json | jq ."
+  dim "  Status:       launchctl list | grep -i minsky    (macOS)  /  systemctl --user status minsky-supervisor.target  (Linux)"
   dim "  Re-run:       ./setup.sh --dogfood (idempotent; re-renders templates)"
   echo
   ok "GREEN — supervisor loaded; tick-loop will pick the next P0 task on its next cadence"
