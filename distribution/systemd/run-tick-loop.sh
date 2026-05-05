@@ -118,6 +118,21 @@ if [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" 
   fi
 fi
 
+# Auto-merge sweep (advisory). Runs `scripts/auto-merge-clean-prs.mjs`
+# when `MINSKY_AUTO_MERGE=1` — drains every CLEAN PR via `gh pr merge
+# --squash --delete-branch`. Off by default so the operator opts in
+# explicitly (rule #2 escape hatch); a label `minsky-no-merge` on a PR
+# overrides the sweep for that single PR. Skipped under dry-run for the
+# same reason self-diagnose is — dry-run is a hermetic smoke that
+# shouldn't reach out to GitHub.
+#
+# Failure of `gh pr merge` (auth / network / GH-state-changed-mid-sweep)
+# is logged but does not block startup — rule #7 graceful-degrade.
+if [[ "${MINSKY_AUTO_MERGE:-}" == "1" || "${MINSKY_AUTO_MERGE:-}" == "true" ]] && [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" ]]; then
+  printf 'auto-merge: starting sweep (MINSKY_AUTO_MERGE=on)\n'
+  node "${MINSKY_HOME}/scripts/auto-merge-clean-prs.mjs" || printf 'auto-merge: sweep exited non-zero (advisory; continuing)\n'
+fi
+
 # Bash quirk: under `set -u`, `"${EXTRA_ARGS[@]}"` triggers an unbound-
 # variable error when EXTRA_ARGS is empty (no env-var mappings hit
 # above). The `+"${EXTRA_ARGS[@]}"` parameter-substitution form expands
