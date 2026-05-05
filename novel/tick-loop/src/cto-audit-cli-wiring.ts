@@ -189,15 +189,9 @@ async function safeRun<T>(
   parse: (raw: string) => T,
   fallback: T,
 ): Promise<T> {
-  try {
-    const raw = await produce();
-    return parse(raw);
-    // rule-6: handled-locally — `git`/`gh` failures (offline, rate-limit,
-    // missing remote) are documented graceful-degrade boundaries; rethrowing
-    // would crash the daemon iteration.
-  } catch {
-    return fallback;
-  }
+  return produce()
+    .then(parse)
+    .catch(() => fallback);
 }
 
 /**
