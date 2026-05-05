@@ -30,11 +30,13 @@
  * `runDaemon` is the pure orchestrator above.
  */
 
+import { execFile as execFileCb } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 // Force synchronous (line-buffered) stdout/stderr writes when the daemon
 // runs under launchd / systemd-user. Both supervisors redirect stdout to a
@@ -66,6 +68,8 @@ import {
   DryRunSpawnStrategy,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
+  createFileBackedCtoAuditLock,
+  createGitGhSignalsBuilder,
   fromRealBudgetGuard,
   runDaemon,
 } from "../dist/index.js";
@@ -204,6 +208,42 @@ const observability =
     ? undefined
     : new OtelObservability({ endpoint: otelEndpoint, serviceName: "minsky-tick-loop" });
 
+// Sub-step (d/e/f) of `post-task-cto-audit` — opt-in CLI-side construction
+// of the `CtoAuditSeam`. Default is OFF so the audit's prompt-engineering
+// surface ships behind an explicit flag (rule #9 pivot threshold #1: don't
+// fire >5 audits/day on first rollout). Setting `MINSKY_CTO_AUDIT_ENABLE=1`
+// (or `true`) constructs:
+//   - `spawn` — re-uses the daemon's already-constructed `spawnStrategy`
+//     (structurally compatible with `CtoAuditSpawn` per task spec sub-step (a));
+//   - `lock` — file-backed at `<MINSKY_HOME>/.minsky/cto-audit-lock/<id>` so
+//     the cap-1-per-task contract (sub-step f) survives daemon restart;
+//   - `buildSignals` — `git log` / `gh issue/pr list` collector with rule-#7
+//     graceful-degrade on offline / rate-limit.
+// The audit's own gate (`shouldRunCtoAudit`) still respects
+// `MINSKY_CTO_AUDIT=off` for per-iteration skips even when the seam is wired.
+const ctoAuditEnabled = (() => {
+  const raw = process.env.MINSKY_CTO_AUDIT_ENABLE;
+  if (raw === undefined) return false;
+  const normalised = raw.trim().toLowerCase();
+  return normalised === "1" || normalised === "true";
+})();
+const ctoAuditSeam = (() => {
+  if (!ctoAuditEnabled) return undefined;
+  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
+  const lockDir = resolve(minskyHome, ".minsky", "cto-audit-lock");
+  const execFile = promisify(execFileCb);
+  /** @type {import("../dist/index.js").ExecFileLike} */
+  const execFileLike = async (file, args) => {
+    const { stdout } = await execFile(file, [...args], { encoding: "utf-8" });
+    return stdout;
+  };
+  return {
+    spawn: spawnStrategy,
+    lock: createFileBackedCtoAuditLock(lockDir),
+    buildSignals: createGitGhSignalsBuilder({ execFile: execFileLike }),
+  };
+})();
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -234,6 +274,8 @@ const result = await runDaemon({
   budgetGuard: fromRealBudgetGuard(realGuard),
   // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
   ...(notifier !== undefined ? { notifier } : {}),
+  // Optional CTO-audit seam; `undefined` when MINSKY_CTO_AUDIT_ENABLE isn't 1/true.
+  ...(ctoAuditSeam !== undefined ? { ctoAudit: ctoAuditSeam } : {}),
   emit: (event) => {
     // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
@@ -258,6 +300,13 @@ if (observability !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no OTEL wired (set MINSKY_OTEL_ENDPOINT to publish spans to OpenObserve)\n",
+  );
+}
+if (ctoAuditSeam !== undefined) {
+  process.stdout.write("[tick-loop] CTO audit wired (file-backed lock + git/gh signals)\n");
+} else {
+  process.stdout.write(
+    "[tick-loop] no CTO audit wired (set MINSKY_CTO_AUDIT_ENABLE=1 to fire post-task audits)\n",
   );
 }
 

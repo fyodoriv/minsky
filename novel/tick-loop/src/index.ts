@@ -384,6 +384,20 @@ export {
   shouldRunCtoAudit,
 } from "./post-task-cto-audit.js";
 
+// Sub-step (d/e/f) of `post-task-cto-audit` — CLI-side construction of the
+// `CtoAuditSeam` (file-backed lock + git/gh signals collector). Keeps the
+// CLI bin script (`bin/tick-loop.mjs`) thin: the bin only decides whether
+// to opt-in (env var) and forwards `process.env` / a real `execFile` here.
+export {
+  type ExecFileLike,
+  type SignalsBuilderArgs,
+  createFileBackedCtoAuditLock,
+  createGitGhSignalsBuilder,
+  extractPrUrl,
+  parseFilesChangedFromGit,
+  parseRecentMainCommitsFromGit,
+} from "./cto-audit-cli-wiring.js";
+
 export { fromRealBudgetGuard } from "./budget-guard-facade.js";
 
 // Sub-task 3/3 (`tick-loop-daemon-real-spawn-flip`): expose the Strategies
