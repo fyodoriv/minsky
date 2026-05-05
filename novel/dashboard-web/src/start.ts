@@ -64,6 +64,25 @@ const getValue = await resolveGetValue();
 const args = getValue === undefined ? undefined : { getValue };
 const { fetch } = createServer(args);
 
-serve({ fetch, port }, (info) => {
+// `serve()` emits an unhandled `error` event on EADDRINUSE — node's default
+// handler prints a stack trace and exits non-zero, which surfaces to the
+// operator as a confusing crash. Catch the common case (port-already-in-use,
+// usually a stale dashboard process) and exit with an actionable message
+// instead. The supervisor (if any) sees exit 1 and applies its restart
+// policy; the operator running `pnpm dogfood:ui` directly sees the hint.
+const server = serve({ fetch, port }, (info) => {
   process.stdout.write(`dashboard-web listening on http://localhost:${info.port}/\n`);
+});
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    process.stderr.write(
+      `dashboard-web: port ${port} is already in use.
+  - Another dashboard is probably running already; open http://localhost:${port}/
+  - Or pick a different port: \`PORT=8888 pnpm dogfood:ui\`
+  - Or free this one: \`lsof -ti :${port} | xargs kill\`
+`,
+    );
+    process.exit(1);
+  }
+  throw err;
 });
