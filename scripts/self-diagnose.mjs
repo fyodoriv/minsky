@@ -199,8 +199,8 @@ export function claudeBinaryReachableInvariant(opts) {
  * @property {string} timestamp — ISO8601
  *
  * @typedef {object} NoopIterationInvariantOpts
- * @property {() => Promise<readonly DaemonIteration[]>} recentIterations — newest-last
- * @property {number} [threshold] — fire when consecutive non-committed iterations on the same taskId reach this count (default 4 — observed: the 88-iteration brief-refresh churn before #174)
+ * @property {() => Promise<readonly DaemonIteration[]>} recentIterations - newest-last
+ * @property {number} [threshold] - fire when consecutive non-committed iterations on the same taskId reach this count (default 4; observed: the 88-iteration brief-refresh churn before #174)
  */
 
 /**
@@ -270,7 +270,7 @@ export function daemonNoopIterationRateInvariant(opts) {
  *
  * @typedef {object} StuckOnCiInvariantOpts
  * @property {() => Promise<readonly DaemonPrCiSnapshot[]>} daemonPrs
- * @property {number} [failureThreshold] — fire when `ciFailureCount` reaches this and no fix was committed (default 2)
+ * @property {number} [failureThreshold] - fire when `ciFailureCount` reaches this and no fix was committed (default 2)
  */
 
 /**
@@ -311,8 +311,8 @@ export function daemonPrStuckOnCiInvariant(opts) {
 /**
  * @typedef {object} ShippedRatioInvariantOpts
  * @property {() => Promise<{ iterationCount: number, shippedPrCount: number }>} rollingStats
- * @property {number} [windowMinIterations] — only evaluate once `iterationCount` ≥ this (default 20)
- * @property {number} [minRatio] — fire below this ratio (default 0.05 — at least 1 PR per 20 iterations)
+ * @property {number} [windowMinIterations] - only evaluate once `iterationCount` reaches this (default 20)
+ * @property {number} [minRatio] - fire below this ratio (default 0.05; at least 1 PR per 20 iterations)
  */
 
 /**
@@ -355,7 +355,7 @@ export function daemonShippedRatioInvariant(opts) {
  *
  * @typedef {object} InFlightCollisionInvariantOpts
  * @property {() => Promise<readonly OpenPrSnapshot[]>} openDaemonPrs
- * @property {number} [overlapThreshold] — fire when file-set overlap exceeds this fraction (default 0.5)
+ * @property {number} [overlapThreshold] - fire when file-set overlap exceeds this fraction (default 0.5)
  */
 
 /**
@@ -635,9 +635,10 @@ export function defaultInvariants() {
     /** @type {DaemonPrCiSnapshot[]} */
     const out = [];
     for (const pr of data) {
+      /** @type {readonly {conclusion?: string, state?: string}[]} */
       const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
       const failed = checks.filter(
-        (c) => c && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
+        (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
       );
       out.push({
         number: pr.number,
@@ -686,11 +687,15 @@ export function defaultInvariants() {
       "50",
     ]);
     if (!Array.isArray(data)) return [];
-    return data.map((pr) => ({
-      number: pr.number,
-      taskId: extractTaskIdFromPr(pr.headRefName ?? "", pr.title ?? ""),
-      files: Array.isArray(pr.files) ? pr.files.map((f) => f.path).filter(Boolean) : [],
-    }));
+    return data.map((pr) => {
+      /** @type {readonly { path?: string }[]} */
+      const files = Array.isArray(pr.files) ? pr.files : [];
+      return {
+        number: pr.number,
+        taskId: extractTaskIdFromPr(pr.headRefName ?? "", pr.title ?? ""),
+        files: files.map((f) => f.path ?? "").filter((p) => p.length > 0),
+      };
+    });
   };
 
   const inFlightTaskIds = async () => {
