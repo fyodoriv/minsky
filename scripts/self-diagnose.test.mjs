@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  claudeBinaryReachableInvariant,
   findingsToTasksMd,
   runInvariants,
   tokenMonitorNotAllPeggedInvariant,
@@ -78,6 +79,25 @@ describe("tokenMonitorNotAllPeggedInvariant", () => {
     expect(result.evidence).toContain("pro:");
     expect(result.evidence).toContain("max20:");
     expect(result.suggestedFix).toContain("cache_read");
+  });
+});
+
+describe("claudeBinaryReachableInvariant", () => {
+  it("passes when the probe reports the binary is reachable", async () => {
+    const probe = async () => ({ ok: true });
+    const result = await claudeBinaryReachableInvariant({ probe })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails with the launchd-PATH suggestedFix when the probe reports unreachable", async () => {
+    const probe = async () => ({ ok: false });
+    const result = await claudeBinaryReachableInvariant({ probe })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("claude-binary-reachable");
+    expect(result.evidence).toContain("ENOENT");
+    expect(result.suggestedFix).toContain("launchd");
+    expect(result.suggestedFix).toContain("run-tick-loop.sh");
   });
 });
 
