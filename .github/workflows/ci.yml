@@ -388,6 +388,31 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  cto-audit-pr-conventions:
+    # `post-task-cto-audit` (TASKS.md): the audit's pre-registered
+    # measurement is `gh pr list --label minsky:cto-audit ...`. Without
+    # this gate, the label + branch convention is prompt-instructed only
+    # — the spawned `claude --print` reads `CTO_PROMPT_HEADER` and is
+    # asked to apply both. Prompt-instructed conventions drift; this
+    # gate makes the convention deterministically enforced. Same shape
+    # as `pr-self-grade` above.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: fetch PR head-branch + labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json headRefName,labels > /tmp/cto-audit-pr.json
+          test -s /tmp/cto-audit-pr.json
+      - name: lint branch ↔ label biconditional
+        run: node scripts/check-cto-audit-pr-conventions.mjs /tmp/cto-audit-pr.json
+
   linux-supervisor-integration:
     # supervisor-integration-tests (TASKS.md): empirically exercise rows
     # 1–4 of `distribution/README.md` § "Failure modes & chaos verification"
@@ -857,6 +882,7 @@ jobs:
       - anchor-primary-source
       - biome
       - cadence-pivot-threshold
+      - cto-audit-pr-conventions
       - glossary-discipline
       - hygiene
       - linux-supervisor-integration
@@ -933,12 +959,13 @@ jobs:
               *) fail=1 ;;
             esac
           done
-          # pr-self-grade, pattern-index, and skill-rule-cap may be
-          # `skipped` (push event) OR `success` (PR); only `failure` /
-          # `cancelled` should fail.
+          # pr-self-grade, pattern-index, skill-rule-cap, and
+          # cto-audit-pr-conventions may be `skipped` (push event) OR
+          # `success` (PR); only `failure` / `cancelled` should fail.
           for r in "${{ needs.pr-self-grade.result }}" \
                    "${{ needs.pattern-index.result }}" \
-                   "${{ needs.skill-rule-cap.result }}"; do
+                   "${{ needs.skill-rule-cap.result }}" \
+                   "${{ needs.cto-audit-pr-conventions.result }}"; do
             case "$r" in
               success|skipped) ;;
               *) fail=1 ;;
