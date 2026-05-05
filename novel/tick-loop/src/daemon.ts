@@ -833,12 +833,24 @@ function isEnoent(err: unknown): boolean {
 
 /**
  * Build the brief the spawn strategy hands to claude --print. Loads the
- * picked task's block + an anti-noop directive — observation 2026-05-05:
- * the placeholder brief `"daemon brief for ${taskId}"` led claude to
- * default to "refresh the brief in TASKS.md" (1-line additions, no code,
- * 87+ iterations of churn on cross-repo-ci-action). The directive
- * forbids brief-refresh-only PRs and steers toward shipping the smallest
- * meaningful code change.
+ * picked task's block + an anti-noop directive + a priority-discipline
+ * gate.
+ *
+ * Anti-noop directive (2026-05-05): the placeholder brief
+ * `"daemon brief for ${taskId}"` led claude to default to "refresh the
+ * brief in TASKS.md" (1-line additions, no code, 87+ iterations of churn
+ * on cross-repo-ci-action). The directive forbids brief-refresh-only PRs
+ * and steers toward shipping the smallest meaningful code change.
+ *
+ * Priority-discipline gate (2026-05-05): operator observed that the
+ * daemon picked `daily-changelog-for-humans` (P1) for 30 iterations
+ * while genuine P0 work sat unclaimed. Root cause: `pickTask` walks file
+ * ordering, so a p1-tagged block placed in the `## P0` section gets
+ * picked first. The brief now lists all open unclaimed p0-tagged tasks
+ * and tells claude to abort with a `noop, exiting` reason if the picked
+ * task isn't among them — making the misordering visible-not-silent.
+ * The architectural fix (teach `pickTask` to consult `**Tags**:`) is
+ * filed as `daemon-priority-discipline-picktask-bug`.
  *
  * @otel-exempt pure builder of the spawn-strategy input.
  */
@@ -847,6 +859,14 @@ export function buildDaemonBrief(args: {
   readonly tasksMdContent: string;
 }): string {
   const block = extractTaskBlock(args.tasksMdContent, args.taskId);
+  const openP0s = extractOpenP0TaskIds(args.tasksMdContent);
+  const pickedIsP0 = openP0s.includes(args.taskId);
+  const openP0List = openP0s.length === 0 ? "(none)" : openP0s.map((id) => `\`${id}\``).join(", ");
+  const priorityVerdict = pickedIsP0
+    ? `Your picked task \`${args.taskId}\` IS in the open P0 set above. Proceed.`
+    : openP0s.length === 0
+      ? `No open P0 tasks. Your picked task \`${args.taskId}\` is the highest-priority work available. Proceed.`
+      : `**STOP.** Your picked task \`${args.taskId}\` is NOT in the open P0 set above. Output \`noop, exiting — priority discipline: '${args.taskId}' is not the highest-priority unclaimed P0; should pick '${openP0s[0]}' instead\` to stdout and DO NOT open a PR. Exception: if your picked task's block contains \`**Pick-next**: yes\` AND no open P0 has \`**Pick-next**: yes\`, the operator has explicitly overridden — proceed and note the override in your reason.`;
   return [
     `# Daemon iteration brief for \`${args.taskId}\``,
     "",
@@ -854,6 +874,12 @@ export function buildDaemonBrief(args: {
     "",
     block ??
       "(task block not found in TASKS.md — task may have been closed; if so, exit without writing files)",
+    "",
+    "## Priority-discipline gate",
+    "",
+    `Open P0 tasks (unclaimed, unblocked, tagged \`p0\`): ${openP0List}`,
+    "",
+    priorityVerdict,
     "",
     "## Iteration directive",
     "",
@@ -866,6 +892,41 @@ export function buildDaemonBrief(args: {
     "If the task's substrate already exists on main and what's left is a wire-in / config flip / one-line change, that IS a meaningful code change — ship it. Don't refresh briefs about it.",
     "",
   ].join("\n");
+}
+
+/**
+ * Return task IDs in `## P0` that are unclaimed, unblocked, AND have a
+ * `**Tags**:` line containing `p0`. Used by `buildDaemonBrief`'s
+ * priority-discipline gate.
+ *
+ * @otel-exempt pure helper of `buildDaemonBrief`.
+ */
+export function extractOpenP0TaskIds(tasksMd: string): readonly string[] {
+  const blocks = splitBlocks(sliceP0Section(tasksMd));
+  const ids: string[] = [];
+  for (const block of blocks) {
+    const id = openP0Id(block);
+    if (id !== undefined) ids.push(id);
+  }
+  return ids;
+}
+
+function openP0Id(block: string): string | undefined {
+  const id = parseId(block);
+  if (id === undefined) return undefined;
+  if (block.includes("(@minsky-tick-loop)")) return undefined;
+  if (/\*\*Blocked by\*\*:/i.test(block)) return undefined;
+  if (/\*\*Blocked\*\*:/.test(block)) return undefined;
+  if (!/\*\*Tags\*\*:[^\n]*\bp0\b/i.test(block)) return undefined;
+  return id;
+}
+
+function sliceP0Section(tasksMd: string): string {
+  const p0Start = tasksMd.search(/\n##\s+P0\b/);
+  if (p0Start < 0) return "";
+  const after = tasksMd.slice(p0Start);
+  const p1 = after.search(/\n##\s+P1\b/);
+  return p1 < 0 ? after : after.slice(0, p1);
 }
 
 /**
