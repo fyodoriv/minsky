@@ -16,12 +16,16 @@
  */
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { serve } from "@hono/node-server";
 
+import { loadRecentSpans } from "./activity.js";
 import type { GetValue } from "./render.js";
 import { createServer } from "./server.js";
 import { type Snapshot, openObserveGetValue, snapshotGetValue } from "./strategy.js";
+
+const ACTIVITY_LIMIT = 20;
 
 function loadSnapshot(): Snapshot | null {
   const path = process.env["DASHBOARD_METRICS_SNAPSHOT"];
@@ -61,7 +65,18 @@ async function resolveGetValue(): Promise<GetValue | undefined> {
 
 const port = Number.parseInt(process.env["PORT"] ?? "8080", 10);
 const getValue = await resolveGetValue();
-const args = getValue === undefined ? undefined : { getValue };
+
+// Activity feed reads the supervisor's stdout log on every request —
+// O(file-size) per `GET /` but the file is bounded (operator-side, KBs not
+// MBs) and the 5-second auto-refresh is the operator's expectation. The
+// log path follows `MINSKY_HOME/.minsky/tick-loop.out.log`; if MINSKY_HOME
+// is unset we fall back to the dashboard-web package's CWD which is the
+// repo root under `pnpm dogfood:ui`.
+const minskyHome = process.env["MINSKY_HOME"] ?? process.cwd();
+const activityLogPath = resolve(minskyHome, ".minsky/tick-loop.out.log");
+const getActivity = () => loadRecentSpans(activityLogPath, ACTIVITY_LIMIT);
+
+const args = { getActivity, ...(getValue === undefined ? {} : { getValue }) };
 const { fetch } = createServer(args);
 
 // `serve()` emits an unhandled `error` event on EADDRINUSE — node's default
