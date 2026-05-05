@@ -1,0 +1,97 @@
+id: scope-discipline-policy-lint-2026-05-04
+hypothesis: |
+  Rule #12 (vision.md § "Scope discipline") declares that no new
+  scope ships in any Minsky-governed repo without one of:
+    (a) a human-approved task block in `TASKS.md` referencing the
+        new public artefact;
+    (b) a market-research read-only investigation (no code shipped
+        — falls out for free, since "no diff" produces no public-
+        surface candidates);
+    (c) a pre-registered `experiments/<id>.yaml` whose body
+        references the new public artefact.
+
+  Without a deterministic CI gate, rule #12 degenerates into
+  operator discipline that drifts (rule #10 — every constitutional
+  rule gets a deterministic enforcer). A
+  `scripts/check-rule-12-scope-discipline.mjs` lint reads the PR
+  diff, classifies every newly-added (status A) public artefact —
+  files under `novel/**` (excluding `*.test.ts`, `*.fixture.ts`),
+  top-level scripts under `scripts/*.{mjs,sh,ts}`, new workflows
+  under `.github/workflows/*.yml`, and `distribution/**` — then
+  resolves each candidate against TASKS.md (task-block mention) /
+  `experiments/*.yaml` (pre-registration mention) / a
+  `<!-- scope: human-approved <reason> -->` opt-out comment in
+  the new file's first ~20 lines or the PR body. Any candidate
+  that resolves to none of those three gates → CI fails.
+
+  Granularity is file-level for v0 (rule-1 / rule-3 / rule-4
+  precedent — grandfather modifications, only flag status A); the
+  Pivot path (a manifest-driven approach reading
+  `package.json#minsky-public-surface`) is documented for the
+  static-analysis-of-TS-exports brittleness escape valve.
+success: |
+  - `pnpm vitest run scripts/check-rule-12-scope-discipline.test.mjs
+    --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests
+    == 0'` exits 0 (≥6 paired tests, all green).
+  - `node scripts/check-rule-12-scope-discipline.mjs
+    --diff=test/fixtures/rule-12/new-feature-without-experiment.diff`
+    exits 1 (the negative-fixture path triggers the gate).
+  - `node scripts/check-rule-12-scope-discipline.mjs
+    --diff=test/fixtures/rule-12/new-feature-with-experiment.diff`
+    exits 0 (the positive-fixture path passes).
+  - `.github/workflows/ci.yml` carries a `rule-12-scope-discipline`
+    job entry AND a matching `needs:` reference in the `ci`
+    aggregator (`grep -c "rule-12-scope-discipline" .github/
+    workflows/ci.yml` returns ≥3 — job header + needs entry +
+    aggregator gate loop).
+  - `vision.md` § "Pattern conformance index" carries a row
+    mentioning `scripts/check-rule-12-scope-discipline.mjs`
+    (`grep -q "check-rule-12-scope-discipline" vision.md` exits 0).
+pivot: |
+  If the file-level static-analysis approach proves brittle in
+  practice — e.g., legitimate refactors that *move* an existing
+  module to a new file path get flagged because git records the
+  rename as a delete + add (status A on the new path) and the
+  TASKS.md task block doesn't list the new path verbatim — pivot
+  in two steps:
+
+    1. **Status R awareness** (small): teach `classifyNewScope`
+       to skip status-R rows entirely (file move, not new
+       surface). This is a 2-line change and rescues most false
+       positives.
+    2. **Manifest approach** (larger): if step 1 isn't enough,
+       retire path-substring-matching and read each package's
+       `package.json#minsky-public-surface` array. The manifest
+       is a rule-#12 ratchet by construction (every public
+       addition requires a manifest update).
+
+  Pivot trigger: ≥2 false positives per month over a sustained
+  4-week window (per rule #11's flake-rate envelope, applied to
+  policy lints). Below that, the lint is working as intended.
+measurement: |
+  - `pnpm vitest run scripts/check-rule-12-scope-discipline.test.mjs
+    --reporter=json | jq -e '.numPassedTests >= 6 and .numFailedTests
+    == 0'` exits 0.
+  - `node scripts/check-rule-12-scope-discipline.mjs
+    --diff=test/fixtures/rule-12/new-feature-without-experiment.diff`
+    exits 1.
+  - `node scripts/check-rule-12-scope-discipline.mjs
+    --diff=test/fixtures/rule-12/new-feature-with-experiment.diff`
+    exits 0.
+  - `grep -c "rule-12-scope-discipline" .github/workflows/ci.yml`
+    returns ≥3.
+  - `grep -q "check-rule-12-scope-discipline" vision.md` exits 0.
+anchor: |
+  rule #12 (vision.md § "Scope discipline" — iron rule, no
+  exemption); rule #10 (vision.md § 10 — deterministic
+  enforcement: every constitutional rule has a CI lint); Ries,
+  *The Lean Startup*, Crown Business, 2011 (validated learning —
+  features without hypotheses are vanity); Beyer, Jones, Petoff,
+  Murphy, *Site Reliability Engineering*, O'Reilly, 2016, Ch. 3
+  (error-budget discipline — known improvements before invented
+  ones); Beck, *Extreme Programming Explained*, Addison-Wesley,
+  1999, Ch. 17 (CI as the constraint enforcer); Munafò, Nosek,
+  Bishop et al., "A Manifesto for Reproducible Science", *Nature
+  Human Behaviour* 1, 0021, 2017 (pre-registration — the
+  `experiments/<id>.yaml` gate operationalises the pre-
+  registration discipline at PR-merge time).
