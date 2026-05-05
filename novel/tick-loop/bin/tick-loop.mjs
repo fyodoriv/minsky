@@ -147,9 +147,23 @@ const dryRun = readDryRunEnv(process.env);
 // `~/.claude/projects`) so the local smoke stays hermetic; production
 // (real spawn) uses `MaciekTokenMonitor` against the user's Claude Code
 // config dir, the same data source Maciek's `claude-monitor` reads.
+// `MINSKY_PLAN_CAP_OVERRIDE` (rule #2 escape hatch) lets the operator
+// override the heuristic per-plan ceiling without code changes. Parsed
+// here at the I/O boundary; non-integer / non-positive values fall back
+// to the plan default (the constructor itself ignores invalid overrides
+// — this is just an early-fail nicety so the operator sees a clean path).
+const planCapOverride = (() => {
+  const raw = process.env["MINSKY_PLAN_CAP_OVERRIDE"];
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+})();
 const tokenMonitor = dryRun
   ? new StubTokenMonitor()
-  : new MaciekTokenMonitor({ configDir: resolve(homedir(), ".claude") });
+  : new MaciekTokenMonitor({
+      configDir: resolve(homedir(), ".claude"),
+      ...(planCapOverride === undefined ? {} : { cap: planCapOverride }),
+    });
 const realGuard = new BudgetGuard(tokenMonitor, () => {
   /* push-decision side effects (flag-file, OTEL) live in a follow-up;
      the daemon only branches on `decide()`'s return value. */
