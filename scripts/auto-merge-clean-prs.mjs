@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved 2026-05-04 user request "settings eg mode. Implement it" -->
 // Auto-merge sweep — lists open PRs with mergeStateStatus=CLEAN and
 // squash-merges each, deleting the branch.
 //
