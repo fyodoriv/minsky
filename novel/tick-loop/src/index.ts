@@ -392,9 +392,10 @@ export { createFileBackedChangelogReader } from "./changelog-cli-wiring.js";
 
 // Sub-task of `daily-changelog-for-humans` Details (e) — daily snapshot
 // capture I/O wrapper. Pure gate (`shouldRunSnapshot`) + injected
-// existence-probe + capture seams; the daemon wire-in and CLI-side
-// construction (production: spawns `pnpm changelog:snapshot`) land in
-// follow-ups, mirroring the #181 → #182 → #183 split for `runChangelog`.
+// existence-probe + capture seams; the daemon wire-in (`SnapshotSeam` on
+// `RunDaemonOpts`) shipped in #190; CLI-side construction (file-backed
+// existence probe + `pnpm changelog:snapshot --date <date>` capture)
+// lives in `snapshot-cli-wiring`.
 export {
   type RunSnapshotArgs,
   type RunSnapshotOutcome,
@@ -404,6 +405,16 @@ export {
   runSnapshot,
   shouldRunSnapshot,
 } from "./snapshot-runner.js";
+
+// CLI-side construction of the `SnapshotSeam` (file-backed existence probe
+// + pnpm-backed capture). Twin of `changelog-cli-wiring`'s file-backed
+// reader — keeps `bin/tick-loop.mjs` thin: the bin only decides whether to
+// opt-in (env var) and forwards the repo root here.
+export {
+  type PnpmSnapshotCaptureOptions,
+  createFileBackedSnapshotExists,
+  createPnpmSnapshotCapture,
+} from "./snapshot-cli-wiring.js";
 
 // Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
 // so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past
