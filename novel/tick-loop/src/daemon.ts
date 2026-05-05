@@ -37,6 +37,12 @@
  * @module tick-loop/daemon
  */
 
+import {
+  type ChangelogSpawn,
+  type ReadChangelog,
+  type RunChangelogOutcome,
+  runChangelog,
+} from "./changelog-runner.js";
 import { type MockAnthropicClient, type TickSpan, tick } from "./index.js";
 import {
   type CompletedIterationSignals,
@@ -152,6 +158,16 @@ export interface RunDaemonOpts {
    * supervisor daemons predating this seam keep working unchanged.
    */
   readonly ctoAudit?: CtoAuditSeam;
+  /**
+   * Optional daily-changelog seam (rule #2). When injected, the daemon
+   * fires `runChangelog` once per iteration; the runner's own gate
+   * (`shouldRunChangelog`) filters env-off + already-authored so that
+   * only one spawn lands per UTC date. When omitted, the changelog never
+   * runs — supervisor daemons predating this seam keep working unchanged.
+   * Substrate for `daily-changelog-for-humans` acceptance (3) "I/O wrapper
+   * fires daily".
+   */
+  readonly changelog?: ChangelogSeam;
 }
 
 /**
@@ -199,6 +215,26 @@ export interface CtoAuditSeam {
   }) => Promise<CompletedIterationSignals>;
 }
 
+/**
+ * Optional daily-changelog seam (rule #2). When injected, the daemon
+ * dispatches into `runChangelog` once per iteration. Two sub-seams:
+ *   - `spawn` — the I/O surface for `claude --print` in changelog-mode.
+ *     Structurally compatible with `SpawnStrategy` so the daemon can
+ *     hand its existing spawn strategy in without an adapter.
+ *   - `readChangelog` — reads CHANGELOG.md so the gate
+ *     (`hasDateSection`) can decide whether today is already authored.
+ *     Returning `""` for missing-file is intentional — a fresh checkout
+ *     pre-genesis still fires (the runner authors the genesis entry).
+ *
+ * Idempotency comes from CHANGELOG.md content itself, not a per-day
+ * lock dir (rule #2 — one source of truth; the section header IS the
+ * "this happened" record).
+ */
+export interface ChangelogSeam {
+  readonly spawn: ChangelogSpawn;
+  readonly readChangelog: ReadChangelog;
+}
+
 // ---- runDaemon ------------------------------------------------------------
 
 /**
@@ -242,6 +278,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     iterations.push(outcome.result);
     notifyOnPauseTransition(opts, outcome.result, pauseState);
     await maybeRunCtoAudit(opts, outcome.result);
+    await maybeRunChangelog(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -355,6 +392,78 @@ function emitCtoAuditSpan(opts: RunDaemonOpts, taskId: string, outcome: RunCtoAu
     base["audit.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.cto-audit", attributes: base });
+}
+
+/**
+ * Wire-in for the daily changelog runner (rule #2 — the daemon orchestrates,
+ * `runChangelog` decides + spawns). Skip-fast when:
+ *   - the seam isn't injected (production daemons predating this seam),
+ *   - the iteration is operator-quiet (`paused` sentinel — operator told
+ *     us to be silent),
+ *   - the iteration is `budget-paused` (we're inside the 5h cap; firing
+ *     a daily spawn here would consume the budget the cap is protecting),
+ *   - the iteration is `missing-tasks-md` (the daemon stops anyway).
+ *
+ * Otherwise derive the UTC date from the clock seam (or `Date.now()`)
+ * and invoke `runChangelog`. The gate inside `runChangelog`
+ * (`shouldRunChangelog`) is the per-day debounce: env-off short-circuits
+ * before the file read, and `hasDateSection` filters days that are
+ * already authored. So the daemon can call this every iteration and
+ * still land exactly one spawn per UTC date.
+ *
+ * Failed iterations DO fire the changelog: the per-day cadence is
+ * "every day with merged PRs has a corresponding section within 24h"
+ * (Acceptance pre-registration), not "every day with a successful
+ * daemon iteration" — PRs may merge from human work even when the
+ * daemon's own iteration failed.
+ *
+ * Outcome is emitted as a `tick-loop.changelog` span so the dashboard
+ * can chart firing-rate + skip-reason distribution.
+ *
+ * Extracted so `runDaemon` stays dispatch-only (rule #6, biome ≤10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunChangelog(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+): Promise<void> {
+  if (opts.changelog === undefined) return;
+  if (result.status === "paused") return;
+  if (result.status === "budget-paused") return;
+  if (result.status === "missing-tasks-md") return;
+
+  const ms = opts.now === undefined ? Date.now() : opts.now();
+  const date = new Date(ms).toISOString().slice(0, 10);
+  const outcome = await runChangelog({
+    date,
+    env: process.env,
+    readChangelog: opts.changelog.readChangelog,
+    spawn: opts.changelog.spawn,
+  });
+  emitChangelogSpan(opts, date, outcome);
+}
+
+/**
+ * Emit a `tick-loop.changelog` span describing the runner's outcome. One
+ * span per invocation (skipped or ran), so the dashboard can chart
+ * firing-rate, skip-reason distribution, and exit-code distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitChangelogSpan(opts: RunDaemonOpts, date: string, outcome: RunChangelogOutcome): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "changelog.date": date,
+    "changelog.outcome": outcome.outcome,
+  };
+  if (outcome.outcome === "skipped") {
+    base["changelog.skip_reason"] = outcome.reason;
+  } else {
+    base["changelog.exit_code"] = outcome.exitCode;
+    base["changelog.duration_ms"] = outcome.durationMs;
+  }
+  opts.emit({ name: "tick-loop.changelog", attributes: base });
 }
 
 /**
