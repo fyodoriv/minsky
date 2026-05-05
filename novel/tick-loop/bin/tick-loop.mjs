@@ -70,8 +70,10 @@ import {
   TestFakeMockAnthropic,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
+  createFileBackedLastRenderedDate,
   createFileBackedSnapshotExists,
   createGitGhSignalsBuilder,
+  createPnpmMetricsRender,
   createPnpmSnapshotCapture,
   fromRealBudgetGuard,
   runDaemon,
@@ -298,6 +300,31 @@ const snapshotSeam = (() => {
   };
 })();
 
+// `canonical-metric-list-per-repo` Acceptance (3) — CLI-side construction
+// of the `MetricsRenderSeam` (the per-day `METRICS.md` writer). Wires
+// under the same umbrella opt-in as the changelog + snapshot seams: the
+// renderer reads from `.minsky/metric-snapshots/<date>.json` (the
+// substrate the snapshot seam writes), so it would be incoherent to wire
+// the renderer without the snapshot writer below it. When
+// `MINSKY_CHANGELOG_ENABLE=1` is set, the CLI constructs:
+//   - `getLastRenderedDate` — file-backed mtime probe at
+//     `<MINSKY_HOME>/METRICS.md` (genesis case returns `null` so the
+//     first daemon iteration of a fresh checkout authors the file —
+//     rule #2, the file mtime IS the per-day "this happened" record);
+//   - `render` — spawns `pnpm metrics:render --date <date>` (the operator
+//     CLI shipped slice 3/N, #196) with bounded stdout/stderr tails.
+// The runner's own gate (`shouldRunMetricsRender`) still respects
+// `MINSKY_CHANGELOG=off` for ad-hoc skips; idempotency comes from the
+// METRICS.md mtime, not a separate lock dir.
+const metricsRenderSeam = (() => {
+  if (!changelogEnabled) return undefined;
+  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
+  return {
+    getLastRenderedDate: createFileBackedLastRenderedDate(resolve(minskyHome, "METRICS.md")),
+    render: createPnpmMetricsRender({ cwd: minskyHome }),
+  };
+})();
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -335,6 +362,9 @@ const result = await runDaemon({
   // Optional daily-snapshot seam; same opt-in as the changelog seam (the two
   // share the daily-changelog umbrella — see SnapshotSeam construction above).
   ...(snapshotSeam !== undefined ? { snapshot: snapshotSeam } : {}),
+  // Optional daily-metrics-render seam; same umbrella as the snapshot seam
+  // (it consumes the snapshot file and writes METRICS.md).
+  ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
   emit: (event) => {
     // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
@@ -382,6 +412,15 @@ if (snapshotSeam !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no daily snapshot wired (set MINSKY_CHANGELOG_ENABLE=1 to capture per-day metric snapshots)\n",
+  );
+}
+if (metricsRenderSeam !== undefined) {
+  process.stdout.write(
+    "[tick-loop] daily metrics render wired (file-backed METRICS.md mtime probe + pnpm metrics:render)\n",
+  );
+} else {
+  process.stdout.write(
+    "[tick-loop] no daily metrics render wired (set MINSKY_CHANGELOG_ENABLE=1 to refresh METRICS.md daily)\n",
   );
 }
 
