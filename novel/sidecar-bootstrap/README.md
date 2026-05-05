@@ -8,7 +8,7 @@ Pure-functions-with-I/O-at-the-edge (Martin 2017). The package exports inference
 
 ## Why this exists
 
-User story 006 (cross-repo-runner) needs a per-host substrate: `repo.yaml` overlay, `experiments/` directory, `vision.md` symlink, ignore-list registration. This package is the bootstrap step that materialises that substrate idempotently. Pre-`cross-repo-runner-v0`, this is the precondition.
+User story 006 (cross-repo-runner) needs a per-host substrate: `repo.yaml` overlay, `experiments/` directory, `vision.md` symlink, ignore-list registration. This package is the bootstrap step that materialises that substrate idempotently. Pre-`cross-repo-runner-v0`, this is the precondition. The contract that substrate gates against — what "follows Minsky principles" actually means — is enumerated in [`docs/host-transformation-checklist.md`](../../docs/host-transformation-checklist.md): six disciplines (lint / test / OTEL / chaos / experiment / pattern-conformance) mapped 1:1 to constitutional rules #2 / #3 / #4 / #7 / #9 / #8, each citing its enforcing `scripts/check-*.mjs`.
 
 ## Pattern conformance
 
