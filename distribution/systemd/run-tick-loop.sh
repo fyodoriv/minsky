@@ -84,6 +84,27 @@ fi
 # `MINSKY_TICK_DRY_RUN` (read by the CLI directly) is the env-var control
 # surface for dry-run; unset = real spawn (production default).
 #
+# Self-diagnose probe (advisory). Runs `scripts/self-diagnose.mjs` once
+# at supervisor start — invariant violations write a P0 task block to
+# stdout (and to TASKS.md when --write-tasks-md is passed; v0 leaves the
+# write opt-in pending the operator/automation review of false-positive
+# rate). Non-zero exit code is logged but does not block startup —
+# rule #7 graceful-degrade. Wallclock + finding count get echoed so the
+# supervisor log surfaces "self-diagnose ran, N findings" on every boot.
+#
+# Skipped under MINSKY_TICK_DRY_RUN=1 because dry-run smoke tests don't
+# stand up the full token-monitor data path; the probe would
+# false-positive against an empty fixture and obscure real findings.
+if [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" ]]; then
+  diagnose_start=$(date -u +%FT%TZ)
+  diagnose_findings=$(node "${MINSKY_HOME}/scripts/self-diagnose.mjs" --json 2>&1 || true)
+  diagnose_count=$(printf '%s' "${diagnose_findings}" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).length))}catch{process.stdout.write("?")}})' 2>/dev/null || printf '?')
+  printf 'self-diagnose: ran at %s, %s findings\n' "${diagnose_start}" "${diagnose_count}"
+  if [[ "${diagnose_count}" != "0" && "${diagnose_count}" != "?" ]]; then
+    printf 'self-diagnose findings (advisory):\n%s\n' "${diagnose_findings}"
+  fi
+fi
+
 # Bash quirk: under `set -u`, `"${EXTRA_ARGS[@]}"` triggers an unbound-
 # variable error when EXTRA_ARGS is empty (no env-var mappings hit
 # above). The `+"${EXTRA_ARGS[@]}"` parameter-substitution form expands
