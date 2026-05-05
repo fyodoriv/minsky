@@ -13,7 +13,7 @@ I'm working on `aifn-840-slash-command-labels` in `~/apps/iep-capabilities-3`. F
 - The spawned Claude Code session sees the canonical `vision.md` via the symlink at `<host>/.minsky/vision.md`. Constitutional rules apply unchanged.
 - The PR opened by the spawn carries a `Hypothesis self-grade` block whose four fields (Predicted / Observed / Match / Lesson) are all non-empty.
 - A minsky-side GitHub Action (decision C2) posts a `minsky-constitution` check-run on the host PR via `gh api repos/$host_repo/check-runs`. Pre-push hook installed by `bootstrap` (decision C3) is the local fallback if the action is unreachable.
-- 12 of the 13 rule lints (per [`docs/cross-repo-portability.md`](../docs/cross-repo-portability.md)) run against the host substrate via `MINSKY_HOST_ROOT`. The one exception (`check-rule-1-novel-justification`) stays repo-local *by design* — the host's source taxonomy is the host's domain, not minsky's.
+- 12 of the 13 rule lints (per [`docs/cross-repo-portability.md`](../docs/cross-repo-portability.md), and grouped into the six disciplines a host opts into per [`docs/host-transformation-checklist.md`](../docs/host-transformation-checklist.md)) run against the host substrate via `MINSKY_HOST_ROOT`. The one exception (`check-rule-1-novel-justification`) stays repo-local *by design* — the host's source taxonomy is the host's domain, not minsky's.
 - The host repo's tracked files are never modified by `minsky bootstrap` or `minsky run` — only the actual code change the spawned task ships, and only at the spawned agent's hand. Verified by `git status` on the host *before* a `minsky run` and *immediately after* `minsky bootstrap`: identical output.
 
 ## Metric
