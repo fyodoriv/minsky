@@ -51,6 +51,12 @@ import {
   type RunCtoAuditOutcome,
   runCtoAudit,
 } from "./post-task-cto-audit.js";
+import {
+  type RunSnapshotOutcome,
+  type SnapshotCapture,
+  type SnapshotExists,
+  runSnapshot,
+} from "./snapshot-runner.js";
 import type { SpawnStrategy } from "./spawn-strategy.js";
 
 // ---- Types ----------------------------------------------------------------
@@ -168,6 +174,20 @@ export interface RunDaemonOpts {
    * fires daily".
    */
   readonly changelog?: ChangelogSeam;
+  /**
+   * Optional daily-snapshot seam (rule #2). When injected, the daemon
+   * fires `runSnapshot` once per iteration; the runner's own gate
+   * (`shouldRunSnapshot`) filters env-off + already-captured so that
+   * only one capture lands per UTC date. When omitted, the snapshot
+   * never runs — supervisor daemons predating this seam keep working
+   * unchanged. Substrate for `daily-changelog-for-humans` Details (e):
+   * `.minsky/metric-snapshots/<date>.json` is the per-day record day-N's
+   * Δ rendering depends on (without it, day-(N+1)'s changelog has no
+   * `prevMetricsSnapshot` to diff against). Independent of the
+   * `changelog` seam — manual CHANGELOG.md authoring must NOT suppress
+   * snapshot writes.
+   */
+  readonly snapshot?: SnapshotSeam;
 }
 
 /**
@@ -235,6 +255,28 @@ export interface ChangelogSeam {
   readonly readChangelog: ReadChangelog;
 }
 
+/**
+ * Optional daily-snapshot seam (rule #2). When injected, the daemon
+ * dispatches into `runSnapshot` once per iteration. Two sub-seams:
+ *   - `capture` — writes today's snapshot to disk. Production binding
+ *     spawns `pnpm changelog:snapshot --date <date>` via the daemon's
+ *     existing `SpawnStrategy`; tests inject a stub.
+ *   - `snapshotExists` — checks whether `<rootDir>/.minsky/metric-snapshots/
+ *     <date>.json` already exists, so the gate can short-circuit on days
+ *     the operator (or a prior daemon iteration) already captured.
+ *
+ * Independent of the `changelog` seam: manual CHANGELOG.md authoring must
+ * NOT suppress snapshot capture (otherwise day-(N+1)'s Δ rendering loses
+ * its baseline). Same calendar, separate gates — see `snapshot-runner.ts`.
+ *
+ * Idempotency comes from the snapshot file itself, not a separate lock
+ * dir (rule #2 — the file IS the "this happened" record).
+ */
+export interface SnapshotSeam {
+  readonly capture: SnapshotCapture;
+  readonly snapshotExists: SnapshotExists;
+}
+
 // ---- runDaemon ------------------------------------------------------------
 
 /**
@@ -279,6 +321,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     notifyOnPauseTransition(opts, outcome.result, pauseState);
     await maybeRunCtoAudit(opts, outcome.result);
     await maybeRunChangelog(opts, outcome.result);
+    await maybeRunSnapshot(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -464,6 +507,73 @@ function emitChangelogSpan(opts: RunDaemonOpts, date: string, outcome: RunChange
     base["changelog.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.changelog", attributes: base });
+}
+
+/**
+ * Wire-in for the daily snapshot runner (rule #2 — the daemon orchestrates,
+ * `runSnapshot` decides + writes). Skip-fast on the same operator-quiet
+ * iteration shapes as `maybeRunChangelog`:
+ *   - the seam isn't injected (production daemons predating this seam),
+ *   - `paused` (operator told us to be silent),
+ *   - `budget-paused` (we're inside the 5h cap; `pnpm changelog:snapshot`
+ *     is two `gh` calls + a JSON write, but the cap is the cap),
+ *   - `missing-tasks-md` (the daemon stops anyway).
+ *
+ * Otherwise derive the UTC date and invoke `runSnapshot`. The gate inside
+ * `runSnapshot` (`shouldRunSnapshot`) is the per-day debounce: env-off
+ * short-circuits before the existence probe, and the existence probe
+ * filters days already captured. So the daemon may safely call this every
+ * iteration and still land exactly one capture per UTC date.
+ *
+ * Failed iterations DO fire snapshot capture. The snapshot is the
+ * baseline day-(N+1)'s Δ rendering depends on; "every day with merged
+ * PRs has a corresponding section within 24h" requires the substrate
+ * (snapshots) to be captured even when the daemon's iteration failed.
+ *
+ * Outcome is emitted as a `tick-loop.snapshot` span so the dashboard can
+ * chart firing-rate + skip-reason distribution.
+ *
+ * Extracted so `runDaemon` stays dispatch-only (rule #6, biome ≤10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunSnapshot(opts: RunDaemonOpts, result: DaemonIterationResult): Promise<void> {
+  if (opts.snapshot === undefined) return;
+  if (result.status === "paused") return;
+  if (result.status === "budget-paused") return;
+  if (result.status === "missing-tasks-md") return;
+
+  const ms = opts.now === undefined ? Date.now() : opts.now();
+  const date = new Date(ms).toISOString().slice(0, 10);
+  const outcome = await runSnapshot({
+    date,
+    env: process.env,
+    snapshotExists: opts.snapshot.snapshotExists,
+    capture: opts.snapshot.capture,
+  });
+  emitSnapshotSpan(opts, date, outcome);
+}
+
+/**
+ * Emit a `tick-loop.snapshot` span describing the runner's outcome. One
+ * span per invocation (skipped or ran), so the dashboard can chart
+ * firing-rate, skip-reason distribution, and exit-code distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitSnapshotSpan(opts: RunDaemonOpts, date: string, outcome: RunSnapshotOutcome): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "snapshot.date": date,
+    "snapshot.outcome": outcome.outcome,
+  };
+  if (outcome.outcome === "skipped") {
+    base["snapshot.skip_reason"] = outcome.reason;
+  } else {
+    base["snapshot.exit_code"] = outcome.exitCode;
+    base["snapshot.duration_ms"] = outcome.durationMs;
+  }
+  opts.emit({ name: "tick-loop.snapshot", attributes: base });
 }
 
 /**

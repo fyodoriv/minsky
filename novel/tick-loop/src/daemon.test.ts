@@ -24,6 +24,7 @@ import {
   type BudgetGuardLike,
   type ChangelogSeam,
   type CtoAuditSeam,
+  type SnapshotSeam,
   buildDaemonBrief,
   extractTaskBlock,
   pickTask,
@@ -35,6 +36,7 @@ import type {
   CtoAuditLock,
   CtoAuditSpawn,
 } from "./post-task-cto-audit.js";
+import type { SnapshotCapture, SnapshotExists } from "./snapshot-runner.js";
 import { DryRunSpawnStrategy, ProcessSpawnStrategy } from "./spawn-strategy.js";
 
 // ---- Fixtures -------------------------------------------------------------
@@ -924,6 +926,229 @@ describe("tick-loop / daemon / runDaemon", () => {
     });
     expect(readCalls.count).toBe(3);
     expect(spawnCalls).toHaveLength(1);
+  });
+
+  // ---- daily-snapshot wire-in --------------------------------------------
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunSnapshot`. The
+  // runner's own gate / dispatch semantics are tested in
+  // `snapshot-runner.test.ts`; here we only verify that the daemon
+  // dispatches into `runSnapshot` for the right iteration shapes, skips
+  // for the operator-quiet states, and emits the `tick-loop.snapshot` span.
+
+  /**
+   * Build a `SnapshotSeam` whose `capture` and `snapshotExists` record
+   * their calls. `existsByDate` is the existence map; defaults to empty
+   * (every date "missing", so the gate fires).
+   */
+  function makeSnapshotSeam(opts: { existsByDate?: ReadonlySet<string> } = {}): {
+    readonly seam: SnapshotSeam;
+    readonly captureCalls: Array<{ date: string }>;
+    readonly existsCalls: { count: number };
+  } {
+    const existsCalls = { count: 0 };
+    const captureCalls: Array<{ date: string }> = [];
+    const known = opts.existsByDate ?? new Set<string>();
+    const snapshotExists: SnapshotExists = async (date) => {
+      existsCalls.count++;
+      return known.has(date);
+    };
+    const capture: SnapshotCapture = {
+      capture: async (input) => {
+        captureCalls.push({ date: input.date });
+        return { exitCode: 0, durationMs: 11, stdoutTail: "snapshot ran", stderrTail: "" };
+      },
+    };
+    return { seam: { capture, snapshotExists }, captureCalls, existsCalls };
+  }
+
+  it("snapshot wire-in: missing snapshot triggers capture + emits a ran span tagged with today's UTC date", async () => {
+    const recorder = new SpanRecorder();
+    const snap = makeSnapshotSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      emit: (e: TickSpan) => recorder.record(e),
+      snapshot: snap.seam,
+    });
+    expect(snap.existsCalls.count).toBe(1);
+    expect(snap.captureCalls).toEqual([{ date: "2026-05-05" }]);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.snapshot");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["snapshot.outcome"]).toBe("ran");
+    expect(spans[0]?.attributes["snapshot.date"]).toBe("2026-05-05");
+    expect(spans[0]?.attributes["snapshot.exit_code"]).toBe(0);
+  });
+
+  it("snapshot wire-in: existing snapshot skips with already-captured span", async () => {
+    const recorder = new SpanRecorder();
+    const snap = makeSnapshotSeam({ existsByDate: new Set(["2026-05-05"]) });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      emit: (e: TickSpan) => recorder.record(e),
+      snapshot: snap.seam,
+    });
+    expect(snap.existsCalls.count).toBe(1);
+    expect(snap.captureCalls).toHaveLength(0);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.snapshot");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["snapshot.outcome"]).toBe("skipped");
+    expect(spans[0]?.attributes["snapshot.skip_reason"]).toBe("already-captured");
+  });
+
+  it("snapshot wire-in: omitted seam (production daemons predating this seam) keeps working unchanged", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.snapshot");
+    expect(spans).toHaveLength(0);
+  });
+
+  it("snapshot wire-in: paused iteration does NOT fire (operator-quiet)", async () => {
+    const snap = makeSnapshotSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: pausedNow(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      snapshot: snap.seam,
+    });
+    expect(snap.existsCalls.count).toBe(0);
+    expect(snap.captureCalls).toHaveLength(0);
+  });
+
+  it("snapshot wire-in: budget-paused iteration does NOT fire (don't burn the cap on a daily-fire)", async () => {
+    const snap = makeSnapshotSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      snapshot: snap.seam,
+    });
+    expect(snap.existsCalls.count).toBe(0);
+    expect(snap.captureCalls).toHaveLength(0);
+  });
+
+  it("snapshot wire-in: failed iteration STILL fires (per-day cadence — the snapshot IS the baseline tomorrow's Δ depends on)", async () => {
+    // Acceptance contract for `daily-changelog-for-humans` Details (e):
+    // snapshots are captured every UTC day so the next-day Δ render has
+    // data to diff against. Even on a failed iteration, that contract
+    // holds — same rationale as `maybeRunChangelog` firing on failed.
+    const snap = makeSnapshotSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic({ failureMode: "http-5xx" }),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      snapshot: snap.seam,
+    });
+    expect(snap.existsCalls.count).toBe(1);
+    expect(snap.captureCalls).toHaveLength(1);
+  });
+
+  it("snapshot wire-in: multi-iteration same day probes every tick but captures only once (gate idempotency)", async () => {
+    // The first iteration's capture would write `.minsky/metric-snapshots/<date>.json`;
+    // the second iteration's existence probe returns `true` and the gate
+    // skips. Simulate by mutating an in-memory existence set in the capture
+    // stub.
+    const knownDates = new Set<string>();
+    const existsCalls = { count: 0 };
+    const captureCalls: Array<{ date: string }> = [];
+    const snapshotExists: SnapshotExists = async (date) => {
+      existsCalls.count++;
+      return knownDates.has(date);
+    };
+    const capture: SnapshotCapture = {
+      capture: async (input) => {
+        captureCalls.push({ date: input.date });
+        // The runner's capture would write `<date>.json`; mirror that
+        // side effect on our in-memory set.
+        knownDates.add(input.date);
+        return { exitCode: 0, durationMs: 11, stdoutTail: "ran", stderrTail: "" };
+      },
+    };
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 3,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      snapshot: { capture, snapshotExists },
+    });
+    expect(existsCalls.count).toBe(3);
+    expect(captureCalls).toHaveLength(1);
+  });
+
+  it("snapshot wire-in: independent of the changelog seam — manual-author day still captures snapshot", async () => {
+    // Critical contract: if the operator (or someone else) authored
+    // CHANGELOG.md manually for today, `runChangelog` skips with
+    // `already-authored`. But the snapshot still needs writing — without
+    // it, day-(N+1)'s Δ rendering has no `prevMetricsSnapshot` to diff
+    // against. This test asserts the two gates are truly independent.
+    const cl = makeChangelogSeam({ content: "## 2026-05-05\n\nManual entry.\n" });
+    const snap = makeSnapshotSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      changelog: cl.seam,
+      snapshot: snap.seam,
+    });
+    // changelog skipped (manually authored)…
+    expect(cl.spawnCalls).toHaveLength(0);
+    // …but the snapshot still fired.
+    expect(snap.captureCalls).toHaveLength(1);
   });
 });
 
