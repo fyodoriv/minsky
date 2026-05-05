@@ -44,15 +44,43 @@ console.log(snap);
 - `now?` — clock seam; defaults to `() => new Date()`. Tests inject a
   fixed `Date` so block selection is deterministic.
 - `plan?` — Anthropic plan tier; defaults to `'max5'`.
+- `cap?` — numeric override of the 5h-window cap. When set (positive
+  integer), wins over `PLAN_CAPS[plan]`. The supervisor wires this from
+  the `MINSKY_PLAN_CAP_OVERRIDE` env var (rule #2 escape hatch).
 
-**Plan caps** (mirrored from `claude_monitor/core/plans.py` `PLAN_LIMITS`):
+**Plan caps** (heuristic — diverges from Maciek upstream's stale 2024
+numbers; see "Calibration note" below):
 
-| Plan | Tokens / 5h window |
+| Plan | Chargeable tokens / 5h window |
 |---|---|
-| `pro` | 19 000 |
-| `max5` | 88 000 (default) |
-| `max20` | 220 000 |
-| `custom` | 44 000 |
+| `pro` |  2 000 000 |
+| `max5` | 10 000 000 (default) |
+| `max20` | 40 000 000 |
+| `custom` |  5 000 000 |
+
+### Calibration note
+
+Maciek upstream's `claude_monitor==3.1.0` `PLAN_LIMITS` reflects 2024
+estimates calibrated against ~500-1500-token messages. On 1M-context
+Claude Code, per-message chargeable averages ~3k tokens, so an active
+5h dogfood block burns 4M+ chargeable tokens (empirical: 4,107,313 on
+the operator's session 2026-05-04). The numbers above are derived from:
+
+- The empirical 4.1M-chargeable-in-5h observation on a Max-tier session
+  that wasn't being throttled.
+- Anthropic's public messaging that Max20 is "~20× a typical Pro user".
+- Headroom of ~10× over the empirical observation so BudgetGuard's 85%
+  circuit-break threshold still leaves room for genuine over-spend.
+
+Operators whose accounts have different real ceilings can override via
+`MINSKY_PLAN_CAP_OVERRIDE=<integer>` (the supervisor's bootstrap reads
+the env var and threads it through to the constructor `cap` opt).
+
+**Pivot (rule #9)**: if heuristic caps cause false circuit-breaks during
+normal operator usage (≥10% of iterations budget-paused over a 7-day
+window), the principled solution is a separate `TokenMonitor` Strategy
+that reads `anthropic-ratelimit-tokens-remaining` from response headers.
+That's a separate PR behind the existing rule-#2 seam.
 
 ### Algorithm (mirrored from Maciek's `data/analyzer.py`)
 
