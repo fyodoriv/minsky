@@ -302,7 +302,7 @@ async function runOneIteration(args: {
     return { result };
   }
 
-  const result = await runClaimedIteration({ opts, iteration, taskId });
+  const result = await runClaimedIteration({ opts, iteration, taskId, tasksMdContent: taskSource });
   emitIterationSpan(opts, result);
   return { result };
 }
@@ -318,8 +318,9 @@ async function runClaimedIteration(args: {
   readonly opts: RunDaemonOpts;
   readonly iteration: number;
   readonly taskId: string;
+  readonly tasksMdContent: string;
 }): Promise<DaemonIterationResult> {
-  const { opts, iteration, taskId } = args;
+  const { opts, iteration, taskId, tasksMdContent } = args;
   // claim() is in-memory only in v0 (persistence in follow-up); we still
   // call it so the contract surface is exercised.
   claim({ taskId });
@@ -330,7 +331,7 @@ async function runClaimedIteration(args: {
   if (opts.spawnStrategy !== undefined) {
     const stratResult = await opts.spawnStrategy.spawn({
       taskId,
-      brief: `daemon brief for ${taskId}`,
+      brief: buildDaemonBrief({ taskId, tasksMdContent }),
       env: process.env,
     });
     return {
@@ -396,6 +397,63 @@ function isEnoent(err: unknown): boolean {
  *
  * @otel tick-loop.pick-task
  */
+/**
+ * Build the brief the spawn strategy hands to claude --print. Loads the
+ * picked task's block + an anti-noop directive — observation 2026-05-05:
+ * the placeholder brief `"daemon brief for ${taskId}"` led claude to
+ * default to "refresh the brief in TASKS.md" (1-line additions, no code,
+ * 87+ iterations of churn on cross-repo-ci-action). The directive
+ * forbids brief-refresh-only PRs and steers toward shipping the smallest
+ * meaningful code change.
+ *
+ * @otel-exempt pure builder of the spawn-strategy input.
+ */
+export function buildDaemonBrief(args: {
+  readonly taskId: string;
+  readonly tasksMdContent: string;
+}): string {
+  const block = extractTaskBlock(args.tasksMdContent, args.taskId);
+  return [
+    `# Daemon iteration brief for \`${args.taskId}\``,
+    "",
+    "## Task block (current TASKS.md)",
+    "",
+    block ??
+      "(task block not found in TASKS.md — task may have been closed; if so, exit without writing files)",
+    "",
+    "## Iteration directive",
+    "",
+    "Ship the smallest meaningful next iteration of this task. Open a PR with code changes that move the task toward its Acceptance criteria.",
+    "",
+    "**FORBIDDEN — anti-noop guard:**",
+    "- DO NOT open a PR whose only change is appending to the task block in TASKS.md (so-called 'brief refresh'). That is the noop pattern observed on iterations 87-93 of cross-repo-ci-action before the operator intervened. If you cannot ship a code change this iteration (the task is blocked, the substrate already exists, or the next step is a separate human-approval action), output `noop, exiting` to stdout and do NOT open a PR.",
+    "- DO NOT add new task blocks to TASKS.md unless the task you are executing explicitly directs you to.",
+    "",
+    "If the task's substrate already exists on main and what's left is a wire-in / config flip / one-line change, that IS a meaningful code change — ship it. Don't refresh briefs about it.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Extract a single task block from TASKS.md by ID. The block runs from
+ * the `- [ ] ` heading to (a) the next `- [ ] ` heading, (b) the next
+ * `## ` section heading, or (c) end-of-file. Returns `undefined` when
+ * the ID isn't found.
+ *
+ * @otel-exempt pure helper of `buildDaemonBrief`.
+ */
+export function extractTaskBlock(tasksMd: string, taskId: string): string | undefined {
+  const headingPattern = new RegExp(
+    `^- \\[ \\] \`${taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\``,
+    "m",
+  );
+  const start = tasksMd.search(headingPattern);
+  if (start < 0) return undefined;
+  const after = tasksMd.slice(start);
+  const endMatch = after.match(/\n(?:- \[ \] |## )/);
+  return endMatch === null ? after.trim() : after.slice(0, endMatch.index ?? after.length).trim();
+}
+
 export function pickTask(tasksMd: string): string | undefined {
   const sliced = sliceP0P1(tasksMd);
   const blocks = splitBlocks(sliced);
