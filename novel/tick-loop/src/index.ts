@@ -356,6 +356,7 @@ export function parseFixtureTaskIds(source: string): readonly string[] {
 export {
   type BudgetDecisionLike,
   type BudgetGuardLike,
+  type CtoAuditSeam,
   type DaemonIterationResult,
   type DaemonIterationStatus,
   type DaemonRunResult,
@@ -365,6 +366,23 @@ export {
   runDaemon,
   spawnTickDryRun,
 } from "./daemon.js";
+
+// Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
+// so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past
+// `dist/`. The pure builder + gate stay testable in isolation; `runCtoAudit`
+// is the I/O wrapper the daemon dispatches into.
+export {
+  CTO_PROMPT_HEADER,
+  type CompletedIterationSignals,
+  type CtoAuditLock,
+  type CtoAuditSpawn,
+  type RunCtoAuditArgs,
+  type RunCtoAuditOutcome,
+  type SkipReason,
+  buildCtoBrief,
+  runCtoAudit,
+  shouldRunCtoAudit,
+} from "./post-task-cto-audit.js";
 
 export { fromRealBudgetGuard } from "./budget-guard-facade.js";
 
