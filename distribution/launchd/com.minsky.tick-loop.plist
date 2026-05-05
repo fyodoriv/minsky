@@ -34,6 +34,19 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
              temporarily (e.g., for a chaos test or a fresh-install
              smoke), set `MINSKY_TICK_DRY_RUN=1` here, `pnpm dogfood`
              to reload, then drop it again. -->
+        <!-- Daily-changelog umbrella opt-in (acceptance criterion (3) of
+             `daily-changelog-for-humans`). Enables BOTH `runDaemon` seams
+             the CLI constructs under this single env var: the changelog-mode
+             `claude --print` author (per-day, gated by `## YYYY-MM-DD` H2 in
+             CHANGELOG.md) AND the per-day metric-snapshot capture
+             (`pnpm changelog:snapshot --date <date>`, gated by
+             `.minsky/metric-snapshots/<date>.json` presence). Both gates are
+             idempotent — exactly one fire per UTC date — so leaving this on
+             across many iterations is safe by design (rule #2 — file
+             presence IS the "this happened" record). Drop these two keys
+             to revert to substrate-inert. -->
+        <key>MINSKY_CHANGELOG_ENABLE</key>
+        <string>1</string>
     </dict>
 
     <key>ProgramArguments</key>
