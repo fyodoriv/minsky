@@ -1,0 +1,107 @@
+# Cross-repo constitution check (decision C2). Listens for the runner-emitted
+# `repository_dispatch` event (`event_type: cross-repo-pr`) when a host PR is
+# opened, fetches the host PR's substrate via `gh`, runs the cross-repo lints
+# via `scripts/cross-repo-check-runner.mjs`, and posts the verdict back to
+# the host PR as a `minsky-constitution` check-run.
+#
+# v0 scope (per TASKS.md `cross-repo-ci-action` Brief, 2026-05-04):
+#   - workflow exists with both `workflow_dispatch` (manual) and
+#     `repository_dispatch` (runner-emitted) triggers,
+#   - the runner script produces the verdict locally,
+#   - the live `gh api …/check-runs` POST is wired here but only fires when
+#     `MINSKY_BOT_INSTALLED=1` is set in the workflow env (operator opts in
+#     once a `minsky-bot` install lands on the host org).
+# Out of scope (filed as follow-up tasks):
+#   - the runner-side actual `gh api …/dispatches` emission
+#   - rate-limit handling beyond GitHub's defaults
+#   - the PROJ-840-driven first-real-host integration test
+
+name: cross-repo-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      host_repo:
+        description: "Host repo as owner/name."
+        required: true
+        type: string
+      pr_number:
+        description: "PR number on the host repo."
+        required: true
+        type: string
+      experiment_yaml_url:
+        description: "GitHub-API URL to the EXPERIMENT.yaml on the host PR's branch."
+        required: true
+        type: string
+  repository_dispatch:
+    types: [cross-repo-pr]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Runner needs `pnpm` to invoke the script's deps; minsky's own checks
+      # don't need a host clone, so node + pnpm is enough.
+      HOST_REPO: >-
+        ${{ github.event.inputs.host_repo || github.event.client_payload.host_repo }}
+      PR_NUMBER: >-
+        ${{ github.event.inputs.pr_number || github.event.client_payload.pr_number }}
+      EXPERIMENT_YAML_URL: >-
+        ${{ github.event.inputs.experiment_yaml_url || github.event.client_payload.experiment_yaml_url }}
+    steps:
+      - name: Checkout minsky
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.3"
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Run cross-repo check
+        id: check
+        env:
+          # `gh` is preinstalled on ubuntu-latest; auth via the workflow's
+          # GITHUB_TOKEN (must have `pull-request: read` on the host repo —
+          # operator wires this via a `minsky-bot` install on the host org;
+          # see docs/cross-repo-ci-runbook.md).
+          GH_TOKEN: ${{ secrets.MINSKY_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cross-repo-check
+          node scripts/cross-repo-check-runner.mjs \
+            --host-repo "$HOST_REPO" \
+            --pr-number "$PR_NUMBER" \
+            --experiment-yaml-url "$EXPERIMENT_YAML_URL" \
+            --work-dir /tmp/cross-repo-check \
+            --json-only \
+            > /tmp/cross-repo-check/verdict.json
+          echo "verdict_path=/tmp/cross-repo-check/verdict.json" >> "$GITHUB_OUTPUT"
+          cat /tmp/cross-repo-check/verdict.json
+      - name: Post check-run to host PR
+        if: ${{ env.MINSKY_BOT_INSTALLED == '1' }}
+        env:
+          GH_TOKEN: ${{ secrets.MINSKY_BOT_TOKEN }}
+          MINSKY_BOT_INSTALLED: ${{ vars.MINSKY_BOT_INSTALLED }}
+        run: |
+          set -euo pipefail
+          VERDICT="$(cat /tmp/cross-repo-check/verdict.json)"
+          CONCLUSION="$(echo "$VERDICT" | jq -r '.conclusion')"
+          SUMMARY="$(echo "$VERDICT" | jq -r '.summary')"
+          DETAILS="$(echo "$VERDICT" | jq -r '.details')"
+          HEAD_SHA="$(echo "$VERDICT" | jq -r '.head_sha')"
+          gh api "repos/${HOST_REPO}/check-runs" \
+            -f name=minsky-constitution \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed \
+            -f conclusion="$CONCLUSION" \
+            -f "output[title]=Minsky constitution check" \
+            -f "output[summary]=$SUMMARY" \
+            -f "output[text]=$DETAILS"
