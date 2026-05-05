@@ -380,24 +380,6 @@ function isEnoent(err: unknown): boolean {
 }
 
 /**
- * Pick the first unblocked, unclaimed P0/P1 task from a TASKS.md source.
- *
- * Heuristic (v0): scan top-down, find a `**ID**: <kebab-id>` line whose
- * preceding `- [ ] …` task heading does NOT contain `(@minsky-tick-loop)`,
- * whose subsequent `**Blocked by**:` line (if any) is absent (dependency
- * blocker), AND whose `**Blocked**:` line (if any) is absent (external-
- * constraint blocker — the safety surface for blocked-by-default actions
- * per the `/next-task` skill; see TASKS.md task
- * `tick-loop-picktask-honors-blocked-field`). The `**Blocked**` field
- * match is case-sensitive on the field name and triggers regardless of
- * the reason text — its mere presence means "do not pick autonomously".
- * Stops scanning at the `## P2` header so only P0/P1 tasks are considered.
- *
- * Pure function — no I/O.
- *
- * @otel tick-loop.pick-task
- */
-/**
  * Build the brief the spawn strategy hands to claude --print. Loads the
  * picked task's block + an anti-noop directive — observation 2026-05-05:
  * the placeholder brief `"daemon brief for ${taskId}"` led claude to
@@ -454,6 +436,15 @@ export function extractTaskBlock(tasksMd: string, taskId: string): string | unde
   return endMatch === null ? after.trim() : after.slice(0, endMatch.index ?? after.length).trim();
 }
 
+/**
+ * Pick the first unblocked, unclaimed P0/P1 task from a TASKS.md source.
+ * v0 heuristic: scan top-down, skip claimed (`(@minsky-tick-loop)`),
+ * skip `**Blocked by**:` (dependency blocker) AND `**Blocked**:`
+ * (external-constraint blocker — the `/next-task` safety surface). Stops
+ * at `## P2` so only P0/P1 are considered. Pure function.
+ *
+ * @otel tick-loop.pick-task
+ */
 export function pickTask(tasksMd: string): string | undefined {
   const sliced = sliceP0P1(tasksMd);
   const blocks = splitBlocks(sliced);
