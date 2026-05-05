@@ -64,3 +64,8 @@ lighthouse-self-hosted-runner-pivot
 # the lint that mechanically enforces rule #12 on every PR. Anchored in
 # TASKS.md as `**ID**: scope-discipline-policy-lint`.
 scope-discipline-policy-lint
+
+# Future-lint name cited in vision.md rule #1 per-feature mandate (operator
+# directive 2026-05-05). The lint will block feature PRs missing a
+# research-replace-or-relocate-<feature-id> task; today the rule itself enforces.
+pr-replace-or-relocate-research
