@@ -26,8 +26,9 @@
 // would change.
 
 import { execFile } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
@@ -192,6 +193,307 @@ export function claudeBinaryReachableInvariant(opts) {
 }
 
 /**
+ * @typedef {object} DaemonIteration
+ * @property {string} taskId
+ * @property {boolean} committed — true if the iteration produced a git commit
+ * @property {string} timestamp — ISO8601
+ *
+ * @typedef {object} NoopIterationInvariantOpts
+ * @property {() => Promise<readonly DaemonIteration[]>} recentIterations - newest-last
+ * @property {number} [threshold] - fire when consecutive non-committed iterations on the same taskId reach this count (default 4; observed: the 88-iteration brief-refresh churn before #174)
+ */
+
+/**
+ * @param {readonly DaemonIteration[]} iters
+ * @returns {{ worstRun: number, worstTaskId: string }}
+ */
+function computeWorstNoopRun(iters) {
+  let currentTaskId = "";
+  let run = 0;
+  let worstRun = 0;
+  let worstTaskId = "";
+  for (const iter of iters) {
+    if (iter.taskId !== currentTaskId) {
+      currentTaskId = iter.taskId;
+      run = 0;
+    }
+    if (iter.committed) {
+      run = 0;
+      continue;
+    }
+    run++;
+    if (run > worstRun) {
+      worstRun = run;
+      worstTaskId = iter.taskId;
+    }
+  }
+  return { worstRun, worstTaskId };
+}
+
+/**
+ * Throughput invariant: the daemon spent ≥`threshold` consecutive
+ * iterations on the same task without producing a commit. Surfaces the
+ * 2026-05-04 noop pattern that operator-authored #170/#174 caught after
+ * 88 iterations of brief-refresh churn — Minsky should have noticed
+ * first.
+ *
+ * @param {NoopIterationInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonNoopIterationRateInvariant(opts) {
+  const { recentIterations, threshold = 4 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const iters = await recentIterations();
+    const { worstRun, worstTaskId } = computeWorstNoopRun(iters);
+    if (worstRun < threshold) return { id: "daemon-noop-iteration-rate-too-high", ok: true };
+    return {
+      id: "daemon-noop-iteration-rate-too-high",
+      ok: false,
+      evidence: `${worstRun} consecutive non-committed iterations on task \`${worstTaskId}\` (threshold ${threshold}).`,
+      suggestedTaskTitle: `daemon stuck in noop loop on \`${worstTaskId}\` (${worstRun} iterations, no commits)`,
+      suggestedFix:
+        "The daemon is iterating without making forward progress on the current task. Two known root causes: (1) the daemon brief is a placeholder string (fixed for tick-loop in PR #174 with `buildDaemonBrief` + FORBIDDEN-noop directive — verify the supervisor's launched binary includes it), or (2) the task is genuinely blocked but missing a `**Blocked**:` marker. Inspect the latest iteration's stdout in `.minsky/tick-loop.out.log`; if no commit hash is present, either tighten the brief or mark the task blocked.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-noop-iteration-rate-too-high";
+  return fn;
+}
+
+/**
+ * @typedef {object} DaemonPrCiSnapshot
+ * @property {number} number
+ * @property {string} headRefName
+ * @property {number} ciFailureCount — consecutive failed CI runs on HEAD
+ * @property {boolean} hasDaemonFixCommitSinceLastFailure — true if a daemon-authored commit landed after the most recent CI failure
+ *
+ * @typedef {object} StuckOnCiInvariantOpts
+ * @property {() => Promise<readonly DaemonPrCiSnapshot[]>} daemonPrs
+ * @property {number} [failureThreshold] - fire when `ciFailureCount` reaches this and no fix was committed (default 2)
+ */
+
+/**
+ * Throughput invariant: a daemon PR has accumulated ≥`failureThreshold`
+ * CI failures without the daemon authoring a fix commit. The pattern
+ * the operator caught manually on PRs that sat for hours after
+ * pre-commit + biome rejected them.
+ *
+ * @param {StuckOnCiInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonPrStuckOnCiInvariant(opts) {
+  const { daemonPrs, failureThreshold = 2 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const prs = await daemonPrs();
+    const stuck = prs.filter(
+      (p) => p.ciFailureCount >= failureThreshold && !p.hasDaemonFixCommitSinceLastFailure,
+    );
+    if (stuck.length === 0) return { id: "daemon-pr-stuck-on-ci-failure", ok: true };
+    const evidence = stuck
+      .map((p) => `#${p.number} (${p.headRefName}): ${p.ciFailureCount} failures, no fix commit`)
+      .join("; ");
+    return {
+      id: "daemon-pr-stuck-on-ci-failure",
+      ok: false,
+      evidence,
+      suggestedTaskTitle: `daemon PR(s) stuck on CI failure with no fix commit: ${stuck.map((p) => `#${p.number}`).join(", ")}`,
+      suggestedFix:
+        "One or more daemon-authored PRs have failed CI ≥2 times consecutively and the daemon has not landed a fix commit. The next iteration's brief should resume the failing PR's branch (not start fresh) and address the CI output. Verify `daemon-fix-own-pr-on-ci-failure` (P0) is wired into runIteration's pre-spawn step. Until that ships, the operator should either (a) merge the green portion manually, (b) push a fix commit, or (c) close the PR.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-pr-stuck-on-ci-failure";
+  return fn;
+}
+
+/**
+ * @typedef {object} ShippedRatioInvariantOpts
+ * @property {() => Promise<{ iterationCount: number, shippedPrCount: number }>} rollingStats
+ * @property {number} [windowMinIterations] - only evaluate once `iterationCount` reaches this (default 20)
+ * @property {number} [minRatio] - fire below this ratio (default 0.05; at least 1 PR per 20 iterations)
+ */
+
+/**
+ * Throughput invariant: rolling-window shipped-PR / iteration ratio is
+ * below `minRatio`. The macro signal of "Minsky is doing work but not
+ * shipping". Pre-#174 the session ratio was 0/87.
+ *
+ * @param {ShippedRatioInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonShippedRatioInvariant(opts) {
+  const { rollingStats, windowMinIterations = 20, minRatio = 0.05 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const { iterationCount, shippedPrCount } = await rollingStats();
+    if (iterationCount < windowMinIterations) {
+      return { id: "daemon-iteration-vs-shipped-ratio", ok: true };
+    }
+    const ratio = shippedPrCount / iterationCount;
+    if (ratio >= minRatio) return { id: "daemon-iteration-vs-shipped-ratio", ok: true };
+    return {
+      id: "daemon-iteration-vs-shipped-ratio",
+      ok: false,
+      evidence: `rolling window: ${shippedPrCount} shipped PRs / ${iterationCount} iterations = ${ratio.toFixed(3)} (threshold ${minRatio}).`,
+      suggestedTaskTitle: `daemon shipping ratio ${ratio.toFixed(3)} below ${minRatio} (${shippedPrCount}/${iterationCount})`,
+      suggestedFix:
+        "The daemon is iterating without shipping at a healthy rate. Likely combinations: (1) noop-iteration loop on the current task — see `daemon-noop-iteration-rate-too-high`, (2) PRs piling up stuck on CI — see `daemon-pr-stuck-on-ci-failure`, (3) tasks too large to ship in one iteration — decompose the picked task into sub-tasks per the next-task skill's decomposition rule. Inspect `gh pr list --author '@me' --state merged --limit 10` for the last shipped PR; if older than the rolling window, the loop is stalling rather than just slow.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-iteration-vs-shipped-ratio";
+  return fn;
+}
+
+/**
+ * @typedef {object} OpenPrSnapshot
+ * @property {number} number
+ * @property {string | null} taskId — extracted from PR title or commit messages
+ * @property {readonly string[]} files
+ *
+ * @typedef {object} InFlightCollisionInvariantOpts
+ * @property {() => Promise<readonly OpenPrSnapshot[]>} openDaemonPrs
+ * @property {number} [overlapThreshold] - fire when file-set overlap exceeds this fraction (default 0.5)
+ */
+
+/**
+ * @param {readonly OpenPrSnapshot[]} prs
+ * @returns {Map<string, OpenPrSnapshot[]>}
+ */
+function groupPrsByTaskId(prs) {
+  /** @type {Map<string, OpenPrSnapshot[]>} */
+  const byTask = new Map();
+  for (const pr of prs) {
+    if (!pr.taskId) continue;
+    const list = byTask.get(pr.taskId) ?? [];
+    list.push(pr);
+    byTask.set(pr.taskId, list);
+  }
+  return byTask;
+}
+
+/**
+ * @param {OpenPrSnapshot} a
+ * @param {OpenPrSnapshot} b
+ * @returns {{ overlap: number, overlapCount: number, denom: number }}
+ */
+function pairwiseOverlap(a, b) {
+  const setA = new Set(a.files);
+  const overlapCount = b.files.filter((f) => setA.has(f)).length;
+  const denom = Math.min(a.files.length, b.files.length) || 1;
+  return { overlap: overlapCount / denom, overlapCount, denom };
+}
+
+/**
+ * @param {string} taskId
+ * @param {readonly OpenPrSnapshot[]} group
+ * @param {number} overlapThreshold
+ * @returns {string[]}
+ */
+function findCollisionsInGroup(taskId, group, overlapThreshold) {
+  /** @type {string[]} */
+  const collisions = [];
+  for (let i = 0; i < group.length; i++) {
+    for (let j = i + 1; j < group.length; j++) {
+      const a = group[i];
+      const b = group[j];
+      if (!a || !b) continue;
+      const { overlap, overlapCount, denom } = pairwiseOverlap(a, b);
+      if (overlap > overlapThreshold) {
+        collisions.push(
+          `task=${taskId} #${a.number}↔#${b.number} overlap=${overlap.toFixed(2)} (${overlapCount}/${denom})`,
+        );
+      }
+    }
+  }
+  return collisions;
+}
+
+/**
+ * @param {Map<string, OpenPrSnapshot[]>} byTask
+ * @param {number} overlapThreshold
+ * @returns {string[]}
+ */
+function findCollisions(byTask, overlapThreshold) {
+  /** @type {string[]} */
+  const collisions = [];
+  for (const [taskId, group] of byTask) {
+    if (group.length < 2) continue;
+    collisions.push(...findCollisionsInGroup(taskId, group, overlapThreshold));
+  }
+  return collisions;
+}
+
+/**
+ * Throughput invariant: ≥2 open PRs share the same `taskId` AND have
+ * file-set overlap > `overlapThreshold`. Encodes the operator-spotted
+ * 2026-05-05 pattern on PRs #180/#181/#182 (3 overlapping PRs for
+ * `daily-changelog-for-humans`).
+ *
+ * @param {InFlightCollisionInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonInFlightPrCollisionInvariant(opts) {
+  const { openDaemonPrs, overlapThreshold = 0.5 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const prs = await openDaemonPrs();
+    const byTask = groupPrsByTaskId(prs);
+    const collisions = findCollisions(byTask, overlapThreshold);
+    if (collisions.length === 0) return { id: "daemon-in-flight-pr-collision", ok: true };
+    return {
+      id: "daemon-in-flight-pr-collision",
+      ok: false,
+      evidence: collisions.join("; "),
+      suggestedTaskTitle: `${collisions.length} in-flight PR collision(s) — daemon authored overlapping PRs for the same task`,
+      suggestedFix:
+        "The daemon authored ≥2 PRs targeting the same task with overlapping file-sets. Pre-spawn check missing: `gh pr list --json files,headRefName --search 'is:open author:@me'` should be queried before authoring a new PR; if any open PR for the same `taskId` overlaps the planned file-set by >50%, the daemon should resume that PR's branch instead of opening a new one. Close or supersede the redundant PRs and add the pre-spawn check to runIteration.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-in-flight-pr-collision";
+  return fn;
+}
+
+/**
+ * @typedef {object} TaskIdStalenessInvariantOpts
+ * @property {() => Promise<readonly string[]>} inFlightTaskIds — taskIds the daemon currently has work-in-flight for (open PRs, active branches, claimed tasks)
+ * @property {() => Promise<string>} tasksMdContent — full TASKS.md text
+ */
+
+/**
+ * Throughput invariant: the daemon is iterating on a task whose block
+ * has been removed from TASKS.md. The "stale claim" failure mode —
+ * daemon keeps spending budget on work the operator already removed.
+ *
+ * @param {TaskIdStalenessInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonTaskIdStalenessInvariant(opts) {
+  const { inFlightTaskIds, tasksMdContent } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const ids = await inFlightTaskIds();
+    if (ids.length === 0) return { id: "daemon-task-id-staleness", ok: true };
+    const md = await tasksMdContent();
+    const stale = ids.filter((id) => !md.includes(`**ID**: ${id}`));
+    if (stale.length === 0) return { id: "daemon-task-id-staleness", ok: true };
+    return {
+      id: "daemon-task-id-staleness",
+      ok: false,
+      evidence: `in-flight task ids absent from TASKS.md: ${stale.join(", ")}.`,
+      suggestedTaskTitle: `daemon iterating on stale task id(s): ${stale.join(", ")}`,
+      suggestedFix:
+        "The daemon has work-in-flight (open PRs / active branches / claimed task entries) for task ids that no longer have a `**ID**: <id>` block in TASKS.md. The operator likely removed or renamed the task. The daemon should refuse to keep iterating: close the orphan PR(s), abandon the branch, and pick a fresh task on the next iteration. If the work is still valuable, re-file the task block with a new ID and retarget the in-flight branch.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-task-id-staleness";
+  return fn;
+}
+
+/**
  * Default probe: spawns `<name> --version` and resolves based on exit code.
  *
  * @param {string} name
@@ -207,6 +509,96 @@ async function spawnVersionProbe(name) {
 }
 
 /**
+ * Best-effort `gh` invocation. Returns null when gh is unavailable or
+ * the command fails — keeps invariants graceful-degrade rather than
+ * surfacing self-inflicted false positives on a fresh clone.
+ *
+ * @param {readonly string[]} args
+ * @returns {Promise<unknown | null>}
+ */
+async function ghJson(args) {
+  try {
+    const { stdout } = await execFileAsync("gh", [...args], { timeout: 10_000 });
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract a `taskId` reference from a PR title or branch name. Daemon
+ * convention: branches and PR titles carry the taskId after a `/` or
+ * the conventional-commit scope (e.g., `feat(tick-loop): foo` → null;
+ * `chore/daily-changelog-for-humans` → `daily-changelog-for-humans`).
+ *
+ * @param {string} headRefName
+ * @param {string} title
+ * @returns {string | null}
+ */
+function extractTaskIdFromPr(headRefName, title) {
+  const slashIdx = headRefName.indexOf("/");
+  if (slashIdx >= 0 && slashIdx < headRefName.length - 1) {
+    return headRefName.slice(slashIdx + 1);
+  }
+  const m = title.match(/`([a-z][a-z0-9-]+)`/);
+  return m ? (m[1] ?? null) : null;
+}
+
+/**
+ * Production probe for `recentIterations`: parses the supervisor's
+ * tick-loop log into a flat list of `{taskId, committed}` records.
+ * Returns `[]` when the log file is absent (fresh checkout, supervisor
+ * never ran).
+ *
+ * Conventions: each iteration emits a JSON line with `evt:"iteration"`,
+ * `taskId`, and `committedSha` fields when the OTEL adapter is
+ * enabled; `committed` is true iff `committedSha` is a non-empty
+ * string. Lines that don't parse are silently skipped.
+ *
+ * @param {string} logPath
+ * @returns {Promise<readonly DaemonIteration[]>}
+ */
+async function readIterationsFromLog(logPath) {
+  try {
+    await stat(logPath);
+  } catch {
+    return [];
+  }
+  let raw;
+  try {
+    raw = await readFile(logPath, "utf8");
+  } catch {
+    return [];
+  }
+  /** @type {DaemonIteration[]} */
+  const out = [];
+  for (const line of raw.split("\n")) {
+    const iter = parseIterationLogLine(line);
+    if (iter) out.push(iter);
+  }
+  return out;
+}
+
+/**
+ * @param {string} line
+ * @returns {DaemonIteration | null}
+ */
+function parseIterationLogLine(line) {
+  if (!line) return null;
+  try {
+    const obj = JSON.parse(line);
+    if (!obj || obj.evt !== "iteration" || typeof obj.taskId !== "string") return null;
+    return {
+      taskId: obj.taskId,
+      committed: typeof obj.committedSha === "string" && obj.committedSha.length > 0,
+      timestamp: typeof obj.ts === "string" ? obj.ts : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -218,9 +610,120 @@ export function defaultInvariants() {
   const configDir = join(homedir(), ".claude");
   /** @type {(plan: "pro"|"max5"|"max20"|"custom") => Promise<TokenSnapshot>} */
   const snapshotPerPlan = async (plan) => new MaciekTokenMonitor({ configDir, plan }).snapshot();
+
+  const repoRoot = process.cwd();
+  const logPath = resolve(repoRoot, ".minsky/tick-loop.out.log");
+  const tasksMdPath = resolve(repoRoot, "TASKS.md");
+
+  const recentIterations = () => readIterationsFromLog(logPath);
+
+  /** @type {() => Promise<readonly DaemonPrCiSnapshot[]>} */
+  const daemonPrs = async () => {
+    const data = await ghJson([
+      "pr",
+      "list",
+      "--author",
+      "@me",
+      "--state",
+      "open",
+      "--json",
+      "number,headRefName,statusCheckRollup,commits",
+      "--limit",
+      "50",
+    ]);
+    if (!Array.isArray(data)) return [];
+    /** @type {DaemonPrCiSnapshot[]} */
+    const out = [];
+    for (const pr of data) {
+      /** @type {readonly {conclusion?: string, state?: string}[]} */
+      const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+      const failed = checks.filter(
+        (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
+      );
+      out.push({
+        number: pr.number,
+        headRefName: pr.headRefName,
+        ciFailureCount: failed.length,
+        hasDaemonFixCommitSinceLastFailure: false,
+      });
+    }
+    return out;
+  };
+
+  const rollingStats = async () => {
+    const iters = await recentIterations();
+    const merged = await ghJson([
+      "pr",
+      "list",
+      "--author",
+      "@me",
+      "--state",
+      "merged",
+      "--search",
+      "merged:>=2026-04-28",
+      "--json",
+      "number",
+      "--limit",
+      "100",
+    ]);
+    return {
+      iterationCount: iters.length,
+      shippedPrCount: Array.isArray(merged) ? merged.length : 0,
+    };
+  };
+
+  /** @type {() => Promise<readonly OpenPrSnapshot[]>} */
+  const openDaemonPrs = async () => {
+    const data = await ghJson([
+      "pr",
+      "list",
+      "--author",
+      "@me",
+      "--state",
+      "open",
+      "--json",
+      "number,headRefName,title,files",
+      "--limit",
+      "50",
+    ]);
+    if (!Array.isArray(data)) return [];
+    return data.map((pr) => {
+      /** @type {readonly { path?: string }[]} */
+      const files = Array.isArray(pr.files) ? pr.files : [];
+      return {
+        number: pr.number,
+        taskId: extractTaskIdFromPr(pr.headRefName ?? "", pr.title ?? ""),
+        files: files.map((f) => f.path ?? "").filter((p) => p.length > 0),
+      };
+    });
+  };
+
+  const inFlightTaskIds = async () => {
+    const prs = await openDaemonPrs();
+    /** @type {string[]} */
+    const ids = [];
+    for (const pr of prs) {
+      if (pr.taskId) ids.push(pr.taskId);
+    }
+    return ids;
+  };
+
+  const tasksMdContent = async () => {
+    try {
+      return await readFile(tasksMdPath, "utf8");
+    } catch {
+      return "";
+    }
+  };
+
   return [
     tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan }),
     claudeBinaryReachableInvariant({ probe: spawnVersionProbe }),
+    daemonNoopIterationRateInvariant({ recentIterations }),
+    daemonPrStuckOnCiInvariant({ daemonPrs }),
+    daemonShippedRatioInvariant({ rollingStats }),
+    daemonInFlightPrCollisionInvariant({ openDaemonPrs }),
+    daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent }),
   ];
 }
 

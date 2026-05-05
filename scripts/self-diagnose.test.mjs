@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   claudeBinaryReachableInvariant,
+  daemonInFlightPrCollisionInvariant,
+  daemonNoopIterationRateInvariant,
+  daemonPrStuckOnCiInvariant,
+  daemonShippedRatioInvariant,
+  daemonTaskIdStalenessInvariant,
   findingsToTasksMd,
   runInvariants,
   tokenMonitorNotAllPeggedInvariant,
@@ -98,6 +103,161 @@ describe("claudeBinaryReachableInvariant", () => {
     expect(result.evidence).toContain("ENOENT");
     expect(result.suggestedFix).toContain("launchd");
     expect(result.suggestedFix).toContain("run-tick-loop.sh");
+  });
+});
+
+describe("daemonNoopIterationRateInvariant", () => {
+  it("passes when no taskId has ≥threshold consecutive non-committed iterations", async () => {
+    const recentIterations = async () => [
+      { taskId: "a", committed: false, timestamp: "" },
+      { taskId: "a", committed: true, timestamp: "" },
+      { taskId: "a", committed: false, timestamp: "" },
+      { taskId: "a", committed: false, timestamp: "" },
+    ];
+    const result = await daemonNoopIterationRateInvariant({ recentIterations, threshold: 4 })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when consecutive non-committed iterations on the same taskId reach the threshold", async () => {
+    const recentIterations = async () => [
+      { taskId: "stuck-task", committed: false, timestamp: "" },
+      { taskId: "stuck-task", committed: false, timestamp: "" },
+      { taskId: "stuck-task", committed: false, timestamp: "" },
+      { taskId: "stuck-task", committed: false, timestamp: "" },
+    ];
+    const result = await daemonNoopIterationRateInvariant({ recentIterations, threshold: 4 })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-noop-iteration-rate-too-high");
+    expect(result.evidence).toContain("stuck-task");
+    expect(result.suggestedFix).toContain("placeholder");
+  });
+});
+
+describe("daemonPrStuckOnCiInvariant", () => {
+  it("passes when no PR has ≥failureThreshold failures without a fix commit", async () => {
+    const daemonPrs = async () => [
+      {
+        number: 1,
+        headRefName: "feat/x",
+        ciFailureCount: 1,
+        hasDaemonFixCommitSinceLastFailure: false,
+      },
+      {
+        number: 2,
+        headRefName: "feat/y",
+        ciFailureCount: 3,
+        hasDaemonFixCommitSinceLastFailure: true,
+      },
+    ];
+    const result = await daemonPrStuckOnCiInvariant({ daemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires for PRs with ≥failureThreshold failures and no fix commit", async () => {
+    const daemonPrs = async () => [
+      {
+        number: 42,
+        headRefName: "feat/stuck",
+        ciFailureCount: 3,
+        hasDaemonFixCommitSinceLastFailure: false,
+      },
+    ];
+    const result = await daemonPrStuckOnCiInvariant({ daemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-pr-stuck-on-ci-failure");
+    expect(result.evidence).toContain("#42");
+    expect(result.suggestedFix).toContain("daemon-fix-own-pr-on-ci-failure");
+  });
+});
+
+describe("daemonShippedRatioInvariant", () => {
+  it("passes when iterationCount is below the warm-up window (no signal)", async () => {
+    const rollingStats = async () => ({ iterationCount: 5, shippedPrCount: 0 });
+    const result = await daemonShippedRatioInvariant({ rollingStats })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when ratio meets minRatio", async () => {
+    const rollingStats = async () => ({ iterationCount: 100, shippedPrCount: 10 });
+    const result = await daemonShippedRatioInvariant({ rollingStats })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when ratio is below minRatio and the warm-up window is met", async () => {
+    const rollingStats = async () => ({ iterationCount: 100, shippedPrCount: 1 });
+    const result = await daemonShippedRatioInvariant({ rollingStats })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-iteration-vs-shipped-ratio");
+    expect(result.evidence).toContain("1");
+    expect(result.evidence).toContain("100");
+  });
+});
+
+describe("daemonInFlightPrCollisionInvariant", () => {
+  it("passes when no two PRs share both a taskId and overlapping files", async () => {
+    const openDaemonPrs = async () => [
+      { number: 1, taskId: "a", files: ["foo.ts"] },
+      { number: 2, taskId: "b", files: ["bar.ts"] },
+    ];
+    const result = await daemonInFlightPrCollisionInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when ≥2 PRs share a taskId and their file-sets overlap above threshold", async () => {
+    const openDaemonPrs = async () => [
+      {
+        number: 180,
+        taskId: "daily-changelog-for-humans",
+        files: ["CHANGELOG.md", "src/changelog.ts", "src/changelog.test.ts"],
+      },
+      {
+        number: 181,
+        taskId: "daily-changelog-for-humans",
+        files: ["CHANGELOG.md", "src/changelog.ts", "docs/changelog.md"],
+      },
+      {
+        number: 182,
+        taskId: "daily-changelog-for-humans",
+        files: ["CHANGELOG.md", "src/changelog.ts", "src/changelog.wire.ts"],
+      },
+    ];
+    const result = await daemonInFlightPrCollisionInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-in-flight-pr-collision");
+    expect(result.evidence).toContain("daily-changelog-for-humans");
+    expect(result.evidence).toContain("#180");
+  });
+});
+
+describe("daemonTaskIdStalenessInvariant", () => {
+  it("passes when every in-flight taskId has a matching block in TASKS.md", async () => {
+    const inFlightTaskIds = async () => ["foo-task", "bar-task"];
+    const tasksMdContent = async () =>
+      "- [ ] foo\n  - **ID**: foo-task\n- [ ] bar\n  - **ID**: bar-task\n";
+    const result = await daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when there are no in-flight taskIds", async () => {
+    const inFlightTaskIds = async () => [];
+    const tasksMdContent = async () => "";
+    const result = await daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when an in-flight taskId is absent from TASKS.md (orphan work)", async () => {
+    const inFlightTaskIds = async () => ["live-task", "removed-task"];
+    const tasksMdContent = async () => "- [ ] live\n  - **ID**: live-task\n";
+    const result = await daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-task-id-staleness");
+    expect(result.evidence).toContain("removed-task");
+    expect(result.evidence).not.toContain("live-task,");
   });
 });
 
