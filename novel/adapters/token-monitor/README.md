@@ -48,38 +48,46 @@ console.log(snap);
   integer), wins over `PLAN_CAPS[plan]`. The supervisor wires this from
   the `MINSKY_PLAN_CAP_OVERRIDE` env var (rule #2 escape hatch).
 
-**Plan caps** (heuristic — diverges from Maciek upstream's stale 2024
-numbers; see "Calibration note" below):
+**Plan caps** (above any plausible Anthropic ceiling — advisory-only;
+real rate-limit is enforced by Anthropic's own 429):
 
 | Plan | Chargeable tokens / 5h window |
 |---|---|
-| `pro` |  2 000 000 |
-| `max5` | 10 000 000 (default) |
-| `max20` | 40 000 000 |
-| `custom` |  5 000 000 |
+| `pro` |  100 000 000 |
+| `max5` | 500 000 000 (default) |
+| `max20` | 2 000 000 000 |
+| `custom` |  250 000 000 |
 
-### Calibration note
+### Calibration note (2026-05-05 — capped above Anthropic's ceiling)
 
-Maciek upstream's `claude_monitor==3.1.0` `PLAN_LIMITS` reflects 2024
-estimates calibrated against ~500-1500-token messages. On 1M-context
-Claude Code, per-message chargeable averages ~3k tokens, so an active
-5h dogfood block burns 4M+ chargeable tokens (empirical: 4,107,313 on
-the operator's session 2026-05-04). The numbers above are derived from:
+Operator philosophy 2026-05-05: "if Anthropic doesn't have a problem,
+neither should we". Preemptive circuit-breaking at a heuristic threshold
+*below* Anthropic's actual ceiling just leaves headroom on the table.
+The numbers above are deliberately set ~50× above the empirical 4.1M
+chargeable-in-5h observation on the operator's Max20 session, which
+puts them well above any plausible Anthropic published-plan ceiling.
 
-- The empirical 4.1M-chargeable-in-5h observation on a Max-tier session
-  that wasn't being throttled.
-- Anthropic's public messaging that Max20 is "~20× a typical Pro user".
-- Headroom of ~10× over the empirical observation so BudgetGuard's 85%
-  circuit-break threshold still leaves room for genuine over-spend.
+Real rate-limiting therefore happens at Anthropic's 429 — not at our
+internal threshold. The daemon handles 429 as a rule-#7 graceful-
+degrade (iteration fails, retry next tick); BudgetGuard's circuit-break
+becomes a *belt-and-suspenders* signal (only fires if Anthropic's
+ceiling moves dramatically without warning).
 
-Operators whose accounts have different real ceilings can override via
-`MINSKY_PLAN_CAP_OVERRIDE=<integer>` (the supervisor's bootstrap reads
-the env var and threads it through to the constructor `cap` opt).
+**Why not infinite?** Operators on lower tiers may want a conservative
+local cap to avoid surprise 429s on shared sessions. The four-plan
+keying gives them a per-tier dial. If a future PR reduces the tier
+spread to one number, retire the keys.
 
-**Pivot (rule #9)**: if heuristic caps cause false circuit-breaks during
-normal operator usage (≥10% of iterations budget-paused over a 7-day
-window), the principled solution is a separate `TokenMonitor` Strategy
-that reads `anthropic-ratelimit-tokens-remaining` from response headers.
+**If Anthropic publishes exact ceilings** (or you observe consistent
+429s at a known threshold), set `cap` (constructor opt) or
+`MINSKY_PLAN_CAP_OVERRIDE` (env) to that threshold; the per-deployment
+override wins.
+
+**Pivot (rule #9)**: if BudgetGuard never circuit-breaks under normal
+operation (the intended state — strictly downstream of Anthropic's
+429), the four-plan keying retires and `PLAN_CAPS` becomes a single
+`INFINITE_CAP = Number.MAX_SAFE_INTEGER`. Don't retire yet; lower-tier
+operators may still want a local conservative cap.
 That's a separate PR behind the existing rule-#2 seam.
 
 ### Algorithm (mirrored from Maciek's `data/analyzer.py`)
