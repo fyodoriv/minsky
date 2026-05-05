@@ -20,6 +20,8 @@
 //   `--gh-bin scripts/fixtures/cross-repo-check-runner-gh-stub.mjs`
 // plus `MINSKY_GH_STUB_MODE=<mode>` in env.
 
+import { writeSync } from "node:fs";
+
 const argv = process.argv.slice(2);
 const mode = process.env["MINSKY_GH_STUB_MODE"] ?? "happy";
 
@@ -88,19 +90,21 @@ const VALID_DIFF = [
   "",
 ].join("\n");
 
-// Flush before exiting. On Linux, `process.exit()` immediately after
-// `process.stdout.write()` can drop buffered data when stdout is a pipe:
-// the parent's `spawnSync` then sees a truncated body, the runner's
-// JSON.parse catches and writes an empty PR body, and pr-self-grade
-// fails on the empty body — flipping the happy path's verdict from
-// `success` to `failure`. macOS pipe semantics flush in time, which
-// hid the race locally.
+// fs.writeSync to fd 1 instead of process.stdout.write: on Linux,
+// process.exit() right after process.stdout.write() can drop buffered
+// data when stdout is a pipe. fs.writeSync skips the stream buffer
+// entirely, so the parent's spawnSync sees the full payload before
+// the child exits. emit must remain synchronous-and-terminating so
+// that the multi-branch fallthrough below stops at the first match
+// (the callback form of write does NOT terminate synchronously and
+// would let later emit() calls race their writes).
 /**
  * @param {string} stdout
- * @returns {void}
+ * @returns {never}
  */
 function emit(stdout) {
-  process.stdout.write(stdout, () => process.exit(0));
+  writeSync(1, stdout);
+  process.exit(0);
 }
 
 // `gh pr view --repo X N --json body,headRefOid --jq .` (first call, fetch step).
