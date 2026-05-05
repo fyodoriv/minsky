@@ -21,12 +21,18 @@ import { fromRealBudgetGuard } from "./budget-guard-facade.js";
 import {
   type BudgetDecisionLike,
   type BudgetGuardLike,
+  type CtoAuditSeam,
   buildDaemonBrief,
   extractTaskBlock,
   pickTask,
   runDaemon,
 } from "./daemon.js";
 import { SpanRecorder, TestFakeMockAnthropic, type TickSpan } from "./index.js";
+import type {
+  CompletedIterationSignals,
+  CtoAuditLock,
+  CtoAuditSpawn,
+} from "./post-task-cto-audit.js";
 import { DryRunSpawnStrategy, ProcessSpawnStrategy } from "./spawn-strategy.js";
 
 // ---- Fixtures -------------------------------------------------------------
@@ -517,6 +523,204 @@ describe("tick-loop / daemon / runDaemon", () => {
     });
     // 3 iterations → 2 inter-iteration sleeps.
     expect(sleepCalls).toEqual([250, 250]);
+  });
+
+  // ---- post-task CTO audit wire-in ---------------------------------------
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunCtoAudit`. The
+  // audit's own gate / no-recurse / lock semantics are tested in
+  // `post-task-cto-audit.test.ts`; here we only verify that the daemon
+  // dispatches into `runCtoAudit` for the right iteration shapes and
+  // emits the `tick-loop.cto-audit` span.
+
+  /**
+   * Build a `CtoAuditSeam` whose `spawn` and `buildSignals` record their
+   * calls so tests can assert dispatch.
+   */
+  function makeAuditSeam(
+    opts: {
+      readonly initialLocks?: readonly string[];
+      readonly buildSignalsOverride?: (args: {
+        taskId: string;
+        spawnStdoutTail: string;
+      }) => Partial<CompletedIterationSignals>;
+    } = {},
+  ): {
+    readonly seam: CtoAuditSeam;
+    readonly spawnCalls: Array<{ taskId: string; brief: string }>;
+    readonly buildSignalsCalls: Array<{ taskId: string; spawnStdoutTail: string }>;
+    readonly heldLocks: Set<string>;
+  } {
+    const spawnCalls: Array<{ taskId: string; brief: string }> = [];
+    const buildSignalsCalls: Array<{ taskId: string; spawnStdoutTail: string }> = [];
+    const heldLocks = new Set<string>(opts.initialLocks ?? []);
+    const spawn: CtoAuditSpawn = {
+      spawn: async (input) => {
+        spawnCalls.push({ taskId: input.taskId, brief: input.brief });
+        return { exitCode: 0, durationMs: 5, stdoutTail: "audit ran", stderrTail: "" };
+      },
+    };
+    const lock: CtoAuditLock = {
+      lockExists: (taskId) => heldLocks.has(taskId),
+      acquireLock: (taskId) => {
+        heldLocks.add(taskId);
+      },
+    };
+    const buildSignals: CtoAuditSeam["buildSignals"] = async (args) => {
+      buildSignalsCalls.push({ taskId: args.taskId, spawnStdoutTail: args.spawnStdoutTail });
+      const baseline: CompletedIterationSignals = {
+        completedTaskId: args.taskId,
+        prUrl: "https://github.com/fyodoriv/minsky/pull/999",
+        filesChanged: ["src/foo.ts"],
+        recentMainCommits: ["feat: shipped"],
+        openWorkItems: 0,
+        lintScores: {},
+      };
+      const override = opts.buildSignalsOverride?.(args) ?? {};
+      return { ...baseline, ...override };
+    };
+    return { seam: { spawn, lock, buildSignals }, spawnCalls, buildSignalsCalls, heldLocks };
+  }
+
+  it("ctoAudit wire-in: completed iteration triggers the audit spawn + emits a cto-audit span", async () => {
+    const recorder = new SpanRecorder();
+    const audit = makeAuditSeam();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      ctoAudit: audit.seam,
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    expect(audit.spawnCalls).toHaveLength(1);
+    expect(audit.spawnCalls[0]?.taskId).toBe("cto-audit:alpha");
+    expect(audit.buildSignalsCalls).toHaveLength(1);
+    expect(audit.buildSignalsCalls[0]?.taskId).toBe("alpha");
+    expect(audit.heldLocks.has("alpha")).toBe(true);
+    const auditSpans = recorder.spans.filter((s) => s.name === "tick-loop.cto-audit");
+    expect(auditSpans).toHaveLength(1);
+    expect(auditSpans[0]?.attributes["audit.outcome"]).toBe("ran");
+    expect(auditSpans[0]?.attributes["task.id"]).toBe("alpha");
+  });
+
+  it("ctoAudit wire-in: failed iteration does NOT trigger the audit (gate skip pre-buildSignals)", async () => {
+    const audit = makeAuditSeam();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic({ failureMode: "http-5xx" }),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      ctoAudit: audit.seam,
+    });
+    expect(result.iterations[0]?.status).toBe("failed");
+    // No audit spawn AND no buildSignals call — the daemon short-circuits
+    // before invoking the (potentially expensive) git/gh I/O surface when
+    // the iteration didn't ship.
+    expect(audit.spawnCalls).toHaveLength(0);
+    expect(audit.buildSignalsCalls).toHaveLength(0);
+  });
+
+  it("ctoAudit wire-in: budget-paused iteration does NOT trigger the audit", async () => {
+    const audit = makeAuditSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      sleep: noSleep,
+      ctoAudit: audit.seam,
+    });
+    expect(audit.spawnCalls).toHaveLength(0);
+    expect(audit.buildSignalsCalls).toHaveLength(0);
+  });
+
+  it("ctoAudit wire-in: gate-skipped audit (no files + no PR) emits a skipped span", async () => {
+    const recorder = new SpanRecorder();
+    // The signals collector returns a no-op shape (no files, no PR) so the
+    // audit's gate (`shouldRunCtoAudit`) skips with `gate-rejected`.
+    const audit = makeAuditSeam({
+      buildSignalsOverride: () => ({ filesChanged: [], prUrl: null }),
+    });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      ctoAudit: audit.seam,
+    });
+    expect(audit.spawnCalls).toHaveLength(0);
+    expect(audit.buildSignalsCalls).toHaveLength(1);
+    const auditSpans = recorder.spans.filter((s) => s.name === "tick-loop.cto-audit");
+    expect(auditSpans).toHaveLength(1);
+    expect(auditSpans[0]?.attributes["audit.outcome"]).toBe("skipped");
+    expect(auditSpans[0]?.attributes["audit.skip_reason"]).toBe("gate-rejected");
+  });
+
+  it("ctoAudit wire-in: omitted seam (production daemons predating the seam) keeps working unchanged", async () => {
+    // No `ctoAudit` field — the daemon must complete iterations without
+    // throwing and without emitting any audit spans.
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
+    const auditSpans = recorder.spans.filter((s) => s.name === "tick-loop.cto-audit");
+    expect(auditSpans).toHaveLength(0);
+  });
+
+  it("ctoAudit wire-in: spawnStdoutTail threads through from the iteration's reason field", async () => {
+    // The `result.reason` for completed iterations carries the spawn's
+    // stdoutTail — the audit's `buildSignals` collector parses PR URLs
+    // out of this in production. Verify the value reaches buildSignals.
+    let captured = "";
+    const audit = makeAuditSeam({
+      buildSignalsOverride: ({ spawnStdoutTail }) => {
+        captured = spawnStdoutTail;
+        return {};
+      },
+    });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      spawnStrategy: new DryRunSpawnStrategy(),
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      ctoAudit: audit.seam,
+    });
+    // `DryRunSpawnStrategy` returns `daemon dry-run prompt for ${taskId}` as
+    // its stdoutTail, which the daemon's `runClaimedIteration` puts in
+    // `result.reason` for completed iterations.
+    expect(captured).toContain("alpha");
   });
 });
 
