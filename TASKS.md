@@ -239,7 +239,7 @@
   - **Risk**: high. Cloud infrastructure is a step-change in operational complexity (auth, billing-once-paywall-lands, multi-tenant data isolation, OTEL ingestion at scale). Mitigation: ship one sub-task at a time, each behind its own `MINSKY_CLOUD_<feature>=disabled` flag, with the local CLI remaining the first-class default. The Pivot threshold (none of three features shows value in dogfood) is the hard gate.
   - **Surfaced-by**: 2026-05-04 user vision conversation — "Minsky has free tier and paid tier" + my 2026-05-04 reply identifying the moat axes (cross-repo benchmarking / shared invariant catalog / compliance attestation). User's response: "let's add tasks for paid features (temporarily free for now, let's implement the features first)". This task block operationalises that.
 
-
+- [ ] `omc-tasksmd-bridge-v1-watcher` — reverse-sync + filesystem watcher for the OMC ↔ tasks.md bridge
   - **ID**: omc-tasksmd-bridge-v1-watcher
   - **Tags**: novel, bridge, follow-up, dormant-until-crdt-story
   - **Estimate**: 1–2w (CRDT story + watcher + reverse-sync)
