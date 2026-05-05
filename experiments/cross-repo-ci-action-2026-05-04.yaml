@@ -1,0 +1,60 @@
+id: cross-repo-ci-action-2026-05-04
+hypothesis: |
+  Today the cross-repo lints run only locally (in the host's pre-push hook
+  installed by `minsky bootstrap`). An operator who bypasses pre-push
+  (`git push --no-verify`) or whose hook fails silently can ship a PR that
+  violates the constitution without minsky catching it. This experiment's
+  v0 ships the **deterministic, locally-testable substrate** of decision
+  C2 — a minsky-side workflow + verdict-producing script + the
+  `novel/cross-repo-runner/src/dispatch-emit.ts` pure function — so the
+  cross-repo lints can be run by a minsky-owned
+  GitHub Action without any host-side CI changes. The live cross-repo
+  install (`minsky-bot` on a host org, real `repository_dispatch`
+  emission) is deferred to an operator-driven follow-up; the v0
+  measurement is local, deterministic, and reproducible. Pre-registered
+  effect: a contributor running `node scripts/cross-repo-check-runner.mjs
+  --self-test` and `pnpm vitest run scripts/cross-repo-check-runner.test.mjs`
+  observes both pass — i.e., the runner end-to-ends locally against the
+  injected `gh` stub, and the per-failure-mode rows from TASKS.md
+  `cross-repo-ci-action` are pinned by paired tests.
+success: |
+  pnpm vitest run scripts/cross-repo-check-runner.test.mjs
+  novel/cross-repo-runner/src/dispatch-emit.test.ts --reporter=json |
+  jq -e '.numPassedTests >= 20 and .numFailedTests == 0' exits 0
+  AND `node scripts/cross-repo-check-runner.mjs --self-test` exits 0
+  AND `.github/workflows/cross-repo-check.yml` exists and declares both
+      `workflow_dispatch` and `repository_dispatch` (event type
+      `cross-repo-pr`); `grep -q "cross-repo-pr"
+      .github/workflows/cross-repo-check.yml` exits 0
+  AND `vision.md` § "Pattern conformance index" carries a row referencing
+      `scripts/cross-repo-check-runner.mjs`; `grep -q
+      check-runner vision.md` exits 0.
+pivot: |
+  If the runner's verdict shape proves brittle (≥3 false positives in 30
+  days once the live install lands — tracked separately), pivot to
+  decision **C3**: the host-side pre-push hook that `minsky bootstrap`
+  already installs becomes the sole gate. C3 covers ~95% of operators
+  (those who don't bypass pre-push); the remaining 5% become a
+  documented gap rather than a load-bearing claim. The v0 runner
+  remains useful as a local diagnostic even after a C3 pivot — the
+  pure-function pieces (`buildDispatchPayload`, `synthesiseVerdict`,
+  `decodeContentsResponse`) are all testable without external systems.
+measurement: |
+  pnpm vitest run scripts/cross-repo-check-runner.test.mjs novel/cross-repo-runner/src/dispatch-emit.test.ts --reporter=json | jq -e '.numPassedTests >= 20 and .numFailedTests == 0' && node scripts/cross-repo-check-runner.mjs --self-test && grep -q cross-repo-pr .github/workflows/cross-repo-check.yml && grep -q check-runner vision.md
+anchor: |
+  Beyer, Jones, Petoff, Murphy, *Site Reliability Engineering*, O'Reilly,
+  2016, Ch. 6 (every internal state operator cares about must surface —
+  the constitutional verdict surfaces on the host PR's checks tab, the
+  place reviewers already look); Helland, "Life beyond Distributed
+  Transactions", *CIDR* 2007 (out-of-band check via API is an
+  asynchronous boundary; the eventual-consistency window is bounded by
+  the dispatch delivery + workflow run time); Munafò, Nosek, Bishop et
+  al., "A Manifesto for Reproducible Science", *Nature Human Behaviour*
+  1, 0021, 2017 (pre-registration — this experiment's measurement is
+  declared *before* the live install lands, so the v0 cannot post-hoc
+  rationalise its threshold); rule #4 (vision.md § 4 — every novel
+  function emits OTEL — `buildSpawnPlan`, `buildDispatchPayload`, and
+  the runner all carry `@otel` annotations); rule #10 (vision.md § 10
+  — deterministic enforcement; same input, same output; no LLM in the
+  chain); TASKS.md `cross-repo-ci-action` (the parent task whose Brief
+  this experiment operationalises).

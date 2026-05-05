@@ -13,3 +13,9 @@ export { buildSpawnPlan } from "./spawn-plan.js";
 export type { RunnerPlan, SpawnPlanInputs } from "./spawn-plan.js";
 export { renderIterationRecord } from "./iteration-record.js";
 export type { IterationRecord, IterationVerdict } from "./iteration-record.js";
+export {
+  DEFAULT_MINSKY_DISPATCH_REPO,
+  DISPATCH_EVENT_TYPE,
+  buildDispatchPayload,
+} from "./dispatch-emit.js";
+export type { DispatchPayload } from "./dispatch-emit.js";
