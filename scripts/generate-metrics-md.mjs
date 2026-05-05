@@ -1,0 +1,211 @@
+#!/usr/bin/env node
+// Pattern: pure builder / strategy seam — same shape as
+// `generate-changelog-entry.mjs` (rule #2). Daemon-side I/O wrapper +
+// CI freshness lint compose with this renderer; this module never
+// reads OTEL, files, or env.
+// Source: 2026-05-05 user request — "every minsky repo must have a
+//   list of important metrics … always be visible and updated …
+//   super critical not to have wrong data or useless metrics."
+// Anchor: Card & Mackinlay 1999 (10-metric glanceable display);
+//   Ries 2011 (vanity-metric anti-pattern); rule #2 (one source of
+//   truth — `SUCCESS_METRICS` is canonical, this renderer projects);
+//   rule #10 (deterministic).
+// Pivot (rule #9): if the static render's mean operator-glance time
+//   exceeds 10s for 10 metrics, restructure to a table — don't retire.
+// Conformance: full — pure data-in/string-out. The CLI wrapper at the
+//   bottom is the only I/O surface.
+
+/**
+ * @typedef {Object} SuccessMetricLike
+ * @property {string} id
+ * @property {string} label
+ * @property {string} unit
+ * @property {string} formula
+ * @property {number} freshnessBudgetMs
+ * @property {"ok"} [monotonic]
+ */
+
+/**
+ * @typedef {Object} Observation
+ * @property {string | number} value
+ * @property {number} timestampMs  epoch ms — the moment the observation
+ *   was captured (not generation time)
+ * @property {string} [source]     short pointer (script path / OTEL query)
+ *   shown in the `_Updated:` line
+ * @property {boolean} [previouslyObserved] for monotonic check: was this
+ *   metric ever observed at a lower value? Pure builder leaves this
+ *   field for the no-vanity lint to verify; absent here.
+ */
+
+/**
+ * @typedef {Object} BuildMetricsMdInput
+ * @property {ReadonlyArray<SuccessMetricLike>} metrics
+ * @property {Readonly<Record<string, Observation>>} [observations] keyed by metric id
+ * @property {number} [nowMs] for staleness — pure: caller supplies the clock
+ * @property {string} [stubFollowUp] task id or PR pointer rendered next to
+ *   each `(stub)` so an unobserved metric never reads as a silent zero;
+ *   defaults to `canonical-metric-list-per-repo follow-up`
+ */
+
+/** ms in one day */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const DEFAULT_STUB_FOLLOW_UP = "wired in canonical-metric-list-per-repo follow-up";
+
+/**
+ * Decide whether `obs` is fresh given `metric.freshnessBudgetMs` and the
+ * caller-supplied `nowMs`. Pure: same input → same output.
+ *
+ * @param {SuccessMetricLike} metric
+ * @param {Observation | undefined} obs
+ * @param {number} nowMs
+ * @returns {"missing" | "stale" | "fresh"}
+ */
+export function classifyFreshness(metric, obs, nowMs) {
+  if (obs === undefined) return "missing";
+  const ageMs = nowMs - obs.timestampMs;
+  if (ageMs < 0) return "fresh"; // future timestamp — treat as fresh, lint flags absurd values
+  return ageMs <= metric.freshnessBudgetMs ? "fresh" : "stale";
+}
+
+/**
+ * @param {number} ms
+ * @returns {string}
+ */
+function humanizeBudget(ms) {
+  if (ms >= DAY_MS) {
+    const days = ms / DAY_MS;
+    return `${days}d`;
+  }
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  return `${hours}h`;
+}
+
+/**
+ * @param {number} ms
+ * @returns {string}
+ */
+function isoUtc(ms) {
+  // YYYY-MM-DDTHH:mm:ssZ — millisecond precision is operational noise
+  // for a daily render.
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * @param {SuccessMetricLike} metric
+ * @param {Observation | undefined} obs
+ * @param {number} nowMs
+ * @param {string} stubFollowUp
+ * @returns {string}
+ */
+function renderSection(metric, obs, nowMs, stubFollowUp) {
+  const freshness = classifyFreshness(metric, obs, nowMs);
+  const monotonicTag = metric.monotonic === "ok" ? " · _monotonic: ok_" : "";
+  const heading = `## ${metric.id} — ${metric.label}`;
+
+  if (freshness === "fresh" && obs !== undefined) {
+    const sourceTag = obs.source ? ` · Source: \`${obs.source}\`` : "";
+    return [
+      heading,
+      "",
+      `_Updated: ${isoUtc(obs.timestampMs)} · Budget: ${humanizeBudget(metric.freshnessBudgetMs)}${sourceTag}${monotonicTag}_`,
+      "",
+      `**Value:** ${obs.value} ${metric.unit}`,
+      "",
+      `Formula: \`${metric.formula}\``,
+      "",
+    ].join("\n");
+  }
+
+  const reason =
+    freshness === "missing"
+      ? `(stub) — no observation captured yet (${stubFollowUp})`
+      : `(stub) — last observation older than ${humanizeBudget(metric.freshnessBudgetMs)} budget (${stubFollowUp})`;
+
+  return [
+    heading,
+    "",
+    `_Budget: ${humanizeBudget(metric.freshnessBudgetMs)}${monotonicTag}_`,
+    "",
+    `**Value:** ${reason}`,
+    "",
+    `Formula: \`${metric.formula}\``,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Build the markdown METRICS.md document. Pure: same input → same output.
+ *
+ * @param {BuildMetricsMdInput} input
+ * @returns {string}
+ */
+export function buildMetricsMd(input) {
+  const { metrics, observations, nowMs, stubFollowUp } = input;
+  const followUp = stubFollowUp ?? DEFAULT_STUB_FOLLOW_UP;
+  const clock = nowMs ?? 0;
+
+  const sections = metrics.map((m) => renderSection(m, observations?.[m.id], clock, followUp));
+
+  return [
+    "# METRICS.md — canonical observability surface",
+    "",
+    "_Generated by `node scripts/generate-metrics-md.mjs`. Each entry is either a fresh observation (within its `freshnessBudgetMs`) or an explicit `(stub)`. Never a silent zero — wrong data is worse than no data (Ries 2011)._",
+    "",
+    ...sections,
+  ].join("\n");
+}
+
+// ---- CLI thin wrapper -------------------------------------------------
+//
+// Reads a JSON `BuildMetricsMdInput` from `--input <path>` or stdin and
+// writes the markdown document to stdout. Defaults `nowMs` to
+// `Date.now()` when absent.
+
+/**
+ * @param {string[]} argv
+ */
+function parseArgs(argv) {
+  /** @type {{ input: string | null, now: string | null }} */
+  const args = { input: null, now: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--input") args.input = argv[++i] ?? null;
+    else if (a === "--now") args.now = argv[++i] ?? null;
+  }
+  return args;
+}
+
+/**
+ * @param {string | null} argInput
+ * @returns {Promise<string>}
+ */
+async function readInput(argInput) {
+  if (argInput) {
+    const { readFile } = await import("node:fs/promises");
+    return await readFile(argInput, "utf8");
+  }
+  /** @type {Buffer[]} */
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const raw = await readInput(args.input);
+  const parsed = JSON.parse(raw);
+  if (parsed.nowMs === undefined) {
+    parsed.nowMs = args.now ? Number(args.now) : Date.now();
+  }
+  process.stdout.write(buildMetricsMd(parsed));
+  return 0;
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("generate-metrics-md.mjs");
+if (invokedDirectly) {
+  const code = await main();
+  process.exit(code);
+}
