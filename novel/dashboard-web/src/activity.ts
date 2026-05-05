@@ -1,3 +1,4 @@
+// <!-- scope: human-approved 2026-05-04 user request "stream of latest messages from inside" -->
 /**
  * Activity feed — read recent tick-loop iteration spans from the
  * supervisor's stdout log (`.minsky/tick-loop.out.log`) and surface
