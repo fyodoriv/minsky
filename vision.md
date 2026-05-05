@@ -51,6 +51,8 @@ Strict preference order:
 
 Apply continuously, not only at project start. Quarterly: scan whether each novel layer is now solvable upstream — and replace yourself.
 
+**Per-feature replace-or-relocate research is mandatory** (operator directive 2026-05-05). Every time a feature lands in this repo (any PR introducing a new module, CLI, daemon seam, or cross-cutting capability), the *same* PR — or an immediately-following one filed in TASKS.md — must add a research task answering two questions: (a) **Replace?** Does an existing tool already do this; if so, what would it cost to swap us out? (b) **Relocate?** Should this feature live in another repo and be imported here instead? Default candidate hosts in priority order: [`agentbrew`](https://github.com/fyodoriv/agentbrew), [`dotfiles`](https://github.com/fyodoriv/dotfiles), [`tasks.md`](https://github.com/tasksmd/tasks.md). The research task is `research-replace-or-relocate-<feature-id>`, tagged `p2, research, replace-or-relocate`. Without that task, the feature PR does not ship — `pr-replace-or-relocate-research` lint blocks merge. The discipline keeps rule #1 honest at the cadence features actually land, not the cadence calendars enforce.
+
 ### 2. Every dependency behind an interface
 
 No tool we depend on is hardcoded. Each is accessed through an adapter — a Minsky module that defines an interface, then implements it against the currently chosen tool. Swapping OMC for a future better orchestrator is a one-file change. See `ARCHITECTURE.md` for the adapter pattern applied to all dependencies.

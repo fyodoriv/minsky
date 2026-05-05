@@ -43,6 +43,13 @@ export interface CompletedIterationSignals {
   readonly lintScores: Readonly<Record<string, number>>;
 }
 
+/** Label every audit-filed PR carries; the pre-registered measurement
+ *  command (`gh pr list --label minsky:cto-audit ...`) keys on this exact
+ *  string, so it is exported + referenced in the prompt header below
+ *  rather than hard-coded twice. Brief drift on this constant breaks the
+ *  measurement; the test suite pins it. */
+export const CTO_AUDIT_PR_LABEL = "minsky:cto-audit";
+
 /** The CTO-mode prompt header. Data, not code — tested. */
 export const CTO_PROMPT_HEADER = [
   "You are reviewing what just shipped from a CTO perspective.",
@@ -65,6 +72,29 @@ export const CTO_PROMPT_HEADER = [
   "LOC, commits, hours, tasks-in-flight). The metric must be falsifiable.",
   "",
   "If no high-leverage task is visible, say so explicitly — don't fabricate work.",
+  "",
+  "## Branch + PR conventions (load-bearing for the audit's pre-registered metric)",
+  "",
+  "Open the PR on a branch named `audit/<UTC-date>-<completed-task-id>` (e.g.",
+  "`audit/2026-05-05-canonical-metric-list-per-repo`). One audit per ship; the",
+  "branch name encodes which ship the audit was triggered by.",
+  "",
+  `Label the PR \`${CTO_AUDIT_PR_LABEL}\`. The pre-registered measurement command`,
+  `(\`gh pr list --label ${CTO_AUDIT_PR_LABEL} ...\`) queries this exact label,`,
+  "so a missing label silently zeroes the success metric (Ries 2011's anti-",
+  "vanity discipline applies in reverse here — the measurement must be able to",
+  "see the PR for the hypothesis to be falsifiable).",
+  "",
+  "If the label does not yet exist on the repository, create it first:",
+  "",
+  "```",
+  `gh label list --search ${CTO_AUDIT_PR_LABEL} --json name --jq '.[].name' | grep -qx ${CTO_AUDIT_PR_LABEL} \\`,
+  `  || gh label create ${CTO_AUDIT_PR_LABEL} --description 'Filed by post-task CTO audit' --color 0e8a16`,
+  "```",
+  "",
+  "Then add the label at PR-create time (`gh pr create --label",
+  `${CTO_AUDIT_PR_LABEL} ...\`) so the metric sees it from the moment the PR is`,
+  "opened, not retroactively.",
   "",
 ].join("\n");
 
