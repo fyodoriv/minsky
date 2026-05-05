@@ -15,12 +15,12 @@
 //   8. synthesiseVerdict            — pure-function unit cases
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 
 import {
   decodeContentsResponse,
@@ -31,6 +31,28 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNNER = resolve(HERE, "cross-repo-check-runner.mjs");
 const STUB = resolve(HERE, "fixtures/cross-repo-check-runner-gh-stub.mjs");
+const REPO_ROOT = resolve(HERE, "..");
+
+// Vitest resolves `@minsky/experiment-record` from the package's `src/`
+// via vitest.config.ts. The runner, however, spawns the lint scripts as
+// fresh Node processes — those go through package.json `main`/`exports`,
+// which point at `dist/`. CI's `test` job runs `pnpm install` only (no
+// `pnpm build`), so on CI `dist/` is missing and ESM resolution fails
+// with `node:internal/modules/esm/resolve` (visible as the lint's
+// `reason` field). Build the workspace package once at suite setup if
+// the dist directory doesn't yet exist; locally with a built tree this
+// is a no-op.
+beforeAll(() => {
+  const distEntry = resolve(REPO_ROOT, "novel/experiment-record/dist/index.js");
+  if (existsSync(distEntry)) return;
+  const r = spawnSync("pnpm", ["--filter", "@minsky/experiment-record", "build"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  if ((r.status ?? 1) !== 0) {
+    throw new Error(`@minsky/experiment-record build failed: ${r.stderr}\n${r.stdout}`);
+  }
+});
 
 /** @param {string} stubMode */
 function runRunner(stubMode) {
