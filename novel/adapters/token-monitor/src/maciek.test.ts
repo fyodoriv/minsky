@@ -143,4 +143,26 @@ describe("MaciekTokenMonitor", () => {
     const s = await tm.snapshot();
     expect(s.tokensRemainingInWindow).toBe(85_000);
   });
+
+  it("cache_read_input_tokens are excluded from the 5h-window sum", async () => {
+    const tmp = mkdtempSync(`${tmpdir()}/maciek-cacheread-`);
+    const projects = `${tmp}/projects/-x`;
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(projects, { recursive: true });
+    writeFileSync(
+      `${projects}/s.jsonl`,
+      // 1k input + 2k output + 5k cache_creation + 900k cache_read.
+      // Pre-fix: 908_000 → wraps every plan to 0 remaining.
+      // Post-fix: 8_000 → 80_000 remaining for max5.
+      '{"type":"assistant","timestamp":"2026-05-04T12:00:00.000Z","message":{"id":"msg_x","usage":{"input_tokens":1000,"output_tokens":2000,"cache_creation_input_tokens":5000,"cache_read_input_tokens":900000}},"requestId":"req_x"}',
+      "utf8",
+    );
+    const tm = new MaciekTokenMonitor({
+      configDir: tmp,
+      now: () => new Date("2026-05-04T12:00:00.000Z"),
+      plan: "max5",
+    });
+    const s = await tm.snapshot();
+    expect(s.tokensRemainingInWindow).toBe(80_000);
+  });
 });

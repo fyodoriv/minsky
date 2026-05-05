@@ -66,8 +66,17 @@ console.log(snap);
    `floor(first-entry-timestamp, hour)` UTC; new block when
    `entry.ts >= block.end_time` OR `gap-since-last-entry >= 5h`.
 6. Pick the active block — the one whose `[start, end)` contains `now()`.
-7. `tokensUsed = sum(input + output + cache_creation + cache_read)`
-   over that block's entries.
+7. `tokensUsed = sum(input + output + cache_creation)`
+   over that block's entries. **Diverges from Maciek upstream's
+   `TokenExtractor.extract_tokens`**, which sums `cache_read` too.
+   Anthropic's prompt-cache reads are billed at ~0.1× input pricing and
+   don't count fully against the 5h cap; on 1M-context Claude Code
+   sessions a single message can carry ~1M cache-read tokens, so summing
+   them inflated the active-block total by ~10× and false-positive-paused
+   every iteration. Live verification 2026-05-04: an active block carried
+   ~700M total tokens (696M of which were cache reads); chargeable was
+   ~3.6M. See PR #155 + the regression test
+   `cache_read_input_tokens are excluded from the 5h-window sum`.
 8. `tokensRemainingInWindow = max(0, planCap − tokensUsed)`.
 9. `secondsUntilWindowReset = (block.end − now)` in seconds.
 

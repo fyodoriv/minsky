@@ -248,10 +248,15 @@ function parseUsageLine(line: string): UsageEntry | null {
   const cacheCreation = toNonNegInt(
     (usage as { cache_creation_input_tokens?: unknown }).cache_creation_input_tokens,
   );
-  const cacheRead = toNonNegInt(
-    (usage as { cache_read_input_tokens?: unknown }).cache_read_input_tokens,
-  );
-  const tokens = inputTokens + outputTokens + cacheCreation + cacheRead;
+  // cache_read_input_tokens is intentionally NOT summed. Anthropic's 5h
+  // session-window throttle bills cache reads at ~0.1× a normal input token
+  // (see Anthropic prompt-caching pricing); on a 1M-context Claude Code
+  // session a single message can read ~1M cache tokens, so summing them
+  // naively inflates the active-block total by ~10× and false-positives
+  // BudgetGuard. Diverges from Maciek upstream `TokenExtractor.extract_tokens`
+  // (rule #1 — fork acknowledged, behaviour validated empirically against
+  // the 5h cap on 2026-05-04: pre-fix all four plans read 100%).
+  const tokens = inputTokens + outputTokens + cacheCreation;
   if (tokens <= 0) return null;
 
   const messageId = stringOrEmpty((message as { id?: unknown }).id);
