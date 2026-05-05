@@ -70,6 +70,10 @@ console.log(`${recorder.spans.length} spans recorded`);
 
 After every successfully completed iteration that shipped real change (commit on the branch OR PR opened), the daemon can fire one extra `claude --print` invocation in CTO-mode to identify the next highest-leverage task and file it as a TASKS.md block. The substrate ships in `src/post-task-cto-audit.ts` — a pure brief builder + gate (no I/O); the daemon wire-in lands in a follow-up. The CTO-mode prompt header is data (the `CTO_PROMPT_HEADER` constant), tested verbatim, so brief drift surfaces in tests rather than silently in production. Disable per-iteration via `MINSKY_CTO_AUDIT=off`.
 
+## Daemon brief (anti-noop guard)
+
+The daemon's spawn-step receives a brief built by `buildDaemonBrief({taskId, tasksMdContent})` (pure function in `src/daemon.ts`, replacing the earlier `"daemon brief for ${taskId}"` placeholder). The brief embeds the picked task's TASKS.md block via `extractTaskBlock` plus an iteration directive that explicitly forbids 1-line "brief refresh" PRs (the noop pattern observed on supervisor iterations 87-93 of `cross-repo-ci-action`, 2026-05-05). When claude --print cannot ship a meaningful code change, the directive instructs it to output `noop, exiting` to stdout and skip the PR. Pure substrate; tested in `daemon.test.ts` (5 tests for `extractTaskBlock` + 4 for `buildDaemonBrief`).
+
 ## Relationship to `config/tick-loop.json` (the real tick-loop's backoff ladder)
 
 The `scripts/check-tick-loop-backoff-schedule.mjs` lint gates a future `config/tick-loop.json` artefact whose `backoff_schedule` matches `ARCHITECTURE.md` L215's `5s → 30s → 5min` prose anchor. That config governs the *real* (non-mock) tick-loop's supervisor-respawn cadence — a different concern from this package, which is the in-process mock daemon for the smoke. The naming overlap is intentional: this mock daemon is the unit the real tick-loop's chaos-verification harness will exercise once the config-driven loop ships. The mock uses defaults (no config file) and exposes `budgetMs` + `maxTicks` directly via `SmokeOpts`.
