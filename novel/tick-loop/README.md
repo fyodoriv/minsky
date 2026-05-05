@@ -68,7 +68,7 @@ console.log(`${recorder.spans.length} spans recorded`);
 
 ## Post-task CTO audit (rule #9 — compounding self-improvement)
 
-After every successfully completed iteration that shipped real change (commit on the branch OR PR opened), the daemon can fire one extra `claude --print` invocation in CTO-mode to identify the next highest-leverage task and file it as a TASKS.md block. The substrate ships in `src/post-task-cto-audit.ts` — a pure brief builder + gate (no I/O); the daemon wire-in lands in a follow-up. The CTO-mode prompt header is data (the `CTO_PROMPT_HEADER` constant), tested verbatim, so brief drift surfaces in tests rather than silently in production. Disable per-iteration via `MINSKY_CTO_AUDIT=off`.
+After every successfully completed iteration that shipped real change (commit on the branch OR PR opened), the daemon fires one extra `claude --print` invocation in CTO-mode to identify the next highest-leverage task and file it as a TASKS.md block. Substrate ships in `src/post-task-cto-audit.ts`: pure `buildCtoBrief` + `shouldRunCtoAudit` gate, plus the I/O wrapper `runCtoAudit({signals, spawn, lockPath})` with three composed seams — gate (skip when not warranted), no-recurse (CTO-mode never triggers another CTO-mode), and lock (one audit at a time per supervisor host). The CTO-mode prompt header is data (`CTO_PROMPT_HEADER` constant), tested verbatim, so brief drift surfaces in tests rather than silently in production. Disable per-iteration via `MINSKY_CTO_AUDIT=off`.
 
 ## Daemon brief (anti-noop guard)
 
