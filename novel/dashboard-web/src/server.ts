@@ -28,11 +28,21 @@
 
 import { Hono } from "hono";
 
+import type { ActivityEntry } from "./activity.js";
 import { type SetPaused, parseControlBody } from "./control.js";
 import { createMemoryPauseState } from "./control.js";
 import { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
 import { type GetValue, STUB_GET_VALUE, render } from "./render.js";
 import { type PauseReasonState, type PauseState, watchEnvelope } from "./watch.js";
+
+/**
+ * Strategy seam (rule #2) for the activity feed — a synchronous read
+ * that returns the most recent N iteration spans, youngest-first.
+ * `start.ts` injects a `loadRecentSpans(MINSKY_HOME/.minsky/tick-loop.out.log, 20)`
+ * implementation; tests inject a fixed array. `null` / unset → no
+ * activity section is rendered (the feed is opt-in).
+ */
+export type GetActivity = () => readonly ActivityEntry[];
 
 /** Server handle: `app` for tests, `fetch` for embedding. */
 export interface DashboardServer {
@@ -58,6 +68,7 @@ export function createServer(args?: {
   readonly getPauseState?: PauseState;
   readonly setPaused?: SetPaused;
   readonly getPauseReason?: PauseReasonState;
+  readonly getActivity?: GetActivity;
 }): DashboardServer {
   const metrics = args?.metrics ?? SUCCESS_METRICS;
   const getValue = args?.getValue ?? STUB_GET_VALUE;
@@ -65,8 +76,12 @@ export function createServer(args?: {
   const getPauseState = args?.getPauseState ?? memory.getPauseState;
   const setPaused = args?.setPaused ?? memory.setPaused;
   const getPauseReason = args?.getPauseReason;
+  const getActivity = args?.getActivity;
   const app = new Hono();
-  app.get("/", (c) => c.html(render({ metrics, getValue })));
+  app.get("/", (c) => {
+    const activity = getActivity?.() ?? [];
+    return c.html(render({ metrics, getValue, activity }));
+  });
   app.get("/watch.json", (c) =>
     c.json(
       watchEnvelope(
