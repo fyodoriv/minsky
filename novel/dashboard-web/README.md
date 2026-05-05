@@ -4,6 +4,8 @@
 
 SSR web dashboard for Minsky's 10 success metrics (vision.md § "Success criteria"). v0 sub-task 1/4 ships the skeleton: a Hono v4 app with a single `GET /` route, a pure `render({ metrics })` function, and a `SuccessMetric` shape with one placeholder entry. Sub-tasks 2-4 (filed in TASKS.md) populate the 10 metrics, wire the OTEL backend through `@minsky/observability`, and add the Lighthouse Mobile ≥0.85 CI gate (threshold pivoted from 0.9 → 0.85 on 2026-05-04 — see § "Sub-task 4" below for the rationale).
 
+The HTML carries an inlined `<style>` block (Card & Mackinlay 1999 — glanceable display): system font stack, dark slate background, responsive grid of metric cards (`auto-fill, minmax(280px, 1fr)`), muted styling for the `(stub)` not-wired-yet state so an unwired backend is visibly distinct from a real value. Inlined CSS keeps the dashboard a single SSR response (no extra fetch round-trip; works offline) and stays well within the parent `dashboard-web-v0` 300-LoC pivot cap.
+
 ## Pattern conformance
 
 Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index) row 57:
