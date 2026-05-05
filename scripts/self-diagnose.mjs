@@ -25,10 +25,14 @@
 // surfacing — the false-positive rate, not the architecture, is what
 // would change.
 
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * @typedef {object} InvariantOk
@@ -141,6 +145,68 @@ export function tokenMonitorNotAllPeggedInvariant(opts) {
 }
 
 /**
+ * @typedef {object} ClaudeBinaryInvariantOpts
+ * @property {(name: string) => Promise<{ ok: boolean }>} probe — returns
+ *   `{ ok: true }` when the binary is reachable from the current PATH;
+ *   `{ ok: false }` otherwise. Tests inject a fake; production calls
+ *   `claude --version`.
+ */
+
+/**
+ * Invariant: the `claude` CLI must be reachable from the supervisor's
+ * PATH. The tick-loop spawns `claude --print` per iteration; a missing
+ * binary triggers `ENOENT`, which the daemon surfaces as an unhandled
+ * exception → process exit → launchd respawn loop at `ThrottleInterval`
+ * cadence. This invariant catches the failure at boot, so the operator
+ * sees a one-line task instead of a 12-times-per-minute respawn loop.
+ *
+ * Live observed 2026-05-04 during the post-#158 dogfood restart: the
+ * launchd minimal PATH didn't include `~/.local/bin`, so the CLI wasn't
+ * found and tick-loop crashed on its first spawn.
+ *
+ * Strategy seam: `probe` is injected so tests can simulate
+ * available/unavailable without touching the real CLI.
+ *
+ * @param {ClaudeBinaryInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function claudeBinaryReachableInvariant(opts) {
+  const { probe } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const result = await probe("claude");
+    if (result.ok) return { id: "claude-binary-reachable", ok: true };
+    return {
+      id: "claude-binary-reachable",
+      ok: false,
+      evidence:
+        "the `claude` CLI is not reachable from the supervisor's PATH; spawning it raises ENOENT.",
+      suggestedTaskTitle:
+        "supervisor cannot find the `claude` CLI on its PATH — every iteration crashes",
+      suggestedFix:
+        "Locate the `claude` binary (`which claude` from your shell) and ensure its directory is on the launchd / systemd-user PATH. The supervisor bootstrap (`distribution/systemd/run-tick-loop.sh`) extends PATH with common installer locations (~/.local/bin, ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin) — if your install lives elsewhere, add it to that loop. Without this fix the daemon ENOENT-crashes on first iteration and launchd respawns it at ThrottleInterval (5s) indefinitely.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "claude-binary-reachable";
+  return fn;
+}
+
+/**
+ * Default probe: spawns `<name> --version` and resolves based on exit code.
+ *
+ * @param {string} name
+ * @returns {Promise<{ ok: boolean }>}
+ */
+async function spawnVersionProbe(name) {
+  try {
+    await execFileAsync(name, ["--version"], { timeout: 5_000 });
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -152,7 +218,10 @@ export function defaultInvariants() {
   const configDir = join(homedir(), ".claude");
   /** @type {(plan: "pro"|"max5"|"max20"|"custom") => Promise<TokenSnapshot>} */
   const snapshotPerPlan = async (plan) => new MaciekTokenMonitor({ configDir, plan }).snapshot();
-  return [tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan })];
+  return [
+    tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan }),
+    claudeBinaryReachableInvariant({ probe: spawnVersionProbe }),
+  ];
 }
 
 /**

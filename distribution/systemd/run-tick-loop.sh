@@ -69,6 +69,19 @@ for brew_prefix in /opt/homebrew/bin /usr/local/bin; do
   [ -x "${brew_prefix}/node" ] && node_path_extras="${brew_prefix}:${node_path_extras}"
 done
 PATH="${node_path_extras}${PATH:-/usr/bin:/bin}"
+
+# Same problem as `node`, separate axis: the supervisor spawns `claude
+# --print` (the headless Claude Code CLI) per iteration. The Claude
+# Code installer's default location is `~/.local/bin/claude` (also
+# `~/.npm-global/bin/claude` for npm-global installs and
+# `/opt/homebrew/bin/claude` / `/usr/local/bin/claude` for Homebrew).
+# A spawn against a missing `claude` is `ENOENT`, which the daemon
+# surfaces as an unhandled exception → process exit → launchd respawn
+# loop at `ThrottleInterval` cadence (5s). Surfaced live 2026-05-04
+# during the post-#158 dogfood restart.
+for claude_dir in "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
+  [ -x "${claude_dir}/claude" ] && PATH="${claude_dir}:${PATH}" && break
+done
 export PATH
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
