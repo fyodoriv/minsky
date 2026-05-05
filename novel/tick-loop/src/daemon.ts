@@ -45,6 +45,12 @@ import {
 } from "./changelog-runner.js";
 import { type MockAnthropicClient, type TickSpan, tick } from "./index.js";
 import {
+  type GetLastRenderedDate,
+  type MetricsRender,
+  type RunMetricsRenderOutcome,
+  runMetricsRender,
+} from "./metrics-render-runner.js";
+import {
   type CompletedIterationSignals,
   type CtoAuditLock,
   type CtoAuditSpawn,
@@ -188,6 +194,19 @@ export interface RunDaemonOpts {
    * snapshot writes.
    */
   readonly snapshot?: SnapshotSeam;
+  /**
+   * Optional daily metrics-render seam (rule #2). When injected, the daemon
+   * fires `runMetricsRender` once per iteration; the runner's own gate
+   * (`shouldRunMetricsRender`) filters env-off + already-rendered so that
+   * only one spawn lands per UTC date. When omitted, the metrics render
+   * never runs — supervisor daemons predating this seam keep working
+   * unchanged. Substrate for `canonical-metric-list-per-repo` Acceptance
+   * (3) "daemon refreshes daily". Independent of the `snapshot` seam: a
+   * snapshot-capture failure (gh rate-limit, network) must NOT suppress
+   * today's render — yesterday's snapshot still produces a usable
+   * `METRICS.md` (visible-not-silent, Helland 2007).
+   */
+  readonly metricsRender?: MetricsRenderSeam;
 }
 
 /**
@@ -277,6 +296,34 @@ export interface SnapshotSeam {
   readonly snapshotExists: SnapshotExists;
 }
 
+/**
+ * Optional daily metrics-render seam (rule #2). When injected, the daemon
+ * dispatches into `runMetricsRender` once per iteration. Two sub-seams:
+ *   - `render` — writes today's `METRICS.md`. Production binding spawns
+ *     `pnpm metrics:render --date <date>` via the daemon's existing
+ *     `SpawnStrategy`; tests inject a stub.
+ *   - `getLastRenderedDate` — returns the UTC-date string of the last
+ *     `METRICS.md` render (mtime-formatted in production), or `null` when
+ *     `METRICS.md` does not yet exist (genesis case — flows through to
+ *     render so the file is authored on the first daemon iteration of a
+ *     fresh checkout).
+ *
+ * Independent of the `snapshot` seam: a snapshot-capture failure must NOT
+ * suppress today's render — yesterday's snapshot still produces a usable
+ * `METRICS.md` (visible-not-silent). Same calendar, separate gates — see
+ * `metrics-render-runner.ts`.
+ *
+ * Idempotency comes from the file mtime itself, not a separate lock dir
+ * (rule #2 — the file IS the "this happened" record). `pnpm metrics:render`
+ * is byte-deterministic for a given snapshot, so a double-fire would write
+ * identical bytes; the gate exists to keep span noise + write churn down,
+ * not for correctness.
+ */
+export interface MetricsRenderSeam {
+  readonly render: MetricsRender;
+  readonly getLastRenderedDate: GetLastRenderedDate;
+}
+
 // ---- runDaemon ------------------------------------------------------------
 
 /**
@@ -322,6 +369,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunCtoAudit(opts, outcome.result);
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
+    await maybeRunMetricsRender(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -574,6 +622,80 @@ function emitSnapshotSpan(opts: RunDaemonOpts, date: string, outcome: RunSnapsho
     base["snapshot.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.snapshot", attributes: base });
+}
+
+/**
+ * Wire-in for the daily metrics-render runner (rule #2 — the daemon
+ * orchestrates, `runMetricsRender` decides + spawns). Skip-fast on the
+ * same operator-quiet iteration shapes as `maybeRunSnapshot`:
+ *   - the seam isn't injected (daemons predating this seam),
+ *   - `paused` (operator told us to be silent),
+ *   - `budget-paused` (we're inside the 5h cap; `pnpm metrics:render`
+ *     is a deterministic in-process build but the cap is the cap),
+ *   - `missing-tasks-md` (the daemon stops anyway).
+ *
+ * Otherwise derive the UTC date and invoke `runMetricsRender`. The gate
+ * inside `runMetricsRender` (`shouldRunMetricsRender`) is the per-day
+ * debounce: env-off short-circuits before the mtime probe, and the
+ * mtime probe filters days already rendered. So the daemon may safely
+ * call this every iteration and still land exactly one spawn per UTC date.
+ *
+ * Failed iterations DO fire metrics-render. The render is the
+ * always-visible operator-glance surface; "every minsky repo … always
+ * be visible and updated" requires the substrate (METRICS.md) to be
+ * refreshed even when the daemon's iteration failed.
+ *
+ * Outcome is emitted as a `tick-loop.metrics-render` span so the
+ * dashboard can chart firing-rate + skip-reason distribution.
+ *
+ * Extracted so `runDaemon` stays dispatch-only (rule #6, biome ≤10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunMetricsRender(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+): Promise<void> {
+  if (opts.metricsRender === undefined) return;
+  if (result.status === "paused") return;
+  if (result.status === "budget-paused") return;
+  if (result.status === "missing-tasks-md") return;
+
+  const ms = opts.now === undefined ? Date.now() : opts.now();
+  const today = new Date(ms).toISOString().slice(0, 10);
+  const outcome = await runMetricsRender({
+    today,
+    env: process.env,
+    getLastRenderedDate: opts.metricsRender.getLastRenderedDate,
+    render: opts.metricsRender.render,
+  });
+  emitMetricsRenderSpan(opts, today, outcome);
+}
+
+/**
+ * Emit a `tick-loop.metrics-render` span describing the runner's outcome.
+ * One span per invocation (skipped or ran), so the dashboard can chart
+ * firing-rate, skip-reason distribution, and exit-code distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitMetricsRenderSpan(
+  opts: RunDaemonOpts,
+  date: string,
+  outcome: RunMetricsRenderOutcome,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "metrics-render.date": date,
+    "metrics-render.outcome": outcome.outcome,
+  };
+  if (outcome.outcome === "skipped") {
+    base["metrics-render.skip_reason"] = outcome.reason;
+  } else {
+    base["metrics-render.exit_code"] = outcome.exitCode;
+    base["metrics-render.duration_ms"] = outcome.durationMs;
+  }
+  opts.emit({ name: "tick-loop.metrics-render", attributes: base });
 }
 
 /**
