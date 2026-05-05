@@ -20,7 +20,8 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test:coverage",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",
     "dogfood": "./setup.sh --dogfood",
-    "dogfood:doctor": "./setup.sh --doctor"
+    "dogfood:doctor": "./setup.sh --doctor",
+    "dogfood:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
