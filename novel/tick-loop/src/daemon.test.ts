@@ -18,9 +18,11 @@ import { StubTokenMonitor } from "@minsky/token-monitor";
 import { describe, expect, it } from "vitest";
 
 import { fromRealBudgetGuard } from "./budget-guard-facade.js";
+import type { ChangelogSpawn, ReadChangelog } from "./changelog-runner.js";
 import {
   type BudgetDecisionLike,
   type BudgetGuardLike,
+  type ChangelogSeam,
   type CtoAuditSeam,
   buildDaemonBrief,
   extractTaskBlock,
@@ -721,6 +723,207 @@ describe("tick-loop / daemon / runDaemon", () => {
     // its stdoutTail, which the daemon's `runClaimedIteration` puts in
     // `result.reason` for completed iterations.
     expect(captured).toContain("alpha");
+  });
+
+  // ---- daily-changelog wire-in -------------------------------------------
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunChangelog`. The
+  // runner's own gate / prompt / dispatch semantics are tested in
+  // `changelog-runner.test.ts`; here we only verify that the daemon
+  // dispatches into `runChangelog` for the right iteration shapes,
+  // skips for the operator-quiet states, and emits the
+  // `tick-loop.changelog` span.
+
+  /**
+   * Build a `ChangelogSeam` whose `spawn` and `readChangelog` record their
+   * calls. `content` is what `readChangelog` returns; defaults to "" so
+   * the gate fires.
+   */
+  function makeChangelogSeam(opts: { content?: string } = {}): {
+    readonly seam: ChangelogSeam;
+    readonly spawnCalls: Array<{ taskId: string; brief: string }>;
+    readonly readCalls: { count: number };
+  } {
+    const readCalls = { count: 0 };
+    const spawnCalls: Array<{ taskId: string; brief: string }> = [];
+    const readChangelog: ReadChangelog = async () => {
+      readCalls.count++;
+      return opts.content ?? "";
+    };
+    const spawn: ChangelogSpawn = {
+      spawn: async (input) => {
+        spawnCalls.push({ taskId: input.taskId, brief: input.brief });
+        return { exitCode: 0, durationMs: 7, stdoutTail: "changelog ran", stderrTail: "" };
+      },
+    };
+    return { seam: { spawn, readChangelog }, spawnCalls, readCalls };
+  }
+
+  // 2026-05-05 UTC midnight — ISO-formats to "2026-05-05".
+  const FIXED_NOW_2026_05_05 = Date.UTC(2026, 4, 5);
+
+  it("changelog wire-in: empty CHANGELOG triggers spawn + emits a ran span tagged with today's UTC date", async () => {
+    const recorder = new SpanRecorder();
+    const cl = makeChangelogSeam({ content: "" });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      emit: (e: TickSpan) => recorder.record(e),
+      changelog: cl.seam,
+    });
+    expect(cl.readCalls.count).toBe(1);
+    expect(cl.spawnCalls).toHaveLength(1);
+    expect(cl.spawnCalls[0]?.taskId).toBe("changelog:2026-05-05");
+    expect(cl.spawnCalls[0]?.brief).toContain("2026-05-05");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.changelog");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["changelog.outcome"]).toBe("ran");
+    expect(spans[0]?.attributes["changelog.date"]).toBe("2026-05-05");
+    expect(spans[0]?.attributes["changelog.exit_code"]).toBe(0);
+  });
+
+  it("changelog wire-in: existing date section skips with already-authored span", async () => {
+    const recorder = new SpanRecorder();
+    const cl = makeChangelogSeam({ content: "## 2026-05-05\n\nGenesis entry.\n" });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      emit: (e: TickSpan) => recorder.record(e),
+      changelog: cl.seam,
+    });
+    expect(cl.readCalls.count).toBe(1);
+    expect(cl.spawnCalls).toHaveLength(0);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.changelog");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["changelog.outcome"]).toBe("skipped");
+    expect(spans[0]?.attributes["changelog.skip_reason"]).toBe("already-authored");
+  });
+
+  it("changelog wire-in: omitted seam (production daemons predating this seam) keeps working unchanged", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.changelog");
+    expect(spans).toHaveLength(0);
+  });
+
+  it("changelog wire-in: paused iteration does NOT fire (operator-quiet)", async () => {
+    const cl = makeChangelogSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: pausedNow(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      changelog: cl.seam,
+    });
+    expect(cl.readCalls.count).toBe(0);
+    expect(cl.spawnCalls).toHaveLength(0);
+  });
+
+  it("changelog wire-in: budget-paused iteration does NOT fire (don't burn the cap on a daily-fire)", async () => {
+    const cl = makeChangelogSeam();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      changelog: cl.seam,
+    });
+    expect(cl.readCalls.count).toBe(0);
+    expect(cl.spawnCalls).toHaveLength(0);
+  });
+
+  it("changelog wire-in: failed iteration STILL fires (per-day cadence, not per-shipped-task)", async () => {
+    // Acceptance contract: "every day with merged PRs has a corresponding
+    // section within 24h" — PRs may merge from human work even when the
+    // daemon's own iteration failed. The CTO audit gates on completed-only;
+    // the changelog explicitly does not.
+    const cl = makeChangelogSeam({ content: "" });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic({ failureMode: "http-5xx" }),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      changelog: cl.seam,
+    });
+    expect(cl.readCalls.count).toBe(1);
+    expect(cl.spawnCalls).toHaveLength(1);
+  });
+
+  it("changelog wire-in: multi-iteration same day fires read every tick but spawn only once (gate idempotency)", async () => {
+    // The first iteration's spawn would author `## <date>` to CHANGELOG.md;
+    // the second iteration's read returns that updated content and the
+    // gate skips. Simulate by mutating the seam's read source after the
+    // first spawn call.
+    let content = "";
+    const readCalls = { count: 0 };
+    const spawnCalls: Array<{ taskId: string }> = [];
+    const readChangelog: ReadChangelog = async () => {
+      readCalls.count++;
+      return content;
+    };
+    const spawn: ChangelogSpawn = {
+      spawn: async (input) => {
+        spawnCalls.push({ taskId: input.taskId });
+        // The runner's spawn would append `## 2026-05-05` to CHANGELOG.md;
+        // mirror that side effect on our in-memory content store.
+        content = "## 2026-05-05\n";
+        return { exitCode: 0, durationMs: 7, stdoutTail: "ran", stderrTail: "" };
+      },
+    };
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 3,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      now: () => FIXED_NOW_2026_05_05,
+      changelog: { spawn, readChangelog },
+    });
+    expect(readCalls.count).toBe(3);
+    expect(spawnCalls).toHaveLength(1);
   });
 });
 

@@ -68,6 +68,7 @@ import {
   DryRunSpawnStrategy,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
+  createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
   createGitGhSignalsBuilder,
   fromRealBudgetGuard,
@@ -244,6 +245,33 @@ const ctoAuditSeam = (() => {
   };
 })();
 
+// Daily-changelog acceptance criterion (3) — CLI-side construction of the
+// `ChangelogSeam`. Default is OFF for parity with the CTO-audit opt-in
+// (rule #9 pivot threshold #1: don't fire >1 spawn/day on first rollout).
+// Setting `MINSKY_CHANGELOG_ENABLE=1` (or `true`) constructs:
+//   - `spawn` — re-uses the daemon's already-constructed `spawnStrategy`
+//     (structurally compatible with `ChangelogSpawn` per task spec sub-step (a));
+//   - `readChangelog` — file-backed reader at `<MINSKY_HOME>/CHANGELOG.md`
+//     with ENOENT graceful-degrade (genesis-entry case fires on a fresh
+//     checkout pre-CHANGELOG.md).
+// The runner's own gate (`shouldRunChangelog`) still respects
+// `MINSKY_CHANGELOG=off` for ad-hoc skips even when the seam is wired.
+const changelogEnabled = (() => {
+  const raw = process.env.MINSKY_CHANGELOG_ENABLE;
+  if (raw === undefined) return false;
+  const normalised = raw.trim().toLowerCase();
+  return normalised === "1" || normalised === "true";
+})();
+const changelogSeam = (() => {
+  if (!changelogEnabled) return undefined;
+  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
+  const changelogPath = resolve(minskyHome, "CHANGELOG.md");
+  return {
+    spawn: spawnStrategy,
+    readChangelog: createFileBackedChangelogReader(changelogPath),
+  };
+})();
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -276,6 +304,8 @@ const result = await runDaemon({
   ...(notifier !== undefined ? { notifier } : {}),
   // Optional CTO-audit seam; `undefined` when MINSKY_CTO_AUDIT_ENABLE isn't 1/true.
   ...(ctoAuditSeam !== undefined ? { ctoAudit: ctoAuditSeam } : {}),
+  // Optional daily-changelog seam; `undefined` when MINSKY_CHANGELOG_ENABLE isn't 1/true.
+  ...(changelogSeam !== undefined ? { changelog: changelogSeam } : {}),
   emit: (event) => {
     // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
@@ -307,6 +337,13 @@ if (ctoAuditSeam !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no CTO audit wired (set MINSKY_CTO_AUDIT_ENABLE=1 to fire post-task audits)\n",
+  );
+}
+if (changelogSeam !== undefined) {
+  process.stdout.write("[tick-loop] daily changelog wired (file-backed CHANGELOG.md reader)\n");
+} else {
+  process.stdout.write(
+    "[tick-loop] no daily changelog wired (set MINSKY_CHANGELOG_ENABLE=1 to fire daily entries)\n",
   );
 }
 
