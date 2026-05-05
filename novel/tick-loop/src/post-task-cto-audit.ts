@@ -133,3 +133,109 @@ export function shouldRunCtoAudit(args: {
   if (args.filesChanged.length === 0 && args.prUrl === null) return false;
   return true;
 }
+
+// ---- runCtoAudit (I/O wrapper) -------------------------------------------
+
+/**
+ * Minimum spawn surface `runCtoAudit` depends on. Structurally compatible
+ * with `tick-loop/spawn-strategy.ts` `SpawnStrategy` so the daemon can pass
+ * its already-constructed spawn strategy in without an adapter.
+ */
+export interface CtoAuditSpawn {
+  spawn(input: {
+    readonly taskId: string;
+    readonly brief: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  }): Promise<{
+    readonly exitCode: number;
+    readonly durationMs: number;
+    readonly stdoutTail: string;
+    readonly stderrTail: string;
+  }>;
+}
+
+/**
+ * Idempotent per-task lock seam — `lockExists` returns whether an audit
+ * for `taskId` has already been recorded; `acquireLock` records one.
+ * Production wires these to `.minsky/cto-audit-lock/<taskId>` file presence
+ * + creation; tests pass an in-memory Set.
+ */
+export interface CtoAuditLock {
+  lockExists(taskId: string): boolean;
+  acquireLock(taskId: string): void;
+}
+
+export type RunCtoAuditOutcome =
+  | { readonly outcome: "skipped"; readonly reason: SkipReason }
+  | {
+      readonly outcome: "ran";
+      readonly exitCode: number;
+      readonly durationMs: number;
+      readonly stdoutTail: string;
+      readonly stderrTail: string;
+    };
+
+export type SkipReason = "gate-rejected" | "no-recurse" | "lock-held";
+
+export interface RunCtoAuditArgs {
+  readonly signals: CompletedIterationSignals;
+  readonly status: "completed" | "budget-paused" | "failed" | "no-task" | "missing-tasks-md";
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly spawn: CtoAuditSpawn;
+  readonly lock: CtoAuditLock;
+}
+
+/**
+ * Run the CTO audit for the just-completed iteration. The I/O wrapper
+ * around `buildCtoBrief` + `shouldRunCtoAudit` (rule #2 — this is the
+ * boundary; the gate + brief builder are pure).
+ *
+ * Skip order is observable + tested:
+ *   1. `shouldRunCtoAudit` gate (status / no-op / env override)
+ *   2. no-recurse — the audit's own iteration (`task.id === "cto-audit"`)
+ *      MUST NOT trigger another audit, or the loop diverges (one audit
+ *      per ship, full stop — task spec sub-step (f))
+ *   3. lock-held — at most one audit per `completedTaskId`, idempotent
+ *      across daemon restarts (the lock persists across process boundaries
+ *      via the file-system-backed implementation in production)
+ *
+ * Lock acquisition happens BEFORE spawn so a crash mid-spawn doesn't yield
+ * a duplicate audit on restart. The lock is the audit's "this happened"
+ * record, not its "this succeeded" record — operator review of the PR is
+ * the success surface (task spec sub-step (e)).
+ *
+ * @otel tick-loop.post-task-cto-audit.run
+ */
+export async function runCtoAudit(args: RunCtoAuditArgs): Promise<RunCtoAuditOutcome> {
+  const gateAllows = shouldRunCtoAudit({
+    status: args.status,
+    filesChanged: args.signals.filesChanged,
+    prUrl: args.signals.prUrl,
+    env: args.env,
+  });
+  if (!gateAllows) return { outcome: "skipped", reason: "gate-rejected" };
+
+  if (args.signals.completedTaskId === "cto-audit") {
+    return { outcome: "skipped", reason: "no-recurse" };
+  }
+
+  if (args.lock.lockExists(args.signals.completedTaskId)) {
+    return { outcome: "skipped", reason: "lock-held" };
+  }
+  args.lock.acquireLock(args.signals.completedTaskId);
+
+  const brief = buildCtoBrief(args.signals);
+  const result = await args.spawn.spawn({
+    taskId: `cto-audit:${args.signals.completedTaskId}`,
+    brief,
+    env: args.env,
+  });
+
+  return {
+    outcome: "ran",
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    stdoutTail: result.stdoutTail,
+    stderrTail: result.stderrTail,
+  };
+}
