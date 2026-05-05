@@ -822,6 +822,36 @@ jobs:
           path: tmp/rule-11/*-task-block.md tmp/rule-11/*-workflow.patch
           if-no-files-found: ignore
 
+  metric-freshness:
+    # Substrate slice 2/N of `canonical-metric-list-per-repo` — gates the
+    # canonical `METRICS.md` artefact (vision.md row 82) against drift.
+    # Every section is either a fresh observation within its
+    # per-metric `freshnessBudgetMs` OR an explicit `(stub) — …`
+    # follow-up pointer (visible-not-silent, Helland 2007). The
+    # `--expected` flag enables drift detection against the 10
+    # `SUCCESS_METRICS` ids; the lint fails when an id is missing,
+    # rendered twice, or rendered without `_Updated:` past its budget.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # Munafò et al. 2017 (pre-registered staleness threshold);
+    # Ries 2011 (vanity-metric anti-pattern; `_monotonic: ok_` opt-in).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: metric-freshness lint
+        run: |
+          node scripts/check-metric-freshness.mjs \
+            --expected loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
+
   ci:
     needs:
       - anchor-primary-source
@@ -838,6 +868,7 @@ jobs:
       - mape-k-watchdog-cadence
       - markdownlint
       - measurement-inspects-output
+      - metric-freshness
       - no-singleton-experiment
       - pattern-index
       - pivot-success-margin
@@ -875,6 +906,7 @@ jobs:
                    "${{ needs.mape-k-watchdog-cadence.result }}" \
                    "${{ needs.markdownlint.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
+                   "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
