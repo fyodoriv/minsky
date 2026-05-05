@@ -39,6 +39,22 @@ Environment=MINSKY_HOME=${MINSKY_HOME}
 # many iterations is safe by design (rule #2 — file presence IS the
 # "this happened" record). Drop the flag to revert to substrate-inert.
 Environment=MINSKY_CHANGELOG_ENABLE=1
+# Post-task CTO-audit umbrella opt-in (sub-step (d) of `post-task-cto-audit`).
+# Constructs the `CtoAuditSeam` the daemon dispatches into after every
+# successfully-completed iteration that shipped a real change (commit on the
+# branch OR PR opened — noop iterations are gated out by `shouldRunCtoAudit`).
+# The audit spawns a separate `claude --print` invocation with a CTO-mode
+# prompt header (`CTO_PROMPT_HEADER`) that asks for the single highest-leverage
+# next task; output is committed to TASKS.md on a dedicated branch
+# (`audit/<UTC-date>-<original-task-id>`) and a PR is opened with label
+# `minsky:cto-audit` for operator review (sub-step (e)). The cap-1-per-task
+# contract (sub-step (f)) is enforced by a file-backed lock at
+# `<MINSKY_HOME>/.minsky/cto-audit-lock/<task-id>` that survives daemon restart.
+# Per-iteration override: set `MINSKY_CTO_AUDIT=off` to skip a single fire
+# without unwinding the seam (sub-step (c)). Operator runbook:
+# `docs/post-task-cto-audit.md`. Pivot trigger (rule #9): >5 audit-PRs/day
+# means tighten the brief; <1/week sustained 4 weeks means retire.
+Environment=MINSKY_CTO_AUDIT_ENABLE=1
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
 # Erlang-style "transient" restart: only on non-zero exit (let-it-crash
