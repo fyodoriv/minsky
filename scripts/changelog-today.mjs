@@ -18,8 +18,11 @@
 //   acceptance hook for the daily cadence.
 
 import { spawn } from "node:child_process";
+import { readFile as fsReadFile } from "node:fs/promises";
+import process from "node:process";
 
 import { buildChangelogEntry, buildChangelogJson } from "./generate-changelog-entry.mjs";
+import { loadSnapshot, previousDateUtc } from "./metric-snapshot-store.mjs";
 
 /**
  * @typedef {Object} GhPrRecord
@@ -137,23 +140,52 @@ export async function fetchTodaysPRs({ date, runGh }) {
 }
 
 /**
+ * @typedef {(date: string) => Promise<import("./metric-snapshot-store.mjs").MetricSnapshot | undefined>} LoadSnapshotForDate
+ *   Async loader returning the on-disk metric snapshot for `date`, or
+ *   `undefined` when no snapshot exists for that day. The
+ *   production binding wraps `loadSnapshot({rootDir, readFile})`; tests
+ *   inject a deterministic stub.
+ */
+
+/**
  * @typedef {Object} RunOpts
  * @property {string} date
  * @property {GhRunner} runGh
  * @property {boolean} [json]    emit structured JSON instead of markdown
+ * @property {LoadSnapshotForDate} [loadSnapshotForDate]  optional metric-
+ *   snapshot loader. When supplied, the orchestrator loads `date`'s
+ *   snapshot AND `previousDateUtc(date)`'s snapshot, passing both to the
+ *   pure builder so the rendered output carries metric Δ lines. When
+ *   omitted, the pipeline runs PR-only (acceptance-criterion (3)
+ *   graceful-degrade — `pnpm changelog:today` works in a fresh repo
+ *   pre-instrumentation).
  */
 
 /**
  * Top-level orchestrator: fetch → filter → render. Returns the string
- * the CLI writes to stdout. Pure once `runGh` resolves — no clock, no
- * env reads, no FS access.
+ * the CLI writes to stdout. Pure once `runGh` (+ optional
+ * `loadSnapshotForDate`) resolves — no clock, no env reads, no FS access.
  *
  * @param {RunOpts} opts
  * @returns {Promise<string>}
  */
-export async function runChangelogToday({ date, runGh, json }) {
+export async function runChangelogToday({ date, runGh, json, loadSnapshotForDate }) {
   const prs = await fetchTodaysPRs({ date, runGh });
+  /** @type {{
+   *   date: string,
+   *   mergedPRs: ReturnType<typeof toMergedPRs>,
+   *   metricsSnapshot?: import("./metric-snapshot-store.mjs").MetricSnapshot,
+   *   prevMetricsSnapshot?: import("./metric-snapshot-store.mjs").MetricSnapshot,
+   * }} */
   const input = { date, mergedPRs: toMergedPRs(prs) };
+  if (loadSnapshotForDate !== undefined) {
+    const [today, prev] = await Promise.all([
+      loadSnapshotForDate(date),
+      loadSnapshotForDate(previousDateUtc(date)),
+    ]);
+    if (today !== undefined) input.metricsSnapshot = today;
+    if (prev !== undefined) input.prevMetricsSnapshot = prev;
+  }
   if (json) return `${JSON.stringify(buildChangelogJson(input), null, 2)}\n`;
   return buildChangelogEntry(input);
 }
@@ -209,10 +241,31 @@ function parseArgs(argv) {
   return args;
 }
 
+/**
+ * Production `LoadSnapshotForDate` binding. Resolves snapshots under
+ * `process.cwd()/.minsky/metric-snapshots/<date>.json`. ENOENT → undefined
+ * per the rule #7 graceful-degrade contract documented in
+ * `metric-snapshot-store.mjs`; all other read errors propagate.
+ *
+ * @type {LoadSnapshotForDate}
+ */
+function loadSnapshotForDateProd(date) {
+  return loadSnapshot({
+    rootDir: process.cwd(),
+    date,
+    readFile: (path) => fsReadFile(path, "utf8"),
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const date = args.date ?? todayUtc();
-  const out = await runChangelogToday({ date, runGh: spawnGh, json: args.json });
+  const out = await runChangelogToday({
+    date,
+    runGh: spawnGh,
+    json: args.json,
+    loadSnapshotForDate: loadSnapshotForDateProd,
+  });
   process.stdout.write(out);
   return 0;
 }
