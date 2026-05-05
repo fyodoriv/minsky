@@ -193,4 +193,69 @@ describe("runChangelogToday", () => {
     const md = await runChangelogToday({ date: "2026-05-05", runGh });
     expect(md).toContain("_No PRs merged on this date._");
   });
+
+  test("loadSnapshotForDate seam supplies metrics for today + previous day", async () => {
+    const runGh = async () => sampleRaw;
+    /** @type {string[]} */
+    const requestedDates = [];
+    /** @type {import("./changelog-today.mjs").LoadSnapshotForDate} */
+    const loadSnapshotForDate = async (d) => {
+      requestedDates.push(d);
+      if (d === "2026-05-05") return { uptime_h: { value: 10, higherIsBetter: true } };
+      if (d === "2026-05-04") return { uptime_h: { value: 7, higherIsBetter: true } };
+      return undefined;
+    };
+    const out = await runChangelogToday({
+      date: "2026-05-05",
+      runGh,
+      json: true,
+      loadSnapshotForDate,
+    });
+    const parsed = JSON.parse(out);
+    expect(requestedDates.sort()).toEqual(["2026-05-04", "2026-05-05"]);
+    expect(parsed.metrics).toHaveLength(1);
+    expect(parsed.metrics[0]).toMatchObject({
+      name: "uptime_h",
+      value: 10,
+      prev: 7,
+      delta: 3,
+      direction: "improved",
+    });
+  });
+
+  test("missing previous-day snapshot is rendered without Δ (graceful-degrade)", async () => {
+    const runGh = async () => sampleRaw;
+    /** @type {import("./changelog-today.mjs").LoadSnapshotForDate} */
+    const loadSnapshotForDate = async (d) => {
+      if (d === "2026-05-05") return { findings: { value: 0, higherIsBetter: false } };
+      return undefined;
+    };
+    const out = await runChangelogToday({
+      date: "2026-05-05",
+      runGh,
+      json: true,
+      loadSnapshotForDate,
+    });
+    const parsed = JSON.parse(out);
+    expect(parsed.metrics[0]).toMatchObject({
+      name: "findings",
+      value: 0,
+      prev: null,
+      delta: null,
+      direction: null,
+    });
+  });
+
+  test("no loadSnapshotForDate seam → markdown carries the no-metrics sentinel", async () => {
+    const runGh = async () => sampleRaw;
+    const md = await runChangelogToday({ date: "2026-05-05", runGh });
+    expect(md).toContain("_No metrics recorded for this date._");
+  });
+
+  test("loadSnapshotForDate returns undefined for both → falls back to no-metrics sentinel", async () => {
+    const runGh = async () => sampleRaw;
+    const loadSnapshotForDate = async () => undefined;
+    const md = await runChangelogToday({ date: "2026-05-05", runGh, loadSnapshotForDate });
+    expect(md).toContain("_No metrics recorded for this date._");
+  });
 });
