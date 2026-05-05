@@ -5,8 +5,9 @@ hypothesis: |
   (`git push --no-verify`) or whose hook fails silently can ship a PR that
   violates the constitution without minsky catching it. This experiment's
   v0 ships the **deterministic, locally-testable substrate** of decision
-  C2 — a minsky-side workflow + verdict-producing script + dispatch-emit
-  pure function — so the cross-repo lints can be run by a minsky-owned
+  C2 — a minsky-side workflow + verdict-producing script + the
+  `novel/cross-repo-runner/src/dispatch-emit.ts` pure function — so the
+  cross-repo lints can be run by a minsky-owned
   GitHub Action without any host-side CI changes. The live cross-repo
   install (`minsky-bot` on a host org, real `repository_dispatch`
   emission) is deferred to an operator-driven follow-up; the v0

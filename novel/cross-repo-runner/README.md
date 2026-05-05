@@ -6,6 +6,10 @@
 
 Step 5 of 7 in the cross-repo-runner roadmap. Built on top of `@minsky/sidecar-bootstrap` (the host's `.minsky/` substrate) and the host-root-resolver (lints honour `MINSKY_HOST_ROOT`). The runner is the orchestrator that reads the host's overlay, finds the task, synthesises an `EXPERIMENT.yaml` per rule #9, and (in v1) spawns Claude Code wrapped in `BudgetGuard`.
 
+### `dispatch-emit` (decision C2 hook, v0)
+
+`src/dispatch-emit.ts` exports `buildDispatchPayload({hostRepo, prNumber, experimentYamlUrl})` — the pure function that returns the `gh api .../dispatches` argv array the runner emits when it opens a host PR. The minsky-side workflow at `.github/workflows/cross-repo-check.yml` listens for that `repository_dispatch` (`event_type=cross-repo-pr`) and posts a `minsky-constitution` check-run on the host PR. v0 is build-only: the runner does not yet *call* `gh` with the argv (operator-driven; tracked as follow-up). Live `gh api .../check-runs` POST in the workflow is gated on `vars.MINSKY_BOT_INSTALLED=1`. See `experiments/cross-repo-ci-action-2026-05-04.yaml` for the rule-#9 pre-registration.
+
 ## Pattern conformance
 
 Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index):
