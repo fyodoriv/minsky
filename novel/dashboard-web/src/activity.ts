@@ -53,6 +53,7 @@ export function parseSpan(line: string): ActivityEntry | null {
   let obj: unknown;
   try {
     obj = JSON.parse(json);
+    // rule-6: handled-locally — malformed JSON in a single span line is the rule #7 graceful-degrade path; one bad line must not abort the activity feed render.
   } catch {
     return null;
   }
@@ -111,6 +112,7 @@ export function loadRecentSpans(logPath: string, n: number): ActivityEntry[] {
   try {
     statSync(logPath);
     content = readFileSync(logPath, "utf-8");
+    // rule-6: handled-locally — missing log file (daemon hasn't started yet) is the rule #7 graceful-degrade path; an empty activity section is the right cold-start UX.
   } catch {
     return [];
   }
