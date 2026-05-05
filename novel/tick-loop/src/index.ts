@@ -362,6 +362,7 @@ export {
   type DaemonIterationStatus,
   type DaemonRunResult,
   type RunDaemonOpts,
+  type SnapshotSeam,
   claim,
   pickTask,
   runDaemon,
@@ -388,6 +389,21 @@ export {
 // bin script (`bin/tick-loop.mjs`) thin: the bin only decides whether to
 // opt-in (env var) and forwards the CHANGELOG.md path here.
 export { createFileBackedChangelogReader } from "./changelog-cli-wiring.js";
+
+// Sub-task of `daily-changelog-for-humans` Details (e) — daily snapshot
+// capture I/O wrapper. Pure gate (`shouldRunSnapshot`) + injected
+// existence-probe + capture seams; the daemon wire-in and CLI-side
+// construction (production: spawns `pnpm changelog:snapshot`) land in
+// follow-ups, mirroring the #181 → #182 → #183 split for `runChangelog`.
+export {
+  type RunSnapshotArgs,
+  type RunSnapshotOutcome,
+  type SnapshotCapture,
+  type SnapshotExists,
+  type SnapshotSkipReason,
+  runSnapshot,
+  shouldRunSnapshot,
+} from "./snapshot-runner.js";
 
 // Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
 // so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past
