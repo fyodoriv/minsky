@@ -62,12 +62,17 @@ export function shouldRunChangelog(args: {
  * The changelog-mode prompt header. Data, not code — tested.
  *
  * The daemon spawn that hands this to `claude --print` runs against a
- * checkout where `scripts/generate-changelog-entry.mjs` is the renderer
- * and CHANGELOG.md the destination. The model's job is to assemble the
- * `BuildChangelogEntryInput` JSON (PRs from `gh`, metrics from the
- * snapshot store), invoke the renderer, and append the markdown to
- * CHANGELOG.md. Pre-registration: every day with merged PRs has a
- * corresponding section within 24h.
+ * checkout where the canonical pipeline is `pnpm changelog:today` (shipped
+ * in #185 — `scripts/changelog-today.mjs`): `gh pr list` → `BuildChangelogEntryInput`
+ * → `scripts/generate-changelog-entry.mjs` collapsed into one command.
+ * The model's job is to invoke that, supply the day's narrative, and
+ * commit the appended section. Pre-registration: every day with merged
+ * PRs has a corresponding section within 24h.
+ *
+ * Brief evolution (2026-05-05): earlier wording asked the model to
+ * `gh pr list` and compose JSON manually, which duplicates the operator
+ * CLI from #185 and adds variance per spawn. Rule #2 — one source of
+ * truth; the substrate IS the command.
  */
 export const CHANGELOG_PROMPT_HEADER = [
   "You are authoring today's CHANGELOG.md entry for the Minsky project.",
@@ -77,13 +82,15 @@ export const CHANGELOG_PROMPT_HEADER = [
   "glanceable display.",
   "",
   "Workflow:",
-  '  (1) `gh pr list --state merged --search "merged:>=$(date -u +%F)"` to',
-  "      gather today's merged PRs (number, title, +/-).",
-  "  (2) Compose a JSON payload matching `BuildChangelogEntryInput` (see",
-  "      `scripts/generate-changelog-entry.mjs` JSDoc).",
-  "  (3) Pipe it through `node scripts/generate-changelog-entry.mjs`",
-  "      and append the markdown section to CHANGELOG.md.",
-  "  (4) Open a PR with the changelog edit only.",
+  "  (1) Run `pnpm changelog:today` to render today's section from merged PRs",
+  "      (the script does `gh pr list` → JSON → markdown in one shot).",
+  "      Use `pnpm changelog:today --json` first if you want to inspect the",
+  "      structured shape; supply a `narrativeOverride` and pipe the edited",
+  "      JSON through `node scripts/generate-changelog-entry.mjs` to render",
+  "      with your narrative instead of the auto-synthesised one.",
+  "  (2) Append the rendered section to CHANGELOG.md (after the existing",
+  "      content; do not overwrite prior days).",
+  "  (3) Open a PR with the changelog edit only.",
   "",
   "Discipline:",
   "  - Every metric line must carry an explicit Δ + improved/regressed/unchanged",
@@ -91,8 +98,8 @@ export const CHANGELOG_PROMPT_HEADER = [
   "  - Refuse vanity-metric lines (Ries 2011 — counts that always go up:",
   "    LOC, commits, hours, tasks-in-flight). The metric must be falsifiable.",
   "  - Narrative is one paragraph, max — not a digest of every PR.",
-  "  - If no PRs merged today and no metrics moved, output `noop, exiting`",
-  "    instead of opening a PR.",
+  "  - If `pnpm changelog:today` reports zero PRs and no metrics moved,",
+  "    output `noop, exiting` instead of opening a PR.",
   "",
 ].join("\n");
 
