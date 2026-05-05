@@ -21,7 +21,10 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",
     "dogfood": "./setup.sh --dogfood",
     "dogfood:doctor": "./setup.sh --doctor",
-    "dogfood:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh"
+    "dogfood:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
+    "dogfood:logs": "tail -F .minsky/tick-loop.out.log .minsky/tick-loop.err.log",
+    "dogfood:status": "launchctl list 2>/dev/null | grep -i minsky || systemctl --user status minsky-supervisor.target 2>/dev/null",
+    "dogfood:stop": "launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist 2>/dev/null; launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.budget-guard.plist 2>/dev/null; systemctl --user stop minsky-supervisor.target 2>/dev/null; echo 'supervisor stopped'"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
