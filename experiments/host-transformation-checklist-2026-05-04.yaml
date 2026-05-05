@@ -1,0 +1,81 @@
+id: host-transformation-checklist-2026-05-04
+hypothesis: |
+  When `minsky bootstrap <host-dir>` writes a per-host `.minsky/`
+  sidecar, the operator (and the future cross-repo runner's task-
+  synthesis layer) needs a canonical written contract for what
+  "follows Minsky principles" means in concrete terms. Without a
+  written checklist, the transformation drifts into "whatever the
+  operator remembers" and the sidecar becomes load-bearing prose
+  rather than an enforceable substrate. `docs/host-transformation-
+  checklist.md` enumerates six disciplines (lint / test / OTEL /
+  chaos / experiment / pattern-conformance), maps each 1:1 to a
+  constitutional rule (#2 / #3 / #4 / #7 / #9 / #8), and cites the
+  enforcing `scripts/check-*.mjs` for each. The checklist is read
+  by three callers — `minsky bootstrap` (operator-facing summary),
+  the `/next-task` Tier-1–3 audit cascade (queue-empty case picks
+  the next gap), and `cross-repo-runner-v1`'s task-synthesis layer
+  (auto-task creation when the host's queue empties) — so its
+  presence is load-bearing for rule #12 (scope discipline) under
+  cross-repo conditions.
+
+  A "Minimum viable subset" callout names the 4 disciplines that
+  every host runs from day one (test, OTEL, chaos, experiment) and
+  documents the `repo.yaml.disciplines: [...]` opt-in for the
+  remaining two — the partial-conformance escape valve is visible-
+  not-silent.
+success: |
+  - `wc -l docs/host-transformation-checklist.md` ≥ 60 (the
+    checklist is substantive — anchored to the 6 disciplines + their
+    enforcers).
+  - `grep -c "^## " docs/host-transformation-checklist.md` ≥ 6 (one
+    heading per discipline; observed: 9 headings, including
+    "Minimum viable subset", "Pivot", "See also").
+  - `grep -q "host-transformation-checklist" vision.md` exits 0 (a
+    pattern-conformance row is added in the same commit, per
+    rule #8 — the gate `node scripts/check-pattern-index.mjs` exits
+    0 against the diff).
+  - `grep -q "host-transformation-checklist" user-stories/006-runner-on-any-repo.md`
+    exits 0 (cross-referenced from the umbrella user story per the
+    Acceptance criterion).
+  - `grep -q "host-transformation-checklist" novel/sidecar-bootstrap/README.md`
+    exits 0 (cross-referenced from the bootstrap README so callers
+    reach the contract from both sides).
+pivot: |
+  If hosts in the wild surface a 7th discipline (e.g., supply-chain
+  hygiene — SBOM coverage, dep-pin discipline), extend the checklist
+  with a 7th heading rather than retiring an existing one. A 7th
+  heading is a one-PR addition, not an architectural shift. If the
+  6 disciplines prove *over-specified* for early-stage hosts (e.g.,
+  a legacy repo without an existing OTEL story), the documented
+  "Minimum viable subset" callout (4 disciplines: test / OTEL /
+  chaos / experiment) is the escape valve — declared via
+  `.minsky/repo.yaml.disciplines: [...]`, surfaced on the
+  dashboard so partial conformance is visible-not-silent.
+
+  Pivot trigger: ≥2 hosts in 30 days request the same 7th
+  discipline (extend the checklist), OR ≥3 hosts decline to
+  bootstrap because the 6-discipline contract is too heavy
+  (promote the Minimum viable subset to the default and the full
+  6 to opt-in). Below those thresholds, the checklist is working
+  as intended.
+measurement: |
+  [ "$(wc -l < docs/host-transformation-checklist.md)" -ge 60 ] && [ "$(grep -c '^## ' docs/host-transformation-checklist.md)" -ge 6 ] && grep -q host-transformation-checklist vision.md && grep -q host-transformation-checklist user-stories/006-runner-on-any-repo.md && grep -q host-transformation-checklist novel/sidecar-bootstrap/README.md && node scripts/check-pattern-index.mjs
+anchor: |
+  rule #12 (vision.md § "Scope discipline" — the checklist is the
+  substrate the queue-empty audit cascade gates against; the
+  documented contract makes "what gap to close next" enumerable
+  rather than folkloric); rule #8 (vision.md § 8 — pattern
+  conformance: every new top-level artefact gets an index row in
+  the same commit; the checklist itself is a pattern-catalogue
+  leaf indexed by discipline); Alexander, Ishikawa, Silverstein,
+  *A Pattern Language*, Oxford University Press, 1977 (catalogue
+  indexed by node — the 6 disciplines ARE the leaf nodes);
+  Gabriel, *Patterns of Software*, Oxford University Press, 1996
+  (a pattern language IS a checklist of conformance points);
+  Munafò, Nosek, Bishop et al., "A Manifesto for Reproducible
+  Science", *Nature Human Behaviour* 1, 0021, 2017 (pre-
+  registration — the checklist is committed before any host is
+  bootstrapped against it, so the contract is falsifiable);
+  rules #2 / #3 / #4 / #7 / #9 (the 5 deterministic CI gates the
+  6 disciplines map to; their enforcers were already shipped, so
+  this PR is pure documentation of the existing substrate).
