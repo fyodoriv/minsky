@@ -40,43 +40,47 @@ import { join } from "node:path";
 import type { TokenMonitor, TokenSnapshot } from "./index.js";
 
 /**
- * Plan token caps — heuristic 5h-window chargeable-token ceilings per
- * Anthropic plan tier. Diverges from Maciek upstream `PLAN_LIMITS`,
- * which still reflects 2024 estimates calibrated against ~500-1500-token
- * messages. On 1M-context Claude Code, per-message chargeable averages
- * ~3k tokens, so an active 5h dogfood block burns 4M+ chargeable tokens
- * (empirical: 4,107,313 on the operator's session 2026-05-04).
+ * Plan token caps — set ABOVE Anthropic's actual 5h-window ceiling so
+ * that BudgetGuard's circuit-break is advisory-only and the real
+ * rate-limit is enforced by Anthropic itself (the 429 response on
+ * over-spend). Operator philosophy 2026-05-05: "if Anthropic doesn't
+ * have a problem, neither should we" — preemptive circuit-breaking at
+ * a heuristic threshold below Anthropic's actual ceiling just leaves
+ * headroom on the table. The daemon handles 429 as a rule-#7
+ * graceful-degrade (iteration fails, retry next tick).
  *
- * Numbers below are derived from:
- *   (a) the empirical 4.1M-chargeable-in-5h observation on a Max-tier
- *       1M-context session that wasn't being throttled,
+ * Anthropic does not publish exact 5h token ceilings. The numbers
+ * below are derived from:
+ *   (a) prior empirical 4.1M-chargeable-in-5h observation on a Max20
+ *       session that was NOT being throttled (PR #155 / 2026-05-04);
  *   (b) Anthropic's public messaging that Max20 is "~20× a typical
- *       Pro user" (https://www.anthropic.com/pricing — ratios, not
- *       absolute numbers, since absolutes aren't published),
- *   (c) headroom of ~10× over the empirical observation so that
- *       BudgetGuard's 85% circuit-break threshold (≈ 34M for max20)
- *       still leaves room for genuine over-spend signals.
+ *       Pro user";
+ *   (c) ~50× headroom over the empirical observation, well above any
+ *       plausible Anthropic ceiling for the published plans — the
+ *       intent is that BudgetGuard never circuit-breaks before
+ *       Anthropic 429s.
  *
- * Override per-deployment with the `cap` constructor opt or, for
- * supervisor wiring, the `MINSKY_PLAN_CAP_OVERRIDE` env var (parsed by
- * the CLI bootstrap, not by this module).
+ * If Anthropic eventually starts 429ing the operator at a known
+ * threshold, set `cap` (constructor opt) or `MINSKY_PLAN_CAP_OVERRIDE`
+ * (env) to that threshold; the per-deployment override wins.
  *
- * Pivot (rule #9): if heuristic caps still cause false circuit-breaks
- * during normal operator usage (≥10% iterations budget-paused over a
- * 7-day window), pivot to a separate `TokenMonitor` Strategy that
- * reads `anthropic-ratelimit-tokens-remaining` from response headers
- * — the principled solution. Heuristic-caps is the v0 unblock.
+ * Pivot (rule #9): if BudgetGuard never circuit-breaks during normal
+ * operation (i.e., we are now strictly downstream of Anthropic's 429
+ * — the intended state), this constant can become a single number
+ * `INFINITE_CAP = Number.MAX_SAFE_INTEGER` and the four-plan keying
+ * retires. Don't retire yet — operators on lower tiers may want a
+ * conservative local cap to avoid surprise 429s on shared sessions.
  *
- * - `pro`     —  2 000 000 chargeable tokens / 5 h window
- * - `max5`    — 10 000 000 chargeable tokens / 5 h window (default — most common Max tier)
- * - `max20`   — 40 000 000 chargeable tokens / 5 h window
- * - `custom`  —  5 000 000 chargeable tokens / 5 h window (operator's escape hatch)
+ * - `pro`     —  100 000 000 chargeable tokens / 5 h window
+ * - `max5`    —  500 000 000 chargeable tokens / 5 h window (default — most common Max tier)
+ * - `max20`   — 2 000 000 000 chargeable tokens / 5 h window
+ * - `custom`  —  250 000 000 chargeable tokens / 5 h window (operator's escape hatch)
  */
 export const PLAN_CAPS = {
-  pro: 2_000_000,
-  max5: 10_000_000,
-  max20: 40_000_000,
-  custom: 5_000_000,
+  pro: 100_000_000,
+  max5: 500_000_000,
+  max20: 2_000_000_000,
+  custom: 250_000_000,
 } as const;
 
 export type PlanName = keyof typeof PLAN_CAPS;
