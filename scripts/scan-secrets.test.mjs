@@ -8,7 +8,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SECRET_PATTERNS, formatFinding, scanContentForSecrets } from "./scan-secrets.mjs";
+import {
+  SECRET_PATTERNS,
+  formatFinding,
+  scanContentForSecrets,
+  scanFilesForSecrets,
+} from "./scan-secrets.mjs";
 
 describe("scanContentForSecrets (pure function)", () => {
   it("(a) prose with no credential shapes → ok", () => {
@@ -220,5 +225,113 @@ describe("formatFinding", () => {
         expect(out).toMatch(/^1:\d+:/);
       }
     }
+  });
+});
+
+describe("scanFilesForSecrets (multi-file walker, slice 2)", () => {
+  it("(a) empty file list → no violations", () => {
+    expect(scanFilesForSecrets({ files: [] })).toEqual({ violations: [] });
+  });
+
+  it("(b) all-clean files → no violations", () => {
+    const r = scanFilesForSecrets({
+      files: [
+        { path: "a.md", source: "Just prose. sk-test fixture, ghp_short label." },
+        { path: "b.txt", source: "AKIA prefix only.\nNo real secret." },
+      ],
+    });
+    expect(r).toEqual({ violations: [] });
+  });
+
+  it("(c) single file with one secret → 1 violation, file path attached", () => {
+    const r = scanFilesForSecrets({
+      files: [
+        { path: "config/local.env", source: "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123" },
+      ],
+    });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.file).toBe("config/local.env");
+    expect(r.violations[0]?.tag).toBe("github-pat");
+    expect(r.violations[0]?.snippet).toBe("ghp_…");
+    expect(r.violations[0]?.line).toBe(1);
+  });
+
+  it("(d) multi-line multi-secret in one file → preserves (line, column) sort", () => {
+    const source = [
+      "line1: ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+      "line2: AKIAIOSFODNN7EXAMPLE",
+      "line3: AIzaSyA-abc_DEFghi-JKLmnoPQRstuVWXyz01234",
+    ].join("\n");
+    const r = scanFilesForSecrets({ files: [{ path: "x.txt", source }] });
+    expect(r.violations).toHaveLength(3);
+    expect(r.violations.map((v) => v.line)).toEqual([1, 2, 3]);
+    expect(r.violations.map((v) => v.tag)).toEqual([
+      "github-pat",
+      "aws-access-key-id",
+      "google-api-key",
+    ]);
+    for (const v of r.violations) {
+      expect(v.file).toBe("x.txt");
+    }
+  });
+
+  it("(e) multiple files with secrets → violations from each, input order preserved across files", () => {
+    const r = scanFilesForSecrets({
+      files: [
+        { path: "alpha.env", source: "AKIAIOSFODNN7EXAMPLE" },
+        { path: "beta.txt", source: "clean prose" },
+        { path: "gamma.env", source: "K=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123" },
+      ],
+    });
+    expect(r.violations).toHaveLength(2);
+    expect(r.violations.map((v) => v.file)).toEqual(["alpha.env", "gamma.env"]);
+    expect(r.violations.map((v) => v.tag)).toEqual(["aws-access-key-id", "github-pat"]);
+  });
+
+  it("(f) within-file ordering wins over across-file ordering for same path", () => {
+    const source =
+      "k=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123 j=ghp_xyzwvutsrqponmlkjihgfedcba9876543210";
+    const r = scanFilesForSecrets({ files: [{ path: "x.txt", source }] });
+    expect(r.violations).toHaveLength(2);
+    expect(r.violations[0]?.column).toBeLessThan(r.violations[1]?.column ?? 0);
+    expect(r.violations[0]?.file).toBe("x.txt");
+    expect(r.violations[1]?.file).toBe("x.txt");
+  });
+
+  it("(g) PEM private key in one file, AWS key in another → both flag with right files", () => {
+    const r = scanFilesForSecrets({
+      files: [
+        { path: "id_rsa", source: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA..." },
+        { path: "credentials", source: "aws_access_key_id=AKIAIOSFODNN7EXAMPLE" },
+      ],
+    });
+    expect(r.violations.map((v) => ({ file: v.file, tag: v.tag }))).toEqual([
+      { file: "id_rsa", tag: "pem-private-key" },
+      { file: "credentials", tag: "aws-access-key-id" },
+    ]);
+  });
+
+  it("(h) violation shape carries every SecretFinding field plus `file`", () => {
+    const r = scanFilesForSecrets({
+      files: [{ path: "x", source: "ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123" }],
+    });
+    expect(r.violations[0]).toMatchObject({
+      file: "x",
+      tag: "github-pat",
+      label: expect.any(String),
+      line: 1,
+      column: expect.any(Number),
+      snippet: "ghp_…",
+    });
+  });
+
+  it("(i) walker is pure — calling twice with the same input returns equal output", () => {
+    const input = {
+      files: [
+        { path: "a", source: "AKIAIOSFODNN7EXAMPLE" },
+        { path: "b", source: "ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123" },
+      ],
+    };
+    expect(scanFilesForSecrets(input)).toEqual(scanFilesForSecrets(input));
   });
 });
