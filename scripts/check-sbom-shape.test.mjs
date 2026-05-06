@@ -1,10 +1,11 @@
 // @ts-check
-// Paired tests for `classifySbomShape` (slice 1) and `walkSbomViolations`
-// (slice 2) of the SBOM sub-track of `supply-chain-hardening-lockfile-sbom-slsa`.
+// Paired tests for `classifySbomShape` (slice 1), `walkSbomViolations`
+// (slice 2), and `parseSbomJson` (slice 3) of the SBOM sub-track of
+// `supply-chain-hardening-lockfile-sbom-slsa`.
 //
 // Each case carries a one-line tag matching the verdict table in the
-// script's header. Slice ≥3 (JSON I/O, workflow generation, CI gate) is
-// gated against this fixed seam.
+// script's header. Slice ≥4 (CLI + CI gate) is gated against these fixed
+// seams.
 
 import { describe, expect, it } from "vitest";
 
@@ -12,6 +13,7 @@ import {
   ALLOWED_COMPONENT_TYPES,
   ALLOWED_SPEC_VERSIONS,
   classifySbomShape,
+  parseSbomJson,
   walkSbomViolations,
 } from "./check-sbom-shape.mjs";
 
@@ -697,5 +699,217 @@ describe("walkSbomViolations — slice-1 parity", () => {
     const first = walkSbomViolations(sbom);
     const second = walkSbomViolations(sbom);
     expect(first).toEqual(second);
+  });
+});
+
+// Slice 3: `parseSbomJson` JSON-text parser. --------------------------------
+
+const UTF8_BOM = "﻿";
+
+describe("parseSbomJson — valid input", () => {
+  it("parses a minimal valid SBOM and round-trips through the slice-1 classifier", () => {
+    const text = JSON.stringify(validSbom());
+    const parsed = parseSbomJson(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(classifySbomShape(parsed.parsed)).toEqual({ ok: true, kind: "valid" });
+    }
+  });
+
+  it("parses a multi-component valid SBOM and round-trips through the slice-2 walker", () => {
+    const sbom = validSbom({
+      components: [
+        { type: "library", name: "a", version: "1.0.0", purl: "pkg:npm/a@1.0.0" },
+        { type: "library", name: "b", version: "2.0.0", purl: "pkg:npm/b@2.0.0" },
+      ],
+    });
+    const text = JSON.stringify(sbom);
+    const parsed = parseSbomJson(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(walkSbomViolations(parsed.parsed)).toEqual({ violations: [] });
+    }
+  });
+
+  it("parses a JSON array — shape rejection is the slice-1 classifier's job, not the parser's", () => {
+    const parsed = parseSbomJson("[]");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.parsed).toEqual([]);
+      // `classifySbomShape` rejects arrays as `not-object` — confirms the
+      // parser/classifier responsibility split.
+      expect(classifySbomShape(parsed.parsed)).toEqual({
+        ok: false,
+        code: "not-object",
+        reason: "SBOM root must be a JSON object",
+      });
+    }
+  });
+
+  it("parses a JSON primitive — caller responsibility to reject downstream", () => {
+    expect(parseSbomJson("null")).toEqual({ ok: true, parsed: null });
+    expect(parseSbomJson("42")).toEqual({ ok: true, parsed: 42 });
+    expect(parseSbomJson('"a string"')).toEqual({ ok: true, parsed: "a string" });
+  });
+
+  it("strips a leading UTF-8 BOM before parsing — cyclonedx-cli sometimes emits one", () => {
+    const text = `${UTF8_BOM}${JSON.stringify(validSbom())}`;
+    const parsed = parseSbomJson(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(classifySbomShape(parsed.parsed)).toEqual({ ok: true, kind: "valid" });
+    }
+  });
+
+  it("tolerates leading and trailing whitespace around valid JSON", () => {
+    const parsed = parseSbomJson(`\n  ${JSON.stringify(validSbom())}\n  `);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(classifySbomShape(parsed.parsed)).toEqual({ ok: true, kind: "valid" });
+    }
+  });
+
+  it("preserves Unicode characters in component names", () => {
+    const sbom = validSbom({
+      components: [
+        { type: "library", name: "café", version: "1.0.0", purl: "pkg:npm/caf%C3%A9@1.0.0" },
+      ],
+    });
+    const text = JSON.stringify(sbom);
+    const parsed = parseSbomJson(text);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      const components = /** @type {Record<string, unknown>} */ (parsed.parsed)["components"];
+      expect(/** @type {Array<Record<string, unknown>>} */ (components)[0]?.["name"]).toBe("café");
+    }
+  });
+});
+
+describe("parseSbomJson — non-string input", () => {
+  it("rejects undefined with code=non-string-input", () => {
+    expect(parseSbomJson(undefined)).toEqual({
+      ok: false,
+      code: "non-string-input",
+      reason: "parseSbomJson requires a string argument; received undefined",
+    });
+  });
+
+  it("rejects null with a distinct reason that names the type", () => {
+    const result = parseSbomJson(null);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("non-string-input");
+      expect(result.reason).toContain("null");
+    }
+  });
+
+  it("rejects a number with code=non-string-input", () => {
+    const result = parseSbomJson(42);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("non-string-input");
+      expect(result.reason).toContain("number");
+    }
+  });
+
+  it("rejects an object with code=non-string-input — caller must read text from disk first", () => {
+    const result = parseSbomJson({ bomFormat: "CycloneDX" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("non-string-input");
+      expect(result.reason).toContain("object");
+    }
+  });
+});
+
+describe("parseSbomJson — empty input", () => {
+  it("rejects an empty string with code=empty-input", () => {
+    expect(parseSbomJson("")).toEqual({
+      ok: false,
+      code: "empty-input",
+      reason: "SBOM text is empty or whitespace-only",
+    });
+  });
+
+  it("rejects a whitespace-only string with code=empty-input", () => {
+    expect(parseSbomJson("   \n\t  \r\n")).toEqual({
+      ok: false,
+      code: "empty-input",
+      reason: "SBOM text is empty or whitespace-only",
+    });
+  });
+
+  it("rejects a BOM-only string (no payload after BOM strip) with code=empty-input", () => {
+    expect(parseSbomJson(UTF8_BOM)).toEqual({
+      ok: false,
+      code: "empty-input",
+      reason: "SBOM text is empty or whitespace-only",
+    });
+  });
+
+  it("rejects BOM + whitespace as empty-input", () => {
+    expect(parseSbomJson(`${UTF8_BOM}   \n  `)).toEqual({
+      ok: false,
+      code: "empty-input",
+      reason: "SBOM text is empty or whitespace-only",
+    });
+  });
+});
+
+describe("parseSbomJson — invalid JSON", () => {
+  it("rejects a truncated JSON object with code=invalid-json", () => {
+    const result = parseSbomJson('{"bomFormat": "CycloneDX"');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("invalid-json");
+      expect(result.reason).toMatch(/^SBOM text is not valid JSON: /);
+    }
+  });
+
+  it("rejects a trailing-comma object with code=invalid-json", () => {
+    const result = parseSbomJson('{"bomFormat": "CycloneDX",}');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("invalid-json");
+    }
+  });
+
+  it("rejects an unquoted key with code=invalid-json", () => {
+    const result = parseSbomJson("{bomFormat: CycloneDX}");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("invalid-json");
+    }
+  });
+
+  it("rejects accidentally-binary content with code=invalid-json", () => {
+    const result = parseSbomJson("\x00\x01\x02not json at all");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("invalid-json");
+    }
+  });
+
+  it("rejects a stray character before the JSON object with code=invalid-json", () => {
+    const result = parseSbomJson(`x${JSON.stringify(validSbom())}`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("invalid-json");
+    }
+  });
+});
+
+describe("parseSbomJson — determinism", () => {
+  it("is idempotent — re-parsing the same text returns equal results", () => {
+    const text = JSON.stringify(validSbom());
+    expect(parseSbomJson(text)).toEqual(parseSbomJson(text));
+  });
+
+  it("returns a fresh object each call so mutating one result cannot leak into the next", () => {
+    const text = JSON.stringify(validSbom());
+    const a = parseSbomJson(text);
+    const b = parseSbomJson(text);
+    expect(a).not.toBe(b);
+    if (a.ok && b.ok) expect(a.parsed).not.toBe(b.parsed);
   });
 });
