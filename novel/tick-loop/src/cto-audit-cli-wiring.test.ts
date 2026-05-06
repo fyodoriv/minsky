@@ -8,10 +8,12 @@ import {
   type ExecFileLike,
   createFileBackedCtoAuditLock,
   createGitGhSignalsBuilder,
+  ensureCtoAuditLabel,
   extractPrUrl,
   parseFilesChangedFromGit,
   parseRecentMainCommitsFromGit,
 } from "./cto-audit-cli-wiring.js";
+import { CTO_AUDIT_PR_LABEL } from "./post-task-cto-audit.js";
 
 describe("createFileBackedCtoAuditLock", () => {
   let dir: string;
@@ -177,5 +179,77 @@ describe("createGitGhSignalsBuilder", () => {
     const build = createGitGhSignalsBuilder({ execFile });
     const signals = await build({ taskId: "x", spawnStdoutTail: "" });
     expect(signals.openWorkItems).toBe(0);
+  });
+});
+
+describe("ensureCtoAuditLabel", () => {
+  const isLabelList: Route["match"] = (file, args) =>
+    file === "gh" && args[0] === "label" && args[1] === "list";
+  const isLabelCreate: Route["match"] = (file, args) =>
+    file === "gh" && args[0] === "label" && args[1] === "create";
+
+  it("returns 'exists' when the label is already present (no create call)", async () => {
+    const execFile = vi.fn(fakeExec([{ match: isLabelList, out: `${CTO_AUDIT_PR_LABEL}\n` }]));
+    const outcome = await ensureCtoAuditLabel({ execFile });
+    expect(outcome).toBe("exists");
+    const createCalls = execFile.mock.calls.filter(
+      (call) => call[1][0] === "label" && call[1][1] === "create",
+    );
+    expect(createCalls).toHaveLength(0);
+  });
+
+  it("returns 'created' when label-list comes back empty and create succeeds", async () => {
+    const execFile = vi.fn(
+      fakeExec([
+        { match: isLabelList, out: "" },
+        { match: isLabelCreate, out: 'Label "minsky:cto-audit" created in fyodoriv/minsky' },
+      ]),
+    );
+    const outcome = await ensureCtoAuditLabel({ execFile });
+    expect(outcome).toBe("created");
+    expect(execFile).toHaveBeenCalledWith(
+      "gh",
+      expect.arrayContaining(["label", "create", CTO_AUDIT_PR_LABEL]),
+    );
+  });
+
+  it("ignores substring-only matches (e.g. minsky:cto-audit-future)", async () => {
+    const execFile = vi.fn(
+      fakeExec([
+        { match: isLabelList, out: "minsky:cto-audit-future\nminsky:other" },
+        { match: isLabelCreate, out: "ok" },
+      ]),
+    );
+    const outcome = await ensureCtoAuditLabel({ execFile });
+    expect(outcome).toBe("created");
+  });
+
+  it("returns 'skipped-degraded' when gh label list rejects (offline / gh missing)", async () => {
+    const execFile: ExecFileLike = vi.fn(async () => {
+      throw new Error("gh: command not found");
+    });
+    const outcome = await ensureCtoAuditLabel({ execFile });
+    expect(outcome).toBe("skipped-degraded");
+  });
+
+  it("treats a race-condition 'already exists' create error as 'exists'", async () => {
+    const execFile = vi.fn(async (file: string, args: readonly string[]) => {
+      if (file === "gh" && args[0] === "label" && args[1] === "list") return "";
+      if (file === "gh" && args[0] === "label" && args[1] === "create") {
+        throw new Error('a label with the name "minsky:cto-audit" already exists');
+      }
+      return "";
+    });
+    const outcome = await ensureCtoAuditLabel({ execFile });
+    expect(outcome).toBe("exists");
+  });
+
+  it("returns 'skipped-degraded' when gh label create rejects with an unrelated error", async () => {
+    const execFile: ExecFileLike = vi.fn(async (file, args) => {
+      if (file === "gh" && args[0] === "label" && args[1] === "list") return "";
+      throw new Error("HTTP 403: rate-limited");
+    });
+    const outcome = await ensureCtoAuditLabel({ execFile });
+    expect(outcome).toBe("skipped-degraded");
   });
 });

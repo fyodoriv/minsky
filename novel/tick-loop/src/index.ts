@@ -465,10 +465,12 @@ export {
 // CLI bin script (`bin/tick-loop.mjs`) thin: the bin only decides whether
 // to opt-in (env var) and forwards `process.env` / a real `execFile` here.
 export {
+  type EnsureLabelOutcome,
   type ExecFileLike,
   type SignalsBuilderArgs,
   createFileBackedCtoAuditLock,
   createGitGhSignalsBuilder,
+  ensureCtoAuditLabel,
   extractPrUrl,
   parseFilesChangedFromGit,
   parseRecentMainCommitsFromGit,
