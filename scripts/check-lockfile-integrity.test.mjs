@@ -13,6 +13,7 @@ import {
   classifyLockfileEntryChange,
   extractEntriesFromLockfile,
   formatVerdict,
+  parsePnpmLockfile,
   parseSpecifier,
   walkLockfileChanges,
 } from "./check-lockfile-integrity.mjs";
@@ -463,6 +464,229 @@ describe("walkLockfileChanges (slice 2 — diff walker)", () => {
     const result = walkLockfileChanges({ before, after });
     expect(result.violations).toEqual([]);
     expect(result.summary.unchanged).toBe(1); // only lodash; link@workspace skipped
+  });
+});
+
+describe("parsePnpmLockfile (slice 3 — pure pnpm-lock.yaml parser)", () => {
+  it("parses a single inline-flow resolution: {integrity: …} entry", () => {
+    const text = [
+      "lockfileVersion: '9.0'",
+      "",
+      "packages:",
+      "",
+      "  lodash@4.17.21:",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(parsed.packages?.["lodash@4.17.21"]).toEqual({
+      resolution: { integrity: SHA512_A },
+    });
+  });
+
+  it("parses a quoted scoped-package key (pnpm always quotes leading-@ keys)", () => {
+    const text = [
+      "packages:",
+      "",
+      "  '@types/node@20.0.0':",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(parsed.packages?.["@types/node@20.0.0"]).toEqual({
+      resolution: { integrity: SHA512_A },
+    });
+  });
+
+  it("ignores extra inline-flow fields after integrity (engines, hasBin, …)", () => {
+    const text = [
+      "packages:",
+      "",
+      "  foo@1.0.0:",
+      `    resolution: {integrity: ${SHA512_A}, tarball: 'https://example/foo.tgz'}`,
+      "    engines: {node: '>=18'}",
+      "    hasBin: true",
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(parsed.packages?.["foo@1.0.0"]).toEqual({
+      resolution: { integrity: SHA512_A },
+    });
+  });
+
+  it("parses block-style resolution + integrity (hand-edited / non-pnpm-emitted shape)", () => {
+    const text = [
+      "packages:",
+      "",
+      "  foo@1.0.0:",
+      "    resolution:",
+      `      integrity: ${SHA512_A}`,
+      "      tarball: https://example/foo.tgz",
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(parsed.packages?.["foo@1.0.0"]).toEqual({
+      resolution: { integrity: SHA512_A },
+    });
+  });
+
+  it("parses multiple entries with mixed scoped/unscoped names", () => {
+    const text = [
+      "packages:",
+      "",
+      "  '@minsky/observability@0.1.0':",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+      "  lodash@4.17.21:",
+      `    resolution: {integrity: ${SHA512_B}}`,
+      "    engines: {node: '>=12'}",
+      "",
+      "  react@18.2.0:",
+      `    resolution: {integrity: ${SHA384_A}}`,
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(Object.keys(parsed.packages ?? {})).toEqual([
+      "@minsky/observability@0.1.0",
+      "lodash@4.17.21",
+      "react@18.2.0",
+    ]);
+    expect(parsed.packages?.["lodash@4.17.21"]).toEqual({
+      resolution: { integrity: SHA512_B },
+    });
+  });
+
+  it("stops at a sibling top-level block (snapshots:, settings:, …)", () => {
+    const text = [
+      "packages:",
+      "",
+      "  foo@1.0.0:",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+      "snapshots:",
+      "",
+      "  bar@2.0.0:",
+      `    resolution: {integrity: ${SHA512_B}}`,
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    // Only `foo@1.0.0` from `packages:` — `bar@2.0.0` lives under `snapshots:`.
+    expect(Object.keys(parsed.packages ?? {})).toEqual(["foo@1.0.0"]);
+  });
+
+  it("preserves keys without integrity (workspace links, file: deps) as empty entries", () => {
+    // The slice-2 walker filters these out via extractEntriesFromLockfile;
+    // the parser doesn't pre-filter so the consumer sees an honest map.
+    const text = [
+      "packages:",
+      "",
+      "  link@workspace:",
+      "    name: link",
+      "    version: workspace",
+      "",
+      "  good@1.0.0:",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(parsed.packages?.["link@workspace"]).toEqual({});
+    expect(parsed.packages?.["good@1.0.0"]).toEqual({
+      resolution: { integrity: SHA512_A },
+    });
+  });
+
+  it("returns { packages: {} } for empty / non-string input", () => {
+    expect(parsePnpmLockfile("")).toEqual({ packages: {} });
+    // @ts-expect-error - exercising runtime guard
+    expect(parsePnpmLockfile(null)).toEqual({ packages: {} });
+    // @ts-expect-error - exercising runtime guard
+    expect(parsePnpmLockfile(undefined)).toEqual({ packages: {} });
+    // @ts-expect-error - exercising runtime guard
+    expect(parsePnpmLockfile(42)).toEqual({ packages: {} });
+  });
+
+  it("returns { packages: {} } when the text has no packages: block", () => {
+    const text = [
+      "lockfileVersion: '9.0'",
+      "",
+      "settings:",
+      "  autoInstallPeers: true",
+      "",
+      "importers:",
+      "  .:",
+      "    devDependencies: {}",
+      "",
+    ].join("\n");
+    expect(parsePnpmLockfile(text)).toEqual({ packages: {} });
+  });
+
+  it("strips top-of-file # comments and ignores blank lines inside the block", () => {
+    const text = [
+      "# This file is autogenerated by pnpm. Do not edit.",
+      "lockfileVersion: '9.0'",
+      "",
+      "packages:",
+      "",
+      "",
+      "  foo@1.0.0:",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+    ].join("\n");
+    const parsed = parsePnpmLockfile(text);
+    expect(parsed.packages?.["foo@1.0.0"]).toEqual({
+      resolution: { integrity: SHA512_A },
+    });
+  });
+
+  it("round-trips into extractEntriesFromLockfile + walkLockfileChanges", () => {
+    // The acceptance criterion of slice 3: parser output is a drop-in for the
+    // slice-1/2 seams. A hash-change-without-version-change crafted as text
+    // surfaces as the same supply-chain-attack verdict the walker emits.
+    const before = [
+      "packages:",
+      "",
+      "  debug@4.3.4:",
+      `    resolution: {integrity: ${SHA512_A}}`,
+      "",
+    ].join("\n");
+    const after = [
+      "packages:",
+      "",
+      "  debug@4.3.4:",
+      `    resolution: {integrity: ${SHA512_B}}`,
+      "",
+    ].join("\n");
+    const parsedBefore = parsePnpmLockfile(before);
+    const parsedAfter = parsePnpmLockfile(after);
+    const entriesBefore = extractEntriesFromLockfile(parsedBefore);
+    expect(entriesBefore.size).toBe(1);
+    const result = walkLockfileChanges({ before: parsedBefore, after: parsedAfter });
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.code).toBe("hash-change-without-version-change");
+    expect(result.violations[0]?.key).toBe("debug@4.3.4");
+  });
+
+  it("parses the repository's own pnpm-lock.yaml without throwing and finds ≥10 entries", async () => {
+    // Sanity check against the real lockfile shape — the parser's narrow
+    // dialect must cover what pnpm v9 actually emits on this repo.
+    const { readFileSync } = await import("node:fs");
+    const { resolve, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = dirname(fileURLToPath(import.meta.url));
+    const lockfilePath = resolve(here, "..", "pnpm-lock.yaml");
+    const text = readFileSync(lockfilePath, "utf8");
+    const parsed = parsePnpmLockfile(text);
+    const keys = Object.keys(parsed.packages ?? {});
+    expect(keys.length).toBeGreaterThan(10);
+    // Every parsed entry that has a resolution must carry a non-empty
+    // SRI-shaped integrity — otherwise the parser is mis-extracting.
+    for (const key of keys) {
+      const entry = parsed.packages?.[key];
+      const integrity = entry?.resolution?.integrity;
+      if (integrity !== undefined) {
+        expect(integrity).toMatch(/^(sha256|sha384|sha512)-[A-Za-z0-9+/_-]+={0,2}$/);
+      }
+    }
   });
 });
 
