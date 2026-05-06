@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- pattern: not-applicable — operator-side activation file mirroring com.minsky.tick-loop.plist; OTP transient-restart semantics already declared at vision.md § "Pattern conformance index" row for the tick-loop plist (Armstrong 2007). -->
+<!-- scope: human-approved 2026-05-05 — operator directive: detect stuck iterations and resolve them off-tick. -->
 <!--
 Minsky watchdog — launchd LaunchAgent for macOS.
 

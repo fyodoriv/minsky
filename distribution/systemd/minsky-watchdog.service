@@ -1,3 +1,6 @@
+# <!-- pattern: not-applicable — operator-side activation file mirroring minsky-tick-loop.service; OTP transient-restart semantics already declared at vision.md § "Pattern conformance index" row for the tick-loop service (Armstrong 2007). -->
+# <!-- scope: human-approved 2026-05-05 — operator directive: detect stuck iterations and resolve them off-tick. -->
+#
 # Minsky watchdog — continuous self-diagnose poller that auto-resolves
 # findings whose action is local + reversible-via-respawn. Currently:
 # kills `claude --print` spawns whose etime exceeds the threshold so the

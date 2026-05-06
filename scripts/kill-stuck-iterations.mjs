@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved 2026-05-05 — operator directive: detect stuck iterations and resolve them off-tick (companion to scripts/watchdog.mjs). -->
 // Pattern: reactive-resolution (Beyer SRE 2016 Ch. 6 — silence is failure;
 // Kephart & Chess 2003 — MAPE-K's E phase). Runs the self-diagnose
 // invariants once, finds any `daemon-iteration-runtime-exceeded`

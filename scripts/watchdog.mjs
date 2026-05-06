@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved 2026-05-05 — operator directive: detect stuck iterations and resolve them off-tick (continuous loop; companion to scripts/kill-stuck-iterations.mjs). -->
 // Pattern: continuous-watchdog (Beyer SRE 2016 Ch. 6 — every state operator
 // cares about must surface; Kephart & Chess 2003 — MAPE-K's M+A+P+E pipeline
 // runs continuously, not on tick boundaries). Polls the self-diagnose
