@@ -40,6 +40,14 @@
 // allow-list annotation (slice ≥3, mirroring the otel-no-pii pattern) is the
 // targeted relief valve, not regex relaxation.
 //
+// Slice 2 (this file): adds `scanFilesForSecrets({ files })` — the pure
+// multi-file walker that runs the slice-1 classifier across a list of
+// `{ path, source }` records and returns aggregated violations with the
+// file path attached to each finding. Mirrors `extractAttributeViolations`
+// in `scripts/check-otel-no-pii.mjs` (the slice-2 walker on the OTEL side
+// of vision.md § 13). The lefthook pre-commit hook, allow-list annotation,
+// and CI gate ship in slices ≥3 against this fixed seam.
+//
 // Pattern: deterministic gate (rule #10), pure function (rule #2 — the
 // classifier is the seam, the staged-files walker / CLI / gitleaks pivot is
 // the boundary). Sibling: `scripts/check-otel-no-pii.mjs` (slice 1 of the
@@ -276,4 +284,48 @@ export function formatFinding(finding, filePath) {
     ? `${filePath}:${finding.line}:${finding.column}`
     : `${finding.line}:${finding.column}`;
   return `${where}: ${finding.label} (${finding.tag}) — ${finding.snippet}`;
+}
+
+/**
+ * @typedef {object} WalkerSourceFile
+ * @property {string} path     POSIX, repo-relative — preserved verbatim on
+ *                             every violation so the CLI / hook can print
+ *                             a click-through `path:line:col` location.
+ * @property {string} source   full file content as a UTF-8 string. Binary
+ *                             files are the CLI wrapper's concern (slice ≥4);
+ *                             this walker treats `source` as opaque text.
+ */
+
+/**
+ * @typedef {SecretFinding & { file: string }} ScanViolation
+ */
+
+/**
+ * Pure multi-file walker. Run `scanContentForSecrets` against each input
+ * file's `source` and return aggregated violations with the originating
+ * `file` path attached to each finding. Findings preserve the slice-1
+ * `(line, column)` ordering within each file; files are reported in the
+ * order they were supplied (call-site decides whether that's
+ * `git diff --cached`'s order, alphabetical, etc.).
+ *
+ * Pure: no I/O, no globals, no async. The CLI wrapper (slice ≥4) is
+ * responsible for reading files off disk and feeding them in. This boundary
+ * matches `extractAttributeViolations({ files })` in
+ * `scripts/check-otel-no-pii.mjs` so the same staged-files plumbing can be
+ * shared.
+ *
+ * @param {{ files: readonly WalkerSourceFile[] }} input
+ * @returns {{ violations: ScanViolation[] }}
+ */
+export function scanFilesForSecrets({ files }) {
+  /** @type {ScanViolation[]} */
+  const violations = [];
+  for (const f of files) {
+    const result = scanContentForSecrets(f.source);
+    if (result.ok) continue;
+    for (const finding of result.findings) {
+      violations.push({ ...finding, file: f.path });
+    }
+  }
+  return { violations };
 }
