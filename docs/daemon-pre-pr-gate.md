@@ -63,7 +63,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `measurement-inspects-output` — every rule-#9 record's measurement command inspects runtime output, not just exit code.
 - `skill-rule-cap` — every advisory Claude Code skill resolves to ≤ the documented number of vision.md rules.
 
-The env-dependent CI jobs (`hygiene` / `linux-supervisor-integration` / `macos-supervisor-integration` / `maciek-smoke` / `pr-self-grade`) are intentionally absent from the manifest — they cannot evaluate against a local checkout without GitHub / pipx / dbus plumbing the daemon does not have. CI runs them; this gate does not pretend to. (Two further CI jobs, `rule-11-flake-detection` and `cto-audit-pr-conventions`, run on every PR for diagnostic value but are not in the `ci:` aggregator's `needs:` — they don't gate the meta-check, so they are not in the manifest either.)
+The env-dependent CI jobs (`hygiene` / `linux-supervisor-integration` / `macos-supervisor-integration` / `maciek-smoke` / `pr-self-grade` / `pr-security-review`) are intentionally absent from the manifest — they cannot evaluate against a local checkout without GitHub / pipx / dbus plumbing the daemon does not have. CI runs them; this gate does not pretend to. (Two further CI jobs, `rule-11-flake-detection` and `cto-audit-pr-conventions`, run on every PR for diagnostic value but are not in the `ci:` aggregator's `needs:` — they don't gate the meta-check, so they are not in the manifest either.)
 
 ## Drift hazards and their mitigations
 
