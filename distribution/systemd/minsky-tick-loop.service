@@ -57,6 +57,25 @@ Environment=MINSKY_CHANGELOG_ENABLE=1
 Environment=MINSKY_CTO_AUDIT_ENABLE=1
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
+# Sandboxing — stage 0 of `supervisor-sandbox-syscall-restriction`
+# (vision.md rule #13 item 3 — security-privacy is Minsky's #2 priority
+# after performance). Pinned by scripts/check-supervisor-sandbox-hardening.mjs.
+# Anchor: systemd.exec(5) "Sandboxing" section — every directive below
+# is documented as having no effect on a normal long-lived Node.js
+# process that reads/writes its WorkingDirectory and spawns child
+# processes. Filesystem/network restrictions (ProtectSystem=,
+# ProtectHome=, RestrictAddressFamilies=, SystemCallFilter=) are
+# deliberately deferred to stage 1+ behind the dry-run + warn-only ramp.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
 # Erlang-style "transient" restart: only on non-zero exit (let-it-crash
 # discipline, rule #6). Backoff caps the API hammering on systematic failures.
 Restart=on-failure
