@@ -5,6 +5,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  CANONICAL_REPO,
+  GH_PR_LIST_LIMIT,
   ROLLING_30D_MIN_N,
   ROLLING_30D_MIN_PASS_RATE,
   ROLLING_WINDOW_DAYS,
@@ -33,6 +35,15 @@ describe("pre-registered constants", () => {
 
   test("ROLLING_WINDOW_DAYS matches the brief's 30d window", () => {
     expect(ROLLING_WINDOW_DAYS).toBe(30);
+  });
+
+  test("CANONICAL_REPO matches the daemon's PR target — owner/name shape", () => {
+    // Slice 14: pinned so `gh`'s origin-inference can't silently zero the
+    // metric. The exact value is the only repo this daemon ever ships PRs
+    // against; if that ever changes, both the metric script and the
+    // self-diagnose invariant flip together (single-source).
+    expect(CANONICAL_REPO).toBe("fyodoriv/minsky");
+    expect(CANONICAL_REPO).toMatch(/^[\w.-]+\/[\w.-]+$/);
   });
 });
 
@@ -166,7 +177,26 @@ describe("buildRecentPrListGhArgs (canonical query — slice 12)", () => {
     expect(args).toContain("--json");
     expect(args).toContain("number,statusCheckRollup");
     expect(args).toContain("--limit");
-    expect(args).toContain("100");
+    expect(args).toContain(String(GH_PR_LIST_LIMIT));
+  });
+
+  test("GH_PR_LIST_LIMIT is high enough to satisfy the n≥10 threshold", () => {
+    // The threshold is the data-not-code source of "verdict can fire";
+    // shrinking the limit below it would silently leave the verdict
+    // INSUFFICIENT-DATA forever even when the gate is failing.
+    expect(GH_PR_LIST_LIMIT).toBeGreaterThanOrEqual(ROLLING_30D_MIN_N);
+  });
+
+  test("threads -R CANONICAL_REPO so the query is immune to origin pollution (slice 14)", () => {
+    // Without `-R`, gh infers the repo from the working dir's `origin`
+    // remote. The cross-repo-runner integration tests have been observed
+    // mutating that URL to a fake test-org/test-iep-capabilities path,
+    // which silently zeroes the PR set. Pin -R + CANONICAL_REPO so the
+    // query never depends on local remote state.
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    const rIdx = args.indexOf("-R");
+    expect(rIdx).toBeGreaterThanOrEqual(0);
+    expect(args[rIdx + 1]).toBe(CANONICAL_REPO);
   });
 
   test("output is shaped like a flat string[] — no nesting, no undefined entries", () => {
@@ -267,6 +297,7 @@ describe("formatReport", () => {
       stats: { total: 10, clean: 10, dirtyNumbers: [], passRate: 1 },
     });
     expect(report).toContain("--author @me");
+    expect(report).toContain(`-R ${CANONICAL_REPO}`);
     expect(report).toContain(">= 2026-04-06");
     expect(report).toContain("docs/daemon-pre-pr-gate.md");
   });
@@ -286,6 +317,8 @@ describe("runDaemonPrLintMetrics", () => {
     });
     expect(ghCalls).toHaveLength(1);
     const [call] = ghCalls;
+    expect(call).toContain("-R");
+    expect(call).toContain(CANONICAL_REPO);
     expect(call).toContain("--author");
     expect(call).toContain("@me");
     expect(call).toContain("--state");
@@ -295,7 +328,7 @@ describe("runDaemonPrLintMetrics", () => {
     expect(call).toContain("--json");
     expect(call).toContain("number,statusCheckRollup");
     expect(call).toContain("--limit");
-    expect(call).toContain("100");
+    expect(call).toContain(String(GH_PR_LIST_LIMIT));
   });
 
   test("threads parsed stats back into the result + report", async () => {
