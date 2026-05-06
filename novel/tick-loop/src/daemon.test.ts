@@ -84,6 +84,24 @@ function extractBriefRedBulletNames(brief: string): Set<string> {
   return out;
 }
 
+/**
+ * Extract the noop-exit token prefix from the brief's `noop, exiting —
+ * TOKEN: <PLACEHOLDER>` instruction and return it with the trailing colon
+ * (e.g., `pre-pr-lint-failures:`). The token is the load-bearing string
+ * the daemon emits to stdout when the gate stays red after 3 retries; the
+ * docs and the self-diagnose invariant's `suggestedFix` both tell operators
+ * to grep `.minsky/tick-loop.out.log` for this exact prefix. Slice 24/N
+ * pins all three surfaces equal — see the parity test below for the
+ * mutation-test rationale.
+ */
+function extractBriefNoopExitTokenPrefix(brief: string): string {
+  const m = /noop, exiting — ([a-z0-9-]+):/.exec(brief);
+  if (m === null || m[1] === undefined) {
+    throw new Error("brief: missing `noop, exiting — TOKEN:` noop-exit instruction");
+  }
+  return `${m[1]}:`;
+}
+
 // ---- Fixtures -------------------------------------------------------------
 
 const FIXTURE_TASKS_MD = `# Tasks
@@ -1657,6 +1675,47 @@ describe("buildDaemonBrief", () => {
       missingFromBrief: [],
       extraInBrief: [],
     });
+  });
+
+  it("noop-exit token prefix is identical across brief, invariant suggestedFix, and operator docs (slice 24/N)", () => {
+    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): the brief tells
+    // the daemon to emit `noop, exiting — pre-pr-lint-failures: <step name>`
+    // to stdout when the gate stays red after 3 retries. Both
+    // `docs/daemon-pre-pr-gate.md` § "When the invariant fires" and the
+    // `daemonPrLintPassRateInvariant`'s `suggestedFix` (in
+    // `scripts/self-diagnose.mjs`) instruct operators to grep
+    // `.minsky/tick-loop.out.log` for that same `pre-pr-lint-failures: <step>`
+    // token. If a refactor renames the token in the brief without updating
+    // the grep instructions (or vice versa), operators grep and find nothing,
+    // conclude the brief skip isn't happening, when in fact it is — exactly
+    // the silent-divergence drift hazard slices 13/16/17/18/22/23 close on
+    // their respective surfaces. Slice 24/N closes the same drift on the
+    // noop-exit token prefix: extract the prefix from the brief itself
+    // (single source of truth — the daemon's emission is what operators will
+    // actually find in the log), then assert the docs and the invariant
+    // source both contain that exact prefix verbatim.
+    //
+    // Mutation testing — three directions of drift surfaced:
+    // - rename token in brief (`pre-pr-lint-failures` → `lint-gate-failed`)
+    //   → extracted prefix becomes `lint-gate-failed:`; docs + invariant
+    //   still hold the old name → both `expect.toContain` calls fail.
+    // - rename token in docs only → extracted prefix unchanged
+    //   (`pre-pr-lint-failures:`); docs no longer contains it → docs
+    //   `toContain` fails, invariant passes.
+    // - rename token in invariant `suggestedFix` only → invariant
+    //   `toContain` fails, docs passes.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    const tokenPrefix = extractBriefNoopExitTokenPrefix(brief);
+    // Sanity: the extractor must produce a non-empty token-with-colon — if it
+    // ever returns just `:` the parity test would silently pass on every
+    // surface. Pin the load-bearing structure here too.
+    expect(tokenPrefix).toMatch(/^[a-z][a-z0-9-]+:$/);
+
+    const docs = readFileSync(resolve(here, "../../../docs/daemon-pre-pr-gate.md"), "utf8");
+    const invariantSrc = readFileSync(resolve(here, "../../../scripts/self-diagnose.mjs"), "utf8");
+    expect(docs).toContain(tokenPrefix);
+    expect(invariantSrc).toContain(tokenPrefix);
   });
 
   it("includes the optimization-discipline gate with concrete eligible-optimization list", () => {
