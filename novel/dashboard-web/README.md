@@ -136,3 +136,7 @@ serve({ fetch, port: 8080 }); // distribution/run-dashboard-web.sh owns the port
 const snapshot = { "loop-uptime": "0.99", "tokens-per-story": "12345" };
 createServer({ getValue: snapshotGetValue(snapshot) });
 ```
+
+## Localhost-only by default (security)
+
+Per vision.md rule #13.4 (security minimum bar — boundary protection, NIST SP 800-53 SC-7), the dashboard binds to `127.0.0.1` by default. LAN exposure requires explicit operator opt-in via `MINSKY_DASHBOARD_BIND=0.0.0.0`. The bind decision lives in `src/bind.ts` (pure helper) consumed by `src/start.ts`. See `test/bind.test.ts` for the paired tests.
