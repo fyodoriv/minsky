@@ -15,5 +15,11 @@ pre-commit:
 
 pre-push:
   commands:
-    full-check:
-      run: pnpm run check
+    pre-pr-lint:
+      # Canonical pre-PR lint stack — single source of truth shared with the
+      # daemon's brief gate (TASKS.md `daemon-pre-pr-lint-gate`). Humans run
+      # `--stage=full` (adds vitest + diff-relative + dormant-config lints);
+      # the daemon brief runs `--stage=fast` for spawn-budget reasons. Both
+      # share the manifest in `scripts/run-pre-pr-lint-stack.mjs`. Rule #10 —
+      # the daemon and the human pass through the same gate.
+      run: pnpm pre-pr-lint --stage=full
