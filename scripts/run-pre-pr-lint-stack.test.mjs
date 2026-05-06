@@ -584,3 +584,60 @@ describe("docs/daemon-pre-pr-gate.md env-dependent allowlist drift-protection", 
     }
   });
 });
+
+describe("docs/daemon-pre-pr-gate.md alias-mapping drift-protection", () => {
+  // Slice 18/N: closes the seventh parity surface. The doc's drift-hazard #1
+  // section enumerates "the two known name aliases" in prose
+  // (`` `test`↔`vitest`, `glossary-discipline`↔`rule-5-glossary-discipline` ``),
+  // which mirrors `CI_TO_MANIFEST_ALIAS` exported from
+  // `scripts/run-pre-pr-lint-stack.mjs`. Slice 17/N lifted the allowlist and
+  // the alias map into the canonical module but only pinned the allowlist
+  // against the doc; the alias enumeration stayed unpinned. Same hazard
+  // pattern as slices 13/16/17 — the next time a CI job's name diverges from
+  // its manifest step name (e.g., a renamed job adding a third alias), the
+  // doc would silently drift unless this parity test fails.
+  //
+  // Regex contract: backtick-quoted `<a>↔<b>` pairs. The section headers
+  // ("Manifest ↔ CI parity", "Brief ↔ manifest parity", etc.) put spaces
+  // around ↔ and never enclose the words in backticks, so they are not
+  // matched. The doc currently has exactly the two alias pairs.
+
+  /**
+   * @param {string} doc
+   * @returns {Array<[string, string]>}   [ciJobName, manifestStepName] pairs
+   */
+  function extractDocAliasPairs(doc) {
+    /** @type {Array<[string, string]>} */
+    const pairs = [];
+    const re = /`([a-z][a-z0-9-]*)`↔`([a-z][a-z0-9-]*)`/g;
+    for (const match of doc.matchAll(re)) {
+      if (match[1] !== undefined && match[2] !== undefined) {
+        pairs.push([match[1], match[2]]);
+      }
+    }
+    return pairs;
+  }
+
+  test("doc's alias enumeration ↔ CI_TO_MANIFEST_ALIAS (bidirectional)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const docPairs = extractDocAliasPairs(doc);
+    const docMap = new Map(docPairs);
+
+    // Both directions: a doc pair missing from the alias map = the doc
+    // claims an alias the test normaliser doesn't apply (the parity test
+    // would silently miss the drift); an alias map entry missing from the
+    // doc = the doc undercounts the aliases the parity test depends on.
+    const aliasEntries = Object.entries(CI_TO_MANIFEST_ALIAS);
+    const missingFromDoc = aliasEntries.filter(([ci, manifest]) => docMap.get(ci) !== manifest);
+    const extraInDoc = docPairs.filter(([ci, manifest]) => CI_TO_MANIFEST_ALIAS[ci] !== manifest);
+    expect({ missingFromDoc, extraInDoc }).toEqual({ missingFromDoc: [], extraInDoc: [] });
+  });
+
+  test("extractDocAliasPairs picks up at least one well-known alias (parser sanity)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const pairs = extractDocAliasPairs(doc);
+    const flat = pairs.flat();
+    expect(flat).toContain("test");
+    expect(flat).toContain("vitest");
+  });
+});
