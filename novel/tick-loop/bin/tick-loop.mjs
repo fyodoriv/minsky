@@ -78,7 +78,9 @@ import {
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
   fromRealBudgetGuard,
+  parseWorkerArgs,
   runDaemon,
+  workerStartupLine,
 } from "../dist/index.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -152,6 +154,18 @@ function applyArg(arg, out) {
 
 const args = parseArgs(process.argv.slice(2));
 const dryRun = readDryRunEnv(process.env);
+
+// Slice 2 of `daemon-parallel-worktree-launch`: parse `--worker-id` /
+// `--workers-total`. Single-process (both absent) returns undefined; both
+// present returns a config; either alone is an error and we exit 2.
+const workerParseResult = parseWorkerArgs(process.argv.slice(2));
+if (workerParseResult !== undefined && "error" in workerParseResult) {
+  console.error(`tick-loop: ${workerParseResult.error}`);
+  process.exit(2);
+}
+/** @type {import("../dist/index.js").WorkerConfig | undefined} */
+const workerConfig = workerParseResult;
+console.error(workerStartupLine(workerConfig));
 
 // Sub-task 2/3: wire the real `BudgetGuard` from `@minsky/budget-guard`.
 // Dry-run uses a `StubTokenMonitor` (a fresh, full 5h window — no I/O against
