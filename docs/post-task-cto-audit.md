@@ -49,7 +49,7 @@ The CTO-mode prompt instructs the spawned `claude --print` to:
 4. Refuse to file vanity-metric tasks (Ries 2011 — counts that always go up: LOC, commits, hours, tasks-in-flight).
 5. Say so explicitly + stop if no high-leverage task is visible (no fabrication).
 
-The label is load-bearing for the success metric (see below); a missing label silently zeroes the audit's pre-registered measurement.
+The label is load-bearing for the success metric (see below); a missing label silently zeroes the audit's pre-registered measurement. The CI gate `cto-audit-pr-conventions` (`scripts/check-cto-audit-pr-conventions.mjs`) enforces the audit-branch ↔ label biconditional on every PR, so drift surfaces before merge rather than as a silent zero in the weekly query.
 
 ## Monitor
 
