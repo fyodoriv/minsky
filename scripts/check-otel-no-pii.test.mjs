@@ -6,7 +6,11 @@
 // matching the description in the script's header.
 
 import { describe, expect, it } from "vitest";
-import { classifyAttributesObject, classifySpanAttribute } from "./check-otel-no-pii.mjs";
+import {
+  classifyAttributesObject,
+  classifySpanAttribute,
+  extractAttributeViolations,
+} from "./check-otel-no-pii.mjs";
 
 describe("classifySpanAttribute (pure function)", () => {
   it("(a) plain attribute passes — { ok: true }", () => {
@@ -106,5 +110,130 @@ describe("classifyAttributesObject (pure function)", () => {
     });
     expect(r?.name).toBe("payload");
     expect(r?.shape).toBe("value-shape");
+  });
+});
+
+describe("extractAttributeViolations (AST walker, slice 2)", () => {
+  it("(w-a) clean source produces zero violations", () => {
+    const source = `
+      function emit(e: any) {}
+      emit({
+        name: "tick-loop.iteration",
+        attributes: {
+          "iteration.index": 1,
+          "iteration.status": "completed",
+        },
+      });
+    `;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it('(w-b) `attributes: { apiKey: "x" }` flagged on name-shape', () => {
+    const source = `emit({ name: "x", attributes: { apiKey: "redacted" } });`;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    const [v] = r.violations;
+    expect(v).toMatchObject({
+      file: "a.ts",
+      attributeName: "apiKey",
+      shape: "name-shape",
+    });
+    expect(v?.line).toBeGreaterThan(0);
+  });
+
+  it("(w-c) string-literal credential value flagged on value-shape", () => {
+    // Build the token by concatenation so the lint that flags credential
+    // patterns in this very test source doesn't itself fire on us.
+    const token = `ghp_${"a".repeat(40)}`;
+    const source = `emit({ attributes: { note: "${token}" } });`;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]).toMatchObject({
+      attributeName: "note",
+      shape: "value-shape",
+    });
+  });
+
+  it("(w-d) non-literal value with safe name is NOT flagged", () => {
+    // The runtime guard (slice ≥4) catches these; the static walker
+    // intentionally does not — value cannot be statically verified.
+    const source = "emit({ attributes: { url: someVar } });";
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(w-e) non-literal value with credential-shaped name IS flagged", () => {
+    // Name-shape doesn't depend on the value, so dynamic values still
+    // flag if the key itself is credential-shaped.
+    const source = "emit({ attributes: { password: someVar } });";
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]).toMatchObject({
+      attributeName: "password",
+      shape: "name-shape",
+    });
+  });
+
+  it("(w-f) computed property keys are skipped (static name unknown)", () => {
+    const source = `
+      const KEY = "apiKey";
+      emit({ attributes: { [KEY]: "redacted" } });
+    `;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(w-g) string-literal property keys are honoured", () => {
+    const source = `emit({ attributes: { "apiKey": "x" } });`;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.attributeName).toBe("apiKey");
+  });
+
+  it("(w-h) nested `attributes:` properties are walked recursively", () => {
+    const source = `
+      const cfg = {
+        outer: {
+          attributes: { apiKey: "x" },
+        },
+      };
+    `;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.attributeName).toBe("apiKey");
+  });
+
+  it("(w-i) only `attributes:` literals are considered (other props ignored)", () => {
+    // A `headers: { apiKey }` literal MUST NOT flag — span attributes are
+    // the lint's scope, not generic config objects.
+    const source = `request({ headers: { apiKey: "x" } });`;
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(w-j) multiple files aggregate", () => {
+    const r = extractAttributeViolations({
+      files: [
+        { path: "a.ts", source: `emit({ attributes: { apiKey: "x" } });` },
+        { path: "b.ts", source: `emit({ attributes: { token: "x" } });` },
+      ],
+    });
+    expect(r.violations).toHaveLength(2);
+    expect(r.violations.map((v) => v.file).sort()).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("(w-k) line numbers are 1-based and locate the offending property", () => {
+    const source = [
+      "emit({", //
+      '  name: "x",',
+      "  attributes: {",
+      '    apiKey: "x",',
+      "  },",
+      "});",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.line).toBe(4);
   });
 });
