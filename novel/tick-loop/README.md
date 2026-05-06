@@ -30,6 +30,16 @@ Per constitutional rule #7 (vision.md § 7).
 | 4 | Network-timeout (`failureMode: 'network-timeout'`) — delayed rejection | upstream-error (latency) | `tick` returns `status: 'failed'` with `output: 'network-timeout for task=…'` after the configured delay | covered manually by the network-timeout fixture in `TestFakeMockAnthropic`; assertion-level chaos test deferred until the fake's timeoutMs path drives a real fault-injection scenario |
 | 5 | Wall-clock budget exhausted mid-smoke | resource-exhaustion (time) | `runSmoke` halts before the next tick fires; `budgetExhausted: true`; partial results returned (graceful degrade per rule #7) | covered by `halts when wall-clock budget is exhausted` test in `novel/tick-loop/src/index.test.ts` |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `claude --print` output (LLM-generated; treated as data, never code); the Anthropic SDK adapter's wire responses (5xx / malformed-output / network-timeout — all enumerated in Failure modes #1-4); operator-mutable config under `${MINSKY_HOME}` (`config/tick-loop.json`, env overrides).
+- **Trusted state**: the OTP-style supervisor (systemd-user / launchd unit), its restart-policy template, the budget-guard envelope (rule #13.4 binds it to localhost), the in-process orchestrator (`tick`/`runSmoke`).
+- **Trust boundary**: the daemon respects `dashboard-localhost-only-by-default` (rule #13.4) and the `secret-scanning-precommit-and-ci` floor (rule #13.1); it never exfiltrates session JSONL or source code beyond Anthropic (already required for `claude --print`) and OpenObserve (operator-controlled, on-host) per rule #13.7. Wire payloads back from the SDK never reach `eval` / `child_process.exec`.
+- **STRIDE focus**: **D**enial-of-service — `budget-guard`'s burn-rate ladder is the load-shedding response (Failure mode #5 + rule #13's pairing with budget-guard); `loud-crash-supervisor-restart` is the failure-mode default per rule #6. **I**nformation disclosure — OTEL spans are PII-scrubbed at the lint level (rule #13.2 — `otel-no-pii-in-spans-lint` blocks PII-shaped attributes at CI). **T**ampering — malformed-output (Failure mode #3) is reported as `<<<MALFORMED>>>`; downstream validators must check (rule #6 — don't trust upstream).
+- **Performance-first carve-out** (rule #13's relief valve): none declared. Tick cadence is minutes-to-hours, so security overhead at the SDK boundary is invisible to the success threshold.
+
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: a deterministic mock-tick daemon with 3+ chaos-mode mocks reproduces user-story 001's P2-task-throughput Acceptance in <10 min CI wall-clock.
