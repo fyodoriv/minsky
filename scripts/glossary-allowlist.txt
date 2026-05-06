@@ -69,3 +69,9 @@ scope-discipline-policy-lint
 # directive 2026-05-05). The lint will block feature PRs missing a
 # research-replace-or-relocate-<feature-id> task; today the rule itself enforces.
 pr-replace-or-relocate-research
+
+# Stability-suite unit-file names cited in vision.md rule #6 (operator directive
+# 2026-05-05: "ensure that forever all stability features for minsky are enabled
+# by default"). Substrate exists at distribution/{systemd,launchd}/.
+minsky-supervisor.target
+minsky-watchdog.service
