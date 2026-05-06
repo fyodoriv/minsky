@@ -31,6 +31,16 @@ Per constitutional rule #7 (vision.md § 7).
 | 7 | `GET /budget` before any decision recorded | server started before guard's first tick (process-state) | `graceful-degrade` — HTTP 503 with `{ "error": "no decision recorded yet" }` so consumers can distinguish "not ready" from "broken" | covered by `HonoBudgetServer` 503 test |
 | 8 | Port collision on default 9876 | another process owns the port (resource-contention) | `loud-crash-supervisor-restart` — `serve()` rejects synchronously; supervisor restarts after the operator picks a free port via `MINSKY_BUDGET_GUARD_PORT` | covered manually; ephemeral-port `start({ port: 0 })` test exercises the bind path |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `TokenMonitor.snapshot()` output (parsed from Maciek's `claude-monitor` cache file owned by the same user); `GET /budget` HTTP requests; the contents of `${MINSKY_HOME}/.minsky/budget.flag` (writable by any process running as the same user).
+- **Trusted state**: `decide()` is a pure function; threshold constants live in source (`DEFAULT_THRESHOLDS`); the SRE burn-rate ladder is from Beyer et al. 2016 — never operator-overridable at runtime.
+- **Trust boundary**: the HTTP envelope binds to localhost via the `dashboard-localhost-only-by-default` discipline (rule #13.4); the flag-file path is under user-owned `${MINSKY_HOME}`, never `/var/run` (path deviation declared at pattern-index row 26 — root-required paths are out of scope for solo-dev tier).
+- **STRIDE focus**: **I**nformation disclosure — `BudgetServer` returns burn-rate fractions / decisions, never absolute token counts or dollar cost without operator opt-in (`cost: null` until `budget-guard-maciek-impl` ships); **D**enial-of-service — flag-file write uses tmp-file + `rename(2)` to keep the prior flag readable on partial-write failure (Failure mode #6 above).
+- **Performance-first carve-out** (rule #13's relief valve): none declared. The watchdog poll cadence is configurable (default 5s) — tightening it for lower-latency reaction would not measurably move security posture.
+
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: a pure `decide()` function over snapshot + thresholds plus a thin `setInterval` watchdog suffices to express the entire budget-guard policy from `ARCHITECTURE.md` § "Token economy" without I / O coupling.

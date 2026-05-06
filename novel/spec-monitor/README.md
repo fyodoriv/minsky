@@ -21,3 +21,13 @@ Per constitutional rule #7. Spec-monitor has no runtime — it is a prompt-only 
 | 3 | Advisory rule count exceeds the SKILL.md cap (≤5)         | scope-creep                                   | `loud-crash-supervisor-restart` — adding a 6th rule requires retiring one OR shipping a deterministic linter for it; enforced by `scripts/check-skill-rule-cap.mjs` (rule-#10 ratchet applied to the Skill itself) | covered by the unit tests in `scripts/check-skill-rule-cap.test.mjs` (specifically the "6 rules → fail" case) |
 | 4 | Skill misclassifies a deterministic violation as advisory | judgement-overlap                             | `graceful-degrade` — the deterministic linter still fires; the Skill's advisory is double-coverage, not blocker | covered by the deterministic-overlap fixture under `test/deterministic-overlap/` |
 | 5 | Skill itself becomes load-bearing (process depends on its verdict) | inversion-of-rule-#10                         | `loud-crash-supervisor-restart` — rule #10 says non-deterministic checks are not constitutional rules; if a process is gating on the Skill's verdict, that process is misconfigured | (deferred — covered when `audit-spec-monitor-coverage-q3-2026` ships) |
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: the operator's natural-language prompt invoking the Skill; the source files the Skill reads at advisory-time (vision.md, task records, prior advisories under `spec-advisories/`).
+- **Trusted state**: the deterministic `scripts/check-rule-*.mjs` linters carry the load-bearing share (rule #10); `SKILL.md` itself is constants; `scripts/check-skill-rule-cap.mjs` enforces the ≤5 advisory-rule cap (Failure mode #3).
+- **Trust boundary**: the Skill is prompt-only — no exec surface, no file-write surface, no network reach. It never gates CI (rule #10 — Failure mode #1 is the lint that catches a misconfiguration that tries to make it required).
+- **STRIDE focus**: **R**epudiation — every advisory verdict is logged to `spec-advisories/<date>-<topic>.md` so audit history is reconstructable; **E**levation of privilege — the Skill cannot escalate because it is prompt-only with no exec surface (the prompt is the *only* attack surface and it is read by a human).
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
