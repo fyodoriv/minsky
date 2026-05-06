@@ -44,8 +44,20 @@
 // pure AST walker that finds `attributes: { … }` object-literal properties
 // (the shape `emit({ name, attributes })` call sites pass), runs the slice-1
 // classifier on each property, and returns the violation list. The diff
-// base, CLI, allow-list annotation, and CI wire-in still ship in slice ≥3
-// against this fixed seam.
+// base, CLI, and CI wire-in still ship in slice ≥4 against this fixed seam.
+//
+// Slice 3 (this file): adds the `// @otel-pii-allowed: <reason>` annotation
+// seam — a leading-comment escape hatch on a flagged property suppresses the
+// violation, provided the reason is ≥3 characters of substantive text. This
+// is the parent task's `Details (c)` (TASKS.md `otel-no-pii-in-spans-lint`):
+// "explicit annotations like `// @otel-pii-allowed: <reason>` next to a
+// flagged line, recording why this particular attribute is intentionally
+// PII-shaped (e.g., a hash of an opaque ID where the regex false-positives
+// on the `_token` substring)." Both `//` and `/* … */` comment forms are
+// honoured; the annotation must appear in the leading-trivia of the offending
+// property (i.e., between the previous token and the property's first token).
+// Malformed annotations (missing reason / reason < 3 chars) do NOT suppress
+// — the original violation stands so the operator can fix one or the other.
 
 import ts from "typescript";
 
@@ -84,6 +96,15 @@ const VALUE_PATTERNS = Object.freeze([
   Object.freeze({ tag: "slack-bot-token", re: /\bxoxb-[A-Za-z0-9-]{10,}\b/ }),
   Object.freeze({ tag: "slack-user-token", re: /\bxoxp-[A-Za-z0-9-]{10,}\b/ }),
 ]);
+
+// Allow-list annotation (slice 3). Must capture a non-empty reason; the
+// `MIN_ALLOW_REASON_LEN` floor matches `check-pr-security-review.mjs`'s
+// `MIN_OPT_OUT_REASON_LEN` so opt-out reasons across security gates have
+// the same minimum substantiveness. Greedy match for the reason keeps
+// `// @otel-pii-allowed: hash; not the secret itself` working — the comment
+// terminator (`*/` or end-of-line) is the bound, not the next punctuation.
+const ALLOW_ANNOTATION_RE = /@otel-pii-allowed:[ \t]*([^\r\n*]+?)(?:[ \t]*\*\/)?[ \t]*$/m;
+const MIN_ALLOW_REASON_LEN = 3;
 
 /**
  * Pure classifier. Decide whether a key/value pair would leak PII or a
@@ -246,6 +267,7 @@ function classifyObjectLiteral(obj, sf, path, out) {
     const value = staticValueOf(prop.initializer);
     const result = classifySpanAttribute(name, value);
     if (result.ok) continue;
+    if (hasValidAllowAnnotation(sf, prop)) continue;
     const { line } = sf.getLineAndCharacterOfPosition(prop.getStart(sf));
     out.push({
       file: path,
@@ -255,6 +277,32 @@ function classifyObjectLiteral(obj, sf, path, out) {
       reason: /** @type {string} */ (result.reason),
     });
   }
+}
+
+/**
+ * Slice 3: check the leading-trivia of `node` for a well-formed
+ * `// @otel-pii-allowed: <reason>` annotation. Both line-comments (`//`) and
+ * block-comments (`/* … *\/`) are honoured. The annotation suppresses the
+ * violation iff the captured reason is ≥`MIN_ALLOW_REASON_LEN` characters
+ * after trimming. Malformed annotations (missing or too-short reason) do NOT
+ * suppress — the underlying violation stands so the operator can fix either
+ * the annotation or the attribute.
+ *
+ * @param {ts.SourceFile} sf
+ * @param {ts.Node} node
+ * @returns {boolean}
+ */
+function hasValidAllowAnnotation(sf, node) {
+  const ranges = ts.getLeadingCommentRanges(sf.text, node.getFullStart());
+  if (!ranges) return false;
+  for (const range of ranges) {
+    const commentText = sf.text.slice(range.pos, range.end);
+    const m = commentText.match(ALLOW_ANNOTATION_RE);
+    if (!m) continue;
+    const reason = (m[1] ?? "").trim();
+    if (reason.length >= MIN_ALLOW_REASON_LEN) return true;
+  }
+  return false;
 }
 
 /**

@@ -237,3 +237,93 @@ describe("extractAttributeViolations (AST walker, slice 2)", () => {
     expect(r.violations[0]?.line).toBe(4);
   });
 });
+
+describe("@otel-pii-allowed annotation (slice 3)", () => {
+  it("(a-a) leading `//` annotation with valid reason suppresses the violation", () => {
+    const source = [
+      "emit({ attributes: {",
+      "  // @otel-pii-allowed: hash of an opaque ID, not the secret itself",
+      '  apiKey: "redacted-hash",',
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(a-b) leading `/* … */` block annotation with valid reason suppresses", () => {
+    const source = [
+      "emit({ attributes: {",
+      "  /* @otel-pii-allowed: synthetic test fixture */",
+      '  password: "x",',
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(a-c) annotation without a reason does NOT suppress (malformed)", () => {
+    const source = [
+      "emit({ attributes: {",
+      "  // @otel-pii-allowed:",
+      '  apiKey: "x",',
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.attributeName).toBe("apiKey");
+  });
+
+  it("(a-d) annotation with too-short reason does NOT suppress", () => {
+    const source = [
+      "emit({ attributes: {",
+      "  // @otel-pii-allowed: x",
+      '  apiKey: "x",',
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+  });
+
+  it("(a-e) annotation on a sibling (non-leading) property does NOT cross over", () => {
+    // The allow-comment leads `password`; it must not also suppress the
+    // unrelated `apiKey` violation immediately above it.
+    const source = [
+      "emit({ attributes: {",
+      '  apiKey: "x",',
+      "  // @otel-pii-allowed: this is unrelated to apiKey",
+      '  password: "x",',
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.attributeName).toBe("apiKey");
+  });
+
+  it("(a-f) value-shape violation is also suppressible", () => {
+    // Build the credential by concatenation so this test source itself
+    // doesn't trip the lint when the lint scans the repo (slice ≥4).
+    const token = `ghp_${"a".repeat(40)}`;
+    const source = [
+      "emit({ attributes: {",
+      "  // @otel-pii-allowed: documented test fixture for value-shape rule",
+      `  note: "${token}",`,
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(a-g) annotation with a different tag does NOT suppress", () => {
+    // Defence against accidental cross-tool collision (e.g., a generic
+    // `// @lint-ignore` would not be specific enough — the parent task
+    // requires the precise `@otel-pii-allowed:` tag).
+    const source = [
+      "emit({ attributes: {",
+      "  // @lint-ignore: this is not the otel-pii tag",
+      '  apiKey: "x",',
+      "} });",
+    ].join("\n");
+    const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
+    expect(r.violations).toHaveLength(1);
+  });
+});
