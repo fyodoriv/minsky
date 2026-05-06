@@ -494,6 +494,76 @@ export function daemonTaskIdStalenessInvariant(opts) {
 }
 
 /**
+ * @typedef {object} ClaudePrintSpawn
+ * @property {number} pid
+ * @property {number} etimeSeconds — wall-clock seconds since spawn
+ * @property {number | null} ppid — parent process id (the supervisor)
+ *
+ * @typedef {object} StuckIterationInvariantOpts
+ * @property {() => Promise<readonly ClaudePrintSpawn[]>} listClaudePrintSpawns - the daemon's child claude --print processes
+ * @property {number} [thresholdSeconds] - fire when any spawn's etime exceeds this (default 1800 = 30 min)
+ */
+
+/**
+ * Throughput invariant: a `claude --print` spawn (the daemon's per-iteration
+ * child process) has been alive longer than `thresholdSeconds`. Live observed
+ * 2026-05-05: a daemon iteration ran for 2h+ at ~1% CPU with no commit and
+ * no error — the brief had grown too analytical (3 discipline gates on top
+ * of the original anti-noop guard) and claude was thrashing on tool calls.
+ * Operator killed it manually; this invariant catches the same pattern at
+ * the next supervisor self-diagnose tick.
+ *
+ * `suggestedFix` includes the kill command for each detected spawn so an
+ * auto-resolution helper (`scripts/kill-stuck-iterations.mjs`) can act on it
+ * without re-deriving the pid.
+ *
+ * Strategy seam: `listClaudePrintSpawns` is injected so tests can drive the
+ * decision function with synthetic snapshots without spawning real claude.
+ *
+ * @param {StuckIterationInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonIterationRuntimeInvariant(opts) {
+  const { listClaudePrintSpawns, thresholdSeconds = 1800 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const spawns = await listClaudePrintSpawns();
+    const stuck = spawns.filter((s) => s.etimeSeconds > thresholdSeconds);
+    if (stuck.length === 0) return { id: "daemon-iteration-runtime-exceeded", ok: true };
+    const evidence = stuck
+      .map((s) => `pid=${s.pid} etime=${formatEtime(s.etimeSeconds)} (>${thresholdSeconds}s)`)
+      .join("; ");
+    const killCmds = stuck.map((s) => `kill ${s.pid}`).join(" && ");
+    return {
+      id: "daemon-iteration-runtime-exceeded",
+      ok: false,
+      evidence,
+      suggestedTaskTitle: `daemon iteration stuck: ${stuck.length} \`claude --print\` spawn(s) exceeded ${formatEtime(thresholdSeconds)} runtime`,
+      suggestedFix: `One or more daemon-spawned \`claude --print\` processes have been alive longer than ${formatEtime(thresholdSeconds)}. Likely cause: brief grew too analytical and claude is thrashing on tool calls. Kill the spawn(s) so the supervisor's launchd respawns the tick fresh: \`${killCmds}\`. The supervisor itself (parent process) is unaffected; only the per-iteration child dies. Pivot if false-positives ≥1/week: raise threshold to ${formatEtime(thresholdSeconds * 2)}. Auto-resolution: \`node scripts/kill-stuck-iterations.mjs\`.`,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-iteration-runtime-exceeded";
+  return fn;
+}
+
+/**
+ * Format seconds as `<H>h<M>m<S>s` short form. Used in evidence and
+ * suggestedFix rendering for human readability.
+ *
+ * @param {number} seconds
+ * @returns {string}
+ */
+function formatEtime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h${m}m${s}s`;
+  if (m > 0) return `${m}m${s}s`;
+  return `${s}s`;
+}
+
+/**
  * Default probe: spawns `<name> --version` and resolves based on exit code.
  *
  * @param {string} name
@@ -506,6 +576,94 @@ async function spawnVersionProbe(name) {
   } catch {
     return { ok: false };
   }
+}
+
+/**
+ * Production probe for `listClaudePrintSpawns`: shells out to `pgrep -f 'claude --print'`,
+ * then `ps -o pid=,ppid=,etime=` for each. Returns `[]` if pgrep is unavailable
+ * or there are no spawns. Etime is parsed from `[[DD-]HH:]MM:SS` format.
+ *
+ * @returns {Promise<readonly ClaudePrintSpawn[]>}
+ */
+async function listClaudePrintSpawnsViaPgrep() {
+  const pids = await pgrepClaudePrintPids();
+  /** @type {ClaudePrintSpawn[]} */
+  const out = [];
+  for (const pidStr of pids) {
+    const spawn = await readSpawnViaPs(pidStr);
+    if (spawn !== null) out.push(spawn);
+  }
+  return out;
+}
+
+/**
+ * Run `pgrep -f 'claude --print'`. Returns numeric pid strings; `[]` on failure.
+ *
+ * @returns {Promise<readonly string[]>}
+ */
+async function pgrepClaudePrintPids() {
+  try {
+    const { stdout } = await execFileAsync("pgrep", ["-f", "claude --print"], { timeout: 5_000 });
+    return stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Run `ps -p <pid> -o pid=,ppid=,etime=` and parse the single line.
+ * Returns null on any failure (race, malformed output).
+ *
+ * @param {string} pidStr
+ * @returns {Promise<ClaudePrintSpawn | null>}
+ */
+async function readSpawnViaPs(pidStr) {
+  try {
+    const { stdout } = await execFileAsync("ps", ["-p", pidStr, "-o", "pid=,ppid=,etime="], {
+      timeout: 5_000,
+    });
+    const line = stdout.trim();
+    if (!line) return null;
+    const parts = line.split(/\s+/);
+    if (parts.length < 3) return null;
+    const pid = Number(parts[0]);
+    const ppid = Number(parts[1]);
+    const etimeSeconds = parseEtime(parts[2] ?? "");
+    if (!Number.isFinite(pid) || etimeSeconds === null) return null;
+    return { pid, etimeSeconds, ppid: Number.isFinite(ppid) ? ppid : null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse the BSD/Linux `ps -o etime` format `[[DD-]HH:]MM:SS` into seconds.
+ * Returns null on malformed input.
+ *
+ * @param {string} s
+ * @returns {number | null}
+ */
+function parseEtime(s) {
+  const dayMatch = s.match(/^(\d+)-(.+)$/);
+  let days = 0;
+  let rest = s;
+  if (dayMatch) {
+    days = Number(dayMatch[1]);
+    rest = dayMatch[2] ?? "";
+  }
+  const parts = rest.split(":").map((p) => Number(p));
+  if (parts.some((n) => !Number.isFinite(n))) return null;
+  let h = 0;
+  let m = 0;
+  let sec = 0;
+  if (parts.length === 3) [h, m, sec] = /** @type {[number, number, number]} */ (parts);
+  else if (parts.length === 2) [m, sec] = /** @type {[number, number]} */ (parts);
+  else if (parts.length === 1) sec = parts[0] ?? 0;
+  else return null;
+  return days * 86400 + h * 3600 + m * 60 + sec;
 }
 
 /**
@@ -724,6 +882,7 @@ export function defaultInvariants() {
     daemonShippedRatioInvariant({ rollingStats }),
     daemonInFlightPrCollisionInvariant({ openDaemonPrs }),
     daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent }),
+    daemonIterationRuntimeInvariant({ listClaudePrintSpawns: listClaudePrintSpawnsViaPgrep }),
   ];
 }
 

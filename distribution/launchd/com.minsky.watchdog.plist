@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- pattern: not-applicable — operator-side activation file mirroring com.minsky.tick-loop.plist; OTP transient-restart semantics already declared at vision.md § "Pattern conformance index" row for the tick-loop plist (Armstrong 2007). -->
+<!-- scope: human-approved 2026-05-05 — operator directive: detect stuck iterations and resolve them off-tick. -->
+<!--
+Minsky watchdog — launchd LaunchAgent for macOS.
+
+Pattern: continuous-watchdog (Beyer SRE 2016 Ch. 6 — every state operator
+cares about must surface). Runs `scripts/watchdog.mjs` continuously,
+polling self-diagnose invariants and auto-resolving findings whose action
+is local + reversible-via-respawn (currently: kill stuck `claude --print`
+spawns whose etime exceeds WATCHDOG_STUCK_THRESHOLD_SECONDS).
+
+Source: 2026-05-05 operator dogfood — a daemon iteration ran for 2h+ at
+~1% CPU before manual kill. Operator directive: detect + immediately
+resolve OUTSIDE supervisor-tick-cadence.
+
+Placeholders substituted by setup.sh via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.minsky.watchdog.plist
+  launchctl enable gui/$(id -u)/com.minsky.watchdog
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.watchdog</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <!-- Tick cadence in seconds. Default 60 (one self-diagnose run per
+             minute). Tighten if iterations regress to <30min and threshold
+             drops below 1800. -->
+        <key>WATCHDOG_INTERVAL_SECONDS</key>
+        <string>60</string>
+        <!-- Stuck-iteration threshold in seconds. Default 1800 (30 min). The
+             observed 2026-05-05 hang was 2h+, so 1800s catches it well within
+             one window. Pivot trigger (rule #9): if false-positives >1/week,
+             raise to 3600 (1h) before retiring. -->
+        <key>WATCHDOG_STUCK_THRESHOLD_SECONDS</key>
+        <string>1800</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>node</string>
+        <string>${MINSKY_HOME}/scripts/watchdog.mjs</string>
+    </array>
+
+    <!-- Restart on non-zero exit only (transient policy per Armstrong 2007). -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Backoff between respawn attempts; caps respawn loop on systematic failures. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>${MINSKY_HOME}/.minsky/watchdog.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${MINSKY_HOME}/.minsky/watchdog.err.log</string>
+</dict>
+</plist>
