@@ -4,6 +4,16 @@
 // Slice 1 of the SBOM sub-track of `supply-chain-hardening-lockfile-sbom-slsa`
 // (TASKS.md): the pure CycloneDX 1.5 / 1.6 SBOM-shape classifier.
 //
+// Slice 3 (this file): adds `formatSbomViolation(violation)` (one-line) and
+// `formatSbomReport(walkResult)` (multi-line) — pure ASCII formatters that
+// turn the slice-2 walker's `SbomWalkResult` into the diagnostic shape the
+// slice-4 CLI / CI gate will print before exiting. Mirrors `formatFinding`
+// (`scripts/scan-secrets.mjs` § 13.1) and `formatVerdict`
+// (`scripts/check-lockfile-integrity.mjs` § 13.5 lockfile sub-track) so a
+// downstream tool that scrapes any of the three security gates' output can
+// rely on the same `[ok]` / `[fail]` leading-token contract. The CLI
+// (slice 4) does not invent its own formatting; it calls these.
+//
 // `classifySbomShape(parsed)` decides whether an already-parsed JSON object
 // is a well-formed CycloneDX SBOM matching the subset that
 // `cyclonedx/gh-node-module-generatebom@v1` emits for this repo. The
@@ -12,7 +22,7 @@
 // SBOMs to a known-good shape ship in subsequent slices against this fixed
 // seam.
 //
-// Slice 2 (this file): adds `walkSbomViolations(parsed)` — the pure
+// Slice 2: adds `walkSbomViolations(parsed)` — the pure
 // aggregating walker that runs the slice-1 verdict logic over every
 // component and collects ALL violations rather than short-circuiting on
 // the first failure. The slice-1 classifier deliberately exits on the
@@ -503,4 +513,42 @@ function collectComponentViolations(components) {
     seenBomRefs.set(bomRef, i);
   }
   return violations;
+}
+
+// Slice 3: pure ASCII report formatters over slice-2 walker results. ----------
+
+/**
+ * Format a single `SbomViolation` as a one-line `[fail] <code>[ <path>]: <reason>`
+ * string suitable for stderr / CI annotation. Stable across versions —
+ * downstream tooling pins to the leading `[fail]` token and the `<code>:`
+ * separator. The `path` segment (`components[i]`) is included when present
+ * so an operator can jump to the offending entry; top-level shape failures
+ * (`not-object`, `missing-bomFormat`, …) carry no path and read cleanly
+ * without it.
+ *
+ * @param {SbomViolation} violation
+ * @returns {string}
+ */
+export function formatSbomViolation(violation) {
+  const where = violation.path ? ` ${violation.path}` : "";
+  return `[fail] ${violation.code}${where}: ${violation.reason}`;
+}
+
+/**
+ * Format a `SbomWalkResult` as a multi-line ASCII report. Empty input
+ * (zero violations) returns the single line `[ok] valid`; one or more
+ * violations return a header line `[fail] sbom-shape: N violation(s)`
+ * followed by one `formatSbomViolation` line per entry, in the walker's
+ * document order. Lines are joined with `\n` and the result has no
+ * trailing newline (the slice-4 CLI appends its own).
+ *
+ * @param {SbomWalkResult} walkResult
+ * @returns {string}
+ */
+export function formatSbomReport(walkResult) {
+  const { violations } = walkResult;
+  if (violations.length === 0) return "[ok] valid";
+  const header = `[fail] sbom-shape: ${violations.length} violation(s)`;
+  const lines = violations.map((v) => `  ${formatSbomViolation(v)}`);
+  return [header, ...lines].join("\n");
 }
