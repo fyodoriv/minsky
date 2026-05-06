@@ -8,11 +8,13 @@ import {
   ROLLING_30D_MIN_N,
   ROLLING_30D_MIN_PASS_RATE,
   ROLLING_WINDOW_DAYS,
+  buildRecentPrListGhArgs,
   computeStats,
   daysAgoUtc,
   formatDateUtcYmd,
   formatReport,
   parsePrList,
+  parsePrListEntries,
   runDaemonPrLintMetrics,
 } from "./daemon-pr-lint-metrics.mjs";
 
@@ -118,6 +120,59 @@ describe("parsePrList", () => {
 
   test("non-array JSON throws with explanatory message", () => {
     expect(() => parsePrList(JSON.stringify({ number: 1 }))).toThrow(/array/);
+  });
+});
+
+describe("parsePrListEntries (already-decoded array path)", () => {
+  // Slice 12: self-diagnose.mjs reaches `gh` via `ghJson` which JSON-parses
+  // before handing back, so the invariant cannot share `parsePrList`'s
+  // string entrypoint. `parsePrListEntries` is the post-JSON.parse seam
+  // both surfaces share — drift on the per-PR FAILURE rule is now a
+  // single-line edit, not two.
+  test("idempotent against the same data parsePrList sees", () => {
+    const fixture = [
+      { number: 1, statusCheckRollup: [{ conclusion: "SUCCESS" }] },
+      { number: 2, statusCheckRollup: [{ state: "FAILURE" }] },
+    ];
+    expect(parsePrListEntries(fixture)).toEqual(parsePrList(JSON.stringify(fixture)));
+  });
+
+  test("rejects non-array (matches parsePrList semantics)", () => {
+    expect(() => parsePrListEntries({ number: 1 })).toThrow(/array/);
+    expect(() => parsePrListEntries(null)).toThrow(/array/);
+  });
+});
+
+describe("buildRecentPrListGhArgs (canonical query — slice 12)", () => {
+  // The args used to live inline in two places: `runDaemonPrLintMetrics`
+  // here, and `recentDaemonPrs` in scripts/self-diagnose.mjs. Both used
+  // `--author @me`, `--state all`, `created:>=YYYY-MM-DD`, but if either
+  // drifted (e.g., one added `--state open`) the metric and the invariant
+  // would silently report on different PR sets. This helper is the seam.
+  test("threads the date into the search predicate", () => {
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    expect(args).toContain("--search");
+    expect(args).toContain("created:>=2026-04-06");
+  });
+
+  test("pins the canonical selector + json shape (drift guard)", () => {
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    expect(args[0]).toBe("pr");
+    expect(args[1]).toBe("list");
+    expect(args).toContain("--author");
+    expect(args).toContain("@me");
+    expect(args).toContain("--state");
+    expect(args).toContain("all");
+    expect(args).toContain("--json");
+    expect(args).toContain("number,statusCheckRollup");
+    expect(args).toContain("--limit");
+    expect(args).toContain("100");
+  });
+
+  test("output is shaped like a flat string[] — no nesting, no undefined entries", () => {
+    const args = buildRecentPrListGhArgs("2026-04-06");
+    expect(Array.isArray(args)).toBe(true);
+    for (const a of args) expect(typeof a).toBe("string");
   });
 });
 
