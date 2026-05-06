@@ -613,13 +613,164 @@ export function daemonPrLintPassRateInvariant(opts) {
 }
 
 /**
+ * @typedef {object} GitConfigParseableInvariantOpts
+ * @property {() => Promise<{ ok: boolean, durationMs: number, stderr?: string }>} probeGitStatus - runs `git status` (or equiv) under a tight timeout
+ * @property {() => Promise<readonly { line: number, marker: string }[]>} scanGitConfigForConflicts - probes ~/.gitconfig for merge-conflict markers
+ * @property {number} [timeoutMs] - declare broken if git status takes longer than this (default 5000)
+ */
+
+/**
+ * Live-fire invariant: `git status` must exit cleanly within `timeoutMs`.
+ * Live observed 2026-05-06: a stash-apply left unresolved merge markers in
+ * `~/.gitconfig` line 100; every `git`/`gh` command in the operator's
+ * foreground session failed with `bad config line 100`, blocking PR
+ * shipping for hours. The supervisor's daemon process (started before the
+ * conflict) kept the parsed config in memory and continued shipping,
+ * masking the failure. This invariant catches the next supervisor respawn
+ * before it grounds the daemon.
+ *
+ * Auto-resolution path: when `scanGitConfigForConflicts` returns ≥1 marker
+ * line, the suggestedFix names the exact `python3` (or `git mergetool`)
+ * fix command. Operators can wire `kill-stuck-iterations.mjs`-style helper
+ * to apply the fix automatically.
+ *
+ * @param {GitConfigParseableInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function gitConfigParseableInvariant(opts) {
+  const { probeGitStatus, scanGitConfigForConflicts, timeoutMs = 5000 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const result = await probeGitStatus();
+    if (result.ok && result.durationMs <= timeoutMs) {
+      return { id: "git-config-parseable", ok: true };
+    }
+    const markers = await scanGitConfigForConflicts();
+    const markerEvidence =
+      markers.length > 0
+        ? ` Conflict markers in ~/.gitconfig: ${markers.map((m) => `line ${m.line} (${m.marker})`).join(", ")}.`
+        : "";
+    const evidence = result.ok
+      ? `git status took ${result.durationMs}ms (>${timeoutMs}ms threshold).${markerEvidence}`
+      : `git status failed (exit non-zero or timeout): ${result.stderr ?? "unknown error"}.${markerEvidence}`;
+    const fixCmd =
+      markers.length > 0
+        ? "Resolve the conflict markers in ~/.gitconfig: `python3 -c \"import re; p='/Users/$(whoami)/.gitconfig'; s=open(p).read(); s=re.sub(r'<<<<<<<.*?=======\\\\n(.*?)>>>>>>>.*?\\\\n', r'\\\\1', s, flags=re.S); open(p,'w').write(s)\"` (keeps the post-====== branch). Then verify: `git status` succeeds in <1s."
+        : "git status is failing or slow but no conflict markers found in ~/.gitconfig. Likely cause: corrupt `.git/index` or stale lock. Run `rm .git/index.lock 2>/dev/null; git status` and inspect the output.";
+    return {
+      id: "git-config-parseable",
+      ok: false,
+      evidence,
+      suggestedTaskTitle: "git status is broken — supervisor's git ops will fail on next respawn",
+      suggestedFix: fixCmd,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "git-config-parseable";
+  return fn;
+}
+
+/**
+ * @typedef {object} OpenDaemonPrSnapshotForDirty
+ * @property {number} number
+ * @property {string} mergeableState - GitHub's mergeable_state field: clean | dirty | blocked | behind | unstable | unknown
+ * @property {number} ageHours - hours since the PR's head commit was authored
+ *
+ * @typedef {object} DaemonPrStuckDirtyInvariantOpts
+ * @property {() => Promise<readonly OpenDaemonPrSnapshotForDirty[]>} openDaemonPrs
+ * @property {number} [maxAgeHours] - fire when any PR has been dirty/conflicting for longer than this (default 2)
+ */
+
+/**
+ * Throughput invariant: a daemon-authored PR has been in `dirty` (merge
+ * conflict) state for ≥ `maxAgeHours`. Distinct from
+ * `daemon-pr-stuck-on-ci-failure` (CI-failure-based) — this catches the
+ * silent-rebase-needed failure mode observed 2026-05-06 where #227 sat
+ * dirty for 6+ hours after #228 merged its imports first; daemon never
+ * rebased because no CI failure ever fired.
+ *
+ * Auto-resolution path: watchdog can run `gh pr update-branch <n>` for
+ * each finding to attempt automatic rebase.
+ *
+ * @param {DaemonPrStuckDirtyInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonPrStuckDirtyInvariant(opts) {
+  const { openDaemonPrs, maxAgeHours = 2 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const prs = await openDaemonPrs();
+    const stuck = prs.filter((p) => p.mergeableState === "dirty" && p.ageHours >= maxAgeHours);
+    if (stuck.length === 0) return { id: "daemon-pr-stuck-dirty", ok: true };
+    const evidence = stuck
+      .map((p) => `#${p.number} dirty for ${p.ageHours.toFixed(1)}h (>${maxAgeHours}h)`)
+      .join("; ");
+    const updateCmds = stuck.map((p) => `gh pr update-branch ${p.number}`).join(" && ");
+    return {
+      id: "daemon-pr-stuck-dirty",
+      ok: false,
+      evidence,
+      suggestedTaskTitle: `${stuck.length} daemon PR(s) stuck dirty (merge conflict) for >${maxAgeHours}h`,
+      suggestedFix: `One or more daemon-authored PRs have been in DIRTY (merge-conflict) state for >${maxAgeHours}h. Auto-resolution: \`${updateCmds}\` — if that succeeds, daemon can re-trigger CI. If \`gh pr update-branch\` fails with conflicts, the daemon must rebase manually OR the operator should close the PR as superseded (the recurring 2026-05-06 #227 pattern). Pivot if false-positives ≥1/week: raise threshold to 4h.`,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-pr-stuck-dirty";
+  return fn;
+}
+
+/**
+ * @typedef {object} DaemonTaskScopeInvariantOpts
+ * @property {() => Promise<ReadonlyMap<string, number>>} mergedPrCountByTaskId - rolling-24h count of daemon-merged PRs grouped by taskId
+ * @property {number} [threshold] - fire when any taskId crosses this (default 6)
+ */
+
+/**
+ * Throughput invariant: a single taskId has shipped ≥`threshold` daemon
+ * PRs in the last 24h. Live observed 2026-05-06: `daemon-pre-pr-lint-gate`
+ * shipped 18 slices in ~6h — slices 10+ were single-source-of-truth
+ * refactors and parity tests that could have been ≤3 bundled PRs. Each
+ * slice individually committed (so `daemon-noop-iteration-rate-too-high`
+ * never fired) and individually shipped (so `daemon-iteration-vs-shipped-
+ * ratio` stayed healthy) — but the operator's read-time was wasted on
+ * tiny PRs.
+ *
+ * @param {DaemonTaskScopeInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonTaskScopeExplosionInvariant(opts) {
+  const { mergedPrCountByTaskId, threshold = 6 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const counts = await mergedPrCountByTaskId();
+    /** @type {[string, number][]} */
+    const exploded = [];
+    for (const [taskId, count] of counts) {
+      if (count >= threshold) exploded.push([taskId, count]);
+    }
+    if (exploded.length === 0) return { id: "daemon-task-scope-explosion", ok: true };
+    const evidence = exploded.map(([id, n]) => `${id}: ${n} PRs/24h`).join("; ");
+    const top = exploded[0];
+    const topId = top?.[0] ?? "<unknown>";
+    return {
+      id: "daemon-task-scope-explosion",
+      ok: false,
+      evidence,
+      suggestedTaskTitle: `daemon scope-explosion: ${exploded.length} task(s) shipped ≥${threshold} PRs in 24h`,
+      suggestedFix: `One or more taskIds have shipped ≥${threshold} daemon PRs in 24h — likely the task is done but the block is still in TASKS.md, OR the daemon is over-slicing. Action: (1) check whether the task's Acceptance criteria are met on main; if yes, close the task block (operator-curated cleanup, same pattern as PR #195 / #217). (2) If acceptance is genuinely incomplete, the daemon brief should bundle related slices — extend \`buildDaemonBrief\` with a "bundle similar slices" directive. Concrete: file \`chore(tasks): close ${topId}\` PR.`,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-task-scope-explosion";
+  return fn;
+}
+
+/**
  * Format seconds as `<H>h<M>m<S>s` short form. Used in evidence and
  * suggestedFix rendering for human readability.
  *
  * @param {number} seconds
  * @returns {string}
  */
-function formatEtime(seconds) {
+export function formatEtime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
@@ -711,7 +862,7 @@ async function readSpawnViaPs(pidStr) {
  * @param {string} s
  * @returns {number | null}
  */
-function parseEtime(s) {
+export function parseEtime(s) {
   const dayMatch = s.match(/^(\d+)-(.+)$/);
   let days = 0;
   let rest = s;
@@ -751,20 +902,123 @@ async function ghJson(args) {
 /**
  * Extract a `taskId` reference from a PR title or branch name. Daemon
  * convention: branches and PR titles carry the taskId after a `/` or
- * the conventional-commit scope (e.g., `feat(tick-loop): foo` → null;
- * `chore/daily-changelog-for-humans` → `daily-changelog-for-humans`).
+ * the conventional-commit scope.
+ *
+ * Two-pass: prefer the title's backtick-quoted taskId (e.g., the
+ * "Pre-registered task: `daemon-foo-bar`" pattern), then fall back to
+ * branch's leading task-prefix. Branch suffix-stripping (slice numbers,
+ * "-substrate", "-final") yields the same taskId for sibling branches
+ * — closes the failure mode observed 2026-05-06 where #218 + #219
+ * were the same task but different post-slash text.
  *
  * @param {string} headRefName
  * @param {string} title
  * @returns {string | null}
  */
-function extractTaskIdFromPr(headRefName, title) {
-  const slashIdx = headRefName.indexOf("/");
-  if (slashIdx >= 0 && slashIdx < headRefName.length - 1) {
-    return headRefName.slice(slashIdx + 1);
+export function extractTaskIdFromPr(headRefName, title) {
+  const titleMatch = title.match(/`([a-z][a-z0-9-]+)`/);
+  if (titleMatch?.[1]) return titleMatch[1];
+  return stripBranchSuffixes(stripBranchPrefix(headRefName)) || null;
+}
+
+/**
+ * Find git merge-conflict marker lines in a config-file's text.
+ *
+ * @param {string} content
+ * @returns {readonly { line: number, marker: string }[]}
+ */
+export function findConflictMarkers(content) {
+  /** @type {{ line: number, marker: string }[]} */
+  const out = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const marker = detectConflictMarker(lines[i] ?? "");
+    if (marker !== null) out.push({ line: i + 1, marker });
   }
-  const m = title.match(/`([a-z][a-z0-9-]+)`/);
-  return m ? (m[1] ?? null) : null;
+  return out;
+}
+
+/**
+ * @param {string} line
+ * @returns {string | null}
+ */
+export function detectConflictMarker(line) {
+  if (line.startsWith("<<<<<<<")) return "<<<<<<<";
+  if (line.startsWith(">>>>>>>")) return ">>>>>>>";
+  if (line.startsWith("|||||||")) return "|||||||";
+  return null;
+}
+
+/**
+ * Pure transform: turn the raw `gh pr list ... --json statusCheckRollup` output
+ * into the `DaemonPrCiSnapshot[]` shape consumed by
+ * `daemonPrStuckOnCiInvariant`. Extracted so coverage tests can exercise the
+ * mapping without spawning `gh`.
+ *
+ * @param {readonly { number: number, headRefName: string, statusCheckRollup?: unknown }[]} data
+ * @returns {readonly DaemonPrCiSnapshot[]}
+ */
+export function mapGhPrListToCiSnapshots(data) {
+  /** @type {DaemonPrCiSnapshot[]} */
+  const out = [];
+  for (const pr of data) {
+    /** @type {readonly {conclusion?: string, state?: string}[]} */
+    const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+    const failed = checks.filter(
+      (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
+    );
+    out.push({
+      number: pr.number,
+      headRefName: pr.headRefName,
+      ciFailureCount: failed.length,
+      hasDaemonFixCommitSinceLastFailure: false,
+    });
+  }
+  return out;
+}
+
+/**
+ * Strip a leading conventional-commit-style scope prefix from a branch.
+ *
+ * @param {string} branch
+ * @returns {string}
+ */
+export function stripBranchPrefix(branch) {
+  const prefixes = ["feat/", "fix/", "chore/", "docs/"];
+  for (const prefix of prefixes) {
+    if (branch.startsWith(prefix)) return branch.slice(prefix.length);
+  }
+  return branch;
+}
+
+/**
+ * Strip slice/version/substrate suffixes from a branch tail so sibling
+ * branches collapse to the same task-id. Examples:
+ *   `daemon-foo-substrate`         → `daemon-foo`
+ *   `daemon-foo-slice-2`           → `daemon-foo`
+ *   `daemon-foo-slice-12-docs`     → `daemon-foo`
+ *   `daemon-foo-final`             → `daemon-foo`
+ *   `daemon-foo-rebased`           → `daemon-foo`
+ *   `daemon-foo-v2`                → `daemon-foo`
+ *
+ * @param {string} branch
+ * @returns {string}
+ */
+export function stripBranchSuffixes(branch) {
+  let out = branch;
+  // Strip `-slice-N[-anything]`, `-substrate[-anything]`, `-final`, `-rebased`,
+  // `-vN`, repeatedly until the suffix stops shrinking.
+  for (let i = 0; i < 5; i++) {
+    const next = out
+      .replace(/-slice-\d+(?:-[a-z0-9-]+)?$/i, "")
+      .replace(/-substrate(?:-[a-z0-9-]+)?$/i, "")
+      .replace(/-final$/i, "")
+      .replace(/-rebased$/i, "")
+      .replace(/-v\d+$/i, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
 }
 
 /**
@@ -806,7 +1060,7 @@ async function readIterationsFromLog(logPath) {
  * @param {string} line
  * @returns {DaemonIteration | null}
  */
-function parseIterationLogLine(line) {
+export function parseIterationLogLine(line) {
   if (!line) return null;
   try {
     const obj = JSON.parse(line);
@@ -855,22 +1109,7 @@ export function defaultInvariants() {
       "50",
     ]);
     if (!Array.isArray(data)) return [];
-    /** @type {DaemonPrCiSnapshot[]} */
-    const out = [];
-    for (const pr of data) {
-      /** @type {readonly {conclusion?: string, state?: string}[]} */
-      const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
-      const failed = checks.filter(
-        (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
-      );
-      out.push({
-        number: pr.number,
-        headRefName: pr.headRefName,
-        ciFailureCount: failed.length,
-        hasDaemonFixCommitSinceLastFailure: false,
-      });
-    }
-    return out;
+    return mapGhPrListToCiSnapshots(data);
   };
 
   const rollingStats = async () => {
@@ -949,6 +1188,91 @@ export function defaultInvariants() {
     return parsePrListEntries(data);
   };
 
+  /** @type {() => Promise<readonly OpenDaemonPrSnapshotForDirty[]>} */
+  const openDaemonPrsForDirty = async () => {
+    const data = await ghJson([
+      "pr",
+      "list",
+      "--repo",
+      "fyodoriv/minsky",
+      "--author",
+      "@me",
+      "--state",
+      "open",
+      "--json",
+      "number,mergeStateStatus,createdAt",
+      "--limit",
+      "20",
+    ]);
+    if (!Array.isArray(data)) return [];
+    const now = Date.now();
+    return data.map((pr) => ({
+      number: pr.number,
+      mergeableState:
+        typeof pr.mergeStateStatus === "string" ? pr.mergeStateStatus.toLowerCase() : "unknown",
+      ageHours:
+        typeof pr.createdAt === "string"
+          ? Math.max(0, (now - Date.parse(pr.createdAt)) / 3_600_000)
+          : 0,
+    }));
+  };
+
+  /** @type {() => Promise<ReadonlyMap<string, number>>} */
+  const mergedPrCountByTaskId = async () => {
+    const since = new Date(Date.now() - 24 * 3_600_000).toISOString().slice(0, 10);
+    const data = await ghJson([
+      "pr",
+      "list",
+      "--repo",
+      "fyodoriv/minsky",
+      "--author",
+      "@me",
+      "--state",
+      "merged",
+      "--search",
+      `merged:>=${since}`,
+      "--json",
+      "number,headRefName,title",
+      "--limit",
+      "50",
+    ]);
+    /** @type {Map<string, number>} */
+    const counts = new Map();
+    if (!Array.isArray(data)) return counts;
+    for (const pr of data) {
+      const id = extractTaskIdFromPr(pr.headRefName ?? "", pr.title ?? "");
+      if (!id) continue;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  };
+
+  /** @type {() => Promise<{ ok: boolean, durationMs: number, stderr?: string }>} */
+  const probeGitStatus = async () => {
+    const start = Date.now();
+    try {
+      await execFileAsync("git", ["status", "--porcelain"], {
+        timeout: 5_000,
+        cwd: repoRoot,
+      });
+      return { ok: true, durationMs: Date.now() - start };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, durationMs: Date.now() - start, stderr: message };
+    }
+  };
+
+  /** @type {() => Promise<readonly { line: number, marker: string }[]>} */
+  const scanGitConfigForConflicts = async () => {
+    const path = join(homedir(), ".gitconfig");
+    try {
+      const content = await readFile(path, "utf8");
+      return findConflictMarkers(content);
+    } catch {
+      return [];
+    }
+  };
+
   return [
     tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan }),
     claudeBinaryReachableInvariant({ probe: spawnVersionProbe }),
@@ -959,6 +1283,9 @@ export function defaultInvariants() {
     daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent }),
     daemonIterationRuntimeInvariant({ listClaudePrintSpawns: listClaudePrintSpawnsViaPgrep }),
     daemonPrLintPassRateInvariant({ recentDaemonPrs }),
+    gitConfigParseableInvariant({ probeGitStatus, scanGitConfigForConflicts }),
+    daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
+    daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
   ];
 }
 
@@ -994,6 +1321,7 @@ export function findingsToTasksMd(findings, nowIso) {
   return blocks.join("\n");
 }
 
+/* v8 ignore start */
 const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
   const findings = await runInvariants(defaultInvariants());
@@ -1013,3 +1341,4 @@ if (isMain) {
   }
   process.exit(findings.length === 0 ? 0 : 1);
 }
+/* v8 ignore stop */

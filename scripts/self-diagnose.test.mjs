@@ -6,11 +6,24 @@ import {
   daemonIterationRuntimeInvariant,
   daemonNoopIterationRateInvariant,
   daemonPrLintPassRateInvariant,
+  daemonPrStuckDirtyInvariant,
   daemonPrStuckOnCiInvariant,
   daemonShippedRatioInvariant,
   daemonTaskIdStalenessInvariant,
+  daemonTaskScopeExplosionInvariant,
+  defaultInvariants,
+  detectConflictMarker,
+  extractTaskIdFromPr,
+  findConflictMarkers,
   findingsToTasksMd,
+  formatEtime,
+  gitConfigParseableInvariant,
+  mapGhPrListToCiSnapshots,
+  parseEtime,
+  parseIterationLogLine,
   runInvariants,
+  stripBranchPrefix,
+  stripBranchSuffixes,
   tokenMonitorNotAllPeggedInvariant,
 } from "./self-diagnose.mjs";
 
@@ -375,6 +388,431 @@ describe("daemonPrLintPassRateInvariant", () => {
       minPassRate: 0.9,
     })();
     expect(failResult.ok).toBe(false);
+  });
+});
+
+describe("gitConfigParseableInvariant", () => {
+  it("passes when git status exits cleanly under threshold", async () => {
+    const probeGitStatus = async () => ({ ok: true, durationMs: 50 });
+    const scanGitConfigForConflicts = async () => [];
+    const result = await gitConfigParseableInvariant({
+      probeGitStatus,
+      scanGitConfigForConflicts,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires with conflict-marker evidence when git status fails AND ~/.gitconfig has merge markers", async () => {
+    const probeGitStatus = async () => ({
+      ok: false,
+      durationMs: 100,
+      stderr: "fatal: bad config line 100 in file ~/.gitconfig",
+    });
+    const scanGitConfigForConflicts = async () => [
+      { line: 100, marker: "<<<<<<<" },
+      { line: 108, marker: "=======" },
+      { line: 111, marker: ">>>>>>>" },
+    ];
+    const result = await gitConfigParseableInvariant({
+      probeGitStatus,
+      scanGitConfigForConflicts,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("git-config-parseable");
+    expect(result.evidence).toContain("bad config line 100");
+    expect(result.evidence).toContain("line 100");
+    expect(result.evidence).toContain("<<<<<<<");
+    expect(result.suggestedFix).toContain("Resolve the conflict markers");
+  });
+
+  it("fires on slow git status (over threshold) even when no markers found", async () => {
+    const probeGitStatus = async () => ({ ok: true, durationMs: 6000 });
+    const scanGitConfigForConflicts = async () => [];
+    const result = await gitConfigParseableInvariant({
+      probeGitStatus,
+      scanGitConfigForConflicts,
+      timeoutMs: 5000,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("6000ms");
+    expect(result.suggestedFix).toContain("git status is failing or slow");
+  });
+
+  it("fires when git status fails and no markers found (other corruption)", async () => {
+    const probeGitStatus = async () => ({ ok: false, durationMs: 80, stderr: "ENOENT" });
+    const scanGitConfigForConflicts = async () => [];
+    const result = await gitConfigParseableInvariant({
+      probeGitStatus,
+      scanGitConfigForConflicts,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.suggestedFix).toContain("no conflict markers found");
+    expect(result.suggestedFix).toContain("rm .git/index.lock");
+  });
+});
+
+describe("daemonPrStuckDirtyInvariant", () => {
+  it("passes when no PR is dirty", async () => {
+    const openDaemonPrs = async () => [
+      { number: 1, mergeableState: "clean", ageHours: 5 },
+      { number: 2, mergeableState: "behind", ageHours: 10 },
+    ];
+    const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when a dirty PR is younger than the threshold", async () => {
+    const openDaemonPrs = async () => [{ number: 1, mergeableState: "dirty", ageHours: 1 }];
+    const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs, maxAgeHours: 2 })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires for dirty PRs older than threshold and emits update-branch fix", async () => {
+    const openDaemonPrs = async () => [
+      { number: 227, mergeableState: "dirty", ageHours: 6.5 },
+      { number: 999, mergeableState: "dirty", ageHours: 3.2 },
+    ];
+    const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs, maxAgeHours: 2 })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-pr-stuck-dirty");
+    expect(result.evidence).toContain("#227");
+    expect(result.evidence).toContain("6.5h");
+    expect(result.suggestedFix).toContain("gh pr update-branch 227");
+    expect(result.suggestedFix).toContain("gh pr update-branch 999");
+  });
+
+  it("uses default threshold of 2 hours when none provided", async () => {
+    const openDaemonPrs = async () => [{ number: 1, mergeableState: "dirty", ageHours: 2.5 }];
+    const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("daemonTaskScopeExplosionInvariant", () => {
+  it("passes when no taskId crosses the threshold", async () => {
+    const mergedPrCountByTaskId = async () =>
+      new Map([
+        ["task-a", 3],
+        ["task-b", 2],
+      ]);
+    const result = await daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when a taskId ships ≥threshold PRs in 24h and names the offender in suggestedFix", async () => {
+    const mergedPrCountByTaskId = async () =>
+      new Map([
+        ["daemon-pre-pr-lint-gate", 18],
+        ["task-b", 2],
+      ]);
+    const result = await daemonTaskScopeExplosionInvariant({
+      mergedPrCountByTaskId,
+      threshold: 6,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-task-scope-explosion");
+    expect(result.evidence).toContain("daemon-pre-pr-lint-gate: 18 PRs/24h");
+    expect(result.evidence).not.toContain("task-b");
+    expect(result.suggestedFix).toContain("close the task block");
+    expect(result.suggestedFix).toContain("daemon-pre-pr-lint-gate");
+  });
+
+  it("fires across multiple exploded taskIds", async () => {
+    const mergedPrCountByTaskId = async () =>
+      new Map([
+        ["task-a", 7],
+        ["task-b", 9],
+      ]);
+    const result = await daemonTaskScopeExplosionInvariant({
+      mergedPrCountByTaskId,
+      threshold: 6,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("task-a: 7 PRs/24h");
+    expect(result.evidence).toContain("task-b: 9 PRs/24h");
+  });
+
+  it("uses default threshold of 6 when none provided", async () => {
+    const mergedPrCountByTaskId = async () => new Map([["task-x", 6]]);
+    const result = await daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId })();
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("daemonInFlightPrCollisionInvariant — task-prefix sibling-branch detection", () => {
+  it("groups sibling slice-N branches as the same taskId via title backtick", async () => {
+    const openDaemonPrs = async () => [
+      {
+        number: 218,
+        taskId: "daemon-pre-pr-lint-gate",
+        files: ["scripts/run-pre-pr-lint-stack.mjs", "package.json"],
+      },
+      {
+        number: 219,
+        taskId: "daemon-pre-pr-lint-gate",
+        files: ["scripts/run-pre-pr-lint-stack.mjs", "package.json"],
+      },
+    ];
+    const result = await daemonInFlightPrCollisionInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("#218");
+    expect(result.evidence).toContain("#219");
+    expect(result.evidence).toContain("daemon-pre-pr-lint-gate");
+  });
+});
+
+describe("formatEtime", () => {
+  it("formats sub-minute as Ns", () => {
+    expect(formatEtime(45)).toBe("45s");
+  });
+  it("formats sub-hour as MmSs", () => {
+    expect(formatEtime(125)).toBe("2m5s");
+  });
+  it("formats over-hour as HhMmSs", () => {
+    expect(formatEtime(7320)).toBe("2h2m0s");
+  });
+  it("handles zero", () => {
+    expect(formatEtime(0)).toBe("0s");
+  });
+});
+
+describe("parseEtime", () => {
+  it("parses MM:SS", () => {
+    expect(parseEtime("02:30")).toBe(150);
+  });
+  it("parses HH:MM:SS", () => {
+    expect(parseEtime("01:00:00")).toBe(3600);
+  });
+  it("parses DD-HH:MM:SS", () => {
+    expect(parseEtime("1-00:00:00")).toBe(86400);
+  });
+  it("parses bare seconds (single component)", () => {
+    expect(parseEtime("42")).toBe(42);
+  });
+  it("returns null on malformed input", () => {
+    expect(parseEtime("not-a-time")).toBeNull();
+    expect(parseEtime("a:b")).toBeNull();
+  });
+  it("returns null on too many components (>3)", () => {
+    expect(parseEtime("1:2:3:4")).toBeNull();
+  });
+});
+
+describe("extractTaskIdFromPr", () => {
+  it("prefers backticked taskId from title", () => {
+    expect(extractTaskIdFromPr("daemon-foo-slice-2", "feat: ship `my-task` slice 2")).toBe(
+      "my-task",
+    );
+  });
+  it("falls back to branch when title has no backtick", () => {
+    expect(extractTaskIdFromPr("daemon-foo-bar", "feat: ship slice")).toBe("daemon-foo-bar");
+  });
+  it("strips feat/ prefix from branch", () => {
+    expect(extractTaskIdFromPr("feat/daemon-foo", "x")).toBe("daemon-foo");
+  });
+  it("collapses sibling slice/substrate branches to same taskId", () => {
+    const a = extractTaskIdFromPr("daemon-pre-pr-lint-gate-substrate", "feat: ship");
+    const b = extractTaskIdFromPr("daemon-pre-pr-lint-gate-slice-2", "feat: ship");
+    const c = extractTaskIdFromPr("daemon-pre-pr-lint-gate-slice-12-docs", "feat: ship");
+    expect(a).toBe("daemon-pre-pr-lint-gate");
+    expect(b).toBe("daemon-pre-pr-lint-gate");
+    expect(c).toBe("daemon-pre-pr-lint-gate");
+  });
+  it("returns null when input has no recognizable taskId", () => {
+    expect(extractTaskIdFromPr("", "")).toBeNull();
+  });
+});
+
+describe("stripBranchPrefix", () => {
+  it("strips feat/, fix/, chore/, docs/", () => {
+    expect(stripBranchPrefix("feat/foo")).toBe("foo");
+    expect(stripBranchPrefix("fix/foo")).toBe("foo");
+    expect(stripBranchPrefix("chore/foo")).toBe("foo");
+    expect(stripBranchPrefix("docs/foo")).toBe("foo");
+  });
+  it("returns input unchanged when no recognized prefix", () => {
+    expect(stripBranchPrefix("daemon-foo")).toBe("daemon-foo");
+  });
+});
+
+describe("stripBranchSuffixes", () => {
+  it("strips -slice-N", () => {
+    expect(stripBranchSuffixes("daemon-foo-slice-2")).toBe("daemon-foo");
+  });
+  it("strips -slice-N-docs", () => {
+    expect(stripBranchSuffixes("daemon-foo-slice-12-docs")).toBe("daemon-foo");
+  });
+  it("strips -substrate", () => {
+    expect(stripBranchSuffixes("daemon-foo-substrate")).toBe("daemon-foo");
+  });
+  it("strips -final", () => {
+    expect(stripBranchSuffixes("daemon-foo-final")).toBe("daemon-foo");
+  });
+  it("strips -rebased", () => {
+    expect(stripBranchSuffixes("daemon-foo-rebased")).toBe("daemon-foo");
+  });
+  it("strips -vN", () => {
+    expect(stripBranchSuffixes("daemon-foo-v2")).toBe("daemon-foo");
+  });
+  it("idempotent on already-clean branch", () => {
+    expect(stripBranchSuffixes("daemon-foo")).toBe("daemon-foo");
+  });
+});
+
+describe("detectConflictMarker", () => {
+  it("detects each marker type", () => {
+    expect(detectConflictMarker("<<<<<<< Updated upstream")).toBe("<<<<<<<");
+    expect(detectConflictMarker(">>>>>>> Stashed changes")).toBe(">>>>>>>");
+    expect(detectConflictMarker("||||||| Stash base")).toBe("|||||||");
+  });
+  it("returns null on a regular line", () => {
+    expect(detectConflictMarker("[user]")).toBeNull();
+    expect(detectConflictMarker("=======")).toBeNull();
+  });
+});
+
+describe("findConflictMarkers", () => {
+  it("returns empty for clean content", () => {
+    expect(findConflictMarkers("[user]\n  email = x@y.com\n")).toEqual([]);
+  });
+  it("locates each marker by line number", () => {
+    const content = [
+      "[a]",
+      "<<<<<<< Updated upstream",
+      "  helper = a",
+      "||||||| Stash base",
+      "  helper = b",
+      "=======",
+      "  helper = c",
+      ">>>>>>> Stashed changes",
+    ].join("\n");
+    const markers = findConflictMarkers(content);
+    expect(markers).toEqual([
+      { line: 2, marker: "<<<<<<<" },
+      { line: 4, marker: "|||||||" },
+      { line: 8, marker: ">>>>>>>" },
+    ]);
+  });
+});
+
+describe("parseIterationLogLine", () => {
+  it("returns null on empty line", () => {
+    expect(parseIterationLogLine("")).toBeNull();
+  });
+  it("returns null on non-JSON line", () => {
+    expect(parseIterationLogLine("not json at all")).toBeNull();
+  });
+  it("returns null on JSON missing the iteration evt", () => {
+    expect(parseIterationLogLine('{"evt":"other","taskId":"x"}')).toBeNull();
+  });
+  it("parses a committed iteration line", () => {
+    const result = parseIterationLogLine(
+      '{"evt":"iteration","taskId":"foo","committedSha":"abc123","ts":"2026-05-06T00:00:00Z"}',
+    );
+    expect(result).toEqual({ taskId: "foo", committed: true, timestamp: "2026-05-06T00:00:00Z" });
+  });
+  it("parses a non-committed iteration line", () => {
+    const result = parseIterationLogLine('{"evt":"iteration","taskId":"foo"}');
+    expect(result).toEqual({ taskId: "foo", committed: false, timestamp: "" });
+  });
+});
+
+describe("defaultInvariants", () => {
+  it("returns at least 12 invariants (covering all the named gap-detectors)", () => {
+    const invariants = defaultInvariants();
+    expect(invariants.length).toBeGreaterThanOrEqual(12);
+  });
+  it("each invariant is a callable function", () => {
+    for (const inv of defaultInvariants()) {
+      expect(typeof inv).toBe("function");
+    }
+  });
+  it("runInvariants(defaultInvariants()) executes every probe and returns an array", async () => {
+    const findings = await runInvariants(defaultInvariants());
+    expect(Array.isArray(findings)).toBe(true);
+    for (const f of findings) {
+      expect(f.ok).toBe(false);
+      expect(typeof f.id).toBe("string");
+      expect(typeof f.evidence).toBe("string");
+      expect(typeof f.suggestedFix).toBe("string");
+      expect(typeof f.suggestedTaskTitle).toBe("string");
+    }
+  }, 30_000);
+});
+
+describe("mapGhPrListToCiSnapshots", () => {
+  it("returns empty for empty input", () => {
+    expect(mapGhPrListToCiSnapshots([])).toEqual([]);
+  });
+  it("counts FAILURE checks across both .conclusion and .state shapes", () => {
+    const out = mapGhPrListToCiSnapshots([
+      {
+        number: 1,
+        headRefName: "feat/a",
+        statusCheckRollup: [
+          { conclusion: "FAILURE", state: null },
+          { conclusion: "SUCCESS", state: null },
+          { conclusion: null, state: "FAILURE" },
+        ],
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        number: 1,
+        headRefName: "feat/a",
+        ciFailureCount: 2,
+        hasDaemonFixCommitSinceLastFailure: false,
+      },
+    ]);
+  });
+  it("handles missing statusCheckRollup gracefully", () => {
+    const out = mapGhPrListToCiSnapshots([{ number: 9, headRefName: "feat/x" }]);
+    expect(out[0]?.ciFailureCount).toBe(0);
+  });
+  it("filters out null/undefined check entries", () => {
+    const out = mapGhPrListToCiSnapshots([
+      {
+        number: 1,
+        headRefName: "feat/a",
+        statusCheckRollup: [null, { conclusion: "FAILURE" }, undefined],
+      },
+    ]);
+    expect(out[0]?.ciFailureCount).toBe(1);
+  });
+});
+
+describe("findingsToTasksMd — additional cases", () => {
+  it("renders multiple findings as separate task blocks", () => {
+    const block = findingsToTasksMd(
+      [
+        {
+          id: "first",
+          ok: false,
+          evidence: "e1",
+          suggestedTaskTitle: "t1",
+          suggestedFix: "f1",
+        },
+        {
+          id: "second",
+          ok: false,
+          evidence: "e2",
+          suggestedTaskTitle: "t2",
+          suggestedFix: "f2",
+        },
+      ],
+      "2026-05-06T00:00:00.000Z",
+    );
+    expect(block).toContain("self-diagnose-first-2026-05-06");
+    expect(block).toContain("self-diagnose-second-2026-05-06");
+    expect(block).toContain("**Hypothesis**: f1");
+    expect(block).toContain("**Hypothesis**: f2");
   });
 });
 
