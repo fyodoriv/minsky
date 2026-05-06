@@ -48,6 +48,16 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 6 | Two `minsky-run` invocations race against the same task on the same host | concurrency | `graceful-degrade` — both runs produce the same dry-run plan; v0's append-only iteration-store records two `planned` lines instead of one (operator deduplicates manually); v1's live-spawn boundary will add a per-host file-lock | manual integration assert: parallel invocations both exit 0 with identical plans |
 | 7 | Spawned Claude Code modifies host tracked files outside the task scope | sandbox-leak (v1) | `circuit-break-and-notify` — runner re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` | (deferred — covered when `cross-repo-runner-v1-live-spawn` ships and the live-spawn path is exercised) |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: the host repo's `.minsky/repo.yaml` (could be tampered with by another local process); the host's `TASKS.md` task block; the spawned Claude Code child's writes back into the host worktree (v1 live-spawn).
+- **Trusted state**: this repo's source for the runner; `gh` CLI authentication is the operator's keychain entry, never echoed; the rule-#9 task-block schema is constants in `experiment-synth.ts`.
+- **Trust boundary**: every cross-repo write lands inside `<host>/.minsky/` (an opt-in directory) — never in tracked files (Failure mode #7 above is the v1 backstop). `gh` shell-outs use array-form arguments — never string-templated bash.
+- **STRIDE focus**: **T**ampering — out-of-scope file writes by the spawned child are detected via `git diff` post-spawn (scope-leak verdict); **E**levation of privilege — the runner runs as the operator's user, never `sudo`; spawned Claude inherits no extra capabilities beyond the operator's environment.
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
+
 ## Tests
 
 43 paired vitest cases across 5 files:

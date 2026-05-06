@@ -99,6 +99,16 @@ Per constitutional rule #7 (vision.md § 7).
 | 11 | Verdict log entries with non-finite `predicted` or `value` fed to Knowledge (upstream-malformed calibration data) | upstream-malformed | `graceful-degrade` — `knowledge` skips the bad rows; calibration MAE is computed only over the well-formed remainder; the per-tick `constraintsAppend` is still written | covered by `novel/mape-k-loop/src/knowledge.test.ts` "ignores entries with non-finite predicted or value (rule #7)" assertion |
 | 12 | Calibration drift exceeds the configured threshold (predicted Δ vs observed Δ MAE >50 % default) | observable signal (rule-#9 quarterly layer) | `circuit-break-and-notify` — `knowledge` emits a `researchMdAmendmentProposal` text the operator pastes into a preparation PR; the live log keeps the audit trail | covered by `novel/mape-k-loop/src/knowledge.test.ts` "emits an amendment proposal text when calibration drift exceeds threshold" assertion + `user-stories/003-mape-k-improves-prompts.test.ts` "fires the calibration-drift amendment only when drift exceeds threshold" assertion |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `claude --print` output (LLM-generated — never trusted as code without operator review); prompt-optimizer outputs (DSPy-style scores + winner picks); operator-supplied `constraints.md`; the verdict-log JSONL stream feeding Knowledge.
+- **Trusted state**: the orchestrator (`tick`/`orchestrate`) is pure and does not exec arbitrary strings; the OTEL provider is local-only (rule #13.7); thresholds (`SUSTAINED_GAIN_WINDOW_DAYS`, calibration-drift) are constants in source.
+- **Trust boundary**: every Execute-phase action that mutates the host (a rollout) is gated through a typed `decision: 'rollout' | 'abstain'` discriminated union — raw LLM strings never reach `eval` / `child_process.exec`. The `winnerId` is checked against the supplied variant list (Failure mode #7) before any side-effect.
+- **STRIDE focus**: **E**levation of privilege — LLM outputs cannot escalate beyond the typed action surface; **T**ampering — `constraints.md` lives in the operator's repo and is read at tick time, never written; **I**nformation disclosure — variants stored in `EXPERIMENT.yaml`-shaped records carry no PII (rule #13.2 lint at the OTEL boundary catches drift).
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
+
 ## Hypothesis-driven development (rule #9)
 
 ### Sub-task 2 (Monitor + Analyze)

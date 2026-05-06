@@ -34,6 +34,16 @@ Per constitutional rule #7 (vision.md § 7).
 | 4 | Unknown route requested (`GET /admin`, `GET /api/secret`) | adversarial input | `graceful-degrade` — Hono's default 404 handler returns `404 Not Found`; the SSR surface is intentionally minimal (one route) so there is no surface to enumerate | covered by `novel/dashboard-web/test/server.test.ts` "returns 404 for an unknown route (Hono default — let-it-crash equivalent)" assertion |
 | 5 | Malformed control payload (missing body, missing `paused` key, non-boolean `paused`, non-JSON body) on `POST /control` | upstream-malformed (adversarial / rule #7) | `graceful-degrade` — `parseControlBody` returns a discriminated `{ok:false, error}` and the route handler maps it to `400` with `{error}`; the `setPaused` Strategy is *never* called on the malformed branch (verified by call-counter assertions) | covered by `novel/dashboard-web/test/server.test.ts` "400 on missing body", "400 on body without `paused` key", "400 on non-boolean `paused`", and "400 on malformed JSON body (graceful-degrade per rule #7)" assertions |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: any HTTP request reaching the listening socket; metric labels / formulas that travel through the renderer (could carry HTML metacharacters from a future OTEL backend); the `LAN` itself when the operator opts into `0.0.0.0` bind.
+- **Trusted state**: the server-rendered HTML carries zero third-party JS (rule #13.7); the renderer is pure (no I/O); route table is constants in source; `escapeHtml` is the single sanitiser before any user-influenced string reaches the wire (Failure mode #3 above).
+- **Trust boundary**: `start.ts` defaults `host` to `127.0.0.1` per rule #13.4 (NIST SP 800-53 SC-7 boundary protection); LAN exposure requires explicit `--host 0.0.0.0` (operator opt-in) and is documented with the implications. Anything past the loopback interface is outside Minsky's control.
+- **STRIDE focus**: **S**poofing — no auth in v0 because localhost-only; once `0.0.0.0` is enabled the operator must front it with a Tailscale ACL or equivalent (filed as `dashboard-tailscale-acl` follow-up). **I**nformation disclosure — page payloads carry only USE/RED-shaped numbers + tick state, never raw `claude --print` output, session JSONL paths, or operator filesystem layout. **T**ampering — `escapeHtml` blocks XSS at the render boundary (Failure mode #3).
+- **Performance-first carve-out** (rule #13's relief valve): none declared. SSR + zero-JS keeps Lighthouse Mobile in-budget *and* removes the entire client-side attack surface — security and performance reinforce here, they don't compete.
+
 ## Hypothesis-driven development (rule #9)
 
 ### Sub-task 1 (this PR — skeleton)
