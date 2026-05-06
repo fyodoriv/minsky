@@ -24,3 +24,13 @@ This README documents the *namespace*; each contained bridge package owns its ow
 |---|---|---|---|---|
 | 1 | A new bridge package lands without its own chaos table | governance lapse | `circuit-break-and-notify` — `scripts/check-rule-7-chaos-coverage.mjs` fails the PR | covered by `scripts/check-rule-7-chaos-coverage.test.mjs` (the linter's paired test asserts the file-level policy) |
 | 2 | A bridge package ships a write path before v1+ CRDT story | rule violation | `circuit-break-and-notify` — the bridge's own README's chaos table must declare it; reviewers reject otherwise | covered by per-package fixture + assertion (e.g., `novel/bridges/omc-tasksmd/src/sync.test.ts` asserts merge-by-id throws in v0) |
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: peer-format payloads each contained bridge reads (e.g., OMC team-task JSON written by a sibling process under the same user account).
+- **Trusted state**: this README is namespace-only with zero runtime; per-bridge READMEs own their per-package threat models.
+- **Trust boundary**: each contained bridge package sits at the boundary; the namespace itself has no I/O, no parser, no shared state — nothing to tamper with at this level.
+- **STRIDE focus**: **T**ampering — bridges are read-only in v0 (Helland 2007 — read-side first when the write-side needs a CRDT story); a write path lands only with a per-package CRDT design documented in its own threat model.
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
