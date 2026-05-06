@@ -151,6 +151,8 @@ createServer({ getValue: snapshotGetValue(snapshot) });
 
 Per vision.md rule #13.4 (security minimum bar — boundary protection, NIST SP 800-53 SC-7), the dashboard binds to `127.0.0.1` by default. LAN exposure requires explicit operator opt-in via `MINSKY_DASHBOARD_BIND=0.0.0.0`. The bind decision lives in `src/bind.ts` (pure helper) consumed by `src/start.ts`. See `test/bind.test.ts` for the paired tests.
 
+The full threat model — STRIDE focus, recommended remote-access patterns (SSH local-forward / Tailscale ACL / reverse-proxy with auth), and the verification commands — lives in [`docs/security/dashboard-exposure.md`](../../docs/security/dashboard-exposure.md).
+
 ### `POST /control` requires a per-run token (slices 1–3 shipped)
 
 Even when the operator opts into LAN exposure, the `POST /control` endpoint must still gate on a per-run secret so a curious neighbor on the WiFi can't pause the supervisor. Slice 1 (PR #276) ships the three pure helpers in `src/control-auth.ts`:
