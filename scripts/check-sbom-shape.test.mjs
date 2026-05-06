@@ -12,6 +12,8 @@ import {
   ALLOWED_COMPONENT_TYPES,
   ALLOWED_SPEC_VERSIONS,
   classifySbomShape,
+  formatSbomReport,
+  formatSbomViolation,
   walkSbomViolations,
 } from "./check-sbom-shape.mjs";
 
@@ -697,5 +699,114 @@ describe("walkSbomViolations — slice-1 parity", () => {
     const first = walkSbomViolations(sbom);
     const second = walkSbomViolations(sbom);
     expect(first).toEqual(second);
+  });
+});
+
+describe("formatSbomViolation — single-line diagnostic shape", () => {
+  it("formats a top-level violation without a path segment", () => {
+    const out = formatSbomViolation({
+      ok: false,
+      code: "missing-bomFormat",
+      reason: 'SBOM is missing required top-level field "bomFormat"',
+    });
+    expect(out).toBe(
+      '[fail] missing-bomFormat: SBOM is missing required top-level field "bomFormat"',
+    );
+  });
+
+  it("includes the components[i] path segment when present", () => {
+    const out = formatSbomViolation({
+      ok: false,
+      code: "component-missing-purl",
+      reason: 'components[3] (type=library) is missing required field "purl"',
+      path: "components[3]",
+    });
+    expect(out).toBe(
+      '[fail] component-missing-purl components[3]: components[3] (type=library) is missing required field "purl"',
+    );
+  });
+
+  it("starts with the stable [fail] leading token", () => {
+    const out = formatSbomViolation({
+      ok: false,
+      code: "not-object",
+      reason: "SBOM root must be a JSON object",
+    });
+    expect(out.startsWith("[fail] ")).toBe(true);
+  });
+});
+
+describe("formatSbomReport — multi-line aggregate over walker output", () => {
+  it("returns [ok] valid when there are zero violations", () => {
+    const result = walkSbomViolations(validSbom());
+    expect(formatSbomReport(result)).toBe("[ok] valid");
+  });
+
+  it("renders a header + one indented line per violation in document order", () => {
+    const sbom = validSbom({
+      components: [
+        { type: "library", name: "good", version: "1.0.0", purl: "pkg:npm/good@1.0.0" },
+        { type: "library", name: "missing-purl", version: "1.0.0" },
+        { type: "library", version: "1.0.0", purl: "pkg:npm/missing-name@1.0.0" },
+      ],
+    });
+    const report = formatSbomReport(walkSbomViolations(sbom));
+    const lines = report.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe("[fail] sbom-shape: 2 violation(s)");
+    expect(lines[1]?.startsWith("  [fail] component-missing-purl")).toBe(true);
+    expect(lines[2]?.startsWith("  [fail] component-missing-name")).toBe(true);
+  });
+
+  it("renders a top-level wrong-bomFormat report as a single header + one line", () => {
+    const sbom = validSbom();
+    sbom["bomFormat"] = "SPDX";
+    const report = formatSbomReport(walkSbomViolations(sbom));
+    const lines = report.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("[fail] sbom-shape: 1 violation(s)");
+    expect(lines[1]?.includes("wrong-bomFormat")).toBe(true);
+  });
+
+  it("does not include a trailing newline (CLI is responsible for that)", () => {
+    const result = walkSbomViolations(validSbom({ specVersion: "1.4" }));
+    const report = formatSbomReport(result);
+    expect(report.endsWith("\n")).toBe(false);
+  });
+
+  it("is deterministic — same input produces byte-identical output", () => {
+    const sbom = validSbom({
+      components: [
+        { type: "library", name: "a", version: "1.0.0" },
+        { type: "library", name: "b", version: "1.0.0" },
+      ],
+    });
+    const r1 = formatSbomReport(walkSbomViolations(sbom));
+    const r2 = formatSbomReport(walkSbomViolations(sbom));
+    expect(r1).toBe(r2);
+  });
+
+  it("counts duplicate-bom-ref violations alongside per-component shape errors", () => {
+    const sbom = validSbom({
+      components: [
+        {
+          type: "library",
+          name: "a",
+          version: "1.0.0",
+          purl: "pkg:npm/a@1.0.0",
+          "bom-ref": "shared",
+        },
+        {
+          type: "library",
+          name: "b",
+          version: "1.0.0",
+          purl: "pkg:npm/b@1.0.0",
+          "bom-ref": "shared",
+        },
+      ],
+    });
+    const report = formatSbomReport(walkSbomViolations(sbom));
+    expect(report).toContain("[fail] sbom-shape: 1 violation(s)");
+    expect(report).toContain("duplicate-bom-ref");
   });
 });
