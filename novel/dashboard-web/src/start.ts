@@ -15,6 +15,7 @@
  * @otel-exempt thin I/O boundary — `createServer` carries the OTEL span.
  */
 
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -22,6 +23,7 @@ import { serve } from "@hono/node-server";
 
 import { loadRecentSpans } from "./activity.js";
 import { bindHostnameWarning, resolveBindHostname } from "./bind.js";
+import { controlTokenStartupHint, resolveControlToken } from "./control-auth.js";
 import type { GetValue } from "./render.js";
 import { createServer } from "./server.js";
 import { type Snapshot, openObserveGetValue, snapshotGetValue } from "./strategy.js";
@@ -67,9 +69,11 @@ async function resolveGetValue(): Promise<GetValue | undefined> {
 const port = Number.parseInt(process.env["PORT"] ?? "8080", 10);
 const hostname = resolveBindHostname(process.env);
 const getValue = await resolveGetValue();
+const controlToken = resolveControlToken(process.env, () => randomBytes(32).toString("hex"));
 
 const warning = bindHostnameWarning(hostname);
 if (warning !== null) process.stderr.write(`${warning}\n`);
+process.stderr.write(`${controlTokenStartupHint(controlToken)}\n`);
 
 // Activity feed reads the supervisor's stdout log on every request —
 // O(file-size) per `GET /` but the file is bounded (operator-side, KBs not
@@ -81,7 +85,11 @@ const minskyHome = process.env["MINSKY_HOME"] ?? process.cwd();
 const activityLogPath = resolve(minskyHome, ".minsky/tick-loop.out.log");
 const getActivity = () => loadRecentSpans(activityLogPath, ACTIVITY_LIMIT);
 
-const args = { getActivity, ...(getValue === undefined ? {} : { getValue }) };
+const args = {
+  getActivity,
+  controlToken: controlToken.token,
+  ...(getValue === undefined ? {} : { getValue }),
+};
 const { fetch } = createServer(args);
 
 // `serve()` emits an unhandled `error` event on EADDRINUSE — node's default
