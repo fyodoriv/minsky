@@ -12,6 +12,22 @@
 // SBOMs to a known-good shape ship in subsequent slices against this fixed
 // seam.
 //
+// Slice 2 (this file): adds `walkSbomViolations(parsed)` — the pure
+// aggregating walker that runs the slice-1 verdict logic over every
+// component and collects ALL violations rather than short-circuiting on
+// the first failure. The slice-1 classifier deliberately exits on the
+// first per-component error (so a malformed-components rejection is the
+// fastest path to a clear actionable verdict for an interactive user);
+// the walker is the seam the CI gate consumes so a release with eight
+// malformed component entries surfaces all eight in one log line, not
+// eight successive PR runs. Workflow generation, JSON I/O, and the CI
+// gate ship in slices ≥3 against this fixed seam — `walkSbomViolations`
+// takes an already-parsed object so the test suite can exercise every
+// verdict path with hand-built fixtures and is not coupled to a JSON
+// parser or an on-disk file. Mirrors `walkLockfileChanges` (slice 2 of
+// the lockfile-integrity sub-track) and `extractAttributeViolations`
+// (slice 2 of vision.md § 13.2 OTEL no-PII).
+//
 // Why a shape classifier (not a generator) is the right slice 1: the
 // sibling supply-chain gates (`scan-secrets`, `otel-no-pii-in-spans-lint`,
 // `lockfile-integrity`) all start with a pure decision function whose
@@ -372,4 +388,119 @@ export function classifySbomShape(parsed) {
   const componentsVerdict = classifyComponents(components);
   if (componentsVerdict !== null) return componentsVerdict;
   return { ok: true, kind: "valid" };
+}
+
+// Slice 2: pure aggregating walker over already-parsed SBOMs. ----------------
+
+/**
+ * @typedef {{ ok: false, code: string, reason: string, path?: string }} SbomViolation
+ */
+
+/**
+ * @typedef {object} SbomWalkResult
+ * @property {SbomViolation[]} violations
+ *   All discovered violations, in document order: top-level first, then
+ *   per-component, then duplicate-bom-ref. Empty array means the SBOM is
+ *   well-formed. Each entry carries the same `{ code, reason, path? }`
+ *   shape `classifySbomShape` returns — downstream printers can format
+ *   either origin uniformly.
+ */
+
+/**
+ * Walk every component in an already-parsed SBOM, collecting ALL
+ * violations rather than short-circuiting on the first one. Top-level
+ * shape failures (root not object, missing/wrong `bomFormat` /
+ * `specVersion` / `version` / `components`) still produce a single
+ * violation — there's nothing more to walk when the envelope is wrong —
+ * but a `components[]` array with eight malformed entries surfaces all
+ * eight at once.
+ *
+ * The walker is the seam the CI gate (slice ≥3) consumes so a release
+ * with multiple shape regressions surfaces every one in a single log
+ * line. The slice-1 `classifySbomShape` retains its early-fail behaviour
+ * so interactive users (a developer running the gate locally) get the
+ * fastest path to a clear actionable verdict.
+ *
+ * Order of checks mirrors `classifySbomShape`:
+ *   1. root not object → single violation, return.
+ *   2. top-level field rejections → single violation, return.
+ *   3. missing/non-array `components` → single violation, return.
+ *   4. per-component shape errors → collect all, append duplicate-bom-ref
+ *      pairs, return.
+ *
+ * @param {unknown} parsed  Already-parsed JSON — caller does I/O.
+ * @returns {SbomWalkResult}
+ */
+export function walkSbomViolations(parsed) {
+  if (!isPlainObject(parsed)) {
+    return {
+      violations: [{ ok: false, code: "not-object", reason: "SBOM root must be a JSON object" }],
+    };
+  }
+  const topLevel = classifyTopLevelFields(parsed);
+  if (topLevel !== null && topLevel.ok === false) return { violations: [topLevel] };
+  if (!("components" in parsed)) {
+    return {
+      violations: [
+        {
+          ok: false,
+          code: "missing-components",
+          reason: 'SBOM is missing required top-level field "components"',
+        },
+      ],
+    };
+  }
+  const components = parsed["components"];
+  if (!Array.isArray(components)) {
+    return {
+      violations: [
+        { ok: false, code: "components-not-array", reason: "components must be an array" },
+      ],
+    };
+  }
+  return { violations: collectComponentViolations(components) };
+}
+
+/**
+ * Walk every entry in `components[]`, collecting both shape errors (from
+ * `classifyComponent`) and duplicate-bom-ref pairs. Pulled out so
+ * `walkSbomViolations` stays under the cognitive-complexity cap and so the
+ * iteration logic for the aggregate path is its own well-named seam.
+ *
+ * `classifyComponent` itself returns at most one verdict per entry — that
+ * matches operator intent (an entry that's both missing `name` and missing
+ * `purl` reports the first failure; once the operator fixes that, the next
+ * walk surfaces the second). Across-entry independence is what slice 2
+ * adds: entries 3, 5, and 7 all malformed each get their own violation.
+ *
+ * @param {unknown[]} components
+ * @returns {SbomViolation[]}
+ */
+function collectComponentViolations(components) {
+  /** @type {SbomViolation[]} */
+  const violations = [];
+  /** @type {Map<string, number>} */
+  const seenBomRefs = new Map();
+  for (let i = 0; i < components.length; i += 1) {
+    const verdict = classifyComponent(components[i], i);
+    if (verdict !== null && verdict.ok === false) {
+      violations.push(verdict);
+      continue;
+    }
+    const component = /** @type {Record<string, unknown>} */ (components[i]);
+    const bomRef = component["bom-ref"];
+    if (typeof bomRef !== "string" || bomRef === "") continue;
+    const previous = seenBomRefs.get(bomRef);
+    if (previous !== undefined) {
+      violations.push({
+        ok: false,
+        code: "duplicate-bom-ref",
+        reason: `bom-ref "${bomRef}" is shared by components[${previous}] and components[${i}]`,
+        path: `components[${i}]`,
+      });
+      continue;
+    }
+    seenBomRefs.set(bomRef, i);
+  }
+  return violations;
 }
