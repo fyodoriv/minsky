@@ -388,6 +388,32 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  secret-scan:
+    # vision.md § 13.1 / TASKS.md `secret-scanning-precommit-and-ci` §
+    # Measurement: full-scan of every tracked file rejects PR-introduced
+    # credential shapes (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`, `AIza…`, PEM
+    # private-key headers). Slices 1-3 (PRs #258, #259, #261) shipped the
+    # pure classifier, the multi-file walker, and the
+    # `@scan-secrets-allowed: <reason>` annotation seam in
+    # `scripts/scan-secrets.mjs`. This slice (4) wires the CLI into the
+    # gate. Push + PR; security gates are NOT PR-only because a leak that
+    # lands via direct push must still surface (and rotate).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: secret-scan lint
+        run: node scripts/scan-secrets.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/scan-secrets.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -948,6 +974,7 @@ jobs:
       - metric-freshness
       - no-singleton-experiment
       - otel-no-pii
+      - secret-scan
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
@@ -988,6 +1015,7 @@ jobs:
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.otel-no-pii.result }}" \
+                   "${{ needs.secret-scan.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \

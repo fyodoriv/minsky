@@ -156,6 +156,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-6-let-it-crash",
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
+      "secret-scan",
       "tasks-lint",
       "test",
       "tick-loop-backoff-schedule",
@@ -280,6 +281,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-otel-no-pii.mjs"],
+  },
+  {
+    name: "secret-scan",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/scan-secrets.mjs"],
   },
   {
     name: "metric-freshness",
