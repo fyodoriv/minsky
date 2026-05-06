@@ -30,6 +30,16 @@ See [`spec.md` § "Failure modes & chaos verification"](./spec.md#failure-modes-
 | 4 | Unknown extra field | upstream-malformed | `graceful-degrade` — return `ParseError` with `kind: unknown-field` | covered by `additionalProperties: false` JSON-Schema assertion in the parse test |
 | 5 | `replay_windows_days: []` | edge case | `graceful-degrade` — return `ParseError` with `kind: empty-replay-windows` | covered by parser test (`empty-replay-windows` assertion) |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `EXPERIMENT.yaml` content (operator-, daemon-, or PR-author-supplied; CI parses it on every PR; arbitrary text up to a length cap).
+- **Trusted state**: the parser is pure (no I/O); the schema is JSON-Schema constants in source (`additionalProperties: false`); the vanity-metric blacklist is an in-source list.
+- **Trust boundary**: `parse(source)` accepts a string and returns either a typed record or a structured error list — no exception escapes; YAML loading uses `js-yaml` `safeLoad`-equivalent (no `!!js/function`, no alias-bombs).
+- **STRIDE focus**: **D**enial-of-service — input length cap at parser entry returns a `ParseError` rather than OOM (matches `@minsky/handoff-spec`'s 1 MB precedent); **T**ampering — `additionalProperties: false` rejects unknown fields so a malicious PR can't smuggle a `command_to_run` shell-out through the schema.
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
+
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: A small declarative YAML schema (the five rule-#9 fields plus an experiment-id and replay windows) is sufficient to encode every PR's rule-#9 contract and produces a parser whose output the daily and weekly automation layers consume directly without further transformation.

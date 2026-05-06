@@ -50,6 +50,16 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 6 | `.minsky/repo.yaml` parses but fails validation | upstream-malformed | `loud-crash-supervisor-restart` from `--doctor` — verdict RED with the field-level error from `parseRepoConfig`; operator runs `--repair` | covered by `schema.test.ts` validation cases + `doctor.test.ts` red-status path |
 | 7 | Symlink target (canonical `vision.md`) deleted after bootstrap | host-config-drift / external-cleanup | `loud-crash-supervisor-restart` from `--doctor` — verdict RED with "vision.md symlink is broken (target missing)"; operator runs `--repair` after restoring the target | covered by `doctor.test.ts` (broken-symlink red-status case) |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: the operator-supplied `<host>` argument; the host's existing `.git/config` (read for remote-URL inference); the operator's pre-existing global git-ignore file (we append a single entry).
+- **Trusted state**: `setup.sh` is committed and reviewed; the per-step ledger at `.minsky/.bootstrap.lock.d` is mkdir-locked (atomic across local processes per Helland 2007); `parseRepoConfig` is pure with `additionalProperties: false`.
+- **Trust boundary**: every write lands inside `<host>/.minsky/` (gitignored — never tracked) or one append to the operator's global git-ignore. The bootstrap runs under the operator's user account; never `sudo`s; never writes outside `${MINSKY_HOME}` and the host's `.minsky/`.
+- **STRIDE focus**: **T**ampering — symlink target validation (Failure mode #7) and idempotent ledger replay catch external `.minsky/` mutation; **E**levation of privilege — bootstrap inherits the operator's environment and capabilities only; **D**enial-of-service — concurrent runs are serialised via mkdir lock (Failure mode #3 returns EX_TEMPFAIL=75 rather than corrupting state).
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
+
 ## Invariants
 
 1. **Idempotent**: running `minsky-bootstrap <host>` twice is identical to running it once. The planner skips actions for already-present artefacts.
