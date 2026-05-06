@@ -200,3 +200,100 @@ describe("lefthook pre-push contract", () => {
     expect(prePushSection).toContain("pnpm pre-pr-lint");
   });
 });
+
+describe("ci.yml drift-protection", () => {
+  // The brief of `daemon-pre-pr-lint-gate` (Risk § "Local lint stack drift vs CI")
+  // claims `scripts/run-pre-pr-lint-stack.mjs` is canonical and CI runs the same
+  // logical set of steps. Without a test, that claim drifts: a future PR adds a
+  // CI lint job, forgets the manifest, and the daemon's pre-PR gate silently
+  // stops covering it — the failure mode operator-side cleanup is supposed to
+  // prevent. This block pins the bidirectional set equality between the CI
+  // aggregator's `needs:` list and the manifest's `full` stage, with a small
+  // explicit allowlist for the env-dependent jobs the manifest cannot run
+  // offline (per `STACK_MANIFEST` JSDoc § "env-dependent jobs are intentionally
+  // absent").
+
+  // Jobs in `ci:`'s `needs:` that the manifest intentionally omits because they
+  // require GitHub-runner-only or PR-context plumbing the daemon doesn't have.
+  // Each entry needs a one-line reason — silent additions hide drift.
+  const CI_ENV_DEPENDENT = new Set([
+    "hygiene", // pnpm audit — needs network + advisory DB
+    "linux-supervisor-integration", // systemd user bus
+    "macos-supervisor-integration", // launchd user agent
+    "maciek-smoke", // pipx Python install
+    "pr-self-grade", // PR body context (`## Hypothesis self-grade`)
+  ]);
+
+  // Two CI job names diverge from their manifest step names. The aliases are
+  // pinned here so the equality check passes — any new alias is a deliberate
+  // edit, never silent drift.
+  /** @type {Record<string, string>} */
+  const CI_TO_MANIFEST_ALIAS = {
+    test: "vitest", // `pnpm test:coverage` ↔ manifest's `vitest` step
+    "glossary-discipline": "rule-5-glossary-discipline", // job is named for the rule's effect; manifest names it for the rule number
+  };
+
+  /**
+   * @param {string} block
+   * @returns {string[]}
+   */
+  function parseNeedsBlockLines(block) {
+    /** @type {string[]} */
+    const names = [];
+    for (const line of block.split("\n")) {
+      const m = /^ {6}- ([a-z][a-z0-9-]*)$/.exec(line);
+      if (m !== null && m[1] !== undefined) names.push(m[1]);
+    }
+    return names;
+  }
+
+  /**
+   * Extract the `needs:` list under the top-level `ci:` aggregator job from
+   * `.github/workflows/ci.yml`. Pure string parse — the workflow file's shape
+   * is owned by this repo, so the regex contract is stable. Avoids pulling
+   * `yaml` into `scripts/` just for one drift test.
+   *
+   * @param {string} yml
+   * @returns {string[]}
+   */
+  function extractCiAggregatorNeeds(yml) {
+    const ciStart = yml.search(/^ {2}ci:$/m);
+    if (ciStart < 0) throw new Error("ci.yml has no top-level `ci:` job");
+    const needsBlock = yml.slice(ciStart).match(/^ {4}needs:\n([\s\S]*?)(?=^ {4}[a-z])/m);
+    if (needsBlock === null || needsBlock[1] === undefined) {
+      throw new Error("`ci:` job has no `needs:` block");
+    }
+    return parseNeedsBlockLines(needsBlock[1]);
+  }
+
+  test("manifest's full stage covers every offline-reproducible CI lint job (bidirectional)", () => {
+    const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    const ciNeeds = extractCiAggregatorNeeds(yml);
+    expect(ciNeeds.length).toBeGreaterThan(20); // sanity — the aggregator is the full stack
+
+    const expectedManifestNames = new Set(
+      ciNeeds.filter((n) => !CI_ENV_DEPENDENT.has(n)).map((n) => CI_TO_MANIFEST_ALIAS[n] ?? n),
+    );
+    const actualManifestNames = new Set(selectSteps("full").map((s) => s.name));
+
+    // Bidirectional set equality: a missing CI job means the daemon's gate
+    // doesn't cover it locally; a stray manifest entry means the manifest
+    // claims to gate something that's not actually a CI lint job.
+    const missingFromManifest = [...expectedManifestNames].filter(
+      (n) => !actualManifestNames.has(n),
+    );
+    const extraInManifest = [...actualManifestNames].filter((n) => !expectedManifestNames.has(n));
+    expect({ missingFromManifest, extraInManifest }).toEqual({
+      missingFromManifest: [],
+      extraInManifest: [],
+    });
+  });
+
+  test("extractCiAggregatorNeeds returns at least one well-known job (parser sanity)", () => {
+    const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    const ciNeeds = extractCiAggregatorNeeds(yml);
+    expect(ciNeeds).toContain("biome");
+    expect(ciNeeds).toContain("typecheck");
+    expect(ciNeeds).toContain("markdownlint");
+  });
+});
