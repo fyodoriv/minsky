@@ -388,6 +388,30 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  pr-security-review:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate` §
+    # Measurement: every PR body carries either a `## Security & privacy`
+    # section OR a typed `<!-- security: not-applicable — <reason> -->`
+    # opt-out. Slice 2 of `pr-security-review` (slice 1 shipped the pure
+    # classifier in `scripts/check-pr-security-review.mjs` as PR #253) wires
+    # the classifier into the gate. PR-event only, like `pr-self-grade`.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: fetch PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/pr-body.md
+          test -s /tmp/pr-body.md
+      - name: lint security-review marker
+        run: node scripts/check-pr-security-review.mjs /tmp/pr-body.md
+
   cto-audit-pr-conventions:
     # TASKS.md `post-task-cto-audit` sub-step (e/f): audit PRs land on
     # `audit/<UTC-date>-<task-id>` branches AND carry the
@@ -899,6 +923,7 @@ jobs:
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
+      - pr-security-review
       - skill-rule-cap
       - rule-1-novel-justification
       - rule-2-dep-coverage
@@ -959,10 +984,11 @@ jobs:
               *) fail=1 ;;
             esac
           done
-          # pr-self-grade, pattern-index, and skill-rule-cap may be
-          # `skipped` (push event) OR `success` (PR); only `failure` /
-          # `cancelled` should fail.
+          # pr-self-grade, pr-security-review, pattern-index, and
+          # skill-rule-cap may be `skipped` (push event) OR `success` (PR);
+          # only `failure` / `cancelled` should fail.
           for r in "${{ needs.pr-self-grade.result }}" \
+                   "${{ needs.pr-security-review.result }}" \
                    "${{ needs.pattern-index.result }}" \
                    "${{ needs.skill-rule-cap.result }}"; do
             case "$r" in
