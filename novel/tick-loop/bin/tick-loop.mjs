@@ -75,6 +75,7 @@ import {
   createGitGhSignalsBuilder,
   createPnpmMetricsRender,
   createPnpmSnapshotCapture,
+  detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
   fromRealBudgetGuard,
   runDaemon,
@@ -275,6 +276,37 @@ const ctoAuditSeam = (() => {
 if (ctoAuditSeam !== undefined) {
   const outcome = await ensureCtoAuditLabel({ execFile: execFileLike });
   process.stdout.write(`[tick-loop] cto-audit label preflight: ${outcome}\n`);
+}
+
+// Source-plist ↔ live-env drift detector. Surfaces install drift between
+// `distribution/launchd/com.minsky.tick-loop.plist` (source of truth) and
+// `~/Library/LaunchAgents/com.minsky.tick-loop.plist` (installed copy)
+// without waiting for a supervisor restart. The install-drift case
+// (source enables MINSKY_CTO_AUDIT_ENABLE but live env is unset) silently
+// zeroes the pre-registered measurement query
+// (`gh pr list --label minsky:cto-audit ...` returns 0 forever) — PR #214's
+// wire-status announcement only catches it post-restart, but the operator
+// running `tail` against the supervisor log sees the loud warning here at
+// boot. Runs unconditionally — even when the seam isn't wired, the
+// drift-stale-install case IS itself the reason the seam wasn't wired
+// (live env unset because the installed plist is older than the source).
+const envDrift = detectCtoAuditEnvDrift({
+  sourcePlistPath: resolve(
+    process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", ".."),
+    "distribution/launchd/com.minsky.tick-loop.plist",
+  ),
+  liveEnv: process.env,
+});
+if (envDrift === "drift-stale-install") {
+  process.stdout.write(
+    "[tick-loop] WARN cto-audit env drift (drift-stale-install): source plist enables " +
+      "MINSKY_CTO_AUDIT_ENABLE=1 but the supervisor's live env doesn't. The installed " +
+      "launchd agent (~/Library/LaunchAgents/com.minsky.tick-loop.plist) is older than " +
+      "the source plist. Re-install via `pnpm dogfood:install` then restart the agent " +
+      "(`launchctl kickstart -k gui/$(id -u)/com.minsky.tick-loop`) to load the new env.\n",
+  );
+} else {
+  process.stdout.write(`[tick-loop] cto-audit env drift check: ${envDrift}\n`);
 }
 
 // Daily-changelog acceptance criterion (3) — CLI-side construction of the

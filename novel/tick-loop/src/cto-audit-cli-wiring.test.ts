@@ -1,16 +1,19 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CTO_AUDIT_ENABLE_ENV_VAR,
   type ExecFileLike,
   createFileBackedCtoAuditLock,
   createGitGhSignalsBuilder,
+  detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
   extractPrUrl,
   parseFilesChangedFromGit,
+  parsePlistEnv,
   parseRecentMainCommitsFromGit,
 } from "./cto-audit-cli-wiring.js";
 import { CTO_AUDIT_PR_LABEL } from "./post-task-cto-audit.js";
@@ -251,5 +254,129 @@ describe("ensureCtoAuditLabel", () => {
     });
     const outcome = await ensureCtoAuditLabel({ execFile });
     expect(outcome).toBe("skipped-degraded");
+  });
+});
+
+describe("parsePlistEnv", () => {
+  it("returns an empty object when the plist has no EnvironmentVariables dict", () => {
+    const xml = `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>x</string></dict></plist>`;
+    expect(parsePlistEnv(xml)).toEqual({});
+  });
+
+  it("extracts every <key>/<string> pair within the EnvironmentVariables dict", () => {
+    const xml = `<plist><dict>
+      <key>EnvironmentVariables</key>
+      <dict>
+        <key>${CTO_AUDIT_ENABLE_ENV_VAR}</key><string>1</string>
+        <key>MINSKY_HOME</key><string>/path/to/repo</string>
+      </dict>
+    </dict></plist>`;
+    const env = parsePlistEnv(xml);
+    expect(env[CTO_AUDIT_ENABLE_ENV_VAR]).toBe("1");
+    expect(env["MINSKY_HOME"]).toBe("/path/to/repo");
+  });
+
+  it("ignores keys outside the EnvironmentVariables dict (e.g. Label)", () => {
+    const xml = `<plist><dict>
+      <key>Label</key><string>com.minsky.tick-loop</string>
+      <key>EnvironmentVariables</key><dict>
+        <key>${CTO_AUDIT_ENABLE_ENV_VAR}</key><string>1</string>
+      </dict>
+    </dict></plist>`;
+    const env = parsePlistEnv(xml);
+    expect(Object.keys(env)).toEqual([CTO_AUDIT_ENABLE_ENV_VAR]);
+  });
+
+  it("matches the production plist's CTO-audit env var", () => {
+    // Pin against the real source plist so a future edit that drops the
+    // env-var line breaks the test rather than silently bypassing the drift
+    // detector. The test runs from the package dir; resolve up to repo root.
+    const repoRoot = resolve(__dirname, "..", "..", "..");
+    const plistPath = resolve(repoRoot, "distribution/launchd/com.minsky.tick-loop.plist");
+    const xml = readFileSync(plistPath, "utf-8");
+    const env = parsePlistEnv(xml);
+    expect(env[CTO_AUDIT_ENABLE_ENV_VAR]).toBe("1");
+  });
+});
+
+describe("detectCtoAuditEnvDrift", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(resolve(tmpdir(), "cto-audit-drift-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writePlist(env: Record<string, string>): string {
+    const pairs = Object.entries(env)
+      .map(([k, v]) => `<key>${k}</key><string>${v}</string>`)
+      .join("\n");
+    const xml = `<plist><dict>
+      <key>Label</key><string>com.minsky.tick-loop</string>
+      <key>EnvironmentVariables</key><dict>
+        ${pairs}
+      </dict>
+    </dict></plist>`;
+    const p = resolve(dir, "tick-loop.plist");
+    writeFileSync(p, xml, "utf-8");
+    return p;
+  }
+
+  it("returns 'in-sync-enabled' when source plist and live env both enable the var", () => {
+    const sourcePlistPath = writePlist({ [CTO_AUDIT_ENABLE_ENV_VAR]: "1" });
+    const outcome = detectCtoAuditEnvDrift({
+      sourcePlistPath,
+      liveEnv: { [CTO_AUDIT_ENABLE_ENV_VAR]: "1" },
+    });
+    expect(outcome).toBe("in-sync-enabled");
+  });
+
+  it("returns 'in-sync-disabled' when neither side enables the var", () => {
+    const sourcePlistPath = writePlist({});
+    const outcome = detectCtoAuditEnvDrift({ sourcePlistPath, liveEnv: {} });
+    expect(outcome).toBe("in-sync-disabled");
+  });
+
+  it("returns 'drift-stale-install' when source enables but live env is unset (the load-bearing case)", () => {
+    const sourcePlistPath = writePlist({ [CTO_AUDIT_ENABLE_ENV_VAR]: "1" });
+    const outcome = detectCtoAuditEnvDrift({ sourcePlistPath, liveEnv: {} });
+    expect(outcome).toBe("drift-stale-install");
+  });
+
+  it("returns 'drift-stale-install' when live env has the var set to a non-truthy value", () => {
+    const sourcePlistPath = writePlist({ [CTO_AUDIT_ENABLE_ENV_VAR]: "1" });
+    const outcome = detectCtoAuditEnvDrift({
+      sourcePlistPath,
+      liveEnv: { [CTO_AUDIT_ENABLE_ENV_VAR]: "0" },
+    });
+    expect(outcome).toBe("drift-stale-install");
+  });
+
+  it("returns 'drift-local-override' when live env enables the var but source plist doesn't", () => {
+    const sourcePlistPath = writePlist({});
+    const outcome = detectCtoAuditEnvDrift({
+      sourcePlistPath,
+      liveEnv: { [CTO_AUDIT_ENABLE_ENV_VAR]: "true" },
+    });
+    expect(outcome).toBe("drift-local-override");
+  });
+
+  it("returns 'plist-unreadable' when the source plist is missing (graceful-degrade per rule #7)", () => {
+    const outcome = detectCtoAuditEnvDrift({
+      sourcePlistPath: resolve(dir, "does-not-exist.plist"),
+      liveEnv: { [CTO_AUDIT_ENABLE_ENV_VAR]: "1" },
+    });
+    expect(outcome).toBe("plist-unreadable");
+  });
+
+  it("treats 'true' (case-insensitive) as enabled in both source and live env", () => {
+    const sourcePlistPath = writePlist({ [CTO_AUDIT_ENABLE_ENV_VAR]: "TRUE" });
+    const outcome = detectCtoAuditEnvDrift({
+      sourcePlistPath,
+      liveEnv: { [CTO_AUDIT_ENABLE_ENV_VAR]: " True " },
+    });
+    expect(outcome).toBe("in-sync-enabled");
   });
 });

@@ -25,7 +25,7 @@
  * @module tick-loop/cto-audit-cli-wiring
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -33,6 +33,12 @@ import {
   type CompletedIterationSignals,
   type CtoAuditLock,
 } from "./post-task-cto-audit.js";
+
+/** Env-var name the launchd plist + systemd unit set to opt-in the CTO audit
+ *  seam in `bin/tick-loop.mjs`. Exported + referenced both in the source-plist
+ *  parser and the live-env comparator below so brief drift on the var name
+ *  surfaces in tests rather than silently zeroing the drift detector. */
+export const CTO_AUDIT_ENABLE_ENV_VAR = "MINSKY_CTO_AUDIT_ENABLE";
 
 // ---- File-backed lock -----------------------------------------------------
 
@@ -314,4 +320,122 @@ async function createLabel(execFile: ExecFileLike): Promise<EnsureLabelOutcome> 
       if (/already exists/i.test(msg)) return "exists" as const;
       return "skipped-degraded" as const;
     });
+}
+
+// ---- Source-plist env-drift detector --------------------------------------
+
+/** Outcomes the source-plist ↔ live-env comparator can resolve to. The
+ *  load-bearing case is `"drift-stale-install"`: source plist enables the
+ *  CTO audit but the supervisor's live env doesn't have the var set, which
+ *  is the install-drift signature when `~/Library/LaunchAgents/<plist>` is
+ *  older than the source plist in the repo. The other three are noise to
+ *  filter in the call-site. */
+export type EnvDriftOutcome =
+  /** Source plist enables the var AND live env has it set to 1/true. */
+  | "in-sync-enabled"
+  /** Source plist does not enable the var AND live env doesn't either. */
+  | "in-sync-disabled"
+  /** Source plist enables the var but live env is unset/non-truthy — the
+   *  install-drift case PR #214's wire-status announcement guards against
+   *  on supervisor restart, surfaced here at boot without needing a restart. */
+  | "drift-stale-install"
+  /** Live env enables the var but source plist doesn't — operator local
+   *  override (the var was set manually via `launchctl setenv` or in the
+   *  installed plist after edit). Not an error; just a drift signal. */
+  | "drift-local-override"
+  /** Plist file unreadable / unparseable — graceful-degrade per rule #7
+   *  (fresh checkout, non-mac install, file moved). */
+  | "plist-unreadable";
+
+/**
+ * Extract the `EnvironmentVariables` dict from a launchd plist XML body.
+ * Returns a `Record<string, string>` of the env vars set in the plist; an
+ * empty object when the dict is absent or the plist has no env vars.
+ *
+ * The plist grammar is stable (Apple's PropertyList-1.0.dtd) so a
+ * regex-based parser is robust enough for this single dict — pulling in an
+ * XML library here would be a rule-12 scope violation. Tests pin the parser
+ * against the actual repo plist plus several edge-case fixtures.
+ *
+ * @otel-exempt pure parser.
+ */
+export function parsePlistEnv(xml: string): Readonly<Record<string, string>> {
+  const dictMatch = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(xml);
+  if (dictMatch === null) return {};
+  const body = dictMatch[1] ?? "";
+  const out: Record<string, string> = {};
+  const pairRe = /<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g;
+  let m: RegExpExecArray | null = pairRe.exec(body);
+  while (m !== null) {
+    const k = m[1];
+    const v = m[2];
+    if (k !== undefined && v !== undefined) out[k] = v;
+    m = pairRe.exec(body);
+  }
+  return out;
+}
+
+/**
+ * Treat the live env's CTO-audit-enable var as truthy iff it's `"1"` or
+ * `"true"` (case-insensitive, trimmed) — the same predicate `bin/tick-loop.mjs`
+ * uses to decide whether to wire the `CtoAuditSeam`. Anything else (unset,
+ * empty, `"0"`, `"false"`, garbage) is non-truthy.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function isAuditEnvEnabled(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const normalised = value.trim().toLowerCase();
+  return normalised === "1" || normalised === "true";
+}
+
+export interface DetectCtoAuditEnvDriftOpts {
+  /** Path to the source launchd plist (production:
+   *  `${MINSKY_HOME}/distribution/launchd/com.minsky.tick-loop.plist`). */
+  readonly sourcePlistPath: string;
+  /** Live process env. Production passes `process.env`; tests inject a
+   *  frozen record so the comparator is deterministic. */
+  readonly liveEnv: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * Compare the source launchd plist's `EnvironmentVariables` dict against
+ * the supervisor's live process env to surface install drift between the
+ * checked-in plist (the source of truth) and `~/Library/LaunchAgents/<plist>`
+ * (the installed copy) without waiting for a supervisor restart.
+ *
+ * Failure mode this guards against: PRs #205 / #213 / #214 land changes to
+ * the source plist (`MINSKY_CTO_AUDIT_ENABLE=1`, etc.) that only take
+ * effect after `pnpm dogfood:install` re-copies the plist + `launchctl
+ * bootstrap` reloads it. If the operator skips the reinstall, the live
+ * supervisor runs with stale env. PR #214's wire-status announcement
+ * surfaces this on the *next* restart, but until restart the supervisor
+ * silently zeroes the pre-registered measurement query
+ * (`gh pr list --label minsky:cto-audit ...` returns 0 forever). This
+ * detector closes that gap: at supervisor startup, before `runDaemon`
+ * enters its loop, the bin script calls this helper and emits a loud
+ * warning when the stale-install case is detected.
+ *
+ * Graceful-degrade per rule #7: a missing / unreadable plist returns
+ * `"plist-unreadable"` rather than crashing. Production wires
+ * `bin/tick-loop.mjs`'s startup banner to log a one-line hint per
+ * outcome; the supervisor never blocks on a drift finding.
+ *
+ * @otel-exempt thin sync helper invoked once at supervisor startup; the
+ *   `bin/tick-loop.mjs` boundary carries the start-up span.
+ */
+export function detectCtoAuditEnvDrift(opts: DetectCtoAuditEnvDriftOpts): EnvDriftOutcome {
+  let xml: string;
+  try {
+    xml = readFileSync(opts.sourcePlistPath, "utf-8");
+  } catch {
+    return "plist-unreadable";
+  }
+  const env = parsePlistEnv(xml);
+  const sourceEnabled = isAuditEnvEnabled(env[CTO_AUDIT_ENABLE_ENV_VAR]);
+  const liveEnabled = isAuditEnvEnabled(opts.liveEnv[CTO_AUDIT_ENABLE_ENV_VAR]);
+  if (sourceEnabled && liveEnabled) return "in-sync-enabled";
+  if (!sourceEnabled && !liveEnabled) return "in-sync-disabled";
+  if (sourceEnabled && !liveEnabled) return "drift-stale-install";
+  return "drift-local-override";
 }
