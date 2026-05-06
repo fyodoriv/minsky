@@ -23,8 +23,9 @@ describe("pre-registered constants", () => {
 
   test("ROLLING_30D_MIN_N matches the self-diagnose windowMinPrs default (10)", () => {
     // Drift on this constant silently lets the verdict flip OK below
-    // statistical significance — pinned on both sides (here +
-    // scripts/self-diagnose.mjs daemonPrLintPassRateInvariant default).
+    // statistical significance. Pinned at this single source —
+    // scripts/self-diagnose.mjs daemonPrLintPassRateInvariant imports
+    // ROLLING_30D_MIN_N from this file rather than re-declaring it.
     expect(ROLLING_30D_MIN_N).toBe(10);
   });
 

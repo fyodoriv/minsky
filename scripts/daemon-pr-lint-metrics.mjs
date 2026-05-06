@@ -39,8 +39,10 @@ export const ROLLING_30D_MIN_PASS_RATE = 0.8;
  *  not BELOW. */
 export const ROLLING_30D_MIN_N = 10;
 
-/** Width of the rolling window in days. Mirrored in self-diagnose
- *  (`recentDaemonPrs` hard-codes 30) and the task block. */
+/** Width of the rolling window in days. Imported by self-diagnose
+ *  (`recentDaemonPrs` + `daemonPrLintPassRateInvariant`) so the metric
+ *  script, the invariant, and the task block can never disagree on the
+ *  window size. */
 export const ROLLING_WINDOW_DAYS = 30;
 
 /**

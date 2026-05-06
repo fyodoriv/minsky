@@ -33,6 +33,12 @@ import { promisify } from "node:util";
 
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
 
+import {
+  ROLLING_30D_MIN_N,
+  ROLLING_30D_MIN_PASS_RATE,
+  ROLLING_WINDOW_DAYS,
+} from "./daemon-pr-lint-metrics.mjs";
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -553,9 +559,9 @@ export function daemonIterationRuntimeInvariant(opts) {
  * @property {boolean} hasFailure — true iff statusCheckRollup currently shows ≥1 conclusion=FAILURE check
  *
  * @typedef {object} PrLintPassRateInvariantOpts
- * @property {() => Promise<readonly DaemonPrCleanCiSummary[]>} recentDaemonPrs — rolling window the brief defines (default impl: 30d)
- * @property {number} [windowMinPrs] - only evaluate once the window holds this many PRs (default 10; below that the ratio is too noisy)
- * @property {number} [minPassRate] - fire below this fraction (default 0.8, the brief's pre-registered threshold)
+ * @property {() => Promise<readonly DaemonPrCleanCiSummary[]>} recentDaemonPrs — rolling window the brief defines (default impl: `ROLLING_WINDOW_DAYS`-day, currently 30d)
+ * @property {number} [windowMinPrs] - only evaluate once the window holds this many PRs; defaults to `ROLLING_30D_MIN_N` (currently 10) imported from `scripts/daemon-pr-lint-metrics.mjs` so the metric script and this invariant can never disagree on the warm-up size
+ * @property {number} [minPassRate] - fire below this fraction; defaults to `ROLLING_30D_MIN_PASS_RATE` (currently 0.8) imported from `scripts/daemon-pr-lint-metrics.mjs` so both surfaces use the single pre-registered threshold
  */
 
 /**
@@ -576,7 +582,11 @@ export function daemonIterationRuntimeInvariant(opts) {
  * @returns {Invariant}
  */
 export function daemonPrLintPassRateInvariant(opts) {
-  const { recentDaemonPrs, windowMinPrs = 10, minPassRate = 0.8 } = opts;
+  const {
+    recentDaemonPrs,
+    windowMinPrs = ROLLING_30D_MIN_N,
+    minPassRate = ROLLING_30D_MIN_PASS_RATE,
+  } = opts;
   /** @type {Invariant} */
   const fn = async () => {
     const prs = await recentDaemonPrs();
@@ -929,7 +939,9 @@ export function defaultInvariants() {
 
   /** @type {() => Promise<readonly DaemonPrCleanCiSummary[]>} */
   const recentDaemonPrs = async () => {
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const since = new Date(Date.now() - ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
     const data = await ghJson([
       "pr",
       "list",
