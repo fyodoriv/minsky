@@ -287,9 +287,52 @@ export async function runStack(stage, runStep, manifest = STACK_MANIFEST) {
 }
 
 /**
+ * Names `git push` exports to its hooks (GIT_DIR points at the bare repo,
+ * GIT_INDEX_FILE at a transient index, etc.). They poison children that
+ * spawn their own `git` against a tmpdir fixture (e.g., the cross-repo-runner
+ * integration tests bootstrap a host repo) — the inner `git` reuses the
+ * outer GIT_DIR instead of inferring from cwd, and the test fails with
+ * "host is not bootstrapped" / "not a git repository". The standalone
+ * `pnpm pre-pr-lint` invocation has none of these set, so the gate passed
+ * locally but failed under lefthook pre-push — exactly the "local lint stack
+ * drift vs CI" risk the brief flags. Reference: git-scm.com/docs/githooks
+ * § "pre-push" — the env-export contract.
+ */
+const GIT_HOOK_LEAKED_ENV_NAMES = Object.freeze([
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_PREFIX",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_REFLOG_ACTION",
+  "GIT_INTERNAL_GETTEXT_SH_SCHEME",
+]);
+
+/**
+ * Strip the names `git` exports to its hooks from a copy of the parent env.
+ * Pure function so the test can exercise the filter without spawning git.
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function stripGitHookEnv(env) {
+  /** @type {NodeJS.ProcessEnv} */
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (GIT_HOOK_LEAKED_ENV_NAMES.includes(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
  * Default I/O boundary: shell out to the step. Captures stderr for the failure
  * tail. The cwd is fixed to REPO_ROOT so paths in the manifest are stable
- * regardless of where the script is invoked from.
+ * regardless of where the script is invoked from. Strips the env names
+ * `git push` exports to its hooks — without this, lefthook pre-push runs
+ * the stack with GIT_DIR/GIT_WORK_TREE set, and tests that bootstrap their
+ * own git repo in a tmpdir misroute to the parent repo's index and fail.
  *
  * @type {RunStep}
  */
@@ -301,7 +344,7 @@ export async function defaultRunStep(step) {
       step.args,
       {
         cwd: REPO_ROOT,
-        env: { ...process.env, ...(step.env ?? {}) },
+        env: { ...stripGitHookEnv(process.env), ...(step.env ?? {}) },
         // Big buffer — vitest output can be megabytes.
         maxBuffer: 64 * 1024 * 1024,
       },

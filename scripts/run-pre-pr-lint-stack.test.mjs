@@ -14,6 +14,7 @@ import {
   parseArgs,
   runStack,
   selectSteps,
+  stripGitHookEnv,
 } from "./run-pre-pr-lint-stack.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -198,6 +199,48 @@ describe("lefthook pre-push contract", () => {
     const lefthookYml = readFileSync(resolve(REPO_ROOT, "lefthook.yml"), "utf8");
     const prePushSection = lefthookYml.split(/^pre-push:$/m)[1] ?? "";
     expect(prePushSection).toContain("pnpm pre-pr-lint");
+  });
+});
+
+describe("stripGitHookEnv", () => {
+  // Without this filter, `git push` -> lefthook pre-push -> pnpm pre-pr-lint
+  // runs the stack with GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE inherited
+  // from the outer git invocation. Vitest steps that bootstrap a fresh git
+  // repo in a tmpdir (e.g. cross-repo-runner integration tests) misroute
+  // their inner `git` to the parent's index and fail with "host is not
+  // bootstrapped". The standalone `pnpm pre-pr-lint` invocation never
+  // exhibits this, so the gate looked green locally but failed at push —
+  // the canonical failure mode for "local lint stack drift vs CI" the brief
+  // calls out (TASKS.md daemon-pre-pr-lint-gate § Risk).
+
+  test("removes the names git exports to its hooks", () => {
+    const stripped = stripGitHookEnv({
+      PATH: "/usr/bin",
+      HOME: "/Users/x",
+      GIT_DIR: "/Users/x/repo/.git",
+      GIT_WORK_TREE: "/Users/x/repo",
+      GIT_INDEX_FILE: "/tmp/git-index",
+      GIT_PREFIX: "",
+      GIT_OBJECT_DIRECTORY: "/objects",
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: "/alt",
+      GIT_REFLOG_ACTION: "push",
+      GIT_INTERNAL_GETTEXT_SH_SCHEME: "gnu",
+    });
+    expect(stripped).toEqual({ PATH: "/usr/bin", HOME: "/Users/x" });
+  });
+
+  test("preserves unrelated env names verbatim (no copy/clone surprises)", () => {
+    const input = { PATH: "/bin", NODE_ENV: "test", FOO: "bar" };
+    const stripped = stripGitHookEnv(input);
+    expect(stripped).toEqual(input);
+    // Defensive: we want a copy, not the same reference, so callers can
+    // safely spread additional keys onto the result.
+    expect(stripped).not.toBe(input);
+  });
+
+  test("is a no-op when no git-hook-leaked names are set (the standalone-invocation case)", () => {
+    const input = { PATH: "/bin" };
+    expect(stripGitHookEnv(input)).toEqual(input);
   });
 });
 
