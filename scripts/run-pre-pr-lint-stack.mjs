@@ -100,6 +100,73 @@ export const CI_TO_MANIFEST_ALIAS = Object.freeze({
 });
 
 /**
+ * The `ci:` aggregator's bash `gate` step partitions `needs:` across three
+ * buckets that treat job results differently:
+ *
+ *   - `mustSucceed` — `[ "$r" = "success" ] || fail=1`. Anything other than
+ *     `success` (including `skipped`) fails the aggregator. Lint jobs that
+ *     run on every event live here.
+ *   - `supervisorSkippable` — `case "$r" in success|skipped) ;; *) fail=1 ;;`.
+ *     Supervisor-integration jobs may legitimately exit 77 (skipped) when the
+ *     runner's user-bus / launchd plumbing isn't usable; only `failure` /
+ *     `cancelled` fails the gate.
+ *   - `prOnlySkippable` — same `success|skipped` shape, but for jobs gated by
+ *     `if: github.event_name == 'pull_request'` so they're `skipped` on push.
+ *
+ * Slice 15/N's bash-loop drift test pins set equality between `needs:` and
+ * the union of these buckets, but does not pin which bucket each job belongs
+ * to. A regression that moved `pr-self-grade` from `prOnlySkippable` to
+ * `mustSucceed` would silently break every push to `main` (the job is
+ * `skipped` on push); inversely, moving `biome` from `mustSucceed` to
+ * `supervisorSkippable` would silently ungate the lint without tripping
+ * slice 15's union check. Slice 21/N exposes the per-bucket assignment as a
+ * canonical constant so the parity test can pin each bucket separately —
+ * same shape as `CI_ENV_DEPENDENT_JOBS` (rule #2 — single seam, single pin).
+ *
+ * @type {Readonly<{
+ *   mustSucceed: ReadonlySet<string>,
+ *   supervisorSkippable: ReadonlySet<string>,
+ *   prOnlySkippable: ReadonlySet<string>,
+ * }>}
+ */
+export const CI_BASH_GATE_BUCKETS = Object.freeze({
+  mustSucceed: Object.freeze(
+    new Set([
+      "anchor-primary-source",
+      "biome",
+      "cadence-pivot-threshold",
+      "glossary-discipline",
+      "hygiene",
+      "maciek-smoke",
+      "mape-k-budget-cap",
+      "mape-k-constraints-md-size",
+      "mape-k-tick-iteration-backstop",
+      "mape-k-watchdog-cadence",
+      "markdownlint",
+      "measurement-inspects-output",
+      "metric-freshness",
+      "no-singleton-experiment",
+      "pivot-success-margin",
+      "rule-1-novel-justification",
+      "rule-2-dep-coverage",
+      "rule-3-doc-first",
+      "rule-4-otel-coverage",
+      "rule-6-let-it-crash",
+      "rule-7-chaos-coverage",
+      "rule-12-scope-discipline",
+      "tasks-lint",
+      "test",
+      "tick-loop-backoff-schedule",
+      "typecheck",
+    ]),
+  ),
+  supervisorSkippable: Object.freeze(
+    new Set(["linux-supervisor-integration", "macos-supervisor-integration"]),
+  ),
+  prOnlySkippable: Object.freeze(new Set(["pr-self-grade", "pattern-index", "skill-rule-cap"])),
+});
+
+/**
  * The manifest. Order is informational — `runStack` may run steps in parallel
  * up to a small fan-out. New CI jobs that should gate locally get a row here;
  * env-dependent jobs (see `CI_ENV_DEPENDENT_JOBS` above) are intentionally
