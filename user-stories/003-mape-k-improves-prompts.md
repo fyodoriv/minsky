@@ -74,3 +74,13 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Conformance level**: full
 - **Index row**: vision.md § "Pattern conformance index" row 43
 - **Notes**: Each phase (Monitor / Analyze / Plan / Execute) emits one OTEL span, and the Knowledge base is `constraints.md`. Cross-references the planned implementation at row 5 (`claude-mape-k-loop`); this row anchors the user-story specification, row 5 anchors the implementation contract.
+
+## Security & privacy
+
+(Operator directive 2026-05-06 — vision.md rule #13 "Security & privacy — second priority after performance".) Industry-standard primitives only; rule #1 (don't reinvent) applies.
+
+- **Trust boundary**: this story's untrusted inputs are the operator's TASKS.md content + claude --print stdout (LLM output, treated as untrusted by default per OWASP LLM02). Trusted: the local filesystem + the launchd unit-file's environment. Anything that crosses the boundary (PR body emission, OTEL span content) passes through the secret-leak scanner (`scripts/scan-secrets.mjs`) and the no-PII span lint.
+- **Secrets**: no API keys, tokens, or `.env` content in PR bodies, OTEL spans, or `.minsky/` logs. Floor: `scan-secrets` pre-commit + `secret-scanning-precommit-and-ci` (TASKS.md P0).
+- **PII**: no email/IP/full-paths-with-username in OTEL span attributes. Floor: `otel-no-pii-in-spans-lint` (TASKS.md P0).
+- **Sandbox**: the supervisor process's filesystem + network reach is restricted to what this story actually needs. Floor: `supervisor-sandbox-syscall-restriction` (TASKS.md P0); industry standard via systemd `ProtectSystem=strict` + `PrivateTmp=true` / launchd App Sandbox.
+- **Performance carve-out**: when a security restriction would cost >10% on this story's load-bearing latency metric, the trade-off is documented in this section as a declared deviation with a numeric cost figure. Silent trade-offs are forbidden (vision.md rule #13's "performance-first carve-out" clause).

@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -388,6 +392,184 @@ describe("daemonPrLintPassRateInvariant", () => {
       minPassRate: 0.9,
     })();
     expect(failResult.ok).toBe(false);
+  });
+});
+
+// ---- slice 23/N parsers — lifted to module scope so the test body's --------
+// cognitive complexity stays under biome's `noExcessiveCognitiveComplexity`
+// ceiling (max 10). Same shape as the extractor helpers in
+// scripts/run-pre-pr-lint-stack.test.mjs (slice 17/N) and
+// novel/tick-loop/src/daemon.test.ts (slice 22/N): a pure regex parse over a
+// source string the repo owns.
+
+/** @type {Readonly<Record<string, number>>} */
+const ROOT_CAUSE_NUMBER_WORDS = Object.freeze({
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+});
+
+/**
+ * Slice the `## When the invariant fires` section out of the doc and return
+ * its body. The section ends at the next H2 header.
+ *
+ * @param {string} doc
+ * @returns {string}
+ */
+function extractDocsInvariantFiresSection(doc) {
+  const start = doc.search(/^## When the invariant fires$/m);
+  if (start < 0) {
+    throw new Error("docs/daemon-pre-pr-gate.md: missing 'When the invariant fires' H2");
+  }
+  const tail = doc.slice(start);
+  const nextSection = tail.slice(1).search(/^## /m);
+  return nextSection < 0 ? tail : tail.slice(0, nextSection + 1);
+}
+
+/**
+ * Count markdown numbered root-cause bullets (`1. **Name** — …`) in the
+ * sliced section. The `**` requirement keeps incidental numbered lists
+ * elsewhere in the section from inflating the count.
+ *
+ * @param {string} block
+ * @returns {number}
+ */
+function countDocsRootCauseBullets(block) {
+  let count = 0;
+  for (const line of block.split("\n")) {
+    if (/^\d+\. \*\*/.test(line)) count++;
+  }
+  return count;
+}
+
+/**
+ * Pull the prose count from `with N named root causes` (e.g., `with two
+ * named root causes`) and map it to an integer.
+ *
+ * @param {string} block
+ * @returns {number}
+ */
+function extractDocsHeaderCount(block) {
+  const m = /with (\w+) named root causes/.exec(block);
+  if (m === null || m[1] === undefined) {
+    throw new Error("docs/daemon-pre-pr-gate.md: missing 'with N named root causes' prose");
+  }
+  const n = ROOT_CAUSE_NUMBER_WORDS[m[1].toLowerCase()];
+  if (n === undefined) {
+    throw new Error(`docs/daemon-pre-pr-gate.md: unrecognised number word '${m[1]}'`);
+  }
+  return n;
+}
+
+/**
+ * Count `(N)` enumerations in the invariant's `suggestedFix` prose. The
+ * invariant emits its root causes as "(1) ... (2) ..."; matching the
+ * parenthesised digit is a structural count that ignores any incidental
+ * use of digits in the surrounding sentences.
+ *
+ * @param {string} suggestedFix
+ * @returns {number}
+ */
+function countSuggestedFixEnumerations(suggestedFix) {
+  return [...suggestedFix.matchAll(/\((\d+)\)/g)].length;
+}
+
+describe("daemonPrLintPassRateInvariant ↔ docs root-cause enumeration parity (slice 23/N)", () => {
+  // The invariant's `suggestedFix` enumerates N named root causes as
+  // `(1) ... (2) ...`. `docs/daemon-pre-pr-gate.md` § "When the invariant
+  // fires" enumerates them as a markdown numbered list AND echoes the count
+  // in prose ("with two named root causes"). Three surfaces, no parity check
+  // before this slice — a future PR adding a third root cause to the
+  // invariant without updating the docs (or the reverse) would let the
+  // operator-facing diagnostic silently diverge from the in-context hint
+  // the supervisor emits. Slice 23/N pins all three surfaces' counts equal.
+
+  it("invariant suggestedFix `(N)` count == docs numbered bullets count == docs prose 'N named root causes'", async () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const docPath = resolve(here, "../docs/daemon-pre-pr-gate.md");
+    const doc = readFileSync(docPath, "utf8");
+    const section = extractDocsInvariantFiresSection(doc);
+    const docBulletCount = countDocsRootCauseBullets(section);
+    const docHeaderCount = extractDocsHeaderCount(section);
+
+    // Trigger the unmet branch — same fixture shape as the existing
+    // `fires when >20% of PRs in the window carry a FAILURE check` test.
+    const recentDaemonPrs = async () =>
+      Array.from({ length: 10 }, (_, i) => ({ number: 100 + i, hasFailure: i < 5 }));
+    const result = await daemonPrLintPassRateInvariant({ recentDaemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const suggestedFixCount = countSuggestedFixEnumerations(result.suggestedFix ?? "");
+
+    expect({ suggestedFixCount, docBulletCount, docHeaderCount }).toEqual({
+      suggestedFixCount: 2,
+      docBulletCount: 2,
+      docHeaderCount: 2,
+    });
+  });
+
+  it("parser sanity: extractDocsInvariantFiresSection finds the H2 and the section body contains the prose header", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const docPath = resolve(here, "../docs/daemon-pre-pr-gate.md");
+    const doc = readFileSync(docPath, "utf8");
+    const section = extractDocsInvariantFiresSection(doc);
+    expect(section).toContain("## When the invariant fires");
+    expect(section).toMatch(/with \w+ named root causes/);
+  });
+});
+
+describe("daemonPrLintPassRateInvariant ↔ docs/TASKS.md jq selector parity (slice 25/N)", () => {
+  // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): the invariant ID
+  // string `"daemon-pr-lint-pass-rate"` is set on `daemonPrLintPassRateInvariant`'s
+  // returned function via `fn.invariantId = ...` (canonical source: the
+  // factory in `scripts/self-diagnose.mjs`). Two operator-facing surfaces
+  // mirror that exact string inside a `jq` selector so operators can probe
+  // the live verdict:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` § "What you'll see day-to-day":
+  //       node scripts/self-diagnose.mjs --json |
+  //         jq '.[] | select(.id == "daemon-pr-lint-pass-rate")'
+  //   - `TASKS.md` task block § "Measurement" (the pre-registered metric
+  //     verification one-liner): same `select(.id == "...")` predicate.
+  //
+  // No parity check before this slice — a refactor renaming the invariant
+  // ID in the source would update the existing
+  // `expect(result.id).toBe(...)` test (line 372) but the docs and the
+  // task-block verification command would silently keep referencing the
+  // old name; operators run the documented `jq` query, get an empty
+  // result, and conclude the invariant isn't firing when in fact the
+  // selector is stale. Same shape as slice 24/N (noop-exit token
+  // brief↔invariant↔docs parity), applied to a different load-bearing
+  // string with a different canonical source.
+
+  it('invariant ID set on `fn.invariantId` matches the `select(.id == "…")` literal in both docs and TASKS.md', () => {
+    // Pull the canonical ID off the function the way `runInvariants` does
+    // — `(fn).invariantId` is the same property name self-diagnose's
+    // runner uses to label findings, so this is the source of truth, not
+    // a freshly-typed string. The factory needs an opts object; the
+    // recentDaemonPrs probe is never invoked because we only read the
+    // attached property.
+    const fn = daemonPrLintPassRateInvariant({ recentDaemonPrs: async () => [] });
+    const id = /** @type {{ invariantId?: string }} */ (fn).invariantId;
+    // Sanity: the property must exist and be a non-empty kebab-case token.
+    // Without this, a regression that drops the `(fn).invariantId = …`
+    // assignment would make `id` `undefined`, and `select(.id == "undefined")`
+    // would silently pass `toContain` against… nothing useful.
+    expect(id).toMatch(/^[a-z][a-z0-9-]+$/);
+
+    // The selector predicate is the load-bearing shape — the literal
+    // string by itself appears in plenty of unrelated prose, but the
+    // `select(.id == "…")` substring uniquely identifies the operator's
+    // jq query. Pin that exact predicate, not just the bare ID.
+    const selector = `select(.id == "${id}")`;
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    const docs = readFileSync(resolve(here, "../docs/daemon-pre-pr-gate.md"), "utf8");
+    const tasks = readFileSync(resolve(here, "../TASKS.md"), "utf8");
+    expect(docs).toContain(selector);
+    expect(tasks).toContain(selector);
   });
 });
 
