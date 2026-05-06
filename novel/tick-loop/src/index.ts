@@ -493,3 +493,15 @@ export {
   type SpawnResult,
   type SpawnStrategy,
 } from "./spawn-strategy.js";
+
+// Slice 2 of `daemon-parallel-worktree-launch`: per-worker namespacing
+// helpers exposed for the CLI (`bin/tick-loop.mjs`) so it can parse
+// `--worker-id` / `--workers-total` and announce parallel mode on startup.
+export {
+  type WorkerConfig,
+  claudeArgsForWorker,
+  parseWorkerArgs,
+  workerBranchName,
+  workerStartupLine,
+  workerWorktreeName,
+} from "./worker-config.js";
