@@ -147,6 +147,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "measurement-inspects-output",
       "metric-freshness",
       "no-singleton-experiment",
+      "otel-no-pii",
       "pivot-success-margin",
       "rule-1-novel-justification",
       "rule-2-dep-coverage",
@@ -273,6 +274,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-no-singleton-experiment.mjs"],
+  },
+  {
+    name: "otel-no-pii",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-otel-no-pii.mjs"],
   },
   {
     name: "metric-freshness",

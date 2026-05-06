@@ -51,6 +51,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `rule-5-glossary-discipline` — every glossary term in vision.md has exactly one definition.
 - `pattern-index` — every artefact maps to a row in vision.md's "Pattern conformance index" (rule #8).
 - `no-singleton-experiment` — every `experiments/*.yaml` resolves to ≥2 deployed instances (no singletons).
+- `otel-no-pii` — full-scan of `novel/**/*.ts` rejects PII-shaped span attributes (rule #13.2 — security & privacy minimum-bar item #2).
 - `metric-freshness` — every dashboard metric in the expected list emitted within its freshness window.
 - `mape-k-budget-cap` — the autonomic-manager weekly budget cap matches the documented value.
 - `mape-k-constraints-md-size` — `novel/mape-k-loop/constraints.md` archive stays under its 200-entry cap.

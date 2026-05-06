@@ -58,8 +58,25 @@
 // property (i.e., between the previous token and the property's first token).
 // Malformed annotations (missing reason / reason < 3 chars) do NOT suppress
 // — the original violation stands so the operator can fix one or the other.
+//
+// Slice 4 (this file): wires the walker into a runnable CLI. `main()` walks
+// `novel/**/*.ts` (excluding `*.test.ts`, `*.fixture.ts`, `*.d.ts`), feeds
+// every file into `extractAttributeViolations`, and exits 0 / 1 on the
+// violation list. Full-scan rather than diff-based: the parent task's
+// Hypothesis (TASKS.md `otel-no-pii-in-spans-lint`) preregisters
+// "0 PII-shaped attributes across all current `record({...})` calls",
+// which is a global invariant — diff-based grandfathering would defeat it.
+// The companion `.github/workflows/ci.yml` `otel-no-pii` job runs this CLI
+// on every PR and is wired into the `ci` gate's `needs:` array.
 
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..");
 
 /**
  * @typedef {object} ClassifyResult
@@ -334,3 +351,145 @@ function staticValueOf(expr) {
   }
   return undefined;
 }
+
+// CLI ------------------------------------------------------------------------
+
+/**
+ * @param {string[]} argv
+ * @returns {{ repo: string }}
+ */
+export function parseArgs(argv) {
+  let repo = REPO_ROOT;
+  for (const arg of argv) {
+    const m = /^--([^=]+)=(.*)$/.exec(arg);
+    if (m === null) continue;
+    if (m[1] === "repo") repo = m[2] ?? repo;
+  }
+  return { repo };
+}
+
+// Suffix-based skip list (declarations / tests / fixtures). Order is
+// irrelevant — `Array#some` short-circuits on the first match.
+const EXCLUDED_SUFFIXES = Object.freeze([
+  ".d.ts",
+  ".test.ts",
+  ".test.tsx",
+  ".spec.ts",
+  ".spec.tsx",
+  ".fixture.ts",
+  ".fixture.tsx",
+]);
+
+// Substring-based skip list (path segments that designate fixture trees).
+const EXCLUDED_SEGMENTS = Object.freeze(["/test/fixtures/", "/__fixtures__/"]);
+
+/**
+ * @param {string} relPosix  repo-relative POSIX path
+ * @returns {boolean}
+ */
+function isInScope(relPosix) {
+  if (!relPosix.startsWith("novel/")) return false;
+  if (!(relPosix.endsWith(".ts") || relPosix.endsWith(".tsx"))) return false;
+  if (EXCLUDED_SUFFIXES.some((s) => relPosix.endsWith(s))) return false;
+  if (EXCLUDED_SEGMENTS.some((s) => relPosix.includes(s))) return false;
+  return true;
+}
+
+/**
+ * @param {string} dir
+ * @param {(absPath: string) => void} onFile
+ */
+function walkDir(dir, onFile) {
+  /** @type {import('node:fs').Dirent[]} */
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.name === "node_modules" || e.name === "dist" || e.name === ".turbo") continue;
+    const abs = resolve(dir, e.name);
+    if (e.isDirectory()) walkDir(abs, onFile);
+    else if (e.isFile()) onFile(abs);
+  }
+}
+
+/**
+ * Recursively list every `.ts` / `.tsx` file under `novel/` that is in the
+ * lint's scope. Excludes test, spec, fixture, and `.d.ts` files plus
+ * `**\/test/fixtures/**`, `**\/__fixtures__/**`, and `**\/node_modules/**`.
+ * Returns POSIX-relative paths (forward-slash regardless of host OS) so
+ * violation reports are reproducible across CI and local runs.
+ *
+ * @param {string} repo  absolute path to the repo root
+ * @returns {string[]}
+ */
+export function listScannableNovelFiles(repo) {
+  /** @type {string[]} */
+  const out = [];
+  const novelRoot = resolve(repo, "novel");
+  walkDir(novelRoot, (abs) => {
+    const rel = relative(repo, abs).split(sep).join("/");
+    if (isInScope(rel)) out.push(rel);
+  });
+  out.sort();
+  return out;
+}
+
+/**
+ * Read-and-classify pipeline. Pure-ish — does file I/O but is deterministic
+ * given a stable filesystem. Used by `main()` and exercised in unit tests
+ * via the `--repo=<dir>` knob.
+ *
+ * @param {string} repo
+ * @returns {{ scanned: number, violations: WalkerViolation[] }}
+ */
+export function scanRepoForOtelPii(repo) {
+  const files = listScannableNovelFiles(repo).map((rel) => ({
+    path: rel,
+    source: readFileSync(resolve(repo, rel), "utf8"),
+  }));
+  const { violations } = extractAttributeViolations({ files });
+  return { scanned: files.length, violations };
+}
+
+function main() {
+  const { repo } = parseArgs(process.argv.slice(2));
+  const { scanned, violations } = scanRepoForOtelPii(repo);
+
+  if (violations.length === 0) {
+    process.stdout.write(
+      `otel-no-pii ok: scanned ${scanned} novel/**/*.ts file(s); 0 PII-shaped span attributes.\n`,
+    );
+    process.exit(0);
+    return;
+  }
+
+  process.stderr.write("otel-no-pii: PII-shaped span attributes found:\n");
+  for (const v of violations) {
+    process.stderr.write(
+      `  ${v.file}:${v.line} attributes.${v.attributeName} (${v.shape}) — ${v.reason}\n`,
+    );
+  }
+  process.stderr.write(
+    [
+      "",
+      "Fix one of:",
+      "  1. rename the attribute / drop the credential value;",
+      "  2. annotate the offending property with a leading comment",
+      "     `// @otel-pii-allowed: <reason ≥3 chars>` if the match is a",
+      "     genuine false positive (e.g. an opaque hash whose name happens",
+      "     to contain `_token`).",
+      "",
+      "See vision.md § 13.2 (security & privacy minimum-bar item #2).",
+      "",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("check-otel-no-pii.mjs") === true;
+if (invokedDirectly) main();

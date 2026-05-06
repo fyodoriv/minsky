@@ -5,11 +5,17 @@
 // walker / CI gate around it. Each case carries a one-letter rubric tag
 // matching the description in the script's header.
 
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   classifyAttributesObject,
   classifySpanAttribute,
   extractAttributeViolations,
+  listScannableNovelFiles,
+  parseArgs,
+  scanRepoForOtelPii,
 } from "./check-otel-no-pii.mjs";
 
 describe("classifySpanAttribute (pure function)", () => {
@@ -325,5 +331,127 @@ describe("@otel-pii-allowed annotation (slice 3)", () => {
     ].join("\n");
     const r = extractAttributeViolations({ files: [{ path: "a.ts", source }] });
     expect(r.violations).toHaveLength(1);
+  });
+});
+
+describe("CLI helpers (slice 4)", () => {
+  /** @type {string} */
+  let repo;
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "otel-no-pii-cli-"));
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  /**
+   * @param {string} relPath  POSIX-style path under `repo`
+   * @param {string} content
+   */
+  function write(relPath, content) {
+    const segments = relPath.split("/");
+    const fileName = /** @type {string} */ (segments.pop());
+    const dir = join(repo, ...segments);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, fileName), content);
+  }
+
+  describe("parseArgs", () => {
+    it("(c-a) defaults `repo` to the package root when no args", () => {
+      const { repo: r } = parseArgs([]);
+      expect(r).toMatch(/[\\/]minsky$/);
+    });
+
+    it("(c-b) honours `--repo=<path>`", () => {
+      const { repo: r } = parseArgs(["--repo=/tmp/x"]);
+      expect(r).toBe("/tmp/x");
+    });
+
+    it("(c-c) ignores unknown flags", () => {
+      const { repo: r } = parseArgs(["--unknown=value", "--repo=/tmp/y"]);
+      expect(r).toBe("/tmp/y");
+    });
+  });
+
+  describe("listScannableNovelFiles", () => {
+    it("(c-d) finds in-scope `novel/**/*.ts` files only", () => {
+      write("novel/pkg/src/index.ts", "// in scope");
+      write("novel/pkg/src/util.tsx", "// in scope (tsx)");
+      write("novel/pkg/src/index.test.ts", "// excluded: test");
+      write("novel/pkg/src/index.spec.ts", "// excluded: spec");
+      write("novel/pkg/src/types.d.ts", "// excluded: declarations");
+      write("novel/pkg/src/sample.fixture.ts", "// excluded: fixture suffix");
+      write("novel/pkg/test/fixtures/leak.ts", "// excluded: under fixtures dir");
+      write("novel/pkg/__fixtures__/leak.ts", "// excluded: __fixtures__ dir");
+      write("scripts/foo.ts", "// excluded: not under novel/");
+      write("novel/pkg/dist/index.ts", "// excluded: dist");
+      write("novel/pkg/node_modules/dep/index.ts", "// excluded: node_modules");
+
+      const files = listScannableNovelFiles(repo);
+      expect(files).toEqual(["novel/pkg/src/index.ts", "novel/pkg/src/util.tsx"]);
+    });
+
+    it("(c-e) returns an empty list when novel/ is missing", () => {
+      const files = listScannableNovelFiles(repo);
+      expect(files).toEqual([]);
+    });
+  });
+
+  describe("scanRepoForOtelPii", () => {
+    it("(c-f) reports zero violations against a clean tree", () => {
+      write(
+        "novel/pkg/src/index.ts",
+        `emit({ name: "tick.iter", attributes: { "iteration.index": 1 } });`,
+      );
+      const { scanned, violations } = scanRepoForOtelPii(repo);
+      expect(scanned).toBe(1);
+      expect(violations).toEqual([]);
+    });
+
+    it("(c-g) flags a synthetic leaking-span fixture (CI's fail-on-leak gate)", () => {
+      // This is the synthetic fixture preregistered in TASKS.md
+      // `otel-no-pii-in-spans-lint` § Measurement: introducing a span
+      // attribute named `apiKey` MUST trip the lint and exit non-zero.
+      write("novel/pkg/src/leak.ts", `emit({ name: "x", attributes: { apiKey: "redacted" } });`);
+      const { scanned, violations } = scanRepoForOtelPii(repo);
+      expect(scanned).toBe(1);
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toMatchObject({
+        file: "novel/pkg/src/leak.ts",
+        attributeName: "apiKey",
+        shape: "name-shape",
+      });
+    });
+
+    it("(c-h) ignores leaking spans inside fixture / test files", () => {
+      // Test/fixture files contain deliberate bad shapes for *other* test
+      // suites (e.g. the security-review test fixtures). The CLI must
+      // honour the same exclusion list that `listScannableNovelFiles` uses.
+      write("novel/pkg/src/sample.fixture.ts", `emit({ attributes: { apiKey: "x" } });`);
+      write("novel/pkg/test/fixtures/leak.ts", `emit({ attributes: { password: "x" } });`);
+      const { scanned, violations } = scanRepoForOtelPii(repo);
+      expect(scanned).toBe(0);
+      expect(violations).toEqual([]);
+    });
+
+    it("(c-i) honours `// @otel-pii-allowed: <reason>` in scanned files", () => {
+      // End-to-end: the slice-3 annotation seam threads through the
+      // file-reading pipeline. A leaking attribute with a valid annotation
+      // produces zero violations even on full-scan.
+      write(
+        "novel/pkg/src/legit.ts",
+        [
+          "emit({ attributes: {",
+          "  // @otel-pii-allowed: opaque hash, not the secret itself",
+          '  apiKey: "h1",',
+          "} });",
+        ].join("\n"),
+      );
+      const { scanned, violations } = scanRepoForOtelPii(repo);
+      expect(scanned).toBe(1);
+      expect(violations).toEqual([]);
+    });
   });
 });
