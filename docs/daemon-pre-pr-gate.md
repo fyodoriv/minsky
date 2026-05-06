@@ -67,7 +67,7 @@ The env-dependent CI jobs (`hygiene` / `linux-supervisor-integration` / `macos-s
 
 ## Drift hazards and their mitigations
 
-The gate's value depends on six parity claims, each with its own pin:
+The gate's value depends on seven parity claims, each with its own pin:
 
 1. **Manifest ↔ CI parity.** A future PR adding a CI lint job and forgetting the manifest entry would leave the gate silently undergated. Slice 5/N's `ci.yml drift` test parses the `ci:` aggregator's `needs:` list, filters out the env-dependent allowlist, normalises the two known name aliases (`test`↔`vitest`, `glossary-discipline`↔`rule-5-glossary-discipline`), and asserts bidirectional set equality with the manifest's `full` stage. Adding a CI job without manifest entry now fails this test loudly.
 
@@ -81,7 +81,9 @@ The gate's value depends on six parity claims, each with its own pin:
 
 6. **Docs ↔ manifest full-stage parity.** Slice 13/N closed this surface for the fast stage but left the full stage in prose, where two manifest entries (`rule-5-glossary-discipline`, `no-singleton-experiment`) had silently never been listed at all. Slice 16/N refactors the full-stage description to a bullet list in the same shape as the fast-stage list, and the `docs/daemon-pre-pr-gate.md full-stage drift-protection` block in `scripts/run-pre-pr-lint-stack.test.mjs` parses it and asserts bidirectional set equality with `selectSteps("full")`. Every full-stage step in the manifest must now appear in the operator-facing doc; every step in the doc must correspond to a manifest entry — the same invariant slice 13 enforces for the fast stage, now extended to the operator-side gate's full set.
 
-The gate is now invariant to which transport invokes it (operator terminal, lefthook pre-push, daemon iteration), to which name a fast-stage step takes (brief and manifest stay in lockstep), to where the aggregator gate is sourced (the `needs:` declaration and its bash gate-check stay set-equal), and to which stage a doc bullet documents (the `pnpm pre-pr-lint --stage=full` set is equally pinned).
+7. **Docs ↔ env-dependent allowlist parity.** The doc's "What the gate enforces" section enumerates the env-dependent CI jobs intentionally absent from the manifest (`hygiene` / `linux-supervisor-integration` / `macos-supervisor-integration` / `maciek-smoke` / `pr-self-grade`). That enumeration mirrored a `CI_ENV_DEPENDENT` set previously hardcoded in `scripts/run-pre-pr-lint-stack.test.mjs` — two sources of truth, drift waiting to happen the next time a CI job's env-dependence changes (e.g., promoting a job from PR-only to push-and-PR, or retiring an env-dependent job). Slice 17/N lifts the allowlist into the canonical manifest module (`CI_ENV_DEPENDENT_JOBS` in `scripts/run-pre-pr-lint-stack.mjs`, paired with `CI_TO_MANIFEST_ALIAS`) and the `docs/daemon-pre-pr-gate.md env-dependent allowlist drift-protection` block parses the doc's enumeration and asserts bidirectional set equality with `CI_ENV_DEPENDENT_JOBS.keys()`. Every allowlist entry must appear in the doc; every doc enumeration must correspond to an allowlist entry.
+
+The gate is now invariant to which transport invokes it (operator terminal, lefthook pre-push, daemon iteration), to which name a fast-stage step takes (brief and manifest stay in lockstep), to where the aggregator gate is sourced (the `needs:` declaration and its bash gate-check stay set-equal), to which stage a doc bullet documents (the `pnpm pre-pr-lint --stage=full` set is equally pinned), and to which CI jobs the manifest intentionally omits (the env-dependent allowlist's enumeration in code and in the doc stay set-equal).
 
 ## Operator commands
 
