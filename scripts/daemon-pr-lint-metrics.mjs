@@ -87,15 +87,17 @@ export function daysAgoUtc(now, days) {
  */
 
 /**
- * Parse `gh pr list --json number,statusCheckRollup` raw stdout into a list
- * of PR summaries. Throws on malformed JSON or non-array — the caller
- * wants a hard failure over silently writing a misleading verdict.
+ * Parse a pre-decoded array of PR records (the shape `gh pr list --json
+ * number,statusCheckRollup` returns) into PR summaries. Extracted so the
+ * self-diagnose invariant (which already JSON-parses via `ghJson`) shares
+ * the same per-PR rule for `hasFailure` as the metric report — slice 12 of
+ * `daemon-pre-pr-lint-gate`. Throws on non-array — caller wants a hard
+ * failure over a misleading verdict.
  *
- * @param {string} raw
+ * @param {unknown} parsed
  * @returns {readonly PrSummary[]}
  */
-export function parsePrList(raw) {
-  const parsed = JSON.parse(raw);
+export function parsePrListEntries(parsed) {
   if (!Array.isArray(parsed)) {
     throw new Error("expected gh JSON output to be an array");
   }
@@ -110,6 +112,47 @@ export function parsePrList(raw) {
     out.push({ number: Number(pr.number), hasFailure });
   }
   return out;
+}
+
+/**
+ * Parse `gh pr list --json number,statusCheckRollup` raw stdout into a list
+ * of PR summaries. Throws on malformed JSON or non-array — the caller
+ * wants a hard failure over silently writing a misleading verdict.
+ *
+ * @param {string} raw
+ * @returns {readonly PrSummary[]}
+ */
+export function parsePrList(raw) {
+  return parsePrListEntries(JSON.parse(raw));
+}
+
+/**
+ * Canonical `gh pr list` argv for the rolling-window query. Single source
+ * of truth shared between the metric report (`runDaemonPrLintMetrics`) and
+ * the self-diagnose invariant (`recentDaemonPrs` in
+ * `scripts/self-diagnose.mjs`) — slice 12 of `daemon-pre-pr-lint-gate`.
+ * Drift between the two callers (e.g., one adds `--state open` and the
+ * other doesn't) used to be possible because each caller built the args
+ * inline; with this helper the args can only diverge on purpose.
+ *
+ * @param {string} sinceYmd  YYYY-MM-DD lower bound for `created:>=`
+ * @returns {readonly string[]}
+ */
+export function buildRecentPrListGhArgs(sinceYmd) {
+  return [
+    "pr",
+    "list",
+    "--author",
+    "@me",
+    "--state",
+    "all",
+    "--search",
+    `created:>=${sinceYmd}`,
+    "--json",
+    "number,statusCheckRollup",
+    "--limit",
+    "100",
+  ];
 }
 
 /**
@@ -203,20 +246,7 @@ export async function runDaemonPrLintMetrics({ clock, runGh }) {
   const dateNow = formatDateUtcYmd(now);
   const date30dAgo = formatDateUtcYmd(daysAgoUtc(now, ROLLING_WINDOW_DAYS));
 
-  const raw = await runGh([
-    "pr",
-    "list",
-    "--author",
-    "@me",
-    "--state",
-    "all",
-    "--search",
-    `created:>=${date30dAgo}`,
-    "--json",
-    "number,statusCheckRollup",
-    "--limit",
-    "100",
-  ]);
+  const raw = await runGh(buildRecentPrListGhArgs(date30dAgo));
 
   const prs = parsePrList(raw);
   const stats = computeStats(prs);
