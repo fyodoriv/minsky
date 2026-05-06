@@ -244,6 +244,25 @@ describe("lefthook pre-push contract", () => {
     const prePushSection = lefthookYml.split(/^pre-push:$/m)[1] ?? "";
     expect(prePushSection).toContain("pnpm pre-pr-lint");
   });
+
+  // Slice 20/N: the lefthook test above passes for `pnpm pre-pr-lint` with any
+  // `--stage` argument (or none) — `--stage=fast` would silently undergate the
+  // operator's `git push` against the slow lints (vitest, dormant-config caps,
+  // measurement-inspects-output, etc.) that the daemon brief intentionally
+  // skips for spawn-budget reasons. The whole point of lefthook pre-push is to
+  // catch what CI catches, locally, before push (per `docs/daemon-pre-pr-gate.md`
+  // operator commands § "Full stage (run before pushing — what lefthook
+  // pre-push runs)"). Drift to fast turns the human's pre-push into a fast-only
+  // mirror of the daemon's gate, deferring vitest failures to CI — exactly the
+  // operator-side babysitting the task block tries to eliminate. Pin the stage
+  // selection explicitly, same shape as the existing string-contains test
+  // above. Mutation-tested: rewriting `--stage=full` → `--stage=fast` (or
+  // dropping the flag) fails this test.
+  test("lefthook.yml pre-push runs --stage=full (operator-side gate, not the daemon's --stage=fast)", () => {
+    const lefthookYml = readFileSync(resolve(REPO_ROOT, "lefthook.yml"), "utf8");
+    const prePushSection = lefthookYml.split(/^pre-push:$/m)[1] ?? "";
+    expect(prePushSection).toContain("pnpm pre-pr-lint --stage=full");
+  });
 });
 
 describe("stripGitHookEnv", () => {
