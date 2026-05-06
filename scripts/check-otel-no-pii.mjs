@@ -39,6 +39,15 @@
 //   California; OWASP A04 "Insecure Design"; Truffle Security 2023 ("State of
 //   Secrets Sprawl") — credential prefix patterns.
 // Conformance: full — no I/O, no async, no LLM.
+//
+// Slice 2 (this file): adds `extractAttributeViolations({ files })` — the
+// pure AST walker that finds `attributes: { … }` object-literal properties
+// (the shape `emit({ name, attributes })` call sites pass), runs the slice-1
+// classifier on each property, and returns the violation list. The diff
+// base, CLI, allow-list annotation, and CI wire-in still ship in slice ≥3
+// against this fixed seam.
+
+import ts from "typescript";
 
 /**
  * @typedef {object} ClassifyResult
@@ -139,4 +148,141 @@ export function classifyAttributesObject(attrs) {
     }
   }
   return null;
+}
+
+/**
+ * @typedef {object} WalkerSourceFile
+ * @property {string} path     POSIX, repo-relative
+ * @property {string} source   full TS source text
+ */
+
+/**
+ * @typedef {object} WalkerViolation
+ * @property {string} file
+ * @property {number} line                 1-based
+ * @property {string} attributeName        the property key that flagged
+ * @property {"name-shape" | "value-shape"} shape
+ * @property {string} reason
+ */
+
+/**
+ * Pure AST walker over TypeScript source files. Finds every
+ * `attributes: { … }` PropertyAssignment whose value is an ObjectLiteral
+ * (the shape Minsky's `emit({ name, attributes })` and OTEL's
+ * `setAttributes({ … })` call sites use), and runs `classifySpanAttribute`
+ * against each inner property.
+ *
+ * Recognised inner-property shapes:
+ *
+ *   1. `attributes: { apiKey: "x" }`           — string literal value
+ *   2. `attributes: { apiKey: \`x\` }`           — no-substitution template
+ *   3. `attributes: { apiKey: someVar }`       — non-literal; classify by
+ *                                                 NAME ONLY (value-shape
+ *                                                 cannot be statically
+ *                                                 verified, so it falls
+ *                                                 through unflagged unless
+ *                                                 the NAME itself flags)
+ *
+ * Identifier / computed property keys (e.g. `[NAME]: …`) are skipped: the
+ * static name is unknown and the runtime classifier (slice ≥4 follow-up)
+ * is the right point to catch those. Non-string-literal values whose name
+ * is safe are also skipped — same justification.
+ *
+ * Pure: no I/O, no globals. The CLI wrapper (slice ≥3) is responsible for
+ * reading files off disk and feeding them in.
+ *
+ * @param {{ files: readonly WalkerSourceFile[] }} input
+ * @returns {{ violations: WalkerViolation[] }}
+ */
+export function extractAttributeViolations({ files }) {
+  /** @type {WalkerViolation[]} */
+  const violations = [];
+  for (const f of files) {
+    const sf = ts.createSourceFile(
+      f.path,
+      f.source,
+      ts.ScriptTarget.ES2023,
+      true,
+      f.path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    walk(sf, sf, f.path, violations);
+  }
+  return { violations };
+}
+
+/**
+ * Recursively descend the AST. When we hit a `PropertyAssignment` whose
+ * (identifier or string-literal) name is `attributes` and whose initializer
+ * is an `ObjectLiteralExpression`, classify each of that object's
+ * properties.
+ *
+ * @param {ts.Node} node
+ * @param {ts.SourceFile} sf
+ * @param {string} path
+ * @param {WalkerViolation[]} out
+ */
+function walk(node, sf, path, out) {
+  if (ts.isPropertyAssignment(node) && propertyKeyName(node.name) === "attributes") {
+    if (ts.isObjectLiteralExpression(node.initializer)) {
+      classifyObjectLiteral(node.initializer, sf, path, out);
+    }
+  }
+  ts.forEachChild(node, (child) => walk(child, sf, path, out));
+}
+
+/**
+ * Classify each property of an ObjectLiteralExpression.
+ *
+ * @param {ts.ObjectLiteralExpression} obj
+ * @param {ts.SourceFile} sf
+ * @param {string} path
+ * @param {WalkerViolation[]} out
+ */
+function classifyObjectLiteral(obj, sf, path, out) {
+  for (const prop of obj.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue;
+    const name = propertyKeyName(prop.name);
+    if (name === undefined) continue;
+    const value = staticValueOf(prop.initializer);
+    const result = classifySpanAttribute(name, value);
+    if (result.ok) continue;
+    const { line } = sf.getLineAndCharacterOfPosition(prop.getStart(sf));
+    out.push({
+      file: path,
+      line: line + 1,
+      attributeName: name,
+      shape: /** @type {"name-shape" | "value-shape"} */ (result.shape),
+      reason: /** @type {string} */ (result.reason),
+    });
+  }
+}
+
+/**
+ * Extract the static name of a PropertyName node, or `undefined` if the
+ * key is computed / non-literal (those are skipped by the walker; the
+ * runtime guard in slice ≥4 covers them).
+ *
+ * @param {ts.PropertyName} name
+ * @returns {string | undefined}
+ */
+function propertyKeyName(name) {
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
+  return undefined;
+}
+
+/**
+ * Extract the static value of an initializer if and only if it's a
+ * string literal or a no-substitution template literal. Anything else
+ * (identifiers, numbers, calls, …) returns `undefined` — the classifier
+ * then falls back to name-only classification.
+ *
+ * @param {ts.Expression} expr
+ * @returns {string | undefined}
+ */
+function staticValueOf(expr) {
+  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+    return expr.text;
+  }
+  return undefined;
 }
