@@ -1762,6 +1762,33 @@ describe("buildDaemonBrief", () => {
     expect(brief).not.toMatch(/Open P0 tasks[^\n]*claimed-p0/);
     expect(brief).not.toMatch(/Open P0 tasks[^\n]*blocked-p0/);
   });
+
+  it("orders stable sections before volatile sections so Anthropic's prompt cache hits across iterations", () => {
+    const sample = [
+      "# Tasks",
+      "",
+      "## P0",
+      "",
+      "- [ ] `real-task` — clean",
+      "  - **ID**: real-task",
+      "  - **Tags**: p0",
+      "  - **Hypothesis**: H",
+      "",
+    ].join("\n");
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    const idx = (heading: string) => brief.indexOf(heading);
+    const stable = [
+      "## Iteration directive",
+      "## Pre-PR lint-stack gate",
+      "## Optimization-discipline gate",
+    ];
+    const volatile = ["## Priority-discipline gate", "## Task block (current TASKS.md)"];
+    for (const s of stable) {
+      for (const v of volatile) {
+        expect(idx(s), `${s} must precede ${v} for cache-prefix stability`).toBeLessThan(idx(v));
+      }
+    }
+  });
 });
 
 describe("extractOpenP0TaskIds", () => {
