@@ -12,6 +12,15 @@ pre-commit:
     test:
       glob: "*.ts"
       run: pnpm vitest related --run {staged_files}
+    scan-secrets:
+      # vision.md § 13.1 / TASKS.md `secret-scanning-precommit-and-ci`: gate
+      # credentials at commit time, before they land even locally — git's
+      # rotation cost stays at "delete the working-tree line" instead of
+      # escalating to "rotate the credential and rewrite history". The CLI
+      # accepts `{staged_files}` positionally and runs only on those paths;
+      # the same script's no-arg full-scan mode runs in CI as the
+      # `secret-scan` gate.
+      run: node scripts/scan-secrets.mjs {staged_files}
 
 pre-push:
   commands:

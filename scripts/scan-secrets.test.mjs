@@ -6,13 +6,23 @@
 // script's header. Slice ≥2 (staged-files walker / CLI / lefthook wire-in)
 // is gated against this fixed seam.
 
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   SECRET_PATTERNS,
   formatFinding,
+  isScannablePath,
+  listScannableTrackedFiles,
+  parseArgs,
+  readScannableFiles,
   scanContentForSecrets,
   scanFilesForSecrets,
+  scanRepoForSecrets,
 } from "./scan-secrets.mjs";
 
 describe("scanContentForSecrets (pure function)", () => {
@@ -462,5 +472,158 @@ describe("@scan-secrets-allowed allow-annotation (slice 3)", () => {
       "MIIEpAIBAAKCAQEA...",
     ].join("\n");
     expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+});
+
+describe("CLI seam (slice 4) — parseArgs", () => {
+  it("(a) no args → repo defaults, paths empty", () => {
+    const r = parseArgs([]);
+    expect(r.repo.length).toBeGreaterThan(0);
+    expect(r.paths).toEqual([]);
+  });
+
+  it("(b) `--repo=<dir>` sets the repo", () => {
+    const r = parseArgs(["--repo=/tmp/foo"]);
+    expect(r.repo).toBe("/tmp/foo");
+    expect(r.paths).toEqual([]);
+  });
+
+  it("(c) positional args land in paths in order", () => {
+    const r = parseArgs(["a.env", "src/b.ts", "c.txt"]);
+    expect(r.paths).toEqual(["a.env", "src/b.ts", "c.txt"]);
+  });
+
+  it("(d) mixed flags + positionals — flags consumed, positionals preserved", () => {
+    const r = parseArgs(["--repo=/x", "a.env", "--unknown", "b.env"]);
+    expect(r.repo).toBe("/x");
+    expect(r.paths).toEqual(["a.env", "b.env"]);
+  });
+});
+
+describe("CLI seam (slice 4) — isScannablePath", () => {
+  it("(a) source / config files are scannable", () => {
+    expect(isScannablePath("src/foo.ts")).toBe(true);
+    expect(isScannablePath("README.md")).toBe(true);
+    expect(isScannablePath(".env")).toBe(true);
+    expect(isScannablePath("config/prod.yaml")).toBe(true);
+  });
+
+  it("(b) test files are excluded (legitimate credential-shaped fixtures)", () => {
+    expect(isScannablePath("scripts/scan-secrets.test.mjs")).toBe(false);
+    expect(isScannablePath("scripts/foo.test.ts")).toBe(false);
+    expect(isScannablePath("src/bar.spec.ts")).toBe(false);
+  });
+
+  it("(c) binary extensions are excluded", () => {
+    expect(isScannablePath("docs/diagram.png")).toBe(false);
+    expect(isScannablePath("public/logo.svg")).toBe(true);
+    expect(isScannablePath("public/font.woff2")).toBe(false);
+    expect(isScannablePath("docs/spec.pdf")).toBe(false);
+  });
+
+  it("(d) empty string is not scannable (defensive)", () => {
+    expect(isScannablePath("")).toBe(false);
+  });
+});
+
+describe("CLI seam (slice 4) — file-system pipeline", () => {
+  /** @type {string} */
+  let repo;
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "scan-secrets-"));
+    execFileSync("git", ["-C", repo, "init", "-q"]);
+    execFileSync("git", ["-C", repo, "config", "user.email", "t@t"]);
+    execFileSync("git", ["-C", repo, "config", "user.name", "t"]);
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("(a) listScannableTrackedFiles — returns POSIX-relative tracked paths, sorted, excluding test fixtures", () => {
+    writeFileSync(join(repo, "a.env"), "x");
+    writeFileSync(join(repo, "b.test.mjs"), "x");
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, "src", "c.ts"), "x");
+    execFileSync("git", ["-C", repo, "add", "."]);
+    expect(listScannableTrackedFiles(repo)).toEqual(["a.env", "src/c.ts"]);
+  });
+
+  it("(b) listScannableTrackedFiles — empty repo returns empty array (no crash)", () => {
+    expect(listScannableTrackedFiles(repo)).toEqual([]);
+  });
+
+  it("(c) readScannableFiles — missing path is reported in errors, not files", () => {
+    const r = readScannableFiles(repo, ["does-not-exist.env"]);
+    expect(r.files).toEqual([]);
+    expect(r.errors).toEqual([{ path: "does-not-exist.env", reason: "missing" }]);
+  });
+
+  it("(d) readScannableFiles — files larger than the cap are skipped silently", () => {
+    const big = "x".repeat(2 * 1024 * 1024);
+    writeFileSync(join(repo, "big.txt"), big);
+    const r = readScannableFiles(repo, ["big.txt"]);
+    expect(r.files).toEqual([]);
+    expect(r.errors).toEqual([]);
+  });
+
+  it("(e) scanRepoForSecrets — clean tree → 0 violations", () => {
+    writeFileSync(join(repo, "README.md"), "Hello world. sk-test fixture, ghp_short label.");
+    execFileSync("git", ["-C", repo, "add", "."]);
+    const r = scanRepoForSecrets(repo, []);
+    expect(r.scanned).toBe(1);
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(f) scanRepoForSecrets — leaking tracked file is flagged with file path attached", () => {
+    writeFileSync(join(repo, "leak.env"), "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123");
+    execFileSync("git", ["-C", repo, "add", "."]);
+    const r = scanRepoForSecrets(repo, []);
+    expect(r.scanned).toBe(1);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.file).toBe("leak.env");
+    expect(r.violations[0]?.tag).toBe("github-pat");
+  });
+
+  it("(g) scanRepoForSecrets — positional paths override the full scan (lefthook mode)", () => {
+    writeFileSync(join(repo, "a.env"), "AKIAIOSFODNN7EXAMPLE");
+    writeFileSync(join(repo, "b.env"), "ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123");
+    execFileSync("git", ["-C", repo, "add", "."]);
+    const r = scanRepoForSecrets(repo, ["b.env"]);
+    expect(r.scanned).toBe(1);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.file).toBe("b.env");
+    expect(r.violations[0]?.tag).toBe("github-pat");
+  });
+
+  it("(h) scanRepoForSecrets — slice-3 annotation suppresses end-to-end through the CLI seam", () => {
+    writeFileSync(
+      join(repo, "fixture.env"),
+      [
+        "# @scan-secrets-allowed: documented test fixture",
+        "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+      ].join("\n"),
+    );
+    execFileSync("git", ["-C", repo, "add", "."]);
+    const r = scanRepoForSecrets(repo, []);
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(i) scanRepoForSecrets — test files in the tree are excluded by suffix even if they contain credential shapes", () => {
+    writeFileSync(
+      join(repo, "foo.test.mjs"),
+      "const fixture = 'ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123';",
+    );
+    execFileSync("git", ["-C", repo, "add", "."]);
+    const r = scanRepoForSecrets(repo, []);
+    expect(r.scanned).toBe(0);
+    expect(r.violations).toEqual([]);
+  });
+
+  it("(j) scanRepoForSecrets — staged-mode path that's been deleted is reported as missing, not a crash", () => {
+    const r = scanRepoForSecrets(repo, ["was-deleted.env"]);
+    expect(r.scanned).toBe(0);
+    expect(r.violations).toEqual([]);
   });
 });
