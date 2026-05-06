@@ -414,6 +414,34 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/scan-secrets.test.mjs
 
+  lockfile-integrity:
+    # vision.md § 13.5 / TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` §
+    # Measurement: every PR's `pnpm-lock.yaml` is diffed against `origin/main`
+    # and every same-`name@version` entry whose integrity hash changed is
+    # rejected — the empirical fingerprint of the 2025 chalk/debug supply-chain
+    # incident. Slices 1-3 (PRs #263, #264, #265) shipped the pure classifier,
+    # the diff walker, and the pnpm-lock.yaml parser in
+    # `scripts/check-lockfile-integrity.mjs`. This slice (4) wires the CLI into
+    # the gate. Push event runs the lint too — security gates are NOT PR-only,
+    # because a hijack landed via direct push must still surface and rotate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # diff against origin/main needs the merge base.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: lockfile-integrity lint
+        run: node scripts/check-lockfile-integrity.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-lockfile-integrity.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -963,6 +991,7 @@ jobs:
       - glossary-discipline
       - hygiene
       - linux-supervisor-integration
+      - lockfile-integrity
       - macos-supervisor-integration
       - maciek-smoke
       - mape-k-budget-cap
@@ -1005,6 +1034,7 @@ jobs:
                    "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
+                   "${{ needs.lockfile-integrity.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.mape-k-budget-cap.result }}" \
                    "${{ needs.mape-k-constraints-md-size.result }}" \

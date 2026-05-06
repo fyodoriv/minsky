@@ -75,7 +75,17 @@
 //   not a warning); rule #2 (the classifier is the swappable seam — if
 //   pnpm v10's lockfile shape changes the field name, only the walker
 //   changes, not this function).
-// Conformance: full — no I/O, no async, no LLM.
+// Conformance: full — slices 1–3 are pure (no I/O); slice 4 adds the CLI
+// boundary that does I/O via `readFileSync` + `git show` against `process.cwd()`.
+
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..");
 
 /**
  * The set of integrity-hash algorithms permitted in `pnpm-lock.yaml` per
@@ -484,6 +494,51 @@ function tallyBenignKind(summary, kind) {
   else if (kind === "version-bump") summary.versionBump += 1;
 }
 
+// Slice 4 (this file): wires the slice 1-3 seams into a runnable CLI + CI gate.
+// `runLockfileIntegrityCheck({ readTree, readBase })` — a pure-ish driver that
+// takes two file-reader thunks (one for the working-tree lockfile, one for the
+// `<diff-base>:pnpm-lock.yaml` blob) and returns the verdict. `main()` wires it
+// to the real filesystem + `git show`. Splitting the driver out lets the test
+// suite cover every CLI exit-path (no lockfile, lockfile-just-introduced,
+// unreachable diff base, supply-chain-attack signature) deterministically
+// without spawning git or touching the working tree.
+//
+// The CLI is diff-based, not full-scan: the verdict the gate exists to catch
+// (`hash-change-without-version-change`) is by definition a delta between two
+// snapshots of the same `name@version` key. A full-scan against the current
+// lockfile alone has nothing to compare against — it would always pass.
+// `--diff-base=<ref>` (default `origin/main`, override via env
+// `LOCKFILE_INTEGRITY_DIFF_BASE`) names the snapshot we compare against, the
+// same shape rule-3-doc-first / rule-6 / rule-12 already use; CI fetches
+// `origin/main` for every PR run, so the base is always reachable in CI.
+//
+// Edge-case behaviour matrix (each is exercised by paired tests, slice 4):
+//
+//   - tree has no `pnpm-lock.yaml`        → exit 0, "skipped" (nothing to defend)
+//   - base has no `pnpm-lock.yaml` (file just introduced in PR)
+//                                          → walker sees empty before, all
+//                                            entries "added", 0 violations
+//   - base ref is unreachable             → exit 2 (not 1) — the gate cannot
+//                                            verify integrity, fail-safe per
+//                                            Saltzer & Schroeder 1975 default
+//   - tree + base both healthy, no delta  → walker returns 0 violations, exit 0
+//   - tree differs from base, all bumps   → version-bump verdicts, exit 0
+//   - tree differs from base, hijack      → hash-change-without-version-change
+//                                            verdict, exit 1 with redacted
+//                                            before/after hash diagnostic
+//
+// Wired to:
+//   - `.github/workflows/ci.yml` `lockfile-integrity` job (push + PR — security
+//     gates are NOT PR-only because a hijack landed via direct push must still
+//     surface and rotate; mirrors the existing `secret-scan` / `otel-no-pii`
+//     wiring posture).
+//   - `STACK_MANIFEST` (`scripts/run-pre-pr-lint-stack.mjs`) for the daemon's
+//     `pnpm pre-pr-lint --stage=full` sweep.
+//   - `CI_BASH_GATE_BUCKETS.mustSucceed` (the bash aggregator's
+//     `[ "$r" = "success" ]` bucket — a `skipped` lockfile-integrity must NOT
+//     pass the gate; the four parity tests in `run-pre-pr-lint-stack.test.mjs`
+//     pin manifest ↔ ci.yml needs ↔ bash buckets ↔ docs).
+
 // Slice 3: pure pnpm-lock.yaml parser. ----------------------------------------
 //
 // `parsePnpmLockfile(text)` extracts the minimum shape `walkLockfileChanges`
@@ -693,3 +748,212 @@ export function parsePnpmLockfile(text) {
 
   return { packages: state.packages };
 }
+
+// Slice 4: CLI + diff-base resolver + CI gate. --------------------------------
+
+/**
+ * @typedef {object} CheckOutcome
+ * @property {0 | 1 | 2} exitCode
+ *   `0` = clean (no violations or no lockfile to scan).
+ *   `1` = supply-chain-attack signature found.
+ *   `2` = the gate cannot evaluate (base ref unreachable, IO error). The
+ *          fail-safe-defaults split (Saltzer & Schroeder 1975) makes the two
+ *          failure shapes distinguishable in CI: a `1` is "the lockfile was
+ *          tampered with"; a `2` is "we don't know". Both block the PR.
+ * @property {string} stdout    diagnostic suitable for `process.stdout.write`.
+ * @property {string} stderr    diagnostic suitable for `process.stderr.write`.
+ * @property {WalkerViolation[]} violations  exposed for tests.
+ */
+
+/**
+ * @typedef {object} ReaderOk
+ * @property {"ok"} kind
+ * @property {string} text
+ */
+/**
+ * @typedef {object} ReaderMissing
+ * @property {"missing"} kind
+ */
+/**
+ * @typedef {object} ReaderError
+ * @property {"error"} kind
+ * @property {string} reason
+ */
+/** @typedef {ReaderOk | ReaderMissing | ReaderError} ReaderResult */
+
+/**
+ * Pure driver. Given two readers (one for the working tree's lockfile, one
+ * for the diff-base's lockfile blob), produce the verdict + diagnostic. The
+ * CLI's `main()` is a thin wrapper around this — splitting the I/O boundary
+ * out lets the test suite cover every exit path without spawning git.
+ *
+ * @param {{ readTree: () => ReaderResult, readBase: () => ReaderResult }} input
+ * @returns {CheckOutcome}
+ */
+export function runLockfileIntegrityCheck({ readTree, readBase }) {
+  const tree = readTree();
+  if (tree.kind === "missing") {
+    return {
+      exitCode: 0,
+      stdout: "lockfile-integrity skipped: pnpm-lock.yaml not present in working tree.\n",
+      stderr: "",
+      violations: [],
+    };
+  }
+  if (tree.kind === "error") {
+    return {
+      exitCode: 2,
+      stdout: "",
+      stderr: `lockfile-integrity: cannot read working-tree pnpm-lock.yaml — ${tree.reason}\n`,
+      violations: [],
+    };
+  }
+
+  const base = readBase();
+  if (base.kind === "error") {
+    return {
+      exitCode: 2,
+      stdout: "",
+      stderr: `lockfile-integrity: cannot read base pnpm-lock.yaml — ${base.reason}\n`,
+      violations: [],
+    };
+  }
+
+  const beforeText = base.kind === "ok" ? base.text : "";
+  const before = parsePnpmLockfile(beforeText);
+  const after = parsePnpmLockfile(tree.text);
+  const { violations, summary } = walkLockfileChanges({ before, after });
+
+  if (violations.length === 0) {
+    return {
+      exitCode: 0,
+      stdout: `lockfile-integrity ok: ${summary.unchanged} unchanged, ${summary.added} added, ${summary.removed} removed, ${summary.versionBump} version-bump entries; 0 hash-change-without-version-change violations.\n`,
+      stderr: "",
+      violations: [],
+    };
+  }
+
+  const lines = ["lockfile-integrity: supply-chain-attack signatures detected:"];
+  for (const v of violations) {
+    lines.push(`  ${v.key}: ${v.code} — ${v.reason}`);
+  }
+  lines.push(
+    "",
+    "Fix one of:",
+    "  1. revert the lockfile change and rotate any credential whose tarball",
+    "     was swapped (every `hash-change-without-version-change` is",
+    "     cryptographically incompatible with a legitimate registry tarball);",
+    "  2. bump the package version alongside the integrity hash if the",
+    "     republish is intentional (the legitimate `version-bump` shape);",
+    "  3. rerun `pnpm install` against a clean cache if the diff is local",
+    "     drift (rare; usually a sign of registry-side resolution churn).",
+    "",
+    "See vision.md § 13.5 (security & privacy minimum-bar item #5 —",
+    "supply-chain hardening; the 2025 chalk/debug incident as load-bearing",
+    "precedent).",
+    "",
+  );
+
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr: `${lines.join("\n")}`,
+    violations,
+  };
+}
+
+/**
+ * @param {string[]} argv
+ * @param {Record<string, string | undefined>} [env]  defaults to `process.env`
+ *   — overridable for unit tests so the env-fallback path is exercised
+ *   deterministically without poking at `process.env`.
+ * @returns {{ diffBase: string, repo: string }}
+ */
+export function parseArgs(argv, env = process.env) {
+  let diffBase = env["LOCKFILE_INTEGRITY_DIFF_BASE"] ?? "origin/main";
+  let repo = REPO_ROOT;
+  for (const arg of argv) {
+    if (arg.startsWith("--diff-base=")) {
+      diffBase = arg.slice("--diff-base=".length);
+    } else if (arg.startsWith("--repo=")) {
+      repo = arg.slice("--repo=".length);
+    }
+  }
+  return { diffBase, repo };
+}
+
+/**
+ * Read a file from disk into the `ReaderResult` shape. `ENOENT` maps to
+ * `{ kind: "missing" }` (a healthy "no lockfile to scan" signal); any other
+ * error maps to `{ kind: "error", reason }` (the gate exits 2 — fail-safe).
+ *
+ * @param {string} absPath
+ * @returns {ReaderResult}
+ */
+function readFileAsReaderResult(absPath) {
+  try {
+    return { kind: "ok", text: readFileSync(absPath, "utf8") };
+  } catch (err) {
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    if (code === "ENOENT") return { kind: "missing" };
+    return { kind: "error", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Read the diff-base's `pnpm-lock.yaml` blob via `git show <ref>:pnpm-lock.yaml`.
+ * If the ref is unreachable → `{ kind: "error" }` (CI fail-safe). If the ref
+ * is reachable but the file didn't exist at that ref (i.e., the lockfile is
+ * being introduced in this PR) → `{ kind: "missing" }`, which the driver
+ * treats as an empty before-snapshot.
+ *
+ * @param {string} repo
+ * @param {string} diffBase
+ * @returns {ReaderResult}
+ */
+function readBaseLockfile(repo, diffBase) {
+  // Probe ref reachability separately from the file-existence question so the
+  // two failure shapes can be distinguished. `git rev-parse --verify` exits
+  // non-zero on an unreachable ref; `git show <ref>:path` exits non-zero
+  // EITHER on unreachable ref OR on a missing file at that ref.
+  try {
+    execFileSync("git", ["-C", repo, "rev-parse", "--verify", `${diffBase}^{commit}`], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    return {
+      kind: "error",
+      reason: `diff-base "${diffBase}" is unreachable (${err instanceof Error ? err.message.split("\n")[0] : "git rev-parse failed"})`,
+    };
+  }
+  try {
+    const text = execFileSync("git", ["-C", repo, "show", `${diffBase}:pnpm-lock.yaml`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return { kind: "ok", text };
+  } catch {
+    // ref is reachable (rev-parse passed) but pnpm-lock.yaml didn't exist at
+    // that ref — file is being introduced in this PR. Walker handles empty
+    // before-snapshot natively.
+    return { kind: "missing" };
+  }
+}
+
+function main() {
+  const { diffBase, repo } = parseArgs(process.argv.slice(2));
+  const treeLockfile = resolve(repo, "pnpm-lock.yaml");
+  const outcome = runLockfileIntegrityCheck({
+    readTree: () => readFileAsReaderResult(treeLockfile),
+    readBase: () => readBaseLockfile(repo, diffBase),
+  });
+  if (outcome.stdout.length > 0) process.stdout.write(outcome.stdout);
+  if (outcome.stderr.length > 0) process.stderr.write(outcome.stderr);
+  process.exit(outcome.exitCode);
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("check-lockfile-integrity.mjs") === true;
+if (invokedDirectly) main();
