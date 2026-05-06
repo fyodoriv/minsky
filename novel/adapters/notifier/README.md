@@ -141,3 +141,13 @@ import('@minsky/notifier').then(async (m) => {
 
 The subscriber should receive the push within ~1 s; the printed
 `{ ok: true }` confirms the round-trip.
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `Notification` body / title / tags supplied by daemon callers; HTTP responses from `ntfy.sh` (or self-hosted ntfy); `MINSKY_NTFY_TOPIC` / `MINSKY_NTFY_TOKEN` environment values.
+- **Trusted state**: stateless adapter (no shared state between `push()` calls); the auth token is resolved by the caller from the OS keychain — the adapter never shells out to `security` or reads from disk; the documented daemon pacing (≤3 pushes/day) caps third-party exposure.
+- **Trust boundary**: HTTPS to a third-party push service (`ntfy.sh` public tier by default; `serverBaseUrl` opt for self-hosted); topic name + payload bodies leak to the ntfy operator on the public tier — sensitive deployments must self-host on the user's Tailnet (the documented pivot path).
+- **STRIDE focus**: **I**nformation disclosure — push bodies are sent in cleartext relative to the ntfy operator; callers must never include secrets, file paths, or PII (the `daemon` morning-summary payload is task counts + token totals, not task content); **R**epudiation — `ntfy.sh` retains topic logs server-side, so deployments that need a non-repudiable audit trail must self-host; **D**enial-of-service — rate-limit (HTTP 429) is treated as a soft `yellow` selfTest signal so the operator can distinguish "we're noisy" from "ntfy is down" (chaos table row 3).
+- **Performance-first carve-out** (rule #13's relief valve): none declared. Push latency is fire-and-forget from the daemon's perspective; tightening it would not move security posture.

@@ -73,3 +73,13 @@ const overall = aggregateStatus(results); // "green" | "yellow" | "red"
 
 For back-compat, `@minsky/observability` continues to re-export these
 identifiers; existing imports keep working unchanged.
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `SelfTestResult[]` arrays passed to `aggregateStatus`; in the type system these are constrained to the closed `"green" | "yellow" | "red"` union, but a `JSON.parse`'d caller bypasses the compile-time guard.
+- **Trusted state**: zero runtime state; pure functions only; no I/O, no shared mutable state, no globals; the closed union is the only contract.
+- **Trust boundary**: the type boundary itself — `verbatimModuleSyntax` + `strict` + `noUncheckedIndexedAccess` in `tsconfig.base.json` enforce the closed union at compile time; any consumer that introduces a JSON edge (HTTP request, file parse) is responsible for runtime validation.
+- **STRIDE focus**: there is no STRIDE letter that applies directly to a pure leaf — no information to disclose, no service to deny, no privilege to elevate, no trust to repudiate. The closed union IS the security boundary; the future `parseSelfTestResult` zod schema (filed as `adapter-types-runtime-guard`) extends the boundary across the JSON edge for consumers that need it.
+- **Performance-first carve-out** (rule #13's relief valve): not applicable — the linear-time `aggregateStatus` scan is unconditionally cheap (chaos row 2: 1M elements in <100 ms on a single core); no carve-out warranted.

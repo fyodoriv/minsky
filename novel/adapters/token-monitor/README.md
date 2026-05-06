@@ -224,3 +224,13 @@ Verification command (run from this directory after `pnpm build`):
 ```sh
 npm publish --dry-run --loglevel=info
 ```
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `.jsonl` files under `<configDir>/projects/` (written by Claude Code itself; same-user trust); `configDir` / `plan` / `cap` constructor opts; `MINSKY_PLAN_CAP_OVERRIDE` env via the supervisor.
+- **Trusted state**: `PLAN_CAPS` is a frozen object literal with deliberately-above-Anthropic-ceiling values (calibration note 2026-05-05 — the real rate-limit is Anthropic's 429, not our internal threshold); the `decide()` reduction is pure; the algorithm is mirrored from upstream Maciek `data/analyzer.py` — no operator-overridable code path inside the parser.
+- **Trust boundary**: filesystem read on `~/.claude/projects/` under the same user account; zero network I/O; `JSON.parse` is the only parser surface and is wrapped in per-line graceful-degrade (chaos row 2).
+- **STRIDE focus**: **T**ampering — malformed JSONL (truncated writes, partial flushes, future Anthropic schema additions) is handled by per-line `JSON.parse` + skip (chaos rows 2 + 5); the parser never throws on a single bad line; **I**nformation disclosure — `snapshot()` returns aggregate token counts only (`tokensRemainingInWindow`, `windowSizeTokens`, `secondsUntilWindowReset`); raw `message.id` / `requestId` values are used internally for dedup but never escape the parser; **D**enial-of-service — recursive `rglob` over `~/.claude/projects/` is O(N) on session-log size; the snapshot interval (BudgetGuard's 5-60 s default) bounds the cost; on `EACCES`/`ENOENT` the adapter graceful-degrades to "full plan cap remaining" (chaos rows 1 + 4) so a permission flip never blocks the supervisor.
+- **Performance-first carve-out** (rule #13's relief valve): the recursive JSONL scan IS performance-sensitive — on multi-GB log roots it can dominate snapshot latency. The carve-out path is the BudgetGuard polling cadence (currently 5-60 s); tightening below the JSONL scan's 99th-percentile time would block other ticks. No carve-out is declared today — current cadence comfortably exceeds scan time on operator hardware.
