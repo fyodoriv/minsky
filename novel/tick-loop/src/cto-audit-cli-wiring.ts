@@ -28,7 +28,11 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { CompletedIterationSignals, CtoAuditLock } from "./post-task-cto-audit.js";
+import {
+  CTO_AUDIT_PR_LABEL,
+  type CompletedIterationSignals,
+  type CtoAuditLock,
+} from "./post-task-cto-audit.js";
 
 // ---- File-backed lock -----------------------------------------------------
 
@@ -212,4 +216,102 @@ async function safeCount(execFile: ExecFileLike, kind: "issue" | "pr"): Promise<
     },
     0,
   );
+}
+
+// ---- Label preflight ------------------------------------------------------
+
+/** Outcome categories an `ensureCtoAuditLabel` invocation can resolve to. */
+export type EnsureLabelOutcome =
+  /** Label was missing and `gh label create` succeeded. */
+  | "created"
+  /** Label already existed; `gh label create` was not invoked. */
+  | "exists"
+  /** `gh label list`/`create` threw (offline, gh missing, auth missing). */
+  | "skipped-degraded";
+
+/**
+ * Idempotently ensure the `minsky:cto-audit` label exists on the current
+ * repo so the audit's first PR-create doesn't fail with "label not found"
+ * and the pre-registered measurement query (`gh pr list --label
+ * minsky:cto-audit ...`) can see audit PRs from the moment they open.
+ *
+ * The CTO_PROMPT_HEADER tells the spawned agent to create the label
+ * idempotently, but that path is LLM-runtime-dependent; this preflight is
+ * the deterministic substrate equivalent — the supervisor handles it once
+ * at startup so the agent never has to.
+ *
+ * Graceful-degrade per rule #7: when `gh` is missing, offline, or
+ * unauthenticated, return `"skipped-degraded"` rather than crashing. The
+ * audit's own brief still instructs the agent to create the label as a
+ * fallback path; the lint (`scripts/check-cto-audit-pr-conventions.mjs`)
+ * blocks any audit PR that lands without the label, so a degraded
+ * preflight is not a silent failure.
+ *
+ * @otel-exempt thin async helper invoked at supervisor startup; the
+ *   `bin/tick-loop.mjs` boundary carries the start-up span.
+ */
+export async function ensureCtoAuditLabel(opts: {
+  readonly execFile: ExecFileLike;
+}): Promise<EnsureLabelOutcome> {
+  const { execFile } = opts;
+  const exists = await labelExists(execFile);
+  if (exists === "unknown") return "skipped-degraded";
+  if (exists === "yes") return "exists";
+  return createLabel(execFile);
+}
+
+/**
+ * Probe `gh label list --search ${label} --json name --jq '.[].name'`. The
+ * `--search` is a best-effort filter; we still match the exact label name
+ * out of the result to avoid false positives from substring matches (e.g.
+ * `minsky:cto-audit-future`).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function labelExists(execFile: ExecFileLike): Promise<"yes" | "no" | "unknown"> {
+  return execFile("gh", [
+    "label",
+    "list",
+    "--search",
+    CTO_AUDIT_PR_LABEL,
+    "--json",
+    "name",
+    "--jq",
+    ".[].name",
+  ])
+    .then((raw) => {
+      const names = raw
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      return names.includes(CTO_AUDIT_PR_LABEL) ? ("yes" as const) : ("no" as const);
+    })
+    .catch(() => "unknown" as const);
+}
+
+/**
+ * Run `gh label create` with the brief's documented `--description` +
+ * `--color`. Race condition: if a parallel supervisor invocation creates
+ * the label between our `labelExists` check and this call, `gh` returns a
+ * "already exists" error; we treat that as success (`"exists"`) rather
+ * than `"skipped-degraded"`.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function createLabel(execFile: ExecFileLike): Promise<EnsureLabelOutcome> {
+  return execFile("gh", [
+    "label",
+    "create",
+    CTO_AUDIT_PR_LABEL,
+    "--description",
+    "Filed by post-task CTO audit",
+    "--color",
+    "0e8a16",
+  ])
+    .then(() => "created" as const)
+    .catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/already exists/i.test(msg)) return "exists" as const;
+      return "skipped-degraded" as const;
+    });
 }

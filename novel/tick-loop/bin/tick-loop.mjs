@@ -75,6 +75,7 @@ import {
   createGitGhSignalsBuilder,
   createPnpmMetricsRender,
   createPnpmSnapshotCapture,
+  ensureCtoAuditLabel,
   fromRealBudgetGuard,
   runDaemon,
 } from "../dist/index.js";
@@ -232,22 +233,49 @@ const ctoAuditEnabled = (() => {
   const normalised = raw.trim().toLowerCase();
   return normalised === "1" || normalised === "true";
 })();
+/**
+ * Promisified `execFile` adapter that returns trimmed stdout and rejects
+ * on non-zero exit. Reused by both the CTO-audit signals collector and
+ * the audit-label preflight below.
+ *
+ * @type {import("../dist/index.js").ExecFileLike}
+ */
+const execFileLike = (() => {
+  const execFile = promisify(execFileCb);
+  return async (file, args) => {
+    const { stdout } = await execFile(file, [...args], { encoding: "utf-8" });
+    return stdout;
+  };
+})();
 const ctoAuditSeam = (() => {
   if (!ctoAuditEnabled) return undefined;
   const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
   const lockDir = resolve(minskyHome, ".minsky", "cto-audit-lock");
-  const execFile = promisify(execFileCb);
-  /** @type {import("../dist/index.js").ExecFileLike} */
-  const execFileLike = async (file, args) => {
-    const { stdout } = await execFile(file, [...args], { encoding: "utf-8" });
-    return stdout;
-  };
   return {
     spawn: spawnStrategy,
     lock: createFileBackedCtoAuditLock(lockDir),
     buildSignals: createGitGhSignalsBuilder({ execFile: execFileLike }),
   };
 })();
+
+// Audit-label preflight: when the CTO-audit seam is wired, idempotently
+// ensure the `minsky:cto-audit` label exists on the current GitHub repo
+// before the supervisor enters its tick loop. Without this, the audit's
+// first PR-create can fail with "label not found" and the pre-registered
+// measurement query (`gh pr list --label minsky:cto-audit ...`) is unable
+// to see audit PRs from the moment they open. The CTO_PROMPT_HEADER also
+// instructs the spawned agent to create the label idempotently as a
+// fallback, but that path is LLM-runtime-dependent; this preflight is the
+// deterministic substrate so the agent never has to.
+//
+// Graceful-degrade per rule #7: outcome `"skipped-degraded"` (gh missing,
+// offline, unauthenticated) does not crash the supervisor — the lint
+// (`scripts/check-cto-audit-pr-conventions.mjs`) is the post-hoc gate
+// that blocks any audit PR that lands without the label.
+if (ctoAuditSeam !== undefined) {
+  const outcome = await ensureCtoAuditLabel({ execFile: execFileLike });
+  process.stdout.write(`[tick-loop] cto-audit label preflight: ${outcome}\n`);
+}
 
 // Daily-changelog acceptance criterion (3) — CLI-side construction of the
 // `ChangelogSeam`. Default is OFF for parity with the CTO-audit opt-in
