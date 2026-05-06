@@ -245,6 +245,29 @@ describe("lefthook pre-push contract", () => {
     const prePushSection = lefthookYml.split(/^pre-push:$/m)[1] ?? "";
     expect(prePushSection).toContain("pnpm pre-pr-lint");
   });
+
+  // Slice 19/N: the lefthook→pnpm→canonical-script chain has a third link
+  // unpinned by the test above. `pnpm pre-pr-lint` resolves through
+  // `package.json scripts["pre-pr-lint"]`; if a future PR removes that entry
+  // or rewrites it to invoke a different file, lefthook pre-push fails with a
+  // confusing pnpm error and the daemon brief's `pnpm pre-pr-lint` mandate
+  // silently misroutes — both transports break in lockstep, but neither CI
+  // nor the slice-5 manifest-vs-CI test catches the drift (CI invokes the
+  // individual `needs:` jobs directly, not through pnpm). The two tests
+  // below pin the missing link: the script entry exists, and its body still
+  // invokes the canonical manifest module path the rest of the gate keys
+  // off. Same shape as the lefthook test above (string-contains pin on a
+  // single source of truth in a small config file).
+  test("package.json defines a `pre-pr-lint` script (so `pnpm pre-pr-lint` resolves)", () => {
+    const pkgJson = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8"));
+    expect(pkgJson.scripts?.["pre-pr-lint"]).toBeTypeOf("string");
+    expect(pkgJson.scripts["pre-pr-lint"].length).toBeGreaterThan(0);
+  });
+
+  test("package.json `pre-pr-lint` script invokes the canonical manifest module", () => {
+    const pkgJson = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8"));
+    expect(pkgJson.scripts["pre-pr-lint"]).toContain("scripts/run-pre-pr-lint-stack.mjs");
+  });
 });
 
 describe("stripGitHookEnv", () => {
