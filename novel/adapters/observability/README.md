@@ -112,3 +112,13 @@ the only consumer in v0 is the adapter's own `selfTest()`; setting globals
 from a constructor causes test-isolation pollution and gives no value yet.
 A future task `register-otel-globals-at-bootstrap` will add a single
 explicit registration call site in `setup.sh`'s adapter bootstrap.
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `ObservabilityEvent` attribute payloads supplied by daemon callers; `OTEL_EXPORTER_OTLP_ENDPOINT` / `endpoint` opt; OTLP HTTP responses from a collector.
+- **Trusted state**: SDK-managed providers (constructor-scoped, not global per the v0 deviation above); `serviceName` is constructor-set; the in-memory exporters injected by tests are deterministic.
+- **Trust boundary**: OTLP/HTTP to a collector — localhost (`http://127.0.0.1:5080`) for the OpenObserve install, or a remote backend; span / metric / log payloads cross network when the endpoint is non-loopback.
+- **STRIDE focus**: **I**nformation disclosure — span attributes and log bodies must never carry PII or secrets; the sibling P0 `otel-no-pii-in-spans-lint` (rule #13.5) is the deterministic gate at CI; **D**enial-of-service — the OTLP exporter queues asynchronously and drops on backpressure (chaos row 1: `iptables` DROP on 4318 still resolves `selfTest()` `green` within 5 s) so a misbehaving collector cannot stall the daemon's hot loop; **T**ampering — malformed metric values (e.g., `Number.NaN`, chaos row 5) are caught by the `selfTest()` try/catch and surfaced as `red`.
+- **Performance-first carve-out** (rule #13's relief valve): the fire-and-forget exporter contract IS the carve-out — any synchronous flush before returning would couple caller latency to collector latency, violating rule #6 (stay alive). Spans are best-effort, not load-bearing for safety.

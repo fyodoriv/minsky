@@ -171,3 +171,13 @@ import('@minsky/persona-spawner').then(async (m) => {
 The spawned OMC session writes its team-state under
 `./.omc/state/team/manual-smoke/`; the printed
 `{ exitCode, durationMs, omcStateDir }` confirms the round-trip.
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: `taskId`, `persona`, `workingDir` strings passed to `child_process.spawn` argv; the `omc` binary itself (resolved via PATH from `omcBin`); `.omc/state/team/<teamName>/` directory contents written by the child process.
+- **Trusted state**: `PERSONA_DISPATCH_TABLE` is a frozen object literal (`Object.freeze`); the dispatch logic is a pure function (Wooldridge 2009 — role assignment); `omcBin` defaults to bare `'omc'` (PATH lookup) — operator-overridable via constructor opt for self-hosted deployments.
+- **Trust boundary**: subprocess spawn under the same user account; argv is passed as an array (Node's default `shell: false`), so `taskId` / `persona` / `workingDir` are never shell-interpolated; the spawned OMC session inherits the user's environment and disk privileges — no sandbox at the adapter layer (the supervisor's systemd / launchd unit-files own that boundary, slice 4 of rule #13).
+- **STRIDE focus**: **E**levation of privilege — Node's `spawn(omc, [argv...])` with the default `shell: false` blocks argv injection from caller-supplied strings; the adapter never builds a shell command line; **T**ampering — `omc` is PATH-resolved, so an attacker who controls earlier `$PATH` entries could shadow the binary; mitigated only by the user's own PATH discipline (the supervisor unit-files set an explicit minimal PATH per the live-fire-smoke skill); **D**enial-of-service — a runaway OMC session is bounded by the daemon's tick budget + budget-guard PAUSE; the chaos table's row 3 (no team-state produced) covers the empty-output recovery path.
+- **Performance-first carve-out** (rule #13's relief valve): none declared. Spawn cadence is rate-limited by the daemon's tick (≥30 s default), well below any throughput tier where security posture would conflict with latency.

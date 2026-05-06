@@ -112,3 +112,13 @@ const client: MessagesClient = {
 };
 const opt = new AnthropicPromptOptimizer({ client });
 ```
+
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003. Treat LLM outputs per OWASP LLM Top 10 (2025 ed.) — model output is never trusted text.
+
+- **Untrusted inputs**: model `content` blocks returned from `messages.create` (potential prompt-injection / jailbreak per OWASP LLM01); operator-supplied A/B `variants[].system` and `.user` template strings; `inputs[]` payloads bound into the user template; `ANTHROPIC_API_KEY` from env.
+- **Trusted state**: the cache-prefix invariant (`cache_control` on the system prefix) is asserted by `anthropic.test.ts` per chaos row 5 — silent miss = loud test failure; the `runABTest` winner-selection is a pure reduction over scored results.
+- **Trust boundary**: HTTPS to the Anthropic API; system + user prompts cross the wire; model output crosses back as untrusted text.
+- **STRIDE focus**: **T**ampering — `structured()` v0 is `JSON.parse`'d without further runtime validation; downstream callers must validate against their own domain schema (the partial conformance is documented above and the future zod-rider tightens this); **I**nformation disclosure — operator-supplied system prompts cross to Anthropic, so callers must never embed secrets / API keys / PII in the system prefix (the cache-control invariant cannot defend against poor prompt hygiene — it only optimises spend); **D**enial-of-service — an A/B with N variants × M inputs costs N×M API calls; cost-bounded by caller via the `inputs.length` they pass; the daemon's budget-guard PAUSE is the upstream relief valve.
+- **Performance-first carve-out** (rule #13's relief valve): the `cache_control` system-prefix pin IS a token-spend optimisation (rule #1's "performance comes first") — but breaking it would silently inflate spend (chaos row 5), so the test-asserted invariant prevents the carve-out from quietly disabling the security posture. They reinforce each other.
