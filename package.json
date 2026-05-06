@@ -22,6 +22,7 @@
     "changelog:snapshot": "node scripts/changelog-snapshot.mjs",
     "metrics:render": "node scripts/metrics-render.mjs",
     "cto-audit:metrics": "node scripts/cto-audit-metrics.mjs",
+    "daemon-pr-lint:metrics": "node scripts/daemon-pr-lint-metrics.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
     "dogfood": "./setup.sh --dogfood",
