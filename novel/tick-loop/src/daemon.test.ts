@@ -1789,6 +1789,29 @@ describe("buildDaemonBrief", () => {
       }
     }
   });
+
+  it("includes the PR self-grade copy-paste template with the lint-passing format", () => {
+    const sample = [
+      "# Tasks",
+      "",
+      "## P0",
+      "",
+      "- [ ] `t` — clean",
+      "  - **ID**: t",
+      "  - **Tags**: p0",
+      "  - **Hypothesis**: H",
+      "",
+    ].join("\n");
+    const brief = buildDaemonBrief({ taskId: "t", tasksMdContent: sample });
+    expect(brief).toContain("## PR self-grade template");
+    expect(brief).toContain("- **Predicted**:");
+    expect(brief).toContain("- **Observed**:");
+    expect(brief).toContain("- **Match**: yes | no | partial");
+    expect(brief).toContain("- **Lesson**:");
+    expect(brief).toContain("DO NOT REWRITE THIS FORMAT");
+    expect(brief).toMatch(/\*\*Predicted:\*\*[^\n]*colon INSIDE bold/);
+    expect(brief).toMatch(/\*\*Match:\*\*[^\n]*colon INSIDE bold/);
+  });
 });
 
 describe("extractOpenP0TaskIds", () => {
