@@ -48,6 +48,13 @@ export interface SpawnInput {
   readonly env: NodeJS.ProcessEnv;
   /** Optional cancellation signal — the supervisor's stop signal. */
   readonly signal?: AbortSignal;
+  /**
+   * Optional per-iteration args appended to the Strategy's base args.
+   * Used by `daemon-parallel-worktree-launch` slice 2.5 to inject
+   * `--worktree <daemon-N-taskId>` per claimed task without re-constructing
+   * the Strategy. `[]` or omitted preserves the v0 contract.
+   */
+  readonly extraArgs?: readonly string[];
 }
 
 /**
@@ -179,8 +186,9 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
    */
   spawn(input: SpawnInput): Promise<SpawnResult> {
     const startedAt = Date.now();
+    const argv = [...this.args, ...(input.extraArgs ?? [])];
     return new Promise<SpawnResult>((resolve, reject) => {
-      const child = this.spawnFn(this.command, [...this.args], {
+      const child = this.spawnFn(this.command, argv, {
         env: input.env,
         stdio: ["pipe", "pipe", "pipe"],
         ...(input.signal === undefined ? {} : { signal: input.signal }),
