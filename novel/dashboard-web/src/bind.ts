@@ -1,3 +1,4 @@
+// <!-- scope: human-approved 2026-05-06 — operator directive: vision.md rule #13.4 security minimum bar item 4. Pre-registered task: `dashboard-localhost-only-by-default` (P0, security-privacy-priority-substrate). -->
 /**
  * Dashboard bind-hostname resolution. Vision rule #13.4 ("Dashboard binds to
  * 127.0.0.1 by default — never 0.0.0.0 without explicit operator opt-in")
