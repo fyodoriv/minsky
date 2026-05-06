@@ -23,6 +23,7 @@
     "metrics:render": "node scripts/metrics-render.mjs",
     "cto-audit:metrics": "node scripts/cto-audit-metrics.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",
+    "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
     "dogfood": "./setup.sh --dogfood",
     "dogfood:doctor": "./setup.sh --doctor",
     "dogfood:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
