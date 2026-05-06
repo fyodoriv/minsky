@@ -41,7 +41,6 @@
 
 <!-- daemon-pre-pr-lint-gate (P0) — closed 2026-05-06. All substrate on main across PRs #218 (closed-as-dup), #219, #220, #221, #222, #224, #225, #226, #227 (closed-as-superseded), #228, #229, #230, #231, #232, #233, #235, #236, #237, #240, #241, #243, #245 (slices 1-25/N). Pre-registered metric is GREEN: 47/50 = 0.940 daemon-PR clean-CI pass-rate (threshold ≥0.80). Daemon noop'd cleanly across iterations 95-110 (~16 noop iters with same "substrate complete + metric green" reasoning). Removed to free queue and to validate the new `daemon-task-scope-explosion` invariant from #239 — this task shipped 25 slices in 24h, which is exactly what that invariant catches. Operator-curated cleanup pattern (cf. PR #195 daily-changelog, #217 post-task-cto-audit). -->
 
-
 - [ ] `daemon-fix-own-pr-on-ci-failure` — when daemon's PR fails CI, daemon automatically opens a fix commit on the same branch instead of noop-iterating
   - **ID**: daemon-fix-own-pr-on-ci-failure
   - **Tags**: p0, daemon, supervisor, throughput, self-improvement, pick-next
