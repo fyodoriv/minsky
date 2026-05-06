@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  CI_BASH_GATE_BUCKETS,
   CI_ENV_DEPENDENT_JOBS,
   CI_TO_MANIFEST_ALIAS,
   STACK_MANIFEST,
@@ -452,6 +453,157 @@ describe("ci.yml aggregator bash-loop drift-protection", () => {
     expect(checkedJobs).toContain("biome");
     expect(checkedJobs).toContain("typecheck");
     expect(checkedJobs).toContain("linux-supervisor-integration"); // from the success|skipped bucket
+  });
+
+  // Slice 21/N: pins per-bucket membership. Slice 15 pins the union of the
+  // three bash buckets equals `needs:`, but a regression that moves
+  // `pr-self-grade` from `prOnlySkippable` (success|skipped) to
+  // `mustSucceed` (only success) would silently break every push to `main`
+  // without tripping the union check. Inversely, moving `biome` from
+  // `mustSucceed` to `supervisorSkippable` would silently ungate the lint —
+  // a `skipped` biome would now pass the gate. Pinning each bucket against
+  // `CI_BASH_GATE_BUCKETS` (canonical constant — rule #2 — single seam,
+  // single pin) catches both shapes.
+
+  /**
+   * Extract the three bash buckets from the `ci:` aggregator's `gate` step
+   * separately. Each bucket is a `for r in "${{ needs.X.result }}" \ ... ; do
+   * <body>; done` block; the first uses `[ "$r" = "success" ] || fail=1`
+   * (mustSucceed), the next two use `case "$r" in success|skipped) ;; *)
+   * fail=1 ;;` (skippable). Distinguishing them needs the body, not just the
+   * `for` line — the same job name could in principle appear in multiple
+   * buckets (a lint typo) and the slice 15 union test would still pass.
+   *
+   * @param {string} yml
+   * @returns {{ mustSucceed: Set<string>, skippable: Set<string>[] }}
+   *   `skippable` is an array because the workflow has two distinct
+   *   skippable buckets (supervisor-integration, pr-only). The caller
+   *   resolves which is which by membership against the canonical constant.
+   */
+  /**
+   * Extract `needs.<name>.result` references from a single bucket's `for`
+   * args. Pulled out of `extractAggregatorBashBuckets` to keep that
+   * function's cognitive complexity below the biome cap.
+   *
+   * @param {string} args
+   * @returns {Set<string>}
+   */
+  function namesFromBashForArgs(args) {
+    /** @type {Set<string>} */
+    const names = new Set();
+    const re = /\$\{\{\s*needs\.([a-z][a-z0-9-]*)\.result\s*\}\}/g;
+    for (const m of args.matchAll(re)) {
+      if (m[1] !== undefined) names.add(m[1]);
+    }
+    return names;
+  }
+
+  /**
+   * Classify a single `for r in <args>; do <body>; done` block by the body's
+   * comparator. Returns `"must-succeed"` for `[ "$r" = "success" ]`,
+   * `"skippable"` for `case "$r" in success|skipped) ;;`, or `null` for any
+   * other body shape (the parser ignores those — the workflow doesn't
+   * currently have any, but a future edit might).
+   *
+   * @param {string} body
+   * @returns {"must-succeed" | "skippable" | null}
+   */
+  function classifyBashForBody(body) {
+    if (body.includes('= "success" ]')) return "must-succeed";
+    if (body.includes("success|skipped")) return "skippable";
+    return null;
+  }
+
+  /**
+   * Pull every `for r in <args>; do <body> done` block out of the ci block
+   * as `{kind, names}` records, dropping any block whose body shape we
+   * don't recognise.
+   *
+   * @param {string} ciBlock
+   * @returns {{ kind: "must-succeed" | "skippable", names: Set<string> }[]}
+   */
+  function parseBashForBlocks(ciBlock) {
+    // Args span multi-line continuations (` \\\n`); body is whatever sits
+    // between `do` and `done`. `[\s\S]` makes `.` cross newlines.
+    const blockRe = /for r in ([\s\S]*?); do([\s\S]*?)done/g;
+    return [...ciBlock.matchAll(blockRe)].flatMap((match) => {
+      const kind = classifyBashForBody(match[2] ?? "");
+      if (kind === null) return [];
+      return [{ kind, names: namesFromBashForArgs(match[1] ?? "") }];
+    });
+  }
+
+  /**
+   * @param {string} yml
+   * @returns {{ mustSucceed: Set<string>, skippable: Set<string>[] }}
+   */
+  function extractAggregatorBashBuckets(yml) {
+    const ciStart = yml.search(/^ {2}ci:$/m);
+    if (ciStart < 0) throw new Error("ci.yml has no top-level `ci:` job");
+    const blocks = parseBashForBlocks(yml.slice(ciStart));
+    const mustSucceed = new Set(
+      blocks.filter((b) => b.kind === "must-succeed").flatMap((b) => [...b.names]),
+    );
+    const skippable = blocks.filter((b) => b.kind === "skippable").map((b) => b.names);
+    return { mustSucceed, skippable };
+  }
+
+  test("each bash bucket's membership matches CI_BASH_GATE_BUCKETS (per-bucket)", () => {
+    const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    const parsed = extractAggregatorBashBuckets(yml);
+
+    // mustSucceed is direct.
+    expect([...parsed.mustSucceed].sort()).toEqual([...CI_BASH_GATE_BUCKETS.mustSucceed].sort());
+
+    // The two skippable buckets are distinguished by membership against
+    // the canonical constants (the workflow's source order is informational
+    // — the test resolves identity by content, not position).
+    expect(parsed.skippable.length).toBe(2);
+    const expectedSupervisor = new Set(CI_BASH_GATE_BUCKETS.supervisorSkippable);
+    const expectedPrOnly = new Set(CI_BASH_GATE_BUCKETS.prOnlySkippable);
+    /** @type {Set<string> | undefined} */
+    let supervisorBucket;
+    /** @type {Set<string> | undefined} */
+    let prOnlyBucket;
+    for (const bucket of parsed.skippable) {
+      if ([...bucket].some((n) => expectedSupervisor.has(n))) {
+        supervisorBucket = bucket;
+      } else {
+        prOnlyBucket = bucket;
+      }
+    }
+    expect(supervisorBucket).toBeDefined();
+    expect(prOnlyBucket).toBeDefined();
+    expect([...(supervisorBucket ?? [])].sort()).toEqual([...expectedSupervisor].sort());
+    expect([...(prOnlyBucket ?? [])].sort()).toEqual([...expectedPrOnly].sort());
+  });
+
+  test("CI_BASH_GATE_BUCKETS partitions `needs:` (no overlap, full coverage)", () => {
+    // Sanity invariant on the canonical constant itself: the three buckets
+    // must be disjoint, and their union must equal `needs:`. If a future
+    // edit accidentally adds a job to two buckets, the bash gate's
+    // semantics for that job become whichever check `fail=1` runs first
+    // (mustSucceed wins because it appears first in the workflow) — which
+    // the bucket-membership test above would catch only if the job's
+    // position changed.
+    const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    const ciNeeds = new Set(extractCiAggregatorNeeds(yml));
+    const { mustSucceed, supervisorSkippable, prOnlySkippable } = CI_BASH_GATE_BUCKETS;
+    const overlapMustSupervisor = [...mustSucceed].filter((n) => supervisorSkippable.has(n));
+    const overlapMustPrOnly = [...mustSucceed].filter((n) => prOnlySkippable.has(n));
+    const overlapSupervisorPrOnly = [...supervisorSkippable].filter((n) => prOnlySkippable.has(n));
+    expect({ overlapMustSupervisor, overlapMustPrOnly, overlapSupervisorPrOnly }).toEqual({
+      overlapMustSupervisor: [],
+      overlapMustPrOnly: [],
+      overlapSupervisorPrOnly: [],
+    });
+    const union = new Set([...mustSucceed, ...supervisorSkippable, ...prOnlySkippable]);
+    const missingFromConstant = [...ciNeeds].filter((n) => !union.has(n));
+    const extraInConstant = [...union].filter((n) => !ciNeeds.has(n));
+    expect({ missingFromConstant, extraInConstant }).toEqual({
+      missingFromConstant: [],
+      extraInConstant: [],
+    });
   });
 });
 
