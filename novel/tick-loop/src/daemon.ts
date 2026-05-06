@@ -836,6 +836,15 @@ function isEnoent(err: unknown): boolean {
  * picked task's block + an anti-noop directive + a priority-discipline
  * gate.
  *
+ * Section order (cache-friendliness, 2026-05-06): stable content first
+ * (iteration directive, pre-PR lint-stack gate, optimization-discipline
+ * gate — invariant across iterations) so Anthropic's prompt cache (5-min
+ * TTL, longest-common-prefix matching, 90% read discount) sees a stable
+ * prefix; volatile content last (priority-discipline gate, current task
+ * block — change every iteration as tasks ship and queue shifts) so the
+ * volatile suffix doesn't break the prefix chain. Slice 1 of
+ * `daemon-cross-iteration-prompt-cache`.
+ *
  * Anti-noop directive (2026-05-05): the placeholder brief
  * `"daemon brief for ${taskId}"` led claude to default to "refresh the
  * brief in TASKS.md" (1-line additions, no code, 87+ iterations of churn
@@ -869,17 +878,6 @@ export function buildDaemonBrief(args: {
       : `**STOP.** Your picked task \`${args.taskId}\` is NOT in the open P0 set above. Output \`noop, exiting — priority discipline: '${args.taskId}' is not the highest-priority unclaimed P0; should pick '${openP0s[0]}' instead\` to stdout and DO NOT open a PR. Exception: if your picked task's block contains \`**Pick-next**: yes\` AND no open P0 has \`**Pick-next**: yes\`, the operator has explicitly overridden — proceed and note the override in your reason.`;
   return [
     `# Daemon iteration brief for \`${args.taskId}\``,
-    "",
-    "## Task block (current TASKS.md)",
-    "",
-    block ??
-      "(task block not found in TASKS.md — task may have been closed; if so, exit without writing files)",
-    "",
-    "## Priority-discipline gate",
-    "",
-    `Open P0 tasks (unclaimed, unblocked, tagged \`p0\`): ${openP0List}`,
-    "",
-    priorityVerdict,
     "",
     "## Iteration directive",
     "",
@@ -920,6 +918,17 @@ export function buildDaemonBrief(args: {
     "Bundle the optimization with the main task's PR (small enough to be one commit on the same branch). If you cannot identify an optimization this iteration, note `optimization: none-this-iteration: <one-line reason>` in your iteration reason — silence is failure (Beyer SRE 2016 Ch. 6). Anti-vanity guard: the optimization must be measurable — token savings (input or output bytes), wall-time savings (ms), or eliminated round-trip count. Do not file vague optimizations like 'cleaner code' or 'better organization'.",
     "",
     "Pivot threshold (rule #9): if the optimization gate produces ≥1 trivially-rejected commit per week (e.g., a 1-byte whitespace change), the threshold is too loose — tighten the eligibility to ≥10-byte savings minimum before retiring.",
+    "",
+    "## Priority-discipline gate",
+    "",
+    `Open P0 tasks (unclaimed, unblocked, tagged \`p0\`): ${openP0List}`,
+    "",
+    priorityVerdict,
+    "",
+    "## Task block (current TASKS.md)",
+    "",
+    block ??
+      "(task block not found in TASKS.md — task may have been closed; if so, exit without writing files)",
     "",
   ].join("\n");
 }
