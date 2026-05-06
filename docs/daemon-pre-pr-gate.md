@@ -31,7 +31,7 @@ Each component has one job. The manifest is the seam (rule #2 — single source 
 
 ## What the gate enforces
 
-The fast stage (default) runs the eight lints that close ~80% of historical daemon-PR failure modes:
+The fast stage (default) runs the nine lints that close the five empirically-named daemon-PR failure modes (markdownlint MD001, rule-12 scope opt-out, rule-3 doc-first, rule-6 catch annotations, rule-7 chaos parsing — the brief's pre-fix observation set), plus the four cheap structural checks that keep the whole tree compiling:
 
 - `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`.
 - `typecheck` — `tsc --noEmit` across the workspace.
@@ -40,9 +40,10 @@ The fast stage (default) runs the eight lints that close ~80% of historical daem
 - `rule-2-dep-coverage` — every cross-package import has a Strategy seam.
 - `rule-3-doc-first` — every `novel/**/*.ts` change touches a doc (or carries a deferral marker).
 - `rule-6-let-it-crash` — every `try/catch` carries an `// rule-6:` annotation explaining the swallow.
+- `rule-7-chaos-coverage` — every `novel/**/README.md` lists a chaos test for each public artefact (promoted from full-only to fast on 2026-05-06 in slice 8/N — the 5th and final empirical failure mode now gated pre-PR rather than only at lefthook).
 - `rule-12-scope-discipline` — every newly-added public artefact resolves to a TASKS.md block, an `experiments/` pre-registration, or an in-PR opt-out.
 
-The full stage adds vitest, the remaining diff-relative lints (`rule-1`, `rule-4`, `rule-7`, `pattern-index`, `metric-freshness`), and the dormant config caps (`mape-k-*`, `tick-loop-backoff-schedule`, `cadence-pivot-threshold`, `pivot-success-margin`, `anchor-primary-source`, `measurement-inspects-output`, `skill-rule-cap`). The env-dependent CI jobs (`hygiene` / `supervisor-integration` / `maciek-smoke` / `rule-11-flake-detection` / `pr-self-grade` / `cto-audit-pr-conventions`) are intentionally absent — they cannot evaluate against a local checkout without GitHub / pipx / dbus plumbing the daemon does not have. CI runs them; this gate does not pretend to.
+The full stage adds vitest, the remaining diff-relative lints (`rule-1`, `rule-4`, `pattern-index`, `metric-freshness`), and the dormant config caps (`mape-k-*`, `tick-loop-backoff-schedule`, `cadence-pivot-threshold`, `pivot-success-margin`, `anchor-primary-source`, `measurement-inspects-output`, `skill-rule-cap`). The env-dependent CI jobs (`hygiene` / `supervisor-integration` / `maciek-smoke` / `rule-11-flake-detection` / `pr-self-grade` / `cto-audit-pr-conventions`) are intentionally absent — they cannot evaluate against a local checkout without GitHub / pipx / dbus plumbing the daemon does not have. CI runs them; this gate does not pretend to.
 
 ## Three drift hazards, three mitigations
 
