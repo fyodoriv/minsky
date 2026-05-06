@@ -465,3 +465,71 @@ describe("ci.yml aggregator bash-loop drift-protection", () => {
     expect(checkedJobs).toContain("linux-supervisor-integration"); // from the success|skipped bucket
   });
 });
+
+describe("docs/daemon-pre-pr-gate.md full-stage drift-protection", () => {
+  // Slice 16/N: closes the docs↔manifest parity gap for the full stage.
+  // Slice 13/N pinned the fast-stage bullet list; the full stage was prose,
+  // and the prose was already drifted (silent omissions of
+  // `rule-5-glossary-discipline` and `no-singleton-experiment` after their
+  // full-stage entries landed in earlier work — exactly the failure mode the
+  // slice-13 test catches for the fast stage). Refactoring the prose into a
+  // bullet list in the same shape as the fast-stage list and pinning it
+  // bidirectionally extends slice 13's invariant to the operator-side gate's
+  // full set.
+
+  /**
+   * Extract step names from the bulleted full-stage list at
+   * `docs/daemon-pre-pr-gate.md` § "What the gate enforces". Mirrors the
+   * fast-stage extractor at line 374 in shape: bound the block by the
+   * section's intro paragraph above and the next paragraph (the
+   * env-dependent CI jobs note) below; parse `- \`<name>\`` bullets in
+   * between.
+   *
+   * @param {string} doc
+   * @returns {string[]}
+   */
+  function extractDocFullStageNames(doc) {
+    const header = doc.search(/^The full stage adds/m);
+    if (header < 0) {
+      throw new Error("docs/daemon-pre-pr-gate.md has no full-stage section header");
+    }
+    const tail = doc.slice(header);
+    const envDependentStart = tail.search(/^The env-dependent /m);
+    const block = envDependentStart < 0 ? tail : tail.slice(0, envDependentStart);
+    /** @type {string[]} */
+    const names = [];
+    for (const line of block.split("\n")) {
+      const m = /^- `([a-z][a-z0-9-]*)`/.exec(line);
+      if (m?.[1] !== undefined) names.push(m[1]);
+    }
+    return names;
+  }
+
+  test("doc's full-stage list ↔ manifest's full-only steps (bidirectional)", () => {
+    // The doc's full-stage section enumerates the *additional* steps the full
+    // stage adds beyond fast (the fast-stage list above already enumerates the
+    // shared steps). The corresponding manifest set is "full-tagged minus
+    // fast-tagged" — i.e. the steps that exist only in full. Comparing against
+    // the raw `selectSteps("full")` would double-count the fast steps, since
+    // every fast entry is also tagged `full` in the manifest.
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const docNames = new Set(extractDocFullStageNames(doc));
+    const fastNames = new Set(selectSteps("fast").map((s) => s.name));
+    const fullOnlyNames = new Set(
+      selectSteps("full")
+        .map((s) => s.name)
+        .filter((n) => !fastNames.has(n)),
+    );
+
+    const missingFromDoc = [...fullOnlyNames].filter((n) => !docNames.has(n));
+    const extraInDoc = [...docNames].filter((n) => !fullOnlyNames.has(n));
+    expect({ missingFromDoc, extraInDoc }).toEqual({ missingFromDoc: [], extraInDoc: [] });
+  });
+
+  test("extractDocFullStageNames parses at least one well-known step (parser sanity)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const names = extractDocFullStageNames(doc);
+    expect(names).toContain("vitest");
+    expect(names).toContain("rule-1-novel-justification");
+  });
+});
