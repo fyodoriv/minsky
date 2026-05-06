@@ -121,6 +121,12 @@ export const STACK_MANIFEST = Object.freeze([
     env: { RULE_6_DIFF_BASE: "origin/main" },
   },
   {
+    name: "rule-7-chaos-coverage",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-7-chaos-coverage.mjs"],
+  },
+  {
     name: "rule-12-scope-discipline",
     stages: ["fast", "full"],
     cmd: "node",
@@ -151,12 +157,6 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-rule-5-glossary-discipline.mjs"],
-  },
-  {
-    name: "rule-7-chaos-coverage",
-    stages: ["full"],
-    cmd: "node",
-    args: ["scripts/check-rule-7-chaos-coverage.mjs"],
   },
   {
     name: "pattern-index",
