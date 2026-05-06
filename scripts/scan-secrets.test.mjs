@@ -335,3 +335,132 @@ describe("scanFilesForSecrets (multi-file walker, slice 2)", () => {
     expect(scanFilesForSecrets(input)).toEqual(scanFilesForSecrets(input));
   });
 });
+
+describe("@scan-secrets-allowed allow-annotation (slice 3)", () => {
+  it("(a) annotation on the line immediately preceding the finding suppresses it", () => {
+    const text = [
+      "// @scan-secrets-allowed: documentation example, not a real token",
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+    ].join("\n");
+    expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+
+  it("(b) annotation inline on the same line as the finding suppresses it", () => {
+    const text =
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123 # @scan-secrets-allowed: test fixture";
+    expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+
+  it("(c) annotation two lines above does NOT suppress (only own + preceding line)", () => {
+    const text = [
+      "// @scan-secrets-allowed: this won't reach two lines down",
+      "// some unrelated comment",
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+    ].join("\n");
+    const r = scanContentForSecrets(text);
+    expect(r.ok).toBe(false);
+  });
+
+  it("(d) annotation with too-short reason does NOT suppress (< 3 chars)", () => {
+    const text = [
+      "// @scan-secrets-allowed: ab",
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+    ].join("\n");
+    const r = scanContentForSecrets(text);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) {
+      expect(r.findings).toHaveLength(1);
+    }
+  });
+
+  it("(e) annotation with no reason at all does NOT suppress", () => {
+    const text = [
+      "// @scan-secrets-allowed:",
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+    ].join("\n");
+    const r = scanContentForSecrets(text);
+    expect(r.ok).toBe(false);
+  });
+
+  it("(f) annotation in `#` comment (shell / dotenv / yaml) suppresses", () => {
+    const text = [
+      "# @scan-secrets-allowed: example value in a fixture",
+      "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+    ].join("\n");
+    expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+
+  it("(g) annotation in `/* … */` block comment suppresses", () => {
+    const text = [
+      "/* @scan-secrets-allowed: regression-test fixture */",
+      "const k = 'AIzaSyA-abc_DEFghi-JKLmnoPQRstuVWXyz01234';",
+    ].join("\n");
+    expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+
+  it("(h) annotation suppresses some findings but not others (per-line scope)", () => {
+    const text = [
+      "// @scan-secrets-allowed: only this one is intentional",
+      "fixture: ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+      "real: AKIAIOSFODNN7EXAMPLE",
+    ].join("\n");
+    const r = scanContentForSecrets(text);
+    expect(r.ok).toBe(false);
+    if (r.ok === false) {
+      expect(r.findings).toHaveLength(1);
+      expect(r.findings[0]?.tag).toBe("aws-access-key-id");
+    }
+  });
+
+  it("(i) walker honours the annotation across files", () => {
+    const r = scanFilesForSecrets({
+      files: [
+        {
+          path: "fixtures/example.env",
+          source: [
+            "# @scan-secrets-allowed: documented in test fixtures",
+            "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+          ].join("\n"),
+        },
+        {
+          path: "src/config.ts",
+          source: "const aws = 'AKIAIOSFODNN7EXAMPLE';",
+        },
+      ],
+    });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]?.file).toBe("src/config.ts");
+    expect(r.violations[0]?.tag).toBe("aws-access-key-id");
+  });
+
+  it("(j) reason is trimmed before length check (whitespace doesn't count)", () => {
+    const text = [
+      "// @scan-secrets-allowed:        ",
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+    ].join("\n");
+    const r = scanContentForSecrets(text);
+    expect(r.ok).toBe(false);
+  });
+
+  it("(k) trailing `*/` of a block comment is stripped before length check", () => {
+    // The reason `yes` is 3 chars after the `*/` is stripped — exactly at the
+    // floor. If the regex/strip mishandled the trailing `*/`, the apparent
+    // reason would be `yes */` (6 chars) and pass even when it shouldn't, OR
+    // the strip would erase the `s` and leave `ye` (2 chars) and erroneously
+    // fail. This test pins both directions.
+    const text = [
+      "/* @scan-secrets-allowed: yes */",
+      "TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEF0123",
+    ].join("\n");
+    expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+
+  it("(l) annotation works for PEM private key headers too", () => {
+    const text = [
+      "// @scan-secrets-allowed: documentation key from RFC 8032",
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "MIIEpAIBAAKCAQEA...",
+    ].join("\n");
+    expect(scanContentForSecrets(text)).toEqual({ ok: true });
+  });
+});
