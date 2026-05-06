@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
-// <!-- scope: human-approved implements parent task `secret-scanning-precommit-and-ci` § Details (a)/(b) — gitleaks-equivalent classifier -->
+// <!-- scope: human-approved implements parent task `secret-scanning-precommit-and-ci` § Details (a)/(b)/(c)/(d) — gitleaks-equivalent classifier + walker + annotation + CLI/CI gate -->
 // Slice 1 of `secret-scanning-precommit-and-ci` (TASKS.md): the pure classifier.
 //
 // `scanContentForSecrets(text, filePath?)` decides whether a string of file
@@ -62,6 +62,30 @@
 // (missing or too-short reason) do NOT suppress; the underlying violation
 // stands so the operator fixes one or the other (parent task `Details (c)`).
 //
+// Slice 4 (this file): wires the walker into a runnable CLI + CI gate +
+// lefthook pre-commit hook. Two invocation modes share the same code path:
+//
+//   1. No positional args → full scan via `git ls-files` (the CI mode).
+//      Excludes test files (`*.test.{mjs,ts,tsx}`) — those legitimately
+//      embed credential-shaped strings as fixtures and are guarded by the
+//      slice-3 annotation. Excludes binary file extensions (.png, .pdf,
+//      .lock files, fonts) by name; tracked text files are everything else.
+//
+//   2. Positional args → scan only those paths (the lefthook mode). The
+//      hook expands `{staged_files}` into the CLI's argv; if zero files
+//      stage, lefthook short-circuits and the CLI is never invoked. This
+//      mirrors `git diff --cached`'s shape and keeps pre-commit fast even
+//      on large commits — only what the operator is about to commit gets
+//      scanned, not the whole tree.
+//
+// Both modes feed `scanFilesForSecrets` and exit non-zero on any finding.
+// The CI gate (`.github/workflows/ci.yml::secret-scan`) runs the full mode
+// on every push and PR; lefthook (`lefthook.yml::pre-commit::scan-secrets`)
+// runs the staged-files mode locally before the commit lands. Both share
+// the classifier, the walker, and the annotation — three pure seams behind
+// one boundary, per the parent task's gitleaks/trufflehog pivot strategy
+// (rule #2 — swap the boundary, keep the seams).
+//
 // Pattern: deterministic gate (rule #10), pure function (rule #2 — the
 // classifier is the seam, the staged-files walker / CLI / gitleaks pivot is
 // the boundary). Sibling: `scripts/check-otel-no-pii.mjs` (slice 1 of the
@@ -78,6 +102,22 @@
 //   Saltzer & Schroeder 1975 "open design" (the gate is a public lint, not
 //   a private heuristic).
 // Conformance: full — no I/O, no async, no LLM.
+
+import { execFileSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..");
+
+// Files larger than this are skipped to keep the regex scan O(repo size).
+// Real credentials are short; legitimate large tracked files (lockfiles,
+// generated bundles) push this threshold and are vanishingly unlikely to
+// embed a high-entropy credential prefix in a way the slice-1 patterns
+// would match. 1 MiB matches gitleaks's default `max-target-bytes`.
+const MAX_FILE_BYTES = 1024 * 1024;
 
 /**
  * @typedef {object} SecretPattern
@@ -380,7 +420,7 @@ export function formatFinding(finding, filePath) {
  * order they were supplied (call-site decides whether that's
  * `git diff --cached`'s order, alphabetical, etc.).
  *
- * Pure: no I/O, no globals, no async. The CLI wrapper (slice ≥4) is
+ * Pure: no I/O, no globals, no async. The CLI wrapper (slice 4) is
  * responsible for reading files off disk and feeding them in. This boundary
  * matches `extractAttributeViolations({ files })` in
  * `scripts/check-otel-no-pii.mjs` so the same staged-files plumbing can be
@@ -401,3 +441,202 @@ export function scanFilesForSecrets({ files }) {
   }
   return { violations };
 }
+
+// CLI ------------------------------------------------------------------------
+
+// Suffix-based skip list. Test files legitimately carry credential-shaped
+// strings as fixtures (every paired test in `scan-secrets.test.mjs` and
+// `check-otel-no-pii.test.mjs` exercises the classifier with literals) — the
+// slice-3 annotation handles the inline-fixture case, but blanket-excluding
+// test files keeps the lint quiet on the harness itself. Binary extensions
+// are excluded because `readFileSync(path, "utf8")` would mojibake them and
+// could yield spurious matches.
+const EXCLUDED_SUFFIXES = Object.freeze([
+  ".test.mjs",
+  ".test.ts",
+  ".test.tsx",
+  ".spec.ts",
+  ".spec.tsx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".ico",
+  ".webp",
+  ".pdf",
+  ".zip",
+  ".gz",
+  ".tgz",
+  ".woff",
+  ".woff2",
+  ".otf",
+  ".ttf",
+  ".eot",
+]);
+
+/**
+ * @param {string} relPosix  repo-relative POSIX path
+ * @returns {boolean}
+ */
+export function isScannablePath(relPosix) {
+  if (relPosix === "") return false;
+  for (const suffix of EXCLUDED_SUFFIXES) {
+    if (relPosix.endsWith(suffix)) return false;
+  }
+  return true;
+}
+
+/**
+ * @param {string[]} argv  the script's argv tail (`process.argv.slice(2)`).
+ * @returns {{ repo: string, paths: string[] }}
+ *   `repo` is the absolute path the CLI scans against (overridable via
+ *   `--repo=<dir>` for tests). `paths` is the set of repo-relative POSIX
+ *   paths the operator passed positionally (lefthook's `{staged_files}`
+ *   expansion); empty array means full-scan mode.
+ */
+export function parseArgs(argv) {
+  let repo = REPO_ROOT;
+  /** @type {string[]} */
+  const paths = [];
+  for (const arg of argv) {
+    if (arg.startsWith("--repo=")) {
+      repo = arg.slice("--repo=".length);
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
+    paths.push(arg);
+  }
+  return { repo, paths };
+}
+
+/**
+ * Enumerate every tracked file in `repo` via `git ls-files`. POSIX paths
+ * (forward-slash) regardless of host OS so violation reports are stable
+ * across CI / local. Excludes test fixtures + binary extensions per
+ * `isScannablePath`.
+ *
+ * @param {string} repo
+ * @returns {string[]}
+ */
+export function listScannableTrackedFiles(repo) {
+  const stdout = execFileSync("git", ["-C", repo, "ls-files", "-z"], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const all = stdout.length === 0 ? [] : stdout.split("\0").filter((p) => p.length > 0);
+  return all.filter(isScannablePath).sort();
+}
+
+/**
+ * Read each `relPath` (skipping files larger than `MAX_FILE_BYTES`,
+ * non-existent paths, and paths outside `repo`'s ls-files set) and return
+ * the `{ path, source }` records the walker consumes. Errors are surfaced
+ * as a separate `errors` array so the caller can decide whether to fail
+ * the gate on read failures (CI does; pre-commit on missing files does
+ * not — `git diff --cached` may list a path that's been concurrently
+ * deleted).
+ *
+ * @param {string} repo
+ * @param {readonly string[]} relPaths
+ * @returns {{ files: WalkerSourceFile[], errors: { path: string, reason: string }[] }}
+ */
+export function readScannableFiles(repo, relPaths) {
+  /** @type {WalkerSourceFile[]} */
+  const files = [];
+  /** @type {{ path: string, reason: string }[]} */
+  const errors = [];
+  for (const rel of relPaths) {
+    const result = readOneScannableFile(repo, rel);
+    if (result.kind === "skip") continue;
+    if (result.kind === "error") {
+      errors.push({ path: rel, reason: result.reason });
+      continue;
+    }
+    files.push({ path: rel, source: result.source });
+  }
+  return { files, errors };
+}
+
+/**
+ * @param {string} repo
+ * @param {string} rel
+ * @returns {{ kind: "skip" } | { kind: "error", reason: string } | { kind: "ok", source: string }}
+ */
+function readOneScannableFile(repo, rel) {
+  if (!isScannablePath(rel)) return { kind: "skip" };
+  const abs = isAbsolute(rel) ? rel : resolve(repo, rel);
+  let stat;
+  try {
+    stat = statSync(abs);
+  } catch {
+    return { kind: "error", reason: "missing" };
+  }
+  if (!stat.isFile()) return { kind: "skip" };
+  if (stat.size > MAX_FILE_BYTES) return { kind: "skip" };
+  try {
+    return { kind: "ok", source: readFileSync(abs, "utf8") };
+  } catch (err) {
+    return { kind: "error", reason: err instanceof Error ? err.message : "unreadable" };
+  }
+}
+
+/**
+ * End-to-end pipeline: list scannable files (full or staged), read each,
+ * run the walker, return aggregated violations + the count of files
+ * actually scanned. Used by `main()` and exercised in unit tests via
+ * `--repo=<dir>` + optional positional paths.
+ *
+ * @param {string} repo
+ * @param {readonly string[]} positionalPaths
+ *   Empty → full scan via `git ls-files`. Non-empty → only those paths
+ *   (lefthook's `{staged_files}` mode).
+ * @returns {{ scanned: number, violations: ScanViolation[] }}
+ */
+export function scanRepoForSecrets(repo, positionalPaths) {
+  const relPaths =
+    positionalPaths.length === 0 ? listScannableTrackedFiles(repo) : [...positionalPaths];
+  const { files } = readScannableFiles(repo, relPaths);
+  const { violations } = scanFilesForSecrets({ files });
+  return { scanned: files.length, violations };
+}
+
+function main() {
+  const { repo, paths } = parseArgs(process.argv.slice(2));
+  const { scanned, violations } = scanRepoForSecrets(repo, paths);
+
+  if (violations.length === 0) {
+    const mode = paths.length === 0 ? "tracked" : "staged";
+    process.stdout.write(
+      `scan-secrets ok: scanned ${scanned} ${mode} file(s); 0 credential shapes detected.\n`,
+    );
+    process.exit(0);
+    return;
+  }
+
+  process.stderr.write("scan-secrets: credential shapes detected:\n");
+  for (const v of violations) {
+    process.stderr.write(`  ${formatFinding(v, v.file)}\n`);
+  }
+  process.stderr.write(
+    [
+      "",
+      "Fix one of:",
+      "  1. remove the credential and rotate it (every credential committed",
+      "     to git is compromised — rotation is required even after deletion);",
+      "  2. annotate the offending line with a comment carrying",
+      "     `@scan-secrets-allowed: <reason ≥3 chars>` if the match is a",
+      "     genuine false positive (e.g. a documented fixture, an example in",
+      "     a test, or a public-issue dump). The annotation is comment-form-",
+      "     agnostic — `//`, `#`, `/* */`, `;` all work.",
+      "",
+      "See vision.md § 13.1 (security & privacy minimum-bar item #1).",
+      "",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("scan-secrets.mjs") === true;
+if (invokedDirectly) main();
