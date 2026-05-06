@@ -2,6 +2,10 @@
 // the manifest + an injected `runStep`; tests stub `runStep` and assert the
 // stage filter + green/red verdict logic.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, test } from "vitest";
 
 import {
@@ -11,6 +15,8 @@ import {
   runStack,
   selectSteps,
 } from "./run-pre-pr-lint-stack.mjs";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("STACK_MANIFEST", () => {
   test("every entry has name / cmd / args / stages", () => {
@@ -179,5 +185,18 @@ describe("parseArgs", () => {
 
   test("unknown flags are ignored (forward-compat)", () => {
     expect(parseArgs(["--unknown", "--stage=full"])).toEqual({ stage: "full", json: false });
+  });
+});
+
+describe("lefthook pre-push contract", () => {
+  // Pin the rule #10 deterministic-enforcement claim in the daemon's brief
+  // (`novel/tick-loop/src/daemon.ts`: "the daemon runs the same gate humans
+  // run via `lefthook` `pre-push`"). If `lefthook.yml` drifts back to running
+  // `pnpm check` (or any path that bypasses the canonical manifest), this
+  // test fails — the brief's claim becomes false the moment that line moves.
+  test("lefthook.yml pre-push invokes pnpm pre-pr-lint (single source of truth)", () => {
+    const lefthookYml = readFileSync(resolve(REPO_ROOT, "lefthook.yml"), "utf8");
+    const prePushSection = lefthookYml.split(/^pre-push:$/m)[1] ?? "";
+    expect(prePushSection).toContain("pnpm pre-pr-lint");
   });
 });
