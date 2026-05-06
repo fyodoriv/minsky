@@ -19,12 +19,25 @@
 export const BIND_DEFAULT = "127.0.0.1";
 export const BIND_OVERRIDE_ENV = "MINSKY_DASHBOARD_BIND";
 
+/**
+ * Resolve dashboard bind hostname from env. Default loopback per rule #13.4.
+ *
+ * @otel-exempt pure helper — no I/O, no async; the OTEL span lives at the
+ *   server-start call site in `start.ts` where the bind decision is acted on.
+ */
 export function resolveBindHostname(env: NodeJS.ProcessEnv): string {
   const override = env[BIND_OVERRIDE_ENV];
   if (override === undefined || override === "") return BIND_DEFAULT;
   return override;
 }
 
+/**
+ * Return a stderr-bound warning string when the operator opted into a
+ * non-loopback bind. Null when bound loopback (no warning needed).
+ *
+ * @otel-exempt pure helper — caller writes the returned string to the
+ *   already-instrumented startup span at the I/O boundary.
+ */
 export function bindHostnameWarning(hostname: string): string | null {
   if (hostname === BIND_DEFAULT || hostname === "localhost") return null;
   return `WARNING: dashboard-web bound to ${hostname} (not loopback). It is now reachable from any device that can route to this host. Consider an SSH tunnel ('ssh -L <port>:localhost:<port>') or a reverse proxy with auth instead. (vision.md rule #13.4)`;
