@@ -64,6 +64,8 @@ import {
   runSnapshot,
 } from "./snapshot-runner.js";
 import type { SpawnStrategy } from "./spawn-strategy.js";
+import { acquireTaskClaim } from "./worker-claim.js";
+import { type WorkerConfig, claudeArgsForWorker } from "./worker-config.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -207,6 +209,32 @@ export interface RunDaemonOpts {
    * `METRICS.md` (visible-not-silent, Helland 2007).
    */
   readonly metricsRender?: MetricsRenderSeam;
+  /**
+   * Optional per-worker config (slice 2 of `daemon-parallel-worktree-launch`).
+   * When set:
+   *   - the iteration acquires a per-task claim under `locksDir` before
+   *     spawning; collisions surface as `no-task` with reason
+   *     `claim-collision: held by ${heldBy}`,
+   *   - the spawn-strategy receives `extraArgs: ["--worktree", "daemon-N-<taskId>"]`
+   *     so the child runs in its own git worktree (per-process isolation).
+   *
+   * `undefined` (the default) preserves v0 single-process behaviour — the
+   * daemon runs against the shared main checkout, no claim layer.
+   */
+  readonly workerConfig?: WorkerConfig;
+  /**
+   * Locks directory for per-task `acquireTaskClaim`. Default `.minsky/locks`
+   * resolved against `MINSKY_HOME`. Only consulted when `workerConfig` is
+   * set; ignored in single-process mode.
+   */
+  readonly locksDir?: string;
+  /**
+   * Claim TTL in milliseconds. Default 30 min — long enough to cover a
+   * full iteration including post-spawn lints + PR creation, short enough
+   * that a crashed worker's claim is recoverable within one tick of the
+   * sweeper. Only consulted when `workerConfig` is set.
+   */
+  readonly claimTtlMs?: number;
 }
 
 /**
@@ -754,9 +782,68 @@ async function runOneIteration(args: {
     return { result };
   }
 
-  const result = await runClaimedIteration({ opts, iteration, taskId, tasksMdContent: taskSource });
-  emitIterationSpan(opts, result);
-  return { result };
+  // Slice 2.5 of `daemon-parallel-worktree-launch`: when a worker config is
+  // set, acquire the per-task claim before spawning. Single-process mode
+  // (no workerConfig) bypasses entirely.
+  const claim = tryAcquireWorkerClaim(opts, taskId);
+  if (claim?.acquired === false) {
+    const result: DaemonIterationResult = {
+      iteration,
+      status: "no-task",
+      reason: `claim-collision: held by ${claim.heldBy} until ${formatExpiry(claim.expiresAt)}`,
+      taskId,
+    };
+    emitIterationSpan(opts, result);
+    return { result };
+  }
+
+  try {
+    const result = await runClaimedIteration({
+      opts,
+      iteration,
+      taskId,
+      tasksMdContent: taskSource,
+    });
+    emitIterationSpan(opts, result);
+    return { result };
+  } finally {
+    claim?.release();
+  }
+}
+
+type WorkerClaimHandle =
+  | { readonly acquired: true; readonly release: () => void }
+  | { readonly acquired: false; readonly heldBy: string; readonly expiresAt: number };
+
+/**
+ * Format a claim expiry as ISO 8601, falling back to the raw ms value
+ * when the timestamp is out of `Date`'s representable range (e.g. test
+ * fixtures using `Number.MAX_SAFE_INTEGER` to mark "never expires").
+ */
+function formatExpiry(ms: number): string {
+  try {
+    return new Date(ms).toISOString();
+    // rule-6: handled-locally — RangeError on out-of-Date-range timestamps falls back to ms; reason string is informational only
+  } catch {
+    return `${ms}ms`;
+  }
+}
+
+/**
+ * Acquire a per-task claim when `workerConfig` is set; return `undefined`
+ * in single-process mode (no claim layer, v0 contract preserved).
+ */
+function tryAcquireWorkerClaim(opts: RunDaemonOpts, taskId: string): WorkerClaimHandle | undefined {
+  if (opts.workerConfig === undefined) return undefined;
+  const result = acquireTaskClaim({
+    taskId,
+    workerId: `${opts.workerConfig.workerId}`,
+    ttlMs: opts.claimTtlMs ?? 30 * 60_000,
+    locksDir: opts.locksDir ?? ".minsky/locks",
+    ...(opts.now !== undefined ? { now: opts.now } : {}),
+  });
+  if (result.acquired) return { acquired: true, release: result.release };
+  return { acquired: false, heldBy: result.heldBy, expiresAt: result.expiresAt };
 }
 
 /**
@@ -781,10 +868,16 @@ async function runClaimedIteration(args: {
   // no Strategy is injected, fall through to v0's legacy `tick(...)` path
   // so the 13 dry-run tests keep their existing observable behaviour.
   if (opts.spawnStrategy !== undefined) {
+    const extraArgs = claudeArgsForWorker({
+      baseArgs: [],
+      taskId,
+      workerConfig: opts.workerConfig,
+    });
     const stratResult = await opts.spawnStrategy.spawn({
       taskId,
       brief: buildDaemonBrief({ taskId, tasksMdContent }),
       env: process.env,
+      extraArgs,
     });
     return {
       iteration,

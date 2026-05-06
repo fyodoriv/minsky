@@ -488,6 +488,10 @@ const result = await runDaemon({
   pausedSentinelReader: () => existsSync(args.pausedSentinelPath),
   // Real `BudgetGuard.tick()` wrapped behind the daemon's `BudgetGuardLike.decide()` shape.
   budgetGuard: fromRealBudgetGuard(realGuard),
+  // Slice 2.5 of `daemon-parallel-worktree-launch`: per-worker config when
+  // `--worker-id` / `--workers-total` are passed. `undefined` preserves
+  // single-process v0 behaviour.
+  ...(workerConfig !== undefined ? { workerConfig } : {}),
   // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
   ...(notifier !== undefined ? { notifier } : {}),
   // Optional CTO-audit seam; `undefined` when MINSKY_CTO_AUDIT_ENABLE isn't 1/true.
