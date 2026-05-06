@@ -388,6 +388,33 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  otel-no-pii:
+    # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
+    # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
+    # whose names look like credentials (`apiKey`, `password`, `bearerToken`,
+    # …) or whose string-literal values match a known credential prefix
+    # (`sk-…`, `ghp_…`, `xoxb-…`). Slices 1–3 (PRs #252, #255, #256) shipped
+    # the pure classifier, the AST walker, and the
+    # `// @otel-pii-allowed: <reason>` annotation seam in
+    # `scripts/check-otel-no-pii.mjs`. This slice (4) wires the CLI into the
+    # gate. Push event runs the lint too — security gates are NOT PR-only,
+    # because a leak landed via direct push must still surface.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: otel-no-pii lint
+        run: node scripts/check-otel-no-pii.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-otel-no-pii.test.mjs
+
   pr-security-review:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate` §
     # Measurement: every PR body carries either a `## Security & privacy`
@@ -920,6 +947,7 @@ jobs:
       - measurement-inspects-output
       - metric-freshness
       - no-singleton-experiment
+      - otel-no-pii
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
@@ -959,6 +987,7 @@ jobs:
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
+                   "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
