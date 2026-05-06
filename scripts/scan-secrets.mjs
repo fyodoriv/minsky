@@ -48,6 +48,20 @@
 // of vision.md § 13). The lefthook pre-commit hook, allow-list annotation,
 // and CI gate ship in slices ≥3 against this fixed seam.
 //
+// Slice 3 (this file): adds the `@scan-secrets-allowed: <reason>` annotation
+// seam — a comment carrying the annotation on the offending line OR the line
+// immediately preceding suppresses the finding, provided the reason is ≥3
+// characters of substantive text after trimming. Mirrors `@otel-pii-allowed`
+// in `scripts/check-otel-no-pii.mjs`; the floor (3 chars) matches the
+// `MIN_ALLOW_REASON_LEN` / `MIN_OPT_OUT_REASON_LEN` floors elsewhere in the
+// rule-#13 substrate so opt-out reasons across security gates have the same
+// minimum substantiveness. The annotation is comment-form-agnostic: the
+// regex matches the bare token regardless of whether it's preceded by `//`,
+// `#`, `/* */`, `;`, etc., so the same seam works in JS/TS, shell, dotenv,
+// YAML, INI — wherever a credential might land. Malformed annotations
+// (missing or too-short reason) do NOT suppress; the underlying violation
+// stands so the operator fixes one or the other (parent task `Details (c)`).
+//
 // Pattern: deterministic gate (rule #10), pure function (rule #2 — the
 // classifier is the seam, the staged-files walker / CLI / gitleaks pivot is
 // the boundary). Sibling: `scripts/check-otel-no-pii.mjs` (slice 1 of the
@@ -166,6 +180,30 @@ export const SECRET_PATTERNS = Object.freeze(
 
 const SNIPPET_HEAD_LEN = 4;
 
+// Slice 3: allow-annotation seam. The regex captures any text after the
+// `@scan-secrets-allowed:` token up to end-of-line (or the closing `*/` of
+// a block comment); the captured group's trimmed length must be ≥
+// `MIN_ALLOW_REASON_LEN` for the annotation to suppress. The leading word
+// boundary (`\b`) prevents accidental subset matches like
+// `@scan-secrets-allowed-but-not-really:`.
+const ALLOW_ANNOTATION_RE = /\B@scan-secrets-allowed:[ \t]*([^\r\n]*?)(?:[ \t]*\*\/[ \t]*)?$/m;
+const MIN_ALLOW_REASON_LEN = 3;
+
+/**
+ * Check whether a string of text contains a well-formed allow-annotation.
+ * Used by `scanContentForSecrets` to test the line containing each finding
+ * and the line immediately preceding it; either may carry the annotation.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function lineHasAllowAnnotation(line) {
+  const m = line.match(ALLOW_ANNOTATION_RE);
+  if (!m) return false;
+  const reason = (m[1] ?? "").replace(/\s*\*\/\s*$/, "").trim();
+  return reason.length >= MIN_ALLOW_REASON_LEN;
+}
+
 /**
  * Redact a matched secret to a safe diagnostic form: `<first-N-chars>…`.
  * The first 4 chars are kept so the diagnostic distinguishes `ghp_` /
@@ -180,6 +218,67 @@ function redactSnippet(match) {
     return match;
   }
   return `${match.slice(0, SNIPPET_HEAD_LEN)}…`;
+}
+
+/**
+ * Compute line-offsets so absolute index → (line, column) is O(log n).
+ * Line 1 starts at offset 0.
+ *
+ * @param {string} text
+ * @returns {number[]}
+ */
+function computeLineOffsets(text) {
+  const offsets = [0];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 0x0a /* \n */) {
+      offsets.push(i + 1);
+    }
+  }
+  return offsets;
+}
+
+/**
+ * Binary search for the largest `offsets[i] ≤ index`, return 1-based
+ * (line, column).
+ *
+ * @param {readonly number[]} offsets
+ * @param {number} index
+ * @returns {{ line: number, column: number }}
+ */
+function locateInOffsets(offsets, index) {
+  let lo = 0;
+  let hi = offsets.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    const offset = offsets[mid];
+    if (offset !== undefined && offset <= index) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  const lineStart = offsets[lo] ?? 0;
+  return { line: lo + 1, column: index - lineStart + 1 };
+}
+
+/**
+ * Slice 3 suppression: a finding on `line` (1-based) is suppressed iff its
+ * own line OR the line immediately preceding carries a well-formed
+ * `@scan-secrets-allowed: <reason ≥3>` annotation. Inline form covers
+ * `EXPORT KEY=… # @scan-secrets-allowed: …` (shell, dotenv); preceding-line
+ * form covers `// @scan-secrets-allowed: …\nconst k = '…'` (JS/TS) and the
+ * block-comment / `#` / `;` variants — the regex is comment-form-agnostic.
+ *
+ * @param {readonly string[]} lines
+ * @param {number} line
+ * @returns {boolean}
+ */
+function isFindingSuppressed(lines, line) {
+  const own = lines[line - 1];
+  if (own !== undefined && lineHasAllowAnnotation(own)) return true;
+  const prev = lines[line - 2];
+  if (prev !== undefined && lineHasAllowAnnotation(prev)) return true;
+  return false;
 }
 
 /**
@@ -211,42 +310,15 @@ export function scanContentForSecrets(text) {
 
   /** @type {SecretFinding[]} */
   const findings = [];
-
-  // Pre-compute line offsets so a single absolute index → (line, column)
-  // lookup is O(log n). Line 1 starts at offset 0.
-  const lineOffsets = [0];
-  for (let i = 0; i < text.length; i += 1) {
-    if (text.charCodeAt(i) === 0x0a /* \n */) {
-      lineOffsets.push(i + 1);
-    }
-  }
-
-  /**
-   * @param {number} index
-   * @returns {{ line: number, column: number }}
-   */
-  function locate(index) {
-    // Binary search for the largest lineOffsets[i] ≤ index.
-    let lo = 0;
-    let hi = lineOffsets.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >>> 1;
-      const offset = lineOffsets[mid];
-      if (offset !== undefined && offset <= index) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    const lineStart = lineOffsets[lo] ?? 0;
-    return { line: lo + 1, column: index - lineStart + 1 };
-  }
+  const lineOffsets = computeLineOffsets(text);
+  const lines = text.split(/\r?\n/);
 
   for (const { tag, label, re } of SECRET_PATTERNS) {
     for (const match of text.matchAll(re)) {
       const matched = match[0];
       const index = match.index ?? 0;
-      const { line, column } = locate(index);
+      const { line, column } = locateInOffsets(lineOffsets, index);
+      if (isFindingSuppressed(lines, line)) continue;
       findings.push({
         tag,
         label,
