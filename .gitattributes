@@ -1,0 +1,23 @@
+# Mergiraf semantic merge driver — auto-resolves conflicts using tree-sitter
+# AST diffs (33 languages, mergiraf.org). Slice 5 of `daemon-parallel-worktree-launch`,
+# also addresses operator directive 2026-05-06 ("ensure that minsky itself will be
+# able to resolve git conflicts when it merges its work").
+#
+# Activation:
+#   node scripts/setup-mergiraf.mjs   # idempotent — installs binary if missing,
+#                                       sets `git config merge.mergiraf.{name,driver,recursive}`
+#
+# Without the binary, git falls back to the default merge driver silently — no
+# regression. With the binary, daemon-vs-daemon and operator-vs-daemon merges
+# on the file types below auto-resolve when the conflict is structural
+# (e.g. TASKS.md task-block insertions on both sides) rather than semantic.
+
+*.ts merge=mergiraf
+*.tsx merge=mergiraf
+*.mjs merge=mergiraf
+*.js merge=mergiraf
+*.jsx merge=mergiraf
+*.json merge=mergiraf
+*.md merge=mergiraf
+*.yml merge=mergiraf
+*.yaml merge=mergiraf
