@@ -75,3 +75,18 @@ pr-replace-or-relocate-research
 # by default"). Substrate exists at distribution/{systemd,launchd}/.
 minsky-supervisor.target
 minsky-watchdog.service
+
+# Security & privacy P0 task IDs cited in vision.md rule #13 (operator
+# directive 2026-05-06: "make security and privacy one of main priorities").
+secret-scanning-precommit-and-ci
+otel-no-pii-in-spans-lint
+supervisor-sandbox-syscall-restriction
+dashboard-localhost-only-by-default
+supply-chain-hardening-lockfile-sbom-slsa
+cloud-tier-external-security-audit-gate
+scan-secrets
+
+# systemd directive names — third-party (systemd) syntax cited verbatim per vision.md rule #13 sandbox bullet.
+ProtectSystem
+PrivateTmp
+RestrictAddressFamilies
