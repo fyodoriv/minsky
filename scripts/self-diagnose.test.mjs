@@ -5,6 +5,7 @@ import {
   daemonInFlightPrCollisionInvariant,
   daemonIterationRuntimeInvariant,
   daemonNoopIterationRateInvariant,
+  daemonPrLintPassRateInvariant,
   daemonPrStuckOnCiInvariant,
   daemonShippedRatioInvariant,
   daemonTaskIdStalenessInvariant,
@@ -322,6 +323,56 @@ describe("daemonIterationRuntimeInvariant", () => {
     const failResult = await daemonIterationRuntimeInvariant({
       listClaudePrintSpawns,
       thresholdSeconds: 300,
+    })();
+    expect(failResult.ok).toBe(false);
+  });
+});
+
+describe("daemonPrLintPassRateInvariant", () => {
+  it("passes when the rolling window is below the warm-up size (no signal)", async () => {
+    const recentDaemonPrs = async () => [
+      { number: 1, hasFailure: true },
+      { number: 2, hasFailure: true },
+      { number: 3, hasFailure: true },
+    ];
+    const result = await daemonPrLintPassRateInvariant({ recentDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when ≥80% of PRs in the window have no FAILURE checks", async () => {
+    const recentDaemonPrs = async () =>
+      Array.from({ length: 10 }, (_, i) => ({ number: i + 1, hasFailure: i < 2 }));
+    const result = await daemonPrLintPassRateInvariant({ recentDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when >20% of PRs in the window carry a FAILURE check", async () => {
+    const recentDaemonPrs = async () =>
+      Array.from({ length: 10 }, (_, i) => ({ number: 100 + i, hasFailure: i < 5 }));
+    const result = await daemonPrLintPassRateInvariant({ recentDaemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-pr-lint-pass-rate");
+    expect(result.evidence).toContain("5 clean / 10");
+    expect(result.evidence).toContain("0.500");
+    expect(result.evidence).toContain("#100");
+    expect(result.suggestedFix).toContain("run-pre-pr-lint-stack.mjs");
+    expect(result.suggestedFix).toContain("buildDaemonBrief");
+  });
+
+  it("respects custom windowMinPrs and minPassRate when injected", async () => {
+    const recentDaemonPrs = async () =>
+      Array.from({ length: 5 }, (_, i) => ({ number: i + 1, hasFailure: i < 2 }));
+    const passResult = await daemonPrLintPassRateInvariant({
+      recentDaemonPrs,
+      windowMinPrs: 5,
+      minPassRate: 0.5,
+    })();
+    expect(passResult.ok).toBe(true);
+    const failResult = await daemonPrLintPassRateInvariant({
+      recentDaemonPrs,
+      windowMinPrs: 5,
+      minPassRate: 0.9,
     })();
     expect(failResult.ok).toBe(false);
   });
