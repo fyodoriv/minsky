@@ -19,6 +19,44 @@ import {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// ---- ci.yml parsers (shared across the four parity describes below) -----
+// Lifted to module scope (slice 15) so the bash-loop drift test can reuse the
+// same `needs:` parser the slice-5 manifest-vs-CI test was already using —
+// keeps a single source of truth for "what the aggregator's `needs:` list is".
+
+/**
+ * @param {string} block
+ * @returns {string[]}
+ */
+function parseNeedsBlockLines(block) {
+  /** @type {string[]} */
+  const names = [];
+  for (const line of block.split("\n")) {
+    const m = /^ {6}- ([a-z][a-z0-9-]*)$/.exec(line);
+    if (m !== null && m[1] !== undefined) names.push(m[1]);
+  }
+  return names;
+}
+
+/**
+ * Extract the `needs:` list under the top-level `ci:` aggregator job from
+ * `.github/workflows/ci.yml`. Pure string parse — the workflow file's shape
+ * is owned by this repo, so the regex contract is stable. Avoids pulling
+ * `yaml` into `scripts/` just for one drift test.
+ *
+ * @param {string} yml
+ * @returns {string[]}
+ */
+function extractCiAggregatorNeeds(yml) {
+  const ciStart = yml.search(/^ {2}ci:$/m);
+  if (ciStart < 0) throw new Error("ci.yml has no top-level `ci:` job");
+  const needsBlock = yml.slice(ciStart).match(/^ {4}needs:\n([\s\S]*?)(?=^ {4}[a-z])/m);
+  if (needsBlock === null || needsBlock[1] === undefined) {
+    throw new Error("`ci:` job has no `needs:` block");
+  }
+  return parseNeedsBlockLines(needsBlock[1]);
+}
+
 describe("STACK_MANIFEST", () => {
   test("every entry has name / cmd / args / stages", () => {
     for (const step of STACK_MANIFEST) {
@@ -280,39 +318,6 @@ describe("ci.yml drift-protection", () => {
     "glossary-discipline": "rule-5-glossary-discipline", // job is named for the rule's effect; manifest names it for the rule number
   };
 
-  /**
-   * @param {string} block
-   * @returns {string[]}
-   */
-  function parseNeedsBlockLines(block) {
-    /** @type {string[]} */
-    const names = [];
-    for (const line of block.split("\n")) {
-      const m = /^ {6}- ([a-z][a-z0-9-]*)$/.exec(line);
-      if (m !== null && m[1] !== undefined) names.push(m[1]);
-    }
-    return names;
-  }
-
-  /**
-   * Extract the `needs:` list under the top-level `ci:` aggregator job from
-   * `.github/workflows/ci.yml`. Pure string parse — the workflow file's shape
-   * is owned by this repo, so the regex contract is stable. Avoids pulling
-   * `yaml` into `scripts/` just for one drift test.
-   *
-   * @param {string} yml
-   * @returns {string[]}
-   */
-  function extractCiAggregatorNeeds(yml) {
-    const ciStart = yml.search(/^ {2}ci:$/m);
-    if (ciStart < 0) throw new Error("ci.yml has no top-level `ci:` job");
-    const needsBlock = yml.slice(ciStart).match(/^ {4}needs:\n([\s\S]*?)(?=^ {4}[a-z])/m);
-    if (needsBlock === null || needsBlock[1] === undefined) {
-      throw new Error("`ci:` job has no `needs:` block");
-    }
-    return parseNeedsBlockLines(needsBlock[1]);
-  }
-
   test("manifest's full stage covers every offline-reproducible CI lint job (bidirectional)", () => {
     const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
     const ciNeeds = extractCiAggregatorNeeds(yml);
@@ -396,5 +401,135 @@ describe("docs/daemon-pre-pr-gate.md drift-protection", () => {
     const names = extractDocFastStageNames(doc);
     expect(names).toContain("biome");
     expect(names).toContain("typecheck");
+  });
+});
+
+describe("ci.yml aggregator bash-loop drift-protection", () => {
+  // Slice 5/N pinned the `ci:` aggregator's `needs:` list against the manifest's
+  // full stage. One drift surface remained: the aggregator's `gate` step
+  // hand-enumerates `${{ needs.X.result }}` across three bash buckets
+  // (must-succeed; supervisor-integration success-or-skipped; pr-self-grade /
+  // pattern-index / skill-rule-cap success-or-skipped). A future PR adding a
+  // job to `needs:` and forgetting the bash bucket would let the aggregator
+  // report green when that job failed — silently undergating the meta-check
+  // operators key off. Bidirectional set equality between `needs:` and the
+  // union of the three buckets pins this fourth-layer parity surface.
+
+  /**
+   * Extract every `needs.<job>.result` reference from the aggregator's `gate`
+   * step. The bash blocks use the GitHub Actions templating shape
+   * `${{ needs.<name>.result }}`; one regex over the whole `ci:` block
+   * captures them. Pure string parse — the workflow file's shape is owned by
+   * this repo, same justification as `extractCiAggregatorNeeds`.
+   *
+   * @param {string} yml
+   * @returns {string[]}  job names in source order, with duplicates removed
+   */
+  function extractAggregatorBashCheckedJobs(yml) {
+    const ciStart = yml.search(/^ {2}ci:$/m);
+    if (ciStart < 0) throw new Error("ci.yml has no top-level `ci:` job");
+    const ciBlock = yml.slice(ciStart);
+    /** @type {Set<string>} */
+    const seen = new Set();
+    const re = /\$\{\{\s*needs\.([a-z][a-z0-9-]*)\.result\s*\}\}/g;
+    for (const match of ciBlock.matchAll(re)) {
+      if (match[1] !== undefined) seen.add(match[1]);
+    }
+    return [...seen];
+  }
+
+  test("every job in `needs:` appears in the aggregator's bash gate-check (bidirectional)", () => {
+    const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    const ciNeeds = new Set(extractCiAggregatorNeeds(yml));
+    const checkedJobs = new Set(extractAggregatorBashCheckedJobs(yml));
+
+    // A job in `needs:` but not in the bash check is silently ungated — the
+    // aggregator passes even when that job fails. A job in the bash check but
+    // not in `needs:` would error at workflow load (GitHub Actions validates
+    // `needs.X` references), so this direction is automatic in production —
+    // we still pin it as a fast local signal that catches the typo before
+    // pushing.
+    const inNeedsNotChecked = [...ciNeeds].filter((n) => !checkedJobs.has(n));
+    const checkedNotInNeeds = [...checkedJobs].filter((n) => !ciNeeds.has(n));
+    expect({ inNeedsNotChecked, checkedNotInNeeds }).toEqual({
+      inNeedsNotChecked: [],
+      checkedNotInNeeds: [],
+    });
+  });
+
+  test("extractAggregatorBashCheckedJobs returns at least one well-known job (parser sanity)", () => {
+    const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    const checkedJobs = extractAggregatorBashCheckedJobs(yml);
+    expect(checkedJobs).toContain("biome");
+    expect(checkedJobs).toContain("typecheck");
+    expect(checkedJobs).toContain("linux-supervisor-integration"); // from the success|skipped bucket
+  });
+});
+
+describe("docs/daemon-pre-pr-gate.md full-stage drift-protection", () => {
+  // Slice 16/N: closes the docs↔manifest parity gap for the full stage.
+  // Slice 13/N pinned the fast-stage bullet list; the full stage was prose,
+  // and the prose was already drifted (silent omissions of
+  // `rule-5-glossary-discipline` and `no-singleton-experiment` after their
+  // full-stage entries landed in earlier work — exactly the failure mode the
+  // slice-13 test catches for the fast stage). Refactoring the prose into a
+  // bullet list in the same shape as the fast-stage list and pinning it
+  // bidirectionally extends slice 13's invariant to the operator-side gate's
+  // full set.
+
+  /**
+   * Extract step names from the bulleted full-stage list at
+   * `docs/daemon-pre-pr-gate.md` § "What the gate enforces". Mirrors the
+   * fast-stage extractor at line 374 in shape: bound the block by the
+   * section's intro paragraph above and the next paragraph (the
+   * env-dependent CI jobs note) below; parse `- \`<name>\`` bullets in
+   * between.
+   *
+   * @param {string} doc
+   * @returns {string[]}
+   */
+  function extractDocFullStageNames(doc) {
+    const header = doc.search(/^The full stage adds/m);
+    if (header < 0) {
+      throw new Error("docs/daemon-pre-pr-gate.md has no full-stage section header");
+    }
+    const tail = doc.slice(header);
+    const envDependentStart = tail.search(/^The env-dependent /m);
+    const block = envDependentStart < 0 ? tail : tail.slice(0, envDependentStart);
+    /** @type {string[]} */
+    const names = [];
+    for (const line of block.split("\n")) {
+      const m = /^- `([a-z][a-z0-9-]*)`/.exec(line);
+      if (m?.[1] !== undefined) names.push(m[1]);
+    }
+    return names;
+  }
+
+  test("doc's full-stage list ↔ manifest's full-only steps (bidirectional)", () => {
+    // The doc's full-stage section enumerates the *additional* steps the full
+    // stage adds beyond fast (the fast-stage list above already enumerates the
+    // shared steps). The corresponding manifest set is "full-tagged minus
+    // fast-tagged" — i.e. the steps that exist only in full. Comparing against
+    // the raw `selectSteps("full")` would double-count the fast steps, since
+    // every fast entry is also tagged `full` in the manifest.
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const docNames = new Set(extractDocFullStageNames(doc));
+    const fastNames = new Set(selectSteps("fast").map((s) => s.name));
+    const fullOnlyNames = new Set(
+      selectSteps("full")
+        .map((s) => s.name)
+        .filter((n) => !fastNames.has(n)),
+    );
+
+    const missingFromDoc = [...fullOnlyNames].filter((n) => !docNames.has(n));
+    const extraInDoc = [...docNames].filter((n) => !fullOnlyNames.has(n));
+    expect({ missingFromDoc, extraInDoc }).toEqual({ missingFromDoc: [], extraInDoc: [] });
+  });
+
+  test("extractDocFullStageNames parses at least one well-known step (parser sanity)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const names = extractDocFullStageNames(doc);
+    expect(names).toContain("vitest");
+    expect(names).toContain("rule-1-novel-justification");
   });
 });
