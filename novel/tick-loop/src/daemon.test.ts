@@ -45,6 +45,45 @@ import type {
 import type { SnapshotCapture, SnapshotExists } from "./snapshot-runner.js";
 import { DryRunSpawnStrategy, ProcessSpawnStrategy } from "./spawn-strategy.js";
 
+// ---- Parsers used by the brief↔manifest fast-stage drift test (slice 22/N) -
+// Lifted to module scope so the test body's cognitive complexity stays under
+// biome's noExcessiveCognitiveComplexity ceiling (max 10). Same shape as the
+// extractor helpers in scripts/run-pre-pr-lint-stack.test.mjs (slice 17/N): a
+// pure regex parse over a source string the repo owns.
+
+/**
+ * Parse `STACK_MANIFEST` entries from `scripts/run-pre-pr-lint-stack.mjs` and
+ * return the set of step names whose `stages:` array includes `"fast"`.
+ */
+function extractManifestFastStageNames(src: string): Set<string> {
+  const stepRegex = /\{\s*name:\s*"([^"]+)",\s*stages:\s*\[([^\]]+)\]/g;
+  const out = new Set<string>();
+  for (const match of src.matchAll(stepRegex)) {
+    const name = match[1];
+    const stages = match[2];
+    if (name !== undefined && stages !== undefined && /"fast"/.test(stages)) {
+      out.add(name);
+    }
+  }
+  return out;
+}
+
+/**
+ * Extract the backtick-quoted step names from the brief's "Red →" bullet's
+ * parenthesized enumeration: `... names the exact failing step (\`a\` /
+ * \`b\` / ...)`. Returns an empty set if the bullet isn't found — callers
+ * combine that with set-equality to surface the failure (a missing-bullet
+ * brief produces `missingFromBrief = <every fast step>`).
+ */
+function extractBriefRedBulletNames(brief: string): Set<string> {
+  const enumMatch = /names the exact failing step \(([^)]+)\)/.exec(brief);
+  const out = new Set<string>();
+  for (const m of (enumMatch?.[1] ?? "").matchAll(/`([a-z][a-z0-9-]*)`/g)) {
+    if (m[1] !== undefined) out.add(m[1]);
+  }
+  return out;
+}
+
 // ---- Fixtures -------------------------------------------------------------
 
 const FIXTURE_TASKS_MD = `# Tasks
@@ -1588,35 +1627,36 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("≥80%");
   });
 
-  it("brief's fast-stage step names match the canonical manifest at scripts/run-pre-pr-lint-stack.mjs", () => {
-    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate` slice 5/N): the
-    // brief tells the daemon which step name to look for in stderr when the
-    // gate fails. If a new fast-stage check is added to the manifest but the
-    // brief isn't updated, the "fix the named step" retry instruction is
-    // silently incomplete — the daemon would not know it should iterate on
-    // (e.g.) a new `rule-13-*` failure. Pin the contract by parsing the
-    // canonical manifest source and asserting the brief enumerates every
-    // fast-stage step name.
+  it("brief's fast-stage step names match the canonical manifest at scripts/run-pre-pr-lint-stack.mjs (bidirectional)", () => {
+    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate` slices 5/N + 22/N):
+    // the brief tells the daemon which step name to look for in stderr when
+    // the gate fails. Two drift directions threaten the retry instruction's
+    // completeness: (a) a step ADDED to the fast stage in the manifest must
+    // appear in the brief or the daemon won't know to retry on its failures
+    // (slice 5/N caught this); (b) a step REMOVED from the fast stage (e.g.
+    // demoted to full-only because it's flaky) leaves a stale name in the
+    // brief, so the daemon would still try to retry on a failure that no
+    // longer fires from the fast stack — which silently confuses the retry
+    // budget when the actual failing step is elsewhere. Slice 22/N closes
+    // that second direction by pinning *set equality* between the brief's
+    // "Red →" parenthesized enumeration and the manifest's `selectSteps("fast")`.
     const here = dirname(fileURLToPath(import.meta.url));
     const manifestPath = resolve(here, "../../../scripts/run-pre-pr-lint-stack.mjs");
     const src = readFileSync(manifestPath, "utf8");
-    const stepRegex = /\{\s*name:\s*"([^"]+)",\s*stages:\s*\[([^\]]+)\]/g;
-    const fastStageNames: string[] = [];
-    for (const match of src.matchAll(stepRegex)) {
-      const name = match[1];
-      const stages = match[2];
-      if (name !== undefined && stages !== undefined && /"fast"/.test(stages)) {
-        fastStageNames.push(name);
-      }
-    }
+    const fastStageNames = extractManifestFastStageNames(src);
     // Sanity: the manifest must declare at least one fast-stage step or the
     // daemon's gate is meaningless.
-    expect(fastStageNames.length).toBeGreaterThan(0);
+    expect(fastStageNames.size).toBeGreaterThan(0);
 
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
-    for (const stepName of fastStageNames) {
-      expect(brief, `brief should enumerate fast-stage step \`${stepName}\``).toContain(stepName);
-    }
+    const briefNames = extractBriefRedBulletNames(brief);
+
+    const missingFromBrief = [...fastStageNames].filter((n) => !briefNames.has(n));
+    const extraInBrief = [...briefNames].filter((n) => !fastStageNames.has(n));
+    expect({ missingFromBrief, extraInBrief }).toEqual({
+      missingFromBrief: [],
+      extraInBrief: [],
+    });
   });
 
   it("includes the optimization-discipline gate with concrete eligible-optimization list", () => {
