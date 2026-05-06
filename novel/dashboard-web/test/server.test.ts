@@ -282,3 +282,156 @@ describe("createServer — POST /control (pause/resume Shortcut endpoint)", () =
     expect(calls).toEqual([]);
   });
 });
+
+describe("createServer — POST /control X-Minsky-Token auth (rule #13.4 slice 2)", () => {
+  const TOKEN = "abc123def456";
+
+  function postControlWith(
+    fetch: ReturnType<typeof createServer>["fetch"],
+    headers: Record<string, string>,
+    body: unknown,
+  ): Promise<Response> {
+    return fetch(
+      new Request("http://test.local/control", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      }),
+    ) as Promise<Response>;
+  }
+
+  it("401 + missing-header error when controlToken is configured but no X-Minsky-Token sent", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(fetch, {}, { paused: true });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "missing X-Minsky-Token header" });
+    expect(calls).toEqual([]);
+  });
+
+  it("401 + wrong-token error when X-Minsky-Token does not match the configured token", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(
+      fetch,
+      { "x-minsky-token": "wrongtoken000" },
+      { paused: true },
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "wrong token" });
+    expect(calls).toEqual([]);
+  });
+
+  it("401 + wrong-token when token length differs (constant-time length-check path)", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(fetch, { "x-minsky-token": "short" }, { paused: true });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "wrong token" });
+    expect(calls).toEqual([]);
+  });
+
+  it("200 when X-Minsky-Token matches the configured token (happy path)", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(fetch, { "x-minsky-token": TOKEN }, { paused: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, paused: true });
+    expect(calls).toEqual([true]);
+  });
+
+  it("header lookup is case-insensitive (X-Minsky-Token vs x-minsky-token, RFC 7230 §3.2)", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(fetch, { "X-Minsky-Token": TOKEN }, { paused: false });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([false]);
+  });
+
+  it("auth runs BEFORE body parse — bad token + invalid body still returns 401, not 400", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(fetch, { "x-minsky-token": "wrongbutsame" }, { other: 99 });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "wrong token" });
+    expect(calls).toEqual([]);
+  });
+
+  it("auth runs BEFORE body parse — missing header + missing body returns 401, not 400", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await fetch(new Request("http://test.local/control", { method: "POST" }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "missing X-Minsky-Token header" });
+    expect(calls).toEqual([]);
+  });
+
+  it("when controlToken is undefined (default), POST /control accepts requests without a token (backward-compat with v0)", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({ setPaused: (v) => calls.push(v) });
+    const res = await fetch(
+      new Request("http://test.local/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paused: true }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([true]);
+  });
+
+  it("matching token + valid body round-trips into GET /watch.json (auth doesn't break the pause-state pipeline)", async () => {
+    const { fetch } = createServer({ controlToken: TOKEN });
+    const before = (await (
+      await fetch(new Request("http://test.local/watch.json"))
+    ).json()) as Record<string, unknown>;
+    expect(before.paused).toBe(false);
+    const post = await postControlWith(fetch, { "x-minsky-token": TOKEN }, { paused: true });
+    expect(post.status).toBe(200);
+    const after = (await (
+      await fetch(new Request("http://test.local/watch.json"))
+    ).json()) as Record<string, unknown>;
+    expect(after.paused).toBe(true);
+  });
+
+  it("empty-string X-Minsky-Token is rejected as missing-header (matches validateControlAuth contract)", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({
+      controlToken: TOKEN,
+      setPaused: (v) => calls.push(v),
+    });
+    const res = await postControlWith(fetch, { "x-minsky-token": "" }, { paused: true });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "missing X-Minsky-Token header" });
+    expect(calls).toEqual([]);
+  });
+
+  it("GET / and GET /watch.json are NOT gated by controlToken — auth applies only to POST /control", async () => {
+    const { fetch } = createServer({ controlToken: TOKEN });
+    const html = await fetch(new Request("http://test.local/"));
+    expect(html.status).toBe(200);
+    const json = await fetch(new Request("http://test.local/watch.json"));
+    expect(json.status).toBe(200);
+  });
+});
