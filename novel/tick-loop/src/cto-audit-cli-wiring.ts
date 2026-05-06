@@ -428,6 +428,7 @@ export function detectCtoAuditEnvDrift(opts: DetectCtoAuditEnvDriftOpts): EnvDri
   let xml: string;
   try {
     xml = readFileSync(opts.sourcePlistPath, "utf-8");
+    // rule-6: handled-locally — graceful-degrade per rule #7; missing/unreadable plist resolves to a typed outcome the caller logs, never crashes the supervisor
   } catch {
     return "plist-unreadable";
   }
