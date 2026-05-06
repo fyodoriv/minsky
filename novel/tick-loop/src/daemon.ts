@@ -891,6 +891,20 @@ export function buildDaemonBrief(args: {
     "",
     "If the task's substrate already exists on main and what's left is a wire-in / config flip / one-line change, that IS a meaningful code change — ship it. Don't refresh briefs about it.",
     "",
+    "## Optimization-discipline gate",
+    "",
+    "Operator directive 2026-05-05: every Minsky loop iteration must try to improve the supervisor's own speed and decrease its token consumption. After completing the main task above (or before exiting noop), spend ≤30s identifying ONE concrete optimization opportunity in the daemon's loop and act on it. Eligible optimizations:",
+    "",
+    "- **Brief-shrinking**: a section of `buildDaemonBrief` that's verbose, redundant, or duplicates information already cached in the prompt's prefix. Trim it.",
+    "- **Cached-prompt extension**: identify content the daemon writes to `claude --print` that's invariant across iterations (rule text, glossary anchors) and move it to the cacheable prefix.",
+    "- **Skip-earlier gate**: a check that could fire BEFORE spawning `claude --print` (e.g., if no tasks are open, the supervisor shouldn't pay the spawn cost at all).",
+    "- **Log-line dedup**: a verbose iteration.reason that re-emits the same multi-paragraph rationale every iteration. Compress.",
+    "- **Round-trip elimination**: a `gh` / `git` call that's repeated across the iteration when one read could feed multiple seams.",
+    "",
+    "Bundle the optimization with the main task's PR (small enough to be one commit on the same branch). If you cannot identify an optimization this iteration, note `optimization: none-this-iteration: <one-line reason>` in your iteration reason — silence is failure (Beyer SRE 2016 Ch. 6). Anti-vanity guard: the optimization must be measurable — token savings (input or output bytes), wall-time savings (ms), or eliminated round-trip count. Do not file vague optimizations like 'cleaner code' or 'better organization'.",
+    "",
+    "Pivot threshold (rule #9): if the optimization gate produces ≥1 trivially-rejected commit per week (e.g., a 1-byte whitespace change), the threshold is too loose — tighten the eligibility to ≥10-byte savings minimum before retiring.",
+    "",
   ].join("\n");
 }
 
