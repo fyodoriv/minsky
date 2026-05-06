@@ -21,6 +21,7 @@ import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
 
 import { loadRecentSpans } from "./activity.js";
+import { bindHostnameWarning, resolveBindHostname } from "./bind.js";
 import type { GetValue } from "./render.js";
 import { createServer } from "./server.js";
 import { type Snapshot, openObserveGetValue, snapshotGetValue } from "./strategy.js";
@@ -64,7 +65,11 @@ async function resolveGetValue(): Promise<GetValue | undefined> {
 }
 
 const port = Number.parseInt(process.env["PORT"] ?? "8080", 10);
+const hostname = resolveBindHostname(process.env);
 const getValue = await resolveGetValue();
+
+const warning = bindHostnameWarning(hostname);
+if (warning !== null) process.stderr.write(`${warning}\n`);
 
 // Activity feed reads the supervisor's stdout log on every request —
 // O(file-size) per `GET /` but the file is bounded (operator-side, KBs not
@@ -85,8 +90,8 @@ const { fetch } = createServer(args);
 // usually a stale dashboard process) and exit with an actionable message
 // instead. The supervisor (if any) sees exit 1 and applies its restart
 // policy; the operator running `pnpm dogfood:ui` directly sees the hint.
-const server = serve({ fetch, port }, (info) => {
-  process.stdout.write(`dashboard-web listening on http://localhost:${info.port}/\n`);
+const server = serve({ fetch, hostname, port }, (info) => {
+  process.stdout.write(`dashboard-web listening on http://${hostname}:${info.port}/\n`);
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
