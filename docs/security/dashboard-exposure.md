@@ -30,7 +30,7 @@ STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, Microsoft Press, 2003
 
 When the override fires, `start.ts` emits a stderr warning before the listen call:
 
-```
+```text
 WARNING: dashboard now reachable from any LAN device. Consider running
 behind a reverse proxy with auth, or use an SSH tunnel from the remote.
 ```
