@@ -367,44 +367,20 @@ const notifier =
           : {}),
       });
 
-const result = await runDaemon({
-  tickInterval: args.tickIntervalMs,
-  maxIterations: args.maxIterations,
-  // `dryRun` here is the legacy v0 guard inside `runDaemon`; setting it to
-  // `true` keeps `runDaemon`'s legacy throw-on-misuse semantics quiet for
-  // the dry-run Strategy, while injecting `spawnStrategy` makes the daemon
-  // dispatch via the Strategy (real spawn or dry-run, decided above).
-  dryRun,
-  mockClient: new TestFakeMockAnthropic(),
-  spawnStrategy,
-  tasksMdReader: () => readFileSync(args.tasksMdPath, "utf-8"),
-  pausedSentinelReader: () => existsSync(args.pausedSentinelPath),
-  // Real `BudgetGuard.tick()` wrapped behind the daemon's `BudgetGuardLike.decide()` shape.
-  budgetGuard: fromRealBudgetGuard(realGuard),
-  // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
-  ...(notifier !== undefined ? { notifier } : {}),
-  // Optional CTO-audit seam; `undefined` when MINSKY_CTO_AUDIT_ENABLE isn't 1/true.
-  ...(ctoAuditSeam !== undefined ? { ctoAudit: ctoAuditSeam } : {}),
-  // Optional daily-changelog seam; `undefined` when MINSKY_CHANGELOG_ENABLE isn't 1/true.
-  ...(changelogSeam !== undefined ? { changelog: changelogSeam } : {}),
-  // Optional daily-snapshot seam; same opt-in as the changelog seam (the two
-  // share the daily-changelog umbrella — see SnapshotSeam construction above).
-  ...(snapshotSeam !== undefined ? { snapshot: snapshotSeam } : {}),
-  // Optional daily-metrics-render seam; same umbrella as the snapshot seam
-  // (it consumes the snapshot file and writes METRICS.md).
-  ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
-  emit: (event) => {
-    // Plain-text line on stdout for terminal/journalctl visibility.
-    process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
-    // Forward to OTEL when wired; the SDK ships to OpenObserve / whatever
-    // OTLP backend MINSKY_OTEL_ENDPOINT points at — fire-and-forget per
-    // rule #7 graceful-degrade (the OTEL SDK swallows transport errors).
-    if (observability !== undefined) {
-      observability.emitTickSpan(event);
-    }
-  },
-});
-
+// Wire-status announcements emitted at supervisor STARTUP, before
+// `runDaemon` enters its (in production, non-terminating) loop. Without
+// this, the symmetric "no X wired" lines fire only after `runDaemon`
+// returns — unreachable under launchd/systemd-user, where the supervisor
+// runs indefinitely. The visible failure mode this guards against:
+// install drift between `distribution/launchd/com.minsky.tick-loop.plist`
+// (source) and `~/Library/LaunchAgents/com.minsky.tick-loop.plist`
+// (installed) silently zeroes `MINSKY_CTO_AUDIT_ENABLE`, which silently
+// zeroes the pre-registered measurement query
+// (`gh pr list --label minsky:cto-audit ...`). Surfacing the not-wired
+// state in the first lines of `.minsky/tick-loop.out.log` lets an
+// operator running `tail` catch the drift in seconds rather than
+// waiting 7 days for the rolling weekly window to expire with a
+// 0-reading whose root cause is configuration, not the audit feature.
 if (notifier !== undefined) {
   process.stdout.write(`[tick-loop] notifier wired (ntfy topic=${ntfyTopic})\n`);
 } else {
@@ -451,6 +427,44 @@ if (metricsRenderSeam !== undefined) {
     "[tick-loop] no daily metrics render wired (set MINSKY_CHANGELOG_ENABLE=1 to refresh METRICS.md daily)\n",
   );
 }
+
+const result = await runDaemon({
+  tickInterval: args.tickIntervalMs,
+  maxIterations: args.maxIterations,
+  // `dryRun` here is the legacy v0 guard inside `runDaemon`; setting it to
+  // `true` keeps `runDaemon`'s legacy throw-on-misuse semantics quiet for
+  // the dry-run Strategy, while injecting `spawnStrategy` makes the daemon
+  // dispatch via the Strategy (real spawn or dry-run, decided above).
+  dryRun,
+  mockClient: new TestFakeMockAnthropic(),
+  spawnStrategy,
+  tasksMdReader: () => readFileSync(args.tasksMdPath, "utf-8"),
+  pausedSentinelReader: () => existsSync(args.pausedSentinelPath),
+  // Real `BudgetGuard.tick()` wrapped behind the daemon's `BudgetGuardLike.decide()` shape.
+  budgetGuard: fromRealBudgetGuard(realGuard),
+  // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
+  ...(notifier !== undefined ? { notifier } : {}),
+  // Optional CTO-audit seam; `undefined` when MINSKY_CTO_AUDIT_ENABLE isn't 1/true.
+  ...(ctoAuditSeam !== undefined ? { ctoAudit: ctoAuditSeam } : {}),
+  // Optional daily-changelog seam; `undefined` when MINSKY_CHANGELOG_ENABLE isn't 1/true.
+  ...(changelogSeam !== undefined ? { changelog: changelogSeam } : {}),
+  // Optional daily-snapshot seam; same opt-in as the changelog seam (the two
+  // share the daily-changelog umbrella — see SnapshotSeam construction above).
+  ...(snapshotSeam !== undefined ? { snapshot: snapshotSeam } : {}),
+  // Optional daily-metrics-render seam; same umbrella as the snapshot seam
+  // (it consumes the snapshot file and writes METRICS.md).
+  ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
+  emit: (event) => {
+    // Plain-text line on stdout for terminal/journalctl visibility.
+    process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
+    // Forward to OTEL when wired; the SDK ships to OpenObserve / whatever
+    // OTLP backend MINSKY_OTEL_ENDPOINT points at — fire-and-forget per
+    // rule #7 graceful-degrade (the OTEL SDK swallows transport errors).
+    if (observability !== undefined) {
+      observability.emitTickSpan(event);
+    }
+  },
+});
 
 process.stdout.write(
   `[tick-loop] ${result.totalIterations} iteration(s) (${result.stoppedReason})\n`,
