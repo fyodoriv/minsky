@@ -181,6 +181,22 @@ If you're an agent and you're stuck:
 
 Do not loop. Do not try the same approach repeatedly. Per the constitution, "let it crash" — escalate visibly and continue.
 
+## `**Touches**:` field on task blocks (parallel-launch coordination)
+
+When the daemon runs in parallel mode (`pnpm dogfood --worker-id=N --workers-total=M`), each task block in `TASKS.md` may declare a `**Touches**: <glob>[, <glob>…]` field listing the file globs the task is expected to modify. The daemon's pre-spawn collision check (slice 3 of `daemon-parallel-worktree-launch`, see `novel/tick-loop/src/touches-glob.ts`) refuses to start a worker on a task whose globs overlap any open daemon PR's changed-file list — the second line of defense after `acquireTaskClaim` (slice 1).
+
+Format:
+
+```markdown
+- **Touches**: `novel/tick-loop/**`, `scripts/foo.mjs`
+```
+
+Multiple comma-separated globs allowed; backticks optional but encouraged for markdown rendering. Supported glob syntax (per `globMatchesPath`): `*` matches any chars including `/`, `?` matches a single char, exact text matches literally — no brace expansion, no character classes. The matcher is intentionally minimal to avoid a `micromatch` / `minimatch` dependency.
+
+Single-process daemon (no `--worker-id`) ignores the field entirely. Empty / absent `**Touches**` is treated as "no globs declared" — the collision check returns `proceed` (lenient default during rollout); strict mode is a future policy choice.
+
+Declare `**Touches**:` on tasks the daemon is likely to pick. Broad meta-tasks (e.g. `security-privacy-priority-substrate`) that span many directories should be decomposed into narrower sub-tasks rather than declaring `novel/**` as a glob — the latter would over-collide.
+
 ## Pushback is welcome
 
 If a task description is wrong, or a constitutional rule is being misapplied, push back. Add a `**Pushback**:` block to the task explaining the issue. The human or the MAPE-K loop will resolve it. Silent compliance with a bad spec is itself a constitutional violation.
