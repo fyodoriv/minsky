@@ -12,6 +12,9 @@
  */
 
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { BudgetGuard } from "@minsky/budget-guard";
 import { StubTokenMonitor } from "@minsky/token-monitor";
@@ -1583,6 +1586,37 @@ describe("buildDaemonBrief", () => {
     // Pre-registered metric (TASKS.md `daemon-pre-pr-lint-gate`) — pin the
     // 80% threshold so a brief edit can't silently weaken the hypothesis.
     expect(brief).toContain("≥80%");
+  });
+
+  it("brief's fast-stage step names match the canonical manifest at scripts/run-pre-pr-lint-stack.mjs", () => {
+    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate` slice 5/N): the
+    // brief tells the daemon which step name to look for in stderr when the
+    // gate fails. If a new fast-stage check is added to the manifest but the
+    // brief isn't updated, the "fix the named step" retry instruction is
+    // silently incomplete — the daemon would not know it should iterate on
+    // (e.g.) a new `rule-13-*` failure. Pin the contract by parsing the
+    // canonical manifest source and asserting the brief enumerates every
+    // fast-stage step name.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const manifestPath = resolve(here, "../../../scripts/run-pre-pr-lint-stack.mjs");
+    const src = readFileSync(manifestPath, "utf8");
+    const stepRegex = /\{\s*name:\s*"([^"]+)",\s*stages:\s*\[([^\]]+)\]/g;
+    const fastStageNames: string[] = [];
+    for (const match of src.matchAll(stepRegex)) {
+      const name = match[1];
+      const stages = match[2];
+      if (name !== undefined && stages !== undefined && /"fast"/.test(stages)) {
+        fastStageNames.push(name);
+      }
+    }
+    // Sanity: the manifest must declare at least one fast-stage step or the
+    // daemon's gate is meaningless.
+    expect(fastStageNames.length).toBeGreaterThan(0);
+
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    for (const stepName of fastStageNames) {
+      expect(brief, `brief should enumerate fast-stage step \`${stepName}\``).toContain(stepName);
+    }
   });
 
   it("includes the optimization-discipline gate with concrete eligible-optimization list", () => {
