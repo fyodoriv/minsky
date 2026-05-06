@@ -27,6 +27,16 @@ Per constitutional rule #7 (vision.md § 7).
 | 5 | Created-at is not ISO-8601 | upstream-malformed | `circuit-break-and-notify` | covered by structural-error test |
 | 6 | Document exceeds the 1 MB cap | resource exhaustion | `circuit-break-and-notify` (return `kind: "input-too-large"` error, no parsing) | covered by parser test "input-too-large" in `novel/handoff-spec/src/index.test.ts` |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: handoff documents authored by sibling agents (markdown blobs of arbitrary origin within the operator's machine — e.g., a persona's tick output).
+- **Trusted state**: the parser + validator are pure functions; the spec lives in `spec.md` and is referenced by tests; `parsimmon`-free recursive-descent has no parser-combinator surface to exploit.
+- **Trust boundary**: `parseHandoffs(source)` accepts a string and returns a `Handoff[]` plus a `ParseError[]` — no exception escapes; the 1 MB input cap is enforced at parser entry (Failure mode #6).
+- **STRIDE focus**: **T**ampering — every field is validated against the schema; structural errors are returned as `ParseError`, never silently dropped (Failure modes #1-5). **D**enial-of-service — input-too-large returns `kind: "input-too-large"` rather than OOM (Armstrong 2007 — let it crash, but with a precise error).
+- **Performance-first carve-out** (rule #13's relief valve): none declared.
+
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: a small declarative spec + recursive-descent parser + per-rule validators suffice to catch every malformed handoff before it reaches a downstream agent.
