@@ -12,8 +12,9 @@
  */
 
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BudgetGuard } from "@minsky/budget-guard";
@@ -43,7 +44,12 @@ import type {
   CtoAuditSpawn,
 } from "./post-task-cto-audit.js";
 import type { SnapshotCapture, SnapshotExists } from "./snapshot-runner.js";
-import { DryRunSpawnStrategy, ProcessSpawnStrategy } from "./spawn-strategy.js";
+import {
+  DryRunSpawnStrategy,
+  ProcessSpawnStrategy,
+  type SpawnInput,
+  type SpawnStrategy,
+} from "./spawn-strategy.js";
 
 // ---- Parsers used by the brief↔manifest fast-stage drift test (slice 22/N) -
 // Lifted to module scope so the test body's cognitive complexity stays under
@@ -1440,6 +1446,127 @@ describe("tick-loop / daemon / runDaemon", () => {
     });
     // metrics render fired despite the snapshot-capture failure.
     expect(mr.renderCalls).toHaveLength(1);
+  });
+
+  it("worker mode: passes extraArgs (--worktree daemon-N-taskId) to the spawn strategy", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-worker-"));
+    const seenInputs: SpawnInput[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input: SpawnInput) => {
+        seenInputs.push(input);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    const client = new TestFakeMockAnthropic();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: client,
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 2 },
+      locksDir: tmp,
+    });
+    expect(seenInputs).toHaveLength(1);
+    expect(seenInputs[0]?.extraArgs).toEqual(["--worktree", "daemon-0-alpha"]);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("single-process (no workerConfig): does NOT include extraArgs / --worktree", async () => {
+    const seenInputs: SpawnInput[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input: SpawnInput) => {
+        seenInputs.push(input);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    const client = new TestFakeMockAnthropic();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: client,
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+    });
+    expect(seenInputs).toHaveLength(1);
+    expect(seenInputs[0]?.extraArgs ?? []).toEqual([]);
+  });
+
+  it("worker mode: a held claim returns no-task with claim-collision reason", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-claim-"));
+    // Pre-create a live lock for taskId "alpha" held by another worker.
+    const lockPath = join(tmp, "task-alpha.lock");
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        taskId: "alpha",
+        workerId: "9",
+        claimedAt: 0,
+        expiresAt: Number.MAX_SAFE_INTEGER,
+      }),
+    );
+    const fakeStrategy: SpawnStrategy = {
+      spawn: () =>
+        Promise.resolve({
+          exitCode: 0,
+          durationMs: 0,
+          stdoutTail: "should-not-spawn",
+          stderrTail: "",
+        }),
+    };
+    const client = new TestFakeMockAnthropic();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: client,
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 2 },
+      locksDir: tmp,
+    });
+    expect(result.iterations[0]?.status).toBe("no-task");
+    expect(result.iterations[0]?.reason).toContain("claim-collision");
+    expect(result.iterations[0]?.reason).toContain("held by 9");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("worker mode: claim is released after a successful iteration (subsequent acquire works)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-release-"));
+    const fakeStrategy: SpawnStrategy = {
+      spawn: () =>
+        Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" }),
+    };
+    const client = new TestFakeMockAnthropic();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: false,
+      mockClient: client,
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 2 },
+      locksDir: tmp,
+    });
+    // Two iterations would BOTH fail with claim-collision if the release
+    // weren't called — assert both completed.
+    const lockExists = existsSync(join(tmp, "task-alpha.lock"));
+    expect(lockExists).toBe(false);
+    rmSync(tmp, { recursive: true, force: true });
   });
 });
 
