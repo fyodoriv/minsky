@@ -388,6 +388,32 @@ jobs:
         # vitest config includes `scripts/**/*.test.mjs`). Keep this gate
         # narrow: read the PR body, lint the block, exit.
 
+  cto-audit-pr-conventions:
+    # TASKS.md `post-task-cto-audit` sub-step (e/f): audit PRs land on
+    # `audit/<UTC-date>-<task-id>` branches AND carry the
+    # `minsky:cto-audit` label. The pre-registered measurement query
+    # (`gh pr list --label minsky:cto-audit ...`) keys on the label;
+    # without this gate the metric silently undercounts when an audit
+    # PR is missing the label or uses the wrong branch (Munafò et al.
+    # 2017's pre-registration only works when the post-hoc query can
+    # actually see the artefacts it was committed to count).
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: fetch PR shape
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json headRefName,labels > /tmp/pr-shape.json
+          test -s /tmp/pr-shape.json
+      - name: lint audit-branch ↔ label biconditional
+        run: node scripts/check-cto-audit-pr-conventions.mjs /tmp/pr-shape.json
+
   linux-supervisor-integration:
     # supervisor-integration-tests (TASKS.md): empirically exercise rows
     # 1–4 of `distribution/README.md` § "Failure modes & chaos verification"
