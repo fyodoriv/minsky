@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   claudeBinaryReachableInvariant,
   daemonInFlightPrCollisionInvariant,
+  daemonIterationRuntimeInvariant,
   daemonNoopIterationRateInvariant,
   daemonPrStuckOnCiInvariant,
   daemonShippedRatioInvariant,
@@ -258,6 +259,71 @@ describe("daemonTaskIdStalenessInvariant", () => {
     expect(result.id).toBe("daemon-task-id-staleness");
     expect(result.evidence).toContain("removed-task");
     expect(result.evidence).not.toContain("live-task,");
+  });
+});
+
+describe("daemonIterationRuntimeInvariant", () => {
+  it("passes when no claude --print spawn exceeds the threshold", async () => {
+    const listClaudePrintSpawns = async () => [
+      { pid: 1234, etimeSeconds: 60, ppid: 1 },
+      { pid: 1235, etimeSeconds: 600, ppid: 1 },
+    ];
+    const result = await daemonIterationRuntimeInvariant({
+      listClaudePrintSpawns,
+      thresholdSeconds: 1800,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when there are no spawns at all", async () => {
+    const listClaudePrintSpawns = async () => [];
+    const result = await daemonIterationRuntimeInvariant({ listClaudePrintSpawns })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires with kill commands when a spawn exceeds the threshold", async () => {
+    const listClaudePrintSpawns = async () => [{ pid: 93564, etimeSeconds: 7320, ppid: 97262 }];
+    const result = await daemonIterationRuntimeInvariant({
+      listClaudePrintSpawns,
+      thresholdSeconds: 1800,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-iteration-runtime-exceeded");
+    expect(result.evidence).toContain("pid=93564");
+    expect(result.evidence).toContain("2h2m0s");
+    expect(result.suggestedFix).toContain("kill 93564");
+    expect(result.suggestedFix).toContain("scripts/kill-stuck-iterations.mjs");
+  });
+
+  it("emits a kill command per stuck spawn when multiple exceed", async () => {
+    const listClaudePrintSpawns = async () => [
+      { pid: 1001, etimeSeconds: 1900, ppid: 1 },
+      { pid: 1002, etimeSeconds: 200, ppid: 1 },
+      { pid: 1003, etimeSeconds: 3600, ppid: 1 },
+    ];
+    const result = await daemonIterationRuntimeInvariant({
+      listClaudePrintSpawns,
+      thresholdSeconds: 1800,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.suggestedFix).toContain("kill 1001 && kill 1003");
+    expect(result.suggestedFix).not.toContain("kill 1002");
+  });
+
+  it("uses a custom threshold when injected", async () => {
+    const listClaudePrintSpawns = async () => [{ pid: 5000, etimeSeconds: 400, ppid: 1 }];
+    const passResult = await daemonIterationRuntimeInvariant({
+      listClaudePrintSpawns,
+      thresholdSeconds: 600,
+    })();
+    expect(passResult.ok).toBe(true);
+    const failResult = await daemonIterationRuntimeInvariant({
+      listClaudePrintSpawns,
+      thresholdSeconds: 300,
+    })();
+    expect(failResult.ok).toBe(false);
   });
 });
 
