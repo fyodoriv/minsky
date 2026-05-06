@@ -344,3 +344,57 @@ describe("ci.yml drift-protection", () => {
     expect(ciNeeds).toContain("markdownlint");
   });
 });
+
+describe("docs/daemon-pre-pr-gate.md drift-protection", () => {
+  // Slice 8/N promoted `rule-7-chaos-coverage` into the fast stage, but the
+  // operator-facing doc shipped in slice 9/N (same day, separate branch) was
+  // written against the pre-slice-8 manifest and listed `rule-7` only in the
+  // full-stage section — a silent docs↔manifest drift the slice-7 brief
+  // parity test does not catch (it pins brief↔manifest, not docs↔manifest).
+  // Slice 13/N closes that fourth parity surface so the canonical operator
+  // explanation cannot drift behind the manifest the next time a step
+  // changes stages.
+
+  /**
+   * Extract step names from the bulleted fast-stage list at
+   * `docs/daemon-pre-pr-gate.md` § "What the gate enforces". The list shape
+   * is `- \`<name>\` — <description>`. The fast-stage list is bounded above
+   * by the section's intro paragraph and below by the next paragraph
+   * starting "The full stage adds"; slicing between them isolates exactly
+   * the bullet block.
+   *
+   * @param {string} doc
+   * @returns {string[]}
+   */
+  function extractDocFastStageNames(doc) {
+    const header = doc.search(/^The fast stage \(default\) runs/m);
+    if (header < 0) throw new Error("docs/daemon-pre-pr-gate.md has no fast-stage section header");
+    const tail = doc.slice(header);
+    const fullSectionStart = tail.search(/^The full stage adds/m);
+    const block = fullSectionStart < 0 ? tail : tail.slice(0, fullSectionStart);
+    /** @type {string[]} */
+    const names = [];
+    for (const line of block.split("\n")) {
+      const m = /^- `([a-z][a-z0-9-]*)`/.exec(line);
+      if (m?.[1] !== undefined) names.push(m[1]);
+    }
+    return names;
+  }
+
+  test("doc's fast-stage list ↔ manifest's fast stage (bidirectional)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const docNames = new Set(extractDocFastStageNames(doc));
+    const manifestNames = new Set(selectSteps("fast").map((s) => s.name));
+
+    const missingFromDoc = [...manifestNames].filter((n) => !docNames.has(n));
+    const extraInDoc = [...docNames].filter((n) => !manifestNames.has(n));
+    expect({ missingFromDoc, extraInDoc }).toEqual({ missingFromDoc: [], extraInDoc: [] });
+  });
+
+  test("extractDocFastStageNames parses at least one well-known step (parser sanity)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const names = extractDocFastStageNames(doc);
+    expect(names).toContain("biome");
+    expect(names).toContain("typecheck");
+  });
+});
