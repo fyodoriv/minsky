@@ -37,6 +37,8 @@ import {
   ROLLING_30D_MIN_N,
   ROLLING_30D_MIN_PASS_RATE,
   ROLLING_WINDOW_DAYS,
+  buildRecentPrListGhArgs,
+  parsePrListEntries,
 } from "./daemon-pr-lint-metrics.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -942,32 +944,9 @@ export function defaultInvariants() {
     const since = new Date(Date.now() - ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
-    const data = await ghJson([
-      "pr",
-      "list",
-      "--author",
-      "@me",
-      "--state",
-      "all",
-      "--search",
-      `created:>=${since}`,
-      "--json",
-      "number,statusCheckRollup",
-      "--limit",
-      "100",
-    ]);
+    const data = await ghJson(buildRecentPrListGhArgs(since));
     if (!Array.isArray(data)) return [];
-    /** @type {DaemonPrCleanCiSummary[]} */
-    const out = [];
-    for (const pr of data) {
-      /** @type {readonly { conclusion?: string, state?: string }[]} */
-      const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
-      const hasFailure = checks.some(
-        (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
-      );
-      out.push({ number: pr.number, hasFailure });
-    }
-    return out;
+    return parsePrListEntries(data);
   };
 
   return [
