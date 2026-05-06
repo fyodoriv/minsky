@@ -138,6 +138,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "cadence-pivot-threshold",
       "glossary-discipline",
       "hygiene",
+      "lockfile-integrity",
       "maciek-smoke",
       "mape-k-budget-cap",
       "mape-k-constraints-md-size",
@@ -275,6 +276,13 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-no-singleton-experiment.mjs"],
+  },
+  {
+    name: "lockfile-integrity",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-lockfile-integrity.mjs"],
+    env: { LOCKFILE_INTEGRITY_DIFF_BASE: "origin/main" },
   },
   {
     name: "otel-no-pii",

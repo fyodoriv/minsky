@@ -13,8 +13,10 @@ import {
   classifyLockfileEntryChange,
   extractEntriesFromLockfile,
   formatVerdict,
+  parseArgs,
   parsePnpmLockfile,
   parseSpecifier,
+  runLockfileIntegrityCheck,
   walkLockfileChanges,
 } from "./check-lockfile-integrity.mjs";
 
@@ -687,6 +689,183 @@ describe("parsePnpmLockfile (slice 3 — pure pnpm-lock.yaml parser)", () => {
         expect(integrity).toMatch(/^(sha256|sha384|sha512)-[A-Za-z0-9+/_-]+={0,2}$/);
       }
     }
+  });
+});
+
+// Slice 4 — CLI driver + arg parsing.
+
+describe("parseArgs (slice 4 — CLI)", () => {
+  // The `env` argument defaults to `process.env` in production but lets tests
+  // exercise the env-fallback path deterministically with a frozen object —
+  // no `vi.stubEnv` / `delete process.env[...]` plumbing required.
+  it("defaults diffBase to origin/main when no flag and no env override", () => {
+    expect(parseArgs([], {}).diffBase).toBe("origin/main");
+  });
+
+  it("honours LOCKFILE_INTEGRITY_DIFF_BASE env override when no flag is set", () => {
+    expect(parseArgs([], { LOCKFILE_INTEGRITY_DIFF_BASE: "upstream/main" }).diffBase).toBe(
+      "upstream/main",
+    );
+  });
+
+  it("honours --diff-base=<ref>", () => {
+    expect(parseArgs(["--diff-base=HEAD~1"], {}).diffBase).toBe("HEAD~1");
+  });
+
+  it("--diff-base wins over env override", () => {
+    expect(
+      parseArgs(["--diff-base=upstream/main"], { LOCKFILE_INTEGRITY_DIFF_BASE: "main" }).diffBase,
+    ).toBe("upstream/main");
+  });
+
+  it("honours --repo=<dir>", () => {
+    expect(parseArgs(["--repo=/tmp/x"], {}).repo).toBe("/tmp/x");
+  });
+
+  it("ignores unrecognised flags (forward-compat with future slices)", () => {
+    expect(parseArgs(["--unknown=foo", "--diff-base=HEAD"], {}).diffBase).toBe("HEAD");
+  });
+});
+
+describe("runLockfileIntegrityCheck (slice 4 — driver)", () => {
+  // Build a minimal lockfile-text fixture exercising the slice-3 parser. Two
+  // packages, both with inline-flow `resolution: {integrity}` — the shape pnpm
+  // emits.
+  /** @param {readonly (readonly [string, string])[]} entries */
+  const lockText = (entries) => {
+    const lines = ["lockfileVersion: '9.0'", "", "packages:"];
+    for (const [key, integrity] of entries) {
+      lines.push(`  '${key}':`, `    resolution: {integrity: ${integrity}}`);
+    }
+    return `${lines.join("\n")}\n`;
+  };
+
+  const HASH_A = `sha512-${"A".repeat(86)}==`;
+  const HASH_B = `sha512-${"B".repeat(86)}==`;
+
+  it("tree missing → exit 0 with skipped diagnostic", () => {
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "missing" }),
+      readBase: () => {
+        throw new Error("readBase should not be called when tree is missing");
+      },
+    });
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("skipped");
+    expect(out.stderr).toBe("");
+  });
+
+  it("tree read error → exit 2 (fail-safe; gate cannot evaluate)", () => {
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "error", reason: "EACCES" }),
+      readBase: () => ({ kind: "missing" }),
+    });
+    expect(out.exitCode).toBe(2);
+    expect(out.stderr).toContain("EACCES");
+  });
+
+  it("base unreachable → exit 2 (fail-safe)", () => {
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: lockText([["lodash@4.17.21", HASH_A]]) }),
+      readBase: () => ({ kind: "error", reason: "diff-base unreachable" }),
+    });
+    expect(out.exitCode).toBe(2);
+    expect(out.stderr).toContain("unreachable");
+  });
+
+  it("base missing (file just introduced in PR) → walker treats as empty before, all entries 'added', exit 0", () => {
+    const tree = lockText([
+      ["lodash@4.17.21", HASH_A],
+      ["debug@4.3.4", HASH_B],
+    ]);
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: tree }),
+      readBase: () => ({ kind: "missing" }),
+    });
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("2 added");
+  });
+
+  it("tree === base → 0 violations, exit 0, summary cites unchanged count", () => {
+    const fixture = lockText([["lodash@4.17.21", HASH_A]]);
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: fixture }),
+      readBase: () => ({ kind: "ok", text: fixture }),
+    });
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("1 unchanged");
+    expect(out.violations).toEqual([]);
+  });
+
+  it("hash changed without version change → exit 1 with hijack diagnostic", () => {
+    const before = lockText([["debug@4.3.4", HASH_A]]);
+    const after = lockText([["debug@4.3.4", HASH_B]]);
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: after }),
+      readBase: () => ({ kind: "ok", text: before }),
+    });
+    expect(out.exitCode).toBe(1);
+    expect(out.stderr).toContain("hash-change-without-version-change");
+    expect(out.stderr).toContain("debug@4.3.4");
+    expect(out.violations.length).toBe(1);
+    expect(out.violations[0]?.code).toBe("hash-change-without-version-change");
+  });
+
+  it("legitimate version-bump (different version key, different hash) → 0 violations", () => {
+    // pnpm keys by name@version, so a version bump is a removed + added pair —
+    // both benign. The 'version-bump' verdict is reachable only by manual
+    // pairing in the classifier; the walker never emits it.
+    const before = lockText([["debug@4.3.4", HASH_A]]);
+    const after = lockText([["debug@4.3.5", HASH_B]]);
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: after }),
+      readBase: () => ({ kind: "ok", text: before }),
+    });
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("1 added");
+    expect(out.stdout).toContain("1 removed");
+  });
+
+  it("multi-package mix surfaces only the hijack, not the bumps", () => {
+    const before = lockText([
+      ["lodash@4.17.21", HASH_A],
+      ["debug@4.3.4", HASH_A],
+      ["chalk@5.0.0", HASH_A],
+    ]);
+    const after = lockText([
+      ["lodash@4.17.21", HASH_A], // unchanged
+      ["debug@4.3.4", HASH_B], // hijack — same key, different hash
+      ["chalk@5.1.0", HASH_B], // legit bump
+    ]);
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: after }),
+      readBase: () => ({ kind: "ok", text: before }),
+    });
+    expect(out.exitCode).toBe(1);
+    expect(out.violations.length).toBe(1);
+    expect(out.violations[0]?.key).toBe("debug@4.3.4");
+  });
+
+  it("exit-2 diagnostic does NOT leak the base ref text into stdout", () => {
+    // stdout is for ok-path digests only; failure modes go to stderr. The
+    // CI gate's bash bucket asserts on exit code, but human reviewers paste
+    // stdout — keeping failure diagnostics on stderr keeps the convention.
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: lockText([["a@1.0.0", HASH_A]]) }),
+      readBase: () => ({ kind: "error", reason: "boom" }),
+    });
+    expect(out.stdout).toBe("");
+    expect(out.stderr.length).toBeGreaterThan(0);
+  });
+
+  it("violation message cites vision.md § 13.5 anchor (operator hand-off)", () => {
+    const before = lockText([["debug@4.3.4", HASH_A]]);
+    const after = lockText([["debug@4.3.4", HASH_B]]);
+    const out = runLockfileIntegrityCheck({
+      readTree: () => ({ kind: "ok", text: after }),
+      readBase: () => ({ kind: "ok", text: before }),
+    });
+    expect(out.stderr).toContain("vision.md § 13.5");
   });
 });
 
