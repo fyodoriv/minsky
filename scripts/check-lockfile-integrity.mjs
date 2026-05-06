@@ -15,6 +15,18 @@
 // over `pnpm-lock.yaml`, the CLI, and the CI gate ship in subsequent slices
 // against this fixed seam.
 //
+// Slice 2 (this file): adds `extractEntriesFromLockfile(parsed)` and
+// `walkLockfileChanges({ before, after })` — the pure pair of helpers that
+// turn two already-parsed `pnpm-lock.yaml` snapshots into the set of
+// per-entry classifications. Keys are the lockfile's own `name@version`
+// strings (pnpm v9's `packages` map uses these as object keys, so they're
+// already unique by construction); the walker iterates the union of keys
+// and runs `classifyLockfileEntryChange` on each pair. YAML parsing, file
+// I/O, and the CI gate ship in slices ≥3 against this fixed seam — the
+// walker takes the parsed object so the test suite can exercise every
+// verdict path with hand-built fixtures and not be coupled to a YAML
+// library or a real lockfile on disk.
+//
 // The 2025 `chalk` / `debug` incident (vision.md § 13.5) is the load-bearing
 // precedent: a maintainer credential was compromised, the attacker
 // republished `debug@4.x.x` (and several siblings) under their existing
@@ -322,4 +334,152 @@ export function formatVerdict(result, packageName) {
     return `[ok] ${tag}${result.kind}`;
   }
   return `[fail] ${tag}${result.code}: ${result.reason}`;
+}
+
+// Slice 2: pure walker over already-parsed pnpm-lock.yaml snapshots. ----------
+
+/**
+ * @typedef {object} ParsedLockfile
+ * @property {Record<string, { resolution?: { integrity?: string } }>} [packages]
+ *   pnpm v9's `packages:` map. Keys are `<name>@<version>` strings; values
+ *   are entries with at minimum `resolution.integrity` populated. Other
+ *   fields (engines, hasBin, peerDependencies, …) are ignored by the walker
+ *   — they don't affect tarball-byte integrity.
+ */
+
+/**
+ * Extract a `Map<key, LockEntry>` from a parsed pnpm-lock.yaml snapshot.
+ * Keys are the lockfile's own `name@version` strings; values are the
+ * `{ specifier, integrity }` shape `classifyLockfileEntryChange` consumes.
+ *
+ * Entries missing a `resolution.integrity` (workspace links, file: deps,
+ * git+ssh deps — anything the registry doesn't ship a tarball for) are
+ * skipped. The classifier flags missing integrity on entries that *should*
+ * have one; here we filter out entries that legitimately don't.
+ *
+ * @param {ParsedLockfile | null | undefined} parsed
+ * @returns {Map<string, LockEntry>}
+ */
+export function extractEntriesFromLockfile(parsed) {
+  /** @type {Map<string, LockEntry>} */
+  const entries = new Map();
+  if (parsed === null || parsed === undefined || typeof parsed !== "object") {
+    return entries;
+  }
+  const packages = parsed.packages;
+  if (packages === null || packages === undefined || typeof packages !== "object") {
+    return entries;
+  }
+  for (const [key, value] of Object.entries(packages)) {
+    const integrity = readEntryIntegrity(value);
+    if (integrity === null) continue;
+    entries.set(key, { specifier: key, integrity });
+  }
+  return entries;
+}
+
+/**
+ * Pull `value.resolution.integrity` out of a parsed lockfile package entry,
+ * returning a non-empty SRI-shaped string or `null` when the entry doesn't
+ * carry one (workspace links, file: deps, malformed shapes). Pulled out so
+ * `extractEntriesFromLockfile` stays under the cognitive-complexity cap
+ * (rule #2 / Biome).
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function readEntryIntegrity(value) {
+  if (value === null || typeof value !== "object") return null;
+  const resolution = /** @type {{ integrity?: unknown } | undefined} */ (
+    /** @type {any} */ (value).resolution
+  );
+  if (resolution === null || resolution === undefined || typeof resolution !== "object") {
+    return null;
+  }
+  const integrity = resolution.integrity;
+  if (typeof integrity !== "string" || integrity.length === 0) return null;
+  return integrity;
+}
+
+/**
+ * @typedef {object} WalkerViolation
+ * @property {string} key       lockfile key (`name@version`) — present in at
+ *                              least one of before/after. The walker keys
+ *                              violations by this string so the CLI / CI
+ *                              gate can emit a stable `key: code` line.
+ * @property {string} code      classifier code from `classifyLockfileEntryChange`.
+ * @property {string} reason    classifier reason.
+ */
+
+/**
+ * @typedef {object} WalkerResult
+ * @property {WalkerViolation[]} violations  ordered by key (lexicographic).
+ * @property {{ unchanged: number, added: number, removed: number, versionBump: number }} summary
+ *   counts of benign verdicts so the CLI can print a one-line "scanned N
+ *   entries, M added, K removed, ..." digest after a clean walk.
+ */
+
+/**
+ * Pair entries from two parsed lockfile snapshots by `name@version` key
+ * and run the slice-1 classifier on each pair.
+ *
+ * The walker is deliberately key-by-key rather than by-package-name:
+ * pnpm-lock.yaml uses `name@version` as the package map's key, so a
+ * version bump shows up as a removed `name@1.0.0` + added `name@1.0.1`
+ * (both benign verdicts), not a single before/after pair. The classifier's
+ * `version-bump` verdict is reachable only when a caller manually
+ * constructs a same-name-different-version pair — by design, the walker
+ * doesn't, because that would require name-grouping heuristics (which
+ * package version is the "successor" of which?) that pnpm's resolver
+ * already encoded in the lockfile keys.
+ *
+ * The supply-chain-attack signature this walker exists to catch is the
+ * `hash-change-without-version-change` case: the *same* `name@version`
+ * key exists in both before and after, but its `integrity` differs. That
+ * is cryptographically impossible for a legitimate registry tarball
+ * (Subresource Integrity is content-addressed by definition) and is the
+ * empirical fingerprint of the 2025 `chalk`/`debug` incident.
+ *
+ * @param {{ before: ParsedLockfile | null | undefined, after: ParsedLockfile | null | undefined }} input
+ * @returns {WalkerResult}
+ */
+export function walkLockfileChanges({ before, after }) {
+  const beforeEntries = extractEntriesFromLockfile(before);
+  const afterEntries = extractEntriesFromLockfile(after);
+
+  /** @type {WalkerViolation[]} */
+  const violations = [];
+  const summary = { unchanged: 0, added: 0, removed: 0, versionBump: 0 };
+
+  const keys = new Set([...beforeEntries.keys(), ...afterEntries.keys()]);
+  const sortedKeys = [...keys].sort();
+
+  for (const key of sortedKeys) {
+    const beforeEntry = beforeEntries.get(key) ?? null;
+    const afterEntry = afterEntries.get(key) ?? null;
+    const verdict = classifyLockfileEntryChange({ before: beforeEntry, after: afterEntry });
+    if (verdict.ok === true) {
+      tallyBenignKind(summary, verdict.kind);
+      continue;
+    }
+    violations.push({ key, code: verdict.code, reason: verdict.reason });
+  }
+
+  return { violations, summary };
+}
+
+/**
+ * Increment the corresponding field of a walker summary for one benign
+ * verdict kind. Pulled out so `walkLockfileChanges` stays under the
+ * cognitive-complexity cap (rule #2 / Biome).
+ *
+ * @param {{ unchanged: number, added: number, removed: number, versionBump: number }} summary
+ * @param {"unchanged" | "added" | "removed" | "version-bump"} kind
+ * @returns {void}
+ */
+function tallyBenignKind(summary, kind) {
+  if (kind === "unchanged") summary.unchanged += 1;
+  else if (kind === "added") summary.added += 1;
+  else if (kind === "removed") summary.removed += 1;
+  else if (kind === "version-bump") summary.versionBump += 1;
 }
