@@ -154,6 +154,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-6-let-it-crash",
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
+      "supervisor-sandbox-hardening",
       "tasks-lint",
       "test",
       "tick-loop-backoff-schedule",
@@ -310,6 +311,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-tick-loop-backoff-schedule.mjs"],
+  },
+  {
+    name: "supervisor-sandbox-hardening",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-supervisor-sandbox-hardening.mjs"],
   },
   {
     name: "cadence-pivot-threshold",

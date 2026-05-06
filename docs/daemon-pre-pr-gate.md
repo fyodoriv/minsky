@@ -57,6 +57,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `mape-k-tick-iteration-backstop` — the tick-iteration backstop integer matches ARCHITECTURE.md.
 - `mape-k-watchdog-cadence` — the watchdog cadence (hours) matches ARCHITECTURE.md.
 - `tick-loop-backoff-schedule` — the restart-backoff schedule matches ARCHITECTURE.md (5s → 30s → 5min).
+- `supervisor-sandbox-hardening` — the safe set of systemd sandboxing directives is present in every supervisor unit file (vision.md rule #13 item 3).
 - `cadence-pivot-threshold` — the cadence-pivot threshold fraction matches research.md.
 - `pivot-success-margin` — every rule-#9 record's pivot threshold is below its success threshold by ≥ the documented margin.
 - `anchor-primary-source` — every rule-#9 record's anchor cites a primary source, not a tutorial.
