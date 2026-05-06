@@ -40,11 +40,14 @@ describe("STACK_MANIFEST", () => {
     expect(uniq.size).toBe(names.length);
   });
 
-  test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-12", () => {
+  test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-7 / rule-12", () => {
     // Pre-registered scope of the daemon's pre-PR gate (TASKS.md
     // `daemon-pre-pr-lint-gate` Pivot — fast lints close ~80% of the failure
     // modes the operator cleans up). Drift here is what the manifest is
-    // supposed to detect; pin the set explicitly.
+    // supposed to detect; pin the set explicitly. rule-7 was promoted to
+    // fast 2026-05-06 (slice 8/N) — it is the 5th of 5 empirically-named
+    // failure modes in the brief and walks `novel/**/README.md` only
+    // (~0.3s wall-clock, well under the 5-min pivot budget).
     const fastNames = selectSteps("fast")
       .map((s) => s.name)
       .sort();
@@ -56,6 +59,7 @@ describe("STACK_MANIFEST", () => {
         "rule-2-dep-coverage",
         "rule-3-doc-first",
         "rule-6-let-it-crash",
+        "rule-7-chaos-coverage",
         "tasks-lint",
         "typecheck",
       ].sort(),

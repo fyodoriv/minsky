@@ -902,7 +902,7 @@ export function buildDaemonBrief(args: {
     "This is the same script CI imports — passing it locally is the precondition for opening the PR (single source of truth: `scripts/run-pre-pr-lint-stack.mjs`; rule #10 — deterministic enforcement, the daemon runs the same gate humans run via `lefthook` `pre-push`). Behaviour:",
     "",
     "- **Green** → proceed to `gh pr create`.",
-    "- **Red** → fix the failures and re-run, up to 3 attempts total. The stack's stderr tail names the exact failing step (`biome` / `typecheck` / `markdownlint` / `tasks-lint` / `rule-2-dep-coverage` / `rule-3-doc-first` / `rule-6-let-it-crash` / `rule-12-scope-discipline`); each failure is a daemon-side fix iteration, not an operator-side cleanup PR.",
+    "- **Red** → fix the failures and re-run, up to 3 attempts total. The stack's stderr tail names the exact failing step (`biome` / `typecheck` / `markdownlint` / `tasks-lint` / `rule-2-dep-coverage` / `rule-3-doc-first` / `rule-6-let-it-crash` / `rule-7-chaos-coverage` / `rule-12-scope-discipline`); each failure is a daemon-side fix iteration, not an operator-side cleanup PR.",
     "- **Still red after 3 attempts** → output `noop, exiting — pre-pr-lint-failures: <step name>` to stdout and DO NOT open a PR. Filing a `Blocked: pre-pr-lint-failures` task is acceptable; opening a red PR is not.",
     "",
     "Pre-registered (TASKS.md `daemon-pre-pr-lint-gate`): post-fix, ≥80% of daemon-authored PRs open with zero red CI checks (vs the current ~0%).",
