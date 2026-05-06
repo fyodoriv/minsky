@@ -150,3 +150,13 @@ createServer({ getValue: snapshotGetValue(snapshot) });
 ## Localhost-only by default (security)
 
 Per vision.md rule #13.4 (security minimum bar — boundary protection, NIST SP 800-53 SC-7), the dashboard binds to `127.0.0.1` by default. LAN exposure requires explicit operator opt-in via `MINSKY_DASHBOARD_BIND=0.0.0.0`. The bind decision lives in `src/bind.ts` (pure helper) consumed by `src/start.ts`. See `test/bind.test.ts` for the paired tests.
+
+### `POST /control` requires a per-run token (slice 1 — pure helpers shipped)
+
+Even when the operator opts into LAN exposure, the `POST /control` endpoint must still gate on a per-run secret so a curious neighbor on the WiFi can't pause the supervisor. Slice 1 ships the three pure helpers in `src/control-auth.ts`:
+
+- `resolveControlToken(env, generateRandom)` reads `MINSKY_CONTROL_TOKEN` if set, falling back to `generateRandom()` (production: `crypto.randomBytes(32).toString("hex")`). Empty-string env is treated as unset (mirrors `bind.ts`).
+- `validateControlAuth(headers, expectedToken)` does a length-then-byte-XOR constant-time compare of the `X-Minsky-Token` header against the expected token (NIST SP 800-63B "Memorized Secret" comparison; OWASP ASVS 2.10).
+- `controlTokenStartupHint(resolved)` formats the stderr line the operator reads after server start. The env-source variant deliberately does NOT echo the secret; the generated-source variant does (operator must be able to copy it).
+
+Slice 2 wires `validateControlAuth` into the route handler in `src/server.ts` (`401` on missing/wrong token, `setPaused` Strategy never called on the unauthenticated branch). Slice 3 wires the resolver + startup hint into `src/start.ts`. Until slice 2 lands, `POST /control` remains unauthenticated — the bind-default keeps the surface unreachable from the LAN, so the per-run-secret gate is defense-in-depth, not the only door. Paired tests live in `test/control-auth.test.ts` (15 cases — env / generator / empty-string / case-insensitive header / constant-time discipline / real `Headers` vs stub).
