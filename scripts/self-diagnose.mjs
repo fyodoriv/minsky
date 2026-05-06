@@ -548,6 +548,59 @@ export function daemonIterationRuntimeInvariant(opts) {
 }
 
 /**
+ * @typedef {object} DaemonPrCleanCiSummary
+ * @property {number} number
+ * @property {boolean} hasFailure — true iff statusCheckRollup currently shows ≥1 conclusion=FAILURE check
+ *
+ * @typedef {object} PrLintPassRateInvariantOpts
+ * @property {() => Promise<readonly DaemonPrCleanCiSummary[]>} recentDaemonPrs — rolling window the brief defines (default impl: 30d)
+ * @property {number} [windowMinPrs] - only evaluate once the window holds this many PRs (default 10; below that the ratio is too noisy)
+ * @property {number} [minPassRate] - fire below this fraction (default 0.8, the brief's pre-registered threshold)
+ */
+
+/**
+ * Pre-registered metric for `daemon-pre-pr-lint-gate` (TASKS.md): rolling
+ * 30d fraction of daemon-authored PRs whose `statusCheckRollup` carries
+ * zero `conclusion=FAILURE` checks must stay ≥ `minPassRate` (0.8).
+ * Below that the gate has drifted — either the canonical lint stack
+ * (`scripts/run-pre-pr-lint-stack.mjs`) is missing a check CI runs, or
+ * the daemon brief stopped honoring `pnpm pre-pr-lint` before
+ * `gh pr create`. Either way the operator gets a TASKS.md block on the
+ * next supervisor self-diagnose tick.
+ *
+ * Strategy seam: `recentDaemonPrs` is injected so tests can drive the
+ * decision function without shelling out to gh; production calls
+ * `gh pr list --author @me --state all --search "created:>=<30d>"`.
+ *
+ * @param {PrLintPassRateInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonPrLintPassRateInvariant(opts) {
+  const { recentDaemonPrs, windowMinPrs = 10, minPassRate = 0.8 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const prs = await recentDaemonPrs();
+    if (prs.length < windowMinPrs) {
+      return { id: "daemon-pr-lint-pass-rate", ok: true };
+    }
+    const cleanCount = prs.filter((p) => !p.hasFailure).length;
+    const passRate = cleanCount / prs.length;
+    if (passRate >= minPassRate) return { id: "daemon-pr-lint-pass-rate", ok: true };
+    const dirty = prs.filter((p) => p.hasFailure).map((p) => `#${p.number}`);
+    return {
+      id: "daemon-pr-lint-pass-rate",
+      ok: false,
+      evidence: `rolling window: ${cleanCount} clean / ${prs.length} daemon PRs = ${passRate.toFixed(3)} (threshold ${minPassRate}). Failed: ${dirty.join(", ")}.`,
+      suggestedTaskTitle: `daemon PR lint pass-rate ${passRate.toFixed(3)} below ${minPassRate} (${cleanCount}/${prs.length} clean)`,
+      suggestedFix:
+        "The pre-PR lint gate has drifted from CI. Two known root causes: (1) `scripts/run-pre-pr-lint-stack.mjs` is missing a check that CI's `needs:` aggregator runs — diff the script's manifest against `.github/workflows/ci.yml` and add the missing step; (2) the daemon brief's `pnpm pre-pr-lint` mandate is being skipped — inspect `novel/tick-loop/src/daemon.ts`'s `buildDaemonBrief` to confirm the directive is still emitted, and check recent iteration logs in `.minsky/tick-loop.out.log` for the `pre-pr-lint-failures: <step>` noop-exit string. If neither is the cause, the threshold may be too aggressive — pivot per the task block to a staged gate (fast lints pre-PR, slow lints CI-only).",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-pr-lint-pass-rate";
+  return fn;
+}
+
+/**
  * Format seconds as `<H>h<M>m<S>s` short form. Used in evidence and
  * suggestedFix rendering for human readability.
  *
@@ -874,6 +927,37 @@ export function defaultInvariants() {
     }
   };
 
+  /** @type {() => Promise<readonly DaemonPrCleanCiSummary[]>} */
+  const recentDaemonPrs = async () => {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const data = await ghJson([
+      "pr",
+      "list",
+      "--author",
+      "@me",
+      "--state",
+      "all",
+      "--search",
+      `created:>=${since}`,
+      "--json",
+      "number,statusCheckRollup",
+      "--limit",
+      "100",
+    ]);
+    if (!Array.isArray(data)) return [];
+    /** @type {DaemonPrCleanCiSummary[]} */
+    const out = [];
+    for (const pr of data) {
+      /** @type {readonly { conclusion?: string, state?: string }[]} */
+      const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+      const hasFailure = checks.some(
+        (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
+      );
+      out.push({ number: pr.number, hasFailure });
+    }
+    return out;
+  };
+
   return [
     tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan }),
     claudeBinaryReachableInvariant({ probe: spawnVersionProbe }),
@@ -883,6 +967,7 @@ export function defaultInvariants() {
     daemonInFlightPrCollisionInvariant({ openDaemonPrs }),
     daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent }),
     daemonIterationRuntimeInvariant({ listClaudePrintSpawns: listClaudePrintSpawnsViaPgrep }),
+    daemonPrLintPassRateInvariant({ recentDaemonPrs }),
   ];
 }
 
