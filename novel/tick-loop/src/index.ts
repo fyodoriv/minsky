@@ -517,3 +517,18 @@ export {
   globMatchesPath,
   parseTouchesField,
 } from "./touches-glob.js";
+
+// Slice 4 of `daemon-parallel-worktree-launch`: pure decisions for the
+// per-tick sweeper that recovers stale .git/index.lock files (Claude Code
+// #11005), expired .minsky/locks/task-*.lock claims, and orphaned
+// daemon-namespace worktrees. The I/O wrapper (next slice) executes the
+// unlinks + `git worktree prune` and emits the counters.
+export {
+  type ClaimLockSnapshot,
+  type SweepDecision,
+  type WorktreeSnapshot,
+  decideExpiredClaim,
+  decideOrphanedWorktree,
+  decideStaleIndexLock,
+  summarizeSweepDecisions,
+} from "./parallel-sweeper.js";
