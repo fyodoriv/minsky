@@ -483,3 +483,213 @@ function tallyBenignKind(summary, kind) {
   else if (kind === "removed") summary.removed += 1;
   else if (kind === "version-bump") summary.versionBump += 1;
 }
+
+// Slice 3: pure pnpm-lock.yaml parser. ----------------------------------------
+//
+// `parsePnpmLockfile(text)` extracts the minimum shape `walkLockfileChanges`
+// consumes — `{ packages: { '<name>@<version>': { resolution: { integrity } } } }`
+// — from a textual `pnpm-lock.yaml`. The parser is intentionally narrow: it
+// understands only the `packages:` top-level block of pnpm v9's lockfile
+// dialect, not arbitrary YAML. That narrowness is the point — adding a full
+// YAML library to a *supply-chain-hardening* gate would expand the trusted
+// dependency surface the gate exists to defend (rule #1: "don't reinvent" cuts
+// both ways — don't reinvent general YAML, but don't import a 30-KLOC parser
+// to pluck two fields either). The pnpm v9 lockfile shape is stable and
+// machine-emitted; if pnpm v10 changes the field names, only this function
+// changes — the classifier (slice 1) and walker (slice 2) keep their seams.
+//
+// What the parser handles:
+//   - `packages:` block at column 0 (the lockfile's outermost key).
+//   - 2-space-indented entries: `'<key>':` (quoted) or `<key>:` (unquoted).
+//     Keys are returned verbatim — pnpm uses `<name>@<version>` strings, but
+//     the parser doesn't validate that here (the classifier does, downstream).
+//   - 4-space-indented `resolution: {integrity: <sri>}` (inline flow — pnpm's
+//     emitted style) AND the block-style fallback:
+//         resolution:
+//           integrity: <sri>
+//     Hand-edited lockfiles sometimes use the block form; both yield the same
+//     `{ packages: { key: { resolution: { integrity } } } }` shape.
+//   - Other 4-space-indented fields under an entry (`engines`, `hasBin`,
+//     `peerDependencies`, …) are skipped — they don't affect tarball-byte
+//     integrity, and including them would mean implementing more of YAML.
+//
+// What the parser does NOT handle (intentional):
+//   - YAML anchors (`&foo`) / aliases (`*foo`) — pnpm doesn't emit them.
+//   - Multi-document streams (`---` separators).
+//   - Block-scalar literals (`|`, `>`).
+//   - Comments are tolerated (`#` to end-of-line is stripped) but not parsed.
+//   - The `importers:`, `snapshots:`, `settings:`, `lockfileVersion:` blocks —
+//     they don't carry per-tarball integrity; the gate doesn't read them.
+//
+// Pattern: pure function (rule #2 — string in, object out, no I/O); the seam
+// between the YAML lockfile representation on disk and the JS object the
+// classifier/walker reason about. Slice 4 wires this into a CLI that reads
+// `pnpm-lock.yaml` from disk + a git base ref and feeds both into
+// `walkLockfileChanges`. Slice ≥5 (per the parent task) lands the CI gate.
+//
+// Source: pnpm v9 lockfile spec (github.com/pnpm/spec/blob/master/lockfile/9.md
+//   — the `packages:` block uses `<name>@<version>` keys with `resolution`
+//   carrying SRI-format `integrity`); rule #13 (security & privacy — second
+//   priority); SLSA Specification 1.0 § "build integrity" — minimum trusted
+//   surface; YAML 1.2 Core Schema (yaml.org/spec/1.2.2/) — the inline-flow
+//   subset the parser handles is fully spec-compliant.
+
+/**
+ * Strip a trailing inline `# comment` from a line, respecting that `#` inside
+ * single-quoted strings is literal. The pnpm-lock dialect uses `#` only for
+ * top-of-file metadata comments, never inside `packages:`, but the
+ * conservative behaviour keeps the parser robust to hand edits.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function stripInlineComment(line) {
+  let inSingleQuote = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === "'") inSingleQuote = !inSingleQuote;
+    else if (ch === "#" && !inSingleQuote) return line.slice(0, i).trimEnd();
+  }
+  return line;
+}
+
+/**
+ * Match a 2-space-indented `packages:` child key: either `'<key>':` (single-
+ * quoted) or `<key>:` (unquoted). Returns the unquoted key, or `null` if the
+ * line isn't a key.
+ *
+ * @param {string} line
+ * @returns {string | null}
+ */
+function matchPackageKey(line) {
+  // `^  '(.+?)':\s*$` — quoted key.
+  const quoted = /^ {2}'([^']+)':\s*$/.exec(line);
+  if (quoted !== null) return quoted[1] ?? null;
+  // `^  <key>:\s*$` — unquoted key. pnpm only quotes keys that need it
+  // (those starting with `@` or containing special chars), but unquoted
+  // `<name>@<version>` is also valid YAML when the name doesn't start with
+  // `@` — e.g. `lodash@4.17.21:`.
+  const unquoted = /^ {2}([^\s'][^:]*?):\s*$/.exec(line);
+  if (unquoted !== null) return unquoted[1] ?? null;
+  return null;
+}
+
+/**
+ * Match an inline-flow `resolution: {integrity: <sri>, …}` line under a
+ * 4-space-indented entry child. Returns the integrity string (unquoted) or
+ * `null` if the line doesn't carry one.
+ *
+ * @param {string} line
+ * @returns {string | null}
+ */
+function matchInlineResolutionIntegrity(line) {
+  // `^    resolution:\s*\{...integrity:\s*<sri>...\}\s*$`
+  const m = /^ {4}resolution:\s*\{[^}]*?\bintegrity:\s*(['"]?)([^,'"\s}]+)\1[^}]*\}\s*$/.exec(line);
+  return m === null ? null : (m[2] ?? null);
+}
+
+/**
+ * Match a block-style `integrity: <sri>` line — used when `resolution:` is
+ * itself a block:
+ *   resolution:
+ *     integrity: sha512-...
+ * The parser tracks the in-block state in `parsePnpmLockfile`; this matcher
+ * is name-only.
+ *
+ * @param {string} line
+ * @returns {string | null}
+ */
+function matchBlockIntegrity(line) {
+  const m = /^ {6}integrity:\s*(['"]?)([^'"\s]+)\1\s*$/.exec(line);
+  return m === null ? null : (m[2] ?? null);
+}
+
+/**
+ * True if a line marks the end of the `packages:` block — either EOF (caller
+ * handles), or a new top-level key (`^[A-Za-z]`), or `^---`. Blank lines and
+ * lines indented ≥1 space stay inside the block.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function endsPackagesBlock(line) {
+  if (line.length === 0) return false;
+  if (line.startsWith(" ") || line.startsWith("\t")) return false;
+  return /^[A-Za-z][A-Za-z0-9_-]*:/.test(line) || line === "---";
+}
+
+/**
+ * @typedef {object} ParserState
+ * @property {Record<string, { resolution?: { integrity?: string } }>} packages
+ * @property {string | null} currentKey
+ * @property {boolean} inBlockResolution
+ */
+
+/**
+ * Process one line that lives inside the `packages:` block. Mutates `state`.
+ * Pulled out so the top-level loop in `parsePnpmLockfile` stays under the
+ * cognitive-complexity cap (rule #2 / Biome).
+ *
+ * @param {string} line
+ * @param {ParserState} state
+ * @returns {void}
+ */
+function applyPackagesLine(line, state) {
+  const newKey = matchPackageKey(line);
+  if (newKey !== null) {
+    state.currentKey = newKey;
+    state.inBlockResolution = false;
+    // Initialise the entry slot so a key with no integrity (workspace link,
+    // file: dep) still surfaces — the slice-2 walker filters those out.
+    state.packages[newKey] = state.packages[newKey] ?? {};
+    return;
+  }
+  if (state.currentKey === null) return;
+
+  const inlineIntegrity = matchInlineResolutionIntegrity(line);
+  if (inlineIntegrity !== null) {
+    state.packages[state.currentKey] = { resolution: { integrity: inlineIntegrity } };
+    state.inBlockResolution = false;
+    return;
+  }
+  if (/^ {4}resolution:\s*$/.test(line)) {
+    state.inBlockResolution = true;
+    return;
+  }
+  if (!state.inBlockResolution) return;
+  const blockIntegrity = matchBlockIntegrity(line);
+  if (blockIntegrity !== null) {
+    state.packages[state.currentKey] = { resolution: { integrity: blockIntegrity } };
+    state.inBlockResolution = false;
+  }
+}
+
+/**
+ * Pure pnpm-lock.yaml parser. See header comment for what's handled.
+ *
+ * @param {string} text  raw `pnpm-lock.yaml` contents.
+ * @returns {ParsedLockfile}
+ */
+export function parsePnpmLockfile(text) {
+  /** @type {ParserState} */
+  const state = {
+    packages: Object.create(null),
+    currentKey: null,
+    inBlockResolution: false,
+  };
+  if (typeof text !== "string" || text.length === 0) return { packages: state.packages };
+
+  const lines = text.split(/\r?\n/);
+  let inPackages = false;
+  for (const rawLine of lines) {
+    const line = stripInlineComment(rawLine);
+    if (!inPackages) {
+      if (line === "packages:") inPackages = true;
+      continue;
+    }
+    if (endsPackagesBlock(line)) break;
+    applyPackagesLine(line, state);
+  }
+
+  return { packages: state.packages };
+}
