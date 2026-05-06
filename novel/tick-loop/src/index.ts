@@ -465,14 +465,18 @@ export {
 // CLI bin script (`bin/tick-loop.mjs`) thin: the bin only decides whether
 // to opt-in (env var) and forwards `process.env` / a real `execFile` here.
 export {
+  CTO_AUDIT_ENABLE_ENV_VAR,
   type EnsureLabelOutcome,
+  type EnvDriftOutcome,
   type ExecFileLike,
   type SignalsBuilderArgs,
   createFileBackedCtoAuditLock,
   createGitGhSignalsBuilder,
+  detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
   extractPrUrl,
   parseFilesChangedFromGit,
+  parsePlistEnv,
   parseRecentMainCommitsFromGit,
 } from "./cto-audit-cli-wiring.js";
 
