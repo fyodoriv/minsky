@@ -83,6 +83,7 @@ export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
     ["macos-supervisor-integration", "launchd user agent"],
     ["maciek-smoke", "pipx Python install"],
     ["pr-self-grade", "PR body context (`## Hypothesis self-grade`)"],
+    ["pr-security-review", "PR body context (`## Security & privacy` or typed opt-out)"],
   ]),
 );
 
@@ -163,7 +164,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
   supervisorSkippable: Object.freeze(
     new Set(["linux-supervisor-integration", "macos-supervisor-integration"]),
   ),
-  prOnlySkippable: Object.freeze(new Set(["pr-self-grade", "pattern-index", "skill-rule-cap"])),
+  prOnlySkippable: Object.freeze(
+    new Set(["pr-self-grade", "pr-security-review", "pattern-index", "skill-rule-cap"]),
+  ),
 });
 
 /**
