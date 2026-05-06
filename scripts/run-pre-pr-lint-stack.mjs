@@ -65,12 +65,46 @@ const REPO_ROOT = resolve(HERE, "..");
  */
 
 /**
+ * CI aggregator (`.github/workflows/ci.yml` § `ci:` `needs:`) jobs that the
+ * manifest intentionally omits because they require GitHub-runner-only or
+ * PR-context plumbing the daemon doesn't have. Each entry needs a one-line
+ * reason — silent additions hide drift. Lifted to the canonical module (slice
+ * 17/N) so the docs' env-dependent allowlist enumeration in
+ * `docs/daemon-pre-pr-gate.md` and the CI-parity test in
+ * `scripts/run-pre-pr-lint-stack.test.mjs` both pin against this single
+ * source of truth — same shape as the manifest itself (rule #2).
+ *
+ * @type {ReadonlyMap<string, string>}
+ */
+export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
+  new Map([
+    ["hygiene", "pnpm audit — needs network + advisory DB"],
+    ["linux-supervisor-integration", "systemd user bus"],
+    ["macos-supervisor-integration", "launchd user agent"],
+    ["maciek-smoke", "pipx Python install"],
+    ["pr-self-grade", "PR body context (`## Hypothesis self-grade`)"],
+  ]),
+);
+
+/**
+ * CI job names that diverge from their manifest step names. The aliases are
+ * pinned here so the CI-parity test's set equality passes — any new alias is
+ * a deliberate edit, never silent drift. Lifted to the canonical module
+ * (slice 17/N) alongside `CI_ENV_DEPENDENT_JOBS` for the same reason.
+ *
+ * @type {Readonly<Record<string, string>>}
+ */
+export const CI_TO_MANIFEST_ALIAS = Object.freeze({
+  test: "vitest", // `pnpm test:coverage` ↔ manifest's `vitest` step
+  "glossary-discipline": "rule-5-glossary-discipline", // job named for the rule's effect; manifest names it for the rule number
+});
+
+/**
  * The manifest. Order is informational — `runStack` may run steps in parallel
  * up to a small fan-out. New CI jobs that should gate locally get a row here;
- * env-dependent jobs (supervisor-integration, hygiene, maciek-smoke, rule-11,
- * pr-self-grade, cto-audit-pr-conventions) are intentionally absent — they
- * cannot evaluate against a local checkout without GitHub / pipx / dbus
- * plumbing the daemon doesn't have.
+ * env-dependent jobs (see `CI_ENV_DEPENDENT_JOBS` above) are intentionally
+ * absent — they cannot evaluate against a local checkout without GitHub /
+ * pipx / dbus plumbing the daemon doesn't have.
  *
  * @type {readonly StackStep[]}
  */
