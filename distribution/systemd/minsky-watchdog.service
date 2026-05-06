@@ -1,0 +1,48 @@
+# Minsky watchdog — continuous self-diagnose poller that auto-resolves
+# findings whose action is local + reversible-via-respawn. Currently:
+# kills `claude --print` spawns whose etime exceeds the threshold so the
+# tick-loop's launchd/systemd respawn picks up a fresh tick.
+#
+# Pattern: continuous-watchdog (Beyer SRE 2016 Ch. 6 — every state
+# operator cares about must surface; Kephart & Chess 2003 — MAPE-K's E
+# phase runs continuously, not on tick boundaries). Conformance: full.
+#
+# Source: 2026-05-05 operator dogfood — a daemon iteration ran for 2h+
+# at ~1% CPU before manual kill. Operator directive: detect + immediately
+# resolve OUTSIDE supervisor-tick-cadence.
+#
+# Placeholders (substituted by setup.sh via envsubst):
+#   ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+[Unit]
+Description=Minsky watchdog — auto-kill stuck claude --print spawns
+PartOf=minsky-supervisor.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${MINSKY_HOME}
+Environment=MINSKY_HOME=${MINSKY_HOME}
+# Tick cadence in seconds. Default 60 (one self-diagnose run per minute).
+Environment=WATCHDOG_INTERVAL_SECONDS=60
+# Stuck-iteration threshold in seconds. Default 1800 (30 min). The
+# observed 2026-05-05 hang was 2h+, so 1800s catches it well within one
+# window. Pivot trigger (rule #9): if false-positives >1/week, raise to
+# 3600 (1h) before retiring.
+Environment=WATCHDOG_STUCK_THRESHOLD_SECONDS=1800
+ExecStart=/usr/bin/env node ${MINSKY_HOME}/scripts/watchdog.mjs
+
+# Erlang-style "transient" restart: only on non-zero exit (let-it-crash
+# discipline, rule #6). Backoff caps the respawn loop on systematic failures.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# StandardOutput/StandardError → journal (queryable via journalctl --user)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minsky-watchdog
+
+[Install]
+WantedBy=minsky-supervisor.target
