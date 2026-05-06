@@ -520,6 +520,59 @@ describe("daemonPrLintPassRateInvariant ↔ docs root-cause enumeration parity (
   });
 });
 
+describe("daemonPrLintPassRateInvariant ↔ docs/TASKS.md jq selector parity (slice 25/N)", () => {
+  // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): the invariant ID
+  // string `"daemon-pr-lint-pass-rate"` is set on `daemonPrLintPassRateInvariant`'s
+  // returned function via `fn.invariantId = ...` (canonical source: the
+  // factory in `scripts/self-diagnose.mjs`). Two operator-facing surfaces
+  // mirror that exact string inside a `jq` selector so operators can probe
+  // the live verdict:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` § "What you'll see day-to-day":
+  //       node scripts/self-diagnose.mjs --json |
+  //         jq '.[] | select(.id == "daemon-pr-lint-pass-rate")'
+  //   - `TASKS.md` task block § "Measurement" (the pre-registered metric
+  //     verification one-liner): same `select(.id == "...")` predicate.
+  //
+  // No parity check before this slice — a refactor renaming the invariant
+  // ID in the source would update the existing
+  // `expect(result.id).toBe(...)` test (line 372) but the docs and the
+  // task-block verification command would silently keep referencing the
+  // old name; operators run the documented `jq` query, get an empty
+  // result, and conclude the invariant isn't firing when in fact the
+  // selector is stale. Same shape as slice 24/N (noop-exit token
+  // brief↔invariant↔docs parity), applied to a different load-bearing
+  // string with a different canonical source.
+
+  it('invariant ID set on `fn.invariantId` matches the `select(.id == "…")` literal in both docs and TASKS.md', () => {
+    // Pull the canonical ID off the function the way `runInvariants` does
+    // — `(fn).invariantId` is the same property name self-diagnose's
+    // runner uses to label findings, so this is the source of truth, not
+    // a freshly-typed string. The factory needs an opts object; the
+    // recentDaemonPrs probe is never invoked because we only read the
+    // attached property.
+    const fn = daemonPrLintPassRateInvariant({ recentDaemonPrs: async () => [] });
+    const id = /** @type {{ invariantId?: string }} */ (fn).invariantId;
+    // Sanity: the property must exist and be a non-empty kebab-case token.
+    // Without this, a regression that drops the `(fn).invariantId = …`
+    // assignment would make `id` `undefined`, and `select(.id == "undefined")`
+    // would silently pass `toContain` against… nothing useful.
+    expect(id).toMatch(/^[a-z][a-z0-9-]+$/);
+
+    // The selector predicate is the load-bearing shape — the literal
+    // string by itself appears in plenty of unrelated prose, but the
+    // `select(.id == "…")` substring uniquely identifies the operator's
+    // jq query. Pin that exact predicate, not just the bare ID.
+    const selector = `select(.id == "${id}")`;
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    const docs = readFileSync(resolve(here, "../docs/daemon-pre-pr-gate.md"), "utf8");
+    const tasks = readFileSync(resolve(here, "../TASKS.md"), "utf8");
+    expect(docs).toContain(selector);
+    expect(tasks).toContain(selector);
+  });
+});
+
 describe("gitConfigParseableInvariant", () => {
   it("passes when git status exits cleanly under threshold", async () => {
     const probeGitStatus = async () => ({ ok: true, durationMs: 50 });
