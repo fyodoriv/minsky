@@ -45,6 +45,30 @@ export const ROLLING_30D_MIN_N = 10;
  *  window size. */
 export const ROLLING_WINDOW_DAYS = 30;
 
+/** Canonical GitHub repo `owner/name` for the daemon's PRs. Pinned here
+ *  (rather than relying on `gh`'s `origin`-based inference) because the
+ *  cross-repo-runner integration tests have been observed to mutate the
+ *  parent checkout's `origin` URL — pollution that silently zeroes the
+ *  metric's PR set (`gh pr list --author @me` returns `[]` against a
+ *  repo nobody pushed to). With `-R CANONICAL_REPO` threaded into the
+ *  args helper, the metric and the self-diagnose invariant survive any
+ *  remote-URL drift in the operator's checkout. Mirrors `gh pr view -R`
+ *  flag from supervisor iteration 88 where the operator pushed via
+ *  explicit-repo HTTPS for the same reason. Slice 14 of
+ *  `daemon-pre-pr-lint-gate`. */
+export const CANONICAL_REPO = "fyodoriv/minsky";
+
+/** `gh pr list --limit` cap. The naive `--limit 100` query times out at
+ *  GitHub's GraphQL gateway (HTTP 504/502) because expanding
+ *  `statusCheckRollup` for ~100 PRs × ~30 checks each blows past the
+ *  per-request budget — empirically observed at this repo's PR volume on
+ *  2026-05-06 (slice 14 dogfood). 50 is the largest cap that returns
+ *  reliably and still leaves the n≥10 threshold (`ROLLING_30D_MIN_N`)
+ *  satisfiable. Sampling the most-recent 50 PRs of the rolling window
+ *  doesn't bias the clean/dirty ratio — it caps time-resolution, not
+ *  outcome-resolution. Slice 14 of `daemon-pre-pr-lint-gate`. */
+export const GH_PR_LIST_LIMIT = 50;
+
 /**
  * Format a `Date` as a UTC `YYYY-MM-DD` string for use in `gh ... --search
  * "created:>=YYYY-MM-DD"`. UTC chosen to match the supervisor's clock
@@ -135,6 +159,11 @@ export function parsePrList(raw) {
  * other doesn't) used to be possible because each caller built the args
  * inline; with this helper the args can only diverge on purpose.
  *
+ * Slice 14: `-R CANONICAL_REPO` is threaded ahead of the selector so the
+ * query no longer depends on `gh`'s `origin`-based repo inference. See
+ * the constant's docstring for the polluted-origin failure mode this
+ * closes.
+ *
  * @param {string} sinceYmd  YYYY-MM-DD lower bound for `created:>=`
  * @returns {readonly string[]}
  */
@@ -142,6 +171,8 @@ export function buildRecentPrListGhArgs(sinceYmd) {
   return [
     "pr",
     "list",
+    "-R",
+    CANONICAL_REPO,
     "--author",
     "@me",
     "--state",
@@ -151,7 +182,7 @@ export function buildRecentPrListGhArgs(sinceYmd) {
     "--json",
     "number,statusCheckRollup",
     "--limit",
-    "100",
+    String(GH_PR_LIST_LIMIT),
   ];
 }
 
@@ -206,7 +237,7 @@ export function formatReport(inputs) {
 
   return [
     "Daemon pre-PR lint-gate pre-registered metric (anchor: TASKS.md `daemon-pre-pr-lint-gate` Measurement)",
-    `Run at ${dateNow}Z; selector = \`--author @me\` (single-operator repo proxy for daemon-authored PRs — see scripts/self-diagnose.mjs § daemonPrLintPassRateInvariant)`,
+    `Run at ${dateNow}Z; selector = \`-R ${CANONICAL_REPO} --author @me\` (single-operator repo proxy for daemon-authored PRs — see scripts/self-diagnose.mjs § daemonPrLintPassRateInvariant)`,
     "",
     `Rolling ${ROLLING_WINDOW_DAYS}d clean-CI fraction (PRs created with zero \`statusCheckRollup\` FAILUREs, window >= ${date30dAgo}):`,
     `  Value:     ${valueCell}`,
