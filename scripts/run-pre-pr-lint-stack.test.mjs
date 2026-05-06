@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  CI_ENV_DEPENDENT_JOBS,
+  CI_TO_MANIFEST_ALIAS,
   STACK_MANIFEST,
   buildStepResult,
   parseArgs,
@@ -298,25 +300,12 @@ describe("ci.yml drift-protection", () => {
   // offline (per `STACK_MANIFEST` JSDoc § "env-dependent jobs are intentionally
   // absent").
 
-  // Jobs in `ci:`'s `needs:` that the manifest intentionally omits because they
-  // require GitHub-runner-only or PR-context plumbing the daemon doesn't have.
-  // Each entry needs a one-line reason — silent additions hide drift.
-  const CI_ENV_DEPENDENT = new Set([
-    "hygiene", // pnpm audit — needs network + advisory DB
-    "linux-supervisor-integration", // systemd user bus
-    "macos-supervisor-integration", // launchd user agent
-    "maciek-smoke", // pipx Python install
-    "pr-self-grade", // PR body context (`## Hypothesis self-grade`)
-  ]);
-
-  // Two CI job names diverge from their manifest step names. The aliases are
-  // pinned here so the equality check passes — any new alias is a deliberate
-  // edit, never silent drift.
-  /** @type {Record<string, string>} */
-  const CI_TO_MANIFEST_ALIAS = {
-    test: "vitest", // `pnpm test:coverage` ↔ manifest's `vitest` step
-    "glossary-discipline": "rule-5-glossary-discipline", // job is named for the rule's effect; manifest names it for the rule number
-  };
+  // `CI_ENV_DEPENDENT_JOBS` and `CI_TO_MANIFEST_ALIAS` were lifted into the
+  // canonical manifest module (slice 17/N) so the docs' env-dependent
+  // allowlist enumeration in `docs/daemon-pre-pr-gate.md` and this test both
+  // pin against one source. The local `CI_ENV_DEPENDENT_KEYS` set is just the
+  // membership view this block needs.
+  const CI_ENV_DEPENDENT_KEYS = new Set(CI_ENV_DEPENDENT_JOBS.keys());
 
   test("manifest's full stage covers every offline-reproducible CI lint job (bidirectional)", () => {
     const yml = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
@@ -324,7 +313,7 @@ describe("ci.yml drift-protection", () => {
     expect(ciNeeds.length).toBeGreaterThan(20); // sanity — the aggregator is the full stack
 
     const expectedManifestNames = new Set(
-      ciNeeds.filter((n) => !CI_ENV_DEPENDENT.has(n)).map((n) => CI_TO_MANIFEST_ALIAS[n] ?? n),
+      ciNeeds.filter((n) => !CI_ENV_DEPENDENT_KEYS.has(n)).map((n) => CI_TO_MANIFEST_ALIAS[n] ?? n),
     );
     const actualManifestNames = new Set(selectSteps("full").map((s) => s.name));
 
@@ -531,5 +520,67 @@ describe("docs/daemon-pre-pr-gate.md full-stage drift-protection", () => {
     const names = extractDocFullStageNames(doc);
     expect(names).toContain("vitest");
     expect(names).toContain("rule-1-novel-justification");
+  });
+});
+
+describe("docs/daemon-pre-pr-gate.md env-dependent allowlist drift-protection", () => {
+  // Slice 17/N: closes the sixth and last parity surface. The doc's
+  // "What the gate enforces" section enumerates the env-dependent CI jobs
+  // intentionally absent from the manifest (`hygiene` /
+  // `linux-supervisor-integration` / `macos-supervisor-integration` /
+  // `maciek-smoke` / `pr-self-grade`). That enumeration mirrored the
+  // `CI_ENV_DEPENDENT` set previously hardcoded in this test file — two
+  // sources of truth, drift waiting to happen the next time a CI job's
+  // env-dependence changes. Slice 17/N lifts the allowlist into the canonical
+  // manifest module (`CI_ENV_DEPENDENT_JOBS`), this test imports it, and the
+  // block below asserts the doc enumerates exactly those jobs. Same shape as
+  // the four manifest-driven parity blocks above.
+
+  /**
+   * Extract job names from the env-dependent enumeration sentence in
+   * `docs/daemon-pre-pr-gate.md`. The sentence has the shape
+   * `The env-dependent CI jobs (`a` / `b` / `c` / …) are intentionally absent`.
+   * Pure string parse; we slice the sentence and pick out the backtick-quoted
+   * names. Same justification as `extractCiAggregatorNeeds` — the doc's shape
+   * is owned by this repo, so the regex contract is stable.
+   *
+   * @param {string} doc
+   * @returns {string[]}
+   */
+  function extractDocEnvDependentJobs(doc) {
+    const m = /^The env-dependent CI jobs \(([^)]+)\)/m.exec(doc);
+    if (m === null || m[1] === undefined) {
+      throw new Error("docs/daemon-pre-pr-gate.md has no env-dependent enumeration sentence");
+    }
+    /** @type {string[]} */
+    const names = [];
+    for (const match of m[1].matchAll(/`([a-z][a-z0-9-]*)`/g)) {
+      if (match[1] !== undefined) names.push(match[1]);
+    }
+    return names;
+  }
+
+  test("doc's env-dependent enumeration ↔ CI_ENV_DEPENDENT_JOBS (bidirectional)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const docNames = new Set(extractDocEnvDependentJobs(doc));
+    const allowlistNames = new Set(CI_ENV_DEPENDENT_JOBS.keys());
+
+    const missingFromDoc = [...allowlistNames].filter((n) => !docNames.has(n));
+    const extraInDoc = [...docNames].filter((n) => !allowlistNames.has(n));
+    expect({ missingFromDoc, extraInDoc }).toEqual({ missingFromDoc: [], extraInDoc: [] });
+  });
+
+  test("extractDocEnvDependentJobs parses at least one well-known job (parser sanity)", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const names = extractDocEnvDependentJobs(doc);
+    expect(names).toContain("hygiene");
+    expect(names).toContain("linux-supervisor-integration");
+  });
+
+  test("every CI_ENV_DEPENDENT_JOBS entry carries a non-empty reason (silent additions hide drift)", () => {
+    for (const [name, reason] of CI_ENV_DEPENDENT_JOBS) {
+      expect(typeof reason).toBe("string");
+      expect(reason.length, `${name} needs a one-line reason`).toBeGreaterThan(0);
+    }
   });
 });
