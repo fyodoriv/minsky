@@ -11,8 +11,10 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOWED_INTEGRITY_ALGORITHMS,
   classifyLockfileEntryChange,
+  extractEntriesFromLockfile,
   formatVerdict,
   parseSpecifier,
+  walkLockfileChanges,
 } from "./check-lockfile-integrity.mjs";
 
 const SHA512_A =
@@ -252,6 +254,215 @@ describe("classifyLockfileEntryChange — caller / input errors", () => {
       expect(r.code).toBe("malformed-specifier");
       expect(r.reason).toContain("before.specifier");
     }
+  });
+});
+
+describe("extractEntriesFromLockfile (slice 2 — pure helper)", () => {
+  it("extracts name@version → { specifier, integrity } from a pnpm v9 packages map", () => {
+    const parsed = {
+      packages: {
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+        "@types/node@20.0.0": { resolution: { integrity: SHA512_B } },
+      },
+    };
+    const map = extractEntriesFromLockfile(parsed);
+    expect(map.size).toBe(2);
+    expect(map.get("lodash@4.17.21")).toEqual({
+      specifier: "lodash@4.17.21",
+      integrity: SHA512_A,
+    });
+    expect(map.get("@types/node@20.0.0")).toEqual({
+      specifier: "@types/node@20.0.0",
+      integrity: SHA512_B,
+    });
+  });
+
+  it("skips entries without resolution.integrity (workspace links, file: deps)", () => {
+    const parsed = {
+      packages: {
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+        "link@workspace": {},
+        "git-dep@1.0.0": { resolution: { tarball: "https://..." } },
+      },
+    };
+    const map = extractEntriesFromLockfile(/** @type {any} */ (parsed));
+    expect(map.size).toBe(1);
+    expect(map.has("lodash@4.17.21")).toBe(true);
+  });
+
+  it("returns an empty map for missing/null/non-object input", () => {
+    expect(extractEntriesFromLockfile(null).size).toBe(0);
+    expect(extractEntriesFromLockfile(undefined).size).toBe(0);
+    // @ts-expect-error - exercising runtime guard
+    expect(extractEntriesFromLockfile("not an object").size).toBe(0);
+    expect(extractEntriesFromLockfile({}).size).toBe(0);
+    // @ts-expect-error - exercising runtime guard
+    expect(extractEntriesFromLockfile({ packages: "not an object" }).size).toBe(0);
+  });
+
+  it("skips non-object entry values without crashing", () => {
+    const parsed = {
+      packages: {
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+        "weird@1.0.0": null,
+        "weirder@1.0.0": "not an object",
+      },
+    };
+    const map = extractEntriesFromLockfile(/** @type {any} */ (parsed));
+    expect(map.size).toBe(1);
+  });
+
+  it("skips entries with non-string or empty integrity", () => {
+    const parsed = {
+      packages: {
+        "good@1.0.0": { resolution: { integrity: SHA512_A } },
+        "empty@1.0.0": { resolution: { integrity: "" } },
+        "numeric@1.0.0": { resolution: { integrity: 123 } },
+      },
+    };
+    const map = extractEntriesFromLockfile(/** @type {any} */ (parsed));
+    expect(map.size).toBe(1);
+    expect(map.has("good@1.0.0")).toBe(true);
+  });
+});
+
+describe("walkLockfileChanges (slice 2 — diff walker)", () => {
+  it("emits no violations on an unchanged lockfile", () => {
+    const lock = {
+      packages: {
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+        "@types/node@20.0.0": { resolution: { integrity: SHA512_B } },
+      },
+    };
+    const result = walkLockfileChanges({ before: lock, after: lock });
+    expect(result.violations).toEqual([]);
+    expect(result.summary).toEqual({ unchanged: 2, added: 0, removed: 0, versionBump: 0 });
+  });
+
+  it("counts an added key (only in after) as ok/added", () => {
+    const before = { packages: {} };
+    const after = { packages: { "lodash@4.17.21": { resolution: { integrity: SHA512_A } } } };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toEqual([]);
+    expect(result.summary.added).toBe(1);
+  });
+
+  it("counts a removed key (only in before) as ok/removed", () => {
+    const before = { packages: { "lodash@4.17.21": { resolution: { integrity: SHA512_A } } } };
+    const after = { packages: {} };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toEqual([]);
+    expect(result.summary.removed).toBe(1);
+  });
+
+  it("models a version bump as removed-old + added-new (no violations, not version-bump)", () => {
+    // pnpm-lock keys differ across versions, so a bump shows up as two
+    // benign verdicts at the walker boundary — not the classifier's
+    // `version-bump` kind, which is reachable only via direct calls.
+    const before = { packages: { "lodash@4.17.20": { resolution: { integrity: SHA512_A } } } };
+    const after = { packages: { "lodash@4.17.21": { resolution: { integrity: SHA512_B } } } };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toEqual([]);
+    expect(result.summary.removed).toBe(1);
+    expect(result.summary.added).toBe(1);
+    expect(result.summary.versionBump).toBe(0);
+  });
+
+  it("flags hash-change-without-version-change — the supply-chain-attack signature", () => {
+    const before = { packages: { "debug@4.3.4": { resolution: { integrity: SHA512_A } } } };
+    const after = { packages: { "debug@4.3.4": { resolution: { integrity: SHA512_B } } } };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.key).toBe("debug@4.3.4");
+    expect(result.violations[0]?.code).toBe("hash-change-without-version-change");
+    expect(result.violations[0]?.reason).toContain("debug@4.3.4");
+  });
+
+  it("flags scoped-package hash-change-without-version-change", () => {
+    const before = { packages: { "@types/node@20.0.0": { resolution: { integrity: SHA512_A } } } };
+    const after = { packages: { "@types/node@20.0.0": { resolution: { integrity: SHA512_B } } } };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.key).toBe("@types/node@20.0.0");
+    expect(result.violations[0]?.code).toBe("hash-change-without-version-change");
+  });
+
+  it("returns violations sorted by key lexicographically (stable diagnostic order)", () => {
+    const before = {
+      packages: {
+        "zeta@1.0.0": { resolution: { integrity: SHA512_A } },
+        "alpha@1.0.0": { resolution: { integrity: SHA512_A } },
+        "middle@1.0.0": { resolution: { integrity: SHA512_A } },
+      },
+    };
+    const after = {
+      packages: {
+        "zeta@1.0.0": { resolution: { integrity: SHA512_B } },
+        "alpha@1.0.0": { resolution: { integrity: SHA512_B } },
+        "middle@1.0.0": { resolution: { integrity: SHA512_B } },
+      },
+    };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations.map((v) => v.key)).toEqual([
+      "alpha@1.0.0",
+      "middle@1.0.0",
+      "zeta@1.0.0",
+    ]);
+  });
+
+  it("emits multiple violations for a multi-package supply-chain incident", () => {
+    // The 2025 chalk/debug incident: maintainer credential compromise
+    // republished several siblings under their existing version numbers.
+    const before = {
+      packages: {
+        "chalk@5.3.0": { resolution: { integrity: SHA512_A } },
+        "debug@4.3.4": { resolution: { integrity: SHA512_A } },
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+      },
+    };
+    const after = {
+      packages: {
+        "chalk@5.3.0": { resolution: { integrity: SHA512_B } },
+        "debug@4.3.4": { resolution: { integrity: SHA512_B } },
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+      },
+    };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toHaveLength(2);
+    expect(result.violations.map((v) => v.code)).toEqual([
+      "hash-change-without-version-change",
+      "hash-change-without-version-change",
+    ]);
+    expect(result.summary.unchanged).toBe(1);
+  });
+
+  it("handles empty / missing lockfiles on either side", () => {
+    expect(walkLockfileChanges({ before: null, after: null })).toEqual({
+      violations: [],
+      summary: { unchanged: 0, added: 0, removed: 0, versionBump: 0 },
+    });
+    expect(walkLockfileChanges({ before: {}, after: {} })).toEqual({
+      violations: [],
+      summary: { unchanged: 0, added: 0, removed: 0, versionBump: 0 },
+    });
+  });
+
+  it("ignores entries that legitimately lack integrity (workspace links)", () => {
+    const before = {
+      packages: {
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+        "link@workspace": {},
+      },
+    };
+    const after = {
+      packages: {
+        "lodash@4.17.21": { resolution: { integrity: SHA512_A } },
+        "link@workspace": {},
+      },
+    };
+    const result = walkLockfileChanges({ before, after });
+    expect(result.violations).toEqual([]);
+    expect(result.summary.unchanged).toBe(1); // only lodash; link@workspace skipped
   });
 });
 
