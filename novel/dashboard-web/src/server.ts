@@ -24,11 +24,19 @@
  * boolean (`createMemoryPauseState`) so `POST /control` round-trips into
  * the next `GET /watch.json` body. Production supervisors inject their
  * own pair to write a sentinel file the loop honors.
+ *
+ * `controlToken` (vision rule #13.4 slice 2) — when present, `POST /control`
+ * gates on a constant-time match of the `X-Minsky-Token` header before
+ * parsing the body. Auth check runs first so a bad/missing token returns
+ * 401 regardless of body shape (fail-fast). When `controlToken` is undefined
+ * (the v0 default and existing test wiring), no validation runs — `start.ts`
+ * (slice 3) supplies the resolved token in production.
  */
 
 import { Hono } from "hono";
 
 import type { ActivityEntry } from "./activity.js";
+import { validateControlAuth } from "./control-auth.js";
 import { type SetPaused, parseControlBody } from "./control.js";
 import { createMemoryPauseState } from "./control.js";
 import { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
@@ -69,6 +77,7 @@ export function createServer(args?: {
   readonly setPaused?: SetPaused;
   readonly getPauseReason?: PauseReasonState;
   readonly getActivity?: GetActivity;
+  readonly controlToken?: string;
 }): DashboardServer {
   const metrics = args?.metrics ?? SUCCESS_METRICS;
   const getValue = args?.getValue ?? STUB_GET_VALUE;
@@ -77,6 +86,7 @@ export function createServer(args?: {
   const setPaused = args?.setPaused ?? memory.setPaused;
   const getPauseReason = args?.getPauseReason;
   const getActivity = args?.getActivity;
+  const controlToken = args?.controlToken;
   const app = new Hono();
   app.get("/", (c) => {
     const activity = getActivity?.() ?? [];
@@ -92,6 +102,8 @@ export function createServer(args?: {
     ),
   );
   app.post("/control", async (c) => {
+    const authError = checkControlAuth(c.req.raw.headers, controlToken);
+    if (authError !== null) return c.json({ error: authError }, 401);
     const body = await readJsonBody(c.req.raw);
     const parsed = parseControlBody(body);
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
@@ -117,4 +129,21 @@ async function readJsonBody(req: Request): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Auth-gate adapter for the route handler. Returns `null` when auth passes
+ * (or `controlToken` is undefined — the v0 backward-compat path) and a
+ * caller-facing error string when it fails. Lifted out so the route handler
+ * itself stays under the biome cognitive-complexity cap of 10.
+ *
+ * @otel-exempt pure dispatcher — `validateControlAuth` carries the
+ *   constant-time compare; this helper only translates its discriminated
+ *   result into a 401 body string.
+ */
+function checkControlAuth(headers: Headers, controlToken: string | undefined): string | null {
+  if (controlToken === undefined) return null;
+  const auth = validateControlAuth(headers, controlToken);
+  if (auth.ok) return null;
+  return auth.reason === "missing-header" ? "missing X-Minsky-Token header" : "wrong token";
 }
