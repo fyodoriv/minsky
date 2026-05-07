@@ -87,9 +87,9 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
         fixtureReadme({
           lines: [
             `${variant} methodology applied.`,
-            "- bullet 1",
-            "- bullet 2",
-            "- bullet 3",
+            "- **Untrusted inputs**: stdin",
+            "- **Trusted state**: pure",
+            "- **Trust boundary**: process",
             "- **Performance-first carve-out**: none declared.",
           ],
         }),
@@ -107,6 +107,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
           "STRIDE-shaped per Howard & LeBlanc 2003.",
           "- **Untrusted inputs**: type-bounded only",
           "- **Trusted state**: pure functions",
+          "- **Trust boundary**: import-time only",
           "- there is no STRIDE letter that applies directly to a pure leaf",
           "- **Performance-first carve-out**: none declared.",
         ],
@@ -144,6 +145,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
             "STRIDE-shaped per Howard & LeBlanc 2003.",
             "- **Untrusted inputs**: stdin",
             "- **Trusted state**: pure functions",
+            "- **Trust boundary**: process boundary",
             "- **STRIDE focus**: **T**ampering",
             `- **${variant}**: none declared.`,
           ],
@@ -153,7 +155,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
     }
   });
 
-  test("aggregates multiple errors when content-line floor, STRIDE, and carve-out all fail", () => {
+  test("aggregates multiple errors when content-line floor, STRIDE, carve-out, and trust-triplet all fail", () => {
     const r = checkThreatModelSection(
       fixtureReadme({
         lines: ["one line", "", "two lines"],
@@ -161,7 +163,81 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
     );
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.errors.length).toBe(3);
+    // 6 axes: content-line floor + STRIDE + carve-out + Untrusted + Trusted + Trust boundary.
+    expect(r.errors.length).toBe(6);
+  });
+
+  test("fails when the section omits `Untrusted` (vision.md § 13.8 (a))", () => {
+    const r = checkThreatModelSection(
+      fixtureReadme({
+        lines: [
+          "STRIDE-shaped per Howard & LeBlanc 2003.",
+          "- **Inputs**: stdin",
+          "- **Trusted state**: pure functions",
+          "- **Trust boundary**: process boundary",
+          "- **Performance-first carve-out**: none declared.",
+        ],
+      }),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.some((e) => e.includes("Untrusted"))).toBe(true);
+  });
+
+  test("fails when the section omits `Trusted` standalone (only `Untrusted` is present)", () => {
+    // Word-boundary requirement: `\bTrusted\b` must NOT be satisfied by the
+    // substring inside `Untrusted`. The fixture below has `Untrusted` but no
+    // standalone `Trusted` — the lint must still flag it.
+    const r = checkThreatModelSection(
+      fixtureReadme({
+        lines: [
+          "STRIDE-shaped per Howard & LeBlanc 2003.",
+          "- **Untrusted inputs**: stdin",
+          "- **State**: pure functions",
+          "- **Trust boundary**: process boundary",
+          "- **Performance-first carve-out**: none declared.",
+        ],
+      }),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.some((e) => e.includes("`Trusted`"))).toBe(true);
+  });
+
+  test("fails when the section omits `Trust boundary` (vision.md § 13.8 (c))", () => {
+    const r = checkThreatModelSection(
+      fixtureReadme({
+        lines: [
+          "STRIDE-shaped per Howard & LeBlanc 2003.",
+          "- **Untrusted inputs**: stdin",
+          "- **Trusted state**: pure functions",
+          "- **Boundary**: process boundary (no `trust` qualifier)",
+          "- **Performance-first carve-out**: none declared.",
+        ],
+      }),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.some((e) => e.includes("Trust boundary"))).toBe(true);
+  });
+
+  test("accepts the trust-triplet in any case (case-insensitive)", () => {
+    for (const variant of ["UNTRUSTED", "untrusted", "Untrusted"]) {
+      const trustedVariant = variant.toLowerCase() === "untrusted" ? "TRUSTED" : "Trusted";
+      const boundaryVariant = variant === "UNTRUSTED" ? "TRUST BOUNDARY" : "trust boundary";
+      const r = checkThreatModelSection(
+        fixtureReadme({
+          lines: [
+            "STRIDE-shaped per Howard & LeBlanc 2003.",
+            `- **${variant} inputs**: stdin`,
+            `- **${trustedVariant} state**: pure functions`,
+            `- **${boundaryVariant}**: process boundary`,
+            "- **Performance-first carve-out**: none declared.",
+          ],
+        }),
+      );
+      expect(r.ok, `variant: "${variant}"`).toBe(true);
+    }
   });
 });
 
