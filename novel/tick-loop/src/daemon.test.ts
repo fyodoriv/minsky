@@ -1990,8 +1990,8 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("- **Match**: yes | no | partial");
     expect(brief).toContain("- **Lesson**:");
     expect(brief).toContain("DO NOT REWRITE THIS FORMAT");
-    expect(brief).toMatch(/\*\*Predicted:\*\*[^\n]*colon INSIDE bold/);
-    expect(brief).toMatch(/\*\*Match:\*\*[^\n]*colon INSIDE bold/);
+    expect(brief).toMatch(/colon INSIDE bold[^\n]*\*\*Predicted:\*\*[^\n]*\*\*Match:\*\*/);
+    expect(brief).toMatch(/values lowercase/);
   });
 });
 
