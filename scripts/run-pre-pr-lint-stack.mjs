@@ -163,6 +163,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "test",
       "tick-loop-backoff-schedule",
       "typecheck",
+      "user-story-security-section",
     ]),
   ),
   supervisorSkippable: Object.freeze(
@@ -372,6 +373,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-skill-rule-cap.mjs"],
+  },
+  {
+    name: "user-story-security-section",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-user-story-security-section.mjs"],
   },
 ]);
 

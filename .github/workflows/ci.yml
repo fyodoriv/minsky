@@ -473,6 +473,31 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-lockfile-integrity.test.mjs
 
+  user-story-security-section:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
+    # acceptance criterion #2: every user story (001–006) carries a
+    # `## Security & privacy` section that cites `rule #13` and has ≥5
+    # non-empty content lines. Pins the substrate-slice's user-story
+    # surface so a future rewrite cannot silently drop the
+    # constitutional-anchor link. Push event runs too — the gate is on
+    # the file shape, not on PR body context, so direct-push edits must
+    # surface as well.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: user-story-security-section lint
+        run: node scripts/check-user-story-security-section.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-user-story-security-section.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -1052,6 +1077,7 @@ jobs:
       - test
       - tick-loop-backoff-schedule
       - typecheck
+      - user-story-security-section
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -1090,7 +1116,8 @@ jobs:
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
-                   "${{ needs.typecheck.result }}"; do
+                   "${{ needs.typecheck.result }}" \
+                   "${{ needs.user-story-security-section.result }}"; do
             [ "$r" = "success" ] || fail=1
           done
           # Supervisor-integration jobs may legitimately exit 77 (skipped)
