@@ -598,3 +598,15 @@ export {
   decideDuplicate,
   prTitleNamesTask,
 } from "./duplicate-pr-detector.js";
+
+// Daemon task-completion detector (P0 watchdog from #346, operator 2026-05-07):
+// pure decision the daemon consults to auto-remove TASKS.md task blocks once
+// their substrate has shipped (≥1 merged PR + Acceptance field has no
+// unchecked boxes). Surfaced-by 9h dogfood window 2026-05-06/07 (worker-1
+// kept re-picking `daemon-pre-pr-lint-gate` for 3h after #309 had merged).
+export {
+  type MergedPrSnapshot,
+  type TaskCompletionVerdict,
+  decideTaskCompletion,
+  titleNamesTask,
+} from "./task-completion-detector.js";
