@@ -68,6 +68,7 @@ import {
   DryRunSpawnStrategy,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
+  buildChildWorkerArgs,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
   createFileBackedLastRenderedDate,
@@ -78,10 +79,13 @@ import {
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
   fromRealBudgetGuard,
+  parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   runDaemon,
   workerStartupLine,
 } from "../dist/index.js";
+
+import { spawn as nodeSpawn } from "node:child_process";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PKG_ROOT = resolve(HERE, "..");
@@ -156,15 +160,50 @@ const args = parseArgs(process.argv.slice(2));
 const dryRun = readDryRunEnv(process.env);
 
 // Slice 2 of `daemon-parallel-worktree-launch`: parse `--worker-id` /
-// `--workers-total`. Single-process (both absent) returns undefined; both
-// present returns a config; either alone is an error and we exit 2.
+// `--workers-total`. New default (2026-05-06): claim-aware worker-0-of-1 when
+// neither flag is set, so additional workers can join later without a
+// behaviour change on the existing process. `--workers-total=N` alone is OK
+// (defaults `--worker-id=0`); `--worker-id=K` alone is an error.
 const workerParseResult = parseWorkerArgs(process.argv.slice(2));
-if (workerParseResult !== undefined && "error" in workerParseResult) {
+if ("error" in workerParseResult) {
   console.error(`tick-loop: ${workerParseResult.error}`);
   process.exit(2);
 }
-/** @type {import("../dist/index.js").WorkerConfig | undefined} */
-const workerConfig = workerParseResult;
+
+// Slice 2.6 of `daemon-parallel-worktree-launch`: `--spawn-additional-workers=N`
+// makes the root process fork N children at startup, each with
+// `--worker-id=K --workers-total=(N+1)` and `MINSKY_WORKER_SPAWNED=1` in env so
+// they cannot recursively spawn (depth-2 cap: only grandchildren allowed).
+const spawnDecision = parseSpawnAdditionalWorkers({
+  argv: process.argv.slice(2),
+  env: process.env,
+});
+if ("error" in spawnDecision) {
+  console.error(`tick-loop: ${spawnDecision.error}`);
+  process.exit(2);
+}
+
+let workerConfig = workerParseResult;
+if (spawnDecision.count > 0) {
+  const totalAfterSpawn = spawnDecision.count + 1;
+  workerConfig = { workerId: 0, workersTotal: totalAfterSpawn };
+  for (let i = 1; i <= spawnDecision.count; i++) {
+    const childArgs = buildChildWorkerArgs({
+      parentArgv: process.argv.slice(2),
+      childIndex: i,
+      totalAfterSpawn,
+    });
+    const child = nodeSpawn(process.execPath, [process.argv[1], ...childArgs], {
+      env: { ...process.env, MINSKY_WORKER_SPAWNED: "1" },
+      stdio: "inherit",
+      detached: false,
+    });
+    console.error(
+      `tick-loop: spawned worker ${i}/${spawnDecision.count} as PID ${child.pid} (worker-id=${i}, workers-total=${totalAfterSpawn})`,
+    );
+  }
+}
+
 console.error(workerStartupLine(workerConfig));
 
 // Sub-task 2/3: wire the real `BudgetGuard` from `@minsky/budget-guard`.
