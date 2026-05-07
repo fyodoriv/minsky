@@ -552,3 +552,21 @@ export {
   analyzeConfig,
   formatRecommendations,
 } from "./config-analyzer.js";
+
+// Pre-PR lint-stack gate (TASKS.md `daemon-pre-pr-lint-gate`): TypeScript
+// API for the gate the daemon's brief already mandates as text instructions.
+// `runPrePrLintGate` retries up to 3× (injectable `PrePrLintRun` seam);
+// `shouldRunPrePrLintGate` short-circuits on `Blocked: pre-pr-lint-failures`.
+// Production binding: `createPnpmPrePrLintRun` spawns the canonical manifest
+// (`scripts/run-pre-pr-lint-stack.mjs --json`) — same script `pnpm pre-pr-lint`
+// and `lefthook pre-push` invoke (rule #10 deterministic enforcement).
+export {
+  type PnpmPrePrLintRunOptions,
+  type PrePrLintGateResult,
+  type PrePrLintRun,
+  type PrePrLintRunResult,
+  type RunPrePrLintGateArgs,
+  createPnpmPrePrLintRun,
+  runPrePrLintGate,
+  shouldRunPrePrLintGate,
+} from "./pre-pr-lint-gate.js";
