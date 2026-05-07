@@ -539,3 +539,16 @@ export {
 // structured `[span] tick-loop.iteration {…}` lines into glanceable
 // one-liners. Used by `bin/minsky.mjs`'s `start` and `logs` subcommands.
 export { type FormatOpts, formatLogLine } from "./pretty-log.js";
+
+// Daemon self-config analyzer (operator 2026-05-06): pure decision
+// function that surfaces "you should turn this on" recommendations at
+// daemon startup, and the formatter that renders them as one-line
+// operator-facing log entries.
+export {
+  type ConfigContext,
+  type ConfigRecommendation,
+  type ImpactCategory,
+  type RecommendationKind,
+  analyzeConfig,
+  formatRecommendations,
+} from "./config-analyzer.js";
