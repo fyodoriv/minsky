@@ -54,7 +54,7 @@ jobs:
         ${{ github.event.inputs.experiment_yaml_url || github.event.client_payload.experiment_yaml_url }}
     steps:
       - name: Checkout minsky
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
