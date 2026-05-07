@@ -49,8 +49,8 @@ function main() {
   }
   const missing = findMissingMergirafGlobs(text);
   if (missing.length === 0) {
-    console.log(
-      `check-gitattributes-mergiraf: OK (${REQUIRED_MERGIRAF_GLOBS.length} globs declared).`,
+    process.stdout.write(
+      `check-gitattributes-mergiraf: OK (${REQUIRED_MERGIRAF_GLOBS.length} globs declared).\n`,
     );
     process.exit(0);
   }
