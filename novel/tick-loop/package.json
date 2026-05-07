@@ -14,7 +14,8 @@
     }
   },
   "bin": {
-    "tick-loop": "./bin/tick-loop.mjs"
+    "tick-loop": "./bin/tick-loop.mjs",
+    "minsky": "./bin/minsky.mjs"
   },
   "files": [
     "dist/**/*.js",
@@ -22,6 +23,7 @@
     "!dist/**/*.test.js",
     "!dist/**/*.test.d.ts",
     "bin/tick-loop.mjs",
+    "bin/minsky.mjs",
     "README.md",
     "test/fixtures/**/*.md"
   ],
