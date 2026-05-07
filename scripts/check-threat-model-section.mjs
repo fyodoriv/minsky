@@ -90,6 +90,15 @@ const CARVE_OUT_RE = /\bperformance-first carve-out\b/i;
 const UNTRUSTED_RE = /\bUntrusted\b/i;
 const TRUSTED_RE = /\bTrusted\b/i;
 const TRUST_BOUNDARY_RE = /\btrust\s+boundary\b/i;
+// vision.md § 13.8 anchor: every threat-model section must cite `vision.md`
+// back to the constitution. The canonical opening line everywhere on main is
+// "Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard
+// & LeBlanc, *Writing Secure Code*, 2003." Pin the `vision.md` reference so a
+// future README rewrite cannot silently drop the anchor line — the carve-out
+// clause already mentions `rule #13` (e.g., "(rule #13's relief valve)") so
+// requiring `rule #13` alone wouldn't catch an anchor-line drop. Requiring
+// `vision.md` is what tightens the pin.
+const VISION_MD_RE = /\bvision\.md\b/i;
 
 /**
  * Slice the `## Threat model` section body out of a README. Returns `null`
@@ -133,6 +142,12 @@ export function extractThreatModelSection(readmeText) {
  *      enumeration; without all three, the section can engage with STRIDE
  *      while skipping the trust-axis decomposition that operators read first
  *      during incident response.
+ *   6. The section cites `vision.md` (case-insensitive). The canonical opening
+ *      line is "Per constitutional rule #13 (vision.md § 13.8). …"; pinning
+ *      `vision.md` catches a future rewrite that silently drops the anchor
+ *      line back to the constitution. Pinning `rule #13` alone wouldn't
+ *      suffice — the carve-out clause already names `rule #13` (e.g., "(rule
+ *      #13's relief valve)"), so a citation drop would slip through.
  *
  * @param {string} readmeText
  * @returns {CheckResult}
@@ -173,6 +188,11 @@ export function checkThreatModelSection(readmeText) {
   if (!TRUST_BOUNDARY_RE.test(section)) {
     errors.push(
       "section does not name `Trust boundary` — vision.md § 13.8 (c) requires the package to name the boundary between trusted and untrusted",
+    );
+  }
+  if (!VISION_MD_RE.test(section)) {
+    errors.push(
+      "section does not cite `vision.md` — rule #13.8 requires the section to anchor back to the constitution (canonical: `Per constitutional rule #13 (vision.md § 13.8).`)",
     );
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
