@@ -29,7 +29,7 @@ function fixtureReadme({
   trailer = "\n## Next section\n",
 } = {}) {
   const body = lines ?? [
-    "Per constitutional rule #13 (STRIDE-shaped per Howard & LeBlanc 2003).",
+    "Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc 2003.",
     "",
     "- **Untrusted inputs**: stdin, env, file contents",
     "- **Trusted state**: pure functions only",
@@ -86,7 +86,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
       const r = checkThreatModelSection(
         fixtureReadme({
           lines: [
-            `${variant} methodology applied.`,
+            `Per vision.md § 13.8. ${variant} methodology applied.`,
             "- **Untrusted inputs**: stdin",
             "- **Trusted state**: pure",
             "- **Trust boundary**: process",
@@ -104,7 +104,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
     const r = checkThreatModelSection(
       fixtureReadme({
         lines: [
-          "STRIDE-shaped per Howard & LeBlanc 2003.",
+          "Per vision.md § 13.8. STRIDE-shaped per Howard & LeBlanc 2003.",
           "- **Untrusted inputs**: type-bounded only",
           "- **Trusted state**: pure functions",
           "- **Trust boundary**: import-time only",
@@ -142,7 +142,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
       const r = checkThreatModelSection(
         fixtureReadme({
           lines: [
-            "STRIDE-shaped per Howard & LeBlanc 2003.",
+            "Per vision.md § 13.8. STRIDE-shaped per Howard & LeBlanc 2003.",
             "- **Untrusted inputs**: stdin",
             "- **Trusted state**: pure functions",
             "- **Trust boundary**: process boundary",
@@ -155,7 +155,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
     }
   });
 
-  test("aggregates multiple errors when content-line floor, STRIDE, carve-out, and trust-triplet all fail", () => {
+  test("aggregates multiple errors when every axis fails", () => {
     const r = checkThreatModelSection(
       fixtureReadme({
         lines: ["one line", "", "two lines"],
@@ -163,8 +163,9 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
     );
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    // 6 axes: content-line floor + STRIDE + carve-out + Untrusted + Trusted + Trust boundary.
-    expect(r.errors.length).toBe(6);
+    // 7 axes: content-line floor + STRIDE + carve-out + Untrusted + Trusted +
+    // Trust boundary + vision.md anchor.
+    expect(r.errors.length).toBe(7);
   });
 
   test("fails when the section omits `Untrusted` (vision.md § 13.8 (a))", () => {
@@ -228,10 +229,49 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
       const r = checkThreatModelSection(
         fixtureReadme({
           lines: [
-            "STRIDE-shaped per Howard & LeBlanc 2003.",
+            "Per vision.md § 13.8. STRIDE-shaped per Howard & LeBlanc 2003.",
             `- **${variant} inputs**: stdin`,
             `- **${trustedVariant} state**: pure functions`,
             `- **${boundaryVariant}**: process boundary`,
+            "- **Performance-first carve-out**: none declared.",
+          ],
+        }),
+      );
+      expect(r.ok, `variant: "${variant}"`).toBe(true);
+    }
+  });
+
+  test("fails when the section omits `vision.md` anchor (only `rule #13` survives via carve-out)", () => {
+    // Negative case: the canonical "Per constitutional rule #13 (vision.md
+    // § 13.8). …" opening line is dropped, but the carve-out clause keeps a
+    // bare `rule #13` reference. Without pinning `vision.md`, the lint would
+    // miss the silent anchor-line drop because `rule #13` still appears.
+    const r = checkThreatModelSection(
+      fixtureReadme({
+        lines: [
+          "STRIDE-shaped per Howard & LeBlanc 2003.",
+          "- **Untrusted inputs**: stdin",
+          "- **Trusted state**: pure functions",
+          "- **Trust boundary**: process boundary",
+          "- **STRIDE focus**: **T**ampering",
+          "- **Performance-first carve-out** (rule #13's relief valve): none declared.",
+        ],
+      }),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.some((e) => e.includes("vision.md"))).toBe(true);
+  });
+
+  test("accepts the `vision.md` anchor in any case (case-insensitive)", () => {
+    for (const variant of ["vision.md", "VISION.MD", "Vision.md"]) {
+      const r = checkThreatModelSection(
+        fixtureReadme({
+          lines: [
+            `Per constitutional rule #13 (${variant} § 13.8). STRIDE-shaped per Howard & LeBlanc 2003.`,
+            "- **Untrusted inputs**: stdin",
+            "- **Trusted state**: pure functions",
+            "- **Trust boundary**: process boundary",
             "- **Performance-first carve-out**: none declared.",
           ],
         }),

@@ -4,6 +4,7 @@ import {
   type DaemonOwnPrSnapshot,
   decideDaemonPrState,
   isFailingConclusion,
+  parseGhPrListForDaemonPrState,
 } from "./daemon-pr-state.js";
 
 const TASK_ID = "daemon-fix-own-pr-on-ci-failure";
@@ -173,6 +174,149 @@ describe("decideDaemonPrState — pr-retries-exhausted", () => {
     const prs: DaemonOwnPrSnapshot[] = [makePr({ number: 33, checks: [failing] })];
     const verdict = decideDaemonPrState({ taskId: TASK_ID, prs, attemptsSoFar: 2 });
     expect(verdict.kind).toBe("pr-failing");
+  });
+});
+
+describe("parseGhPrListForDaemonPrState — happy path", () => {
+  it("parses a single open PR with mixed CheckRun conclusions", () => {
+    const raw = JSON.stringify([
+      {
+        number: 355,
+        state: "OPEN",
+        title: `feat(${TASK_ID}): pure decideDaemonPrState (slice 1/N)`,
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "biome", conclusion: "SUCCESS" },
+          { __typename: "CheckRun", name: "typecheck", conclusion: "FAILURE" },
+          { __typename: "CheckRun", name: "build", conclusion: null, status: "IN_PROGRESS" },
+        ],
+      },
+    ]);
+    expect(parseGhPrListForDaemonPrState(raw)).toEqual([
+      {
+        number: 355,
+        title: `feat(${TASK_ID}): pure decideDaemonPrState (slice 1/N)`,
+        state: "OPEN",
+        checks: [
+          { name: "biome", conclusion: "SUCCESS" },
+          { name: "typecheck", conclusion: "FAILURE" },
+          { name: "build", conclusion: null },
+        ],
+      },
+    ]);
+  });
+
+  it("composes with decideDaemonPrState end-to-end (parse → decide)", () => {
+    const raw = JSON.stringify([
+      {
+        number: 99,
+        state: "OPEN",
+        title: `feat(${TASK_ID}): slice 2/N`,
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "biome", conclusion: "SUCCESS" },
+          { __typename: "CheckRun", name: "typecheck", conclusion: "FAILURE" },
+        ],
+      },
+    ]);
+    const prs = parseGhPrListForDaemonPrState(raw);
+    const verdict = decideDaemonPrState({ taskId: TASK_ID, prs });
+    expect(verdict).toEqual({
+      kind: "pr-failing",
+      prNumber: 99,
+      failedChecks: ["typecheck"],
+      attemptNumber: 1,
+    });
+  });
+
+  it("returns [] for an empty JSON array", () => {
+    expect(parseGhPrListForDaemonPrState("[]")).toEqual([]);
+  });
+
+  it("preserves order of multiple open PRs", () => {
+    const raw = JSON.stringify([
+      { number: 1, state: "OPEN", title: "feat(a): x", statusCheckRollup: [] },
+      { number: 2, state: "OPEN", title: "feat(b): y", statusCheckRollup: [] },
+    ]);
+    const result = parseGhPrListForDaemonPrState(raw);
+    expect(result.map((p) => p.number)).toEqual([1, 2]);
+  });
+});
+
+describe("parseGhPrListForDaemonPrState — filtering", () => {
+  it("drops PRs whose state is not OPEN", () => {
+    const raw = JSON.stringify([
+      { number: 1, state: "MERGED", title: "feat(a): x", statusCheckRollup: [] },
+      { number: 2, state: "CLOSED", title: "feat(b): y", statusCheckRollup: [] },
+      { number: 3, state: "OPEN", title: "feat(c): z", statusCheckRollup: [] },
+    ]);
+    const result = parseGhPrListForDaemonPrState(raw);
+    expect(result.map((p) => p.number)).toEqual([3]);
+  });
+
+  it("drops non-CheckRun rollup entries (e.g., StatusContext)", () => {
+    const raw = JSON.stringify([
+      {
+        number: 5,
+        state: "OPEN",
+        title: "feat(a): x",
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "biome", conclusion: "SUCCESS" },
+          { __typename: "StatusContext", context: "legacy/bot", state: "FAILURE" },
+        ],
+      },
+    ]);
+    const [pr] = parseGhPrListForDaemonPrState(raw);
+    expect(pr?.checks).toEqual([{ name: "biome", conclusion: "SUCCESS" }]);
+  });
+
+  it("normalises unknown conclusion values to null (treated as in-flight)", () => {
+    const raw = JSON.stringify([
+      {
+        number: 7,
+        state: "OPEN",
+        title: "feat(a): x",
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "weird", conclusion: "STALE" },
+          { __typename: "CheckRun", name: "missing-conclusion-field" },
+        ],
+      },
+    ]);
+    const [pr] = parseGhPrListForDaemonPrState(raw);
+    expect(pr?.checks).toEqual([
+      { name: "weird", conclusion: null },
+      { name: "missing-conclusion-field", conclusion: null },
+    ]);
+  });
+});
+
+describe("parseGhPrListForDaemonPrState — graceful degrade", () => {
+  it("returns [] for malformed JSON (rule #6/#7)", () => {
+    expect(parseGhPrListForDaemonPrState("not-json")).toEqual([]);
+  });
+
+  it("returns [] when JSON root is not an array", () => {
+    expect(parseGhPrListForDaemonPrState('{"unexpected":"shape"}')).toEqual([]);
+  });
+
+  it("returns [] for empty input", () => {
+    expect(parseGhPrListForDaemonPrState("")).toEqual([]);
+  });
+
+  it("skips entries missing required fields rather than throwing", () => {
+    const raw = JSON.stringify([
+      { state: "OPEN", title: "no-number", statusCheckRollup: [] },
+      { number: 2, state: "OPEN", statusCheckRollup: [] },
+      { number: 3, state: "OPEN", title: "valid", statusCheckRollup: [] },
+      null,
+      "string-entry",
+    ]);
+    const result = parseGhPrListForDaemonPrState(raw);
+    expect(result.map((p) => p.number)).toEqual([3]);
+  });
+
+  it("treats missing statusCheckRollup as zero checks", () => {
+    const raw = JSON.stringify([{ number: 1, state: "OPEN", title: "feat(a): x" }]);
+    const [pr] = parseGhPrListForDaemonPrState(raw);
+    expect(pr?.checks).toEqual([]);
   });
 });
 
