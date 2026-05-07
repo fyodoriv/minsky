@@ -66,11 +66,16 @@ function createFixtureHost(): FixtureHost {
 
   // Initialise as a real git repo with a synthetic remote URL — bootstrap's
   // inferer reads .git/config to populate `host_repo`.
-  execFileSync("git", ["init", "--quiet"], { cwd: hostRoot });
+  // Strip GIT_* env vars so parallel tests can't pollute GIT_DIR / GIT_CONFIG_GLOBAL,
+  // which would cause `git config` to write to the wrong location.
+  const gitEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+  );
+  execFileSync("git", ["init", "--quiet"], { cwd: hostRoot, env: gitEnv });
   execFileSync(
     "git",
     ["config", "remote.origin.url", "git@github.com:test-org/test-iep-capabilities.git"],
-    { cwd: hostRoot },
+    { cwd: hostRoot, env: gitEnv },
   );
 
   // Write a minimal package.json so the inferer detects a `lint` script.
