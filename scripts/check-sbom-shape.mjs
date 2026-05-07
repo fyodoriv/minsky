@@ -12,21 +12,25 @@
 // SBOMs to a known-good shape ship in subsequent slices against this fixed
 // seam.
 //
-// Slice 2 (this file): adds `walkSbomViolations(parsed)` — the pure
-// aggregating walker that runs the slice-1 verdict logic over every
-// component and collects ALL violations rather than short-circuiting on
-// the first failure. The slice-1 classifier deliberately exits on the
-// first per-component error (so a malformed-components rejection is the
-// fastest path to a clear actionable verdict for an interactive user);
-// the walker is the seam the CI gate consumes so a release with eight
-// malformed component entries surfaces all eight in one log line, not
-// eight successive PR runs. Workflow generation, JSON I/O, and the CI
-// gate ship in slices ≥3 against this fixed seam — `walkSbomViolations`
-// takes an already-parsed object so the test suite can exercise every
-// verdict path with hand-built fixtures and is not coupled to a JSON
-// parser or an on-disk file. Mirrors `walkLockfileChanges` (slice 2 of
-// the lockfile-integrity sub-track) and `extractAttributeViolations`
-// (slice 2 of vision.md § 13.2 OTEL no-PII).
+// Slice 2 adds `walkSbomViolations(parsed)` — the pure aggregating walker
+// that runs the slice-1 verdict logic over every component and collects ALL
+// violations rather than short-circuiting on the first failure. The slice-1
+// classifier deliberately exits on the first per-component error (so a
+// malformed-components rejection is the fastest path to a clear actionable
+// verdict for an interactive user); the walker is the seam the CI gate
+// consumes so a release with eight malformed component entries surfaces all
+// eight in one log line, not eight successive PR runs. Mirrors
+// `walkLockfileChanges` (slice 2 of the lockfile-integrity sub-track) and
+// `extractAttributeViolations` (slice 2 of vision.md § 13.2 OTEL no-PII).
+//
+// Slice 3 (this file): adds `parseSbomJson(text)` — the pure JSON-text-to-
+// `unknown`-object wrapper around `JSON.parse` that produces a structured
+// `{ ok, code, reason }` verdict on parse failure (matching the slice-1 /
+// slice-2 verdict shape) and an early-out for empty / whitespace-only input.
+// The seam slice 4 (CLI + CI gate) needs is exactly this: text from disk →
+// uniform verdict surface → slice-2 walker. Mirrors `parsePnpmLockfile`
+// (slice 3 of the lockfile-integrity sub-track, PR #265). See the dedicated
+// header comment over `parseSbomJson` below for the full rationale.
 //
 // Why a shape classifier (not a generator) is the right slice 1: the
 // sibling supply-chain gates (`scan-secrets`, `otel-no-pii-in-spans-lint`,
@@ -503,4 +507,100 @@ function collectComponentViolations(components) {
     seenBomRefs.set(bomRef, i);
   }
   return violations;
+}
+
+// Slice 3: pure SBOM JSON parser. --------------------------------------------
+//
+// `parseSbomJson(text)` turns an on-disk CycloneDX SBOM (a UTF-8 JSON string)
+// into the `unknown` shape `classifySbomShape` / `walkSbomViolations` consume.
+// JSON.parse already does the heavy lifting — unlike pnpm-lock.yaml's slice 3
+// (where avoiding a 30-KLOC YAML library was load-bearing), there is no
+// custom-grammar work to do here. The seam this slice ships is the *verdict
+// surface*: a SyntaxError from `JSON.parse` becomes a structured
+// `{ ok: false, code: "invalid-json" }` result with the same shape the
+// classifier and walker emit, so slice 4 (CLI + CI gate) can format every
+// failure mode — bad JSON, bad envelope, bad component — through one printer.
+//
+// The slice-1 / slice-2 classifier-then-walker rejects only *parsed* objects;
+// without this slice, the CLI would have to wrap `JSON.parse` in its own
+// try/catch and invent an ad-hoc error code, duplicating the verdict
+// vocabulary and drifting from the slice-1 table. Putting the parse step
+// under the same `{ ok, code, reason }` discipline keeps the four sub-tracks'
+// output formats uniform (compare `parsePnpmLockfile` returning a structured
+// shape, not throwing).
+//
+// Why a wrapper at all (vs. calling `JSON.parse` from slice 4 directly):
+//   - empty / whitespace-only input is an early-out the CLI shouldn't have to
+//     re-derive — `cyclonedx-cli` regressions have shipped that produced a
+//     zero-byte file in CI; that's a parser-level verdict, not "JSON parse
+//     error: Unexpected end of input".
+//   - The error message from `JSON.parse` varies across runtimes (V8 vs.
+//     SpiderMonkey vs. JSC) and minor versions — the gate's CI log line must
+//     be deterministic so log-grep-based monitors don't false-positive on
+//     a Node minor bump. Wrapping into `code: "invalid-json"` with a stable
+//     `reason` template (the underlying error message preserved as the tail)
+//     anchors the prefix.
+//
+// What this slice does NOT do (slice 4):
+//   - Read the SBOM file from disk (`fs.readFileSync`).
+//   - Resolve the SBOM path relative to a workflow / repo root.
+//   - Print formatted output or set a process exit code.
+//   - Run the walker over the parsed result (the caller chains
+//     `parseSbomJson(text)` → `walkSbomViolations(parsed)` explicitly so
+//     parser-level failures and shape-level failures stay distinguishable).
+//
+// Pattern: deterministic gate (rule #10), pure function (rule #2 — text in,
+// `{ ok, parsed }` or `{ ok, code, reason }` out, no I/O). Mirrors
+// `parsePnpmLockfile` (slice 3 of vision.md § 13.5 lockfile sub-track) and
+// `parseAttribute` (slice 3 of vision.md § 13.2 OTEL no-PII).
+//
+// Source: ECMA-404 (the JSON Data Interchange Standard, 2017) — JSON.parse
+//   conformance; CycloneDX 1.5 / 1.6 specs (cyclonedx.org/docs/, 2023-2024) —
+//   the spec mandates JSON or XML serialization; this gate covers the JSON
+//   serialization only. Sibling: `parsePnpmLockfile` (scripts/check-lockfile-
+//   integrity.mjs slice 3, PR #265). vision.md § 13.5 (supply-chain
+//   hardening — SBOM is item #5 of the minimum bar).
+
+/**
+ * @typedef {(
+ *   | { ok: true, parsed: unknown }
+ *   | { ok: false, code: "empty-input" | "invalid-json", reason: string }
+ * )} ParseSbomResult
+ */
+
+/**
+ * Parse a CycloneDX SBOM from its on-disk JSON serialization. Pure: takes
+ * the file's text and returns either the parsed object or a structured
+ * verdict with the same `{ ok: false, code, reason }` shape the slice-1
+ * classifier and slice-2 walker emit.
+ *
+ * Empty / whitespace-only input is short-circuited to `code: "empty-input"`
+ * so a zero-byte SBOM produced by a `cyclonedx-cli` regression surfaces a
+ * specific actionable verdict instead of an opaque "Unexpected end of JSON
+ * input". All other parse failures (malformed JSON, truncated file,
+ * embedded NULs, …) collapse into `code: "invalid-json"` with the
+ * underlying error message preserved as the verdict's tail; the prefix is
+ * stable across Node versions so log-grep monitors don't flap.
+ *
+ * @param {string} text  The SBOM file's text (UTF-8 decoded by the caller).
+ * @returns {ParseSbomResult}
+ */
+export function parseSbomJson(text) {
+  if (typeof text !== "string" || text.trim() === "") {
+    return {
+      ok: false,
+      code: "empty-input",
+      reason: "SBOM input is empty or whitespace-only",
+    };
+  }
+  try {
+    return { ok: true, parsed: JSON.parse(text) };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      code: "invalid-json",
+      reason: `SBOM is not valid JSON: ${detail}`,
+    };
+  }
 }
