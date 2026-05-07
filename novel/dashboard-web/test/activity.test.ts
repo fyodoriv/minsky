@@ -15,7 +15,26 @@ describe("parseSpan", () => {
       status: "completed",
       taskId: "foo",
       reason: "daemon dry-run prompt for foo",
+      provider: "",
     });
+  });
+
+  test("parses iteration.provider when set (slice 5 of local-llm-fallback)", () => {
+    const line =
+      '[span] tick-loop.iteration {"iteration.index":7,"iteration.status":"completed","task.id":"foo","iteration.reason":"x","iteration.provider":"local"}';
+    const r = parseSpan(line);
+    expect(r?.provider).toBe("local");
+  });
+
+  test("parses iteration.provider=claude", () => {
+    const line =
+      '[span] tick-loop.iteration {"iteration.index":7,"iteration.status":"completed","iteration.provider":"claude"}';
+    expect(parseSpan(line)?.provider).toBe("claude");
+  });
+
+  test("missing iteration.provider falls back to empty string (back-compat)", () => {
+    const line = '[span] tick-loop.iteration {"iteration.index":7,"iteration.status":"completed"}';
+    expect(parseSpan(line)?.provider).toBe("");
   });
 
   test("returns null for non-span lines", () => {
@@ -37,6 +56,7 @@ describe("parseSpan", () => {
       status: "budget-paused",
       taskId: "",
       reason: "",
+      provider: "",
     });
   });
 
