@@ -54,11 +54,23 @@ git worktree remove --force /tmp/local-llm-smoke
 git branch -D local-llm-smoke
 ```
 
+### Verified — 2026-05-07 (M1 Max 32 GB)
+
+The smoke test was run end-to-end on this machine on 2026-05-07. Recorded numbers:
+
+- Cold-start `mlx_lm.server` boot to `GET /v1/models` 200 OK: ~45 s (one-time model load into Metal).
+- Single 47-token prompt, 31-token completion: 6 s wall-clock (includes warm-up).
+- Steady-state 47-token prompt, 124-token completion: 8.8 s wall-clock → ~14 tok/s.
+- Aider one-shot edit (7.6k prompt tokens — full repo-map + README — 72 completion tokens, single SEARCH/REPLACE block applied to `SMOKE.md`): under 30 s wall-clock end-to-end.
+- Output quality: `SMOKE.md` content is grounded in README (not hallucinated), one paragraph, three sentences. No stray edits to other files.
+
+Pass criteria met. The 14 tok/s steady-state matches the MLX-on-M1-Max literature for 32B-4bit and is the baseline against which slice 1's `decideProvider` will be judged.
+
 ## How the daemon picks the provider (slice 1+ — not yet wired)
 
 Pure decision function in `novel/tick-loop/src/llm-provider-selector.ts`:
 
-```
+```text
 decideProvider({ budgetState, lastClaudeFailure, localProbeResult })
   → "claude" | "local"
 ```
