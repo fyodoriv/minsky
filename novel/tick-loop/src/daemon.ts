@@ -1045,7 +1045,7 @@ export function buildDaemonBrief(args: {
     "- `**Predicted.** …` (period inside bold) — fails. Use `**Predicted**: …`.",
     "- Capitalized values (`**Match**: Yes`) — fails. Use lowercase: `yes`, `no`, or `partial`.",
     "",
-    "The lint regex (single source of truth at `scripts/check-pr-self-grade.mjs`) requires: optional bullet (`-`/`*`/`•`), optional bold-open `**`, the literal label, optional bold-close `**`, optional whitespace, then `:` or `-`, then the value. The colon must be OUTSIDE the bold tags. Match value must be lowercase `yes` / `no` / `partial`.",
+    "Single source of truth: `scripts/check-pr-self-grade.mjs`.",
     "",
     "## Priority-discipline gate",
     "",
