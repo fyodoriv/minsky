@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   type WorkerConfig,
+  buildChildWorkerArgs,
   claudeArgsForWorker,
+  parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   workerBranchName,
   workerStartupLine,
@@ -9,9 +11,9 @@ import {
 } from "./worker-config.js";
 
 describe("parseWorkerArgs", () => {
-  it("returns undefined when neither flag is present (single-process default)", () => {
-    expect(parseWorkerArgs([])).toBeUndefined();
-    expect(parseWorkerArgs(["--max-iterations=4"])).toBeUndefined();
+  it("defaults to claim-aware worker 0 of 1 when neither flag is present (2026-05-06 default change)", () => {
+    expect(parseWorkerArgs([])).toEqual({ workerId: 0, workersTotal: 1 });
+    expect(parseWorkerArgs(["--max-iterations=4"])).toEqual({ workerId: 0, workersTotal: 1 });
   });
 
   it("returns the parsed config when both flags are present", () => {
@@ -25,11 +27,14 @@ describe("parseWorkerArgs", () => {
     });
   });
 
-  it("returns an error when only one of the two flags is present", () => {
-    const result1 = parseWorkerArgs(["--worker-id=0"]);
-    expect(result1).toMatchObject({ error: expect.stringMatching(/must be passed together/) });
-    const result2 = parseWorkerArgs(["--workers-total=2"]);
-    expect(result2).toMatchObject({ error: expect.stringMatching(/must be passed together/) });
+  it("defaults workerId=0 when --workers-total alone is supplied (operator launches root)", () => {
+    expect(parseWorkerArgs(["--workers-total=3"])).toEqual({ workerId: 0, workersTotal: 3 });
+  });
+
+  it("returns an error when --worker-id is supplied without --workers-total", () => {
+    expect(parseWorkerArgs(["--worker-id=0"])).toMatchObject({
+      error: expect.stringMatching(/--worker-id requires --workers-total/),
+    });
   });
 
   it("returns an error when values are not integers", () => {
@@ -139,5 +144,89 @@ describe("workerStartupLine", () => {
     expect(line).toContain("worker 1 of 3");
     expect(line).toContain("daemon/1/<task-id>");
     expect(line).toContain("daemon-1-<task-id>");
+  });
+});
+
+describe("parseSpawnAdditionalWorkers", () => {
+  it("returns count: 0 when --spawn-additional-workers is absent (default)", () => {
+    expect(parseSpawnAdditionalWorkers({ argv: [], env: {} })).toEqual({ count: 0 });
+    expect(parseSpawnAdditionalWorkers({ argv: ["--max-iterations=4"], env: {} })).toEqual({
+      count: 0,
+    });
+  });
+
+  it("returns the count when the flag is present and env is unset (root worker)", () => {
+    expect(
+      parseSpawnAdditionalWorkers({ argv: ["--spawn-additional-workers=2"], env: {} }),
+    ).toEqual({ count: 2 });
+  });
+
+  it("returns count: 0 for explicit zero (no spawn)", () => {
+    expect(
+      parseSpawnAdditionalWorkers({ argv: ["--spawn-additional-workers=0"], env: {} }),
+    ).toEqual({ count: 0 });
+  });
+
+  it("returns an error when MINSKY_WORKER_SPAWNED=1 (depth-2 cap — only grandchildren allowed)", () => {
+    expect(
+      parseSpawnAdditionalWorkers({
+        argv: ["--spawn-additional-workers=1"],
+        env: { MINSKY_WORKER_SPAWNED: "1" },
+      }),
+    ).toMatchObject({ error: expect.stringMatching(/only grandchildren allowed/) });
+  });
+
+  it("the depth-2 cap only triggers on positive count — count=0 is a no-op even in spawned children", () => {
+    expect(
+      parseSpawnAdditionalWorkers({
+        argv: ["--spawn-additional-workers=0"],
+        env: { MINSKY_WORKER_SPAWNED: "1" },
+      }),
+    ).toEqual({ count: 0 });
+  });
+
+  it("returns an error for non-integer / negative counts", () => {
+    expect(
+      parseSpawnAdditionalWorkers({ argv: ["--spawn-additional-workers=abc"], env: {} }),
+    ).toMatchObject({ error: expect.stringMatching(/non-negative integer/) });
+    expect(
+      parseSpawnAdditionalWorkers({ argv: ["--spawn-additional-workers=-1"], env: {} }),
+    ).toMatchObject({ error: expect.stringMatching(/non-negative integer/) });
+  });
+});
+
+describe("buildChildWorkerArgs", () => {
+  it("strips --spawn-additional-workers + --worker-id + --workers-total from parent argv before adding child's", () => {
+    const parentArgv = [
+      "--max-iterations=10",
+      "--spawn-additional-workers=2",
+      "--worker-id=0",
+      "--workers-total=99",
+      "--tick-interval-ms=300000",
+    ];
+    const child = buildChildWorkerArgs({ parentArgv, childIndex: 1, totalAfterSpawn: 3 });
+    expect(child).not.toContain("--spawn-additional-workers=2");
+    expect(child).not.toContain("--worker-id=0");
+    expect(child).not.toContain("--workers-total=99");
+    expect(child).toContain("--worker-id=1");
+    expect(child).toContain("--workers-total=3");
+  });
+
+  it("preserves other args verbatim", () => {
+    const parentArgv = ["--max-iterations=10", "--tick-interval-ms=300000"];
+    const child = buildChildWorkerArgs({ parentArgv, childIndex: 1, totalAfterSpawn: 2 });
+    expect(child).toContain("--max-iterations=10");
+    expect(child).toContain("--tick-interval-ms=300000");
+  });
+
+  it("computes child worker-id 1..count (not 0 — that's the root)", () => {
+    expect(buildChildWorkerArgs({ parentArgv: [], childIndex: 1, totalAfterSpawn: 3 })).toEqual([
+      "--worker-id=1",
+      "--workers-total=3",
+    ]);
+    expect(buildChildWorkerArgs({ parentArgv: [], childIndex: 2, totalAfterSpawn: 3 })).toEqual([
+      "--worker-id=2",
+      "--workers-total=3",
+    ]);
   });
 });
