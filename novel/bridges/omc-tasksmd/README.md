@@ -74,3 +74,16 @@ await writeFile("TASKS.md", next);
 ```
 
 The bridge is read-only on the OMC side; no `.omc/state/` write paths exist in this package. v1+ reverse direction is filed as `omc-tasksmd-bridge-v1-watcher` in TASKS.md.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). Read-only OMC JSON → tasks.md bridge; primary risks are markdown injection and task impersonation.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | An adversary creates crafted OMC task JSON files on a shared machine to inject tasks into `TASKS.md` | File reads are scoped to `.omc/state/team/`; the daemon's task-picker validates ID format and fields before claiming any synced task |
+| Tampering | An OMC task `subject` or `description` contains markdown that disrupts the tasks.md section structure (e.g., a fake `## OMC Sync` heading) | The mapper emits projections verbatim in v0; a follow-up task adds heading-character sanitisation before the section-replace emit |
+| Repudiation | No signed audit trail of which OMC tasks were synced or when | The sentinel HTML comment in the sync section includes a batch timestamp; git commit of `TASKS.md` records the post-sync file state |
+| Information Disclosure | OMC task descriptions may contain sensitive project data (API URLs, secrets embedded in descriptions) | Treat all OMC task content as operator-controlled; do not store secrets in OMC task descriptions; `otel-no-pii-in-spans-lint` covers the OTEL layer |
+| Denial of Service | A very large OMC task set causes `TASKS.md` to grow past the soft size cap | `rule-12-scope-discipline` lint surfaces an oversized `TASKS.md`; the OMC sync section is bounded by OMC's own task count |
+| Elevation of Privilege | Injected task IDs cause the daemon's task-picker to claim and execute unintended work | Task-picker validates ID format and ownership before claiming; the bridge is read-only — it cannot directly trigger execution |

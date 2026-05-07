@@ -141,3 +141,16 @@ import('@minsky/notifier').then(async (m) => {
 
 The subscriber should receive the push within ~1 s; the printed
 `{ ok: true }` confirms the round-trip.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). Push-notification channel; primary secrets are the bearer token and the ntfy topic name.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | DNS or MITM interception impersonates ntfy.sh, harvesting the bearer token | HTTPS enforced by ntfy.sh (TLS required for bearer auth); adapter uses the documented endpoint, not a caller-supplied URL |
+| Tampering | MITM modifies notification content in transit | HTTPS; ntfy.sh transport is TLS-only for authenticated topics |
+| Repudiation | No operator-controlled audit trail of which notifications were sent | ntfy server retains a delivery log; the adapter returns `{ ok, reason }` per call so the daemon can log it via OTEL |
+| Information Disclosure | Bearer token (`MINSKY_NTFY_TOKEN`) visible in process environment or logs | Token sourced from env / OS keychain; never logged by the adapter; rotate via keychain on suspected exposure |
+| Denial of Service | ntfy.sh rate-limits the topic (429) or the server becomes unreachable | `graceful-degrade` — returns `{ ok: false, reason: 'http 429' }`; daemon paces pushes to max 3/day; `selfTest()` surfaces the signal |
+| Elevation of Privilege | Leaked bearer token grants write access to the operator's ntfy topic | Scope is one topic per token; rotate token if leaked; ntfy.sh supports per-topic ACL in self-hosted deployments |

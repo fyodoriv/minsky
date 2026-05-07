@@ -73,3 +73,16 @@ const overall = aggregateStatus(results); // "green" | "yellow" | "red"
 
 For back-compat, `@minsky/observability` continues to re-export these
 identifiers; existing imports keep working unchanged.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). Leaf types package with no runtime I/O; threat surface is supply-chain and type-boundary only.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | N/A — no authentication boundary; this package exports pure types and one pure function | n/a |
+| Tampering | Supply-chain compromise of this leaf package injects a malicious `aggregateStatus` implementation across all consumers | Lockfile pinning (`supply-chain-hardening-lockfile-sbom-slsa` P0 task); CycloneDX SBOM tracks this package; Sigstore provenance on release |
+| Repudiation | N/A — no actions or side effects to dispute | n/a |
+| Information Disclosure | N/A — no data processed or stored; `SelfTestResult` fields are operational metadata, not user data | n/a |
+| Denial of Service | A 1M-element array passed to `aggregateStatus()` blocks the event loop for O(n) time | Acceptable at current scale (~10 adapters); callers control input size; a future `MAX_ADAPTERS` guard can be added if the adapter count grows beyond 100 |
+| Elevation of Privilege | N/A — pure function with no OS interaction, no process privileges | n/a |

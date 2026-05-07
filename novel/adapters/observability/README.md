@@ -112,3 +112,16 @@ the only consumer in v0 is the adapter's own `selfTest()`; setting globals
 from a constructor causes test-isolation pollution and gives no value yet.
 A future task `register-otel-globals-at-bootstrap` will add a single
 explicit registration call site in `setup.sh`'s adapter bootstrap.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). Telemetry exporter; primary risk is PII leakage through span attributes.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | Malicious OTEL collector at a spoofed endpoint harvests span data | Endpoint is operator-controlled via `OTEL_EXPORTER_OTLP_ENDPOINT` / `MINSKY_OTEL_ENDPOINT`; default is `localhost:4318` (local only) |
+| Tampering | Span attributes injected with crafted values (e.g., Unicode escapes) disrupt collector parsing | OTEL SDK validates attribute types at call site; attribute values are operator-controlled strings, not user-supplied content |
+| Repudiation | Spans are write-only once shipped; no cryptographic proof of origin | Acceptable — observability is best-effort, not a legal audit trail; git commit is the authoritative change record |
+| Information Disclosure | PII in span attribute keys or values (task content, API key fragments) reaches an external collector | `otel-no-pii-in-spans-lint` CI gate (`scripts/check-otel-no-pii.mjs`) rejects PII-shaped attribute keys; no raw user content in attributes by convention |
+| Denial of Service | Runaway span emission exhausts OTEL SDK export queue or collector capacity | OTEL SDK export queue is bounded; `emitTickSpan` is fire-and-forget (rule #7 graceful-degrade); missed spans never block the caller's hot loop |
+| Elevation of Privilege | Collector endpoint configured to a third-party service that harvests production telemetry | Endpoint is operator-set; Minsky ships no default external collector; operators running cloud-tier deployments must declare the endpoint in their config |

@@ -224,3 +224,16 @@ Verification command (run from this directory after `pnpm build`):
 ```sh
 npm publish --dry-run --loglevel=info
 ```
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). Read-only consumer of `~/.claude/projects/` JSONL; primary risk is disclosure of conversation metadata.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | Crafted JSONL files on a shared machine report falsely low usage, disabling circuit-breaking | `MaciekTokenMonitor` is read-only; file integrity depends on OS-level permissions on `~/.claude/` (mode 700 recommended) |
+| Tampering | Injected JSONL line with an inflated token count causes premature circuit-breaking | Fail-safe: inflated counts trigger early circuit-break (pause), not bypass; `BudgetGuard` applies conservatively |
+| Repudiation | JSONL token records are unsigned; an operator could dispute the counts | JSONL is written exclusively by the Claude Code process (Anthropic-controlled); the monitor is read-only and cannot alter records |
+| Information Disclosure | `~/.claude/projects/<cwd>/<session>.jsonl` contains full conversation messages including any sensitive content | OS permissions on `~/.claude/` restrict access to the running user; the monitor reads only `message.usage` numeric fields, skipping content fields |
+| Denial of Service | A very large JSONL file (millions of lines) exhausts memory during `readFile` | v0 buffers the whole file in RAM; operator-managed risk — avoid multi-million-line sessions; streaming parser planned as follow-up |
+| Elevation of Privilege | Read access to `~/.claude/projects/` reveals all active Claude Code sessions on the machine | Restricted to the running user's home directory by OS permissions; `supervisor-sandbox-syscall-restriction` adds FS-level isolation |
