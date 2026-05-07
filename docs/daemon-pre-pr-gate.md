@@ -54,6 +54,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `lockfile-integrity` — diffs `pnpm-lock.yaml` against `origin/main` and rejects same-`name@version` entries whose integrity hash changed (rule #13.5 — security & privacy minimum-bar item #5; the empirical fingerprint of the 2025 chalk/debug supply-chain incident).
 - `otel-no-pii` — full-scan of `novel/**/*.ts` rejects PII-shaped span attributes (rule #13.2 — security & privacy minimum-bar item #2).
 - `secret-scan` — full-scan of every tracked file rejects credential shapes (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`, `AIza…`, PEM headers); rule #13.1 — security & privacy minimum-bar item #1.
+- `sbom-shape` — validates the on-disk CycloneDX SBOM against the 1.5/1.6 subset (`bomFormat`, `specVersion`, `version`, `components[].type/name/version/purl`, unique `bom-ref`); fail-safe-defaults exit-0 when no SBOM is present so the gate is wire-able before the generation step lands; rule #13.5 — security & privacy minimum-bar item #5 (supply-chain hardening — SBOM shape is the consumer's only structural guarantee against generator-side regressions).
 - `metric-freshness` — every dashboard metric in the expected list emitted within its freshness window.
 - `mape-k-budget-cap` — the autonomic-manager weekly budget cap matches the documented value.
 - `mape-k-constraints-md-size` — `novel/mape-k-loop/constraints.md` archive stays under its 200-entry cap.
