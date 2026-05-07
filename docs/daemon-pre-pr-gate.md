@@ -64,6 +64,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `mape-k-tick-iteration-backstop` — the tick-iteration backstop integer matches ARCHITECTURE.md.
 - `mape-k-watchdog-cadence` — the watchdog cadence (hours) matches ARCHITECTURE.md.
 - `tick-loop-backoff-schedule` — the restart-backoff schedule matches ARCHITECTURE.md (5s → 30s → 5min).
+- `supervisor-sandbox-hardening` — every Minsky supervisor systemd unit (`minsky-tick-loop.service`, `minsky-budget-guard.service`, `minsky-watchdog.service`) carries the safe set of stage-0 hardening directives (`NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectKernel{Tunables,Modules,Logs}=yes`, `ProtectControlGroups=yes`, `RestrictSUIDSGID=yes`, `LockPersonality=yes`, `RestrictRealtime=yes`); rule #13.3 — security & privacy minimum-bar item #3 (supervisor sandbox), stage 0 of `supervisor-sandbox-syscall-restriction`. Filesystem/network restrictions ship in stage 1+ behind the dry-run + warn-only ramp.
 - `cadence-pivot-threshold` — the cadence-pivot threshold fraction matches research.md.
 - `pivot-success-margin` — every rule-#9 record's pivot threshold is below its success threshold by ≥ the documented margin.
 - `anchor-primary-source` — every rule-#9 record's anchor cites a primary source, not a tutorial.
