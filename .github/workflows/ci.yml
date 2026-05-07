@@ -878,6 +878,28 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
 
+  secret-scan:
+    # rule #13 item 3: secret scanning at commit and CI (non-bypassable).
+    # fetch-depth: 0 scans the full repo history — surfaces any historical
+    # leak that predates the gate (one-time audit on every PR).
+    # Anchor: rule #13 (vision.md § 13); Truffle Security "State of Secrets
+    #         Sprawl 2023" (median TTD for public GitHub secrets: hours);
+    #         Beyer SRE 2016 Ch. 5 (defence in depth).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.18.4"
+        run: |
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+      - name: scan for secrets
+        run: gitleaks detect --redact --no-banner --config .gitleaks.toml --exit-code 1
+
   ci:
     needs:
       - anchor-primary-source
@@ -899,6 +921,7 @@ jobs:
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
+      - secret-scan
       - skill-rule-cap
       - rule-1-novel-justification
       - rule-2-dep-coverage
@@ -935,6 +958,7 @@ jobs:
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
+                   "${{ needs.secret-scan.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
                    "${{ needs.rule-3-doc-first.result }}" \

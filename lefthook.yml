@@ -12,6 +12,20 @@ pre-commit:
     test:
       glob: "*.ts"
       run: pnpm vitest related --run {staged_files}
+    scan-secrets:
+      # rule #13 item 3: block secrets at commit time.
+      # Install gitleaks: brew install gitleaks (macOS) / see docs/security/secret-scanning.md.
+      # Emergency local bypass (CI remains non-bypassable): MINSKY_SKIP_SECRET_SCAN=1
+      run: |
+        if [ "${MINSKY_SKIP_SECRET_SCAN}" = "1" ]; then
+          echo "secret scan skipped (MINSKY_SKIP_SECRET_SCAN=1)"
+          exit 0
+        fi
+        if ! command -v gitleaks >/dev/null 2>&1; then
+          printf 'ERROR: gitleaks not installed.\nInstall: brew install gitleaks  (macOS)\nSee docs/security/secret-scanning.md for other platforms.\nEmergency local bypass: MINSKY_SKIP_SECRET_SCAN=1  (CI is non-bypassable)\n' >&2
+          exit 1
+        fi
+        gitleaks protect --staged --redact --no-banner --config .gitleaks.toml --exit-code 1
 
 pre-push:
   commands:

@@ -1,0 +1,21 @@
+# Gitleaks configuration for Minsky.
+# Starts with the default ruleset; allow-list entries are added per-occurrence
+# with a mandatory TASKS-id justification comment.
+#
+# Anchor: rule #13 (vision.md § 13 — security & privacy — second priority
+#         after performance; item 3 — secret scanning at commit and CI);
+#         Saltzer & Schroeder 1975 principle 4 (least privilege);
+#         Truffle Security "State of Secrets Sprawl 2023".
+
+title = "minsky"
+
+[extend]
+useDefault = true
+
+# Add project-specific allow-list entries below as false positives are
+# encountered. Each entry must include a description and a TASKS-id reference.
+# Example:
+#
+# [[allowlists]]
+# description = "fake key in otel-pii test fixture (otel-no-pii-in-spans-lint)"
+# paths = ['''test/fixtures/otel-pii/''']
