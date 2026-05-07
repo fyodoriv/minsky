@@ -561,11 +561,13 @@ export {
 // (`scripts/run-pre-pr-lint-stack.mjs --json`) — same script `pnpm pre-pr-lint`
 // and `lefthook pre-push` invoke (rule #10 deterministic enforcement).
 export {
+  type BodyAwarePrePrLintRunOptions,
   type PnpmPrePrLintRunOptions,
   type PrePrLintGateResult,
   type PrePrLintRun,
   type PrePrLintRunResult,
   type RunPrePrLintGateArgs,
+  createBodyAwarePrePrLintRun,
   createPnpmPrePrLintRun,
   runPrePrLintGate,
   shouldRunPrePrLintGate,
