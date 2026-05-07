@@ -9,19 +9,27 @@
 //
 // Two rejection paths:
 //
-//   1. NAME-shape: the attribute name matches one of the credential-shaped
-//      tokens documented in TASKS.md `otel-no-pii-in-spans-lint` Hypothesis —
-//      `(api[_-]?key | password | token | secret | credential | bearer)`.
-//      Match is case-insensitive and substring (so `apiKey`, `userPassword`,
-//      `auth_token`, `clientSecret`, `bearer_jwt` all flag).
+//   1. NAME-shape: the attribute name matches one of the credential- or
+//      PII-shaped tokens documented in TASKS.md `otel-no-pii-in-spans-lint`
+//      Hypothesis and vision.md § 13.2 ("PII-shaped attributes (email, IP,
+//      full path with username)"):
+//        - credentials: `api[_-]?key | password | token | secret | credential
+//          | bearer` (case-insensitive substring; `apiKey`, `userPassword`,
+//          `auth_token`, `clientSecret`, `bearer_jwt` all flag).
+//        - PII: `email` (case-insensitive substring); `ip` separated by `_`,
+//          `-`, `.`, or string boundary (`client.ip`, `client_ip`,
+//          `ip_address` all flag; `description`, `recipient`, `chip` do not).
 //
 //   2. VALUE-shape: the value is a string and matches a known credential
-//      prefix:
+//      prefix or a username-bearing filesystem path:
 //        - `sk-…` (≥20 trailing alphanumerics) — Anthropic / OpenAI keys
 //        - `ghp_…` (≥30 trailing alphanumerics) — GitHub PATs
 //        - `xoxb-…` / `xoxp-…` — Slack tokens
+//        - `/Users/<name>/…` — macOS user-home path (leaks the operator's
+//          local username; rule #13.2 third PII example)
+//        - `/home/<name>/…` — Linux user-home path (same)
 //      The value rule is independent of the name; a span attribute named
-//      `note` whose value is `sk-...` still flags.
+//      `note` whose value is `sk-...` or `/Users/cbrwizard/...` still flags.
 //
 // Both shapes return `{ ok: false, reason }`. Anything else returns
 // `{ ok: true }`. Non-string values short-circuit value-shape detection
@@ -93,6 +101,16 @@ const REPO_ROOT = resolve(HERE, "..");
 // plain substrings — `password` flags `userPassword`, `passwordHash`,
 // `oldPassword`, etc. Entry order is also the diagnostic order (the
 // `reason` field cites the first-matched token).
+//
+// `email` and `ip-address` extend the credential set to vision.md § 13.2's
+// explicit PII-shape examples ("email, IP, full path with username").
+// `email` is plain substring (case-insensitive): `userEmail`, `email`,
+// `emailAddress`, `user.email` all flag — `email` does not appear as a
+// coincidental substring in non-email identifiers in practice.
+// `ip-address` uses separator-anchored boundaries (`_`, `-`, `.`, BOL/EOL)
+// so OTEL's standard convention names like `client.ip`, `client_ip`,
+// `network.peer.ip`, `ip_address` flag while non-PII identifiers
+// (`description`, `iteration`, `recipient`, `chip`, `clip`) do not.
 const NAME_PATTERNS = Object.freeze([
   Object.freeze({ tag: "api-key", re: /api[_-]?key/i }),
   Object.freeze({ tag: "password", re: /password/i }),
@@ -100,6 +118,8 @@ const NAME_PATTERNS = Object.freeze([
   Object.freeze({ tag: "credential", re: /credential/i }),
   Object.freeze({ tag: "bearer", re: /bearer/i }),
   Object.freeze({ tag: "token", re: /token/i }),
+  Object.freeze({ tag: "email", re: /email/i }),
+  Object.freeze({ tag: "ip-address", re: /(?:^|[._-])ip(?:[._-]|$)/i }),
 ]);
 
 // Value-shape: known credential prefixes. The minimum-tail length (`{20,}`,
@@ -107,11 +127,21 @@ const NAME_PATTERNS = Object.freeze([
 // it's actually a label. Real Anthropic / OpenAI / GitHub keys are far
 // longer than the floor; the floor exists to keep the false-positive rate
 // near zero on prose.
+//
+// `macos-user-home-path` and `linux-user-home-path` extend value-shape to
+// vision.md § 13.2's third PII example: "full path with username". A span
+// attribute whose value embeds `/Users/<name>/…` (macOS) or `/home/<name>/…`
+// (Linux) leaks the operator's local username — even if the attribute name
+// is innocuous (`note`, `path`, `cwd`). The username segment must start
+// with a letter and be ≥1 character; `/Users//` (empty) and trailing-slash
+// roots like `/home/` (no user) do not match.
 const VALUE_PATTERNS = Object.freeze([
   Object.freeze({ tag: "anthropic-or-openai-key", re: /\bsk-[A-Za-z0-9_-]{20,}\b/ }),
   Object.freeze({ tag: "github-pat", re: /\bghp_[A-Za-z0-9]{30,}\b/ }),
   Object.freeze({ tag: "slack-bot-token", re: /\bxoxb-[A-Za-z0-9-]{10,}\b/ }),
   Object.freeze({ tag: "slack-user-token", re: /\bxoxp-[A-Za-z0-9-]{10,}\b/ }),
+  Object.freeze({ tag: "macos-user-home-path", re: /\/Users\/[A-Za-z][A-Za-z0-9._-]*\// }),
+  Object.freeze({ tag: "linux-user-home-path", re: /\/home\/[A-Za-z][A-Za-z0-9._-]*\// }),
 ]);
 
 // Allow-list annotation (slice 3). Must capture a non-empty reason; the
