@@ -20,9 +20,11 @@
 // silently shrink, weaken, or drop these sections — and rule #13.8 would
 // lose its grip on the package-level documentation surface that operators
 // rely on for incident response. This lint pins the section's existence,
-// minimum substance (≥5 non-empty lines), and STRIDE-name engagement
-// (the methodology must be cited even when a package's STRIDE letters
-// don't apply, as in `novel/adapters/types/README.md`).
+// minimum substance (≥5 non-empty lines), STRIDE-name engagement (the
+// methodology must be cited even when a package's STRIDE letters don't
+// apply, as in `novel/adapters/types/README.md`), and the per-package
+// `performance-first carve-out` line (vision.md § 13's relief-valve clause —
+// the surface where declared performance/security trade-offs live).
 //
 // Pivot (rule #9): if STRIDE is later replaced by a different threat-model
 // methodology in vision.md (e.g., LINDDUN for privacy-heavy packages),
@@ -74,6 +76,20 @@ const SECTION_HEADER_RE = /^## Threat model\s*$/m;
 const NEXT_H2_RE = /^## /m;
 const STRIDE_RE = /\bSTRIDE\b/i;
 const MIN_CONTENT_LINES = 5;
+// vision.md § 13's relief-valve clause: "performance wins on a case-by-case
+// basis, with the security cost documented in the relevant package's
+// threat-model section as a declared deviation." Pin the per-section line so
+// a future README rewrite cannot silently drop the carve-out, removing the
+// surface where declared performance/security trade-offs live.
+const CARVE_OUT_RE = /\bperformance-first carve-out\b/i;
+// vision.md § 13.8's enumeration: "every package's README has a 'Threat model'
+// section enumerating: (a) what's untrusted, (b) what's trusted, (c) the
+// boundary between them." Pin the (a)/(b)/(c) triplet so a future README
+// rewrite cannot drop one of the three axes the constitutional rule names.
+// Word boundaries make `\bTrusted\b` reject the substring inside `Untrusted`.
+const UNTRUSTED_RE = /\bUntrusted\b/i;
+const TRUSTED_RE = /\bTrusted\b/i;
+const TRUST_BOUNDARY_RE = /\btrust\s+boundary\b/i;
 
 /**
  * Slice the `## Threat model` section body out of a README. Returns `null`
@@ -105,6 +121,18 @@ export function extractThreatModelSection(readmeText) {
  *      package's STRIDE letters don't apply (e.g., the leaf-only `types`
  *      adapter), the methodology must be cited so future readers see the
  *      author engaged with it rather than skipped it.
+ *   4. The section names rule #13's "performance-first carve-out" clause
+ *      (case-insensitive). This is the documented surface for declared
+ *      performance/security trade-offs per vision.md § 13's relief valve;
+ *      every package must say either "none declared" or list the deviations.
+ *      Pinning forces the surface to stay populated even when no deviation
+ *      currently exists.
+ *   5. The section names the (a)/(b)/(c) trust-boundary triplet from vision.md
+ *      § 13.8 — `Untrusted`, `Trusted`, and `Trust boundary` (each
+ *      case-insensitive, word-bounded). This is the constitutional
+ *      enumeration; without all three, the section can engage with STRIDE
+ *      while skipping the trust-axis decomposition that operators read first
+ *      during incident response.
  *
  * @param {string} readmeText
  * @returns {CheckResult}
@@ -125,6 +153,26 @@ export function checkThreatModelSection(readmeText) {
   if (!STRIDE_RE.test(section)) {
     errors.push(
       "section does not name `STRIDE` — rule #13.8 requires explicit methodology engagement",
+    );
+  }
+  if (!CARVE_OUT_RE.test(section)) {
+    errors.push(
+      "section does not name `performance-first carve-out` — vision.md § 13's relief-valve clause requires per-package documentation of declared deviations (or an explicit `none declared` line)",
+    );
+  }
+  if (!UNTRUSTED_RE.test(section)) {
+    errors.push(
+      "section does not name `Untrusted` — vision.md § 13.8 (a) requires the package to enumerate what's untrusted",
+    );
+  }
+  if (!TRUSTED_RE.test(section)) {
+    errors.push(
+      "section does not name `Trusted` (standalone, not the substring of `Untrusted`) — vision.md § 13.8 (b) requires the package to enumerate what's trusted",
+    );
+  }
+  if (!TRUST_BOUNDARY_RE.test(section)) {
+    errors.push(
+      "section does not name `Trust boundary` — vision.md § 13.8 (c) requires the package to name the boundary between trusted and untrusted",
     );
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
@@ -156,15 +204,24 @@ export function checkAllThreatModelSections(contentsByPath, paths = THREAT_MODEL
  * @returns {Promise<number>}
  */
 async function main() {
+  // Parallel reads: 17 paths × ~10ms read latency, sequenced via `Promise.all`
+  // shrinks wall-time to the per-file ceiling instead of summing the latencies.
+  const reads = await Promise.all(
+    THREAT_MODEL_README_PATHS.map(async (rel) => {
+      try {
+        const text = await readFile(resolve(REPO_ROOT, rel), "utf8");
+        return /** @type {const} */ ([rel, text]);
+      } catch {
+        // Returning `null` lets us drop the entry; checkAll surfaces
+        // "file missing on disk" via the absent Map key.
+        return /** @type {const} */ ([rel, null]);
+      }
+    }),
+  );
   /** @type {Map<string, string>} */
   const contents = new Map();
-  for (const rel of THREAT_MODEL_README_PATHS) {
-    try {
-      const text = await readFile(resolve(REPO_ROOT, rel), "utf8");
-      contents.set(rel, text);
-    } catch {
-      // Leave the entry unset; checkAll surfaces "file missing on disk".
-    }
+  for (const [rel, text] of reads) {
+    if (text !== null) contents.set(rel, text);
   }
   const results = checkAllThreatModelSections(contents);
   const failures = results.filter((r) => !r.result.ok);
@@ -186,7 +243,9 @@ async function main() {
       "",
       "Per vision.md § 13.8 and TASKS.md `security-privacy-priority-substrate`",
       "acceptance criterion #5, every novel package's README must carry a",
-      "STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines.",
+      "STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines",
+      "and a per-package `performance-first carve-out` line (vision.md § 13's",
+      "relief-valve clause — declared deviations OR an explicit `none declared`).",
       "",
     ].join("\n"),
   );
