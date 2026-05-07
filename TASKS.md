@@ -11,6 +11,79 @@
 
 ## P0
 
+<!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 found 4 minsky-loop bugs that lost throughput and required manual unblock. Filed below as P0 (operator directive 2026-05-07 — "use p0 for important things like minsky loop bugs"). They share the framing the operator articulated 2026-05-07: "monitor + unblock + file tasks so next time minsky unblocks itself" — i.e., the watchdog substrate that makes 10-worker mode safe. -->
+
+- [ ] `daemon-claude-print-hang-watchdog` — daemon spawn-strategy must time out child `claude --print` processes so a stuck child doesn't silently freeze a worker for hours
+  - **ID**: daemon-claude-print-hang-watchdog
+  - **Tags**: p0, daemon, supervisor, throughput, watchdog, pick-next, minsky-loop-bug
+  - **Pick-next**: yes — 9h monitoring window 2026-05-07 caught worker-1's `claude --print --worktree daemon-1-security-privacy-priority-substrate` (PID 87396) hung at 0.1% CPU for 1h 56min; daemon parent waited indefinitely. Lost ~24 iterations of throughput. Operator manually killed PID 87396; parent recovered via failed-iteration log + next tick.
+  - **Estimate**: 1d
+  - **Hypothesis**: The daemon's `ProcessSpawnStrategy.spawn()` resolves only on child `close` event. If `claude --print` hangs (slow API, network drop, OOM, missing input on stdin), the parent waits forever. Pre-registration: post-fix, every `claude --print` spawn carries a per-iteration timeout (default 15 min — well above the 95th-percentile productive iteration but below the operator's tolerance for blind silence). Hung children are SIGKILLed and the iteration logs `failed` with reason `claude-print-timeout: <ms>ms`. Over a rolling 7d window, the count of `claude-print-timeout` reasons is the new visible-not-silent metric (Beyer SRE 2016 Ch. 6). Target ≤2 timeouts/day per worker; if more, the timeout is too aggressive — pivot to a configurable threshold per `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`.
+  - **Details**: (a) Add `timeoutMs?: number` to `ProcessSpawnStrategyOptions`. (b) When set, wrap the child in `setTimeout(timeoutMs)` that calls `child.kill('SIGKILL')` + records timeout reason. (c) The `ProcessSpawnStrategy.spawn` Promise resolves with `{ exitCode: -1, durationMs, stdoutTail, stderrTail: '<timed out after Nms>' }` so the daemon's outer loop sees a `failed` iteration and ticks again. (d) `bin/tick-loop.mjs` reads `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` (default 900_000 = 15 min) and threads through. (e) Self-diagnose invariant `claudePrintTimeoutFrequencyInvariant` fires if rolling-7d timeout count > 14 (more than 2/day average across workers).
+  - **Files**: `novel/tick-loop/src/spawn-strategy.ts` (`timeoutMs` opt + watchdog), `novel/tick-loop/src/spawn-strategy.test.ts` (paired tests for fast / slow / hung child), `novel/tick-loop/bin/tick-loop.mjs` (env-var threading), `scripts/self-diagnose.mjs` (`claudePrintTimeoutFrequencyInvariant`).
+  - **Verification**: paired tests for spawn-strategy: happy path (resolves before timeout) / slow-but-completes (no false positive) / hung child (SIGKILL fires, exit code -1) / opt-out (no `timeoutMs` → legacy unbounded behaviour preserved).
+  - **Measurement**: `grep -c "claude-print-timeout" .minsky/workers/*.log` over rolling 7d window ≤14. AND no single iteration shows daemon-parent's `claude --print` child running for >`timeoutMs + 30s` per `pgrep --parent <daemon-pid> -a | awk` over a 1min sampling window (chaos test).
+  - **Pivot**: if the 15min default produces >2 false-positive timeouts/day on legitimate long iterations, raise to 30 min — but document the wall-clock-vs-budget tradeoff. If the timeout is set too low (e.g., 5 min), some legitimate iterations get killed mid-spawn. Don't retire the timeout — silence is failure (Beyer SRE 2016 Ch. 6) is the operator's stated tolerance.
+  - **Anchor**: 9h monitoring window 2026-05-07 (worker-1 PID 87396 hung 1h 56min); rule #2 (Strategy seam — `ProcessSpawnStrategy.spawn` is the boundary); rule #6 (let-it-crash — kill the hung child, the iteration loop catches the `failed` status); rule #9 (pre-registered HDD); operator 2026-05-07 — "monitor + unblock + file tasks so next time minsky unblocks itself".
+  - **Risk**: low. The timeout is opt-in via env var; legacy behaviour preserved when unset. Mitigation: ship with the env-var read but a safe default (15 min) so production immediately benefits.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07 — worker-1 stuck for ~2h, ~24 iterations lost.
+
+- [ ] `daemon-stuck-pr-rebase-watchdog` — when a daemon's open PR goes CONFLICTING for >Nh, force the daemon to rebase or escalate as `Blocked: needs-operator-rebase`
+  - **ID**: daemon-stuck-pr-rebase-watchdog
+  - **Tags**: p0, daemon, supervisor, watchdog, conflict-resolution, minsky-loop-bug
+  - **Estimate**: 2d
+  - **Hypothesis**: The 9h monitoring window 2026-05-07 ended with 5 daemon PRs (#321 / #324 / #331 / #339 / #341) stuck CONFLICTING because the daemon couldn't rebase its own worktree branches (force-push sandbox policy denies the push). One PR (#330, the resolveDiffBase fix) eventually rebased successfully; the others didn't. The pattern: as main moves under a daemon PR, the PR goes CONFLICTING and stays there. Pre-registration: post-fix, no daemon PR remains CONFLICTING for >2h; the watchdog either rebases via Mergiraf or files a `Blocked: needs-operator-rebase` task. Rolling-7d count of escalations ≤1/day; if higher, the daemon's rebase capability isn't sufficient — pivot to allowlist `--force-with-lease` on `daemon/<id>/<task-id>` branches.
+  - **Details**: (a) Extend self-diagnose's `daemonPrStuckDirtyInvariant` (#239) to also classify `CONFLICTING` (not just `DIRTY`). (b) New daemon iteration step: when self-diagnose finds a CONFLICTING daemon PR, the iteration's brief becomes "rebase PR #N onto current main; resolve conflicts via Mergiraf if available; force-push with `--force-with-lease`". (c) On 2 retries failing, the daemon files a fresh TASKS.md entry `daemon-pr-stuck-rebase: PR #N conflicting for Nh; needs operator manual rebase` and labels the PR `Blocked: needs-operator-rebase`. (d) Composes with #273's Mergiraf merge driver (already shipped + activated): when conflicts are structural, Mergiraf auto-resolves; otherwise escalate.
+  - **Files**: `scripts/self-diagnose.mjs` (extend `daemonPrStuckDirtyInvariant`), `novel/tick-loop/src/daemon-pr-rebase.ts` + `.test.ts` (rebase decision + I/O wrapper), `novel/tick-loop/src/daemon.ts` (wire-in to runOneIteration's brief-builder).
+  - **Verification**: paired tests for daemon-pr-rebase decision: clean-pr / conflicting-1h / conflicting-3h / 2-retries-exhausted. Integration test on a synthetic conflict (branch + main edit same line) → mergiraf auto-resolve.
+  - **Measurement**: `gh pr list --author "@minsky-bot" --state open --json mergeable --jq '[.[] | select(.mergeable == "CONFLICTING")] | length'` over 7d rolling: median ≤1.
+  - **Pivot**: if the daemon can't actually force-push from sandbox (the original blocker that caused this), pivot to "soft escalation" — file the rebase task and notify operator via ntfy. The daemon-side detection still works; only the auto-rebase action degrades.
+  - **Anchor**: 9h monitoring window 2026-05-07 (5 PRs stuck CONFLICTING at end of window); rule #1 (don't reinvent — Mergiraf merge driver shipped at #273); rule #2 (Strategy seam — pure rebase decision fed by injected I/O); rule #9 (pre-registered HDD); composes with `daemon-fix-own-pr-on-ci-failure` (already filed P0).
+  - **Risk**: medium. Force-pushing daemon branches risks history loss if the operator was reviewing. Mitigation: `--force-with-lease` (refuses if upstream advanced); cap-2 retries; explicit escalation path via the new TASKS.md filing.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07 — 5 of 7 open daemon PRs CONFLICTING at end of window; force-push sandbox policy denied daemon's own rebase attempts.
+
+- [ ] `daemon-task-rotation-on-completion` — when a TASKS.md task ships via a merged PR, the task block should auto-mark complete so daemons don't re-pick it
+  - **ID**: daemon-task-rotation-on-completion
+  - **Tags**: p0, daemon, supervisor, task-discipline, minsky-loop-bug
+  - **Estimate**: 1d
+  - **Hypothesis**: 9h monitoring window 2026-05-07: worker-1 picked `daemon-pre-pr-lint-gate` task on iter 26-27 even though #309 had already shipped the substrate. Worker-1 re-created the same gate module + tests + brief compressions as PR #343 — closed as duplicate. Pattern repeats: when a task's substrate ships but the task block isn't manually removed, daemons keep re-picking it, wasting iterations. Pre-registration: post-fix, when a PR with title containing `feat(<task-id>)` merges, the daemon's iteration step removes the task block from TASKS.md if all the task's `**Acceptance**` criteria parse as satisfied. Visible-not-silent: removal commit message names the criteria-checker decision. Rolling-7d count of duplicate-PR creations (PR with `<task-id>` in title where `<task-id>` block doesn't exist on main) → 0.
+  - **Details**: (a) New pure helper `decideTaskCompletion({ taskBlock, openPrs, mergedPrs }) → 'remove' | 'keep' | 'incomplete'` based on acceptance criteria checkboxes + merged-PR titles matching the task ID. (b) Daemon iteration runs this after each merge it observes; emits a TASKS.md edit + commit. (c) The decision is conservative — only auto-removes when ALL acceptance criteria parse as ✅ (operator can keep `**Acceptance**: TBD` to defer auto-removal).
+  - **Files**: `scripts/check-task-completion.mjs` + `.test.mjs` (pure decision), `novel/tick-loop/src/daemon-task-rotation.ts` + `.test.ts` (I/O wrapper), `novel/tick-loop/src/daemon.ts` (wire-in after `runMetricsRender`).
+  - **Verification**: paired tests for `decideTaskCompletion`: all-acceptance-✅ + merged-PR-found → remove / mixed-✅-and-incomplete → keep / no-merged-PR → incomplete. Integration test: synthetic TASKS.md with one shipped task + matching merged PR → daemon iteration produces a TASKS.md commit removing the block.
+  - **Measurement**: `git log --grep "feat(<id>)" --since=30d | wc -l > A`; `git log --grep "duplicate of #" --since=30d | wc -l > B`; `B/A` ≤ 0.05 (less than 5% of merged PRs are subsequently re-created as duplicates).
+  - **Pivot**: if auto-removal mis-fires (removes blocks for tasks that aren't really done), tighten the criteria — require explicit `**Status**: shipped` field rather than parsing acceptance checkboxes. Don't retire the rotation — manual TASKS.md curation at scale doesn't keep up with daemon pickTask rate.
+  - **Anchor**: 9h monitoring window 2026-05-07 (worker-1 re-created #309 as #343); rule #2 (Strategy seam — pure decision); rule #9 (pre-registered HDD); composes with `daemon-duplicate-work-detection` (next).
+  - **Risk**: medium. Aggressive auto-removal could lose in-flight task context. Mitigation: only fire when an explicit merged PR with matching title exists; keep `**Pushback**` field which operators can use to veto.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07 — worker-1 re-created already-merged work multiple times.
+
+- [ ] `daemon-duplicate-work-detection` — `pickAndClaim` should consult open + recently-merged PRs for a task ID and skip / fix-iterate instead of opening a duplicate
+  - **ID**: daemon-duplicate-work-detection
+  - **Tags**: p0, daemon, supervisor, task-discipline, minsky-loop-bug
+  - **Estimate**: 1d
+  - **Hypothesis**: Same 9h-window pattern: worker-1 picked `daemon-pre-pr-lint-gate`, ran an iteration, opened #343 — without checking that #309 (already merged) covered the task and that #322 (still open) had the same content. Pre-registration: post-fix, before any `gh pr create`, the daemon queries `gh pr list --search "<task-id> in:title"` and refuses with `noop, exiting — task already in flight (PR #N)` if any open or recently-merged PR matches. Rolling-7d duplicate-PR rate → 0.
+  - **Details**: (a) Pure helper `decideDuplicate({ taskId, prs }) → { kind: 'open' | 'merged' | 'none', prNumber? }`. (b) Daemon's `runClaimedIteration` calls this after `pickAndClaim` but before the `gh pr create`. (c) On `open` → daemon's brief becomes "rebase + iterate on PR #N" (the existing `daemon-fix-own-pr-on-ci-failure` flow). (d) On `merged` → daemon writes the TASKS.md task-completion edit (composes with `daemon-task-rotation-on-completion`) and exits noop. (e) Composes with `pickAndClaim` (already shipped #298) — claim layer prevents same-task selection across workers; this prevents same-task PR creation across iterations.
+  - **Files**: `scripts/check-duplicate-pr.mjs` + `.test.mjs` (pure decision), `novel/tick-loop/src/daemon-duplicate-detection.ts` + `.test.ts` (I/O wrapper), `novel/tick-loop/src/daemon.ts` (wire-in to spawn step).
+  - **Verification**: paired tests for `decideDuplicate`: no-pr / open-pr / merged-pr-this-week / merged-pr-old / multiple-prs.
+  - **Measurement**: `gh pr list --author "@minsky-bot" --state closed --search "merged:>$(date -v-7d -u +%Y-%m-%d) closed-as-not-planned"` ≤ 1/week (counting daemon PRs closed as duplicate).
+  - **Pivot**: if `gh pr list` query is too coarse (mis-classifies unrelated PRs that mention the task ID), restrict to PRs authored by the daemon and with branch names matching `daemon/<id>/<task-id>`.
+  - **Anchor**: 9h monitoring window 2026-05-07 (worker-1's #343 was a duplicate of merged #309); rule #2 (Strategy seam); rule #9 (pre-registered HDD); composes with #298 (`pickAndClaim`) and `daemon-task-rotation-on-completion`.
+  - **Risk**: low. The check is read-only against the GitHub API; the conservative default is `noop, exiting` rather than corrupting state.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07 — worker-1's #343, #322 patterns.
+
+- [ ] `daemon-pr-age-watchdog` — flag open daemon PRs with >N commits and >Mh wall-clock age as "rebase or close" candidates
+  - **ID**: daemon-pr-age-watchdog
+  - **Tags**: p0, daemon, supervisor, watchdog, optimize-thrash, minsky-loop-bug
+  - **Estimate**: 1d
+  - **Hypothesis**: 9h monitoring window 2026-05-07: worker-1 stacked 11+ brief-compression commits onto PR #322 over ~5 hours without the PR ever merging — accumulated −4,195 bytes/iter of token savings that never landed because the PR stayed CONFLICTING. The optimize-thrash pattern: workers keep polishing a stuck PR instead of opening a fresh one or closing the stuck one. Pre-registration: post-fix, no daemon PR has >5 commits AND >2h age without a green merge or a forced-rebase action. Rolling-7d count of "thrashed" PRs (commit-count × age-hours product crossing threshold) ≤1.
+  - **Details**: (a) New self-diagnose invariant `daemonPrThrashInvariant` checking `gh pr list --author "@minsky-bot" --state open --json commits,createdAt`. (b) When a PR has commits>5 AND ageHours>2 AND mergeable!="MERGEABLE", it's flagged. (c) The daemon's iteration brief on next pick of the matching task ID becomes "rebase PR #N or close it; do NOT add more commits". (d) Visible-not-silent: invariant emits the thrash list as part of the daemon's startup span.
+  - **Files**: `scripts/self-diagnose.mjs` (`daemonPrThrashInvariant`), `scripts/self-diagnose.test.mjs` (paired tests).
+  - **Verification**: paired tests: pr-fresh / pr-aged-fresh-commits / pr-aged-many-commits / pr-merged.
+  - **Measurement**: `node scripts/self-diagnose.mjs --json | jq -e '[.[] | select(.id == "daemon-pr-thrash")] | length == 0'` exits 0 over 7d rolling.
+  - **Pivot**: if the threshold (5 commits / 2h) is too aggressive (legitimate iterative substrate work is long-lived), raise to 10 commits / 4h. Don't retire the watchdog — the optimize-thrash cost is invisible without it.
+  - **Anchor**: 9h monitoring window 2026-05-07 (PR #322 with 11+ commits / 5h wall-clock); rule #9 (pre-registered HDD); composes with `daemon-stuck-pr-rebase-watchdog`.
+  - **Risk**: low. The invariant is read-only.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07 — worker-1's #322 thrash, ~−4,195 bytes/iter savings stranded.
+
 <!-- These P0 tasks operationalise the "24/7 autonomy" gap analysis: the parts that turn Minsky's pure functions + adapters + lints into a running system that Claude Code on its own cannot do. Each task is a precondition for the system to actually run unattended overnight. `observability-backend-deploy` shipped as `feat: observability backend deploy (OpenObserve install + dashboard Strategy)` — see vision.md § "Pattern conformance index" row 66. -->
 
 <!-- Cross-repo-runner roadmap (vision: "minsky governs any repo, not just itself", user-approved 2026-05-04): steps 0–6 of 7 shipped via #126/#122/#127/#128/#129/#131. Only `cross-repo-ci-action` (decision C2 — minsky-side GitHub Action posts check-runs via the GitHub API) remains in P0; local pre-push (C3) is the v0 fallback already shipped with the runner. See user-stories/006-runner-on-any-repo.md for the umbrella user story. -->
@@ -308,6 +381,64 @@
 
 ## P1
 
+<!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P1 ergonomics findings — operator-flagged but not loop-breaking. -->
+
+- [ ] `daemon-iteration-phase-tagged-spans` — emit OTEL spans per-phase (pickTask / claim / spawn / pre-pr-lint / pr-create) so hangs are diagnosable
+  - **ID**: daemon-iteration-phase-tagged-spans
+  - **Tags**: p1, daemon, observability, watchdog
+  - **Estimate**: 0.5d
+  - **Hypothesis**: When worker-1 hung 2h on `claude --print`, the only signal was the absence of new iteration spans — diagnosing required `ps -ef | grep`. Pre-registration: post-fix, every iteration emits child spans for each phase. Hang diagnosis becomes "look at the dashboard for the iteration span without a `spawn-claude` close timestamp" instead of `ps`.
+  - **Details**: child spans `tick-loop.iteration.pickTask`, `.claim`, `.spawn`, `.pre-pr-lint`, `.pr-create` with `phase` attribute. Parent span carries the result.
+  - **Files**: `novel/tick-loop/src/daemon.ts` (span emission), `novel/dashboard-web/src/throughput.ts` (per-phase histogram tile).
+  - **Verification**: paired tests asserting one parent + N child spans per iteration.
+  - **Measurement**: hang-diagnosis time drops from "manual `ps` after operator notices silence" to "next dashboard refresh".
+  - **Pivot**: if span volume is too noisy, consolidate to one parent span with phase-keyed attributes.
+  - **Anchor**: 9h monitoring window 2026-05-07 (worker-1 hang); rule #4 (everything measurable, everything visible); composes with `daemon-claude-print-hang-watchdog`.
+  - **Risk**: low.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07.
+
+- [ ] `daemon-config-analyzer-auto-apply` — slice 3 of #299: auto-apply safe `enable` recommendations for self-dogfood (CTO_AUDIT, CHANGELOG, METRICS_RENDER) unless `MINSKY_NO_AUTO_OPTIMIZE=1`
+  - **ID**: daemon-config-analyzer-auto-apply
+  - **Tags**: p1, daemon, config-analyzer, follow-up
+  - **Estimate**: 1d
+  - **Hypothesis**: #299 ships boot-time recommendations as advisory. Operator's directive 2026-05-06 was "enable needed features always in the most optimal way by default". Pre-registration: post-fix, fresh `pnpm minsky` on the minsky repo auto-enables CTO audit + changelog + metrics-render. Visible-not-silent — the boot log names the auto-applied changes and the operator can roll back via `MINSKY_NO_AUTO_OPTIMIZE=1`.
+  - **Details**: extend `analyzeConfig` to mark recommendations as `autoApply: true | 'requires-operator-approval'`. Boot-time wrapper in `bin/tick-loop.mjs` mutates `process.env` for `autoApply: true` recs unless opt-out env is set.
+  - **Files**: `novel/tick-loop/src/config-analyzer.ts`, `novel/tick-loop/bin/tick-loop.mjs`, paired tests.
+  - **Verification**: paired tests for the auto-apply branch + the opt-out branch.
+  - **Measurement**: post-deploy, `MINSKY_CTO_AUDIT_ENABLE` is set in the running daemon's env without operator intervention.
+  - **Pivot**: if auto-apply mis-fires (false positives on self-dogfood detection), revert to advisory + operator-CLI `pnpm minsky apply-recommendations`.
+  - **Anchor**: operator 2026-05-06 directive; #299 already shipped substrate.
+  - **Risk**: low.
+  - **Surfaced-by**: operator question 2026-05-07 ("why is CTO audit not default"), config-analyzer #299 left auto-apply for slice 3.
+
+- [ ] `daemon-launchd-drift-warning-suppress-when-cli-launched` — suppress `cto-audit env drift (drift-stale-install)` warning when daemon is launched via `pnpm minsky` not launchd
+  - **ID**: daemon-launchd-drift-warning-suppress-when-cli-launched
+  - **Tags**: p1, daemon, ergonomics, follow-up
+  - **Estimate**: 0.25d
+  - **Hypothesis**: 9h window 2026-05-07: every `pnpm minsky` boot logs `[tick-loop] WARN cto-audit env drift (drift-stale-install): source plist enables MINSKY_CTO_AUDIT_ENABLE=1 but the supervisor's live env doesn't.` That warning's premise (a launchd plist exists and has drifted) is irrelevant when the daemon isn't launched by launchd at all. Pre-registration: post-fix, the warning fires only when `process.env.LAUNCHD_SOCKET_NAME !== undefined` (the launchd-mode signal already used by `config-analyzer`).
+  - **Details**: add `isLaunchd` guard around `detectCtoAuditEnvDrift` invocation in `bin/tick-loop.mjs`.
+  - **Files**: `novel/tick-loop/bin/tick-loop.mjs`.
+  - **Verification**: existing detect-drift unit tests preserved; new boot test asserts no drift warning when not in launchd mode.
+  - **Measurement**: `grep -c 'drift-stale-install' .minsky/workers/*.log` post-fix → 0 in pnpm-minsky mode.
+  - **Pivot**: if operators do install launchd later and forget to reload, they need the drift signal — keep an opt-in `MINSKY_CHECK_LAUNCHD_DRIFT=1` for that case.
+  - **Anchor**: operator-flagged 2026-05-07 ("the install-drift warning is noisy in the new pnpm minsky mode").
+  - **Risk**: low.
+  - **Surfaced-by**: operator question 2026-05-07.
+
+- [ ] `daemon-brief-test-pin-soft-tolerance` — relax `daemon.test.ts` brief-pin assertions to allow legitimate trims while preserving drift protection
+  - **ID**: daemon-brief-test-pin-soft-tolerance
+  - **Tags**: p1, daemon, brief, test-quality
+  - **Estimate**: 0.5d
+  - **Hypothesis**: 9h window 2026-05-07: workers identified valid optimizations (e.g., `−~110 bytes/iter`) that were blocked by exact-string `expect(brief).toContain("...")` pins in `daemon.test.ts`. The pins are good drift protection but block legitimate trims. Pre-registration: post-fix, pins use substring-of-section assertions (`expect(brief).toMatch(new RegExp("...intent keyword..."))`) so wording can be tightened while structure is preserved.
+  - **Details**: refactor brief tests to assert intent (e.g., "the section names both body-only checkers") rather than exact prose. Identify which pins are load-bearing (test-pinned-string contracts) vs drift-protective (must-mention).
+  - **Files**: `novel/tick-loop/src/daemon.test.ts`.
+  - **Verification**: existing brief-content tests still pass; deliberate prose mutation that drops a load-bearing section still fails.
+  - **Measurement**: post-fix, the median brief-trim PR adds 0 test-update commits (currently averages 1).
+  - **Pivot**: if soft pins miss real regressions, restore exact pins for the specific contracts that broke.
+  - **Anchor**: 9h window 2026-05-07 — multiple workers blocked by pin strictness on otherwise-valid trims.
+  - **Risk**: low-medium. Drift could slip through; mitigated by mutation-testing the new assertion shape.
+  - **Surfaced-by**: 9h monitoring window — workers identified ≥3 pin-blocked optimizations.
+
 <!-- The first three P1 tasks below operationalise constitutional rule #9's automation layer (per-PR runner / weekly-monthly tracker / quarterly calibration). The next eight operationalise rule #10 (deterministic enforcement — every rule is a CI lint, not a hope). They are intentionally bundled at P1 because rules #9 and #10 are iron and a rule without its lint is a rule on the honour system. -->
 
 - [ ] File OMC issue proposing native tasks.md integration
@@ -392,6 +523,50 @@
   - **Last-enriched**: 2026-05-04
 
 ## P2
+
+<!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
+
+- [ ] `dependabot-bumps-dep-regression-triage` — 8+ open dependabot PRs (#300–#307) failing CI on dep-upgrade regressions; need triage policy
+  - **ID**: dependabot-bumps-dep-regression-triage
+  - **Tags**: p2, dependencies, ergonomics, dependabot
+  - **Estimate**: 1d
+  - **Hypothesis**: 9h window 2026-05-07: 8 dependabot PRs (`actions/setup-python` 5→6, `actions/upload-artifact` 4→7, `markdownlint-cli2` 0.15→0.22, `hono` 4.12.16→4.12.18, OTEL 0.57.2→0.217.0 ×3, etc.) all failing CI. Most are major bumps with breaking-change semantics; some are patch bumps that should pass. Pre-registration: post-fix, dependabot PRs split by semver: patch+minor auto-merge if CI green; major bumps file a `dep-upgrade-<package>` task with the breaking-change diff and require operator approval. Rolling-7d failing-dependabot-PR count → ≤2.
+  - **Details**: `.github/dependabot.yml` configures `versioning-strategy: increase` for patch + minor; major bumps go to a separate group with `labels: [needs-operator]`. Existing 8 PRs: triage manually — close the major OTEL bumps as out-of-scope, retry the patch bumps after main updates.
+  - **Files**: `.github/dependabot.yml`, `docs/dependency-policy.md`.
+  - **Verification**: paired test: synthetic patch-bump PR auto-merges; major-bump PR opens with `needs-operator` label.
+  - **Measurement**: count of `closed-as-not-planned` dependabot PRs over 30d ≤ 1/month average.
+  - **Pivot**: if patch bumps still cause regressions (transitive deps), tighten to lockfile-only updates.
+  - **Anchor**: 9h window 2026-05-07; Dependabot best practices.
+  - **Risk**: low.
+  - **Surfaced-by**: 9h monitoring window — 8 stuck dependabot PRs.
+
+- [ ] `spawn-n-workers-with-watchdog-monitoring` — substrate for safely running N (4-10) parallel workers with a monitor that auto-unblocks stuck children + files incident tasks
+  - **ID**: spawn-n-workers-with-watchdog-monitoring
+  - **Tags**: p2, daemon, supervisor, parallel, watchdog, follow-up
+  - **Estimate**: 1w
+  - **Hypothesis**: Operator question 2026-05-07: "should and can we spawn 10 workers, all monitored by this window that unblocks them & files tasks so that next time minsky unblocks itself". The 9h window demonstrated I was that monitor manually — killed the worker-1 hang, closed duplicate PRs, fixed body-fail PRs, rebased stuck PRs. Pre-registration: post-fix, a monitor process spawned by `pnpm minsky --spawn-additional-workers=N --watchdog` performs all 4 of those interventions automatically and emits incident spans + TASKS.md filings for each. Rolling-7d operator-manual-intervention count → 0 across N=4 workers; → ≤1/day across N=10.
+  - **Details**: (a) New flag `--watchdog` on the root `pnpm minsky` invocation. (b) Watchdog process (separate from worker daemons): runs every 60s, queries `pgrep --parent <worker-pid>` for stuck children (CPU<5% for >15min) → SIGKILLs them. (c) Queries `gh pr list --author "@minsky-bot"` for: PRs CONFLICTING >2h → invokes the rebase watchdog (#daemon-stuck-pr-rebase-watchdog); PRs failing only on body-only checks → patches body. (d) For each intervention, files a TASKS.md entry under `## P2` with `**Auto-filed-by**: spawn-n-workers-with-watchdog-monitoring` so the daemon learns the unblock pattern over time. (e) Composes with `daemon-claude-print-hang-watchdog` (P0), `daemon-stuck-pr-rebase-watchdog` (P0), `daemon-task-rotation-on-completion` (P0), `daemon-duplicate-work-detection` (P0) — those four shipped is the precondition for safe N≥4.
+  - **Files**: `novel/tick-loop/bin/watchdog.mjs` (new bin), `novel/tick-loop/src/watchdog.ts` (pure decisions for kill / rebase / body-patch), `novel/tick-loop/src/watchdog.test.ts` (paired tests for each intervention), `package.json` `bin: { minsky-watchdog: ... }`.
+  - **Verification**: paired tests for each intervention class. Integration test: spawn 2 fake workers, simulate a hang, watchdog kills + files task within 60s.
+  - **Measurement**: `count(operator-manual-interventions)` per worker per day → see hypothesis thresholds. Concrete log probe: `grep -c 'minsky: operator manually killed' .minsky/workers/*.log` over 7d → 0 (ideal); 1-3 is acceptable while substrate matures.
+  - **Pivot**: if the watchdog itself crashes (silence-is-failure on the watchdog), the operator's manual intervention rate stays high — pivot to `launchd KeepAlive` + a separate `minsky-watchdog` plist so the watchdog has its own respawn.
+  - **Anchor**: operator 2026-05-07 — "monitor + unblock + file tasks so next time minsky unblocks itself"; `daemon-parallel-worktree-launch` parent task; rule #2 (Strategy seam — pure decisions); rule #6 (let-it-crash — watchdog kills hung children); rule #9 (pre-registered HDD).
+  - **Risk**: medium. The watchdog has destructive power (SIGKILL, force-push, body-patch). Mitigations: cap-3 retries before escalating to `Blocked: needs-operator`; all interventions logged + incident-task-filed; opt-out via `MINSKY_WATCHDOG_DRY_RUN=1` for first deploy.
+  - **Surfaced-by**: operator 2026-05-07 directive ("file tasks for all findings and bugs… should we spawn 10 workers"); 9h monitoring window 2026-05-06/07 demonstrated all 4 intervention classes manually.
+
+- [ ] `brief-trim-coordinator` — workers compete on the same brief sections; need a coordinator so one PR/iter trims and others abstain
+  - **ID**: brief-trim-coordinator
+  - **Tags**: p2, daemon, optimization, parallel-launch
+  - **Estimate**: 0.5d
+  - **Hypothesis**: 9h window 2026-05-07 with 2 workers: both shipped brief-trim commits on overlapping sections → multiple rebases needed and ~1/3 of optimization commits got conflicts. With N=10 workers this becomes severe. Pre-registration: post-fix, `acquireTaskClaim`-style lock on `buildDaemonBrief` itself — only the worker holding the brief-trim claim may touch `daemon.ts` brief constants per iteration; others fall back to `optimization: none-this-iteration`.
+  - **Details**: extend `acquireTaskClaim` with a per-resource lock (`brief-trim` resource) with TTL 10 min. The optimization-discipline gate in `buildDaemonBrief` reads this and either greenlights or steers to alternative optimization classes (round-trip elimination, log-line dedup) when locked.
+  - **Files**: `novel/tick-loop/src/worker-claim.ts` (extend with resource locks), `novel/tick-loop/src/daemon.ts` (brief gate reads the lock).
+  - **Verification**: paired tests for resource lock; brief contains coordinator hint when locked.
+  - **Measurement**: post-deploy, brief-trim-commit conflicts in 7d → 0 across active workers.
+  - **Pivot**: if resource lock causes optimization-gate noops too often, drop the lock and accept the conflict cost.
+  - **Anchor**: 9h window 2026-05-07 — observed brief-trim conflicts; `daemon-parallel-worktree-launch` parent task.
+  - **Risk**: low.
+  - **Surfaced-by**: 9h monitoring window 2026-05-07.
 
 <!-- spec-monitor-skill and its successor `spec-monitor-deterministic-rewrite` both shipped: the deterministic linters under `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` carry the load-bearing share of runtime verification (rule #10's enforcement model), and the residual judgement-heavy scope ships as the advisory-only Claude Skill at `novel/spec-monitor/SKILL.md` — capped at ≤5 advisory rules per the rule-#10 ratchet. See `vision.md` § "Pattern conformance index" rows 11 and 35. -->
 
