@@ -1024,6 +1024,34 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs
 
+  supervisor-sandbox-hardening:
+    # rule #10 ratchet applied to vision.md rule #13 item 3 (supervisor
+    # sandbox) — pins the safe set of systemd hardening directives across
+    # all three supervisor unit files. Stage 0 of the
+    # `supervisor-sandbox-syscall-restriction` task: directives that have
+    # no effect on a normal long-lived Node.js process but raise the
+    # `systemd-analyze security` exposure score. Filesystem/network
+    # restrictions ship in stage 1+ behind the dry-run + warn-only ramp.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # vision.md rule #13 item 3 (supervisor sandbox minimum bar);
+    # systemd.exec(5) "Sandboxing" stanza; Saltzer & Schroeder 1975
+    # (principle of least privilege).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: supervisor-sandbox-hardening lint
+        run: node scripts/check-supervisor-sandbox-hardening.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-supervisor-sandbox-hardening.test.mjs
+
   mape-k-tick-iteration-backstop:
     # rule #10 ratchet applied to ARCHITECTURE.md L218 — the 1000-tick
     # tick-iteration backstop on the MAPE-K cadence. Reads the future
@@ -1266,6 +1294,7 @@ jobs:
       - rule-13-sibling-anchors
       - sandbox-env-declared
       - sbom-shape
+      - supervisor-sandbox-hardening
       - tasks-lint
       - test
       - threat-model-section
@@ -1313,6 +1342,7 @@ jobs:
                    "${{ needs.rule-13-sibling-anchors.result }}" \
                    "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
+                   "${{ needs.supervisor-sandbox-hardening.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
                    "${{ needs.threat-model-section.result }}" \
