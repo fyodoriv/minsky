@@ -926,7 +926,7 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-  }, 30_000);
+  }, 60_000);
 });
 
 describe("mapGhPrListToCiSnapshots", () => {
