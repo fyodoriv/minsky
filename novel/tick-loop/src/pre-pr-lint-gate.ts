@@ -164,6 +164,56 @@ interface StackResultJson {
 }
 
 /**
+ * Per-step row emitted by `run-pre-pr-lint-stack.mjs --json` (NDJSON
+ * format, one row per step + one trailing summary row carrying
+ * `summary: true` + `allPass`).
+ */
+interface NdjsonStepRow {
+  readonly name: string;
+  readonly verdict: "pass" | "fail";
+  readonly stderrTail?: string;
+}
+
+interface NdjsonSummaryRow {
+  readonly summary: true;
+  readonly allPass: boolean;
+}
+
+/**
+ * Parse the script's NDJSON stdout into the shape `createPnpmPrePrLintRun`
+ * expects. Throws when the input has zero parseable rows or when the
+ * trailing summary row is missing — surfaces real script crashes
+ * (rule #6 visible-not-silent) without dropping legitimate per-step rows.
+ *
+ * @otel-exempt pure parser; the I/O wrapper records the read.
+ */
+export function parseStackNdjson(raw: string): StackResultJson {
+  const lines = raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) {
+    throw new Error("pre-pr-lint-gate: empty stdout (script crash before any output)");
+  }
+  const steps: NdjsonStepRow[] = [];
+  let summary: NdjsonSummaryRow | undefined;
+  for (const line of lines) {
+    const obj = JSON.parse(line) as NdjsonStepRow | NdjsonSummaryRow;
+    if ((obj as NdjsonSummaryRow).summary === true) {
+      summary = obj as NdjsonSummaryRow;
+    } else {
+      steps.push(obj as NdjsonStepRow);
+    }
+  }
+  if (summary === undefined) {
+    throw new Error(
+      `pre-pr-lint-gate: NDJSON output missing trailing summary row (got ${steps.length} step row(s) but no {"summary":true,...})`,
+    );
+  }
+  return { allPass: summary.allPass, steps };
+}
+
+/**
  * Build a `PrePrLintRun` that spawns
  * `node scripts/run-pre-pr-lint-stack.mjs --json [--stage=<stage>]`
  * and parses the JSON output into a structured result.
@@ -188,57 +238,67 @@ export function createPnpmPrePrLintRun(opts: PnpmPrePrLintRunOptions = {}): PreP
   return async (): Promise<PrePrLintRunResult> => {
     const args = [scriptPath, "--json", `--stage=${stage}`];
     if (bodyPath !== undefined) args.push(`--body=${bodyPath}`);
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
+    const { stdout, stderr } = await runScriptCapture(spawnFn, nodePath, args, cwd);
+    const parsed = parseStackOrThrow(stdout, stderr);
+    return resultFromParsed(parsed);
+  };
+}
 
-    await new Promise<void>((resolve, reject) => {
-      const child: ChildProcess = spawnFn(nodePath, args, {
-        stdio: ["ignore", "pipe", "pipe"],
-        ...(cwd === undefined ? {} : { cwd }),
-      });
-
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk);
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderrChunks.push(chunk);
-      });
-
-      child.on("error", reject);
-
-      child.on("close", () => {
-        // exitCode is encoded as allPass=false in the JSON; parse below.
-        resolve();
-      });
+/**
+ * Run the script via `spawnFn`, accumulate stdout + stderr, and resolve
+ * once the child closes (exit code is encoded as `allPass=false` in the
+ * JSON; the caller parses).
+ */
+async function runScriptCapture(
+  spawnFn: typeof nodeSpawn,
+  nodePath: string,
+  args: readonly string[],
+  cwd: string | undefined,
+): Promise<{ stdout: string; stderr: string }> {
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    const child: ChildProcess = spawnFn(nodePath, args.slice(), {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(cwd === undefined ? {} : { cwd }),
     });
-
-    const raw = Buffer.concat(stdoutChunks as Buffer[])
+    child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    child.on("error", reject);
+    child.on("close", () => resolve());
+  });
+  return {
+    stdout: Buffer.concat(stdoutChunks as Buffer[])
       .toString("utf8")
-      .trim();
-    let parsed: StackResultJson;
-    try {
-      parsed = JSON.parse(raw) as StackResultJson;
-      // rule-6: handled-locally — JSON parse is the I/O boundary; invalid JSON
-      // (script crash) is surfaced as a real Error with stdout+stderr context.
-    } catch {
-      const stderr = Buffer.concat(stderrChunks as Buffer[])
-        .toString("utf8")
-        .trimEnd();
-      throw new Error(
-        `pre-pr-lint-gate: script produced non-JSON output (crash?)\nstdout: ${raw}\nstderr: ${stderr}`,
-      );
-    }
+      .trim(),
+    stderr: Buffer.concat(stderrChunks as Buffer[])
+      .toString("utf8")
+      .trimEnd(),
+  };
+}
 
-    if (parsed.allPass) {
-      return { verdict: "pass" };
-    }
+/** Parse the script's NDJSON output, surfacing crashes with stderr context. */
+function parseStackOrThrow(stdout: string, stderr: string): StackResultJson {
+  try {
+    return parseStackNdjson(stdout);
+    // rule-6: handled-locally — NDJSON parse is the I/O boundary; invalid
+    // input (script crash, missing summary row) surfaces as a real Error.
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `pre-pr-lint-gate: script produced unparseable output (${cause})\nstdout: ${stdout}\nstderr: ${stderr}`,
+    );
+  }
+}
 
-    const firstFail = parsed.steps.find((s) => s.verdict === "fail");
-    return {
-      verdict: "fail",
-      ...(firstFail?.name !== undefined && { failedStep: firstFail.name }),
-      ...(firstFail?.stderrTail !== undefined && { stderrTail: firstFail.stderrTail }),
-    };
+/** Map the parsed result into a `PrePrLintRunResult`. */
+function resultFromParsed(parsed: StackResultJson): PrePrLintRunResult {
+  if (parsed.allPass) return { verdict: "pass" };
+  const firstFail = parsed.steps.find((s) => s.verdict === "fail");
+  return {
+    verdict: "fail",
+    ...(firstFail?.name !== undefined && { failedStep: firstFail.name }),
+    ...(firstFail?.stderrTail !== undefined && { stderrTail: firstFail.stderrTail }),
   };
 }
 
