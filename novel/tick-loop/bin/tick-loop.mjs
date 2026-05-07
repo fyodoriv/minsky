@@ -274,9 +274,25 @@ const realGuard = new BudgetGuard(tokenMonitor, () => {
 // resumed the previous conversation — fixed by
 // `tick-loop-spawn-args-fresh-session`; default args come from
 // `ProcessSpawnStrategyOptions` (currently `["--print"]`).
+// `daemon-claude-print-hang-watchdog` (operator 2026-05-07): per-iteration
+// timeout on the `claude --print` subprocess. Default 900_000ms (15 min) — well
+// above the 95th-percentile productive iteration but low enough that a stuck
+// child doesn't silently freeze a worker for hours (the worker-1 hang of
+// 2026-05-07 ran 1h 56min before manual intervention). Operator-overridable
+// via `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` env var; non-positive disables.
+const claudePrintTimeoutMs = (() => {
+  const raw = process.env["MINSKY_CLAUDE_PRINT_TIMEOUT_MS"];
+  if (raw === undefined) return 900_000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+})();
 const spawnStrategy = dryRun
   ? new DryRunSpawnStrategy()
-  : new ProcessSpawnStrategy({ command: "claude" });
+  : new ProcessSpawnStrategy({
+      command: "claude",
+      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    });
 
 // Wire the push channel for `runDaemon`'s edge-triggered budget-paused
 // notifier (P1 `daemon-budget-pause-observability`, shipped #113). The seam

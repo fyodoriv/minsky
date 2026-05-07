@@ -68,6 +68,16 @@ export interface SpawnResult {
   readonly durationMs: number;
   readonly stdoutTail: string;
   readonly stderrTail: string;
+  /**
+   * `true` when the strategy killed a hung child via the `timeoutMs` watchdog.
+   * Distinguishes "child died on its own with exitCode -1" from "watchdog
+   * SIGKILLed a child that never closed". Daemons should treat `timedOut: true`
+   * as `failed` status with reason `claude-print-timeout: <ms>ms` so the
+   * rolling-7d timeout-frequency invariant has a stable string to grep.
+   *
+   * Surfaced-by `daemon-claude-print-hang-watchdog` (operator 2026-05-07).
+   */
+  readonly timedOut?: boolean;
 }
 
 /**
@@ -149,6 +159,22 @@ export interface ProcessSpawnStrategyOptions {
    * `child_process.spawn` without touching the OS. Production omits.
    */
   readonly spawnFn?: typeof nodeSpawn;
+  /**
+   * Per-iteration timeout in milliseconds. When set, the strategy SIGKILLs
+   * any child still running after `timeoutMs` and resolves with
+   * `exitCode: -1`, `stderrTail: '<timed out after Nms>'`, and
+   * `timedOut: true`. When omitted, the legacy unbounded behaviour is
+   * preserved — the daemon waits forever for the child to close.
+   *
+   * Operator-recommended default in `bin/tick-loop.mjs`: 900_000 (15 min).
+   * Higher than the 95th-percentile productive iteration; low enough that
+   * a stuck `claude --print` doesn't silently freeze a worker for hours
+   * (the worker-1 hang of 2026-05-07 ran for 1h 56min before manual
+   * intervention).
+   *
+   * Surfaced-by `daemon-claude-print-hang-watchdog` (operator 2026-05-07).
+   */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -170,11 +196,13 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
   private readonly command: string;
   private readonly args: readonly string[];
   private readonly spawnFn: typeof nodeSpawn;
+  private readonly timeoutMs: number | undefined;
 
   constructor(opts: ProcessSpawnStrategyOptions = {}) {
     this.command = opts.command ?? "claude";
     this.args = opts.args ?? ["--print"];
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
+    this.timeoutMs = opts.timeoutMs;
   }
 
   /**
@@ -187,6 +215,7 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
   spawn(input: SpawnInput): Promise<SpawnResult> {
     const startedAt = Date.now();
     const argv = [...this.args, ...(input.extraArgs ?? [])];
+    const timeoutMs = this.timeoutMs;
     return new Promise<SpawnResult>((resolve, reject) => {
       const child = this.spawnFn(this.command, argv, {
         env: input.env,
@@ -196,6 +225,21 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
 
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
+      let timedOut = false;
+      let watchdog: NodeJS.Timeout | undefined;
+
+      // Per-iteration watchdog: SIGKILL the child if it doesn't close within
+      // `timeoutMs`. The `claude --print` hang of 2026-05-07 ran for 1h 56min
+      // with 0.1% CPU before manual intervention; this prevents that class.
+      // Surfaced-by `daemon-claude-print-hang-watchdog` (operator 2026-05-07).
+      if (timeoutMs !== undefined && timeoutMs > 0) {
+        watchdog = setTimeout(() => {
+          timedOut = true;
+          // SIGKILL (not SIGTERM): `claude --print` ignores SIGTERM in some
+          // hang modes; SIGKILL is the let-it-crash boundary (rule #6).
+          child.kill("SIGKILL");
+        }, timeoutMs);
+      }
 
       child.stdout?.on("data", (chunk: Buffer) => {
         stdoutChunks.push(chunk);
@@ -205,16 +249,22 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
       });
 
       child.on("error", (err) => {
+        if (watchdog !== undefined) clearTimeout(watchdog);
         reject(err);
       });
 
       child.on("close", (code) => {
-        resolve({
-          exitCode: code ?? -1,
-          durationMs: Date.now() - startedAt,
-          stdoutTail: tailOf(stdoutChunks, TAIL_CAP_BYTES),
-          stderrTail: tailOf(stderrChunks, TAIL_CAP_BYTES),
-        });
+        if (watchdog !== undefined) clearTimeout(watchdog);
+        resolve(
+          buildSpawnResult({
+            code,
+            timedOut,
+            timeoutMs,
+            startedAt,
+            stdoutChunks,
+            stderrChunks,
+          }),
+        );
       });
 
       // Write the brief to stdin and close — `claude --print`'s headless
@@ -225,6 +275,34 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
       }
     });
   }
+}
+
+/**
+ * Build a `SpawnResult` from the close-event inputs. Extracted so the
+ * `child.on('close', …)` handler stays under biome's cognitive-complexity
+ * cap (rule #6 / biome ≤10) once the watchdog branch was added.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function buildSpawnResult(input: {
+  readonly code: number | null;
+  readonly timedOut: boolean;
+  readonly timeoutMs: number | undefined;
+  readonly startedAt: number;
+  readonly stdoutChunks: readonly Buffer[];
+  readonly stderrChunks: readonly Buffer[];
+}): SpawnResult {
+  const exitCode = input.timedOut ? -1 : (input.code ?? -1);
+  const stderrTail = input.timedOut
+    ? `<timed out after ${input.timeoutMs}ms>`
+    : tailOf(input.stderrChunks, TAIL_CAP_BYTES);
+  return {
+    exitCode,
+    durationMs: Date.now() - input.startedAt,
+    stdoutTail: tailOf(input.stdoutChunks, TAIL_CAP_BYTES),
+    stderrTail,
+    ...(input.timedOut ? { timedOut: true } : {}),
+  };
 }
 
 /**
