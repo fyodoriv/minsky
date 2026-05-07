@@ -61,6 +61,24 @@ const execFileAsync = promisify(execFile);
  */
 
 /**
+ * @param {unknown} fn
+ * @param {unknown} reason
+ * @returns {InvariantViolation}
+ */
+function thrownFinding(fn, reason) {
+  const typed = /** @type {{ invariantId?: string, name?: string }} */ (fn);
+  const id = typed?.invariantId ?? typed?.name ?? "<anonymous>";
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return {
+    id,
+    ok: false,
+    evidence: `invariant threw: ${message}`,
+    suggestedTaskTitle: `self-diagnose: ${id} probe is itself broken`,
+    suggestedFix: `The probe for invariant ${id} threw before it could decide. Either the probe is wrong or its inputs (env, file paths, network) drifted. Read the probe at scripts/self-diagnose.mjs and the throwing site in the tracelog above.`,
+  };
+}
+
+/**
  * Pure runner — runs every invariant; returns the violations list.
  * Exceptions inside an invariant become violations with `evidence` =
  * the error message (rule #7 — graceful-degrade, explicit not silent).
@@ -72,29 +90,19 @@ const execFileAsync = promisify(execFile);
  * @returns {Promise<InvariantViolation[]>}
  */
 export async function runInvariants(invariants) {
+  // Run all probes concurrently — sequential execution caused the
+  // defaultInvariants() smoke test to time out (12 × ~2.5s gh calls ≈ 30s).
+  const settled = await Promise.allSettled(invariants.map((inv) => inv()));
   /** @type {InvariantViolation[]} */
   const findings = [];
-  for (const invariant of invariants) {
-    /** @type {InvariantResult} */
-    let result;
-    try {
-      result = await invariant();
-    } catch (err) {
-      const id =
-        /** @type {{ invariantId?: string, name?: string }} */ (invariant).invariantId ??
-        invariant.name ??
-        "<anonymous>";
-      const message = err instanceof Error ? err.message : String(err);
-      findings.push({
-        id,
-        ok: false,
-        evidence: `invariant threw: ${message}`,
-        suggestedTaskTitle: `self-diagnose: ${id} probe is itself broken`,
-        suggestedFix: `The probe for invariant ${id} threw before it could decide. Either the probe is wrong or its inputs (env, file paths, network) drifted. Read the probe at scripts/self-diagnose.mjs and the throwing site in the tracelog above.`,
-      });
-      continue;
+  for (let i = 0; i < invariants.length; i++) {
+    const s = settled[i];
+    if (!s) continue;
+    if (s.status === "rejected") {
+      findings.push(thrownFinding(invariants[i], s.reason));
+    } else if (!s.value.ok) {
+      findings.push(s.value);
     }
-    if (!result.ok) findings.push(result);
   }
   return findings;
 }
