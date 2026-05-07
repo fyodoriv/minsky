@@ -248,6 +248,7 @@ export function parseGhPrListForDaemonPrState(rawJson: string): readonly DaemonO
 function safeParseJson(rawJson: string): unknown {
   try {
     return JSON.parse(rawJson);
+    // rule-6: handled-locally — parser graceful-degrade contract documented in JSDoc.
   } catch {
     return undefined;
   }
