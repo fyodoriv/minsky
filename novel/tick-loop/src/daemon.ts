@@ -1076,8 +1076,6 @@ export function buildDaemonBrief(args: {
     "",
     "Bundle on same branch. If none, note `optimization: none-this-iteration: <reason>` — silence is failure. Anti-vanity: must be measurable (token bytes saved, wall-time ms, round-trips).",
     "",
-    "Pivot threshold (rule #9): ≥1 trivial commit/week → tighten to ≥10-byte minimum savings.",
-    "",
     "## PR self-grade template (copy-paste verbatim)",
     "",
     "DO NOT REWRITE THIS FORMAT — colon OUTSIDE bold tags; `scripts/check-pr-self-grade.mjs` fails otherwise. Paste verbatim:",

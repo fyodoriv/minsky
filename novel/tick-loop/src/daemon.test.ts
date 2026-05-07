@@ -1950,7 +1950,6 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("token bytes saved");
     expect(brief).toContain("wall-time ms");
     expect(brief).toContain("Anti-vanity");
-    expect(brief).toContain("Pivot threshold");
   });
 
   it("excludes claimed and blocked tasks from the open P0 list", () => {
