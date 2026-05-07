@@ -12,21 +12,34 @@
 // SBOMs to a known-good shape ship in subsequent slices against this fixed
 // seam.
 //
-// Slice 2 (this file): adds `walkSbomViolations(parsed)` — the pure
-// aggregating walker that runs the slice-1 verdict logic over every
-// component and collects ALL violations rather than short-circuiting on
-// the first failure. The slice-1 classifier deliberately exits on the
-// first per-component error (so a malformed-components rejection is the
-// fastest path to a clear actionable verdict for an interactive user);
-// the walker is the seam the CI gate consumes so a release with eight
-// malformed component entries surfaces all eight in one log line, not
-// eight successive PR runs. Workflow generation, JSON I/O, and the CI
-// gate ship in slices ≥3 against this fixed seam — `walkSbomViolations`
-// takes an already-parsed object so the test suite can exercise every
-// verdict path with hand-built fixtures and is not coupled to a JSON
-// parser or an on-disk file. Mirrors `walkLockfileChanges` (slice 2 of
-// the lockfile-integrity sub-track) and `extractAttributeViolations`
-// (slice 2 of vision.md § 13.2 OTEL no-PII).
+// Slice 2: `walkSbomViolations(parsed)` — the pure aggregating walker that
+// runs the slice-1 verdict logic over every component and collects ALL
+// violations rather than short-circuiting on the first failure. The slice-1
+// classifier deliberately exits on the first per-component error (so a
+// malformed-components rejection is the fastest path to a clear actionable
+// verdict for an interactive user); the walker is the seam the CI gate
+// consumes so a release with eight malformed component entries surfaces all
+// eight in one log line, not eight successive PR runs. Mirrors
+// `walkLockfileChanges` (slice 2 of the lockfile-integrity sub-track) and
+// `extractAttributeViolations` (slice 2 of vision.md § 13.2 OTEL no-PII).
+//
+// Slice 3 (this file): adds `runSbomShapeCheck({ readSbom })` and
+// `parseArgs(argv, env)` — the pure CLI driver and the arg/env resolver. The
+// driver consumes a reader-result triple (`ok` / `missing` / `error`),
+// JSON-parses on the ok path, runs `walkSbomViolations`, and returns a
+// `CheckOutcome` (exit code + stdout + stderr + violations) suitable for
+// `process.exit` + writes. The boundary `main()` does the file I/O via
+// `readFileSync` and is the only impure surface — the driver remains pure
+// so the test suite can exercise every exit path (missing SBOM, IO error,
+// malformed JSON, valid SBOM, multi-violation SBOM) without spawning a
+// process or touching disk. Same fail-safe-defaults split (Saltzer &
+// Schroeder 1975) the lockfile-integrity gate uses: `0` = clean, `1` =
+// shape regression detected, `2` = the gate cannot evaluate (file
+// unreadable, JSON parse failure). Both `1` and `2` block the PR; the
+// distinction is for human triage, not enforcement. CI-gate wiring (the
+// `.github/workflows/sbom.yml` workflow that generates the SBOM via
+// `cyclonedx/gh-node-module-generatebom@v1` and pipes it into this CLI)
+// ships in slice 4 against this fixed seam.
 //
 // Why a shape classifier (not a generator) is the right slice 1: the
 // sibling supply-chain gates (`scan-secrets`, `otel-no-pii-in-spans-lint`,
@@ -92,8 +105,17 @@
 //   should ship a machine-verified SBOM; rule #2 (the classifier is the
 //   swappable seam — when CycloneDX 1.7 ships, only the spec-version
 //   allowlist changes).
-// Conformance: full — slice 1 is pure (no I/O); subsequent slices add the
-//   boundary (workflow generation, CLI, CI gate) via well-typed wrappers.
+// Conformance: full — slices 1–3 keep all decision logic pure (no I/O). The
+//   `main()` boundary is the only impure surface; slice 4 (the CI workflow
+//   that generates the SBOM and invokes this CLI) is wiring, not logic.
+
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..");
 
 /**
  * The CycloneDX spec-version allowlist for this repo. 1.5 is the floor
@@ -504,3 +526,221 @@ function collectComponentViolations(components) {
   }
   return violations;
 }
+
+// Slice 3: CLI driver + arg/env resolver. ------------------------------------
+
+/**
+ * The default SBOM artefact path the CI workflow attaches at release time —
+ * `cyclonedx/gh-node-module-generatebom@v1` writes here by convention. The
+ * CLI accepts `--sbom=<path>` to point at a different file (so an operator
+ * can validate a downloaded SBOM locally), and `MINSKY_SBOM_PATH` as the env
+ * fallback (mirrors the `LOCKFILE_INTEGRITY_DIFF_BASE` pattern).
+ */
+const DEFAULT_SBOM_PATH = "sbom-cyclonedx.json";
+
+/**
+ * @typedef {(
+ *   | { kind: "ok", text: string }
+ *   | { kind: "missing" }
+ *   | { kind: "error", reason: string }
+ * )} ReaderResult
+ */
+
+/**
+ * @typedef {object} CheckOutcome
+ * @property {0 | 1 | 2} exitCode
+ *   `0` = clean (SBOM is well-formed, OR no SBOM to scan).
+ *   `1` = shape regression — at least one structural violation. The CI gate
+ *          must fail; the operator must fix the SBOM (or the generator's
+ *          output) before merging.
+ *   `2` = the gate cannot evaluate (file unreadable, JSON parse failure).
+ *          Fail-safe defaults (Saltzer & Schroeder 1975): the two failure
+ *          shapes are distinguishable in CI, but both block the PR.
+ * @property {string} stdout    diagnostic suitable for `process.stdout.write`.
+ * @property {string} stderr    diagnostic suitable for `process.stderr.write`.
+ * @property {SbomViolation[]} violations  exposed for tests.
+ */
+
+/**
+ * Render the human-readable diagnostic for a non-empty violation list. Pulled
+ * out of `runSbomShapeCheck` to keep that function under the 10-cognitive-
+ * complexity cap.
+ *
+ * @param {SbomViolation[]} violations
+ * @returns {string}
+ */
+function formatShapeFailureDiagnostic(violations) {
+  const header = `sbom-shape: ${violations.length} CycloneDX shape violation${violations.length === 1 ? "" : "s"} detected:`;
+  const lines = [header];
+  for (const v of violations) {
+    const where = v.path !== undefined ? ` ${v.path}` : "";
+    lines.push(`  ${v.code}${where}: ${v.reason}`);
+  }
+  lines.push(
+    "",
+    "Fix one of:",
+    "  1. regenerate the SBOM with the current `cyclonedx-cli` / ",
+    "     `cyclonedx-node-generator` version (a stale generator can emit a",
+    "     malformed shape — bumping the action pins is usually the fastest",
+    "     repair);",
+    "  2. extend ALLOWED_SPEC_VERSIONS in scripts/check-sbom-shape.mjs if a",
+    "     newer CycloneDX spec version (1.7+) is the verdict — the relief",
+    "     valve is the spec-version allowlist, not relaxed field requirements;",
+    "  3. file a follow-up PR if the violation is in a transitive component",
+    "     name we don't control — every release artefact's SBOM shape is the",
+    "     consumer's only structural guarantee until SLSA L3 provenance",
+    "     verification ships (slice 6 of supply-chain-hardening).",
+    "",
+    "See vision.md § 13.5 (security & privacy minimum-bar item #5 —",
+    "supply-chain hardening; CycloneDX 1.5 / 1.6 SBOM as load-bearing",
+    "consumer guarantee).",
+    "",
+  );
+  return lines.join("\n");
+}
+
+/**
+ * Parse the SBOM text or return a fail-safe `CheckOutcome`. Returns either
+ * the parsed value (`{ kind: "ok", parsed }`) or a fully-formed `exit-2`
+ * outcome that the caller can pass through. Splitting the parse step out of
+ * `runSbomShapeCheck` keeps that function under the 10-cognitive-complexity
+ * cap; the JSON parse error is the only `exit-2` shape that originates
+ * inside the driver (the others come from the reader).
+ *
+ * @param {string} text
+ * @returns {{ kind: "ok", parsed: unknown } | { kind: "fail", outcome: CheckOutcome }}
+ */
+function parseSbomTextOrFailSafe(text) {
+  try {
+    return { kind: "ok", parsed: JSON.parse(text) };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message.split("\n")[0] : String(err);
+    return {
+      kind: "fail",
+      outcome: {
+        exitCode: 2,
+        stdout: "",
+        stderr: `sbom-shape: SBOM artefact is not valid JSON — ${reason}\n`,
+        violations: [],
+      },
+    };
+  }
+}
+
+/**
+ * Count `components[]` on an already-parsed SBOM. Returns 0 if the shape
+ * doesn't carry a `components` array (the walker has already classified
+ * that case as a violation).
+ *
+ * @param {unknown} parsed
+ * @returns {number}
+ */
+function countComponents(parsed) {
+  if (!isPlainObject(parsed)) return 0;
+  const components = parsed["components"];
+  return Array.isArray(components) ? components.length : 0;
+}
+
+/**
+ * Pure driver. Given a reader (which produces the raw SBOM JSON text or one
+ * of the two failure shapes), produce the verdict + diagnostic. The boundary
+ * `main()` is a thin wrapper around this — splitting the I/O off lets the
+ * test suite cover every exit path without touching disk.
+ *
+ * @param {{ readSbom: () => ReaderResult }} input
+ * @returns {CheckOutcome}
+ */
+export function runSbomShapeCheck({ readSbom }) {
+  const result = readSbom();
+  if (result.kind === "missing") {
+    return {
+      exitCode: 0,
+      stdout: "sbom-shape skipped: SBOM artefact not present (no release in flight).\n",
+      stderr: "",
+      violations: [],
+    };
+  }
+  if (result.kind === "error") {
+    return {
+      exitCode: 2,
+      stdout: "",
+      stderr: `sbom-shape: cannot read SBOM artefact — ${result.reason}\n`,
+      violations: [],
+    };
+  }
+
+  const parsed = parseSbomTextOrFailSafe(result.text);
+  if (parsed.kind === "fail") return parsed.outcome;
+
+  const { violations } = walkSbomViolations(parsed.parsed);
+  if (violations.length === 0) {
+    return {
+      exitCode: 0,
+      stdout: `sbom-shape ok: CycloneDX SBOM is well-formed; ${countComponents(parsed.parsed)} components; 0 shape violations.\n`,
+      stderr: "",
+      violations: [],
+    };
+  }
+
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr: formatShapeFailureDiagnostic(violations),
+    violations,
+  };
+}
+
+/**
+ * Parse CLI args + env into a resolved `{ sbomPath }`. `--sbom=<path>` is the
+ * flag form; `MINSKY_SBOM_PATH` is the env fallback; the default is
+ * `sbom-cyclonedx.json` at the repo root. The `env` argument defaults to
+ * `process.env` in production but lets tests exercise the env-fallback path
+ * deterministically with a frozen object.
+ *
+ * @param {string[]} argv
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {{ sbomPath: string }}
+ */
+export function parseArgs(argv, env = process.env) {
+  let sbomPath = env["MINSKY_SBOM_PATH"] ?? resolve(REPO_ROOT, DEFAULT_SBOM_PATH);
+  for (const arg of argv) {
+    if (arg.startsWith("--sbom=")) {
+      sbomPath = arg.slice("--sbom=".length);
+    }
+  }
+  return { sbomPath };
+}
+
+/**
+ * Read a file from disk into the `ReaderResult` shape. `ENOENT` maps to
+ * `{ kind: "missing" }` (a healthy "no SBOM to scan" signal — the gate is a
+ * no-op on PRs that don't touch a release artefact); any other error maps
+ * to `{ kind: "error", reason }` (the gate exits 2 — fail-safe).
+ *
+ * @param {string} absPath
+ * @returns {ReaderResult}
+ */
+function readFileAsReaderResult(absPath) {
+  try {
+    return { kind: "ok", text: readFileSync(absPath, "utf8") };
+  } catch (err) {
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    if (code === "ENOENT") return { kind: "missing" };
+    return { kind: "error", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function main() {
+  const { sbomPath } = parseArgs(process.argv.slice(2));
+  const outcome = runSbomShapeCheck({
+    readSbom: () => readFileAsReaderResult(resolve(sbomPath)),
+  });
+  if (outcome.stdout.length > 0) process.stdout.write(outcome.stdout);
+  if (outcome.stderr.length > 0) process.stderr.write(outcome.stderr);
+  process.exit(outcome.exitCode);
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("check-sbom-shape.mjs") === true;
+if (invokedDirectly) main();
