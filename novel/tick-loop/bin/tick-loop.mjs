@@ -85,6 +85,7 @@ import {
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   runDaemon,
+  sandboxModeStartupHint,
   workerStartupLine,
 } from "../dist/index.js";
 
@@ -552,6 +553,17 @@ const preLintRun = createPnpmPrePrLintRun({ cwd: minskyHome });
 process.stdout.write(
   "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement)\n",
 );
+
+// Supervisor-sandbox mode banner (vision.md § 13.3): surface the resolved
+// `MINSKY_SANDBOX` mode + any typo warning in the supervisor log at boot.
+// Slice 2 of `supervisor-sandbox-syscall-restriction`: substrate-inert —
+// the resolver still defaults to `'off'` and no profile is applied, so
+// flipping the env to `enforce` today does not actually sandbox anything.
+// The banner is honest about that. Visible-not-silent (rule #6) so an
+// operator running `tail .minsky/tick-loop.out.log` sees a stale typo
+// (`MINSKY_SANDBOX=enforcde`) immediately, instead of silently running
+// 'off' against a value they thought was 'enforce'.
+process.stdout.write(`${sandboxModeStartupHint(process.env)}\n`);
 
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
