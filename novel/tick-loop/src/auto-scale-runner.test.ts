@@ -184,7 +184,89 @@ describe("AutoScaleRunner", () => {
         attributes: {},
       });
     }
-    // No spawn — these aren't iteration spans.
+    // No spawn — these aren't iteration or pre-pr-lint spans.
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it("counts pre-pr-lint failures as recentFailedIterations", () => {
+    const spawnCalls: { workerId: number; totalAfter: number }[] = [];
+    const runner = new AutoScaleRunner({
+      maxWorkers: 5,
+      initialWorkers: 1,
+      getEligibleTaskCount: () => 10,
+      getBudgetState: () => "normal",
+      spawn: (input) => {
+        spawnCalls.push(input);
+      },
+      evalEveryN: 5,
+    });
+    // 3 pre-pr-lint failures interleaved with 5 completed iterations.
+    // After eval at iteration 5, recentFailedIterations=3 → system-unstable → hold.
+    runner.observeEvent({
+      name: "tick-loop.pre-pr-lint-gate",
+      attributes: { "pre-pr-lint.verdict": "fail", "pre-pr-lint.failed_step": "biome" },
+    });
+    runner.observeEvent(makeIterationEvent());
+    runner.observeEvent({
+      name: "tick-loop.pre-pr-lint-gate",
+      attributes: { "pre-pr-lint.verdict": "fail", "pre-pr-lint.failed_step": "biome" },
+    });
+    runner.observeEvent(makeIterationEvent());
+    runner.observeEvent({
+      name: "tick-loop.pre-pr-lint-gate",
+      attributes: { "pre-pr-lint.verdict": "fail", "pre-pr-lint.failed_step": "biome" },
+    });
+    runner.observeEvent(makeIterationEvent());
+    runner.observeEvent(makeIterationEvent());
+    runner.observeEvent(makeIterationEvent());
+    expect(spawnCalls).toHaveLength(0);
+    expect(runner.getState().recentFailedIterations).toBe(3);
+  });
+
+  it("doesn't count pre-pr-lint passes as failures", () => {
+    const spawnCalls: { workerId: number; totalAfter: number }[] = [];
+    const runner = new AutoScaleRunner({
+      maxWorkers: 5,
+      initialWorkers: 1,
+      getEligibleTaskCount: () => 10,
+      getBudgetState: () => "normal",
+      spawn: (input) => {
+        spawnCalls.push(input);
+      },
+      evalEveryN: 5,
+    });
+    for (let i = 0; i < 5; i++) {
+      runner.observeEvent({
+        name: "tick-loop.pre-pr-lint-gate",
+        attributes: { "pre-pr-lint.verdict": "pass" },
+      });
+      runner.observeEvent(makeIterationEvent());
+    }
+    // 5 iterations + 5 pre-pr-lint passes → favourable → spawn fires.
+    expect(spawnCalls).toEqual([{ workerId: 1, totalAfter: 2 }]);
+    expect(runner.getState().recentFailedIterations).toBe(0);
+  });
+
+  it("pre-pr-lint failures don't affect iterationsSinceLastEval (only iteration spans drive eval cadence)", () => {
+    const spawnCalls: { workerId: number; totalAfter: number }[] = [];
+    const runner = new AutoScaleRunner({
+      maxWorkers: 5,
+      initialWorkers: 1,
+      getEligibleTaskCount: () => 10,
+      getBudgetState: () => "normal",
+      spawn: (input) => {
+        spawnCalls.push(input);
+      },
+      evalEveryN: 5,
+    });
+    // 100 pre-pr-lint failures + 4 iterations → no spawn yet (only 4 iterations < 5 evalEveryN).
+    for (let i = 0; i < 100; i++) {
+      runner.observeEvent({
+        name: "tick-loop.pre-pr-lint-gate",
+        attributes: { "pre-pr-lint.verdict": "fail" },
+      });
+    }
+    for (let i = 0; i < 4; i++) runner.observeEvent(makeIterationEvent());
     expect(spawnCalls).toHaveLength(0);
   });
 

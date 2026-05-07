@@ -146,13 +146,29 @@ export class AutoScaleRunner {
    * evaluates `decideAutoScale` and calls `spawn` when the verdict is
    * `spawn`.
    *
-   * Non-iteration spans are ignored.
+   * Two span types are observed:
+   *   - `tick-loop.iteration` — drives the eval cadence and increments
+   *     `recentFailedIterations` when `iteration.status === "failed"`
+   *     OR when `iteration.reason` includes `collision-prevented`
+   *     (which feeds `recentClaimCollisions`).
+   *   - `tick-loop.pre-pr-lint-gate` — when `pre-pr-lint.verdict === "fail"`,
+   *     also increments `recentFailedIterations`. Iteration status stays
+   *     `"completed"` (the spawn exited 0) but the resulting PR can't
+   *     open lint-clean — auto-scale treats this as instability so the
+   *     supervisor doesn't compound a stuck pipeline by spawning more
+   *     workers stuck on the same lint failure.
+   *
+   * All other span types are ignored.
    *
    * @otel-exempt this method is itself the producer of the
    *   `tick-loop.auto-scale.decision` span (emitted via the injected
    *   `emit` callback when an evaluation fires).
    */
   observeEvent(event: ObservableEvent): void {
+    if (event.name === "tick-loop.pre-pr-lint-gate") {
+      this.updateCountersFromPrePrLint(event.attributes);
+      return;
+    }
     if (event.name !== "tick-loop.iteration") return;
     this.updateCountersFromIteration(event.attributes);
     this.iterationsSinceLastEval++;
@@ -185,6 +201,19 @@ export class AutoScaleRunner {
     if (status === "failed") this.recentFailedIterations++;
     if (typeof reason === "string" && reason.includes("collision-prevented")) {
       this.recentClaimCollisions++;
+    }
+  }
+
+  /**
+   * Pre-pr-lint failures count as instability. The iteration's spawn
+   * exited 0 (so `iteration.status === "completed"`) but the resulting
+   * branch is lint-red — claude correctly noop-exits and no PR opens.
+   * Auto-scale treats this as a failed iteration so the runner doesn't
+   * spawn more workers into a stuck pipeline.
+   */
+  private updateCountersFromPrePrLint(attributes: Readonly<Record<string, unknown>>): void {
+    if (attributes["pre-pr-lint.verdict"] === "fail") {
+      this.recentFailedIterations++;
     }
   }
 
