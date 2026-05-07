@@ -2,6 +2,10 @@
 // fixtures over pure transforms (Meszaros 2007); the I/O seam (`runGh`) is
 // stubbed so the orchestrator runs end-to-end without touching `gh`.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, test } from "vitest";
 
 import {
@@ -19,6 +23,8 @@ import {
   parsePrListEntries,
   runDaemonPrLintMetrics,
 } from "./daemon-pr-lint-metrics.mjs";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("pre-registered constants", () => {
   test("ROLLING_30D_MIN_PASS_RATE matches the TASKS.md threshold (0.80)", () => {
@@ -364,5 +370,113 @@ describe("runDaemonPrLintMetrics", () => {
         runGh,
       }),
     ).rejects.toThrow(/not authenticated/);
+  });
+});
+
+describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => {
+  // Slice 26/N: the rolling-window pass-rate threshold (0.8) lives canonically
+  // as `ROLLING_30D_MIN_PASS_RATE` in this module; `scripts/self-diagnose.mjs`
+  // and `formatReport` import it directly, so the in-code dependency stays
+  // tight (the `pre-registered constants` block above pins the constant's
+  // value). Three operator-facing surfaces still cite the threshold inline as
+  // prose:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` (the gate's explanation page —
+  //     "≥80%" / "Below 0.8").
+  //   - `TASKS.md` `daemon-pre-pr-lint-gate` block (the task's pre-registered
+  //     metric — Hypothesis "≥80%", Details "below 80%", Measurement "≥0.80").
+  //   - `novel/tick-loop/src/daemon.ts` § buildDaemonBrief (the daemon's
+  //     iteration prompt — "≥80% of daemon-authored PRs ...").
+  //
+  // A future PR tightening the threshold to 0.85 would update the constant +
+  // its in-code imports without tripping any test, while the prose silently
+  // continued to claim "≥80%" / "below 0.8". Operators reading any surface
+  // would see a stale number; the daemon's prompt would announce a different
+  // threshold than the one its self-diagnose actually applies.
+  //
+  // Slice 26/N closes the surface: derive the percent and decimal forms from
+  // the canonical constant, then assert each surface contains both shapes
+  // verbatim. Same pattern as slices 24/N (noop-exit token brief↔invariant↔docs)
+  // and 25/N (invariant-id ↔ docs/TASKS.md jq-selector) — single source of
+  // truth in code, prose surfaces pinned to it.
+
+  /**
+   * Render the canonical fraction in the two textual shapes that appear in
+   * prose: "0.8" decimal and "80%" percent. Both are the natural `String(...)`
+   * form a writer would type, so both must update in lockstep when the
+   * constant moves.
+   *
+   * @param {number} fraction
+   * @returns {{ percent: string, decimal: string }}
+   */
+  function thresholdProseShapes(fraction) {
+    return {
+      percent: `${Math.round(fraction * 100)}%`,
+      decimal: String(fraction),
+    };
+  }
+
+  /**
+   * Slice the `daemon-pre-pr-lint-gate` task block out of TASKS.md so the
+   * parity check doesn't accidentally pass on an unrelated `0.8` / `80%`
+   * mention elsewhere in the file (other tasks have their own percentage
+   * figures — `daemon-cross-iteration-prompt-cache` cites "≥80%" cache hit
+   * rate; `dashboard-web-lighthouse-ci-pivot` cites "≥80%" success rate; both
+   * unrelated to this constant). The block starts at the
+   * `- [ ] \`daemon-pre-pr-lint-gate\`` line and runs until the next
+   * top-level `- [ ]` / `- [x]` task entry.
+   *
+   * @param {string} tasksMd
+   * @returns {string}
+   */
+  function extractDaemonPrePrLintGateBlock(tasksMd) {
+    const startRe = /^- \[ \] `daemon-pre-pr-lint-gate`/m;
+    const startMatch = startRe.exec(tasksMd);
+    if (startMatch === null) {
+      throw new Error("TASKS.md has no `daemon-pre-pr-lint-gate` task block");
+    }
+    const tail = tasksMd.slice(startMatch.index);
+    const nextTaskRe = /\n- \[[ x]\] `[a-z][a-z0-9-]*`/;
+    const nextMatch = nextTaskRe.exec(tail.slice(1));
+    return nextMatch === null ? tail : tail.slice(0, 1 + nextMatch.index);
+  }
+
+  test("docs/daemon-pre-pr-gate.md cites the threshold in both percent and decimal forms", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    const { percent, decimal } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
+    expect(doc).toContain(percent);
+    expect(doc).toContain(decimal);
+  });
+
+  test("TASKS.md `daemon-pre-pr-lint-gate` block cites the threshold in both percent and decimal forms", () => {
+    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
+    const block = extractDaemonPrePrLintGateBlock(tasksMd);
+    const { percent, decimal } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
+    expect(block).toContain(percent);
+    expect(block).toContain(decimal);
+  });
+
+  test("daemon brief (novel/tick-loop/src/daemon.ts) cites the threshold's percent form", () => {
+    // The brief at line ~1010 ("Pre-registered (TASKS.md
+    // `daemon-pre-pr-lint-gate`): post-fix, ≥80% of daemon-authored PRs ...")
+    // is the load-bearing prompt the inner Claude reads every iteration; if
+    // the constant moves and the brief's percent token is stale, the daemon
+    // announces a threshold its self-diagnose no longer applies. Pinning the
+    // percent form alone is sufficient — the brief is one paragraph, the
+    // decimal form is not used there.
+    const brief = readFileSync(resolve(REPO_ROOT, "novel/tick-loop/src/daemon.ts"), "utf8");
+    const { percent } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
+    expect(brief).toContain(percent);
+  });
+
+  test("extractDaemonPrePrLintGateBlock parses to a non-trivial block bounded by the next task (parser sanity)", () => {
+    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
+    const block = extractDaemonPrePrLintGateBlock(tasksMd);
+    expect(block).toContain("daemon-pre-pr-lint-gate");
+    expect(block.length).toBeGreaterThan(500);
+    // The next task in TASKS.md is `daemon-fix-own-pr-on-ci-failure`; the
+    // extractor must stop before that block begins, otherwise the parity
+    // assertions can pass on prose belonging to a sibling task.
+    expect(block).not.toContain("daemon-fix-own-pr-on-ci-failure");
   });
 });
