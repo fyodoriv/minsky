@@ -988,7 +988,7 @@ export function buildDaemonBrief(args: {
     "Ship the smallest meaningful next iteration of this task. Open a PR with code changes that move the task toward its Acceptance criteria.",
     "",
     "**FORBIDDEN — anti-noop guard:**",
-    "- DO NOT open a PR whose only change is appending to the task block in TASKS.md (so-called 'brief refresh'). That is the noop pattern observed on iterations 87-93 of cross-repo-ci-action before the operator intervened. If you cannot ship a code change this iteration (the task is blocked, the substrate already exists, or the next step is a separate human-approval action), output `noop, exiting` to stdout and do NOT open a PR.",
+    "- DO NOT open a PR whose only change is appending to the task block in TASKS.md (so-called 'brief refresh'). If you cannot ship a code change this iteration (the task is blocked, the substrate already exists, or the next step is a separate human-approval action), output `noop, exiting` to stdout and do NOT open a PR.",
     "- DO NOT add new task blocks to TASKS.md unless the task you are executing explicitly directs you to.",
     "",
     "If the task's substrate already exists on main and what's left is a wire-in / config flip / one-line change, that IS a meaningful code change — ship it. Don't refresh briefs about it.",
