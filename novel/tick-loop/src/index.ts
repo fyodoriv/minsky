@@ -550,13 +550,31 @@ export {
 // parser + pre-spawn collision check. Consumed by the supervisor to refuse
 // starting a worker on a task whose globs overlap an open daemon PR's file
 // list (which would create a merge conflict at land time).
+//
+// Slice 4 wiring (this PR): `parseTouchesOrFiles` + `extractFilePathsFromFilesField`
+// give the daemon a Files-fallback path so file-collision prevention works
+// against the existing TASKS.md surface without a `**Touches**:` migration.
 export {
   type CollisionDecision,
   type TouchesPrSnapshot,
   decideTouchesCollision,
+  extractFilePathsFromFilesField,
   globMatchesPath,
   parseTouchesField,
+  parseTouchesOrFiles,
 } from "./touches-glob.js";
+
+// Slice 4 of `daemon-parallel-worktree-launch`: I/O wrapper that snapshots
+// open daemon-authored PRs via `gh pr list` for the per-tick collision
+// check. The pure decision (`decideTouchesCollision`) lives next door;
+// this module is the thin Strategy seam.
+export {
+  type CreateOpenPrFetcherInput,
+  type OpenPrFetcher,
+  createOpenPrFetcher,
+  isDaemonAuthoredBranch,
+  parseGhPrListJson,
+} from "./touches-glob-fetch.js";
 
 // Slice 4 of `daemon-parallel-worktree-launch`: pure decisions for the
 // per-tick sweeper that recovers stale .git/index.lock files (Claude Code

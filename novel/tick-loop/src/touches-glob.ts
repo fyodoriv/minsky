@@ -26,6 +26,12 @@
  */
 
 const TOUCHES_RE = /^\s*-\s+\*\*Touches\*\*:\s*(.+?)\s*$/im;
+const FILES_RE = /^\s*-\s+\*\*Files\*\*:\s*(.+)$/im;
+// Backtick-wrapped path-shaped tokens: anything inside backticks that
+// contains a `/` or has a recognizable file extension. Captures the path
+// only (without backticks). Multiline flag because **Files**: blocks can
+// wrap across lines via parenthetical descriptions.
+const BACKTICK_PATH_RE = /`([^`\s]*[/.][^`\s]*)`/g;
 
 /**
  * Parse the `**Touches**: <glob>[, <glob>…]` field from a single task
@@ -44,6 +50,55 @@ export function parseTouchesField(blockText: string): readonly string[] {
     .map((g) => stripTicks(g.trim()))
     .filter((g) => g.length > 0);
   return [...new Set(split)];
+}
+
+/**
+ * Slice 4 substrate of `daemon-parallel-worktree-launch`.
+ *
+ * Extract backtick-wrapped path-shaped tokens from a task block's
+ * `**Files**:` field. The field's prose form ("`a/b.ts` (purpose),
+ * `c/d.ts` (purpose), …") is human-readable; this parser pulls just the
+ * path tokens so the file-collision check can run against tasks that
+ * predate the `**Touches**:` field. A token counts as a path when it
+ * contains `/` or `.` (a file extension).
+ *
+ * Returns deduped, order-preserving paths. Empty array when the field is
+ * absent.
+ *
+ * @otel-exempt pure parser.
+ */
+export function extractFilePathsFromFilesField(blockText: string): readonly string[] {
+  const match = blockText.match(FILES_RE);
+  if (match === null || match[1] === undefined) return [];
+  const fieldValue = match[1];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // Use matchAll on the captured field-value so we don't pick up backticks
+  // from neighbouring fields (e.g. **Hypothesis** further down in the block).
+  for (const m of fieldValue.matchAll(BACKTICK_PATH_RE)) {
+    const path = m[1];
+    if (path !== undefined && !seen.has(path)) {
+      seen.add(path);
+      out.push(path);
+    }
+  }
+  return out;
+}
+
+/**
+ * Slice 4 substrate of `daemon-parallel-worktree-launch`.
+ *
+ * Combined glob list: prefer `**Touches**:` (the design intent), fall back
+ * to `**Files**:` paths when Touches is absent (every task already has a
+ * Files field, so this gives the daemon collision data without a TASKS.md
+ * migration). Returns the deduped union.
+ *
+ * @otel-exempt pure parser.
+ */
+export function parseTouchesOrFiles(blockText: string): readonly string[] {
+  const touches = parseTouchesField(blockText);
+  if (touches.length > 0) return touches;
+  return extractFilePathsFromFilesField(blockText);
 }
 
 function stripTicks(s: string): string {
