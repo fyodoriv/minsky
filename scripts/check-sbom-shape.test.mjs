@@ -12,6 +12,8 @@ import {
   ALLOWED_COMPONENT_TYPES,
   ALLOWED_SPEC_VERSIONS,
   classifySbomShape,
+  parseArgs,
+  runSbomShapeCheck,
   walkSbomViolations,
 } from "./check-sbom-shape.mjs";
 
@@ -696,6 +698,171 @@ describe("walkSbomViolations — slice-1 parity", () => {
     });
     const first = walkSbomViolations(sbom);
     const second = walkSbomViolations(sbom);
+    expect(first).toEqual(second);
+  });
+});
+
+// Slice 3 — CLI driver + arg/env resolver.
+
+describe("parseArgs (slice 3 — CLI)", () => {
+  it("defaults to <repo>/sbom-cyclonedx.json when no flag and no env override", () => {
+    const { sbomPath } = parseArgs([], {});
+    expect(sbomPath.endsWith("sbom-cyclonedx.json")).toBe(true);
+  });
+
+  it("honours MINSKY_SBOM_PATH env override when no flag is set", () => {
+    expect(parseArgs([], { MINSKY_SBOM_PATH: "/tmp/x.json" }).sbomPath).toBe("/tmp/x.json");
+  });
+
+  it("honours --sbom=<path>", () => {
+    expect(parseArgs(["--sbom=/tmp/y.json"], {}).sbomPath).toBe("/tmp/y.json");
+  });
+
+  it("--sbom flag wins over env override", () => {
+    expect(
+      parseArgs(["--sbom=/tmp/flag.json"], { MINSKY_SBOM_PATH: "/tmp/env.json" }).sbomPath,
+    ).toBe("/tmp/flag.json");
+  });
+
+  it("ignores unrecognised flags (forward-compat with future slices)", () => {
+    expect(parseArgs(["--unknown=foo", "--sbom=/tmp/z.json"], {}).sbomPath).toBe("/tmp/z.json");
+  });
+});
+
+describe("runSbomShapeCheck (slice 3 — driver)", () => {
+  /** @param {Partial<Record<string, unknown>>} overrides */
+  const validSbomText = (overrides = {}) =>
+    JSON.stringify({
+      bomFormat: "CycloneDX",
+      specVersion: "1.5",
+      version: 1,
+      components: [
+        {
+          type: "library",
+          name: "lodash",
+          version: "4.17.21",
+          purl: "pkg:npm/lodash@4.17.21",
+        },
+      ],
+      ...overrides,
+    });
+
+  it("missing SBOM (no release in flight) → exit 0 with skipped diagnostic", () => {
+    const out = runSbomShapeCheck({ readSbom: () => ({ kind: "missing" }) });
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("skipped");
+    expect(out.stderr).toBe("");
+    expect(out.violations).toEqual([]);
+  });
+
+  it("read error (EACCES, etc.) → exit 2 (fail-safe; gate cannot evaluate)", () => {
+    const out = runSbomShapeCheck({
+      readSbom: () => ({ kind: "error", reason: "EACCES" }),
+    });
+    expect(out.exitCode).toBe(2);
+    expect(out.stdout).toBe("");
+    expect(out.stderr).toContain("EACCES");
+    expect(out.violations).toEqual([]);
+  });
+
+  it("malformed JSON → exit 2 (fail-safe)", () => {
+    const out = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: "{ not valid json" }),
+    });
+    expect(out.exitCode).toBe(2);
+    expect(out.stdout).toBe("");
+    expect(out.stderr).toContain("not valid JSON");
+    expect(out.violations).toEqual([]);
+  });
+
+  it("valid SBOM → exit 0 with component-count digest on stdout", () => {
+    const out = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: validSbomText() }),
+    });
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("ok");
+    expect(out.stdout).toContain("1 components");
+    expect(out.violations).toEqual([]);
+  });
+
+  it("shape regression (wrong bomFormat) → exit 1 with diagnostic on stderr", () => {
+    const out = runSbomShapeCheck({
+      readSbom: () => ({
+        kind: "ok",
+        text: validSbomText({ bomFormat: "SPDX" }),
+      }),
+    });
+    expect(out.exitCode).toBe(1);
+    expect(out.stdout).toBe("");
+    expect(out.stderr).toContain("wrong-bomFormat");
+    expect(out.violations).toHaveLength(1);
+    expect(out.violations[0]?.code).toBe("wrong-bomFormat");
+  });
+
+  it("multi-violation SBOM surfaces every shape error in one report", () => {
+    const sbom = {
+      bomFormat: "CycloneDX",
+      specVersion: "1.5",
+      version: 1,
+      components: [
+        { type: "library", name: "missing-purl", version: "1.0.0" },
+        { type: "library", name: "missing-version", purl: "pkg:npm/x@1.0.0" },
+        { type: "wrong-type", name: "x" },
+      ],
+    };
+    const out = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: JSON.stringify(sbom) }),
+    });
+    expect(out.exitCode).toBe(1);
+    expect(out.violations).toHaveLength(3);
+    expect(out.stderr).toContain("3 CycloneDX shape violations detected");
+    expect(out.stderr).toContain("component-missing-purl");
+    expect(out.stderr).toContain("component-missing-version");
+    expect(out.stderr).toContain("component-invalid-type");
+  });
+
+  it("violation message cites vision.md § 13.5 anchor (operator hand-off)", () => {
+    const out = runSbomShapeCheck({
+      readSbom: () => ({
+        kind: "ok",
+        text: validSbomText({ bomFormat: "SPDX" }),
+      }),
+    });
+    expect(out.stderr).toContain("vision.md § 13.5");
+  });
+
+  it("exit-2 paths do NOT leak diagnostic text into stdout", () => {
+    // stdout is reserved for ok-path digests; failure modes route to stderr.
+    // CI gates assert on exit code, but human reviewers paste stdout — keeping
+    // failure diagnostics on stderr keeps the convention.
+    const errOut = runSbomShapeCheck({
+      readSbom: () => ({ kind: "error", reason: "boom" }),
+    });
+    expect(errOut.stdout).toBe("");
+    expect(errOut.stderr.length).toBeGreaterThan(0);
+
+    const parseOut = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: "<html>not json</html>" }),
+    });
+    expect(parseOut.stdout).toBe("");
+    expect(parseOut.stderr.length).toBeGreaterThan(0);
+  });
+
+  it("singular vs plural violation count phrasing", () => {
+    const single = runSbomShapeCheck({
+      readSbom: () => ({
+        kind: "ok",
+        text: validSbomText({ bomFormat: "SPDX" }),
+      }),
+    });
+    expect(single.stderr).toContain("1 CycloneDX shape violation detected");
+    expect(single.stderr).not.toContain("violations detected");
+  });
+
+  it("idempotent — same input yields same outcome on a second run", () => {
+    const reader = () => /** @type {const} */ ({ kind: "ok", text: validSbomText() });
+    const first = runSbomShapeCheck({ readSbom: reader });
+    const second = runSbomShapeCheck({ readSbom: reader });
     expect(first).toEqual(second);
   });
 });
