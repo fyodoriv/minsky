@@ -161,6 +161,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "secret-scan",
       "tasks-lint",
       "test",
+      "threat-model-section",
       "tick-loop-backoff-schedule",
       "typecheck",
     ]),
@@ -302,6 +303,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-sbom-shape.mjs"],
+  },
+  {
+    name: "threat-model-section",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-threat-model-section.mjs"],
   },
   {
     name: "metric-freshness",
