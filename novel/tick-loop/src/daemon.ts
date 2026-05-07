@@ -58,6 +58,11 @@ import {
   runCtoAudit,
 } from "./post-task-cto-audit.js";
 import {
+  type PrePrLintGateResult,
+  type PrePrLintRun,
+  runPrePrLintGate,
+} from "./pre-pr-lint-gate.js";
+import {
   type RunSnapshotOutcome,
   type SnapshotCapture,
   type SnapshotExists,
@@ -209,6 +214,24 @@ export interface RunDaemonOpts {
    * `METRICS.md` (visible-not-silent, Helland 2007).
    */
   readonly metricsRender?: MetricsRenderSeam;
+  /**
+   * Optional outer lint-gate verification seam (rule #2). When injected, the
+   * daemon runs one post-iteration lint check after every `completed` iteration
+   * to verify the branch is lint-clean. Failure emits a
+   * `tick-loop.pre-pr-lint-gate` span so the dashboard can track
+   * pass-rate — the pre-registered metric for `daemon-pre-pr-lint-gate`
+   * (rolling 30d ≥80%, measured by `pnpm daemon-pr-lint:metrics`).
+   *
+   * One attempt only (`maxAttempts: 1`): the inner Claude already ran up to 3
+   * retries per the brief mandate; the outer check is a verification layer,
+   * not a second retry loop. When omitted, no post-iteration lint check runs —
+   * pre-existing daemons predating this seam keep working unchanged.
+   *
+   * Production binding: `createPnpmPrePrLintRun({ stage: "fast" })` from
+   * `@minsky/tick-loop/pre-pr-lint-gate` — same script `pnpm pre-pr-lint`
+   * invokes (rule #10 — single source of truth: `scripts/run-pre-pr-lint-stack.mjs`).
+   */
+  readonly preLintRun?: PrePrLintRun;
   /**
    * Optional per-worker config (slice 2 of `daemon-parallel-worktree-launch`).
    * When set:
@@ -398,6 +421,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
     await maybeRunMetricsRender(opts, outcome.result);
+    await maybeRunPrePrLintGate(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -724,6 +748,55 @@ function emitMetricsRenderSpan(
     base["metrics-render.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.metrics-render", attributes: base });
+}
+
+/**
+ * Outer lint-gate verification: runs one post-iteration lint check on the
+ * current branch after every `completed` iteration. One attempt only —
+ * the inner Claude already ran up to 3 retries per the brief mandate; this
+ * is a verification layer that creates the OTEL signal for the
+ * `daemon-pre-pr-lint-gate` rolling pass-rate metric.
+ *
+ * Skip-fast when:
+ *   - the seam isn't injected (pre-existing daemons),
+ *   - the iteration didn't `complete` (lint is only meaningful after a real
+ *     PR-creation attempt by inner Claude).
+ *
+ * Emits `tick-loop.pre-pr-lint-gate` span with `verdict` + optionally
+ * `failedStep` so the OTEL dashboard can chart pass-rate distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunPrePrLintGate(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+): Promise<void> {
+  if (opts.preLintRun === undefined) return;
+  if (result.status !== "completed") return;
+  const gateResult = await runPrePrLintGate({ runLint: opts.preLintRun, maxAttempts: 1 });
+  emitPrePrLintGateSpan(opts, result.taskId, gateResult);
+}
+
+/**
+ * Emit a `tick-loop.pre-pr-lint-gate` span describing the gate's outcome.
+ * One span per completed iteration (pass or fail), so the OTEL dashboard can
+ * chart pass-rate and failing-step distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitPrePrLintGateSpan(
+  opts: RunDaemonOpts,
+  taskId: string | undefined,
+  gateResult: PrePrLintGateResult,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "pre-pr-lint.verdict": gateResult.verdict,
+    "pre-pr-lint.attempts": gateResult.attempts,
+  };
+  if (taskId !== undefined) base["task.id"] = taskId;
+  if (gateResult.failedStep !== undefined) base["pre-pr-lint.failed_step"] = gateResult.failedStep;
+  opts.emit({ name: "tick-loop.pre-pr-lint-gate", attributes: base });
 }
 
 /**
