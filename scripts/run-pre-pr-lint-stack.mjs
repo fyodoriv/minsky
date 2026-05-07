@@ -254,6 +254,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
       "rule-13-sibling-anchors",
+      "sandbox-env-declared",
       "sbom-shape",
       "secret-scan",
       "tasks-lint",
@@ -502,6 +503,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-rule-13-sibling-anchors.mjs"],
+  },
+  {
+    name: "sandbox-env-declared",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-sandbox-env-declared.mjs"],
   },
   {
     name: "vision-rule-13-task-id-citations",
