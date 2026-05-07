@@ -17,9 +17,9 @@ STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, Microsoft Press, 2003
   - **D**enial of service — addressed by the audit's evaluation of per-tenant rate-limits + multi-tenant noisy-neighbour isolation; out of scope at v0 (no cloud customers to denial-of-service yet).
   - **E**levation of privilege — addressed by the audit's evaluation of the cross-tenant trust boundaries (operator → cloud supervisor → tenant repo) + the privilege escalation paths through the GH App's installation token surface.
 
-## Layer 1: gate lint (planned, blocked-on-cloud-readiness)
+## Layer 1: gate lint (shipped)
 
-`scripts/check-cloud-audit-gate.mjs` (planned per `cloud-tier-external-security-audit-gate` task block) will scan every PR diff for paths under `novel/cloud-supervisor/`, `novel/cross-repo-benchmark/`, or `novel/shared-invariant-catalog/` (the three packages that constitute the cloud tier; none exist in the tree today). The lint exits 1 when any such path is touched and the gate's `**Blocked**:` line in `TASKS.md` still names `needs-user-approval`. The lint exits 0 when none of the cloud-tier packages are touched, *or* when the `**Blocked**:` line has been removed (operator-side action; out of scope for autonomous loops per `feedback_modify_only_minsky_repo.md`).
+`scripts/check-cloud-audit-gate.mjs` scans every PR diff for paths under `novel/cloud-supervisor/`, `novel/cross-repo-benchmark/`, or `novel/shared-invariant-catalog/` (the three packages that constitute the cloud tier; none exist in the tree today). The lint exits 1 when any such path is touched and the gate's `**Blocked**:` line in `TASKS.md` still names `needs-user-approval`. The lint exits 0 when none of the cloud-tier packages are touched, *or* when the `**Blocked**:` line has been removed (operator-side action; out of scope for autonomous loops per `feedback_modify_only_minsky_repo.md`). Wired into `scripts/run-pre-pr-lint-stack.mjs` (the same gate humans run via `lefthook`'s `pre-push`) and into `.github/workflows/ci.yml` as a required check.
 
 The gate is a CI lint, not a runtime guard, because the cloud tier doesn't run yet — there's nothing to gate at runtime. The PR-time block is the deterministic enforcement (rule #10) that keeps cloud-tier code from accruing in `main` ahead of its audit. Same shape as the dependabot allowlist (rule #13.5 layer 3): a gate that sits dormant until the artefact it guards begins to land.
 
@@ -50,9 +50,9 @@ Per rule #13's relief valve: when security and performance compete, performance 
 
 ## Verification
 
-- **Gate (cloud-tier path touched, blocked)**: synthetic PR adds a file to `novel/cloud-supervisor/`; `node scripts/check-cloud-audit-gate.mjs` exits 1 with a `cloud-tier-blocked-on-audit` violation citing the offending path and the `**Blocked**:` line. (Verifiable once the lint ships.)
-- **Gate (no cloud-tier paths touched)**: any PR that doesn't touch the three packages exits 0 silently. (Verifiable once the lint ships.)
-- **Gate (block line removed)**: same diff as the first case, but with the `**Blocked**:` line removed from the task block; lint exits 0. (Verifiable once the lint ships and the operator removes the line per the unblock criteria above.)
+- **Gate (cloud-tier path touched, blocked)**: synthetic PR adds a file to `novel/cloud-supervisor/`; `node scripts/check-cloud-audit-gate.mjs` exits 1 with a `cloud-tier-blocked-on-audit` violation citing the offending path and the `**Blocked**:` line. Pinned by `scripts/check-cloud-audit-gate.test.mjs`.
+- **Gate (no cloud-tier paths touched)**: any PR that doesn't touch the three packages exits 0 silently.
+- **Gate (block line removed)**: same diff as the first case, but with the `**Blocked**:` line removed from the task block; lint exits 0. (Verifiable once the operator removes the line per the unblock criteria above — pre-pinned by the test fixture's "blocked-line absent" case.)
 - **Findings round-trip**: introduce a synthetic finding to the tracker; the corresponding P0 sub-task carries the audit-section citation in its anchor; the rule-#13-sibling-anchors gate (`scripts/check-rule-13-sibling-anchors.mjs`) accepts the citation form. (Verifiable once the audit lands.)
 
 ## Sources
