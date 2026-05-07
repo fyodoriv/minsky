@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   type TouchesPrSnapshot,
   decideTouchesCollision,
+  extractFilePathsFromFilesField,
   globMatchesPath,
   parseTouchesField,
+  parseTouchesOrFiles,
 } from "./touches-glob.js";
 
 describe("parseTouchesField", () => {
@@ -129,5 +131,70 @@ describe("decideTouchesCollision", () => {
     expect(decideTouchesCollision({ taskGlobs: ["novel/tick-loop/**"], openPrs: [] })).toEqual({
       verdict: "proceed",
     });
+  });
+});
+
+describe("extractFilePathsFromFilesField", () => {
+  it("extracts backtick-wrapped paths from a typical Files line", () => {
+    const block = [
+      "- [ ] `task-id` — desc",
+      "  - **ID**: task-id",
+      "  - **Files**: `novel/tick-loop/src/spawn-strategy.ts` (timeout opt + watchdog), `novel/tick-loop/src/spawn-strategy.test.ts` (paired tests), `scripts/self-diagnose.mjs` (new invariant).",
+    ].join("\n");
+    expect(extractFilePathsFromFilesField(block)).toEqual([
+      "novel/tick-loop/src/spawn-strategy.ts",
+      "novel/tick-loop/src/spawn-strategy.test.ts",
+      "scripts/self-diagnose.mjs",
+    ]);
+  });
+
+  it("dedupes and preserves first-seen order", () => {
+    const block =
+      "  - **Files**: `a/b.ts` (one), `a/b.ts` (one again), `c/d.mjs` (two), `c/d.mjs`.";
+    expect(extractFilePathsFromFilesField(block)).toEqual(["a/b.ts", "c/d.mjs"]);
+  });
+
+  it("returns [] when no Files field is present", () => {
+    const block = "- [ ] `t` — clean\n  - **ID**: t\n  - **Tags**: p0\n";
+    expect(extractFilePathsFromFilesField(block)).toEqual([]);
+  });
+
+  it("ignores backtick-wrapped tokens that aren't path-shaped (no slash, no dot)", () => {
+    // Identifiers in the field's prose like `claudePrintTimeoutFrequencyInvariant`
+    // — code symbol, not a path. Must not pollute the path list.
+    const block = "  - **Files**: `novel/x/y.ts` (`buildXyz`), `scripts/y.mjs` (`zzz`).";
+    expect(extractFilePathsFromFilesField(block)).toEqual(["novel/x/y.ts", "scripts/y.mjs"]);
+  });
+
+  it("does not leak backticks from neighbouring fields", () => {
+    // The Hypothesis field contains backticks too; only Files should be
+    // parsed. Use a single-line Files field so the regex doesn't span
+    // unrelated content.
+    const block = [
+      "- [ ] `t` — desc",
+      "  - **Hypothesis**: do `x` then `novel/other/thing.ts` later.",
+      "  - **Files**: `novel/here/this.ts` (purpose).",
+      "  - **Risk**: low.",
+    ].join("\n");
+    expect(extractFilePathsFromFilesField(block)).toEqual(["novel/here/this.ts"]);
+  });
+});
+
+describe("parseTouchesOrFiles", () => {
+  it("prefers Touches when present", () => {
+    const block = [
+      "  - **Files**: `a/b.ts`, `c/d.ts`.",
+      "  - **Touches**: novel/tick-loop/**, scripts/*.mjs",
+    ].join("\n");
+    expect(parseTouchesOrFiles(block)).toEqual(["novel/tick-loop/**", "scripts/*.mjs"]);
+  });
+
+  it("falls back to Files when Touches is absent", () => {
+    const block = "  - **Files**: `a/b.ts` (purpose), `c/d.mjs` (other).";
+    expect(parseTouchesOrFiles(block)).toEqual(["a/b.ts", "c/d.mjs"]);
+  });
+
+  it("returns [] when neither field is present", () => {
+    expect(parseTouchesOrFiles("- [ ] `t` — clean\n  - **Tags**: p0\n")).toEqual([]);
   });
 });

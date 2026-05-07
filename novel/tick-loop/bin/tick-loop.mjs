@@ -79,12 +79,14 @@ import {
   createFileBackedLastRenderedDate,
   createFileBackedSnapshotExists,
   createGitGhSignalsBuilder,
+  createOpenPrFetcher,
   createPnpmMetricsRender,
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
   formatRecommendations,
   fromRealBudgetGuard,
+  isDaemonAuthoredBranch,
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   runDaemon,
@@ -721,6 +723,36 @@ process.stdout.write(
   "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n",
 );
 
+// Slice 4 of `daemon-parallel-worktree-launch`: file-collision pre-spawn
+// check. Only meaningful in parallel mode (workerConfig set). On every
+// iteration the daemon snapshots open daemon-authored PRs (branch shape
+// `daemon/<id>/<task-id>`) and refuses to claim a candidate task whose
+// `**Touches**:` (or `**Files**:` fallback) overlaps a PR's changed
+// files — preventing two workers from picking conflict-prone tasks.
+//
+// Operator escape hatch: `MINSKY_TOUCHES_GLOB_CHECK=0` disables the
+// fetcher (useful when `gh` isn't authenticated locally and the operator
+// wants the claim layer to stand alone). Default = on when
+// `workerConfig` is set.
+const touchesGlobCheckEnabled =
+  workerConfig !== undefined &&
+  process.env["MINSKY_TOUCHES_GLOB_CHECK"] !== "0" &&
+  process.env["MINSKY_TOUCHES_GLOB_CHECK"] !== "false";
+const openPrFetcher = touchesGlobCheckEnabled
+  ? createOpenPrFetcher({ branchFilter: isDaemonAuthoredBranch })
+  : undefined;
+if (touchesGlobCheckEnabled) {
+  process.stdout.write(
+    "[tick-loop] file-collision check wired (gh pr list --author @me --state open --json files; branch filter: daemon/<id>/<task-id>; off via MINSKY_TOUCHES_GLOB_CHECK=0)\n",
+  );
+} else if (workerConfig === undefined) {
+  process.stdout.write(
+    "[tick-loop] no file-collision check (single-process mode — no parallel workers to collide)\n",
+  );
+} else {
+  process.stdout.write("[tick-loop] file-collision check disabled (MINSKY_TOUCHES_GLOB_CHECK=0)\n");
+}
+
 // Supervisor-sandbox mode banner (vision.md § 13.3): surface the resolved
 // `MINSKY_SANDBOX` mode + any typo warning in the supervisor log at boot.
 // Slice 2 of `supervisor-sandbox-syscall-restriction`: substrate-inert —
@@ -750,6 +782,9 @@ const result = await runDaemon({
   // `--worker-id` / `--workers-total` are passed. `undefined` preserves
   // single-process v0 behaviour.
   ...(workerConfig !== undefined ? { workerConfig } : {}),
+  // Slice 4 of `daemon-parallel-worktree-launch`: file-collision pre-spawn
+  // check. `undefined` keeps the slice-1/2 claim-only path.
+  ...(openPrFetcher !== undefined ? { openPrFetcher } : {}),
   // Optional push channel; `undefined` when MINSKY_NTFY_TOPIC isn't set.
   ...(notifier !== undefined ? { notifier } : {}),
   // Optional CTO-audit seam; `undefined` when MINSKY_CTO_AUDIT_ENABLE isn't 1/true.

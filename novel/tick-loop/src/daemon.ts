@@ -69,6 +69,11 @@ import {
   runSnapshot,
 } from "./snapshot-runner.js";
 import type { SpawnStrategy } from "./spawn-strategy.js";
+import {
+  type TouchesPrSnapshot,
+  decideTouchesCollision,
+  parseTouchesOrFiles,
+} from "./touches-glob.js";
 import { acquireTaskClaim } from "./worker-claim.js";
 import { type WorkerConfig, claudeArgsForWorker } from "./worker-config.js";
 
@@ -267,6 +272,24 @@ export interface RunDaemonOpts {
    * sweeper. Only consulted when `workerConfig` is set.
    */
   readonly claimTtlMs?: number;
+  /**
+   * Slice 4 of `daemon-parallel-worktree-launch`. When set + `workerConfig`
+   * is set, the daemon fetches the open-PR snapshot once per iteration and
+   * runs `decideTouchesCollision` against each candidate task BEFORE the
+   * `acquireTaskClaim` attempt. Tasks whose `**Touches**:` (or fallback
+   * `**Files**:`) overlap any open PR's changed files are skipped with a
+   * `collision-prevented:` reason. The check is opt-in (caller wires the
+   * fetcher); `undefined` preserves slice-1/2 claim-only behaviour.
+   *
+   * The fetcher is awaited at most once per iteration (the snapshot is
+   * shared across all candidate-task collision checks). Callers should
+   * filter to daemon-authored open PRs (e.g.
+   * `gh pr list --author "@me" --state open --json number,files`).
+   *
+   * Failures inside the fetcher (network, gh auth, parse errors) bubble up
+   * to `runDaemon` and surface as a failed iteration — rule #6 let-it-crash.
+   */
+  readonly openPrFetcher?: () => Promise<readonly TouchesPrSnapshot[]>;
 }
 
 /**
@@ -859,7 +882,18 @@ async function runOneIteration(args: {
   // collision pattern where two workers picked the same first-priority
   // task and one slept 5 min for nothing. Single-process mode (no
   // workerConfig) keeps the legacy first-match pickTask path.
-  const picked = pickAndClaim(opts, taskSource);
+  //
+  // Slice 4: when openPrFetcher is also set, fetch the open-PR snapshot
+  // once and run `decideTouchesCollision` against each candidate before
+  // the claim attempt. File-level disjointness composes with task-level
+  // claim — workers refuse to start a task whose Touches/Files overlap
+  // an open daemon PR, so 5x parallel mode doesn't produce conflict
+  // storms.
+  const openPrs =
+    opts.openPrFetcher !== undefined && opts.workerConfig !== undefined
+      ? await opts.openPrFetcher()
+      : [];
+  const picked = pickAndClaim(opts, taskSource, openPrs);
   if (picked.kind === "no-task") {
     const result: DaemonIterationResult = {
       iteration,
@@ -894,7 +928,11 @@ type PickAndClaimResult =
     }
   | { readonly kind: "no-task"; readonly reason: string; readonly taskId?: string };
 
-function pickAndClaim(opts: RunDaemonOpts, taskSource: string): PickAndClaimResult {
+function pickAndClaim(
+  opts: RunDaemonOpts,
+  taskSource: string,
+  openPrs: readonly TouchesPrSnapshot[],
+): PickAndClaimResult {
   if (opts.workerConfig === undefined) {
     const taskId = pickTask(taskSource);
     if (taskId === undefined)
@@ -906,16 +944,58 @@ function pickAndClaim(opts: RunDaemonOpts, taskSource: string): PickAndClaimResu
     return { kind: "no-task", reason: "no unblocked unclaimed P0/P1 task" };
   const collisions: string[] = [];
   for (const taskId of candidates) {
-    const claim = tryAcquireWorkerClaim(opts, taskId);
-    if (claim === undefined) return { kind: "claimed", taskId, claim: undefined };
-    if (claim.acquired) return { kind: "claimed", taskId, claim };
-    collisions.push(`${taskId}:held-by-${claim.heldBy}`);
+    const verdict = tryClaimCandidate(opts, taskSource, openPrs, taskId);
+    if (verdict.kind === "claimed") return verdict;
+    collisions.push(verdict.collision);
   }
   return {
     kind: "no-task",
     reason: `claim-collision on ${candidates.length} eligible task(s): ${collisions.join(", ")}`,
     ...(candidates[0] === undefined ? {} : { taskId: candidates[0] }),
   };
+}
+
+/**
+ * Per-candidate verdict: try the file-level collision check (slice 4),
+ * then the task-level claim (slice 1). Either fails with a collision
+ * string or succeeds with a claimed result.
+ */
+function tryClaimCandidate(
+  opts: RunDaemonOpts,
+  taskSource: string,
+  openPrs: readonly TouchesPrSnapshot[],
+  taskId: string,
+):
+  | { kind: "claimed"; taskId: string; claim: WorkerClaimHandle | undefined }
+  | {
+      kind: "skip";
+      collision: string;
+    } {
+  const fileCollision = checkFileCollision(taskSource, openPrs, taskId);
+  if (fileCollision !== undefined) return { kind: "skip", collision: fileCollision };
+  const claim = tryAcquireWorkerClaim(opts, taskId);
+  if (claim === undefined) return { kind: "claimed", taskId, claim: undefined };
+  if (claim.acquired) return { kind: "claimed", taskId, claim };
+  return { kind: "skip", collision: `${taskId}:held-by-${claim.heldBy}` };
+}
+
+/**
+ * Slice 4: file-level disjointness check against open daemon PRs. Returns
+ * a collision string when the candidate's `**Touches**:` (or fallback
+ * `**Files**:`) overlaps any open PR's changed files; `undefined` when
+ * the check is a no-op (no fetcher wired) or the candidate is safe.
+ */
+function checkFileCollision(
+  taskSource: string,
+  openPrs: readonly TouchesPrSnapshot[],
+  taskId: string,
+): string | undefined {
+  if (openPrs.length === 0) return undefined;
+  const block = extractTaskBlock(taskSource, taskId) ?? "";
+  const taskGlobs = parseTouchesOrFiles(block);
+  const collision = decideTouchesCollision({ taskGlobs, openPrs });
+  if (collision.verdict !== "collision-prevented") return undefined;
+  return `${taskId}:collision-prevented-by-PR-#${collision.prNumber}-on-${collision.overlapping.join("+")}`;
 }
 
 type WorkerClaimHandle =
