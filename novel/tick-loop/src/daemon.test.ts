@@ -1919,19 +1919,17 @@ describe("buildDaemonBrief", () => {
   it("includes the optimization-discipline gate with concrete eligible-optimization list", () => {
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
     expect(brief).toContain("## Optimization-discipline gate");
-    expect(brief).toContain("Brief-shrinking");
-    expect(brief).toContain("Cached-prompt extension");
-    expect(brief).toContain("Skip-earlier gate");
+    expect(brief).toContain("brief-shrinking");
+    expect(brief).toContain("cached-prompt extension");
+    expect(brief).toContain("skip-earlier gate");
     expect(brief).toContain("optimization: none-this-iteration");
   });
 
   it("emits the operator-directive anchor 2026-05-05 + measurable-only guard in the optimization gate", () => {
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
     expect(brief).toContain("Operator directive 2026-05-05");
-    expect(brief).toContain("token savings");
-    expect(brief).toContain("wall-time savings");
-    expect(brief).toContain("Anti-vanity guard");
-    expect(brief).toContain("Pivot threshold");
+    expect(brief).toContain("≥10-byte savings minimum");
+    expect(brief).toContain("Anti-vanity:");
   });
 
   it("excludes claimed and blocked tasks from the open P0 list", () => {
