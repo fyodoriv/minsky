@@ -63,6 +63,10 @@ export type ConfigRecommendation = {
  * Run the analysis. Pure: same input → same output. The caller (boot-time
  * wrapper) feeds in `process.env`, `process.argv`, and the dogfood/launchd
  * flags; this function returns the recommendation list.
+ *
+ * @otel-exempt pure analysis function — input → output, no I/O. The
+ *   caller (boot-time wrapper) is responsible for emitting any span that
+ *   summarises the recommendation list at the I/O boundary.
  */
 export function analyzeConfig(ctx: ConfigContext): readonly ConfigRecommendation[] {
   const recs: ConfigRecommendation[] = [];
