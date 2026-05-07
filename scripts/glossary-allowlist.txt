@@ -75,3 +75,18 @@ pr-replace-or-relocate-research
 # by default"). Substrate exists at distribution/{systemd,launchd}/.
 minsky-supervisor.target
 minsky-watchdog.service
+
+# --- Security & privacy P0 task IDs (rule #13 substrate, 2026-05-07). ---
+# Anchored in TASKS.md; cited in vision.md § 13 substrate-cohesion paragraph.
+# TASKS.md task ID — secret-scanning hooks (gitleaks + trufflehog).
+secret-scanning-precommit-and-ci
+# TASKS.md task ID — OS sandbox for the supervisor daemon.
+supervisor-sandbox-syscall-restriction
+# TASKS.md task ID — localhost-only binding for the dashboard HTTP server.
+dashboard-localhost-only-by-default
+# TASKS.md task ID — OTEL span PII lint.
+otel-no-pii-in-spans-lint
+# TASKS.md task ID — CycloneDX SBOM + SLSA Build Level 3 + Sigstore.
+supply-chain-hardening-lockfile-sbom-slsa
+# TASKS.md task ID — external security audit gate before cloud-tier ship.
+cloud-tier-external-security-audit-gate

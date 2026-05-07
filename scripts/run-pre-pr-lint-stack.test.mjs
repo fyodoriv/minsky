@@ -52,6 +52,8 @@ describe("STACK_MANIFEST", () => {
         "biome",
         "markdownlint",
         "rule-12-scope-discipline",
+        "rule-13-sibling-anchors",
+        "rule-13-vision-task-citations",
         "rule-2-dep-coverage",
         "rule-3-doc-first",
         "rule-6-let-it-crash",

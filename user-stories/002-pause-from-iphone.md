@@ -72,3 +72,13 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Conformance level**: partial
 - **Index row**: vision.md § "Pattern conformance index" row 42
 - **Notes**: Pause is delivered as an HTTPS request over Tailscale (RPC at the wire) but consumed as a flag-file rather than a synchronous RPC return — the in-flight tick checks the flag at the next safe point and self-suspends. Birrell-Nelson's transparency property is intentionally weakened: the caller does not block until the loop has paused; the Watch surface is the eventual-consistency read-back.
+
+## Security & privacy
+
+Per constitutional rule #13 (vision.md § 13 — Security & privacy, second priority after performance).
+
+- **Threat surface**: the Tailscale HTTP endpoint (`POST /pause`, `POST /resume`) is a remote control surface. A spoofed or replayed request could pause the supervisor at a critical moment or resume it unexpectedly.
+- **Authentication**: requests over Tailscale inherit device-level authentication (Tailscale ACLs — the requesting device must be on the operator's tailnet). No additional credential is required for pause/resume; the attack surface is limited to devices the operator has authorised in their tailnet.
+- **No PII in the pause payload**: the `POST /pause` and `POST /resume` request bodies carry no user data — the flag file written to `state/PAUSED` is a zero-byte sentinel. The ntfy push on state transition carries only the state label and timestamp.
+- **Localhost-only dashboard**: the web app's main HTTP surface binds `127.0.0.1` (`dashboard-localhost-only-by-default`); the Tailscale endpoint is a separate, explicitly scoped service.
+- **Threat model**: see `novel/dashboard-web/README.md` § Threat model (STRIDE-shaped, ≥5 lines; ships with slice 7 of `security-privacy-priority-substrate`).
