@@ -16,7 +16,7 @@
 
 <!-- local-llm-fallback-on-budget-pause (P0) — operator directive 2026-05-07: "soon we'll run out of claude limits for the week. Add a P0 task to fully support running minsky on local llm, then find the best local llm for this machine, set it up. Then add logic so that by default minsky runs on Claude but switches to backup model when out of credits. It should switch back when it's optimal." Operator-elected stack: MLX-LM (Apple Silicon native — ~12-20 tok/s on 32B-Q4 vs ~5-8 with llama.cpp) + Qwen2.5-Coder-32B-Instruct-4bit (best agentic-coder in the 4-bit-quantizable class) + aider as the agentic harness (closest drop-in for `claude --print` semantics: one-shot `--message`, agentic edit loop, OpenAI-compat client). 32GB unified memory comfortably runs 32B-4bit (~19GB resident). -->
 
-- [ ] `local-llm-fallback-on-budget-pause` — daemon switches to local LLM (MLX-LM + Qwen2.5-Coder-32B + aider) when Claude budget circuit-breaks; switches back when budget resets
+- [ ] `local-llm-fallback-on-budget-pause` (@devin) — daemon switches to local LLM (MLX-LM + Qwen2.5-Coder-32B + aider) when Claude budget circuit-breaks; switches back when budget resets
   - **ID**: local-llm-fallback-on-budget-pause
   - **Tags**: p0, daemon, supervisor, throughput, stay-alive, fallback, pick-next, operator-promoted-2026-05-07
   - **Pick-next**: yes — operator-flagged 2026-05-07: weekly Claude limit exhaustion is imminent; the daemon must keep running on local fallback rather than burning budget-paused streaks while the operator waits for the 5h window to roll over.

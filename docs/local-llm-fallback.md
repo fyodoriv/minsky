@@ -66,33 +66,45 @@ The smoke test was run end-to-end on this machine on 2026-05-07. Recorded number
 
 Pass criteria met. The 14 tok/s steady-state matches the MLX-on-M1-Max literature for 32B-4bit and is the baseline against which slice 1's `decideProvider` will be judged.
 
-## How the daemon picks the provider (slice 1+ — not yet wired)
+## How the daemon picks the provider (slice 1 — landed; slice 2-3 wiring deferred)
 
-Pure decision function in `novel/tick-loop/src/llm-provider-selector.ts`:
+Pure decision function in `novel/tick-loop/src/llm-provider-selector.ts` (slice 1, this PR):
 
-```text
-decideProvider({ budgetState, lastClaudeFailure, localProbeResult })
-  → "claude" | "local"
+```ts
+decideProvider({
+  budgetState,         // "normal" | "graceful-degrade" | "circuit-break-and-notify" | "weekly-cap-warn"
+  lastClaudeFailure,   // { exitCode, stderrTail, observedAtMs } | undefined
+  localProbeResult,    // { reachable, observedAtMs, reason? }
+  forceClaude,         // operator override — MINSKY_LLM_PROVIDER=claude-only
+  preferLocal,         // operator opt-in — MINSKY_LLM_PROVIDER=local-preferred
+}): { provider: "claude" | "local" | "hold", reason: string }
 ```
 
 Inputs:
 
-- `budgetState` — `proceed` / `graceful-degrade` / `circuit-break-and-notify` from `novel/budget-guard/src/index.ts`.
-- `lastClaudeFailure` — exit code + stderr-tail of the last claude iteration (signals like 429, 401, hard-limit text from anthropic CLI).
-- `localProbeResult` — 60-second probe result for `http://127.0.0.1:8080/v1/models`.
+- `budgetState` — `BudgetAction` from `novel/budget-guard/src/index.ts` (`normal` / `graceful-degrade` / `circuit-break-and-notify` / `weekly-cap-warn`).
+- `lastClaudeFailure` — exit code + last-4KB stderr-tail of the last `claude --print` iteration. The stderr-tail is classified by `isClaudeHardLimit(...)` against an explicit substring allowlist (`HARD_LIMIT_PATTERNS`: `usage limit`, `rate limit`, `rate-limited`, `quota exceeded`, `429`, `limit reached`, `limit will reset`, `limit hit`, …). The pattern set is the public contract — adding a substring is safe; removing one is breaking and needs a `pivot-llm-provider-selector` rule-#9 record.
+- `localProbeResult` — 60-second probe result for `http://127.0.0.1:8080/v1/models` produced by `scripts/check-mlx-server.mjs` (slice 1 substrate). The probe writes a JSON line (`{ reachable, observedAtMs, reason? }`) to stdout and exits 0/1; the wiring layer (slice 3) parses that line and threads it into `decideProvider`.
 
 Decision matrix:
 
 | budgetState | last-claude | local-probe | provider |
 | --- | --- | --- | --- |
-| `proceed` | clean | — | `claude` |
-| `proceed` | hard-limit | reachable | `local` |
+| `normal` | clean | — | `claude` |
+| `normal` | hard-limit | reachable | `local` |
+| `normal` | hard-limit | unreachable | `claude` (retry; log) |
 | `graceful-degrade` | clean | reachable | `claude` |
 | `graceful-degrade` | hard-limit | reachable | `local` |
 | `circuit-break-and-notify` | — | reachable | `local` |
-| `circuit-break-and-notify` | — | unreachable | (hold — log, don't iterate) |
+| `circuit-break-and-notify` | — | unreachable | `hold` — log, don't iterate |
+| `weekly-cap-warn` | clean | — | `claude` (warn ≠ pause) |
 
-Switchback: when `provider === "local"` and `budgetState` returns to `proceed`, the next 3 iterations run a "claude probe" (clean exit + non-empty stdout) before fully committing back. This avoids flap when the budget reset is partial.
+Operator escape hatches:
+
+- `forceClaude: true` (env `MINSKY_LLM_PROVIDER=claude-only` — slice 3 wires this) — always returns `claude`. Wins over everything.
+- `preferLocal: true` (env `MINSKY_LLM_PROVIDER=local-preferred` — slice 3 wires this) — returns `local` when the probe is reachable, even when budget is normal. Useful for testing aider/Qwen quality without waiting for budget exhaustion. Loses to `forceClaude`.
+
+Switchback: when `provider === "local"` and `budgetState` returns to `normal`, the next 3 iterations run a "claude probe" (clean exit + non-empty stdout) before fully committing back. This avoids flap when the budget reset is partial. Implemented in slice 4 (`switchback-claude-probe`).
 
 ## Throughput baseline (post-slice-3 measurement)
 
