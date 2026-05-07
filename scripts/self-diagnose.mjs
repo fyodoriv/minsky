@@ -34,6 +34,7 @@ import { promisify } from "node:util";
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
 
 import {
+  CANONICAL_REPO,
   ROLLING_30D_MIN_N,
   ROLLING_30D_MIN_PASS_RATE,
   ROLLING_WINDOW_DAYS,
@@ -1194,7 +1195,7 @@ export function defaultInvariants() {
       "pr",
       "list",
       "--repo",
-      "fyodoriv/minsky",
+      CANONICAL_REPO,
       "--author",
       "@me",
       "--state",
@@ -1224,7 +1225,7 @@ export function defaultInvariants() {
       "pr",
       "list",
       "--repo",
-      "fyodoriv/minsky",
+      CANONICAL_REPO,
       "--author",
       "@me",
       "--state",

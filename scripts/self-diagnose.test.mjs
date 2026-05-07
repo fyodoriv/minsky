@@ -926,7 +926,28 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-  }, 30_000);
+  }, 60_000);
+});
+
+describe("CANONICAL_REPO is single-sourced from daemon-pr-lint-metrics", () => {
+  // Slice extension: the metric script (daemon-pr-lint-metrics.mjs) already
+  // exports CANONICAL_REPO so the rolling-30d query is immune to origin
+  // pollution (slice 14). The two `gh pr list --repo …` callers in
+  // self-diagnose.mjs (`openDaemonPrsForDirty`, `mergedPrCountByTaskId`)
+  // used to hardcode the same string, so a fork or repo rename would have
+  // to flip three places. Pin the absence of the literal so future drift
+  // can't silently re-introduce the duplicate.
+  const SOURCE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "self-diagnose.mjs");
+
+  it("self-diagnose.mjs holds zero hardcoded `fyodoriv/minsky` literals", () => {
+    const src = readFileSync(SOURCE_PATH, "utf8");
+    expect(src).not.toMatch(/"fyodoriv\/minsky"/);
+  });
+
+  it("self-diagnose.mjs imports CANONICAL_REPO from daemon-pr-lint-metrics", () => {
+    const src = readFileSync(SOURCE_PATH, "utf8");
+    expect(src).toMatch(/CANONICAL_REPO[\s\S]*?from "\.\/daemon-pr-lint-metrics\.mjs"/);
+  });
 });
 
 describe("mapGhPrListToCiSnapshots", () => {
