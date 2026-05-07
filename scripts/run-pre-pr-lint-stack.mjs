@@ -27,13 +27,68 @@
 //   enforcement); Beck 1999 (CI as constraint enforcer); Forsgren-Humble-Kim 2018
 //   (DORA — same gate humans pass through must gate the bot).
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
+
+/**
+ * Resolve the canonical "main" reference the diff-relative checks (rule-3,
+ * rule-6, rule-12, lockfile-integrity, rule-1, rule-4, pattern-index,
+ * cloud-audit-gate) compare HEAD against. CI explicitly sets
+ * `RULE_*_DIFF_BASE=origin/main` because that's the only main-tracking ref the
+ * Github-Actions checkout populates. In a daemon worktree, `origin/main` is
+ * frequently stale (the worktree's `origin` may point at a placeholder remote
+ * never re-fetched), so the local lint stack and CI silently disagree on the
+ * diff range — the exact "passes locally / fails CI" footgun
+ * `daemon-pre-pr-lint-gate` was filed to close. Concrete evidence: PR #329
+ * (slice 30/N) passed `pnpm pre-pr-lint` locally and failed `rule-3-doc-first`
+ * on CI for this reason.
+ *
+ * Resolution order:
+ *   1. `PRE_PR_LINT_DIFF_BASE` env override (escape hatch — explicit beats
+ *      heuristic).
+ *   2. Local `main` if it resolves (fresh in dev + daemon worktrees).
+ *   3. `origin/main` if it resolves (CI's canonical reference).
+ *   4. `upstream/main` as a last fallback (fork pattern).
+ *   5. Hard fallback `origin/main` (preserves prior behaviour even when
+ *      no candidate resolves).
+ *
+ * @param {{ env?: NodeJS.ProcessEnv, refExists?: (ref: string) => boolean }} [opts]
+ * @returns {string}
+ */
+export function resolveDiffBase(opts = {}) {
+  const env = opts.env ?? process.env;
+  const refExists = opts.refExists ?? defaultRefExists;
+  const override = env["PRE_PR_LINT_DIFF_BASE"];
+  if (override !== undefined && override.length > 0) return override;
+  for (const ref of ["main", "origin/main", "upstream/main"]) {
+    if (refExists(ref)) return ref;
+  }
+  return "origin/main";
+}
+
+/**
+ * @param {string} ref
+ * @returns {boolean}
+ */
+function defaultRefExists(ref) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+    // rule-6: handled-locally — `git rev-parse` exits non-zero on missing
+    // refs, which Node surfaces as a thrown Error. That's the I/O boundary,
+    // not a programming bug — we want a boolean.
+  } catch {
+    return false;
+  }
+}
 
 /**
  * @typedef {"fast" | "full"} Stage
@@ -437,6 +492,73 @@ export function selectSteps(stage, manifest = STACK_MANIFEST) {
 }
 
 /**
+ * @param {readonly string[]} args
+ * @param {string} diffBase
+ * @returns {{ args: string[], changed: boolean }}
+ */
+function rewriteArgsDiffBase(args, diffBase) {
+  let changed = false;
+  const out = args.map((a) => {
+    if (a === "--diff-base=origin/main") {
+      changed = true;
+      return `--diff-base=${diffBase}`;
+    }
+    return a;
+  });
+  return { args: out, changed };
+}
+
+/**
+ * @param {Record<string, string> | undefined} env
+ * @param {string} diffBase
+ * @returns {{ env: Record<string, string> | undefined, changed: boolean }}
+ */
+function rewriteEnvDiffBase(env, diffBase) {
+  if (env === undefined) return { env, changed: false };
+  let changed = false;
+  /** @type {Record<string, string>} */
+  const next = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === "origin/main") {
+      next[k] = diffBase;
+      changed = true;
+    } else {
+      next[k] = v;
+    }
+  }
+  return { env: changed ? next : env, changed };
+}
+
+/**
+ * Pure transform: rewrite manifest entries that reference `origin/main` (env
+ * values OR `--diff-base=origin/main` argv) to use the resolved diff base.
+ * The static manifest keeps `origin/main` as its default — only the runtime
+ * invocation in `main()` swaps in the resolved value, so the existing
+ * STACK_MANIFEST shape (and the slice-15 CI-parity tests that pin it) don't
+ * shift. Fast-path no-op when `diffBase === "origin/main"`. Returns a frozen
+ * array (preserves the manifest's freeze contract).
+ *
+ * @param {readonly StackStep[]} manifest
+ * @param {string} diffBase
+ * @returns {readonly StackStep[]}
+ */
+export function withResolvedDiffBase(manifest, diffBase) {
+  if (diffBase === "origin/main") return manifest;
+  return Object.freeze(
+    manifest.map((step) => {
+      const argRewrite = rewriteArgsDiffBase(step.args, diffBase);
+      const envRewrite = rewriteEnvDiffBase(step.env, diffBase);
+      if (!argRewrite.changed && !envRewrite.changed) return step;
+      return Object.freeze({
+        ...step,
+        args: argRewrite.args,
+        ...(envRewrite.env !== undefined ? { env: envRewrite.env } : {}),
+      });
+    }),
+  );
+}
+
+/**
  * @callback RunStep
  * @param {StackStep} step
  * @returns {Promise<StepResult>}
@@ -644,7 +766,9 @@ export function renderJson(result) {
 
 async function main() {
   const { stage, json } = parseArgs(process.argv.slice(2));
-  const result = await runStack(stage, defaultRunStep);
+  const diffBase = resolveDiffBase();
+  const manifest = withResolvedDiffBase(STACK_MANIFEST, diffBase);
+  const result = await runStack(stage, defaultRunStep, manifest);
   process.stdout.write(`${json ? renderJson(result) : renderHuman(result)}\n`);
   process.exit(result.allPass ? 0 : 1);
 }

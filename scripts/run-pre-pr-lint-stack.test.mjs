@@ -16,9 +16,11 @@ import {
   buildStepResult,
   parseArgs,
   renderJson,
+  resolveDiffBase,
   runStack,
   selectSteps,
   stripGitHookEnv,
+  withResolvedDiffBase,
 } from "./run-pre-pr-lint-stack.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -832,5 +834,108 @@ describe("docs/daemon-pre-pr-gate.md env-dependent allowlist drift-protection", 
       expect(typeof reason).toBe("string");
       expect(reason.length, `${name} needs a one-line reason`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("resolveDiffBase (slice 31/N — stale-origin/main footgun)", () => {
+  test("returns explicit override from PRE_PR_LINT_DIFF_BASE", () => {
+    expect(
+      resolveDiffBase({ env: { PRE_PR_LINT_DIFF_BASE: "v1.2.3" }, refExists: () => false }),
+    ).toBe("v1.2.3");
+  });
+
+  test("ignores empty override (treated as unset)", () => {
+    expect(
+      resolveDiffBase({ env: { PRE_PR_LINT_DIFF_BASE: "" }, refExists: (r) => r === "main" }),
+    ).toBe("main");
+  });
+
+  test("prefers local `main` when it resolves (daemon worktree case)", () => {
+    expect(resolveDiffBase({ env: {}, refExists: (r) => r === "main" })).toBe("main");
+  });
+
+  test("falls back to `origin/main` when only it resolves (CI checkout case)", () => {
+    expect(resolveDiffBase({ env: {}, refExists: (r) => r === "origin/main" })).toBe("origin/main");
+  });
+
+  test("falls back to `upstream/main` when only it resolves (fork pattern)", () => {
+    expect(resolveDiffBase({ env: {}, refExists: (r) => r === "upstream/main" })).toBe(
+      "upstream/main",
+    );
+  });
+
+  test("hard fallback to `origin/main` when no candidate resolves", () => {
+    expect(resolveDiffBase({ env: {}, refExists: () => false })).toBe("origin/main");
+  });
+
+  test("when both `main` and `origin/main` exist, `main` wins (freshest source-of-truth)", () => {
+    expect(
+      resolveDiffBase({ env: {}, refExists: (r) => r === "main" || r === "origin/main" }),
+    ).toBe("main");
+  });
+});
+
+/**
+ * Count `--diff-base=<v>` argv occurrences across a manifest.
+ * @param {readonly { args: readonly string[] }[]} manifest
+ * @param {string} v
+ * @returns {number}
+ */
+function countDiffBaseArgs(manifest, v) {
+  return manifest.reduce((n, s) => n + s.args.filter((a) => a === `--diff-base=${v}`).length, 0);
+}
+
+/**
+ * Count env-value occurrences across a manifest.
+ * @param {readonly { env?: Record<string, string> }[]} manifest
+ * @param {string} v
+ * @returns {number}
+ */
+function countEnvValues(manifest, v) {
+  return manifest.reduce((n, s) => n + Object.values(s.env ?? {}).filter((x) => x === v).length, 0);
+}
+
+describe("withResolvedDiffBase (slice 31/N — manifest rewrite)", () => {
+  test("no-op fast path when diffBase === 'origin/main' (returns same reference)", () => {
+    expect(withResolvedDiffBase(STACK_MANIFEST, "origin/main")).toBe(STACK_MANIFEST);
+  });
+
+  test("rewrites every `*_DIFF_BASE` env value from origin/main to the resolved base", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(countEnvValues(swapped, "origin/main")).toBe(0);
+    expect(countEnvValues(swapped, "main")).toBeGreaterThanOrEqual(4);
+  });
+
+  test("rewrites every `--diff-base=origin/main` argv to the resolved base", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(countDiffBaseArgs(swapped, "origin/main")).toBe(0);
+    expect(countDiffBaseArgs(swapped, "main")).toBeGreaterThanOrEqual(3);
+  });
+
+  test("preserves the original manifest unchanged (pure transform — referential equality of all args+env)", () => {
+    const beforeArgCount = countDiffBaseArgs(STACK_MANIFEST, "origin/main");
+    const beforeEnvCount = countEnvValues(STACK_MANIFEST, "origin/main");
+    withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(countDiffBaseArgs(STACK_MANIFEST, "origin/main")).toBe(beforeArgCount);
+    expect(countEnvValues(STACK_MANIFEST, "origin/main")).toBe(beforeEnvCount);
+  });
+
+  test("returns a frozen array (preserves manifest's freeze contract)", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(Object.isFrozen(swapped)).toBe(true);
+  });
+
+  test("steps without origin/main references pass through unchanged (referential equality)", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    const biome = STACK_MANIFEST.find((s) => s.name === "biome");
+    const swappedBiome = swapped.find((s) => s.name === "biome");
+    expect(swappedBiome).toBe(biome);
+  });
+
+  test("regression-floor: pre-slice-31 manifest references origin/main in ≥7 sites", () => {
+    const total =
+      countDiffBaseArgs(STACK_MANIFEST, "origin/main") +
+      countEnvValues(STACK_MANIFEST, "origin/main");
+    expect(total).toBeGreaterThanOrEqual(7);
   });
 });
