@@ -180,8 +180,8 @@ describe("checkAllThreatModelSections — multi-file aggregation", () => {
   });
 });
 
-describe("real novel/*/README.md — the threat-model invariant on main", () => {
-  test("all 16 constitutional novel package READMEs carry a STRIDE-shaped threat-model section", async () => {
+describe("real novel/**/README.md — the threat-model invariant on main", () => {
+  test("all 17 constitutional novel package READMEs carry a STRIDE-shaped threat-model section", async () => {
     /** @type {Map<string, string>} */
     const contents = new Map();
     for (const rel of THREAT_MODEL_README_PATHS) {
@@ -198,10 +198,14 @@ describe("real novel/*/README.md — the threat-model invariant on main", () => 
     expect(failures.length).toBe(0);
   });
 
-  test("the hardcoded path list matches all top-level novel/* and novel/adapters/* READMEs", () => {
-    expect(THREAT_MODEL_README_PATHS.length).toBe(16);
+  test("the hardcoded path list covers top-level novel/*, novel/adapters/*, and novel/bridges/* READMEs", () => {
+    expect(THREAT_MODEL_README_PATHS.length).toBe(17);
     const adapterCount = THREAT_MODEL_README_PATHS.filter((p) => p.includes("/adapters/")).length;
     expect(adapterCount).toBe(6);
-    expect(THREAT_MODEL_README_PATHS.length - adapterCount).toBe(10);
+    const bridgeSubpkgCount = THREAT_MODEL_README_PATHS.filter(
+      (p) => p.startsWith("novel/bridges/") && p !== "novel/bridges/README.md",
+    ).length;
+    expect(bridgeSubpkgCount).toBe(1);
+    expect(THREAT_MODEL_README_PATHS.length - adapterCount - bridgeSubpkgCount).toBe(10);
   });
 });

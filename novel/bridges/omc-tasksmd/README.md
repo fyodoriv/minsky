@@ -49,6 +49,16 @@ Per constitutional rule #7 (vision.md § 7).
 | 5 | Existing TASKS.md has a stale `## OMC Sync` section | re-run after upstream change | replace the section in place; do not duplicate | covered by `novel/bridges/omc-tasksmd/src/sync.test.ts` replace-existing test |
 | 6 | Caller requests `mode: "merge-by-id"` (v1+ feature) | premature use | throw with a `v1+` reference (rule #6 let-it-crash — caller decides next step) | covered by `novel/bridges/omc-tasksmd/src/sync.test.ts` merge-by-id assertion |
 
+## Threat model
+
+Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBlanc, *Writing Secure Code*, 2003.
+
+- **Untrusted inputs**: every `*.json` file under `<repoRoot>/.omc/state/team/` (written by sibling OMC processes running as the same user — schema-validated by `mapper.ts`, JSON-parsed by the reader); the `existingTasksMd` string passed to `syncOmcToTasksMd(...)` (the on-disk TASKS.md the caller hands in); `repoRoot` and `teamName` arguments supplied by the caller.
+- **Trusted state**: `mapper` and `sync` are pure functions with no I/O and no shared state; the OMC-managed section is bracketed by a fixed sentinel HTML comment so the projection cannot escape into operator-curated TASKS.md content above or below it; the reader is the sole I/O boundary and only reads (no writes to `.omc/state/`).
+- **Trust boundary**: the on-disk handoff between OMC's sibling-owned `.omc/state/team/*.json` files and Minsky's TASKS.md sync section. Both sides run as the same OS user — there is no privilege boundary; the surface that matters is the *content* boundary (what crosses from the JSON projection into the human-readable repo file).
+- **STRIDE focus**: **T**ampering — the section-replace idempotency (sentinel HTML comment + heading) confines projected content to the OMC-managed section; an attacker writing crafted `subject` / `description` strings (e.g., embedded markdown headings) cannot collapse adjacent operator-authored sections into the OMC block (chaos table row 5 pins the replace-in-place behaviour). **I**nformation disclosure — every documented OMC field that the projection surfaces (`subject`, `description`, `owner`, `blocked_by`, `created_at`, `version`) lands verbatim in TASKS.md, which is committed to git; operators must classify what flows into OMC accordingly, since anything in those fields becomes part of the repo's permanent history. The lossy-projection table above doubles as the disclosure boundary — fields outside it (`claim.token`, `metadata`, `result`, `error`) are dropped at the mapper, never serialised to TASKS.md. **D**enial-of-service — malformed JSON files are gracefully skipped with a stderr advisory (chaos table row 2); a single poison file cannot abort the whole snapshot, and missing `.omc/state/team/` returns `[]` (chaos table row 1).
+- **Performance-first carve-out** (rule #13's relief valve): none declared. The reader's sole I/O is a directory walk + JSON parse per file; the mapper + sync are pure. Tightening any of these would not measurably move security posture.
+
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: a thin read-only OMC → tasks.md bridge against synthetic fixtures parses + maps + syncs deterministically, validating PR #77's parseable verdict.
