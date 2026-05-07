@@ -56,3 +56,4 @@ desktop.ini
 # the auto-emitted *-task-block.md + *-workflow.patch files are not.
 tmp/rule-11/*-task-block.md
 tmp/rule-11/*-workflow.patch
+.aider*
