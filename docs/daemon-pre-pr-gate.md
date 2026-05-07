@@ -67,6 +67,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `anchor-primary-source` — every rule-#9 record's anchor cites a primary source, not a tutorial.
 - `measurement-inspects-output` — every rule-#9 record's measurement command inspects runtime output, not just exit code.
 - `skill-rule-cap` — every advisory Claude Code skill resolves to ≤ the documented number of vision.md rules.
+- `user-story-security-section` — every user story (001–006) carries a `## Security & privacy` section that cites `rule #13` and has ≥5 non-empty content lines (rule #13 / `security-privacy-priority-substrate` acceptance criterion #2).
 
 The env-dependent CI jobs (`hygiene` / `linux-supervisor-integration` / `macos-supervisor-integration` / `maciek-smoke` / `pr-self-grade` / `pr-security-review`) are intentionally absent from the manifest — they cannot evaluate against a local checkout without GitHub / pipx / dbus plumbing the daemon does not have. CI runs them; this gate does not pretend to. (Two further CI jobs, `rule-11-flake-detection` and `cto-audit-pr-conventions`, run on every PR for diagnostic value but are not in the `ci:` aggregator's `needs:` — they don't gate the meta-check, so they are not in the manifest either.)
 
