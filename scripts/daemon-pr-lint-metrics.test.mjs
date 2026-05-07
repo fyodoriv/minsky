@@ -527,3 +527,49 @@ describe("ROLLING_30D_MIN_N prose ↔ canonical constant parity", () => {
     expect(block).toContain(minNProseShape(ROLLING_30D_MIN_N));
   });
 });
+
+describe("ROLLING_WINDOW_DAYS prose ↔ canonical constant parity", () => {
+  // Slice 28/N: extends slices 26/N + 27/N to the third load-bearing number
+  // exported from this module — the rolling-window width
+  // (`ROLLING_WINDOW_DAYS = 30`). `scripts/self-diagnose.mjs` imports the
+  // constant directly (`since = Date.now() - ROLLING_WINDOW_DAYS * 86_400_000`),
+  // so the in-code dependency stays tight; two operator-facing surfaces still
+  // cite the window inline as prose:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` — "rolling 30d daemon-PR clean-CI
+  //     fraction" (the gate's overview line).
+  //   - `TASKS.md` `daemon-pre-pr-lint-gate` block — Details "rolling 30d
+  //     pass-rate" + Measurement "rolling 30d window holds ≥10 PRs".
+  //
+  // A future PR widening the window to 60d (e.g., to dampen short-term noise
+  // in the verdict) would update the constant + its self-diagnose import
+  // without tripping any test, while the prose silently kept claiming "30d".
+  // Operators reading either surface would see a stale number; the metric's
+  // observed-vs-expected mismatch would surface only via an alert chain none
+  // of these surfaces own. Same single-shape pattern as slice 27/N — the
+  // daemon brief is not covered because the window width is not cited there.
+
+  /**
+   * Render the canonical window width in the prose form both surfaces use:
+   * `${n}d` (e.g., "30d"). This is the natural compact shape a writer types
+   * for a day-count window; pinning that exact byte sequence forces a prose
+   * update in lockstep with the constant.
+   *
+   * @param {number} days
+   * @returns {string}
+   */
+  function windowDaysProseShape(days) {
+    return `${days}d`;
+  }
+
+  test("docs/daemon-pre-pr-gate.md cites the window width in Nd form", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    expect(doc).toContain(windowDaysProseShape(ROLLING_WINDOW_DAYS));
+  });
+
+  test("TASKS.md `daemon-pre-pr-lint-gate` block cites the window width in Nd form", () => {
+    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
+    const block = extractDaemonPrePrLintGateBlock(tasksMd);
+    expect(block).toContain(windowDaysProseShape(ROLLING_WINDOW_DAYS));
+  });
+});
