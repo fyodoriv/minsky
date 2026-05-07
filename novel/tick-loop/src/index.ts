@@ -617,6 +617,16 @@ export {
   parseGhPrListForDaemonPrState,
 } from "./daemon-pr-state.js";
 
+// Daemon fix-CI brief builder (slice 4/N for `daemon-fix-own-pr-on-ci-failure`):
+// pure builder of the prompt the daemon hands to claude --print when
+// decideDaemonPrState returns `pr-failing`. Wire-in lands in slice 5+.
+export {
+  type BuildFixCiBriefInput,
+  type PrFailingVerdict,
+  FIX_CI_BRIEF_MAX_CHARS,
+  buildFixCiBrief,
+} from "./daemon-fix-own-pr.js";
+
 // Daemon task-completion detector (P0 watchdog from #346, operator 2026-05-07):
 // pure decision the daemon consults to auto-remove TASKS.md task blocks once
 // their substrate has shipped (≥1 merged PR + Acceptance field has no
