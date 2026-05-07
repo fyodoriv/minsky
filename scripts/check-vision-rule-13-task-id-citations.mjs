@@ -24,11 +24,13 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
-/** Canonical IDs — must match SIBLING_P0_IDS in check-rule-13-sibling-anchors.mjs. */
+/**
+ * Canonical IDs — must match SIBLING_P0_IDS in check-rule-13-sibling-anchors.mjs.
+ * Shipped tasks are removed once their PR merges; dashboard-localhost-only-by-default shipped.
+ */
 export const SIBLING_P0_IDS = Object.freeze([
   "secret-scanning-precommit-and-ci",
   "supervisor-sandbox-syscall-restriction",
-  "dashboard-localhost-only-by-default",
   "otel-no-pii-in-spans-lint",
   "supply-chain-hardening-lockfile-sbom-slsa",
   "cloud-tier-external-security-audit-gate",

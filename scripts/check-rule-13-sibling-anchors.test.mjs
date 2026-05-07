@@ -41,10 +41,10 @@ describe("checkSiblingAnchors", () => {
   });
 
   it("passes for 'rule #13' cited in various positions in the Anchor line", () => {
-    const id = "dashboard-localhost-only-by-default";
+    const id = "otel-no-pii-in-spans-lint";
     const anchors = [
       "rule #13 (vision.md § 13 — security); OWASP",
-      "OWASP; rule #13 (item 5); rule #7",
+      "OWASP; rule #13 (item 2); rule #7",
       "rule #13; Saltzer & Schroeder 1975",
     ];
     for (const anchor of anchors) {
@@ -54,11 +54,11 @@ describe("checkSiblingAnchors", () => {
     }
   });
 
-  it("handles all 6 canonical sibling IDs being present in SIBLING_P0_IDS", () => {
-    expect(SIBLING_P0_IDS).toHaveLength(6);
+  it("handles the 5 open sibling IDs in SIBLING_P0_IDS (dashboard-localhost-only-by-default shipped and removed)", () => {
+    expect(SIBLING_P0_IDS).toHaveLength(5);
     expect(SIBLING_P0_IDS).toContain("secret-scanning-precommit-and-ci");
     expect(SIBLING_P0_IDS).toContain("supervisor-sandbox-syscall-restriction");
-    expect(SIBLING_P0_IDS).toContain("dashboard-localhost-only-by-default");
+    expect(SIBLING_P0_IDS).not.toContain("dashboard-localhost-only-by-default");
     expect(SIBLING_P0_IDS).toContain("otel-no-pii-in-spans-lint");
     expect(SIBLING_P0_IDS).toContain("supply-chain-hardening-lockfile-sbom-slsa");
     expect(SIBLING_P0_IDS).toContain("cloud-tier-external-security-audit-gate");

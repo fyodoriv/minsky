@@ -69,9 +69,10 @@ describe("checkVisionRule13Citations", () => {
     expect(results[0]?.cited).toBe(false);
   });
 
-  it("exports SIBLING_P0_IDS with the canonical 6 IDs", () => {
-    expect(SIBLING_P0_IDS).toHaveLength(6);
+  it("exports SIBLING_P0_IDS with the 5 open sibling IDs (dashboard-localhost-only-by-default shipped)", () => {
+    expect(SIBLING_P0_IDS).toHaveLength(5);
     expect(SIBLING_P0_IDS).toContain("secret-scanning-precommit-and-ci");
     expect(SIBLING_P0_IDS).toContain("cloud-tier-external-security-audit-gate");
+    expect(SIBLING_P0_IDS).not.toContain("dashboard-localhost-only-by-default");
   });
 });

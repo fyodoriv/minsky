@@ -15,6 +15,7 @@
  * @otel-exempt thin I/O boundary — `createServer` carries the OTEL span.
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -64,6 +65,10 @@ async function resolveGetValue(): Promise<GetValue | undefined> {
 }
 
 const port = Number.parseInt(process.env["PORT"] ?? "8080", 10);
+// OWASP "Default Secure Configuration": bind localhost-only; require explicit opt-in for LAN exposure.
+const bindHost = process.env["MINSKY_DASHBOARD_BIND"] ?? "127.0.0.1";
+// Random per-run token → connection-level auth for POST /control without persisting a secret.
+const controlToken = process.env["MINSKY_CONTROL_TOKEN"] ?? randomUUID();
 const getValue = await resolveGetValue();
 
 // Activity feed reads the supervisor's stdout log on every request —
@@ -76,7 +81,7 @@ const minskyHome = process.env["MINSKY_HOME"] ?? process.cwd();
 const activityLogPath = resolve(minskyHome, ".minsky/tick-loop.out.log");
 const getActivity = () => loadRecentSpans(activityLogPath, ACTIVITY_LIMIT);
 
-const args = { getActivity, ...(getValue === undefined ? {} : { getValue }) };
+const args = { getActivity, controlToken, ...(getValue === undefined ? {} : { getValue }) };
 const { fetch } = createServer(args);
 
 // `serve()` emits an unhandled `error` event on EADDRINUSE — node's default
@@ -85,8 +90,15 @@ const { fetch } = createServer(args);
 // usually a stale dashboard process) and exit with an actionable message
 // instead. The supervisor (if any) sees exit 1 and applies its restart
 // policy; the operator running `pnpm dogfood:ui` directly sees the hint.
-const server = serve({ fetch, port }, (info) => {
-  process.stdout.write(`dashboard-web listening on http://localhost:${info.port}/\n`);
+const server = serve({ fetch, port, hostname: bindHost }, (info) => {
+  const displayHost = bindHost === "127.0.0.1" ? "localhost" : bindHost;
+  process.stdout.write(`dashboard-web listening on http://${displayHost}:${info.port}/\n`);
+  process.stdout.write(`dashboard-web control token: ${controlToken}\n`);
+  if (bindHost !== "127.0.0.1" && bindHost !== "::1") {
+    process.stderr.write(
+      `dashboard-web WARNING: binding to ${bindHost} — dashboard is reachable from any LAN device.\n  Protect with a reverse proxy + auth. See docs/security/dashboard-exposure.md\n`,
+    );
+  }
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
