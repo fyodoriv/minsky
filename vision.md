@@ -218,6 +218,34 @@ The first inaugural case under rule #11 is `lighthouse-mobile` on GitHub-hosted 
 
 Sources: Memon, A., et al., "Taming Google-Scale Continuous Testing", *ICSE-SEIP* 2017 (the "DETECTOR" system at Google — flake-rate measurement is itself a CI primitive); Forsgren, Humble, Kim, *Accelerate*, 2018, Ch. 3 (DORA test-reliability — a CI gate that doesn't run reliably teaches the team to ignore failure, which is the worst possible signal); Beyer, B., Jones, C., Petoff, J., Murphy, N. R. (eds.), *Site Reliability Engineering*, O'Reilly, 2016, Ch. 17 (post-mortem culture — the metric is the bug, not the change); Beck, K., *Extreme Programming Explained*, 1999, Ch. 17 (CI as the constraint enforcer — only deterministic checks are constraints; flaky checks are noise); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (rule #9's pre-registration anchor — flaky-fix-pre-registration is the rule-#9 contract applied to the metric itself rather than a change the metric gates); rule #10 (the deterministic-enforcement substrate — rule #11 is what keeps rule #10 from being an empty assertion).
 
+### 13. Security & privacy — second priority after performance
+
+*Performance comes first, then security and privacy in a reasonable way* (operator directive 2026-05-06). Where performance and security conflict, performance wins with a documented declared deviation following rule #8's deviation discipline (the same relief valve as rule #12's scope-discipline carve-out). Where they do not conflict, every Minsky component and every feature PR must satisfy the 8-item minimum bar below. "Reasonable way" means adopting industry-standard primitives — rule #1 governs; this rule makes the security domain explicit.
+
+**8-item minimum bar** (Saltzer & Schroeder 1975; NIST SSDF 2022; OWASP LLM Top 10 2025; SLSA 1.0):
+
+1. **Least privilege.** Every process, script, and agent persona requests only the permissions it needs. Applied structurally: the supervisor daemon runs inside the OS sandbox (`supervisor-sandbox-syscall-restriction`); personas receive only the tool-call permissions their user story declares.
+
+2. **No secrets or PII in spans or logs.** OTEL spans and log lines never carry secrets, credentials, or PII — GDPR Article 25 (privacy by design) applies at the observability layer. Applied by CI lint (`otel-no-pii-in-spans-lint`).
+
+3. **Secret scanning at commit and CI.** Pre-commit and CI hooks scan for secrets before code reaches the remote. A detected secret blocks merge; the override is intentional and logged (`secret-scanning-precommit-and-ci`).
+
+4. **Supply-chain integrity.** Lockfile is pinned and integrity-checked in CI. A CycloneDX SBOM is generated on release. SLSA Build Level 3 provenance is published for release artefacts (`supply-chain-hardening-lockfile-sbom-slsa`).
+
+5. **Dashboard binds localhost by default.** The dashboard-web HTTP server binds to `127.0.0.1`, never `0.0.0.0`. LAN exposure is an explicit opt-in with a documented declaration (`dashboard-localhost-only-by-default`).
+
+6. **Industry-standard primitives only.** Minsky does not invent crypto, sandbox profiles, or threat models. It adopts: TrustedBSD MAC profiles (macOS), systemd Security Directives (Linux), gitleaks / trufflehog (secret scanning), CycloneDX (SBOM), Sigstore (provenance). Rule #1 governs.
+
+7. **Threat model per novel package.** Each package under `novel/` documents a STRIDE-shaped threat model section in its README (Shostack, *Threat Modeling*, 2014; Spoofing / Tampering / Repudiation / Information Disclosure / Denial of Service / Elevation of Privilege) with ≥5 non-empty content lines. Gate: `scripts/check-threat-model-section.mjs`.
+
+8. **Pre-registered security experiments.** Security-affecting changes declare their threat-mitigation hypothesis, success threshold, pivot threshold, and measurement command per rule #9 — no security change is exempt. Post-hoc metric selection is forbidden.
+
+**Performance-first carve-out clause.** When a security or privacy measure would meaningfully degrade a rule-#1-through-#6 performance property (token throughput, tick latency, overnight uptime, MTTR), the measure is deferred with a documented declared deviation per rule #8. The deviation records: which security property is relaxed, the residual risk accepted, and the condition under which the measure ships. The carve-out is the relief valve, not a bypass — the deviation is public, never silent.
+
+**Substrate cohesion.** Six sibling P0 tasks implement the minimum bar: `secret-scanning-precommit-and-ci` (item 3), `supervisor-sandbox-syscall-restriction` (item 1), `dashboard-localhost-only-by-default` (item 5), `otel-no-pii-in-spans-lint` (item 2), `supply-chain-hardening-lockfile-sbom-slsa` (item 4), `cloud-tier-external-security-audit-gate` (item 8 prerequisite). A CI lint (`scripts/check-rule-13-sibling-anchors.mjs`) verifies each sibling cites `rule #13` in its Anchor line; the inverse lint (`scripts/check-vision-rule-13-task-id-citations.mjs`) verifies this section cites each sibling's canonical task ID as backticked text.
+
+Sources: Saltzer & Schroeder, "The Protection of Information in Computer Systems", *Proceedings of the IEEE* 63(9), 1975 (the 8 design principles — least privilege, fail-safe defaults, economy of mechanism, complete mediation, open design, separation of privilege, least common mechanism, psychological acceptability); NIST SP 800-218, *Secure Software Development Framework (SSDF)*, 2022; OWASP LLM Top 10, 2025 edition; GDPR Article 25 (privacy by design and by default); Shostack, *Threat Modeling: Designing for Security*, Wiley, 2014 (STRIDE methodology); SLSA Specification 1.0, slsa.dev/spec/v1.0/, 2025; operator directive 2026-05-06 — "make security and privacy one of main priorities for Minsky ... performance comes first but in a reasonable way comes second. Eg it's fine to follow industry standard solutions."
+
 ## Pattern conformance index
 
 Operationalises rule #8. Each row maps a Minsky artifact (file path, package, interface, architectural decision, process step) to its governing pattern, the published source, and its conformance level. **Every PR that adds a new top-level artifact adds a row in the same commit** (a CI lint will eventually enforce this; tracked in TASKS.md).

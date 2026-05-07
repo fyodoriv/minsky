@@ -127,6 +127,18 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-rule-12-scope-discipline.mjs"],
     env: { RULE_12_DIFF_BASE: "origin/main" },
   },
+  {
+    name: "rule-13-sibling-anchors",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-13-sibling-anchors.mjs"],
+  },
+  {
+    name: "rule-13-vision-task-citations",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-vision-rule-13-task-id-citations.mjs"],
+  },
   // ---- full stage ----------------------------------------------------------
   {
     name: "vitest",
@@ -239,6 +251,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-skill-rule-cap.mjs"],
+  },
+  {
+    name: "threat-model-section",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-threat-model-section.mjs"],
   },
 ]);
 

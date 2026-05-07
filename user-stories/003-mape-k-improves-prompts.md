@@ -74,3 +74,12 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Conformance level**: full
 - **Index row**: vision.md § "Pattern conformance index" row 43
 - **Notes**: Each phase (Monitor / Analyze / Plan / Execute) emits one OTEL span, and the Knowledge base is `constraints.md`. Cross-references the planned implementation at row 5 (`claude-mape-k-loop`); this row anchors the user-story specification, row 5 anchors the implementation contract.
+
+## Security & privacy
+
+Per constitutional rule #13 (vision.md § 13 — Security & privacy, second priority after performance).
+
+- **Threat surface**: the MAPE-K loop reads prompt text and performance metrics; the Analysis phase writes back to `constraints.md`. A prompt-injection in a task's hypothesis field could attempt to modify `constraints.md` in adversarial ways (OWASP LLM Top 10 2025, LLM01 — Prompt Injection).
+- **Prompt injection mitigation**: the Knowledge base (`constraints.md`) is version-controlled and diff-reviewed; the MAPE-K loop's Plan phase is bounded by the EXPERIMENT.yaml schema (validated by `@minsky/experiment-record`) — free-form injection in a task block cannot escape the schema's field types.
+- **No PII in spans**: OTEL spans across the four MAPE-K phases carry only anonymous metrics (token counts, latency, experiment IDs) — never the prompt text itself (`otel-no-pii-in-spans-lint`).
+- **Threat model**: see `novel/mape-k-loop/README.md` § Threat model (STRIDE-shaped, ≥5 lines; ships with slice 7 of `security-privacy-priority-substrate`).

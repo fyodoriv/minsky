@@ -85,3 +85,13 @@ The 12 failure-mode rows above are mapped to their existing tests (or the deferr
 - **Conformance level**: partial
 - **Index row**: vision.md § "Pattern conformance index" row 41
 - **Notes**: The supervisor primitive is systemd / launchd (POSIX), not BEAM — same deviation already declared at row 4. Tick cadence is minutes-to-hours, so respawn latency (~100 ms vs Erlang's microseconds) is invisible at the user-story's success threshold (`overnight_uptime_pct` ≥ 99 %).
+
+## Security & privacy
+
+Per constitutional rule #13 (vision.md § 13 — Security & privacy, second priority after performance).
+
+- **Threat surface**: the supervisor runs overnight as the operator's full UID with read access to `~/.claude/projects/` (every Claude Code session log on the machine, which may contain API keys and sensitive code). It also spawns `claude --print` per iteration with the Anthropic API key in the process environment.
+- **Least privilege**: the OS sandbox (`supervisor-sandbox-syscall-restriction`) limits the daemon to `ReadWritePaths=<repo>` and `ProtectHome=read-only` on Linux; TrustedBSD deny-default on macOS. The overnight run does not access `~/.claude/projects/` directly — session logs are read by the `claude` binary, which runs inside the sandbox's allowed-exec list.
+- **No PII in spans**: OTEL spans from the overnight run (tick iteration spans, task-claim spans) carry only task IDs and anonymous metrics — never code snippets, API keys, or chat content (`otel-no-pii-in-spans-lint`).
+- **Secret scanning**: pre-commit hooks prevent secrets accidentally committed to `TASKS.md` or generated code from reaching the remote (`secret-scanning-precommit-and-ci`).
+- **Threat model**: see `novel/tick-loop/README.md` § Threat model (STRIDE-shaped, ≥5 lines; ships with slice 7 of `security-privacy-priority-substrate`).

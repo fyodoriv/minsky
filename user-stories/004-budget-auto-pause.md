@@ -72,3 +72,12 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Conformance level**: full
 - **Index row**: vision.md § "Pattern conformance index" row 44
 - **Notes**: The 70 % / 85 % / weekly-cap thresholds map directly to SRE burn-rate ladder; the model-downgrade (Sonnet to Haiku) is the load-shedding response. Cross-references the implementation at rows 10 and 26 (`@minsky/budget-guard` watchdog and `decide()` decision function); this row anchors the user-story specification.
+
+## Security & privacy
+
+Per constitutional rule #13 (vision.md § 13 — Security & privacy, second priority after performance).
+
+- **Threat surface**: the BudgetGuard HTTP server exposes `/budget.json` and `/budget.flag` over the local network. A spoofed high-budget reading could prevent the supervisor from pausing when it should (Denial of Service via false signal).
+- **Localhost-only binding**: the BudgetGuard HTTP server binds to `127.0.0.1` by default (companion to `dashboard-localhost-only-by-default`). Budget readings that arrive over anything other than the loopback interface are rejected.
+- **No credentials in budget spans**: the budget decision spans carry only the decision label (`NORMAL` / `WARN` / `PAUSE`) and the remaining-budget percentage — never the API key or account identifier used to derive the reading (`otel-no-pii-in-spans-lint`).
+- **Threat model**: see `novel/budget-guard/README.md` § Threat model (STRIDE-shaped, ≥5 lines; ships with slice 7 of `security-privacy-priority-substrate`).

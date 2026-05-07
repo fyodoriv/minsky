@@ -72,3 +72,13 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Conformance level**: full
 - **Index row**: vision.md § "Pattern conformance index" row 45
 - **Notes**: Three values, no chrome; the surface stays at the periphery of attention until needed. Inverted dwell metric (`wrist_dwell_seconds_per_day` ≤ 60 s) operationalises the calm-tech invariant: more attention to the read-out is a sign the surface or the system is failing. Cross-references row 12 (the Watch surface as the implementation locus); this row anchors the user-story specification.
+
+## Security & privacy
+
+Per constitutional rule #13 (vision.md § 13 — Security & privacy, second priority after performance).
+
+- **Threat surface**: the Watch surface polls the dashboard-web endpoint for the three numbers. The polling response must not carry PII or data that leaks system state beyond the three intended values (`overnight_uptime_pct`, `tokens_remaining_pct`, `wrist_dwell_seconds_per_day`).
+- **Localhost-only dashboard**: the dashboard-web endpoint from which the Watch surface reads binds to `127.0.0.1` (`dashboard-localhost-only-by-default`). An Apple Watch or iPhone reads via the Tailscale VPN, not a public-facing URL.
+- **Minimal response surface**: the `/watch.json` endpoint returns exactly three numeric values and a timestamp. No task content, no repo paths, no API credentials appear in the response.
+- **No PII in spans**: the Watch-surface refresh spans carry only the three metric values and the poll timestamp (`otel-no-pii-in-spans-lint`).
+- **Threat model**: see `novel/dashboard-web/README.md` § Threat model (STRIDE-shaped, ≥5 lines; ships with slice 7 of `security-privacy-priority-substrate`).

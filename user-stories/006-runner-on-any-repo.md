@@ -96,3 +96,13 @@ This user story IS the umbrella rule-#9 contract for the cross-repo runner. Per-
 - **Conformance level**: full (planned).
 - **Index row**: vision.md § "Pattern conformance index" — new row added when `cross-repo-runner-v0` ships per rule #8.
 - **Notes**: The actor's "universe" is `MINSKY_HOST_ROOT`; the contract is `.minsky/vision.md` + `repo.yaml`. The check-run boundary is asynchronous: `repository_dispatch` → minsky workflow → GitHub-API check-post; eventual-consistency window is bounded by dispatch-delivery + workflow-run time (typically <60s). The supervised spawn is the existing `ProcessSpawnStrategy` — no new spawn surface (rule #1 — don't reinvent).
+
+## Security & privacy
+
+Per constitutional rule #13 (vision.md § 13 — Security & privacy, second priority after performance).
+
+- **Threat surface**: the cross-repo runner has read access to the host's `TASKS.md` and write access to the host's `.minsky/` sidecar. A malicious `TASKS.md` entry could attempt prompt injection into the synthesised `EXPERIMENT.yaml` (OWASP LLM Top 10 2025, LLM01). The runner also reads `.minsky/repo.yaml` which controls allowed paths — a tampered `repo.yaml` could widen the sandbox.
+- **Prompt injection mitigation**: `EXPERIMENT.yaml` is validated by `@minsky/experiment-record`'s schema before the spawn; fields that do not match the declared types are rejected at parse time. The runner's `allowed_paths` are read from `repo.yaml` but validated against a fixed allow-list of path patterns — no arbitrary shell expansion.
+- **Supply-chain integrity**: the runner binary ships with SLSA Build Level 3 provenance and a CycloneDX SBOM entry (`supply-chain-hardening-lockfile-sbom-slsa`). Host operators can verify the binary before bootstrapping.
+- **No host data in minsky spans**: OTEL spans from cross-repo runs carry only the experiment ID and verdict — never the host's code, task content, or credentials (`otel-no-pii-in-spans-lint`).
+- **Threat model**: see `novel/cross-repo-runner/README.md` § Threat model (STRIDE-shaped, ≥5 lines; ships with slice 7 of `security-privacy-priority-substrate`).
