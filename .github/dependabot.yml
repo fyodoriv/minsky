@@ -1,0 +1,61 @@
+# Dependabot config — supply-chain hardening minimum-bar item per
+# vision.md rule #13.5 / TASKS.md `supply-chain-hardening-lockfile-sbom-slsa`
+# bullet (e): "Renovate / Dependabot configured with allow-list (only `direct`
+# updates, group dev-deps weekly, security updates immediate)."
+#
+# Why direct-only: Dependabot's `dependency-type: direct` instructs it to skip
+# transitive bumps that already flow through the dependency graph when their
+# parent is updated. Updating transitives directly creates noisy churn and
+# lockfile races against `pnpm`'s resolver. Security updates remain immediate
+# regardless of group/schedule (Dependabot's documented behaviour: vulnerable
+# package alerts open a PR independent of the schedule).
+#
+# Why pnpm: `package-ecosystem: npm` covers pnpm workspaces — Dependabot's npm
+# updater reads `pnpm-lock.yaml` natively as of GitHub's 2024 update.
+#
+# Anchor: NIST SP 800-218 SSDF PW.4 (manage third-party software security);
+# OWASP Top 10 A06:2021 (vulnerable & outdated components).
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-type: direct
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      runtime-dependencies-patch:
+        dependency-type: production
+        update-types:
+          - patch
+    labels:
+      - dependencies
+      - supply-chain
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore
+      include: scope
