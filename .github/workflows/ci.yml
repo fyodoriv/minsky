@@ -526,6 +526,31 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-rule-13-sibling-anchors.test.mjs
 
+  dashboard-localhost-bind:
+    # vision.md rule #13 minimum-bar item #4 / TASKS.md
+    # `dashboard-localhost-only-by-default` P0: pins the substrate-cohesion
+    # contract that `novel/dashboard-web/src/bind.ts` (pure resolver — default
+    # `127.0.0.1`) and `novel/dashboard-web/src/start.ts` (I/O boundary —
+    # `serve({ hostname })`) implement together. Without this gate, a future
+    # edit could silently re-expose the dashboard to LAN by removing the
+    # `resolveBindHostname` call or omitting the `hostname` field from
+    # `serve(...)` (whereupon @hono/node-server falls back to `0.0.0.0`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: dashboard-localhost-bind lint
+        run: node scripts/check-dashboard-localhost-bind.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-dashboard-localhost-bind.test.mjs
+
   vision-rule-13-task-id-citations:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
     # acceptance criterion #3 (inverse direction): vision.md § 13's
@@ -1148,6 +1173,7 @@ jobs:
       - anchor-primary-source
       - biome
       - cadence-pivot-threshold
+      - dashboard-localhost-bind
       - glossary-discipline
       - hygiene
       - linux-supervisor-integration
@@ -1198,6 +1224,7 @@ jobs:
           for r in "${{ needs.anchor-primary-source.result }}" \
                    "${{ needs.biome.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
+                   "${{ needs.dashboard-localhost-bind.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.lockfile-integrity.result }}" \

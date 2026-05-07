@@ -136,6 +136,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "anchor-primary-source",
       "biome",
       "cadence-pivot-threshold",
+      "dashboard-localhost-bind",
       "glossary-discipline",
       "hygiene",
       "lockfile-integrity",
@@ -313,6 +314,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-privacy-data-egress.mjs"],
+  },
+  {
+    name: "dashboard-localhost-bind",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-dashboard-localhost-bind.mjs"],
   },
   {
     name: "threat-model-section",
