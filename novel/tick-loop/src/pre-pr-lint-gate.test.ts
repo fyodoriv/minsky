@@ -15,9 +15,73 @@ import {
   type PrePrLintRunResult,
   createBodyAwarePrePrLintRun,
   createPnpmPrePrLintRun,
+  parseStackNdjson,
   runPrePrLintGate,
   shouldRunPrePrLintGate,
 } from "./pre-pr-lint-gate.js";
+
+describe("parseStackNdjson", () => {
+  it("parses the canonical NDJSON output (per-step rows + trailing summary)", () => {
+    const raw = [
+      JSON.stringify({ name: "biome", verdict: "pass", durationMs: 455, exitCode: 0 }),
+      JSON.stringify({ name: "typecheck", verdict: "pass", durationMs: 2077, exitCode: 0 }),
+      JSON.stringify({ summary: true, stage: "fast", allPass: true, stepCount: 2 }),
+    ].join("\n");
+    const parsed = parseStackNdjson(raw);
+    expect(parsed.allPass).toBe(true);
+    expect(parsed.steps).toHaveLength(2);
+    expect(parsed.steps[0]).toMatchObject({ name: "biome", verdict: "pass" });
+    expect(parsed.steps[1]).toMatchObject({ name: "typecheck", verdict: "pass" });
+  });
+
+  it("propagates allPass=false when summary says so", () => {
+    const raw = [
+      JSON.stringify({ name: "biome", verdict: "fail", stderrTail: "lint error" }),
+      JSON.stringify({ name: "typecheck", verdict: "pass" }),
+      JSON.stringify({ summary: true, stage: "fast", allPass: false, stepCount: 2 }),
+    ].join("\n");
+    const parsed = parseStackNdjson(raw);
+    expect(parsed.allPass).toBe(false);
+    const failed = parsed.steps.find((s) => s.verdict === "fail");
+    expect(failed).toMatchObject({ name: "biome", stderrTail: "lint error" });
+  });
+
+  it("ignores blank lines and trims whitespace", () => {
+    const raw = [
+      "",
+      `  ${JSON.stringify({ name: "biome", verdict: "pass" })}  `,
+      "",
+      JSON.stringify({ summary: true, stage: "fast", allPass: true, stepCount: 1 }),
+      "",
+    ].join("\n");
+    const parsed = parseStackNdjson(raw);
+    expect(parsed.steps).toHaveLength(1);
+    expect(parsed.allPass).toBe(true);
+  });
+
+  it("throws when stdout is empty (script crash before any output)", () => {
+    expect(() => parseStackNdjson("")).toThrow(/empty stdout/);
+    expect(() => parseStackNdjson("   \n  \n")).toThrow(/empty stdout/);
+  });
+
+  it("throws when summary row is missing (script crashed mid-stream)", () => {
+    const raw = [
+      JSON.stringify({ name: "biome", verdict: "pass" }),
+      JSON.stringify({ name: "typecheck", verdict: "pass" }),
+      // no summary
+    ].join("\n");
+    expect(() => parseStackNdjson(raw)).toThrow(/missing trailing summary row/);
+  });
+
+  it("throws on invalid JSON (lets caller surface as Error with stderr context)", () => {
+    const raw = [
+      JSON.stringify({ name: "biome", verdict: "pass" }),
+      "this-is-not-json",
+      JSON.stringify({ summary: true, stage: "fast", allPass: true, stepCount: 1 }),
+    ].join("\n");
+    expect(() => parseStackNdjson(raw)).toThrow();
+  });
+});
 
 describe("runPrePrLintGate", () => {
   it("happy path: lint passes on first attempt → verdict pass, attempts 1", async () => {
@@ -193,7 +257,7 @@ describe("createPnpmPrePrLintRun (slice 32/N — bodyPath option)", () => {
     return { spawn, captured };
   }
 
-  const passJson = JSON.stringify({ allPass: true, steps: [] });
+  const passJson = JSON.stringify({ summary: true, stage: "fast", allPass: true, stepCount: 0 });
 
   it("does NOT pass --body when bodyPath is unset (default behaviour preserved)", async () => {
     const { spawn, captured } = fakeSpawn(passJson);
@@ -265,7 +329,7 @@ describe("createBodyAwarePrePrLintRun (slice 33/N — outer gate auto-discovers 
     return { spawn, captured };
   }
 
-  const passJson = JSON.stringify({ allPass: true, steps: [] });
+  const passJson = JSON.stringify({ summary: true, stage: "fast", allPass: true, stepCount: 0 });
 
   it("does NOT pass --body when pr-body.md is absent (no false body-validation)", async () => {
     const { spawn, captured } = fakeSpawn(passJson);
