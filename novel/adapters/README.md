@@ -1,3 +1,5 @@
+<!-- scope: human-approved security-privacy-priority-substrate — namespace README for the adapters layer, no novel runtime code -->
+
 # `novel/adapters/`
 
 External-dependency adapters (rule #2 — every external dependency behind an interface). Each adapter is a separate package with its own README, chaos-verification table, and self-test seam.
@@ -26,7 +28,7 @@ This README documents the *namespace*; each contained adapter package owns its o
 | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|---|
 | 1 | A new adapter package lands without its own chaos table | governance lapse | `circuit-break-and-notify` — `scripts/check-rule-7-chaos-coverage.mjs` fails the PR | covered by `scripts/check-rule-7-chaos-coverage.test.mjs` (the linter's paired test asserts the file-level policy) |
-| 2 | An adapter package exposes an external service directly (rule #2 violation) | governance lapse | `circuit-break-and-notify` — rule #12 scope-discipline lint and PR review reject the direct import | covered by CI typecheck (the adapter interface must be the only import surface) |
+| 2 | An adapter package exposes an external service directly (rule #2 violation) | governance lapse | `circuit-break-and-notify` — rule #12 scope-discipline lint and PR review reject the direct import | `tsc --noEmit` asserts the adapter interface shape at compile time; rule #12 lint asserts no out-of-scope imports land |
 
 ## Threat model
 
