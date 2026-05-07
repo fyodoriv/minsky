@@ -10,6 +10,8 @@ The HTML carries an inlined `<style>` block (Card & Mackinlay 1999 — glanceabl
 
 Below the metric grid, a "Recent activity" section streams the latest 20 tick-loop iteration spans from `.minsky/tick-loop.out.log` (youngest-first), each rendered as a colored status pill (completed = green; budget-paused = amber; failed = red; no-task / missing-tasks-md = slate-grey) plus the task ID or daemon reason. The page auto-refreshes every 5s. Source: pure `parseSpan` / `takeRecentSpans` in `src/activity.ts`; I/O at the edge in `loadRecentSpans` (the `dashboard-web.activity.load-recent` OTEL span). Surfaces the supervisor's live state without requiring `tail -f` against the log file.
 
+Slice 5 of `local-llm-fallback-on-budget-pause` adds an optional LLM provider badge per row — when `iteration.provider` is set in the iteration span (claude / local / hold), the badge surfaces alongside the status pill. claude-blue, local-amber, hold-red. Legacy iterations (no provider field, the supervisor wasn't running with `MINSKY_LOCAL_LLM=1`) render no badge so existing dashboards stay visually identical. The grid template extends from 3 to 4 columns; the mobile breakpoint promotes the badge to a full-width row to keep the layout readable. `parseSpan` reads `iteration.provider` with empty-string default, preserving back-compat with span logs predating the local-LLM wrapper.
+
 ## Pattern conformance
 
 Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index) row 57:
