@@ -499,7 +499,9 @@ export {
 // `--worker-id` / `--workers-total` and announce parallel mode on startup.
 export {
   type WorkerConfig,
+  buildChildWorkerArgs,
   claudeArgsForWorker,
+  parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   workerBranchName,
   workerStartupLine,
