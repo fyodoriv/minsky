@@ -1829,23 +1829,23 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("≥80%");
   });
 
-  it("gate section also names the body-only CI checks the lint stack can't run (slice 29/N)", () => {
+  it("gate section names the body-only CI checks routed through the `--body=` flag (slices 29→30/N)", () => {
     // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): `pnpm pre-pr-lint`
     // covers the branch-code lints but cannot evaluate the two PR-body CI
     // checks (`pr-security-review`, `pr-self-grade`) — both are in
     // `CI_ENV_DEPENDENT_JOBS` precisely because they need PR-body context.
-    // PR #327 (slice 28/N) shipped with `pnpm pre-pr-lint` green and still
-    // failed `pr-security-review` because the inner Claude wrote a body
-    // without the `## Security & privacy` marker. The gate's body-only blind
-    // spot was exactly the failure mode this task is meant to close. Slice
-    // 29/N extends the gate's procedure: after `pnpm pre-pr-lint` is green,
-    // run the two body checkers against the draft body file before
-    // `gh pr create -F`. Pin the script names so future brief trims can't
-    // silently drop the directive.
+    // Slice 29/N (PR #328) added a brief sentence telling the inner Claude
+    // to invoke both checkers as separate `node scripts/check-*.mjs` calls;
+    // slice 30/N consolidated that into one `--body=<path>` flag on the
+    // canonical lint-stack runner so the same retry budget governs them.
+    // The slice-30 brief therefore names the two checks by their step IDs
+    // (`pr-self-grade`, `pr-security-review`) rather than the bare
+    // `.mjs` paths. Pin the body-only framing + the two step IDs so a
+    // future brief trim can't silently drop the directive.
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
     const gateSection = extractGateSection(brief);
-    expect(gateSection).toContain("scripts/check-pr-security-review.mjs");
-    expect(gateSection).toContain("scripts/check-pr-self-grade.mjs");
+    expect(gateSection).toContain("pr-security-review");
+    expect(gateSection).toContain("pr-self-grade");
     // The two body-only CI jobs are precisely the env-dependent ones that
     // can't run inside `pnpm pre-pr-lint` — pin the framing so the directive
     // doesn't drift to "run extra lints" without the operator-facing reason.
@@ -2030,6 +2030,31 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("DO NOT REWRITE THIS FORMAT");
     expect(brief).toMatch(/colon INSIDE bold[^\n]*\*\*Predicted:\*\*[^\n]*\*\*Match:\*\*/);
     expect(brief).toMatch(/values lowercase/);
+  });
+
+  it("directs the inner Claude to use `pnpm pre-pr-lint -- --body=<file>` so the two body-only checks ride the same retry budget (slice 30/N)", () => {
+    // Pre-slice-30, the body-only checks (`pr-self-grade`,
+    // `pr-security-review`) needed three separate commands and three
+    // independent retry decisions. Slice 30 adds `--body=<path>` to the
+    // canonical `run-pre-pr-lint-stack.mjs`; the brief points the inner
+    // Claude at the consolidated invocation so it doesn't have to reason
+    // about which checks to run separately.
+    const sample = [
+      "# Tasks",
+      "",
+      "## P0",
+      "",
+      "- [ ] `t` — clean",
+      "  - **ID**: t",
+      "  - **Tags**: p0",
+      "  - **Hypothesis**: H",
+      "",
+    ].join("\n");
+    const brief = buildDaemonBrief({ taskId: "t", tasksMdContent: sample });
+    expect(brief).toContain("--body=");
+    expect(brief).toContain("pnpm pre-pr-lint -- --body=");
+    expect(brief).toContain("pr-self-grade");
+    expect(brief).toContain("pr-security-review");
   });
 });
 
