@@ -1625,6 +1625,205 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(lockExists).toBe(false);
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  // ---- Slice 4: openPrFetcher / decideTouchesCollision wire-in ----------
+
+  it("worker mode + openPrFetcher: skips a candidate whose Files overlap an open PR's changed files", async () => {
+    // alpha's **Files**: lists `novel/tick-loop/src/daemon.ts`.
+    // An open PR has changed that file → alpha must be skipped.
+    // beta's **Files**: lists `scripts/lint.mjs` (no overlap) → claimed.
+    const fixture = `# Tasks\n
+## P0\n
+- [ ] \`alpha\` — alpha
+  - **ID**: alpha
+  - **Files**: \`novel/tick-loop/src/daemon.ts\` (impl), \`novel/tick-loop/src/daemon.test.ts\` (paired tests).
+
+- [ ] \`beta\` — beta
+  - **ID**: beta
+  - **Files**: \`scripts/lint.mjs\` (lint script).
+`;
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-touches-skip-"));
+    const seenTasks: string[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input) => {
+        seenTasks.push(input.taskId);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: new TestFakeMockAnthropic(),
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(fixture),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 5 },
+      locksDir: tmp,
+      openPrFetcher: () =>
+        Promise.resolve([{ number: 42, files: ["novel/tick-loop/src/daemon.ts"] }]),
+    });
+    // alpha was collision-prevented; beta got picked.
+    expect(seenTasks).toEqual(["beta"]);
+    expect(result.iterations[0]?.status).toBe("completed");
+    expect(result.iterations[0]?.taskId).toBe("beta");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("worker mode + openPrFetcher: returns no-task when ALL eligible tasks collide with open PRs", async () => {
+    const fixture = `# Tasks\n
+## P0\n
+- [ ] \`alpha\` — alpha
+  - **ID**: alpha
+  - **Files**: \`novel/tick-loop/src/daemon.ts\` (impl).
+
+- [ ] \`beta\` — beta
+  - **ID**: beta
+  - **Files**: \`scripts/lint.mjs\` (lint).
+`;
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-touches-all-"));
+    const fakeStrategy: SpawnStrategy = {
+      spawn: () =>
+        Promise.resolve({
+          exitCode: 0,
+          durationMs: 0,
+          stdoutTail: "should-not-spawn",
+          stderrTail: "",
+        }),
+    };
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: new TestFakeMockAnthropic(),
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(fixture),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 5 },
+      locksDir: tmp,
+      openPrFetcher: () =>
+        Promise.resolve([
+          { number: 42, files: ["novel/tick-loop/src/daemon.ts"] },
+          { number: 43, files: ["scripts/lint.mjs"] },
+        ]),
+    });
+    expect(result.iterations[0]?.status).toBe("no-task");
+    expect(result.iterations[0]?.reason).toContain("collision-prevented");
+    expect(result.iterations[0]?.reason).toContain("alpha");
+    expect(result.iterations[0]?.reason).toContain("beta");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("worker mode + openPrFetcher with empty snapshot: no-op (legacy claim-only behaviour)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-touches-empty-"));
+    const seenTasks: string[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input) => {
+        seenTasks.push(input.taskId);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: new TestFakeMockAnthropic(),
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 2 },
+      locksDir: tmp,
+      openPrFetcher: () => Promise.resolve([]),
+    });
+    expect(seenTasks).toEqual(["alpha"]);
+    expect(result.iterations[0]?.status).toBe("completed");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("worker mode without openPrFetcher: file-collision check is skipped (slice-1/2 path preserved)", async () => {
+    // No openPrFetcher passed → the candidate's Files field is ignored,
+    // so a task whose Files would have collided still gets claimed. This
+    // is the back-compat invariant.
+    const fixture = `# Tasks\n
+## P0\n
+- [ ] \`alpha\` — alpha
+  - **ID**: alpha
+  - **Files**: \`novel/tick-loop/src/daemon.ts\` (impl).
+`;
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-touches-noop-"));
+    const seenTasks: string[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input) => {
+        seenTasks.push(input.taskId);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: new TestFakeMockAnthropic(),
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(fixture),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 5 },
+      locksDir: tmp,
+      // openPrFetcher intentionally omitted
+    });
+    expect(seenTasks).toEqual(["alpha"]);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("worker mode + openPrFetcher: prefers Touches when both Touches and Files are present", async () => {
+    // alpha has both Touches (narrow) and Files (broad). The Touches glob
+    // doesn't match the open PR's file → proceed. If the daemon were
+    // reading Files instead, alpha WOULD collide.
+    const fixture = `# Tasks\n
+## P0\n
+- [ ] \`alpha\` — alpha
+  - **ID**: alpha
+  - **Files**: \`novel/tick-loop/src/daemon.ts\` (broader).
+  - **Touches**: scripts/*.mjs
+
+- [ ] \`beta\` — beta
+  - **ID**: beta
+  - **Files**: \`other/dir/file.ts\`.
+`;
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-touches-prefers-"));
+    const seenTasks: string[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input) => {
+        seenTasks.push(input.taskId);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: new TestFakeMockAnthropic(),
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(fixture),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 5 },
+      locksDir: tmp,
+      openPrFetcher: () =>
+        Promise.resolve([{ number: 1, files: ["novel/tick-loop/src/daemon.ts"] }]),
+    });
+    // alpha's Touches=`scripts/*.mjs` doesn't match the PR's daemon.ts file → alpha proceeds.
+    expect(seenTasks).toEqual(["alpha"]);
+    rmSync(tmp, { recursive: true, force: true });
+  });
 });
 
 describe("tick-loop / daemon / pickTask", () => {
