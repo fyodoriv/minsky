@@ -603,11 +603,28 @@ function renderHuman(result) {
 }
 
 /**
+ * NDJSON: one JSON line per step, then one summary line. Operator can pipe
+ * to `jq -c` and grep individual step results without parsing a 30+-step
+ * blob. The summary's discriminator field (`summary: true`) lets a consumer
+ * separate the per-step lines from the final aggregate without counting.
+ * Anchor: `docs/daemon-pre-pr-gate.md` § Operator commands ("one JSON line
+ * per step + a final summary"); the doc claim and this renderer are pinned
+ * by `--json output shape` in `run-pre-pr-lint-stack.test.mjs`.
+ *
  * @param {StackResult} result
  * @returns {string}
  */
-function renderJson(result) {
-  return JSON.stringify(result);
+export function renderJson(result) {
+  const lines = result.steps.map((s) => JSON.stringify(s));
+  lines.push(
+    JSON.stringify({
+      summary: true,
+      stage: result.stage,
+      allPass: result.allPass,
+      stepCount: result.steps.length,
+    }),
+  );
+  return lines.join("\n");
 }
 
 async function main() {
