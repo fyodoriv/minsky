@@ -5,7 +5,7 @@
 // walker / CI gate around it. Each case carries a one-letter rubric tag
 // matching the description in the script's header.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -361,7 +361,10 @@ describe("CLI helpers (slice 4)", () => {
   describe("parseArgs", () => {
     it("(c-a) defaults `repo` to the package root when no args", () => {
       const { repo: r } = parseArgs([]);
-      expect(r).toMatch(/[\\/]minsky$/);
+      // Assert the shape (a directory holding package.json) rather than the
+      // literal dir name "minsky", so the test passes in worktrees and
+      // clones whose parent-dir name differs from upstream.
+      expect(existsSync(`${r}/package.json`)).toBe(true);
     });
 
     it("(c-b) honours `--repo=<path>`", () => {

@@ -532,3 +532,8 @@ export {
   decideStaleIndexLock,
   summarizeSweepDecisions,
 } from "./parallel-sweeper.js";
+
+// Operator-CLI ergonomics (2026-05-06): pretty-format the daemon's
+// structured `[span] tick-loop.iteration {…}` lines into glanceable
+// one-liners. Used by `bin/minsky.mjs`'s `start` and `logs` subcommands.
+export { type FormatOpts, formatLogLine } from "./pretty-log.js";
