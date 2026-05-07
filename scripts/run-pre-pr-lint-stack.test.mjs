@@ -13,6 +13,7 @@ import {
   CI_ENV_DEPENDENT_JOBS,
   CI_TO_MANIFEST_ALIAS,
   STACK_MANIFEST,
+  appendBodyChecks,
   buildStepResult,
   parseArgs,
   renderJson,
@@ -232,6 +233,86 @@ describe("parseArgs", () => {
 
   test("unknown flags are ignored (forward-compat)", () => {
     expect(parseArgs(["--unknown", "--stage=full"])).toEqual({ stage: "full", json: false });
+  });
+
+  test("--body=<path> surfaces the body-file the daemon will pass to `gh pr create -F`", () => {
+    expect(parseArgs(["--body=pr-body.md"])).toEqual({
+      stage: "fast",
+      json: false,
+      body: "pr-body.md",
+    });
+  });
+
+  test("--body= (empty value) is ignored — empty paths can't satisfy the body checks", () => {
+    expect(parseArgs(["--body="])).toEqual({ stage: "fast", json: false });
+  });
+});
+
+describe("appendBodyChecks (slice 30/N — `--body=<path>` consolidates 3 commands → 1)", () => {
+  // The two body-only checks (`pr-self-grade`, `pr-security-review`) sit in
+  // `CI_ENV_DEPENDENT_JOBS` because in CI they read the GitHub PR body. The
+  // daemon writes the draft body to a local file before `gh pr create -F
+  // <file>`; that file is exactly what both check scripts already accept as
+  // their first arg. Surfacing them as manifest steps closes the body-only
+  // blind spot inside the same retry budget the rest of the gate uses.
+
+  test("appends two new steps named `pr-self-grade` and `pr-security-review`", () => {
+    const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
+    expect(augmented.length).toBe(STACK_MANIFEST.length + 2);
+    const names = augmented.slice(STACK_MANIFEST.length).map((s) => s.name);
+    expect(names).toEqual(["pr-self-grade", "pr-security-review"]);
+  });
+
+  test("each appended step invokes its canonical `scripts/check-pr-*.mjs` with the body path", () => {
+    const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
+    const selfGrade = augmented.find((s) => s.name === "pr-self-grade");
+    const securityReview = augmented.find((s) => s.name === "pr-security-review");
+    if (selfGrade === undefined) throw new Error("pr-self-grade step missing");
+    if (securityReview === undefined) throw new Error("pr-security-review step missing");
+    expect(selfGrade.cmd).toBe("node");
+    expect(selfGrade.args).toEqual(["scripts/check-pr-self-grade.mjs", "draft.md"]);
+    expect(securityReview.cmd).toBe("node");
+    expect(securityReview.args).toEqual(["scripts/check-pr-security-review.mjs", "draft.md"]);
+  });
+
+  test("appended steps participate in both stages (cheap regex — fast-stage budget unaffected)", () => {
+    const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
+    for (const name of ["pr-self-grade", "pr-security-review"]) {
+      const step = augmented.find((s) => s.name === name);
+      if (step === undefined) throw new Error(`${name} step missing`);
+      expect(step.stages).toContain("fast");
+      expect(step.stages).toContain("full");
+    }
+  });
+
+  test("the original manifest is preserved unchanged (returns a new frozen array)", () => {
+    const before = STACK_MANIFEST.length;
+    const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
+    expect(STACK_MANIFEST.length).toBe(before);
+    expect(augmented).not.toBe(STACK_MANIFEST);
+  });
+
+  test("runStack picks up the appended steps for fast stage", async () => {
+    const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
+    /** @type {string[]} */
+    const seen = [];
+    /** @type {import("./run-pre-pr-lint-stack.mjs").RunStep} */
+    const fakeRunStep = async (step) => {
+      seen.push(step.name);
+      return { name: step.name, verdict: "pass", durationMs: 1, exitCode: 0 };
+    };
+    await runStack("fast", fakeRunStep, augmented);
+    expect(seen).toContain("pr-self-grade");
+    expect(seen).toContain("pr-security-review");
+  });
+
+  test("the two body checks ARE listed in CI_ENV_DEPENDENT_JOBS — pinning the rationale this slice exists to bridge", () => {
+    // Drift guard: if a future PR moves these into the static manifest, the
+    // `--body` extension becomes redundant. This test fails the moment that
+    // happens, surfacing the redundancy instead of letting both code paths
+    // silently coexist (rule #2 — single seam).
+    expect(CI_ENV_DEPENDENT_JOBS.has("pr-self-grade")).toBe(true);
+    expect(CI_ENV_DEPENDENT_JOBS.has("pr-security-review")).toBe(true);
   });
 });
 

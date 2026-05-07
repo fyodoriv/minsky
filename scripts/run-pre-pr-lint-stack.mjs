@@ -19,6 +19,13 @@
 //
 // JSON output: `--json` emits one line per step plus a final summary. Tests use it.
 //
+// Body-only checks: `--body=<path>` appends the two PR-body lints
+// (`pr-self-grade`, `pr-security-review`) to the run, validating the
+// daemon-written draft body file in the same gate as everything else. The
+// two checks are env-dependent in CI (they read the GitHub PR body); the
+// `--body` flag is the daemon-side equivalent — same scripts, same
+// regexes, just sourced from a local file. One command, one retry budget.
+//
 // Pattern: deterministic gate (rule #10); pure manifest + injected runner (rule #2 —
 //   the manifest is the seam, the runner is the boundary). Conformance: full —
 //   `runStack` is a pure function over (manifest, runStep); the I/O lives in
@@ -578,23 +585,69 @@ function tailLines(s, n) {
 
 /**
  * @param {string[]} argv
- * @returns {{ stage: Stage, json: boolean }}
+ * @returns {{ stage: Stage, json: boolean, body?: string }}
  */
 export function parseArgs(argv) {
   /** @type {Stage} */
   let stage = "fast";
   let json = false;
+  /** @type {string | undefined} */
+  let body;
   for (const arg of argv) {
     if (arg === "--json") {
       json = true;
       continue;
     }
-    const m = /^--stage=(fast|full)$/.exec(arg);
-    if (m !== null && m[1] !== undefined) {
-      stage = /** @type {Stage} */ (m[1]);
+    const stageMatch = /^--stage=(fast|full)$/.exec(arg);
+    if (stageMatch !== null && stageMatch[1] !== undefined) {
+      stage = /** @type {Stage} */ (stageMatch[1]);
+      continue;
+    }
+    const bodyMatch = /^--body=(.+)$/.exec(arg);
+    if (bodyMatch !== null && bodyMatch[1] !== undefined) {
+      body = bodyMatch[1];
     }
   }
-  return { stage, json };
+  return body === undefined ? { stage, json } : { stage, json, body };
+}
+
+/**
+ * Append the two body-only checks (`pr-self-grade`, `pr-security-review`) to
+ * the manifest when the operator passes `--body=<path>`. Both checks live in
+ * `CI_ENV_DEPENDENT_JOBS` because in CI they read from the GitHub PR body —
+ * the daemon's gate has no PR body until `gh pr create` has run, but the
+ * draft-body file the daemon writes BEFORE `gh pr create -F <file>` is
+ * exactly the input these scripts already accept (both their `main()` reads
+ * `process.argv[2]` as a path). Surfacing both as manifest steps consolidates
+ * three commands (`pnpm pre-pr-lint`, `node scripts/check-pr-self-grade.mjs`,
+ * `node scripts/check-pr-security-review.mjs`) into one — one round-trip in
+ * the daemon's iteration vs three, and a single retry budget instead of
+ * three independent decisions about how to react to red.
+ *
+ * Both steps participate in `fast` and `full` so the daemon's fast-stage
+ * gate exercises them too — they're cheap (regex-over-body) so the ≤2 min
+ * fast-stage budget is unaffected.
+ *
+ * @param {readonly StackStep[]} manifest
+ * @param {string} bodyPath
+ * @returns {readonly StackStep[]}
+ */
+export function appendBodyChecks(manifest, bodyPath) {
+  return Object.freeze([
+    ...manifest,
+    {
+      name: "pr-self-grade",
+      stages: ["fast", "full"],
+      cmd: "node",
+      args: ["scripts/check-pr-self-grade.mjs", bodyPath],
+    },
+    {
+      name: "pr-security-review",
+      stages: ["fast", "full"],
+      cmd: "node",
+      args: ["scripts/check-pr-security-review.mjs", bodyPath],
+    },
+  ]);
 }
 
 /**
@@ -643,9 +696,11 @@ export function renderJson(result) {
 }
 
 async function main() {
-  const { stage, json } = parseArgs(process.argv.slice(2));
-  const result = await runStack(stage, defaultRunStep);
-  process.stdout.write(`${json ? renderJson(result) : renderHuman(result)}\n`);
+  const parsed = parseArgs(process.argv.slice(2));
+  const manifest =
+    parsed.body === undefined ? STACK_MANIFEST : appendBodyChecks(STACK_MANIFEST, parsed.body);
+  const result = await runStack(parsed.stage, defaultRunStep, manifest);
+  process.stdout.write(`${parsed.json ? renderJson(result) : renderHuman(result)}\n`);
   process.exit(result.allPass ? 0 : 1);
 }
 
