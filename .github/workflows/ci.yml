@@ -1218,7 +1218,7 @@ jobs:
           # below carries the signal.
           node scripts/check-rule-11-no-flaky-gates.mjs --workflows ci --emit tmp/rule-11/ || true
       - name: upload rule-11 patches
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: rule-11-flake-patches
