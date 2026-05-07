@@ -409,4 +409,96 @@ describe("createBodyAwarePrePrLintRun (slice 33/N — outer gate auto-discovers 
     expect(args).toContain("--stage=full");
     expect(args).toContain("--body=/repo/pr-body.md");
   });
+
+  // ---- slice 34/N — bodyDiscovered surfaces silent body-only check skips ----
+  // PR #337 was BLOCKED in CI on `pr-security-review` even after the body-aware
+  // wire-in (slice 33/N) shipped — the inner Claude opened the PR without
+  // writing `pr-body.md` to disk, so the outer gate's body-only checks
+  // silently skipped. This metric makes that asymmetry visible per-iteration.
+  it("sets bodyDiscovered=true on the result when pr-body.md is present", async () => {
+    const { spawn } = fakeSpawn(passJson);
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      fileExists: () => true,
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    const result = await run();
+    expect(result.verdict).toBe("pass");
+    expect(result.bodyDiscovered).toBe(true);
+  });
+
+  it("sets bodyDiscovered=false on the result when pr-body.md is absent", async () => {
+    const { spawn } = fakeSpawn(passJson);
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      fileExists: () => false,
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    const result = await run();
+    expect(result.verdict).toBe("pass");
+    expect(result.bodyDiscovered).toBe(false);
+  });
+
+  it("preserves bodyDiscovered through a fail result (carries the silent-skip flag with the failure)", async () => {
+    const failJson = `${JSON.stringify({
+      name: "biome",
+      verdict: "fail",
+      stderrTail: "lint err",
+    })}\n${JSON.stringify({
+      summary: true,
+      stage: "fast",
+      allPass: false,
+      stepCount: 1,
+    })}`;
+    const { spawn } = fakeSpawn(failJson);
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      fileExists: () => false,
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    const result = await run();
+    expect(result.verdict).toBe("fail");
+    expect(result.failedStep).toBe("biome");
+    expect(result.bodyDiscovered).toBe(false);
+  });
+});
+
+describe("runPrePrLintGate forwards bodyDiscovered (slice 34/N)", () => {
+  it("propagates bodyDiscovered=true through the pass path", async () => {
+    const runLint = vi.fn<() => Promise<PrePrLintRunResult>>().mockResolvedValue({
+      verdict: "pass",
+      bodyDiscovered: true,
+    });
+    const result = await runPrePrLintGate({ runLint });
+    expect(result).toEqual({ verdict: "pass", attempts: 1, bodyDiscovered: true });
+  });
+
+  it("propagates bodyDiscovered=false through the fail path (last attempt's status wins)", async () => {
+    const runLint = vi.fn<() => Promise<PrePrLintRunResult>>().mockResolvedValue({
+      verdict: "fail",
+      failedStep: "pr-security-review",
+      stderrTail: "missing security marker",
+      bodyDiscovered: false,
+    });
+    const result = await runPrePrLintGate({ runLint, maxAttempts: 1 });
+    expect(result).toEqual({
+      verdict: "fail",
+      attempts: 1,
+      failedStep: "pr-security-review",
+      stderrTail: "missing security marker",
+      bodyDiscovered: false,
+    });
+  });
+
+  it("omits bodyDiscovered when the run is body-blind by construction (legacy createPnpmPrePrLintRun)", async () => {
+    const runLint = vi.fn<() => Promise<PrePrLintRunResult>>().mockResolvedValue({
+      verdict: "pass",
+    });
+    const result = await runPrePrLintGate({ runLint });
+    expect(result).toEqual({ verdict: "pass", attempts: 1 });
+    expect("bodyDiscovered" in result).toBe(false);
+  });
 });

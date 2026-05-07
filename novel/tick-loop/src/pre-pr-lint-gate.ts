@@ -38,6 +38,21 @@ export interface PrePrLintRunResult {
   readonly failedStep?: string;
   /** Last ~80 lines of stderr from the failing step (set when `verdict` is `"fail"`). */
   readonly stderrTail?: string;
+  /**
+   * Whether the body-only checks (`pr-self-grade`, `pr-security-review`)
+   * actually ran. `true` when a draft body file was discovered and forwarded
+   * via `--body=<path>`; `false` when no body file was present and the body
+   * checks were silently skipped; `undefined` when the run was body-blind by
+   * construction (the legacy `createPnpmPrePrLintRun` direct binding).
+   *
+   * Set only by `createBodyAwarePrePrLintRun` (slice 34/N — surfacing the
+   * silent skip so the OTEL signal can chart how often the daemon opens PRs
+   * without writing `pr-body.md` to disk first). PR #337 was BLOCKED in CI
+   * because the body-only `pr-security-review` check fired in CI but the
+   * outer gate's body-only checks had silently skipped the same check
+   * locally — this field makes that asymmetry visible per-iteration.
+   */
+  readonly bodyDiscovered?: boolean;
 }
 
 /**
@@ -55,6 +70,13 @@ export interface PrePrLintGateResult {
   readonly failedStep?: string;
   /** Stderr tail from the last failing attempt (set when `verdict` is `"fail"`). */
   readonly stderrTail?: string;
+  /**
+   * Body-discovery status from the last attempt — `true`/`false`/`undefined`
+   * mirrors `PrePrLintRunResult.bodyDiscovered`. Forwarded so the daemon's
+   * span emitter can surface `pre-pr-lint.body_discovered` per-iteration
+   * (slice 34/N).
+   */
+  readonly bodyDiscovered?: boolean;
 }
 
 export interface RunPrePrLintGateArgs {
@@ -86,7 +108,11 @@ export async function runPrePrLintGate(args: RunPrePrLintGateArgs): Promise<PreP
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     last = await args.runLint();
     if (last.verdict === "pass") {
-      return { verdict: "pass", attempts: attempt };
+      return {
+        verdict: "pass",
+        attempts: attempt,
+        ...(last.bodyDiscovered !== undefined && { bodyDiscovered: last.bodyDiscovered }),
+      };
     }
   }
   return {
@@ -94,6 +120,7 @@ export async function runPrePrLintGate(args: RunPrePrLintGateArgs): Promise<PreP
     attempts: maxAttempts,
     ...(last?.failedStep !== undefined && { failedStep: last.failedStep }),
     ...(last?.stderrTail !== undefined && { stderrTail: last.stderrTail }),
+    ...(last?.bodyDiscovered !== undefined && { bodyDiscovered: last.bodyDiscovered }),
   };
 }
 
@@ -357,65 +384,7 @@ export function createBodyAwarePrePrLintRun(opts: BodyAwarePrePrLintRunOptions):
       ...(opts.spawnFn !== undefined && { spawnFn: opts.spawnFn }),
       ...(bodyPath !== undefined && { bodyPath }),
     });
-    return inner();
-  };
-}
-
-// ---- Body-aware production binding ----------------------------------------
-
-/** Options for `createBodyAwarePrePrLintRun`. */
-export interface BodyAwarePrePrLintRunOptions {
-  /**
-   * Working directory for the spawn AND the directory the body file is
-   * looked up in. In production this is the daemon's worktree root
-   * (`minskyHome` in `tick-loop.mjs`).
-   */
-  readonly cwd: string;
-  /**
-   * Filename to look for, relative to `cwd`. Default `"pr-body.md"` —
-   * the path the daemon brief instructs the inner Claude to write the
-   * draft PR body to (see `daemon.ts § buildDaemonBrief` body-only line).
-   */
-  readonly bodyFilename?: string;
-  /** Stage forwarded to `createPnpmPrePrLintRun`. Default `"fast"`. */
-  readonly stage?: "fast" | "full";
-  /** Existence-check seam (rule #2). Default `node:fs.existsSync`. */
-  readonly fileExists?: (path: string) => boolean;
-  /** Spawn seam — forwarded to `createPnpmPrePrLintRun`. */
-  readonly spawnFn?: typeof nodeSpawn;
-}
-
-/**
- * Build a `PrePrLintRun` that auto-discovers a draft PR-body file in `cwd`
- * each invocation and passes it through as `--body=<path>` when present.
- *
- * Why per-call detection (not bind-once-at-startup): the body file is
- * authored by the inner Claude *during* an iteration; binding the path at
- * daemon boot would miss it. Per-call `existsSync` is cheap (one stat per
- * iteration) and closes the loop the brief already documents — inner
- * Claude writes `pr-body.md`, outer gate validates it on the same retry
- * budget as the branch-code lints. Without this, the outer gate is blind
- * to the body file and only catches branch-code drift.
- *
- * Pattern (rule #2): pure factory — file existence is the only I/O, and
- * it's behind the `fileExists` seam. The spawn happens inside the
- * delegated `createPnpmPrePrLintRun` binding.
- *
- * @otel-exempt pure factory; the span lives at the call-site
- *   (`tick-loop.pre-pr-lint-gate` in `daemon.ts § maybeRunPrePrLintGate`).
- */
-export function createBodyAwarePrePrLintRun(opts: BodyAwarePrePrLintRunOptions): PrePrLintRun {
-  const filename = opts.bodyFilename ?? "pr-body.md";
-  const fileExists = opts.fileExists ?? existsSync;
-  return async (): Promise<PrePrLintRunResult> => {
-    const fullPath = join(opts.cwd, filename);
-    const bodyPath = fileExists(fullPath) ? fullPath : undefined;
-    const inner = createPnpmPrePrLintRun({
-      cwd: opts.cwd,
-      ...(opts.stage !== undefined && { stage: opts.stage }),
-      ...(opts.spawnFn !== undefined && { spawnFn: opts.spawnFn }),
-      ...(bodyPath !== undefined && { bodyPath }),
-    });
-    return inner();
+    const result = await inner();
+    return { ...result, bodyDiscovered: bodyPath !== undefined };
   };
 }
