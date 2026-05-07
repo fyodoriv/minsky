@@ -22,11 +22,15 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
-/** Canonical IDs of the six sibling security P0 tasks. */
+/**
+ * Canonical IDs of the open sibling security P0 tasks.
+ * Shipped tasks are removed from this list once their PR merges so
+ * tasks-lint (which requires removal, not check-off) and this gate
+ * don't conflict. Shipped: dashboard-localhost-only-by-default.
+ */
 export const SIBLING_P0_IDS = Object.freeze([
   "secret-scanning-precommit-and-ci",
   "supervisor-sandbox-syscall-restriction",
-  "dashboard-localhost-only-by-default",
   "otel-no-pii-in-spans-lint",
   "supply-chain-hardening-lockfile-sbom-slsa",
   "cloud-tier-external-security-audit-gate",

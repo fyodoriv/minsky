@@ -282,3 +282,62 @@ describe("createServer — POST /control (pause/resume Shortcut endpoint)", () =
     expect(calls).toEqual([]);
   });
 });
+
+describe("createServer — POST /control X-Minsky-Token auth (dashboard-localhost-only-by-default)", () => {
+  function postControlWithToken(
+    fetch: ReturnType<typeof createServer>["fetch"],
+    body: unknown,
+    token?: string,
+  ): Promise<Response> {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (token !== undefined) headers["x-minsky-token"] = token;
+    return fetch(
+      new Request("http://test.local/control", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      }),
+    ) as Promise<Response>;
+  }
+
+  it("401 when controlToken is set and X-Minsky-Token header is missing", async () => {
+    const { fetch } = createServer({ controlToken: "secret-abc" });
+    const res = await postControlWithToken(fetch, { paused: true });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("401 when controlToken is set and X-Minsky-Token header is wrong", async () => {
+    const { fetch } = createServer({ controlToken: "secret-abc" });
+    const res = await postControlWithToken(fetch, { paused: true }, "wrong-token");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("200 when controlToken is set and X-Minsky-Token header matches", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({ controlToken: "secret-abc", setPaused: (v) => calls.push(v) });
+    const res = await postControlWithToken(fetch, { paused: true }, "secret-abc");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, paused: true });
+    expect(calls).toEqual([true]);
+  });
+
+  it("200 without token header when controlToken is not set (backward compat — no auth required)", async () => {
+    const calls: boolean[] = [];
+    const { fetch } = createServer({ setPaused: (v) => calls.push(v) });
+    const res = await postControlWithToken(fetch, { paused: true });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([true]);
+  });
+
+  it("token auth fires before body validation — 401 even with invalid body", async () => {
+    const { fetch } = createServer({ controlToken: "secret-abc" });
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    const res = await fetch(
+      new Request("http://test.local/control", { method: "POST", headers, body: "{bad-json" }),
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+});

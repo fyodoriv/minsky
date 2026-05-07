@@ -69,6 +69,7 @@ export function createServer(args?: {
   readonly setPaused?: SetPaused;
   readonly getPauseReason?: PauseReasonState;
   readonly getActivity?: GetActivity;
+  readonly controlToken?: string;
 }): DashboardServer {
   const metrics = args?.metrics ?? SUCCESS_METRICS;
   const getValue = args?.getValue ?? STUB_GET_VALUE;
@@ -77,6 +78,7 @@ export function createServer(args?: {
   const setPaused = args?.setPaused ?? memory.setPaused;
   const getPauseReason = args?.getPauseReason;
   const getActivity = args?.getActivity;
+  const controlToken = args?.controlToken;
   const app = new Hono();
   app.get("/", (c) => {
     const activity = getActivity?.() ?? [];
@@ -92,6 +94,9 @@ export function createServer(args?: {
     ),
   );
   app.post("/control", async (c) => {
+    if (controlToken !== undefined && c.req.header("x-minsky-token") !== controlToken) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
     const body = await readJsonBody(c.req.raw);
     const parsed = parseControlBody(body);
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
