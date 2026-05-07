@@ -107,6 +107,7 @@ describe("STACK_MANIFEST", () => {
         "rule-6-let-it-crash",
         "rule-7-chaos-coverage",
         "tasks-lint",
+        "threat-model-section",
         "typecheck",
       ].sort(),
     );
