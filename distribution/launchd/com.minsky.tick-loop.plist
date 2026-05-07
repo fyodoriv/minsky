@@ -69,6 +69,20 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
              4 weeks means retire. -->
         <key>MINSKY_CTO_AUDIT_ENABLE</key>
         <string>1</string>
+        <!-- Supervisor-sandbox mode (vision.md § 13.3 — third minimum-bar
+             item of rule #13). Resolver substrate ships in
+             `novel/tick-loop/src/sandbox-mode.ts` (PR #332); startup banner
+             consumes it (PR #335). Unset / `'off'` is the substrate-inert
+             default — no `sandbox-exec` profile applied. Operator ramp path:
+             uncomment the two lines below with value `'warn-only'` for the
+             14-day soak (logs every disallowed access, blocks nothing);
+             flip to `'enforce'` after the soak. An unrecognised value
+             (typo) falls back to `'off'` and surfaces a WARNING line in
+             the supervisor log (rule #6 visible-not-silent). Substrate-
+             inert until later slices wire the `sandbox-exec` profile —
+             flipping to `enforce` today does not actually sandbox anything. -->
+        <!-- <key>MINSKY_SANDBOX</key>
+             <string>off</string> -->
     </dict>
 
     <key>ProgramArguments</key>

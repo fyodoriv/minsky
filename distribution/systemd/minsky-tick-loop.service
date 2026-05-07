@@ -55,6 +55,18 @@ Environment=MINSKY_CHANGELOG_ENABLE=1
 # `docs/post-task-cto-audit.md`. Pivot trigger (rule #9): >5 audit-PRs/day
 # means tighten the brief; <1/week sustained 4 weeks means retire.
 Environment=MINSKY_CTO_AUDIT_ENABLE=1
+# Supervisor-sandbox mode (vision.md § 13.3 — third minimum-bar item of
+# rule #13). Resolver substrate ships in `novel/tick-loop/src/sandbox-mode.ts`
+# (PR #332); startup banner consumes it (PR #335). Unset / `'off'` is the
+# substrate-inert default — no syscall restrictions applied. Operator
+# ramp path: uncomment to `'warn-only'` for the 14-day soak (logs every
+# disallowed access, blocks nothing); flip to `'enforce'` after the soak.
+# An unrecognised value (typo) falls back to `'off'` and surfaces a
+# WARNING line in the supervisor log (rule #6 visible-not-silent).
+# Substrate-inert until later slices wire `SystemCallFilter`, `ProtectSystem`,
+# `PrivateTmp`, and `RestrictAddressFamilies` — flipping to `enforce` today
+# does not actually sandbox anything.
+# Environment=MINSKY_SANDBOX=off
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
 # Erlang-style "transient" restart: only on non-zero exit (let-it-crash
