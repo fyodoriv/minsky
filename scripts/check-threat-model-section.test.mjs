@@ -35,6 +35,7 @@ function fixtureReadme({
     "- **Trusted state**: pure functions only",
     "- **Trust boundary**: process boundary",
     "- **STRIDE focus**: **T**ampering — input validation",
+    "- **Performance-first carve-out** (rule #13's relief valve): none declared.",
   ];
   return ["# Pkg", "", header, "", ...body, trailer].join("\n");
 }
@@ -89,7 +90,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
             "- bullet 1",
             "- bullet 2",
             "- bullet 3",
-            "- bullet 4",
+            "- **Performance-first carve-out**: none declared.",
           ],
         }),
       );
@@ -106,15 +107,53 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
           "STRIDE-shaped per Howard & LeBlanc 2003.",
           "- **Untrusted inputs**: type-bounded only",
           "- **Trusted state**: pure functions",
-          "- **Trust boundary**: type system",
           "- there is no STRIDE letter that applies directly to a pure leaf",
+          "- **Performance-first carve-out**: none declared.",
         ],
       }),
     );
     expect(r.ok).toBe(true);
   });
 
-  test("aggregates multiple errors when both content-line floor and STRIDE engagement fail", () => {
+  test("fails when the section omits the `performance-first carve-out` clause", () => {
+    const r = checkThreatModelSection(
+      fixtureReadme({
+        lines: [
+          "STRIDE-shaped per Howard & LeBlanc 2003.",
+          "- **Untrusted inputs**: stdin",
+          "- **Trusted state**: pure functions",
+          "- **Trust boundary**: process boundary",
+          "- **STRIDE focus**: **T**ampering — input validation",
+        ],
+      }),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.some((e) => e.includes("performance-first carve-out"))).toBe(true);
+  });
+
+  test("accepts the carve-out clause in any case (case-insensitive)", () => {
+    for (const variant of [
+      "Performance-first carve-out",
+      "performance-first carve-out",
+      "PERFORMANCE-FIRST CARVE-OUT",
+    ]) {
+      const r = checkThreatModelSection(
+        fixtureReadme({
+          lines: [
+            "STRIDE-shaped per Howard & LeBlanc 2003.",
+            "- **Untrusted inputs**: stdin",
+            "- **Trusted state**: pure functions",
+            "- **STRIDE focus**: **T**ampering",
+            `- **${variant}**: none declared.`,
+          ],
+        }),
+      );
+      expect(r.ok, `variant: "${variant}"`).toBe(true);
+    }
+  });
+
+  test("aggregates multiple errors when content-line floor, STRIDE, and carve-out all fail", () => {
     const r = checkThreatModelSection(
       fixtureReadme({
         lines: ["one line", "", "two lines"],
@@ -122,7 +161,7 @@ describe("checkThreatModelSection — pure-function paired fixtures", () => {
     );
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.errors.length).toBe(2);
+    expect(r.errors.length).toBe(3);
   });
 });
 
