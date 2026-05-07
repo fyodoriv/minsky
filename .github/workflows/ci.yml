@@ -576,6 +576,39 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-vision-rule-13-task-id-citations.test.mjs
 
+  cloud-audit-gate:
+    # vision.md § 13 minimum-bar item 6 / TASKS.md
+    # `cloud-tier-external-security-audit-gate` § Files: blocks any PR
+    # touching cloud-tier package paths (`novel/cloud-supervisor/`,
+    # `novel/cross-repo-benchmark/`, `novel/shared-invariant-catalog/`)
+    # while the task block's `**Blocked**:` line still contains
+    # `needs-user-approval`. The gate is dormant today (no cloud-tier
+    # packages exist in `main`); shipping it ahead of the cloud tier ensures
+    # cloud-tier code cannot accrue silently before the audit clears. Pure
+    # classifier + paired tests ship in `scripts/check-cloud-audit-gate.mjs`;
+    # operator-facing prose lives in `docs/security/audit-gate.md` § Layer 1.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: cloud-audit-gate lint
+        env:
+          CLOUD_AUDIT_GATE_DIFF_BASE: origin/main
+        run: node scripts/check-cloud-audit-gate.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-cloud-audit-gate.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -1173,6 +1206,7 @@ jobs:
       - anchor-primary-source
       - biome
       - cadence-pivot-threshold
+      - cloud-audit-gate
       - dashboard-localhost-bind
       - glossary-discipline
       - hygiene
@@ -1224,6 +1258,7 @@ jobs:
           for r in "${{ needs.anchor-primary-source.result }}" \
                    "${{ needs.biome.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
+                   "${{ needs.cloud-audit-gate.result }}" \
                    "${{ needs.dashboard-localhost-bind.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
