@@ -147,9 +147,15 @@ export function decideDaemonPrState(input: DecideDaemonPrStateInput): DaemonPrSt
   );
   if (matching === undefined) return { kind: "no-pr" };
 
-  const failedChecks = matching.checks
-    .filter((c) => isFailingConclusion(c.conclusion))
-    .map((c) => c.name);
+  // Single-loop collection (slice-2 round-trip-elimination optimization):
+  // `filter(...).map(...)` allocates an intermediate array of CheckRunSnapshot
+  // before mapping to names. The decision runs every daemon iteration once
+  // wired (slice 4+); skipping the intermediate array saves one allocation
+  // per call on the hot path.
+  const failedChecks: string[] = [];
+  for (const c of matching.checks) {
+    if (isFailingConclusion(c.conclusion)) failedChecks.push(c.name);
+  }
 
   if (failedChecks.length === 0) {
     return { kind: "pr-clean", prNumber: matching.number };
@@ -191,4 +197,117 @@ export function isFailingConclusion(conclusion: CheckRunSnapshot["conclusion"]):
     conclusion === "ACTION_REQUIRED" ||
     conclusion === "STARTUP_FAILURE"
   );
+}
+
+// ---- gh pr list JSON parser (slice 2/N) -----------------------------------
+
+/**
+ * Pure parser for `gh pr list --head <branch> --state open --json
+ * number,title,state,statusCheckRollup` raw JSON output → the
+ * `DaemonOwnPrSnapshot[]` shape `decideDaemonPrState` consumes.
+ *
+ * Slice 2/N for `daemon-fix-own-pr-on-ci-failure`. Splits the I/O surface
+ * (executing `gh`) from the parse surface so the parser is unit-testable
+ * against frozen JSON fixtures without spawning subprocesses (mirrors
+ * `parseFilesChangedFromGit` / `parseRecentMainCommitsFromGit` in
+ * `cto-audit-cli-wiring.ts`). Slice 3+ wires `execFile("gh", […])` and
+ * feeds this parser; slice 4+ plumbs the verdict into `bin/tick-loop.mjs`.
+ *
+ * Graceful-degrade per rule #6/#7: invalid JSON, non-array root, or
+ * malformed entries yield `[]` rather than throwing — a `gh` outage or
+ * unexpected schema must not crash the daemon iteration.
+ *
+ * Schema mapping:
+ *   - PR-level: `state !== "OPEN"` → entry dropped (the decision only
+ *     consults open PRs anyway; filtering here keeps the snapshot lean).
+ *   - `statusCheckRollup` entries with `__typename === "CheckRun"` are
+ *     mapped to `CheckRunSnapshot` directly (the `conclusion` field is
+ *     pre-shaped to match GitHub's `CheckConclusionState` enum).
+ *   - Non-`CheckRun` rollup entries (`StatusContext`, etc.) are dropped.
+ *     Minsky CI is GitHub Actions only — every check in the rollup is a
+ *     `CheckRun`. If legacy commit statuses appear (e.g., a bot adds a
+ *     `StatusContext`), the parser silently ignores them rather than
+ *     misclassifying their conclusion. Slice 3+ revisits if observed.
+ *   - Unknown `conclusion` values map to `null` (treated as in-flight by
+ *     `isFailingConclusion`); the daemon waits rather than redo-ing.
+ *
+ * @otel-exempt pure parser; the I/O wrapper handles span emission.
+ */
+export function parseGhPrListForDaemonPrState(rawJson: string): readonly DaemonOwnPrSnapshot[] {
+  const parsed = safeParseJson(rawJson);
+  if (!Array.isArray(parsed)) return [];
+
+  const result: DaemonOwnPrSnapshot[] = [];
+  for (const entry of parsed) {
+    const snapshot = snapshotFromGhEntry(entry);
+    if (snapshot !== undefined) result.push(snapshot);
+  }
+  return result;
+}
+
+function safeParseJson(rawJson: string): unknown {
+  try {
+    return JSON.parse(rawJson);
+  } catch {
+    return undefined;
+  }
+}
+
+function snapshotFromGhEntry(entry: unknown): DaemonOwnPrSnapshot | undefined {
+  const validated = validatePrEntry(entry);
+  if (validated === undefined) return undefined;
+  return {
+    number: validated.number,
+    title: validated.title,
+    state: "OPEN",
+    checks: parseRollup(validated.rollup),
+  };
+}
+
+function validatePrEntry(
+  entry: unknown,
+): { readonly number: number; readonly title: string; readonly rollup: unknown } | undefined {
+  if (entry === null || typeof entry !== "object") return undefined;
+  const e = entry as Record<string, unknown>;
+  if (e["state"] !== "OPEN") return undefined;
+  const number = e["number"];
+  if (typeof number !== "number") return undefined;
+  const title = e["title"];
+  if (typeof title !== "string") return undefined;
+  return { number, title, rollup: e["statusCheckRollup"] };
+}
+
+function parseRollup(rollup: unknown): readonly CheckRunSnapshot[] {
+  if (!Array.isArray(rollup)) return [];
+  const checks: CheckRunSnapshot[] = [];
+  for (const raw of rollup) {
+    const check = checkFromRollupEntry(raw);
+    if (check !== undefined) checks.push(check);
+  }
+  return checks;
+}
+
+function checkFromRollupEntry(raw: unknown): CheckRunSnapshot | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  if (r["__typename"] !== "CheckRun") return undefined;
+  const name = r["name"];
+  if (typeof name !== "string") return undefined;
+  return { name, conclusion: normaliseConclusion(r["conclusion"]) };
+}
+
+function normaliseConclusion(value: unknown): CheckRunSnapshot["conclusion"] {
+  switch (value) {
+    case "SUCCESS":
+    case "FAILURE":
+    case "CANCELLED":
+    case "TIMED_OUT":
+    case "ACTION_REQUIRED":
+    case "STARTUP_FAILURE":
+    case "SKIPPED":
+    case "NEUTRAL":
+      return value;
+    default:
+      return null;
+  }
 }
