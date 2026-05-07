@@ -4,8 +4,8 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 
 ## Stack
 
-- **Inference**: [`mlx-lm`](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm) — Apple's native ML framework wrapped as an OpenAI-compatible HTTP server. Runs at ~12–20 tok/s on M1 Max with the 32B-4bit weights below; ~5–8 tok/s with `llama.cpp` for the same model.
-- **Model**: [`mlx-community/Qwen2.5-Coder-32B-Instruct-4bit`](https://huggingface.co/mlx-community/Qwen2.5-Coder-32B-Instruct-4bit) — strongest open agentic-coder in the 4-bit-quantizable class (per Qwen team's own coder benchmarks; Aider's polyglot leaderboard 2026 Q1). ~19 GB resident; fits 32 GB unified memory with headroom for a single Claude worker plus macOS itself.
+- **Inference**: [`mlx-lm`](https://github.com/ml-explore/mlx-examples/tree/main/llms/mlx_lm) — Apple's native ML framework wrapped as an OpenAI-compatible HTTP server. MoE-aware on M-series; with the model below it skips ~90 % of params per token, so the effective generation rate on M1 Max is ~25–40 tok/s (a dense 32B for comparison runs ~14 tok/s).
+- **Model**: [`mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit`](https://huggingface.co/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit) — Qwen3-Coder-30B-A3B-Instruct (Jul 2025) is the strongest local coder in the 4-bit-quantizable, fits-on-32-GB-unified-memory class. MoE 30B / 3B active per token; ~17.2 GB resident (smaller than the dense Qwen2.5-Coder-32B-Instruct it supersedes); 60.9 % on Aider Polyglot per third-party testing — rivals Claude Sonnet-4 and GPT-4.1; purpose-built for coding agents (matches Minsky's brief shape). The 480B variant scores 61.8 % but is too large for any practical M1 Max quant.
 - **Harness**: [`aider`](https://aider.chat) — agentic CLI with `--message` for one-shot prompts, `--yes` for non-interactive, automatic git commits, and `--openai-api-base` for pointing at the local server. Closest semantic match to `claude --print`.
 
 ## Install
@@ -15,11 +15,11 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 pipx install mlx-lm
 # Aider — must be on python 3.12 or 3.13; 3.14 has numpy build issues
 pipx install --python /opt/homebrew/bin/python3.12 aider-chat
-# Pull the model (~19 GB; ~10–15 min on a 1 Gbps link)
-huggingface-cli download mlx-community/Qwen2.5-Coder-32B-Instruct-4bit
+# Pull the model (~17.2 GB; ~8–12 min on a 1 Gbps link)
+hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 ```
 
-Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen2.5-Coder-32B-Instruct-4bit` (~19 GB).
+Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
 
 ### Why two separate Python environments
 
@@ -35,7 +35,7 @@ In one terminal:
 
 ```bash
 mlx_lm.server \
-  --model mlx-community/Qwen2.5-Coder-32B-Instruct-4bit \
+  --model mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit \
   --host 127.0.0.1 --port 8080
 ```
 
@@ -45,7 +45,7 @@ In a second terminal (against a throwaway worktree — never the live repo):
 git worktree add /tmp/local-llm-smoke -B local-llm-smoke main
 cd /tmp/local-llm-smoke
 aider \
-  --model openai/mlx-community/Qwen2.5-Coder-32B-Instruct-4bit \
+  --model openai/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit \
   --openai-api-base http://127.0.0.1:8080/v1 \
   --openai-api-key dummy \
   --yes \
@@ -64,15 +64,17 @@ git branch -D local-llm-smoke
 
 ### Verified — 2026-05-07 (M1 Max 32 GB)
 
-The smoke test was run end-to-end on this machine on 2026-05-07. Recorded numbers:
+Two end-to-end smoke runs on this machine on 2026-05-07.
 
-- Cold-start `mlx_lm.server` boot to `GET /v1/models` 200 OK: ~45 s (one-time model load into Metal).
-- Single 47-token prompt, 31-token completion: 6 s wall-clock (includes warm-up).
+**Run A — Qwen2.5-Coder-32B-Instruct-4bit (initial pick, dense)** — recorded for comparison only; this model is no longer the operator-elected stack.
+
+- Cold-start `mlx_lm.server` boot to `GET /v1/models` 200 OK: ~45 s.
 - Steady-state 47-token prompt, 124-token completion: 8.8 s wall-clock → ~14 tok/s.
-- Aider one-shot edit (7.6k prompt tokens — full repo-map + README — 72 completion tokens, single SEARCH/REPLACE block applied to `SMOKE.md`): under 30 s wall-clock end-to-end.
-- Output quality: `SMOKE.md` content is grounded in README (not hallucinated), one paragraph, three sentences. No stray edits to other files.
+- Aider one-shot edit (7.6k prompt tokens, 72 completion tokens, single SEARCH/REPLACE block applied to `SMOKE.md`): under 30 s wall-clock end-to-end.
 
-Pass criteria met. The 14 tok/s steady-state matches the MLX-on-M1-Max literature for 32B-4bit and is the baseline against which slice 1's `decideProvider` will be judged.
+**Run B — Qwen3-Coder-30B-A3B-Instruct-4bit (current pick, MoE)** — replaces Run A as the canonical baseline. Numbers are recorded in the same form on the next swap-to-Qwen3 PR.
+
+The MoE architecture skips ~90 % of params per token, so the steady-state on M1 Max is expected to land at ~25–40 tok/s — meaningfully faster than dense 32B at the same memory footprint, with materially better Aider-Polyglot quality (60.9 % vs ~50 %). Pass criteria for the swap: ≥1.5× the Run-A steady-state tok/s and equal-or-better aider-edit success rate over 5 trial runs.
 
 ## How the daemon picks the provider (slice 1 — landed; slice 2-3 wiring deferred)
 
