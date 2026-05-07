@@ -1949,12 +1949,11 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("optimization: none-this-iteration");
   });
 
-  it("emits the operator-directive anchor 2026-05-05 + measurable-only guard in the optimization gate", () => {
+  it("emits the measurable-only anti-vanity guard in the optimization gate", () => {
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
-    expect(brief).toContain("Operator directive 2026-05-05");
-    expect(brief).toContain("token savings");
-    expect(brief).toContain("wall-time savings");
-    expect(brief).toContain("Anti-vanity guard");
+    expect(brief).toContain("token bytes saved");
+    expect(brief).toContain("wall-time ms");
+    expect(brief).toContain("Anti-vanity");
     expect(brief).toContain("Pivot threshold");
   });
 
