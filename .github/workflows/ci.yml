@@ -525,6 +525,32 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-otel-no-pii.test.mjs
 
+  privacy-data-egress:
+    # vision.md § 13.7 / TASKS.md `security-privacy-priority-substrate` slice
+    # (e): `docs/security/privacy-data-egress.md` is the single-page operator
+    # answer to "where does my data go?". Slice 1 (PR #310) shipped the doc;
+    # slice 2 (PR #311) shipped the pure classifier in
+    # `scripts/check-privacy-data-egress.mjs` pinning the six required H2
+    # sections, the five enumerated egress destinations, the STRIDE
+    # methodology engagement, and the GDPR Article 25 anchor. This slice
+    # wires the CLI into the gate so a future doc rewrite cannot silently
+    # drop the allow-list rows or strip the methodological grounding.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: privacy-data-egress lint
+        run: node scripts/check-privacy-data-egress.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-privacy-data-egress.test.mjs
+
   threat-model-section:
     # vision.md § 13.8 / TASKS.md `security-privacy-priority-substrate` §
     # Acceptance #5: every constitutional `novel/**/README.md` carries a
@@ -1089,6 +1115,7 @@ jobs:
       - pivot-success-margin
       - pr-self-grade
       - pr-security-review
+      - privacy-data-egress
       - skill-rule-cap
       - rule-1-novel-justification
       - rule-2-dep-coverage
@@ -1131,6 +1158,7 @@ jobs:
                    "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.secret-scan.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
+                   "${{ needs.privacy-data-egress.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
                    "${{ needs.rule-2-dep-coverage.result }}" \
                    "${{ needs.rule-3-doc-first.result }}" \
