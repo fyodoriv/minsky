@@ -494,6 +494,44 @@ export {
   type SpawnStrategy,
 } from "./spawn-strategy.js";
 
+// Slice 1 of `local-llm-fallback-on-budget-pause`: expose the pure
+// decision function + classifier so the CLI wiring (slice 3) can wire
+// it into the spawn-strategy seam.
+export {
+  type BudgetState,
+  type DecideProviderInput,
+  type LastClaudeFailure,
+  type LocalProbeResult,
+  type ProviderDecision,
+  decideProvider,
+  isClaudeHardLimit,
+} from "./llm-provider-selector.js";
+
+// Slice 2 of `local-llm-fallback-on-budget-pause`: expose the invocation
+// builders so the CLI wiring (slice 3) can hand them to
+// `ProcessSpawnStrategy` as the per-iteration `invocation` opt.
+export {
+  type BuildAiderInvocationOpts,
+  type BuildClaudePrintInvocationOpts,
+  type LlmInvocation,
+  DEFAULT_AIDER_MODEL,
+  DEFAULT_AIDER_OPENAI_API_BASE,
+  DEFAULT_AIDER_OPENAI_API_KEY,
+  buildAiderInvocation,
+  buildClaudePrintInvocation,
+} from "./llm-invocation.js";
+
+// Slice 3 of `local-llm-fallback-on-budget-pause`: expose the wrapping
+// SpawnStrategy that dispatches between claude / local based on
+// `decideProvider(...)`.
+export {
+  type BudgetStateProbe,
+  type LlmProviderSpawnStrategyOptions,
+  LlmProviderSpawnStrategy,
+  probeWithErrorGuard,
+  synthesiseHoldResult,
+} from "./llm-provider-spawn-strategy.js";
+
 // Slice 2 of `daemon-parallel-worktree-launch`: per-worker namespacing
 // helpers exposed for the CLI (`bin/tick-loop.mjs`) so it can parse
 // `--worker-id` / `--workers-total` and announce parallel mode on startup.
