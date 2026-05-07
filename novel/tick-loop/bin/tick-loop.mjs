@@ -65,6 +65,7 @@ import { OtelObservability } from "@minsky/observability/otel";
 import { MaciekTokenMonitor, StubTokenMonitor } from "@minsky/token-monitor";
 
 import {
+  AutoScaleRunner,
   DryRunSpawnStrategy,
   LlmProviderSpawnStrategy,
   ProcessSpawnStrategy,
@@ -87,6 +88,7 @@ import {
   formatRecommendations,
   fromRealBudgetGuard,
   isDaemonAuthoredBranch,
+  listEligibleTasks,
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   runDaemon,
@@ -753,6 +755,81 @@ if (touchesGlobCheckEnabled) {
   process.stdout.write("[tick-loop] file-collision check disabled (MINSKY_TOUCHES_GLOB_CHECK=0)\n");
 }
 
+// Auto-scale workers (operator 2026-05-07 — slice 2/N). The root daemon
+// observes its own iteration spans, tracks rolling counters, and forks
+// another child via the existing --worker-id/--workers-total mechanism
+// when `decideAutoScale` says spawn. Default ON; off via
+// MINSKY_AUTO_SCALE_WORKERS=0/false. Children (MINSKY_WORKER_SPAWNED=1)
+// never auto-scale — only the root.
+const autoScaleEnabled =
+  process.env["MINSKY_WORKER_SPAWNED"] !== "1" &&
+  process.env["MINSKY_AUTO_SCALE_WORKERS"] !== "0" &&
+  process.env["MINSKY_AUTO_SCALE_WORKERS"] !== "false";
+const autoScaleMax = (() => {
+  const raw = process.env["MINSKY_AUTO_SCALE_MAX"];
+  if (raw === undefined || raw === "") return 5;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return 5;
+  return n;
+})();
+let autoScaleRunner;
+if (autoScaleEnabled) {
+  // Production wiring: real spawn forks another tick-loop process with
+  // --worker-id=<workerId> --workers-total=<totalAfter> and
+  // MINSKY_WORKER_SPAWNED=1 in env so the child doesn't recurse.
+  const autoSpawn = (input) => {
+    const childArgs = buildChildWorkerArgs({
+      parentArgv: process.argv.slice(2),
+      childIndex: input.workerId,
+      totalAfterSpawn: input.totalAfter,
+    });
+    const child = nodeSpawn(process.execPath, [process.argv[1], ...childArgs], {
+      env: { ...process.env, MINSKY_WORKER_SPAWNED: "1" },
+      stdio: "inherit",
+      detached: false,
+    });
+    process.stdout.write(
+      `[tick-loop] auto-scale: spawned worker ${input.workerId} as PID ${child.pid} (workers-total=${input.totalAfter})\n`,
+    );
+  };
+  const initialWorkers = workerConfig !== undefined ? workerConfig.workersTotal : 1;
+  autoScaleRunner = new AutoScaleRunner({
+    maxWorkers: autoScaleMax,
+    initialWorkers,
+    getEligibleTaskCount: () => {
+      try {
+        return listEligibleTasks(readFileSync(args.tasksMdPath, "utf-8")).length;
+        // rule-6: handled-locally — TASKS.md unreadable → 0 eligibles → no spawn
+      } catch {
+        return 0;
+      }
+    },
+    getBudgetState: () => {
+      const decision = realGuard.lastDecision?.();
+      if (decision === undefined || decision === null) return "normal";
+      if (decision.action === "circuit-break") return "circuit-break";
+      const reason = decision.reason ?? "";
+      if (reason.includes("weekly-cap-paused")) return "weekly-cap-paused";
+      if (reason.includes("weekly-cap-warn")) return "weekly-cap-warn";
+      return "normal";
+    },
+    spawn: autoSpawn,
+    emit: (event) => {
+      process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
+      if (observability !== undefined) observability.emitTickSpan(event);
+    },
+  });
+  process.stdout.write(
+    `[tick-loop] auto-scale workers wired (initial=${initialWorkers}, max=${autoScaleMax}; off via MINSKY_AUTO_SCALE_WORKERS=0)\n`,
+  );
+} else if (process.env["MINSKY_WORKER_SPAWNED"] === "1") {
+  process.stdout.write(
+    "[tick-loop] auto-scale workers off (this is a spawned child; only the root scales)\n",
+  );
+} else {
+  process.stdout.write("[tick-loop] auto-scale workers disabled (MINSKY_AUTO_SCALE_WORKERS=0)\n");
+}
+
 // Supervisor-sandbox mode banner (vision.md § 13.3): surface the resolved
 // `MINSKY_SANDBOX` mode + any typo warning in the supervisor log at boot.
 // Slice 2 of `supervisor-sandbox-syscall-restriction`: substrate-inert —
@@ -807,6 +884,12 @@ const result = await runDaemon({
     // rule #7 graceful-degrade (the OTEL SDK swallows transport errors).
     if (observability !== undefined) {
       observability.emitTickSpan(event);
+    }
+    // Auto-scale workers (slice 2/N): the root daemon's runner observes
+    // iteration spans and may spawn another child. Spawned children
+    // (MINSKY_WORKER_SPAWNED=1) skip this — only the root scales.
+    if (autoScaleRunner !== undefined) {
+      autoScaleRunner.observeEvent(event);
     }
   },
 });
