@@ -158,6 +158,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-6-let-it-crash",
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
+      "rule-13-sibling-anchors",
       "sbom-shape",
       "secret-scan",
       "tasks-lint",
@@ -166,6 +167,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "tick-loop-backoff-schedule",
       "typecheck",
       "user-story-security-section",
+      "vision-rule-13-task-id-citations",
     ]),
   ),
   supervisorSkippable: Object.freeze(
@@ -393,6 +395,18 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-user-story-security-section.mjs"],
+  },
+  {
+    name: "rule-13-sibling-anchors",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-rule-13-sibling-anchors.mjs"],
+  },
+  {
+    name: "vision-rule-13-task-id-citations",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-vision-rule-13-task-id-citations.mjs"],
   },
 ]);
 

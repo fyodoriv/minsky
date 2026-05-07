@@ -498,6 +498,59 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-user-story-security-section.test.mjs
 
+  rule-13-sibling-anchors:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
+    # acceptance criterion #3: each of the 6 sibling security P0s
+    # (`secret-scanning-precommit-and-ci`, `supervisor-sandbox-syscall-restriction`,
+    # `dashboard-localhost-only-by-default`, `otel-no-pii-in-spans-lint`,
+    # `supply-chain-hardening-lockfile-sbom-slsa`,
+    # `cloud-tier-external-security-audit-gate`) cites `rule #13` in its
+    # Anchor line. The pure classifier shipped in
+    # `scripts/check-rule-13-sibling-anchors.mjs`. This gate wires it into
+    # CI so a future TASKS.md rewrite that drops the anchor on a sibling
+    # surfaces here rather than silently breaking the substrate-cohesion
+    # invariant.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-13-sibling-anchors lint
+        run: node scripts/check-rule-13-sibling-anchors.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-13-sibling-anchors.test.mjs
+
+  vision-rule-13-task-id-citations:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
+    # acceptance criterion #3 (inverse direction): vision.md § 13's
+    # minimum-bar items 1–6 each cite the canonical sibling P0 ID
+    # verbatim as backticked text. The pure classifier shipped in
+    # `scripts/check-vision-rule-13-task-id-citations.mjs`. This gate
+    # wires it into CI so a future vision.md rewrite that drops one of
+    # the sibling IDs (or replaces it with prose) surfaces here rather
+    # than silently desynchronising the rule from its enforcement substrate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: vision-rule-13-task-id-citations lint
+        run: node scripts/check-vision-rule-13-task-id-citations.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-vision-rule-13-task-id-citations.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -1124,6 +1177,7 @@ jobs:
       - rule-6-let-it-crash
       - rule-7-chaos-coverage
       - rule-12-scope-discipline
+      - rule-13-sibling-anchors
       - sbom-shape
       - tasks-lint
       - test
@@ -1131,6 +1185,7 @@ jobs:
       - tick-loop-backoff-schedule
       - typecheck
       - user-story-security-section
+      - vision-rule-13-task-id-citations
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -1166,13 +1221,15 @@ jobs:
                    "${{ needs.rule-6-let-it-crash.result }}" \
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.rule-12-scope-discipline.result }}" \
+                   "${{ needs.rule-13-sibling-anchors.result }}" \
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
                    "${{ needs.threat-model-section.result }}" \
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
                    "${{ needs.typecheck.result }}" \
-                   "${{ needs.user-story-security-section.result }}"; do
+                   "${{ needs.user-story-security-section.result }}" \
+                   "${{ needs.vision-rule-13-task-id-citations.result }}"; do
             [ "$r" = "success" ] || fail=1
           done
           # Supervisor-integration jobs may legitimately exit 77 (skipped)
