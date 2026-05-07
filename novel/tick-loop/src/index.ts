@@ -570,3 +570,18 @@ export {
   runPrePrLintGate,
   shouldRunPrePrLintGate,
 } from "./pre-pr-lint-gate.js";
+
+// Supervisor-sandbox mode resolver (vision.md § 13.3 — supervisor sandbox,
+// the third minimum-bar item of rule #13). Slice 2 of
+// `supervisor-sandbox-syscall-restriction`: `bin/tick-loop.mjs`'s startup
+// banner consumes `sandboxModeStartupHint` so the resolved `MINSKY_SANDBOX`
+// mode + any typo warning surface in the supervisor log at boot.
+// Substrate-inert until slice 3+ wires the actual sandbox profile.
+export {
+  SANDBOX_MODE_DEFAULT,
+  SANDBOX_MODE_ENV,
+  type SandboxMode,
+  resolveSandboxMode,
+  sandboxModeStartupHint,
+  sandboxModeWarning,
+} from "./sandbox-mode.js";

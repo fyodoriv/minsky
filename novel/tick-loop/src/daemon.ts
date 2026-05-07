@@ -1113,8 +1113,6 @@ export function buildDaemonBrief(args: {
     "",
     "Forbidden: colon INSIDE bold (`**Predicted:**`, `**Match:**`) or capitalized values (`Yes`) — fails. Colon outside; values lowercase (`**Match**: yes`/`no`/`partial`).",
     "",
-    "Single source of truth: `scripts/check-pr-self-grade.mjs`.",
-    "",
     "## PR security-review template (copy-paste verbatim)",
     "",
     "vision.md § 13: every PR body MUST contain ONE of the following or `scripts/check-pr-security-review.mjs` fails CI.",
