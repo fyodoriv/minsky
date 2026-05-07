@@ -136,6 +136,17 @@ export interface PnpmPrePrLintRunOptions {
    * (resolved relative to `cwd`, which is the repo root in production).
    */
   readonly scriptPath?: string;
+  /**
+   * Path to a draft PR-body file. When set, the gate appends `--body=<path>`
+   * so the two body-only CI checks (`pr-self-grade`, `pr-security-review`,
+   * both env-dependent on PR-body context in CI) ride the same retry budget
+   * as the branch-code lints. Slice 30/N added the flag to the canonical
+   * runner; slice 32/N exposes it on the typed binding so the daemon's
+   * programmatic gate can validate the body file the same way the brief
+   * already instructs the inner Claude to via the shell. Unset → no
+   * body-only checks (the existing daemon wire-in's behaviour).
+   */
+  readonly bodyPath?: string;
   /** Optional spawn override — a seam tests use to inject a fake subprocess. */
   readonly spawnFn?: typeof nodeSpawn;
 }
@@ -170,9 +181,11 @@ export function createPnpmPrePrLintRun(opts: PnpmPrePrLintRunOptions = {}): PreP
   const scriptPath = opts.scriptPath ?? "scripts/run-pre-pr-lint-stack.mjs";
   const spawnFn = opts.spawnFn ?? nodeSpawn;
   const cwd = opts.cwd;
+  const bodyPath = opts.bodyPath;
 
   return async (): Promise<PrePrLintRunResult> => {
     const args = [scriptPath, "--json", `--stage=${stage}`];
+    if (bodyPath !== undefined) args.push(`--body=${bodyPath}`);
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 

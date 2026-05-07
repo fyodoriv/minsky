@@ -7,10 +7,13 @@
 // Plus an integration-style test that simulates a rule-7-chaos-coverage
 // violation and verifies the gate retries 3× rather than declaring pass.
 
+import { EventEmitter } from "node:events";
+import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   type PrePrLintRunResult,
+  createPnpmPrePrLintRun,
   runPrePrLintGate,
   shouldRunPrePrLintGate,
 } from "./pre-pr-lint-gate.js";
@@ -145,5 +148,85 @@ describe("shouldRunPrePrLintGate", () => {
     const taskBlock = "  - **Blocked**: PRE-PR-LINT-FAILURES — wrong casing";
     // Must NOT opt out on wrong casing — the gate token is exact.
     expect(shouldRunPrePrLintGate({ taskBlock })).toBe(true);
+  });
+});
+
+describe("createPnpmPrePrLintRun (slice 32/N — bodyPath option)", () => {
+  // Slice 30/N (PR #329) added `--body=<path>` to the canonical
+  // `scripts/run-pre-pr-lint-stack.mjs` so the two body-only CI checks
+  // (`pr-self-grade`, `pr-security-review` — both env-dependent on PR-body
+  // context in CI) ride the same retry budget as the branch-code lints.
+  // The brief already instructs the inner Claude to invoke the flag via the
+  // shell. Slice 32/N exposes the same flag on the typed binding so the
+  // daemon's programmatic gate (`tick-loop.mjs § preLintRun`) can validate
+  // a draft PR-body file without the shell round-trip — the wire-in is one
+  // line per call-site once consumers want it. These tests pin that the
+  // binding propagates `--body=<path>` through to the spawned argv.
+  /**
+   * Build a fake `spawn` that records the args it was called with and
+   * synthesises a successful JSON result on stdout.
+   */
+  function fakeSpawn(stdoutJson: string): {
+    spawn: ReturnType<typeof vi.fn>;
+    captured: { args: readonly string[] }[];
+  } {
+    const captured: { args: readonly string[] }[] = [];
+    const spawn = vi.fn((_cmd: string, args: readonly string[]) => {
+      captured.push({ args });
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: Readable;
+        stderr: Readable;
+      };
+      const stdout = Readable.from([Buffer.from(stdoutJson, "utf8")]);
+      const stderr = Readable.from([Buffer.from("", "utf8")]);
+      child.stdout = stdout;
+      child.stderr = stderr;
+      // Defer `close` until after stdout has drained so the production
+      // code sees the JSON before it tries to parse — matching real
+      // child-process semantics where `close` follows the streams' `end`.
+      stdout.on("end", () => {
+        queueMicrotask(() => child.emit("close", 0));
+      });
+      return child;
+    });
+    return { spawn, captured };
+  }
+
+  const passJson = JSON.stringify({ allPass: true, steps: [] });
+
+  it("does NOT pass --body when bodyPath is unset (default behaviour preserved)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn — the test seam types it identically.
+    const run = createPnpmPrePrLintRun({ spawnFn: spawn as any });
+    await run();
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.args.some((a) => a.startsWith("--body="))).toBe(false);
+  });
+
+  it("passes --body=<path> when bodyPath is set (slice 30 flag wired through)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    const run = createPnpmPrePrLintRun({
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn — the test seam types it identically.
+      spawnFn: spawn as any,
+      bodyPath: "pr-body.md",
+    });
+    await run();
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.args).toContain("--body=pr-body.md");
+  });
+
+  it("preserves --json + --stage=<stage> alongside --body (flags compose, no rewrites)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    const run = createPnpmPrePrLintRun({
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn — the test seam types it identically.
+      spawnFn: spawn as any,
+      stage: "full",
+      bodyPath: "/tmp/draft-body.md",
+    });
+    await run();
+    const args = captured[0]?.args ?? [];
+    expect(args).toContain("--json");
+    expect(args).toContain("--stage=full");
+    expect(args).toContain("--body=/tmp/draft-body.md");
   });
 });

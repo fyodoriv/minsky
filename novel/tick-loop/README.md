@@ -164,6 +164,8 @@ The daemon extends the parent table above with three v0 rows:
 
 Each row carries a deterministic vitest assertion in `novel/tick-loop/src/daemon.test.ts` (rows 6–8) or `novel/tick-loop/src/pre-pr-lint-gate.test.ts` (rows 9–10). The paired daemon tests run in <1 s on any CI runner.
 
+The typed binding `createPnpmPrePrLintRun` in `novel/tick-loop/src/pre-pr-lint-gate.ts` accepts `bodyPath?: string` (slice 32/N): when set, it forwards `--body=<path>` to the spawned canonical script so the two body-only checks (`pr-self-grade`, `pr-security-review`, slice 30/N's flag) ride the same retry budget as the branch-code lints. Unset → no behaviour change; the existing daemon wire-in at `bin/tick-loop.mjs` doesn't pass `bodyPath`, so its argv is identical.
+
 ### SpawnStrategy seam (sub-task 1/3 of `tick-loop-daemon-real-spawn`)
 
 `novel/tick-loop/src/spawn-strategy.ts` introduces the `SpawnStrategy` interface (rule #2 adapter pattern, Wirfs-Brock & McKean 2003) — the seam test-mode + production-mode share for the per-iteration spawn step. Two v0 implementations:
