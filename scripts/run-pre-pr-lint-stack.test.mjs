@@ -17,6 +17,7 @@ import {
   buildStepResult,
   parseArgs,
   renderJson,
+  resolveBodyPath,
   resolveDiffBase,
   runStack,
   selectSteps,
@@ -247,6 +248,49 @@ describe("parseArgs", () => {
 
   test("--body= (empty value) is ignored — empty paths can't satisfy the body checks", () => {
     expect(parseArgs(["--body="])).toEqual({ stage: "fast", json: false });
+  });
+});
+
+describe("resolveBodyPath (slice 35/N — `pnpm pre-pr-lint` auto-discovers `pr-body.md`)", () => {
+  // Slice 33/N lifted the auto-discovery into the daemon's TS factory
+  // (`createBodyAwarePrePrLintRun`); this slice mirrors it in the script so
+  // the operator's `pnpm pre-pr-lint` and the daemon's
+  // `node scripts/run-pre-pr-lint-stack.mjs` invocation share one discovery
+  // path (rule #2 — single source of truth). Explicit `--body=<path>` always
+  // wins; auto-discovery is the silent fallback.
+
+  test("explicit --body=<path> wins (no fileExists call needed)", () => {
+    let calls = 0;
+    const fileExists = () => {
+      calls += 1;
+      return true;
+    };
+    expect(resolveBodyPath("draft.md", fileExists, "/repo")).toBe("draft.md");
+    expect(calls).toBe(0);
+  });
+
+  test("returns the discovered path when `pr-body.md` exists at repoRoot", () => {
+    /** @type {(p: string) => boolean} */
+    const fileExists = (p) => p === "/repo/pr-body.md";
+    expect(resolveBodyPath(undefined, fileExists, "/repo")).toBe("/repo/pr-body.md");
+  });
+
+  test("returns undefined when `pr-body.md` is absent and no flag was passed", () => {
+    /** @type {(p: string) => boolean} */
+    const fileExists = () => false;
+    expect(resolveBodyPath(undefined, fileExists, "/repo")).toBeUndefined();
+  });
+
+  test("uses repoRoot for discovery — not the caller's cwd", () => {
+    /** @type {string[]} */
+    const probed = [];
+    /** @type {(p: string) => boolean} */
+    const fileExists = (p) => {
+      probed.push(p);
+      return false;
+    };
+    resolveBodyPath(undefined, fileExists, "/some/repo");
+    expect(probed).toEqual(["/some/repo/pr-body.md"]);
   });
 });
 
