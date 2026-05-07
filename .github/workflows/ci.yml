@@ -687,6 +687,32 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-threat-model-section.test.mjs
 
+  sandbox-env-declared:
+    # vision.md § 13.3 / TASKS.md `supervisor-sandbox-syscall-restriction`:
+    # `MINSKY_SANDBOX` must be declared in the resolver source
+    # (`SANDBOX_MODE_ENV` in `novel/tick-loop/src/sandbox-mode.ts`) AND
+    # surfaced in both supervisor unit-file templates (commented opt-in is
+    # sufficient — substrate-inert by default). Pure classifier + paired
+    # tests ship in `scripts/check-sandbox-env-declared.mjs`. This gate
+    # pins substrate-cohesion so a future rename of the env var or removal
+    # of the operator-visible declaration from one platform surfaces in CI
+    # rather than silently desynchronising the operator-facing surface.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: sandbox-env-declared lint
+        run: node scripts/check-sandbox-env-declared.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-sandbox-env-declared.test.mjs
+
   pr-security-review:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate` §
     # Measurement: every PR body carries either a `## Security & privacy`
@@ -1238,6 +1264,7 @@ jobs:
       - rule-7-chaos-coverage
       - rule-12-scope-discipline
       - rule-13-sibling-anchors
+      - sandbox-env-declared
       - sbom-shape
       - tasks-lint
       - test
@@ -1284,6 +1311,7 @@ jobs:
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.rule-12-scope-discipline.result }}" \
                    "${{ needs.rule-13-sibling-anchors.result }}" \
+                   "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
