@@ -112,3 +112,16 @@ const client: MessagesClient = {
 };
 const opt = new AnthropicPromptOptimizer({ client });
 ```
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). LLM API caller; primary secrets are the Anthropic API key and the prompt variant content.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | `ANTHROPIC_API_KEY` compromise allows impersonation of the operator's Anthropic account | Key sourced from env only; never logged by the adapter; rotate via Anthropic console on suspected exposure |
+| Tampering | Prompt variants supplied as input embed injection attacks that corrupt LLM output | Variants are operator-controlled in v0; no raw user input passed to the API; `structured()` callers validate schema shape |
+| Repudiation | No audit trail of which API calls were made or which variant won | Caller logs intent before invoking; OTEL spans can wrap calls via `emitTickSpan`; Anthropic console shows usage logs |
+| Information Disclosure | `ANTHROPIC_API_KEY` visible in process environment (`/proc/<pid>/environ`) | Key is injected at process start; `supervisor-sandbox-syscall-restriction` restricts `/proc` access; never log `process.env` |
+| Denial of Service | Unconstrained A/B test calls exhaust the 5h token budget before `BudgetGuard` fires | `BudgetGuard` circuit-breaks upstream before the optimizer is invoked; per-test token accounting planned in `mape-k-plan-execute-phases` |
+| Elevation of Privilege | A leaked API key grants full Anthropic account API access at the operator's billing level | Least-privilege: use an API key scoped only to the models needed; Anthropic console supports key-level rate limits |

@@ -102,8 +102,36 @@ export function checkReadme(
   return { readmePath, sectionFound: true, strideOk, lengthOk, contentLines };
 }
 
+/** Directories that are not novel packages and should be skipped during sub-scan. */
+const SKIP_SUBDIRS = new Set(["node_modules", "dist", "src", ".turbo", ".git", "test", "tests"]);
+
 /**
- * Enumerate novel/<pkg>/README.md files and run checkReadme on each.
+ * Read and validate README.md at the given path if it exists; otherwise return [].
+ *
+ * @param {string} readmePath
+ * @returns {ThreatModelResult[]}
+ */
+function readIfExists(readmePath) {
+  if (!existsSync(readmePath)) return [];
+  return [checkReadme(readmePath, readFileSync(readmePath, "utf8"))];
+}
+
+/**
+ * Enumerate one level of sub-packages inside a top-level novel package directory
+ * (e.g. novel/adapters/<sub>/README.md) and run checkReadme on each found README.
+ *
+ * @param {string} pkgDir
+ * @returns {ThreatModelResult[]}
+ */
+function checkSubPackages(pkgDir) {
+  return readdirSync(pkgDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !SKIP_SUBDIRS.has(e.name))
+    .flatMap((sub) => readIfExists(join(pkgDir, sub.name, "README.md")));
+}
+
+/**
+ * Enumerate novel/<pkg>/README.md files (and one level of sub-packages, e.g.
+ * novel/adapters/<sub>/README.md) and run checkReadme on each.
  *
  * @param {string} repoRoot
  * @returns {ThreatModelResult[]}
@@ -112,16 +140,12 @@ export function checkAllNovelReadmes(repoRoot) {
   const novelDir = join(repoRoot, "novel");
   if (!existsSync(novelDir)) return [];
 
-  const packages = readdirSync(novelDir, { withFileTypes: true })
+  return readdirSync(novelDir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
-    .map((e) => e.name);
-
-  return packages.flatMap((pkg) => {
-    const readmePath = join(novelDir, pkg, "README.md");
-    if (!existsSync(readmePath)) return [];
-    const content = readFileSync(readmePath, "utf8");
-    return [checkReadme(readmePath, content)];
-  });
+    .flatMap((e) => {
+      const pkgDir = join(novelDir, e.name);
+      return [...readIfExists(join(pkgDir, "README.md")), ...checkSubPackages(pkgDir)];
+    });
 }
 
 // --------------------------------------------------------------- CLI -------

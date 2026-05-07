@@ -171,3 +171,16 @@ import('@minsky/persona-spawner').then(async (m) => {
 The spawned OMC session writes its team-state under
 `./.omc/state/team/manual-smoke/`; the printed
 `{ exitCode, durationMs, omcStateDir }` confirms the round-trip.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). Subprocess spawner; primary risks are PATH poisoning and argument injection.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | A malicious binary named `omc` earlier on PATH is executed instead of the real OMC | `omcBin` constructor opt pins the binary to an absolute path in production deployments; `selfTest()` validates presence and identity |
+| Tampering | Task IDs passed as argv to the OMC child process contain shell metacharacters | `spawn` (not `exec`) is used — no shell interpolation; argv is a typed string array, never passed through a shell |
+| Repudiation | No signed record of which persona was spawned for which task | `omcStateDir` in the return value is the per-spawn audit record; TASKS.md claim entries and OTEL spans record the intent |
+| Information Disclosure | Task ID appears in `/proc/<pid>/cmdline` visible to other local processes | v0 passes only task ID and persona tag (not task content); `supervisor-sandbox-syscall-restriction` P0 task restricts `/proc` visibility |
+| Denial of Service | OMC subprocess hangs indefinitely, blocking the daemon's tick loop | Process timeout is a planned v1 addition (`omc-tasksmd-bridge-v1-watcher`); v0 callers set a manual wall-clock timeout |
+| Elevation of Privilege | OMC subprocess inherits the daemon's full process privileges (filesystem, network) | v0 inherits; `supervisor-sandbox-syscall-restriction` P0 task adds a systemd / macOS sandbox profile limiting the spawn's reach |
