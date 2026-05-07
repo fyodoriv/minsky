@@ -20,9 +20,11 @@
 // silently shrink, weaken, or drop these sections — and rule #13.8 would
 // lose its grip on the package-level documentation surface that operators
 // rely on for incident response. This lint pins the section's existence,
-// minimum substance (≥5 non-empty lines), and STRIDE-name engagement
-// (the methodology must be cited even when a package's STRIDE letters
-// don't apply, as in `novel/adapters/types/README.md`).
+// minimum substance (≥5 non-empty lines), STRIDE-name engagement (the
+// methodology must be cited even when a package's STRIDE letters don't
+// apply, as in `novel/adapters/types/README.md`), and the per-package
+// `performance-first carve-out` line (vision.md § 13's relief-valve clause —
+// the surface where declared performance/security trade-offs live).
 //
 // Pivot (rule #9): if STRIDE is later replaced by a different threat-model
 // methodology in vision.md (e.g., LINDDUN for privacy-heavy packages),
@@ -74,6 +76,12 @@ const SECTION_HEADER_RE = /^## Threat model\s*$/m;
 const NEXT_H2_RE = /^## /m;
 const STRIDE_RE = /\bSTRIDE\b/i;
 const MIN_CONTENT_LINES = 5;
+// vision.md § 13's relief-valve clause: "performance wins on a case-by-case
+// basis, with the security cost documented in the relevant package's
+// threat-model section as a declared deviation." Pin the per-section line so
+// a future README rewrite cannot silently drop the carve-out, removing the
+// surface where declared performance/security trade-offs live.
+const CARVE_OUT_RE = /\bperformance-first carve-out\b/i;
 
 /**
  * Slice the `## Threat model` section body out of a README. Returns `null`
@@ -105,6 +113,12 @@ export function extractThreatModelSection(readmeText) {
  *      package's STRIDE letters don't apply (e.g., the leaf-only `types`
  *      adapter), the methodology must be cited so future readers see the
  *      author engaged with it rather than skipped it.
+ *   4. The section names rule #13's "performance-first carve-out" clause
+ *      (case-insensitive). This is the documented surface for declared
+ *      performance/security trade-offs per vision.md § 13's relief valve;
+ *      every package must say either "none declared" or list the deviations.
+ *      Pinning forces the surface to stay populated even when no deviation
+ *      currently exists.
  *
  * @param {string} readmeText
  * @returns {CheckResult}
@@ -125,6 +139,11 @@ export function checkThreatModelSection(readmeText) {
   if (!STRIDE_RE.test(section)) {
     errors.push(
       "section does not name `STRIDE` — rule #13.8 requires explicit methodology engagement",
+    );
+  }
+  if (!CARVE_OUT_RE.test(section)) {
+    errors.push(
+      "section does not name `performance-first carve-out` — vision.md § 13's relief-valve clause requires per-package documentation of declared deviations (or an explicit `none declared` line)",
     );
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
@@ -186,7 +205,9 @@ async function main() {
       "",
       "Per vision.md § 13.8 and TASKS.md `security-privacy-priority-substrate`",
       "acceptance criterion #5, every novel package's README must carry a",
-      "STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines.",
+      "STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines",
+      "and a per-package `performance-first carve-out` line (vision.md § 13's",
+      "relief-valve clause — declared deviations OR an explicit `none declared`).",
       "",
     ].join("\n"),
   );
