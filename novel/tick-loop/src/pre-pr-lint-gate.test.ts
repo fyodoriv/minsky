@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   type PrePrLintRunResult,
+  createBodyAwarePrePrLintRun,
   createPnpmPrePrLintRun,
   runPrePrLintGate,
   shouldRunPrePrLintGate,
@@ -228,5 +229,120 @@ describe("createPnpmPrePrLintRun (slice 32/N — bodyPath option)", () => {
     expect(args).toContain("--json");
     expect(args).toContain("--stage=full");
     expect(args).toContain("--body=/tmp/draft-body.md");
+  });
+});
+
+describe("createBodyAwarePrePrLintRun (slice 33/N — outer gate auto-discovers pr-body.md)", () => {
+  // Slice 32/N (PR #333) added `bodyPath` to `createPnpmPrePrLintRun` but the
+  // daemon's outer gate (`tick-loop.mjs § preLintRun`) bound the run once at
+  // boot with no bodyPath, so the outer gate was blind to any draft body file
+  // the inner Claude wrote during the iteration. This factory resolves the
+  // mismatch — each invocation stats `<cwd>/pr-body.md` and forwards
+  // `--body=<path>` when present, on the same retry budget as the branch-code
+  // lints. The brief's "body-only checks" line documents the contract; this
+  // factory implements it on the daemon side instead of trusting inner Claude
+  // to invoke the shell flag itself.
+  function fakeSpawn(stdoutJson: string): {
+    spawn: ReturnType<typeof vi.fn>;
+    captured: { args: readonly string[] }[];
+  } {
+    const captured: { args: readonly string[] }[] = [];
+    const spawn = vi.fn((_cmd: string, args: readonly string[]) => {
+      captured.push({ args });
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: Readable;
+        stderr: Readable;
+      };
+      const stdout = Readable.from([Buffer.from(stdoutJson, "utf8")]);
+      const stderr = Readable.from([Buffer.from("", "utf8")]);
+      child.stdout = stdout;
+      child.stderr = stderr;
+      stdout.on("end", () => {
+        queueMicrotask(() => child.emit("close", 0));
+      });
+      return child;
+    });
+    return { spawn, captured };
+  }
+
+  const passJson = JSON.stringify({ allPass: true, steps: [] });
+
+  it("does NOT pass --body when pr-body.md is absent (no false body-validation)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      fileExists: () => false,
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    await run();
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.args.some((a) => a.startsWith("--body="))).toBe(false);
+  });
+
+  it("passes --body=<cwd>/pr-body.md when the file exists (closes the brief↔gate loop)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    const seen: string[] = [];
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      fileExists: (p) => {
+        seen.push(p);
+        return p === "/repo/pr-body.md";
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    await run();
+    expect(seen).toEqual(["/repo/pr-body.md"]);
+    expect(captured[0]?.args).toContain("--body=/repo/pr-body.md");
+  });
+
+  it("re-stats the body file on every call (not bound at factory time)", async () => {
+    // Per-call detection is the whole point: the body file appears DURING the
+    // iteration, after the factory was built at daemon boot. A bind-once impl
+    // would miss it. This test pins per-call semantics by flipping the stub
+    // between calls.
+    const { spawn, captured } = fakeSpawn(passJson);
+    let exists = false;
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      fileExists: () => exists,
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    await run();
+    exists = true;
+    await run();
+    expect(captured).toHaveLength(2);
+    expect(captured[0]?.args.some((a) => a.startsWith("--body="))).toBe(false);
+    expect(captured[1]?.args).toContain("--body=/repo/pr-body.md");
+  });
+
+  it("honours custom bodyFilename (lets operators rename the convention)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      bodyFilename: "draft-pr.md",
+      fileExists: (p) => p === "/repo/draft-pr.md",
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    await run();
+    expect(captured[0]?.args).toContain("--body=/repo/draft-pr.md");
+  });
+
+  it("forwards --stage=full when set (composes with --body)", async () => {
+    const { spawn, captured } = fakeSpawn(passJson);
+    const run = createBodyAwarePrePrLintRun({
+      cwd: "/repo",
+      stage: "full",
+      fileExists: () => true,
+      // biome-ignore lint/suspicious/noExplicitAny: spawnFn shape mirrors node:child_process.spawn.
+      spawnFn: spawn as any,
+    });
+    await run();
+    const args = captured[0]?.args ?? [];
+    expect(args).toContain("--stage=full");
+    expect(args).toContain("--body=/repo/pr-body.md");
   });
 });

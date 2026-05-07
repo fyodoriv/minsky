@@ -70,13 +70,13 @@ import {
   TestFakeMockAnthropic,
   analyzeConfig,
   buildChildWorkerArgs,
+  createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
   createFileBackedLastRenderedDate,
   createFileBackedSnapshotExists,
   createGitGhSignalsBuilder,
   createPnpmMetricsRender,
-  createPnpmPrePrLintRun,
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
@@ -549,9 +549,16 @@ if (metricsRenderSeam !== undefined) {
 // `pnpm pre-pr-lint --stage=fast` after every completed iteration to verify
 // the branch is lint-clean. Emits `tick-loop.pre-pr-lint-gate` spans for the
 // rolling pass-rate metric (`pnpm daemon-pr-lint:metrics`).
-const preLintRun = createPnpmPrePrLintRun({ cwd: minskyHome });
+//
+// Slice 33/N (`daemon-pre-pr-lint-gate`): `createBodyAwarePrePrLintRun`
+// stats `<minskyHome>/pr-body.md` on each call and forwards `--body=<path>`
+// when present, so the body-only checks (`pr-self-grade`,
+// `pr-security-review`) ride the same retry budget as the branch-code
+// lints — closing the loop the brief already documents (inner Claude
+// writes the file, outer gate validates it).
+const preLintRun = createBodyAwarePrePrLintRun({ cwd: minskyHome });
 process.stdout.write(
-  "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement)\n",
+  "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n",
 );
 
 // Supervisor-sandbox mode banner (vision.md § 13.3): surface the resolved

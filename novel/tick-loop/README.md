@@ -166,6 +166,8 @@ Each row carries a deterministic vitest assertion in `novel/tick-loop/src/daemon
 
 The typed binding `createPnpmPrePrLintRun` in `novel/tick-loop/src/pre-pr-lint-gate.ts` accepts `bodyPath?: string` (slice 32/N): when set, it forwards `--body=<path>` to the spawned canonical script so the two body-only checks (`pr-self-grade`, `pr-security-review`, slice 30/N's flag) ride the same retry budget as the branch-code lints. Unset → no behaviour change; the existing daemon wire-in at `bin/tick-loop.mjs` doesn't pass `bodyPath`, so its argv is identical.
 
+Slice 33/N adds the body-aware factory `createBodyAwarePrePrLintRun` that the daemon's `bin/tick-loop.mjs` wires by default: each invocation stats `<minskyHome>/pr-body.md` and forwards `--body=<path>` when present, so the post-iteration outer gate validates the same draft body file the brief instructs the inner `claude --print` to write — closing the loop the brief documented but the wire-in didn't enforce. Per-call `existsSync` (not bind-once at boot) is the design point: the body file is authored *during* an iteration, after the factory was constructed at daemon startup.
+
 ### SpawnStrategy seam (sub-task 1/3 of `tick-loop-daemon-real-spawn`)
 
 `novel/tick-loop/src/spawn-strategy.ts` introduces the `SpawnStrategy` interface (rule #2 adapter pattern, Wirfs-Brock & McKean 2003) — the seam test-mode + production-mode share for the per-iteration spawn step. Two v0 implementations:
