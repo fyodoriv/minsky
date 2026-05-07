@@ -51,6 +51,7 @@ describe("STACK_MANIFEST", () => {
       [
         "biome",
         "markdownlint",
+        "otel-no-pii",
         "rule-12-scope-discipline",
         "rule-13-sibling-anchors",
         "rule-13-vision-task-citations",
