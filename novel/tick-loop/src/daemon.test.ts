@@ -1788,10 +1788,11 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("(task block not found in TASKS.md");
   });
 
-  it("includes the priority-discipline gate listing open p0-tagged tasks", () => {
+  it("includes the priority-discipline gate; skips full P0 list in the happy path (saves ~554 bytes/iter)", () => {
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
     expect(brief).toContain("## Priority-discipline gate");
-    expect(brief).toContain("Open P0 tasks");
+    // In the happy path the full P0 list is omitted — the verdict already confirms the task is P0.
+    expect(brief).not.toContain("Open P0 tasks");
     expect(brief).toContain("`real-task`");
   });
 

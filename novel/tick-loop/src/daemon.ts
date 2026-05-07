@@ -1047,9 +1047,9 @@ export function buildDaemonBrief(args: {
   const block = extractTaskBlock(args.tasksMdContent, args.taskId);
   const openP0s = extractOpenP0TaskIds(args.tasksMdContent);
   const pickedIsP0 = openP0s.includes(args.taskId);
-  const openP0List = openP0s.length === 0 ? "(none)" : openP0s.map((id) => `\`${id}\``).join(", ");
+  const openP0List = openP0s.map((id) => `\`${id}\``).join(", ");
   const priorityVerdict = pickedIsP0
-    ? `Your picked task \`${args.taskId}\` IS in the open P0 set above. Proceed.`
+    ? `Your picked task \`${args.taskId}\` IS in the open P0 set. Proceed.`
     : openP0s.length === 0
       ? `No open P0 tasks. Your picked task \`${args.taskId}\` is the highest-priority work available. Proceed.`
       : `**STOP.** Your picked task \`${args.taskId}\` is NOT in the open P0 set above. Output \`noop, exiting — priority discipline: '${args.taskId}' is not the highest-priority unclaimed P0; should pick '${openP0s[0]}' instead\` to stdout and DO NOT open a PR. Exception: if your picked task's block contains \`**Pick-next**: yes\` AND no open P0 has \`**Pick-next**: yes\`, the operator has explicitly overridden — proceed and note the override in your reason.`;
@@ -1099,8 +1099,7 @@ export function buildDaemonBrief(args: {
     "",
     "## Priority-discipline gate",
     "",
-    `Open P0 tasks (unclaimed, unblocked, tagged \`p0\`): ${openP0List}`,
-    "",
+    ...(pickedIsP0 || openP0s.length === 0 ? [] : [`Open P0 tasks: ${openP0List}`, ""]),
     priorityVerdict,
     "",
     "## Task block (current TASKS.md)",
