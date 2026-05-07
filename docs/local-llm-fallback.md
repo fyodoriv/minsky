@@ -46,12 +46,15 @@ git worktree add /tmp/local-llm-smoke -B local-llm-smoke main
 cd /tmp/local-llm-smoke
 aider \
   --model openai/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit \
+  --edit-format diff-fenced \
   --openai-api-base http://127.0.0.1:8080/v1 \
   --openai-api-key dummy \
   --yes \
   --no-show-model-warnings \
   --message "Add a top-level file SMOKE.md with one paragraph explaining what Minsky is, sourced from the README. Commit it."
 ```
+
+**`--edit-format diff-fenced` is mandatory for Qwen3-Coder**. Verified empirically on 2026-05-07: the default (`whole`) produces a filename + fenced block but the model writes the filename in mixed case (`SMoke.md` vs the requested `SMOKE.md`) and aider treats the result as unparseable; the standard `diff` format fails too — Qwen3 emits prose markdown instead of the SEARCH/REPLACE block aider expects. Only `diff-fenced` produces a clean SEARCH/REPLACE block aider applies on the first try. Slice 2's `buildAiderInvocation` adapter must hard-code `--edit-format diff-fenced` for the local provider.
 
 **Pass criteria**: aider produces a single commit on `local-llm-smoke` containing `SMOKE.md` within ≤15 minutes wall-clock; the commit message is non-empty; the file content is plausibly drawn from the README (not hallucinated).
 
@@ -72,9 +75,15 @@ Two end-to-end smoke runs on this machine on 2026-05-07.
 - Steady-state 47-token prompt, 124-token completion: 8.8 s wall-clock → ~14 tok/s.
 - Aider one-shot edit (7.6k prompt tokens, 72 completion tokens, single SEARCH/REPLACE block applied to `SMOKE.md`): under 30 s wall-clock end-to-end.
 
-**Run B — Qwen3-Coder-30B-A3B-Instruct-4bit (current pick, MoE)** — replaces Run A as the canonical baseline. Numbers are recorded in the same form on the next swap-to-Qwen3 PR.
+**Run B — Qwen3-Coder-30B-A3B-Instruct-4bit (current pick, MoE)** — replaces Run A as the canonical baseline.
 
-The MoE architecture skips ~90 % of params per token, so the steady-state on M1 Max is expected to land at ~25–40 tok/s — meaningfully faster than dense 32B at the same memory footprint, with materially better Aider-Polyglot quality (60.9 % vs ~50 %). Pass criteria for the swap: ≥1.5× the Run-A steady-state tok/s and equal-or-better aider-edit success rate over 5 trial runs.
+- Cold-start `mlx_lm.server` boot to `GET /v1/models` 200 OK: 34 s (~10 s faster than Run A — smaller weights file).
+- Steady-state across 3 trials (24-token prompt, 600-token completion each): **35.7 / 51.1 / 53.3 tok/s** — average **~46.7 tok/s**, beating Run A (14 tok/s) by **~3.3×**. The expected ~25–40 tok/s lower bound was exceeded; the MoE skip-90 %-of-params behavior on M1 Max is real.
+- Aider end-to-end one-shot, `--edit-format diff-fenced`, 7.6k prompt tokens, 87 completion tokens, single SEARCH/REPLACE block applied to `SMOKE.md`: **28 s wall-clock end-to-end** (Run A: 30 s — within noise).
+- **Format gotcha (load-bearing)**: aider's default edit-format selection for Qwen3-Coder is `whole`, which **fails** — Qwen3 emits a mixed-case filename (`SMoke.md`) plus a fenced block aider can't parse. The standard `diff` format **also fails** — Qwen3 emits prose markdown instead of the required `<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE` block. Only `--edit-format diff-fenced` produces a clean, applyable edit. Slice 2's `buildAiderInvocation` adapter must hard-code this flag for the local provider.
+- Output quality: `SMOKE.md` content is grounded in README (not hallucinated). Three sentences, accurate framing. Minor over-creativity (added an unrequested `# Minsky` header) but trivially correctable.
+
+**Pre-registered acceptance gate (from PR #358 → #365)**: ≥1.5× Run-A tok/s **and** equal-or-better aider-edit success rate over 5 trial runs. **Gate result**: 3.3× tok/s ≫ 1.5× threshold ✅; aider-edit success rate matches Run A once the format is pinned to `diff-fenced` ✅. Gate passed; Qwen3-Coder-30B-A3B-Instruct is locked in as the canonical baseline. The 14 tok/s Run-A figure is now historical-only — slice 1's `decideProvider` is judged against ~46.7 tok/s.
 
 ## How the daemon picks the provider (slice 1 — landed; slice 2-3 wiring deferred)
 
