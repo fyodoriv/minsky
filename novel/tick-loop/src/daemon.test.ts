@@ -108,6 +108,21 @@ function extractBriefNoopExitTokenPrefix(brief: string): string {
   return `${m[1]}:`;
 }
 
+/**
+ * Slice 29/N: pull the `## Pre-PR lint-stack gate` body out of the brief so
+ * parity tests on the gate's contents don't accidentally pass on a token
+ * appearing in a sibling section (e.g., the PR self-grade or security-review
+ * templates further down the brief). Section bounded by its `##` heading and
+ * the next `##` heading.
+ */
+function extractGateSection(brief: string): string {
+  const start = brief.indexOf("## Pre-PR lint-stack gate");
+  if (start === -1) throw new Error("brief: missing `## Pre-PR lint-stack gate` heading");
+  const tail = brief.slice(start);
+  const nextH2 = tail.slice(2).search(/\n## /);
+  return nextH2 === -1 ? tail : tail.slice(0, 2 + nextH2);
+}
+
 // ---- Fixtures -------------------------------------------------------------
 
 const FIXTURE_TASKS_MD = `# Tasks
@@ -1812,6 +1827,29 @@ describe("buildDaemonBrief", () => {
     // Pre-registered metric (TASKS.md `daemon-pre-pr-lint-gate`) — pin the
     // 80% threshold so a brief edit can't silently weaken the hypothesis.
     expect(brief).toContain("≥80%");
+  });
+
+  it("gate section also names the body-only CI checks the lint stack can't run (slice 29/N)", () => {
+    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): `pnpm pre-pr-lint`
+    // covers the branch-code lints but cannot evaluate the two PR-body CI
+    // checks (`pr-security-review`, `pr-self-grade`) — both are in
+    // `CI_ENV_DEPENDENT_JOBS` precisely because they need PR-body context.
+    // PR #327 (slice 28/N) shipped with `pnpm pre-pr-lint` green and still
+    // failed `pr-security-review` because the inner Claude wrote a body
+    // without the `## Security & privacy` marker. The gate's body-only blind
+    // spot was exactly the failure mode this task is meant to close. Slice
+    // 29/N extends the gate's procedure: after `pnpm pre-pr-lint` is green,
+    // run the two body checkers against the draft body file before
+    // `gh pr create -F`. Pin the script names so future brief trims can't
+    // silently drop the directive.
+    const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
+    const gateSection = extractGateSection(brief);
+    expect(gateSection).toContain("scripts/check-pr-security-review.mjs");
+    expect(gateSection).toContain("scripts/check-pr-self-grade.mjs");
+    // The two body-only CI jobs are precisely the env-dependent ones that
+    // can't run inside `pnpm pre-pr-lint` — pin the framing so the directive
+    // doesn't drift to "run extra lints" without the operator-facing reason.
+    expect(gateSection).toMatch(/body-only|body file/i);
   });
 
   it("brief's fast-stage step names match the canonical manifest at scripts/run-pre-pr-lint-stack.mjs (bidirectional)", () => {

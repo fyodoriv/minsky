@@ -1080,6 +1080,8 @@ export function buildDaemonBrief(args: {
     "- **Red** → fix failures and re-run, up to 3 attempts. The stderr tail names the failing step; each failure is a daemon fix, not an operator cleanup PR.",
     "- **Still red after 3 attempts** → output `noop, exiting — pre-pr-lint-failures: <step name>` to stdout and DO NOT open a PR. Filing a `Blocked: pre-pr-lint-failures` task is acceptable; opening a red PR is not.",
     "",
+    "After `pnpm pre-pr-lint` is green, before `gh pr create -F <body-file>`, also validate the draft body file against the two body-only CI checks (env-dependent, so the lint stack can't): `node scripts/check-pr-security-review.mjs <body-file>` and `node scripts/check-pr-self-grade.mjs <body-file>`. Both must exit 0 — the templates below are the canonical inputs.",
+    "",
     "Pre-registered (TASKS.md `daemon-pre-pr-lint-gate`): post-fix, ≥80% of daemon-authored PRs open with zero red CI checks.",
     "",
     "## Optimization-discipline gate",
