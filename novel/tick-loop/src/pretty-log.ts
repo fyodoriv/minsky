@@ -23,6 +23,9 @@ export type FormatOpts = {
   readonly maxReasonChars?: number;
 };
 
+/**
+ * @otel-exempt pure formatter; the I/O wrapper (bin/minsky.mjs) feeds tail-F output through this.
+ */
 export function formatLogLine(raw: string, opts: FormatOpts = {}): string {
   const trimmed = raw.replace(/\r?\n$/, "");
   const span = parseSpan(trimmed);
