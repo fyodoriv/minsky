@@ -32,6 +32,8 @@
 
 import { spawn as nodeSpawn } from "node:child_process";
 
+import type { LlmInvocation } from "./llm-invocation.js";
+
 // ---- Types ----------------------------------------------------------------
 
 /**
@@ -175,6 +177,31 @@ export interface ProcessSpawnStrategyOptions {
    * Surfaced-by `daemon-claude-print-hang-watchdog` (operator 2026-05-07).
    */
   readonly timeoutMs?: number;
+  /**
+   * Optional per-iteration invocation builder (slice 2 of
+   * `local-llm-fallback-on-budget-pause`). When set, the strategy computes
+   * `command` / `argv` / `stdin` / `cwd` per-iteration from this builder
+   * instead of the constructor's static `command` / `args` and the
+   * spawn-input's `brief` (which goes to stdin in the legacy path). This
+   * is the seam the slice-3 wiring uses to pick between
+   * `buildClaudePrintInvocation` and `buildAiderInvocation` based on the
+   * `decideProvider(...)` output.
+   *
+   * When `invocation` is set:
+   *   - `this.command` / `this.args` / `input.brief` are still passed
+   *     (the builder may use any of them);
+   *   - the returned `LlmInvocation` wins over the constructor defaults;
+   *   - `stdin: undefined` means the strategy does NOT write to stdin
+   *     (aider's brief lives on argv via `--message`);
+   *   - `stdin: <string>` means write that exact string to stdin and
+   *     close (claude --print's path; the builder may pass `input.brief`
+   *     through unchanged).
+   *
+   * When `invocation` is `undefined`, behaviour is unchanged from sub-task
+   * 1/3 — the constructor's `command` + `args` + `input.brief` (always to
+   * stdin) is the single observable shape.
+   */
+  readonly invocation?: (input: SpawnInput) => LlmInvocation;
 }
 
 /**
@@ -197,12 +224,14 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
   private readonly args: readonly string[];
   private readonly spawnFn: typeof nodeSpawn;
   private readonly timeoutMs: number | undefined;
+  private readonly invocation: ((input: SpawnInput) => LlmInvocation) | undefined;
 
   constructor(opts: ProcessSpawnStrategyOptions = {}) {
     this.command = opts.command ?? "claude";
     this.args = opts.args ?? ["--print"];
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
     this.timeoutMs = opts.timeoutMs;
+    this.invocation = opts.invocation;
   }
 
   /**
@@ -210,17 +239,25 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
    * brief to stdin, capture bounded stdout/stderr tails, and resolve
    * with the result on close.
    *
+   * When the constructor's `invocation` opt is set (slice 2 of
+   * `local-llm-fallback-on-budget-pause`), `command` / `argv` / `stdin` /
+   * `cwd` are taken from the builder's per-iteration `LlmInvocation`
+   * instead of the constructor's static defaults. The builder owns the
+   * adapter shape (claude → stdin brief; aider → `--message <brief>`
+   * argv).
+   *
    * @otel tick-loop.spawn-strategy.process.spawn
    */
   spawn(input: SpawnInput): Promise<SpawnResult> {
     const startedAt = Date.now();
-    const argv = [...this.args, ...(input.extraArgs ?? [])];
+    const resolved = this.resolveInvocation(input);
     const timeoutMs = this.timeoutMs;
     return new Promise<SpawnResult>((resolve, reject) => {
-      const child = this.spawnFn(this.command, argv, {
+      const child = this.spawnFn(resolved.command, [...resolved.argv], {
         env: input.env,
         stdio: ["pipe", "pipe", "pipe"],
         ...(input.signal === undefined ? {} : { signal: input.signal }),
+        ...(resolved.cwd === undefined ? {} : { cwd: resolved.cwd }),
       });
 
       const stdoutChunks: Buffer[] = [];
@@ -267,13 +304,52 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
         );
       });
 
-      // Write the brief to stdin and close — `claude --print`'s headless
-      // path reads the brief from stdin and exits when the response is
-      // complete (per `claude --help`: "Print response and exit").
-      if (child.stdin !== null && child.stdin !== undefined) {
-        child.stdin.end(input.brief);
-      }
+      // Write the brief to stdin (claude --print path) OR leave stdin
+      // unbound (aider --message path). Extracted into a helper so the
+      // Promise body stays under biome's cognitive-complexity cap.
+      writeStdin(child, resolved.stdin);
     });
+  }
+
+  /**
+   * Resolve the per-iteration invocation. When the constructor's
+   * `invocation` opt is set, delegate to it; otherwise build the legacy
+   * shape from `this.command` / `this.args` / `input.brief` / `input.extraArgs`
+   * (which is exactly what sub-task 1/3 produced).
+   *
+   * Extracted so `spawn(...)` stays under biome's cognitive-complexity
+   * cap (rule #6, ≤10).
+   *
+   * (Internal helper — no JSDoc tag required.)
+   */
+  private resolveInvocation(input: SpawnInput): LlmInvocation {
+    if (this.invocation !== undefined) return this.invocation(input);
+    return {
+      command: this.command,
+      argv: [...this.args, ...(input.extraArgs ?? [])],
+      stdin: input.brief,
+    };
+  }
+}
+
+/**
+ * Close child stdin, optionally writing a brief first. Branches:
+ *   - `child.stdin` absent → no-op (some spawn modes don't pipe stdin).
+ *   - `payload === undefined` → close without writing (aider path:
+ *     the brief is on argv).
+ *   - `payload === <string>` → write the payload and close (claude path).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function writeStdin(
+  child: { stdin: { end: (payload?: string) => void } | null | undefined },
+  payload: string | undefined,
+): void {
+  if (child.stdin === null || child.stdin === undefined) return;
+  if (payload === undefined) {
+    child.stdin.end();
+  } else {
+    child.stdin.end(payload);
   }
 }
 
