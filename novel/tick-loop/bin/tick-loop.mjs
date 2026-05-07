@@ -68,6 +68,7 @@ import {
   DryRunSpawnStrategy,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
+  analyzeConfig,
   buildChildWorkerArgs,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
@@ -78,6 +79,7 @@ import {
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
+  formatRecommendations,
   fromRealBudgetGuard,
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
@@ -205,6 +207,34 @@ if (spawnDecision.count > 0) {
 }
 
 console.error(workerStartupLine(workerConfig));
+
+// Daemon self-config analyzer (operator 2026-05-06): inspect env + argv at
+// boot and print recommendations the operator should consider. Heuristics:
+//   - isSelfDogfood: the package.json at MINSKY_HOME has "name": "minsky"
+//     (the parent repo); falls back to "true when MINSKY_HOME contains a
+//     package.json with a `minsky` name field, false otherwise".
+//   - isLaunchd: parent process is launchd (PPID == 1 on macOS user agent
+//     mode; we just inspect process.env.LAUNCHD_SOCKET as a signal).
+const isSelfDogfood = (() => {
+  try {
+    const pj = JSON.parse(readFileSync(resolve(args.tasksMdPath, "..", "package.json"), "utf-8"));
+    return pj?.name === "minsky";
+  } catch {
+    return false;
+  }
+})();
+const isLaunchd = process.env["LAUNCHD_SOCKET_NAME"] !== undefined;
+const recs = analyzeConfig({
+  env: process.env,
+  argv: process.argv.slice(2),
+  isSelfDogfood,
+  isLaunchd,
+});
+if (recs.length > 0) {
+  console.error(formatRecommendations(recs));
+} else {
+  console.error("[config-analyzer] OK — no recommendations.");
+}
 
 // Sub-task 2/3: wire the real `BudgetGuard` from `@minsky/budget-guard`.
 // Dry-run uses a `StubTokenMonitor` (a fresh, full 5h window — no I/O against
