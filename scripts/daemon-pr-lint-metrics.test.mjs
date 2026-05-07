@@ -373,6 +373,31 @@ describe("runDaemonPrLintMetrics", () => {
   });
 });
 
+/**
+ * Slice the `daemon-pre-pr-lint-gate` task block out of TASKS.md so parity
+ * checks don't accidentally pass on an unrelated `0.8` / `80%` / `≥10`
+ * mention elsewhere in the file (other tasks have their own percentage and
+ * count figures). The block starts at the
+ * `- [ ] \`daemon-pre-pr-lint-gate\`` line and runs until the next top-level
+ * `- [ ]` / `- [x]` task entry. Lifted to module scope (slice 27/N) so the
+ * `ROLLING_30D_MIN_PASS_RATE` and `ROLLING_30D_MIN_N` parity describes share
+ * a single extractor — same shape as slice 26/N's helper, no semantic drift.
+ *
+ * @param {string} tasksMd
+ * @returns {string}
+ */
+function extractDaemonPrePrLintGateBlock(tasksMd) {
+  const startRe = /^- \[ \] `daemon-pre-pr-lint-gate`/m;
+  const startMatch = startRe.exec(tasksMd);
+  if (startMatch === null) {
+    throw new Error("TASKS.md has no `daemon-pre-pr-lint-gate` task block");
+  }
+  const tail = tasksMd.slice(startMatch.index);
+  const nextTaskRe = /\n- \[[ x]\] `[a-z][a-z0-9-]*`/;
+  const nextMatch = nextTaskRe.exec(tail.slice(1));
+  return nextMatch === null ? tail : tail.slice(0, 1 + nextMatch.index);
+}
+
 describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => {
   // Slice 26/N: the rolling-window pass-rate threshold (0.8) lives canonically
   // as `ROLLING_30D_MIN_PASS_RATE` in this module; `scripts/self-diagnose.mjs`
@@ -416,31 +441,6 @@ describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => 
     };
   }
 
-  /**
-   * Slice the `daemon-pre-pr-lint-gate` task block out of TASKS.md so the
-   * parity check doesn't accidentally pass on an unrelated `0.8` / `80%`
-   * mention elsewhere in the file (other tasks have their own percentage
-   * figures — `daemon-cross-iteration-prompt-cache` cites "≥80%" cache hit
-   * rate; `dashboard-web-lighthouse-ci-pivot` cites "≥80%" success rate; both
-   * unrelated to this constant). The block starts at the
-   * `- [ ] \`daemon-pre-pr-lint-gate\`` line and runs until the next
-   * top-level `- [ ]` / `- [x]` task entry.
-   *
-   * @param {string} tasksMd
-   * @returns {string}
-   */
-  function extractDaemonPrePrLintGateBlock(tasksMd) {
-    const startRe = /^- \[ \] `daemon-pre-pr-lint-gate`/m;
-    const startMatch = startRe.exec(tasksMd);
-    if (startMatch === null) {
-      throw new Error("TASKS.md has no `daemon-pre-pr-lint-gate` task block");
-    }
-    const tail = tasksMd.slice(startMatch.index);
-    const nextTaskRe = /\n- \[[ x]\] `[a-z][a-z0-9-]*`/;
-    const nextMatch = nextTaskRe.exec(tail.slice(1));
-    return nextMatch === null ? tail : tail.slice(0, 1 + nextMatch.index);
-  }
-
   test("docs/daemon-pre-pr-gate.md cites the threshold in both percent and decimal forms", () => {
     const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
     const { percent, decimal } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
@@ -478,5 +478,52 @@ describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => 
     // extractor must stop before that block begins, otherwise the parity
     // assertions can pass on prose belonging to a sibling task.
     expect(block).not.toContain("daemon-fix-own-pr-on-ci-failure");
+  });
+});
+
+describe("ROLLING_30D_MIN_N prose ↔ canonical constant parity", () => {
+  // Slice 27/N: extends slice 26/N's drift-gate family to the second
+  // load-bearing number in this module — the minimum-sample-size threshold
+  // (n=10) below which the verdict is INSUFFICIENT-DATA, not OK/BELOW.
+  // `scripts/self-diagnose.mjs` imports `ROLLING_30D_MIN_N` directly, so the
+  // in-code dependency is tight; two operator-facing surfaces still cite the
+  // value as inline prose:
+  //
+  //   - `docs/daemon-pre-pr-gate.md` (Operator commands § self-diagnose
+  //     example — "fires only with ≥10 daemon PRs in the rolling window").
+  //   - `TASKS.md` `daemon-pre-pr-lint-gate` block — Measurement line
+  //     ("rolling 30d window holds ≥10 PRs" + "minimum sample size ≥10 in
+  //     `ROLLING_30D_MIN_N`").
+  //
+  // A future PR tightening n from 10 to 20 would update the constant and its
+  // self-diagnose import without tripping any existing test, while the prose
+  // silently kept claiming "≥10". Operators reading either surface would see
+  // a stale number; the doc's example invariant query and the task block's
+  // pre-registered minimum would announce a smaller window than the verdict
+  // actually requires. Same shape as slice 26/N — the daemon brief is not
+  // covered because n=10 isn't cited there (only the percent threshold is).
+
+  /**
+   * Render the canonical sample-size threshold in the prose form both
+   * surfaces use: "≥10". The "≥" + integer shape is the natural way a
+   * writer cites a non-strict lower bound; pinning that exact byte sequence
+   * forces a prose update in lockstep with the constant.
+   *
+   * @param {number} n
+   * @returns {string}
+   */
+  function minNProseShape(n) {
+    return `≥${n}`;
+  }
+
+  test("docs/daemon-pre-pr-gate.md cites the n threshold in ≥N form", () => {
+    const doc = readFileSync(resolve(REPO_ROOT, "docs/daemon-pre-pr-gate.md"), "utf8");
+    expect(doc).toContain(minNProseShape(ROLLING_30D_MIN_N));
+  });
+
+  test("TASKS.md `daemon-pre-pr-lint-gate` block cites the n threshold in ≥N form", () => {
+    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
+    const block = extractDaemonPrePrLintGateBlock(tasksMd);
+    expect(block).toContain(minNProseShape(ROLLING_30D_MIN_N));
   });
 });
