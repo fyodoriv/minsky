@@ -597,3 +597,189 @@ export function parseSbomJson(text) {
     };
   }
 }
+
+// Slice 4: CLI driver. ------------------------------------------------------
+//
+// Wires the slice 1–3 seams (classifier, walker, parser) into a runnable
+// CLI: `node scripts/check-sbom-shape.mjs --sbom=<path>` reads the SBOM
+// file, parses it via `parseSbomJson`, walks it via `walkSbomViolations`,
+// and exits 0 (clean) / 1 (shape violations) / 2 (cannot evaluate). The
+// SBOM-generation workflow + CI job that produces the file this CLI
+// validates ship in slice ≥5 against this fixed driver. Mirrors
+// `runLockfileIntegrityCheck` (slice 4 of the lockfile-integrity sub-
+// track) — same `{ exitCode, stdout, stderr, violations }` outcome shape,
+// same fail-safe-defaults exit-code split (Saltzer & Schroeder 1975).
+//
+// Why a dependency-injected reader: the test suite covers every exit path
+// (missing file, IO error, parse failure, shape violations, clean) by
+// passing a fake `readSbom` — no temporary directories, no file-system
+// fixtures. Mirrors the `readTree`/`readBase` pattern in
+// `runLockfileIntegrityCheck`.
+
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import process from "node:process";
+
+/**
+ * @typedef {object} SbomCheckOutcome
+ * @property {0 | 1 | 2} exitCode
+ *   `0` = clean (SBOM well-formed or no SBOM to scan).
+ *   `1` = SBOM shape violations found.
+ *   `2` = the gate cannot evaluate (IO error, parse failure). The
+ *          fail-safe-defaults split (Saltzer & Schroeder 1975) makes the
+ *          two failure shapes distinguishable in CI: a `1` is "the SBOM
+ *          we generated does not match the spec"; a `2` is "we don't
+ *          know" (read failed, JSON malformed). Both block the gate.
+ * @property {string} stdout    diagnostic suitable for `process.stdout.write`.
+ * @property {string} stderr    diagnostic suitable for `process.stderr.write`.
+ * @property {SbomViolation[]} violations  exposed for tests.
+ */
+
+/**
+ * @typedef {object} SbomReaderOk
+ * @property {"ok"} kind
+ * @property {string} text
+ */
+/**
+ * @typedef {object} SbomReaderMissing
+ * @property {"missing"} kind
+ */
+/**
+ * @typedef {object} SbomReaderError
+ * @property {"error"} kind
+ * @property {string} reason
+ */
+/** @typedef {SbomReaderOk | SbomReaderMissing | SbomReaderError} SbomReaderResult */
+
+/**
+ * Pure driver. Given a reader for the SBOM file, produce the verdict +
+ * diagnostic. The CLI's `main()` is a thin wrapper around this — splitting
+ * the I/O boundary out lets the test suite cover every exit path without
+ * touching the file system.
+ *
+ * @param {{ readSbom: () => SbomReaderResult, sbomPath: string }} input
+ * @returns {SbomCheckOutcome}
+ */
+export function runSbomShapeCheck({ readSbom, sbomPath }) {
+  const result = readSbom();
+  if (result.kind === "missing") {
+    return {
+      exitCode: 0,
+      stdout: `sbom-shape skipped: ${sbomPath} not present.\n`,
+      stderr: "",
+      violations: [],
+    };
+  }
+  if (result.kind === "error") {
+    return {
+      exitCode: 2,
+      stdout: "",
+      stderr: `sbom-shape: cannot read ${sbomPath} — ${result.reason}\n`,
+      violations: [],
+    };
+  }
+
+  const parsed = parseSbomJson(result.text);
+  if (parsed.ok === false) {
+    return {
+      exitCode: 2,
+      stdout: "",
+      stderr: `sbom-shape: cannot parse ${sbomPath} — ${parsed.code}: ${parsed.reason}\n`,
+      violations: [],
+    };
+  }
+
+  const { violations } = walkSbomViolations(parsed.parsed);
+  if (violations.length === 0) {
+    return {
+      exitCode: 0,
+      stdout: `sbom-shape ok: ${sbomPath} matches CycloneDX 1.5/1.6; 0 violations.\n`,
+      stderr: "",
+      violations: [],
+    };
+  }
+
+  const lines = [`sbom-shape: ${violations.length} violation(s) in ${sbomPath}:`];
+  for (const v of violations) {
+    const prefix = v.path === undefined ? "" : `${v.path}: `;
+    lines.push(`  ${prefix}${v.code} — ${v.reason}`);
+  }
+  lines.push(
+    "",
+    "Fix one of:",
+    "  1. regenerate the SBOM with a `cyclonedx-cli` version that emits",
+    "     CycloneDX 1.5 or 1.6 (the allowlist this gate enforces);",
+    "  2. update the upstream generator if the violation is a real",
+    "     spec-conformance regression (then file an upstream issue);",
+    "  3. extend `ALLOWED_SPEC_VERSIONS` if a newer CycloneDX version",
+    "     ships and is intentionally adopted (slice 1 verdict-table",
+    "     extension, not classifier relaxation).",
+    "",
+    "See vision.md § 13.5 (security & privacy minimum-bar item #5 —",
+    "supply-chain hardening; SBOM shape is the consumer's only structural",
+    "guarantee against generator-side regressions).",
+    "",
+  );
+
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr: lines.join("\n"),
+    violations,
+  };
+}
+
+/**
+ * Parse CLI args. `--sbom=<path>` overrides the default `sbom.cdx.json`;
+ * env `SBOM_SHAPE_PATH` is consulted as a fallback. The default name
+ * matches what `cyclonedx-cli`'s `--output-file` writes by convention.
+ *
+ * @param {string[]} argv
+ * @param {Record<string, string | undefined>} [env]  defaults to `process.env`
+ * @returns {{ sbomPath: string }}
+ */
+export function parseArgs(argv, env = process.env) {
+  let sbomPath = env["SBOM_SHAPE_PATH"] ?? "sbom.cdx.json";
+  for (const arg of argv) {
+    if (arg.startsWith("--sbom=")) {
+      sbomPath = arg.slice("--sbom=".length);
+    }
+  }
+  return { sbomPath };
+}
+
+/**
+ * Read a file from disk into the `SbomReaderResult` shape. `ENOENT` maps
+ * to `{ kind: "missing" }` (the fail-safe "no SBOM to scan" signal — the
+ * gate exits 0 so a repo without a generation step doesn't perma-fail);
+ * any other error maps to `{ kind: "error" }` (the gate exits 2).
+ *
+ * @param {string} absPath
+ * @returns {SbomReaderResult}
+ */
+function readSbomFile(absPath) {
+  try {
+    return { kind: "ok", text: readFileSync(absPath, "utf8") };
+  } catch (err) {
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    if (code === "ENOENT") return { kind: "missing" };
+    return { kind: "error", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function main() {
+  const { sbomPath } = parseArgs(process.argv.slice(2));
+  const absPath = resolve(process.cwd(), sbomPath);
+  const outcome = runSbomShapeCheck({
+    readSbom: () => readSbomFile(absPath),
+    sbomPath,
+  });
+  if (outcome.stdout.length > 0) process.stdout.write(outcome.stdout);
+  if (outcome.stderr.length > 0) process.stderr.write(outcome.stderr);
+  process.exit(outcome.exitCode);
+}
+
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("check-sbom-shape.mjs") === true;
+if (invokedDirectly) main();

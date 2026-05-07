@@ -13,7 +13,9 @@ import {
   ALLOWED_COMPONENT_TYPES,
   ALLOWED_SPEC_VERSIONS,
   classifySbomShape,
+  parseArgs,
   parseSbomJson,
+  runSbomShapeCheck,
   walkSbomViolations,
 } from "./check-sbom-shape.mjs";
 
@@ -911,5 +913,194 @@ describe("parseSbomJson — determinism", () => {
     const b = parseSbomJson(text);
     expect(a).not.toBe(b);
     if (a.ok && b.ok) expect(a.parsed).not.toBe(b.parsed);
+  });
+});
+
+// Slice 4: CLI driver + parseArgs. ------------------------------------------
+
+describe("parseArgs", () => {
+  it("defaults to sbom.cdx.json when no flags given", () => {
+    expect(parseArgs([], {})).toEqual({ sbomPath: "sbom.cdx.json" });
+  });
+
+  it("--sbom=<path> overrides the default", () => {
+    expect(parseArgs(["--sbom=foo.json"], {})).toEqual({ sbomPath: "foo.json" });
+  });
+
+  it("env SBOM_SHAPE_PATH overrides the default when no --sbom flag is set", () => {
+    expect(parseArgs([], { SBOM_SHAPE_PATH: "envpath.json" })).toEqual({
+      sbomPath: "envpath.json",
+    });
+  });
+
+  it("--sbom=<path> wins over env SBOM_SHAPE_PATH", () => {
+    expect(parseArgs(["--sbom=cli.json"], { SBOM_SHAPE_PATH: "envpath.json" })).toEqual({
+      sbomPath: "cli.json",
+    });
+  });
+
+  it("ignores unknown flags", () => {
+    expect(parseArgs(["--something-else=x", "--sbom=ok.json"], {})).toEqual({
+      sbomPath: "ok.json",
+    });
+  });
+});
+
+describe("runSbomShapeCheck — happy paths", () => {
+  it("exits 0 with a 'skipped' message when SBOM file is missing (fail-safe default)", () => {
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "missing" }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.stdout).toContain("skipped");
+    expect(outcome.stdout).toContain("sbom.cdx.json");
+    expect(outcome.stderr).toBe("");
+    expect(outcome.violations).toEqual([]);
+  });
+
+  it("exits 0 when SBOM is valid CycloneDX 1.5", () => {
+    const text = JSON.stringify(validSbom());
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.stdout).toContain("ok");
+    expect(outcome.stdout).toContain("0 violations");
+    expect(outcome.violations).toEqual([]);
+  });
+
+  it("exits 0 when SBOM is valid CycloneDX 1.6", () => {
+    const text = JSON.stringify(validSbom({ specVersion: "1.6" }));
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.violations).toEqual([]);
+  });
+});
+
+describe("runSbomShapeCheck — exit code 2 (cannot evaluate)", () => {
+  it("exits 2 when read returns an error", () => {
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "error", reason: "EACCES: permission denied" }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.stdout).toBe("");
+    expect(outcome.stderr).toContain("cannot read");
+    expect(outcome.stderr).toContain("EACCES");
+  });
+
+  it("exits 2 when SBOM text is not valid JSON", () => {
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: "{not json" }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.stderr).toContain("invalid-json");
+  });
+
+  it("exits 2 when SBOM text is empty", () => {
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: "" }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.stderr).toContain("empty-input");
+  });
+
+  it("distinguishes read-error from parse-error in the diagnostic message", () => {
+    const readErr = runSbomShapeCheck({
+      readSbom: () => ({ kind: "error", reason: "EIO" }),
+      sbomPath: "x.json",
+    });
+    const parseErr = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: "garbage" }),
+      sbomPath: "x.json",
+    });
+    expect(readErr.stderr).toContain("cannot read");
+    expect(parseErr.stderr).toContain("cannot parse");
+    expect(readErr.exitCode).toBe(2);
+    expect(parseErr.exitCode).toBe(2);
+  });
+});
+
+describe("runSbomShapeCheck — exit code 1 (shape violations)", () => {
+  it("exits 1 when SBOM is missing bomFormat", () => {
+    const sbom = validSbom();
+    sbom["bomFormat"] = undefined;
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: JSON.stringify(sbom) }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.violations.length).toBe(1);
+    expect(outcome.violations[0]?.code).toBe("missing-bomFormat");
+    expect(outcome.stderr).toContain("missing-bomFormat");
+  });
+
+  it("exits 1 and surfaces ALL violations when components has multiple shape errors", () => {
+    const sbom = validSbom({
+      components: [
+        { type: "library", name: "a" }, // missing version+purl
+        { type: "library", name: "b" }, // missing version+purl
+        { type: "not-a-real-type", name: "c" }, // invalid type
+      ],
+    });
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: JSON.stringify(sbom) }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.violations.length).toBe(3);
+  });
+
+  it("includes the path in the diagnostic when the violation has one", () => {
+    const sbom = validSbom({
+      components: [{ type: "library", name: "lodash" }],
+    });
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: JSON.stringify(sbom) }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.stderr).toContain("components[0]");
+  });
+
+  it("emits the remediation hint pointing at vision.md § 13.5", () => {
+    const sbom = validSbom();
+    sbom["bomFormat"] = undefined;
+    const outcome = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: JSON.stringify(sbom) }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(outcome.stderr).toContain("vision.md");
+    expect(outcome.stderr).toContain("13.5");
+  });
+});
+
+describe("runSbomShapeCheck — fail-safe-defaults exit-code split", () => {
+  it("exit 0 / 1 / 2 are distinct codes with distinct meanings", () => {
+    const clean = runSbomShapeCheck({
+      readSbom: () => ({ kind: "ok", text: JSON.stringify(validSbom()) }),
+      sbomPath: "sbom.cdx.json",
+    });
+    const violations = runSbomShapeCheck({
+      readSbom: () => ({
+        kind: "ok",
+        text: JSON.stringify({ ...validSbom(), bomFormat: "wrong" }),
+      }),
+      sbomPath: "sbom.cdx.json",
+    });
+    const cannotEvaluate = runSbomShapeCheck({
+      readSbom: () => ({ kind: "error", reason: "any" }),
+      sbomPath: "sbom.cdx.json",
+    });
+    expect(clean.exitCode).toBe(0);
+    expect(violations.exitCode).toBe(1);
+    expect(cannotEvaluate.exitCode).toBe(2);
   });
 });
