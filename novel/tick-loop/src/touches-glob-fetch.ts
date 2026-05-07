@@ -175,6 +175,9 @@ function extractFilePaths(rawFiles: readonly unknown[]): readonly string[] {
  * convention introduced by slice 2 of `daemon-parallel-worktree-launch`.
  * Pre-built so the operator doesn't have to reconstruct the regex when
  * wiring the fetcher.
+ *
+ * @otel-exempt pure regex predicate; the daemon emits the iteration
+ *   span and includes whatever branch filter result this produced.
  */
 export const isDaemonAuthoredBranch = (branchName: string): boolean =>
   /^daemon\/\d+\//.test(branchName);
