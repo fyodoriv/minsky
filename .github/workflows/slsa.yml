@@ -1,0 +1,70 @@
+# <!-- scope: human-approved implements parent task `supply-chain-hardening-lockfile-sbom-slsa` § Details (c) — SLSA Build Level 3 provenance for Minsky releases -->
+# Supply-chain provenance for Minsky distribution artefacts.
+#
+# Every GitHub release gets a SLSA Build Level 3 provenance document
+# signed via Sigstore. Consumers verify with:
+#   slsa-verifier verify-artifact minsky-dist-<tag>.tar.gz \
+#     --provenance-path minsky-dist-<tag>.tar.gz.intoto.jsonl \
+#     --source-uri github.com/<owner>/<repo>
+#
+# Pattern: supply-chain hardening (vision.md § 13.5 — SLSA Build Level 3
+# + Sigstore attestations); rule #1 (industry-standard primitive — the
+# slsa-github-generator reusable workflow is the CNCF reference
+# implementation); fail-safe defaults (Saltzer & Schroeder 1975 — the
+# provenance document is the default, not an opt-in).
+#
+# Pre-registered in experiments/security-slsa-provenance-2026-05-07.yaml.
+
+name: release-provenance
+
+on:
+  release:
+    types: [created]
+
+# SLSA generator requires no top-level permissions so it can set its own
+# minimal scope per the principle of least privilege (Saltzer & Schroeder
+# 1975 — economy of mechanism + least privilege).
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: pack distribution artefacts
+        # Bundle the operator-facing distribution files into a single
+        # versioned tarball. This is the artefact consumers download
+        # and run `setup.sh` from.
+        run: |
+          tar czf minsky-dist-${{ github.ref_name }}.tar.gz \
+            distribution/ \
+            setup.sh
+
+      - name: compute artefact hashes
+        id: hash
+        run: |
+          HASHES=$(sha256sum minsky-dist-*.tar.gz | base64 -w0)
+          echo "hashes=$HASHES" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minsky-dist
+          path: minsky-dist-*.tar.gz
+          if-no-files-found: error
+          retention-days: 5
+
+  provenance:
+    needs: [build]
+    permissions:
+      id-token: write    # Sigstore OIDC token for signing
+      contents: write    # attach provenance to the release
+      actions: read      # slsa-github-generator reads the workflow run
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: "${{ needs.build.outputs.hashes }}"
+      # Attach both the artefact tarball and its provenance document to
+      # the GitHub release so consumers can download them together.
+      upload-assets: true
