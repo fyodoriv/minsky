@@ -1610,6 +1610,68 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(lockExists).toBe(false);
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  it("pre-PR lint gate: emits fail span with failedStep when preLintRun returns fail", async () => {
+    const client = new TestFakeMockAnthropic();
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      preLintRun: async () => ({ verdict: "fail", failedStep: "rule-7-chaos-coverage" }),
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    const lintSpans = recorder.spans.filter((s) => s.name === "tick-loop.pre-pr-lint-gate");
+    expect(lintSpans).toHaveLength(1);
+    expect(lintSpans[0]?.attributes["pre-pr-lint.verdict"]).toBe("fail");
+    expect(lintSpans[0]?.attributes["pre-pr-lint.failed_step"]).toBe("rule-7-chaos-coverage");
+    expect(lintSpans[0]?.attributes["pre-pr-lint.attempts"]).toBe(1);
+  });
+
+  it("pre-PR lint gate: emits pass span when preLintRun returns pass", async () => {
+    const client = new TestFakeMockAnthropic();
+    const recorder = new SpanRecorder();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      preLintRun: async () => ({ verdict: "pass" }),
+    });
+    const lintSpans = recorder.spans.filter((s) => s.name === "tick-loop.pre-pr-lint-gate");
+    expect(lintSpans).toHaveLength(1);
+    expect(lintSpans[0]?.attributes["pre-pr-lint.verdict"]).toBe("pass");
+    expect(lintSpans[0]?.attributes["pre-pr-lint.attempts"]).toBe(1);
+  });
+
+  it("pre-PR lint gate: emits no span when preLintRun is not injected", async () => {
+    const client = new TestFakeMockAnthropic();
+    const recorder = new SpanRecorder();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: client,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    const lintSpans = recorder.spans.filter((s) => s.name === "tick-loop.pre-pr-lint-gate");
+    expect(lintSpans).toHaveLength(0);
+  });
 });
 
 describe("tick-loop / daemon / pickTask", () => {
