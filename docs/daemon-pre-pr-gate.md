@@ -55,6 +55,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `otel-no-pii` — full-scan of `novel/**/*.ts` rejects PII-shaped span attributes (rule #13.2 — security & privacy minimum-bar item #2).
 - `secret-scan` — full-scan of every tracked file rejects credential shapes (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`, `AIza…`, PEM headers); rule #13.1 — security & privacy minimum-bar item #1.
 - `sbom-shape` — validates the on-disk CycloneDX SBOM against the 1.5/1.6 subset (`bomFormat`, `specVersion`, `version`, `components[].type/name/version/purl`, unique `bom-ref`); fail-safe-defaults exit-0 when no SBOM is present so the gate is wire-able before the generation step lands; rule #13.5 — security & privacy minimum-bar item #5 (supply-chain hardening — SBOM shape is the consumer's only structural guarantee against generator-side regressions).
+- `threat-model-section` — every constitutional `novel/**/README.md` carries a STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines; rule #13.8 — security & privacy minimum-bar item #8 (threat-model documented per novel package).
 - `metric-freshness` — every dashboard metric in the expected list emitted within its freshness window.
 - `mape-k-budget-cap` — the autonomic-manager weekly budget cap matches the documented value.
 - `mape-k-constraints-md-size` — `novel/mape-k-loop/constraints.md` archive stays under its 200-entry cap.
