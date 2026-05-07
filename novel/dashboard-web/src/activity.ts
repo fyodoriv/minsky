@@ -30,6 +30,15 @@ export interface ActivityEntry {
   readonly status: string;
   readonly taskId: string;
   readonly reason: string;
+  /**
+   * Optional LLM provider tag — surfaced when the supervisor's
+   * `LlmProviderSpawnStrategy` (slice 3 of
+   * `local-llm-fallback-on-budget-pause`) recorded which provider
+   * served this iteration. Empty string when the supervisor used the
+   * legacy single-strategy claude path (no wrapper). One of:
+   * `"claude"` / `"local"` / `"hold"` / `""`.
+   */
+  readonly provider: string;
 }
 
 const SPAN_PREFIX = "[span] tick-loop.iteration ";
@@ -63,12 +72,14 @@ export function parseSpan(line: string): ActivityEntry | null {
   const status = o["iteration.status"];
   const taskId = o["task.id"];
   const reason = o["iteration.reason"];
+  const provider = o["iteration.provider"];
   if (typeof indexRaw !== "number" || typeof status !== "string") return null;
   return {
     index: indexRaw,
     status,
     taskId: typeof taskId === "string" ? taskId : "",
     reason: typeof reason === "string" ? reason : "",
+    provider: typeof provider === "string" ? provider : "",
   };
 }
 

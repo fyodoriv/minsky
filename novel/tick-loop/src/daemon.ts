@@ -105,6 +105,15 @@ export interface DaemonIterationResult {
   readonly status: DaemonIterationStatus;
   readonly taskId?: string;
   readonly reason?: string;
+  /**
+   * Optional LLM provider tag — set by the slice-3 wiring of
+   * `local-llm-fallback-on-budget-pause` when `LlmProviderSpawnStrategy`
+   * is the injected `spawnStrategy`. Carries the provider chosen for
+   * this iteration: `"claude"`, `"local"`, or `"hold"`. Surfaces in the
+   * `tick-loop.iteration` span as `iteration.provider` so the
+   * pre-registered measurement query can count provider usage.
+   */
+  readonly provider?: "claude" | "local" | "hold";
 }
 
 export interface DaemonRunResult {
@@ -952,33 +961,7 @@ async function runClaimedIteration(args: {
   // no Strategy is injected, fall through to v0's legacy `tick(...)` path
   // so the 13 dry-run tests keep their existing observable behaviour.
   if (opts.spawnStrategy !== undefined) {
-    const extraArgs = claudeArgsForWorker({
-      baseArgs: [],
-      taskId,
-      workerConfig: opts.workerConfig,
-    });
-    const stratResult = await opts.spawnStrategy.spawn({
-      taskId,
-      brief: buildDaemonBrief({ taskId, tasksMdContent }),
-      env: process.env,
-      extraArgs,
-    });
-    // `daemon-claude-print-hang-watchdog`: when the spawn-strategy SIGKILLs a
-    // hung child, the result carries `timedOut: true`. Surface as a stable
-    // `claude-print-timeout: <ms>ms` reason so the rolling-7d invariant (filed
-    // under `claudePrintTimeoutFrequencyInvariant`) has a grep-able string.
-    const reason =
-      stratResult.timedOut === true
-        ? `claude-print-timeout: ${stratResult.durationMs}ms (child SIGKILLed by per-iteration watchdog)`
-        : stratResult.exitCode === 0
-          ? stratResult.stdoutTail
-          : stratResult.stderrTail;
-    return {
-      iteration,
-      status: stratResult.exitCode === 0 ? "completed" : "failed",
-      taskId,
-      reason,
-    };
+    return runStrategyIteration({ opts, iteration, taskId, tasksMdContent });
   }
   const tickResult = await spawnTickDryRun({ taskId, opts });
   return {
@@ -987,6 +970,72 @@ async function runClaimedIteration(args: {
     taskId,
     reason: tickResult.output,
   };
+}
+
+/**
+ * Strategy-dispatch branch of `runClaimedIteration`. Extracted so the
+ * parent function stays under biome's cognitive-complexity cap (rule
+ * #6, ≤10) once the slice-3 `provider` field added another conditional.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function runStrategyIteration(args: {
+  readonly opts: RunDaemonOpts;
+  readonly iteration: number;
+  readonly taskId: string;
+  readonly tasksMdContent: string;
+}): Promise<DaemonIterationResult> {
+  const { opts, iteration, taskId, tasksMdContent } = args;
+  if (opts.spawnStrategy === undefined) {
+    throw new Error("runStrategyIteration called without spawnStrategy");
+  }
+  const extraArgs = claudeArgsForWorker({
+    baseArgs: [],
+    taskId,
+    workerConfig: opts.workerConfig,
+  });
+  const stratResult = await opts.spawnStrategy.spawn({
+    taskId,
+    brief: buildDaemonBrief({ taskId, tasksMdContent }),
+    env: process.env,
+    extraArgs,
+  });
+  // `daemon-claude-print-hang-watchdog`: when the spawn-strategy SIGKILLs
+  // a hung child, the result carries `timedOut: true`. Surface as a
+  // stable `claude-print-timeout: <ms>ms` reason so the rolling-7d
+  // invariant (filed under `claudePrintTimeoutFrequencyInvariant`) has a
+  // grep-able string.
+  const reason = buildIterationReason(stratResult);
+  return {
+    iteration,
+    status: stratResult.exitCode === 0 ? "completed" : "failed",
+    taskId,
+    reason,
+    // `local-llm-fallback-on-budget-pause` slice 3: surface the chosen
+    // provider when the spawn-strategy was `LlmProviderSpawnStrategy`
+    // (otherwise undefined; legacy single-strategy spawns leave the
+    // field absent).
+    ...(stratResult.provider === undefined ? {} : { provider: stratResult.provider }),
+  };
+}
+
+/**
+ * Build the `reason` field of a strategy-dispatched iteration.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function buildIterationReason(stratResult: {
+  readonly timedOut?: boolean;
+  readonly durationMs: number;
+  readonly exitCode: number;
+  readonly stdoutTail: string;
+  readonly stderrTail: string;
+}): string {
+  if (stratResult.timedOut === true) {
+    return `claude-print-timeout: ${stratResult.durationMs}ms (child SIGKILLed by per-iteration watchdog)`;
+  }
+  if (stratResult.exitCode === 0) return stratResult.stdoutTail;
+  return stratResult.stderrTail;
 }
 
 // ---- Pure helpers ---------------------------------------------------------
@@ -1327,6 +1376,10 @@ function emitIterationSpan(opts: RunDaemonOpts, result: DaemonIterationResult): 
       "iteration.status": result.status,
       "task.id": result.taskId ?? "",
       "iteration.reason": result.reason ?? "",
+      // `local-llm-fallback-on-budget-pause` slice 3: emit the provider
+      // attribute when set. Default `""` keeps the attribute schema
+      // stable for OTEL consumers that don't expect missing keys.
+      "iteration.provider": result.provider ?? "",
     },
   });
 }
