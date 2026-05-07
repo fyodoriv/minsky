@@ -15,6 +15,7 @@ import {
   STACK_MANIFEST,
   buildStepResult,
   parseArgs,
+  renderJson,
   runStack,
   selectSteps,
   stripGitHookEnv,
@@ -231,6 +232,80 @@ describe("parseArgs", () => {
 
   test("unknown flags are ignored (forward-compat)", () => {
     expect(parseArgs(["--unknown", "--stage=full"])).toEqual({ stage: "full", json: false });
+  });
+});
+
+describe("renderJson --json output shape", () => {
+  // Pin the doc claim in `docs/daemon-pre-pr-gate.md` § Operator commands —
+  // "Machine-readable output (one JSON line per step + a final summary)".
+  // Pre-fix renderJson collapsed everything onto one line, contradicting the
+  // documented shape. The shape matters: a consumer (e.g., the dashboard
+  // pre-PR gate widget filed under `daemon-pre-pr-lint-gate` follow-ups,
+  // or `jq -c` invocations from the operator) should be able to discriminate
+  // per-step lines from the summary without counting array indices.
+
+  /** @type {import("./run-pre-pr-lint-stack.mjs").StackResult} */
+  const passingResult = {
+    stage: "fast",
+    allPass: true,
+    steps: [
+      { name: "alpha", verdict: "pass", durationMs: 10, exitCode: 0 },
+      { name: "beta", verdict: "pass", durationMs: 20, exitCode: 0 },
+    ],
+  };
+
+  test("emits one JSON line per step plus a summary line (NDJSON)", () => {
+    const out = renderJson(passingResult);
+    const lines = out.split("\n");
+    expect(lines).toHaveLength(passingResult.steps.length + 1);
+    // every line must be valid JSON on its own (NDJSON contract)
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  test("per-step lines preserve StepResult shape (name/verdict/durationMs/exitCode)", () => {
+    const lines = renderJson(passingResult).split("\n");
+    const stepLines = lines.slice(0, passingResult.steps.length);
+    for (let i = 0; i < stepLines.length; i++) {
+      const stepLine = stepLines[i];
+      if (stepLine === undefined) throw new Error(`missing step line at index ${i}`);
+      const parsed = JSON.parse(stepLine);
+      expect(parsed).toEqual(passingResult.steps[i]);
+    }
+  });
+
+  test("summary line carries summary:true + stage + allPass + stepCount", () => {
+    const lines = renderJson(passingResult).split("\n");
+    const lastLine = lines[lines.length - 1];
+    if (lastLine === undefined) throw new Error("renderJson produced no output");
+    const summary = JSON.parse(lastLine);
+    expect(summary.summary).toBe(true);
+    expect(summary.stage).toBe("fast");
+    expect(summary.allPass).toBe(true);
+    expect(summary.stepCount).toBe(passingResult.steps.length);
+  });
+
+  test("failed step's stderrTail is preserved on its line (operator can grep one line for failure detail)", () => {
+    /** @type {import("./run-pre-pr-lint-stack.mjs").StackResult} */
+    const mixed = {
+      stage: "full",
+      allPass: false,
+      steps: [
+        { name: "alpha", verdict: "pass", durationMs: 10, exitCode: 0 },
+        { name: "beta", verdict: "fail", durationMs: 20, exitCode: 1, stderrTail: "boom\nbang" },
+      ],
+    };
+    const lines = renderJson(mixed).split("\n");
+    const betaRaw = lines[1];
+    if (betaRaw === undefined) throw new Error("missing beta step line");
+    const betaLine = JSON.parse(betaRaw);
+    expect(betaLine.verdict).toBe("fail");
+    expect(betaLine.stderrTail).toBe("boom\nbang");
+    const summaryRaw = lines[lines.length - 1];
+    if (summaryRaw === undefined) throw new Error("missing summary line");
+    const summary = JSON.parse(summaryRaw);
+    expect(summary.allPass).toBe(false);
   });
 });
 
