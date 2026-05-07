@@ -1950,6 +1950,7 @@ describe("buildDaemonBrief", () => {
       "## Iteration directive",
       "## Pre-PR lint-stack gate",
       "## Optimization-discipline gate",
+      "## PR security-review template",
     ];
     const volatile = ["## Priority-discipline gate", "## Task block (current TASKS.md)"];
     for (const s of stable) {
@@ -1957,6 +1958,26 @@ describe("buildDaemonBrief", () => {
         expect(idx(s), `${s} must precede ${v} for cache-prefix stability`).toBeLessThan(idx(v));
       }
     }
+  });
+
+  it("includes the PR security-review copy-paste template with both option-A heading and option-B opt-out", () => {
+    const sample = [
+      "# Tasks",
+      "",
+      "## P0",
+      "",
+      "- [ ] `t` — clean",
+      "  - **ID**: t",
+      "  - **Tags**: p0",
+      "  - **Hypothesis**: H",
+      "",
+    ].join("\n");
+    const brief = buildDaemonBrief({ taskId: "t", tasksMdContent: sample });
+    expect(brief).toContain("## PR security-review template");
+    expect(brief).toContain("## Security & privacy");
+    expect(brief).toContain("<!-- security: not-applicable —");
+    expect(brief).toContain("scripts/check-pr-security-review.mjs");
+    expect(brief).toContain("vision.md § 13");
   });
 
   it("includes the PR self-grade copy-paste template with the lint-passing format", () => {
