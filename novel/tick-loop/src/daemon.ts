@@ -963,11 +963,21 @@ async function runClaimedIteration(args: {
       env: process.env,
       extraArgs,
     });
+    // `daemon-claude-print-hang-watchdog`: when the spawn-strategy SIGKILLs a
+    // hung child, the result carries `timedOut: true`. Surface as a stable
+    // `claude-print-timeout: <ms>ms` reason so the rolling-7d invariant (filed
+    // under `claudePrintTimeoutFrequencyInvariant`) has a grep-able string.
+    const reason =
+      stratResult.timedOut === true
+        ? `claude-print-timeout: ${stratResult.durationMs}ms (child SIGKILLed by per-iteration watchdog)`
+        : stratResult.exitCode === 0
+          ? stratResult.stdoutTail
+          : stratResult.stderrTail;
     return {
       iteration,
       status: stratResult.exitCode === 0 ? "completed" : "failed",
       taskId,
-      reason: stratResult.exitCode === 0 ? stratResult.stdoutTail : stratResult.stderrTail,
+      reason,
     };
   }
   const tickResult = await spawnTickDryRun({ taskId, opts });
