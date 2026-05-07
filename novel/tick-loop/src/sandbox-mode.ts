@@ -95,3 +95,30 @@ export function sandboxModeWarning(env: NodeJS.ProcessEnv): string | null {
   if (VALID_MODES.has(normalised as SandboxMode)) return null;
   return `WARNING: ${SANDBOX_MODE_ENV}=${JSON.stringify(raw)} is not a recognised sandbox mode. Falling back to '${SANDBOX_MODE_DEFAULT}'. Valid modes: 'off' | 'warn-only' | 'enforce'. (vision.md rule #13.3)`;
 }
+
+/**
+ * Format the single-line startup banner the supervisor's I/O boundary
+ * (`bin/tick-loop.mjs`) writes at boot. Slice 2 of
+ * `supervisor-sandbox-syscall-restriction`: surface the resolved mode in
+ * the supervisor log so an operator running `tail .minsky/tick-loop.out.log`
+ * sees the active mode + any typo warning in the first lines, instead of
+ * silently running 'off' against a stale `MINSKY_SANDBOX=enforcde` typo.
+ *
+ * Visible-not-silent (rule #6) without operational risk: the resolver
+ * still defaults to `'off'`, so the actual sandbox profile call site
+ * (slice 3+) is unaffected — only the boot-time visibility increases.
+ *
+ * The `(substrate-inert)` parenthetical pins the slice's contract: until
+ * a later slice wires the profile, no mode actually sandboxes anything.
+ * An operator who flips the env to `enforce` today still gets the
+ * pre-sandbox supervisor — the banner is honest about that, instead of
+ * promising enforcement that doesn't exist yet.
+ *
+ * @otel-exempt pure formatter — caller decides whether to write to stderr.
+ */
+export function sandboxModeStartupHint(env: NodeJS.ProcessEnv): string {
+  const mode = resolveSandboxMode(env);
+  const warning = sandboxModeWarning(env);
+  const base = `[tick-loop] sandbox mode: ${mode} (${SANDBOX_MODE_ENV} env, substrate-inert until profile wires in slice 3+)`;
+  return warning === null ? base : `${base}\n${warning}`;
+}

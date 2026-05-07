@@ -4,6 +4,7 @@ import {
   SANDBOX_MODE_DEFAULT,
   SANDBOX_MODE_ENV,
   resolveSandboxMode,
+  sandboxModeStartupHint,
   sandboxModeWarning,
 } from "./sandbox-mode.js";
 
@@ -103,5 +104,38 @@ describe("sandboxModeWarning", () => {
     expect(warning).toContain("'off'");
     expect(warning).toContain("'warn-only'");
     expect(warning).toContain("'enforce'");
+  });
+});
+
+describe("sandboxModeStartupHint", () => {
+  it("starts with the [tick-loop] prefix matching the other supervisor wire-status lines", () => {
+    expect(sandboxModeStartupHint({})).toMatch(/^\[tick-loop\] /);
+  });
+
+  it("names the resolved mode so the supervisor log shows the active value", () => {
+    expect(sandboxModeStartupHint({})).toContain("sandbox mode: off");
+    expect(sandboxModeStartupHint({ [SANDBOX_MODE_ENV]: "warn-only" })).toContain(
+      "sandbox mode: warn-only",
+    );
+    expect(sandboxModeStartupHint({ [SANDBOX_MODE_ENV]: "enforce" })).toContain(
+      "sandbox mode: enforce",
+    );
+  });
+
+  it("notes the substrate-inert contract until the profile wires in (slice-2 honesty)", () => {
+    expect(sandboxModeStartupHint({ [SANDBOX_MODE_ENV]: "enforce" })).toContain("substrate-inert");
+  });
+
+  it("appends the warning line when the env carries an unrecognised value (typo visibility)", () => {
+    const hint = sandboxModeStartupHint({ [SANDBOX_MODE_ENV]: "enforcde" });
+    expect(hint).toContain("sandbox mode: off");
+    expect(hint).toContain("WARNING:");
+    expect(hint).toContain('"enforcde"');
+    expect(hint).toContain("rule #13.3");
+  });
+
+  it("emits a single line (no trailing warning) for valid + unset envs", () => {
+    expect(sandboxModeStartupHint({}).split("\n")).toHaveLength(1);
+    expect(sandboxModeStartupHint({ [SANDBOX_MODE_ENV]: "warn-only" }).split("\n")).toHaveLength(1);
   });
 });
