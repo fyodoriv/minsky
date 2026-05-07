@@ -117,6 +117,8 @@ node scripts/self-diagnose.mjs --json | jq '.[] | select(.id == "daemon-pr-lint-
 
 `pnpm pre-pr-lint` exits 0 iff every step passes. On failure, the script prints the failing step name + its stderr tail and exits non-zero — the daemon brief's three-attempt retry budget keys off this.
 
+If a `pr-body.md` file is sitting at the repo root, the script auto-appends the two body-only checks (`pr-self-grade`, `pr-security-review`) — same retry budget as the rest of the gate, no flag required. `--body=<other-path>` overrides the discovery.
+
 ## When the invariant fires
 
 `scripts/self-diagnose.mjs` runs the `daemon-pr-lint-pass-rate` invariant on every supervisor tick. Below 0.8 (default; threshold pinned in slice 3/N), it returns an `Unmet` verdict with two named root causes and a TASKS.md task-block draft:

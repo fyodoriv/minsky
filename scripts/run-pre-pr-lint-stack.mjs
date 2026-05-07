@@ -35,6 +35,7 @@
 //   (DORA — same gate humans pass through must gate the bot).
 
 import { execFile, execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -772,6 +773,32 @@ export function parseArgs(argv) {
 }
 
 /**
+ * Resolve which draft PR-body file (if any) the run should validate.
+ *
+ * When `--body=<path>` is explicit, honour it. When no flag is set, look for
+ * an adjacent `pr-body.md` in `repoRoot` and pick it up automatically — the
+ * same auto-discovery the daemon's outer gate (`createBodyAwarePrePrLintRun`)
+ * already performs in TS-land. Lifting it into the script means
+ * `pnpm pre-pr-lint` (operator) and `node scripts/run-pre-pr-lint-stack.mjs`
+ * (daemon) share one discovery path — single source of truth (rule #2). The
+ * operator stops needing to remember the flag; the daemon's existing
+ * `--body=<path>` invocation is unaffected (explicit beats discovery).
+ *
+ * Pure helper — file existence is the only I/O, behind the `fileExists` seam.
+ *
+ * @param {string | undefined} explicit  parseArgs's `body` field; `undefined`
+ *   when the operator did not pass `--body=<path>`.
+ * @param {(p: string) => boolean} fileExists
+ * @param {string} repoRoot
+ * @returns {string | undefined}
+ */
+export function resolveBodyPath(explicit, fileExists, repoRoot) {
+  if (explicit !== undefined) return explicit;
+  const candidate = resolve(repoRoot, "pr-body.md");
+  return fileExists(candidate) ? candidate : undefined;
+}
+
+/**
  * Append the two body-only checks (`pr-self-grade`, `pr-security-review`) to
  * the manifest when the operator passes `--body=<path>`. Both checks live in
  * `CI_ENV_DEPENDENT_JOBS` because in CI they read from the GitHub PR body —
@@ -859,7 +886,8 @@ async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   const diffBase = resolveDiffBase();
   const resolved = withResolvedDiffBase(STACK_MANIFEST, diffBase);
-  const manifest = parsed.body === undefined ? resolved : appendBodyChecks(resolved, parsed.body);
+  const body = resolveBodyPath(parsed.body, existsSync, REPO_ROOT);
+  const manifest = body === undefined ? resolved : appendBodyChecks(resolved, body);
   const result = await runStack(parsed.stage, defaultRunStep, manifest);
   process.stdout.write(`${parsed.json ? renderJson(result) : renderHuman(result)}\n`);
   process.exit(result.allPass ? 0 : 1);

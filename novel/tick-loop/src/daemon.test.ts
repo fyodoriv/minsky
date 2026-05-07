@@ -2032,13 +2032,14 @@ describe("buildDaemonBrief", () => {
     expect(brief).toMatch(/values lowercase/);
   });
 
-  it("directs the inner Claude to use `pnpm pre-pr-lint -- --body=<file>` so the two body-only checks ride the same retry budget (slice 30/N)", () => {
+  it("directs the inner Claude at the auto-discovered body flow so the two body-only checks ride the same retry budget (slice 30/N + slice 35/N)", () => {
     // Pre-slice-30, the body-only checks (`pr-self-grade`,
     // `pr-security-review`) needed three separate commands and three
-    // independent retry decisions. Slice 30 adds `--body=<path>` to the
-    // canonical `run-pre-pr-lint-stack.mjs`; the brief points the inner
-    // Claude at the consolidated invocation so it doesn't have to reason
-    // about which checks to run separately.
+    // independent retry decisions. Slice 30 added `--body=<path>` to the
+    // canonical `run-pre-pr-lint-stack.mjs`; slice 35 lifted auto-discovery
+    // into the script so a `pr-body.md` adjacent to the run is picked up
+    // without the flag — one less thing for the inner Claude to remember.
+    // The brief now points at the consolidated, flagless invocation.
     const sample = [
       "# Tasks",
       "",
@@ -2051,8 +2052,8 @@ describe("buildDaemonBrief", () => {
       "",
     ].join("\n");
     const brief = buildDaemonBrief({ taskId: "t", tasksMdContent: sample });
-    expect(brief).toContain("--body=");
-    expect(brief).toContain("pnpm pre-pr-lint -- --body=");
+    expect(brief).toContain("pr-body.md");
+    expect(brief).toContain("pnpm pre-pr-lint");
     expect(brief).toContain("pr-self-grade");
     expect(brief).toContain("pr-security-review");
   });
