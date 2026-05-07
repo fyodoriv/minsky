@@ -2,3 +2,10 @@ packages:
   - "novel/*"
   - "novel/adapters/*"
   - "novel/bridges/*"
+
+# Slice 6 of `daemon-parallel-worktree-launch` (operator 2026-05-07 — 5-worker
+# prerequisite). Each `claude --worktree` creates a fresh git worktree;
+# `enableGlobalVirtualStore: true` shares the underlying package store across
+# worktrees instead of duplicating `node_modules` per worktree. Cuts per-worker
+# disk from ~2GB to ~50MB. Pnpm docs: https://pnpm.io/next/git-worktrees
+enableGlobalVirtualStore: true
