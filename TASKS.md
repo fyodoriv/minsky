@@ -13,7 +13,6 @@
 ## P0
 
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 found 4 minsky-loop bugs that lost throughput and required manual unblock. Filed below as P0 (operator directive 2026-05-07 — "use p0 for important things like minsky loop bugs"). They share the framing the operator articulated 2026-05-07: "monitor + unblock + file tasks so next time minsky unblocks itself" — i.e., the watchdog substrate that makes 10-worker mode safe. -->
-
 - [ ] `daemon-claude-print-hang-watchdog` — daemon spawn-strategy must time out child `claude --print` processes so a stuck child doesn't silently freeze a worker for hours
   - **ID**: daemon-claude-print-hang-watchdog
   - **Tags**: p0, daemon, supervisor, throughput, watchdog, pick-next, minsky-loop-bug

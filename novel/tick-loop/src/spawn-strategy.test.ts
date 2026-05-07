@@ -183,3 +183,150 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
     expect(result.timedOut).toBeUndefined();
   });
 });
+
+// Slice 2 of `local-llm-fallback-on-budget-pause`: the `invocation` opt
+// lets the slice-3 wiring layer hand a per-iteration builder that picks
+// between `buildClaudePrintInvocation` and `buildAiderInvocation`. These
+// tests pin the contract: the builder's output wins over the constructor
+// defaults; stdin can be turned off; cwd flows through; argv override is
+// applied.
+describe("tick-loop / spawn-strategy / ProcessSpawnStrategy with invocation opt", () => {
+  it("builder's argv overrides constructor's args", async () => {
+    // Use a node subprocess that writes its argv to stdout so we can
+    // observe what was actually spawned. Note: with `node -e <script>`,
+    // process.argv[0] is the node binary and process.argv[1] is the first
+    // positional arg after the script (Node strips `-e <script>` itself
+    // from argv); slice(1) gives the positional args we passed.
+    const script = "process.stdout.write(JSON.stringify(process.argv.slice(1)));process.exit(0);";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["should-be-overridden"],
+      invocation: () => ({
+        command: process.execPath,
+        argv: ["-e", script, "from-builder"],
+        stdin: undefined,
+      }),
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdoutTail)).toEqual(["from-builder"]);
+  });
+
+  it("builder's stdin: undefined means stdin is closed without writing brief", async () => {
+    // Child reads stdin to EOF and writes its length; if stdin gets the
+    // brief, length > 0; if stdin closes without writing, length = 0.
+    const script = `
+      let n = 0;
+      process.stdin.on('data', (c) => { n += c.length; });
+      process.stdin.on('end', () => {
+        process.stdout.write(String(n));
+        process.exit(0);
+      });
+    `;
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      invocation: () => ({
+        command: process.execPath,
+        argv: ["-e", script],
+        stdin: undefined,
+      }),
+    });
+    const result = await strat.spawn(emptyInput({ brief: "this should NOT reach stdin" }));
+    expect(result.exitCode).toBe(0);
+    expect(result.stdoutTail).toBe("0");
+  });
+
+  it("builder's stdin: <string> writes that string to stdin (not the input.brief)", async () => {
+    const script = `
+      let s = '';
+      process.stdin.on('data', (c) => { s += c.toString(); });
+      process.stdin.on('end', () => {
+        process.stdout.write(s);
+        process.exit(0);
+      });
+    `;
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      invocation: () => ({
+        command: process.execPath,
+        argv: ["-e", script],
+        stdin: "from-builder-stdin",
+      }),
+    });
+    const result = await strat.spawn(emptyInput({ brief: "ignored" }));
+    expect(result.exitCode).toBe(0);
+    expect(result.stdoutTail).toBe("from-builder-stdin");
+  });
+
+  it("builder's cwd flows through to child's cwd", async () => {
+    const script = "process.stdout.write(process.cwd());process.exit(0);";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      invocation: () => ({
+        command: process.execPath,
+        argv: ["-e", script],
+        stdin: undefined,
+        cwd: "/tmp",
+      }),
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(0);
+    // /tmp may resolve to /private/tmp on macOS; accept either.
+    expect(["/tmp", "/private/tmp"]).toContain(result.stdoutTail);
+  });
+
+  it("builder is called per-iteration (not memoised) so flap between providers works", async () => {
+    let calls = 0;
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      invocation: () => {
+        calls += 1;
+        return {
+          command: process.execPath,
+          argv: ["-e", "process.exit(0);"],
+          stdin: undefined,
+        };
+      },
+    });
+    await strat.spawn(emptyInput());
+    await strat.spawn(emptyInput());
+    await strat.spawn(emptyInput());
+    expect(calls).toBe(3);
+  });
+
+  it("builder receives the SpawnInput so it can read taskId / extraArgs", async () => {
+    /** @type {string[]} */
+    let receivedTaskId = "";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      invocation: (input) => {
+        receivedTaskId = input.taskId;
+        return {
+          command: process.execPath,
+          argv: ["-e", "process.exit(0);"],
+          stdin: undefined,
+        };
+      },
+    });
+    await strat.spawn(emptyInput({ taskId: "expected-task-id" }));
+    expect(receivedTaskId).toBe("expected-task-id");
+  });
+
+  it("legacy path (no invocation opt) still writes brief to stdin", async () => {
+    const script = `
+      let s = '';
+      process.stdin.on('data', (c) => { s += c.toString(); });
+      process.stdin.on('end', () => {
+        process.stdout.write(s);
+        process.exit(0);
+      });
+    `;
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["-e", script],
+    });
+    const result = await strat.spawn(emptyInput({ brief: "legacy-brief-on-stdin" }));
+    expect(result.exitCode).toBe(0);
+    expect(result.stdoutTail).toBe("legacy-brief-on-stdin");
+  });
+});

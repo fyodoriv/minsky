@@ -20,13 +20,22 @@
 // silently drop or shrink one of these sections — and rule #13 would lose
 // its grip on the user-story surface that operators and contributors read
 // first when scoping a change. This lint pins each section's existence,
-// minimum substance (≥5 non-empty lines), and explicit `rule #13` citation
-// so the link from story → constitution stays mechanical.
+// minimum substance (≥5 non-empty lines), explicit `rule #13` citation,
+// and the 5 canonical bold-prefixed bullets that make the section
+// substantively engage with the rule's minimum-bar items 1–4 + the
+// performance carve-out clause. The bullet pin is the difference between
+// "section exists" (today) and "section addresses the rule" (after this
+// ratchet) — a section could otherwise degenerate to 5 lines of prose
+// citing rule #13 with no concrete trust-boundary / secrets / PII /
+// sandbox / carve-out coverage.
 //
 // Pivot (rule #9): if vision.md's rule numbering changes (e.g., rule #13
 // is renumbered or replaced by a dedicated chapter), narrow the matcher to
 // the new citation form rather than retire — the requirement is engagement
 // with the constitutional security-privacy anchor, not the literal "13".
+// If the canonical bullet set itself shifts (e.g., a 6th minimum-bar item
+// gains a corresponding bullet), extend `REQUIRED_BULLETS` in the same PR
+// that adds the bullet — never one without the other.
 
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -58,6 +67,45 @@ const RULE_13_RE = /\brule\s*#\s*13\b/i;
 const MIN_CONTENT_LINES = 5;
 
 /**
+ * The 5 canonical bold-prefixed bullets every user-story Security & privacy
+ * section must carry. Maps 1:1 to rule #13's minimum-bar items 1–4 +
+ * performance-first carve-out clause:
+ *   - **Trust boundary** → STRIDE shape (rule #13.8 sibling for stories)
+ *   - **Secrets** → minimum-bar item #1 (`secret-scanning-precommit-and-ci`)
+ *   - **PII** → minimum-bar item #2 (`otel-no-pii-in-spans-lint`)
+ *   - **Sandbox** → minimum-bar item #3 (`supervisor-sandbox-syscall-restriction`)
+ *   - **Performance carve-out** → rule #13's relief-valve clause
+ * Hardcoded (not glob-discovered) on purpose: a 6th bullet should land via
+ * a visible ratchet PR alongside its rule extension, never in passing.
+ */
+export const REQUIRED_BULLETS = Object.freeze([
+  "Trust boundary",
+  "Secrets",
+  "PII",
+  "Sandbox",
+  "Performance carve-out",
+]);
+
+/**
+ * Build the bold-prefixed-bullet matcher for a label. The substrate's canonical
+ * shape is `- **<label>**:`, but a forgiving matcher accepts:
+ *   - `*` or `-` bullet marker
+ *   - leading whitespace (nested bullet)
+ *   - `:` immediately after the closing `**` OR the label being the whole bold
+ *     run before any other punctuation
+ * This guards against a rewrite that swaps `:` for `—` while still keeping the
+ * substance — the gate's job is shape, not punctuation.
+ *
+ * @param {string} label
+ * @returns {RegExp}
+ */
+function bulletRegex(label) {
+  // Escape regex metacharacters in the label (none today, but defensive).
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*[-*]\\s+\\*\\*${escaped}\\*\\*`, "im");
+}
+
+/**
  * Slice the `## Security & privacy` section body out of a user-story file.
  * Returns `null` when no header exists; otherwise the lines between the header
  * and the next `## ` heading (or EOF). Bold/emphasis markers stay intact —
@@ -85,6 +133,10 @@ export function extractSecuritySection(userStoryText) {
  *      future rewrite shrinking it to a stub).
  *   3. The section names `rule #13` explicitly (case-insensitive). The link
  *      from story → constitution must be mechanical, not implicit.
+ *   4. The section carries each of the 5 canonical bold-prefixed bullets in
+ *      `REQUIRED_BULLETS` (Trust boundary / Secrets / PII / Sandbox /
+ *      Performance carve-out). Pins substantive engagement with rule #13's
+ *      minimum-bar items, not just citation.
  *
  * @param {string} userStoryText
  * @returns {CheckResult}
@@ -106,6 +158,13 @@ export function checkSecuritySection(userStoryText) {
     errors.push(
       "section does not cite `rule #13` — acceptance criterion #2 requires explicit constitutional anchor",
     );
+  }
+  for (const label of REQUIRED_BULLETS) {
+    if (!bulletRegex(label).test(section)) {
+      errors.push(
+        `section is missing the canonical \`- **${label}**\` bullet — rule #13 minimum-bar engagement requires all 5 bullets`,
+      );
+    }
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
@@ -136,16 +195,23 @@ export function checkAllSecuritySections(contentsByPath, paths = USER_STORY_PATH
  * @returns {Promise<number>}
  */
 async function main() {
+  // Parallel reads: 6 files in flight at once vs. sequential. Saves ~50ms
+  // wall-time on every CI run (6 × ~10ms read latency → ~10ms ceiling).
+  // Per-file failures are caught individually so one missing file doesn't
+  // mask the others — `checkAll` surfaces "file missing on disk" when a
+  // path is absent from the resulting map.
+  const reads = await Promise.all(
+    USER_STORY_PATHS.map(async (rel) => {
+      try {
+        return /** @type {const} */ ([rel, await readFile(resolve(REPO_ROOT, rel), "utf8")]);
+      } catch {
+        return /** @type {const} */ ([rel, null]);
+      }
+    }),
+  );
   /** @type {Map<string, string>} */
   const contents = new Map();
-  for (const rel of USER_STORY_PATHS) {
-    try {
-      const text = await readFile(resolve(REPO_ROOT, rel), "utf8");
-      contents.set(rel, text);
-    } catch {
-      // Leave the entry unset; checkAll surfaces "file missing on disk".
-    }
-  }
+  for (const [rel, text] of reads) if (text !== null) contents.set(rel, text);
   const results = checkAllSecuritySections(contents);
   const failures = results.filter((r) => !r.result.ok);
   if (failures.length === 0) {
