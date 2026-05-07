@@ -599,6 +599,20 @@ export {
   prTitleNamesTask,
 } from "./duplicate-pr-detector.js";
 
+// Daemon fix-own-PR-on-CI-failure detector (P0 task `daemon-fix-own-pr-on-ci-failure`,
+// operator-flagged 2026-05-05): pure decision the daemon consults BEFORE building
+// the iteration brief — no-pr / pr-clean / pr-failing / pr-retries-exhausted.
+// Closes the 80+-iteration deadlock observed on PR #167 (`cross-repo-ci-action`)
+// where the daemon couldn't merge a PR with red CI and had no path to fix it.
+export {
+  type CheckRunSnapshot,
+  type DaemonOwnPrSnapshot,
+  type DaemonPrStateVerdict,
+  type DecideDaemonPrStateInput,
+  decideDaemonPrState,
+  isFailingConclusion,
+} from "./daemon-pr-state.js";
+
 // Daemon task-completion detector (P0 watchdog from #346, operator 2026-05-07):
 // pure decision the daemon consults to auto-remove TASKS.md task blocks once
 // their substrate has shipped (≥1 merged PR + Acceptance field has no
