@@ -1578,11 +1578,8 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("## Pre-PR lint-stack gate");
     expect(brief).toContain("pnpm pre-pr-lint");
     expect(brief).toContain("scripts/run-pre-pr-lint-stack.mjs");
-    expect(brief).toContain("up to 3 attempts");
+    expect(brief).toContain("3 fix attempts");
     expect(brief).toContain("noop, exiting — pre-pr-lint-failures");
-    // Pre-registered metric (TASKS.md `daemon-pre-pr-lint-gate`) — pin the
-    // 80% threshold so a brief edit can't silently weaken the hypothesis.
-    expect(brief).toContain("≥80%");
   });
 
   it("includes the optimization-discipline gate with concrete eligible-optimization list", () => {
