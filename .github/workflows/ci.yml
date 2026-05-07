@@ -878,6 +878,33 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
 
+  otel-no-pii:
+    # rule #13 item 2: OTEL span attributes must not carry PII-shaped keys.
+    # Diff-based: only scans novel/**/*.ts files changed vs origin/main so
+    # the gate is fast and doesn't re-audit grandfathered code on every PR.
+    # Anchor: rule #13 (vision.md § 13 — security & privacy, item 2);
+    #   GDPR Article 5(1)(c) (data minimisation); OWASP ASVS 7.1.2 (logs
+    #   must not include sensitive data); rule #10 (deterministic enforcement).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: otel-no-pii lint
+        run: node scripts/check-rule-otel-no-pii.mjs --diff-base=origin/main
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-otel-no-pii.test.mjs
+
   secret-scan:
     # rule #13 item 3: secret scanning at commit and CI (non-bypassable).
     # fetch-depth: 0 scans the full repo history — surfaces any historical
@@ -918,6 +945,7 @@ jobs:
       - measurement-inspects-output
       - metric-freshness
       - no-singleton-experiment
+      - otel-no-pii
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
@@ -957,6 +985,7 @@ jobs:
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
+                   "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.secret-scan.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \

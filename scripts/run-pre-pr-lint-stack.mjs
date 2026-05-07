@@ -139,6 +139,12 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-vision-rule-13-task-id-citations.mjs"],
   },
+  {
+    name: "otel-no-pii",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-otel-no-pii.mjs", "--diff-base=origin/main"],
+  },
   // ---- full stage ----------------------------------------------------------
   {
     name: "vitest",
