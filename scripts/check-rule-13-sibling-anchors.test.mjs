@@ -64,16 +64,33 @@ describe("checkRule13SiblingAnchors — pure-function paired fixtures", () => {
     expect(r.errors.length).toBe(SIBLING_P0_IDS.length);
   });
 
-  test("fails when a sibling P0 task block is missing entirely", () => {
+  test("passes when a sibling P0 task block is removed (task completed)", () => {
+    // A task removed from TASKS.md = completed; constraint fulfilled. Not an error.
     const text = SIBLING_P0_IDS.slice(0, 3)
       .map((id) => fixtureBlock(id, "rule #13."))
       .join("\n");
     const r = checkRule13SiblingAnchors(text);
+    expect(r.ok).toBe(true);
+  });
+
+  test("fails when an open sibling P0 has no Anchor line", () => {
+    // Task is present in TASKS.md (open) but missing its **Anchor**: line.
+    const noAnchorBlock = [
+      `- [ ] \`${SIBLING_P0_IDS[0]}\` — title`,
+      `  - **ID**: ${SIBLING_P0_IDS[0]}`,
+      "  - **Tags**: tag1",
+      "",
+    ].join("\n");
+    const text =
+      noAnchorBlock +
+      SIBLING_P0_IDS.slice(1)
+        .map((id) => fixtureBlock(id, "rule #13."))
+        .join("\n");
+    const r = checkRule13SiblingAnchors(text);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    // The 3 absent IDs each surface as "no Anchor line found".
-    expect(r.errors.length).toBe(3);
-    for (const e of r.errors) expect(e).toContain("no `**Anchor**:` line found");
+    expect(r.errors.length).toBe(1);
+    expect(r.errors[0]).toContain("no `**Anchor**:` line found");
   });
 
   test("matcher accepts `rule #13` and `Rule #13` and `rule#13` (whitespace + case-insensitive)", () => {
@@ -109,14 +126,14 @@ describe("extractAnchorsForIds — TASKS.md parser", () => {
     ].join("\n");
     const out = extractAnchorsForIds(text, ["task-A", "task-B"]);
     expect(out).toEqual([
-      { id: "task-A", anchor: "anchor-A-first" },
-      { id: "task-B", anchor: "anchor-B" },
+      { id: "task-A", found: true, anchor: "anchor-A-first" },
+      { id: "task-B", found: true, anchor: "anchor-B" },
     ]);
   });
 
-  test("returns null anchor for IDs not present in the text", () => {
+  test("returns found:false for IDs not present in the text (completed/removed tasks)", () => {
     const out = extractAnchorsForIds("# empty\n", ["nonexistent"]);
-    expect(out).toEqual([{ id: "nonexistent", anchor: null }]);
+    expect(out).toEqual([{ id: "nonexistent", found: false, anchor: null }]);
   });
 });
 
