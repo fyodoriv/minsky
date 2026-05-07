@@ -1948,8 +1948,6 @@ describe("buildDaemonBrief", () => {
 
   it("emits the measurable-only anti-vanity guard in the optimization gate", () => {
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
-    expect(brief).toContain("token bytes saved");
-    expect(brief).toContain("wall-time ms");
     expect(brief).toContain("Anti-vanity");
   });
 

@@ -1074,7 +1074,7 @@ export function buildDaemonBrief(args: {
     "",
     "≤30s/iter: identify ONE measurable optimization and act on it. Eligible: Brief-shrinking, Cached-prompt extension, Skip-earlier gate, Log-line dedup, Round-trip elimination.",
     "",
-    "Bundle on same branch. If none, note `optimization: none-this-iteration: <reason>` — silence is failure. Anti-vanity: must be measurable (token bytes saved, wall-time ms, round-trips).",
+    "Bundle on same branch. If none, note `optimization: none-this-iteration: <reason>` — silence is failure. Anti-vanity: measurable = bytes/ms/round-trips.",
     "",
     "## PR self-grade template (copy-paste verbatim)",
     "",
