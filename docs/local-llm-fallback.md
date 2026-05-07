@@ -16,10 +16,18 @@ pipx install mlx-lm
 # Aider — must be on python 3.12 or 3.13; 3.14 has numpy build issues
 pipx install --python /opt/homebrew/bin/python3.12 aider-chat
 # Pull the model (~19 GB; ~10–15 min on a 1 Gbps link)
-hf download mlx-community/Qwen2.5-Coder-32B-Instruct-4bit
+huggingface-cli download mlx-community/Qwen2.5-Coder-32B-Instruct-4bit
 ```
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen2.5-Coder-32B-Instruct-4bit` (~19 GB).
+
+### Why two separate Python environments
+
+`mlx-lm` requires `tokenizers>=0.22.0,<=0.23.0` (transformers 4.57+); `aider-chat` pins `tokenizers==0.21.1`. They cannot share a single venv. The runbook above uses `pipx` which installs each into its own venv automatically — no further action needed. If you install them into a shared venv, `mlx_lm.server` will fail at import time with `ImportError: tokenizers>=0.22.0,<=0.23.0 is required`.
+
+### Apple Silicon under Rosetta — install ARM-native
+
+If `which python3` reports a binary under `/usr/local/` (Intel Homebrew) and `sysctl -n sysctl.proc_translated` returns `1`, your shell is in Rosetta. MLX needs ARM-native Python to use the GPU through Metal. Either install ARM-native Homebrew at `/opt/homebrew/`, or use the system Python explicitly: `arch -arm64 /usr/bin/python3 -m venv ~/venvs/mlx`. The `arch -arm64` prefix forces native execution; without it, MLX may fail to load its arm64-only `_imaging.so` PIL bindings or fall back to CPU.
 
 ## Smoke test
 
@@ -37,7 +45,7 @@ In a second terminal (against a throwaway worktree — never the live repo):
 git worktree add /tmp/local-llm-smoke -B local-llm-smoke main
 cd /tmp/local-llm-smoke
 aider \
-  --model openai/qwen2.5-coder-32b-instruct-4bit \
+  --model openai/mlx-community/Qwen2.5-Coder-32B-Instruct-4bit \
   --openai-api-base http://127.0.0.1:8080/v1 \
   --openai-api-key dummy \
   --yes \
@@ -119,6 +127,20 @@ Once slice 3 ships, `node scripts/llm-provider-throughput.mjs --since=$(date -v-
 ```
 
 Acceptance threshold (rolling 7d, when `circuit-break-and-notify` was active for ≥6 cumulative hours): `local.prs ≥ 1 per 24 h per worker`. Below that, the local model isn't capable enough for Minsky's brief shape and the pivot is to "queue tasks, write timestamped TASKS.md notes about what would have been picked, wait for credits" mode.
+
+## Live-run findings (2026-05-07, M3 Max 64GB)
+
+First end-to-end run of the daemon under `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred` against the live Qwen2.5-Coder-32B-Instruct-4bit. Three concrete fixes landed during the run, all in this PR:
+
+1. **Model alias** — `--model openai/qwen2.5-coder-32b-instruct-4bit` (the bare path the original runbook documented) triggers a 401 against `https://huggingface.co/api/models/qwen2.5-coder-32b-instruct-4bit/revision/main` because litellm strips the `openai/` prefix and looks up the tokenizer by the bare ID. The fix: use the full HuggingFace path `openai/mlx-community/Qwen2.5-Coder-32B-Instruct-4bit` so litellm's tokenizer lookup succeeds. `DEFAULT_AIDER_MODEL` in `novel/tick-loop/src/llm-invocation.ts` carries this.
+
+2. **Auto-commits hardening** — aider's default behaviour is to auto-commit every file edit straight to whatever branch its cwd is on. In single-process daemon mode, that is minsky's checked-out branch — destructive to the operator's working state. `--no-auto-commits` is now hard-wired into `buildAiderInvocation`'s default args; the daemon's brief still instructs the LLM to commit and open a PR explicitly via the standard claude-code workflow.
+
+3. **Timeout label split** — when an aider spawn timed out, the daemon's iteration reason was `claude-print-timeout: <ms>ms` because the label was hardcoded for the legacy single-strategy path. The label now splits cleanly: `claude-print-timeout` for the claude path, `local-spawn-timeout` for the local path. The rolling-7d invariant `claudePrintTimeoutFrequencyInvariant` continues to grep `claude-print-timeout` (back-compat) and a future `localSpawnTimeoutFrequency` invariant can grep the new label.
+
+### Brief-size pivot threshold
+
+The daemon's stock brief (`buildDaemonBrief` in `daemon.ts`) is ~7-10KB of context per iteration: the picked task block, priority-discipline gate, anti-noop guard, optimization-discipline gate, fix-own-PR-state. At Qwen 32B's ~14 tok/s steady-state, the 15-min watchdog may bite before aider finishes a meaningful edit cycle on a large task. The 2026-05-07 live run picked the (now-removed) `local-llm-fallback-on-budget-pause` task, whose block alone was ~3 KB; aider scanned the repo (~10s), began generating, and timed out at 15 min. Pivot threshold (rule #9): if rolling-7d p95 of `local-spawn-timeout` count > 5, ship a `daemon-aider-brief-shrinker` task that produces a slimmer brief specifically for the aider path.
 
 ## Failure modes & chaos verification
 
