@@ -54,3 +54,15 @@ if (isValid(result)) {
 ```
 
 See [`spec.md`](./spec.md) for the full record format + validation rules.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014). The package is a pure parser with no I/O, network, or credential surfaces.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | Malformed markdown triggers recursive-descent edge cases or silently drops handoff records | 1 MB cap enforced; `parseHandoffs` returns typed `errors[]`; test suite covers malformed inputs |
+| Repudiation | Handoff records carry no cryptographic signature; any actor can write a record attributed to another | Git commit history is the audit trail; operators validate sender identity via PR review |
+| Information Disclosure | Handoff bodies may encode sensitive task context or persona-internal reasoning | Records are committed to the repo; operators must not embed credentials in handoff bodies |
+| Denial of Service | Deeply nested markdown triggers stack overflow in recursive-descent parser | 1 MB input cap; iterative parser avoids unbounded recursion; malformed input returns `isValid: false` |
+| Spoofing | A forged handoff record claims a `from` persona that did not author it | No runtime enforcement in v0; operator validates during PR review; cryptographic attestation is a v1 goal |

@@ -77,3 +77,14 @@ The schema enforces `[1, 3600]` integer values. Out-of-range or non-integer entr
 ## Follow-up tasks
 
 - **`experiment-tracker-v0`** — weekly/monthly layer: scheduled cron re-runs the measurement at each `replay_windows_days` value, emits `validated` / `regressed` / `inconclusive` verdicts. (Daily layer `ci-experiment-runner-v0` ships in this PR.)
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014). The package is a pure parser with no I/O, network, or credential surfaces.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | Malformed YAML input triggers parser edge cases or produces silently-wrong records | Validated against JSON Schema; `kind: bad-*` error codes signal all out-of-spec inputs |
+| Information Disclosure | Experiment records encode measurement commands that may reveal internal paths or credentials | Records are committed to the repo; operators must not embed secrets in `measurement` fields |
+| Denial of Service | Pathologically large YAML payload (deeply nested anchors) consumes unbounded memory | 1 MB input cap enforced before parsing; js-yaml safe mode prevents code execution |
+| Repudiation | No cryptographic attestation; any writer can produce a record attributed to any persona | Git commit signature is the audit trail; `supply-chain-hardening-lockfile-sbom-slsa` P0 adds SLSA provenance |

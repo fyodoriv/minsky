@@ -136,3 +136,15 @@ serve({ fetch, port: 8080 }); // distribution/run-dashboard-web.sh owns the port
 const snapshot = { "loop-uptime": "0.99", "tokens-per-story": "12345" };
 createServer({ getValue: snapshotGetValue(snapshot) });
 ```
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014).
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Spoofing | `POST /control` accepts JSON commands from any localhost process with no authentication | `dashboard-localhost-only-by-default` P0 task adds authentication; currently risk-accepted as localhost-only |
+| Tampering | Log-injection in `tick-loop.out.log` corrupts metric rendering in the UI | `escapeHtml` applied to all log-derived values before HTML insertion |
+| Information Disclosure | Metric cards may expose internal iteration counts or operational error details | Dashboard binds to `127.0.0.1`; `otel-no-pii-in-spans-lint` P0 enforces no PII in spans |
+| Denial of Service | Unbounded `tick-loop.out.log` growth; malformed OTEL payload triggers server crash | Log-tail read is bounded per rule #7; OTEL payload validation rejects malformed data |
+| Elevation of Privilege | OpenObserve basic-auth credentials in env vars are accessible to any child process | Credentials are env-vars only; never written to disk; `secret-scanning-precommit-and-ci` P0 prevents accidental commit |

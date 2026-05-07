@@ -164,3 +164,15 @@ npm publish --dry-run --loglevel=info
 The full `budget-guard-v0` epic decomposes into these P1 sub-tasks (tracked in `TASKS.md`):
 
 - **`MaciekTokenMonitor` Strategy** — shipped in `@minsky/token-monitor` (`novel/adapters/token-monitor/src/maciek.ts`); reads `~/.claude/projects/<cwd>/<session>.jsonl` directly.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014).
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | `budget.flag` modified externally could disable circuit-breaking silently | Atomic write via `rename`; path anchored to `MINSKY_HOME`; startup clears stale flags |
+| Information Disclosure | HTTP endpoint at `localhost:9876/budget` exposes token consumption rate | Binds to `127.0.0.1` only; `dashboard-localhost-only-by-default` P0 task hardens further |
+| Denial of Service | ENOSPC / EROFS prevents `budget.flag` write; guard becomes inactive | Rule #7: flag-write failure emits loud warning; circuit-break applied conservatively |
+| Elevation of Privilege | Stale `budget.flag` from a crashed daemon grants an over-budget session continued access | Startup clears stale flags; `BudgetGuard.tick()` reads fresh token data on each call |
+| Spoofing | Rogue local process injects false token counts into the Maciek monitor data path | Token monitor data is read-only at a fixed path; no write surface in `budget-guard` itself |

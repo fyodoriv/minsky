@@ -57,3 +57,15 @@ Per constitutional rule #7 (`vision.md` § 7).
 - `spawn-plan.test.ts` (12) — plan shape; branch naming; env vars; system-prompt overlay; brief
 - `iteration-record.test.ts` (4) — JSONL rendering; verdict variants; null pr_url
 - `repo-config-loader.test.ts` (3) — flat-YAML parser; nested map; comments; happy/missing-required cases (subset; the `parseRepoConfig` validator's exhaustive cases ship in `@minsky/sidecar-bootstrap`)
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014).
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | `.minsky/repo.yaml` injection redirects runner at unintended tasks or repos | Operator reviews `repo.yaml` before cross-repo-runner consumes it (sidecar-bootstrap invariant #4) |
+| Information Disclosure | `GITHUB_TOKEN` and shell credentials are inherited by spawned Claude Code child | Env passthrough is intentional; `supervisor-sandbox-syscall-restriction` P0 adds seccomp/App Sandbox |
+| Repudiation | Iteration record (`planned` / `verdict`) is append-only JSONL with no cryptographic attestation | JSONL is immutable-append; git history provides the authoritative audit trail |
+| Elevation of Privilege | Spawned Claude Code can modify tracked files outside the declared task scope | v1 re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` |
+| Denial of Service | Runaway spawned process makes unbounded `gh` API calls or consumes unbounded CPU | `BudgetGuard` circuit-breaks at ≥85 % token budget; `gh` API rate limits apply |
