@@ -607,9 +607,12 @@ export {
 export {
   type CheckRunSnapshot,
   type DaemonOwnPrSnapshot,
+  type DaemonPrStateExecFile,
   type DaemonPrStateVerdict,
   type DecideDaemonPrStateInput,
   decideDaemonPrState,
+  fetchDaemonOwnPrsFromGh,
+  ghPrListArgsForBranch,
   isFailingConclusion,
   parseGhPrListForDaemonPrState,
 } from "./daemon-pr-state.js";
