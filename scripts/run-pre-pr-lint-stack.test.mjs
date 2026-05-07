@@ -17,9 +17,11 @@ import {
   buildStepResult,
   parseArgs,
   renderJson,
+  resolveDiffBase,
   runStack,
   selectSteps,
   stripGitHookEnv,
+  withResolvedDiffBase,
 } from "./run-pre-pr-lint-stack.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -913,5 +915,156 @@ describe("docs/daemon-pre-pr-gate.md env-dependent allowlist drift-protection", 
       expect(typeof reason).toBe("string");
       expect(reason.length, `${name} needs a one-line reason`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("resolveDiffBase (slice 31/N — freshness-aware diff base)", () => {
+  /** @type {(timestamps: Record<string, number>) => (ref: string) => number} */
+  const tsFromMap = (m) => (r) => m[r] ?? 0;
+
+  test("returns explicit override from PRE_PR_LINT_DIFF_BASE", () => {
+    expect(
+      resolveDiffBase({
+        env: { PRE_PR_LINT_DIFF_BASE: "v1.2.3" },
+        refExists: () => false,
+        refTimestamp: () => 0,
+      }),
+    ).toBe("v1.2.3");
+  });
+
+  test("ignores empty override (treated as unset)", () => {
+    expect(
+      resolveDiffBase({
+        env: { PRE_PR_LINT_DIFF_BASE: "" },
+        refExists: (r) => r === "main",
+        refTimestamp: tsFromMap({ main: 100 }),
+      }),
+    ).toBe("main");
+  });
+
+  test("returns the only resolving ref (single-candidate case)", () => {
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "origin/main",
+        refTimestamp: tsFromMap({ "origin/main": 50 }),
+      }),
+    ).toBe("origin/main");
+  });
+
+  test("hard fallback to `origin/main` when no candidate resolves", () => {
+    expect(resolveDiffBase({ env: {}, refExists: () => false, refTimestamp: () => 0 })).toBe(
+      "origin/main",
+    );
+  });
+
+  test("daemon-worktree case: local `main` stale, `upstream/main` fresh → picks `upstream/main`", () => {
+    // Concrete reproducer: PR #330's pre-rebase state. local `main` =
+    // 1175a07 (slice 29 era, ts=100); `upstream/main` = 2fd8ce5 (slice 30
+    // merged, ts=200); `origin/main` = d5742f5 (placeholder remote, ts=50).
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "main" || r === "origin/main" || r === "upstream/main",
+        refTimestamp: tsFromMap({ main: 100, "origin/main": 50, "upstream/main": 200 }),
+      }),
+    ).toBe("upstream/main");
+  });
+
+  test("dev-machine case: stale `origin/main`, fresh local `main` → picks `main`", () => {
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "main" || r === "origin/main",
+        refTimestamp: tsFromMap({ main: 200, "origin/main": 100 }),
+      }),
+    ).toBe("main");
+  });
+
+  test("CI case: only `origin/main` exists → picks `origin/main` (no behaviour change)", () => {
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "origin/main",
+        refTimestamp: tsFromMap({ "origin/main": 200 }),
+      }),
+    ).toBe("origin/main");
+  });
+
+  test("ties broken by reduce-leftmost (stable for in-sync refs)", () => {
+    // `upstream/main` listed first → wins on tie. Stability matters for the
+    // common dev case where `main` and `origin/main` are at the same commit.
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: () => true,
+        refTimestamp: () => 100,
+      }),
+    ).toBe("upstream/main");
+  });
+});
+
+/**
+ * Count `--diff-base=<v>` argv occurrences across a manifest.
+ * @param {readonly { args: readonly string[] }[]} manifest
+ * @param {string} v
+ * @returns {number}
+ */
+function countDiffBaseArgs(manifest, v) {
+  return manifest.reduce((n, s) => n + s.args.filter((a) => a === `--diff-base=${v}`).length, 0);
+}
+
+/**
+ * Count env-value occurrences across a manifest.
+ * @param {readonly { env?: Record<string, string> }[]} manifest
+ * @param {string} v
+ * @returns {number}
+ */
+function countEnvValues(manifest, v) {
+  return manifest.reduce((n, s) => n + Object.values(s.env ?? {}).filter((x) => x === v).length, 0);
+}
+
+describe("withResolvedDiffBase (slice 31/N — manifest rewrite)", () => {
+  test("no-op fast path when diffBase === 'origin/main' (returns same reference)", () => {
+    expect(withResolvedDiffBase(STACK_MANIFEST, "origin/main")).toBe(STACK_MANIFEST);
+  });
+
+  test("rewrites every `*_DIFF_BASE` env value from origin/main to the resolved base", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(countEnvValues(swapped, "origin/main")).toBe(0);
+    expect(countEnvValues(swapped, "main")).toBeGreaterThanOrEqual(4);
+  });
+
+  test("rewrites every `--diff-base=origin/main` argv to the resolved base", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(countDiffBaseArgs(swapped, "origin/main")).toBe(0);
+    expect(countDiffBaseArgs(swapped, "main")).toBeGreaterThanOrEqual(3);
+  });
+
+  test("preserves the original manifest unchanged (pure transform — referential equality of all args+env)", () => {
+    const beforeArgCount = countDiffBaseArgs(STACK_MANIFEST, "origin/main");
+    const beforeEnvCount = countEnvValues(STACK_MANIFEST, "origin/main");
+    withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(countDiffBaseArgs(STACK_MANIFEST, "origin/main")).toBe(beforeArgCount);
+    expect(countEnvValues(STACK_MANIFEST, "origin/main")).toBe(beforeEnvCount);
+  });
+
+  test("returns a frozen array (preserves manifest's freeze contract)", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    expect(Object.isFrozen(swapped)).toBe(true);
+  });
+
+  test("steps without origin/main references pass through unchanged (referential equality)", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    const biome = STACK_MANIFEST.find((s) => s.name === "biome");
+    const swappedBiome = swapped.find((s) => s.name === "biome");
+    expect(swappedBiome).toBe(biome);
+  });
+
+  test("regression-floor: pre-slice-31 manifest references origin/main in ≥7 sites", () => {
+    const total =
+      countDiffBaseArgs(STACK_MANIFEST, "origin/main") +
+      countEnvValues(STACK_MANIFEST, "origin/main");
+    expect(total).toBeGreaterThanOrEqual(7);
   });
 });
