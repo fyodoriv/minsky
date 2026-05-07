@@ -521,6 +521,17 @@ export {
   buildClaudePrintInvocation,
 } from "./llm-invocation.js";
 
+// Slice 3 of `local-llm-fallback-on-budget-pause`: expose the wrapping
+// SpawnStrategy that dispatches between claude / local based on
+// `decideProvider(...)`.
+export {
+  type BudgetStateProbe,
+  type LlmProviderSpawnStrategyOptions,
+  LlmProviderSpawnStrategy,
+  probeWithErrorGuard,
+  synthesiseHoldResult,
+} from "./llm-provider-spawn-strategy.js";
+
 // Slice 2 of `daemon-parallel-worktree-launch`: per-worker namespacing
 // helpers exposed for the CLI (`bin/tick-loop.mjs`) so it can parse
 // `--worker-id` / `--workers-total` and announce parallel mode on startup.

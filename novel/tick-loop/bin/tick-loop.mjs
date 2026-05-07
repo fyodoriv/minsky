@@ -66,10 +66,13 @@ import { MaciekTokenMonitor, StubTokenMonitor } from "@minsky/token-monitor";
 
 import {
   DryRunSpawnStrategy,
+  LlmProviderSpawnStrategy,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
   analyzeConfig,
+  buildAiderInvocation,
   buildChildWorkerArgs,
+  buildClaudePrintInvocation,
   createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
@@ -162,6 +165,12 @@ function applyArg(arg, out) {
 
 const args = parseArgs(process.argv.slice(2));
 const dryRun = readDryRunEnv(process.env);
+// Top-level minskyHome — multiple downstream consumers (pre-PR lint gate,
+// CTO-audit, changelog, snapshot, metrics-render) need this. Was previously
+// only declared inside the seam IIFEs which left line-698's preLintRun ref
+// to `minskyHome` referencing an undefined identifier (latent bug exposed
+// when the bin runs end-to-end). Single source of truth here.
+const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
 
 // Slice 2 of `daemon-parallel-worktree-launch`: parse `--worker-id` /
 // `--workers-total`. New default (2026-05-06): claim-aware worker-0-of-1 when
@@ -287,12 +296,140 @@ const claudePrintTimeoutMs = (() => {
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
 })();
-const spawnStrategy = dryRun
-  ? new DryRunSpawnStrategy()
-  : new ProcessSpawnStrategy({
-      command: "claude",
-      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-    });
+// Wire the OTEL publisher EARLY (was below; moved up for the slice-3
+// local-llm wrapper to capture the `emit` callback). When
+// `MINSKY_OTEL_ENDPOINT` is set, every span is forwarded to the OTLP
+// backend (OpenObserve out of the box, post-#110); when unset, the
+// daemon still writes the stdout line — graceful-degrade per rule #7.
+const otelEndpoint = process.env.MINSKY_OTEL_ENDPOINT;
+const observability =
+  otelEndpoint === undefined || otelEndpoint.trim() === ""
+    ? undefined
+    : new OtelObservability({ endpoint: otelEndpoint, serviceName: "minsky-tick-loop" });
+
+// Slice 3 of `local-llm-fallback-on-budget-pause` — opt-in local-LLM
+// fallback via env vars:
+//   - MINSKY_LOCAL_LLM=1 enables the fallback wrapper. When unset, the
+//     daemon uses the legacy single-strategy claude path (back-compat
+//     with all existing operator deployments).
+//   - MINSKY_LLM_PROVIDER=claude-only forces claude regardless of state
+//     (operator escape hatch — the wrapper still wraps, it just always
+//     dispatches to claude). MINSKY_LLM_PROVIDER=local-preferred opts
+//     into local-when-reachable.
+//   - MINSKY_LOCAL_LLM_PROBE_URL overrides the default probe URL
+//     (default: http://127.0.0.1:8080/v1/models — the mlx-lm.server
+//     endpoint per docs/local-llm-fallback.md).
+//   - MINSKY_LOCAL_LLM_PROBE_TTL_MS overrides the probe cache TTL
+//     (default: 60000).
+//   - MINSKY_LOCAL_LLM_AIDER_BIN overrides the aider binary path
+//     (default: bare `aider` on PATH; useful when aider is in a venv).
+const localLlmEnabled = (() => {
+  const raw = process.env.MINSKY_LOCAL_LLM;
+  if (raw === undefined) return false;
+  const normalised = raw.trim().toLowerCase();
+  return normalised === "1" || normalised === "true";
+})();
+const llmProviderOverride = (process.env.MINSKY_LLM_PROVIDER ?? "").trim().toLowerCase();
+const forceClaude = llmProviderOverride === "claude-only";
+const preferLocal = llmProviderOverride === "local-preferred";
+const localProbeUrl = process.env.MINSKY_LOCAL_LLM_PROBE_URL ?? "http://127.0.0.1:8080/v1/models";
+const localProbeTtlMs = (() => {
+  const raw = process.env.MINSKY_LOCAL_LLM_PROBE_TTL_MS;
+  if (raw === undefined) return 60_000;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+})();
+const aiderBin = process.env.MINSKY_LOCAL_LLM_AIDER_BIN ?? "aider";
+
+/**
+ * Probe the local mlx-lm.server. Reuses the same logic as
+ * `scripts/check-mlx-server.mjs` but inlined here so we don't shell out
+ * once per tick. Returns a `LocalProbeResult`.
+ *
+ * @returns {Promise<{reachable: boolean, observedAtMs: number, reason?: string}>}
+ */
+async function probeLocalLlm() {
+  const observedAtMs = Date.now();
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 5_000);
+  try {
+    const resp = await fetch(localProbeUrl, { signal: ac.signal, method: "GET" });
+    if (resp.ok) return { reachable: true, observedAtMs };
+    return { reachable: false, observedAtMs, reason: `http ${resp.status}` };
+  } catch (err) {
+    /** @type {{cause?: {code?: string}, code?: string, name?: string, message?: string}} */
+    const e = /** @type {any} */ (err);
+    const code = e?.cause?.code ?? e?.code;
+    const reason =
+      typeof code === "string"
+        ? code
+        : e?.name === "AbortError"
+          ? "timeout"
+          : (e?.message ?? "unknown");
+    return { reachable: false, observedAtMs, reason: String(reason).slice(0, 80) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const spawnStrategy = (() => {
+  if (dryRun) return new DryRunSpawnStrategy();
+  // The claude underlying strategy: identical to the legacy v0+sub-task-3 path
+  // — a `ProcessSpawnStrategy` over `claude --print` with the
+  // `--worktree <name>` per-iteration arg already produced by
+  // `claudeArgsForWorker(...)` (this comes through `input.extraArgs` →
+  // `invocation` builder). The invocation builder shape lets a future
+  // extension append more claude-specific args without touching the
+  // wrapper.
+  const claudeStrat = new ProcessSpawnStrategy({
+    command: "claude",
+    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    invocation: (input) =>
+      buildClaudePrintInvocation({
+        brief: input.brief,
+        ...(input.extraArgs && input.extraArgs.length > 0 ? { extraArgs: input.extraArgs } : {}),
+      }),
+  });
+  if (!localLlmEnabled) return claudeStrat;
+  // Local fallback wired. Construct the aider strategy and wrap both in
+  // `LlmProviderSpawnStrategy`.
+  const localStrat = new ProcessSpawnStrategy({
+    command: aiderBin,
+    // Reuse the same per-iteration timeout as claude — aider's `--message`
+    // path is similar in shape (one-shot agentic edit + exit).
+    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    invocation: (input) =>
+      buildAiderInvocation({
+        brief: input.brief,
+        command: aiderBin,
+      }),
+  });
+  process.stdout.write(
+    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"})\n`,
+  );
+  return new LlmProviderSpawnStrategy({
+    claude: claudeStrat,
+    local: localStrat,
+    probe: probeLocalLlm,
+    budgetGuard: realGuard,
+    probeTtlMs: localProbeTtlMs,
+    forceClaude,
+    preferLocal,
+    emit: (event) => {
+      // Forward the dispatch span to OTEL when wired; always also write
+      // to stdout for the operator's `tail` view.
+      process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
+      if (observability !== undefined) {
+        observability.emitTickSpan(event);
+      }
+    },
+  });
+})();
+if (!localLlmEnabled) {
+  process.stdout.write(
+    "[tick-loop] no local-llm fallback wired (set MINSKY_LOCAL_LLM=1 + run mlx-lm.server to enable claude→local switch on hard-limit)\n",
+  );
+}
 
 // Wire the push channel for `runDaemon`'s edge-triggered budget-paused
 // notifier (P1 `daemon-budget-pause-observability`, shipped #113). The seam
@@ -303,18 +440,9 @@ const spawnStrategy = dryRun
 // dependency is absent). `MINSKY_NTFY_SERVER` overrides the public ntfy.sh
 // default for self-hosted; `MINSKY_NTFY_AUTH_TOKEN` is the bearer for
 // authenticated topics. None of these are required for the daemon to run.
-// Wire the OTEL publisher half of the publish-then-read MAPE-K loop
-// (P1 `daemon-otel-pipe`). When `MINSKY_OTEL_ENDPOINT` is set, every
-// per-iteration `TickSpan` is forwarded to the OTLP backend (OpenObserve
-// out of the box, post-#110); when unset, the daemon still writes the
-// stdout line — graceful-degrade per rule #7. Without this, the
-// dashboard's `OpenObserveStrategy` reads `(stub)` for every metric
-// because the publisher side never wired up.
-const otelEndpoint = process.env.MINSKY_OTEL_ENDPOINT;
-const observability =
-  otelEndpoint === undefined || otelEndpoint.trim() === ""
-    ? undefined
-    : new OtelObservability({ endpoint: otelEndpoint, serviceName: "minsky-tick-loop" });
+//
+// (OTEL `observability` was wired earlier — moved up so the slice-3
+// local-llm wrapper can capture `observability` in its `emit` closure.)
 
 // Sub-step (d/e/f) of `post-task-cto-audit` — opt-in CLI-side construction
 // of the `CtoAuditSeam`. Default is OFF so the audit's prompt-engineering

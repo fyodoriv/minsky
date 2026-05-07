@@ -80,6 +80,15 @@ export interface SpawnResult {
    * Surfaced-by `daemon-claude-print-hang-watchdog` (operator 2026-05-07).
    */
   readonly timedOut?: boolean;
+  /**
+   * Optional provider tag set by `LlmProviderSpawnStrategy` (slice 3 of
+   * `local-llm-fallback-on-budget-pause`) — `"claude"` / `"local"` /
+   * `"hold"`. The daemon copies this into the `DaemonIterationResult`
+   * so the iteration span carries `iteration.provider` for the
+   * pre-registered measurement query. Unset means "single-strategy
+   * spawn" (legacy / sub-task 1/3 path).
+   */
+  readonly provider?: "claude" | "local" | "hold";
 }
 
 /**

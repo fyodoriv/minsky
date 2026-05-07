@@ -130,6 +130,10 @@ describe("check-mlx-server / probe", () => {
   it("returns 'timeout Nms' on AbortError after timeout fires", async () => {
     /** @type {typeof fetch} */
     const fetchFn = /** @type {any} */ (
+      /**
+       * @param {any} _url
+       * @param {any} opts
+       */
       async (_url, opts) => {
         await new Promise((_resolve, reject) => {
           /** @type {AbortSignal} */
@@ -170,7 +174,9 @@ describe("check-mlx-server / main", () => {
     });
     expect(code).toBe(0);
     expect(out).toHaveLength(1);
-    expect(JSON.parse(out[0])).toEqual({
+    const first = out[0];
+    if (first === undefined) throw new Error("expected one stdout line");
+    expect(JSON.parse(first)).toEqual({
       reachable: true,
       observedAtMs: 9999,
     });
@@ -193,7 +199,9 @@ describe("check-mlx-server / main", () => {
       now: () => 9999,
     });
     expect(code).toBe(1);
-    const parsed = JSON.parse(out[0]);
+    const first = out[0];
+    if (first === undefined) throw new Error("expected one stdout line");
+    const parsed = JSON.parse(first);
     expect(parsed).toEqual({
       reachable: false,
       observedAtMs: 9999,
