@@ -142,4 +142,44 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
     expect(result.stdoutTail.length).toBeLessThanOrEqual(4096);
     expect(result.stdoutTail).toContain("END_MARKER");
   });
+
+  it("daemon-claude-print-hang-watchdog: SIGKILLs a child that doesn't close within timeoutMs and resolves with timedOut: true", async () => {
+    // Child sleeps forever — would hang indefinitely without watchdog.
+    const script = "setInterval(() => {}, 1000);";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["-e", script],
+      timeoutMs: 200,
+    });
+    const startedAt = Date.now();
+    const result = await strat.spawn(emptyInput());
+    const elapsed = Date.now() - startedAt;
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBe(-1);
+    expect(result.stderrTail).toContain("timed out after 200ms");
+    // Resolution should land just past the timeout, not hours later.
+    expect(elapsed).toBeLessThan(2_000);
+    expect(elapsed).toBeGreaterThanOrEqual(150);
+  });
+
+  it("daemon-claude-print-hang-watchdog: a fast child finishes before the watchdog and timedOut is undefined", async () => {
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["-e", "process.exit(0);"],
+      timeoutMs: 30_000,
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).toBeUndefined();
+  });
+
+  it("daemon-claude-print-hang-watchdog: legacy unbounded behaviour preserved when timeoutMs is omitted", async () => {
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["-e", "process.exit(0);"],
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).toBeUndefined();
+  });
 });
