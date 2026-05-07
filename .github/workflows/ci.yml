@@ -414,6 +414,37 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/scan-secrets.test.mjs
 
+  sbom-shape:
+    # vision.md § 13.5 / TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` §
+    # Measurement: every release-candidate's CycloneDX SBOM matches the 1.5/1.6
+    # subset the consumer's gates depend on. Slices 1-4 (PRs #269, #270, #285,
+    # #286) shipped the pure classifier, the aggregating walker, the JSON-text
+    # parser, and the CLI driver in `scripts/check-sbom-shape.mjs`. This slice
+    # (5) wires the CLI into the CI gate so a regression in `cyclonedx-cli`
+    # output (missed `purl`, duplicated `bom-ref`, unsupported spec version)
+    # surfaces in CI rather than silently shipping with the release.
+    #
+    # Fail-safe-defaults (Saltzer & Schroeder 1975): the CLI exits 0 when no
+    # SBOM is on disk (`sbom.cdx.json` absent — the typical state until a
+    # generation step is wired into the release workflow). The gate therefore
+    # passes today and catches shape regressions the moment the SBOM file
+    # appears, without blocking the build on a missing artefact.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: sbom-shape lint
+        run: node scripts/check-sbom-shape.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-sbom-shape.test.mjs
+
   lockfile-integrity:
     # vision.md § 13.5 / TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` §
     # Measurement: every PR's `pnpm-lock.yaml` is diffed against `origin/main`
@@ -1016,6 +1047,7 @@ jobs:
       - rule-6-let-it-crash
       - rule-7-chaos-coverage
       - rule-12-scope-discipline
+      - sbom-shape
       - tasks-lint
       - test
       - tick-loop-backoff-schedule
@@ -1054,6 +1086,7 @@ jobs:
                    "${{ needs.rule-6-let-it-crash.result }}" \
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.rule-12-scope-discipline.result }}" \
+                   "${{ needs.sbom-shape.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
                    "${{ needs.tick-loop-backoff-schedule.result }}" \

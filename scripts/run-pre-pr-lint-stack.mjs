@@ -157,6 +157,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-6-let-it-crash",
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
+      "sbom-shape",
       "secret-scan",
       "tasks-lint",
       "test",
@@ -295,6 +296,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/scan-secrets.mjs"],
+  },
+  {
+    name: "sbom-shape",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-sbom-shape.mjs"],
   },
   {
     name: "metric-freshness",
