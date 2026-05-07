@@ -75,14 +75,24 @@ ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 # Anchor: systemd.exec(5) "Sandboxing" section — every directive below
 # is documented as having no effect on a normal long-lived Node.js
 # process that reads/writes its WorkingDirectory and spawns child
-# processes. Filesystem/network restrictions (ProtectSystem=,
-# ProtectHome=, RestrictAddressFamilies=, SystemCallFilter=) are
-# deliberately deferred to stage 1+ behind the dry-run + warn-only ramp.
+# processes AND is safe under `systemctl --user` (which is how every
+# Minsky supervisor unit runs by design).
+#
+# Why the `ProtectKernel{Tunables,Modules,Logs}=` triple is NOT here:
+# each one implies a `CapabilityBoundingSet=~CAP_*` drop (CAP_SYS_RAWIO,
+# CAP_SYS_MODULE, CAP_SYSLOG respectively), and prctl(PR_CAPBSET_DROP)
+# requires CAP_SETPCAP. A user-mode systemd session typically lacks
+# CAP_SETPCAP, so the unit fails to start with `status=218/CAPABILITIES`
+# (observed: linux-supervisor-integration CI on PR #347, 2026-05-07).
+# The triple stays deferred to a later stage that ships only when
+# system-mode units are introduced (currently out of scope per
+# vision.md — Minsky supervises itself as the operator, not as root).
+#
+# Filesystem/network restrictions (ProtectSystem=, ProtectHome=,
+# RestrictAddressFamilies=, SystemCallFilter=) are similarly deferred
+# to stage 1+ behind the dry-run + warn-only ramp.
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes

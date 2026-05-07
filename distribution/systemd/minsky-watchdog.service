@@ -42,9 +42,6 @@ ExecStart=/usr/bin/env node ${MINSKY_HOME}/scripts/watchdog.mjs
 # why this set is safe for a long-lived Node.js process.
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes

@@ -53,20 +53,25 @@ export const REQUIRED_UNIT_FILES = Object.freeze([
  * appear verbatim in the unit's `[Service]` section. Drawn from
  * systemd.exec(5)'s "Sandboxing" stanza; every directive in this set is
  * documented as having no effect on a normal long-lived Node.js process
- * that reads/writes its working directory and spawns child processes.
+ * that reads/writes its working directory and spawns child processes
+ * AND works under `systemctl --user` (which is how every Minsky
+ * supervisor unit ships).
  *
- * Directives that DO restrict filesystem/network access
- * (`ProtectSystem=`, `ProtectHome=`, `RestrictAddressFamilies=`,
- * `SystemCallFilter=`) are deliberately NOT in this set — they are
- * gated behind the dry-run + warn-only ramp described in the task block
- * for `supervisor-sandbox-syscall-restriction`.
+ * Directives explicitly deferred:
+ *   - `ProtectKernel{Tunables,Modules,Logs}=` — each implies a
+ *     `CapabilityBoundingSet=~CAP_*` drop, which requires CAP_SETPCAP
+ *     on the systemd manager. A user-mode session lacks CAP_SETPCAP, so
+ *     the unit fails with `status=218/CAPABILITIES` at start
+ *     (observed in linux-supervisor-integration CI 2026-05-07). They
+ *     return when (and if) Minsky ever adds system-mode units.
+ *   - `ProtectSystem=`, `ProtectHome=`, `RestrictAddressFamilies=`,
+ *     `SystemCallFilter=` — these restrict filesystem/network access
+ *     and are gated behind the dry-run + warn-only ramp described in
+ *     the task block for `supervisor-sandbox-syscall-restriction`.
  */
 export const REQUIRED_DIRECTIVES = Object.freeze([
   "NoNewPrivileges=yes",
   "PrivateTmp=yes",
-  "ProtectKernelTunables=yes",
-  "ProtectKernelModules=yes",
-  "ProtectKernelLogs=yes",
   "ProtectControlGroups=yes",
   "RestrictSUIDSGID=yes",
   "LockPersonality=yes",

@@ -107,14 +107,24 @@ describe("checkSupervisorSandboxHardening (pure)", () => {
     expect(Array.from(REQUIRED_DIRECTIVES)).toEqual([
       "NoNewPrivileges=yes",
       "PrivateTmp=yes",
-      "ProtectKernelTunables=yes",
-      "ProtectKernelModules=yes",
-      "ProtectKernelLogs=yes",
       "ProtectControlGroups=yes",
       "RestrictSUIDSGID=yes",
       "LockPersonality=yes",
       "RestrictRealtime=yes",
     ]);
+  });
+
+  test("REQUIRED_DIRECTIVES excludes the user-mode-incompatible ProtectKernel triple", () => {
+    // Dropping CAP_SYS_RAWIO / CAP_SYS_MODULE / CAP_SYSLOG via
+    // PR_CAPBSET_DROP requires CAP_SETPCAP, which user-mode systemd
+    // sessions lack. Including these directives causes the unit to
+    // fail start with status=218/CAPABILITIES (observed: PR #347
+    // linux-supervisor-integration CI 2026-05-07). Pin the exclusion
+    // so a future drift-fix PR doesn't silently re-add them.
+    const directives = Array.from(REQUIRED_DIRECTIVES);
+    expect(directives).not.toContain("ProtectKernelTunables=yes");
+    expect(directives).not.toContain("ProtectKernelModules=yes");
+    expect(directives).not.toContain("ProtectKernelLogs=yes");
   });
 
   test("REQUIRED_UNIT_FILES covers all three supervisor units", () => {
