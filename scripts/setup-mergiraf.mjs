@@ -82,7 +82,7 @@ function main() {
     process.exit(1);
   }
   if (plan.verdict === "configured") {
-    console.log("setup-mergiraf: already configured (no-op).");
+    process.stdout.write("setup-mergiraf: already configured (no-op).\n");
     process.exit(0);
   }
   for (const cmd of plan.commands) {
@@ -91,8 +91,8 @@ function main() {
       process.exit(2);
     }
   }
-  console.log(
-    "setup-mergiraf: configured. Mergiraf will auto-resolve conflicts on supported files.",
+  process.stdout.write(
+    "setup-mergiraf: configured. Mergiraf will auto-resolve conflicts on supported files.\n",
   );
   process.exit(0);
 }
