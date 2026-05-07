@@ -65,3 +65,15 @@ Per constitutional rule #7 (`vision.md` § 7).
 - `inference.test.ts` (15) — defaults / git-remote parsing / package.json scripts / workspaces / default-branch
 - `plan.test.ts` (14) — fresh-host action shape + idempotency + ignore-mechanism enum + YAML rendering
 - `doctor.test.ts` (10) — green / yellow / red rows + Avizienis lattice aggregation
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014).
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | Inferred `repo.yaml` is modified by a third party before cross-repo-runner consumes it | Invariant #4: operator reviews `repo.yaml` before the runner acts on it |
+| Information Disclosure | Git remote URL (potentially token-bearing) is written into `.minsky/repo.yaml` | `.minsky/` is gitignored; `secret-scanning-precommit-and-ci` P0 catches accidental commits |
+| Elevation of Privilege | Bootstrap writes to `~/.config/git/ignore` — a user-level config path | Write is append-only (one `/.minsky/` line); idempotent; never modifies existing entries |
+| Denial of Service | EROFS or quota exhaustion prevents `.minsky/` creation, leaving runner unconfigured | Bootstrap exits 1 with actionable message; operator resolves filesystem issue before re-running |
+| Spoofing | A malicious `package.json` in the host repo causes inference to produce an attacker-controlled `repo.yaml` | Inference is advisory-only; operator validates output before the runner acts on it |

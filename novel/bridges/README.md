@@ -24,3 +24,15 @@ This README documents the *namespace*; each contained bridge package owns its ow
 |---|---|---|---|---|
 | 1 | A new bridge package lands without its own chaos table | governance lapse | `circuit-break-and-notify` — `scripts/check-rule-7-chaos-coverage.mjs` fails the PR | covered by `scripts/check-rule-7-chaos-coverage.test.mjs` (the linter's paired test asserts the file-level policy) |
 | 2 | A bridge package ships a write path before v1+ CRDT story | rule violation | `circuit-break-and-notify` — the bridge's own README's chaos table must declare it; reviewers reject otherwise | covered by per-package fixture + assertion (e.g., `novel/bridges/omc-tasksmd/src/sync.test.ts` asserts merge-by-id throws in v0) |
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Security & privacy — second priority after performance; Shostack, *Threat Modeling*, Wiley, 2014). The bridges namespace has no runtime; threat surface is governance-only.
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | A bridge package ships without a chaos table, weakening rule #7 coverage | `check-rule-7-chaos-coverage.mjs` enforces per-package chaos table at CI |
+| Information Disclosure | A bridge exposes internal data formats in its public specification without review | Per-bridge READMEs reviewed in PR; no credentials stored at namespace level |
+| Elevation of Privilege | A bridge package accumulates write scope beyond read-only format translation | Scope locked to read-only OMC → tasks.md; rule #12 scope-discipline lint gate enforces |
+| Denial of Service | Governance lapse: `bridges/` grows without per-bridge security review | PR review checklist in user-stories/006-runner-on-any-repo.md § Security & privacy |
+| Repudiation | No audit trail for which operator approved a bridge's data access scope | Git commit signature + PR reviewer record is the authoritative audit trail |

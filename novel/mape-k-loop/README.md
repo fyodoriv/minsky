@@ -265,3 +265,15 @@ The orchestrator is pure given an injected `PromptOptimizer` Strategy
 (see `@minsky/prompt-optimizer`); production wires
 `AnthropicPromptOptimizer`, tests use `StubPromptOptimizer`. Pattern
 conformance row: vision.md § "Pattern conformance index" row 69.
+
+## Threat model
+
+STRIDE analysis per vision.md § 13 (Shostack, *Threat Modeling*, Wiley, 2014).
+
+| Threat | Surface | Mitigation |
+|---|---|---|
+| Tampering | Injected content in `spec-advisories/` or CI JSON propagates to `constraints.md` and future MAPE-K analysis | Inputs are type-validated; `constraints.md` is committed — git diff reveals injections |
+| Repudiation | `constraints.md` appends carry no per-entry cryptographic attribution | Appends are timestamped; git commit history identifies the responsible MAPE-K invocation |
+| Information Disclosure | CI JSON payloads may contain internal branch names, secret env-var names, or failure details | `ci-wrapper` filters payloads to structured fields before MAPE-K ingestion |
+| Denial of Service | Unbounded advisory file growth triggers O(n) processing per tick | `--max-rollouts=N` caps output per invocation; advisory file size bounded by PR-review discipline |
+| Elevation of Privilege | Injected advisory proposes a rollout that disables a safety constraint | `AnthropicPromptOptimizer` is pure-proposal; operator approval required before any rollout lands |
