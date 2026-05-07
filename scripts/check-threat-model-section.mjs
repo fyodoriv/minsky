@@ -4,7 +4,9 @@
 // sections — every constitutional novel package's README must carry a `## Threat
 // model` section that engages with STRIDE methodology by name and has at least
 // 5 non-empty content lines. Pins the 16 sections shipped in PR #249 (10
-// top-level packages) + PR #250 (6 adapter subpackages).
+// top-level packages) + PR #250 (6 adapter subpackages), extended to cover
+// `novel/bridges/omc-tasksmd/README.md` once `bridges/README.md` declared it
+// owns its per-package threat model.
 // Source: vision.md rule #13.8 (threat-model section per novel package);
 //   TASKS.md `security-privacy-priority-substrate` acceptance criterion #5;
 //   rule #10 (deterministic enforcement — drift detection is a CI lint, not a
@@ -36,14 +38,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
 /**
- * The 16 constitutional novel-package READMEs that must carry a STRIDE-shaped
+ * The constitutional novel-package READMEs that must carry a STRIDE-shaped
  * `## Threat model` section. Hardcoded (not glob-discovered) on purpose: a
  * new `novel/<name>/` package added without a threat-model section should
  * surface as a separate, visible PR ratchet (add the package + add it here +
  * add the section), not slip in silently.
+ *
+ * Composition: 10 top-level `novel/<pkg>/` packages + 6 `novel/adapters/<pkg>/`
+ * subpackages + 1 `novel/bridges/<pkg>/` subpackage (the bridges parent
+ * README explicitly delegates per-bridge threat models — see its `## Threat
+ * model` section). Future bridges land their own row here in the same PR
+ * that adds them.
  */
 export const THREAT_MODEL_README_PATHS = Object.freeze([
   "novel/bridges/README.md",
+  "novel/bridges/omc-tasksmd/README.md",
   "novel/budget-guard/README.md",
   "novel/cross-repo-runner/README.md",
   "novel/dashboard-web/README.md",
@@ -161,7 +170,7 @@ async function main() {
   const failures = results.filter((r) => !r.result.ok);
   if (failures.length === 0) {
     process.stdout.write(
-      `threat-model-section ok: ${THREAT_MODEL_README_PATHS.length} novel/* READMEs all carry a STRIDE-shaped threat-model section.\n`,
+      `threat-model-section ok: ${THREAT_MODEL_README_PATHS.length} novel/** READMEs all carry a STRIDE-shaped threat-model section.\n`,
     );
     return 0;
   }
