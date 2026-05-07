@@ -34,13 +34,99 @@
 //   enforcement); Beck 1999 (CI as constraint enforcer); Forsgren-Humble-Kim 2018
 //   (DORA — same gate humans pass through must gate the bot).
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
+
+/**
+ * Resolve the canonical "main" reference the diff-relative checks (rule-3,
+ * rule-6, rule-12, lockfile-integrity, rule-1, rule-4, pattern-index,
+ * cloud-audit-gate) compare HEAD against. CI explicitly sets
+ * `RULE_*_DIFF_BASE=origin/main` because that's the only main-tracking ref the
+ * Github-Actions checkout populates. In a daemon worktree, `origin/main` may be
+ * stale (the worktree's `origin` may point at a placeholder remote that's
+ * never re-fetched), AND local `main` may also be stale (the worktree pulls
+ * from `upstream`, not `main`); CI's `origin/main` then disagrees with the
+ * lint stack about which commits constitute "this branch's diff". This is the
+ * "passes locally / fails CI" footgun (and its inverse, "fails locally /
+ * passes CI") that `daemon-pre-pr-lint-gate` was filed to close. Concrete
+ * evidence: PR #329 (slice 30/N) passed `pnpm pre-pr-lint` locally with stale
+ * `origin/main` and failed `rule-3-doc-first` on CI; on the rebase, the
+ * inverse fired (stale local `main` produced spurious local rule-3 failures
+ * for already-merged commits).
+ *
+ * Resolution: among the resolvable candidates (`main`, `origin/main`,
+ * `upstream/main`), pick the one with the latest committer-date. This closes
+ * BOTH directions of the footgun — whichever ref is freshest wins, regardless
+ * of whether `origin` or `main` is the stale one.
+ *
+ * Order of preference (only matters when timestamps tie):
+ *   1. `PRE_PR_LINT_DIFF_BASE` env override (escape hatch — explicit beats
+ *      heuristic).
+ *   2. Freshest of `[upstream/main, origin/main, main]` by committer-date.
+ *   3. Hard fallback `origin/main` (preserves prior behaviour when no
+ *      candidate resolves — e.g. minimal CI checkouts).
+ *
+ * @param {{
+ *   env?: NodeJS.ProcessEnv,
+ *   refExists?: (ref: string) => boolean,
+ *   refTimestamp?: (ref: string) => number,
+ * }} [opts]
+ * @returns {string}
+ */
+export function resolveDiffBase(opts = {}) {
+  const env = opts.env ?? process.env;
+  const refExists = opts.refExists ?? defaultRefExists;
+  const refTimestamp = opts.refTimestamp ?? defaultRefTimestamp;
+  const override = env["PRE_PR_LINT_DIFF_BASE"];
+  if (override !== undefined && override.length > 0) return override;
+  const resolvable = ["upstream/main", "origin/main", "main"].filter((r) => refExists(r));
+  if (resolvable.length === 0) return "origin/main";
+  return resolvable.reduce((best, ref) => (refTimestamp(ref) > refTimestamp(best) ? ref : best));
+}
+
+/**
+ * @param {string} ref
+ * @returns {boolean}
+ */
+function defaultRefExists(ref) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+    // rule-6: handled-locally — `git rev-parse` exits non-zero on missing
+    // refs, which Node surfaces as a thrown Error. That's the I/O boundary,
+    // not a programming bug — we want a boolean.
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} ref
+ * @returns {number} committer-date Unix timestamp, or 0 if the ref is missing.
+ */
+function defaultRefTimestamp(ref) {
+  try {
+    const out = execFileSync("git", ["log", "-1", "--format=%ct", ref], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const n = Number.parseInt(out.toString().trim(), 10);
+    return Number.isFinite(n) ? n : 0;
+    // rule-6: handled-locally — missing ref or non-numeric output should not
+    // crash the gate; treat as "no timestamp", which puts this ref at the
+    // bottom of the freshness ordering.
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * @typedef {"fast" | "full"} Stage
@@ -444,6 +530,73 @@ export function selectSteps(stage, manifest = STACK_MANIFEST) {
 }
 
 /**
+ * @param {readonly string[]} args
+ * @param {string} diffBase
+ * @returns {{ args: string[], changed: boolean }}
+ */
+function rewriteArgsDiffBase(args, diffBase) {
+  let changed = false;
+  const out = args.map((a) => {
+    if (a === "--diff-base=origin/main") {
+      changed = true;
+      return `--diff-base=${diffBase}`;
+    }
+    return a;
+  });
+  return { args: out, changed };
+}
+
+/**
+ * @param {Record<string, string> | undefined} env
+ * @param {string} diffBase
+ * @returns {{ env: Record<string, string> | undefined, changed: boolean }}
+ */
+function rewriteEnvDiffBase(env, diffBase) {
+  if (env === undefined) return { env, changed: false };
+  let changed = false;
+  /** @type {Record<string, string>} */
+  const next = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === "origin/main") {
+      next[k] = diffBase;
+      changed = true;
+    } else {
+      next[k] = v;
+    }
+  }
+  return { env: changed ? next : env, changed };
+}
+
+/**
+ * Pure transform: rewrite manifest entries that reference `origin/main` (env
+ * values OR `--diff-base=origin/main` argv) to use the resolved diff base.
+ * The static manifest keeps `origin/main` as its default — only the runtime
+ * invocation in `main()` swaps in the resolved value, so the existing
+ * STACK_MANIFEST shape (and the slice-15 CI-parity tests that pin it) don't
+ * shift. Fast-path no-op when `diffBase === "origin/main"`. Returns a frozen
+ * array (preserves the manifest's freeze contract).
+ *
+ * @param {readonly StackStep[]} manifest
+ * @param {string} diffBase
+ * @returns {readonly StackStep[]}
+ */
+export function withResolvedDiffBase(manifest, diffBase) {
+  if (diffBase === "origin/main") return manifest;
+  return Object.freeze(
+    manifest.map((step) => {
+      const argRewrite = rewriteArgsDiffBase(step.args, diffBase);
+      const envRewrite = rewriteEnvDiffBase(step.env, diffBase);
+      if (!argRewrite.changed && !envRewrite.changed) return step;
+      return Object.freeze({
+        ...step,
+        args: argRewrite.args,
+        ...(envRewrite.env !== undefined ? { env: envRewrite.env } : {}),
+      });
+    }),
+  );
+}
+
+/**
  * @callback RunStep
  * @param {StackStep} step
  * @returns {Promise<StepResult>}
@@ -697,8 +850,9 @@ export function renderJson(result) {
 
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
-  const manifest =
-    parsed.body === undefined ? STACK_MANIFEST : appendBodyChecks(STACK_MANIFEST, parsed.body);
+  const diffBase = resolveDiffBase();
+  const resolved = withResolvedDiffBase(STACK_MANIFEST, diffBase);
+  const manifest = parsed.body === undefined ? resolved : appendBodyChecks(resolved, parsed.body);
   const result = await runStack(parsed.stage, defaultRunStep, manifest);
   process.stdout.write(`${parsed.json ? renderJson(result) : renderHuman(result)}\n`);
   process.exit(result.allPass ? 0 : 1);
