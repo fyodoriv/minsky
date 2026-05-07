@@ -76,6 +76,7 @@ import {
   createFileBackedSnapshotExists,
   createGitGhSignalsBuilder,
   createPnpmMetricsRender,
+  createPnpmPrePrLintRun,
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
@@ -543,6 +544,15 @@ if (metricsRenderSeam !== undefined) {
   );
 }
 
+// Pre-PR lint gate: always wired — no env-var opt-in needed. Runs
+// `pnpm pre-pr-lint --stage=fast` after every completed iteration to verify
+// the branch is lint-clean. Emits `tick-loop.pre-pr-lint-gate` spans for the
+// rolling pass-rate metric (`pnpm daemon-pr-lint:metrics`).
+const preLintRun = createPnpmPrePrLintRun({ cwd: minskyHome });
+process.stdout.write(
+  "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement)\n",
+);
+
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
   maxIterations: args.maxIterations,
@@ -573,6 +583,8 @@ const result = await runDaemon({
   // Optional daily-metrics-render seam; same umbrella as the snapshot seam
   // (it consumes the snapshot file and writes METRICS.md).
   ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
+  // Outer lint-gate verification — always active; no env opt-in.
+  preLintRun,
   emit: (event) => {
     // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);

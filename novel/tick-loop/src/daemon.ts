@@ -58,6 +58,11 @@ import {
   runCtoAudit,
 } from "./post-task-cto-audit.js";
 import {
+  type PrePrLintGateResult,
+  type PrePrLintRun,
+  runPrePrLintGate,
+} from "./pre-pr-lint-gate.js";
+import {
   type RunSnapshotOutcome,
   type SnapshotCapture,
   type SnapshotExists,
@@ -209,6 +214,24 @@ export interface RunDaemonOpts {
    * `METRICS.md` (visible-not-silent, Helland 2007).
    */
   readonly metricsRender?: MetricsRenderSeam;
+  /**
+   * Optional outer lint-gate verification seam (rule #2). When injected, the
+   * daemon runs one post-iteration lint check after every `completed` iteration
+   * to verify the branch is lint-clean. Failure emits a
+   * `tick-loop.pre-pr-lint-gate` span so the dashboard can track
+   * pass-rate — the pre-registered metric for `daemon-pre-pr-lint-gate`
+   * (rolling 30d ≥80%, measured by `pnpm daemon-pr-lint:metrics`).
+   *
+   * One attempt only (`maxAttempts: 1`): the inner Claude already ran up to 3
+   * retries per the brief mandate; the outer check is a verification layer,
+   * not a second retry loop. When omitted, no post-iteration lint check runs —
+   * pre-existing daemons predating this seam keep working unchanged.
+   *
+   * Production binding: `createPnpmPrePrLintRun({ stage: "fast" })` from
+   * `@minsky/tick-loop/pre-pr-lint-gate` — same script `pnpm pre-pr-lint`
+   * invokes (rule #10 — single source of truth: `scripts/run-pre-pr-lint-stack.mjs`).
+   */
+  readonly preLintRun?: PrePrLintRun;
   /**
    * Optional per-worker config (slice 2 of `daemon-parallel-worktree-launch`).
    * When set:
@@ -398,6 +421,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
     await maybeRunMetricsRender(opts, outcome.result);
+    await maybeRunPrePrLintGate(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
     }
@@ -727,6 +751,55 @@ function emitMetricsRenderSpan(
 }
 
 /**
+ * Outer lint-gate verification: runs one post-iteration lint check on the
+ * current branch after every `completed` iteration. One attempt only —
+ * the inner Claude already ran up to 3 retries per the brief mandate; this
+ * is a verification layer that creates the OTEL signal for the
+ * `daemon-pre-pr-lint-gate` rolling pass-rate metric.
+ *
+ * Skip-fast when:
+ *   - the seam isn't injected (pre-existing daemons),
+ *   - the iteration didn't `complete` (lint is only meaningful after a real
+ *     PR-creation attempt by inner Claude).
+ *
+ * Emits `tick-loop.pre-pr-lint-gate` span with `verdict` + optionally
+ * `failedStep` so the OTEL dashboard can chart pass-rate distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunPrePrLintGate(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+): Promise<void> {
+  if (opts.preLintRun === undefined) return;
+  if (result.status !== "completed") return;
+  const gateResult = await runPrePrLintGate({ runLint: opts.preLintRun, maxAttempts: 1 });
+  emitPrePrLintGateSpan(opts, result.taskId, gateResult);
+}
+
+/**
+ * Emit a `tick-loop.pre-pr-lint-gate` span describing the gate's outcome.
+ * One span per completed iteration (pass or fail), so the OTEL dashboard can
+ * chart pass-rate and failing-step distribution.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitPrePrLintGateSpan(
+  opts: RunDaemonOpts,
+  taskId: string | undefined,
+  gateResult: PrePrLintGateResult,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "pre-pr-lint.verdict": gateResult.verdict,
+    "pre-pr-lint.attempts": gateResult.attempts,
+  };
+  if (taskId !== undefined) base["task.id"] = taskId;
+  if (gateResult.failedStep !== undefined) base["pre-pr-lint.failed_step"] = gateResult.failedStep;
+  opts.emit({ name: "tick-loop.pre-pr-lint-gate", attributes: base });
+}
+
+/**
  * One iteration: PAUSED check → TASKS.md read → budget check → pick →
  * claim → dry-run spawn → complete. Extracted so `runDaemon` itself stays
  * under the cognitive-complexity cap (rule #6, biome ≤10).
@@ -988,10 +1061,10 @@ export function buildDaemonBrief(args: {
     "Ship the smallest meaningful next iteration of this task. Open a PR with code changes that move the task toward its Acceptance criteria.",
     "",
     "**FORBIDDEN — anti-noop guard:**",
-    "- DO NOT open a PR whose only change is appending to the task block in TASKS.md (so-called 'brief refresh'). That is the noop pattern observed on iterations 87-93 of cross-repo-ci-action before the operator intervened. If you cannot ship a code change this iteration (the task is blocked, the substrate already exists, or the next step is a separate human-approval action), output `noop, exiting` to stdout and do NOT open a PR.",
-    "- DO NOT add new task blocks to TASKS.md unless the task you are executing explicitly directs you to.",
+    "- DO NOT open a PR whose only change is a task-block append (so-called 'brief refresh'). If you cannot ship code this iteration, output `noop, exiting` to stdout and do NOT open a PR.",
+    "- DO NOT add new task blocks to TASKS.md unless the task explicitly directs you to.",
     "",
-    "If the task's substrate already exists on main and what's left is a wire-in / config flip / one-line change, that IS a meaningful code change — ship it. Don't refresh briefs about it.",
+    "Wire-in / config flip / one-line change on existing substrate IS a meaningful code change — ship it.",
     "",
     "## Pre-PR lint-stack gate",
     "",
@@ -1001,31 +1074,31 @@ export function buildDaemonBrief(args: {
     "pnpm pre-pr-lint",
     "```",
     "",
-    "This is the same script CI imports — passing it locally is the precondition for opening the PR (single source of truth: `scripts/run-pre-pr-lint-stack.mjs`; rule #10 — deterministic enforcement, the daemon runs the same gate humans run via `lefthook` `pre-push`). Behaviour:",
+    "Same gate as CI — passing locally is the precondition for `gh pr create`. Single source of truth: `scripts/run-pre-pr-lint-stack.mjs`. Behaviour:",
     "",
     "- **Green** → proceed to `gh pr create`.",
-    "- **Red** → fix the failures and re-run, up to 3 attempts total. The stack's stderr tail names the exact failing step (`biome` / `typecheck` / `markdownlint` / `tasks-lint` / `rule-2-dep-coverage` / `rule-3-doc-first` / `rule-6-let-it-crash` / `rule-7-chaos-coverage` / `rule-12-scope-discipline`); each failure is a daemon-side fix iteration, not an operator-side cleanup PR.",
+    "- **Red** → fix failures and re-run, up to 3 attempts. The stderr tail names the failing step; each failure is a daemon fix, not an operator cleanup PR.",
     "- **Still red after 3 attempts** → output `noop, exiting — pre-pr-lint-failures: <step name>` to stdout and DO NOT open a PR. Filing a `Blocked: pre-pr-lint-failures` task is acceptable; opening a red PR is not.",
     "",
     "Pre-registered (TASKS.md `daemon-pre-pr-lint-gate`): post-fix, ≥80% of daemon-authored PRs open with zero red CI checks (vs the current ~0%).",
     "",
     "## Optimization-discipline gate",
     "",
-    "Operator directive 2026-05-05: every Minsky loop iteration must try to improve the supervisor's own speed and decrease its token consumption. After completing the main task above (or before exiting noop), spend ≤30s identifying ONE concrete optimization opportunity in the daemon's loop and act on it. Eligible optimizations:",
+    "Operator directive 2026-05-05: per iteration, spend ≤30s identifying ONE measurable optimization and act on it. Eligible:",
     "",
-    "- **Brief-shrinking**: a section of `buildDaemonBrief` that's verbose, redundant, or duplicates information already cached in the prompt's prefix. Trim it.",
-    "- **Cached-prompt extension**: identify content the daemon writes to `claude --print` that's invariant across iterations (rule text, glossary anchors) and move it to the cacheable prefix.",
-    "- **Skip-earlier gate**: a check that could fire BEFORE spawning `claude --print` (e.g., if no tasks are open, the supervisor shouldn't pay the spawn cost at all).",
-    "- **Log-line dedup**: a verbose iteration.reason that re-emits the same multi-paragraph rationale every iteration. Compress.",
-    "- **Round-trip elimination**: a `gh` / `git` call that's repeated across the iteration when one read could feed multiple seams.",
+    "- **Brief-shrinking**: trim verbose/redundant `buildDaemonBrief` sections.",
+    "- **Cached-prompt extension**: move invariant content (rule text, glossary) to cacheable `--print` prefix.",
+    "- **Skip-earlier gate**: fire checks before spawning `claude --print`.",
+    "- **Log-line dedup**: compress repeated verbose iteration.reason text.",
+    "- **Round-trip elimination**: merge repeated `gh`/`git` calls.",
     "",
-    "Bundle the optimization with the main task's PR (small enough to be one commit on the same branch). If you cannot identify an optimization this iteration, note `optimization: none-this-iteration: <one-line reason>` in your iteration reason — silence is failure (Beyer SRE 2016 Ch. 6). Anti-vanity guard: the optimization must be measurable — token savings (input or output bytes), wall-time savings (ms), or eliminated round-trip count. Do not file vague optimizations like 'cleaner code' or 'better organization'.",
+    "Bundle on the same branch. If none found, note `optimization: none-this-iteration: <reason>` — silence is failure. Anti-vanity guard: must be measurable — token savings (input or output bytes), wall-time savings (ms), or eliminated round-trip count.",
     "",
-    "Pivot threshold (rule #9): if the optimization gate produces ≥1 trivially-rejected commit per week (e.g., a 1-byte whitespace change), the threshold is too loose — tighten the eligibility to ≥10-byte savings minimum before retiring.",
+    "Pivot threshold (rule #9): ≥1 trivial commit/week → tighten to ≥10-byte minimum savings.",
     "",
     "## PR self-grade template (copy-paste verbatim)",
     "",
-    "When opening the PR, the body's `## Hypothesis self-grade` section MUST follow this exact format — the colon stays OUTSIDE the bold tags, never inside. Any other shape fails `scripts/check-pr-self-grade.mjs` and triggers a fix iteration (~30min per occurrence).",
+    "The PR body's `## Hypothesis self-grade` MUST follow this exact format. Colon OUTSIDE bold tags; deviations fail `scripts/check-pr-self-grade.mjs`.",
     "",
     "DO NOT REWRITE THIS FORMAT. Paste it verbatim and fill in the four values:",
     "",
@@ -1038,34 +1111,28 @@ export function buildDaemonBrief(args: {
     "- **Lesson**: <one-sentence takeaway; what changes for the next experiment>",
     "```",
     "",
-    "Forbidden shapes (each fails the lint regex):",
-    "- `**Predicted:** …` (colon INSIDE bold) — fails. Use `**Predicted**: …`.",
-    "- `**Match:** Yes` (colon INSIDE bold) — fails. Use `**Match**: yes`.",
-    "- `**Predicted** (rule #9): …` (parenthesis between bold and colon) — fails. Strip the parenthesis.",
-    "- `**Predicted.** …` (period inside bold) — fails. Use `**Predicted**: …`.",
-    "- Capitalized values (`**Match**: Yes`) — fails. Use lowercase: `yes`, `no`, or `partial`.",
+    "Forbidden: `**Predicted:**` (colon INSIDE bold) — fails. Use `**Predicted**: …`.",
+    "Forbidden: `**Match:**` (colon INSIDE bold or capitalized `Yes`) — fails. Use `**Match**: yes`/`no`/`partial`.",
     "",
     "Single source of truth: `scripts/check-pr-self-grade.mjs`.",
     "",
     "## PR security-review template (copy-paste verbatim)",
     "",
-    "Per vision.md § 13 (security & privacy is Minsky's #2 priority after performance), every PR body MUST contain ONE of: a `## Security & privacy` section, OR a typed opt-out comment. Otherwise `scripts/check-pr-security-review.mjs` fails CI and triggers a fix iteration.",
+    "vision.md § 13: every PR body MUST contain ONE of the following or `scripts/check-pr-security-review.mjs` fails CI.",
     "",
-    "Option A — PR touches a security surface (auth, secrets, sandbox, dashboard exposure, supply chain, PII, telemetry). Paste this section verbatim, fill the body:",
-    "",
+    "**Option A** — security surface touched (auth, secrets, sandbox, PII, supply chain). Paste verbatim:",
     "```",
     "## Security & privacy",
     "",
-    "<one or two lines: threat surface touched + mitigation, OR 'no new attack surface; vision.md § 13 8-item minimum bar reviewed'>",
+    "<threat surface + mitigation, OR 'no new attack surface; vision.md § 13 8-item minimum bar reviewed'>",
     "```",
     "",
-    "Option B — PR genuinely does not touch a security surface (typo / docs-only / brief-refresh / vendor-bump). Paste this HTML comment anywhere in the body:",
-    "",
+    "**Option B** — no security surface (typo / docs / brief-refresh). Paste anywhere in the body:",
     "```",
-    "<!-- security: not-applicable — <reason ≥3 chars; e.g. 'docs typo only' or 'TASKS.md brief refresh'> -->",
+    "<!-- security: not-applicable — <reason ≥3 chars> -->",
     "```",
     "",
-    "Single source of truth: `scripts/check-pr-security-review.mjs`. The opt-out reason must be ≥3 chars; em-dash (—) and ASCII `--` are both accepted as the separator. When in doubt, prefer Option A — the section heading itself is the marker that the rule-#13 8-item bar was considered.",
+    "Reason ≥3 chars; em-dash (—) and `--` both accepted. When in doubt, prefer Option A.",
     "",
     "## Priority-discipline gate",
     "",
