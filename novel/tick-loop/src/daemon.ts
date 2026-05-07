@@ -1077,7 +1077,7 @@ export function buildDaemonBrief(args: {
     "Same gate as CI — passing locally is the precondition for `gh pr create`. Single source of truth: `scripts/run-pre-pr-lint-stack.mjs`. Behaviour:",
     "",
     "- **Green** → proceed to `gh pr create`.",
-    "- **Red** → fix failures and re-run, up to 3 attempts. The stderr tail names the failing step; each failure is a daemon fix, not an operator cleanup PR.",
+    "- **Red** → fix failures and re-run, up to 3 attempts. The stderr tail names the failing step.",
     "- **Still red after 3 attempts** → output `noop, exiting — pre-pr-lint-failures: <step name>` to stdout and DO NOT open a PR. Filing a `Blocked: pre-pr-lint-failures` task is acceptable; opening a red PR is not.",
     "",
     "Body-only checks (`pr-self-grade`, `pr-security-review`): write body to `pr-body.md`, then `pnpm pre-pr-lint -- --body=pr-body.md` (same retry budget), then `gh pr create -F pr-body.md`.",
