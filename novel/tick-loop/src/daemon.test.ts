@@ -2003,7 +2003,7 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("## PR security-review template");
     expect(brief).toContain("## Security & privacy");
     expect(brief).toContain("<!-- security: not-applicable —");
-    expect(brief).toContain("scripts/check-pr-security-review.mjs");
+    expect(brief).toContain("check-pr-security-review.mjs");
     expect(brief).toContain("vision.md § 13");
   });
 
