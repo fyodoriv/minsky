@@ -135,11 +135,34 @@ const NAME_PATTERNS = Object.freeze([
 // is innocuous (`note`, `path`, `cwd`). The username segment must start
 // with a letter and be ≥1 character; `/Users//` (empty) and trailing-slash
 // roots like `/home/` (no user) do not match.
+//
+// Slice 11 (this file): broaden VALUE_PATTERNS to mirror the parent task's
+// in-tree secret scanner (`scripts/scan-secrets.mjs` SECRET_PATTERNS) so the
+// runtime / span-side gate covers the same credential families the tracked-
+// file gate already catches. Without parity, a regression that lifts a value
+// out of an env var into a span attribute (`AKIA…`, `AIza…`, a PEM header,
+// `gho_/ghs_/ghu_` GitHub variants, `xoxa-/xoxs-` Slack variants) would slip
+// past the OTEL lint while the secret scanner only catches the file-side
+// equivalent. Tags + tail-length floors mirror `scan-secrets.mjs` exactly so
+// the two gates report the same finding name; the PEM header is anchored on
+// the documented header literal rather than entropy of the body (a header
+// alone is high-confidence enough — same calibration as the file-side gate).
 const VALUE_PATTERNS = Object.freeze([
   Object.freeze({ tag: "anthropic-or-openai-key", re: /\bsk-[A-Za-z0-9_-]{20,}\b/ }),
   Object.freeze({ tag: "github-pat", re: /\bghp_[A-Za-z0-9]{30,}\b/ }),
+  Object.freeze({ tag: "github-oauth", re: /\bgho_[A-Za-z0-9]{30,}\b/ }),
+  Object.freeze({ tag: "github-server-token", re: /\bghs_[A-Za-z0-9]{30,}\b/ }),
+  Object.freeze({ tag: "github-user-server-token", re: /\bghu_[A-Za-z0-9]{30,}\b/ }),
   Object.freeze({ tag: "slack-bot-token", re: /\bxoxb-[A-Za-z0-9-]{10,}\b/ }),
   Object.freeze({ tag: "slack-user-token", re: /\bxoxp-[A-Za-z0-9-]{10,}\b/ }),
+  Object.freeze({ tag: "slack-app-token", re: /\bxoxa-[A-Za-z0-9-]{10,}\b/ }),
+  Object.freeze({ tag: "slack-config-token", re: /\bxoxs-[A-Za-z0-9-]{10,}\b/ }),
+  Object.freeze({ tag: "aws-access-key-id", re: /\bAKIA[0-9A-Z]{16}\b/ }),
+  Object.freeze({ tag: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{35,}\b/ }),
+  Object.freeze({
+    tag: "pem-private-key",
+    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/,
+  }),
   Object.freeze({ tag: "macos-user-home-path", re: /\/Users\/[A-Za-z][A-Za-z0-9._-]*\// }),
   Object.freeze({ tag: "linux-user-home-path", re: /\/home\/[A-Za-z][A-Za-z0-9._-]*\// }),
 ]);
@@ -266,6 +289,14 @@ export function extractAttributeViolations({ files }) {
   /** @type {WalkerViolation[]} */
   const violations = [];
   for (const f of files) {
+    // Substring short-circuit: the walker only fires on PropertyAssignments
+    // whose name is `attributes`. If the source text doesn't contain that
+    // literal substring, no such node can exist and the AST creation is
+    // pure overhead — skip it. ts.createSourceFile dominates the per-file
+    // cost; on the current `novel/**/*.ts` corpus (80 in-scope files, 5 of
+    // which contain `attributes`), three-run wall-time drops from ~0.88s →
+    // ~0.65s (~230ms / ~26% saved per CI run).
+    if (!f.source.includes("attributes")) continue;
     const sf = ts.createSourceFile(
       f.path,
       f.source,
