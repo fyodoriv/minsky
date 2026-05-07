@@ -3,8 +3,9 @@ import {
   FIX_CI_BRIEF_MAX_CHARS,
   type PrFailingVerdict,
   buildFixCiBrief,
+  selectIterationPlan,
 } from "./daemon-fix-own-pr.js";
-import { decideDaemonPrState } from "./daemon-pr-state.js";
+import { type DaemonPrStateVerdict, decideDaemonPrState } from "./daemon-pr-state.js";
 
 const TASK_ID = "daemon-fix-own-pr-on-ci-failure";
 
@@ -166,5 +167,158 @@ describe("buildFixCiBrief — composition with decideDaemonPrState", () => {
     expect(brief).toContain("PR #360");
     expect(brief).toContain("`typecheck`");
     expect(brief).toContain("Attempt 1 of 3");
+  });
+});
+
+const STANDARD_BRIEF = "# Daemon iteration brief — standard task body\n\n…";
+
+describe("selectIterationPlan — verdict-to-plan mapping", () => {
+  it("maps no-pr → spawn-standard with the standard brief verbatim", () => {
+    const verdict: DaemonPrStateVerdict = { kind: "no-pr" };
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+    });
+    expect(plan.kind).toBe("spawn-standard");
+    if (plan.kind !== "spawn-standard") return;
+    expect(plan.brief).toBe(STANDARD_BRIEF);
+  });
+
+  it("maps pr-clean → spawn-standard (open PR but green; iterate normally)", () => {
+    const verdict: DaemonPrStateVerdict = { kind: "pr-clean", prNumber: 360 };
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+    });
+    expect(plan.kind).toBe("spawn-standard");
+    if (plan.kind !== "spawn-standard") return;
+    expect(plan.brief).toBe(STANDARD_BRIEF);
+  });
+
+  it("maps pr-failing → spawn-fix-ci with the fix-CI brief and prNumber", () => {
+    const verdict: DaemonPrStateVerdict = {
+      kind: "pr-failing",
+      prNumber: 167,
+      failedChecks: ["typecheck", "biome"],
+      attemptNumber: 1,
+    };
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+    });
+    expect(plan.kind).toBe("spawn-fix-ci");
+    if (plan.kind !== "spawn-fix-ci") return;
+    expect(plan.prNumber).toBe(167);
+    expect(plan.brief).toContain("PR #167");
+    expect(plan.brief).toContain("`typecheck`");
+    expect(plan.brief).toContain("Attempt 1 of 3");
+    // The fix-CI brief MUST replace the standard brief — never both.
+    expect(plan.brief).not.toBe(STANDARD_BRIEF);
+  });
+
+  it("forwards a custom maxAttempts to the fix-CI brief (rule #9 pivot to cap=1)", () => {
+    const verdict: DaemonPrStateVerdict = {
+      kind: "pr-failing",
+      prNumber: 360,
+      failedChecks: ["typecheck"],
+      attemptNumber: 1,
+    };
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+      maxAttempts: 1,
+    });
+    expect(plan.kind).toBe("spawn-fix-ci");
+    if (plan.kind !== "spawn-fix-ci") return;
+    expect(plan.brief).toContain("Attempt 1 of 1");
+  });
+
+  it("maps pr-retries-exhausted → skip-spawn-escalate (NO brief; supervisor MUST NOT spawn)", () => {
+    const verdict: DaemonPrStateVerdict = {
+      kind: "pr-retries-exhausted",
+      prNumber: 360,
+      failedChecks: ["typecheck", "biome"],
+      attemptsSoFar: 3,
+    };
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+    });
+    expect(plan.kind).toBe("skip-spawn-escalate");
+    if (plan.kind !== "skip-spawn-escalate") return;
+    expect(plan.prNumber).toBe(360);
+    expect(plan.attemptsSoFar).toBe(3);
+    expect(plan.failedChecks).toEqual(["typecheck", "biome"]);
+    expect(plan.reason).toContain("Blocked: daemon-stuck");
+    expect(plan.reason).toContain("3 of 3");
+    expect(plan.reason).toContain("PR #360");
+  });
+
+  it("escalation reason names a custom maxAttempts cap (cap=1 pivot)", () => {
+    const verdict: DaemonPrStateVerdict = {
+      kind: "pr-retries-exhausted",
+      prNumber: 99,
+      failedChecks: ["x"],
+      attemptsSoFar: 1,
+    };
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+      maxAttempts: 1,
+    });
+    if (plan.kind !== "skip-spawn-escalate") throw new Error("expected skip-spawn-escalate");
+    expect(plan.reason).toContain("1 of 1");
+  });
+});
+
+describe("selectIterationPlan — composition with decideDaemonPrState", () => {
+  it("end-to-end: failing PR → spawn-fix-ci plan with the right prNumber + brief", () => {
+    const verdict = decideDaemonPrState({
+      taskId: TASK_ID,
+      prs: [
+        {
+          number: 360,
+          title: `feat(${TASK_ID}): slice 4/N`,
+          state: "OPEN",
+          checks: [{ name: "tasks-lint", conclusion: "FAILURE" }],
+        },
+      ],
+    });
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+    });
+    expect(plan.kind).toBe("spawn-fix-ci");
+    if (plan.kind !== "spawn-fix-ci") return;
+    expect(plan.prNumber).toBe(360);
+    expect(plan.brief).toContain("`tasks-lint`");
+  });
+
+  it("end-to-end: 3 attempts already burned → skip-spawn-escalate, no spawn", () => {
+    const verdict = decideDaemonPrState({
+      taskId: TASK_ID,
+      attemptsSoFar: 3,
+      prs: [
+        {
+          number: 360,
+          title: `feat(${TASK_ID}): slice 4/N`,
+          state: "OPEN",
+          checks: [{ name: "typecheck", conclusion: "FAILURE" }],
+        },
+      ],
+    });
+    const plan = selectIterationPlan({
+      taskId: TASK_ID,
+      verdict,
+      standardBrief: STANDARD_BRIEF,
+    });
+    expect(plan.kind).toBe("skip-spawn-escalate");
   });
 });

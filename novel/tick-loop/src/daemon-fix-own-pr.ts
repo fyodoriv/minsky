@@ -115,3 +115,98 @@ export function buildFixCiBrief(input: BuildFixCiBriefInput): string {
     `If \`pnpm pre-pr-lint\` stays red after 3 in-iteration retries, output \`noop, exiting — pre-pr-lint-failures: <step>\`. After ${maxAttempts} fix iterations the supervisor labels the PR \`Blocked: daemon-stuck\` (rule #6 escape hatch).`,
   ].join("\n");
 }
+
+// ---- Iteration plan (slice 5/N) -------------------------------------------
+
+/**
+ * Discriminated dispatch verdict the orchestrator (`runClaimedIteration` in
+ * `daemon.ts`, slice 6+) consults to decide what to spawn — or whether to
+ * spawn at all. Slice 5/N for `daemon-fix-own-pr-on-ci-failure`.
+ *
+ * Three arms, each mapping a {@link DaemonPrStateVerdict} branch to a
+ * concrete daemon action:
+ *
+ *   - `'spawn-standard'` (verdicts: `'no-pr'`, `'pr-clean'`) — the open PR
+ *     either doesn't exist or is green; the standard task brief is what
+ *     the daemon hands to `claude --print`. Iteration ships the next slice
+ *     or waits on review.
+ *   - `'spawn-fix-ci'` (verdict: `'pr-failing'`) — the daemon's own PR is
+ *     red; the fix-CI brief replaces the standard brief. Iteration's job
+ *     is "push a fix commit on this branch", not "redo the task".
+ *   - `'skip-spawn-escalate'` (verdict: `'pr-retries-exhausted'`) — the
+ *     daemon has burned its retry budget. The orchestrator MUST NOT spawn
+ *     `claude --print` — instead it labels the PR `Blocked: daemon-stuck`
+ *     and emits the escalation span (rule #6 — let-it-crash AT the
+ *     boundary; the operator is the escape hatch). Skipping the spawn is
+ *     the optimization: a fourth retry burns ~$0.50 of token budget for
+ *     near-zero recovery probability (TASKS.md pivot threshold: >20%
+ *     of failing PRs need >3 retries → switch the cap to 1).
+ */
+export type IterationPlan =
+  | { readonly kind: "spawn-standard"; readonly brief: string }
+  | { readonly kind: "spawn-fix-ci"; readonly brief: string; readonly prNumber: number }
+  | {
+      readonly kind: "skip-spawn-escalate";
+      readonly prNumber: number;
+      readonly failedChecks: readonly string[];
+      readonly attemptsSoFar: number;
+      readonly reason: string;
+    };
+
+export interface SelectIterationPlanInput {
+  readonly taskId: string;
+  readonly verdict: DaemonPrStateVerdict;
+  /**
+   * Standard task brief built upstream by `buildDaemonBrief({ taskId,
+   * tasksMdContent })`. Passed in (not re-built here) so the planner stays
+   * pure — the orchestrator owns the I/O of reading TASKS.md.
+   */
+  readonly standardBrief: string;
+  /**
+   * Mirrors {@link BuildFixCiBriefInput.maxAttempts}. Forwarded to the
+   * fix-CI brief on `'pr-failing'`; surfaced in the escalation reason on
+   * `'pr-retries-exhausted'` so the operator-facing log line names the cap
+   * the daemon was running against.
+   */
+  readonly maxAttempts?: number;
+}
+
+/**
+ * Pure planner: maps a {@link DaemonPrStateVerdict} to an
+ * {@link IterationPlan} the orchestrator dispatches on. The bridge between
+ * `decideDaemonPrState` (slice 1) and the orchestrator wire-in (slice 6+).
+ *
+ * Slice 5/N for `daemon-fix-own-pr-on-ci-failure`. Pure — no I/O, no env
+ * reads, no clock — so the orchestrator's seam is a single planner call
+ * (rule #2 — single source of truth for the dispatch decision; the
+ * verdict-to-action mapping is tested here, not duplicated in tests of
+ * the orchestrator).
+ *
+ * @otel-exempt pure planner; the call-site span is in `daemon.ts`.
+ */
+export function selectIterationPlan(input: SelectIterationPlanInput): IterationPlan {
+  const { verdict, taskId, standardBrief } = input;
+  if (verdict.kind === "no-pr" || verdict.kind === "pr-clean") {
+    return { kind: "spawn-standard", brief: standardBrief };
+  }
+  if (verdict.kind === "pr-failing") {
+    return {
+      kind: "spawn-fix-ci",
+      brief: buildFixCiBrief({
+        taskId,
+        verdict,
+        ...(input.maxAttempts === undefined ? {} : { maxAttempts: input.maxAttempts }),
+      }),
+      prNumber: verdict.prNumber,
+    };
+  }
+  // verdict.kind === "pr-retries-exhausted"
+  const cap = input.maxAttempts ?? 3;
+  return {
+    kind: "skip-spawn-escalate",
+    prNumber: verdict.prNumber,
+    failedChecks: verdict.failedChecks,
+    attemptsSoFar: verdict.attemptsSoFar,
+    reason: `pr-retries-exhausted: ${verdict.attemptsSoFar} of ${cap} fix attempts on PR #${verdict.prNumber} did not clear ${verdict.failedChecks.length} failing check(s); supervisor MUST label \`Blocked: daemon-stuck\` and skip the spawn (rule #6 escape hatch).`,
+  };
+}
