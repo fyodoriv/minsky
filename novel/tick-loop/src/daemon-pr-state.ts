@@ -312,3 +312,79 @@ function normaliseConclusion(value: unknown): CheckRunSnapshot["conclusion"] {
       return null;
   }
 }
+
+// ---- gh pr list I/O wrapper (slice 3/N) -----------------------------------
+
+/**
+ * Subprocess surface this module's I/O wrapper depends on. Structurally
+ * identical to `ExecFileLike` in `cto-audit-cli-wiring.ts`; defined locally
+ * to keep `daemon-pr-state.ts` independent of the audit-wiring module.
+ *
+ * Production wires `node:child_process.execFile` (promisified) returning
+ * trimmed stdout; tests pass a deterministic stub returning frozen JSON.
+ * A non-zero exit / ENOENT must throw — the wrapper catches and graceful-
+ * degrades to `[]`.
+ */
+export type DaemonPrStateExecFile = (file: string, args: readonly string[]) => Promise<string>;
+
+/**
+ * Pure command shape for `gh pr list` keyed to a branch. Exported so the
+ * I/O wrapper and tests share the canonical argv (rule #2 — single source
+ * of truth for the gh invocation; drift between the wrapper and the docs
+ * surfaces in the ghPrListArgsForBranch test).
+ *
+ * `--limit 1` because the daemon's branch-naming convention guarantees at
+ * most one open PR per branch (the duplicate-PR detector blocks duplicates
+ * before `gh pr create`); pulling more wastes the round-trip.
+ *
+ * @otel-exempt pure helper; the I/O wrapper carries the call-site span.
+ */
+export function ghPrListArgsForBranch(branch: string): readonly string[] {
+  return [
+    "pr",
+    "list",
+    "--head",
+    branch,
+    "--state",
+    "open",
+    "--limit",
+    "1",
+    "--json",
+    "number,title,state,statusCheckRollup",
+  ];
+}
+
+/**
+ * I/O wrapper for slice 1+2: run `gh pr list --head <branch> ...` and feed
+ * the raw JSON into `parseGhPrListForDaemonPrState`. Returns the open
+ * daemon-authored PR snapshots `decideDaemonPrState` consumes.
+ *
+ * Slice 3/N for `daemon-fix-own-pr-on-ci-failure`. Branch-name filter
+ * (`--head`) is the precision lever — the daemon's per-task branch
+ * convention (`feat/<task-id>-slice-N`) means one branch maps to ≤1 open
+ * PR, so the title-based match the pure decision performs is belt-and-
+ * suspenders against branches that get re-used across tasks. Slice 4+
+ * wires this into `bin/tick-loop.mjs`.
+ *
+ * Graceful-degrade per rule #6/#7: a `gh` failure (offline / rate-limit /
+ * missing binary / auth missing) yields `[]` rather than crashing — the
+ * `decideDaemonPrState` verdict on `[]` is `'no-pr'`, so the daemon
+ * iterates the standard task brief instead of the fix-CI brief. A `gh`
+ * outage must NOT push the daemon into the wrong code path.
+ *
+ * @otel tick-loop.daemon-pr-state.fetch — caller emits the span; the
+ *   wrapper itself is `@otel-exempt` because the call site (`bin/tick-loop.mjs`)
+ *   is the I/O boundary.
+ */
+export async function fetchDaemonOwnPrsFromGh(opts: {
+  readonly execFile: DaemonPrStateExecFile;
+  readonly branch: string;
+}): Promise<readonly DaemonOwnPrSnapshot[]> {
+  return (
+    opts
+      .execFile("gh", ghPrListArgsForBranch(opts.branch))
+      .then(parseGhPrListForDaemonPrState)
+      // rule-6: handled-locally — graceful-degrade contract documented above.
+      .catch(() => [] as readonly DaemonOwnPrSnapshot[])
+  );
+}

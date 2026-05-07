@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type CheckRunSnapshot,
   type DaemonOwnPrSnapshot,
+  type DaemonPrStateExecFile,
   decideDaemonPrState,
+  fetchDaemonOwnPrsFromGh,
+  ghPrListArgsForBranch,
   isFailingConclusion,
   parseGhPrListForDaemonPrState,
 } from "./daemon-pr-state.js";
@@ -317,6 +320,88 @@ describe("parseGhPrListForDaemonPrState — graceful degrade", () => {
     const raw = JSON.stringify([{ number: 1, state: "OPEN", title: "feat(a): x" }]);
     const [pr] = parseGhPrListForDaemonPrState(raw);
     expect(pr?.checks).toEqual([]);
+  });
+});
+
+describe("ghPrListArgsForBranch", () => {
+  it("includes --head <branch>, --state open, --limit 1, and the json fields the parser consumes", () => {
+    const args = ghPrListArgsForBranch("feat/x-slice-3");
+    expect(args).toEqual([
+      "pr",
+      "list",
+      "--head",
+      "feat/x-slice-3",
+      "--state",
+      "open",
+      "--limit",
+      "1",
+      "--json",
+      "number,title,state,statusCheckRollup",
+    ]);
+  });
+
+  it("passes the branch verbatim (no quoting / escaping at this layer)", () => {
+    const args = ghPrListArgsForBranch("feat/$weird name");
+    expect(args[3]).toBe("feat/$weird name");
+  });
+});
+
+describe("fetchDaemonOwnPrsFromGh", () => {
+  const TASK = "daemon-fix-own-pr-on-ci-failure";
+
+  it("invokes gh with ghPrListArgsForBranch(branch) — single source of truth", async () => {
+    const execFile = vi.fn<DaemonPrStateExecFile>(async () => "[]");
+    await fetchDaemonOwnPrsFromGh({ execFile, branch: "feat/x" });
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledWith("gh", ghPrListArgsForBranch("feat/x"));
+  });
+
+  it("parses gh output and surfaces the snapshot to decideDaemonPrState end-to-end", async () => {
+    const raw = JSON.stringify([
+      {
+        number: 167,
+        state: "OPEN",
+        title: `feat(${TASK}): wire-in (slice 4/N)`,
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "biome", conclusion: "SUCCESS" },
+          { __typename: "CheckRun", name: "typecheck", conclusion: "FAILURE" },
+        ],
+      },
+    ]);
+    const execFile: DaemonPrStateExecFile = async () => raw;
+    const prs = await fetchDaemonOwnPrsFromGh({ execFile, branch: "feat/x" });
+    const verdict = decideDaemonPrState({ taskId: TASK, prs });
+    expect(verdict).toEqual({
+      kind: "pr-failing",
+      prNumber: 167,
+      failedChecks: ["typecheck"],
+      attemptNumber: 1,
+    });
+  });
+
+  it("returns [] when execFile rejects (gh missing / offline / auth missing)", async () => {
+    const execFile: DaemonPrStateExecFile = async () => {
+      throw new Error("gh: command not found");
+    };
+    expect(await fetchDaemonOwnPrsFromGh({ execFile, branch: "feat/x" })).toEqual([]);
+  });
+
+  it("returns [] when gh prints malformed JSON (rule #6/#7 — graceful-degrade)", async () => {
+    const execFile: DaemonPrStateExecFile = async () => "not-json";
+    expect(await fetchDaemonOwnPrsFromGh({ execFile, branch: "feat/x" })).toEqual([]);
+  });
+
+  it("returns [] when no open PR matches the branch (gh prints empty array)", async () => {
+    const execFile: DaemonPrStateExecFile = async () => "[]";
+    expect(await fetchDaemonOwnPrsFromGh({ execFile, branch: "feat/x" })).toEqual([]);
+  });
+
+  it("composes parser → decision so a 'no-pr' verdict survives a gh outage", async () => {
+    const execFile: DaemonPrStateExecFile = async () => {
+      throw new Error("offline");
+    };
+    const prs = await fetchDaemonOwnPrsFromGh({ execFile, branch: "feat/x" });
+    expect(decideDaemonPrState({ taskId: TASK, prs })).toEqual({ kind: "no-pr" });
   });
 });
 
