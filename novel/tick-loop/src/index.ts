@@ -576,6 +576,20 @@ export {
   parseGhPrListJson,
 } from "./touches-glob-fetch.js";
 
+// `auto-scale-workers` (operator 2026-05-07): pure decision function for the
+// "should the supervisor fork another worker?" question. Given a snapshot
+// of state (currentWorkers, maxWorkers, eligibleTaskCount, budgetState,
+// recent-failure / recent-collision counts) it returns spawn-or-hold with
+// a structured reason. The next slice wires this into `bin/tick-loop.mjs`'s
+// root-process tick so 1 worker can grow to N automatically when conditions
+// warrant — and stay at 1 when the system is unstable.
+export {
+  AUTO_SCALE_RULES,
+  type AutoScaleDecision,
+  type AutoScaleState,
+  decideAutoScale,
+} from "./auto-scale-workers.js";
+
 // Slice 4 of `daemon-parallel-worktree-launch`: pure decisions for the
 // per-tick sweeper that recovers stale .git/index.lock files (Claude Code
 // #11005), expired .minsky/locks/task-*.lock claims, and orphaned
