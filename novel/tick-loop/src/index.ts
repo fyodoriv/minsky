@@ -619,12 +619,18 @@ export {
 
 // Daemon fix-CI brief builder (slice 4/N for `daemon-fix-own-pr-on-ci-failure`):
 // pure builder of the prompt the daemon hands to claude --print when
-// decideDaemonPrState returns `pr-failing`. Wire-in lands in slice 5+.
+// decideDaemonPrState returns `pr-failing`. Slice 5/N adds `selectIterationPlan`,
+// the pure verdict-to-action planner the orchestrator dispatches on
+// (spawn-standard / spawn-fix-ci / skip-spawn-escalate). Orchestrator wire-in
+// in slice 6+ (`runClaimedIteration` in `daemon.ts`).
 export {
   type BuildFixCiBriefInput,
+  type IterationPlan,
   type PrFailingVerdict,
+  type SelectIterationPlanInput,
   FIX_CI_BRIEF_MAX_CHARS,
   buildFixCiBrief,
+  selectIterationPlan,
 } from "./daemon-fix-own-pr.js";
 
 // Daemon task-completion detector (P0 watchdog from #346, operator 2026-05-07):
