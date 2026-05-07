@@ -140,7 +140,14 @@ First end-to-end run of the daemon under `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER
 
 ### Brief-size pivot threshold
 
-The daemon's stock brief (`buildDaemonBrief` in `daemon.ts`) is ~7-10KB of context per iteration: the picked task block, priority-discipline gate, anti-noop guard, optimization-discipline gate, fix-own-PR-state. At Qwen 32B's ~14 tok/s steady-state, the 15-min watchdog may bite before aider finishes a meaningful edit cycle on a large task. The 2026-05-07 live run picked the (now-removed) `local-llm-fallback-on-budget-pause` task, whose block alone was ~3 KB; aider scanned the repo (~10s), began generating, and timed out at 15 min. Pivot threshold (rule #9): if rolling-7d p95 of `local-spawn-timeout` count > 5, ship a `daemon-aider-brief-shrinker` task that produces a slimmer brief specifically for the aider path.
+The daemon's stock brief (`buildDaemonBrief` in `daemon.ts`) is ~7-10KB of context per iteration: the picked task block, priority-discipline gate, anti-noop guard, optimization-discipline gate, fix-own-PR-state. Aider then auto-loads every file the brief references (TASKS.md, vision.md, the `**Files**:` list, every `scripts/*.mjs` mentioned), pushing the effective context to 30-50 KB. At Qwen2.5-Coder-32B-Instruct-4bit's ~14 tok/s steady-state on M3 Max 64 GB, prompt processing alone (12-15K input tokens) takes 14-18 min — the 30-min watchdog (`local-spawn-timeout` since the slice-3 label split) bites before aider finishes.
+
+**Live-run evidence (2026-05-07, M3 Max 64 GB).** Two tests against the same mlx-lm.server + Qwen2.5-Coder-32B-Instruct-4bit:
+
+1. *Stock brief* — daemon dispatched against `daemon-claude-print-hang-watchdog`. Aider auto-loaded 9 files (TASKS.md, vision.md, 4 `**Files**:` paths, 4 `scripts/*.mjs` paths). After 5+ minutes the chat-history file showed no LLM output past the prompt; mlx-server CPU at 7 % steady (Metal GPU bound on prompt processing). Run killed before the 30-min watchdog to free the slot.
+2. *Slim brief* — direct `aider --message "Create a file called HELLO.txt with the content 'hello world'."` in an empty cwd. Aider sent 2.4 k tokens, received 28 tokens, applied a SEARCH/REPLACE diff, created the file. End-to-end ≈ 70 s.
+
+The substrate works; the brief shape doesn't. **Pivot threshold (rule #9):** if rolling-7d p95 of `local-spawn-timeout` count > 5/day across all workers, ship `daemon-aider-brief-shrinker` (filed as P0 in TASKS.md) that produces a slim brief (~≤2 KB, no gates, no templates) specifically for the aider path. The threshold has already been tripped by the 2026-05-07 live run; the task is queued.
 
 ## Failure modes & chaos verification
 
