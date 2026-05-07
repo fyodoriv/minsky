@@ -28,7 +28,7 @@ success: |
   - `.github/workflows/slsa.yml` exists and passes the CI
     pattern-index gate (`grep -q slsa vision.md` exits 0).
   - The workflow YAML is syntactically valid:
-    `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/slsa.yml'))"` exits 0.
+    `node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/slsa.yml','utf8'))"` exits 0.
   - The workflow references `slsa-framework/slsa-github-generator`
     (the industry-standard SLSA generator) and `actions/checkout@v4`
     (the pinned checkout action).
@@ -49,7 +49,7 @@ pivot: |
   specific error (not a Minsky build error) AND the slsa-github-
   generator has a known open issue for the runner OS version.
 measurement: |
-  grep -q "slsa.yml" vision.md && grep -q "slsa-framework/slsa-github-generator" .github/workflows/slsa.yml && python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/slsa.yml'))" && echo "ok"
+  grep -q "slsa.yml" vision.md && grep -q "slsa-framework/slsa-github-generator" .github/workflows/slsa.yml && node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/slsa.yml','utf8'))" && echo "ok"
 anchor: |
   TASKS.md `supply-chain-hardening-lockfile-sbom-slsa` § Details (c)
   — the pre-registered scope: `.github/workflows/slsa.yml`; vision.md
