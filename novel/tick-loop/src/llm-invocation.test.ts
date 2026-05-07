@@ -70,9 +70,15 @@ describe("llm-invocation / buildAiderInvocation", () => {
       DEFAULT_AIDER_OPENAI_API_KEY,
       "--yes",
       "--no-show-model-warnings",
+      "--no-auto-commits",
       "--message",
       "do work",
     ]);
+  });
+
+  it("--no-auto-commits is hard-wired (daemon controls commits via the brief)", () => {
+    const inv = buildAiderInvocation({ brief: "h" });
+    expect(inv.argv).toContain("--no-auto-commits");
   });
 
   it("--message is the LAST argv element so brief is easy to read in ps", () => {

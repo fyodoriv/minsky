@@ -1022,6 +1022,14 @@ async function runStrategyIteration(args: {
 /**
  * Build the `reason` field of a strategy-dispatched iteration.
  *
+ * Timeout label includes the provider (when known) so the rolling-7d
+ * `claudePrintTimeoutFrequencyInvariant` metric splits cleanly between
+ * `claude-print-timeout` (the legacy claude path) and
+ * `local-spawn-timeout` (the slice-3 local-LLM path). When provider is
+ * unset (legacy single-strategy spawn), we keep the original
+ * `claude-print-timeout` label for back-compat with the existing
+ * measurement query.
+ *
  * (Internal helper — no JSDoc tag required.)
  */
 function buildIterationReason(stratResult: {
@@ -1030,9 +1038,11 @@ function buildIterationReason(stratResult: {
   readonly exitCode: number;
   readonly stdoutTail: string;
   readonly stderrTail: string;
+  readonly provider?: "claude" | "local" | "hold";
 }): string {
   if (stratResult.timedOut === true) {
-    return `claude-print-timeout: ${stratResult.durationMs}ms (child SIGKILLed by per-iteration watchdog)`;
+    const label = stratResult.provider === "local" ? "local-spawn-timeout" : "claude-print-timeout";
+    return `${label}: ${stratResult.durationMs}ms (child SIGKILLed by per-iteration watchdog)`;
   }
   if (stratResult.exitCode === 0) return stratResult.stdoutTail;
   return stratResult.stderrTail;

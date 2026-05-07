@@ -105,12 +105,20 @@ export function buildClaudePrintInvocation(opts: BuildClaudePrintInvocationOpts)
 // ---- buildAiderInvocation -------------------------------------------------
 
 /**
- * Default model alias for aider's OpenAI client. Matches the smoke-test in
- * `docs/local-llm-fallback.md`. Aider's OpenAI provider routes `openai/<id>`
- * to whatever model the configured `--openai-api-base` server hosts; the
- * actual model resolution happens server-side by `mlx_lm.server`.
+ * Default model alias for aider's OpenAI client. The full HuggingFace
+ * path (`openai/mlx-community/Qwen2.5-Coder-32B-Instruct-4bit`) is
+ * required because litellm (aider's backend) parses the prefix after
+ * `openai/` and looks up the tokenizer by the remainder; the bare
+ * `openai/qwen2.5-coder-32b-instruct-4bit` triggers a 401 against
+ * `https://huggingface.co/api/models/qwen2.5-coder-32b-instruct-4bit`
+ * because litellm strips the namespace before the tokenizer lookup.
+ *
+ * Verified live against `mlx_lm.server --model
+ * mlx-community/Qwen2.5-Coder-32B-Instruct-4bit` on 2026-05-07 (M3 Max
+ * 64GB): aider produced a SEARCH/REPLACE block + applied the edit,
+ * exit 0.
  */
-export const DEFAULT_AIDER_MODEL = "openai/qwen2.5-coder-32b-instruct-4bit";
+export const DEFAULT_AIDER_MODEL = "openai/mlx-community/Qwen2.5-Coder-32B-Instruct-4bit";
 
 /**
  * Default `--openai-api-base` for the local mlx-lm.server. Matches
@@ -165,6 +173,16 @@ export interface BuildAiderInvocationOpts {
  * fixed prefix — easier to read in `ps -ef` output and easier for a
  * future argv allowlist (rule #13's threat-model gate) to validate.
  *
+ * `--no-auto-commits` is hard-wired into the default args because
+ * aider's auto-commit default would commit straight to whatever branch
+ * the daemon's cwd is on (which, in single-process mode, is minsky's
+ * checked-out branch — destructive to the operator's working state).
+ * The daemon's brief (`buildDaemonBrief`) instructs the LLM to commit
+ * and open a PR explicitly, so the auto-commit channel would
+ * double-commit. Operators who genuinely want aider's auto-commit path
+ * can override via `extraArgs: ["--auto-commits"]` (the later flag
+ * wins per aider's argparse).
+ *
  * @otel tick-loop.llm-invocation.build-aider
  */
 export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocation {
@@ -180,6 +198,7 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
     apiKey,
     "--yes",
     "--no-show-model-warnings",
+    "--no-auto-commits",
     ...(opts.extraArgs ?? []),
     "--message",
     opts.brief,
