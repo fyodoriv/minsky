@@ -339,6 +339,17 @@ const localProbeTtlMs = (() => {
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
 })();
+// Slice 4: switchback-probe interval — every Nth iteration on local,
+// the wrapper forces a claude probe (suppresses the carried hard-limit
+// failure) so the operator's quota window rollover is detected within
+// `N × tickIntervalMs` minutes. Default 5 (unspecified env). Set to 0
+// to disable probing entirely.
+const switchbackProbeEvery = (() => {
+  const raw = process.env.MINSKY_LOCAL_LLM_SWITCHBACK_PROBE_EVERY;
+  if (raw === undefined) return undefined; // wrapper picks default 5
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+})();
 const aiderBin = process.env.MINSKY_LOCAL_LLM_AIDER_BIN ?? "aider";
 
 /**
@@ -413,6 +424,7 @@ const spawnStrategy = (() => {
     probe: probeLocalLlm,
     budgetGuard: realGuard,
     probeTtlMs: localProbeTtlMs,
+    ...(switchbackProbeEvery === undefined ? {} : { switchbackProbeEvery }),
     forceClaude,
     preferLocal,
     emit: (event) => {

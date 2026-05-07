@@ -363,6 +363,142 @@ describe("LlmProviderSpawnStrategy / span emission", () => {
   });
 });
 
+// ---- Switchback probe (slice 4) -------------------------------------------
+
+describe("LlmProviderSpawnStrategy / switchback probe (slice 4)", () => {
+  it("after switchbackProbeEvery iterations on local, next iteration probes claude", async () => {
+    // claude returns hard-limit on first call, then clean on the probe call.
+    const claudeSpawn = vi
+      .fn()
+      .mockResolvedValueOnce(CLAUDE_HARD_LIMIT_RESULT) // iter 1
+      .mockResolvedValue(CLEAN_RESULT); // iter 4 (probe)
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claudeSpawn },
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      switchbackProbeEvery: 2, // probe after every 2 local iterations
+      now: () => 1000,
+    });
+    // Iter 1: claude hard-limit
+    const r1 = await wrapper.spawn(emptyInput());
+    expect(r1.provider).toBe("claude");
+    // Iter 2: lastClaudeFailure carries → local
+    const r2 = await wrapper.spawn(emptyInput());
+    expect(r2.provider).toBe("local");
+    // Iter 3: still on local (consecutive count = 1, not yet ≥ 2)
+    const r3 = await wrapper.spawn(emptyInput());
+    expect(r3.provider).toBe("local");
+    // Iter 4: consecutive count = 2 ≥ switchbackProbeEvery → claude probe
+    // claude returns clean → lastClaudeFailure cleared, count reset
+    const r4 = await wrapper.spawn(emptyInput());
+    expect(r4.provider).toBe("claude");
+    expect(r4.exitCode).toBe(0);
+    // Iter 5: no carryover (claude clean cleared it) → claude
+    const r5 = await wrapper.spawn(emptyInput());
+    expect(r5.provider).toBe("claude");
+  });
+
+  it("switchback probe with claude still hard-limited keeps us on local", async () => {
+    const claudeSpawn = vi.fn().mockResolvedValue(CLAUDE_HARD_LIMIT_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claudeSpawn },
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      switchbackProbeEvery: 2,
+      now: () => 1000,
+    });
+    // Iter 1: claude hard-limit
+    await wrapper.spawn(emptyInput());
+    // Iter 2 + 3: on local
+    await wrapper.spawn(emptyInput());
+    await wrapper.spawn(emptyInput());
+    // Iter 4: switchback probe → claude → still hard-limit → carryover
+    // updated, consecutive count reset, but next iter goes back to local
+    const r4 = await wrapper.spawn(emptyInput());
+    expect(r4.provider).toBe("claude");
+    expect(r4.exitCode).toBe(1);
+    // Iter 5: lastClaudeFailure still hard-limit, count reset = 0 → local
+    const r5 = await wrapper.spawn(emptyInput());
+    expect(r5.provider).toBe("local");
+    // Iter 6 + 7: keep on local until probe fires again
+    const r6 = await wrapper.spawn(emptyInput());
+    expect(r6.provider).toBe("local");
+    const r7 = await wrapper.spawn(emptyInput());
+    expect(r7.provider).toBe("claude"); // probe again at count=2
+  });
+
+  it("switchbackProbeEvery=0 disables probing (stays on local forever)", async () => {
+    const claudeSpawn = vi.fn().mockResolvedValue(CLAUDE_HARD_LIMIT_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claudeSpawn },
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      switchbackProbeEvery: 0,
+      now: () => 1000,
+    });
+    await wrapper.spawn(emptyInput()); // iter 1: claude hard-limit
+    // Iters 2-10: all on local (no probing)
+    for (let i = 0; i < 9; i++) {
+      const r = await wrapper.spawn(emptyInput());
+      expect(r.provider).toBe("local");
+    }
+    expect(claudeSpawn).toHaveBeenCalledTimes(1); // only the very first iter
+  });
+
+  it("default switchbackProbeEvery is 5", async () => {
+    const claudeSpawn = vi
+      .fn()
+      .mockResolvedValueOnce(CLAUDE_HARD_LIMIT_RESULT)
+      .mockResolvedValue(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claudeSpawn },
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      now: () => 1000,
+    });
+    await wrapper.spawn(emptyInput()); // iter 1: hard-limit
+    // Iters 2-6: local
+    for (let i = 0; i < 5; i++) {
+      const r = await wrapper.spawn(emptyInput());
+      expect(r.provider).toBe("local");
+    }
+    // Iter 7: probe fires (count=5 >= 5)
+    const r7 = await wrapper.spawn(emptyInput());
+    expect(r7.provider).toBe("claude");
+  });
+
+  it("switchback probe span carries switchback_probe: true attribute", async () => {
+    const spans: Array<{ name: string; attributes: Record<string, unknown> }> = [];
+    const claudeSpawn = vi
+      .fn()
+      .mockResolvedValueOnce(CLAUDE_HARD_LIMIT_RESULT)
+      .mockResolvedValue(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claudeSpawn },
+      local: stubStrategy(CLEAN_RESULT).strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      switchbackProbeEvery: 1,
+      now: () => 1000,
+      emit: (e) => spans.push(e),
+    });
+    await wrapper.spawn(emptyInput()); // iter 1: hard-limit, span has no probe attr
+    await wrapper.spawn(emptyInput()); // iter 2: local
+    await wrapper.spawn(emptyInput()); // iter 3: probe (count=1 >= 1)
+    expect(spans[0]?.attributes["switchback_probe"]).toBeUndefined();
+    expect(spans[1]?.attributes["switchback_probe"]).toBeUndefined();
+    expect(spans[2]?.attributes["switchback_probe"]).toBe(true);
+  });
+});
+
 // ---- SpawnInput flow-through ---------------------------------------------
 
 describe("LlmProviderSpawnStrategy / SpawnInput passthrough", () => {

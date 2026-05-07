@@ -86,6 +86,33 @@ export interface LlmProviderSpawnStrategyOptions {
   readonly forceClaude?: boolean;
   /** Operator opt-in: `MINSKY_LLM_PROVIDER=local-preferred`. */
   readonly preferLocal?: boolean;
+  /**
+   * Switchback probe interval (slice 4 of `local-llm-fallback-on-budget-pause`).
+   * After every N consecutive iterations on local, the next iteration
+   * tries claude once even if `lastClaudeFailure` carries a hard-limit,
+   * to discover whether the operator's quota window has rolled over. If
+   * claude succeeds (clean exit), `lastClaudeFailure` is cleared and
+   * subsequent iterations route to claude normally. If claude
+   * hard-limits again, we capture the new failure and continue on local.
+   *
+   * Default 5 (every 5th local iteration probes claude). Tighter than
+   * Anthropic's documented quota-window granularity (5h / weekly) so the
+   * worst-case "stuck on local after the operator topped up credits"
+   * window is bounded by `5 × tickIntervalMs` minutes — at the daemon's
+   * default 5-min cadence that's at most 25 minutes of "claude is
+   * available but we didn't try" delay after a top-up.
+   *
+   * Set to `0` to disable switchback probing entirely (the wrapper
+   * stays on local until something clears `lastClaudeFailure` — useful
+   * for chaos tests + the `forceClaude` operator escape hatch).
+   *
+   * Pivot threshold (rule #9): if the switchback probe burns >2 wasted
+   * iterations/day on operator stacks where claude is genuinely
+   * exhausted for >24h, raise the interval to 20 (every 20th iter); if
+   * the switchback probe is still missing real recoveries, drop to 1
+   * (every iter probes — equivalent to disabling the carry-over).
+   */
+  readonly switchbackProbeEvery?: number;
   /** Clock seam for tests. Default `Date.now`. */
   readonly now?: () => number;
   /**
@@ -95,6 +122,8 @@ export interface LlmProviderSpawnStrategyOptions {
    *   - `reason` — non-empty string from `decideProvider`
    *   - `budget.state` — current budget action
    *   - `local.reachable` — boolean
+   *   - `switchback_probe` — true when the dispatch was a switchback
+   *     probe forcing claude through a hard-limit carryover (slice 4)
    */
   readonly emit?: (event: {
     name: string;
@@ -103,6 +132,7 @@ export interface LlmProviderSpawnStrategyOptions {
 }
 
 const DEFAULT_PROBE_TTL_MS = 60_000;
+const DEFAULT_SWITCHBACK_PROBE_EVERY = 5;
 
 // ---- Default probe error → graceful-degrade --------------------------------
 
@@ -158,18 +188,29 @@ function truncate(s: string, cap: number): string {
 export class LlmProviderSpawnStrategy implements SpawnStrategy {
   private readonly opts: LlmProviderSpawnStrategyOptions;
   private readonly probeTtlMs: number;
+  private readonly switchbackProbeEvery: number;
   private readonly nowFn: () => number;
   /** Cached probe result; `undefined` means "never probed". */
   private cachedProbe: LocalProbeResult | undefined;
   /** Carried last-claude-failure; `undefined` after a clean claude spawn. */
   private lastClaudeFailure: LastClaudeFailure | undefined;
+  /**
+   * Count of consecutive iterations that ran on `local` (slice 4 — the
+   * switchback-probe interval). Resets to 0 on any non-local dispatch.
+   * When this reaches `switchbackProbeEvery`, the next iteration forces
+   * claude despite a hard-limit carry-over to discover whether the
+   * operator's quota window has rolled over.
+   */
+  private consecutiveLocalIterations: number;
 
   constructor(opts: LlmProviderSpawnStrategyOptions) {
     this.opts = opts;
     this.probeTtlMs = opts.probeTtlMs ?? DEFAULT_PROBE_TTL_MS;
+    this.switchbackProbeEvery = opts.switchbackProbeEvery ?? DEFAULT_SWITCHBACK_PROBE_EVERY;
     this.nowFn = opts.now ?? Date.now;
     this.cachedProbe = undefined;
     this.lastClaudeFailure = undefined;
+    this.consecutiveLocalIterations = 0;
   }
 
   /**
@@ -178,20 +219,46 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
    * (both providers unavailable), returns a synthetic failed result so
    * the daemon's outer loop logs and retries on the next tick.
    *
+   * Slice 4: when the wrapper has been on `local` for
+   * `switchbackProbeEvery` consecutive iterations, the next iteration
+   * suppresses the carried `lastClaudeFailure` (treated as `undefined`
+   * for the decision call) so `decideProvider(...)` can route back to
+   * claude. The probe-iteration's exit captures a fresh failure (or
+   * clears it) — same as any other claude iteration. This bounds the
+   * "stuck on local" window to `switchbackProbeEvery × tickIntervalMs`
+   * even when claude's stderr has been hard-limit-tagged.
+   *
    * @otel tick-loop.llm-provider-spawn-strategy.spawn
    */
   async spawn(input: SpawnInput): Promise<SpawnResult> {
     const probeResult = await this.getProbe();
     const budgetDecision = await Promise.resolve(this.opts.budgetGuard.decide());
+    const isSwitchbackProbe = this.shouldRunSwitchbackProbe();
+    const failureForDecision = isSwitchbackProbe ? undefined : this.lastClaudeFailure;
     const decision = decideProvider({
       budgetState: budgetDecision.action,
-      lastClaudeFailure: this.lastClaudeFailure,
+      lastClaudeFailure: failureForDecision,
       localProbeResult: probeResult,
       ...(this.opts.forceClaude === undefined ? {} : { forceClaude: this.opts.forceClaude }),
       ...(this.opts.preferLocal === undefined ? {} : { preferLocal: this.opts.preferLocal }),
     });
-    this.emitDispatchSpan(decision, budgetDecision.action, probeResult);
+    this.emitDispatchSpan(decision, budgetDecision.action, probeResult, isSwitchbackProbe);
     return this.dispatch(decision, input);
+  }
+
+  /**
+   * True when the wrapper has been on `local` for `switchbackProbeEvery`
+   * consecutive iterations and is due to probe claude. False when:
+   *   - `switchbackProbeEvery` is `0` (probing disabled);
+   *   - we don't have a hard-limit carry to override;
+   *   - the consecutive-local count hasn't reached the interval.
+   *
+   * (Internal helper — no JSDoc tag required.)
+   */
+  private shouldRunSwitchbackProbe(): boolean {
+    if (this.switchbackProbeEvery <= 0) return false;
+    if (this.lastClaudeFailure === undefined) return false;
+    return this.consecutiveLocalIterations >= this.switchbackProbeEvery;
   }
 
   /**
@@ -215,18 +282,29 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
    * Dispatch to claude / local / hold based on `decision.provider`. For
    * claude, captures the failure (if non-zero exit) into
    * `this.lastClaudeFailure` for the next iteration's
-   * `decideProvider(...)`.
+   * `decideProvider(...)`. For local, increments
+   * `consecutiveLocalIterations` so slice 4's switchback probe fires
+   * after `switchbackProbeEvery` calls. Any non-local dispatch resets
+   * the count.
    *
    * (Internal helper — no JSDoc tag required.)
    */
   private async dispatch(decision: ProviderDecision, input: SpawnInput): Promise<SpawnResult> {
     if (decision.provider === "hold") {
+      // `hold` is neither claude nor local, but it does NOT advance
+      // toward a switchback probe (we couldn't get to local) and does
+      // NOT reset the consecutive-local count (we'd lose progress on a
+      // transient local outage). Leave the counter unchanged.
       return synthesiseHoldResult(decision.reason);
     }
     const strategy = decision.provider === "claude" ? this.opts.claude : this.opts.local;
     const result = await strategy.spawn(input);
     if (decision.provider === "claude") {
       this.captureClaudeFailure(result);
+      this.consecutiveLocalIterations = 0;
+    } else {
+      // provider === "local"
+      this.consecutiveLocalIterations += 1;
     }
     return { ...result, provider: decision.provider };
   }
@@ -259,6 +337,7 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
     decision: ProviderDecision,
     budgetState: DecideProviderInput["budgetState"],
     probe: LocalProbeResult,
+    isSwitchbackProbe: boolean,
   ): void {
     if (this.opts.emit === undefined) return;
     this.opts.emit({
@@ -269,6 +348,7 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
         "budget.state": budgetState,
         "local.reachable": probe.reachable,
         ...(probe.reason === undefined ? {} : { "local.reason": probe.reason }),
+        ...(isSwitchbackProbe ? { switchback_probe: true } : {}),
       },
     });
   }
