@@ -500,6 +500,31 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-otel-no-pii.test.mjs
 
+  threat-model-section:
+    # vision.md § 13.8 / TASKS.md `security-privacy-priority-substrate` §
+    # Acceptance #5: every constitutional `novel/**/README.md` carries a
+    # STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines.
+    # The pure classifier + 17 hardcoded README paths shipped in
+    # `scripts/check-threat-model-section.mjs` (substrate slice 7.2). This
+    # slice wires the CLI into the gate so a future README rewrite that drops
+    # / shrinks a threat-model section, or a new `novel/<pkg>/` that lands
+    # without one, surfaces in CI rather than silently slipping in.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: threat-model-section lint
+        run: node scripts/check-threat-model-section.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-threat-model-section.test.mjs
+
   pr-security-review:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate` §
     # Measurement: every PR body carries either a `## Security & privacy`
@@ -1050,6 +1075,7 @@ jobs:
       - sbom-shape
       - tasks-lint
       - test
+      - threat-model-section
       - tick-loop-backoff-schedule
       - typecheck
     runs-on: ubuntu-latest
@@ -1089,6 +1115,7 @@ jobs:
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.tasks-lint.result }}" \
                    "${{ needs.test.result }}" \
+                   "${{ needs.threat-model-section.result }}" \
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
                    "${{ needs.typecheck.result }}"; do
             [ "$r" = "success" ] || fail=1
