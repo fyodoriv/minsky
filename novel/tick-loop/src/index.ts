@@ -587,3 +587,14 @@ export {
   sandboxModeStartupHint,
   sandboxModeWarning,
 } from "./sandbox-mode.js";
+
+// Daemon duplicate-work detection (P0 watchdog from #346, operator 2026-05-07):
+// pure decision consulted by the daemon BEFORE `gh pr create` to avoid
+// re-creating already-shipped/in-flight work. Surfaced-by 9h dogfood window
+// 2026-05-06/07 (worker-1's #343 was a dup of merged #309).
+export {
+  type DuplicateDecision,
+  type PrSnapshot,
+  decideDuplicate,
+  prTitleNamesTask,
+} from "./duplicate-pr-detector.js";
