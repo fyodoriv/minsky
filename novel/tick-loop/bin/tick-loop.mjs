@@ -31,7 +31,7 @@
  */
 
 import { execFile as execFileCb } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -92,6 +92,7 @@ import {
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   runDaemon,
+  runParallelSweeper,
   sandboxModeStartupHint,
   workerStartupLine,
 } from "../dist/index.js";
@@ -753,6 +754,87 @@ if (touchesGlobCheckEnabled) {
   );
 } else {
   process.stdout.write("[tick-loop] file-collision check disabled (MINSKY_TOUCHES_GLOB_CHECK=0)\n");
+}
+
+// Slice 5 of `daemon-parallel-worktree-launch`: per-tick sweeper.
+// Walks `.git/index.lock` (root + per-worktree) + `.minsky/locks/task-*.lock`,
+// removes stale debris (Claude Code #11005 mitigation + crashed-worker
+// claim cleanup). Runs once at supervisor boot — that's enough for
+// recovery: the in-process worker-claim layer's O_EXCL retry handles
+// inter-tick claim contention; this sweep handles BOOT-time debris
+// from a previous crashed run. Skip in dry-run (no real .git or claim
+// state to sweep) and in spawned-child mode (only the root sweeps so
+// children don't race on unlinks). Operator escape:
+// MINSKY_PARALLEL_SWEEPER=0 disables.
+const sweeperEnabled =
+  process.env["MINSKY_WORKER_SPAWNED"] !== "1" &&
+  process.env["MINSKY_TICK_DRY_RUN"] !== "1" &&
+  process.env["MINSKY_TICK_DRY_RUN"] !== "true" &&
+  process.env["MINSKY_PARALLEL_SWEEPER"] !== "0" &&
+  process.env["MINSKY_PARALLEL_SWEEPER"] !== "false";
+if (sweeperEnabled) {
+  try {
+    const sweepResult = runParallelSweeper({
+      minskyHome,
+      io: {
+        now: () => Date.now(),
+        exists: (p) => existsSync(p),
+        mtimeMs: (p) => {
+          try {
+            return statSync(p).mtimeMs;
+            // rule-6: handled-locally — ENOENT / permission denied → undefined → caller flags errors
+          } catch {
+            return undefined;
+          }
+        },
+        readText: (p) => {
+          try {
+            return readFileSync(p, "utf-8");
+            // rule-6: handled-locally — read failure → undefined → caller flags errors
+          } catch {
+            return undefined;
+          }
+        },
+        listDir: (d) => {
+          try {
+            return readdirSync(d);
+            // rule-6: handled-locally — dir not found → [] → caller skips this leg
+          } catch {
+            return [];
+          }
+        },
+        unlink: (p) => {
+          try {
+            unlinkSync(p);
+            return true;
+            // rule-6: handled-locally — unlink failure logged; sweep continues
+          } catch {
+            return false;
+          }
+        },
+      },
+    });
+    process.stdout.write(
+      `[span] tick-loop.parallel-sweeper.tick ${JSON.stringify({
+        "sweeper.indexLocksSwept": sweepResult.indexLocksSwept,
+        "sweeper.expiredClaimsSwept": sweepResult.expiredClaimsSwept,
+        "sweeper.hadRecoverableErrors": sweepResult.hadRecoverableErrors,
+        "sweeper.reasonsHead": sweepResult.reasons.slice(0, 5),
+      })}\n`,
+    );
+    process.stdout.write(
+      `[tick-loop] parallel-sweeper: swept ${sweepResult.indexLocksSwept} index-lock(s) + ${sweepResult.expiredClaimsSwept} expired claim(s)${sweepResult.hadRecoverableErrors ? " (with recoverable errors — see span)" : ""}\n`,
+    );
+    // rule-6: handled-locally — sweeper failure shouldn't gate boot; log and continue
+  } catch (sweeperErr) {
+    process.stdout.write(
+      `[tick-loop] parallel-sweeper: skipped (boot-time error: ${sweeperErr instanceof Error ? sweeperErr.message : String(sweeperErr)})\n`,
+    );
+  }
+} else if (process.env["MINSKY_WORKER_SPAWNED"] === "1") {
+  process.stdout.write(
+    "[tick-loop] parallel-sweeper off (this is a spawned child; only the root sweeps)\n",
+  );
 }
 
 // Auto-scale workers (operator 2026-05-07 — slice 2/N). The root daemon
