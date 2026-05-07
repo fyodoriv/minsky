@@ -84,6 +84,76 @@ describe("classifySpanAttribute (pure function)", () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("must be a string");
   });
+
+  // Vision § 13.2 names "email, IP, full path with username" as the three
+  // PII shapes. (k)–(p) cover the name-shape additions; (q)–(r) cover the
+  // value-shape additions. Each pairs one positive case (must flag) with a
+  // boundary check (must not flag) so future relaxation surfaces immediately.
+
+  it("(k) attribute named `userEmail` flagged on name-shape", () => {
+    const r = classifySpanAttribute("userEmail", "alice@example.com");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("name-shape");
+    expect(r.reason).toContain("email");
+  });
+
+  it("(l) attribute named `email_address` flagged on name-shape", () => {
+    const r = classifySpanAttribute("email_address", "");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("name-shape");
+    expect(r.reason).toContain("email");
+  });
+
+  it("(m) attribute named `client.ip` flagged on name-shape (OTEL convention)", () => {
+    const r = classifySpanAttribute("client.ip", "203.0.113.7");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("name-shape");
+    expect(r.reason).toContain("ip-address");
+  });
+
+  it("(n) attribute named `ip_address` flagged on name-shape", () => {
+    const r = classifySpanAttribute("ip_address", "");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("name-shape");
+    expect(r.reason).toContain("ip-address");
+  });
+
+  it("(o) `description` is NOT flagged — `ip` substring is mid-word, not a segment", () => {
+    // Guards the boundary contract: only `ip` separated by `_`, `-`, `.`,
+    // or string boundary flags. Mid-word `ip` (description, recipient,
+    // chip, clip, iteration) is safe.
+    const r = classifySpanAttribute("description", "x");
+    expect(r).toEqual({ ok: true });
+  });
+
+  it("(p) `iteration.index` is NOT flagged — boundary check on `ip`", () => {
+    // The current OTEL surface uses `iteration.index` heavily; a regression
+    // here would fire the lint on every existing emit() in `novel/tick-loop`.
+    const r = classifySpanAttribute("iteration.index", 1);
+    expect(r).toEqual({ ok: true });
+  });
+
+  it("(q) macOS user-home path value flagged on value-shape", () => {
+    const r = classifySpanAttribute("note", "config at /Users/cbrwizard/apps/minsky/x");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("macos-user-home-path");
+  });
+
+  it("(r) Linux user-home path value flagged on value-shape", () => {
+    const r = classifySpanAttribute("cwd", "/home/runner/work/minsky/minsky");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("linux-user-home-path");
+  });
+
+  it("(s) `/Users/` (no username segment) is NOT flagged — boundary check", () => {
+    // The path regex requires ≥1 letter for the user segment. Bare
+    // `/Users/` and `/home/` (no trailing component) do not match — they
+    // don't carry a username.
+    const r = classifySpanAttribute("path", "/Users/");
+    expect(r).toEqual({ ok: true });
+  });
 });
 
 describe("classifyAttributesObject (pure function)", () => {
