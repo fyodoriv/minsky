@@ -771,32 +771,25 @@ async function runOneIteration(args: {
     return { result };
   }
 
-  const taskId = pickTask(taskSource);
-  if (taskId === undefined) {
+  // Claim-aware pick: when workerConfig is set, walk eligible tasks in
+  // priority order and attempt acquireTaskClaim on each — return the
+  // first ID that successfully claims. Eliminates the wasted-tick
+  // collision pattern where two workers picked the same first-priority
+  // task and one slept 5 min for nothing. Single-process mode (no
+  // workerConfig) keeps the legacy first-match pickTask path.
+  const picked = pickAndClaim(opts, taskSource);
+  if (picked.kind === "no-task") {
     const result: DaemonIterationResult = {
       iteration,
       status: "no-task",
-      reason: "no unblocked unclaimed P0/P1 task",
+      reason: picked.reason,
+      ...(picked.taskId === undefined ? {} : { taskId: picked.taskId }),
     };
     emitIterationSpan(opts, result);
     return { result };
   }
 
-  // Slice 2.5 of `daemon-parallel-worktree-launch`: when a worker config is
-  // set, acquire the per-task claim before spawning. Single-process mode
-  // (no workerConfig) bypasses entirely.
-  const claim = tryAcquireWorkerClaim(opts, taskId);
-  if (claim?.acquired === false) {
-    const result: DaemonIterationResult = {
-      iteration,
-      status: "no-task",
-      reason: `claim-collision: held by ${claim.heldBy} until ${formatExpiry(claim.expiresAt)}`,
-      taskId,
-    };
-    emitIterationSpan(opts, result);
-    return { result };
-  }
-
+  const { taskId, claim } = picked;
   try {
     const result = await runClaimedIteration({
       opts,
@@ -807,27 +800,45 @@ async function runOneIteration(args: {
     emitIterationSpan(opts, result);
     return { result };
   } finally {
-    claim?.release();
+    if (claim?.acquired) claim.release();
   }
+}
+
+type PickAndClaimResult =
+  | {
+      readonly kind: "claimed";
+      readonly taskId: string;
+      readonly claim: WorkerClaimHandle | undefined;
+    }
+  | { readonly kind: "no-task"; readonly reason: string; readonly taskId?: string };
+
+function pickAndClaim(opts: RunDaemonOpts, taskSource: string): PickAndClaimResult {
+  if (opts.workerConfig === undefined) {
+    const taskId = pickTask(taskSource);
+    if (taskId === undefined)
+      return { kind: "no-task", reason: "no unblocked unclaimed P0/P1 task" };
+    return { kind: "claimed", taskId, claim: undefined };
+  }
+  const candidates = listEligibleTasks(taskSource);
+  if (candidates.length === 0)
+    return { kind: "no-task", reason: "no unblocked unclaimed P0/P1 task" };
+  const collisions: string[] = [];
+  for (const taskId of candidates) {
+    const claim = tryAcquireWorkerClaim(opts, taskId);
+    if (claim === undefined) return { kind: "claimed", taskId, claim: undefined };
+    if (claim.acquired) return { kind: "claimed", taskId, claim };
+    collisions.push(`${taskId}:held-by-${claim.heldBy}`);
+  }
+  return {
+    kind: "no-task",
+    reason: `claim-collision on ${candidates.length} eligible task(s): ${collisions.join(", ")}`,
+    ...(candidates[0] === undefined ? {} : { taskId: candidates[0] }),
+  };
 }
 
 type WorkerClaimHandle =
   | { readonly acquired: true; readonly release: () => void }
   | { readonly acquired: false; readonly heldBy: string; readonly expiresAt: number };
-
-/**
- * Format a claim expiry as ISO 8601, falling back to the raw ms value
- * when the timestamp is out of `Date`'s representable range (e.g. test
- * fixtures using `Number.MAX_SAFE_INTEGER` to mark "never expires").
- */
-function formatExpiry(ms: number): string {
-  try {
-    return new Date(ms).toISOString();
-    // rule-6: handled-locally — RangeError on out-of-Date-range timestamps falls back to ms; reason string is informational only
-  } catch {
-    return `${ms}ms`;
-  }
-}
 
 /**
  * Acquire a per-task claim when `workerConfig` is set; return `undefined`
@@ -1115,22 +1126,34 @@ export function extractTaskBlock(tasksMd: string, taskId: string): string | unde
  * @otel tick-loop.pick-task
  */
 export function pickTask(tasksMd: string): string | undefined {
+  const candidates = listEligibleTasks(tasksMd);
+  return candidates.length === 0 ? undefined : candidates[0];
+}
+
+/**
+ * Return ALL eligible task IDs from TASKS.md in priority order. Same
+ * eligibility rules as `pickTask` (skip claimed, skip blocked-by, skip
+ * blocked) but returns the full list rather than first-match. Used by the
+ * claim-aware iteration path: walk candidates and attempt
+ * `acquireTaskClaim` on each, returning the first ID that successfully
+ * claims (eliminates the wasted-tick collision pattern when two workers
+ * race on the same first-priority task).
+ *
+ * @otel-exempt pure helper of `pickTask`.
+ */
+export function listEligibleTasks(tasksMd: string): readonly string[] {
   const sliced = sliceP0P1(tasksMd);
   const blocks = splitBlocks(sliced);
+  const out: string[] = [];
   for (const block of blocks) {
     const id = parseId(block);
     if (id === undefined) continue;
     if (block.includes("(@minsky-tick-loop)")) continue;
     if (/\*\*Blocked by\*\*:/i.test(block)) continue;
-    // `**Blocked**:` (closing asterisks before the colon) is the external-
-    // constraint blocker — distinct from `**Blocked by**:` above. Match is
-    // case-sensitive on the field name. Any non-empty reason after the
-    // colon disqualifies the task; an empty reason still disqualifies (the
-    // field's presence is the signal).
     if (/\*\*Blocked\*\*:/.test(block)) continue;
-    return id;
+    out.push(id);
   }
-  return undefined;
+  return out;
 }
 
 /**

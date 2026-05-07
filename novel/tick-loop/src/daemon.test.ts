@@ -1500,12 +1500,11 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(seenInputs[0]?.extraArgs ?? []).toEqual([]);
   });
 
-  it("worker mode: a held claim returns no-task with claim-collision reason", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-claim-"));
-    // Pre-create a live lock for taskId "alpha" held by another worker.
-    const lockPath = join(tmp, "task-alpha.lock");
+  it("worker mode: walks past a held claim and picks the next eligible task (claim-aware pickTask)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-claim-walk-"));
+    // Lock alpha (first eligible) — daemon should walk past to beta, claim, run.
     writeFileSync(
-      lockPath,
+      join(tmp, "task-alpha.lock"),
       JSON.stringify({
         taskId: "alpha",
         workerId: "9",
@@ -1513,6 +1512,48 @@ describe("tick-loop / daemon / runDaemon", () => {
         expiresAt: Number.MAX_SAFE_INTEGER,
       }),
     );
+    const seenTasks: string[] = [];
+    const fakeStrategy: SpawnStrategy = {
+      spawn: (input) => {
+        seenTasks.push(input.taskId);
+        return Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "ok", stderrTail: "" });
+      },
+    };
+    const client = new TestFakeMockAnthropic();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: false,
+      mockClient: client,
+      spawnStrategy: fakeStrategy,
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      workerConfig: { workerId: 0, workersTotal: 2 },
+      locksDir: tmp,
+    });
+    // Walked past locked `alpha` → claimed `beta` → completed.
+    expect(seenTasks).toEqual(["beta"]);
+    expect(result.iterations[0]?.status).toBe("completed");
+    expect(result.iterations[0]?.taskId).toBe("beta");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("worker mode: returns no-task only when ALL eligible tasks are claim-collided", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "minsky-daemon-all-locked-"));
+    // Lock every fixture P0 task.
+    for (const id of ["alpha", "beta", "gamma", "delta"]) {
+      writeFileSync(
+        join(tmp, `task-${id}.lock`),
+        JSON.stringify({
+          taskId: id,
+          workerId: "9",
+          claimedAt: 0,
+          expiresAt: Number.MAX_SAFE_INTEGER,
+        }),
+      );
+    }
     const fakeStrategy: SpawnStrategy = {
       spawn: () =>
         Promise.resolve({
@@ -1538,7 +1579,8 @@ describe("tick-loop / daemon / runDaemon", () => {
     });
     expect(result.iterations[0]?.status).toBe("no-task");
     expect(result.iterations[0]?.reason).toContain("claim-collision");
-    expect(result.iterations[0]?.reason).toContain("held by 9");
+    expect(result.iterations[0]?.reason).toContain("alpha");
+    expect(result.iterations[0]?.reason).toContain("beta");
     rmSync(tmp, { recursive: true, force: true });
   });
 
