@@ -384,45 +384,49 @@ async function probeLocalLlm() {
 }
 
 const spawnStrategy = (() => {
-  if (dryRun) return new DryRunSpawnStrategy();
-  // The claude underlying strategy: identical to the legacy v0+sub-task-3 path
-  // — a `ProcessSpawnStrategy` over `claude --print` with the
-  // `--worktree <name>` per-iteration arg already produced by
-  // `claudeArgsForWorker(...)` (this comes through `input.extraArgs` →
-  // `invocation` builder). The invocation builder shape lets a future
-  // extension append more claude-specific args without touching the
-  // wrapper.
-  const claudeStrat = new ProcessSpawnStrategy({
-    command: "claude",
-    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-    invocation: (input) =>
-      buildClaudePrintInvocation({
-        brief: input.brief,
-        ...(input.extraArgs && input.extraArgs.length > 0 ? { extraArgs: input.extraArgs } : {}),
-      }),
-  });
+  // Build the underlying claude strategy. In dry-run mode it's a
+  // `DryRunSpawnStrategy` (synthetic — no subprocess); in production
+  // it's `ProcessSpawnStrategy` over `claude --print`.
+  const claudeStrat = dryRun
+    ? new DryRunSpawnStrategy()
+    : new ProcessSpawnStrategy({
+        command: "claude",
+        ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+        invocation: (input) =>
+          buildClaudePrintInvocation({
+            brief: input.brief,
+            ...(input.extraArgs && input.extraArgs.length > 0
+              ? { extraArgs: input.extraArgs }
+              : {}),
+          }),
+      });
   if (!localLlmEnabled) return claudeStrat;
-  // Local fallback wired. Construct the aider strategy and wrap both in
+  // Local-LLM fallback wired. Build the aider strategy (also dry-run-
+  // aware so the chaos test in slice 6 can exercise the dispatch path
+  // without spawning real aider subprocesses) and wrap both in
   // `LlmProviderSpawnStrategy`.
-  const localStrat = new ProcessSpawnStrategy({
-    command: aiderBin,
-    // Reuse the same per-iteration timeout as claude — aider's `--message`
-    // path is similar in shape (one-shot agentic edit + exit).
-    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-    invocation: (input) =>
-      buildAiderInvocation({
-        brief: input.brief,
+  const localStrat = dryRun
+    ? new DryRunSpawnStrategy()
+    : new ProcessSpawnStrategy({
         command: aiderBin,
-      }),
-  });
+        ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+        invocation: (input) =>
+          buildAiderInvocation({
+            brief: input.brief,
+            command: aiderBin,
+          }),
+      });
   process.stdout.write(
-    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"})\n`,
+    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${dryRun ? ", dry-run" : ""})\n`,
   );
   return new LlmProviderSpawnStrategy({
     claude: claudeStrat,
     local: localStrat,
     probe: probeLocalLlm,
-    budgetGuard: realGuard,
+    // The wrapper consumes the daemon's `BudgetGuardLike.decide()` shape,
+    // not the real `BudgetGuard.tick()` shape. `fromRealBudgetGuard` is
+    // the one-line Adapter (per `budget-guard-facade.ts`).
+    budgetGuard: fromRealBudgetGuard(realGuard),
     probeTtlMs: localProbeTtlMs,
     ...(switchbackProbeEvery === undefined ? {} : { switchbackProbeEvery }),
     forceClaude,

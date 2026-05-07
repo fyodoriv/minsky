@@ -22,6 +22,7 @@
     "changelog:snapshot": "node scripts/changelog-snapshot.mjs",
     "metrics:render": "node scripts/metrics-render.mjs",
     "llm-provider:throughput": "node scripts/llm-provider-throughput.mjs",
+    "chaos:budget-exhaust": "node scripts/chaos-budget-exhaust.mjs",
     "cto-audit:metrics": "node scripts/cto-audit-metrics.mjs",
     "daemon-pr-lint:metrics": "node scripts/daemon-pr-lint-metrics.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",

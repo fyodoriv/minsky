@@ -149,10 +149,10 @@ export async function probeWithErrorGuard(
 ): Promise<LocalProbeResult> {
   try {
     return await probe();
-  } catch (err) {
     // rule-6: handled-locally — probe error is a documented chaos mode
     // (table row 3); we want the wrapper to keep dispatching with a
     // stale "unreachable" state rather than crash the supervisor.
+  } catch (err) {
     const message = err instanceof Error ? err.message : typeof err === "string" ? err : "unknown";
     return {
       reachable: false,
