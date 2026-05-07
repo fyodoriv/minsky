@@ -1815,35 +1815,26 @@ describe("buildDaemonBrief", () => {
   });
 
   it("brief's fast-stage step names match the canonical manifest at scripts/run-pre-pr-lint-stack.mjs (bidirectional)", () => {
-    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate` slices 5/N + 22/N):
-    // the brief tells the daemon which step name to look for in stderr when
-    // the gate fails. Two drift directions threaten the retry instruction's
-    // completeness: (a) a step ADDED to the fast stage in the manifest must
-    // appear in the brief or the daemon won't know to retry on its failures
-    // (slice 5/N caught this); (b) a step REMOVED from the fast stage (e.g.
-    // demoted to full-only because it's flaky) leaves a stale name in the
-    // brief, so the daemon would still try to retry on a failure that no
-    // longer fires from the fast stack — which silently confuses the retry
-    // budget when the actual failing step is elsewhere. Slice 22/N closes
-    // that second direction by pinning *set equality* between the brief's
-    // "Red →" parenthesized enumeration and the manifest's `selectSteps("fast")`.
+    // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): the brief no longer
+    // enumerates step names in the "Red →" bullet — the stderr tail already names
+    // the failing step at runtime, so pre-listing them was pure duplication
+    // (−224 bytes/iter). The manifest must still have fast-stage steps (sanity),
+    // and the brief must still instruct the daemon that "the stderr tail names
+    // the failing step" rather than enumerate them — that is the new invariant.
     const here = dirname(fileURLToPath(import.meta.url));
     const manifestPath = resolve(here, "../../../scripts/run-pre-pr-lint-stack.mjs");
     const src = readFileSync(manifestPath, "utf8");
     const fastStageNames = extractManifestFastStageNames(src);
-    // Sanity: the manifest must declare at least one fast-stage step or the
-    // daemon's gate is meaningless.
     expect(fastStageNames.size).toBeGreaterThan(0);
 
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
-    const briefNames = extractBriefRedBulletNames(brief);
 
-    const missingFromBrief = [...fastStageNames].filter((n) => !briefNames.has(n));
-    const extraInBrief = [...briefNames].filter((n) => !fastStageNames.has(n));
-    expect({ missingFromBrief, extraInBrief }).toEqual({
-      missingFromBrief: [],
-      extraInBrief: [],
-    });
+    // New invariant: brief does NOT enumerate step names (regression guard).
+    const briefNames = extractBriefRedBulletNames(brief);
+    expect(briefNames.size).toBe(0);
+
+    // New invariant: brief tells the daemon that stderr names the step.
+    expect(brief).toContain("stderr tail names the failing step");
   });
 
   it("noop-exit token prefix is identical across brief, invariant suggestedFix, and operator docs (slice 24/N)", () => {
