@@ -649,6 +649,7 @@ export {
   type DecideDaemonPrStateInput,
   decideDaemonPrState,
   isFailingConclusion,
+  parseGhPrListForDaemonPrState,
 } from "./daemon-pr-state.js";
 
 // Daemon task-completion detector (P0 watchdog from #346, operator 2026-05-07):
