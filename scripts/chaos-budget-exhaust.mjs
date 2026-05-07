@@ -76,16 +76,38 @@ export function parseArgs(argv) {
   /** @type {string | undefined} */
   let reportPath;
   for (const arg of argv) {
-    if (arg.startsWith("--max-iterations=")) {
-      const parsed = Number.parseInt(arg.slice("--max-iterations=".length), 10);
-      if (Number.isFinite(parsed) && parsed > 0) maxIterations = parsed;
-    } else if (arg.startsWith("--probe-url=")) {
-      probeUrl = arg.slice("--probe-url=".length);
-    } else if (arg.startsWith("--report=")) {
-      reportPath = arg.slice("--report=".length);
-    }
+    const next = applyArg(arg, { maxIterations, probeUrl, reportPath });
+    maxIterations = next.maxIterations;
+    probeUrl = next.probeUrl;
+    reportPath = next.reportPath;
   }
   return { maxIterations, probeUrl, reportPath };
+}
+
+/**
+ * Pure helper: apply one CLI arg to the running parsed-state. Extracted
+ * from `parseArgs` so the parser body stays under biome's
+ * cognitive-complexity cap (rule #6, ≤10).
+ *
+ * @param {string} arg
+ * @param {{ maxIterations: number, probeUrl: string, reportPath: string | undefined }} state
+ * @returns {{ maxIterations: number, probeUrl: string, reportPath: string | undefined }}
+ */
+function applyArg(arg, state) {
+  if (arg.startsWith("--max-iterations=")) {
+    const parsed = Number.parseInt(arg.slice("--max-iterations=".length), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return { ...state, maxIterations: parsed };
+    }
+    return state;
+  }
+  if (arg.startsWith("--probe-url=")) {
+    return { ...state, probeUrl: arg.slice("--probe-url=".length) };
+  }
+  if (arg.startsWith("--report=")) {
+    return { ...state, reportPath: arg.slice("--report=".length) };
+  }
+  return state;
 }
 
 /**

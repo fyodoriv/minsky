@@ -142,6 +142,8 @@ const DEFAULT_SWITCHBACK_PROBE_EVERY = 5;
  * chaos table row 3 (graceful-degrade for probe failures).
  *
  * Pure given a (potentially impure) `probe` and `now`. Exported for tests.
+ *
+ * @otel tick-loop.llm-provider-spawn-strategy.probe-with-error-guard
  */
 export async function probeWithErrorGuard(
   probe: () => Promise<LocalProbeResult>,
@@ -149,9 +151,7 @@ export async function probeWithErrorGuard(
 ): Promise<LocalProbeResult> {
   try {
     return await probe();
-    // rule-6: handled-locally — probe error is a documented chaos mode
-    // (table row 3); we want the wrapper to keep dispatching with a
-    // stale "unreachable" state rather than crash the supervisor.
+    // rule-6: handled-locally — probe error is a documented chaos mode (table row 3 graceful-degrade — keep dispatching with a stale "unreachable" state rather than crash the supervisor)
   } catch (err) {
     const message = err instanceof Error ? err.message : typeof err === "string" ? err : "unknown";
     return {
@@ -360,6 +360,9 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
  * outer loop sees this as a `failed` iteration and reschedules.
  *
  * Exported for tests.
+ *
+ * @otel-exempt pure builder for the hold-result shape; instrumentation
+ *   lives at the dispatch span emitted by the wrapper's `spawn(...)`.
  */
 export function synthesiseHoldResult(reason: string): SpawnResult {
   return {
