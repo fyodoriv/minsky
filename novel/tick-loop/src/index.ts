@@ -606,8 +606,8 @@ export {
 // Slice 4 of `daemon-parallel-worktree-launch`: pure decisions for the
 // per-tick sweeper that recovers stale .git/index.lock files (Claude Code
 // #11005), expired .minsky/locks/task-*.lock claims, and orphaned
-// daemon-namespace worktrees. The I/O wrapper (next slice) executes the
-// unlinks + `git worktree prune` and emits the counters.
+// daemon-namespace worktrees. The I/O wrapper (slice 5 — `parallel-sweeper-runner.ts`)
+// executes the unlinks + `git worktree prune` and emits the counters.
 export {
   type ClaimLockSnapshot,
   type SweepDecision,
@@ -617,6 +617,18 @@ export {
   decideStaleIndexLock,
   summarizeSweepDecisions,
 } from "./parallel-sweeper.js";
+
+// Slice 5 of `daemon-parallel-worktree-launch`: I/O wrapper that ticks
+// the sweeper. Walks `.git/index.lock` (root + per-worktree) + claim
+// leases under `.minsky/locks/`, calls the slice-4 decisions, unlinks
+// stale debris. The bin wires this on every iteration's start so a
+// crashed worker's debris doesn't gate the next tick.
+export {
+  type SweeperIo,
+  type SweeperRunInput,
+  type SweeperTickResult,
+  runParallelSweeper,
+} from "./parallel-sweeper-runner.js";
 
 // Operator-CLI ergonomics (2026-05-06): pretty-format the daemon's
 // structured `[span] tick-loop.iteration {…}` lines into glanceable
