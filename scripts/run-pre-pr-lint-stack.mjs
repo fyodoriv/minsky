@@ -150,6 +150,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "no-singleton-experiment",
       "otel-no-pii",
       "pivot-success-margin",
+      "privacy-data-egress",
       "rule-1-novel-justification",
       "rule-2-dep-coverage",
       "rule-3-doc-first",
@@ -304,6 +305,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-sbom-shape.mjs"],
+  },
+  {
+    name: "privacy-data-egress",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-privacy-data-egress.mjs"],
   },
   {
     name: "threat-model-section",
