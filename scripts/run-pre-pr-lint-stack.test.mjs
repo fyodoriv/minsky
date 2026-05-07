@@ -918,41 +918,89 @@ describe("docs/daemon-pre-pr-gate.md env-dependent allowlist drift-protection", 
   });
 });
 
-describe("resolveDiffBase (slice 31/N — stale-origin/main footgun)", () => {
+describe("resolveDiffBase (slice 31/N — freshness-aware diff base)", () => {
+  /** @type {(timestamps: Record<string, number>) => (ref: string) => number} */
+  const tsFromMap = (m) => (r) => m[r] ?? 0;
+
   test("returns explicit override from PRE_PR_LINT_DIFF_BASE", () => {
     expect(
-      resolveDiffBase({ env: { PRE_PR_LINT_DIFF_BASE: "v1.2.3" }, refExists: () => false }),
+      resolveDiffBase({
+        env: { PRE_PR_LINT_DIFF_BASE: "v1.2.3" },
+        refExists: () => false,
+        refTimestamp: () => 0,
+      }),
     ).toBe("v1.2.3");
   });
 
   test("ignores empty override (treated as unset)", () => {
     expect(
-      resolveDiffBase({ env: { PRE_PR_LINT_DIFF_BASE: "" }, refExists: (r) => r === "main" }),
+      resolveDiffBase({
+        env: { PRE_PR_LINT_DIFF_BASE: "" },
+        refExists: (r) => r === "main",
+        refTimestamp: tsFromMap({ main: 100 }),
+      }),
     ).toBe("main");
   });
 
-  test("prefers local `main` when it resolves (daemon worktree case)", () => {
-    expect(resolveDiffBase({ env: {}, refExists: (r) => r === "main" })).toBe("main");
-  });
-
-  test("falls back to `origin/main` when only it resolves (CI checkout case)", () => {
-    expect(resolveDiffBase({ env: {}, refExists: (r) => r === "origin/main" })).toBe("origin/main");
-  });
-
-  test("falls back to `upstream/main` when only it resolves (fork pattern)", () => {
-    expect(resolveDiffBase({ env: {}, refExists: (r) => r === "upstream/main" })).toBe(
-      "upstream/main",
-    );
+  test("returns the only resolving ref (single-candidate case)", () => {
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "origin/main",
+        refTimestamp: tsFromMap({ "origin/main": 50 }),
+      }),
+    ).toBe("origin/main");
   });
 
   test("hard fallback to `origin/main` when no candidate resolves", () => {
-    expect(resolveDiffBase({ env: {}, refExists: () => false })).toBe("origin/main");
+    expect(resolveDiffBase({ env: {}, refExists: () => false, refTimestamp: () => 0 })).toBe(
+      "origin/main",
+    );
   });
 
-  test("when both `main` and `origin/main` exist, `main` wins (freshest source-of-truth)", () => {
+  test("daemon-worktree case: local `main` stale, `upstream/main` fresh → picks `upstream/main`", () => {
+    // Concrete reproducer: PR #330's pre-rebase state. local `main` =
+    // 1175a07 (slice 29 era, ts=100); `upstream/main` = 2fd8ce5 (slice 30
+    // merged, ts=200); `origin/main` = d5742f5 (placeholder remote, ts=50).
     expect(
-      resolveDiffBase({ env: {}, refExists: (r) => r === "main" || r === "origin/main" }),
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "main" || r === "origin/main" || r === "upstream/main",
+        refTimestamp: tsFromMap({ main: 100, "origin/main": 50, "upstream/main": 200 }),
+      }),
+    ).toBe("upstream/main");
+  });
+
+  test("dev-machine case: stale `origin/main`, fresh local `main` → picks `main`", () => {
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "main" || r === "origin/main",
+        refTimestamp: tsFromMap({ main: 200, "origin/main": 100 }),
+      }),
     ).toBe("main");
+  });
+
+  test("CI case: only `origin/main` exists → picks `origin/main` (no behaviour change)", () => {
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: (r) => r === "origin/main",
+        refTimestamp: tsFromMap({ "origin/main": 200 }),
+      }),
+    ).toBe("origin/main");
+  });
+
+  test("ties broken by reduce-leftmost (stable for in-sync refs)", () => {
+    // `upstream/main` listed first → wins on tie. Stability matters for the
+    // common dev case where `main` and `origin/main` are at the same commit.
+    expect(
+      resolveDiffBase({
+        env: {},
+        refExists: () => true,
+        refTimestamp: () => 100,
+      }),
+    ).toBe("upstream/main");
   });
 });
 

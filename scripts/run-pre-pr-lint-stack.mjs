@@ -47,35 +47,46 @@ const REPO_ROOT = resolve(HERE, "..");
  * rule-6, rule-12, lockfile-integrity, rule-1, rule-4, pattern-index,
  * cloud-audit-gate) compare HEAD against. CI explicitly sets
  * `RULE_*_DIFF_BASE=origin/main` because that's the only main-tracking ref the
- * Github-Actions checkout populates. In a daemon worktree, `origin/main` is
- * frequently stale (the worktree's `origin` may point at a placeholder remote
- * never re-fetched), so the local lint stack and CI silently disagree on the
- * diff range — the exact "passes locally / fails CI" footgun
- * `daemon-pre-pr-lint-gate` was filed to close. Concrete evidence: PR #329
- * (slice 30/N) passed `pnpm pre-pr-lint` locally and failed `rule-3-doc-first`
- * on CI for this reason.
+ * Github-Actions checkout populates. In a daemon worktree, `origin/main` may be
+ * stale (the worktree's `origin` may point at a placeholder remote that's
+ * never re-fetched), AND local `main` may also be stale (the worktree pulls
+ * from `upstream`, not `main`); CI's `origin/main` then disagrees with the
+ * lint stack about which commits constitute "this branch's diff". This is the
+ * "passes locally / fails CI" footgun (and its inverse, "fails locally /
+ * passes CI") that `daemon-pre-pr-lint-gate` was filed to close. Concrete
+ * evidence: PR #329 (slice 30/N) passed `pnpm pre-pr-lint` locally with stale
+ * `origin/main` and failed `rule-3-doc-first` on CI; on the rebase, the
+ * inverse fired (stale local `main` produced spurious local rule-3 failures
+ * for already-merged commits).
  *
- * Resolution order:
+ * Resolution: among the resolvable candidates (`main`, `origin/main`,
+ * `upstream/main`), pick the one with the latest committer-date. This closes
+ * BOTH directions of the footgun — whichever ref is freshest wins, regardless
+ * of whether `origin` or `main` is the stale one.
+ *
+ * Order of preference (only matters when timestamps tie):
  *   1. `PRE_PR_LINT_DIFF_BASE` env override (escape hatch — explicit beats
  *      heuristic).
- *   2. Local `main` if it resolves (fresh in dev + daemon worktrees).
- *   3. `origin/main` if it resolves (CI's canonical reference).
- *   4. `upstream/main` as a last fallback (fork pattern).
- *   5. Hard fallback `origin/main` (preserves prior behaviour even when
- *      no candidate resolves).
+ *   2. Freshest of `[upstream/main, origin/main, main]` by committer-date.
+ *   3. Hard fallback `origin/main` (preserves prior behaviour when no
+ *      candidate resolves — e.g. minimal CI checkouts).
  *
- * @param {{ env?: NodeJS.ProcessEnv, refExists?: (ref: string) => boolean }} [opts]
+ * @param {{
+ *   env?: NodeJS.ProcessEnv,
+ *   refExists?: (ref: string) => boolean,
+ *   refTimestamp?: (ref: string) => number,
+ * }} [opts]
  * @returns {string}
  */
 export function resolveDiffBase(opts = {}) {
   const env = opts.env ?? process.env;
   const refExists = opts.refExists ?? defaultRefExists;
+  const refTimestamp = opts.refTimestamp ?? defaultRefTimestamp;
   const override = env["PRE_PR_LINT_DIFF_BASE"];
   if (override !== undefined && override.length > 0) return override;
-  for (const ref of ["main", "origin/main", "upstream/main"]) {
-    if (refExists(ref)) return ref;
-  }
-  return "origin/main";
+  const resolvable = ["upstream/main", "origin/main", "main"].filter((r) => refExists(r));
+  if (resolvable.length === 0) return "origin/main";
+  return resolvable.reduce((best, ref) => (refTimestamp(ref) > refTimestamp(best) ? ref : best));
 }
 
 /**
@@ -94,6 +105,26 @@ function defaultRefExists(ref) {
     // not a programming bug — we want a boolean.
   } catch {
     return false;
+  }
+}
+
+/**
+ * @param {string} ref
+ * @returns {number} committer-date Unix timestamp, or 0 if the ref is missing.
+ */
+function defaultRefTimestamp(ref) {
+  try {
+    const out = execFileSync("git", ["log", "-1", "--format=%ct", ref], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const n = Number.parseInt(out.toString().trim(), 10);
+    return Number.isFinite(n) ? n : 0;
+    // rule-6: handled-locally — missing ref or non-numeric output should not
+    // crash the gate; treat as "no timestamp", which puts this ref at the
+    // bottom of the freshness ordering.
+  } catch {
+    return 0;
   }
 }
 
