@@ -6,6 +6,7 @@
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path probe + H1 aider python + H2 non-TTY refuse) -->
 // <!-- scope: human-approved minsky-cli-fresh-clone-bootstrap slice 8 (operator 2026-05-08 — "I've cloned minsky from scratch, ran pnpm install, then ran minsky and got module not found about tick-loop") -->
 // <!-- scope: human-approved minsky-fresh-clone-health-checks slice 1 (operator 2026-05-08 — "Next let's add as much stable self-healing as reasonable to minsky & install commands") -->
+// <!-- scope: human-approved minsky-runtime-resilience slice 2 (operator 2026-05-08 — slice 2 of the self-healing trilogy) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -104,8 +105,12 @@ const {
   describeArchState,
   detectArchState,
   detectLocalLlmStack,
+  ensureWorkersDir,
   executeBootstrapPlan,
+  formatTickLoopBinMissingMessage,
+  formatWorkersDirRecoveryMessage,
   needsLocalLlmBootstrap,
+  pickLogPath,
   planLocalLlmBootstrap,
   planRequiresTty,
   preferredPipxPath,
@@ -177,7 +182,29 @@ Reattach: re-run \`minsky\` (or \`minsky logs\`) — it sees the live PID and at
  */
 async function runStartOrAttach(args) {
   const { workerId, extraArgs } = parsePositionalAndForward(args);
-  mkdirSync(WORKERS_DIR, { recursive: true });
+
+  // Slice 2 of `minsky-runtime-resilience` — pre-flight: tick-loop
+  // bin must exist or `spawn(node, [TICK_LOOP_BIN, ...])` would emit
+  // ENOENT with a stack that doesn't point at the missing path.
+  // Defensive backstop on top of slice 8's dist-existence check.
+  if (!existsSync(TICK_LOOP_BIN)) {
+    process.stderr.write(`${formatTickLoopBinMissingMessage(TICK_LOOP_BIN)}\n`);
+    process.exit(1);
+  }
+
+  // Slice 2 of `minsky-runtime-resilience` — workers-dir mkdir with
+  // classified errno + recovery hint instead of a raw EACCES throw.
+  const mkdirOutcome = ensureWorkersDir({
+    dir: WORKERS_DIR,
+    mkdirSyncFn: mkdirSync,
+  });
+  if (mkdirOutcome.ok === false) {
+    process.stderr.write(
+      `${formatWorkersDirRecoveryMessage({ dir: WORKERS_DIR, errCode: mkdirOutcome.errCode, recoveryHint: mkdirOutcome.recoveryHint })}\n`,
+    );
+    process.exit(1);
+  }
+
   const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
   const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
   const livePid = readLivePid(pidPath);
@@ -195,17 +222,46 @@ async function runStartOrAttach(args) {
   // confirm and runs the install plan.
   const bootstrapEnv = await maybeBootstrapLocalLlm();
   const tickLoopArgs = withSaneDefaults(workerId, extraArgs);
-  const fd = openSync(logPath, "a");
+
+  // Slice 2 of `minsky-runtime-resilience` — log-path fallback: if
+  // the primary log path is unwritable (EACCES / EROFS / ENOSPC),
+  // fall through to a /tmp path + warn instead of crashing. When
+  // log falls back, ALSO fall back the pid path to the same /tmp
+  // dir — they live or die together; if `.minsky/workers/` is
+  // read-only, neither should target it. (Operator's `minsky stop
+  // <id>` won't find the pid file in that case — known limitation,
+  // covered in slice 3's cross-machine-dotfile work.)
+  const fallbackLogTmp = resolve(`/tmp/minsky-worker-${workerId}-${process.pid}.log`);
+  const logOutcome = pickLogPath({
+    primary: logPath,
+    fallbackTmp: fallbackLogTmp,
+    openSyncFn: openSync,
+  });
+  if (logOutcome.fellBack) {
+    process.stderr.write(
+      `minsky: warning: ${logPath} is not writable (${logOutcome.reason ?? "unknown"}); falling back to ${logOutcome.path}\n`,
+    );
+    process.stderr.write(
+      "minsky: warning: pid file falls back to the same /tmp dir; `minsky stop` may not find the daemon — set MINSKY_HOME to a writable path to recover\n",
+    );
+  }
+  const activeLogPath = logOutcome.path;
+  const activePidPath = logOutcome.fellBack
+    ? resolve(`/tmp/minsky-worker-${workerId}-${process.pid}.pid`)
+    : pidPath;
+
   const child = spawn(process.execPath, [TICK_LOOP_BIN, ...tickLoopArgs], {
     detached: true,
-    stdio: ["ignore", fd, fd],
+    stdio: ["ignore", logOutcome.fd, logOutcome.fd],
     env: { ...process.env, ...bootstrapEnv },
   });
   child.unref();
-  writeFileSync(pidPath, String(child.pid ?? ""), "utf8");
-  process.stderr.write(`minsky: started worker ${workerId} (PID ${child.pid}, log: ${logPath})\n`);
+  writeFileSync(activePidPath, String(child.pid ?? ""), "utf8");
+  process.stderr.write(
+    `minsky: started worker ${workerId} (PID ${child.pid}, log: ${activeLogPath})\n`,
+  );
   process.stderr.write("minsky: Ctrl+C detaches (daemon keeps running)\n\n");
-  await tailWithPretty(logPath, true);
+  await tailWithPretty(activeLogPath, true);
 }
 
 // ---- Local-LLM auto-bootstrap pre-flight ---------------------------------
