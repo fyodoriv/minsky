@@ -55,7 +55,13 @@ export const SIBLING_P0_IDS = Object.freeze([
 const RULE_13_RE = /\brule\s*#\s*13\b/i;
 
 /**
- * @typedef {{ id: string, anchor: string | null }} BlockAnchor
+ * @typedef {{ id: string, found: boolean, anchor: string | null }} BlockAnchor
+ *
+ * `found: false` means the task ID was not present in TASKS.md — i.e., the
+ * task was completed and removed. A removed task is not a violation: the
+ * constraint only applies to open tasks (the ones still in the queue).
+ * `found: true, anchor: null` means the task is open but has no Anchor line —
+ * that IS a violation.
  */
 
 const TASK_HEADER_RE = /^- \[[ x]\] /;
@@ -124,12 +130,22 @@ export function extractAnchorsForIds(tasksMdText, wantedIds) {
   const found = new Map();
   for (const id of wantedIds) found.set(id, null);
 
+  /** @type {Set<string>} — IDs actually present in TASKS.md */
+  const seenIds = new Set();
+
   /** @type {string | null} */
   let currentId = null;
   for (const line of tasksMdText.split("\n")) {
-    currentId = stepParser(classifyLine(line), currentId, found);
+    const c = classifyLine(line);
+    // Track which wanted IDs appear in the file before stepping the parser.
+    if (c.kind === "id" && found.has(c.id)) seenIds.add(c.id);
+    currentId = stepParser(c, currentId, found);
   }
-  return wantedIds.map((id) => ({ id, anchor: found.get(id) ?? null }));
+  return wantedIds.map((id) => ({
+    id,
+    found: seenIds.has(id),
+    anchor: found.get(id) ?? null,
+  }));
 }
 
 /**
@@ -147,7 +163,9 @@ export function checkRule13SiblingAnchors(tasksMdText, siblingIds = SIBLING_P0_I
   const blocks = extractAnchorsForIds(tasksMdText, siblingIds);
   /** @type {string[]} */
   const errors = [];
-  for (const { id, anchor } of blocks) {
+  for (const { id, found, anchor } of blocks) {
+    // Task not in TASKS.md = completed and removed. Constraint fulfilled; skip.
+    if (!found) continue;
     if (anchor === null) {
       errors.push(`task \`${id}\`: no \`**Anchor**:\` line found in TASKS.md`);
       continue;
@@ -167,10 +185,14 @@ export function checkRule13SiblingAnchors(tasksMdText, siblingIds = SIBLING_P0_I
 async function main() {
   const tasksPath = resolve(REPO_ROOT, "TASKS.md");
   const text = await readFile(tasksPath, "utf8");
+  const blocks = extractAnchorsForIds(text, SIBLING_P0_IDS);
   const result = checkRule13SiblingAnchors(text);
   if (result.ok) {
+    const open = blocks.filter((b) => b.found).length;
+    const closed = SIBLING_P0_IDS.length - open;
+    const suffix = closed > 0 ? ` (${closed} completed and removed)` : "";
     process.stdout.write(
-      `rule-13-sibling-anchors ok: ${SIBLING_P0_IDS.length} sibling security P0s all cite rule #13.\n`,
+      `rule-13-sibling-anchors ok: ${open} open sibling security P0s all cite rule #13${suffix}.\n`,
     );
     return 0;
   }

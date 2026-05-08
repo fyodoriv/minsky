@@ -25,25 +25,41 @@ The CI job `lockfile-integrity` (in [`.github/workflows/ci.yml`](../../.github/w
 
 The empirical signal: when `chalk@5.3.0` or `debug@4.3.4` (or any other entry) appears in the diff with the same `name@version` but a changed `integrity:` hash, the gate fails with a `:` violation citing both hashes and the historical CVEs as the precedent. The remediation is to investigate whether the registry republished the package (rare, surfaces in maintainer's announcements) or whether the PR's `pnpm install` recomputed against a tampered cache (the 2025 incident's signature).
 
-## Layer 2: SBOM-shape validator (shipped, no-op until SBOM is committed)
+## Layer 2: SBOM-shape validator (shipped)
 
 `scripts/check-sbom-shape.mjs` (slices 1–5 — PRs #269, #270, #285, #286, and the existing `sbom-shape` job in `ci.yml`) classifies an already-parsed CycloneDX 1.5 / 1.6 SBOM against the subset that downstream tooling depends on: `bomFormat === "CycloneDX"`, `specVersion ∈ {1.5, 1.6}`, `version` is a positive integer, every component carries a `type` from the spec enum + a non-empty `name`, every `library`-typed component carries a non-empty `version` + a `pkg:<type>/<name>@<version>` `purl`, and `bom-ref`s are unique within the document.
 
-The CI job `sbom-shape` exits 0 when no `sbom.cdx.json` is on disk (the typical state today, before the generation step lands). The fail-safe-defaults split (Saltzer & Schroeder 1975): exit 0 = clean *or* nothing to scan; exit 1 = SBOM shape violation; exit 2 = cannot evaluate (read failure, JSON malformed). The gate therefore passes today and engages the moment the generation step commits a real artefact.
+The CI job `sbom-shape` exits 0 when no `sbom.cdx.json` is on disk (fail-safe-defaults — Saltzer & Schroeder 1975): exit 0 = clean *or* nothing to scan; exit 1 = SBOM shape violation; exit 2 = cannot evaluate (read failure, JSON malformed). The gate validates the artefact before it is attached to the release by Layer 4.
 
 ## Layer 3: Dependabot allowlist (shipped via PR #291)
 
 [`.github/dependabot.yml`](../../.github/dependabot.yml) configures Dependabot's `npm` updater (which reads `pnpm-lock.yaml` natively as of GitHub's 2024 update) with `allow: [{ dependency-type: direct }]` so transitive bumps don't create noisy churn against `pnpm`'s resolver. Dev-dependency minor / patch updates are grouped weekly; runtime patches are grouped weekly; security updates open immediate PRs independent of the schedule (Dependabot's documented behaviour for vulnerability alerts). The `github-actions` ecosystem is configured separately with the same weekly cadence so action-pin drift surfaces in a predictable PR queue rather than a once-a-year audit.
 
-## Future layers (not yet shipped)
+## Layer 4: SBOM generation workflow (shipped)
 
-- **SBOM generation step** — `.github/workflows/sbom.yml` will invoke a CycloneDX-emitting tool (`@cyclonedx/cdxgen` or the `cyclonedx-cli` GH Action) on tag push, producing `sbom.cdx.json` for the consumer; the existing `sbom-shape` validator gates the artefact against the spec subset before it's attached to the GitHub Release. Filed as the next slice of the SBOM sub-track.
-- **SLSA provenance** — `.github/workflows/slsa.yml` will use [`slsa-framework/slsa-github-generator`](https://github.com/slsa-framework/slsa-github-generator)'s reusable workflow to attest the release artefact, producing an in-toto attestation signed via Sigstore (zero-key, identity-based). Pivot per task block: ship SLSA L1 first if L3's hermetic-build claim proves too much CI complexity; SBOM + lockfile gates are independent and ship regardless. Filed as the SLSA sub-track of `supply-chain-hardening-lockfile-sbom-slsa`.
-- **Consumer-side verification doc** — the GitHub Releases page will publish the `cosign verify-blob` command alongside each release asset. Lands in the same PR that wires the SLSA workflow.
+[`.github/workflows/sbom.yml`](../../.github/workflows/sbom.yml) triggers on every `release: created` event. It installs pnpm dependencies, runs `@cyclonedx/cyclonedx-npm` to emit `sbom.cdx.json` (CycloneDX 1.5 or 1.6), validates the shape with `node scripts/check-sbom-shape.mjs`, and attaches the file to the release via `gh release upload`. Pre-registered in `experiments/security-sbom-generation-2026-05-07.yaml`.
+
+Pivot: if `@cyclonedx/cyclonedx-npm` emits a specVersion outside `{1.5, 1.6}` (i.e., `check-sbom-shape.mjs` exits 1 with `unsupported-specVersion`), pivot to `@cyclonedx/cdxgen` — same CycloneDX output, toolkit-agnostic generator. Do not widen `ALLOWED_SPEC_VERSIONS` until CycloneDX has published the new version and downstream tooling supports it.
+
+## Layer 5: SLSA provenance (shipped)
+
+[`.github/workflows/slsa.yml`](../../.github/workflows/slsa.yml) triggers on every `release: created` event. It packs `distribution/` and `setup.sh` into a versioned tarball, computes SHA-256 hashes, and passes them to the [`slsa-framework/slsa-github-generator`](https://github.com/slsa-framework/slsa-github-generator) reusable workflow (CNCF reference implementation), which produces a Sigstore-signed SLSA Build Level 3 provenance document attached to the release. Pre-registered in `experiments/security-slsa-provenance-2026-05-07.yaml`.
+
+Consumer verification:
+
+```sh
+slsa-verifier verify-artifact minsky-dist-<tag>.tar.gz \
+  --provenance-path minsky-dist-<tag>.tar.gz.intoto.jsonl \
+  --source-uri github.com/<owner>/<repo>
+```
+
+## Follow-ups
+
+- **Consumer-side verification doc on Releases page** — surface the `slsa-verifier` and `gh release download` commands in the GitHub Releases release notes for each tag. A follow-up for the cloud tier; SLSA provenance is already machine-verifiable without it.
 
 ## Performance-first carve-out
 
-Per rule #13's relief valve: when security and performance compete, performance wins on a case-by-case basis with the security cost declared in writing. None declared at this layer — the lockfile-integrity gate runs in ≤2s on the current dep tree, the SBOM-shape validator is pure JSON walking on a ≤MB artefact, and the future SLSA generator runs in the release workflow's already-provisioned runner. No hot-path latency is on the line.
+Per rule #13's relief valve: when security and performance compete, performance wins on a case-by-case basis with the security cost declared in writing. None declared at this layer — the lockfile-integrity gate runs in ≤2s on the current dep tree, the SBOM-shape validator is pure JSON walking on a ≤MB artefact, and both release workflows run in already-provisioned runners (no hot-path latency).
 
 ## Verification
 
@@ -52,6 +68,8 @@ Per rule #13's relief valve: when security and performance compete, performance 
 - **SBOM gate (no SBOM committed)**: `node scripts/check-sbom-shape.mjs` exits 0 with `sbom-shape skipped: sbom.cdx.json not present.` (fail-safe defaults).
 - **SBOM gate (synthetic CycloneDX)**: write a 1.5 SBOM with one `bomFormat: "WRONG"`; gate exits 1 with `wrong-bomFormat` and the remediation hint.
 - **SBOM gate (malformed JSON)**: write a truncated `sbom.cdx.json`; gate exits 2 with `cannot parse … invalid-json` (cannot evaluate, distinguishable from shape-violation).
+- **SBOM generation (release)**: `gh release view <tag> --json assets --jq '.assets[] | select(.name == "sbom.cdx.json") | .name'` returns `sbom.cdx.json` for every release after the workflow ships.
+- **SLSA provenance (release)**: `gh release view <tag> --json assets --jq '.assets[] | select(.name | endswith(".intoto.jsonl")) | .name'` returns the provenance document for every release after the workflow ships.
 - **Dependabot allowlist**: a transitive bump (`dependency-type: indirect`) does not produce a Dependabot PR; only `direct` deps and security advisories generate PRs. Verify by inspecting Dependabot's GitHub UI after the config has been live for one full schedule cycle.
 
 Paired tests pin every CLI verdict path: [`scripts/check-lockfile-integrity.test.mjs`](../../scripts/check-lockfile-integrity.test.mjs), [`scripts/check-sbom-shape.test.mjs`](../../scripts/check-sbom-shape.test.mjs).
