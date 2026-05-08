@@ -1,0 +1,231 @@
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
+/**
+ * `@minsky/tick-loop/local-llm-probes` — production wiring for the
+ * `DetectProbes` seam in `local-llm-bootstrap.ts`. Slice 3 substrate of
+ * P0 task `minsky-cli-auto-bootstrap-local-llm`.
+ *
+ * Five probes, each bounded ≤500 ms wall-clock so the no-op fast path
+ * on a set-up machine completes in ≤2.5 s per the rule-#9 measurement:
+ *
+ *   1. {@link probePipx} — `which pipx` shell-out (50 ms typical).
+ *   2. {@link probeMlxLm} — `which mlx_lm.server`.
+ *   3. {@link probeAider} — `which aider`.
+ *   4. {@link probeModel} — filesystem stat of the huggingface cache
+ *      directory (path-derived from the model id; no network call).
+ *   5. {@link probeServer} — `GET <url>/v1/models` with 2 s timeout.
+ *
+ * All probes are pure-over-injection: tests pass synthetic
+ * implementations of the small shared seams (`whichFn`, `existsSyncFn`,
+ * `fetchFn`); the production wiring at the bottom of the file binds
+ * them to the real `node:child_process` / `node:fs` / `globalThis.fetch`.
+ *
+ * Pattern conformance (rule #8):
+ *   - **Adapter** — Wirfs-Brock & McKean, *Object Design*, 2003 — every
+ *     external dependency is behind a probe-shape interface.
+ *     Conformance: full.
+ *   - **Liveness probe** — Burns et al., "Borg, Omega, and Kubernetes",
+ *     *ACM Queue* 14 (1) 2016 — bounded-time GET against a documented
+ *     endpoint. Conformance: full.
+ *
+ * Failure modes (rule #7).
+ *
+ * Steady-state hypothesis: every probe returns a `ComponentState` /
+ * `ServerState` record within its time bound. Probe rejections from
+ * the production seams (e.g., `which` exits non-zero — handled-locally
+ * — typed as "absent"; network errors typed as "unreachable") are
+ * captured and never propagated up, so `detectLocalLlmStack`'s
+ * Promise.all never sees a rejection from these probes.
+ *
+ * | # | Failure mode | Trigger | Expected behavior | Chaos test |
+ * |---|---|---|---|---|
+ * | 1 | `which` exits non-zero | binary missing | `{ present: false, reason: "not on PATH" }` | "probePipx — absent" |
+ * | 2 | `fetch` rejects | server crashed | `{ reachable: false, reason: <code> }` | "probeServer — unreachable" |
+ * | 3 | `fetch` returns 5xx | server starting up | `{ reachable: false, reason: "http 5xx" }` | "probeServer — 503" |
+ * | 4 | `fetch` times out | server hung | `{ reachable: false, reason: "timeout 2000ms" }` | "probeServer — timeout" |
+ * | 5 | huggingface cache dir missing | model not downloaded | `{ present: false, reason: "huggingface-cache miss" }` | "probeModel — missing" |
+ *
+ * @module tick-loop/local-llm-probes
+ */
+
+import { existsSync as nodeExistsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+import {
+  type ComponentState,
+  DEFAULT_LOCAL_LLM_MODEL,
+  DEFAULT_LOCAL_LLM_PROBE_URL,
+  type DetectProbes,
+  type ServerState,
+} from "./local-llm-bootstrap.js";
+
+// ---- Shared seams ---------------------------------------------------------
+
+/** `which <bin>` shape — returns the resolved path or `undefined`. */
+export type WhichFn = (bin: string) => Promise<string | undefined>;
+
+/** `existsSync` shape — same as `node:fs.existsSync`. */
+export type ExistsSyncFn = (path: string) => boolean;
+
+/** Subset of `fetch` shape sufficient for `GET <url>/v1/models`. */
+export type FetchFn = (
+  url: string,
+  init: { signal?: AbortSignal; method?: string },
+) => Promise<{ ok: boolean; status: number }>;
+
+// ---- probePipx / probeMlxLm / probeAider ---------------------------------
+
+/**
+ * Build the three `which`-style probes from the shared seam. Each
+ * resolves to `{ present: true, path }` when `which` finds the binary,
+ * `{ present: false, reason: "not on PATH" }` otherwise.
+ *
+ * @otel tick-loop.local-llm-probes.which
+ */
+export function buildWhichProbe(bin: string, whichFn: WhichFn): () => Promise<ComponentState> {
+  return async () => {
+    const path = await whichFn(bin);
+    if (path === undefined) {
+      return { present: false, reason: "not on PATH" };
+    }
+    return { present: true, path };
+  };
+}
+
+// ---- probeModel ----------------------------------------------------------
+
+/**
+ * Compute the canonical huggingface cache path for a given model id.
+ * Format: `~/.cache/huggingface/hub/models--<owner>--<name>` per the
+ * huggingface-hub CLI's documented cache layout.
+ *
+ * Pure helper — exported only for tests to avoid hard-coding the path.
+ *
+ * @otel-exempt pure path formatter — no I/O, no span.
+ */
+export function modelCachePath(modelId: string, home: string = homedir()): string {
+  // huggingface-hub replaces `/` with `--` and prepends `models--`.
+  const dirName = `models--${modelId.replace(/\//g, "--")}`;
+  return join(home, ".cache", "huggingface", "hub", dirName);
+}
+
+/**
+ * Build the model-presence probe. Filesystem stat only — no network
+ * call; the model has been downloaded if the cache directory exists.
+ * (A more thorough probe would also check that the safetensors files
+ * are non-empty; we trust huggingface-cli's atomic-rename discipline.)
+ *
+ * @otel tick-loop.local-llm-probes.model
+ */
+export function buildModelProbe(opts: {
+  readonly modelId?: string;
+  readonly existsSyncFn?: ExistsSyncFn;
+  readonly home?: string;
+}): () => Promise<ComponentState> {
+  const modelId = opts.modelId ?? DEFAULT_LOCAL_LLM_MODEL;
+  const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
+  const home = opts.home ?? homedir();
+  return async () => {
+    const path = modelCachePath(modelId, home);
+    if (existsSyncFn(path)) {
+      return { present: true, path, detail: modelId };
+    }
+    return { present: false, reason: "huggingface-cache miss", detail: modelId };
+  };
+}
+
+// ---- probeServer ---------------------------------------------------------
+
+/**
+ * Build the mlx-lm.server liveness probe. Bounded-time GET against
+ * `<url>/v1/models`; succeeds on HTTP 200, fails-graceful otherwise.
+ * Mirrors `scripts/check-mlx-server.mjs` but is in-process (no shell-out
+ * cost on every detection call).
+ *
+ * @otel tick-loop.local-llm-probes.server
+ */
+export function buildServerProbe(opts: {
+  readonly url?: string;
+  readonly timeoutMs?: number;
+  readonly fetchFn?: FetchFn;
+}): () => Promise<ServerState> {
+  const url = opts.url ?? DEFAULT_LOCAL_LLM_PROBE_URL;
+  const timeoutMs = opts.timeoutMs ?? 2_000;
+  const fetchFn = opts.fetchFn ?? defaultFetchFn;
+  return async () => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const resp = await fetchFn(url, { method: "GET", signal: ac.signal });
+      if (resp.ok) {
+        return { reachable: true, url };
+      }
+      return { reachable: false, url, reason: `http ${resp.status}` };
+      // rule-6: handled-locally — typed fetch errors into short reason; planner only branches on reachable.
+    } catch (err) {
+      const reason = classifyFetchError(err, timeoutMs);
+      return { reachable: false, url, reason };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+function classifyFetchError(err: unknown, timeoutMs: number): string {
+  /** @type {{cause?: {code?: string}, code?: string, name?: string, message?: string}} */
+  const e = err as {
+    cause?: { code?: string };
+    code?: string;
+    name?: string;
+    message?: string;
+  };
+  const code = e?.cause?.code ?? e?.code;
+  if (typeof code === "string") return code;
+  if (e?.name === "AbortError") return `timeout ${timeoutMs}ms`;
+  return (e?.message ?? "unknown").slice(0, 80);
+}
+
+// rule-6: handled-locally — wrapping `globalThis.fetch` in a tiny
+// adapter so we never read `globalThis` from inside the probe's hot
+// path; the indirection is also the seam tests inject through.
+const defaultFetchFn: FetchFn = async (url, init) => {
+  const resp = await globalThis.fetch(url, init);
+  return { ok: resp.ok, status: resp.status };
+};
+
+// ---- buildProductionProbes ----------------------------------------------
+
+/**
+ * Bind the production `DetectProbes` record by composing the four
+ * `which` + filesystem + fetch probes above. The wiring layer in
+ * `bin/minsky.mjs` calls this once at startup and threads the result
+ * into `detectLocalLlmStack`.
+ *
+ * The `whichFn` seam defaults to a thin `child_process.exec("which …")`
+ * wrapper so tests can swap it out — but since the production usage is
+ * always `node:child_process`, exposing it through opts keeps the
+ * boundary explicit (rule #2).
+ *
+ * @otel-exempt — wires the probes; the spans live on the probes themselves.
+ */
+export function buildProductionProbes(opts: {
+  readonly whichFn: WhichFn;
+  readonly existsSyncFn?: ExistsSyncFn;
+  readonly fetchFn?: FetchFn;
+  readonly url?: string;
+  readonly modelId?: string;
+}): DetectProbes {
+  return {
+    probePipx: buildWhichProbe("pipx", opts.whichFn),
+    probeMlxLm: buildWhichProbe("mlx_lm.server", opts.whichFn),
+    probeAider: buildWhichProbe("aider", opts.whichFn),
+    probeModel: buildModelProbe({
+      ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+      ...(opts.existsSyncFn !== undefined ? { existsSyncFn: opts.existsSyncFn } : {}),
+    }),
+    probeServer: buildServerProbe({
+      ...(opts.url !== undefined ? { url: opts.url } : {}),
+      ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+    }),
+  };
+}

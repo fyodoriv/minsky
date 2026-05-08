@@ -27,10 +27,31 @@ Everything is MIT, every dependency lives behind an interface (`novel/adapters/`
 
 ## What this is *not*
 
-- **Not a global CLI.** Minsky is a **repo-rooted stack**, not a single binary on your `PATH`. `./setup.sh` installs three globals — `tasks`, `tasks-lint`, `tasks-mcp` (the [tasks.md](https://github.com/tasksmd/tasks.md) toolchain) — and bootstraps `.minsky/state.json` in the repo. The supervisor runs out of this repo via `bash distribution/systemd/run-tick-loop.sh` (Linux) or the launchd plist (macOS). There is **no** `minsky` binary; if you typed `minsky --version` and got `command not found`, that's by design — pick up the loop with `/next-task` inside Claude Code instead.
 - **Not a framework.** No multi-agent runtime, no proprietary task queue, no proprietary loop driver. We adapt existing tools rather than rebuild them.
 - **Not for one-off quick fixes.** Every change in this repo carries the iron-rule overhead (hypothesis + measurement + pivot). If your fix can't justify that, it belongs in another repo.
 - **Not an IDE plugin** · **not a productivity tool** · **not a chatbot.** Minsky targets the supervisor layer, not the editor.
+
+## The `minsky` CLI (operator UX)
+
+Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/bin/minsky.mjs`). Sane defaults + auto-bootstrap:
+
+```bash
+pnpm minsky                  # start-or-attach worker 0 (default); auto-detects
+                             # Claude exhaustion + offers to install local-LLM
+                             # fallback (~17 GB Qwen3 weights via mlx-lm + aider)
+                             # with one [Y/n] confirm prompt
+pnpm minsky doctor           # read-only health probe — claude / pipx / mlx-lm /
+                             # aider / model weights / mlx-lm.server reachable
+pnpm minsky bootstrap-local-llm  # explicitly run the local-LLM install plan
+pnpm minsky logs             # tail worker 0's log live
+pnpm minsky stop             # SIGTERM the daemon; leave the log
+```
+
+The auto-bootstrap pre-flight is idempotent — re-running `pnpm minsky` on a set-up machine adds <500 ms wall-clock (one fetch against `127.0.0.1:8080/v1/models`) and threads `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred` into the spawned daemon.
+
+**Operator escape hatches**: `MINSKY_NO_AUTO_BOOTSTRAP=1` skips the pre-flight entirely; `MINSKY_NON_INTERACTIVE=1` (or non-TTY stdin) auto-confirms the install prompt.
+
+The CLI is intentionally repo-rooted (not a global `npm install -g` package) so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. To run from outside the repo, alias it: `alias minsky="pnpm --dir ~/apps/minsky minsky"`.
 
 ## Why this exists
 
