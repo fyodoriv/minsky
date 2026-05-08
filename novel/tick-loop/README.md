@@ -247,6 +247,17 @@ Post-slice-6 operator live-run surfaced three edge cases. All three are now clos
 
 All three are backward-compatible by construction (undefined option fields fall through to slice-1/5/6 behavior) and covered by paired tests (+4 probe + +5 arch + +4 planner + +4 planRequiresTty).
 
+#### Slice 8: fresh-clone bootstrap fix (operator 2026-05-08 — "I've cloned minsky from scratch, ran pnpm install, then ran minsky and got module not found about tick-loop")
+
+`bin/minsky.mjs` imports its CLI logic from `../dist/index.js`. The `dist/` directory is gitignored (build artifacts shouldn't be in git), so a fresh `git clone` produces a repo with no `dist/`. Slice 1's static `import` declarations get hoisted to module-instantiation time, fire BEFORE any code in `bin/minsky.mjs` runs, and node throws `ERR_MODULE_NOT_FOUND` with a stack trace that points the operator at node internals instead of the actual recovery command (`pnpm install`). Operator hit this on a fresh clone after slice 7 shipped.
+
+Slice 8 ships two layers:
+
+1. **Root `package.json` `prepare` script** — runs `pnpm --filter @minsky/tick-loop build` after `pnpm install` (canonical pnpm/npm hook for "build artifacts the package needs to be runnable"). On pnpm v9, `prepare` runs once per `pnpm install` invocation when `node_modules` is being created. Wall-clock cost: ~2 s on a warm cache (TS incremental build short-circuits on subsequent installs). After this, `git clone … && pnpm install && pnpm minsky doctor` works end-to-end with no manual build step.
+2. **Defensive `dist`-existence check at the top of `bin/minsky.mjs`** — replaces all static imports of `../dist/*.js` with dynamic `await import()` calls, with an `existsSync(distIndexPath)` pre-flight that exits 1 with a one-line actionable error if `dist/` is somehow still missing at runtime (e.g., the prepare hook silently failed, or a stale `.tsbuildinfo` made the build a no-op without producing the expected outputs). Pure helpers `checkDistExists` + `formatDistMissingMessage` live in `dist-existence-check.ts` with paired tests pinning the wording contract — but the bin file itself inlines a tiny version of the check so the loud-fail path doesn't depend on the very `dist/` it's checking for.
+
+Pattern conformance: Pre-condition check (Meyer 1992 — Eiffel `require` clauses); Loud-crash boundary (Armstrong 2007 — replaces node's stack trace with a structured operator-facing line). Chaos table: prepare hook silent failure → defensive check fires; stale `.tsbuildinfo` → defensive check fires; `existsSync` throws (read-only mount) → loud-crash up the stack per Armstrong. Backward-compat: both layers add to the existing flow without changing slice-1-7 behavior on a working install.
+
 ### Real Claude probe (slice 4 of `minsky-cli-auto-bootstrap-local-llm`)
 
 `novel/tick-loop/src/claude-health-probe.ts` ships a pure classifier `classifyClaudeProbeOutput({ exitCode, stderrTail, binaryAbsent })` that takes the result of a synthetic `claude --print "ping"` invocation and returns one of four verdicts: `healthy` (exit 0), `exhausted` (non-zero exit + stderr matches `HARD_LIMIT_PATTERNS`), `binary-missing` (claude not on PATH), or `error` (non-zero exit, no hard-limit signal — transient). The pattern set is shared with `HARD_LIMIT_PATTERNS` in `llm-provider-selector.ts` (rule #2 — single source of truth), so a wording change updates both lists in the same PR.
