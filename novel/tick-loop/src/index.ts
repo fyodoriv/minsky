@@ -763,3 +763,16 @@ export {
   buildWhichProbe,
   modelCachePath,
 } from "./local-llm-probes.js";
+
+// Real `claude --print` probe — used by `bin/minsky.mjs` to detect
+// "credits exhausted" vs "binary missing" vs "healthy" so the
+// auto-bootstrap pre-flight fires when the operator's machine cannot
+// actually use claude (not just when the binary is missing). Slice 4
+// of `minsky-cli-auto-bootstrap-local-llm`.
+export {
+  type ClaudeHealthDecision,
+  type ClaudeHealthVerdict,
+  type ClaudeProbeOutput,
+  classifyClaudeProbeOutput,
+  needsLocalLlmBootstrap,
+} from "./claude-health-probe.js";
