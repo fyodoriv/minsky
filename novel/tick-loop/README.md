@@ -272,6 +272,20 @@ Pattern conformance: same as slice 8 — Pre-condition check (Meyer 1992) + Loud
 
 Backward-compat: pure additions on top of slice 8 — no behavioural change on a working install.
 
+#### Slice 2 of `minsky-runtime-resilience`: graceful-degrade on log/workers/bin runtime failures (operator 2026-05-08 — slice 2 of the self-healing trilogy)
+
+Three runtime I/O failure modes were still crashing `minsky` instead of producing operator-actionable output. Each one is now wrapped by a paired-tested pure helper that the bin script consults before doing the I/O.
+
+1. **Log path EACCES / EROFS / ENOSPC** — `bin/minsky.mjs::runStartOrAttach` opens `<MINSKY_HOME>/.minsky/workers/<id>.log` for the daemon's stdout/stderr. On the multi-machine pattern (different username, dotfiles' hardcoded path is wrong), this throws EACCES and crashes the CLI. New helper `pickLogPath({ primary, fallbackTmp, openSyncFn })` tries the primary path; on a recoverable errno (`EACCES` / `EROFS` / `ENOSPC`) falls through to a `/tmp/minsky-worker-<id>-<pid>.log` path and returns `{ path, fellBack: true, fd, reason }` so the caller can warn + continue. Unknown errnos (EBUSY, exotic) bubble up — loud-crash boundary preserved. When log falls back, the pid file ALSO lands in `/tmp` so both files live or die together.
+
+2. **Workers-dir mkdir EACCES / EROFS** — `mkdirSync(WORKERS_DIR, { recursive: true })` was raw — on EACCES (wrong owner) or EROFS (read-only mount), the operator got a node stack trace pointing at the I/O call, not at the substrate misconfiguration. New helper `ensureWorkersDir({ dir, mkdirSyncFn })` returns `{ ok: true }` on success or `{ ok: false, errCode, recoveryHint }` with a path-aware recovery hint (`chmod u+w <path>` for EACCES; set `MINSKY_HOME=<writable-path>` for EROFS or unknown). Paired formatter `formatWorkersDirRecoveryMessage(...)` renders the one-line stderr message.
+
+3. **`bin/tick-loop.mjs` missing** — `spawn(node, [TICK_LOOP_BIN, ...])` with a missing target file emits ENOENT from the child-process layer with no clear pointer at the bin path. New helper `checkTickLoopBinExists` mirrors slice 8's `dist-existence-check` shape exactly — same discriminated-union return, same paired-test wording contract. The bin file itself runs the existsSync check before `mkdirSync` so the error fires at the earliest correct boundary.
+
+The three helpers are all pure-over-injection (Hughes 1989) with paired tests pinning each errno's expected behaviour (+19 tests). The bin-side wiring is three try-catches/checks around the existing I/O calls — happy path is unchanged, error paths now emit one-line operator-actionable messages.
+
+Backward-compat: pure additions; the happy path is byte-identical to slice 1.
+
 ### Real Claude probe (slice 4 of `minsky-cli-auto-bootstrap-local-llm`)
 
 `novel/tick-loop/src/claude-health-probe.ts` ships a pure classifier `classifyClaudeProbeOutput({ exitCode, stderrTail, binaryAbsent })` that takes the result of a synthetic `claude --print "ping"` invocation and returns one of four verdicts: `healthy` (exit 0), `exhausted` (non-zero exit + stderr matches `HARD_LIMIT_PATTERNS`), `binary-missing` (claude not on PATH), or `error` (non-zero exit, no hard-limit signal — transient). The pattern set is shared with `HARD_LIMIT_PATTERNS` in `llm-provider-selector.ts` (rule #2 — single source of truth), so a wording change updates both lists in the same PR.
