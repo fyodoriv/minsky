@@ -3,6 +3,7 @@
 // <!-- scope: human-approved minsky CLI ergonomics (operator 2026-05-06) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well") -->
+// <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path probe + H1 aider python + H2 non-TTY refuse) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -57,6 +58,8 @@ import {
   executeBootstrapPlan,
   needsLocalLlmBootstrap,
   planLocalLlmBootstrap,
+  planRequiresTty,
+  preferredPipxPath,
   probePythonWithDefaults,
   renderConfirmSummary,
 } from "../dist/index.js";
@@ -84,7 +87,15 @@ if (first === "--help" || first === "-h" || first === "help") {
 } else if (first === "doctor") {
   await runDoctor();
 } else if (first === "bootstrap-local-llm") {
-  await runBootstrapLocalLlm({ force: true });
+  const result = await runBootstrapLocalLlm({ force: true });
+  // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
+  // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
+  // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
+  // chaining works. The empty-object return is the refuse signal; a
+  // successful bootstrap returns the env overlay with MINSKY_LOCAL_LLM.
+  if (Object.keys(result).length === 0) {
+    process.exit(1);
+  }
 } else if (first === "start") {
   // Back-compat: keep `start` as an alias of the no-subcommand form. Any
   // further args are forwarded to bin/tick-loop.mjs at spawn time.
@@ -222,21 +233,51 @@ async function maybeBootstrapLocalLlm() {
  * @param {{ force: boolean }} opts
  * @returns {Promise<Record<string, string>>}
  */
-async function runBootstrapLocalLlm({ force }) {
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
-  // slice 5: pick a python interpreter that actually exists on this host
-  // (replaces the hardcoded `/opt/homebrew/bin/python3.12` that worked
-  // only on the operator's Apple-Silicon-brew laptop).
-  const pythonPath = probePythonWithDefaults();
-  // slice 6: detect x86_64-on-Apple-Silicon + missing /opt/homebrew/
-  // so the planner can prepend install-arm-homebrew and use absolute
-  // /opt/homebrew/bin/* paths for subsequent steps.
+/**
+ * Build the planner + probe options together so `runBootstrapLocalLlm`
+ * and `runDoctor` can share the wiring. Slice 7 H0 threads archState's
+ * `preferredPipxPath` into the pipx probe so Intel-brew pipx doesn't
+ * mask the need for a fresh arm-brew pipx install.
+ *
+ * @returns {Promise<{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, planOpts: import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions, pythonPath: string | undefined }>}
+ */
+async function detectForBootstrap() {
   const archState = await detectArchState(buildArchProbes());
+  const expectedPipxPath = preferredPipxPath(archState);
+  /** @type {Parameters<typeof buildProductionProbes>[0]} */
+  const probeOpts = { whichFn };
+  if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
+  const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
+  const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
-  const planOpts = {};
+  const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
-  planOpts.archState = archState;
+  return { state, archState, planOpts, pythonPath };
+}
+
+/**
+ * Slice 7 H2: emit the non-TTY refusal message with the manual install
+ * one-liner. Factored out so the caller's cognitive complexity stays
+ * under biome's cap.
+ */
+function emitNonTtyRefuseMessage() {
+  process.stderr.write(
+    "minsky: install-arm-homebrew step needs a TTY for sudo, but stdin is not a TTY\n",
+  );
+  process.stderr.write(
+    "minsky: rerun `minsky bootstrap-local-llm` from an interactive terminal, OR\n",
+  );
+  process.stderr.write(
+    "minsky: install native ARM Homebrew manually by running this one-liner in Terminal:\n",
+  );
+  process.stderr.write(
+    '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n',
+  );
+  process.stderr.write("minsky: then rerun `minsky bootstrap-local-llm`\n");
+}
+
+async function runBootstrapLocalLlm({ force }) {
+  const { state, planOpts } = await detectForBootstrap();
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
@@ -244,6 +285,13 @@ async function runBootstrapLocalLlm({ force }) {
   }
   const isInteractive =
     process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
+  // Slice 7 H2: if the plan requires a TTY (install-arm-homebrew's
+  // sudo needs stdin inheritance) AND we're non-TTY, refuse with
+  // clear recovery instructions instead of hanging silently at sudo.
+  if (planRequiresTty(plan) && !isInteractive) {
+    emitNonTtyRefuseMessage();
+    return {};
+  }
   const confirmFn = isInteractive ? confirmInteractive : confirmAlwaysYes;
   const result = await executeBootstrapPlan(plan, {
     confirm: confirmFn,
@@ -266,11 +314,13 @@ async function runBootstrapLocalLlm({ force }) {
  * Read-only doctor — prints the current state of the local-LLM stack +
  * Claude health and exits.
  */
-async function runDoctor() {
-  process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
-  const claudeDecision = await probeClaude();
+/**
+ * Emit the 8 doctor status rows. Extracted so `runDoctor` stays under
+ * biome's cognitive-complexity cap.
+ *
+ * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined }} args
+ */
+function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   /** @param {string} label @param {boolean} ok @param {string} [detail] */
   const line = (label, ok, detail) => {
     const mark = ok ? "✓" : "✗";
@@ -287,34 +337,30 @@ async function runDoctor() {
     state.server.reachable,
     state.server.reachable ? state.server.url : (state.server.reason ?? ""),
   );
-  // slice 5: probe python too, so the operator can see what interpreter
-  // the aider install step is going to pin to.
-  const pythonPath = probePythonWithDefaults();
   line(
     "python 3.12/3.13 for aider",
     pythonPath !== undefined,
     pythonPath ?? "no 3.12/3.13 found — will use pipx default (may fail on 3.14+)",
   );
-  // slice 6: show the arch row so Rosetta-on-Apple-Silicon and missing
-  // /opt/homebrew/ are visible before the operator runs bootstrap.
-  const archState = await detectArchState(buildArchProbes());
-  // The row is GREEN when the planner won't need to install arm-homebrew
-  // AND the shell isn't mismatched. Rosetta-with-brew is mismatched but
-  // still GREEN because absolute paths sidestep the mismatch.
+  // Row is GREEN when planner won't need arm-homebrew install.
+  // Rosetta-with-brew still GREEN — absolute paths sidestep the mismatch.
   line("arch", !archState.needsNativeBrew, describeArchState(archState));
+}
+
+async function runDoctor() {
+  process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
+  const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
+  const claudeDecision = await probeClaude();
+  emitDoctorRows({ state, archState, claudeDecision, pythonPath });
   process.stdout.write("\n");
-  /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
-  const planOpts = {};
-  if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
-  planOpts.archState = archState;
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready) {
     process.stdout.write("Local-LLM stack: GREEN — ready\n");
-  } else {
-    process.stdout.write("Local-LLM stack: YELLOW — install plan available\n");
-    process.stdout.write(`${renderConfirmSummary(plan)}\n`);
-    process.stdout.write("\nRun `minsky bootstrap-local-llm` to install.\n");
+    return;
   }
+  process.stdout.write("Local-LLM stack: YELLOW — install plan available\n");
+  process.stdout.write(`${renderConfirmSummary(plan)}\n`);
+  process.stdout.write("\nRun `minsky bootstrap-local-llm` to install.\n");
 }
 
 /**

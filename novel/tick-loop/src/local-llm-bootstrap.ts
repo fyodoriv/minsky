@@ -1,6 +1,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 1 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08 — live-run regression: hardcoded python path broke on Intel-brew machines) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
+// <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H1 arch-consistent aider python + H2 planRequiresTty non-TTY refuse) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap` — pure detection + plan functions
  * for the local-LLM stack. Slice 1 of P0 task
@@ -61,7 +62,12 @@
  * @module tick-loop/local-llm-bootstrap
  */
 
-import { needsArmHomebrewInstall, preferredBrewPath, preferredPipxPath } from "./arch-probe.js";
+import {
+  needsArmHomebrewInstall,
+  preferredBrewPath,
+  preferredPipxPath,
+  preferredPythonPath,
+} from "./arch-probe.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -431,40 +437,66 @@ function isStackReady(state: LocalLlmStackState): boolean {
  *
  * (Internal — not exported.)
  */
+interface ResolvedPaths {
+  readonly brewPath: string | undefined;
+  readonly pipxPath: string | undefined;
+  readonly pythonPath: string | undefined;
+}
+
+/**
+ * Resolve absolute brew / pipx / python paths from `options`. Extracted
+ * so `buildInstallSteps` below stays under biome's cognitive-complexity
+ * cap. When `archState` is undefined, every field is `undefined` and
+ * the step builders fall back to slice-1's bare-name commands.
+ */
+function resolvePaths(options: BootstrapPlanOptions): ResolvedPaths {
+  const { archState } = options;
+  if (archState === undefined) {
+    return { brewPath: undefined, pipxPath: undefined, pythonPath: options.pythonPath };
+  }
+  const archPython = preferredPythonPath(archState);
+  return {
+    brewPath: preferredBrewPath(archState),
+    pipxPath: preferredPipxPath(archState),
+    pythonPath: archPython ?? options.pythonPath,
+  };
+}
+
 function buildInstallSteps(
   state: LocalLlmStackState,
   options: BootstrapPlanOptions,
 ): InstallStep[] {
-  // Slice 6: resolve absolute brew / pipx paths from archState. When
-  // archState is undefined (slice 1-5 call sites), the helpers short-
-  // circuit to `undefined` and the step builders fall back to bare
-  // `brew` / `pipx` on PATH (slice 1 behavior, backward-compat).
-  const brewPath =
-    options.archState !== undefined ? preferredBrewPath(options.archState) : undefined;
-  const pipxPath =
-    options.archState !== undefined ? preferredPipxPath(options.archState) : undefined;
-
+  const { brewPath, pipxPath, pythonPath } = resolvePaths(options);
   const steps: InstallStep[] = [];
-
   if (options.archState !== undefined && needsArmHomebrewInstall(options.archState)) {
     steps.push(buildInstallArmHomebrewStep());
   }
-  if (!state.pipx.present) {
-    steps.push(buildPipxStep(brewPath));
-  }
-  if (!state.mlxLm.present) {
-    steps.push(buildMlxLmStep(pipxPath));
-  }
-  if (!state.aider.present) {
-    steps.push(buildAiderStep(options.pythonPath, pipxPath));
-  }
-  if (!state.model.present) {
-    steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  }
-  if (!state.server.reachable) {
-    steps.push(buildStartServerStep());
-  }
+  if (!state.pipx.present) steps.push(buildPipxStep(brewPath));
+  if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
+  if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
+  if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
+  if (!state.server.reachable) steps.push(buildStartServerStep());
   return steps;
+}
+
+/**
+ * Does the plan contain at least one step that needs an interactive
+ * terminal (stdin inheritance for sudo prompt)? Slice 7 H2 — the CLI
+ * wiring uses this to refuse `bootstrap-local-llm` when the operator
+ * runs `minsky` without a TTY (launchd, systemd, cron, `< /dev/null`).
+ *
+ * Currently the only TTY-required step is `install-arm-homebrew` (the
+ * Homebrew installer needs sudo to `mkdir /opt/homebrew/`). If future
+ * steps add sudo dependencies, extend the predicate here.
+ *
+ * Pattern conformance: Predicate pattern — Meyer, *Eiffel: The
+ * Language*, 1992 (the `require` / `ensure` contract-by-pre/post-
+ * condition tradition). Pure function; same input → same output.
+ *
+ * @otel-exempt pure predicate — no span.
+ */
+export function planRequiresTty(plan: BootstrapPlan): boolean {
+  return plan.steps.some((step) => step.type === "install-arm-homebrew");
 }
 
 /**

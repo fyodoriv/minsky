@@ -250,3 +250,69 @@ describe("buildProductionProbes", () => {
     expect(server.reachable).toBe(true);
   });
 });
+
+// ---- H0: expectedPipxPath override (slice 7) ----------------------------
+
+describe("buildProductionProbes — expectedPipxPath override (slice 7 H0)", () => {
+  // Slice 6 ships the install plan with `/opt/homebrew/bin/pipx` as the
+  // arch-correct pipx path. But slice 1's pipx probe uses `which pipx`,
+  // which on an Intel-brew-on-Apple-Silicon machine resolves to
+  // `/usr/local/bin/pipx` and reports `present: true`. The planner then
+  // skips install-pipx, and step 2 of the plan (`/opt/homebrew/bin/pipx
+  // install mlx-lm`) fails at "command not found".
+  //
+  // H0: when `expectedPipxPath` is set, the pipx probe checks that
+  // specific path via existsSync, ignoring whichFn. This lets the
+  // planner correctly detect that arch-correct pipx doesn't exist and
+  // schedule install-pipx.
+
+  it("uses existsSync on expectedPipxPath when set (returns present when path exists)", async () => {
+    const probes = buildProductionProbes({
+      whichFn: async () => "/usr/local/bin/pipx",
+      existsSyncFn: (p) => p === "/opt/homebrew/bin/pipx",
+      expectedPipxPath: "/opt/homebrew/bin/pipx",
+    });
+    const pipx = await probes.probePipx();
+    expect(pipx.present).toBe(true);
+    expect(pipx.path).toBe("/opt/homebrew/bin/pipx");
+  });
+
+  it("reports absent when expectedPipxPath is set but file doesn't exist", async () => {
+    // Operator's M3 Max Rosetta scenario: whichFn returns Intel pipx,
+    // but we're asking about the arm64 pipx path.
+    const probes = buildProductionProbes({
+      whichFn: async () => "/usr/local/bin/pipx",
+      existsSyncFn: (p) => p !== "/opt/homebrew/bin/pipx",
+      expectedPipxPath: "/opt/homebrew/bin/pipx",
+    });
+    const pipx = await probes.probePipx();
+    expect(pipx.present).toBe(false);
+    expect(pipx.reason).toMatch(/\/opt\/homebrew\/bin\/pipx/);
+  });
+
+  it("falls back to whichFn when expectedPipxPath is undefined (slice-6 behavior)", async () => {
+    // Backward compat: no override → slice 1's `which pipx` path.
+    const probes = buildProductionProbes({
+      whichFn: async () => "/usr/local/bin/pipx",
+      existsSyncFn: () => false,
+    });
+    const pipx = await probes.probePipx();
+    expect(pipx.present).toBe(true);
+    expect(pipx.path).toBe("/usr/local/bin/pipx");
+  });
+
+  it("does NOT affect mlxLm or aider probes (they stay on whichFn)", async () => {
+    // mlx_lm.server and aider are installed by pipx into
+    // ~/.local/bin/ (pipx's default PIPX_BIN_DIR) regardless of which
+    // pipx instance installed them. We only need to override the pipx
+    // probe itself; mlx-lm and aider stay with `which`.
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => false,
+      expectedPipxPath: "/opt/homebrew/bin/pipx",
+    });
+    const [mlx, aider] = await Promise.all([probes.probeMlxLm(), probes.probeAider()]);
+    expect(mlx.path).toBe("/usr/local/bin/mlx_lm.server");
+    expect(aider.path).toBe("/usr/local/bin/aider");
+  });
+});

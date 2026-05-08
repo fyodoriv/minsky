@@ -29,6 +29,16 @@ Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-
 
 If `which python3` reports a binary under `/usr/local/` (Intel Homebrew) and `sysctl -n sysctl.proc_translated` returns `1`, your shell is in Rosetta. MLX needs ARM-native Python to use the GPU through Metal. Either install ARM-native Homebrew at `/opt/homebrew/`, or use the system Python explicitly: `arch -arm64 /usr/bin/python3 -m venv ~/venvs/mlx`. The `arch -arm64` prefix forces native execution; without it, MLX may fail to load its arm64-only `_imaging.so` PIL bindings or fall back to CPU.
 
+### Auto-bootstrap recovery paths (slices 6–7)
+
+Since slice 6 (`minsky-cli-arch-detection`), the `minsky` CLI auto-detects the Rosetta + missing-`/opt/homebrew/` case and includes an `install-arm-homebrew` step as step 1 of the generated plan. The installer is wrapped with `arch -arm64 /bin/bash -c "NONINTERACTIVE=1 $(curl ... install.sh)"` so `mkdir /opt/homebrew/` lands in arm64 mode even when the parent shell is in Rosetta.
+
+Slice 7 hardened three remaining edge cases:
+
+- **H0 (pipx probe):** the pipx probe now checks `/opt/homebrew/bin/pipx` explicitly on Apple Silicon instead of `which pipx`. This prevents the planner from skipping `install-pipx` when Intel brew's pipx exists but the plan references the arm64 path. `minsky doctor` now correctly shows `✗ pipx  /opt/homebrew/bin/pipx does not exist` on a dual-brew machine.
+- **H1 (aider python):** the aider install step now uses `/opt/homebrew/bin/python3.13` (brew's canonical post-install path) when arch-state says we'll have native brew, instead of picking up Intel brew's python3.13 as a first-fit slice-5 candidate. The plan is now architecturally consistent (all paths under `/opt/homebrew/`).
+- **H2 (non-TTY refuse):** `minsky bootstrap-local-llm < /dev/null` (or under launchd / systemd / any context where stdin is not a TTY) refuses immediately with exit code 1 and prints the manual installer one-liner instead of hanging silently at sudo. To install `/opt/homebrew/` from a daemonized context: run `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` in Terminal, then rerun `minsky bootstrap-local-llm` from any shell.
+
 ## Smoke test
 
 In one terminal:

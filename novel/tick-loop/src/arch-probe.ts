@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
+// <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — preferredPythonPath for arch-consistent aider install) -->
 /**
  * `@minsky/tick-loop/arch-probe` — pure architecture detection for the
  * local-LLM bootstrap. Slice 6 of P0 task `minsky-cli-arch-detection`
@@ -207,6 +208,37 @@ export function preferredPipxPath(state: ArchState): string | undefined {
   // Swap the trailing `brew` → `pipx`. Works for both `/opt/homebrew/bin/brew`
   // and `/usr/local/bin/brew` and any future prefix.
   return brewPath.replace(/\/brew$/, "/pipx");
+}
+
+/**
+ * Canonical post-install python path for aider on Apple Silicon hosts.
+ * Slice 7 H1 — the aider install step previously used whatever
+ * slice-5's `PYTHON_CANDIDATES` scan picked first (often
+ * `/usr/local/bin/python3.13` on dual-brew machines), which works via
+ * universal-binary dispatch but mixes Intel + Apple Silicon layouts.
+ *
+ * Returns `/opt/homebrew/bin/python3.13` iff the host is Apple Silicon
+ * AND native brew is or will be present by the time the aider step
+ * runs (either `nativeBrewPath` already set, or `needsNativeBrew`
+ * signaling that install-arm-homebrew is scheduled first). `brew
+ * install pipx` depends on `python@3.13` so the formula chain
+ * guarantees the path will exist — see `install-pipx` step in
+ * `planLocalLlmBootstrap`.
+ *
+ * Returns `undefined` on Intel / Linux / unknown hosts so the planner
+ * falls through to slice-5's `pythonPath` (from `probePythonWithDefaults`).
+ *
+ * @otel-exempt pure selector — no span.
+ */
+export function preferredPythonPath(state: ArchState): string | undefined {
+  if (state.hardwareArch !== "arm64") return undefined;
+  // Native brew is or will be present → brew pipx brings python@3.13.
+  if (state.needsNativeBrew || state.nativeBrewPath !== undefined) {
+    return "/opt/homebrew/bin/python3.13";
+  }
+  // arm64 hardware without brew AND without the install plan — defensive
+  // fallthrough (the planner never produces this state in practice).
+  return undefined;
 }
 
 /**
