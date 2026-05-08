@@ -720,3 +720,46 @@ export {
   decideTaskCompletion,
   titleNamesTask,
 } from "./task-completion-detector.js";
+
+// Local-LLM auto-bootstrap (P0 from operator 2026-05-08, "git pull && minsky"
+// UX target): pure detect + plan functions plus the executor that dispatches
+// pipx / mlx-lm / aider / huggingface-cli / mlx_lm.server installs in
+// dependency order, with one operator-facing confirm prompt. Slice 1-3 of
+// `minsky-cli-auto-bootstrap-local-llm`.
+export {
+  type BootstrapPlan,
+  type BootstrapStepType,
+  type ComponentState,
+  type DetectProbes,
+  DEFAULT_LOCAL_LLM_MODEL,
+  DEFAULT_LOCAL_LLM_PROBE_URL,
+  DEFAULT_MODEL_DOWNLOAD_MB,
+  type InstallStep,
+  type LocalLlmStackState,
+  type ServerState,
+  detectLocalLlmStack,
+  planLocalLlmBootstrap,
+  summarisePlan,
+} from "./local-llm-bootstrap.js";
+export {
+  type ConfirmFn,
+  type ExecuteOpts,
+  type ExecuteResult,
+  type ExecuteSpawnResult,
+  type LogFn,
+  type SpawnFn,
+  confirmAlwaysNo,
+  confirmAlwaysYes,
+  executeBootstrapPlan,
+  renderConfirmSummary,
+} from "./local-llm-bootstrap-executor.js";
+export {
+  type ExistsSyncFn,
+  type FetchFn,
+  type WhichFn,
+  buildModelProbe,
+  buildProductionProbes,
+  buildServerProbe,
+  buildWhichProbe,
+  modelCachePath,
+} from "./local-llm-probes.js";
