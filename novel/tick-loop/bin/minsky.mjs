@@ -1,39 +1,62 @@
 #!/usr/bin/env node
 // @ts-check
 // <!-- scope: human-approved minsky CLI ergonomics (operator 2026-05-06) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
  *
- * Sane defaults + attach detection:
+ * Sane defaults + attach detection + local-LLM auto-bootstrap (P0 from
+ * operator 2026-05-08, "git pull && minsky" UX):
  *
- *   minsky                    start-or-attach worker 0 (default)
+ *   minsky                    start-or-attach worker 0; auto-bootstrap if Claude is exhausted
  *   minsky 1                  start-or-attach worker 1
  *   minsky logs               tail worker 0's log (never spawns)
  *   minsky logs 1             tail worker 1's log
  *   minsky stop               stop worker 0 (SIGTERM the daemon, leave the log)
  *   minsky stop 1             stop worker 1
+ *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
+ *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
  *      open the log file with `tail -F` (pretty output), don't spawn anything.
- *   2. Otherwise → SPAWN: fork bin/tick-loop.mjs with sane defaults
- *      (--worker-id=<id>, --workers-total=max(id+1, 1), tick interval 5min,
- *      private paused-sentinel so the legacy launchd PAUSED doesn't pause us),
- *      write the PID to `.minsky/workers/<id>.pid`, then attach.
+ *   2. Otherwise (cold start) → run the local-LLM auto-bootstrap pre-flight:
+ *      - probe `mlx_lm.server` reachability (~2s)
+ *      - if reachable → set `MINSKY_LOCAL_LLM=1` for the spawn and skip
+ *      - if unreachable AND Claude is also unhealthy → run
+ *        `detectLocalLlmStack` + `planLocalLlmBootstrap`; if the plan
+ *        is non-empty, prompt the operator with one `[Y/n]` confirm,
+ *        then install + start the local server
+ *      - then SPAWN: fork bin/tick-loop.mjs with sane defaults
+ *
+ * Operator escape hatches:
+ *   - `MINSKY_NO_AUTO_BOOTSTRAP=1` skips the pre-flight entirely
+ *   - `MINSKY_NON_INTERACTIVE=1` (or non-TTY stdin/stdout) auto-confirms
  *
  * Detach: Ctrl+C exits the tail only; the daemon keeps running.
  * Reattach: re-run `minsky` (or `minsky logs`) — it sees the live PID
  * and attaches without respawning.
  */
 
-import { spawn } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
+import {
+  buildProductionProbes,
+  confirmAlwaysYes,
+  detectLocalLlmStack,
+  executeBootstrapPlan,
+  planLocalLlmBootstrap,
+  renderConfirmSummary,
+} from "../dist/index.js";
 import { formatLogLine } from "../dist/pretty-log.js";
+
+const execAsync = promisify(exec);
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const PKG_ROOT = resolve(HERE, "..");
@@ -52,6 +75,10 @@ if (first === "--help" || first === "-h" || first === "help") {
   await runLogs(argv.slice(1));
 } else if (first === "stop") {
   runStop(argv.slice(1));
+} else if (first === "doctor") {
+  await runDoctor();
+} else if (first === "bootstrap-local-llm") {
+  await runBootstrapLocalLlm({ force: true });
 } else if (first === "start") {
   // Back-compat: keep `start` as an alias of the no-subcommand form. Any
   // further args are forwarded to bin/tick-loop.mjs at spawn time.
@@ -104,18 +131,237 @@ async function runStartOrAttach(args) {
     await tailWithPretty(logPath, true);
     return;
   }
+  // Cold start — run the local-LLM auto-bootstrap pre-flight. Idempotent:
+  // a fully-set-up machine adds <500ms and sets MINSKY_LOCAL_LLM=1 if the
+  // server is reachable; an unset machine prompts the operator with one
+  // confirm and runs the install plan.
+  const bootstrapEnv = await maybeBootstrapLocalLlm();
   const tickLoopArgs = withSaneDefaults(workerId, extraArgs);
   const fd = openSync(logPath, "a");
   const child = spawn(process.execPath, [TICK_LOOP_BIN, ...tickLoopArgs], {
     detached: true,
     stdio: ["ignore", fd, fd],
-    env: process.env,
+    env: { ...process.env, ...bootstrapEnv },
   });
   child.unref();
   writeFileSync(pidPath, String(child.pid ?? ""), "utf8");
   process.stderr.write(`minsky: started worker ${workerId} (PID ${child.pid}, log: ${logPath})\n`);
   process.stderr.write("minsky: Ctrl+C detaches (daemon keeps running)\n\n");
   await tailWithPretty(logPath, true);
+}
+
+// ---- Local-LLM auto-bootstrap pre-flight ---------------------------------
+
+/**
+ * Probe the local-LLM stack and run the install plan if needed. Idempotent
+ * fast path: an already-running mlx-lm.server is detected with one fetch
+ * call and we just return `MINSKY_LOCAL_LLM=1` so the spawned daemon picks
+ * up the local fallback path.
+ *
+ * Operator escape hatches: `MINSKY_NO_AUTO_BOOTSTRAP=1` skips the pre-flight
+ * entirely; `MINSKY_NON_INTERACTIVE=1` (or non-TTY stdin) auto-confirms.
+ *
+ * Returns an env-overlay object the spawn merges with `process.env`. Empty
+ * object means "no overlay needed" (caller passes the daemon's existing env).
+ *
+ * @returns {Promise<Record<string, string>>}
+ */
+async function maybeBootstrapLocalLlm() {
+  if (process.env["MINSKY_NO_AUTO_BOOTSTRAP"] === "1") {
+    return {};
+  }
+  // Already opted in via env? Don't re-run the bootstrap.
+  if (process.env["MINSKY_LOCAL_LLM"] === "1") {
+    return {};
+  }
+  const probes = buildProductionProbes({ whichFn });
+  const state = await detectLocalLlmStack(probes);
+  // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
+  // skip the install pipeline entirely.
+  if (state.server.reachable) {
+    process.stderr.write(
+      `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
+    );
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
+  // Server unreachable. Decide whether to bootstrap. Default: bootstrap
+  // when the operator is on an interactive terminal AND the plan is
+  // non-empty AND Claude is also unhealthy. The Claude probe is a coarse
+  // `which claude` check today; future slice tightens to a hard-limit
+  // detection per `HARD_LIMIT_PATTERNS` from `llm-provider-selector`.
+  const claudeOk = await probeClaudeHealthy();
+  if (claudeOk) {
+    // Claude is on PATH; the daemon will prefer it. No need to bootstrap
+    // local fallback right now — the operator can run `minsky bootstrap-local-llm`
+    // explicitly later.
+    return {};
+  }
+  process.stderr.write("minsky: claude is unhealthy AND local-LLM server is not reachable\n");
+  return await runBootstrapLocalLlm({ force: false });
+}
+
+/**
+ * Idempotent bootstrap entry point. Runs detect + plan + execute. When
+ * `force === true` (operator ran `minsky bootstrap-local-llm` explicitly),
+ * the prompt always shows even if the plan is empty; otherwise we skip the
+ * prompt for empty plans.
+ *
+ * @param {{ force: boolean }} opts
+ * @returns {Promise<Record<string, string>>}
+ */
+async function runBootstrapLocalLlm({ force }) {
+  const probes = buildProductionProbes({ whichFn });
+  const state = await detectLocalLlmStack(probes);
+  const plan = planLocalLlmBootstrap(state);
+  if (plan.ready && !force) {
+    process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
+  const isInteractive =
+    process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
+  const confirmFn = isInteractive ? confirmInteractive : confirmAlwaysYes;
+  const result = await executeBootstrapPlan(plan, {
+    confirm: confirmFn,
+    spawnFn: spawnAdapter,
+    log: (s) => process.stderr.write(s),
+  });
+  if (!result.success) {
+    process.stderr.write(
+      `minsky: local-LLM bootstrap failed (${result.failedStep ?? "unknown"}: ${result.reason ?? "no reason"})\n`,
+    );
+    process.stderr.write(
+      "minsky: continuing without local-LLM fallback; daemon will use claude only\n",
+    );
+    return {};
+  }
+  return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+}
+
+/**
+ * Read-only doctor — prints the current state of the local-LLM stack +
+ * Claude health and exits.
+ */
+async function runDoctor() {
+  process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
+  const probes = buildProductionProbes({ whichFn });
+  const state = await detectLocalLlmStack(probes);
+  const claudeOk = await probeClaudeHealthy();
+  /** @param {string} label @param {boolean} ok @param {string} [detail] */
+  const line = (label, ok, detail) => {
+    const mark = ok ? "✓" : "✗";
+    const detailStr = detail !== undefined && detail.length > 0 ? `  ${detail}` : "";
+    process.stdout.write(`  ${mark} ${label}${detailStr}\n`);
+  };
+  line("claude CLI", claudeOk, claudeOk ? "" : "not on PATH");
+  line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
+  line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
+  line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
+  line("model weights", state.model.present, state.model.detail ?? state.model.reason ?? "");
+  line(
+    "mlx-lm.server reachable",
+    state.server.reachable,
+    state.server.reachable ? state.server.url : (state.server.reason ?? ""),
+  );
+  process.stdout.write("\n");
+  const plan = planLocalLlmBootstrap(state);
+  if (plan.ready) {
+    process.stdout.write("Local-LLM stack: GREEN — ready\n");
+  } else {
+    process.stdout.write("Local-LLM stack: YELLOW — install plan available\n");
+    process.stdout.write(`${renderConfirmSummary(plan)}\n`);
+    process.stdout.write("\nRun `minsky bootstrap-local-llm` to install.\n");
+  }
+}
+
+/** `which <bin>` adapter — uses `command -v` (POSIX) for portability. */
+async function whichFn(bin) {
+  try {
+    const { stdout } = await execAsync(`command -v ${shellQuote(bin)}`, {
+      timeout: 1000,
+    });
+    const path = stdout.trim();
+    return path.length > 0 ? path : undefined;
+    // rule-6: handled-locally — `command -v` exits 1 when the binary is
+    // missing; promisify treats that as a thrown Error. We type that as
+    // "not on PATH" rather than crash the whole CLI.
+  } catch {
+    return undefined;
+  }
+}
+
+/** Quote a shell argument minimally (no globbing in our usage). */
+function shellQuote(s) {
+  return /^[\w.\/-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Spawn adapter for the bootstrap executor — wraps `child_process.spawn`
+ * to return a `{ exitCode, stderrTail }` Promise. Streams stdout/stderr
+ * through to the operator's terminal so long installs (model download)
+ * show progress live.
+ *
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @param {{ cwd?: string; env?: NodeJS.ProcessEnv }} [opts]
+ * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
+ */
+function spawnAdapter(command, args, opts = {}) {
+  return new Promise((resolveDone, rejectFail) => {
+    const child = spawn(command, args, {
+      cwd: opts.cwd,
+      env: opts.env ?? process.env,
+      stdio: ["ignore", "inherit", "pipe"],
+    });
+    let stderrTail = "";
+    child.stderr?.on("data", (chunk) => {
+      const s = chunk.toString("utf8");
+      process.stderr.write(s);
+      stderrTail = (stderrTail + s).slice(-2048);
+    });
+    child.on("error", rejectFail);
+    child.on("close", (code) => {
+      resolveDone({ exitCode: code ?? -1, stderrTail });
+    });
+  });
+}
+
+/**
+ * Read one [Y/n] answer from stdin. Used by the confirm prompt.
+ *
+ * @param {string} summary
+ * @returns {Promise<boolean>}
+ */
+async function confirmInteractive(summary) {
+  process.stderr.write(summary);
+  process.stderr.write(" [Y/n] ");
+  return new Promise((resolveAns) => {
+    let buf = "";
+    /** @param {Buffer} chunk */
+    const onData = (chunk) => {
+      buf += chunk.toString("utf8");
+      if (buf.includes("\n")) {
+        process.stdin.removeListener("data", onData);
+        process.stdin.pause();
+        const ans = buf.trim().toLowerCase();
+        // Default Y on empty input (operator hit Enter).
+        resolveAns(ans === "" || ans === "y" || ans === "yes");
+      }
+    };
+    process.stdin.resume();
+    process.stdin.on("data", onData);
+  });
+}
+
+/**
+ * Probe Claude health. Coarse today: `which claude` is the only check.
+ * Future slice tightens to a hard-limit detection via a synthetic
+ * 1-token claude --print probe.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function probeClaudeHealthy() {
+  const path = await whichFn("claude");
+  return path !== undefined;
 }
 
 /**
