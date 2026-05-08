@@ -422,7 +422,7 @@ export const STACK_MANIFEST = Object.freeze([
   },
   {
     name: "threat-model-section",
-    stages: ["full"],
+    stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-threat-model-section.mjs"],
   },
