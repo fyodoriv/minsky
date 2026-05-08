@@ -609,6 +609,30 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-cloud-audit-gate.test.mjs
 
+  vision-rule-13-non-task-anchors:
+    # vision.md § 13 / rule #13 minimum-bar items 7 (Privacy by default) and
+    # 8 (Threat model per novel/* package): the two items that have no
+    # sibling P0 task ID — their load-bearing citation is the named
+    # industry-standard ("GDPR Article 25", "OWASP Privacy Top 10",
+    # "STRIDE"). Companion gate to `vision-rule-13-task-id-citations` (which
+    # pins items 1-6); together the two close the inverse substrate-cohesion
+    # direction for *every* numbered minimum-bar item.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: vision-rule-13-non-task-anchors lint
+        run: node scripts/check-vision-rule-13-non-task-anchors.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-vision-rule-13-non-task-anchors.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -1301,6 +1325,7 @@ jobs:
       - tick-loop-backoff-schedule
       - typecheck
       - user-story-security-section
+      - vision-rule-13-non-task-anchors
       - vision-rule-13-task-id-citations
     runs-on: ubuntu-latest
     if: always()
@@ -1349,6 +1374,7 @@ jobs:
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
+                   "${{ needs.vision-rule-13-non-task-anchors.result }}" \
                    "${{ needs.vision-rule-13-task-id-citations.result }}"; do
             [ "$r" = "success" ] || fail=1
           done
