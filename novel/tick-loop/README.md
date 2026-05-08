@@ -286,6 +286,33 @@ The three helpers are all pure-over-injection (Hughes 1989) with paired tests pi
 
 Backward-compat: pure additions; the happy path is byte-identical to slice 1.
 
+#### Slice 3 of `minsky-cross-machine-dotfile-checks`: surface invalid git config paths from synced dotfiles (operator 2026-05-08 — slice 3 of the self-healing trilogy, completes the slice 1–2–3 sequence)
+
+PRs #394/#395 shipped graceful-degrade for the lefthook permission denial caused by an invalid `core.hooksPath` from synced dotfiles. That covers the symptom of one specific key during one specific phase (`pnpm install`'s prepare hook). The general pattern — git config keys that reference filesystem paths via dotfiles synced across machines with different usernames — affects multiple keys and surfaces at different times (mid-commit, mid-merge, mid-rebase). This slice surfaces all of them upfront in `minsky doctor` and `setup.sh --doctor` so the operator can fix all the broken paths with copy-paste-able recovery commands before any of them blow up.
+
+`minsky doctor` adds a `git config sanity` section (3 rows, one per key in `PATH_CONFIG_KEYS`):
+
+```text
+  ✓ git config core.hooksPath
+  ⚠ git config core.attributesfile  — /Users/dotfiles-user/.gitattributes (global) does not exist; recover with `git config --global --unset core.attributesfile`
+  ✓ git config core.excludesfile
+```
+
+Each broken row carries:
+
+1. The config key (`core.hooksPath` / `core.attributesfile` / `core.excludesfile`).
+2. The broken value (so the operator can sanity-check what their dotfiles wrote).
+3. The scope inferred from `git config --show-origin` (`global` / `local` / `system` / `unknown`).
+4. A copy-paste-able recovery command sized to the actual scope (`git config --global --unset <key>`, etc.) — which is more precise than the generic "edit your gitconfig" hint.
+
+The pure helper `checkGitConfigPaths(opts)` is paired-tested over a (key × origin × valid/invalid) matrix (+10 tests). The production wiring in `bin/minsky.mjs` shells out to `git config --show-origin --get <key>` per key and parses the origin tab-prefix. Tilde expansion (`~/<path>` → `$HOME/<path>`) is handled in the `existsSyncFn` wrapper because git itself expands tilde when consuming path values, so a raw `existsSync("~/.gitignore_global")` would produce false positives.
+
+`setup.sh --doctor` ships the same check via a shell wrapper (`check_git_config_path` function) that mirrors the JS helper's logic.
+
+Aggressiveness: **detect-only** (per the operator's chosen aggressiveness — "detect + auto-fix safe ops"; git config is OUTSIDE `.minsky/`, so this slice never auto-mutates the operator's config). Broken paths surface as YELLOW (don't block daemon) — they're footguns the operator should know about, not immediate crashes.
+
+Backward-compat: pure additions on top of slice 2; happy path is byte-identical (the new section is only printed in `runDoctor`, not in the start-or-attach path).
+
 ### Real Claude probe (slice 4 of `minsky-cli-auto-bootstrap-local-llm`)
 
 `novel/tick-loop/src/claude-health-probe.ts` ships a pure classifier `classifyClaudeProbeOutput({ exitCode, stderrTail, binaryAbsent })` that takes the result of a synthetic `claude --print "ping"` invocation and returns one of four verdicts: `healthy` (exit 0), `exhausted` (non-zero exit + stderr matches `HARD_LIMIT_PATTERNS`), `binary-missing` (claude not on PATH), or `error` (non-zero exit, no hard-limit signal — transient). The pattern set is shared with `HARD_LIMIT_PATTERNS` in `llm-provider-selector.ts` (rule #2 — single source of truth), so a wording change updates both lists in the same PR.
