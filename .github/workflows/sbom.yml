@@ -1,0 +1,69 @@
+# <!-- scope: human-approved implements parent task `supply-chain-hardening-lockfile-sbom-slsa` § Details (b) — CycloneDX SBOM generation for Minsky releases -->
+# CycloneDX SBOM generation for Minsky releases.
+#
+# Every GitHub release gets a CycloneDX 1.5/1.6 SBOM listing all direct and
+# transitive npm dependencies. The shape is validated by
+# `scripts/check-sbom-shape.mjs` (rule #10 — deterministic enforcement) before
+# `sbom.cdx.json` is attached to the release.
+#
+# Consumer verification:
+#   gh release download <tag> --pattern sbom.cdx.json
+#   node scripts/check-sbom-shape.mjs
+#
+# Pattern: supply-chain hardening (vision.md § 13.5 — SBOM per release);
+# rule #1 (industry-standard — @cyclonedx/cyclonedx-npm is the CycloneDX
+# reference implementation for Node.js projects); rule #10 (deterministic
+# enforcement — shape validated before attachment so a generator regression
+# surfaces before the artefact reaches the consumer).
+#
+# Pre-registered in experiments/security-sbom-generation-2026-05-07.yaml.
+
+name: release-sbom
+
+on:
+  release:
+    types: [created]
+
+# Minimal top-level permissions per Saltzer & Schroeder 1975 — least privilege.
+# Each job declares its own scope.
+permissions: {}
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required: attach sbom.cdx.json to the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: generate CycloneDX SBOM
+        # @cyclonedx/cyclonedx-npm is the CycloneDX reference implementation
+        # for Node.js. `--output-format json` selects CycloneDX JSON 1.5/1.6.
+        # The `.` argument resolves the project root. Pivot: if the emitted
+        # specVersion falls outside {1.5, 1.6}, switch to @cyclonedx/cdxgen
+        # per experiments/security-sbom-generation-2026-05-07.yaml § pivot.
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-format json --output-file sbom.cdx.json .
+
+      - name: validate SBOM shape
+        # Exits 0 iff sbom.cdx.json matches the CycloneDX 1.5/1.6 subset
+        # `check-sbom-shape.mjs` enforces. Exits 1 on shape violation; exits 2
+        # on read/parse failure. The gate fires BEFORE attachment — a shape
+        # regression from a generator update surfaces here, not downstream.
+        run: node scripts/check-sbom-shape.mjs
+
+      - name: attach SBOM to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" sbom.cdx.json --clobber
