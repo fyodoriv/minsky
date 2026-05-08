@@ -258,6 +258,20 @@ Slice 8 ships two layers:
 
 Pattern conformance: Pre-condition check (Meyer 1992 — Eiffel `require` clauses); Loud-crash boundary (Armstrong 2007 — replaces node's stack trace with a structured operator-facing line). Chaos table: prepare hook silent failure → defensive check fires; stale `.tsbuildinfo` → defensive check fires; `existsSync` throws (read-only mount) → loud-crash up the stack per Armstrong. Backward-compat: both layers add to the existing flow without changing slice-1-7 behavior on a working install.
 
+#### Slice 1 of `minsky-fresh-clone-health-checks`: catch the remaining three fresh-clone failure modes (operator 2026-05-08 — "Next let's add as much stable self-healing as reasonable to minsky & install commands")
+
+Slice 8 above covered ONE of the four likeliest fresh-clone failure modes (`dist/` not built). This slice covers the remaining three: `node_modules/` missing, `pnpm` not on PATH, and Node major version too old.
+
+Three changes:
+
+1. **`node_modules/` existence check in `bin/minsky.mjs`** — runs immediately after the dist check. The dist file might exist (operator ran `pnpm --filter ... build` once before deleting `node_modules`) but its transitive imports (`@types/node`, `vitest`, etc.) resolve at module-load time and produce cryptic `ERR_MODULE_NOT_FOUND` stack traces pointing at node internals. The check inlines `existsSync(NODE_MODULES_PATH)` (so we don't depend on `node_modules` to detect that `node_modules` is missing) and emits a one-line operator-actionable stderr message before the failing import is reached.
+2. **`pnpm` + Node-major checks in `setup.sh`** — extends both `--doctor` and install-mode prereq blocks. Fatal in install mode (RED in `--doctor`) when `pnpm` is missing, since pnpm is the install command itself. Catches Node major version too old up-front (engines `>=20`) instead of letting pnpm later emit an opaque `ERR_PNPM_UNSUPPORTED_PLATFORM`. Single source of truth `MINSKY_NODE_MIN_MAJOR=20` near the top of the script.
+3. **4 new substrate rows in `minsky doctor`** — `node_modules` / `pnpm-lock.yaml` / `dist/index.js` / `pnpm` on PATH. Renders via `renderDoctorSubstrateRows(state)` from the new pure helper `doctor-substrate-rows.ts` (paired tests pin every row's exact prefix + label + recovery hint). When ANY substrate row is RED, doctor's banner becomes RED and exits 1 (daemon literally cannot run without these), and the local-LLM stack check is skipped — fix substrate first.
+
+Pattern conformance: same as slice 8 — Pre-condition check (Meyer 1992) + Loud-crash boundary (Armstrong 2007). Sources: Beyer et al., *Site Reliability Engineering*, 2016, Ch. 6 (health checks must distinguish failure modes the operator can act on from internal bugs; cryptic stack traces conflate these). Chaos table: each new failure mode → one-line operator-actionable message + clear recovery command (`pnpm install` for the first three, install-pnpm one-liner for the fourth, `nvm install 20` for the Node-too-old case).
+
+Backward-compat: pure additions on top of slice 8 — no behavioural change on a working install.
+
 ### Real Claude probe (slice 4 of `minsky-cli-auto-bootstrap-local-llm`)
 
 `novel/tick-loop/src/claude-health-probe.ts` ships a pure classifier `classifyClaudeProbeOutput({ exitCode, stderrTail, binaryAbsent })` that takes the result of a synthetic `claude --print "ping"` invocation and returns one of four verdicts: `healthy` (exit 0), `exhausted` (non-zero exit + stderr matches `HARD_LIMIT_PATTERNS`), `binary-missing` (claude not on PATH), or `error` (non-zero exit, no hard-limit signal — transient). The pattern set is shared with `HARD_LIMIT_PATTERNS` in `llm-provider-selector.ts` (rule #2 — single source of truth), so a wording change updates both lists in the same PR.
