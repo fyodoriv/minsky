@@ -92,6 +92,15 @@ The 24/7-autonomy P0 path is end-to-end shippable: real-spawn daemon + real budg
 ```bash
 git clone https://github.com/fyodoriv/minsky.git
 cd minsky
+pnpm install   # the `prepare` hook builds @minsky/tick-loop's dist
+pnpm minsky doctor   # verify health
+```
+
+`pnpm install` runs a `prepare` hook that builds `@minsky/tick-loop`'s `dist/` (the CLI's runtime artifacts) so `pnpm minsky` works on a fresh clone with no separate build step. If `dist/` is somehow missing at runtime (e.g., `prepare` was skipped, or a stale `.tsbuildinfo` short-circuited the build), `pnpm minsky` exits 1 with a one-line message naming the recovery command — no node `ERR_MODULE_NOT_FOUND` stack traces.
+
+For the full supervisor + dashboard install + dogfood-on-self loop, run `./setup.sh`:
+
+```bash
 ./setup.sh
 ```
 

@@ -4,6 +4,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path probe + H1 aider python + H2 non-TTY refuse) -->
+// <!-- scope: human-approved minsky-cli-fresh-clone-bootstrap slice 8 (operator 2026-05-08 — "I've cloned minsky from scratch, ran pnpm install, then ran minsky and got module not found about tick-loop") -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -48,7 +49,37 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import {
+const execAsync = promisify(exec);
+
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const PKG_ROOT = resolve(HERE, "..");
+const TICK_LOOP_BIN = resolve(PKG_ROOT, "bin", "tick-loop.mjs");
+
+const MINSKY_HOME = process.env["MINSKY_HOME"] ?? resolve(PKG_ROOT, "..", "..");
+const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
+
+// Slice 8 (`minsky-cli-fresh-clone-bootstrap`): pre-flight check that
+// the dist build artifacts exist BEFORE we dynamic-import them.
+// Replaces node's `ERR_MODULE_NOT_FOUND` stack trace with a single
+// actionable line on a fresh clone where `pnpm install`'s prepare
+// hook hasn't run yet (or failed). Static `import` declarations are
+// hoisted to module-instantiation time, so a static import of
+// `../dist/index.js` would fire before any code in this file runs;
+// dynamic `await import()` defers the resolution until after the
+// existsSync check. The pure helpers used to format the message live
+// in `dist-existence-check.ts` (compiled to `dist/dist-existence-check.js`)
+// — but we deliberately inline a tiny version here so the check
+// itself doesn't depend on dist/ existing. The paired tests in
+// `dist-existence-check.test.ts` pin the wording contract.
+const DIST_INDEX_PATH = resolve(PKG_ROOT, "dist", "index.js");
+if (!existsSync(DIST_INDEX_PATH)) {
+  process.stderr.write(
+    `minsky: dist not built (${DIST_INDEX_PATH} missing) — run \`pnpm install\` from the repo root, or \`pnpm --filter @minsky/tick-loop build\` directly\n`,
+  );
+  process.exit(1);
+}
+
+const {
   buildProductionProbes,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
@@ -62,17 +93,8 @@ import {
   preferredPipxPath,
   probePythonWithDefaults,
   renderConfirmSummary,
-} from "../dist/index.js";
-import { formatLogLine } from "../dist/pretty-log.js";
-
-const execAsync = promisify(exec);
-
-const HERE = fileURLToPath(new URL(".", import.meta.url));
-const PKG_ROOT = resolve(HERE, "..");
-const TICK_LOOP_BIN = resolve(PKG_ROOT, "bin", "tick-loop.mjs");
-
-const MINSKY_HOME = process.env["MINSKY_HOME"] ?? resolve(PKG_ROOT, "..", "..");
-const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
+} = await import("../dist/index.js");
+const { formatLogLine } = await import("../dist/pretty-log.js");
 
 const argv = process.argv.slice(2);
 const first = argv[0];
