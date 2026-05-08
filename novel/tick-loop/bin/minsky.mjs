@@ -48,9 +48,11 @@ import { promisify } from "node:util";
 
 import {
   buildProductionProbes,
+  classifyClaudeProbeOutput,
   confirmAlwaysYes,
   detectLocalLlmStack,
   executeBootstrapPlan,
+  needsLocalLlmBootstrap,
   planLocalLlmBootstrap,
   renderConfirmSummary,
 } from "../dist/index.js";
@@ -184,19 +186,26 @@ async function maybeBootstrapLocalLlm() {
     );
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
-  // Server unreachable. Decide whether to bootstrap. Default: bootstrap
-  // when the operator is on an interactive terminal AND the plan is
-  // non-empty AND Claude is also unhealthy. The Claude probe is a coarse
-  // `which claude` check today; future slice tightens to a hard-limit
-  // detection per `HARD_LIMIT_PATTERNS` from `llm-provider-selector`.
-  const claudeOk = await probeClaudeHealthy();
-  if (claudeOk) {
-    // Claude is on PATH; the daemon will prefer it. No need to bootstrap
-    // local fallback right now — the operator can run `minsky bootstrap-local-llm`
-    // explicitly later.
+  // Server unreachable. Run a REAL synthetic claude probe (slice 4 —
+  // operator pushback 2026-05-08: "So that all will work even if no
+  // message can be sent to claude right?"). The previous slice's
+  // `which claude` check returned `true` whenever the binary existed,
+  // falsely deferring to claude when credits were exhausted. This probe
+  // spawns `claude --print "ping"` with a 10 s timeout and classifies
+  // the stderr against `HARD_LIMIT_PATTERNS` (shared contract with
+  // `llm-provider-selector`).
+  const decision = await probeClaude();
+  process.stderr.write(`minsky: claude probe → ${decision.verdict} (${decision.reason})\n`);
+  if (!needsLocalLlmBootstrap(decision)) {
+    // Claude is healthy OR transient error. Don't trigger a 17 GB
+    // download on a network blip — the daemon's per-iteration
+    // `decideProvider` will catch any hard-limit signal on the next
+    // claude spawn and switch to local then (graceful-degrade).
     return {};
   }
-  process.stderr.write("minsky: claude is unhealthy AND local-LLM server is not reachable\n");
+  process.stderr.write(
+    `minsky: claude unavailable (${decision.verdict}) AND local-LLM server not reachable\n`,
+  );
   return await runBootstrapLocalLlm({ force: false });
 }
 
@@ -245,14 +254,14 @@ async function runDoctor() {
   process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
   const probes = buildProductionProbes({ whichFn });
   const state = await detectLocalLlmStack(probes);
-  const claudeOk = await probeClaudeHealthy();
+  const claudeDecision = await probeClaude();
   /** @param {string} label @param {boolean} ok @param {string} [detail] */
   const line = (label, ok, detail) => {
     const mark = ok ? "✓" : "✗";
     const detailStr = detail !== undefined && detail.length > 0 ? `  ${detail}` : "";
     process.stdout.write(`  ${mark} ${label}${detailStr}\n`);
   };
-  line("claude CLI", claudeOk, claudeOk ? "" : "not on PATH");
+  line("claude CLI", claudeDecision.verdict === "healthy", claudeDecision.reason);
   line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
   line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
   line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
@@ -353,15 +362,86 @@ async function confirmInteractive(summary) {
 }
 
 /**
- * Probe Claude health. Coarse today: `which claude` is the only check.
- * Future slice tightens to a hard-limit detection via a synthetic
- * 1-token claude --print probe.
+ * Real Claude health probe — slice 4 of `minsky-cli-auto-bootstrap-local-llm`.
  *
- * @returns {Promise<boolean>}
+ * Spawns `claude --print "ping"` with a 10 s timeout, captures the
+ * exit code + stderr, and classifies via {@link classifyClaudeProbeOutput}.
+ * The classifier returns one of four verdicts: `healthy` / `exhausted`
+ * / `binary-missing` / `error` (transient).
+ *
+ * Cost: ≤2 input + ≤1 output tokens of Claude budget on the healthy
+ * path; zero on the exhausted path (Anthropic rejects before billing).
+ *
+ * @returns {Promise<import("../dist/claude-health-probe.js").ClaudeHealthDecision>}
  */
-async function probeClaudeHealthy() {
+async function probeClaude() {
+  // Short-circuit: binary missing → no point spawning.
   const path = await whichFn("claude");
-  return path !== undefined;
+  if (path === undefined) {
+    return classifyClaudeProbeOutput({
+      exitCode: -1,
+      stderrTail: "",
+      binaryAbsent: true,
+    });
+  }
+  // Synthetic 1-token probe. `claude --print "ping"` returns "pong" or
+  // similar in <5s on the healthy path; on exhausted, exits non-zero
+  // with a hard-limit message in stderr within ~1s.
+  return new Promise((resolveDone) => {
+    let stderrBuf = "";
+    let stdoutBuf = "";
+    let resolved = false;
+    const child = spawn("claude", ["--print", "ping"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    // 20s timeout — exhausted claude returns sub-second (429); healthy
+    // claude --print can take 5-15s for first-token latency on a cold
+    // session. Above 20s we classify as `error` (transient) and defer
+    // to claude — don't trigger 17 GB download on a slow network.
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        child.kill("SIGKILL");
+        resolveDone(
+          classifyClaudeProbeOutput({
+            exitCode: -1,
+            stderrTail: `<probe timed out after 20000ms>${stderrBuf.slice(-3000)}`,
+          }),
+        );
+      }
+    }, 20_000);
+    child.stdout?.on("data", (chunk) => {
+      stdoutBuf = (stdoutBuf + chunk.toString("utf8")).slice(-2048);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderrBuf = (stderrBuf + chunk.toString("utf8")).slice(-4096);
+    });
+    // rule-6: handled-locally — child.on("error") fires for ENOENT/EACCES; classifier turns it into a verdict.
+    child.on("error", (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolveDone(
+        classifyClaudeProbeOutput({
+          exitCode: -1,
+          stderrTail: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    });
+    child.on("close", (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolveDone(
+        classifyClaudeProbeOutput({
+          exitCode: code ?? -1,
+          stderrTail: stderrBuf,
+          stdoutTail: stdoutBuf,
+        }),
+      );
+    });
+  });
 }
 
 /**
