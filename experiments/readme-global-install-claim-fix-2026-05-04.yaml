@@ -14,22 +14,31 @@ hypothesis: |
   the framing of "install": signifier (Norman 1988) → affordance
   (the actual repo-rooted stack).
 success: |
-  - `grep -E "(repo-rooted stack|not a global CLI)" README.md` exits 0
-    with at least one match (the disambiguation bullet).
+  - `grep -E "(pnpm minsky|repo-rooted)" README.md` exits 0 with at least
+    one match: the README documents the actual CLI surface (`pnpm minsky`
+    + `pnpm minsky doctor` + `pnpm minsky bootstrap-local-llm`) so a
+    first-time-install user has an exact next-command to run after
+    `./setup.sh`. The 2026-05-08 update (PR #382, `minsky-cli-auto-bootstrap-local-llm`)
+    retired the original "Not a global CLI" disclaimer in favour of a
+    documented "## The `minsky` CLI (operator UX)" section that names
+    the actual entry points; `pnpm minsky` is the load-bearing token now.
   - `command -v tasks` AND `command -v tasks-lint` AND
     `command -v tasks-mcp` all exit 0 (the three globals `setup.sh`
-    actually installs — the bullet's claim is true).
+    actually installs — the original bullet's claim is still true at
+    `setup.sh`-install time).
   - `./setup.sh --doctor` still exits 0 GREEN (the docs change doesn't
     break the self-test).
 pivot: |
-  If the disambiguation bullet gets reverted in a future docs-rewrite
-  (it's short enough to lose in a wholesale rewrite), promote the
+  If a future docs-rewrite removes the `pnpm minsky` documentation
+  without replacing it with another concrete entry point, promote the
   disambiguation to a deterministic CI lint that fails when README.md
-  adds the literal token "install minsky globally" without an adjacent
-  "not a global CLI" paragraph (≤30 LoC linter — a one-time docs gate
-  is cheaper than a recurring expectation gap).
+  adds an "install" claim without naming the actual entry point
+  (≤30 LoC linter — a one-time docs gate is cheaper than a recurring
+  expectation gap). The 2026-05-08 update made the affordance explicit
+  rather than disclaimed-absent — that's the right resolution of the
+  original Norman 1988 signifier-affordance gap.
 measurement: |
-  grep -qE "(repo-rooted stack|not a global CLI)" README.md
+  grep -qE "(pnpm minsky|repo-rooted)" README.md
 anchor: |
   Norman, D. A., *The Design of Everyday Things*, Basic Books, 1988
   (signifiers — the README is the affordance; "install" is a strong
