@@ -112,11 +112,41 @@ jobs:
             --experiment-store=experiment-store \
             --tmp-dir=tmp
 
+      - name: compute add-paths (skip non-existent files)
+        # `peter-evans/create-pull-request@v6` passes every line of its
+        # `add-paths` input to `git add --` verbatim. If a path doesn't
+        # exist (`tmp/proposed-rule-9-amendment.md` is conditional —
+        # only written when calibration MAE exceeds the rule-#9
+        # threshold per Munafò et al. 2017), git add fails with `fatal:
+        # pathspec ... did not match any files`. Pre-compute the list
+        # so we only stage files that actually exist on disk.
+        id: addpaths
+        run: |
+          set -euo pipefail
+          paths=()
+          for p in novel/mape-k-loop/constraints.md tmp/proposed-rule-9-amendment.md; do
+            if [ -f "$p" ]; then
+              paths+=("$p")
+            fi
+          done
+          if [ ${#paths[@]} -eq 0 ]; then
+            echo "no orchestrator outputs to commit; skipping PR"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "skip=false"
+            echo "paths<<EOF"
+            printf '%s\n' "${paths[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: open draft PR for orchestrator outputs
         # Only fires when the orchestrator wrote new files (constraints.md
         # append OR a tmp/ amendment proposal). The PR stays in DRAFT — never
         # auto-merged. Industry-standard `peter-evans/create-pull-request@v6`
         # handles branch + commit + PR open in one step.
+        if: steps.addpaths.outputs.skip != 'true'
         env:
           # Disable lefthook for the action's internal `git commit`. Slice
           # 8.1's prepare hook (PR #389) installs lefthook hooks at
@@ -148,6 +178,4 @@ jobs:
             - `tmp/proposed-rule-9-amendment.md` — only present when
               calibration MAE exceeded the rule-#9 threshold (Munafò et al.
               2017). Promote to a `research.md` PR if the operator agrees.
-          add-paths: |
-            novel/mape-k-loop/constraints.md
-            tmp/proposed-rule-9-amendment.md
+          add-paths: ${{ steps.addpaths.outputs.paths }}
