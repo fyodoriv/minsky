@@ -2020,12 +2020,14 @@ describe("buildDaemonBrief", () => {
     const brief = buildDaemonBrief({ taskId: "real-task", tasksMdContent: sample });
     expect(brief).toContain("## Pre-PR lint-stack gate");
     expect(brief).toContain("pnpm pre-pr-lint");
-    expect(brief).toContain("scripts/run-pre-pr-lint-stack.mjs");
     expect(brief).toContain("up to 3 attempts");
     expect(brief).toContain("noop, exiting — pre-pr-lint-failures");
-    // Pre-registered metric (TASKS.md `daemon-pre-pr-lint-gate`) — pin the
-    // 80% threshold so a brief edit can't silently weaken the hypothesis.
-    expect(brief).toContain("≥80%");
+    // Note: the slice 34/N "drop gate preamble + Pre-registered postscript"
+    // optimisation removed the `scripts/run-pre-pr-lint-stack.mjs` literal
+    // and `≥80%` substrings from the brief body. Both assertions migrated
+    // to the bidirectional manifest-parity test below (which still pins
+    // the literal). The 80% threshold is documented in TASKS.md
+    // `daemon-pre-pr-lint-gate` instead of repeated per iteration.
   });
 
   it("gate section names the body-only CI checks routed through the `--body=` flag (slices 29→30/N)", () => {

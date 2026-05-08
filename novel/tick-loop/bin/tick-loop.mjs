@@ -171,10 +171,11 @@ function applyArg(arg, out) {
 const args = parseArgs(process.argv.slice(2));
 const dryRun = readDryRunEnv(process.env);
 // Top-level minskyHome — multiple downstream consumers (pre-PR lint gate,
-// CTO-audit, changelog, snapshot, metrics-render) need this. Was previously
-// only declared inside the seam IIFEs which left line-698's preLintRun ref
-// to `minskyHome` referencing an undefined identifier (latent bug exposed
-// when the bin runs end-to-end). Single source of truth here.
+// CTO-audit, changelog, snapshot, metrics-render) need this. Hoisted here
+// (not in each IIFE) to fix the ReferenceError at line ~575 where
+// `createBodyAwarePrePrLintRun({ cwd: minskyHome })` was reached after the
+// IIFEs' local `const minskyHome` had already gone out of scope. Single
+// source of truth here.
 const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
 
 // Slice 2 of `daemon-parallel-worktree-launch`: parse `--worker-id` /
@@ -500,7 +501,6 @@ const execFileLike = (() => {
 })();
 const ctoAuditSeam = (() => {
   if (!ctoAuditEnabled) return undefined;
-  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
   const lockDir = resolve(minskyHome, ".minsky", "cto-audit-lock");
   return {
     spawn: spawnStrategy,
@@ -578,7 +578,6 @@ const changelogEnabled = (() => {
 })();
 const changelogSeam = (() => {
   if (!changelogEnabled) return undefined;
-  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
   const changelogPath = resolve(minskyHome, "CHANGELOG.md");
   return {
     spawn: spawnStrategy,
@@ -603,7 +602,6 @@ const changelogSeam = (() => {
 // not a separate lock dir (rule #2 — one source of truth).
 const snapshotSeam = (() => {
   if (!changelogEnabled) return undefined;
-  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
   return {
     snapshotExists: createFileBackedSnapshotExists(minskyHome),
     capture: createPnpmSnapshotCapture({ cwd: minskyHome }),
@@ -628,7 +626,6 @@ const snapshotSeam = (() => {
 // METRICS.md mtime, not a separate lock dir.
 const metricsRenderSeam = (() => {
   if (!changelogEnabled) return undefined;
-  const minskyHome = process.env.MINSKY_HOME ?? resolve(PKG_ROOT, "..", "..");
   return {
     getLastRenderedDate: createFileBackedLastRenderedDate(resolve(minskyHome, "METRICS.md")),
     render: createPnpmMetricsRender({ cwd: minskyHome }),
