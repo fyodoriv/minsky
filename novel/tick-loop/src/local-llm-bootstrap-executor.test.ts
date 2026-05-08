@@ -227,3 +227,65 @@ describe("executeBootstrapPlan — empty command vector edge case", () => {
     expect(result.reason).toMatch(/empty command/);
   });
 });
+
+// ---- Slice 6: stdinMode plumbing for install-arm-homebrew ----------------
+
+describe("executeBootstrapPlan — slice 6 stdinMode", () => {
+  it("passes stdinMode=inherit to spawnFn for install-arm-homebrew step", async () => {
+    const spawnCalls: Array<{
+      cmd: string;
+      opts?: { stdinMode?: "ignore" | "inherit" };
+    }> = [];
+    const captureSpawn: SpawnFn = async (cmd, _args, opts) => {
+      spawnCalls.push({ cmd, ...(opts !== undefined ? { opts } : {}) });
+      return { exitCode: 0 };
+    };
+    const armHomebrewPlan: BootstrapPlan = {
+      ready: false,
+      totalEstimatedDurationMs: 180_000,
+      totalEstimatedDownloadMb: 0,
+      steps: [
+        {
+          type: "install-arm-homebrew",
+          description: "Install native ARM Homebrew (needs sudo)",
+          estimatedDurationMs: 180_000,
+          command: ["arch", "-arm64", "/bin/bash", "-c", "installer"],
+        },
+        {
+          type: "install-pipx",
+          description: "Install pipx",
+          estimatedDurationMs: 30_000,
+          command: ["/opt/homebrew/bin/brew", "install", "pipx"],
+        },
+      ],
+    };
+    const result = await executeBootstrapPlan(armHomebrewPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    // First step (install-arm-homebrew) gets inherit; second (install-pipx) gets ignore.
+    expect(spawnCalls[0]?.opts?.stdinMode).toBe("inherit");
+    expect(spawnCalls[1]?.opts?.stdinMode).toBe("ignore");
+  });
+
+  it("passes stdinMode=ignore for every non-arm-homebrew step (default)", async () => {
+    const spawnCalls: Array<{
+      opts?: { stdinMode?: "ignore" | "inherit" };
+    }> = [];
+    const captureSpawn: SpawnFn = async (_cmd, _args, opts) => {
+      spawnCalls.push({ ...(opts !== undefined ? { opts } : {}) });
+      return { exitCode: 0 };
+    };
+    await executeBootstrapPlan(samplePlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      log: sink,
+    });
+    // All non-arm-homebrew steps → ignore.
+    for (const call of spawnCalls) {
+      expect(call.opts?.stdinMode).toBe("ignore");
+    }
+  });
+});
