@@ -176,6 +176,8 @@ The typed binding `createPnpmPrePrLintRun` in `novel/tick-loop/src/pre-pr-lint-g
 
 Slice 33/N adds the body-aware factory `createBodyAwarePrePrLintRun` that the daemon's `bin/tick-loop.mjs` wires by default: each invocation stats `<minskyHome>/pr-body.md` and forwards `--body=<path>` when present, so the post-iteration outer gate validates the same draft body file the brief instructs the inner `claude --print` to write — closing the loop the brief documented but the wire-in didn't enforce. Per-call `existsSync` (not bind-once at boot) is the design point: the body file is authored *during* an iteration, after the factory was constructed at daemon startup.
 
+Slice 34/N surfaces a `bodyDiscovered: boolean` metric on the `tick-loop.pre-pr-lint-gate` span: `createBodyAwarePrePrLintRun` returns the `PrePrLintRunResult` with `bodyDiscovered = bodyPath !== undefined`, threaded into the iteration span attribute. Operators get a per-iteration signal that the auto-discovery path actually fired (vs the inner Claude wrote no body file at all and the gate silently degraded to body-less validation).
+
 Slice 35/N lifts the same auto-discovery into the canonical `scripts/run-pre-pr-lint-stack.mjs` via `resolveBodyPath(explicit, fileExists, repoRoot)`: when `--body=<path>` is not passed, `pnpm pre-pr-lint` falls back to a one-stat probe of `<repoRoot>/pr-body.md`. Both surfaces (operator terminal + daemon spawn) now share one discovery path (rule #2 — single source of truth); the inner Claude can drop the `-- --body=pr-body.md` flag from its run, and the brief is trimmed to match.
 
 ### SpawnStrategy seam (sub-task 1/3 of `tick-loop-daemon-real-spawn`)
