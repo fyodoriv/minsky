@@ -814,3 +814,21 @@ export {
   type DoctorSubstrateRowState,
   renderDoctorSubstrateRows,
 } from "./doctor-substrate-rows.js";
+
+// Slice 2 of `minsky-runtime-resilience`: three pure helpers that
+// graceful-degrade or loud-crash at the right boundary on the three
+// runtime I/O failure modes.
+//   - log-path-fallback: primary log path → tmp on EACCES/EROFS/ENOSPC
+//   - workers-dir-mkdir: classify mkdir errnos into recovery hints
+//   - tick-loop-bin-existence-check: defensive check before spawn
+export { type LogPathOutcome, pickLogPath } from "./log-path-fallback.js";
+export {
+  type WorkersDirMkdirOutcome,
+  ensureWorkersDir,
+  formatWorkersDirRecoveryMessage,
+} from "./workers-dir-mkdir.js";
+export {
+  type TickLoopBinCheckOutcome,
+  checkTickLoopBinExists,
+  formatTickLoopBinMissingMessage,
+} from "./tick-loop-bin-existence-check.js";
