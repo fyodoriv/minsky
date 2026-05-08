@@ -7,6 +7,7 @@
 // <!-- scope: human-approved minsky-cli-fresh-clone-bootstrap slice 8 (operator 2026-05-08 — "I've cloned minsky from scratch, ran pnpm install, then ran minsky and got module not found about tick-loop") -->
 // <!-- scope: human-approved minsky-fresh-clone-health-checks slice 1 (operator 2026-05-08 — "Next let's add as much stable self-healing as reasonable to minsky & install commands") -->
 // <!-- scope: human-approved minsky-runtime-resilience slice 2 (operator 2026-05-08 — slice 2 of the self-healing trilogy) -->
+// <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -44,7 +45,7 @@
  * and attaches without respawning.
  */
 
-import { exec, spawn } from "node:child_process";
+import { exec, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -99,7 +100,9 @@ if (!existsSync(NODE_MODULES_PATH)) {
 }
 
 const {
+  PATH_CONFIG_KEYS,
   buildProductionProbes,
+  checkGitConfigPaths,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
   describeArchState,
@@ -460,6 +463,12 @@ async function runDoctor() {
     process.stdout.write(`${l}\n`);
   }
   const anySubstrateRed = substrateLines.some((l) => l.startsWith("  ✗"));
+  // Slice 3 of `minsky-cross-machine-dotfile-checks`: detect git
+  // config keys that point at filesystem paths synced via dotfiles
+  // across machines with different usernames. Detect-only (per the
+  // operator's chosen aggressiveness — git config is outside
+  // `.minsky/`); broken paths surface as YELLOW (don't block daemon).
+  await emitGitConfigSanityRows();
   process.stdout.write("\n");
   if (anySubstrateRed) {
     process.stdout.write("Substrate: RED — install-time prerequisites missing\n");
@@ -475,6 +484,112 @@ async function runDoctor() {
   process.stdout.write("Local-LLM stack: YELLOW — install plan available\n");
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
   process.stdout.write("\nRun `minsky bootstrap-local-llm` to install.\n");
+}
+
+/**
+ * Slice 3 of `minsky-cross-machine-dotfile-checks` — emit one row
+ * per checked git config key. Renders `  ✓ <key>` when unset OR set
+ * to a valid path; `  ⚠ <key>  — <value> does not exist; recover
+ * with \`<recovery>\`` when set + path missing.
+ *
+ * Output is YELLOW (warning), not RED — broken git config doesn't
+ * immediately stop the daemon; it's a footgun the operator should
+ * know about.
+ */
+async function emitGitConfigSanityRows() {
+  const outcome = checkGitConfigPaths({
+    keysToCheck: PATH_CONFIG_KEYS,
+    getGitConfigFn: getGitConfigShowOrigin,
+    existsSyncFn: existsSyncWithTildeExpansion,
+  });
+  // Map broken paths back to keys for fast lookup.
+  const brokenByKey = new Map(outcome.brokenPaths.map((b) => [b.configKey, b]));
+  for (const key of PATH_CONFIG_KEYS) {
+    const broken = brokenByKey.get(key);
+    if (broken === undefined) {
+      process.stdout.write(`  ✓ git config ${key}\n`);
+    } else {
+      process.stdout.write(
+        `  ⚠ git config ${key}  — ${broken.configValue} (${broken.origin}) does not exist; recover with \`${broken.recoveryCommand}\`\n`,
+      );
+    }
+  }
+}
+
+/**
+ * Production wiring of {@link checkGitConfigPaths}'s `getGitConfigFn`
+ * seam. Shells out to `git config --show-origin --get <key>` and
+ * parses the origin prefix:
+ *
+ *   - `file:/etc/gitconfig`        → system
+ *   - `file:/Users/.../.gitconfig` → global (when path matches $HOME)
+ *   - `file:.git/config`           → local (when path is repo-relative)
+ *   - command line / blob / unknown → unknown
+ *
+ * Returns `undefined` when the key is unset (`git config --get`
+ * exits 1 with empty stdout — no quirks).
+ *
+ * @param {string} key
+ * @returns {import("../dist/git-config-path-checks.js").GitConfigValue | undefined}
+ */
+function getGitConfigShowOrigin(key) {
+  const result = spawnSync("git", ["config", "--show-origin", "--get", key], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) return undefined;
+  const stdout = String(result.stdout).trim();
+  if (stdout.length === 0) return undefined;
+  // Output format: `<origin>\t<value>` where origin is e.g. `file:/Users/.../.gitconfig`.
+  const tabIdx = stdout.indexOf("\t");
+  if (tabIdx === -1) return undefined;
+  const originRaw = stdout.slice(0, tabIdx);
+  const value = stdout.slice(tabIdx + 1);
+  return { value, origin: classifyOrigin(originRaw) };
+}
+
+/**
+ * Wrap `existsSync` with tilde expansion. Git config values often
+ * use `~/<path>` for $HOME-relative paths (git itself expands tilde
+ * when consuming the value, e.g. for `core.excludesfile`); a raw
+ * `existsSync("~/...")` returns false even when the path is valid
+ * because POSIX file APIs don't expand tilde. This wrapper expands
+ * leading `~/` to `$HOME/` before the existsSync call.
+ *
+ * @param {string} p
+ * @returns {boolean}
+ */
+function existsSyncWithTildeExpansion(p) {
+  if (p.startsWith("~/") && process.env["HOME"] !== undefined) {
+    return existsSync(`${process.env["HOME"]}${p.slice(1)}`);
+  }
+  if (p === "~" && process.env["HOME"] !== undefined) {
+    return existsSync(process.env["HOME"]);
+  }
+  return existsSync(p);
+}
+
+/**
+ * Map git's `--show-origin` output to our closed origin set.
+ *
+ * @param {string} originRaw
+ * @returns {import("../dist/git-config-path-checks.js").GitConfigOrigin}
+ */
+function classifyOrigin(originRaw) {
+  if (originRaw.startsWith("file:")) {
+    const filePath = originRaw.slice("file:".length);
+    if (filePath === "/etc/gitconfig" || filePath.startsWith("/etc/git/config")) {
+      return "system";
+    }
+    const home = process.env["HOME"] ?? "";
+    if (home.length > 0 && filePath.startsWith(home)) {
+      return "global";
+    }
+    // Repo-local config — usually `.git/config` or `<repo>/.git/config`.
+    if (filePath.includes(".git/config")) {
+      return "local";
+    }
+  }
+  return "unknown";
 }
 
 /**

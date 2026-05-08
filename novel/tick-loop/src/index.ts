@@ -832,3 +832,18 @@ export {
   checkTickLoopBinExists,
   formatTickLoopBinMissingMessage,
 } from "./tick-loop-bin-existence-check.js";
+
+// Slice 3 of `minsky-cross-machine-dotfile-checks`: pure detect-and-
+// report helper for git config keys that point at filesystem paths
+// synchronised across machines via dotfiles. Generalises PRs #394/
+// #395's lefthook permission-denial fix to the broader set of
+// dotfile-controlled git config keys.
+export {
+  type BrokenGitConfigPath,
+  type GitConfigCheckOutcome,
+  type GitConfigOrigin,
+  type GitConfigValue,
+  PATH_CONFIG_KEYS,
+  checkGitConfigPaths,
+  formatBrokenPathMessage,
+} from "./git-config-path-checks.js";

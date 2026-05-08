@@ -192,6 +192,51 @@ check_node_major() {
   esac
 }
 
+# --- check_git_config_path: detect git config keys pointing at non-existent paths ---
+# Slice 3 of `minsky-cross-machine-dotfile-checks`. Generalises PRs
+# #394/#395 (lefthook permission-denial fix) to the broader set of
+# dotfile-controlled git config keys (e.g., `core.hooksPath` synced
+# across machines with different usernames → invalid path on this
+# host). For each key in MINSKY_PATH_CONFIG_KEYS, if set and pointing
+# at a path that doesn't exist, emits a YELLOW warn with the recovery
+# command. Detect-only (per the operator's chosen aggressiveness —
+# git config is outside `.minsky/`).
+MINSKY_PATH_CONFIG_KEYS="core.hooksPath core.attributesfile core.excludesfile"
+
+check_git_config_path() {
+  local key="$1"
+  local origin_value
+  origin_value=$(git config --show-origin --get "$key" 2>/dev/null) || return 0  # unset → ok
+  [ -z "$origin_value" ] && return 0
+  local value origin_raw scope expanded
+  value=$(printf '%s' "$origin_value" | awk -F'\t' '{print $2}')
+  origin_raw=$(printf '%s' "$origin_value" | awk -F'\t' '{print $1}')
+  [ -z "$value" ] && return 0
+  # Tilde expansion: git config values often use `~/<path>` for $HOME-
+  # relative paths (e.g. `core.excludesfile = ~/.gitignore_global`).
+  # Quoted `[ -e "$value" ]` won't expand tilde — do it manually.
+  case "$value" in
+    "~/"*) expanded="${HOME:-}${value#\~}" ;;
+    "~")   expanded="${HOME:-}" ;;
+    *)     expanded="$value" ;;
+  esac
+  if [ -e "$expanded" ]; then
+    return 0
+  fi
+  # Path is set but doesn't exist — broken.
+  if printf '%s' "$origin_raw" | grep -q "/etc/git"; then
+    scope="--system"
+  elif [ -n "${HOME:-}" ] && printf '%s' "$origin_raw" | grep -q "$HOME"; then
+    scope="--global"
+  elif printf '%s' "$origin_raw" | grep -q "\.git/config"; then
+    scope="--local"
+  else
+    scope=""
+  fi
+  warn "git config $key points at $value which does not exist; recover with \`git config $scope --unset $key\`"
+  return 1
+}
+
 # --- state.json initialisation (only on first run; idempotent) ---
 if [ ! -f "$STATE_FILE" ]; then
   CURRENT_STEP="init-state"
@@ -289,6 +334,17 @@ if [ "$MODE" = "doctor" ]; then
   # SRE 2016 ch. 6 — health checks must cover the real failure surface).
   if command -v curl   >/dev/null 2>&1; then ok "curl";   else warn "curl missing — push notifications disabled"; STATUS="${STATUS/green/yellow}"; fi
   if command -v ntfy   >/dev/null 2>&1; then ok "ntfy";   else warn "ntfy CLI missing — pushes fall back to curl"; STATUS="${STATUS/green/yellow}"; fi
+
+  # Slice 3 of `minsky-cross-machine-dotfile-checks` — git config
+  # sanity. Detect-only; broken paths surface as YELLOW (don't block
+  # daemon). Mirrors the corresponding section in `minsky doctor`.
+  for k in $MINSKY_PATH_CONFIG_KEYS; do
+    if check_git_config_path "$k"; then
+      ok "git config $k"
+    else
+      STATUS="${STATUS/green/yellow}"
+    fi
+  done
 
   # adapter selfTest aggregation: today there are no wired adapters; future P1 PRs add them.
   # The contract is documented at novel/adapters/types/src/index.ts.
