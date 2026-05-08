@@ -265,6 +265,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "tick-loop-backoff-schedule",
       "typecheck",
       "user-story-security-section",
+      "vision-rule-13-non-task-anchors",
       "vision-rule-13-task-id-citations",
     ]),
   ),
@@ -530,6 +531,12 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-cloud-audit-gate.mjs"],
     env: { CLOUD_AUDIT_GATE_DIFF_BASE: "origin/main" },
+  },
+  {
+    name: "vision-rule-13-non-task-anchors",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-vision-rule-13-non-task-anchors.mjs"],
   },
 ]);
 
