@@ -146,7 +146,17 @@ jobs:
         # append OR a tmp/ amendment proposal). The PR stays in DRAFT — never
         # auto-merged. Industry-standard `peter-evans/create-pull-request@v6`
         # handles branch + commit + PR open in one step.
+        #
+        # `continue-on-error: true` because the repo's "Allow GitHub Actions
+        # to create and approve pull requests" setting (Settings > Actions
+        # > General > Workflow permissions) may be disabled. When it is,
+        # the action fails with `GitHub Actions is not permitted to create
+        # or approve pull requests`. Per rule #6 graceful-degrade: log a
+        # warning, keep the workflow green, accept that ingest output isn't
+        # auto-PR'd until the operator flips the setting (or grants a PAT
+        # via `PAT_TOKEN` secret). Operator can always re-run after enabling.
         if: steps.addpaths.outputs.skip != 'true'
+        continue-on-error: true
         env:
           # Disable lefthook for the action's internal `git commit`. Slice
           # 8.1's prepare hook (PR #389) installs lefthook hooks at
