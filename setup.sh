@@ -49,6 +49,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# Slice 1 of `minsky-fresh-clone-health-checks` — single source of truth
+# for the minimum Node major version. Mirrors `package.json`'s
+# `engines.node` field (`>=20.0.0`). Bump in lockstep when the field
+# changes; the test layer checks both stay in sync.
+MINSKY_NODE_MIN_MAJOR=20
+
 STATE_DIR="$ROOT/.minsky"
 STATE_FILE="$STATE_DIR/state.json"
 # POSIX-portable lock: a directory whose `mkdir` is the atomic claim.
@@ -170,6 +176,22 @@ if command -v jq >/dev/null 2>&1; then
   have_jq=1
 fi
 
+# --- check_node_major: print the running node's major version (or empty on failure) ---
+# Slice 1 of `minsky-fresh-clone-health-checks`. Portable across nvm /
+# asdf / fnm / brew node — they all expose `node --version` returning
+# `vMAJOR.MINOR.PATCH`. Returns empty on any failure (treated as
+# "node not detectable" → RED in doctor, fatal in install).
+check_node_major() {
+  local v
+  v=$(node --version 2>/dev/null) || return 1
+  v=${v#v}             # strip leading "v"
+  v=${v%%.*}           # take the first segment (major)
+  case "$v" in
+    *[!0-9]*|"") return 1 ;;
+    *) printf '%s' "$v" ;;
+  esac
+}
+
 # --- state.json initialisation (only on first run; idempotent) ---
 if [ ! -f "$STATE_FILE" ]; then
   CURRENT_STEP="init-state"
@@ -234,7 +256,28 @@ if [ "$MODE" = "doctor" ]; then
   # built-in checks (prerequisites)
   if command -v git    >/dev/null 2>&1; then ok "git";    else warn "git missing";    STATUS="red";    fi
   if command -v node   >/dev/null 2>&1; then ok "node";   else warn "node missing";   STATUS="red";    fi
+  # Slice 1 of `minsky-fresh-clone-health-checks` — node MAJOR-version
+  # gate. The engines field says `>=20.0.0`; on a host with Node 18
+  # the install path silently passes prereqs but pnpm later emits an
+  # opaque `ERR_PNPM_UNSUPPORTED_PLATFORM`. Catch up-front with a
+  # clear "below the >=N requirement" message.
+  if command -v node >/dev/null 2>&1; then
+    NODE_MAJOR=$(check_node_major || true)
+    if [ -z "$NODE_MAJOR" ]; then
+      warn "node version unparsable — \`node --version\` returned non-standard output"
+      STATUS="${STATUS/green/yellow}"
+    elif [ "$NODE_MAJOR" -lt "$MINSKY_NODE_MIN_MAJOR" ]; then
+      warn "node ${NODE_MAJOR}.x.x is below the >=${MINSKY_NODE_MIN_MAJOR} engine requirement (see package.json engines.node)"
+      STATUS="red"
+    else
+      ok "node major ≥${MINSKY_NODE_MIN_MAJOR} (running ${NODE_MAJOR}.x.x)"
+    fi
+  fi
   if command -v npx    >/dev/null 2>&1; then ok "npx";    else warn "npx missing";    STATUS="red";    fi
+  # Slice 1 of `minsky-fresh-clone-health-checks` — pnpm is the install
+  # command. setup.sh / pnpm install / prepare hook / minsky doctor all
+  # depend on it being on PATH. RED if missing.
+  if command -v pnpm   >/dev/null 2>&1; then ok "pnpm";   else warn "pnpm missing — install via \`corepack enable\` (Node ≥16.13) OR \`brew install pnpm\` OR \`npm i -g pnpm\`"; STATUS="red"; fi
   if command -v claude >/dev/null 2>&1; then ok "claude"; else warn "claude CLI missing"; STATUS="${STATUS/green/yellow}"; fi
   if command -v jq     >/dev/null 2>&1; then ok "jq";     else warn "jq missing — ledger writes are skipped"; STATUS="${STATUS/green/yellow}"; fi
   # Push-channel deps: NtfyNotifier (novel/adapters/notifier) shells out to either
@@ -406,7 +449,34 @@ if ! ledger_has "$CURRENT_STEP"; then
   bold "Checking prerequisites…"
   command -v git  >/dev/null 2>&1 || { err "git not found";  SETUP_FAILED=1; exit 1; }
   command -v node >/dev/null 2>&1 || { err "node not found"; SETUP_FAILED=1; exit 1; }
+  # Slice 1 of `minsky-fresh-clone-health-checks` — Node major version
+  # gate. Fatal if too old (engines `>=20`); pnpm install would later
+  # emit `ERR_PNPM_UNSUPPORTED_PLATFORM` with no clear pointer at
+  # node version, so catch up-front.
+  NODE_MAJOR=$(check_node_major || true)
+  if [ -z "$NODE_MAJOR" ]; then
+    err "could not parse \`node --version\` — got non-standard output (a version manager misconfiguration?)"
+    SETUP_FAILED=1
+    exit 1
+  fi
+  if [ "$NODE_MAJOR" -lt "$MINSKY_NODE_MIN_MAJOR" ]; then
+    err "node ${NODE_MAJOR}.x.x is below the >=${MINSKY_NODE_MIN_MAJOR} engine requirement (see package.json engines.node)"
+    err "  upgrade with: nvm install ${MINSKY_NODE_MIN_MAJOR} && nvm use ${MINSKY_NODE_MIN_MAJOR}, or brew install node@${MINSKY_NODE_MIN_MAJOR}"
+    SETUP_FAILED=1
+    exit 1
+  fi
   command -v npx  >/dev/null 2>&1 || { err "npx not found";  SETUP_FAILED=1; exit 1; }
+  # Slice 1 of `minsky-fresh-clone-health-checks` — pnpm is the install
+  # command. Fatal if missing — `pnpm install` is in every documented
+  # path (README, setup.sh suggestions, prepare hook, etc.).
+  if ! command -v pnpm >/dev/null 2>&1; then
+    err "pnpm not found — install via:"
+    err "    corepack enable          (preferred, Node ≥16.13)"
+    err "    brew install pnpm        (macOS)"
+    err "    npm i -g pnpm            (cross-platform fallback)"
+    SETUP_FAILED=1
+    exit 1
+  fi
   command -v claude >/dev/null 2>&1 \
     || warn "claude CLI not found — install: https://docs.claude.com/en/docs/claude-code/overview"
   command -v jq >/dev/null 2>&1 \

@@ -800,3 +800,17 @@ export {
   preferredPipxPath,
   preferredPythonPath,
 } from "./arch-probe.js";
+
+// Slice 1 of `minsky-fresh-clone-health-checks`: pure pre-flight
+// check that `node_modules/` exists, plus the doctor-substrate row
+// renderer (4 new doctor rows: node_modules / pnpm-lock.yaml /
+// dist/index.js / pnpm-on-PATH).
+export {
+  type NodeModulesCheckOutcome,
+  checkNodeModulesExists,
+  formatNodeModulesMissingMessage,
+} from "./node-modules-existence-check.js";
+export {
+  type DoctorSubstrateRowState,
+  renderDoctorSubstrateRows,
+} from "./doctor-substrate-rows.js";
