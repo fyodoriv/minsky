@@ -27,6 +27,7 @@ import {
   needsArmHomebrewInstall,
   preferredBrewPath,
   preferredPipxPath,
+  preferredPythonPath,
 } from "./arch-probe.js";
 
 // ---- Fixtures -------------------------------------------------------------
@@ -355,6 +356,79 @@ describe("preferredPipxPath — derived pipx absolute path", () => {
       needsNativeBrew: true,
     };
     expect(preferredPipxPath(state)).toBe("/opt/homebrew/bin/pipx");
+  });
+});
+
+describe("preferredPythonPath — slice 7 H1 canonical post-install python", () => {
+  // When archState says we'll have native brew (either already present
+  // or about to install), we prefer `/opt/homebrew/bin/python3.13` for
+  // the aider install step because brew pipx depends on python@3.13
+  // (installed as a brew dependency), so that path will exist by the
+  // time the aider step runs.
+
+  it("returns /opt/homebrew/bin/python3.13 when Apple Silicon + native brew present", () => {
+    const state: ArchState = {
+      shellArch: "arm64",
+      hardwareArch: "arm64",
+      nativeBrewPath: "/opt/homebrew/bin/brew",
+      intelBrewPath: undefined,
+      mismatch: false,
+      needsNativeBrew: false,
+    };
+    expect(preferredPythonPath(state)).toBe("/opt/homebrew/bin/python3.13");
+  });
+
+  it("returns /opt/homebrew/bin/python3.13 when Apple Silicon + needsNativeBrew (will install)", () => {
+    // Operator's M3 Max Rosetta case — brew not installed yet but will
+    // be. The planner pre-references the post-install path.
+    const state: ArchState = {
+      shellArch: "x86_64",
+      hardwareArch: "arm64",
+      nativeBrewPath: undefined,
+      intelBrewPath: "/usr/local/bin/brew",
+      mismatch: true,
+      needsNativeBrew: true,
+    };
+    expect(preferredPythonPath(state)).toBe("/opt/homebrew/bin/python3.13");
+  });
+
+  it("returns undefined on Intel Mac (slice-5 PYTHON_CANDIDATES takes over)", () => {
+    const state: ArchState = {
+      shellArch: "x86_64",
+      hardwareArch: "x86_64",
+      nativeBrewPath: undefined,
+      intelBrewPath: "/usr/local/bin/brew",
+      mismatch: false,
+      needsNativeBrew: false,
+    };
+    expect(preferredPythonPath(state)).toBeUndefined();
+  });
+
+  it("returns undefined on Linux (sysctl absent → hardwareArch other)", () => {
+    const state: ArchState = {
+      shellArch: "x86_64",
+      hardwareArch: "other",
+      nativeBrewPath: undefined,
+      intelBrewPath: undefined,
+      mismatch: false,
+      needsNativeBrew: false,
+    };
+    expect(preferredPythonPath(state)).toBeUndefined();
+  });
+
+  it("returns undefined on Apple Silicon with zero brew AND no needsNativeBrew (edge)", () => {
+    // Defensive: if somehow hardwareArch is arm64 but neither brew
+    // exists AND needsNativeBrew is false (impossible in current code,
+    // defensive test), fall through to planner's slice-5 fallback.
+    const state: ArchState = {
+      shellArch: "arm64",
+      hardwareArch: "arm64",
+      nativeBrewPath: undefined,
+      intelBrewPath: undefined,
+      mismatch: false,
+      needsNativeBrew: false,
+    };
+    expect(preferredPythonPath(state)).toBeUndefined();
   });
 });
 

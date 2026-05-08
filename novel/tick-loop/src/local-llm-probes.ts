@@ -1,5 +1,6 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path override) -->
 /**
  * `@minsky/tick-loop/local-llm-probes` — production wiring for the
  * `DetectProbes` seam in `local-llm-bootstrap.ts`. Slice 3 substrate of
@@ -294,9 +295,24 @@ export function buildProductionProbes(opts: {
   readonly fetchFn?: FetchFn;
   readonly url?: string;
   readonly modelId?: string;
+  /**
+   * Slice 7 H0: when set, the pipx probe checks `existsSync(path)`
+   * instead of `whichFn("pipx")`. The wiring layer supplies this when
+   * arch detection says pipx should live at a specific path (e.g.,
+   * `/opt/homebrew/bin/pipx` on Apple Silicon). Without this, the
+   * probe found Intel-brew's pipx on the operator's M3 Max Rosetta
+   * shell and the planner skipped install-pipx, causing step 2 to
+   * fail at "command not found". See `arch-probe.ts preferredPipxPath`.
+   */
+  readonly expectedPipxPath?: string;
 }): DetectProbes {
+  const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
+  const probePipx: () => Promise<ComponentState> =
+    opts.expectedPipxPath !== undefined
+      ? buildExistsProbe(opts.expectedPipxPath, existsSyncFn)
+      : buildWhichProbe("pipx", opts.whichFn);
   return {
-    probePipx: buildWhichProbe("pipx", opts.whichFn),
+    probePipx,
     probeMlxLm: buildWhichProbe("mlx_lm.server", opts.whichFn),
     probeAider: buildWhichProbe("aider", opts.whichFn),
     probeModel: buildModelProbe({
@@ -307,5 +323,26 @@ export function buildProductionProbes(opts: {
       ...(opts.url !== undefined ? { url: opts.url } : {}),
       ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
     }),
+  };
+}
+
+/**
+ * Build a path-specific existence probe. Mirrors `buildWhichProbe` but
+ * uses `existsSync` against a single fixed path. Slice 7 H0 — lets
+ * `buildProductionProbes` check `/opt/homebrew/bin/pipx` directly
+ * instead of trusting `which pipx` (which picks up Intel pipx first
+ * on Rosetta / dual-brew machines).
+ *
+ * @otel tick-loop.local-llm-probes.exists
+ */
+export function buildExistsProbe(
+  path: string,
+  existsSyncFn: ExistsSyncFn,
+): () => Promise<ComponentState> {
+  return async () => {
+    if (existsSyncFn(path)) {
+      return { present: true, path };
+    }
+    return { present: false, reason: `${path} does not exist` };
   };
 }
