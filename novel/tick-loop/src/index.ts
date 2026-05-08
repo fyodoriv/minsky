@@ -740,6 +740,7 @@ export {
   type ServerState,
   detectLocalLlmStack,
   planLocalLlmBootstrap,
+  planRequiresTty,
   summarisePlan,
 } from "./local-llm-bootstrap.js";
 export {
@@ -759,6 +760,7 @@ export {
   type FetchFn,
   PYTHON_CANDIDATES,
   type WhichFn,
+  buildExistsProbe,
   buildModelProbe,
   buildProductionProbes,
   buildServerProbe,
@@ -796,4 +798,5 @@ export {
   needsArmHomebrewInstall,
   preferredBrewPath,
   preferredPipxPath,
+  preferredPythonPath,
 } from "./arch-probe.js";

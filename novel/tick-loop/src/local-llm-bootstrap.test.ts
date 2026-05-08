@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  type BootstrapPlan,
   type ComponentState,
   DEFAULT_LOCAL_LLM_MODEL,
   DEFAULT_MODEL_DOWNLOAD_MB,
@@ -23,6 +24,7 @@ import {
   type ServerState,
   detectLocalLlmStack,
   planLocalLlmBootstrap,
+  planRequiresTty,
   summarisePlan,
 } from "./local-llm-bootstrap.js";
 
@@ -359,6 +361,120 @@ describe("planLocalLlmBootstrap — arch-state option (slice 6 fix)", () => {
     const plan = planLocalLlmBootstrap(fullyReady, { archState: rosettaMissingBrew });
     expect(plan.ready).toBe(true);
     expect(plan.steps).toHaveLength(0);
+  });
+});
+
+describe("planLocalLlmBootstrap — slice 7 H1: aider uses arch-canonical python", () => {
+  // Slice 7 H1: when archState indicates we'll have native brew, the
+  // aider install step should use /opt/homebrew/bin/python3.13 — the
+  // canonical path brew pipx installs python@3.13 to as a dependency.
+  // This overrides whatever slice-5's probePythonWithDefaults picked
+  // (often /usr/local/bin/python3.13 on dual-brew machines).
+  const rosettaMissingBrew: import("./arch-probe.js").ArchState = {
+    shellArch: "x86_64",
+    hardwareArch: "arm64",
+    nativeBrewPath: undefined,
+    intelBrewPath: "/usr/local/bin/brew",
+    mismatch: true,
+    needsNativeBrew: true,
+  };
+  const nativeWithBrew: import("./arch-probe.js").ArchState = {
+    shellArch: "arm64",
+    hardwareArch: "arm64",
+    nativeBrewPath: "/opt/homebrew/bin/brew",
+    intelBrewPath: undefined,
+    mismatch: false,
+    needsNativeBrew: false,
+  };
+  const intelMac: import("./arch-probe.js").ArchState = {
+    shellArch: "x86_64",
+    hardwareArch: "x86_64",
+    nativeBrewPath: undefined,
+    intelBrewPath: "/usr/local/bin/brew",
+    mismatch: false,
+    needsNativeBrew: false,
+  };
+
+  it("arch override takes precedence over slice-5 pythonPath on Apple Silicon + needsNativeBrew", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      archState: rosettaMissingBrew,
+      // Slice-5 picked Intel brew's python. Arch override must WIN.
+      pythonPath: "/usr/local/bin/python3.13",
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    // The argv's --python arg must be /opt/homebrew/bin/python3.13,
+    // not /usr/local/bin/python3.13.
+    expect(aiderStep?.command).toEqual([
+      "/opt/homebrew/bin/pipx",
+      "install",
+      "--python",
+      "/opt/homebrew/bin/python3.13",
+      "aider-chat",
+    ]);
+  });
+
+  it("arch override takes precedence when native brew already exists", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      archState: nativeWithBrew,
+      pythonPath: "/usr/local/bin/python3.13", // stale / wrong
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toContain("/opt/homebrew/bin/python3.13");
+  });
+
+  it("Intel Mac: falls through to slice-5 pythonPath (no arch override)", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      archState: intelMac,
+      pythonPath: "/usr/local/bin/python3.13",
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toContain("/usr/local/bin/python3.13");
+    expect(aiderStep?.command).not.toContain("/opt/homebrew/bin/python3.13");
+  });
+
+  it("archState undefined: falls through to slice-5 pythonPath (backward-compat)", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      pythonPath: "/usr/local/bin/python3.13",
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toContain("/usr/local/bin/python3.13");
+  });
+});
+
+describe("planRequiresTty — slice 7 H2: non-TTY pre-flight check", () => {
+  it("returns true when plan contains install-arm-homebrew", () => {
+    const rosettaMissingBrew: import("./arch-probe.js").ArchState = {
+      shellArch: "x86_64",
+      hardwareArch: "arm64",
+      nativeBrewPath: undefined,
+      intelBrewPath: "/usr/local/bin/brew",
+      mismatch: true,
+      needsNativeBrew: true,
+    };
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    expect(planRequiresTty(plan)).toBe(true);
+  });
+
+  it("returns false for a slice-1/5 plan with no install-arm-homebrew step", () => {
+    const plan = planLocalLlmBootstrap(freshMachine);
+    expect(planRequiresTty(plan)).toBe(false);
+  });
+
+  it("returns false for an empty/ready plan", () => {
+    const readyPlan: BootstrapPlan = {
+      ready: true,
+      steps: [],
+      totalEstimatedDurationMs: 0,
+      totalEstimatedDownloadMb: 0,
+    };
+    expect(planRequiresTty(readyPlan)).toBe(false);
+  });
+
+  it("returns false for a model-download-only plan", () => {
+    const plan = planLocalLlmBootstrap(modelMissing);
+    // modelMissing fixture has pipx/mlx/aider present, only model missing
+    expect(plan.steps.some((s) => s.type === "install-arm-homebrew")).toBe(false);
+    expect(planRequiresTty(plan)).toBe(false);
   });
 });
 
