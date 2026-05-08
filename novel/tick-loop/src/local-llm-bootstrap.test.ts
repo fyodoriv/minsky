@@ -233,6 +233,135 @@ describe("planLocalLlmBootstrap — python-path option (slice 5 fix)", () => {
   });
 });
 
+describe("planLocalLlmBootstrap — arch-state option (slice 6 fix)", () => {
+  // Slice 6: when archState is supplied AND needsNativeBrew === true,
+  // the planner prepends install-arm-homebrew AND reshapes brew / pipx
+  // commands to use absolute paths. When archState is undefined (slice
+  // 1-5 call sites), the planner falls back to the bare-`brew`/bare-
+  // `pipx` behavior (backward-compat).
+  //
+  // The operator's M3 Max + Rosetta shell + no `/opt/homebrew/` is the
+  // live-run case that motivated this slice.
+  const rosettaMissingBrew: import("./arch-probe.js").ArchState = {
+    shellArch: "x86_64",
+    hardwareArch: "arm64",
+    nativeBrewPath: undefined,
+    intelBrewPath: "/usr/local/bin/brew",
+    mismatch: true,
+    needsNativeBrew: true,
+  };
+  const nativeWithBrew: import("./arch-probe.js").ArchState = {
+    shellArch: "arm64",
+    hardwareArch: "arm64",
+    nativeBrewPath: "/opt/homebrew/bin/brew",
+    intelBrewPath: undefined,
+    mismatch: false,
+    needsNativeBrew: false,
+  };
+  const intelMac: import("./arch-probe.js").ArchState = {
+    shellArch: "x86_64",
+    hardwareArch: "x86_64",
+    nativeBrewPath: undefined,
+    intelBrewPath: "/usr/local/bin/brew",
+    mismatch: false,
+    needsNativeBrew: false,
+  };
+
+  it("prepends install-arm-homebrew when Apple Silicon hw has no /opt/homebrew/", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    expect(plan.steps[0]?.type).toBe("install-arm-homebrew");
+    // Next step must be install-pipx (brew is a prerequisite).
+    expect(plan.steps[1]?.type).toBe("install-pipx");
+  });
+
+  it("install-arm-homebrew command wraps the installer with arch -arm64", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    const step = plan.steps.find((s) => s.type === "install-arm-homebrew");
+    expect(step?.command[0]).toBe("arch");
+    expect(step?.command[1]).toBe("-arm64");
+    // The shell -c arg must invoke the canonical Homebrew installer.
+    const shellCmd = step?.command[step.command.length - 1];
+    expect(shellCmd).toMatch(/raw\.githubusercontent\.com\/Homebrew\/install/);
+    expect(shellCmd).toMatch(/NONINTERACTIVE=1/);
+  });
+
+  it("pipx step uses /opt/homebrew/bin/brew when archState says Apple Silicon", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    const pipxStep = plan.steps.find((s) => s.type === "install-pipx");
+    expect(pipxStep?.command).toEqual(["/opt/homebrew/bin/brew", "install", "pipx"]);
+  });
+
+  it("mlx-lm step uses /opt/homebrew/bin/pipx when archState says Apple Silicon", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    const mlxStep = plan.steps.find((s) => s.type === "install-mlx-lm");
+    expect(mlxStep?.command).toEqual(["/opt/homebrew/bin/pipx", "install", "mlx-lm"]);
+  });
+
+  it("aider step uses /opt/homebrew/bin/pipx + python path on Apple Silicon", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      archState: rosettaMissingBrew,
+      pythonPath: "/opt/homebrew/bin/python3.13",
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toEqual([
+      "/opt/homebrew/bin/pipx",
+      "install",
+      "--python",
+      "/opt/homebrew/bin/python3.13",
+      "aider-chat",
+    ]);
+  });
+
+  it("does NOT prepend install-arm-homebrew when /opt/homebrew/ already exists", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: nativeWithBrew });
+    expect(plan.steps.some((s) => s.type === "install-arm-homebrew")).toBe(false);
+    // Still uses absolute /opt/homebrew/bin/brew path (arch-transparent
+    // dispatch — works from any shell arch).
+    const pipxStep = plan.steps.find((s) => s.type === "install-pipx");
+    expect(pipxStep?.command).toEqual(["/opt/homebrew/bin/brew", "install", "pipx"]);
+  });
+
+  it("Intel Mac: no install-arm-homebrew; pipx uses /usr/local/bin/brew", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: intelMac });
+    expect(plan.steps.some((s) => s.type === "install-arm-homebrew")).toBe(false);
+    const pipxStep = plan.steps.find((s) => s.type === "install-pipx");
+    expect(pipxStep?.command).toEqual(["/usr/local/bin/brew", "install", "pipx"]);
+  });
+
+  it("backward-compat: archState undefined → slice-1/5 bare `brew`/`pipx` commands", () => {
+    // This is the slice 1-5 call-site shape. The planner must not
+    // surprise existing callers with absolute paths.
+    const plan = planLocalLlmBootstrap(freshMachine);
+    const pipxStep = plan.steps.find((s) => s.type === "install-pipx");
+    expect(pipxStep?.command).toEqual(["brew", "install", "pipx"]);
+    const mlxStep = plan.steps.find((s) => s.type === "install-mlx-lm");
+    expect(mlxStep?.command).toEqual(["pipx", "install", "mlx-lm"]);
+  });
+
+  it("install-arm-homebrew step has a 3-minute duration envelope", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    const step = plan.steps.find((s) => s.type === "install-arm-homebrew");
+    expect(step?.estimatedDurationMs).toBe(180_000);
+    expect(step?.estimatedDownloadMb).toBeUndefined();
+  });
+
+  it("install-arm-homebrew description mentions sudo (operator awareness)", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { archState: rosettaMissingBrew });
+    const step = plan.steps.find((s) => s.type === "install-arm-homebrew");
+    expect(step?.description).toMatch(/sudo/i);
+    expect(step?.description).toMatch(/opt\/homebrew/);
+  });
+
+  it("archState-gated: idempotent fast path still applies (ready stack skips all steps)", () => {
+    // Even when archState says needsNativeBrew, if the local-LLM stack
+    // is already ready, we skip everything. The install-arm-homebrew
+    // step is part of the bootstrap plan, not a standalone prerequisite.
+    const plan = planLocalLlmBootstrap(fullyReady, { archState: rosettaMissingBrew });
+    expect(plan.ready).toBe(true);
+    expect(plan.steps).toHaveLength(0);
+  });
+});
+
 describe("planLocalLlmBootstrap — referential transparency", () => {
   it("returns the same plan shape for the same input (no hidden state)", () => {
     const plan1 = planLocalLlmBootstrap(freshMachine);

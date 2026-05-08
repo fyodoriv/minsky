@@ -2,6 +2,7 @@
 // @ts-check
 // <!-- scope: human-approved minsky CLI ergonomics (operator 2026-05-06) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well") -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -50,6 +51,8 @@ import {
   buildProductionProbes,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
+  describeArchState,
+  detectArchState,
   detectLocalLlmStack,
   executeBootstrapPlan,
   needsLocalLlmBootstrap,
@@ -226,7 +229,15 @@ async function runBootstrapLocalLlm({ force }) {
   // (replaces the hardcoded `/opt/homebrew/bin/python3.12` that worked
   // only on the operator's Apple-Silicon-brew laptop).
   const pythonPath = probePythonWithDefaults();
-  const plan = planLocalLlmBootstrap(state, pythonPath !== undefined ? { pythonPath } : {});
+  // slice 6: detect x86_64-on-Apple-Silicon + missing /opt/homebrew/
+  // so the planner can prepend install-arm-homebrew and use absolute
+  // /opt/homebrew/bin/* paths for subsequent steps.
+  const archState = await detectArchState(buildArchProbes());
+  /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
+  const planOpts = {};
+  if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
+  planOpts.archState = archState;
+  const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
@@ -284,8 +295,19 @@ async function runDoctor() {
     pythonPath !== undefined,
     pythonPath ?? "no 3.12/3.13 found — will use pipx default (may fail on 3.14+)",
   );
+  // slice 6: show the arch row so Rosetta-on-Apple-Silicon and missing
+  // /opt/homebrew/ are visible before the operator runs bootstrap.
+  const archState = await detectArchState(buildArchProbes());
+  // The row is GREEN when the planner won't need to install arm-homebrew
+  // AND the shell isn't mismatched. Rosetta-with-brew is mismatched but
+  // still GREEN because absolute paths sidestep the mismatch.
+  line("arch", !archState.needsNativeBrew, describeArchState(archState));
   process.stdout.write("\n");
-  const plan = planLocalLlmBootstrap(state, pythonPath !== undefined ? { pythonPath } : {});
+  /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
+  const planOpts = {};
+  if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
+  planOpts.archState = archState;
+  const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready) {
     process.stdout.write("Local-LLM stack: GREEN — ready\n");
   } else {
@@ -293,6 +315,57 @@ async function runDoctor() {
     process.stdout.write(`${renderConfirmSummary(plan)}\n`);
     process.stdout.write("\nRun `minsky bootstrap-local-llm` to install.\n");
   }
+}
+
+/**
+ * Build the production {@link import("../dist/arch-probe.js").ArchProbes}
+ * seam. Slice 6 of `minsky-cli-arch-detection`. Wraps:
+ *   - `probeShellArch`: maps Node's `process.arch` to the closed set.
+ *   - `probeHardwareArch`: shells out to `sysctl -n hw.optional.arm64`.
+ *   - `probeNativeBrewPath` / `probeIntelBrewPath`: `existsSync`.
+ */
+function buildArchProbes() {
+  return {
+    probeShellArch: () => {
+      // Node's `process.arch` is "arm64" on native Apple Silicon, "x64"
+      // on both Intel and Rosetta-emulated (x86_64). Map to our closed
+      // three-way set.
+      switch (process.arch) {
+        case "arm64":
+          return "arm64";
+        case "x64":
+        case "ia32":
+          return "x86_64";
+        default:
+          return "other";
+      }
+    },
+    probeHardwareArch: async () => {
+      // `sysctl -n hw.optional.arm64` returns "1" on Apple Silicon
+      // (even under Rosetta — the hardware is reported truthfully),
+      // "0" on Intel Macs, and the command itself is absent on non-
+      // Darwin hosts (Linux / Windows). A probe failure due to
+      // "sysctl: command not found" falls through to "other".
+      try {
+        const { stdout } = await execAsync("sysctl -n hw.optional.arm64 2>/dev/null", {
+          timeout: 500,
+        });
+        const trimmed = stdout.trim();
+        if (trimmed === "1") return "arm64";
+        if (trimmed === "0") return "x86_64";
+        return "other";
+        // rule-6: handled-locally — sysctl absent is a Linux signal,
+        // not a bug; typing as "other" is the planner's signal to skip
+        // arm-homebrew injection.
+      } catch {
+        return "other";
+      }
+    },
+    probeNativeBrewPath: () =>
+      existsSync("/opt/homebrew/bin/brew") ? "/opt/homebrew/bin/brew" : undefined,
+    probeIntelBrewPath: () =>
+      existsSync("/usr/local/bin/brew") ? "/usr/local/bin/brew" : undefined,
+  };
 }
 
 /** `which <bin>` adapter — uses `command -v` (POSIX) for portability. */
@@ -322,17 +395,22 @@ function shellQuote(s) {
  * through to the operator's terminal so long installs (model download)
  * show progress live.
  *
+ * Slice 6: honors `opts.stdinMode` so the install-arm-homebrew step
+ * inherits the parent's stdin (lets sudo prompt for a password on the
+ * operator's terminal). Default "ignore" matches slice-1 behavior.
+ *
  * @param {string} command
  * @param {readonly string[]} args
- * @param {{ cwd?: string; env?: NodeJS.ProcessEnv }} [opts]
+ * @param {{ cwd?: string; env?: NodeJS.ProcessEnv; stdinMode?: "ignore" | "inherit" }} [opts]
  * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
  */
 function spawnAdapter(command, args, opts = {}) {
+  const stdinMode = opts.stdinMode ?? "ignore";
   return new Promise((resolveDone, rejectFail) => {
     const child = spawn(command, args, {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
-      stdio: ["ignore", "inherit", "pipe"],
+      stdio: [stdinMode, "inherit", "pipe"],
     });
     let stderrTail = "";
     child.stderr?.on("data", (chunk) => {
