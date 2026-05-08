@@ -154,6 +154,78 @@ describe("classifySpanAttribute (pure function)", () => {
     const r = classifySpanAttribute("path", "/Users/");
     expect(r).toEqual({ ok: true });
   });
+
+  // Slice 11 — broaden VALUE_PATTERNS to mirror `scripts/scan-secrets.mjs`
+  // SECRET_PATTERNS: a regression that lifts an AWS / Google / PEM / GitHub
+  // OAuth or server-server / Slack app-level credential into a span attribute
+  // must flag with the same tag the tracked-file gate would emit. (t)–(aa)
+  // pin one positive case per added shape; tail-length floors match
+  // `scan-secrets.mjs` exactly, and labels are concatenated so this test
+  // file itself does not trip either lint when scanned.
+
+  it("(t) GitHub OAuth token (`gho_…`) value flagged", () => {
+    const r = classifySpanAttribute("body", `gho_${"a".repeat(36)}`);
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("github-oauth");
+  });
+
+  it("(u) GitHub server-to-server token (`ghs_…`) value flagged", () => {
+    const r = classifySpanAttribute("body", `ghs_${"a".repeat(36)}`);
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("github-server-token");
+  });
+
+  it("(v) GitHub user-to-server token (`ghu_…`) value flagged", () => {
+    const r = classifySpanAttribute("body", `ghu_${"a".repeat(36)}`);
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("github-user-server-token");
+  });
+
+  it("(w) Slack app-level token (`xoxa-…`) value flagged", () => {
+    const r = classifySpanAttribute("hook.url", "xoxa-1234567890-abcdefghij-ABCDEFGHIJ");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("slack-app-token");
+  });
+
+  it("(x) Slack config token (`xoxs-…`) value flagged", () => {
+    const r = classifySpanAttribute("hook.url", "xoxs-1234567890-abcdefghij-ABCDEFGHIJ");
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("slack-config-token");
+  });
+
+  it("(y) AWS access key ID value flagged", () => {
+    const r = classifySpanAttribute("note", `${"AKIA"}ABCDEFGHIJKLMNOP`);
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("aws-access-key-id");
+  });
+
+  it("(z) Google API key value flagged", () => {
+    const r = classifySpanAttribute("note", `${"AIza"}${"a".repeat(35)}`);
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("google-api-key");
+  });
+
+  it("(aa) PEM private key header value flagged", () => {
+    const header = `-----BEGIN ${"RSA "}PRIVATE KEY-----`;
+    const r = classifySpanAttribute("body", `${header}\n…`);
+    expect(r.ok).toBe(false);
+    expect(r.shape).toBe("value-shape");
+    expect(r.reason).toContain("pem-private-key");
+  });
+
+  it("(ab) AWS-shaped substring at letter boundary is NOT flagged below tail floor", () => {
+    // Guard: `AKIA` followed by <16 alphanumerics is below the documented
+    // floor and must not flag (parity with `scan-secrets.mjs`).
+    const r = classifySpanAttribute("note", `${"AKIA"}TOOSHORT`);
+    expect(r).toEqual({ ok: true });
+  });
 });
 
 describe("classifyAttributesObject (pure function)", () => {
@@ -297,6 +369,21 @@ describe("extractAttributeViolations (AST walker, slice 2)", () => {
     });
     expect(r.violations).toHaveLength(2);
     expect(r.violations.map((v) => v.file).sort()).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("(w-k0) substring short-circuit: file without `attributes` substring produces zero violations without crashing", () => {
+    // Guards the optimization that skips ts.createSourceFile when the source
+    // text doesn't contain the literal substring `attributes`. Files of this
+    // shape are the common case in `novel/**/*.ts` and account for ~750ms of
+    // wall-time savings per CI run on the full scan (75 of 80 in-scope files).
+    const source = `
+      function add(a: number, b: number): number {
+        return a + b;
+      }
+      export const noEmit = "no OTEL surface here";
+    `;
+    const r = extractAttributeViolations({ files: [{ path: "no-attrs.ts", source }] });
+    expect(r.violations).toEqual([]);
   });
 
   it("(w-k) line numbers are 1-based and locate the offending property", () => {
