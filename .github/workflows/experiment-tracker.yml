@@ -117,6 +117,15 @@ jobs:
         # append OR a tmp/ amendment proposal). The PR stays in DRAFT — never
         # auto-merged. Industry-standard `peter-evans/create-pull-request@v6`
         # handles branch + commit + PR open in one step.
+        env:
+          # Disable lefthook for the action's internal `git commit`. Slice
+          # 8.1's prepare hook (PR #389) installs lefthook hooks at
+          # `.git/hooks/pre-commit`, which fires on every commit including
+          # the action's. lefthook's TUI output (box-drawing chars) is
+          # interpreted as an "Unexpected error" by the action's parser.
+          # `LEFTHOOK=0` is lefthook's documented escape hatch — disables
+          # the binary entirely for the duration of the step.
+          LEFTHOOK: "0"
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
