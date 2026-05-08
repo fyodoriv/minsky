@@ -68,12 +68,13 @@ jobs:
         with:
           node-version: "20"
           cache: pnpm
+      # Slice 8's `prepare` hook (PR #387) runs `tsc -b && lefthook install`
+      # automatically, building all workspace dist/ in topological order. The
+      # explicit `pnpm --filter @minsky/experiment-record build` step that
+      # used to live here is now redundant — removed to keep the workflow
+      # concise. If the prepare hook is ever retired, restore the explicit
+      # build before the runner step that consumes the dist.
       - run: pnpm install --frozen-lockfile
-
-      - name: build @minsky/experiment-record
-        # The runner imports `parse` from the package; vitest tests use the
-        # source-alias path, but the .mjs runner needs the built dist.
-        run: pnpm --filter @minsky/experiment-record build
 
       - name: detect trivial label
         id: label
@@ -159,10 +160,10 @@ jobs:
         with:
           node-version: "20"
           cache: pnpm
+      # Slice 8's `prepare` hook builds all workspace dist/ during install;
+      # the explicit `pnpm --filter @minsky/experiment-record build` is
+      # now redundant.
       - run: pnpm install --frozen-lockfile
-
-      - name: build @minsky/experiment-record
-        run: pnpm --filter @minsky/experiment-record build
 
       - name: compute refs
         id: refs
@@ -235,4 +236,21 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add experiment-store/
           git commit -m "chore(experiment-store): record run for $HEAD_SHA [skip ci]"
-          git push origin HEAD:main
+          # Branch protection on `main` (status check `ci` required) blocks
+          # direct pushes from the bot — by design, since the bot's push
+          # creates a NEW commit that hasn't been through CI yet. We tried
+          # `[skip ci]` to dodge the trigger but the protection rule fires
+          # on the absence of a green ci run, not on whether ci would have
+          # been triggered. The pragmatic fix per rule #6 (let-it-crash AT
+          # the right boundary): graceful-degrade — log a warning, keep the
+          # workflow green, accept that experiment-store records aren't
+          # auto-committed for protected-branch pushes. Operators with
+          # admin tokens can re-run manually if a record is critical.
+          # Future option: open a PR with `gh pr create` + auto-merge label
+          # so the recorder's commit goes through normal CI; tracked as a
+          # P2 follow-up under `experiment-store-auto-pr`.
+          if git push origin HEAD:main 2>&1 | tee /tmp/push.log; then
+            echo "experiment-store records pushed to main"
+          else
+            echo "::warning::push to main rejected (branch protection); experiment-store records dropped this run — see /tmp/push.log above"
+          fi

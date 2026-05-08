@@ -64,12 +64,12 @@ jobs:
         with:
           node-version: "20"
           cache: pnpm
+      # Slice 8's `prepare` hook (PR #387) runs `tsc -b && lefthook install`
+      # automatically, building every workspace dist/ in topological order.
+      # The explicit `pnpm --filter @minsky/experiment-record build` step
+      # that used to live here is now redundant. Same comment for the
+      # `pnpm --filter @minsky/mape-k-loop build` step further below.
       - run: pnpm install --frozen-lockfile
-
-      - name: build @minsky/experiment-record
-        # The runner imports `parse` from the workspace package; vitest tests
-        # use the source-alias path, but the .mjs runner needs the built dist.
-        run: pnpm --filter @minsky/experiment-record build
 
       - name: replay due experiments
         run: node scripts/replay-experiment.mjs
@@ -99,10 +99,9 @@ jobs:
       # (rule #7 — operator review gate is the load-bearing safety property,
       # Beyer SRE 2016 Ch. 17).
 
-      - name: build @minsky/mape-k-loop
-        # The CLI imports `orchestrate` from `../dist/orchestrator.js` — needs
-        # the built dist (same shape as the `@minsky/experiment-record` step).
-        run: pnpm --filter @minsky/mape-k-loop build
+      # Slice 8's prepare hook already built mape-k-loop's dist — see
+      # comment near `pnpm install --frozen-lockfile` above. The explicit
+      # `pnpm --filter @minsky/mape-k-loop build` step is no longer needed.
 
       - name: ingest verdicts → mape-k orchestrator (Knowledge phase)
         run: |
