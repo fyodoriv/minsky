@@ -54,6 +54,7 @@ import {
   executeBootstrapPlan,
   needsLocalLlmBootstrap,
   planLocalLlmBootstrap,
+  probePythonWithDefaults,
   renderConfirmSummary,
 } from "../dist/index.js";
 import { formatLogLine } from "../dist/pretty-log.js";
@@ -221,7 +222,11 @@ async function maybeBootstrapLocalLlm() {
 async function runBootstrapLocalLlm({ force }) {
   const probes = buildProductionProbes({ whichFn });
   const state = await detectLocalLlmStack(probes);
-  const plan = planLocalLlmBootstrap(state);
+  // slice 5: pick a python interpreter that actually exists on this host
+  // (replaces the hardcoded `/opt/homebrew/bin/python3.12` that worked
+  // only on the operator's Apple-Silicon-brew laptop).
+  const pythonPath = probePythonWithDefaults();
+  const plan = planLocalLlmBootstrap(state, pythonPath !== undefined ? { pythonPath } : {});
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
@@ -271,8 +276,16 @@ async function runDoctor() {
     state.server.reachable,
     state.server.reachable ? state.server.url : (state.server.reason ?? ""),
   );
+  // slice 5: probe python too, so the operator can see what interpreter
+  // the aider install step is going to pin to.
+  const pythonPath = probePythonWithDefaults();
+  line(
+    "python 3.12/3.13 for aider",
+    pythonPath !== undefined,
+    pythonPath ?? "no 3.12/3.13 found — will use pipx default (may fail on 3.14+)",
+  );
   process.stdout.write("\n");
-  const plan = planLocalLlmBootstrap(state);
+  const plan = planLocalLlmBootstrap(state, pythonPath !== undefined ? { pythonPath } : {});
   if (plan.ready) {
     process.stdout.write("Local-LLM stack: GREEN — ready\n");
   } else {

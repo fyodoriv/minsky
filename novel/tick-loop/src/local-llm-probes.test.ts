@@ -16,12 +16,15 @@
 import { describe, expect, it } from "vitest";
 import {
   type FetchFn,
+  PYTHON_CANDIDATES,
   type WhichFn,
   buildModelProbe,
   buildProductionProbes,
   buildServerProbe,
   buildWhichProbe,
   modelCachePath,
+  probePythonWithDefaults,
+  selectPythonPath,
 } from "./local-llm-probes.js";
 
 // ---- modelCachePath -----------------------------------------------------
@@ -134,6 +137,93 @@ describe("buildServerProbe — happy path", () => {
     const state = await probe();
     expect(state.reachable).toBe(true);
     expect(state.url).toBe("http://x:1/v1/models");
+  });
+});
+
+// ---- selectPythonPath / probePythonWithDefaults (slice 5) ---------------
+
+describe("selectPythonPath — first-hit picker", () => {
+  it("returns the first candidate that existsSyncFn says exists", () => {
+    const existsSyncFn = (p: string) => p === "/opt/homebrew/bin/python3.13";
+    const picked = selectPythonPath(
+      ["/opt/homebrew/bin/python3.12", "/opt/homebrew/bin/python3.13", "/usr/bin/python3"],
+      existsSyncFn,
+    );
+    expect(picked).toBe("/opt/homebrew/bin/python3.13");
+  });
+
+  it("returns undefined when no candidate exists", () => {
+    const picked = selectPythonPath(
+      ["/opt/homebrew/bin/python3.12", "/usr/local/bin/python3.13"],
+      () => false,
+    );
+    expect(picked).toBeUndefined();
+  });
+
+  it("handles an empty candidate list", () => {
+    expect(selectPythonPath([], () => true)).toBeUndefined();
+  });
+
+  it("preserves candidate order (first-match wins even when later candidates also exist)", () => {
+    // If both 3.12 and 3.13 exist on the host, we pin to 3.12 — slice 1's
+    // canonical choice — to stay close to the operator's validated env.
+    const picked = selectPythonPath(
+      ["/opt/homebrew/bin/python3.12", "/opt/homebrew/bin/python3.13"],
+      () => true,
+    );
+    expect(picked).toBe("/opt/homebrew/bin/python3.12");
+  });
+});
+
+describe("PYTHON_CANDIDATES — ordering contract", () => {
+  it("lists apple-silicon-brew python3.12 before intel-brew paths", () => {
+    // Operator's canonical machine is Apple Silicon + brew. Intel-brew
+    // machines fall through after. See probePython JSDoc for rationale.
+    const appleSilicon = PYTHON_CANDIDATES.indexOf("/opt/homebrew/bin/python3.12");
+    const intelBrew = PYTHON_CANDIDATES.indexOf("/usr/local/bin/python3.12");
+    expect(appleSilicon).toBeGreaterThanOrEqual(0);
+    expect(intelBrew).toBeGreaterThanOrEqual(0);
+    expect(appleSilicon).toBeLessThan(intelBrew);
+  });
+
+  it("includes both python3.12 and python3.13 for both brew layouts", () => {
+    expect(PYTHON_CANDIDATES).toContain("/opt/homebrew/bin/python3.12");
+    expect(PYTHON_CANDIDATES).toContain("/opt/homebrew/bin/python3.13");
+    expect(PYTHON_CANDIDATES).toContain("/usr/local/bin/python3.12");
+    expect(PYTHON_CANDIDATES).toContain("/usr/local/bin/python3.13");
+  });
+
+  it("falls through to system python3 as a last resort (graceful degrade)", () => {
+    const systemPython = PYTHON_CANDIDATES.indexOf("/usr/bin/python3");
+    const brewPython = PYTHON_CANDIDATES.indexOf("/opt/homebrew/bin/python3.12");
+    expect(systemPython).toBeGreaterThan(brewPython);
+  });
+});
+
+describe("probePythonWithDefaults — production wiring", () => {
+  it("uses injected existsSyncFn and candidates", () => {
+    const picked = probePythonWithDefaults({
+      existsSyncFn: (p) => p === "/custom/python",
+      candidates: ["/custom/python"],
+    });
+    expect(picked).toBe("/custom/python");
+  });
+
+  it("defaults to PYTHON_CANDIDATES when candidates is omitted", () => {
+    // Stub existsSyncFn to only say yes to a known candidate; the
+    // default candidate list must contain it for this to land.
+    const picked = probePythonWithDefaults({
+      existsSyncFn: (p) => p === "/usr/local/bin/python3.13",
+    });
+    expect(picked).toBe("/usr/local/bin/python3.13");
+  });
+
+  it("returns undefined when nothing exists (planner reads as pipx-default)", () => {
+    const picked = probePythonWithDefaults({
+      existsSyncFn: () => false,
+      candidates: ["/x", "/y"],
+    });
+    expect(picked).toBeUndefined();
   });
 });
 

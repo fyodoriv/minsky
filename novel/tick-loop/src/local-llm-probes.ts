@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08) -->
 /**
  * `@minsky/tick-loop/local-llm-probes` — production wiring for the
  * `DetectProbes` seam in `local-llm-bootstrap.ts`. Slice 3 substrate of
@@ -192,6 +193,85 @@ const defaultFetchFn: FetchFn = async (url, init) => {
   const resp = await globalThis.fetch(url, init);
   return { ok: resp.ok, status: resp.status };
 };
+
+// ---- probePython ---------------------------------------------------------
+
+/**
+ * Candidate python interpreter paths, tried in order. Skipped silently
+ * when `existsSyncFn` says the file doesn't exist. First hit wins.
+ *
+ * Order rationale (highest → lowest preference):
+ *   1. Apple-Silicon-brew python 3.12  — the operator's canonical
+ *      machine, matches slice 1's hardcoded path (kept for continuity).
+ *   2. Apple-Silicon-brew python 3.13  — aider supports both 3.12 and
+ *      3.13; brew moved the `python3` default from 3.12 → 3.13 in 2024.
+ *   3. Intel-brew python 3.12          — `/usr/local/` layout on Intel
+ *      Macs (the operator's other laptop, the one that caught this bug).
+ *   4. Intel-brew python 3.13          — same but 3.13.
+ *   5. Intel-brew generic `python3`    — whatever brew linked as default.
+ *   6. System `/usr/bin/python3`       — macOS pre-installed (3.9 on
+ *      Sonoma+); aider install may fail here, but better to *try* than
+ *      hard-error with "no python found".
+ *   7. Linux `/usr/bin/python3.12` + `/usr/bin/python3.13`             — apt/dnf layout.
+ *
+ * This ordering is deliberate: we want the pin to land on the best
+ * known-good interpreter for aider. Falls through to `undefined` on an
+ * exhausted candidate list, which triggers the planner's pipx-default
+ * branch (no `--python` flag).
+ */
+export const PYTHON_CANDIDATES: readonly string[] = Object.freeze([
+  "/opt/homebrew/bin/python3.12",
+  "/opt/homebrew/bin/python3.13",
+  "/usr/local/bin/python3.12",
+  "/usr/local/bin/python3.13",
+  "/usr/local/bin/python3",
+  "/usr/bin/python3.12",
+  "/usr/bin/python3.13",
+  "/usr/bin/python3",
+]);
+
+/**
+ * Pure selector — first candidate that `existsSyncFn` confirms exists.
+ * Exported for tests; the default export
+ * {@link probePythonWithDefaults} wires it to `nodeExistsSync`.
+ *
+ * Returns `undefined` on empty hits, which the planner reads as
+ * "pipx-default python" (no `--python` flag passed). That's a graceful
+ * degrade path — on a machine with zero python, `pipx install` itself
+ * fails loudly at step 2, not silently here.
+ *
+ * @otel-exempt — pure selector, no I/O, no span.
+ */
+export function selectPythonPath(
+  candidates: readonly string[],
+  existsSyncFn: ExistsSyncFn,
+): string | undefined {
+  for (const candidate of candidates) {
+    if (existsSyncFn(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Production wiring for `selectPythonPath` — wired to
+ * `node:fs.existsSync` + {@link PYTHON_CANDIDATES}. Called by
+ * `bin/minsky.mjs` once at bootstrap time; the result is threaded into
+ * `planLocalLlmBootstrap(state, { pythonPath: … })`.
+ *
+ * `existsSyncFn` is injectable for tests; production defaults to
+ * `node:fs.existsSync`.
+ *
+ * @otel-exempt — wraps a pure selector with a seam bind; no span.
+ */
+export function probePythonWithDefaults(opts?: {
+  readonly existsSyncFn?: ExistsSyncFn;
+  readonly candidates?: readonly string[];
+}): string | undefined {
+  return selectPythonPath(
+    opts?.candidates ?? PYTHON_CANDIDATES,
+    opts?.existsSyncFn ?? nodeExistsSync,
+  );
+}
 
 // ---- buildProductionProbes ----------------------------------------------
 
