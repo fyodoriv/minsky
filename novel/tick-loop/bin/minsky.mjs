@@ -5,6 +5,7 @@
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path probe + H1 aider python + H2 non-TTY refuse) -->
 // <!-- scope: human-approved minsky-cli-fresh-clone-bootstrap slice 8 (operator 2026-05-08 — "I've cloned minsky from scratch, ran pnpm install, then ran minsky and got module not found about tick-loop") -->
+// <!-- scope: human-approved minsky-fresh-clone-health-checks slice 1 (operator 2026-05-08 — "Next let's add as much stable self-healing as reasonable to minsky & install commands") -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -79,6 +80,23 @@ if (!existsSync(DIST_INDEX_PATH)) {
   process.exit(1);
 }
 
+// Slice 1 of `minsky-fresh-clone-health-checks` — same defensive
+// pattern as the dist-existence check above. The dist file might
+// exist (operator ran `pnpm --filter ... build` once before deleting
+// node_modules) but its transitive imports (`@types/node`, `vitest`,
+// etc.) resolve at module-load time and produce cryptic
+// `ERR_MODULE_NOT_FOUND` stack traces pointing at node-internals.
+// Inline the check (so we don't depend on node_modules to detect that
+// node_modules is missing) and emit a one-line operator-actionable
+// stderr message before the failing import is reached.
+const NODE_MODULES_PATH = resolve(MINSKY_HOME, "node_modules");
+if (!existsSync(NODE_MODULES_PATH)) {
+  process.stderr.write(
+    `minsky: node_modules/ missing (${NODE_MODULES_PATH}) — run \`pnpm install\` from the repo root\n`,
+  );
+  process.exit(1);
+}
+
 const {
   buildProductionProbes,
   classifyClaudeProbeOutput,
@@ -93,6 +111,7 @@ const {
   preferredPipxPath,
   probePythonWithDefaults,
   renderConfirmSummary,
+  renderDoctorSubstrateRows,
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
@@ -374,7 +393,24 @@ async function runDoctor() {
   const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
   const claudeDecision = await probeClaude();
   emitDoctorRows({ state, archState, claudeDecision, pythonPath });
+  // Slice 1 of `minsky-fresh-clone-health-checks`: 4 substrate rows
+  // (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) so
+  // the operator can see the install-time substrate at the same time
+  // as the local-LLM stack. ANY substrate red → daemon literally
+  // cannot run, so banner is RED instead of YELLOW.
+  const substrateState = await probeSubstrate();
+  const substrateLines = renderDoctorSubstrateRows(substrateState);
+  for (const l of substrateLines) {
+    process.stdout.write(`${l}\n`);
+  }
+  const anySubstrateRed = substrateLines.some((l) => l.startsWith("  ✗"));
   process.stdout.write("\n");
+  if (anySubstrateRed) {
+    process.stdout.write("Substrate: RED — install-time prerequisites missing\n");
+    process.stdout.write("Local-LLM stack check skipped — fix substrate first.\n");
+    process.exitCode = 1;
+    return;
+  }
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready) {
     process.stdout.write("Local-LLM stack: GREEN — ready\n");
@@ -383,6 +419,25 @@ async function runDoctor() {
   process.stdout.write("Local-LLM stack: YELLOW — install plan available\n");
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
   process.stdout.write("\nRun `minsky bootstrap-local-llm` to install.\n");
+}
+
+/**
+ * Probe the install-time substrate for `runDoctor`. Slice 1 of
+ * `minsky-fresh-clone-health-checks`. Reads four FS / PATH probes:
+ * `node_modules/` at MINSKY_HOME, `pnpm-lock.yaml` at MINSKY_HOME,
+ * `novel/tick-loop/dist/index.js` (PKG_ROOT-relative — already
+ * resolved at module-load via DIST_INDEX_PATH), and `which pnpm`.
+ *
+ * @returns {Promise<import("../dist/doctor-substrate-rows.js").DoctorSubstrateRowState>}
+ */
+async function probeSubstrate() {
+  const pnpmPath = await whichFn("pnpm");
+  return {
+    nodeModulesPresent: existsSync(NODE_MODULES_PATH),
+    pnpmLockPresent: existsSync(resolve(MINSKY_HOME, "pnpm-lock.yaml")),
+    distPresent: existsSync(DIST_INDEX_PATH),
+    pnpmOnPath: pnpmPath !== undefined,
+  };
 }
 
 /**
