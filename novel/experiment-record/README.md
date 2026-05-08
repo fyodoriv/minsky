@@ -1,5 +1,7 @@
 # `@minsky/experiment-record`
 
+<!-- rule-1: ajv / generic JSON-Schema validators rejected because: EXPERIMENT.yaml is a Minsky-specific schema with rule-#9 hypothesis / pivot-threshold / measurement / literature-anchor fields that have no off-the-shelf equivalent; the parser is bespoke and the gates that consume it (`ci-experiment-runner-v0`, `experiment-tracker-v0`, `pivot-success-margin`, `anchor-primary-source`, `measurement-inspects-output`) are tightly coupled to the parsed shape. A generic schema validator would only cover the structural layer; the field-level semantics (hypothesis prose ≥ N words, pivot threshold numeric, measurement command runnable) need first-class TS code. -->
+
 Schema + parser + validator for `EXPERIMENT.yaml`, the per-PR pre-registration record carried by every non-trivial PR per [constitutional rule #9](../../vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes). The format and the parser are the *metric source* the rule-#9 automation layer (`ci-experiment-runner-v0`, `experiment-tracker-v0`) consumes.
 
 See [`spec.md`](./spec.md) for the format reference; [`schema.json`](./schema.json) for the JSON-Schema (draft-07) definition.

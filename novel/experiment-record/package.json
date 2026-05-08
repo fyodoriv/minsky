@@ -14,9 +14,15 @@
     }
   },
   "bin": {
-    "experiment-record": "./dist/cli.js"
+    "experiment-record": "./bin/experiment-record.mjs"
   },
-  "files": ["dist/**/*.js", "dist/**/*.d.ts", "schema.json", "spec.md"],
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "bin/experiment-record.mjs",
+    "schema.json",
+    "spec.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --root .",
