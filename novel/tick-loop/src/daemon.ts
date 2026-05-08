@@ -828,6 +828,9 @@ function emitPrePrLintGateSpan(
   };
   if (taskId !== undefined) base["task.id"] = taskId;
   if (gateResult.failedStep !== undefined) base["pre-pr-lint.failed_step"] = gateResult.failedStep;
+  if (gateResult.bodyDiscovered !== undefined) {
+    base["pre-pr-lint.body_discovered"] = gateResult.bodyDiscovered;
+  }
   opts.emit({ name: "tick-loop.pre-pr-lint-gate", attributes: base });
 }
 
@@ -1270,7 +1273,7 @@ export function buildDaemonBrief(args: {
     "<!-- security: not-applicable — <reason ≥3 chars> -->",
     "```",
     "",
-    "Reason ≥3 chars; em-dash (—) and `--` both accepted. When in doubt, prefer Option A.",
+    "When in doubt, prefer Option A.",
     "",
     "## Priority-discipline gate",
     "",

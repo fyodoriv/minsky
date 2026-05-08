@@ -38,6 +38,21 @@ export interface PrePrLintRunResult {
   readonly failedStep?: string;
   /** Last ~80 lines of stderr from the failing step (set when `verdict` is `"fail"`). */
   readonly stderrTail?: string;
+  /**
+   * Whether the body-only checks (`pr-self-grade`, `pr-security-review`)
+   * actually ran. `true` when a draft body file was discovered and forwarded
+   * via `--body=<path>`; `false` when no body file was present and the body
+   * checks were silently skipped; `undefined` when the run was body-blind by
+   * construction (the legacy `createPnpmPrePrLintRun` direct binding).
+   *
+   * Set only by `createBodyAwarePrePrLintRun` (slice 34/N — surfacing the
+   * silent skip so the OTEL signal can chart how often the daemon opens PRs
+   * without writing `pr-body.md` to disk first). PR #337 was BLOCKED in CI
+   * because the body-only `pr-security-review` check fired in CI but the
+   * outer gate's body-only checks had silently skipped the same check
+   * locally — this field makes that asymmetry visible per-iteration.
+   */
+  readonly bodyDiscovered?: boolean;
 }
 
 /**
@@ -55,6 +70,13 @@ export interface PrePrLintGateResult {
   readonly failedStep?: string;
   /** Stderr tail from the last failing attempt (set when `verdict` is `"fail"`). */
   readonly stderrTail?: string;
+  /**
+   * Body-discovery status from the last attempt — `true`/`false`/`undefined`
+   * mirrors `PrePrLintRunResult.bodyDiscovered`. Forwarded so the daemon's
+   * span emitter can surface `pre-pr-lint.body_discovered` per-iteration
+   * (slice 34/N).
+   */
+  readonly bodyDiscovered?: boolean;
 }
 
 export interface RunPrePrLintGateArgs {
@@ -86,7 +108,11 @@ export async function runPrePrLintGate(args: RunPrePrLintGateArgs): Promise<PreP
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     last = await args.runLint();
     if (last.verdict === "pass") {
-      return { verdict: "pass", attempts: attempt };
+      return {
+        verdict: "pass",
+        attempts: attempt,
+        ...(last.bodyDiscovered !== undefined && { bodyDiscovered: last.bodyDiscovered }),
+      };
     }
   }
   return {
@@ -94,6 +120,7 @@ export async function runPrePrLintGate(args: RunPrePrLintGateArgs): Promise<PreP
     attempts: maxAttempts,
     ...(last?.failedStep !== undefined && { failedStep: last.failedStep }),
     ...(last?.stderrTail !== undefined && { stderrTail: last.stderrTail }),
+    ...(last?.bodyDiscovered !== undefined && { bodyDiscovered: last.bodyDiscovered }),
   };
 }
 
@@ -357,6 +384,7 @@ export function createBodyAwarePrePrLintRun(opts: BodyAwarePrePrLintRunOptions):
       ...(opts.spawnFn !== undefined && { spawnFn: opts.spawnFn }),
       ...(bodyPath !== undefined && { bodyPath }),
     });
-    return inner();
+    const result = await inner();
+    return { ...result, bodyDiscovered: bodyPath !== undefined };
   };
 }
