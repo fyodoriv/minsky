@@ -170,6 +170,69 @@ describe("planLocalLlmBootstrap — dependency order", () => {
   });
 });
 
+describe("planLocalLlmBootstrap — python-path option (slice 5 fix)", () => {
+  // Slice 1 hardcoded `--python /opt/homebrew/bin/python3.12` into the
+  // aider install step, which broke on any machine without that exact
+  // path (Intel-brew machines, Linux hosts, machines where brew only
+  // has python@3.13). Slice 5 adds an optional pythonPath knob so the
+  // wiring layer can pass whatever the host actually has. See
+  // `BootstrapPlanOptions` JSDoc.
+
+  it("omits --python when pythonPath is undefined (pipx-default)", () => {
+    const plan = planLocalLlmBootstrap(freshMachine);
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toEqual(["pipx", "install", "aider-chat"]);
+    expect(aiderStep?.description).toMatch(/pipx-default python/);
+  });
+
+  it("omits --python when options is absent (backward-compat with slice 1 call sites)", () => {
+    // Slice 1's planner took no options; any remaining call site that
+    // forgets to pass options must still produce a runnable command.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- documenting shape
+    const plan = planLocalLlmBootstrap(freshMachine);
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command[0]).toBe("pipx");
+    expect(aiderStep?.command).not.toContain("--python");
+  });
+
+  it("pins --python when pythonPath is supplied", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      pythonPath: "/usr/local/bin/python3.13",
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toEqual([
+      "pipx",
+      "install",
+      "--python",
+      "/usr/local/bin/python3.13",
+      "aider-chat",
+    ]);
+    expect(aiderStep?.description).toMatch(/\/usr\/local\/bin\/python3\.13/);
+  });
+
+  it("does not use pythonPath when aider is already installed (no-op fast path)", () => {
+    // If aider is present, the install-aider step is skipped regardless
+    // of what pythonPath says — the option is metadata for a step that
+    // isn't scheduled.
+    const plan = planLocalLlmBootstrap(
+      { ...freshMachine, aider: PRESENT },
+      { pythonPath: "/opt/homebrew/bin/python3.12" },
+    );
+    expect(plan.steps.some((s) => s.type === "install-aider")).toBe(false);
+  });
+
+  it("accepts any interpreter path shape (the planner does not validate existence)", () => {
+    // Validation lives in the probe (local-llm-probes.ts probePython).
+    // The planner trusts the caller — same decoupling as the rest of
+    // the probe seams.
+    const plan = planLocalLlmBootstrap(freshMachine, {
+      pythonPath: "/nonexistent/python",
+    });
+    const aiderStep = plan.steps.find((s) => s.type === "install-aider");
+    expect(aiderStep?.command).toContain("/nonexistent/python");
+  });
+});
+
 describe("planLocalLlmBootstrap — referential transparency", () => {
   it("returns the same plan shape for the same input (no hidden state)", () => {
     const plan1 = planLocalLlmBootstrap(freshMachine);

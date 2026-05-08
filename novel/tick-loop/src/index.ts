@@ -728,6 +728,7 @@ export {
 // `minsky-cli-auto-bootstrap-local-llm`.
 export {
   type BootstrapPlan,
+  type BootstrapPlanOptions,
   type BootstrapStepType,
   type ComponentState,
   type DetectProbes,
@@ -756,12 +757,15 @@ export {
 export {
   type ExistsSyncFn,
   type FetchFn,
+  PYTHON_CANDIDATES,
   type WhichFn,
   buildModelProbe,
   buildProductionProbes,
   buildServerProbe,
   buildWhichProbe,
   modelCachePath,
+  probePythonWithDefaults,
+  selectPythonPath,
 } from "./local-llm-probes.js";
 
 // Real `claude --print` probe — used by `bin/minsky.mjs` to detect

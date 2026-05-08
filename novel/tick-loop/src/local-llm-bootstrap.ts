@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 1 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08 — live-run regression: hardcoded python path broke on Intel-brew machines) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap` — pure detection + plan functions
  * for the local-LLM stack. Slice 1 of P0 task
@@ -174,6 +175,29 @@ export interface BootstrapPlan {
   readonly ready: boolean;
 }
 
+/**
+ * Optional planner knobs. The state record stays focused on "what's
+ * installed"; knobs like "which python interpreter to pin aider to"
+ * are orthogonal and only touch individual steps, so they live here
+ * instead of on {@link LocalLlmStackState}.
+ *
+ * Added 2026-05-08 (slice 5 — `minsky-cli-python-path-detection` fix)
+ * to replace the hardcoded `/opt/homebrew/bin/python3.12` that slice 1
+ * baked into the aider install step. Absent / undefined fields keep
+ * the planner backward-compatible with slice 1's call sites.
+ */
+export interface BootstrapPlanOptions {
+  /**
+   * Interpreter path for `pipx install --python <path> aider-chat`.
+   * When undefined, pipx picks whatever `python3` is on PATH — fine
+   * on most machines (macOS/Linux default to 3.12 or 3.13 which aider
+   * supports). Production wiring calls `probePython()` from
+   * `local-llm-probes.ts` to pick the best interpreter; tests pass
+   * synthetic strings.
+   */
+  readonly pythonPath?: string;
+}
+
 // ---- Constants ------------------------------------------------------------
 
 /**
@@ -237,16 +261,32 @@ function buildMlxLmStep(): InstallStep {
   };
 }
 
-function buildAiderStep(): InstallStep {
-  return {
-    type: "install-aider",
-    description: "Install aider-chat via pipx (agentic CLI; pinned to python 3.12 per docs)",
-    estimatedDurationMs: 60_000,
-    // Pinned python 3.12 because aider's tokenizers==0.21.1 conflicts with
-    // mlx-lm's tokenizers>=0.22; pipx isolates each venv. See
-    // `docs/local-llm-fallback.md` § "Why two separate Python environments".
-    command: ["pipx", "install", "--python", "/opt/homebrew/bin/python3.12", "aider-chat"],
-  };
+function buildAiderStep(pythonPath?: string): InstallStep {
+  // Aider needs python 3.12 or 3.13 (3.14 has numpy build issues — see
+  // `docs/local-llm-fallback.md`). pipx isolates the venv so aider's
+  // tokenizers==0.21.1 doesn't conflict with mlx-lm's >=0.22.
+  //
+  // Resolution order for the python interpreter:
+  //   1. Caller-supplied `pythonPath` (the wiring layer detects what's
+  //      actually available via `probePython`).
+  //   2. Omit `--python` → pipx picks whatever `python3` points to.
+  //      On most macOS/Linux machines that's 3.12 or 3.13 (supported);
+  //      if 3.14, the install fails loudly and the operator can install
+  //      brew python@3.13 and rerun.
+  //
+  // Replaces slice 1's hardcoded `/opt/homebrew/bin/python3.12` path —
+  // it worked on the operator's Apple-Silicon-with-brew-python machine
+  // but failed on machines without brew python@3.12 (caught 2026-05-08
+  // live-run on the operator's laptop).
+  const command =
+    pythonPath !== undefined
+      ? ["pipx", "install", "--python", pythonPath, "aider-chat"]
+      : ["pipx", "install", "aider-chat"];
+  const description =
+    pythonPath !== undefined
+      ? `Install aider-chat via pipx with ${pythonPath} (pinned 3.12/3.13 per docs)`
+      : "Install aider-chat via pipx (pipx-default python; 3.12/3.13 supported)";
+  return { type: "install-aider", description, estimatedDurationMs: 60_000, command };
 }
 
 function buildModelDownloadStep(modelId: string): InstallStep {
@@ -299,7 +339,10 @@ function buildStartServerStep(): InstallStep {
  *
  * @otel tick-loop.local-llm-bootstrap.plan
  */
-export function planLocalLlmBootstrap(state: LocalLlmStackState): BootstrapPlan {
+export function planLocalLlmBootstrap(
+  state: LocalLlmStackState,
+  options: BootstrapPlanOptions = {},
+): BootstrapPlan {
   // Idempotent fast path: everything present + reachable. The operator
   // runs `minsky` again on a set-up machine; we add zero seconds.
   if (
@@ -325,7 +368,7 @@ export function planLocalLlmBootstrap(state: LocalLlmStackState): BootstrapPlan 
   }
 
   if (!state.aider.present) {
-    steps.push(buildAiderStep());
+    steps.push(buildAiderStep(options.pythonPath));
   }
 
   if (!state.model.present) {
