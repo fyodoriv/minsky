@@ -1,5 +1,6 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 1 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08 — live-run regression: hardcoded python path broke on Intel-brew machines) -->
+// <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap` — pure detection + plan functions
  * for the local-LLM stack. Slice 1 of P0 task
@@ -59,6 +60,8 @@
  *
  * @module tick-loop/local-llm-bootstrap
  */
+
+import { needsArmHomebrewInstall, preferredBrewPath, preferredPipxPath } from "./arch-probe.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -127,6 +130,7 @@ export interface LocalLlmStackState {
  * rule-#9 record before it lands; removing one is more breaking still.
  */
 export type BootstrapStepType =
+  | "install-arm-homebrew"
   | "install-pipx"
   | "install-mlx-lm"
   | "install-aider"
@@ -196,6 +200,22 @@ export interface BootstrapPlanOptions {
    * synthetic strings.
    */
   readonly pythonPath?: string;
+
+  /**
+   * Architecture state for the host. Slice 6
+   * (`minsky-cli-arch-detection`) feeds `detectArchState` from
+   * `arch-probe.ts`. When present AND
+   * `archState.needsNativeBrew === true`, the planner prepends the
+   * `install-arm-homebrew` step AND reshapes downstream brew / pipx
+   * commands to use `/opt/homebrew/bin/...` absolute paths so the
+   * chain is architecture-transparent (works from both arm64 shells
+   * and Rosetta shells on Apple Silicon hardware).
+   *
+   * When undefined (slice 1-5 call sites), the planner falls back to
+   * the slice-5 behavior — bare `brew` / `pipx` on PATH. Backward-
+   * compat by construction.
+   */
+  readonly archState?: import("./arch-probe.js").ArchState;
 }
 
 // ---- Constants ------------------------------------------------------------
@@ -237,36 +257,86 @@ export const DEFAULT_LOCAL_LLM_PROBE_URL = "http://127.0.0.1:8080/v1/models";
 // ---- Step Builders --------------------------------------------------------
 
 /**
+ * Build the install-arm-homebrew step. Only scheduled when the host is
+ * Apple Silicon AND `/opt/homebrew/bin/brew` is absent (slice 6's
+ * `archState.needsNativeBrew === true` branch).
+ *
+ * The installer is the official Homebrew one-liner wrapped with
+ * `arch -arm64` so sudo-escalated `mkdir /opt/homebrew/` lands in
+ * arm64 mode even when the parent shell is running under Rosetta.
+ * `NONINTERACTIVE=1` skips the installer's "press RETURN to continue"
+ * prompt; sudo may still prompt for a password on the operator's
+ * terminal (inherited stdin required — handled at the executor layer).
+ *
+ * Estimated 3 min wall-clock on a 1 Gbps link: 30 s for the installer
+ * script download + ~90 s for the Homebrew self-tar unpack + ~60 s for
+ * `brew update` to seed the formula index.
+ *
+ * Internal — exported only for paired tests.
+ */
+function buildInstallArmHomebrewStep(): InstallStep {
+  return {
+    type: "install-arm-homebrew",
+    description:
+      "Install native ARM Homebrew at /opt/homebrew/ (~3 min; needs sudo for /opt/homebrew/ mkdir)",
+    estimatedDurationMs: 180_000,
+    // `arch -arm64` forces the entire installer into arm64 execution;
+    // the installer's own detection logic then chooses /opt/homebrew/
+    // (the Apple-Silicon-standard prefix) because the child process
+    // reports `uname -m` as arm64 regardless of the parent shell.
+    command: [
+      "arch",
+      "-arm64",
+      "/bin/bash",
+      "-c",
+      'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+    ],
+  };
+}
+
+/**
  * Build the canonical install step for `pipx`. Internal — exported only
  * for paired tests. The command uses Homebrew because pipx itself ships
  * via brew on macOS and apt on Linux; the operator's machine is macOS
  * (vision.md § "Tech defaults" — operator-blessed; Linux is supported
  * but is not the default).
+ *
+ * Slice 6: when `brewPath` is supplied, the command becomes
+ * `<brewPath> install pipx` (absolute path → architecture-transparent).
+ * When undefined, falls back to slice-1's bare `brew install pipx`.
  */
-function buildPipxStep(): InstallStep {
+function buildPipxStep(brewPath?: string): InstallStep {
+  const brew = brewPath ?? "brew";
   return {
     type: "install-pipx",
-    description: "Install pipx (Python isolated-venv manager)",
+    description:
+      brewPath !== undefined
+        ? `Install pipx via ${brewPath} (Python isolated-venv manager)`
+        : "Install pipx (Python isolated-venv manager)",
     estimatedDurationMs: 30_000,
-    command: ["brew", "install", "pipx"],
+    command: [brew, "install", "pipx"],
   };
 }
 
-function buildMlxLmStep(): InstallStep {
+function buildMlxLmStep(pipxPath?: string): InstallStep {
+  const pipx = pipxPath ?? "pipx";
   return {
     type: "install-mlx-lm",
-    description: "Install mlx-lm via pipx (Apple Silicon native ML server)",
+    description:
+      pipxPath !== undefined
+        ? `Install mlx-lm via ${pipxPath} (Apple Silicon native ML server)`
+        : "Install mlx-lm via pipx (Apple Silicon native ML server)",
     estimatedDurationMs: 60_000,
-    command: ["pipx", "install", "mlx-lm"],
+    command: [pipx, "install", "mlx-lm"],
   };
 }
 
-function buildAiderStep(pythonPath?: string): InstallStep {
+function buildAiderStep(pythonPath?: string, pipxPath?: string): InstallStep {
   // Aider needs python 3.12 or 3.13 (3.14 has numpy build issues — see
   // `docs/local-llm-fallback.md`). pipx isolates the venv so aider's
   // tokenizers==0.21.1 doesn't conflict with mlx-lm's >=0.22.
   //
-  // Resolution order for the python interpreter:
+  // Resolution order for the python interpreter (slice 5):
   //   1. Caller-supplied `pythonPath` (the wiring layer detects what's
   //      actually available via `probePython`).
   //   2. Omit `--python` → pipx picks whatever `python3` points to.
@@ -274,18 +344,25 @@ function buildAiderStep(pythonPath?: string): InstallStep {
   //      if 3.14, the install fails loudly and the operator can install
   //      brew python@3.13 and rerun.
   //
+  // Slice 6 adds the pipxPath knob so the command uses the arch-correct
+  // `pipx` absolute path (e.g., `/opt/homebrew/bin/pipx` on Apple
+  // Silicon). When both pythonPath and pipxPath are undefined, the
+  // command falls through to slice-5's bare-`pipx install aider-chat`.
+  //
   // Replaces slice 1's hardcoded `/opt/homebrew/bin/python3.12` path —
   // it worked on the operator's Apple-Silicon-with-brew-python machine
   // but failed on machines without brew python@3.12 (caught 2026-05-08
   // live-run on the operator's laptop).
+  const pipx = pipxPath ?? "pipx";
   const command =
     pythonPath !== undefined
-      ? ["pipx", "install", "--python", pythonPath, "aider-chat"]
-      : ["pipx", "install", "aider-chat"];
+      ? [pipx, "install", "--python", pythonPath, "aider-chat"]
+      : [pipx, "install", "aider-chat"];
+  const viaPipxLabel = pipxPath !== undefined ? ` via ${pipxPath}` : "";
   const description =
     pythonPath !== undefined
-      ? `Install aider-chat via pipx with ${pythonPath} (pinned 3.12/3.13 per docs)`
-      : "Install aider-chat via pipx (pipx-default python; 3.12/3.13 supported)";
+      ? `Install aider-chat${viaPipxLabel} with ${pythonPath} (pinned 3.12/3.13 per docs)`
+      : `Install aider-chat${viaPipxLabel} (pipx-default python; 3.12/3.13 supported)`;
   return { type: "install-aider", description, estimatedDurationMs: 60_000, command };
 }
 
@@ -324,6 +401,73 @@ function buildStartServerStep(): InstallStep {
 // ---- planLocalLlmBootstrap ------------------------------------------------
 
 /**
+ * Idempotent fast path check — everything present + reachable. The
+ * operator runs `minsky` again on a set-up machine; we add zero
+ * seconds. Extracted from `planLocalLlmBootstrap` to drop cognitive
+ * complexity per biome's cap (rule #6 — helpers IS the boundary).
+ *
+ * (Internal — not exported.)
+ */
+function isStackReady(state: LocalLlmStackState): boolean {
+  return (
+    state.pipx.present &&
+    state.mlxLm.present &&
+    state.aider.present &&
+    state.model.present &&
+    state.server.reachable
+  );
+}
+
+/**
+ * Build the ordered install step list. Separated from
+ * `planLocalLlmBootstrap` so the public function's cognitive
+ * complexity stays ≤ biome's cap of 10. Pure function — same inputs
+ * → same outputs; no I/O.
+ *
+ * Slice 6: when `options.archState` is supplied AND
+ * `needsNativeBrew === true`, prepends `install-arm-homebrew` and
+ * reshapes downstream `brew` / `pipx` step commands to use absolute
+ * paths.
+ *
+ * (Internal — not exported.)
+ */
+function buildInstallSteps(
+  state: LocalLlmStackState,
+  options: BootstrapPlanOptions,
+): InstallStep[] {
+  // Slice 6: resolve absolute brew / pipx paths from archState. When
+  // archState is undefined (slice 1-5 call sites), the helpers short-
+  // circuit to `undefined` and the step builders fall back to bare
+  // `brew` / `pipx` on PATH (slice 1 behavior, backward-compat).
+  const brewPath =
+    options.archState !== undefined ? preferredBrewPath(options.archState) : undefined;
+  const pipxPath =
+    options.archState !== undefined ? preferredPipxPath(options.archState) : undefined;
+
+  const steps: InstallStep[] = [];
+
+  if (options.archState !== undefined && needsArmHomebrewInstall(options.archState)) {
+    steps.push(buildInstallArmHomebrewStep());
+  }
+  if (!state.pipx.present) {
+    steps.push(buildPipxStep(brewPath));
+  }
+  if (!state.mlxLm.present) {
+    steps.push(buildMlxLmStep(pipxPath));
+  }
+  if (!state.aider.present) {
+    steps.push(buildAiderStep(options.pythonPath, pipxPath));
+  }
+  if (!state.model.present) {
+    steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
+  }
+  if (!state.server.reachable) {
+    steps.push(buildStartServerStep());
+  }
+  return steps;
+}
+
+/**
  * Plan the shortest sequence of install steps that takes the host from
  * `state` to a ready-to-iterate local-LLM stack. Pure decision function;
  * see the JSDoc at the top of this file for the contract and the
@@ -332,6 +476,8 @@ function buildStartServerStep(): InstallStep {
  * Step order is deterministic and dependency-aware: pipx is required by
  * mlx-lm and aider; mlx-lm + aider + model are required by server-start.
  * If a step's dependency is missing, the dependency is scheduled first.
+ * Slice 6: when `options.archState.needsNativeBrew === true`, prepends
+ * an `install-arm-homebrew` step before pipx.
  *
  * Idempotent: a fully-installed reachable stack returns
  * `{ steps: [], ready: true }` in O(1). Empty plan is the operator's
@@ -343,43 +489,10 @@ export function planLocalLlmBootstrap(
   state: LocalLlmStackState,
   options: BootstrapPlanOptions = {},
 ): BootstrapPlan {
-  // Idempotent fast path: everything present + reachable. The operator
-  // runs `minsky` again on a set-up machine; we add zero seconds.
-  if (
-    state.pipx.present &&
-    state.mlxLm.present &&
-    state.aider.present &&
-    state.model.present &&
-    state.server.reachable
-  ) {
+  if (isStackReady(state)) {
     return { steps: [], totalEstimatedDurationMs: 0, totalEstimatedDownloadMb: 0, ready: true };
   }
-
-  const steps: InstallStep[] = [];
-
-  // pipx is the dependency floor. If absent, schedule it first; otherwise
-  // mlx-lm / aider installs would fail.
-  if (!state.pipx.present) {
-    steps.push(buildPipxStep());
-  }
-
-  if (!state.mlxLm.present) {
-    steps.push(buildMlxLmStep());
-  }
-
-  if (!state.aider.present) {
-    steps.push(buildAiderStep(options.pythonPath));
-  }
-
-  if (!state.model.present) {
-    steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  }
-
-  // Server start happens last — it depends on mlx-lm + model. If the
-  // server is already reachable, skip; otherwise schedule.
-  if (!state.server.reachable) {
-    steps.push(buildStartServerStep());
-  }
+  const steps = buildInstallSteps(state, options);
 
   let totalDurationMs = 0;
   let totalDownloadMb = 0;

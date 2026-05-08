@@ -67,11 +67,26 @@ export interface ExecuteSpawnResult {
   readonly stderrTail?: string;
 }
 
-/** Spawn seam — pure function over (argv, opts) → Promise. */
+/**
+ * Spawn seam — pure function over (argv, opts) → Promise.
+ *
+ * Slice 6 extension: `stdinMode` lets specific steps claim the parent's
+ * stdin for interactive prompts (notably `install-arm-homebrew`, which
+ * wraps the Homebrew installer and needs sudo to prompt for a password
+ * on the operator's terminal). Default `"ignore"` matches slice-1
+ * behavior — most installers don't need stdin and letting them read
+ * from the terminal would swallow keystrokes the CLI's Ctrl-C detach
+ * handler wants.
+ */
 export type SpawnFn = (
   command: string,
   args: readonly string[],
-  opts?: { cwd?: string; env?: NodeJS.ProcessEnv },
+  opts?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    /** "ignore" (default) or "inherit" to pass the parent's stdin through. */
+    stdinMode?: "ignore" | "inherit";
+  },
 ) => Promise<ExecuteSpawnResult>;
 
 /** Confirm seam — returns `true` to proceed, `false` to abort. */
@@ -188,9 +203,15 @@ async function runOneStep(
   if (cmd === undefined) {
     return { success: false, failedStep: step.type, reason: "empty command vector" };
   }
+  // Slice 6: install-arm-homebrew wraps the Homebrew installer which
+  // sudo-escalates to create /opt/homebrew/. That needs the parent's
+  // stdin so sudo can prompt for a password. Every other step is
+  // non-interactive and keeps the slice-1 "ignore stdin" default.
+  const stdinMode: "ignore" | "inherit" =
+    step.type === "install-arm-homebrew" ? "inherit" : "ignore";
   let result: ExecuteSpawnResult;
   try {
-    result = await opts.spawnFn(cmd, args);
+    result = await opts.spawnFn(cmd, args, { stdinMode });
     // rule-6: handled-locally — pre-spawn errors (ENOENT/EACCES) typed as failed step, not loud-crash.
   } catch (err) {
     return {

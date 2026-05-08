@@ -780,3 +780,20 @@ export {
   classifyClaudeProbeOutput,
   needsLocalLlmBootstrap,
 } from "./claude-health-probe.js";
+
+// Slice 6 of `minsky-cli-arch-detection`: architecture detection for
+// the local-LLM bootstrap. Catches x86_64-on-Apple-Silicon (Rosetta)
+// and missing `/opt/homebrew/` so the planner can prepend the
+// install-arm-homebrew step and route downstream commands through
+// absolute `/opt/homebrew/bin/...` paths.
+export {
+  type ArchProbes,
+  type ArchState,
+  type HardwareArch,
+  type ShellArch,
+  describeArchState,
+  detectArchState,
+  needsArmHomebrewInstall,
+  preferredBrewPath,
+  preferredPipxPath,
+} from "./arch-probe.js";
