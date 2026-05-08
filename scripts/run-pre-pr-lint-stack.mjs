@@ -258,6 +258,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "sandbox-env-declared",
       "sbom-shape",
       "secret-scan",
+      "security-docs-cohesion",
       "supervisor-sandbox-hardening",
       "tasks-lint",
       "test",
@@ -424,6 +425,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-threat-model-section.mjs"],
+  },
+  {
+    name: "security-docs-cohesion",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-security-docs-cohesion.mjs"],
   },
   {
     name: "metric-freshness",

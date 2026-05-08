@@ -711,6 +711,33 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-threat-model-section.test.mjs
 
+  security-docs-cohesion:
+    # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`:
+    # every `docs/security/*.md` operator-readable doc cites `rule #13` AND
+    # carries a STRIDE-shaped `Threat model` section. Companion to
+    # `threat-model-section` (covers `novel/<pkg>/README.md`),
+    # `rule-13-sibling-anchors` (covers TASKS.md sibling P0s), and
+    # `vision-rule-13-task-id-citations` (covers vision.md § 13). Where those
+    # three pin the task / spec / package surfaces, this gate pins the
+    # operator-doc surface — the fourth and last surface where rule #13's
+    # substrate cohesion can drift silently. Pure classifier + paired tests
+    # ship in `scripts/check-security-docs-cohesion.mjs`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: security-docs-cohesion lint
+        run: node scripts/check-security-docs-cohesion.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-security-docs-cohesion.test.mjs
+
   sandbox-env-declared:
     # vision.md § 13.3 / TASKS.md `supervisor-sandbox-syscall-restriction`:
     # `MINSKY_SANDBOX` must be declared in the resolver source
@@ -1302,6 +1329,7 @@ jobs:
       - no-singleton-experiment
       - otel-no-pii
       - secret-scan
+      - security-docs-cohesion
       - pattern-index
       - pivot-success-margin
       - pr-self-grade
@@ -1355,6 +1383,7 @@ jobs:
                    "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.secret-scan.result }}" \
+                   "${{ needs.security-docs-cohesion.result }}" \
                    "${{ needs.pivot-success-margin.result }}" \
                    "${{ needs.privacy-data-egress.result }}" \
                    "${{ needs.rule-1-novel-justification.result }}" \
