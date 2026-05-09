@@ -49,9 +49,30 @@ pnpm minsky stop             # SIGTERM the daemon; leave the log
 
 The auto-bootstrap pre-flight is idempotent — re-running `pnpm minsky` on a set-up machine adds <500 ms wall-clock (one fetch against `127.0.0.1:8080/v1/models`) and threads `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred` into the spawned daemon.
 
-**Operator escape hatches**: `MINSKY_NO_AUTO_BOOTSTRAP=1` skips the pre-flight entirely; `MINSKY_NON_INTERACTIVE=1` (or non-TTY stdin) auto-confirms the install prompt.
+**Operator escape hatches** (env vars; see `pnpm minsky --help`):
+
+| Env var | Effect |
+|---|---|
+| `MINSKY_LLM_PROVIDER=local-preferred` | "I know I'm exhausted" — skip live claude probe, install + use local-LLM directly. Use this on a fresh machine where you already know claude tokens are out. |
+| `MINSKY_LLM_PROVIDER=claude-only` | Skip the local-LLM probe; force claude even on a hard-limit signal. |
+| `MINSKY_LOCAL_LLM=1` | Wire the local-LLM fallback wrapper, but assume the stack is already installed (no bootstrap). |
+| `MINSKY_HARD_LIMIT_TTL_MIN=<n>` | How long to trust persisted hard-limit hits (default 60). After a hit gets persisted to `.minsky/state.json`, every subsequent `minsky` within the TTL skips the live probe and goes straight to local. |
+| `MINSKY_NO_AUTO_BOOTSTRAP=1` | Skip the pre-flight entirely. Daemon spawns claude regardless of state. |
+| `MINSKY_NON_INTERACTIVE=1` | Auto-confirm the bootstrap install plan. Useful for CI / daemonized contexts. Combined with `install-arm-homebrew` (which needs sudo TTY), the bootstrap refuses non-interactive and prints a manual one-liner instead of hanging. |
 
 The CLI is intentionally repo-rooted (not a global `npm install -g` package) so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. To run from outside the repo, alias it: `alias minsky="pnpm --dir ~/apps/minsky minsky"`.
+
+**Multi-machine flow** (cloning to a second machine where claude tokens are exhausted):
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git && cd minsky
+pnpm install                            # (a) prepare hook builds dist; (b) lefthook installs hooks
+MINSKY_LLM_PROVIDER=local-preferred pnpm minsky   # skip claude probe + bootstrap local-LLM (~19 min, ~17 GB; one [Y/n] confirm)
+```
+
+If `pnpm minsky` ran without the env var, the live probe (1-token `claude --print "ping"`) might false-positive `healthy` even when iterations would hit the quota. The first iteration's hard-limit response gets persisted to `.minsky/state.json::last_claude_hard_limit`; every subsequent `minsky` within `MINSKY_HARD_LIMIT_TTL_MIN` minutes (default 60) skips the live probe automatically.
+
+`pnpm minsky doctor` shows the persisted state at any time; the `claude exhaustion (persisted)` row turns YELLOW with the timestamp + age + reason within TTL.
 
 ## Why this exists
 

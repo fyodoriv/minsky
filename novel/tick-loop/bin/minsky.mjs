@@ -302,6 +302,21 @@ async function maybeBootstrapLocalLlm() {
     return {};
   }
 
+  // Slice 5 of self-healing — `MINSKY_LLM_PROVIDER=local-preferred`
+  // is the operator's "I know I'm exhausted, just install + use
+  // local NOW" shortcut. The slice-4 --help text claimed this env
+  // var "skips claude probe" but the original (slice 6 of
+  // minsky-cli-arch-detection) only consumed it inside the spawned
+  // tick-loop daemon — `minsky` itself ignored it. This slice
+  // closes the gap: when set, skip the live probe AND trigger the
+  // bootstrap pipeline directly, matching the documented behavior.
+  if (process.env["MINSKY_LLM_PROVIDER"] === "local-preferred") {
+    process.stderr.write(
+      "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
+    );
+    return await runBootstrapLocalLlm({ force: false });
+  }
+
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — consult
   // the persisted hard-limit field BEFORE the live probe. The live
   // probe is a 1-token query and can false-positive `healthy` when
