@@ -31,7 +31,14 @@
  */
 
 import { execFile as execFileCb } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -95,6 +102,10 @@ import {
   runParallelSweeper,
   sandboxModeStartupHint,
   workerStartupLine,
+  // Slice 4 of `minsky-claude-exhaustion-persisted-state` — daemon
+  // writes hard-limit hits to .minsky/state.json so the next
+  // `minsky` invocation can skip the live probe and use local-LLM.
+  writeLastHardLimit,
 } from "../dist/index.js";
 
 import { spawn as nodeSpawn } from "node:child_process";
@@ -444,6 +455,26 @@ const spawnStrategy = (() => {
       if (observability !== undefined) {
         observability.emitTickSpan(event);
       }
+    },
+    // Slice 4 of `minsky-claude-exhaustion-persisted-state`: persist
+    // hard-limit hits to `.minsky/state.json` so the next `minsky`
+    // invocation can skip the live probe and go straight to local-LLM.
+    // Failures are graceful-degrade per rule #6 — the in-process
+    // `lastClaudeFailure` carry-over still works either way.
+    persistHardLimit: (failure) => {
+      const stateFilePath = resolve(minskyHome, ".minsky", "state.json");
+      const ts = new Date().toISOString();
+      const reason = failure.stderrTail.slice(-200).trim();
+      writeLastHardLimit({
+        stateFilePath,
+        readFileSyncFn: readFileSync,
+        writeFileSyncFn: writeFileSync,
+        ts,
+        reason: reason.length > 0 ? reason : `claude exit ${failure.exitCode}`,
+      });
+      process.stdout.write(
+        `[tick-loop] persisted hard-limit to ${stateFilePath} (next minsky startup will skip live probe within MINSKY_HARD_LIMIT_TTL_MIN)\n`,
+      );
     },
   });
 })();

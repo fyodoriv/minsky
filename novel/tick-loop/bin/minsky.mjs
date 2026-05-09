@@ -8,6 +8,7 @@
 // <!-- scope: human-approved minsky-fresh-clone-health-checks slice 1 (operator 2026-05-08 — "Next let's add as much stable self-healing as reasonable to minsky & install commands") -->
 // <!-- scope: human-approved minsky-runtime-resilience slice 2 (operator 2026-05-08 — slice 2 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
+// <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -118,6 +119,7 @@ const {
   planRequiresTty,
   preferredPipxPath,
   probePythonWithDefaults,
+  readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
 } = await import("../dist/index.js");
@@ -177,6 +179,14 @@ Logs:    ${WORKERS_DIR}/<worker-id>.log
 PID:     ${WORKERS_DIR}/<worker-id>.pid
 Detach:  Ctrl+C on \`minsky\` exits the tail; the daemon keeps running.
 Reattach: re-run \`minsky\` (or \`minsky logs\`) — it sees the live PID and attaches.
+
+Operator escape hatches (env vars):
+  MINSKY_LLM_PROVIDER=local-preferred   force local-LLM (skip claude probe)
+  MINSKY_LLM_PROVIDER=claude-only       force claude (skip local-LLM probe)
+  MINSKY_LOCAL_LLM=1                    opt in to local-LLM fallback wrapper
+  MINSKY_HARD_LIMIT_TTL_MIN=<minutes>   how long to trust persisted hard-limit (default 60)
+  MINSKY_NO_AUTO_BOOTSTRAP=1            skip the local-LLM auto-bootstrap pre-flight
+  MINSKY_NON_INTERACTIVE=1              auto-confirm the bootstrap install plan
 `);
 }
 
@@ -291,6 +301,24 @@ async function maybeBootstrapLocalLlm() {
   if (process.env["MINSKY_LOCAL_LLM"] === "1") {
     return {};
   }
+
+  // Slice 4 of `minsky-claude-exhaustion-persisted-state` — consult
+  // the persisted hard-limit field BEFORE the live probe. The live
+  // probe is a 1-token query and can false-positive `healthy` when
+  // a real iteration would hit Anthropic's quota; the persisted
+  // state is the daemon's previous-iteration ground truth and is
+  // strictly more reliable when fresh. Within TTL → skip live probe
+  // and go straight to bootstrap. Default TTL: 60 minutes; override
+  // via `MINSKY_HARD_LIMIT_TTL_MIN`.
+  const persisted = readPersistedHardLimit();
+  if (persisted.exhausted) {
+    const ageMin = Math.round(persisted.ageMs / 60_000);
+    process.stderr.write(
+      `minsky: persisted hard-limit hit at ${persisted.ts} (${ageMin}m ago, reason: ${persisted.reason}); skipping live probe and bootstrapping local-LLM\n`,
+    );
+    return await runBootstrapLocalLlm({ force: false });
+  }
+
   const probes = buildProductionProbes({ whichFn });
   const state = await detectLocalLlmStack(probes);
   // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
@@ -322,6 +350,29 @@ async function maybeBootstrapLocalLlm() {
     `minsky: claude unavailable (${decision.verdict}) AND local-LLM server not reachable\n`,
   );
   return await runBootstrapLocalLlm({ force: false });
+}
+
+/**
+ * Slice 4 of `minsky-claude-exhaustion-persisted-state`. Wraps
+ * {@link readLastHardLimit} with the production seam (file-backed
+ * `readFileSync` + `existsSync`) and the env-controlled TTL.
+ *
+ * Default TTL: 60 minutes. Override via `MINSKY_HARD_LIMIT_TTL_MIN`
+ * (positive integer minutes; non-numeric values fall back to default).
+ *
+ * @returns {import("../dist/claude-exhaustion-state.js").ReadHardLimitOutcome}
+ */
+function readPersistedHardLimit() {
+  const raw = process.env["MINSKY_HARD_LIMIT_TTL_MIN"];
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  const ttlMin = Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+  return readLastHardLimit({
+    stateFilePath: resolve(MINSKY_HOME, ".minsky", "state.json"),
+    readFileSyncFn: readFileSync,
+    existsSyncFn: existsSync,
+    nowFn: Date.now,
+    ttlMs: ttlMin * 60_000,
+  });
 }
 
 /**
@@ -469,6 +520,10 @@ async function runDoctor() {
   // operator's chosen aggressiveness — git config is outside
   // `.minsky/`); broken paths surface as YELLOW (don't block daemon).
   await emitGitConfigSanityRows();
+  // Slice 4 of `minsky-claude-exhaustion-persisted-state`: surface
+  // the persisted hard-limit timestamp (if any) so the operator can
+  // see at a glance why minsky might be on local-LLM mode.
+  emitClaudeExhaustionRow();
   process.stdout.write("\n");
   if (anySubstrateRed) {
     process.stdout.write("Substrate: RED — install-time prerequisites missing\n");
@@ -514,6 +569,24 @@ async function emitGitConfigSanityRows() {
       );
     }
   }
+}
+
+/**
+ * Slice 4 of `minsky-claude-exhaustion-persisted-state` — emit a
+ * single doctor row for the persisted hard-limit field. Renders
+ * `  ✓ claude exhaustion (persisted)` when unset OR stale; `  ⚠ ...
+ * (recent)` with timestamp + age when within TTL.
+ */
+function emitClaudeExhaustionRow() {
+  const persisted = readPersistedHardLimit();
+  if (!persisted.exhausted) {
+    process.stdout.write("  ✓ claude exhaustion (persisted)\n");
+    return;
+  }
+  const ageMin = Math.round(persisted.ageMs / 60_000);
+  process.stdout.write(
+    `  ⚠ claude exhaustion (persisted)  — hit at ${persisted.ts} (${ageMin}m ago, reason: ${persisted.reason}); minsky will skip live probe and use local-LLM until TTL expires (override: MINSKY_HARD_LIMIT_TTL_MIN=<n>)\n`,
+  );
 }
 
 /**
