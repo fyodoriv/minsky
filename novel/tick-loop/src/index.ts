@@ -847,3 +847,14 @@ export {
   checkGitConfigPaths,
   formatBrokenPathMessage,
 } from "./git-config-path-checks.js";
+
+// Slice 4 of `minsky-claude-exhaustion-persisted-state`: read/write
+// `.minsky/state.json::last_claude_hard_limit` so a fresh `minsky`
+// startup detects exhaustion without relying on the token-too-small
+// live probe. Composes with the in-process per-iteration
+// `decideProvider` logic.
+export {
+  type ReadHardLimitOutcome,
+  readLastHardLimit,
+  writeLastHardLimit,
+} from "./claude-exhaustion-state.js";

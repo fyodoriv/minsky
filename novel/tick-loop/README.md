@@ -313,6 +313,21 @@ Aggressiveness: **detect-only** (per the operator's chosen aggressiveness — "d
 
 Backward-compat: pure additions on top of slice 2; happy path is byte-identical (the new section is only printed in `runDoctor`, not in the start-or-attach path).
 
+#### Slice 4 of `minsky-claude-exhaustion-persisted-state`: persist hard-limit hits across restarts (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens. It shouldn't have happened, it should have quickly detected that & switched to local model")
+
+The startup probe `claude --print "ping"` is a **1-token** query; Anthropic's quota metering hits at the multi-K-token level (an iteration is typically 5-15K input tokens). When the operator's quota is exhausted, the 1-token probe can still return exit 0 — false-positive `healthy`. The daemon then spawns claude on iteration 1, which fails with hard-limit; the existing per-iteration `decideProvider` correctly switches to local on iteration 2 — but the operator already saw the wasted spawn.
+
+This slice closes the gap with **persistence**:
+
+1. **Daemon writes hard-limit hits** to `.minsky/state.json::last_claude_hard_limit = { ts, reason }` whenever an iteration fails with `isClaudeHardLimit(failure) === true` (hooked into `LlmProviderSpawnStrategy::captureClaudeFailure` via a new `persistHardLimit` injected seam).
+2. **CLI consults persisted state on startup** (`bin/minsky.mjs::maybeBootstrapLocalLlm`) BEFORE the live probe. Within `MINSKY_HARD_LIMIT_TTL_MIN` minutes (default 60), trust the persisted signal and go straight to bootstrap. Beyond TTL, run the live probe as before.
+3. **Doctor row** — `minsky doctor` adds a `claude exhaustion (persisted)` row showing GREEN ✓ when no recent hard-limit, YELLOW ⚠ with timestamp + age + reason when within TTL.
+4. **Operator escape hatches** surfaced in `minsky --help` — `MINSKY_LLM_PROVIDER=local-preferred minsky` (force local, skip probe entirely), `MINSKY_HARD_LIMIT_TTL_MIN=<minutes>` (configure trust window).
+
+The pure helper `claude-exhaustion-state.ts` (paired-tested over 9 chaos rows: file absent, field absent, recent / stale ts, corrupt JSON, invalid ts, write-creates / write-preserves / write-overwrites) handles read + write. Persistence failures are graceful-degrade per rule #6 — the in-process `lastClaudeFailure` carry-over still works even if the disk write fails.
+
+Composes with slices 1-3: same pure-helper pattern; same `.minsky/`-only mutation boundary. Composes with the existing `LlmProviderSpawnStrategy` per-iteration logic — in-process carry catches hard-limit on iteration N+1 of the SAME daemon run; persisted state catches it on iteration 1 of the NEXT `minsky` invocation.
+
 ### Real Claude probe (slice 4 of `minsky-cli-auto-bootstrap-local-llm`)
 
 `novel/tick-loop/src/claude-health-probe.ts` ships a pure classifier `classifyClaudeProbeOutput({ exitCode, stderrTail, binaryAbsent })` that takes the result of a synthetic `claude --print "ping"` invocation and returns one of four verdicts: `healthy` (exit 0), `exhausted` (non-zero exit + stderr matches `HARD_LIMIT_PATTERNS`), `binary-missing` (claude not on PATH), or `error` (non-zero exit, no hard-limit signal — transient). The pattern set is shared with `HARD_LIMIT_PATTERNS` in `llm-provider-selector.ts` (rule #2 — single source of truth), so a wording change updates both lists in the same PR.

@@ -51,6 +51,7 @@ import {
   type LocalProbeResult,
   type ProviderDecision,
   decideProvider,
+  isClaudeHardLimit,
 } from "./llm-provider-selector.js";
 import type { SpawnInput, SpawnResult, SpawnStrategy } from "./spawn-strategy.js";
 
@@ -129,6 +130,22 @@ export interface LlmProviderSpawnStrategyOptions {
     name: string;
     attributes: Record<string, string | number | boolean>;
   }) => void;
+  /**
+   * Slice 4 of `minsky-claude-exhaustion-persisted-state` — optional
+   * sink called when {@link captureClaudeFailure} detects a
+   * hard-limit signal (`isClaudeHardLimit(failure) === true`).
+   * Production wiring in `bin/tick-loop.mjs` sets this to a function
+   * that invokes `writeLastHardLimit(...)` against
+   * `.minsky/state.json`. Test wiring leaves it `undefined` (no-op).
+   *
+   * Async: production wiring writes synchronously (`writeFileSync`)
+   * but the seam is async-aware so a future rate-limit-aware
+   * persistence layer can defer the write without blocking the
+   * spawn dispatch. The sink's promise rejection is caught locally
+   * (rule #6 — persistence failure is graceful-degrade; the
+   * in-process `lastClaudeFailure` carry-over still works).
+   */
+  readonly persistHardLimit?: (failure: LastClaudeFailure) => void | Promise<void>;
 }
 
 const DEFAULT_PROBE_TTL_MS = 60_000;
@@ -313,6 +330,14 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
    * Update `this.lastClaudeFailure` after a claude spawn. Clean exit (0)
    * clears the carry; non-zero captures the snapshot.
    *
+   * Slice 4 of `minsky-claude-exhaustion-persisted-state`: when the
+   * captured failure matches a hard-limit signal, additionally invoke
+   * the `persistHardLimit` sink (if provided) so the persisted state
+   * file is updated for the next `minsky` invocation. Persistence
+   * failures are graceful-degrade per rule #6 — the in-process
+   * `lastClaudeFailure` carry-over still works even if the disk
+   * write fails.
+   *
    * (Internal helper — no JSDoc tag required.)
    */
   private captureClaudeFailure(result: SpawnResult): void {
@@ -320,11 +345,21 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
       this.lastClaudeFailure = undefined;
       return;
     }
-    this.lastClaudeFailure = {
+    const failure: LastClaudeFailure = {
       exitCode: result.exitCode,
       stderrTail: result.stderrTail,
       observedAtMs: this.nowFn(),
     };
+    this.lastClaudeFailure = failure;
+    if (this.opts.persistHardLimit !== undefined && isClaudeHardLimit(failure)) {
+      // Fire-and-forget; rule-6: handled-locally — persistence
+      // failure (disk full, EACCES on .minsky/state.json) does not
+      // block the in-process carry-over. The next iteration's
+      // `decideProvider(...)` still sees `lastClaudeFailure`.
+      Promise.resolve(this.opts.persistHardLimit(failure)).catch(() => {
+        /* graceful-degrade per rule #6 */
+      });
+    }
   }
 
   /**
