@@ -85,19 +85,32 @@ export interface BuildClaudePrintInvocationOpts {
    * PATH). Tests inject a fixture binary.
    */
   readonly command?: string;
+  /**
+   * Optional model override (slice 5 of
+   * `claude-usage-aware-strategic-model-router`). When set, passes
+   * `--model <id>` to `claude --print`. Claude Code accepts both aliases
+   * (`opus`, `sonnet`, `haiku`) and full ids (`claude-opus-4-7`). When
+   * unset, claude uses its session default.
+   */
+  readonly model?: string;
 }
 
 /**
  * Build the invocation for `claude --print` (Anthropic Code's headless
- * mode). Brief on stdin, `--print` first, optional `--worktree <name>`
- * (or other per-iteration args) appended via `extraArgs`.
+ * mode). Brief on stdin, `--print` first, optional `--model <id>` (slice
+ * 5 strategic-router wire-in), then `--worktree <name>` (or other
+ * per-iteration args) appended via `extraArgs`.
  *
  * @otel tick-loop.llm-invocation.build-claude-print
  */
 export function buildClaudePrintInvocation(opts: BuildClaudePrintInvocationOpts): LlmInvocation {
   return {
     command: opts.command ?? "claude",
-    argv: Object.freeze(["--print", ...(opts.extraArgs ?? [])]),
+    argv: Object.freeze([
+      "--print",
+      ...(opts.model === undefined ? [] : ["--model", opts.model]),
+      ...(opts.extraArgs ?? []),
+    ]),
     stdin: opts.brief,
   };
 }

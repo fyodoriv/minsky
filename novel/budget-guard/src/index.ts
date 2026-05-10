@@ -22,7 +22,13 @@
  * Python tool. All tracked in `TASKS.md`.
  */
 
-import { type TokenMonitor, type TokenSnapshot, consumedFraction } from "@minsky/token-monitor";
+import {
+  type RemainingFractions,
+  type TokenMonitor,
+  type TokenSnapshot,
+  consumedFraction,
+  remainingFractions,
+} from "@minsky/token-monitor";
 
 /** Failure-mode response per rule #7. `normal` is the absence of a fault. */
 export type BudgetAction =
@@ -113,6 +119,13 @@ export function decide(
  */
 export class BudgetGuard {
   private timer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Last decision computed by {@link tick}. Cached for downstream
+   * consumers (the strategic picker, the HTTP server, the daemon's
+   * dispatch hook) that need a synchronous read between ticks.
+   * Slice 5 of `claude-usage-aware-strategic-model-router`.
+   */
+  private lastDecisionCache: BudgetDecision | undefined;
 
   constructor(
     private readonly monitor: TokenMonitor,
@@ -125,8 +138,39 @@ export class BudgetGuard {
   async tick(): Promise<BudgetDecision> {
     const snap = await this.monitor.snapshot();
     const decision = decide(snap, this.thresholds);
+    this.lastDecisionCache = decision;
     this.onDecision(decision);
     return decision;
+  }
+
+  /**
+   * Synchronous read of the most recent {@link tick} decision. Returns
+   * `undefined` until the first tick completes (cold-start). Slice 5
+   * of `claude-usage-aware-strategic-model-router` — the pure picker's
+   * `invocation` callback (sync) reads this without awaiting.
+   *
+   * @otel-exempt pure read; spans here would dominate the work
+   */
+  lastDecision(): BudgetDecision | undefined {
+    return this.lastDecisionCache;
+  }
+
+  /**
+   * Slice 2 of `claude-usage-aware-strategic-model-router` — return the
+   * continuous remaining-fraction triple (5h, weekly, monthly) without
+   * collapsing to the 4-state {@link BudgetAction}. The strategic model
+   * picker (slice 4) consumes this directly, comparing each fraction
+   * against per-tier per-window floors.
+   *
+   * Composes with {@link BudgetGuard.tick} — the existing 4-state output
+   * is unchanged for back-compat with `circuit-break-and-notify` paused-
+   * sentinel handling. This is an additional read; both can be called.
+   *
+   * @otel budget-guard.snapshotRemainingPercents
+   */
+  async snapshotRemainingPercents(): Promise<RemainingFractions> {
+    const snap = await this.monitor.snapshot();
+    return remainingFractions(snap);
   }
 
   /** Begin the periodic poll loop. Idempotent — calling twice is a no-op. */

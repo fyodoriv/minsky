@@ -75,6 +75,7 @@ import {
   AutoScaleRunner,
   DryRunSpawnStrategy,
   LlmProviderSpawnStrategy,
+  MODEL_CATALOG,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
   analyzeConfig,
@@ -99,6 +100,7 @@ import {
   listEligibleTasks,
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
+  pickStrategicModel,
   runDaemon,
   runParallelSweeper,
   sandboxModeStartupHint,
@@ -391,6 +393,20 @@ const switchbackProbeEvery = (() => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 })();
 const aiderBin = process.env.MINSKY_LOCAL_LLM_AIDER_BIN ?? "aider";
+
+// Slice 5 of `claude-usage-aware-strategic-model-router` — wire the
+// pure picker into the bin so each iteration picks the highest-quality
+// claude model (Opus 4.7 / Sonnet 4.6 / Haiku 4.5) that fits remaining
+// usage, falling through to local on exhaustion. Opt-in for now while
+// the operator validates the floor calibration; flips to default-on
+// once slice 7's chaos invariants pass on a 24h live-fire.
+const strategicRouterEnabled =
+  (process.env.MINSKY_STRATEGIC_ROUTER ?? "").trim().toLowerCase() === "1" ||
+  (process.env.MINSKY_STRATEGIC_ROUTER ?? "").trim().toLowerCase() === "true";
+const strategicPin = (process.env.MINSKY_STRATEGIC_PIN_MODEL ?? "").trim();
+// In-memory hysteresis state (slice 6 will persist to .minsky/state.json).
+/** @type {string | undefined} */
+let strategicPreviousPickId;
 // `daemon-local-ratio-knob`: soft running-fraction target for the share
 // of iterations that route to local (vs claude) when both providers are
 // usable. Parses `MINSKY_LOCAL_RATIO=0.95` (≈ 5 % claude / 95 % local);
@@ -454,14 +470,69 @@ function buildClaudeStrategy() {
     : new ProcessSpawnStrategy({
         command: "claude",
         ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-        invocation: (input) =>
-          buildClaudePrintInvocation({
+        invocation: (input) => {
+          // Slice 5: strategic picker computes the model per-iteration
+          // when `MINSKY_STRATEGIC_ROUTER=1`. The picker is pure; the
+          // remaining-fractions snapshot is fresh per spawn (cheap —
+          // Maciek parses cached JSONL).
+          const strategicModel = strategicRouterEnabled ? pickAndLogStrategicModel() : undefined;
+          return buildClaudePrintInvocation({
             brief: input.brief,
+            ...(strategicModel === undefined ? {} : { model: strategicModel }),
             ...(input.extraArgs && input.extraArgs.length > 0
               ? { extraArgs: input.extraArgs }
               : {}),
-          }),
+          });
+        },
       });
+}
+
+/**
+ * Slice 5 of `claude-usage-aware-strategic-model-router` — invoke the
+ * pure picker against a fresh remaining-fractions snapshot, log the
+ * decision, and return the model id (or `undefined` when the picker
+ * routes to `local`; the dispatch layer's `LlmProviderSpawnStrategy`
+ * already handles claude→local transitions on the budget signal).
+ *
+ * Synchronous here so the `invocation` callback's signature stays
+ * sync — the picker is pure, the snapshot read is async but we cache
+ * it via the wrapper's TTL. v0 reads from a wrapper-side cache; if
+ * the cache is cold or stale we just return `undefined` and let the
+ * spawn use claude's session default. Slice 6 ratchets to a fresh
+ * pre-spawn snapshot read with the 30s active TTL.
+ *
+ * @returns {string | undefined}
+ */
+function pickAndLogStrategicModel() {
+  // v0: synchronous picker driven by `realGuard.lastDecision()` which
+  // is populated by the BudgetGuard's tick loop. The remaining %
+  // snapshot is the most recent decision's snapshot.
+  const lastDecision = realGuard.lastDecision?.();
+  if (lastDecision === undefined) {
+    // Cold start — no snapshot yet; let claude pick its session default.
+    return undefined;
+  }
+  const snap = lastDecision.snapshot;
+  const remaining = {
+    fivehour: snap.windowSizeTokens > 0 ? snap.tokensRemainingInWindow / snap.windowSizeTokens : 0,
+    weekly: snap.weeklyHeadroomFraction ?? 1,
+    monthly: snap.monthlyHeadroomFraction ?? 1,
+    observedAt: snap.observedAt,
+  };
+  const pick = pickStrategicModel({
+    remaining,
+    catalog: MODEL_CATALOG,
+    hysteresis: { previousPickId: strategicPreviousPickId },
+    ...(strategicPin.length > 0 ? { operatorPin: strategicPin } : {}),
+  });
+  strategicPreviousPickId = pick.model;
+  process.stdout.write(
+    `[span] tick-loop.strategic-pick {"model":"${pick.model}","agent":"${pick.agent}","kind":"${pick.kind}","reason":"${pick.reason.replace(/"/g, '\\"').slice(0, 200)}","fivehour":${remaining.fivehour.toFixed(3)},"weekly":${remaining.weekly.toFixed(3)},"monthly":${remaining.monthly.toFixed(3)}}\n`,
+  );
+  // Only return a model id when the pick targets claude — the local
+  // path goes through buildLocalStrategy and doesn't take --model from
+  // here.
+  return pick.agent === "claude" ? pick.model : undefined;
 }
 
 function buildLocalStrategy() {
