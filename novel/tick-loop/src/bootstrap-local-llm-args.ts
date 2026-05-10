@@ -1,11 +1,12 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wiring) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 21 (operator 2026-05-10 — `--json` flag for machine-readable dry-run plan) -->
 /**
  * `@minsky/tick-loop/bootstrap-local-llm-args` — pure parser for the
- * `minsky bootstrap-local-llm` subcommand's flag surface. Slice 9 of
- * P0 task `minsky-cli-auto-bootstrap-local-llm`.
+ * `minsky bootstrap-local-llm` subcommand's flag surface. Slices 9 + 21
+ * of P0 task `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Currently parses one flag — `--dry-run` — but exists as a typed
- * boundary so future flags (`--no-confirm`, `--model=…`, `--port=…`)
+ * Parses two flags so far — `--dry-run` and `--json` — but exists as a
+ * typed boundary so future flags (`--no-confirm`, `--model=…`, `--port=…`)
  * land here instead of accreting in the bin file. Pure-over-input;
  * tests pass synthetic argv arrays. The wiring at `bin/minsky.mjs`
  * passes `process.argv.slice(2 + 1)` (skip node + script + verb).
@@ -29,6 +30,24 @@ export interface BootstrapLocalLlmArgs {
    * launchd) where slice 7 H2's TTY-refuse path otherwise blocks.
    */
   readonly dryRun: boolean;
+
+  /**
+   * `--json` — when true, the dry-run path emits the install plan as a
+   * single JSON document to stdout instead of the human-readable confirm
+   * summary. Composes with `--dry-run` (the only render seam wired so
+   * far); without `--dry-run` the flag is parsed but the install path
+   * still prompts + executes, since we never want a silent no-op when
+   * the operator forgot the read-only switch.
+   *
+   * Use cases the human-readable summary blocks: (a) `minsky
+   * bootstrap-local-llm --dry-run --json | jq` to inspect a single step's
+   * `command` argv, (b) the daemon's auto-pre-flight logging the plan
+   * to telemetry without a regex-parser, (c) external tooling diffing
+   * two plans across hosts to verify install-step parity. Round-trip
+   * elimination — the JSON shape mirrors `BootstrapPlan` directly so
+   * consumers don't re-parse the prose.
+   */
+  readonly json: boolean;
 }
 
 /**
@@ -37,5 +56,8 @@ export interface BootstrapLocalLlmArgs {
  * @otel-exempt pure parser; no I/O, no span.
  */
 export function parseBootstrapLocalLlmArgs(args: readonly string[]): BootstrapLocalLlmArgs {
-  return { dryRun: args.includes("--dry-run") };
+  return {
+    dryRun: args.includes("--dry-run"),
+    json: args.includes("--json"),
+  };
 }

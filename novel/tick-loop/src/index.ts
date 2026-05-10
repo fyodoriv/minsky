@@ -757,6 +757,7 @@ export {
   confirmAlwaysYes,
   executeBootstrapPlan,
   renderConfirmSummary,
+  renderInstallPlanJson,
 } from "./local-llm-bootstrap-executor.js";
 export {
   type BootstrapLocalLlmArgs,

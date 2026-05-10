@@ -18,6 +18,7 @@ import {
   confirmAlwaysYes,
   executeBootstrapPlan,
   renderConfirmSummary,
+  renderInstallPlanJson,
 } from "./local-llm-bootstrap-executor.js";
 import type { BootstrapPlan } from "./local-llm-bootstrap.js";
 
@@ -179,6 +180,70 @@ describe("renderConfirmSummary", () => {
       ],
     };
     expect(renderConfirmSummary(noDownloadPlan)).not.toMatch(/GB download/);
+  });
+});
+
+// ---- renderInstallPlanJson (slice 21) ------------------------------------
+
+describe("renderInstallPlanJson", () => {
+  it("emits a parseable JSON document with the canonical key set", () => {
+    const out = renderInstallPlanJson(samplePlan);
+    const parsed = JSON.parse(out);
+    expect(parsed.ready).toBe(false);
+    expect(parsed.totalEstimatedDurationMs).toBe(90_000);
+    expect(parsed.totalEstimatedDurationMin).toBe(2);
+    expect(parsed.totalEstimatedDownloadMb).toBe(17_500);
+    expect(parsed.steps).toHaveLength(2);
+  });
+
+  it("preserves each step's type, description, command, and estimatedDownloadMb when present", () => {
+    const parsed = JSON.parse(renderInstallPlanJson(samplePlan));
+    expect(parsed.steps[0]).toEqual({
+      type: "install-pipx",
+      description: "Install pipx",
+      estimatedDurationMs: 30_000,
+      command: ["brew", "install", "pipx"],
+    });
+    expect(parsed.steps[1]).toEqual({
+      type: "download-model",
+      description: "Download model",
+      estimatedDurationMs: 60_000,
+      estimatedDownloadMb: 17_500,
+      command: ["hf", "download", "x"],
+    });
+  });
+
+  it("renders the empty-plan fast path with steps=[]", () => {
+    const parsed = JSON.parse(renderInstallPlanJson(emptyPlan));
+    expect(parsed).toEqual({
+      ready: true,
+      totalEstimatedDurationMs: 0,
+      totalEstimatedDurationMin: 0,
+      totalEstimatedDownloadMb: 0,
+      steps: [],
+    });
+  });
+
+  it("omits estimatedDownloadMb on steps that don't download (start-mlx-server)", () => {
+    const noDownloadPlan: BootstrapPlan = {
+      ready: false,
+      totalEstimatedDurationMs: 30_000,
+      totalEstimatedDownloadMb: 0,
+      steps: [
+        {
+          type: "start-mlx-server",
+          description: "Start server",
+          estimatedDurationMs: 30_000,
+          command: ["mlx_lm.server"],
+        },
+      ],
+    };
+    const parsed = JSON.parse(renderInstallPlanJson(noDownloadPlan));
+    expect(parsed.steps[0]).not.toHaveProperty("estimatedDownloadMb");
+  });
+
+  it("is pure — same input produces equal output", () => {
+    expect(renderInstallPlanJson(samplePlan)).toEqual(renderInstallPlanJson(samplePlan));
   });
 });
 

@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 21 (operator 2026-05-10 — `--json` flag for machine-readable dry-run plan) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -26,6 +27,7 @@
  *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
  *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
  *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
+ *   minsky bootstrap-local-llm --dry-run --json  same, as a single-line JSON document
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -125,6 +127,7 @@ const {
   readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
+  renderInstallPlanJson,
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
@@ -147,7 +150,10 @@ if (first === "--help" || first === "-h" || first === "help") {
   // block. Anchors the task block's Risk mitigation.
   const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
   if (subArgs.dryRun) {
-    await runBootstrapLocalLlmDryRun();
+    // Slice 21: `--json` flips the dry-run renderer from the human-readable
+    // confirm summary to a single-line JSON document for tooling integration
+    // (jq, daemon telemetry). Both forms run the same detect+plan pipeline.
+    await runBootstrapLocalLlmDryRun({ json: subArgs.json });
     process.exit(0);
   }
   const result = await runBootstrapLocalLlm({ force: true });
@@ -181,6 +187,7 @@ Examples:
   minsky logs                     # follow worker 0's log live
   minsky stop 1                   # stop worker 1
   minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
+  minsky bootstrap-local-llm --dry-run --json  # same, as a single-line JSON document for jq / telemetry
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -466,10 +473,21 @@ function emitNonTtyRefuseMessage() {
  * "`--dry-run` flag prints the plan without executing"). Composes with
  * `minsky doctor` (which mixes substrate + git rows in alongside the
  * plan); this path is the focused plan-only preview.
+ *
+ * Slice 21: `opts.json === true` swaps the renderer to
+ * `renderInstallPlanJson` for machine-readable output (one JSON line, no
+ * trailing prose hint). Same detect+plan pipeline; only the format
+ * differs.
+ *
+ * @param {{ json?: boolean }} [opts]
  */
-async function runBootstrapLocalLlmDryRun() {
+async function runBootstrapLocalLlmDryRun(opts = {}) {
   const { state, planOpts } = await detectForBootstrap();
   const plan = planLocalLlmBootstrap(state, planOpts);
+  if (opts.json === true) {
+    process.stdout.write(`${renderInstallPlanJson(plan)}\n`);
+    return;
+  }
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }

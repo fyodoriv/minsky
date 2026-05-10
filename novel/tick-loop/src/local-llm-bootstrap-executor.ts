@@ -265,6 +265,54 @@ export function renderConfirmSummary(plan: BootstrapPlan): string {
   return lines.join("\n");
 }
 
+/**
+ * Render the install plan as a single-line JSON document. Slice 21 of
+ * `minsky-cli-auto-bootstrap-local-llm` — wired by `bin/minsky.mjs`'s
+ * `--dry-run --json` path. Pure formatter; same input → same output.
+ *
+ * Shape: `{ ready, totalEstimatedDurationMs, totalEstimatedDurationMin,
+ * totalEstimatedDownloadMb, steps: [{ type, description,
+ * estimatedDurationMs, estimatedDownloadMb?, command: [...] }] }`. Mirrors
+ * `BootstrapPlan` directly so consumers don't re-parse the prose
+ * (round-trip elimination); the duration in minutes is denormalised
+ * because the human-readable summary is the only other place that
+ * computes `Math.ceil(ms / 60_000)` and external tooling shouldn't
+ * have to reproduce that constant.
+ *
+ * Stability: the JSON keys are public contract. Adding a key is
+ * backward-compatible; renaming or removing one needs a
+ * `pivot-local-llm-bootstrap-plan-json-shape` rule-#9 record.
+ *
+ * @otel-exempt pure formatter; no I/O, no span.
+ */
+export function renderInstallPlanJson(plan: BootstrapPlan): string {
+  const totalEstimatedDurationMin = Math.ceil(plan.totalEstimatedDurationMs / 60_000);
+  return JSON.stringify({
+    ready: plan.ready,
+    totalEstimatedDurationMs: plan.totalEstimatedDurationMs,
+    totalEstimatedDurationMin,
+    totalEstimatedDownloadMb: plan.totalEstimatedDownloadMb,
+    steps: plan.steps.map((step) => {
+      const out: {
+        type: string;
+        description: string;
+        estimatedDurationMs: number;
+        command: readonly string[];
+        estimatedDownloadMb?: number;
+      } = {
+        type: step.type,
+        description: step.description,
+        estimatedDurationMs: step.estimatedDurationMs,
+        command: step.command,
+      };
+      if (step.estimatedDownloadMb !== undefined) {
+        out.estimatedDownloadMb = step.estimatedDownloadMb;
+      }
+      return out;
+    }),
+  });
+}
+
 // ---- Confirm helpers ------------------------------------------------------
 
 /**
