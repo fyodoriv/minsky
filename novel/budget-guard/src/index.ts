@@ -65,6 +65,8 @@ export interface BudgetDecision {
  * which {@link BudgetAction} applies. Higher-severity actions take precedence
  * (status-lattice meet, same as `aggregateStatus` in observability):
  * `circuit-break-and-notify` ⊐ `graceful-degrade` ⊐ `weekly-cap-warn` ⊐ `normal`.
+ *
+ * @otel-exempt pure decision function; spans live at the BudgetGuard.tick caller
  */
 export function decide(
   snapshot: TokenSnapshot,
@@ -134,7 +136,11 @@ export class BudgetGuard {
     private readonly pollIntervalMs: number = 60_000,
   ) {}
 
-  /** Take one snapshot now and return the decision, also pushing to onDecision. */
+  /**
+   * Take one snapshot now and return the decision, also pushing to onDecision.
+   *
+   * @otel budget-guard.tick
+   */
   async tick(): Promise<BudgetDecision> {
     const snap = await this.monitor.snapshot();
     const decision = decide(snap, this.thresholds);
@@ -173,7 +179,11 @@ export class BudgetGuard {
     return remainingFractions(snap);
   }
 
-  /** Begin the periodic poll loop. Idempotent — calling twice is a no-op. */
+  /**
+   * Begin the periodic poll loop. Idempotent — calling twice is a no-op.
+   *
+   * @otel-exempt timer setup; spans fire on each tick via tick()
+   */
   start(): void {
     if (this.timer !== undefined) return;
     this.timer = setInterval(() => {
@@ -181,7 +191,11 @@ export class BudgetGuard {
     }, this.pollIntervalMs);
   }
 
-  /** Stop the periodic poll loop. Idempotent. */
+  /**
+   * Stop the periodic poll loop. Idempotent.
+   *
+   * @otel-exempt timer teardown; no work
+   */
   stop(): void {
     if (this.timer !== undefined) {
       clearInterval(this.timer);
