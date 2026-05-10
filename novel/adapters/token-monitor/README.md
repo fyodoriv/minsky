@@ -132,6 +132,32 @@ exposed without invoking their CLI, and the CLI has no `--json` mode (only
 predictor will land when the upstream feature request for `--json` ships
 (rule #1 — push upstream first).
 
+## Multi-window remaining-fractions (slice 1 of `claude-usage-aware-strategic-model-router`)
+
+`TokenSnapshot` carries three remaining-fraction surfaces — 5h-window,
+weekly, monthly — plus seconds-until-reset for each. The `remainingFractions(snapshot)`
+pure helper extracts the continuous `{ fivehour, weekly, monthly, observedAt }`
+triple the strategic picker (`novel/tick-loop/src/strategic-model-router.ts`,
+slice 4) consumes. Each fraction is clamped to `[0, 1]`; NaN/Infinity
+become `0` (defensive — Maciek's parser can emit them on malformed
+upstream JSONL).
+
+Maciek defaults `monthlyHeadroomFraction = 1.0` (full headroom) on both
+cold-start and active-block branches; slice 6 of the parent task ports
+real cumulative monthly parsing. Two new pure helpers compute the
+calendar-aligned reset windows: `secondsUntilNextMondayUtc(now)` (weekly)
+and `secondsUntilNextMonthStartUtc(now)` (monthly). Operators on a
+custom billing cycle override at the wiring layer (parent task slice 5
+will surface `MINSKY_BILLING_CYCLE_DAY`).
+
+**Out-of-Minsky claude usage detection**: because `MaciekTokenMonitor`
+walks `<configDir>/projects/<cwd>/<session>.jsonl` recursively, every
+claude session on the machine — including ones the operator runs
+directly outside Minsky — is reflected in the snapshot. No additional
+wiring is needed; the strategic picker's input naturally includes
+external usage. The remaining gap is refresh cadence (slice 6 of the
+parent — 30s active / 5min idle re-fetch via `MINSKY_USAGE_REFRESH_INTERVAL_MS`).
+
 ## Failure modes & chaos verification
 
 Per constitutional rule #7 (vision.md § 7).
