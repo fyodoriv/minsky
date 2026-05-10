@@ -14,6 +14,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 27 (operator 2026-05-10 — round-trip elimination: extend slice 26's server-first short-circuit into `runBootstrapLocalLlm`'s !force fast-path so the `local-preferred`/persisted-hard-limit/runtime-claude-hardlimit trigger paths skip the 5-probe detect+plan pipeline when the server is already reachable) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 28 (operator 2026-05-10 — round-trip elimination: thread slice-26's known-unreachable server state into `runBootstrapLocalLlm` so the runtime-claude-hardlimit trigger path skips slice-27's redundant `fetch /v1/models` probe when `maybeBootstrapLocalLlm` already confirmed the server is down) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 29 (operator 2026-05-10 — round-trip elimination: thread the actual slice-26 `ServerState` through `runBootstrapLocalLlm` → `detectForBootstrap` → `buildProductionProbes`'s new `prebuiltServerState` opt so the 5-stack `detectLocalLlmStack` skips its redundant `fetch /v1/models` on the claude-hardlimit cold-start path) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 30 (operator 2026-05-10 — round-trip elimination: capture the slice-27 server probe's `ServerState` when it falls through (unreachable) and thread it into `detectForBootstrap` so the `local-preferred` and persisted-hard-limit trigger paths — which call `runBootstrapLocalLlm({ force: false })` without `knownServerState` — also skip the third `fetch /v1/models` inside `detectLocalLlmStack`) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -545,18 +546,31 @@ async function runBootstrapLocalLlmDryRun() {
  * inside `detectLocalLlmStack`. The `unreachable` shortcut is now a
  * derived check (`!knownServerState.reachable`).
  *
+ * Slice 30: return the captured `serverState` even on the unreachable
+ * branch (instead of bare `undefined`) so the parent can thread it into
+ * `detectForBootstrap`. The `local-preferred` and persisted-hard-limit
+ * trigger paths call `runBootstrapLocalLlm({ force: false })` WITHOUT
+ * `knownServerState`; before this slice the unreachable fall-through
+ * dropped the freshly-probed state on the floor and `detectForBootstrap`
+ * re-probed inside `detectLocalLlmStack`. Same skip semantics for the
+ * reachable branch (still returns the env overlay).
+ *
  * @param {{ knownServerState?: import("../dist/local-llm-bootstrap.js").ServerState }} [hints]
- * @returns {Promise<Record<string, string> | undefined>} env overlay
- *   when the short-circuit fires; `undefined` to fall through to the
- *   full detect+plan pipeline.
+ * @returns {Promise<{ overlay: Record<string, string>, serverState: import("../dist/local-llm-bootstrap.js").ServerState } | { overlay?: undefined, serverState: import("../dist/local-llm-bootstrap.js").ServerState }>}
+ *   discriminated by `overlay` presence: when the server is reachable
+ *   `overlay` is set (caller short-circuits); when unreachable only
+ *   `serverState` is set (caller threads it into detect).
  */
 async function maybeShortCircuitOnReachableServer(hints = {}) {
   const serverState = hints.knownServerState ?? (await buildServerProbe({})());
-  if (!serverState.reachable) return undefined;
+  if (!serverState.reachable) return { serverState };
   process.stderr.write(
     `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback (skipping detect+plan)\n`,
   );
-  return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  return {
+    overlay: { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" },
+    serverState,
+  };
 }
 
 /**
@@ -601,12 +615,19 @@ async function executePlanWithProductionIo(plan) {
  * @returns {Promise<Record<string, string>>}
  */
 async function runBootstrapLocalLlm({ force, knownServerState }) {
+  // Slice 30: capture the slice-27 short-circuit's probed state on the
+  // unreachable branch so we can thread it into `detectForBootstrap`'s
+  // `prebuiltServerState` opt. Before slice 30, the `local-preferred`
+  // and persisted-hard-limit paths (which don't pass `knownServerState`)
+  // dropped the freshly-probed unreachable state and detect re-probed.
+  let prebuiltState = knownServerState;
   if (!force) {
     /** @type {Parameters<typeof maybeShortCircuitOnReachableServer>[0]} */
     const hints = {};
     if (knownServerState !== undefined) hints.knownServerState = knownServerState;
-    const overlay = await maybeShortCircuitOnReachableServer(hints);
-    if (overlay !== undefined) return overlay;
+    const result = await maybeShortCircuitOnReachableServer(hints);
+    if (result.overlay !== undefined) return result.overlay;
+    prebuiltState = result.serverState;
   }
   // Slice 29: thread the known server state into detect so
   // `buildProductionProbes`'s `prebuiltServerState` opt skips the
@@ -614,7 +635,7 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
   // it's unreachable (else the short-circuit above would have fired).
   /** @type {Parameters<typeof detectForBootstrap>[0]} */
   const detectOpts = {};
-  if (knownServerState !== undefined) detectOpts.prebuiltServerState = knownServerState;
+  if (prebuiltState !== undefined) detectOpts.prebuiltServerState = prebuiltState;
   const { state, planOpts } = await detectForBootstrap(detectOpts);
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
