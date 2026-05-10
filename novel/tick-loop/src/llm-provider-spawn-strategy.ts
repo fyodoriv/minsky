@@ -88,6 +88,33 @@ export interface LlmProviderSpawnStrategyOptions {
   /** Operator opt-in: `MINSKY_LLM_PROVIDER=local-preferred`. */
   readonly preferLocal?: boolean;
   /**
+   * Soft target fraction of iterations that should run on local when
+   * both providers are usable (env: `MINSKY_LOCAL_RATIO`). `0.0` ≈ "do
+   * everything on claude", `1.0` ≈ "do everything on local",
+   * `0.95` ≈ "5% by claude, 95% by local". Hard overrides still win:
+   * `forceClaude` always claude; `circuit-break` budget always local;
+   * a carried hard-limit (until switchback probe) always local; an
+   * unreachable probe always claude.
+   *
+   * Mechanism: deterministic running-fraction enforcement. The wrapper
+   * tracks `totalIterations` / `localIterations` and, whenever both
+   * providers are usable AND `decideProvider` returned a soft decision
+   * (`reason` starts with `"normal: clean state"` for claude or
+   * `"operator override (MINSKY_LLM_PROVIDER=local-preferred)"` for
+   * local), routes local when `localIterations / totalIterations <
+   * localRatio` and claude otherwise. Predictable, no RNG, no state
+   * beyond two counters.
+   *
+   * When unset (`undefined`): existing behaviour preserved — `preferLocal`
+   * is the only soft preference, and it's binary.
+   *
+   * Pivot threshold (rule #9): if the running fraction drifts >5 pp from
+   * the target after 50 iterations, the override classifier is too
+   * conservative; pivot to override the local-preferred path too (so a
+   * `localRatio=0.5` flag actually pulls preferLocal halfway back).
+   */
+  readonly localRatio?: number;
+  /**
    * Switchback probe interval (slice 4 of `local-llm-fallback-on-budget-pause`).
    * After every N consecutive iterations on local, the next iteration
    * tries claude once even if `lastClaudeFailure` carries a hard-limit,
@@ -219,6 +246,13 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
    * operator's quota window has rolled over.
    */
   private consecutiveLocalIterations: number;
+  /**
+   * Total dispatches that were either `claude` or `local` (excludes
+   * `hold`). Used by the `localRatio` running-fraction enforcement.
+   */
+  private totalRoutedIterations: number;
+  /** Subset of {@link totalRoutedIterations} that ran on `local`. */
+  private localRoutedIterations: number;
 
   constructor(opts: LlmProviderSpawnStrategyOptions) {
     this.opts = opts;
@@ -228,6 +262,8 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
     this.cachedProbe = undefined;
     this.lastClaudeFailure = undefined;
     this.consecutiveLocalIterations = 0;
+    this.totalRoutedIterations = 0;
+    this.localRoutedIterations = 0;
   }
 
   /**
@@ -252,15 +288,68 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
     const budgetDecision = await Promise.resolve(this.opts.budgetGuard.decide());
     const isSwitchbackProbe = this.shouldRunSwitchbackProbe();
     const failureForDecision = isSwitchbackProbe ? undefined : this.lastClaudeFailure;
-    const decision = decideProvider({
+    const initialDecision = decideProvider({
       budgetState: budgetDecision.action,
       lastClaudeFailure: failureForDecision,
       localProbeResult: probeResult,
       ...(this.opts.forceClaude === undefined ? {} : { forceClaude: this.opts.forceClaude }),
       ...(this.opts.preferLocal === undefined ? {} : { preferLocal: this.opts.preferLocal }),
     });
+    const decision = this.applyLocalRatio(initialDecision, budgetDecision.action, probeResult);
     this.emitDispatchSpan(decision, budgetDecision.action, probeResult, isSwitchbackProbe);
     return this.dispatch(decision, input);
+  }
+
+  /**
+   * Apply the soft `localRatio` running-fraction enforcement. Only fires
+   * when both providers are usable (no hard override, probe reachable,
+   * budget allows) AND the initial decision is a soft one (the
+   * "normal+clean" claude default OR the `preferLocal` soft-local
+   * default). Hard decisions — `forceClaude`, `circuit-break`,
+   * carried `hard-limit`, `hold`, `probe-unreachable` — pass through
+   * unchanged.
+   *
+   * Decision rule: route local when current running fraction
+   * `localRoutedIterations / totalRoutedIterations` is below the
+   * target; claude otherwise. Empty history (`totalRoutedIterations
+   * === 0`) routes per the target — local if target > 0, claude if
+   * target == 0.
+   *
+   * (Internal helper — no JSDoc tag required.)
+   */
+  private applyLocalRatio(
+    decision: ProviderDecision,
+    budgetState: DecideProviderInput["budgetState"],
+    probe: LocalProbeResult,
+  ): ProviderDecision {
+    const target = this.opts.localRatio;
+    if (target === undefined) return decision;
+    if (decision.provider === "hold") return decision;
+    // Hard claude (operator escape hatch): never override.
+    if (this.opts.forceClaude === true) return decision;
+    // Probe unreachable: claude is the only option.
+    if (!probe.reachable) return decision;
+    // Budget circuit-break: local is forced (cloud is unaffordable).
+    if (budgetState === "circuit-break-and-notify") return decision;
+    // Carried hard-limit (and not in switchback probe): local is forced.
+    if (this.lastClaudeFailure !== undefined && decision.provider === "local") return decision;
+    // Both providers usable. Pick whichever choice keeps the post-call
+    // running fraction at or below the target. This handles the
+    // boundary cases (target=0 → always claude; target=1 → always local)
+    // and produces a stable alternation in the middle. Specifically:
+    // route local iff `(local+1) / (total+1) <= target`.
+    const projectedLocalFrac = (this.localRoutedIterations + 1) / (this.totalRoutedIterations + 1);
+    const wantLocal = projectedLocalFrac <= target;
+    const provider: ProviderDecision["provider"] = wantLocal ? "local" : "claude";
+    if (provider === decision.provider) return decision;
+    const currentLocalFrac =
+      this.totalRoutedIterations === 0
+        ? 0
+        : this.localRoutedIterations / this.totalRoutedIterations;
+    return {
+      provider,
+      reason: `localRatio=${target} (current=${currentLocalFrac.toFixed(2)}, target=${target})`,
+    };
   }
 
   /**
@@ -333,6 +422,12 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
       // provider === "local"
       this.consecutiveLocalIterations += 1;
     }
+    // localRatio bookkeeping: count every routed dispatch (claude/local;
+    // not hold). The fraction this informs is consulted on the NEXT
+    // call's `applyLocalRatio` — so the very first call sees an empty
+    // history and routes per the target.
+    this.totalRoutedIterations += 1;
+    if (decision.provider === "local") this.localRoutedIterations += 1;
     return { ...result, provider: decision.provider };
   }
 
