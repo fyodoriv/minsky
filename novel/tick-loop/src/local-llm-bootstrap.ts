@@ -222,6 +222,23 @@ export interface BootstrapPlanOptions {
    * compat by construction.
    */
   readonly archState?: import("./arch-probe.js").ArchState;
+
+  /**
+   * Hugging Face model identifier for the download + server-start steps.
+   * When undefined, falls back to {@link DEFAULT_LOCAL_LLM_MODEL}.
+   *
+   * Wires the operator's `MINSKY_LOCAL_LLM_MODEL_ID` env var (already
+   * honored by `bin/tick-loop.mjs:464` for daemon-side LLM invocation)
+   * through to the bootstrap path so a custom model env triggers the
+   * correct download + server start. Without this, the daemon would
+   * try to use the operator's chosen model while the bootstrap had
+   * downloaded + started the default Qwen3-Coder.
+   *
+   * The planner does not validate the id; callers should pass a
+   * Hugging Face `<org>/<name>` shape. Bad ids fail loudly at the
+   * `hf download` / `mlx_lm.server` step.
+   */
+  readonly modelId?: string;
 }
 
 // ---- Constants ------------------------------------------------------------
@@ -382,7 +399,7 @@ function buildModelDownloadStep(modelId: string): InstallStep {
   };
 }
 
-function buildStartServerStep(): InstallStep {
+function buildStartServerStep(modelId: string): InstallStep {
   return {
     type: "start-mlx-server",
     description: "Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)",
@@ -392,15 +409,7 @@ function buildStartServerStep(): InstallStep {
     // in the executor (it needs detach + log redirection that argv-only
     // can't express). The argv here is the canonical shape the executor
     // dispatches; adjust there if the executor changes the launch path.
-    command: [
-      "mlx_lm.server",
-      "--model",
-      DEFAULT_LOCAL_LLM_MODEL,
-      "--host",
-      "127.0.0.1",
-      "--port",
-      "8080",
-    ],
+    command: ["mlx_lm.server", "--model", modelId, "--host", "127.0.0.1", "--port", "8080"],
   };
 }
 
@@ -471,11 +480,12 @@ function buildInstallSteps(
   if (options.archState !== undefined && needsArmHomebrewInstall(options.archState)) {
     steps.push(buildInstallArmHomebrewStep());
   }
+  const modelId = options.modelId ?? DEFAULT_LOCAL_LLM_MODEL;
   if (!state.pipx.present) steps.push(buildPipxStep(brewPath));
   if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
-  if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  if (!state.server.reachable) steps.push(buildStartServerStep());
+  if (!state.model.present) steps.push(buildModelDownloadStep(modelId));
+  if (!state.server.reachable) steps.push(buildStartServerStep(modelId));
   return steps;
 }
 

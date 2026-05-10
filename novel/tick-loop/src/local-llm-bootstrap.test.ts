@@ -441,6 +441,45 @@ describe("planLocalLlmBootstrap — slice 7 H1: aider uses arch-canonical python
   });
 });
 
+describe("planLocalLlmBootstrap — modelId option (custom model env override)", () => {
+  // Operator's `MINSKY_LOCAL_LLM_MODEL_ID=<org/name>` env (already
+  // honored by the daemon at `bin/tick-loop.mjs:464`) must reach the
+  // planner so the bootstrap downloads + serves the same model the
+  // daemon will invoke. Without this, the bootstrap would download
+  // Qwen3-Coder while the daemon talks to the operator's chosen model.
+
+  it("download-model command uses the supplied modelId", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { modelId: "mlx-community/Foo-Bar-4bit" });
+    const downloadStep = plan.steps.find((s) => s.type === "download-model");
+    expect(downloadStep?.command).toEqual(["hf", "download", "mlx-community/Foo-Bar-4bit"]);
+    expect(downloadStep?.description).toMatch(/mlx-community\/Foo-Bar-4bit/);
+  });
+
+  it("start-mlx-server command uses the supplied modelId", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { modelId: "mlx-community/Foo-Bar-4bit" });
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(startStep?.command).toContain("mlx-community/Foo-Bar-4bit");
+    expect(startStep?.command).not.toContain(DEFAULT_LOCAL_LLM_MODEL);
+  });
+
+  it("falls back to DEFAULT_LOCAL_LLM_MODEL when modelId is undefined", () => {
+    const plan = planLocalLlmBootstrap(freshMachine);
+    const downloadStep = plan.steps.find((s) => s.type === "download-model");
+    expect(downloadStep?.command).toEqual(["hf", "download", DEFAULT_LOCAL_LLM_MODEL]);
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(startStep?.command).toContain(DEFAULT_LOCAL_LLM_MODEL);
+  });
+
+  it("modelId threads through both download AND start steps (consistency)", () => {
+    const plan = planLocalLlmBootstrap(freshMachine, { modelId: "mlx-community/Custom" });
+    const downloadStep = plan.steps.find((s) => s.type === "download-model");
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(downloadStep?.command[2]).toBe("mlx-community/Custom");
+    const startModelArgIdx = (startStep?.command ?? []).indexOf("--model");
+    expect(startStep?.command[startModelArgIdx + 1]).toBe("mlx-community/Custom");
+  });
+});
+
 describe("planRequiresTty — slice 7 H2: non-TTY pre-flight check", () => {
   it("returns true when plan contains install-arm-homebrew", () => {
     const rosettaMissingBrew: import("./arch-probe.js").ArchState = {

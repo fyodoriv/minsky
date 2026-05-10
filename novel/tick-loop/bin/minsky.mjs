@@ -423,14 +423,23 @@ function readPersistedHardLimit() {
 async function detectForBootstrap() {
   const archState = await detectArchState(buildArchProbes());
   const expectedPipxPath = preferredPipxPath(archState);
+  // Operator override: `MINSKY_LOCAL_LLM_MODEL_ID=<org/name>` retargets
+  // both the model probe AND the planner's download + server-start
+  // steps. Without this thread-through, the daemon (which honors the
+  // env at `bin/tick-loop.mjs:464`) would invoke a model that the
+  // bootstrap never downloaded.
+  const modelIdEnv = process.env["MINSKY_LOCAL_LLM_MODEL_ID"]?.trim();
+  const modelId = modelIdEnv !== undefined && modelIdEnv.length > 0 ? modelIdEnv : undefined;
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
+  if (modelId !== undefined) probeOpts.modelId = modelId;
   const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
   const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
+  if (modelId !== undefined) planOpts.modelId = modelId;
   return { state, archState, planOpts, pythonPath };
 }
 
