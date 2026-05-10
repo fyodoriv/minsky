@@ -517,6 +517,148 @@ describe("LlmProviderSpawnStrategy / SpawnInput passthrough", () => {
   });
 });
 
+describe("LlmProviderSpawnStrategy / `localRatio` running-fraction enforcement", () => {
+  it("with localRatio=1.0 + reachable + normal budget → routes every iteration to local", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      localRatio: 1.0,
+      now: () => 1000,
+    });
+    for (let i = 0; i < 5; i++) await wrapper.spawn(emptyInput());
+    expect(local.spawn).toHaveBeenCalledTimes(5);
+    expect(claude.spawn).toHaveBeenCalledTimes(0);
+  });
+
+  it("with localRatio=0.0 + reachable → routes every iteration to claude", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      localRatio: 0.0,
+      now: () => 1000,
+    });
+    for (let i = 0; i < 5; i++) await wrapper.spawn(emptyInput());
+    expect(claude.spawn).toHaveBeenCalledTimes(5);
+    expect(local.spawn).toHaveBeenCalledTimes(0);
+  });
+
+  it("with localRatio=0.8 over 20 iterations → ~80 % local / ~20 % claude (within ±1)", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      localRatio: 0.8,
+      now: () => 1000,
+    });
+    for (let i = 0; i < 20; i++) await wrapper.spawn(emptyInput());
+    // Deterministic running-fraction enforcement: with target 0.8 over
+    // 20 iterations we expect ~16 local / ~4 claude. The first iteration
+    // routes per the target (history empty); subsequent iterations
+    // correct toward the target.
+    expect(local.spawn.mock.calls.length).toBeGreaterThanOrEqual(15);
+    expect(local.spawn.mock.calls.length).toBeLessThanOrEqual(17);
+    expect(claude.spawn.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(claude.spawn.mock.calls.length).toBeLessThanOrEqual(5);
+    // Sum to 20 (no holds)
+    expect(local.spawn.mock.calls.length + claude.spawn.mock.calls.length).toBe(20);
+  });
+
+  it("forceClaude wins over localRatio (escape hatch preserved)", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      forceClaude: true,
+      localRatio: 1.0,
+      now: () => 1000,
+    });
+    for (let i = 0; i < 5; i++) await wrapper.spawn(emptyInput());
+    expect(claude.spawn).toHaveBeenCalledTimes(5);
+    expect(local.spawn).toHaveBeenCalledTimes(0);
+  });
+
+  it("circuit-break wins over localRatio=0.0 (budget forces local even when ratio says claude)", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("circuit-break-and-notify"),
+      localRatio: 0.0,
+      now: () => 1000,
+    });
+    await wrapper.spawn(emptyInput());
+    expect(local.spawn).toHaveBeenCalledTimes(1);
+    expect(claude.spawn).toHaveBeenCalledTimes(0);
+  });
+
+  it("unreachable probe wins over localRatio=1.0 (claude is the only option)", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => UNREACHABLE,
+      budgetGuard: stubBudget("normal"),
+      localRatio: 1.0,
+      now: () => 1000,
+    });
+    await wrapper.spawn(emptyInput());
+    expect(claude.spawn).toHaveBeenCalledTimes(1);
+    expect(local.spawn).toHaveBeenCalledTimes(0);
+  });
+
+  it("undefined localRatio preserves existing behaviour (back-compat — normal+reachable+clean → claude)", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      now: () => 1000,
+    });
+    for (let i = 0; i < 3; i++) await wrapper.spawn(emptyInput());
+    expect(claude.spawn).toHaveBeenCalledTimes(3);
+    expect(local.spawn).toHaveBeenCalledTimes(0);
+  });
+
+  it("dispatch span for ratio-overridden iteration carries the localRatio reason", async () => {
+    const claude = stubStrategy(CLEAN_RESULT);
+    const local = stubStrategy(CLEAN_RESULT);
+    const events: { name: string; attributes: Record<string, string | number | boolean> }[] = [];
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: claude.strategy,
+      local: local.strategy,
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      localRatio: 1.0,
+      emit: (event) => events.push(event),
+      now: () => 1000,
+    });
+    await wrapper.spawn(emptyInput());
+    const span = events.find((e) => e.name === "tick-loop.llm-provider.dispatch");
+    expect(span).toBeDefined();
+    expect(span?.attributes["provider"]).toBe("local");
+    expect(String(span?.attributes["reason"])).toContain("localRatio=1");
+  });
+});
+
 describe("LlmProviderSpawnStrategy / `daemon-aider-brief-shrinker` localBrief substitution", () => {
   it("substitutes localBrief as brief when dispatching to local", async () => {
     const claude = vi.fn().mockResolvedValue(CLEAN_RESULT);
