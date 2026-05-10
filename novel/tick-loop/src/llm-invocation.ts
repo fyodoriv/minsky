@@ -293,11 +293,21 @@ export interface BuildOpencodeInvocationOpts {
  * @otel tick-loop.llm-invocation.build-opencode
  */
 export function buildOpencodeInvocation(opts: BuildOpencodeInvocationOpts): LlmInvocation {
-  const model = opts.model ?? DEFAULT_OPENCODE_MODEL;
+  // 2026-05-10 update: when `opts.model` is undefined, OMIT `--model`
+  // entirely so opencode falls through to its own config-file resolution
+  // (`<repo>/opencode.json` → `~/.config/opencode/opencode.json` → opencode
+  // defaults). This is what makes operator-machine-config changes
+  // (`opencode.json` edits) automatically pick up without Minsky restart —
+  // each `opencode run` re-reads the config. The previous default-to-
+  // {@link DEFAULT_OPENCODE_MODEL} hard-coded the model behind the
+  // operator's back; the new default is "let opencode pick".
+  //
+  // Operators who want to pin a specific model from Minsky's side set
+  // `MINSKY_LOCAL_LLM_MODEL_ID=<provider/model>`; the wiring layer
+  // forwards that as `opts.model` and the explicit pin wins.
   const argv: readonly string[] = Object.freeze([
     "run",
-    "--model",
-    model,
+    ...(opts.model === undefined ? [] : ["--model", opts.model]),
     "--dangerously-skip-permissions",
     ...(opts.extraArgs ?? []),
     opts.brief,
