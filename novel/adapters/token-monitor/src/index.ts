@@ -38,6 +38,70 @@ export interface TokenSnapshot {
   readonly weeklyHeadroomFraction: number;
   /** ISO-8601 UTC timestamp at which this snapshot was taken. */
   readonly observedAt: string;
+  /**
+   * Monthly headroom remaining as a fraction in `[0, 1]` (slice 1 of
+   * `claude-usage-aware-strategic-model-router`). When the adapter
+   * doesn't track monthly cumulative spend (e.g., Maciek v0), this is
+   * `1.0` indicating "headroom assumed full, monthly cap not gating".
+   * Strategic picker treats `null` as "unknown — be conservative" once
+   * adapters opt into nullable; `1.0` as "full — use best-tier model".
+   */
+  readonly monthlyHeadroomFraction: number;
+  /** Seconds until the current weekly window resets (Monday 00:00 UTC). */
+  readonly secondsUntilWeekReset: number;
+  /** Seconds until the current monthly window resets (1st-of-month 00:00 UTC). */
+  readonly secondsUntilMonthReset: number;
+}
+
+/**
+ * Continuous remaining-fraction surface per window. Slice 1 of
+ * `claude-usage-aware-strategic-model-router` — the strategic picker
+ * walks the {@link MODEL_CATALOG} and compares each tier's per-window
+ * floors against this struct to pick the highest-quality model that
+ * fits all three budgets.
+ *
+ * All values in `[0, 1]`. `1.0` = full headroom; `0` = exhausted.
+ * Computed via {@link remainingFractions}.
+ */
+export interface RemainingFractions {
+  /** 5h-window remaining fraction (derived from `tokensRemainingInWindow / windowSizeTokens`). */
+  readonly fivehour: number;
+  /** Weekly remaining fraction (the raw `weeklyHeadroomFraction`). */
+  readonly weekly: number;
+  /** Monthly remaining fraction (the raw `monthlyHeadroomFraction`). */
+  readonly monthly: number;
+  /** ISO-8601 UTC timestamp from the source snapshot — propagated for staleness checks. */
+  readonly observedAt: string;
+}
+
+/**
+ * Extract the continuous remaining-fraction triple from a {@link TokenSnapshot}.
+ * Pure function — no I/O, no clock. Clamps each fraction to `[0, 1]`.
+ *
+ * Slice 1 of `claude-usage-aware-strategic-model-router`: this is the
+ * input shape `pickStrategicModel` consumes. Keeps the picker decoupled
+ * from `TokenSnapshot`'s broader (legacy-shaped) surface.
+ *
+ * @otel-exempt pure arithmetic helper
+ */
+export function remainingFractions(snapshot: TokenSnapshot): RemainingFractions {
+  const fivehour =
+    snapshot.windowSizeTokens <= 0
+      ? 0
+      : clamp01(snapshot.tokensRemainingInWindow / snapshot.windowSizeTokens);
+  return {
+    fivehour,
+    weekly: clamp01(snapshot.weeklyHeadroomFraction),
+    monthly: clamp01(snapshot.monthlyHeadroomFraction),
+    observedAt: snapshot.observedAt,
+  };
+}
+
+function clamp01(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
 }
 
 /**
@@ -85,6 +149,14 @@ function defaultSnapshot(): TokenSnapshot {
     secondsUntilWindowReset: 5 * 60 * 60,
     weeklyHeadroomFraction: 1.0,
     observedAt: new Date().toISOString(),
+    // Slice 1 of `claude-usage-aware-strategic-model-router`: monthly
+    // window defaults to "full headroom" so the strategic picker can
+    // route to the highest-quality model when no monthly data is
+    // available (cold-start, fresh install). Maciek adapter overrides
+    // these once it parses real monthly cumulative spend.
+    monthlyHeadroomFraction: 1.0,
+    secondsUntilWeekReset: 7 * 24 * 60 * 60,
+    secondsUntilMonthReset: 30 * 24 * 60 * 60,
   };
 }
 

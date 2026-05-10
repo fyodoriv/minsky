@@ -17,6 +17,9 @@ const snapshot = (overrides: Partial<Parameters<typeof decide>[0]> = {}) => ({
   secondsUntilWindowReset: 5 * 60 * 60,
   weeklyHeadroomFraction: 1,
   observedAt: "2026-05-03T00:00:00Z",
+  monthlyHeadroomFraction: 1,
+  secondsUntilWeekReset: 604800,
+  secondsUntilMonthReset: 2592000,
   ...overrides,
 });
 
