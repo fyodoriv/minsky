@@ -2,17 +2,18 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm` flag wiring) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 18 (operator 2026-05-08 — `--model=<id>` flag wiring) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 19 (operator 2026-05-08 — `--port=<n>` flag wiring) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 20 (operator 2026-05-08 — `--help`/`-h` flag wiring) -->
 /**
  * `@minsky/tick-loop/bootstrap-local-llm-args` — pure parser for the
  * `minsky bootstrap-local-llm` subcommand's flag surface. Slice 9 / 17
- * / 18 / 19 of P0 task `minsky-cli-auto-bootstrap-local-llm`.
+ * / 18 / 19 / 20 of P0 task `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Parses four flags so far — `--dry-run`, `--no-confirm` (alias `-y`,
- * `--yes`), `--model=<hf-id>`, and `--port=<n>` — but exists as a typed
- * boundary so future flags land here instead of accreting in the bin
- * file. Pure-over-input; tests pass synthetic argv arrays. The wiring
- * at `bin/minsky.mjs` passes `process.argv.slice(2 + 1)` (skip node +
- * script + verb).
+ * Parses five flags so far — `--dry-run`, `--no-confirm` (alias `-y`,
+ * `--yes`), `--model=<hf-id>`, `--port=<n>`, and `--help` (alias `-h`)
+ * — but exists as a typed boundary so future flags land here instead
+ * of accreting in the bin file. Pure-over-input; tests pass synthetic
+ * argv arrays. The wiring at `bin/minsky.mjs` passes
+ * `process.argv.slice(2 + 1)` (skip node + script + verb).
  *
  * Contract: never throws. Unknown flags are ignored — argparse
  * rigour belongs at a future per-subcommand parser layer; for now
@@ -63,6 +64,23 @@ export interface BootstrapLocalLlmArgs {
    * empty model id into the install commands.
    */
   readonly modelId?: string;
+
+  /**
+   * `--help` (alias `-h`) — when true, the CLI prints subcommand-specific
+   * usage to stdout and exits 0 BEFORE running any probe / detect / plan
+   * step. Short-circuits the multi-second detect+plan pipeline (HTTP probe
+   * to `mlx_lm.server`, several `command -v` shellouts, HF cache walk) so
+   * `minsky bootstrap-local-llm --help` is genuinely fast and read-only.
+   * Skip-earlier-gate optimization (rule #6 — pay the cost only when the
+   * answer requires it; the operator asking for help wants the help text,
+   * not a stale probe).
+   *
+   * Highest precedence in `bin/minsky.mjs`: when `help` is set, we render
+   * help and exit BEFORE evaluating `dryRun` / `noConfirm` / `modelId` /
+   * `port` — the operator's intent is informational, no need to also
+   * compute a dry-run plan or prompt.
+   */
+  readonly help: boolean;
 
   /**
    * `--port=<n>` — override the default 8080 mlx-lm.server port for
@@ -136,6 +154,7 @@ function collectValueFlags(args: readonly string[]): {
 export function parseBootstrapLocalLlmArgs(args: readonly string[]): BootstrapLocalLlmArgs {
   const { modelId, port } = collectValueFlags(args);
   return {
+    help: args.includes("--help") || args.includes("-h"),
     dryRun: args.includes("--dry-run"),
     noConfirm: args.includes("--no-confirm") || args.includes("--yes") || args.includes("-y"),
     ...(modelId !== undefined ? { modelId } : {}),
