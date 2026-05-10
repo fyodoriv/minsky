@@ -210,3 +210,102 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
     ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
   };
 }
+
+// ---- buildOpencodeInvocation ----------------------------------------------
+
+/**
+ * Default model alias for opencode's `provider/model` format. The
+ * provider half (`lmstudio`) is a key the operator must define in
+ * `~/.config/opencode/opencode.json` under `provider.lmstudio.options.baseURL =
+ * "http://127.0.0.1:1234/v1"` (LM Studio's documented default port). The
+ * model half (`qwen3-14b`) is the alias the operator gives the model in
+ * the same config under `provider.lmstudio.models`. The pair is
+ * recency-checked May 2026 against opencode's documented `provider/model`
+ * argv shape ([opencode CLI docs](https://opencode.ai/docs/cli/)) and
+ * the operator-shared LM Studio + opencode flow ([Falkingham 2026-05-08](https://peterfalkingham.com/2026/05/08/getting-local-ai-working-for-me-lm-studio-opencode-and-hermes/)).
+ *
+ * Slice 1 of `support-opencode-lmstudio-mlx-qwen3-14b-stack`.
+ */
+export const DEFAULT_OPENCODE_MODEL = "lmstudio/qwen3-14b";
+
+export interface BuildOpencodeInvocationOpts {
+  /** The brief text. Will be passed as the final positional argv element. */
+  readonly brief: string;
+  /** Override the `opencode` command path (tests / fixtures). Default `"opencode"`. */
+  readonly command?: string;
+  /**
+   * Per-iteration extra args, inserted between the fixed-flag prefix
+   * (`run --model <id> --dangerously-skip-permissions`) and the
+   * brief positional. Used by the wiring layer (slice 2) for any
+   * opencode-specific overrides the operator configures via env (agent
+   * selection, session id, etc.).
+   */
+  readonly extraArgs?: readonly string[];
+  /**
+   * Override model alias. Default {@link DEFAULT_OPENCODE_MODEL}. Format:
+   * `provider/model` per opencode's documented `--model` shape — the
+   * provider half must match a key in `~/.config/opencode/opencode.json`'s
+   * `provider.<key>` map.
+   */
+  readonly model?: string;
+  /**
+   * Per-iteration cwd — opencode's tool-use loop edits files in the
+   * current directory, so the daemon's per-worker worktree path must be
+   * passed when in multi-worker mode. When `undefined`, the
+   * spawn-strategy uses the parent process's cwd (single-process default).
+   */
+  readonly cwd?: string;
+}
+
+/**
+ * Build the invocation for `opencode run "<brief>"` (opencode's
+ * documented non-interactive mode — see [opencode CLI docs](https://opencode.ai/docs/cli/):
+ * "useful for scripting, automation"). Brief is delivered as the final
+ * positional argv element; stdin is unbound. Provider config (LM Studio
+ * baseURL + model alias) lives in opencode's own
+ * `~/.config/opencode/opencode.json`; this builder threads the
+ * `provider/model` alias through `--model` so opencode picks the right
+ * provider per iteration.
+ *
+ * `--dangerously-skip-permissions` is wired into the default args because
+ * the supervisor runs unattended — no human is present to approve each
+ * tool call. Operators who want the interactive permission prompts can
+ * override via `extraArgs: []` (wait, actually — once wired, the flag is
+ * always present; an opt-out belongs in the wiring layer, not here).
+ *
+ * The argv order is fixed for stability: `run` subcommand first, then
+ * `--model <id>`, then `--dangerously-skip-permissions`, then operator
+ * extras, then the terminal brief positional. Putting the brief last
+ * makes it the only argv element after the fixed prefix — easier to read
+ * in `ps -ef` output and easier for a future argv allowlist (rule #13's
+ * threat-model gate) to validate.
+ *
+ * Failure modes (rule #7):
+ *   - Argv-poison brief (e.g., embedded `--continue`): handled —
+ *     `child_process.spawn` arrays are immune to shell injection;
+ *     opencode's argparse sees the brief as the trailing positional.
+ *     Tested.
+ *   - Brief exceeds OS argv limit (~256 KB on macOS): handled — `spawn`
+ *     rejects with `E2BIG`; let-it-crash per spawn-strategy's reject
+ *     handler. The slim brief from `daemon-aider-brief-shrinker` (#406
+ *     shipped) is ≤2 KB so this is far from the ceiling. Documented.
+ *
+ * @otel tick-loop.llm-invocation.build-opencode
+ */
+export function buildOpencodeInvocation(opts: BuildOpencodeInvocationOpts): LlmInvocation {
+  const model = opts.model ?? DEFAULT_OPENCODE_MODEL;
+  const argv: readonly string[] = Object.freeze([
+    "run",
+    "--model",
+    model,
+    "--dangerously-skip-permissions",
+    ...(opts.extraArgs ?? []),
+    opts.brief,
+  ]);
+  return {
+    command: opts.command ?? "opencode",
+    argv,
+    stdin: undefined,
+    ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
+  };
+}
