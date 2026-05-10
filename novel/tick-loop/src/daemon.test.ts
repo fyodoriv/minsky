@@ -31,6 +31,7 @@ import {
   type MetricsRenderSeam,
   type SnapshotSeam,
   buildDaemonBrief,
+  buildLocalBrief,
   extractOpenP0TaskIds,
   extractTaskBlock,
   pickTask,
@@ -2255,6 +2256,89 @@ describe("buildDaemonBrief", () => {
     expect(brief).toContain("pnpm pre-pr-lint");
     expect(brief).toContain("pr-self-grade");
     expect(brief).toContain("pr-security-review");
+  });
+});
+
+describe("buildLocalBrief — `daemon-aider-brief-shrinker`", () => {
+  const small = `# Tasks
+
+## P0
+
+- [ ] \`real-task\` — load-bearing tagline for the slim brief
+  - **ID**: real-task
+  - **Tags**: p0, supervisor
+  - **Estimate**: 1d
+  - **Hypothesis**: ship the smallest meaningful change to X so Y holds.
+  - **Details**: edit foo.ts to add bar(); add paired tests.
+  - **Files**: \`foo.ts\`, \`foo.test.ts\`
+  - **Verification**: paired tests green.
+  - **Acceptance**: ship.
+  - **Anchor**: rule #9.
+  - **Risk**: low.
+  - **Surfaced-by**: operator 2026-05-10.
+`;
+
+  it("includes the task id, tagline, hypothesis, details, files", () => {
+    const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
+    expect(brief).toContain("# Task: `real-task`");
+    expect(brief).toContain("load-bearing tagline for the slim brief");
+    expect(brief).toContain("## Hypothesis");
+    expect(brief).toContain("ship the smallest meaningful change");
+    expect(brief).toContain("## Details");
+    expect(brief).toContain("edit foo.ts to add bar()");
+    expect(brief).toContain("## Files");
+    expect(brief).toContain("foo.ts");
+  });
+
+  it("instructs aider to commit locally (supervisor opens the PR)", () => {
+    const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
+    expect(brief).toContain("Commit locally");
+    expect(brief).toContain("supervisor opens the PR");
+  });
+
+  it("drops the priority-discipline / anti-noop / pre-pr-lint / pr-self-grade / pr-security sections", () => {
+    const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
+    expect(brief).not.toContain("Priority-discipline");
+    expect(brief).not.toContain("anti-noop guard");
+    expect(brief).not.toContain("Pre-PR lint-stack");
+    expect(brief).not.toContain("Hypothesis self-grade");
+    expect(brief).not.toContain("PR security-review");
+    expect(brief).not.toContain("Optimization-discipline");
+  });
+
+  it("falls back to a graceful exit message when the task is not found", () => {
+    const brief = buildLocalBrief({ taskId: "missing", tasksMdContent: small });
+    expect(brief).toContain("`missing` not found");
+    expect(brief).toContain("exit without writing");
+  });
+
+  it("stays ≤2 KB on the small fixture", () => {
+    const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
+    expect(Buffer.byteLength(brief, "utf8")).toBeLessThanOrEqual(2048);
+  });
+
+  it("stays ≤2 KB even when the task block has very long Hypothesis/Details/Files cells", () => {
+    const big = `# Tasks
+
+## P0
+
+- [ ] \`fat-task\` — tagline
+  - **ID**: fat-task
+  - **Tags**: p0
+  - **Hypothesis**: ${"x".repeat(5000)}
+  - **Details**: ${"y".repeat(5000)}
+  - **Files**: ${"z".repeat(5000)}
+`;
+    const brief = buildLocalBrief({ taskId: "fat-task", tasksMdContent: big });
+    expect(Buffer.byteLength(brief, "utf8")).toBeLessThanOrEqual(2048);
+    // Ellipsis confirms the truncation kicked in.
+    expect(brief).toContain("…");
+  });
+
+  it("is materially smaller than buildDaemonBrief on the same input", () => {
+    const slim = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
+    const full = buildDaemonBrief({ taskId: "real-task", tasksMdContent: small });
+    expect(Buffer.byteLength(slim, "utf8")).toBeLessThan(Buffer.byteLength(full, "utf8") / 2);
   });
 });
 

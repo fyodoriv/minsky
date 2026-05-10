@@ -315,7 +315,17 @@ export class LlmProviderSpawnStrategy implements SpawnStrategy {
       return synthesiseHoldResult(decision.reason);
     }
     const strategy = decision.provider === "claude" ? this.opts.claude : this.opts.local;
-    const result = await strategy.spawn(input);
+    // `daemon-aider-brief-shrinker`: when the iteration routes to local
+    // and the daemon supplied a slim `localBrief`, substitute it before
+    // delegating. The full brief is 7-10 KB; the slim brief is ≤2 KB,
+    // sized to fit aider+Qwen3-class prompt-processing under the 30-min
+    // watchdog. When `localBrief` is unset (older callers / tests),
+    // pass the full brief unchanged for back-compat.
+    const dispatchInput: SpawnInput =
+      decision.provider === "local" && input.localBrief !== undefined
+        ? { ...input, brief: input.localBrief }
+        : input;
+    const result = await strategy.spawn(dispatchInput);
     if (decision.provider === "claude") {
       this.captureClaudeFailure(result);
       this.consecutiveLocalIterations = 0;
