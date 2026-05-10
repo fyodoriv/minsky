@@ -790,6 +790,18 @@ export {
   pollUntilReachable,
 } from "./local-llm-server-launcher.js";
 
+// Slice 11 of `minsky-cli-auto-bootstrap-local-llm`: pure
+// `stopLocalLlmServer` helper closes the PID-file lifecycle slice 10
+// opened. `minsky stop-mlx-server` sends SIGTERM + unlinks; stale PID
+// files (server crashed out-of-band) are detected and unlinked.
+export {
+  type StopLocalLlmServerOpts,
+  type StopOutcome,
+  type StopOutcomeKind,
+  type StopServerIo,
+  stopLocalLlmServer,
+} from "./local-llm-server-stopper.js";
+
 // Real `claude --print` probe — used by `bin/minsky.mjs` to detect
 // "credits exhausted" vs "binary missing" vs "healthy" so the
 // auto-bootstrap pre-flight fires when the operator's machine cannot
