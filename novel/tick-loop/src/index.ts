@@ -802,6 +802,18 @@ export {
   stopLocalLlmServer,
 } from "./local-llm-server-stopper.js";
 
+// Slice 12 of `minsky-cli-auto-bootstrap-local-llm`: pure
+// `decideStartAction` helper. Symmetric counterpart to slice 11 — the
+// `minsky start-mlx-server` subcommand consults this to pick one of
+// already-running / pid-conflict / stale-pid-then-start / fresh-start
+// without going through the full detect+plan+confirm pipeline.
+export {
+  type StartAction,
+  type StartActionKind,
+  type StartDecisionInput,
+  decideStartAction,
+} from "./local-llm-server-start-decision.js";
+
 // Real `claude --print` probe — used by `bin/minsky.mjs` to detect
 // "credits exhausted" vs "binary missing" vs "healthy" so the
 // auto-bootstrap pre-flight fires when the operator's machine cannot
