@@ -821,6 +821,18 @@ export {
 // (default worker 0) the same way pre-slice-13 `minsky logs` did.
 export { type LogsTarget, type LogsTargetKind, decideLogsTarget } from "./logs-target-decision.js";
 
+// Slice 14 of `minsky-cli-auto-bootstrap-local-llm`: pure
+// `summarizeMlxServerStatus` decision. Read-only counterpart to slices
+// 11/12/13 — `minsky status mlx-server` reports running / unhealthy /
+// stale / not-running / invalid-pid-file in one line so scripts can
+// chain `minsky status mlx-server && next-cmd` without parsing prose.
+export {
+  type MlxServerStatus,
+  type MlxServerStatusKind,
+  type StatusInput,
+  summarizeMlxServerStatus,
+} from "./local-llm-server-status.js";
+
 // Real `claude --print` probe — used by `bin/minsky.mjs` to detect
 // "credits exhausted" vs "binary missing" vs "healthy" so the
 // auto-bootstrap pre-flight fires when the operator's machine cannot
