@@ -756,6 +756,10 @@ export {
   renderConfirmSummary,
 } from "./local-llm-bootstrap-executor.js";
 export {
+  type BootstrapLocalLlmArgs,
+  parseBootstrapLocalLlmArgs,
+} from "./bootstrap-local-llm-args.js";
+export {
   type ExistsSyncFn,
   type FetchFn,
   PYTHON_CANDIDATES,

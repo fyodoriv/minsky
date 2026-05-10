@@ -57,6 +57,16 @@ export interface SpawnInput {
    * the Strategy. `[]` or omitted preserves the v0 contract.
    */
   readonly extraArgs?: readonly string[];
+  /**
+   * Optional slim brief substituted by {@link LlmProviderSpawnStrategy}
+   * when the iteration routes to `local`. Task `daemon-aider-brief-shrinker`:
+   * stock `brief` is 7-10 KB; aider+Qwen3-class models trip the 30-min
+   * watchdog on prompt processing alone. When `localBrief` is set and the
+   * wrapper dispatches to local, it substitutes this value as `brief`
+   * before delegating to the local strategy. When unset, the wrapper
+   * passes the full `brief` regardless of provider (back-compat).
+   */
+  readonly localBrief?: string;
 }
 
 /**
