@@ -14,8 +14,10 @@ import {
   DEFAULT_AIDER_MODEL,
   DEFAULT_AIDER_OPENAI_API_BASE,
   DEFAULT_AIDER_OPENAI_API_KEY,
+  DEFAULT_OPENCODE_MODEL,
   buildAiderInvocation,
   buildClaudePrintInvocation,
+  buildOpencodeInvocation,
 } from "./llm-invocation.js";
 
 describe("llm-invocation / buildClaudePrintInvocation", () => {
@@ -157,6 +159,153 @@ describe("llm-invocation / buildAiderInvocation", () => {
     const inv = buildAiderInvocation({ brief });
     const messageIdx = inv.argv.indexOf("--message");
     expect(inv.argv[messageIdx + 1]).toBe(brief);
+  });
+});
+
+describe("llm-invocation / buildOpencodeInvocation — slice 1 of `support-opencode-lmstudio-mlx-qwen3-14b-stack`", () => {
+  it("returns command='opencode' by default", () => {
+    const inv = buildOpencodeInvocation({ brief: "h" });
+    expect(inv.command).toBe("opencode");
+  });
+
+  it("argv starts with `run --model <DEFAULT_OPENCODE_MODEL> --dangerously-skip-permissions`", () => {
+    const inv = buildOpencodeInvocation({ brief: "h" });
+    expect(inv.argv[0]).toBe("run");
+    expect(inv.argv[1]).toBe("--model");
+    expect(inv.argv[2]).toBe(DEFAULT_OPENCODE_MODEL);
+    expect(inv.argv[3]).toBe("--dangerously-skip-permissions");
+  });
+
+  it("brief is delivered as the final positional argv element (not stdin)", () => {
+    const brief = "ship the next iteration of foo";
+    const inv = buildOpencodeInvocation({ brief });
+    expect(inv.argv[inv.argv.length - 1]).toBe(brief);
+    expect(inv.stdin).toBeUndefined();
+  });
+
+  it("default model is `lmstudio/qwen3-14b` (the operator-pinned May 2026 default)", () => {
+    expect(DEFAULT_OPENCODE_MODEL).toBe("lmstudio/qwen3-14b");
+    const inv = buildOpencodeInvocation({ brief: "h" });
+    expect(inv.argv).toContain("lmstudio/qwen3-14b");
+  });
+
+  it("model override flows through to argv", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "h",
+      model: "lmstudio/qwen3.6-27b",
+    });
+    expect(inv.argv).toContain("lmstudio/qwen3.6-27b");
+    expect(inv.argv).not.toContain("lmstudio/qwen3-14b");
+  });
+
+  it("model override accepts non-lmstudio providers (any provider/model string)", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "h",
+      model: "anthropic/claude-opus-4-7",
+    });
+    expect(inv.argv).toContain("anthropic/claude-opus-4-7");
+  });
+
+  it("command override for fixture binary", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "h",
+      command: "/private/opencode",
+    });
+    expect(inv.command).toBe("/private/opencode");
+  });
+
+  it("extraArgs are inserted between fixed flags and the brief positional", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "task body",
+      extraArgs: ["--agent", "build", "--session", "abc123"],
+    });
+    const briefIdx = inv.argv.length - 1;
+    expect(inv.argv[briefIdx]).toBe("task body");
+    expect(inv.argv[briefIdx - 4]).toBe("--agent");
+    expect(inv.argv[briefIdx - 3]).toBe("build");
+    expect(inv.argv[briefIdx - 2]).toBe("--session");
+    expect(inv.argv[briefIdx - 1]).toBe("abc123");
+  });
+
+  it("cwd is set on the invocation when provided (per-worker worktree path)", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "h",
+      cwd: "/tmp/daemon-3/worktree",
+    });
+    expect(inv.cwd).toBe("/tmp/daemon-3/worktree");
+  });
+
+  it("cwd field is omitted when not provided (so spawn-strategy uses parent cwd)", () => {
+    const inv = buildOpencodeInvocation({ brief: "h" });
+    expect(inv.cwd).toBeUndefined();
+  });
+
+  it("argv is frozen (Strategy seam — wiring layer cannot mutate)", () => {
+    const inv = buildOpencodeInvocation({ brief: "h" });
+    expect(Object.isFrozen(inv.argv)).toBe(true);
+  });
+
+  it("argv-poison brief is delivered as a single argv element (chaos row 1)", () => {
+    // Adversarial brief that, if shell-evaluated, would change opencode's
+    // behavior (--continue resumes the prior session; --fork branches it).
+    const brief = "real task\n--continue\n--fork some-session-id";
+    const inv = buildOpencodeInvocation({ brief });
+    expect(inv.argv[inv.argv.length - 1]).toBe(brief);
+    // No --continue or --fork should appear as standalone argv elements.
+    const continueIdx = inv.argv.indexOf("--continue");
+    expect(continueIdx).toBe(-1);
+    const forkIdx = inv.argv.indexOf("--fork");
+    expect(forkIdx).toBe(-1);
+  });
+
+  it("preserves brief verbatim with whitespace, newlines, emoji, unicode (chaos row)", () => {
+    const brief = "task\n  brief\twith\nlots of   stuff and a 🚀 emoji";
+    const inv = buildOpencodeInvocation({ brief });
+    expect(inv.argv[inv.argv.length - 1]).toBe(brief);
+  });
+
+  it("empty brief is permitted (operator may want to attach to a session with no new prompt)", () => {
+    const inv = buildOpencodeInvocation({ brief: "" });
+    expect(inv.argv[inv.argv.length - 1]).toBe("");
+    // Empty brief is still the trailing argv element, not absent.
+    expect(inv.argv).toHaveLength(5);
+  });
+
+  it("very long brief is delivered intact (no truncation in the builder; spawn-strategy enforces OS argv limits)", () => {
+    const brief = "x".repeat(10_000);
+    const inv = buildOpencodeInvocation({ brief });
+    expect(inv.argv[inv.argv.length - 1]).toBe(brief);
+    expect((inv.argv[inv.argv.length - 1] ?? "").length).toBe(10_000);
+  });
+
+  it("dangerously-skip-permissions flag is always present (daemon runs unattended)", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "h",
+      extraArgs: ["--something-else"],
+    });
+    expect(inv.argv).toContain("--dangerously-skip-permissions");
+  });
+
+  it("stdin is undefined (brief on argv, not piped)", () => {
+    const inv = buildOpencodeInvocation({ brief: "h" });
+    expect(inv.stdin).toBeUndefined();
+  });
+
+  it("argv ordering is stable: run, --model, <id>, --dangerously-skip-permissions, [extras], <brief>", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "B",
+      model: "lmstudio/qwen3-14b",
+      extraArgs: ["--variant", "agent-mode"],
+    });
+    expect([...inv.argv]).toEqual([
+      "run",
+      "--model",
+      "lmstudio/qwen3-14b",
+      "--dangerously-skip-permissions",
+      "--variant",
+      "agent-mode",
+      "B",
+    ]);
   });
 });
 

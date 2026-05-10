@@ -514,12 +514,15 @@ export {
 export {
   type BuildAiderInvocationOpts,
   type BuildClaudePrintInvocationOpts,
+  type BuildOpencodeInvocationOpts,
   type LlmInvocation,
   DEFAULT_AIDER_MODEL,
   DEFAULT_AIDER_OPENAI_API_BASE,
   DEFAULT_AIDER_OPENAI_API_KEY,
+  DEFAULT_OPENCODE_MODEL,
   buildAiderInvocation,
   buildClaudePrintInvocation,
+  buildOpencodeInvocation,
 } from "./llm-invocation.js";
 
 // Slice 3 of `local-llm-fallback-on-budget-pause`: expose the wrapping
