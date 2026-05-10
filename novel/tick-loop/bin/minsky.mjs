@@ -15,6 +15,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 12 (operator 2026-05-08 — slice 11 added `stop-mlx-server`; the symmetric `minsky start-mlx-server` skips the planner+confirm pipeline when the operator just wants to relaunch the server post-stop / post-reboot) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 13 (operator 2026-05-08 — slice 10's detached `mlx_lm.server` writes to `.minsky/local-llm.log`; `minsky logs mlx-server` tails it through the same UX as `minsky logs <worker-id>`) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 14 (operator 2026-05-08 — slices 11/12/13 closed the start/stop/logs lifecycle; the read-only `minsky status mlx-server` reports running/unhealthy/stale/not-running in one line so scripts can chain on exit code without parsing prose) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 15 (operator 2026-05-08 — slices 11/12 are stop+start; the symmetric `minsky restart-mlx-server` composes them so the operator's "kick the server" path is one command instead of `minsky stop-mlx-server && minsky start-mlx-server`; bundles the start-mlx-server probe-skip optimization mirrored from slice 14's status path — saves ~2 s on every cold-start path) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -34,6 +35,7 @@
  *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
  *   minsky start-mlx-server   relaunch the detached mlx_lm.server (skip detect+plan+confirm)
  *   minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
+ *   minsky restart-mlx-server stop-then-start the detached mlx_lm.server (one command)
  *   minsky status mlx-server  one-line read-only summary; exit 0 if running, 1 otherwise
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
@@ -207,6 +209,14 @@ if (first === "--help" || first === "-h" || first === "help") {
   process.exit(runStopMlxServer());
 } else if (first === "start-mlx-server") {
   process.exit(await runStartMlxServer());
+} else if (first === "restart-mlx-server") {
+  // Slice 15: compose stop-mlx-server + start-mlx-server. The operator
+  // who sees a hung server (model-load wedged, port stuck on a zombie,
+  // OOM kill, …) used to type two commands; now one. Idempotent: a
+  // missing PID file makes the stop a no-op and the start dispatches
+  // fresh, which is the correct "make sure the server is running"
+  // semantics.
+  process.exit(await runRestartMlxServer());
 } else if (first === "status") {
   // Slice 14: `minsky status mlx-server` — read-only counterpart to
   // slices 11/12/13. One-line summary so scripts can chain
@@ -233,6 +243,7 @@ Usage:
   minsky bootstrap-local-llm  install + start the local-LLM stack (forces the prompt)
   minsky start-mlx-server   relaunch the detached mlx_lm.server (skips detect+plan+confirm)
   minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
+  minsky restart-mlx-server stop-then-start the detached mlx_lm.server (one command)
   minsky status mlx-server  one-line read-only status; exit 0 iff running
 
 Examples:
@@ -945,19 +956,62 @@ async function runStartMlxServer() {
   const pidAlive = parsedPid !== undefined && isPidLive(parsedPid);
   const probeUrlOverride = process.env["MINSKY_LOCAL_LLM_PROBE_URL"];
   const probeUrl = probeUrlOverride ?? "http://127.0.0.1:8080/v1/models";
-  const probe = buildServerProbe({
-    ...(probeUrlOverride !== undefined && { url: probeUrlOverride }),
-    timeoutMs: 2_000,
-  });
-  const serverState = await probe();
+  // Slice 15 optimization (mirrors slice 14's status path): skip the
+  // HTTP probe when the PID is dead or unparseable. `decideStartAction`
+  // returns `fresh-start` regardless of `serverReachable` whenever
+  // `pidPresent === false` or `parsedPid === undefined`, and
+  // `stale-pid-then-start` whenever `pidAlive === false`. So the probe
+  // only changes the outcome when `pidAlive === true`. Skipping it on
+  // the cold-start path saves ~2 s per `minsky start-mlx-server` /
+  // `minsky restart-mlx-server` invocation (the probe's timeoutMs).
+  let serverReachable = false;
+  if (pidAlive) {
+    const probe = buildServerProbe({
+      ...(probeUrlOverride !== undefined && { url: probeUrlOverride }),
+      timeoutMs: 2_000,
+    });
+    const serverState = await probe();
+    serverReachable = serverState.reachable;
+  }
   const action = decideStartAction({
     pidPresent,
     parsedPid,
     pidAlive,
-    serverReachable: serverState.reachable,
+    serverReachable,
     serverUrl: probeUrl,
   });
   return await dispatchStartAction(action, { pidPresent, parsedPid });
+}
+
+/**
+ * Slice 15: `minsky restart-mlx-server` — compose stop + start in one
+ * command. Mirrors the operator's "I want a fresh server now" path
+ * without requiring `minsky stop-mlx-server && minsky start-mlx-server`
+ * (the `&&` shortcuts on stop's exit-1 paths — invalid PID file —
+ * which would silently skip the start).
+ *
+ * Sequencing:
+ *   1. {@link runStopMlxServer} — graceful SIGTERM + PID cleanup.
+ *      A non-zero exit (kill failed / unparseable PID file) propagates
+ *      back without attempting the start; the operator should
+ *      investigate before re-spawning over a half-killed process.
+ *   2. {@link runStartMlxServer} — fresh detached spawn + readiness
+ *      poll. With the PID file just unlinked, `decideStartAction`
+ *      always returns `fresh-start`.
+ *
+ * Exit code: 0 iff both steps succeed; 1 iff either fails.
+ *
+ * @returns {Promise<number>}
+ */
+async function runRestartMlxServer() {
+  const stopExit = runStopMlxServer();
+  if (stopExit !== 0) {
+    process.stderr.write(
+      "minsky: stop-mlx-server failed — aborting restart (run `minsky stop-mlx-server` to investigate)\n",
+    );
+    return stopExit;
+  }
+  return await runStartMlxServer();
 }
 
 /**
