@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 26 (operator 2026-05-10 — round-trip elimination: server-first probe in `maybeBootstrapLocalLlm`'s dogfood fast-path skips the four `command -v` probes that feed plan generation when only `state.server.reachable` is consumed) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -105,6 +106,7 @@ if (!existsSync(NODE_MODULES_PATH)) {
 const {
   PATH_CONFIG_KEYS,
   buildProductionProbes,
+  buildServerProbe,
   checkGitConfigPaths,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
@@ -347,13 +349,21 @@ async function maybeBootstrapLocalLlm() {
     return await runBootstrapLocalLlm({ force: false });
   }
 
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
-  // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
-  // skip the install pipeline entirely.
-  if (state.server.reachable) {
+  // Slice 26 (skip-earlier gate): server-first probe. The full
+  // `detectLocalLlmStack(buildProductionProbes(...))` runs five
+  // child-process / fetch probes in parallel; on the dogfood
+  // fast-path (re-running `minsky` with a healthy local server) only
+  // `state.server.reachable` is consumed here — the other four
+  // (pipx/mlx-lm/aider/model) feed plan generation, which we won't
+  // run if the server is up. Probe the server alone first; fall back
+  // to the full detect+plan path inside `runBootstrapLocalLlm` only
+  // when the server is unreachable AND claude is unhealthy. Round-trip
+  // elimination per the optimization-discipline gate (≥4 saved
+  // `command -v` exec calls per idempotent invocation).
+  const serverState = await buildServerProbe({})();
+  if (serverState.reachable) {
     process.stderr.write(
-      `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
+      `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback\n`,
     );
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
