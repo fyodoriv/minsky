@@ -396,13 +396,18 @@ const aiderBin = process.env.MINSKY_LOCAL_LLM_AIDER_BIN ?? "aider";
 
 // Slice 5 of `claude-usage-aware-strategic-model-router` — wire the
 // pure picker into the bin so each iteration picks the highest-quality
-// claude model (Opus 4.7 / Sonnet 4.6 / Haiku 4.5) that fits remaining
-// usage, falling through to local on exhaustion. Opt-in for now while
-// the operator validates the floor calibration; flips to default-on
-// once slice 7's chaos invariants pass on a 24h live-fire.
-const strategicRouterEnabled =
-  (process.env.MINSKY_STRATEGIC_ROUTER ?? "").trim().toLowerCase() === "1" ||
-  (process.env.MINSKY_STRATEGIC_ROUTER ?? "").trim().toLowerCase() === "true";
+// claude model (Opus 4.7 / Sonnet 4.6) that fits remaining usage,
+// falling through to local on exhaustion. Operator 2026-05-10:
+// "ensure minsky launches by default with the best params eg that
+// router". Flipped to default-ON; opt-out is `MINSKY_STRATEGIC_ROUTER=0`
+// (or `false`). The picker is conservative (Opus when budget allows,
+// downgrade only when forced) — default-on is safe.
+const strategicRouterEnabled = (() => {
+  const raw = (process.env.MINSKY_STRATEGIC_ROUTER ?? "").trim().toLowerCase();
+  if (raw === "0" || raw === "false") return false;
+  // Default: enabled. Any unset / truthy value enables.
+  return true;
+})();
 const strategicPin = (process.env.MINSKY_STRATEGIC_PIN_MODEL ?? "").trim();
 // In-memory hysteresis state (slice 6 will persist to .minsky/state.json).
 /** @type {string | undefined} */

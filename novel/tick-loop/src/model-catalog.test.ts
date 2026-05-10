@@ -8,8 +8,13 @@ import { describe, expect, it } from "vitest";
 import { MODEL_CATALOG, type ModelCatalogEntry, validateModelCatalog } from "./model-catalog.js";
 
 describe("MODEL_CATALOG (slice 3 — recency-anchored May 2026)", () => {
-  it("ships at least 4 rows (Opus / Sonnet / Haiku / local)", () => {
-    expect(MODEL_CATALOG.length).toBeGreaterThanOrEqual(4);
+  it("ships at least 3 rows (Opus / Sonnet / local — Haiku skipped per operator 2026-05-10)", () => {
+    expect(MODEL_CATALOG.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("intentionally excludes claude-haiku-4-5 (local Qwen3-14B/27B beats Haiku on coding)", () => {
+    const haiku = MODEL_CATALOG.find((e) => e.id === "claude-haiku-4-5");
+    expect(haiku).toBeUndefined();
   });
 
   it("includes claude-opus-4-7 as tier-1", () => {
@@ -26,17 +31,10 @@ describe("MODEL_CATALOG (slice 3 — recency-anchored May 2026)", () => {
     expect(sonnet?.agent).toBe("claude");
   });
 
-  it("includes claude-haiku-4-5 as tier-3", () => {
-    const haiku = MODEL_CATALOG.find((e) => e.id === "claude-haiku-4-5");
-    expect(haiku).toBeDefined();
-    expect(haiku?.qualityTier).toBe(3);
-    expect(haiku?.agent).toBe("claude");
-  });
-
-  it("includes local as tier-4 with zero floors (always-available last resort)", () => {
+  it("includes local as tier-3 with zero floors (always-available last resort)", () => {
     const local = MODEL_CATALOG.find((e) => e.id === "local");
     expect(local).toBeDefined();
-    expect(local?.qualityTier).toBe(4);
+    expect(local?.qualityTier).toBe(3);
     expect(local?.agent).toBe("local");
     expect(local?.fivehourFloor).toBe(0);
     expect(local?.weeklyFloor).toBe(0);
@@ -69,13 +67,14 @@ describe("MODEL_CATALOG (slice 3 — recency-anchored May 2026)", () => {
     expect(local?.costPer1MtokOutput).toBe(0);
   });
 
-  it("Opus is more expensive than Sonnet which is more expensive than Haiku", () => {
+  it("Opus is more expensive than Sonnet which is more expensive than local (which is free)", () => {
     const opus = MODEL_CATALOG.find((e) => e.id === "claude-opus-4-7");
     const sonnet = MODEL_CATALOG.find((e) => e.id === "claude-sonnet-4-6");
-    const haiku = MODEL_CATALOG.find((e) => e.id === "claude-haiku-4-5");
-    if (!opus || !sonnet || !haiku) throw new Error("missing entry");
+    const local = MODEL_CATALOG.find((e) => e.id === "local");
+    if (!opus || !sonnet || !local) throw new Error("missing entry");
     expect(opus.costPer1MtokInput).toBeGreaterThan(sonnet.costPer1MtokInput);
-    expect(sonnet.costPer1MtokInput).toBeGreaterThan(haiku.costPer1MtokInput);
+    expect(sonnet.costPer1MtokInput).toBeGreaterThan(local.costPer1MtokInput);
+    expect(local.costPer1MtokInput).toBe(0);
   });
 
   it("every entry has a recency anchor (recordedAt ISO date)", () => {

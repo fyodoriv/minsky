@@ -51,18 +51,19 @@ describe("pickStrategicModel — tier selection (default catalog)", () => {
     expect(out.model).toBe("claude-sonnet-4-6");
   });
 
-  it("downgrades to claude-haiku-4-5 at 5h=0.29", () => {
+  it("downgrades to local at 5h=0.29 (skips Haiku — operator 2026-05-10 directive)", () => {
     const out = pickStrategicModel({
       remaining: mkRemaining({ fivehour: 0.29, weekly: 0.3, monthly: 0.3 }),
     });
-    expect(out.model).toBe("claude-haiku-4-5");
+    expect(out.model).toBe("local");
+    expect(out.agent).toBe("local");
   });
 
-  it("downgrades to claude-haiku-4-5 at 5h=0.10 (boundary)", () => {
+  it("downgrades to local at 5h=0.10 (Haiku absent from catalog)", () => {
     const out = pickStrategicModel({
       remaining: mkRemaining({ fivehour: 0.1, weekly: 0.1, monthly: 0.05 }),
     });
-    expect(out.model).toBe("claude-haiku-4-5");
+    expect(out.model).toBe("local");
   });
 
   it("downgrades to local at 5h=0.09", () => {
@@ -98,7 +99,7 @@ describe("pickStrategicModel — most-restrictive-window wins", () => {
     expect(out.model).toBe("claude-sonnet-4-6");
   });
 
-  it("returns lowest-tier when ALL windows below haiku floors", () => {
+  it("returns lowest-tier (local) when ALL windows below sonnet floors", () => {
     const out = pickStrategicModel({
       remaining: mkRemaining({ fivehour: 0.05, weekly: 0.05, monthly: 0 }),
     });
@@ -110,11 +111,20 @@ describe("pickStrategicModel — operator pin", () => {
   it("returns the pinned model regardless of remaining when pin is in catalog", () => {
     const out = pickStrategicModel({
       remaining: mkRemaining(),
-      operatorPin: "claude-haiku-4-5",
+      operatorPin: "claude-sonnet-4-6",
     });
-    expect(out.model).toBe("claude-haiku-4-5");
+    expect(out.model).toBe("claude-sonnet-4-6");
     expect(out.kind).toBe("operator-pin");
     expect(out.reason).toContain("MINSKY_STRATEGIC_PIN_MODEL");
+  });
+
+  it("operator-pin to claude-haiku-4-5 falls through (Haiku not in catalog) — picker returns best-fit instead", () => {
+    const out = pickStrategicModel({
+      remaining: mkRemaining(),
+      operatorPin: "claude-haiku-4-5",
+    });
+    expect(out.model).toBe("claude-opus-4-7");
+    expect(out.kind).toBe("strategic-router");
   });
 
   it("falls through to normal walk when pin is not in catalog", () => {

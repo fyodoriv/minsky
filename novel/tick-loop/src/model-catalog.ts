@@ -71,11 +71,22 @@ export interface ModelCatalogEntry {
  *   pricing). Tier 1; gates at 50% 5h-remaining, 30% weekly, 20% monthly.
  * - **Sonnet 4.6 (`claude-sonnet-4-6`)** — Anthropic's mid-tier.
  *   Input \$3 / output \$15 per Mtok. Tier 2; gates at 30% / 20% / 15%.
- * - **Haiku 4.5 (`claude-haiku-4-5`)** — Anthropic's cheap fast tier.
- *   Input \$1 / output \$5 per Mtok. Tier 3; gates at 10% / 10% / 5%.
  * - **local (`local`)** — operator's machine (aider+Qwen3-Coder or
  *   opencode+LM-Studio+Qwen3.6-27B). \$0 per Mtok (electricity).
- *   Tier 4; gates at 0% (always selectable as last-resort).
+ *   Tier 3; gates at 0% (always selectable as last-resort).
+ *
+ * **Why Haiku is intentionally absent (operator 2026-05-10):** local
+ * Qwen3.6-27B Dense (Terminal-Bench 2.0 = 59.3, Opus-parity per
+ * TokenMix May 2026 review; SWE-bench Verified 77.2 per Buildfast)
+ * AND Qwen3-14B (~64% SWE-bench Verified) BOTH outperform Claude
+ * Haiku 4.5 on agentic-coding benchmarks. Minsky's daemon ONLY does
+ * coding work — routing to Haiku when the budget can't afford
+ * Opus/Sonnet is strictly worse than routing to local. The picker
+ * therefore goes Opus → Sonnet → local, skipping Haiku entirely.
+ * Pivot threshold (rule #9): if a future Haiku release closes the
+ * coding-benchmark gap with local Qwen variants (≤2pp delta on
+ * SWE-bench Verified), re-add the row at qualityTier 3 between
+ * sonnet and local.
  *
  * Quarterly refresh process: `scripts/local-model-leaderboard.mjs --refresh`
  * (slice 1 of #daemon-local-model-self-tune) cross-checks this catalog
@@ -105,20 +116,9 @@ export const MODEL_CATALOG: readonly ModelCatalogEntry[] = Object.freeze([
     recordedAt: "2026-05-10",
   },
   {
-    id: "claude-haiku-4-5",
-    agent: "claude",
-    qualityTier: 3,
-    costPer1MtokInput: 1,
-    costPer1MtokOutput: 5,
-    fivehourFloor: 0.1,
-    weeklyFloor: 0.1,
-    monthlyFloor: 0.05,
-    recordedAt: "2026-05-10",
-  },
-  {
     id: "local",
     agent: "local",
-    qualityTier: 4,
+    qualityTier: 3,
     costPer1MtokInput: 0,
     costPer1MtokOutput: 0,
     fivehourFloor: 0,
