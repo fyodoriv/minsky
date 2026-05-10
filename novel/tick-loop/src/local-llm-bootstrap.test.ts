@@ -169,6 +169,45 @@ describe("planLocalLlmBootstrap — modelId option (slice 18: --model=<hf-id>)",
   });
 });
 
+describe("planLocalLlmBootstrap — port option (slice 19: --port=<n>)", () => {
+  it("start-mlx-server command threads the override port through --port argv", () => {
+    const plan = planLocalLlmBootstrap(serverStopped, { port: 9090 });
+    const start = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(start?.command).toEqual([
+      "mlx_lm.server",
+      "--model",
+      DEFAULT_LOCAL_LLM_MODEL,
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "9090",
+    ]);
+  });
+
+  it("composes port + modelId in the start step", () => {
+    const plan = planLocalLlmBootstrap(serverStopped, {
+      modelId: "mlx-community/Qwen3-4B-Instruct-4bit",
+      port: 1234,
+    });
+    const start = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(start?.command).toEqual([
+      "mlx_lm.server",
+      "--model",
+      "mlx-community/Qwen3-4B-Instruct-4bit",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "1234",
+    ]);
+  });
+
+  it("falls back to 8080 when port is omitted", () => {
+    const plan = planLocalLlmBootstrap(serverStopped);
+    const start = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(start?.command.slice(-2)).toEqual(["--port", "8080"]);
+  });
+});
+
 describe("planLocalLlmBootstrap — dependency order", () => {
   it("always schedules pipx before mlx-lm + aider when pipx is absent", () => {
     const plan = planLocalLlmBootstrap({

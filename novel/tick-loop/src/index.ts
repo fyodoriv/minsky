@@ -736,6 +736,7 @@ export {
   type ComponentState,
   type DetectProbes,
   DEFAULT_LOCAL_LLM_MODEL,
+  DEFAULT_LOCAL_LLM_PORT,
   DEFAULT_LOCAL_LLM_PROBE_URL,
   DEFAULT_MODEL_DOWNLOAD_MB,
   type InstallStep,

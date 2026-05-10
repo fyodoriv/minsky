@@ -12,6 +12,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm`/`-y`/`--yes` flag for non-interactive install opt-in) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 18 (operator 2026-05-08 — `--model=<hf-id>` flag overrides pinned default for download + start + cache probe) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 19 (operator 2026-05-08 — `--port=<n>` flag overrides 8080 for start-mlx-server argv + bootstrap-time probe URL) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -30,6 +31,7 @@
  *   minsky bootstrap-local-llm --dry-run    print the install plan and exit 0 (read-only; non-TTY safe)
  *   minsky bootstrap-local-llm --no-confirm install without the [Y/n] prompt (alias: -y, --yes)
  *   minsky bootstrap-local-llm --model=<hf-id> override the pinned default model for this run
+ *   minsky bootstrap-local-llm --port=<n>      override the default mlx-lm.server port (8080)
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -151,7 +153,7 @@ if (first === "--help" || first === "-h" || first === "help") {
   // block. Anchors the task block's Risk mitigation.
   const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
   if (subArgs.dryRun) {
-    await runBootstrapLocalLlmDryRun({ modelId: subArgs.modelId });
+    await runBootstrapLocalLlmDryRun({ modelId: subArgs.modelId, port: subArgs.port });
     process.exit(0);
   }
   // Slice 17: `--no-confirm` / `-y` / `--yes` skips the interactive
@@ -161,10 +163,13 @@ if (first === "--help" || first === "-h" || first === "help") {
   // the only path read by the auto-pre-flight (no env mutation).
   // Slice 18: `--model=<hf-id>` overrides the pinned default model id
   // for the download + start-server steps + the model-cache probe.
+  // Slice 19: `--port=<n>` overrides the default 8080 for both the
+  // start-mlx-server argv and the bootstrap-time probe URL.
   const result = await runBootstrapLocalLlm({
     force: true,
     autoConfirm: subArgs.noConfirm,
     modelId: subArgs.modelId,
+    port: subArgs.port,
   });
   // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
   // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
@@ -198,6 +203,7 @@ Examples:
   minsky bootstrap-local-llm --dry-run    # preview the local-LLM install plan and exit (read-only)
   minsky bootstrap-local-llm --no-confirm # install without the [Y/n] prompt (alias: -y, --yes)
   minsky bootstrap-local-llm --model=mlx-community/Qwen3-4B-Instruct-4bit  # override pinned default model
+  minsky bootstrap-local-llm --port=9090  # override default mlx-lm.server port (also set MINSKY_LOCAL_LLM_PROBE_URL for the daemon)
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -451,7 +457,7 @@ function readPersistedHardLimit() {
  * not the default's) AND the planner (so the install step downloads +
  * starts the operator's choice).
  *
- * @param {{ modelId?: string }} [opts]
+ * @param {{ modelId?: string, port?: number }} [opts]
  * @returns {Promise<{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, planOpts: import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions, pythonPath: string | undefined }>}
  */
 async function detectForBootstrap(opts = {}) {
@@ -461,12 +467,17 @@ async function detectForBootstrap(opts = {}) {
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
   if (opts.modelId !== undefined) probeOpts.modelId = opts.modelId;
+  // Slice 19: `--port=<n>` reshapes the bootstrap-time probe URL so a
+  // server already running on the operator's chosen port is detected
+  // (idempotent fast path) instead of triggering a redundant start step.
+  if (opts.port !== undefined) probeOpts.port = opts.port;
   const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
   const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
   if (opts.modelId !== undefined) planOpts.modelId = opts.modelId;
+  if (opts.port !== undefined) planOpts.port = opts.port;
   return { state, archState, planOpts, pythonPath };
 }
 
@@ -503,15 +514,15 @@ function emitNonTtyRefuseMessage() {
  * `minsky doctor` (which mixes substrate + git rows in alongside the
  * plan); this path is the focused plan-only preview.
  */
-async function runBootstrapLocalLlmDryRun({ modelId } = {}) {
-  const { state, planOpts } = await detectForBootstrap({ modelId });
+async function runBootstrapLocalLlmDryRun({ modelId, port } = {}) {
+  const { state, planOpts } = await detectForBootstrap({ modelId, port });
   const plan = planLocalLlmBootstrap(state, planOpts);
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
-async function runBootstrapLocalLlm({ force, autoConfirm = false, modelId } = {}) {
-  const { state, planOpts } = await detectForBootstrap({ modelId });
+async function runBootstrapLocalLlm({ force, autoConfirm = false, modelId, port } = {}) {
+  const { state, planOpts } = await detectForBootstrap({ modelId, port });
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
