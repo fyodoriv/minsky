@@ -168,11 +168,23 @@ describe("llm-invocation / buildOpencodeInvocation — slice 1 of `support-openc
     expect(inv.command).toBe("opencode");
   });
 
-  it("argv starts with `run --model <DEFAULT_OPENCODE_MODEL> --dangerously-skip-permissions`", () => {
+  it("argv starts with `run --dangerously-skip-permissions` when no model pin (lets opencode read its config)", () => {
     const inv = buildOpencodeInvocation({ brief: "h" });
     expect(inv.argv[0]).toBe("run");
+    // No --model when opts.model is undefined — opencode resolves from
+    // <repo>/opencode.json → ~/.config/opencode/opencode.json → defaults.
+    expect(inv.argv).not.toContain("--model");
+    expect(inv.argv[1]).toBe("--dangerously-skip-permissions");
+  });
+
+  it("argv includes `--model <id>` when opts.model is set", () => {
+    const inv = buildOpencodeInvocation({
+      brief: "h",
+      model: "lmstudio/qwen/qwen3-14b",
+    });
+    expect(inv.argv[0]).toBe("run");
     expect(inv.argv[1]).toBe("--model");
-    expect(inv.argv[2]).toBe(DEFAULT_OPENCODE_MODEL);
+    expect(inv.argv[2]).toBe("lmstudio/qwen/qwen3-14b");
     expect(inv.argv[3]).toBe("--dangerously-skip-permissions");
   });
 
@@ -183,10 +195,8 @@ describe("llm-invocation / buildOpencodeInvocation — slice 1 of `support-openc
     expect(inv.stdin).toBeUndefined();
   });
 
-  it("default model is `lmstudio/qwen3-14b` (the operator-pinned May 2026 default)", () => {
+  it("DEFAULT_OPENCODE_MODEL is the May 2026 reference model (used by docs + tests; builder no longer auto-applies it)", () => {
     expect(DEFAULT_OPENCODE_MODEL).toBe("lmstudio/qwen3-14b");
-    const inv = buildOpencodeInvocation({ brief: "h" });
-    expect(inv.argv).toContain("lmstudio/qwen3-14b");
   });
 
   it("model override flows through to argv", () => {
@@ -268,7 +278,23 @@ describe("llm-invocation / buildOpencodeInvocation — slice 1 of `support-openc
     const inv = buildOpencodeInvocation({ brief: "" });
     expect(inv.argv[inv.argv.length - 1]).toBe("");
     // Empty brief is still the trailing argv element, not absent.
-    expect(inv.argv).toHaveLength(5);
+    // With the 2026-05-10 update (no auto-model), the argv shape is
+    // [run, --dangerously-skip-permissions, <brief>] = 3 elements when
+    // no model is pinned.
+    expect(inv.argv).toHaveLength(3);
+  });
+
+  it("operator-machine-config auto-pickup: with no model pin, opencode reads its own opencode.json (no --model override)", () => {
+    // This test pins the semantic: minsky NEVER passes --model unless
+    // explicitly asked. Operators put their preferred model in
+    // <repo>/opencode.json or ~/.config/opencode/opencode.json and edit
+    // it at will — the next iteration's `opencode run` picks up the
+    // change automatically with no Minsky restart.
+    const inv = buildOpencodeInvocation({ brief: "task" });
+    expect(inv.argv).not.toContain("--model");
+    expect(inv.argv).not.toContain("lmstudio/qwen3-14b");
+    // Argv length proves no --model + <id> pair injected.
+    expect(inv.argv).toEqual(["run", "--dangerously-skip-permissions", "task"]);
   });
 
   it("very long brief is delivered intact (no truncation in the builder; spawn-strategy enforces OS argv limits)", () => {
