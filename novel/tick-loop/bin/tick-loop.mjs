@@ -79,6 +79,7 @@ import {
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
   analyzeConfig,
+  appendUsageHistory,
   buildAiderInvocation,
   buildChildWorkerArgs,
   buildClaudePrintInvocation,
@@ -101,6 +102,7 @@ import {
   parseSpawnAdditionalWorkers,
   parseWorkerArgs,
   pickStrategicModel,
+  predictExhaustionMs,
   runDaemon,
   runParallelSweeper,
   sandboxModeStartupHint,
@@ -289,10 +291,30 @@ const tokenMonitor = dryRun
       configDir: resolve(homedir(), ".claude"),
       ...(planCapOverride === undefined ? {} : { cap: planCapOverride }),
     });
-const realGuard = new BudgetGuard(tokenMonitor, () => {
-  /* push-decision side effects (flag-file, OTEL) live in a follow-up;
-     the daemon only branches on `decide()`'s return value. */
-});
+// Slice 6 of `claude-usage-aware-strategic-model-router` — configurable
+// poll interval. Operator's note: "minsky should be aware that claude
+// can be used outside of it, so it should do checks often of usage."
+// Default 30000ms (30s) — tighter than the BudgetGuard's stock 60s
+// default — so the strategic picker sees fresh remaining-% within
+// half a tick of any external claude usage. Operator can opt for
+// 5000ms (5s) on hot-iteration days or 300000ms (5min) on idle ones.
+// Invalid values fall back to the 30s default.
+const usageRefreshIntervalMs = (() => {
+  const raw = process.env.MINSKY_USAGE_REFRESH_INTERVAL_MS;
+  if (raw === undefined) return 30_000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1000) return 30_000;
+  return parsed;
+})();
+const realGuard = new BudgetGuard(
+  tokenMonitor,
+  () => {
+    /* push-decision side effects (flag-file, OTEL) live in a follow-up;
+       the daemon only branches on `decide()`'s return value. */
+  },
+  undefined,
+  usageRefreshIntervalMs,
+);
 
 // Sub-task 3/3: production default is `ProcessSpawnStrategy` (real
 // `claude --print` headless subprocess — brief on stdin, response on stdout
@@ -409,9 +431,15 @@ const strategicRouterEnabled = (() => {
   return true;
 })();
 const strategicPin = (process.env.MINSKY_STRATEGIC_PIN_MODEL ?? "").trim();
-// In-memory hysteresis state (slice 6 will persist to .minsky/state.json).
+// In-memory hysteresis state.
 /** @type {string | undefined} */
 let strategicPreviousPickId;
+// Slice 6: in-memory ring buffer of recent (snapshot, pick) tuples.
+// Used by the linear-regression exhaustion predictor; persists to
+// `.minsky/state.json::usage_history` so trajectory survives daemon
+// restarts.
+/** @type {readonly import("../dist/index.js").UsageHistoryEntry[]} */
+let usageHistory = [];
 // `daemon-local-ratio-knob`: soft running-fraction target for the share
 // of iterations that route to local (vs claude) when both providers are
 // usable. Parses `MINSKY_LOCAL_RATIO=0.95` (≈ 5 % claude / 95 % local);
@@ -531,8 +559,21 @@ function pickAndLogStrategicModel() {
     ...(strategicPin.length > 0 ? { operatorPin: strategicPin } : {}),
   });
   strategicPreviousPickId = pick.model;
+  // Slice 6: append to ring-buffer trajectory + emit predicted exhaustion
+  // ms per window. Predictor returns `undefined` until ≥2 entries.
+  usageHistory = appendUsageHistory({
+    history: usageHistory,
+    entry: {
+      observedAt: remaining.observedAt,
+      fivehour: remaining.fivehour,
+      weekly: remaining.weekly,
+      monthly: remaining.monthly,
+      pickedModel: pick.model,
+    },
+  });
+  const exhaustion = predictExhaustionMs(usageHistory);
   process.stdout.write(
-    `[span] tick-loop.strategic-pick {"model":"${pick.model}","agent":"${pick.agent}","kind":"${pick.kind}","reason":"${pick.reason.replace(/"/g, '\\"').slice(0, 200)}","fivehour":${remaining.fivehour.toFixed(3)},"weekly":${remaining.weekly.toFixed(3)},"monthly":${remaining.monthly.toFixed(3)}}\n`,
+    `[span] tick-loop.strategic-pick {"model":"${pick.model}","agent":"${pick.agent}","kind":"${pick.kind}","reason":"${pick.reason.replace(/"/g, '\\"').slice(0, 200)}","fivehour":${remaining.fivehour.toFixed(3)},"weekly":${remaining.weekly.toFixed(3)},"monthly":${remaining.monthly.toFixed(3)},"history_size":${usageHistory.length},"exhaustion_ms_5h":${exhaustion.fivehour ?? "null"},"exhaustion_ms_weekly":${exhaustion.weekly ?? "null"},"exhaustion_ms_monthly":${exhaustion.monthly ?? "null"}}\n`,
   );
   // Only return a model id when the pick targets claude — the local
   // path goes through buildLocalStrategy and doesn't take --model from
