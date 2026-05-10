@@ -184,6 +184,12 @@ export class MaciekTokenMonitor implements TokenMonitor {
         secondsUntilWindowReset: FIVE_HOURS_MS / 1000,
         weeklyHeadroomFraction: 0,
         observedAt: now.toISOString(),
+        // Slice 1 of `claude-usage-aware-strategic-model-router`: cold-start
+        // branch — assume monthly headroom full; slice 6 will track real
+        // cumulative monthly spend from the JSONL.
+        monthlyHeadroomFraction: 1.0,
+        secondsUntilWeekReset: secondsUntilNextMondayUtc(now),
+        secondsUntilMonthReset: secondsUntilNextMonthStartUtc(now),
       };
     }
 
@@ -196,6 +202,14 @@ export class MaciekTokenMonitor implements TokenMonitor {
       secondsUntilWindowReset: secondsUntilReset,
       weeklyHeadroomFraction: 0,
       observedAt: now.toISOString(),
+      // Slice 1 of `claude-usage-aware-strategic-model-router`: monthly
+      // tracking not yet ported from Maciek's P90 predictor; default to
+      // "full headroom" so the strategic picker doesn't false-positive
+      // on a missing data point. Slice 6 of that task will add cumulative
+      // monthly parsing.
+      monthlyHeadroomFraction: 1.0,
+      secondsUntilWeekReset: secondsUntilNextMondayUtc(now),
+      secondsUntilMonthReset: secondsUntilNextMonthStartUtc(now),
     };
   }
 }
@@ -424,4 +438,35 @@ function toNonNegInt(v: unknown): number {
  */
 function stringOrEmpty(v: unknown): string {
   return typeof v === "string" ? v : "";
+}
+
+/**
+ * Seconds until next Monday 00:00 UTC, computed from `now`.
+ * Slice 1 of `claude-usage-aware-strategic-model-router` — weekly
+ * window boundary for the strategic picker's per-window remaining
+ * fraction. Pure function (no clock, no env).
+ *
+ * @otel-exempt pure arithmetic helper
+ */
+function secondsUntilNextMondayUtc(now: Date): number {
+  const d = new Date(now.getTime());
+  d.setUTCHours(0, 0, 0, 0);
+  // Days until next Monday: 1=Mon, ..., 0=Sun. (8 - day) % 7 → 0 if Mon, else 1..6.
+  const day = d.getUTCDay();
+  const daysAhead = day === 1 ? 7 : (8 - day) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + daysAhead);
+  return Math.max(0, Math.floor((d.getTime() - now.getTime()) / 1000));
+}
+
+/**
+ * Seconds until next month start (1st-of-month 00:00 UTC). Slice 1 of
+ * `claude-usage-aware-strategic-model-router`. Operators on a custom
+ * billing cycle can override via `MINSKY_BILLING_CYCLE_DAY` env at the
+ * wiring layer (not here — adapter stays calendar-aligned).
+ *
+ * @otel-exempt pure arithmetic helper
+ */
+function secondsUntilNextMonthStartUtc(now: Date): number {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+  return Math.max(0, Math.floor((d.getTime() - now.getTime()) / 1000));
 }
