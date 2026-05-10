@@ -45,6 +45,12 @@ desktop.ini
 # Minsky setup.sh local state — reference template lives at distribution/state.example.json
 .minsky/
 
+# Operator's per-machine opencode config (lives in repo for convenience but
+# never committed — operator manages it through their own workflow; minsky's
+# resolveLocalAgentConfig reads it as one of the machine-state inputs).
+opencode.json
+opencode.notes.md
+
 # Claude Code local
 .claude/local/
 .claude/projects/*
