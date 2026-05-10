@@ -2278,7 +2278,7 @@ describe("buildLocalBrief — `daemon-aider-brief-shrinker`", () => {
   - **Surfaced-by**: operator 2026-05-10.
 `;
 
-  it("includes the task id, tagline, hypothesis, details, files", () => {
+  it("includes the task id, tagline, hypothesis, details", () => {
     const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
     expect(brief).toContain("# Task: `real-task`");
     expect(brief).toContain("load-bearing tagline for the slim brief");
@@ -2286,8 +2286,18 @@ describe("buildLocalBrief — `daemon-aider-brief-shrinker`", () => {
     expect(brief).toContain("ship the smallest meaningful change");
     expect(brief).toContain("## Details");
     expect(brief).toContain("edit foo.ts to add bar()");
-    expect(brief).toContain("## Files");
-    expect(brief).toContain("foo.ts");
+  });
+
+  // 2026-05-09 multi-worker live-fire: aider's --yes flag auto-adds
+  // every path it sees, and task blocks routinely list 8-12 files in
+  // their **Files**: cell. Worker contexts exploded past 50k tokens
+  // and crashed mlx_lm.server. The Hypothesis + Details cells still
+  // surface 1-3 file paths inline, which is the right working set
+  // for a single iteration.
+  it("intentionally omits the Files cell (aider auto-add explosion mitigation)", () => {
+    const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
+    expect(brief).not.toContain("## Files");
+    expect(brief).not.toContain("foo.test.ts");
   });
 
   it("instructs aider to commit locally (supervisor opens the PR)", () => {
@@ -2317,7 +2327,7 @@ describe("buildLocalBrief — `daemon-aider-brief-shrinker`", () => {
     expect(Buffer.byteLength(brief, "utf8")).toBeLessThanOrEqual(2048);
   });
 
-  it("stays ≤2 KB even when the task block has very long Hypothesis/Details/Files cells", () => {
+  it("stays ≤2 KB even when the task block has very long Hypothesis/Details cells", () => {
     const big = `# Tasks
 
 ## P0
