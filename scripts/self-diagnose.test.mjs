@@ -23,6 +23,7 @@ import {
   formatEtime,
   gitConfigParseableInvariant,
   mapGhPrListToCiSnapshots,
+  modelCatalogInvariantsHoldInvariant,
   parseEtime,
   parseIterationLogLine,
   runInvariants,
@@ -1048,5 +1049,38 @@ describe("findingsToTasksMd", () => {
     expect(block).toContain("**Measurement**:");
     expect(block).toContain("**Pivot**:");
     expect(block).toContain("**Tags**: self-detected, token-monitor-not-all-pegged");
+  });
+});
+
+describe("modelCatalogInvariantsHoldInvariant — slice 7 of `claude-usage-aware-strategic-model-router`", () => {
+  it("passes when validate() returns ok", async () => {
+    const validate = () => ({ ok: true, errors: [] });
+    const result = await modelCatalogInvariantsHoldInvariant({ validate })();
+    expect(result.ok).toBe(true);
+    expect(result.id).toBe("model-catalog-invariants-hold");
+  });
+
+  it("fires with the validation errors when validate() returns ok=false", async () => {
+    const validate = () => ({
+      ok: false,
+      errors: ["entry 2 (haiku): qualityTier 3 > prev tier 2"],
+    });
+    const result = await modelCatalogInvariantsHoldInvariant({ validate })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("model-catalog-invariants-hold");
+    expect(result.evidence).toContain("MODEL_CATALOG fails validation");
+    expect(result.evidence).toContain("qualityTier 3 > prev tier 2");
+    expect(result.suggestedFix).toContain("model-catalog.ts");
+  });
+
+  it("joins multiple validation errors with semicolons", async () => {
+    const validate = () => ({
+      ok: false,
+      errors: ["error A", "error B", "error C"],
+    });
+    const result = await modelCatalogInvariantsHoldInvariant({ validate })();
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("error A; error B; error C");
   });
 });

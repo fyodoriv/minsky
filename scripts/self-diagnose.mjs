@@ -31,6 +31,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { MODEL_CATALOG, validateModelCatalog } from "@minsky/tick-loop";
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
 
 import {
@@ -1077,6 +1078,45 @@ export function parseIterationLogLine(line) {
 }
 
 /**
+ * Slice 7 of `claude-usage-aware-strategic-model-router` — supervisor
+ * invariant: every row in the strategic-router's MODEL_CATALOG must
+ * pass `validateModelCatalog`'s shape + monotone-floor checks. Catches
+ * editor mistakes (a slice 5 PR that breaks the monotone-descending
+ * floors invariant would otherwise show up only when an iteration
+ * routes incorrectly; this fires at supervisor boot).
+ *
+ * Strategy seam: `validate` is injected so tests can drive the
+ * decision function with synthetic catalogs; production wiring
+ * passes `validateModelCatalog(MODEL_CATALOG)`.
+ *
+ * @typedef {object} ModelCatalogInvariantOpts
+ * @property {() => { readonly ok: boolean; readonly errors: readonly string[] }} validate
+ *
+ * @param {ModelCatalogInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function modelCatalogInvariantsHoldInvariant(opts) {
+  const { validate } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const result = validate();
+    if (result.ok) return { id: "model-catalog-invariants-hold", ok: true };
+    return {
+      id: "model-catalog-invariants-hold",
+      ok: false,
+      evidence: `MODEL_CATALOG fails validation: ${result.errors.join("; ")}`,
+      suggestedTaskTitle:
+        "MODEL_CATALOG broken — strategic-router will mis-route iterations until fixed",
+      suggestedFix:
+        "Restore monotone-descending floors in `novel/tick-loop/src/model-catalog.ts`. Run `pnpm vitest run novel/tick-loop/src/model-catalog.test.ts` to verify.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "model-catalog-invariants-hold";
+  return fn;
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -1287,6 +1327,9 @@ export function defaultInvariants() {
     gitConfigParseableInvariant({ probeGitStatus, scanGitConfigForConflicts }),
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
     daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
+    modelCatalogInvariantsHoldInvariant({
+      validate: () => validateModelCatalog(MODEL_CATALOG),
+    }),
   ];
 }
 
