@@ -12,6 +12,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 23 (operator 2026-05-10 — round-trip elimination: parallelize `runDoctor`'s independent probes) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 24 (operator 2026-05-10 — skip-earlier gate: honor `MINSKY_LLM_PROVIDER=claude-only` in the bootstrap pre-flight, mirroring slice 5's local-preferred fix) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 25 (operator 2026-05-10 — discoverability surface: wire `--no-confirm`/`-y`/`--yes` from the parser into runBootstrapLocalLlm so scripts skip the [Y/n] without needing MINSKY_NON_INTERACTIVE=1) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -28,6 +29,7 @@
  *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
  *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
  *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
+ *   minsky bootstrap-local-llm --no-confirm  skip the [Y/n] prompt (aliases: --yes, -y)
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -152,7 +154,11 @@ if (first === "--help" || first === "-h" || first === "help") {
     await runBootstrapLocalLlmDryRun();
     process.exit(0);
   }
-  const result = await runBootstrapLocalLlm({ force: true });
+  // Slice 25: `--no-confirm`/`-y`/`--yes` is the CLI-flag form of
+  // `MINSKY_NON_INTERACTIVE=1`. The flag does NOT bypass the slice-7
+  // H2 TTY refuse for sudo-bearing steps — it just skips the [Y/n]
+  // when the plan is safe to auto-run.
+  const result = await runBootstrapLocalLlm({ force: true, autoConfirm: subArgs.noConfirm });
   // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
   // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
   // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
@@ -183,6 +189,7 @@ Examples:
   minsky logs                     # follow worker 0's log live
   minsky stop 1                   # stop worker 1
   minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
+  minsky bootstrap-local-llm --no-confirm  # install plan without [Y/n] prompt (alias: -y, --yes)
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -489,15 +496,19 @@ async function runBootstrapLocalLlmDryRun() {
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
-async function runBootstrapLocalLlm({ force }) {
+async function runBootstrapLocalLlm({ force, autoConfirm = false }) {
   const { state, planOpts } = await detectForBootstrap();
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
+  // Slice 25: `autoConfirm` (from `--no-confirm`/`-y`/`--yes`) folds
+  // into the same isInteractive predicate as the env-hatch path. The
+  // TTY-refuse for sudo-bearing steps below stays unchanged — a CLI
+  // flag can't synthesize a password prompt.
   const isInteractive =
-    process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
+    process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1" && !autoConfirm;
   // Slice 7 H2: if the plan requires a TTY (install-arm-homebrew's
   // sudo needs stdin inheritance) AND we're non-TTY, refuse with
   // clear recovery instructions instead of hanging silently at sudo.
