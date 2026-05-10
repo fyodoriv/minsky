@@ -14,6 +14,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 11 (operator 2026-05-08 — slice 10 wrote the PID file; `minsky stop-mlx-server` closes the lifecycle so operators can graceful-stop the daemon without `kill $(cat …) && rm …`) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 12 (operator 2026-05-08 — slice 11 added `stop-mlx-server`; the symmetric `minsky start-mlx-server` skips the planner+confirm pipeline when the operator just wants to relaunch the server post-stop / post-reboot) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 13 (operator 2026-05-08 — slice 10's detached `mlx_lm.server` writes to `.minsky/local-llm.log`; `minsky logs mlx-server` tails it through the same UX as `minsky logs <worker-id>`) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 14 (operator 2026-05-08 — slices 11/12/13 closed the start/stop/logs lifecycle; the read-only `minsky status mlx-server` reports running/unhealthy/stale/not-running in one line so scripts can chain on exit code without parsing prose) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -33,6 +34,7 @@
  *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
  *   minsky start-mlx-server   relaunch the detached mlx_lm.server (skip detect+plan+confirm)
  *   minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
+ *   minsky status mlx-server  one-line read-only summary; exit 0 if running, 1 otherwise
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -78,6 +80,27 @@ const TICK_LOOP_BIN = resolve(PKG_ROOT, "bin", "tick-loop.mjs");
 
 const MINSKY_HOME = process.env["MINSKY_HOME"] ?? resolve(PKG_ROOT, "..", "..");
 const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
+
+/**
+ * Path of the mlx-lm.server PID file. Slice 10 — written by the
+ * detached daemon spawn and consulted by future `minsky` invocations
+ * for liveness detection. Lives under MINSKY_HOME so it follows
+ * whichever repo the operator is running against.
+ *
+ * Hoisted to the file's prologue so the slice 12 / slice 14 dispatchers
+ * (`start-mlx-server`, `status mlx-server`) can read it from inside their
+ * function bodies — `const` is in the temporal dead zone until execution
+ * reaches the declaration site, and the dispatch block runs first.
+ */
+const LOCAL_LLM_PID_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
+
+/**
+ * Path of the mlx-lm.server background log — the detached daemon's
+ * stdout/stderr is redirected here. Same hoisting reason as
+ * {@link LOCAL_LLM_PID_PATH}: slice 13's `logs mlx-server` reads it
+ * from a function called by the top-of-file dispatch block.
+ */
+const LOCAL_LLM_LOG_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.log");
 
 // Slice 8 (`minsky-cli-fresh-clone-bootstrap`): pre-flight check that
 // the dist build artifacts exist BEFORE we dynamic-import them.
@@ -145,6 +168,7 @@ const {
   renderConfirmSummary,
   renderDoctorSubstrateRows,
   stopLocalLlmServer,
+  summarizeMlxServerStatus,
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
@@ -183,6 +207,12 @@ if (first === "--help" || first === "-h" || first === "help") {
   process.exit(runStopMlxServer());
 } else if (first === "start-mlx-server") {
   process.exit(await runStartMlxServer());
+} else if (first === "status") {
+  // Slice 14: `minsky status mlx-server` — read-only counterpart to
+  // slices 11/12/13. One-line summary so scripts can chain
+  // `minsky status mlx-server && do-x`. Heavyweight `minsky doctor`
+  // remains the multi-row diagnostic.
+  process.exit(await runStatus(argv.slice(1)));
 } else if (first === "start") {
   // Back-compat: keep `start` as an alias of the no-subcommand form. Any
   // further args are forwarded to bin/tick-loop.mjs at spawn time.
@@ -203,6 +233,7 @@ Usage:
   minsky bootstrap-local-llm  install + start the local-LLM stack (forces the prompt)
   minsky start-mlx-server   relaunch the detached mlx_lm.server (skips detect+plan+confirm)
   minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
+  minsky status mlx-server  one-line read-only status; exit 0 iff running
 
 Examples:
   minsky                          # start-or-attach worker 0
@@ -833,21 +864,6 @@ function shellQuote(s) {
 }
 
 /**
- * Path of the mlx-lm.server PID file. Slice 10 — written by
- * {@link spawnAdapter} on daemonMode=true and consulted by future
- * `minsky` invocations for liveness detection. Lives under MINSKY_HOME
- * so it follows whichever repo the operator is running against.
- */
-const LOCAL_LLM_PID_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
-
-/**
- * Path of the mlx-lm.server background log. The detached daemon's
- * stdout/stderr is redirected here so the operator can `tail -f` it
- * post-bootstrap if the server crashes mid-iteration.
- */
-const LOCAL_LLM_LOG_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.log");
-
-/**
  * Slice 11: `minsky stop-mlx-server` — SIGTERM the detached
  * `mlx_lm.server`, unlink the PID file. Wraps the pure
  * {@link stopLocalLlmServer} with `node:fs` + `process.kill` adapters.
@@ -983,6 +999,120 @@ async function dispatchStartAction(action, ctx) {
     safeUnlink(LOCAL_LLM_PID_PATH);
   }
   return await dispatchFreshServerStart();
+}
+
+/**
+ * Slice 14 router: `minsky status <target>`. Today the only target is
+ * `mlx-server` (alias `mlx`); future slices may add `claude` or
+ * `worker`. Unknown / missing target → usage line + exit 1 (avoid a
+ * silent default that would surprise scripts).
+ *
+ * @param {readonly string[]} args
+ * @returns {Promise<number>}
+ */
+async function runStatus(args) {
+  const target = args[0];
+  if (target === "mlx-server" || target === "mlx") {
+    return await runStatusMlxServer();
+  }
+  process.stderr.write(
+    "minsky: usage: `minsky status mlx-server` (no other targets supported yet)\n",
+  );
+  return 1;
+}
+
+/**
+ * Slice 14: `minsky status mlx-server` — read-only one-line status of
+ * the detached `mlx_lm.server`. Same probe sequence as slice 12's
+ * `start-mlx-server` (PID file + liveness + `GET /v1/models`) but
+ * routes the result through {@link summarizeMlxServerStatus} for a
+ * print-and-exit-code-only path.
+ *
+ * Exit codes:
+ *   - 0 — running (operator can dispatch work to the server)
+ *   - 1 — anything else (not-running / stale / unhealthy / invalid PID)
+ *
+ * Most monitoring scripts only need 0/non-zero. Operators who want the
+ * fine-grained state read the printed line.
+ *
+ * @returns {Promise<number>}
+ */
+async function runStatusMlxServer() {
+  const pidPresent = existsSync(LOCAL_LLM_PID_PATH);
+  const parsedPid = pidPresent ? parsePidFromFile(LOCAL_LLM_PID_PATH) : undefined;
+  const pidAlive = parsedPid !== undefined && isPidLive(parsedPid);
+  const probeUrlOverride = process.env["MINSKY_LOCAL_LLM_PROBE_URL"];
+  const probeUrl = probeUrlOverride ?? "http://127.0.0.1:8080/v1/models";
+  // Skip the HTTP probe when the PID is dead or unparseable — the
+  // status is already determined and the probe would just add ~2s
+  // latency to the no-op fast path. The fast path (PID file absent)
+  // runs in well under 100ms.
+  const needsServerProbe = pidAlive;
+  let serverReachable = false;
+  if (needsServerProbe) {
+    const probe = buildServerProbe({
+      ...(probeUrlOverride !== undefined && { url: probeUrlOverride }),
+      timeoutMs: 2_000,
+    });
+    const serverState = await probe();
+    serverReachable = serverState.reachable;
+  }
+  const status = summarizeMlxServerStatus({
+    pidPresent,
+    parsedPid,
+    pidAlive,
+    serverReachable,
+    serverUrl: probeUrl,
+  });
+  return printStatusAndExit(status);
+}
+
+/**
+ * Render the {@link MlxServerStatus} discriminated union as one line
+ * to stdout/stderr (running goes to stdout; everything else goes to
+ * stderr) and return the matching exit code.
+ *
+ * Extracted so {@link runStatusMlxServer} stays under biome's cognitive
+ * complexity cap.
+ *
+ * @param {import("../dist/local-llm-server-status.js").MlxServerStatus} status
+ * @returns {number}
+ */
+function printStatusAndExit(status) {
+  switch (status.kind) {
+    case "running":
+      process.stdout.write(
+        `minsky: mlx_lm.server running (PID ${status.pid}, reachable at ${status.url})\n`,
+      );
+      return 0;
+    case "unhealthy":
+      process.stderr.write(
+        `minsky: mlx_lm.server unhealthy (PID ${status.pid} alive but ${status.url} not reachable; may be loading)\n`,
+      );
+      return 1;
+    case "stale":
+      process.stderr.write(
+        `minsky: mlx_lm.server stale (PID ${status.stalePid} dead; run \`minsky stop-mlx-server\` to clean ${LOCAL_LLM_PID_PATH})\n`,
+      );
+      return 1;
+    case "not-running":
+      process.stderr.write(
+        `minsky: mlx_lm.server not running (no PID file at ${LOCAL_LLM_PID_PATH})\n`,
+      );
+      return 1;
+    case "invalid-pid-file":
+      process.stderr.write(
+        `minsky: PID file ${LOCAL_LLM_PID_PATH} unparseable; run \`minsky stop-mlx-server\` to remove it\n`,
+      );
+      return 1;
+    default: {
+      // exhaustiveness check
+      /** @type {never} */
+      const _exhaustive = status;
+      process.stderr.write(`minsky: unexpected status outcome ${String(_exhaustive)}\n`);
+      return 1;
+    }
+  }
 }
 
 /**
