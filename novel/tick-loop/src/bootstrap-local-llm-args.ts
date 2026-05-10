@@ -1,14 +1,16 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wiring) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm` flag wiring) -->
 /**
  * `@minsky/tick-loop/bootstrap-local-llm-args` — pure parser for the
- * `minsky bootstrap-local-llm` subcommand's flag surface. Slice 9 of
- * P0 task `minsky-cli-auto-bootstrap-local-llm`.
+ * `minsky bootstrap-local-llm` subcommand's flag surface. Slice 9 / 17
+ * of P0 task `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Currently parses one flag — `--dry-run` — but exists as a typed
- * boundary so future flags (`--no-confirm`, `--model=…`, `--port=…`)
- * land here instead of accreting in the bin file. Pure-over-input;
- * tests pass synthetic argv arrays. The wiring at `bin/minsky.mjs`
- * passes `process.argv.slice(2 + 1)` (skip node + script + verb).
+ * Parses two flags so far — `--dry-run` and `--no-confirm` (alias `-y`,
+ * `--yes`) — but exists as a typed boundary so future flags
+ * (`--model=…`, `--port=…`) land here instead of accreting in the bin
+ * file. Pure-over-input; tests pass synthetic argv arrays. The wiring
+ * at `bin/minsky.mjs` passes `process.argv.slice(2 + 1)` (skip node +
+ * script + verb).
  *
  * Contract: never throws. Unknown flags are ignored — argparse
  * rigour belongs at a future per-subcommand parser layer; for now
@@ -29,6 +31,17 @@ export interface BootstrapLocalLlmArgs {
    * launchd) where slice 7 H2's TTY-refuse path otherwise blocks.
    */
   readonly dryRun: boolean;
+
+  /**
+   * `--no-confirm` (aliases: `--yes`, `-y`) — when true, the CLI skips
+   * the interactive `[Y/n]` prompt and runs the install plan directly.
+   * Symmetric to the `MINSKY_NON_INTERACTIVE=1` env var but expressed
+   * as an explicit shell flag (rule #2 — operator intent at the call
+   * site beats action-at-a-distance via env). Composes with
+   * `--dry-run`: when both are set, `--dry-run` still wins (read-only
+   * surfaces over write surfaces).
+   */
+  readonly noConfirm: boolean;
 }
 
 /**
@@ -37,5 +50,8 @@ export interface BootstrapLocalLlmArgs {
  * @otel-exempt pure parser; no I/O, no span.
  */
 export function parseBootstrapLocalLlmArgs(args: readonly string[]): BootstrapLocalLlmArgs {
-  return { dryRun: args.includes("--dry-run") };
+  return {
+    dryRun: args.includes("--dry-run"),
+    noConfirm: args.includes("--no-confirm") || args.includes("--yes") || args.includes("-y"),
+  };
 }
