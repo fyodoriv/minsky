@@ -26,7 +26,7 @@
     "chaos:budget-exhaust": "node scripts/chaos-budget-exhaust.mjs",
     "cto-audit:metrics": "node scripts/cto-audit-metrics.mjs",
     "daemon-pr-lint:metrics": "node scripts/daemon-pr-lint-metrics.mjs",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\"",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\" \"#opencode.notes.md\"",
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
     "dogfood": "./setup.sh --dogfood",
     "dogfood:doctor": "./setup.sh --doctor",
