@@ -78,6 +78,30 @@ import { decide, DEFAULT_THRESHOLDS } from "@minsky/budget-guard";
 const action = decide(snapshot, DEFAULT_THRESHOLDS).action;
 ```
 
+### Continuous remaining-% surface (slice 2 of `claude-usage-aware-strategic-model-router`)
+
+`BudgetGuard.snapshotRemainingPercents()` returns the continuous
+`{ fivehour, weekly, monthly, observedAt }` triple alongside the existing
+4-state `BudgetAction`. The strategic picker (`pickStrategicModel` in
+`@minsky/tick-loop/strategic-model-router`) consumes this directly,
+walking the model catalog from highest-quality (Opus 4.7) to lowest
+(local) and returning the first whose per-window floors fit the current
+remaining fractions.
+
+`BudgetGuard.lastDecision()` returns the most-recent tick's decision
+(synchronously) so consumers that need a sync read between ticks (the
+strategic picker's `invocation` callback, the HTTP server handler) don't
+have to await another snapshot. Returns `undefined` until the first tick
+completes (cold-start).
+
+```ts
+const remaining = await guard.snapshotRemainingPercents();
+// → { fivehour: 0.7, weekly: 0.4, monthly: 0.6, observedAt: "..." }
+
+const last = guard.lastDecision();
+// → BudgetDecision | undefined (cached from last tick)
+```
+
 ## Flag-file envelope
 
 Shell consumers (`setup.sh`, supervisor unit-files, ad-hoc scripts) read the current decision by `cat`-ing a single file:
