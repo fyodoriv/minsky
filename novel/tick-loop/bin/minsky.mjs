@@ -104,6 +104,7 @@ if (!existsSync(NODE_MODULES_PATH)) {
 
 const {
   PATH_CONFIG_KEYS,
+  bootstrapTtyGate,
   buildProductionProbes,
   checkGitConfigPaths,
   classifyClaudeProbeOutput,
@@ -200,6 +201,7 @@ Operator escape hatches (env vars):
   MINSKY_HARD_LIMIT_TTL_MIN=<minutes>   how long to trust persisted hard-limit (default 60)
   MINSKY_NO_AUTO_BOOTSTRAP=1            skip the local-LLM auto-bootstrap pre-flight
   MINSKY_NON_INTERACTIVE=1              auto-confirm the bootstrap install plan
+  MINSKY_ASSUME_TTY=1                   override the install-arm-homebrew TTY gate (tmux/nohup/ssh)
 `);
 }
 
@@ -453,6 +455,10 @@ function emitNonTtyRefuseMessage() {
     '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n',
   );
   process.stderr.write("minsky: then rerun `minsky bootstrap-local-llm`\n");
+  process.stderr.write(
+    "minsky: (or, if your terminal IS interactive but stdin.isTTY misreports — tmux/nohup/ssh-no-`-t` —\n",
+  );
+  process.stderr.write("minsky:  set MINSKY_ASSUME_TTY=1 to override the gate)\n");
 }
 
 /**
@@ -483,10 +489,16 @@ async function runBootstrapLocalLlm({ force }) {
   }
   const isInteractive =
     process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
-  // Slice 7 H2: if the plan requires a TTY (install-arm-homebrew's
-  // sudo needs stdin inheritance) AND we're non-TTY, refuse with
-  // clear recovery instructions instead of hanging silently at sudo.
-  if (planRequiresTty(plan) && !isInteractive) {
+  // Slice 8 hardening: bootstrapTtyGate honors MINSKY_ASSUME_TTY=1 for
+  // tmux/nohup/ssh-without-`-t` false-positives (slice 7 pivot list).
+  // Refuse only when plan needs TTY AND stdin is not a TTY AND the
+  // operator hasn't explicitly opted in via the env hatch.
+  const ttyGate = bootstrapTtyGate({
+    planRequiresTty: planRequiresTty(plan),
+    stdinIsTty: process.stdin.isTTY === true,
+    assumeTtyEnv: process.env["MINSKY_ASSUME_TTY"],
+  });
+  if (!ttyGate.allow) {
     emitNonTtyRefuseMessage();
     return {};
   }

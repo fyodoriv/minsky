@@ -22,6 +22,7 @@ import {
   type DetectProbes,
   type LocalLlmStackState,
   type ServerState,
+  bootstrapTtyGate,
   detectLocalLlmStack,
   planLocalLlmBootstrap,
   planRequiresTty,
@@ -475,6 +476,66 @@ describe("planRequiresTty — slice 7 H2: non-TTY pre-flight check", () => {
     // modelMissing fixture has pipx/mlx/aider present, only model missing
     expect(plan.steps.some((s) => s.type === "install-arm-homebrew")).toBe(false);
     expect(planRequiresTty(plan)).toBe(false);
+  });
+});
+
+describe("bootstrapTtyGate — slice 8: MINSKY_ASSUME_TTY escape hatch", () => {
+  it("allows when plan does not require TTY (regardless of TTY/env state)", () => {
+    const decision = bootstrapTtyGate({
+      planRequiresTty: false,
+      stdinIsTty: false,
+      assumeTtyEnv: undefined,
+    });
+    expect(decision.allow).toBe(true);
+    expect(decision.reason).toMatch(/does not require TTY/);
+  });
+
+  it("allows when stdin is a TTY (slice 7 path unchanged)", () => {
+    const decision = bootstrapTtyGate({
+      planRequiresTty: true,
+      stdinIsTty: true,
+      assumeTtyEnv: undefined,
+    });
+    expect(decision.allow).toBe(true);
+    expect(decision.reason).toMatch(/stdin is a TTY/);
+  });
+
+  it("allows when MINSKY_ASSUME_TTY=1 even though stdin is not a TTY", () => {
+    const decision = bootstrapTtyGate({
+      planRequiresTty: true,
+      stdinIsTty: false,
+      assumeTtyEnv: "1",
+    });
+    expect(decision.allow).toBe(true);
+    expect(decision.reason).toMatch(/MINSKY_ASSUME_TTY=1/);
+  });
+
+  it("refuses when plan needs TTY, stdin is not a TTY, and env hatch unset", () => {
+    const decision = bootstrapTtyGate({
+      planRequiresTty: true,
+      stdinIsTty: false,
+      assumeTtyEnv: undefined,
+    });
+    expect(decision.allow).toBe(false);
+    expect(decision.reason).toMatch(/MINSKY_ASSUME_TTY not set/);
+  });
+
+  it("refuses when env hatch is set to a non-1 value (strict equality)", () => {
+    const decision = bootstrapTtyGate({
+      planRequiresTty: true,
+      stdinIsTty: false,
+      assumeTtyEnv: "true",
+    });
+    expect(decision.allow).toBe(false);
+  });
+
+  it("refuses when env hatch is set to empty string", () => {
+    const decision = bootstrapTtyGate({
+      planRequiresTty: true,
+      stdinIsTty: false,
+      assumeTtyEnv: "",
+    });
+    expect(decision.allow).toBe(false);
   });
 });
 

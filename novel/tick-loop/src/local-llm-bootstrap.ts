@@ -2,6 +2,7 @@
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08 — live-run regression: hardcoded python path broke on Intel-brew machines) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H1 arch-consistent aider python + H2 planRequiresTty non-TTY refuse) -->
+// <!-- scope: human-approved minsky-cli-arch-detection slice 8 (operator 2026-05-08 — slice 7 pivot escape hatch: MINSKY_ASSUME_TTY=1 for tmux/nohup/ssh false-positives) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap` — pure detection + plan functions
  * for the local-LLM stack. Slice 1 of P0 task
@@ -497,6 +498,69 @@ function buildInstallSteps(
  */
 export function planRequiresTty(plan: BootstrapPlan): boolean {
   return plan.steps.some((step) => step.type === "install-arm-homebrew");
+}
+
+/**
+ * Inputs to {@link bootstrapTtyGate}: whether the plan needs a TTY,
+ * whether stdin is currently a TTY (Node's `process.stdin.isTTY`), and
+ * the operator's `MINSKY_ASSUME_TTY` env value (raw string so the
+ * caller's env-read shape passes through unchanged).
+ */
+export interface BootstrapTtyGateInput {
+  readonly planRequiresTty: boolean;
+  readonly stdinIsTty: boolean;
+  readonly assumeTtyEnv: string | undefined;
+}
+
+/**
+ * Decision shape from {@link bootstrapTtyGate}. `allow=false` means the
+ * caller (`bin/minsky.mjs`) must refuse the install with the standard
+ * non-TTY recovery message; `allow=true` means proceed. `reason` is
+ * informational (operator-facing log line, also useful for tests).
+ */
+export interface BootstrapTtyGateDecision {
+  readonly allow: boolean;
+  readonly reason: string;
+}
+
+/**
+ * Slice 8 hardening — the gate that decides whether
+ * `bootstrap-local-llm` may proceed given the plan and the operator's
+ * terminal state. Extends slice 7's `planRequiresTty` refusal with the
+ * `MINSKY_ASSUME_TTY=1` operator escape hatch listed verbatim in slice
+ * 7's pivot section: false-positive scenarios where `process.stdin.isTTY`
+ * returns `false` but the operator IS in an interactive terminal
+ * (nohup, tmux detach, ssh without `-t`, terminals that pipe stdin
+ * through tee/script).
+ *
+ * Decision precedence:
+ *   1. Plan does not require TTY → allow (slice-1/5/7 paths unchanged).
+ *   2. stdin IS a TTY → allow (slice 7 path unchanged).
+ *   3. `MINSKY_ASSUME_TTY=1` is set → allow (slice 8 escape hatch).
+ *   4. Otherwise → refuse.
+ *
+ * Pure function; same input → same output. Pattern conformance:
+ * Predicate-with-Reason — Eiffel-style `require` clauses (Meyer 1992)
+ * extended with the explanation channel from the Either/Result tradition
+ * (Wadler, "Monads for functional programming", 1995) so failure
+ * carries diagnostic information.
+ *
+ * @otel-exempt pure predicate — no span.
+ */
+export function bootstrapTtyGate(input: BootstrapTtyGateInput): BootstrapTtyGateDecision {
+  if (!input.planRequiresTty) {
+    return { allow: true, reason: "plan does not require TTY" };
+  }
+  if (input.stdinIsTty) {
+    return { allow: true, reason: "stdin is a TTY" };
+  }
+  if (input.assumeTtyEnv === "1") {
+    return { allow: true, reason: "MINSKY_ASSUME_TTY=1 override" };
+  }
+  return {
+    allow: false,
+    reason: "plan requires TTY for sudo, stdin is not a TTY, MINSKY_ASSUME_TTY not set",
+  };
 }
 
 /**
