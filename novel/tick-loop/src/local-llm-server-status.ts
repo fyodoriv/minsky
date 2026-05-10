@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 14 (operator 2026-05-08 — slice 11 added stop-mlx-server, slice 12 added start-mlx-server, slice 13 added logs mlx-server; the symmetric read-only `minsky status mlx-server` closes the lifecycle quartet so operators can scriptably ask "is the server running?" without the heavyweight `minsky doctor` probe matrix) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 16 (operator 2026-05-08 — slice 14 prints prose; monitoring scripts that dispatch on the discriminated union (e.g. "if unhealthy, wait; if stale, restart") had to regex stderr — `--json` emits the variant verbatim so `jq -e '.kind == "running"'` replaces the prose-parse round-trip) -->
 /**
  * `@minsky/tick-loop/local-llm-server-status` — pure
  * `summarizeMlxServerStatus` decision for slice 14 of P0 task
@@ -136,4 +137,30 @@ export function summarizeMlxServerStatus(input: StatusInput): MlxServerStatus {
     return { kind: "running", pid, url: input.serverUrl };
   }
   return { kind: "unhealthy", pid, url: input.serverUrl };
+}
+
+// ---- renderMlxServerStatusJson --------------------------------------------
+
+/**
+ * Slice 16: render the status as a single canonical JSON line so monitoring
+ * scripts can dispatch on the discriminated union via `jq -e '.kind == "X"'`
+ * instead of regex-parsing the slice-14 prose. Same input → same output;
+ * key order is stable (`kind` first, then variant fields) so the output
+ * is grep/jq-friendly without sort-keys gymnastics.
+ *
+ * @otel-exempt pure render; mirrors `summarizeMlxServerStatus`'s purity.
+ */
+export function renderMlxServerStatusJson(status: MlxServerStatus): string {
+  switch (status.kind) {
+    case "running":
+      return JSON.stringify({ kind: "running", pid: status.pid, url: status.url });
+    case "unhealthy":
+      return JSON.stringify({ kind: "unhealthy", pid: status.pid, url: status.url });
+    case "stale":
+      return JSON.stringify({ kind: "stale", stalePid: status.stalePid });
+    case "not-running":
+      return JSON.stringify({ kind: "not-running" });
+    case "invalid-pid-file":
+      return JSON.stringify({ kind: "invalid-pid-file" });
+  }
 }

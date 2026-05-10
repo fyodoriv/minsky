@@ -829,6 +829,7 @@ export { type LogsTarget, type LogsTargetKind, decideLogsTarget } from "./logs-t
 export {
   type MlxServerStatus,
   type MlxServerStatusKind,
+  renderMlxServerStatusJson,
   type StatusInput,
   summarizeMlxServerStatus,
 } from "./local-llm-server-status.js";
