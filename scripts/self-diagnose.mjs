@@ -31,8 +31,8 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
 import { MODEL_CATALOG, validateModelCatalog } from "@minsky/tick-loop";
+import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
 
 import {
   CANONICAL_REPO,
@@ -1111,7 +1111,8 @@ export function modelCatalogInvariantsHoldInvariant(opts) {
         "Restore monotone-descending floors in `novel/tick-loop/src/model-catalog.ts`. Run `pnpm vitest run novel/tick-loop/src/model-catalog.test.ts` to verify.",
     };
   };
-  fn.invariantId = "model-catalog-invariants-hold";
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "model-catalog-invariants-hold";
   return fn;
 }
 
