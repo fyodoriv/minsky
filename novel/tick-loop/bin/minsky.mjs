@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm`/`-y`/`--yes` flag for non-interactive install opt-in) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -25,7 +26,8 @@
  *   minsky stop 1             stop worker 1
  *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
  *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
- *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
+ *   minsky bootstrap-local-llm --dry-run    print the install plan and exit 0 (read-only; non-TTY safe)
+ *   minsky bootstrap-local-llm --no-confirm install without the [Y/n] prompt (alias: -y, --yes)
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -150,7 +152,12 @@ if (first === "--help" || first === "-h" || first === "help") {
     await runBootstrapLocalLlmDryRun();
     process.exit(0);
   }
-  const result = await runBootstrapLocalLlm({ force: true });
+  // Slice 17: `--no-confirm` / `-y` / `--yes` skips the interactive
+  // prompt without needing the operator to set MINSKY_NON_INTERACTIVE=1
+  // out-of-band. Symmetric to apt/dnf/pip's `-y`. Threaded into
+  // runBootstrapLocalLlm via opts.autoConfirm so the env var stays
+  // the only path read by the auto-pre-flight (no env mutation).
+  const result = await runBootstrapLocalLlm({ force: true, autoConfirm: subArgs.noConfirm });
   // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
   // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
   // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
@@ -180,7 +187,8 @@ Examples:
   minsky 1                        # start-or-attach worker 1 (in another terminal)
   minsky logs                     # follow worker 0's log live
   minsky stop 1                   # stop worker 1
-  minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
+  minsky bootstrap-local-llm --dry-run    # preview the local-LLM install plan and exit (read-only)
+  minsky bootstrap-local-llm --no-confirm # install without the [Y/n] prompt (alias: -y, --yes)
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -409,7 +417,13 @@ function readPersistedHardLimit() {
  * the prompt always shows even if the plan is empty; otherwise we skip the
  * prompt for empty plans.
  *
- * @param {{ force: boolean }} opts
+ * Slice 17: `autoConfirm` (default false) bypasses the interactive prompt
+ * even on a TTY — wired from `--no-confirm`/`-y`/`--yes`. Composes with
+ * the existing `MINSKY_NON_INTERACTIVE=1` env var (either path skips the
+ * prompt; both paths still respect the slice-7 H2 non-TTY refuse for
+ * arm-homebrew because that one needs stdin inheritance for sudo).
+ *
+ * @param {{ force: boolean, autoConfirm?: boolean }} opts
  * @returns {Promise<Record<string, string>>}
  */
 /**
@@ -474,15 +488,21 @@ async function runBootstrapLocalLlmDryRun() {
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
-async function runBootstrapLocalLlm({ force }) {
+async function runBootstrapLocalLlm({ force, autoConfirm = false }) {
   const { state, planOpts } = await detectForBootstrap();
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
+  // Slice 17: --no-confirm short-circuits the prompt the same way
+  // MINSKY_NON_INTERACTIVE=1 does. The H2 TTY-refuse below still
+  // gates arm-homebrew because that step needs stdin inheritance for
+  // sudo regardless of confirmation source.
   const isInteractive =
-    process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
+    autoConfirm !== true &&
+    process.stdin.isTTY === true &&
+    process.env["MINSKY_NON_INTERACTIVE"] !== "1";
   // Slice 7 H2: if the plan requires a TTY (install-arm-homebrew's
   // sudo needs stdin inheritance) AND we're non-TTY, refuse with
   // clear recovery instructions instead of hanging silently at sudo.
