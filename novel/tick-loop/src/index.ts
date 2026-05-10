@@ -879,3 +879,13 @@ export {
   type PickStrategicModelOutput,
   pickStrategicModel,
 } from "./strategic-model-router.js";
+
+// Slice 6 of `claude-usage-aware-strategic-model-router`: ring-buffer
+// trajectory + linear-regression exhaustion predictor.
+export {
+  DEFAULT_HISTORY_CAP,
+  type UsageHistoryEntry,
+  appendUsageHistory,
+  predictExhaustionMs,
+  recentHistory,
+} from "./usage-history.js";
