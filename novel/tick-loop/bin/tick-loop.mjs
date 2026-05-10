@@ -81,6 +81,7 @@ import {
   buildAiderInvocation,
   buildChildWorkerArgs,
   buildClaudePrintInvocation,
+  buildOpencodeInvocation,
   createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
@@ -349,7 +350,29 @@ const localLlmEnabled = (() => {
 const llmProviderOverride = (process.env.MINSKY_LLM_PROVIDER ?? "").trim().toLowerCase();
 const forceClaude = llmProviderOverride === "claude-only";
 const preferLocal = llmProviderOverride === "local-preferred";
-const localProbeUrl = process.env.MINSKY_LOCAL_LLM_PROBE_URL ?? "http://127.0.0.1:8080/v1/models";
+// `support-opencode-lmstudio-mlx-qwen3-14b-stack` slice 2 — `MINSKY_LOCAL_AGENT`
+// selects which CLI the local-dispatch path invokes. Default `aider` for
+// back-compat. When set to `opencode`, the local strategy spawns
+// `opencode run --model <id> --dangerously-skip-permissions <brief>`
+// (per `buildOpencodeInvocation`) instead of `aider --message <brief>`.
+// Hoisted above `localProbeUrl` so the slice-3 probe-URL default can
+// branch on this value. Invalid values normalise to `aider` (rule #7
+// graceful-degrade — don't crash over a typo).
+const localAgent = (() => {
+  const raw = (process.env.MINSKY_LOCAL_AGENT ?? "").trim().toLowerCase();
+  return raw === "opencode" ? "opencode" : "aider";
+})();
+const opencodeBin = process.env.MINSKY_LOCAL_LLM_OPENCODE_BIN ?? "opencode";
+// Slice 3 — per-agent probe URL default. LM Studio's documented default
+// port is 1234 (`http://127.0.0.1:1234/v1/models`); mlx-lm.server's is
+// 8080. When the operator pins `MINSKY_LOCAL_LLM_PROBE_URL` explicitly,
+// that wins; otherwise the default tracks `MINSKY_LOCAL_AGENT`. Prevents
+// the operator from having to set two env vars to switch stacks.
+const localProbeUrl =
+  process.env.MINSKY_LOCAL_LLM_PROBE_URL ??
+  (localAgent === "opencode"
+    ? "http://127.0.0.1:1234/v1/models"
+    : "http://127.0.0.1:8080/v1/models");
 const localProbeTtlMs = (() => {
   const raw = process.env.MINSKY_LOCAL_LLM_PROBE_TTL_MS;
   if (raw === undefined) return 60_000;
@@ -442,18 +465,39 @@ function buildClaudeStrategy() {
 }
 
 function buildLocalStrategy() {
-  return dryRun
-    ? new DryRunSpawnStrategy()
-    : new ProcessSpawnStrategy({
+  if (dryRun) return new DryRunSpawnStrategy();
+  if (localAgent === "opencode") {
+    return new ProcessSpawnStrategy({
+      command: opencodeBin,
+      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+      invocation: (input) =>
+        buildOpencodeInvocation({
+          brief: input.brief,
+          command: opencodeBin,
+          // `MINSKY_LOCAL_LLM_MODEL_ID` is the bare HF / model id; for
+          // opencode's `provider/model` argv it defaults to the
+          // `lmstudio/<id>` form. When the operator wants a non-lmstudio
+          // provider key they can set the full `<provider>/<model>` shape.
+          ...(localLlmModelId === undefined
+            ? {}
+            : {
+                model: localLlmModelId.includes("/")
+                  ? localLlmModelId
+                  : `lmstudio/${localLlmModelId}`,
+              }),
+        }),
+    });
+  }
+  return new ProcessSpawnStrategy({
+    command: aiderBin,
+    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    invocation: (input) =>
+      buildAiderInvocation({
+        brief: input.brief,
         command: aiderBin,
-        ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-        invocation: (input) =>
-          buildAiderInvocation({
-            brief: input.brief,
-            command: aiderBin,
-            ...(localLlmModelId === undefined ? {} : { model: `openai/${localLlmModelId}` }),
-          }),
-      });
+        ...(localLlmModelId === undefined ? {} : { model: `openai/${localLlmModelId}` }),
+      }),
+  });
 }
 
 const spawnStrategy = (() => {
@@ -461,7 +505,7 @@ const spawnStrategy = (() => {
   if (!localLlmEnabled) return claudeStrat;
   const localStrat = buildLocalStrategy();
   process.stdout.write(
-    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
+    `[tick-loop] local-llm fallback wired (agent=${localAgent}, probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
   );
   return new LlmProviderSpawnStrategy({
     claude: claudeStrat,
