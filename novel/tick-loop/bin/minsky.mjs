@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 22 (operator 2026-05-10 — `--check` flag for exit-code-only readiness probe) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -26,6 +27,7 @@
  *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
  *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
  *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
+ *   minsky bootstrap-local-llm --check   exit 0 if stack is ready, 1 if any install steps remain (no install)
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -146,6 +148,16 @@ if (first === "--help" || first === "-h" || first === "help") {
   // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
   // block. Anchors the task block's Risk mitigation.
   const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
+  if (subArgs.check) {
+    // Slice 22: `--check` is the exit-code-only readiness probe. Same
+    // detect+plan pipeline as `--dry-run`, but skips the prose summary
+    // and maps `plan.ready` → process exit code (0 = ready, 1 = install
+    // steps outstanding). Round-trip elimination versus piping the
+    // `--dry-run --json` output through `jq -e .ready`. `--check` wins
+    // when both flags are present — it's the more terminal signal.
+    const exitCode = await runBootstrapLocalLlmCheck();
+    process.exit(exitCode);
+  }
   if (subArgs.dryRun) {
     await runBootstrapLocalLlmDryRun();
     process.exit(0);
@@ -181,6 +193,7 @@ Examples:
   minsky logs                     # follow worker 0's log live
   minsky stop 1                   # stop worker 1
   minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
+  minsky bootstrap-local-llm --check    # exit 0 if stack ready, 1 if install steps remain (no install)
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -472,6 +485,39 @@ async function runBootstrapLocalLlmDryRun() {
   const plan = planLocalLlmBootstrap(state, planOpts);
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
+}
+
+/**
+ * Slice 22: exit-code-only readiness probe for `minsky
+ * bootstrap-local-llm --check`. Runs the same detect + plan pipeline,
+ * writes a one-line status to stderr (so stdout stays clean for shell
+ * compositions), and returns 0 if `plan.ready === true` or 1 if any
+ * install steps remain. Never spawns an installer, never needs a TTY,
+ * never writes any state.
+ *
+ * Round-trip elimination versus the `--dry-run --json | jq -e .ready`
+ * pattern: scripts no longer need `jq` on PATH and skip the JSON
+ * serialize + regex-parse round-trip. Composes with shell pipelines:
+ *
+ *     if minsky bootstrap-local-llm --check; then
+ *       minsky               # stack ready, just start the daemon
+ *     else
+ *       minsky bootstrap-local-llm   # install first
+ *     fi
+ *
+ * @returns {Promise<0 | 1>} process exit code
+ */
+async function runBootstrapLocalLlmCheck() {
+  const { state, planOpts } = await detectForBootstrap();
+  const plan = planLocalLlmBootstrap(state, planOpts);
+  if (plan.ready) {
+    process.stderr.write("minsky: local-LLM stack ready (no install needed)\n");
+    return 0;
+  }
+  process.stderr.write(
+    `minsky: local-LLM stack not ready — ${plan.steps.length} install step(s) outstanding (rerun without --check to install)\n`,
+  );
+  return 1;
 }
 
 async function runBootstrapLocalLlm({ force }) {
