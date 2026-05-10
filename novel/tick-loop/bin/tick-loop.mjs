@@ -382,6 +382,17 @@ const localRatio = (() => {
   if (parsed < 0 || parsed > 1) return undefined;
   return parsed;
 })();
+// Per-machine model override — slice 0 of `worker-model-per-machine-config`
+// resolution chain. When set, the aider invocation uses this model id
+// (the bare HF id; aider auto-prefixes `openai/`). Operator can pin
+// per-machine via `~/.zshrc` or by exporting at `pnpm minsky` time. The
+// full resolution chain (env > .minsky/local-config.json > repo default)
+// is the follow-up slice.
+const localLlmModelId = (() => {
+  const raw = process.env.MINSKY_LOCAL_LLM_MODEL_ID;
+  if (raw === undefined || raw.trim() === "") return undefined;
+  return raw.trim();
+})();
 
 /**
  * Probe the local mlx-lm.server. Reuses the same logic as
@@ -440,6 +451,7 @@ function buildLocalStrategy() {
           buildAiderInvocation({
             brief: input.brief,
             command: aiderBin,
+            ...(localLlmModelId === undefined ? {} : { model: `openai/${localLlmModelId}` }),
           }),
       });
 }
@@ -449,7 +461,7 @@ const spawnStrategy = (() => {
   if (!localLlmEnabled) return claudeStrat;
   const localStrat = buildLocalStrategy();
   process.stdout.write(
-    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${dryRun ? ", dry-run" : ""})\n`,
+    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
   );
   return new LlmProviderSpawnStrategy({
     claude: claudeStrat,
