@@ -222,6 +222,16 @@ export interface BootstrapPlanOptions {
    * compat by construction.
    */
   readonly archState?: import("./arch-probe.js").ArchState;
+
+  /**
+   * Override the model id baked into the `download-model` and
+   * `start-mlx-server` install steps. Slice 18 — wires the
+   * `--model=<hf-id>` CLI flag through to the planner so the operator
+   * can bootstrap a non-default variant (e.g., a smaller Qwen3-4B
+   * for a low-RAM box) without editing the pinned constant. When
+   * undefined, the planner uses {@link DEFAULT_LOCAL_LLM_MODEL}.
+   */
+  readonly modelId?: string;
 }
 
 // ---- Constants ------------------------------------------------------------
@@ -382,7 +392,7 @@ function buildModelDownloadStep(modelId: string): InstallStep {
   };
 }
 
-function buildStartServerStep(): InstallStep {
+function buildStartServerStep(modelId: string = DEFAULT_LOCAL_LLM_MODEL): InstallStep {
   return {
     type: "start-mlx-server",
     description: "Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)",
@@ -392,15 +402,7 @@ function buildStartServerStep(): InstallStep {
     // in the executor (it needs detach + log redirection that argv-only
     // can't express). The argv here is the canonical shape the executor
     // dispatches; adjust there if the executor changes the launch path.
-    command: [
-      "mlx_lm.server",
-      "--model",
-      DEFAULT_LOCAL_LLM_MODEL,
-      "--host",
-      "127.0.0.1",
-      "--port",
-      "8080",
-    ],
+    command: ["mlx_lm.server", "--model", modelId, "--host", "127.0.0.1", "--port", "8080"],
   };
 }
 
@@ -467,6 +469,10 @@ function buildInstallSteps(
   options: BootstrapPlanOptions,
 ): InstallStep[] {
   const { brewPath, pipxPath, pythonPath } = resolvePaths(options);
+  // Slice 18: respect the operator's `--model=<id>` override (threaded
+  // via `BootstrapPlanOptions.modelId`) for both the download step and
+  // the server-start step. Falls back to the pinned default constant.
+  const modelId = options.modelId ?? DEFAULT_LOCAL_LLM_MODEL;
   const steps: InstallStep[] = [];
   if (options.archState !== undefined && needsArmHomebrewInstall(options.archState)) {
     steps.push(buildInstallArmHomebrewStep());
@@ -474,8 +480,8 @@ function buildInstallSteps(
   if (!state.pipx.present) steps.push(buildPipxStep(brewPath));
   if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
-  if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  if (!state.server.reachable) steps.push(buildStartServerStep());
+  if (!state.model.present) steps.push(buildModelDownloadStep(modelId));
+  if (!state.server.reachable) steps.push(buildStartServerStep(modelId));
   return steps;
 }
 

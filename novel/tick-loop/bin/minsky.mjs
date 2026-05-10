@@ -11,6 +11,7 @@
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm`/`-y`/`--yes` flag for non-interactive install opt-in) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 18 (operator 2026-05-08 — `--model=<hf-id>` flag overrides pinned default for download + start + cache probe) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -28,6 +29,7 @@
  *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
  *   minsky bootstrap-local-llm --dry-run    print the install plan and exit 0 (read-only; non-TTY safe)
  *   minsky bootstrap-local-llm --no-confirm install without the [Y/n] prompt (alias: -y, --yes)
+ *   minsky bootstrap-local-llm --model=<hf-id> override the pinned default model for this run
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -149,7 +151,7 @@ if (first === "--help" || first === "-h" || first === "help") {
   // block. Anchors the task block's Risk mitigation.
   const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
   if (subArgs.dryRun) {
-    await runBootstrapLocalLlmDryRun();
+    await runBootstrapLocalLlmDryRun({ modelId: subArgs.modelId });
     process.exit(0);
   }
   // Slice 17: `--no-confirm` / `-y` / `--yes` skips the interactive
@@ -157,7 +159,13 @@ if (first === "--help" || first === "-h" || first === "help") {
   // out-of-band. Symmetric to apt/dnf/pip's `-y`. Threaded into
   // runBootstrapLocalLlm via opts.autoConfirm so the env var stays
   // the only path read by the auto-pre-flight (no env mutation).
-  const result = await runBootstrapLocalLlm({ force: true, autoConfirm: subArgs.noConfirm });
+  // Slice 18: `--model=<hf-id>` overrides the pinned default model id
+  // for the download + start-server steps + the model-cache probe.
+  const result = await runBootstrapLocalLlm({
+    force: true,
+    autoConfirm: subArgs.noConfirm,
+    modelId: subArgs.modelId,
+  });
   // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
   // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
   // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
@@ -189,6 +197,7 @@ Examples:
   minsky stop 1                   # stop worker 1
   minsky bootstrap-local-llm --dry-run    # preview the local-LLM install plan and exit (read-only)
   minsky bootstrap-local-llm --no-confirm # install without the [Y/n] prompt (alias: -y, --yes)
+  minsky bootstrap-local-llm --model=mlx-community/Qwen3-4B-Instruct-4bit  # override pinned default model
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -423,7 +432,12 @@ function readPersistedHardLimit() {
  * prompt; both paths still respect the slice-7 H2 non-TTY refuse for
  * arm-homebrew because that one needs stdin inheritance for sudo).
  *
- * @param {{ force: boolean, autoConfirm?: boolean }} opts
+ * Slice 18: `modelId` (optional) overrides the pinned default model id
+ * for the model-cache probe + the `download-model` and `start-mlx-server`
+ * install steps. Wired from `--model=<hf-id>`. When undefined, the planner
+ * uses `DEFAULT_LOCAL_LLM_MODEL` (the auto-pre-flight callers below).
+ *
+ * @param {{ force: boolean, autoConfirm?: boolean, modelId?: string }} opts
  * @returns {Promise<Record<string, string>>}
  */
 /**
@@ -432,19 +446,27 @@ function readPersistedHardLimit() {
  * `preferredPipxPath` into the pipx probe so Intel-brew pipx doesn't
  * mask the need for a fresh arm-brew pipx install.
  *
+ * Slice 18: accepts an optional `modelId` so `--model=<hf-id>` flows into
+ * BOTH the model-cache probe (so detection checks the right HF cache dir,
+ * not the default's) AND the planner (so the install step downloads +
+ * starts the operator's choice).
+ *
+ * @param {{ modelId?: string }} [opts]
  * @returns {Promise<{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, planOpts: import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions, pythonPath: string | undefined }>}
  */
-async function detectForBootstrap() {
+async function detectForBootstrap(opts = {}) {
   const archState = await detectArchState(buildArchProbes());
   const expectedPipxPath = preferredPipxPath(archState);
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
+  if (opts.modelId !== undefined) probeOpts.modelId = opts.modelId;
   const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
   const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
+  if (opts.modelId !== undefined) planOpts.modelId = opts.modelId;
   return { state, archState, planOpts, pythonPath };
 }
 
@@ -481,15 +503,15 @@ function emitNonTtyRefuseMessage() {
  * `minsky doctor` (which mixes substrate + git rows in alongside the
  * plan); this path is the focused plan-only preview.
  */
-async function runBootstrapLocalLlmDryRun() {
-  const { state, planOpts } = await detectForBootstrap();
+async function runBootstrapLocalLlmDryRun({ modelId } = {}) {
+  const { state, planOpts } = await detectForBootstrap({ modelId });
   const plan = planLocalLlmBootstrap(state, planOpts);
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
-async function runBootstrapLocalLlm({ force, autoConfirm = false }) {
-  const { state, planOpts } = await detectForBootstrap();
+async function runBootstrapLocalLlm({ force, autoConfirm = false, modelId } = {}) {
+  const { state, planOpts } = await detectForBootstrap({ modelId });
   const plan = planLocalLlmBootstrap(state, planOpts);
   if (plan.ready && !force) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
