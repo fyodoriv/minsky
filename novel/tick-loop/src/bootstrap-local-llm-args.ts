@@ -1,14 +1,15 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wiring) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm` flag wiring) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 18 (operator 2026-05-08 — `--model=<id>` flag wiring) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 19 (operator 2026-05-08 — `--port=<n>` flag wiring) -->
 /**
  * `@minsky/tick-loop/bootstrap-local-llm-args` — pure parser for the
  * `minsky bootstrap-local-llm` subcommand's flag surface. Slice 9 / 17
- * / 18 of P0 task `minsky-cli-auto-bootstrap-local-llm`.
+ * / 18 / 19 of P0 task `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Parses three flags so far — `--dry-run`, `--no-confirm` (alias `-y`,
- * `--yes`), and `--model=<hf-id>` — but exists as a typed boundary so
- * future flags (`--port=…`) land here instead of accreting in the bin
+ * Parses four flags so far — `--dry-run`, `--no-confirm` (alias `-y`,
+ * `--yes`), `--model=<hf-id>`, and `--port=<n>` — but exists as a typed
+ * boundary so future flags land here instead of accreting in the bin
  * file. Pure-over-input; tests pass synthetic argv arrays. The wiring
  * at `bin/minsky.mjs` passes `process.argv.slice(2 + 1)` (skip node +
  * script + verb).
@@ -62,9 +63,70 @@ export interface BootstrapLocalLlmArgs {
    * empty model id into the install commands.
    */
   readonly modelId?: string;
+
+  /**
+   * `--port=<n>` — override the default 8080 mlx-lm.server port for
+   * BOTH the `start-mlx-server` install step's argv AND the bootstrap-
+   * time server-liveness probe URL (`http://127.0.0.1:<port>/v1/models`).
+   * When undefined, the planner uses `DEFAULT_LOCAL_LLM_PORT` (8080).
+   *
+   * Use case: the operator already runs another local server on 8080
+   * (lm-studio default, ollama on 11434, an existing mlx_lm.server)
+   * and wants to bootstrap a parallel instance on a different port.
+   * Composes with `--model` so the operator can run two model variants
+   * side by side. NOTE: the daemon itself reads
+   * `MINSKY_LOCAL_LLM_PROBE_URL` to pick its provider — when bootstrapping
+   * on a non-default port the operator must also set that env var so
+   * the daemon points at the same port; the help text in `bin/minsky.mjs`
+   * mentions this.
+   *
+   * Invalid values (`--port=`, `--port=foo`, `--port=0`, negative,
+   * non-integer, > 65535) parse as undefined — the operator's typo
+   * shouldn't silently bind to the privileged port range or skip
+   * validation. Last `--port=<n>` wins (argv-tail-overrides convention).
+   */
+  readonly port?: number;
 }
 
 const MODEL_FLAG_PREFIX = "--model=";
+const PORT_FLAG_PREFIX = "--port=";
+
+/**
+ * Parse a TCP port string. Returns `undefined` for any input that
+ * isn't a positive integer in the IANA-registered ephemeral range
+ * (1–65535). Pure helper.
+ */
+function parsePortValue(raw: string): number | undefined {
+  if (raw.length === 0) return undefined;
+  // Reject leading-zero / sign / non-digit forms before Number() coerces.
+  if (!/^\d+$/.test(raw)) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0 || n > 65_535) return undefined;
+  return n;
+}
+
+/**
+ * Walk argv once, collecting the value-bearing flags (`--model=<id>`
+ * and `--port=<n>`). Last-wins per flag. Extracted from the public
+ * parser so its cognitive complexity stays under biome's cap (rule #6
+ * — helper IS the boundary).
+ */
+function collectValueFlags(args: readonly string[]): {
+  modelId: string | undefined;
+  port: number | undefined;
+} {
+  let modelId: string | undefined;
+  let port: number | undefined;
+  for (const a of args) {
+    if (a.startsWith(MODEL_FLAG_PREFIX)) {
+      const value = a.slice(MODEL_FLAG_PREFIX.length);
+      modelId = value.length > 0 ? value : undefined;
+    } else if (a.startsWith(PORT_FLAG_PREFIX)) {
+      port = parsePortValue(a.slice(PORT_FLAG_PREFIX.length));
+    }
+  }
+  return { modelId, port };
+}
 
 /**
  * Parse the subcommand's flag surface. Pure — same input → same output.
@@ -72,17 +134,11 @@ const MODEL_FLAG_PREFIX = "--model=";
  * @otel-exempt pure parser; no I/O, no span.
  */
 export function parseBootstrapLocalLlmArgs(args: readonly string[]): BootstrapLocalLlmArgs {
-  // Last `--model=<id>` wins (matches argv-tail-overrides shell convention).
-  let modelId: string | undefined;
-  for (const a of args) {
-    if (a.startsWith(MODEL_FLAG_PREFIX)) {
-      const value = a.slice(MODEL_FLAG_PREFIX.length);
-      modelId = value.length > 0 ? value : undefined;
-    }
-  }
+  const { modelId, port } = collectValueFlags(args);
   return {
     dryRun: args.includes("--dry-run"),
     noConfirm: args.includes("--no-confirm") || args.includes("--yes") || args.includes("-y"),
     ...(modelId !== undefined ? { modelId } : {}),
+    ...(port !== undefined ? { port } : {}),
   };
 }

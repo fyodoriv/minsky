@@ -305,12 +305,23 @@ export function buildProductionProbes(opts: {
    * fail at "command not found". See `arch-probe.ts preferredPipxPath`.
    */
   readonly expectedPipxPath?: string;
+  /**
+   * Slice 19: when set AND `url` is undefined, the server probe URL is
+   * built as `http://127.0.0.1:<port>/v1/models` instead of the default
+   * 8080 URL. Lets the operator's `--port=<n>` flag detect a server
+   * already running on the chosen port (idempotent fast path) so the
+   * planner can skip the `start-mlx-server` step. Explicit `url` still
+   * wins to preserve slice-1 callers' behavior.
+   */
+  readonly port?: number;
 }): DetectProbes {
   const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
   const probePipx: () => Promise<ComponentState> =
     opts.expectedPipxPath !== undefined
       ? buildExistsProbe(opts.expectedPipxPath, existsSyncFn)
       : buildWhichProbe("pipx", opts.whichFn);
+  const serverUrl =
+    opts.url ?? (opts.port !== undefined ? `http://127.0.0.1:${opts.port}/v1/models` : undefined);
   return {
     probePipx,
     probeMlxLm: buildWhichProbe("mlx_lm.server", opts.whichFn),
@@ -320,7 +331,7 @@ export function buildProductionProbes(opts: {
       ...(opts.existsSyncFn !== undefined ? { existsSyncFn: opts.existsSyncFn } : {}),
     }),
     probeServer: buildServerProbe({
-      ...(opts.url !== undefined ? { url: opts.url } : {}),
+      ...(serverUrl !== undefined ? { url: serverUrl } : {}),
       ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
     }),
   };

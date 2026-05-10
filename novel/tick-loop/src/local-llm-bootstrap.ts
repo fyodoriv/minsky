@@ -2,6 +2,7 @@
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08 — live-run regression: hardcoded python path broke on Intel-brew machines) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H1 arch-consistent aider python + H2 planRequiresTty non-TTY refuse) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 19 (operator 2026-05-08 — `--port=<n>` flag wires through to start-mlx-server argv + probe URL) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap` — pure detection + plan functions
  * for the local-LLM stack. Slice 1 of P0 task
@@ -232,6 +233,18 @@ export interface BootstrapPlanOptions {
    * undefined, the planner uses {@link DEFAULT_LOCAL_LLM_MODEL}.
    */
   readonly modelId?: string;
+
+  /**
+   * Override the TCP port baked into the `start-mlx-server` install
+   * step's `--port` argv. Slice 19 — wires the `--port=<n>` CLI flag
+   * through to the planner so the operator can bootstrap a parallel
+   * instance alongside an existing local server (lm-studio default,
+   * another mlx_lm.server). When undefined, the planner uses
+   * {@link DEFAULT_LOCAL_LLM_PORT} (8080). Bootstrap-time only — the
+   * daemon still reads `MINSKY_LOCAL_LLM_PROBE_URL` for its provider
+   * pick; the operator must set both for the new instance to be used.
+   */
+  readonly port?: number;
 }
 
 // ---- Constants ------------------------------------------------------------
@@ -269,6 +282,18 @@ export const DEFAULT_MODEL_DOWNLOAD_MB = 17_500;
  * Anchor: `docs/local-llm-fallback.md` § "Smoke test" — first command.
  */
 export const DEFAULT_LOCAL_LLM_PROBE_URL = "http://127.0.0.1:8080/v1/models";
+
+/**
+ * Pinned TCP port for mlx-lm.server — the same port baked into the
+ * default {@link DEFAULT_LOCAL_LLM_PROBE_URL}. Bumping this is a
+ * breaking change tied to the probe URL constant; keep them in lockstep
+ * so detection and start-server stay aligned.
+ *
+ * Slice 19: lifted from a literal `8080` in `buildStartServerStep` to a
+ * named constant so `--port=<n>` (defaulting to this value when unset)
+ * has a single source of truth shared with the probe URL.
+ */
+export const DEFAULT_LOCAL_LLM_PORT = 8080;
 
 // ---- Step Builders --------------------------------------------------------
 
@@ -392,7 +417,10 @@ function buildModelDownloadStep(modelId: string): InstallStep {
   };
 }
 
-function buildStartServerStep(modelId: string = DEFAULT_LOCAL_LLM_MODEL): InstallStep {
+function buildStartServerStep(
+  modelId: string = DEFAULT_LOCAL_LLM_MODEL,
+  port: number = DEFAULT_LOCAL_LLM_PORT,
+): InstallStep {
   return {
     type: "start-mlx-server",
     description: "Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)",
@@ -402,7 +430,7 @@ function buildStartServerStep(modelId: string = DEFAULT_LOCAL_LLM_MODEL): Instal
     // in the executor (it needs detach + log redirection that argv-only
     // can't express). The argv here is the canonical shape the executor
     // dispatches; adjust there if the executor changes the launch path.
-    command: ["mlx_lm.server", "--model", modelId, "--host", "127.0.0.1", "--port", "8080"],
+    command: ["mlx_lm.server", "--model", modelId, "--host", "127.0.0.1", "--port", String(port)],
   };
 }
 
@@ -481,7 +509,7 @@ function buildInstallSteps(
   if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
   if (!state.model.present) steps.push(buildModelDownloadStep(modelId));
-  if (!state.server.reachable) steps.push(buildStartServerStep(modelId));
+  if (!state.server.reachable) steps.push(buildStartServerStep(modelId, options.port));
   return steps;
 }
 

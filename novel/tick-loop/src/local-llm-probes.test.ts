@@ -316,3 +316,51 @@ describe("buildProductionProbes — expectedPipxPath override (slice 7 H0)", () 
     expect(aider.path).toBe("/usr/local/bin/aider");
   });
 });
+
+// ---- port option (slice 19) ---------------------------------------------
+
+describe("buildProductionProbes — port option (slice 19)", () => {
+  it("reshapes the server probe URL when port is set and url is undefined", async () => {
+    let observedUrl = "";
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      fetchFn: async (url) => {
+        observedUrl = String(url);
+        return { ok: true, status: 200 };
+      },
+      port: 9090,
+    });
+    const server = await probes.probeServer();
+    expect(server.reachable).toBe(true);
+    expect(observedUrl).toBe("http://127.0.0.1:9090/v1/models");
+    expect(server.url).toBe("http://127.0.0.1:9090/v1/models");
+  });
+
+  it("explicit url still wins over port (back-compat)", async () => {
+    let observedUrl = "";
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      fetchFn: async (url) => {
+        observedUrl = String(url);
+        return { ok: true, status: 200 };
+      },
+      url: "http://example.test:7777/v1/models",
+      port: 9090,
+    });
+    await probes.probeServer();
+    expect(observedUrl).toBe("http://example.test:7777/v1/models");
+  });
+
+  it("falls back to default 8080 URL when neither port nor url is set", async () => {
+    let observedUrl = "";
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      fetchFn: async (url) => {
+        observedUrl = String(url);
+        return { ok: true, status: 200 };
+      },
+    });
+    await probes.probeServer();
+    expect(observedUrl).toBe("http://127.0.0.1:8080/v1/models");
+  });
+});

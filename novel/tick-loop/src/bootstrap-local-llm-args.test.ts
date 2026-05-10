@@ -126,4 +126,77 @@ describe("parseBootstrapLocalLlmArgs", () => {
     const args = ["--dry-run", "--no-confirm", "--model=foo/bar", "--other"];
     expect(parseBootstrapLocalLlmArgs(args)).toEqual(parseBootstrapLocalLlmArgs(args));
   });
+
+  // Slice 19 — `--port=<n>` flag.
+
+  it("parses --port=<n> into port (integer)", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=9090"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+      port: 9090,
+    });
+  });
+
+  it("omits port when --port is not passed", () => {
+    expect("port" in parseBootstrapLocalLlmArgs(["--dry-run"])).toBe(false);
+  });
+
+  it("treats --port= (empty value) as unset", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port="])).toEqual({ dryRun: false, noConfirm: false });
+  });
+
+  it("treats non-numeric --port=foo as unset", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=foo"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+    });
+  });
+
+  it("rejects --port=0 (out of valid TCP range)", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=0"])).toEqual({ dryRun: false, noConfirm: false });
+  });
+
+  it("rejects --port=65536 (above valid TCP range)", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=65536"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+    });
+  });
+
+  it("accepts --port=65535 (max valid TCP port)", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=65535"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+      port: 65_535,
+    });
+  });
+
+  it("rejects --port=-1 / signed values", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=-1"])).toEqual({ dryRun: false, noConfirm: false });
+  });
+
+  it("does not match --ports= or --port (no =) prefix variants", () => {
+    expect(parseBootstrapLocalLlmArgs(["--ports=9090"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+    });
+    expect(parseBootstrapLocalLlmArgs(["--port"])).toEqual({ dryRun: false, noConfirm: false });
+  });
+
+  it("last --port=<n> wins when passed multiple times", () => {
+    expect(parseBootstrapLocalLlmArgs(["--port=8080", "--port=9090"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+      port: 9090,
+    });
+  });
+
+  it("composes --port with --model and --dry-run", () => {
+    expect(parseBootstrapLocalLlmArgs(["--dry-run", "--model=acme/tiny", "--port=1234"])).toEqual({
+      dryRun: true,
+      noConfirm: false,
+      modelId: "acme/tiny",
+      port: 1234,
+    });
+  });
 });
