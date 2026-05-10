@@ -13,6 +13,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 10 (operator 2026-05-08 — `start-mlx-server` step needs detached spawn + PID file + readiness wait so the bootstrap pipeline doesn't hang on the long-lived server process) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 11 (operator 2026-05-08 — slice 10 wrote the PID file; `minsky stop-mlx-server` closes the lifecycle so operators can graceful-stop the daemon without `kill $(cat …) && rm …`) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 12 (operator 2026-05-08 — slice 11 added `stop-mlx-server`; the symmetric `minsky start-mlx-server` skips the planner+confirm pipeline when the operator just wants to relaunch the server post-stop / post-reboot) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 13 (operator 2026-05-08 — slice 10's detached `mlx_lm.server` writes to `.minsky/local-llm.log`; `minsky logs mlx-server` tails it through the same UX as `minsky logs <worker-id>`) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -24,6 +25,7 @@
  *   minsky 1                  start-or-attach worker 1
  *   minsky logs               tail worker 0's log (never spawns)
  *   minsky logs 1             tail worker 1's log
+ *   minsky logs mlx-server    tail the detached mlx_lm.server log (.minsky/local-llm.log)
  *   minsky stop               stop worker 0 (SIGTERM the daemon, leave the log)
  *   minsky stop 1             stop worker 1
  *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
@@ -127,6 +129,7 @@ const {
   ensureWorkersDir,
   executeBootstrapPlan,
   buildServerProbe,
+  decideLogsTarget,
   decideStartAction,
   formatTickLoopBinMissingMessage,
   formatWorkersDirRecoveryMessage,
@@ -194,6 +197,7 @@ function printHelp() {
 Usage:
   minsky [<worker-id>]      start-or-attach worker <id> (default 0); Ctrl+C detaches
   minsky logs [<worker-id>] reattach to worker <id>'s log (never spawns)
+  minsky logs mlx-server    tail the detached mlx_lm.server log (.minsky/local-llm.log)
   minsky stop [<worker-id>] stop worker <id> (SIGTERM the daemon)
   minsky doctor             read-only health check of the local-LLM stack
   minsky bootstrap-local-llm  install + start the local-LLM stack (forces the prompt)
@@ -1310,14 +1314,31 @@ async function probeClaude() {
 }
 
 /**
+ * Slice 13: route the operator's first arg through the pure
+ * {@link decideLogsTarget} dispatcher. `mlx-server` / `mlx` →
+ * {@link LOCAL_LLM_LOG_PATH}; everything else → the worker log
+ * (default 0). The "missing log" hint differs by branch so the
+ * recovery instruction is actionable.
+ *
  * @param {readonly string[]} args
  */
 async function runLogs(args) {
-  const { workerId } = parsePositionalAndForward(args);
-  const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
+  const target = decideLogsTarget(args[0]);
+  if (target.kind === "mlx-server") {
+    if (!existsSync(LOCAL_LLM_LOG_PATH)) {
+      process.stderr.write(
+        `minsky: no mlx_lm.server log at ${LOCAL_LLM_LOG_PATH} — run \`minsky start-mlx-server\` (or \`minsky bootstrap-local-llm\` if the stack isn't installed)\n`,
+      );
+      process.exit(1);
+    }
+    process.stderr.write(`minsky: tailing ${LOCAL_LLM_LOG_PATH} (Ctrl+C exits)\n\n`);
+    await tailWithPretty(LOCAL_LLM_LOG_PATH, true);
+    return;
+  }
+  const logPath = resolve(WORKERS_DIR, `${target.workerId}.log`);
   if (!existsSync(logPath)) {
     process.stderr.write(
-      `minsky: no log at ${logPath} — start the worker first with \`minsky ${workerId}\`\n`,
+      `minsky: no log at ${logPath} — start the worker first with \`minsky ${target.workerId}\`\n`,
     );
     process.exit(1);
   }
