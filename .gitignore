@@ -13,6 +13,9 @@ build/
 *.tsbuildinfo
 coverage/
 
+# Transient PR-creation artifact (drafted per-iteration; passed via `gh pr create -F`, never tracked)
+pr-body.md
+
 # Env / secrets
 .env
 .env.local
