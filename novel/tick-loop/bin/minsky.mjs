@@ -16,6 +16,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 13 (operator 2026-05-08 — slice 10's detached `mlx_lm.server` writes to `.minsky/local-llm.log`; `minsky logs mlx-server` tails it through the same UX as `minsky logs <worker-id>`) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 14 (operator 2026-05-08 — slices 11/12/13 closed the start/stop/logs lifecycle; the read-only `minsky status mlx-server` reports running/unhealthy/stale/not-running in one line so scripts can chain on exit code without parsing prose) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 15 (operator 2026-05-08 — slices 11/12 are stop+start; the symmetric `minsky restart-mlx-server` composes them so the operator's "kick the server" path is one command instead of `minsky stop-mlx-server && minsky start-mlx-server`; bundles the start-mlx-server probe-skip optimization mirrored from slice 14's status path — saves ~2 s on every cold-start path) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 16 (operator 2026-05-08 — slice 14's prose output forces monitoring scripts to regex stderr to dispatch on `kind`; `minsky status mlx-server --json` prints the discriminated union as one canonical JSON line so `jq -e '.kind == "running"'` replaces the prose-parse round-trip while preserving the same exit code) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -37,6 +38,7 @@
  *   minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
  *   minsky restart-mlx-server stop-then-start the detached mlx_lm.server (one command)
  *   minsky status mlx-server  one-line read-only summary; exit 0 if running, 1 otherwise
+ *   minsky status mlx-server --json  same exit code; emits one JSON line on stdout for jq pipelines
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -169,6 +171,7 @@ const {
   readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
+  renderMlxServerStatusJson,
   stopLocalLlmServer,
   summarizeMlxServerStatus,
 } = await import("../dist/index.js");
@@ -244,7 +247,7 @@ Usage:
   minsky start-mlx-server   relaunch the detached mlx_lm.server (skips detect+plan+confirm)
   minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
   minsky restart-mlx-server stop-then-start the detached mlx_lm.server (one command)
-  minsky status mlx-server  one-line read-only status; exit 0 iff running
+  minsky status mlx-server [--json]  one-line read-only status; exit 0 iff running (--json emits structured output for jq pipelines)
 
 Examples:
   minsky                          # start-or-attach worker 0
@@ -1065,14 +1068,35 @@ async function dispatchStartAction(action, ctx) {
  * @returns {Promise<number>}
  */
 async function runStatus(args) {
-  const target = args[0];
+  const { target, json } = parseStatusArgs(args);
   if (target === "mlx-server" || target === "mlx") {
-    return await runStatusMlxServer();
+    return await runStatusMlxServer({ json });
   }
   process.stderr.write(
-    "minsky: usage: `minsky status mlx-server` (no other targets supported yet)\n",
+    "minsky: usage: `minsky status mlx-server [--json]` (no other targets supported yet)\n",
   );
   return 1;
+}
+
+/**
+ * Slice 16 — split positional target from the `--json` flag so
+ * `minsky status mlx-server --json` and `minsky status --json mlx-server`
+ * both work. Order-agnostic; `args` is consumed once.
+ *
+ * @param {readonly string[]} args
+ * @returns {{ target: string | undefined; json: boolean }}
+ */
+function parseStatusArgs(args) {
+  let target;
+  let json = false;
+  for (const a of args) {
+    if (a === "--json") {
+      json = true;
+    } else if (target === undefined) {
+      target = a;
+    }
+  }
+  return { target, json };
 }
 
 /**
@@ -1091,7 +1115,7 @@ async function runStatus(args) {
  *
  * @returns {Promise<number>}
  */
-async function runStatusMlxServer() {
+async function runStatusMlxServer(opts = { json: false }) {
   const pidPresent = existsSync(LOCAL_LLM_PID_PATH);
   const parsedPid = pidPresent ? parsePidFromFile(LOCAL_LLM_PID_PATH) : undefined;
   const pidAlive = parsedPid !== undefined && isPidLive(parsedPid);
@@ -1118,6 +1142,10 @@ async function runStatusMlxServer() {
     serverReachable,
     serverUrl: probeUrl,
   });
+  if (opts.json) {
+    process.stdout.write(`${renderMlxServerStatusJson(status)}\n`);
+    return status.kind === "running" ? 0 : 1;
+  }
   return printStatusAndExit(status);
 }
 
