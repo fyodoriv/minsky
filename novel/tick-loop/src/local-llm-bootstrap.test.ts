@@ -137,6 +137,38 @@ describe("planLocalLlmBootstrap — chaos-table row 2: server stopped but stack 
   });
 });
 
+describe("planLocalLlmBootstrap — modelId option (slice 18: --model=<hf-id>)", () => {
+  it("download-model command uses the override modelId when supplied", () => {
+    const plan = planLocalLlmBootstrap(modelMissing, {
+      modelId: "mlx-community/Qwen3-4B-Instruct-4bit",
+    });
+    const download = plan.steps.find((s) => s.type === "download-model");
+    expect(download?.command).toEqual(["hf", "download", "mlx-community/Qwen3-4B-Instruct-4bit"]);
+  });
+
+  it("start-mlx-server command threads the override modelId through --model argv", () => {
+    const plan = planLocalLlmBootstrap(serverStopped, {
+      modelId: "mlx-community/Qwen3-4B-Instruct-4bit",
+    });
+    const start = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(start?.command).toEqual([
+      "mlx_lm.server",
+      "--model",
+      "mlx-community/Qwen3-4B-Instruct-4bit",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "8080",
+    ]);
+  });
+
+  it("falls back to DEFAULT_LOCAL_LLM_MODEL when modelId is omitted", () => {
+    const plan = planLocalLlmBootstrap(modelMissing);
+    const download = plan.steps.find((s) => s.type === "download-model");
+    expect(download?.command).toEqual(["hf", "download", DEFAULT_LOCAL_LLM_MODEL]);
+  });
+});
+
 describe("planLocalLlmBootstrap — dependency order", () => {
   it("always schedules pipx before mlx-lm + aider when pipx is absent", () => {
     const plan = planLocalLlmBootstrap({
