@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 23 (operator 2026-05-10 — round-trip elimination: parallelize `runDoctor`'s independent probes) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -547,15 +548,20 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
 
 async function runDoctor() {
   process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
-  const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
-  const claudeDecision = await probeClaude();
+  // Slice 23: the three startup probes — local-LLM stack detect, claude
+  // health, install-time substrate — share no inputs and no side
+  // effects, so the previous sequential await chain stalled the cheap
+  // probes (~250 ms detect + ~5 ms substrate) behind the slow one
+  // (probeClaude can take 5–20 s on first-token latency). Promise.all
+  // collapses them onto the long-pole's wall-clock. Round-trip
+  // elimination per the optimization-discipline gate.
+  const [detectResult, claudeDecision, substrateState] = await Promise.all([
+    detectForBootstrap(),
+    probeClaude(),
+    probeSubstrate(),
+  ]);
+  const { state, archState, planOpts, pythonPath } = detectResult;
   emitDoctorRows({ state, archState, claudeDecision, pythonPath });
-  // Slice 1 of `minsky-fresh-clone-health-checks`: 4 substrate rows
-  // (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) so
-  // the operator can see the install-time substrate at the same time
-  // as the local-LLM stack. ANY substrate red → daemon literally
-  // cannot run, so banner is RED instead of YELLOW.
-  const substrateState = await probeSubstrate();
   const substrateLines = renderDoctorSubstrateRows(substrateState);
   for (const l of substrateLines) {
     process.stdout.write(`${l}\n`);
