@@ -13,6 +13,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm`/`-y`/`--yes` flag for non-interactive install opt-in) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 18 (operator 2026-05-08 — `--model=<hf-id>` flag overrides pinned default for download + start + cache probe) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 19 (operator 2026-05-08 — `--port=<n>` flag overrides 8080 for start-mlx-server argv + bootstrap-time probe URL) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 20 (operator 2026-05-08 — `--help`/`-h` short-circuits detect+plan; subcommand-specific usage) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -152,6 +153,14 @@ if (first === "--help" || first === "-h" || first === "help") {
   // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
   // block. Anchors the task block's Risk mitigation.
   const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
+  // Slice 20: `--help`/`-h` short-circuits BEFORE any probe / detect /
+  // plan step — skips the multi-second mlx-lm.server HTTP probe + the
+  // pipx/aider/mlx-lm `command -v` shellouts + the HF cache walk. Skip-
+  // earlier-gate (rule #6 — pay the cost only when the answer needs it).
+  if (subArgs.help) {
+    printBootstrapLocalLlmHelp();
+    process.exit(0);
+  }
   if (subArgs.dryRun) {
     await runBootstrapLocalLlmDryRun({ modelId: subArgs.modelId, port: subArgs.port });
     process.exit(0);
@@ -223,6 +232,35 @@ Operator escape hatches (env vars):
   MINSKY_HARD_LIMIT_TTL_MIN=<minutes>   how long to trust persisted hard-limit (default 60)
   MINSKY_NO_AUTO_BOOTSTRAP=1            skip the local-LLM auto-bootstrap pre-flight
   MINSKY_NON_INTERACTIVE=1              auto-confirm the bootstrap install plan
+`);
+}
+
+function printBootstrapLocalLlmHelp() {
+  process.stdout.write(
+    "minsky bootstrap-local-llm — install + start the local-LLM fallback stack\n",
+  );
+  process.stdout.write(`
+Usage:
+  minsky bootstrap-local-llm [flags]
+
+Flags:
+  --dry-run            print the install plan and exit 0 (read-only; non-TTY safe)
+  --no-confirm         install without the [Y/n] prompt (aliases: -y, --yes)
+  --model=<hf-id>      override the pinned default model id for download + start + cache probe
+                       (default: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit)
+  --port=<n>           override the default mlx-lm.server port (default: 8080)
+                       — also set MINSKY_LOCAL_LLM_PROBE_URL=http://127.0.0.1:<n>/v1/models
+                       so the daemon points at the same port
+  --help, -h           print this message and exit 0 (short-circuits detect+plan)
+
+Examples:
+  minsky bootstrap-local-llm                                    # install with the [Y/n] prompt
+  minsky bootstrap-local-llm --dry-run                          # preview the install plan and exit
+  minsky bootstrap-local-llm -y                                 # install without confirmation
+  minsky bootstrap-local-llm --model=mlx-community/Qwen3-4B-Instruct-4bit
+  minsky bootstrap-local-llm --port=9090
+
+See \`minsky --help\` for top-level usage; \`minsky doctor\` for read-only stack health.
 `);
 }
 
