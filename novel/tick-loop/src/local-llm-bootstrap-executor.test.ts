@@ -270,6 +270,45 @@ describe("executeBootstrapPlan — slice 6 stdinMode", () => {
     expect(spawnCalls[1]?.opts?.stdinMode).toBe("ignore");
   });
 
+  it("passes daemonMode=true to spawnFn for start-mlx-server step", async () => {
+    const spawnCalls: Array<{
+      cmd: string;
+      opts?: { stdinMode?: "ignore" | "inherit"; daemonMode?: boolean };
+    }> = [];
+    const captureSpawn: SpawnFn = async (cmd, _args, opts) => {
+      spawnCalls.push({ cmd, ...(opts !== undefined ? { opts } : {}) });
+      return { exitCode: 0 };
+    };
+    const serverPlan: BootstrapPlan = {
+      ready: false,
+      totalEstimatedDurationMs: 90_000,
+      totalEstimatedDownloadMb: 0,
+      steps: [
+        {
+          type: "install-pipx",
+          description: "Install pipx",
+          estimatedDurationMs: 30_000,
+          command: ["brew", "install", "pipx"],
+        },
+        {
+          type: "start-mlx-server",
+          description: "Start mlx_lm.server",
+          estimatedDurationMs: 60_000,
+          command: ["mlx_lm.server", "--model", "x"],
+        },
+      ],
+    };
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    // First step (install-pipx) → daemonMode=false; second (start-mlx-server) → daemonMode=true.
+    expect(spawnCalls[0]?.opts?.daemonMode).toBe(false);
+    expect(spawnCalls[1]?.opts?.daemonMode).toBe(true);
+  });
+
   it("passes stdinMode=ignore for every non-arm-homebrew step (default)", async () => {
     const spawnCalls: Array<{
       opts?: { stdinMode?: "ignore" | "inherit" };

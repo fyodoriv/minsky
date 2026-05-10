@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 10 (operator 2026-05-08 — `start-mlx-server` step needs detached spawn + PID file + readiness wait so the bootstrap pipeline doesn't hang on the long-lived server process) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -113,6 +114,7 @@ const {
   detectLocalLlmStack,
   ensureWorkersDir,
   executeBootstrapPlan,
+  buildServerProbe,
   formatTickLoopBinMissingMessage,
   formatWorkersDirRecoveryMessage,
   needsLocalLlmBootstrap,
@@ -120,6 +122,7 @@ const {
   pickLogPath,
   planLocalLlmBootstrap,
   planRequiresTty,
+  pollUntilReachable,
   preferredPipxPath,
   probePythonWithDefaults,
   readLastHardLimit,
@@ -804,6 +807,21 @@ function shellQuote(s) {
 }
 
 /**
+ * Path of the mlx-lm.server PID file. Slice 10 — written by
+ * {@link spawnAdapter} on daemonMode=true and consulted by future
+ * `minsky` invocations for liveness detection. Lives under MINSKY_HOME
+ * so it follows whichever repo the operator is running against.
+ */
+const LOCAL_LLM_PID_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
+
+/**
+ * Path of the mlx-lm.server background log. The detached daemon's
+ * stdout/stderr is redirected here so the operator can `tail -f` it
+ * post-bootstrap if the server crashes mid-iteration.
+ */
+const LOCAL_LLM_LOG_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.log");
+
+/**
  * Spawn adapter for the bootstrap executor — wraps `child_process.spawn`
  * to return a `{ exitCode, stderrTail }` Promise. Streams stdout/stderr
  * through to the operator's terminal so long installs (model download)
@@ -813,12 +831,21 @@ function shellQuote(s) {
  * inherits the parent's stdin (lets sudo prompt for a password on the
  * operator's terminal). Default "ignore" matches slice-1 behavior.
  *
+ * Slice 10: when `opts.daemonMode === true` (the `start-mlx-server`
+ * step), detach the child + redirect stdio to a log file + write the
+ * PID + poll readiness against the existing server probe URL. Resolves
+ * once the daemon is reachable (success) or with a non-zero exitCode
+ * on readiness timeout (the executor surfaces this as a failed step).
+ *
  * @param {string} command
  * @param {readonly string[]} args
- * @param {{ cwd?: string; env?: NodeJS.ProcessEnv; stdinMode?: "ignore" | "inherit" }} [opts]
+ * @param {{ cwd?: string; env?: NodeJS.ProcessEnv; stdinMode?: "ignore" | "inherit"; daemonMode?: boolean }} [opts]
  * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
  */
 function spawnAdapter(command, args, opts = {}) {
+  if (opts.daemonMode === true) {
+    return spawnDaemonAdapter(command, args, opts);
+  }
   const stdinMode = opts.stdinMode ?? "ignore";
   return new Promise((resolveDone, rejectFail) => {
     const child = spawn(command, args, {
@@ -837,6 +864,75 @@ function spawnAdapter(command, args, opts = {}) {
       resolveDone({ exitCode: code ?? -1, stderrTail });
     });
   });
+}
+
+/**
+ * Slice 10: daemonized spawn for `start-mlx-server`. Spawns detached,
+ * redirects stdio to {@link LOCAL_LLM_LOG_PATH}, writes the PID to
+ * {@link LOCAL_LLM_PID_PATH}, then polls {@link buildServerProbe} until
+ * the daemon answers `GET /v1/models` (or the readiness budget elapses).
+ *
+ * Resolves with `exitCode: 0` once the server is reachable, or
+ * `exitCode: 1` + a `stderrTail` reason on readiness timeout — the
+ * bootstrap executor surfaces the latter as a failed step (the planner's
+ * pivot path: caller falls back to claude-only iteration).
+ *
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @param {{ cwd?: string; env?: NodeJS.ProcessEnv }} opts
+ * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
+ */
+async function spawnDaemonAdapter(command, args, opts) {
+  // The PID file path lives under .minsky/, which `ensureWorkersDir`
+  // already created at startup; an extra mkdir guards against the case
+  // where MINSKY_HOME points somewhere else than the workers dir's
+  // parent (e.g., the operator manually exported a different value).
+  mkdirSync(resolve(MINSKY_HOME, ".minsky"), { recursive: true });
+  // Open the log file in append mode so subsequent server restarts
+  // accumulate rather than truncating prior output. The fd is inherited
+  // by the detached child for stdout + stderr so the parent process can
+  // exit without breaking the child's pipe.
+  const logFd = openSync(LOCAL_LLM_LOG_PATH, "a");
+  const child = spawn(command, args, {
+    cwd: opts.cwd,
+    env: opts.env ?? process.env,
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+  });
+  child.unref();
+  if (child.pid !== undefined) {
+    writeFileSync(LOCAL_LLM_PID_PATH, String(child.pid), "utf8");
+    process.stderr.write(
+      `minsky: mlx_lm.server started detached (PID ${child.pid}, log: ${LOCAL_LLM_LOG_PATH})\n`,
+    );
+  }
+  process.stderr.write(
+    "minsky: waiting for mlx_lm.server to become reachable (model load can take 30–60 s)…\n",
+  );
+  // Reuse the existing server probe — same URL the daemon-side
+  // detection consults, so once this succeeds the bootstrap is by
+  // construction complete. `MINSKY_LOCAL_LLM_PROBE_URL` lets the
+  // operator override the URL for a non-default server port.
+  const probeUrl = process.env["MINSKY_LOCAL_LLM_PROBE_URL"];
+  const probe = buildServerProbe({
+    ...(probeUrl !== undefined && { url: probeUrl }),
+    timeoutMs: 2_000,
+  });
+  const outcome = await pollUntilReachable({
+    probe,
+    intervalMs: 1_000,
+    timeoutMs: 120_000,
+  });
+  if (outcome.ready) {
+    process.stderr.write(
+      `minsky: mlx_lm.server reachable after ${outcome.attempts} probe(s) (~${Math.round(outcome.elapsedMs / 1000)} s)\n`,
+    );
+    return { exitCode: 0 };
+  }
+  return {
+    exitCode: 1,
+    stderrTail: `mlx_lm.server not reachable after ${outcome.attempts} probe(s) over ${Math.round(outcome.elapsedMs / 1000)} s${outcome.lastReason !== undefined ? `; last: ${outcome.lastReason}` : ""}`,
+  };
 }
 
 /**

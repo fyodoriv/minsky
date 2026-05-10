@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 2 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 10 (operator 2026-05-08 — `start-mlx-server` step needs detached spawn + readiness wait so the bootstrap pipeline doesn't hang on the indefinitely-running server) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap-executor` — I/O boundary that
  * dispatches a {@link BootstrapPlan} to subprocess installs. Slice 2 of
@@ -86,6 +87,18 @@ export type SpawnFn = (
     env?: NodeJS.ProcessEnv;
     /** "ignore" (default) or "inherit" to pass the parent's stdin through. */
     stdinMode?: "ignore" | "inherit";
+    /**
+     * Slice 10: `true` for steps that launch a long-lived daemon
+     * (currently only `start-mlx-server`). The adapter is expected to
+     *   - spawn detached + `unref()` so the child outlives the bootstrap call,
+     *   - persist the child PID for subsequent `minsky` invocations,
+     *   - poll a readiness probe and resolve the returned Promise once
+     *     the daemon is reachable (or with a non-zero `exitCode` on
+     *     readiness timeout).
+     * Mutually exclusive with `stdinMode: "inherit"` in practice — daemon
+     * launchers don't read stdin.
+     */
+    daemonMode?: boolean;
   },
 ) => Promise<ExecuteSpawnResult>;
 
@@ -209,9 +222,14 @@ async function runOneStep(
   // non-interactive and keeps the slice-1 "ignore stdin" default.
   const stdinMode: "ignore" | "inherit" =
     step.type === "install-arm-homebrew" ? "inherit" : "ignore";
+  // Slice 10: `start-mlx-server` is a long-lived daemon — it never
+  // exits cleanly on the happy path, so the install-step await-close
+  // pattern would hang forever. Signal the adapter to detach + write
+  // a PID file + poll readiness instead.
+  const daemonMode = step.type === "start-mlx-server";
   let result: ExecuteSpawnResult;
   try {
-    result = await opts.spawnFn(cmd, args, { stdinMode });
+    result = await opts.spawnFn(cmd, args, { stdinMode, daemonMode });
     // rule-6: handled-locally — pre-spawn errors (ENOENT/EACCES) typed as failed step, not loud-crash.
   } catch (err) {
     return {
