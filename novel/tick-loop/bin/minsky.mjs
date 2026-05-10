@@ -11,6 +11,7 @@
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 26 (operator 2026-05-10 — round-trip elimination: server-first probe in `maybeBootstrapLocalLlm`'s dogfood fast-path skips the four `command -v` probes that feed plan generation when only `state.server.reachable` is consumed) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 27 (operator 2026-05-10 — round-trip elimination: extend slice 26's server-first short-circuit into `runBootstrapLocalLlm`'s !force fast-path so the `local-preferred`/persisted-hard-limit/runtime-claude-hardlimit trigger paths skip the 5-probe detect+plan pipeline when the server is already reachable) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -484,13 +485,54 @@ async function runBootstrapLocalLlmDryRun() {
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
-async function runBootstrapLocalLlm({ force }) {
-  const { state, planOpts } = await detectForBootstrap();
-  const plan = planLocalLlmBootstrap(state, planOpts);
-  if (plan.ready && !force) {
-    process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
-    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
-  }
+/**
+ * Slice 27 (skip-earlier gate): server-first short-circuit on the
+ * auto-bootstrap paths. When `force === false` the caller is one of
+ * the auto-trigger paths — `MINSKY_LLM_PROVIDER=local-preferred`,
+ * a persisted hard-limit hit, or a runtime claude-probe hard-limit —
+ * and the only fact we ultimately need to decide "skip bootstrap"
+ * is `serverState.reachable`. The full `detectForBootstrap` runs
+ * arch-detection + 5 stack probes (~6 child processes) only to
+ * discover plan.ready, which is server.reachable AND every other
+ * component present; if the server is reachable end-to-end then by
+ * construction every upstream component is too. Probe the server
+ * alone first; on a hit, return the env overlay without spawning
+ * the heavier detect+plan pipeline. Slice 26 applied the same
+ * optimization in `maybeBootstrapLocalLlm`'s top-level fast-path;
+ * this slice extends it to the three trigger paths that route
+ * directly into `runBootstrapLocalLlm` without first traversing
+ * that fast-path. Force=true (operator ran `minsky
+ * bootstrap-local-llm` explicitly) keeps the full detect+plan so
+ * the confirm summary / doctor flow still works. Round-trip
+ * elimination per the optimization-discipline gate (≥5 saved
+ * child-process spawns per fast-path invocation).
+ *
+ * Extracted into a helper so the parent stays under biome's
+ * cognitive-complexity cap (10).
+ *
+ * @returns {Promise<Record<string, string> | undefined>} env overlay
+ *   when the short-circuit fires; `undefined` to fall through to the
+ *   full detect+plan pipeline.
+ */
+async function maybeShortCircuitOnReachableServer() {
+  const serverState = await buildServerProbe({})();
+  if (!serverState.reachable) return undefined;
+  process.stderr.write(
+    `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback (skipping detect+plan)\n`,
+  );
+  return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+}
+
+/**
+ * Execute a non-empty bootstrap plan with the production confirm
+ * fn + spawn adapter. Extracted from `runBootstrapLocalLlm` so the
+ * parent stays under biome's cognitive-complexity cap after slice 27
+ * added the server-first short-circuit branch.
+ *
+ * @param {import("../dist/local-llm-bootstrap.js").BootstrapPlan} plan
+ * @returns {Promise<Record<string, string>>}
+ */
+async function executePlanWithProductionIo(plan) {
   const isInteractive =
     process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
   // Slice 7 H2: if the plan requires a TTY (install-arm-homebrew's
@@ -516,6 +558,20 @@ async function runBootstrapLocalLlm({ force }) {
     return {};
   }
   return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+}
+
+async function runBootstrapLocalLlm({ force }) {
+  if (!force) {
+    const overlay = await maybeShortCircuitOnReachableServer();
+    if (overlay !== undefined) return overlay;
+  }
+  const { state, planOpts } = await detectForBootstrap();
+  const plan = planLocalLlmBootstrap(state, planOpts);
+  if (plan.ready && !force) {
+    process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
+  return executePlanWithProductionIo(plan);
 }
 
 /**
