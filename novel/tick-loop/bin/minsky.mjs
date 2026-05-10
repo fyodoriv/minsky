@@ -11,6 +11,7 @@
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 10 (operator 2026-05-08 — `start-mlx-server` step needs detached spawn + PID file + readiness wait so the bootstrap pipeline doesn't hang on the long-lived server process) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 11 (operator 2026-05-08 — slice 10 wrote the PID file; `minsky stop-mlx-server` closes the lifecycle so operators can graceful-stop the daemon without `kill $(cat …) && rm …`) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -50,7 +51,15 @@
  */
 
 import { exec, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -128,6 +137,7 @@ const {
   readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
+  stopLocalLlmServer,
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
@@ -162,6 +172,8 @@ if (first === "--help" || first === "-h" || first === "help") {
   if (Object.keys(result).length === 0) {
     process.exit(1);
   }
+} else if (first === "stop-mlx-server") {
+  process.exit(runStopMlxServer());
 } else if (first === "start") {
   // Back-compat: keep `start` as an alias of the no-subcommand form. Any
   // further args are forwarded to bin/tick-loop.mjs at spawn time.
@@ -177,6 +189,9 @@ Usage:
   minsky [<worker-id>]      start-or-attach worker <id> (default 0); Ctrl+C detaches
   minsky logs [<worker-id>] reattach to worker <id>'s log (never spawns)
   minsky stop [<worker-id>] stop worker <id> (SIGTERM the daemon)
+  minsky doctor             read-only health check of the local-LLM stack
+  minsky bootstrap-local-llm  install + start the local-LLM stack (forces the prompt)
+  minsky stop-mlx-server    SIGTERM the detached mlx_lm.server + clear .minsky/local-llm.pid
 
 Examples:
   minsky                          # start-or-attach worker 0
@@ -820,6 +835,64 @@ const LOCAL_LLM_PID_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
  * post-bootstrap if the server crashes mid-iteration.
  */
 const LOCAL_LLM_LOG_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.log");
+
+/**
+ * Slice 11: `minsky stop-mlx-server` — SIGTERM the detached
+ * `mlx_lm.server`, unlink the PID file. Wraps the pure
+ * {@link stopLocalLlmServer} with `node:fs` + `process.kill` adapters.
+ *
+ * Returns a process exit code: 0 on stopped/stale-cleaned/no-pid-file,
+ * 1 on kill-failed/invalid-pid-file (operator gets a non-zero so
+ * scripts can chain `minsky stop-mlx-server && minsky bootstrap-local-llm`
+ * with confidence the previous server is fully gone before reinstall).
+ *
+ * @returns {number}
+ */
+function runStopMlxServer() {
+  const outcome = stopLocalLlmServer({
+    pidPath: LOCAL_LLM_PID_PATH,
+    io: {
+      pidExistsFn: existsSync,
+      readPidFn: (p) => readFileSync(p, "utf8"),
+      killFn: (pid, signal) => {
+        process.kill(pid, signal);
+      },
+      unlinkFn: unlinkSync,
+    },
+  });
+  switch (outcome.kind) {
+    case "stopped":
+      process.stdout.write(`minsky: mlx_lm.server stopped (PID ${outcome.pid})\n`);
+      return 0;
+    case "stale-cleaned":
+      process.stdout.write(
+        `minsky: PID ${outcome.pid} not running — stale ${LOCAL_LLM_PID_PATH} cleaned\n`,
+      );
+      return 0;
+    case "no-pid-file":
+      process.stdout.write(
+        `minsky: no PID file at ${LOCAL_LLM_PID_PATH} — mlx_lm.server not running\n`,
+      );
+      return 0;
+    case "invalid-pid-file":
+      process.stderr.write(
+        `minsky: PID file ${LOCAL_LLM_PID_PATH} unparseable — removed; restart manually if a server is still running\n`,
+      );
+      return 1;
+    case "kill-failed":
+      process.stderr.write(
+        `minsky: kill PID ${outcome.pid} failed (${outcome.reason ?? "unknown"}); PID file left in place\n`,
+      );
+      return 1;
+    default: {
+      // exhaustiveness check
+      /** @type {never} */
+      const _exhaustive = outcome.kind;
+      process.stderr.write(`minsky: unexpected stop outcome ${String(_exhaustive)}\n`);
+      return 1;
+    }
+  }
+}
 
 /**
  * Spawn adapter for the bootstrap executor — wraps `child_process.spawn`
