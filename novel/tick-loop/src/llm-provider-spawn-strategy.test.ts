@@ -516,3 +516,67 @@ describe("LlmProviderSpawnStrategy / SpawnInput passthrough", () => {
     expect(claude).toHaveBeenCalledWith(input);
   });
 });
+
+describe("LlmProviderSpawnStrategy / `daemon-aider-brief-shrinker` localBrief substitution", () => {
+  it("substitutes localBrief as brief when dispatching to local", async () => {
+    const claude = vi.fn().mockResolvedValue(CLEAN_RESULT);
+    const local = vi.fn().mockResolvedValue(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claude },
+      local: { spawn: local },
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("circuit-break-and-notify"),
+      now: () => 1000,
+    });
+    const input = emptyInput({
+      brief: "FULL 7KB BRIEF",
+      localBrief: "SLIM 2KB BRIEF",
+    });
+    await wrapper.spawn(input);
+    expect(local).toHaveBeenCalledTimes(1);
+    expect(claude).not.toHaveBeenCalled();
+    const dispatched = local.mock.calls[0]?.[0] as SpawnInput;
+    expect(dispatched.brief).toBe("SLIM 2KB BRIEF");
+    // localBrief is preserved in the dispatched input — back-compat for
+    // strategies that may want to read it (none today).
+    expect(dispatched.localBrief).toBe("SLIM 2KB BRIEF");
+  });
+
+  it("does NOT substitute on the claude path (full brief preserved)", async () => {
+    const claude = vi.fn().mockResolvedValue(CLEAN_RESULT);
+    const local = vi.fn().mockResolvedValue(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claude },
+      local: { spawn: local },
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("normal"),
+      now: () => 1000,
+    });
+    const input = emptyInput({
+      brief: "FULL 7KB BRIEF",
+      localBrief: "SLIM 2KB BRIEF",
+    });
+    await wrapper.spawn(input);
+    expect(claude).toHaveBeenCalledTimes(1);
+    expect(local).not.toHaveBeenCalled();
+    const dispatched = claude.mock.calls[0]?.[0] as SpawnInput;
+    expect(dispatched.brief).toBe("FULL 7KB BRIEF");
+  });
+
+  it("falls back to the full brief on the local path when localBrief is absent (back-compat)", async () => {
+    const claude = vi.fn().mockResolvedValue(CLEAN_RESULT);
+    const local = vi.fn().mockResolvedValue(CLEAN_RESULT);
+    const wrapper = new LlmProviderSpawnStrategy({
+      claude: { spawn: claude },
+      local: { spawn: local },
+      probe: async () => REACHABLE,
+      budgetGuard: stubBudget("circuit-break-and-notify"),
+      now: () => 1000,
+    });
+    const input = emptyInput({ brief: "FULL ONLY" });
+    await wrapper.spawn(input);
+    expect(local).toHaveBeenCalledTimes(1);
+    const dispatched = local.mock.calls[0]?.[0] as SpawnInput;
+    expect(dispatched.brief).toBe("FULL ONLY");
+  });
+});
