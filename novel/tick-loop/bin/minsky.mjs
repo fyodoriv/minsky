@@ -11,6 +11,7 @@
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 23 (operator 2026-05-10 — round-trip elimination: parallelize `runDoctor`'s independent probes) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 24 (operator 2026-05-10 — skip-earlier gate: honor `MINSKY_LLM_PROVIDER=claude-only` in the bootstrap pre-flight, mirroring slice 5's local-preferred fix) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -313,6 +314,19 @@ async function maybeBootstrapLocalLlm() {
   }
   // Already opted in via env? Don't re-run the bootstrap.
   if (process.env["MINSKY_LOCAL_LLM"] === "1") {
+    return {};
+  }
+
+  // Slice 24 — `MINSKY_LLM_PROVIDER=claude-only` is the operator's
+  // explicit "skip local-LLM probe" signal. The --help text advertises
+  // this behavior but slice 5 only closed the gap for `local-preferred`;
+  // `claude-only` was still falling through to the persisted-hard-limit
+  // read + detectLocalLlmStack (~250 ms-5 s with server timeout) +
+  // probeClaude (~5-20 s). Per the optimization-discipline gate this is
+  // a skip-earlier gate: no I/O, no probes, just inherit the env to the
+  // spawned daemon where `llm-provider-selector` honors it via
+  // `forceClaude`.
+  if (process.env["MINSKY_LLM_PROVIDER"] === "claude-only") {
     return {};
   }
 
