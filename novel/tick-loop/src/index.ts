@@ -774,6 +774,22 @@ export {
   selectPythonPath,
 } from "./local-llm-probes.js";
 
+// Slice 10 of `minsky-cli-auto-bootstrap-local-llm`: pure
+// `pollUntilReachable` helper for the daemonized `start-mlx-server`
+// step. The bootstrap pipeline used to hang indefinitely on the
+// long-lived server process; slice 10 splits that case into detached
+// spawn + PID write + readiness wait.
+export {
+  DEFAULT_POLL_INTERVAL_MS,
+  DEFAULT_POLL_TIMEOUT_MS,
+  type NowFn,
+  type PollOutcome,
+  type PollUntilReachableOpts,
+  type ServerProbeFn,
+  type SleepFn,
+  pollUntilReachable,
+} from "./local-llm-server-launcher.js";
+
 // Real `claude --print` probe — used by `bin/minsky.mjs` to detect
 // "credits exhausted" vs "binary missing" vs "healthy" so the
 // auto-bootstrap pre-flight fires when the operator's machine cannot
