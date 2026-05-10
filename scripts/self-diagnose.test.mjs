@@ -76,13 +76,16 @@ describe("self-diagnose runner", () => {
 
 describe("tokenMonitorNotAllPeggedInvariant", () => {
   it("passes when at least one plan has remaining tokens", async () => {
-    /** @type {(plan: "pro"|"max5"|"max20"|"custom") => Promise<{tokensRemainingInWindow: number, windowSizeTokens: number, secondsUntilWindowReset: number, weeklyHeadroomFraction: number, observedAt: string}>} */
+    /** @type {(plan: "pro"|"max5"|"max20"|"custom") => Promise<{tokensRemainingInWindow: number, windowSizeTokens: number, secondsUntilWindowReset: number, weeklyHeadroomFraction: number, observedAt: string, monthlyHeadroomFraction: number, secondsUntilWeekReset: number, secondsUntilMonthReset: number}>} */
     const snapshotPerPlan = async (plan) => ({
       tokensRemainingInWindow: plan === "max20" ? 100_000 : 0,
       windowSizeTokens: 0,
       secondsUntilWindowReset: 0,
       weeklyHeadroomFraction: 0,
       observedAt: "2026-05-04T12:00:00.000Z",
+      monthlyHeadroomFraction: 1,
+      secondsUntilWeekReset: 604800,
+      secondsUntilMonthReset: 2592000,
     });
     const result = await tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan })();
     expect(result.ok).toBe(true);
@@ -95,6 +98,9 @@ describe("tokenMonitorNotAllPeggedInvariant", () => {
       secondsUntilWindowReset: 0,
       weeklyHeadroomFraction: 0,
       observedAt: "2026-05-04T12:00:00.000Z",
+      monthlyHeadroomFraction: 1,
+      secondsUntilWeekReset: 604800,
+      secondsUntilMonthReset: 2592000,
     });
     const result = await tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan })();
     expect(result.ok).toBe(false);
