@@ -1,3 +1,5 @@
+// <!-- scope: human-approved slice 6 of `claude-usage-aware-strategic-model-router` (P0 task in TASKS.md, parent merged via PR #420; this file is the "ring-buffer trajectory + linear-regression exhaustion predictor" cell of the parent's Details section). -->
+
 /**
  * One ring-buffer entry. Captures enough to reproduce the picker's
  * decision input + the picker's output for trajectory analysis.
