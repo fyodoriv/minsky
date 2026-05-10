@@ -1,6 +1,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path override) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 29 (operator 2026-05-10 — round-trip elimination: `prebuiltServerState` opt skips the redundant `fetch /v1/models` inside `detectLocalLlmStack` when the caller already probed the server) -->
 /**
  * `@minsky/tick-loop/local-llm-probes` — production wiring for the
  * `DetectProbes` seam in `local-llm-bootstrap.ts`. Slice 3 substrate of
@@ -305,12 +306,31 @@ export function buildProductionProbes(opts: {
    * fail at "command not found". See `arch-probe.ts preferredPipxPath`.
    */
   readonly expectedPipxPath?: string;
+  /**
+   * Slice 29: when set, the server probe returns this state directly
+   * instead of issuing a fresh `fetch /v1/models`. The wiring layer
+   * supplies this on the claude-exhaustion bootstrap path, where
+   * `maybeBootstrapLocalLlm` has already probed the server moments
+   * before falling through to `runBootstrapLocalLlm` →
+   * `detectForBootstrap`. Eliminates one HTTP round-trip per
+   * claude-hardlimit cold-start. The shape stays a `() => Promise<…>`
+   * so `detectLocalLlmStack`'s parallel-probe contract is preserved.
+   */
+  readonly prebuiltServerState?: ServerState;
 }): DetectProbes {
   const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
   const probePipx: () => Promise<ComponentState> =
     opts.expectedPipxPath !== undefined
       ? buildExistsProbe(opts.expectedPipxPath, existsSyncFn)
       : buildWhichProbe("pipx", opts.whichFn);
+  const prebuilt = opts.prebuiltServerState;
+  const probeServer: () => Promise<ServerState> =
+    prebuilt !== undefined
+      ? async () => prebuilt
+      : buildServerProbe({
+          ...(opts.url !== undefined ? { url: opts.url } : {}),
+          ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+        });
   return {
     probePipx,
     probeMlxLm: buildWhichProbe("mlx_lm.server", opts.whichFn),
@@ -319,10 +339,7 @@ export function buildProductionProbes(opts: {
       ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
       ...(opts.existsSyncFn !== undefined ? { existsSyncFn: opts.existsSyncFn } : {}),
     }),
-    probeServer: buildServerProbe({
-      ...(opts.url !== undefined ? { url: opts.url } : {}),
-      ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
-    }),
+    probeServer,
   };
 }
 

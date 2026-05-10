@@ -316,3 +316,69 @@ describe("buildProductionProbes — expectedPipxPath override (slice 7 H0)", () 
     expect(aider.path).toBe("/usr/local/bin/aider");
   });
 });
+
+// ---- Slice 29: prebuiltServerState skips fetch -------------------------
+
+describe("buildProductionProbes — prebuiltServerState override (slice 29)", () => {
+  // Slice 26 probes the server before the claude probe; on a hard-limit
+  // verdict we fall through to `runBootstrapLocalLlm` which (slice 27)
+  // re-probes the server, then runs `detectForBootstrap` which (via the
+  // 5-stack `detectLocalLlmStack`) probes the server a THIRD time. The
+  // first probe's verdict is already known; this option threads it
+  // through so the third fetch is skipped. Round-trip elimination per
+  // the optimization-discipline gate.
+
+  it("returns the supplied state without invoking fetchFn", async () => {
+    let fetchInvoked = false;
+    const fetchFn: FetchFn = async () => {
+      fetchInvoked = true;
+      return { ok: true, status: 200 };
+    };
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => true,
+      fetchFn,
+      prebuiltServerState: {
+        reachable: false,
+        url: "http://127.0.0.1:8080/v1/models",
+        reason: "ECONNREFUSED",
+      },
+    });
+    const server = await probes.probeServer();
+    expect(server.reachable).toBe(false);
+    expect(server.reason).toBe("ECONNREFUSED");
+    expect(fetchInvoked).toBe(false);
+  });
+
+  it("falls back to fetchFn when prebuiltServerState is undefined (slice-26 behavior)", async () => {
+    let fetchInvoked = false;
+    const fetchFn: FetchFn = async () => {
+      fetchInvoked = true;
+      return { ok: true, status: 200 };
+    };
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => true,
+      fetchFn,
+    });
+    const server = await probes.probeServer();
+    expect(server.reachable).toBe(true);
+    expect(fetchInvoked).toBe(true);
+  });
+
+  it("preserves a reachable prebuilt state too (symmetry — caller decides)", async () => {
+    // The optimization is direction-agnostic: any prebuilt state is
+    // returned verbatim. The `maybeBootstrapLocalLlm` caller currently
+    // only feeds unreachable states (the reachable branch returns
+    // before reaching `runBootstrapLocalLlm`), but the API contract
+    // is symmetric.
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => true,
+      fetchFn: async () => ({ ok: false, status: 503 }),
+      prebuiltServerState: { reachable: true, url: "http://127.0.0.1:8080/v1/models" },
+    });
+    const server = await probes.probeServer();
+    expect(server.reachable).toBe(true);
+  });
+});
