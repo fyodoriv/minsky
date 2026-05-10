@@ -865,3 +865,17 @@ export {
   readLastHardLimit,
   writeLastHardLimit,
 } from "./claude-exhaustion-state.js";
+
+// Slices 3+4 of `claude-usage-aware-strategic-model-router`:
+// per-machine model catalog + pure strategic picker.
+export {
+  MODEL_CATALOG,
+  type ModelCatalogEntry,
+  validateModelCatalog,
+} from "./model-catalog.js";
+export {
+  type HysteresisState,
+  type PickStrategicModelInput,
+  type PickStrategicModelOutput,
+  pickStrategicModel,
+} from "./strategic-model-router.js";

@@ -123,3 +123,51 @@ describe("BudgetGuard", () => {
     expect(received.length).toBe(before);
   });
 });
+
+describe("BudgetGuard.snapshotRemainingPercents — slice 2 of `claude-usage-aware-strategic-model-router`", () => {
+  it("returns the continuous remaining-fractions triple", async () => {
+    const monitor = new StubTokenMonitor({
+      tokensRemainingInWindow: 750,
+      windowSizeTokens: 1000,
+      weeklyHeadroomFraction: 0.4,
+      monthlyHeadroomFraction: 0.6,
+      observedAt: "2026-05-10T12:00:00Z",
+    });
+    const guard = new BudgetGuard(monitor, () => {});
+    const r = await guard.snapshotRemainingPercents();
+    expect(r.fivehour).toBe(0.75);
+    expect(r.weekly).toBe(0.4);
+    expect(r.monthly).toBe(0.6);
+    expect(r.observedAt).toBe("2026-05-10T12:00:00Z");
+  });
+
+  it("returns 1.0 across all windows on a fresh snapshot", async () => {
+    const monitor = new StubTokenMonitor({
+      tokensRemainingInWindow: 1000,
+      windowSizeTokens: 1000,
+      weeklyHeadroomFraction: 1,
+      monthlyHeadroomFraction: 1,
+    });
+    const guard = new BudgetGuard(monitor, () => {});
+    const r = await guard.snapshotRemainingPercents();
+    expect(r.fivehour).toBe(1);
+    expect(r.weekly).toBe(1);
+    expect(r.monthly).toBe(1);
+  });
+
+  it("does not interfere with tick() (both can be called)", async () => {
+    const monitor = new StubTokenMonitor({
+      tokensRemainingInWindow: 500,
+      windowSizeTokens: 1000,
+      weeklyHeadroomFraction: 0.5,
+      monthlyHeadroomFraction: 0.5,
+    });
+    const decisions: BudgetDecision[] = [];
+    const guard = new BudgetGuard(monitor, (d) => decisions.push(d));
+    const r = await guard.snapshotRemainingPercents();
+    const decision = await guard.tick();
+    expect(r.fivehour).toBe(0.5);
+    expect(decision.action).toBe("normal");
+    expect(decisions.length).toBe(1);
+  });
+});
