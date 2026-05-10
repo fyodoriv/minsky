@@ -814,6 +814,13 @@ export {
   decideStartAction,
 } from "./local-llm-server-start-decision.js";
 
+// Slice 13 of `minsky-cli-auto-bootstrap-local-llm`: pure
+// `decideLogsTarget` dispatcher. `minsky logs mlx-server` (or `mlx`)
+// tails the detached `mlx_lm.server` log slice 10 writes to
+// `.minsky/local-llm.log`; everything else routes to the worker log
+// (default worker 0) the same way pre-slice-13 `minsky logs` did.
+export { type LogsTarget, type LogsTargetKind, decideLogsTarget } from "./logs-target-decision.js";
+
 // Real `claude --print` probe — used by `bin/minsky.mjs` to detect
 // "credits exhausted" vs "binary missing" vs "healthy" so the
 // auto-bootstrap pre-flight fires when the operator's machine cannot
