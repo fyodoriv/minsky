@@ -368,6 +368,20 @@ const switchbackProbeEvery = (() => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 })();
 const aiderBin = process.env.MINSKY_LOCAL_LLM_AIDER_BIN ?? "aider";
+// `daemon-local-ratio-knob`: soft running-fraction target for the share
+// of iterations that route to local (vs claude) when both providers are
+// usable. Parses `MINSKY_LOCAL_RATIO=0.95` (≈ 5 % claude / 95 % local);
+// invalid / out-of-range values are ignored (no override applied).
+// Hard rules (forceClaude / circuit-break / hard-limit / unreachable)
+// always win over the ratio.
+const localRatio = (() => {
+  const raw = process.env.MINSKY_LOCAL_RATIO;
+  if (raw === undefined) return undefined;
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed)) return undefined;
+  if (parsed < 0 || parsed > 1) return undefined;
+  return parsed;
+})();
 
 /**
  * Probe the local mlx-lm.server. Reuses the same logic as
@@ -400,11 +414,8 @@ async function probeLocalLlm() {
   }
 }
 
-const spawnStrategy = (() => {
-  // Build the underlying claude strategy. In dry-run mode it's a
-  // `DryRunSpawnStrategy` (synthetic — no subprocess); in production
-  // it's `ProcessSpawnStrategy` over `claude --print`.
-  const claudeStrat = dryRun
+function buildClaudeStrategy() {
+  return dryRun
     ? new DryRunSpawnStrategy()
     : new ProcessSpawnStrategy({
         command: "claude",
@@ -417,12 +428,10 @@ const spawnStrategy = (() => {
               : {}),
           }),
       });
-  if (!localLlmEnabled) return claudeStrat;
-  // Local-LLM fallback wired. Build the aider strategy (also dry-run-
-  // aware so the chaos test in slice 6 can exercise the dispatch path
-  // without spawning real aider subprocesses) and wrap both in
-  // `LlmProviderSpawnStrategy`.
-  const localStrat = dryRun
+}
+
+function buildLocalStrategy() {
+  return dryRun
     ? new DryRunSpawnStrategy()
     : new ProcessSpawnStrategy({
         command: aiderBin,
@@ -433,8 +442,14 @@ const spawnStrategy = (() => {
             command: aiderBin,
           }),
       });
+}
+
+const spawnStrategy = (() => {
+  const claudeStrat = buildClaudeStrategy();
+  if (!localLlmEnabled) return claudeStrat;
+  const localStrat = buildLocalStrategy();
   process.stdout.write(
-    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${dryRun ? ", dry-run" : ""})\n`,
+    `[tick-loop] local-llm fallback wired (probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${dryRun ? ", dry-run" : ""})\n`,
   );
   return new LlmProviderSpawnStrategy({
     claude: claudeStrat,
@@ -448,6 +463,7 @@ const spawnStrategy = (() => {
     ...(switchbackProbeEvery === undefined ? {} : { switchbackProbeEvery }),
     forceClaude,
     preferLocal,
+    ...(localRatio === undefined ? {} : { localRatio }),
     emit: (event) => {
       // Forward the dispatch span to OTEL when wired; always also write
       // to stdout for the operator's `tail` view.
