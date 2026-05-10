@@ -73,6 +73,8 @@ describe("llm-invocation / buildAiderInvocation", () => {
       "--yes",
       "--no-show-model-warnings",
       "--no-auto-commits",
+      "--map-tokens",
+      "0",
       "--message",
       "do work",
     ]);
@@ -81,6 +83,23 @@ describe("llm-invocation / buildAiderInvocation", () => {
   it("--no-auto-commits is hard-wired (daemon controls commits via the brief)", () => {
     const inv = buildAiderInvocation({ brief: "h" });
     expect(inv.argv).toContain("--no-auto-commits");
+  });
+
+  it("--map-tokens 0 disables aider's repo-map auto-load (slim-brief invariant)", () => {
+    const inv = buildAiderInvocation({ brief: "h" });
+    const idx = inv.argv.indexOf("--map-tokens");
+    expect(idx).toBeGreaterThan(-1);
+    expect(inv.argv[idx + 1]).toBe("0");
+  });
+
+  it("operator can override --map-tokens via extraArgs (later flag wins per aider's argparse)", () => {
+    const inv = buildAiderInvocation({
+      brief: "h",
+      extraArgs: ["--map-tokens", "1024"],
+    });
+    // Both pairs present; last one wins per aider's argparse.
+    const all = inv.argv.filter((x) => x === "--map-tokens");
+    expect(all.length).toBe(2);
   });
 
   it("--message is the LAST argv element so brief is easy to read in ps", () => {
