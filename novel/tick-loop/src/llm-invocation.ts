@@ -202,6 +202,14 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
   const model = opts.model ?? DEFAULT_AIDER_MODEL;
   const apiBase = opts.openaiApiBase ?? DEFAULT_AIDER_OPENAI_API_BASE;
   const apiKey = opts.openaiApiKey ?? DEFAULT_AIDER_OPENAI_API_KEY;
+  // Real-fire 2026-05-10: 3-worker local-only spawn each sent 40-70k
+  // input tokens to mlx_lm.server (slim brief is ≤2KB; the rest is
+  // aider's repo-map auto-load — `--map-tokens 1024` default ramps with
+  // file count). Each request returned an empty response (server hit a
+  // resource limit under concurrent load). Disabling the repo-map by
+  // default cuts the input tokens from 40-70k → ≤5k for the slim
+  // brief's referenced files. Operators who want the repo-map back
+  // override via `extraArgs: ["--map-tokens", "1024"]`.
   const argv: readonly string[] = Object.freeze([
     "--model",
     model,
@@ -212,6 +220,8 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
     "--yes",
     "--no-show-model-warnings",
     "--no-auto-commits",
+    "--map-tokens",
+    "0",
     ...(opts.extraArgs ?? []),
     "--message",
     opts.brief,
