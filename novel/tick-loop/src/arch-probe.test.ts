@@ -28,6 +28,7 @@ import {
   preferredBrewPath,
   preferredPipxPath,
   preferredPythonPath,
+  shouldSkipArchProbe,
 } from "./arch-probe.js";
 
 // ---- Fixtures -------------------------------------------------------------
@@ -504,5 +505,42 @@ describe("detectArchState — referential transparency", () => {
     const result = await detectArchState(probes);
     expect(latchResolved).toBe(true);
     expect(result.hardwareArch).toBe("arm64");
+  });
+});
+
+// ---- Slice 9 — MINSKY_ARCH_PROBE=skip env hatch ---------------------------
+
+describe("shouldSkipArchProbe — env hatch (slice 9)", () => {
+  it("returns true when env is exactly 'skip' (the documented contract)", () => {
+    expect(shouldSkipArchProbe("skip")).toBe(true);
+  });
+
+  it("returns false when env is undefined (default — slice 6/7/8 path unchanged)", () => {
+    expect(shouldSkipArchProbe(undefined)).toBe(false);
+  });
+
+  it("returns false when env is empty string (unset-but-defined sentinel)", () => {
+    expect(shouldSkipArchProbe("")).toBe(false);
+  });
+
+  it("returns false for unrelated values ('1', 'true', 'yes')", () => {
+    expect(shouldSkipArchProbe("1")).toBe(false);
+    expect(shouldSkipArchProbe("true")).toBe(false);
+    expect(shouldSkipArchProbe("yes")).toBe(false);
+  });
+
+  it("returns false for capitalized 'Skip' / 'SKIP' (strict-equality)", () => {
+    // Strict-equality contract — operator must type the documented value
+    // verbatim. Symmetric with slice 8's bootstrapTtyGate `=1` strict
+    // check; widens only via a deliberate code change + test update.
+    expect(shouldSkipArchProbe("Skip")).toBe(false);
+    expect(shouldSkipArchProbe("SKIP")).toBe(false);
+  });
+
+  it("returns false when whitespace surrounds the value", () => {
+    // No trim — the env-var contract is exact. Leading/trailing
+    // whitespace usually means a shell-script bug; we don't hide it.
+    expect(shouldSkipArchProbe(" skip")).toBe(false);
+    expect(shouldSkipArchProbe("skip ")).toBe(false);
   });
 });

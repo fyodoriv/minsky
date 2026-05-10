@@ -806,6 +806,7 @@ export {
   preferredBrewPath,
   preferredPipxPath,
   preferredPythonPath,
+  shouldSkipArchProbe,
 } from "./arch-probe.js";
 
 // Slice 1 of `minsky-fresh-clone-health-checks`: pure pre-flight

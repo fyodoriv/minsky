@@ -125,6 +125,7 @@ const {
   readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
+  shouldSkipArchProbe,
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
@@ -200,6 +201,7 @@ Operator escape hatches (env vars):
   MINSKY_HARD_LIMIT_TTL_MIN=<minutes>   how long to trust persisted hard-limit (default 60)
   MINSKY_NO_AUTO_BOOTSTRAP=1            skip the local-LLM auto-bootstrap pre-flight
   MINSKY_NON_INTERACTIVE=1              auto-confirm the bootstrap install plan
+  MINSKY_ARCH_PROBE=skip                skip the arch probe (sysctl/brew detection); planner falls back to bare commands
 `);
 }
 
@@ -418,18 +420,26 @@ function readPersistedHardLimit() {
  * `preferredPipxPath` into the pipx probe so Intel-brew pipx doesn't
  * mask the need for a fresh arm-brew pipx install.
  *
- * @returns {Promise<{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, planOpts: import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions, pythonPath: string | undefined }>}
+ * Slice 9 — when `MINSKY_ARCH_PROBE=skip` is set, skip `detectArchState`
+ * entirely (saves the ~200 ms sysctl shell-out round-trip) and pass
+ * `archState: undefined` to the planner, which falls back to slice-5's
+ * bare-name commands. The doctor renders a yellow `⚠ arch  skipped` row
+ * instead of the probe-derived one.
+ *
+ * @returns {Promise<{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState | undefined, planOpts: import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions, pythonPath: string | undefined }>}
  */
 async function detectForBootstrap() {
-  const archState = await detectArchState(buildArchProbes());
-  const expectedPipxPath = preferredPipxPath(archState);
+  const archSkipped = shouldSkipArchProbe(process.env["MINSKY_ARCH_PROBE"]);
+  const archState = archSkipped ? undefined : await detectArchState(buildArchProbes());
+  const expectedPipxPath = archState !== undefined ? preferredPipxPath(archState) : undefined;
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
   const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
-  const planOpts = { archState };
+  const planOpts = {};
+  if (archState !== undefined) planOpts.archState = archState;
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
   return { state, archState, planOpts, pythonPath };
 }
@@ -516,7 +526,10 @@ async function runBootstrapLocalLlm({ force }) {
  * Emit the 8 doctor status rows. Extracted so `runDoctor` stays under
  * biome's cognitive-complexity cap.
  *
- * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined }} args
+ * Slice 9: `archState === undefined` is the `MINSKY_ARCH_PROBE=skip`
+ * signal — render a yellow ⚠ row instead of probing-derived ✓/✗.
+ *
+ * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState | undefined, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined }} args
  */
 function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   /** @param {string} label @param {boolean} ok @param {string} [detail] */
@@ -540,6 +553,15 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
     pythonPath !== undefined,
     pythonPath ?? "no 3.12/3.13 found — will use pipx default (may fail on 3.14+)",
   );
+  if (archState === undefined) {
+    // Slice 9 — operator opted out of the arch probe; no detection done.
+    // Yellow ⚠, not red ✗: bootstrap still works, falling back to bare
+    // brew/pipx/python on PATH (slice-5 behavior).
+    process.stdout.write(
+      "  ⚠ arch  skipped (MINSKY_ARCH_PROBE=skip) — planner falls back to bare commands on PATH\n",
+    );
+    return;
+  }
   // Row is GREEN when planner won't need arm-homebrew install.
   // Rosetta-with-brew still GREEN — absolute paths sidestep the mismatch.
   line("arch", !archState.needsNativeBrew, describeArchState(archState));

@@ -1,5 +1,6 @@
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — preferredPythonPath for arch-consistent aider install) -->
+// <!-- scope: human-approved minsky-cli-arch-detection slice 9 (operator 2026-05-08 — MINSKY_ARCH_PROBE=skip env hatch promoted from "(future)" to first-class) -->
 /**
  * `@minsky/tick-loop/arch-probe` — pure architecture detection for the
  * local-LLM bootstrap. Slice 6 of P0 task `minsky-cli-arch-detection`
@@ -32,8 +33,12 @@
  * record for every legitimate input, never mutates host state, and
  * completes in ≤2 s wall-clock (dominated by the sysctl shell-out).
  * Blast radius: a single bootstrap attempt's arch check. Operator escape
- * hatch: `MINSKY_NO_AUTO_BOOTSTRAP=1` disables the pre-flight entirely;
- * `MINSKY_ARCH_PROBE=skip` (future) would skip just this module.
+ * hatches: `MINSKY_NO_AUTO_BOOTSTRAP=1` disables the pre-flight entirely;
+ * `MINSKY_ARCH_PROBE=skip` (slice 9) skips just this module — caller
+ * passes `archState: undefined` to the planner, falling back to slice-5
+ * bare-name commands. Use case: operator on a host where sysctl
+ * misbehaves, or a CI/dogfood loop where arch is known-good and the
+ * ~200 ms sysctl round-trip is wasted.
  *
  * | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
  * |---|---|---|---|---|
@@ -96,6 +101,41 @@ export interface ArchState {
    * `install-arm-homebrew` when this is `true`.
    */
   readonly needsNativeBrew: boolean;
+}
+
+// ---- Env hatch ------------------------------------------------------------
+
+/**
+ * Slice 9 — operator escape hatch promoted from the "future" line in this
+ * module's JSDoc to a first-class env-driven gate. Returns `true` iff the
+ * caller should skip `detectArchState` entirely AND pass `archState:
+ * undefined` to `planLocalLlmBootstrap`, restoring the slice-5 bare-name
+ * command behavior (no `install-arm-homebrew` step, no absolute brew /
+ * pipx / python paths).
+ *
+ * Strict equality with `"skip"` — symmetric with slice 8's
+ * `bootstrapTtyGate` strict-equality choice on `=1`. Other truthy
+ * spellings (`=true`, `=yes`, `=1`, `=Skip` capitalized) are rejected
+ * so the env-var contract reads exactly one way; a future widening
+ * needs a deliberate test rather than tolerating accidental typos.
+ *
+ * Use cases (from arch-probe.ts module JSDoc):
+ *   1. Operator on a host where `sysctl` misbehaves — they've already
+ *      configured everything correctly and want to skip the probe.
+ *   2. CI/dogfood loops where arch is known-good and the ~200 ms
+ *      sysctl round-trip is wasted on every cold start.
+ *   3. Future macOS where `sysctl -n hw.optional.arm64` is renamed —
+ *      operator can disable until minsky is patched.
+ *
+ * Pure function; same input → same output. Pattern conformance:
+ * Pre-condition gate per Meyer 1992 (Eiffel-style `require`); env-var
+ * shape mirrors the existing `MINSKY_NO_AUTO_BOOTSTRAP=1` /
+ * `MINSKY_NON_INTERACTIVE=1` / `MINSKY_ASSUME_TTY=1` family.
+ *
+ * @otel-exempt pure predicate — no span.
+ */
+export function shouldSkipArchProbe(env: string | undefined): boolean {
+  return env === "skip";
 }
 
 // ---- Probes ---------------------------------------------------------------
