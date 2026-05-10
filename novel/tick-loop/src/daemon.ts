@@ -1080,6 +1080,12 @@ async function runStrategyIteration(args: {
   const stratResult = await opts.spawnStrategy.spawn({
     taskId,
     brief: buildDaemonBrief({ taskId, tasksMdContent }),
+    // `daemon-aider-brief-shrinker`: the slim brief used by
+    // `LlmProviderSpawnStrategy` when the iteration routes to local.
+    // ≤2 KB so prompt processing on aider+Qwen3-class models finishes
+    // inside the 30-min watchdog. Built unconditionally; the wrapper
+    // ignores it on the claude path.
+    localBrief: buildLocalBrief({ taskId, tasksMdContent }),
     env: process.env,
     extraArgs,
   });
@@ -1273,6 +1279,82 @@ export function buildDaemonBrief(args: {
       "(task block not found in TASKS.md — task may have been closed; if so, exit without writing files)",
     "",
   ].join("\n");
+}
+
+/**
+ * Build a slim brief for the local-LLM (aider+Qwen) path.
+ *
+ * Why a separate brief: stock `buildDaemonBrief` is 7-10 KB and aider
+ * auto-loads every file referenced in the task block. On a 32B-class
+ * model running ~14 tok/s steady-state, prompt processing alone takes
+ * 14-18 min and trips the 30-min watchdog before aider produces an
+ * edit (live-fire 2026-05-07 against `daemon-claude-print-hang-watchdog`
+ * — task `daemon-aider-brief-shrinker`). The slim brief drops everything
+ * that doesn't change aider's edit decision: priority-discipline gate
+ * (the daemon already picked the task), optimization-discipline gate
+ * (operator directive doesn't apply to survival mode), pre-PR lint
+ * stack (aider commits locally and the supervisor opens PRs), PR
+ * self-grade and security-review templates (same reason), anti-noop
+ * guard (aider's edit loop already implies "make a change"). Keeps:
+ * task ID, tagline, Hypothesis, Details, Files.
+ *
+ * Target: ≤2 KB regardless of task block size (Hypothesis/Details/Files
+ * cells are individually unbounded; the cap is enforced by truncating
+ * each cell's value at 600 chars with a `…` ellipsis).
+ *
+ * @otel-exempt pure brief builder; instrumentation lives at the
+ *   spawn-strategy dispatch span.
+ */
+export function buildLocalBrief(args: {
+  readonly taskId: string;
+  readonly tasksMdContent: string;
+}): string {
+  const block = extractTaskBlock(args.tasksMdContent, args.taskId);
+  if (block === undefined) {
+    return `Task \`${args.taskId}\` not found in TASKS.md — exit without writing files.`;
+  }
+  const tagline = extractTaskTagline(block);
+  const hypothesis = extractSlimField(block, "Hypothesis");
+  const details = extractSlimField(block, "Details");
+  const files = extractSlimField(block, "Files");
+  const lines: string[] = [
+    `# Task: \`${args.taskId}\``,
+    "",
+    "Edit code to ship the smallest meaningful next iteration. Commit locally; the supervisor opens the PR.",
+  ];
+  if (tagline !== undefined) {
+    lines.push("", tagline);
+  }
+  if (hypothesis !== undefined) {
+    lines.push("", "## Hypothesis", hypothesis);
+  }
+  if (details !== undefined) {
+    lines.push("", "## Details", details);
+  }
+  if (files !== undefined) {
+    lines.push("", "## Files", files);
+  }
+  return lines.join("\n");
+}
+
+const SLIM_FIELD_VALUE_CAP = 600;
+
+function extractTaskTagline(block: string): string | undefined {
+  const m = block.match(/^- \[ \] `[^`]+`\s+—\s+(.+)$/m);
+  if (m === null) return undefined;
+  const cap = m[1];
+  return cap === undefined ? undefined : cap.trim();
+}
+
+function extractSlimField(block: string, field: string): string | undefined {
+  const re = new RegExp(`\\*\\*${field}\\*\\*:\\s*([\\s\\S]*?)(?=\\n\\s*-\\s+\\*\\*[A-Z]|$)`);
+  const m = block.match(re);
+  if (m === null) return undefined;
+  const cap = m[1];
+  if (cap === undefined) return undefined;
+  const raw = cap.trim();
+  if (raw.length === 0) return undefined;
+  return raw.length > SLIM_FIELD_VALUE_CAP ? `${raw.slice(0, SLIM_FIELD_VALUE_CAP)}…` : raw;
 }
 
 /**
