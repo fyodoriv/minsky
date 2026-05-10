@@ -9,6 +9,7 @@
 // <!-- scope: human-approved minsky-runtime-resilience slice 2 (operator 2026-05-08 — slice 2 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -24,6 +25,7 @@
  *   minsky stop 1             stop worker 1
  *   minsky doctor             read-only state check (claude / local-LLM stack); prints + exits
  *   minsky bootstrap-local-llm  explicitly run the local-LLM install plan (force the prompt)
+ *   minsky bootstrap-local-llm --dry-run  print the install plan and exit 0 (read-only; non-TTY safe)
  *
  * Behaviour of `minsky [<id>]` (no subcommand or just an ID):
  *   1. If `.minsky/workers/<id>.pid` exists AND the PID is live → ATTACH:
@@ -114,6 +116,7 @@ const {
   formatTickLoopBinMissingMessage,
   formatWorkersDirRecoveryMessage,
   needsLocalLlmBootstrap,
+  parseBootstrapLocalLlmArgs,
   pickLogPath,
   planLocalLlmBootstrap,
   planRequiresTty,
@@ -138,6 +141,15 @@ if (first === "--help" || first === "-h" || first === "help") {
 } else if (first === "doctor") {
   await runDoctor();
 } else if (first === "bootstrap-local-llm") {
+  // Slice 9: `--dry-run` short-circuits before any install attempt.
+  // Pure detect + plan → render summary → exit 0. Read-only; safe in
+  // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
+  // block. Anchors the task block's Risk mitigation.
+  const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
+  if (subArgs.dryRun) {
+    await runBootstrapLocalLlmDryRun();
+    process.exit(0);
+  }
   const result = await runBootstrapLocalLlm({ force: true });
   // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
   // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
@@ -164,10 +176,11 @@ Usage:
   minsky stop [<worker-id>] stop worker <id> (SIGTERM the daemon)
 
 Examples:
-  minsky                      # start-or-attach worker 0
-  minsky 1                    # start-or-attach worker 1 (in another terminal)
-  minsky logs                 # follow worker 0's log live
-  minsky stop 1               # stop worker 1
+  minsky                          # start-or-attach worker 0
+  minsky 1                        # start-or-attach worker 1 (in another terminal)
+  minsky logs                     # follow worker 0's log live
+  minsky stop 1                   # stop worker 1
+  minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -440,6 +453,25 @@ function emitNonTtyRefuseMessage() {
     '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n',
   );
   process.stderr.write("minsky: then rerun `minsky bootstrap-local-llm`\n");
+}
+
+/**
+ * Slice 9: read-only "preview" path for `minsky bootstrap-local-llm
+ * --dry-run`. Runs the same detect + plan as `runBootstrapLocalLlm`,
+ * prints the operator-facing confirm summary to stdout, and returns.
+ * Exits the caller path with code 0 — never spawns an installer, never
+ * needs a TTY, never writes any state.
+ *
+ * Anchors the task block's Risk mitigation (operator 2026-05-08 —
+ * "`--dry-run` flag prints the plan without executing"). Composes with
+ * `minsky doctor` (which mixes substrate + git rows in alongside the
+ * plan); this path is the focused plan-only preview.
+ */
+async function runBootstrapLocalLlmDryRun() {
+  const { state, planOpts } = await detectForBootstrap();
+  const plan = planLocalLlmBootstrap(state, planOpts);
+  process.stdout.write(`${renderConfirmSummary(plan)}\n`);
+  process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
 async function runBootstrapLocalLlm({ force }) {
