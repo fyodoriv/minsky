@@ -159,12 +159,14 @@ function defaultRefTimestamp(ref) {
  */
 
 /**
- * CI aggregator (`.github/workflows/ci.yml` § `ci:` `needs:`) jobs that the
- * manifest intentionally omits because they require GitHub-runner-only or
- * PR-context plumbing the daemon doesn't have. Each entry needs a one-line
- * reason — silent additions hide drift. Lifted to the canonical module (slice
- * 17/N) so the docs' env-dependent allowlist enumeration in
- * `docs/daemon-pre-pr-gate.md` and the CI-parity test in
+ * CI jobs that the manifest intentionally omits because they require
+ * GitHub-runner-only context, PR-context plumbing, or workspace mutation the
+ * daemon's worktree cannot safely provide. Covers jobs from `ci.yml`'s `ci:`
+ * `needs:` aggregator AND standalone workflow gates (separate `.yml` files)
+ * that perform workspace mutation (e.g., destroying `dist/`). Each entry
+ * needs a one-line reason — silent additions hide drift. Lifted to the
+ * canonical module (slice 17/N) so the docs' env-dependent allowlist
+ * enumeration in `docs/daemon-pre-pr-gate.md` and the CI-parity test in
  * `scripts/run-pre-pr-lint-stack.test.mjs` both pin against this single
  * source of truth — same shape as the manifest itself (rule #2).
  *
@@ -172,6 +174,10 @@ function defaultRefTimestamp(ref) {
  */
 export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
   new Map([
+    [
+      "fresh-clone-smoke",
+      "separate workflow (fresh-clone.yml) — destroys novel/tick-loop/dist/; workspace mutation not safe in a daemon worktree",
+    ],
     ["hygiene", "pnpm audit — needs network + advisory DB"],
     ["linux-supervisor-integration", "systemd user bus"],
     ["macos-supervisor-integration", "launchd user agent"],
