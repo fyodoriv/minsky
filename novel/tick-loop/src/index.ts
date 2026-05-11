@@ -751,6 +751,8 @@ export {
   type InstallStep,
   type LocalLlmStackState,
   type ServerState,
+  type TtyMode,
+  decideTtyMode,
   detectLocalLlmStack,
   planLocalLlmBootstrap,
   planRequiresTty,
