@@ -41,3 +41,30 @@ The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: th
 ### Day's narrative
 
 **The day the dogfood loop started compounding.** Morning was infrastructure: secret-scanning task block, P0 daemon-self-improvement filings (#170), the cap raise (#171) that ended a 22-hour budget-paused stall by trusting Anthropic's 429 instead of our heuristic threshold. The afternoon's structural unblock was #174 — the daemon's brief was a placeholder string (`"daemon brief for ${taskId}"`) that had trained claude to default to TASKS.md prose updates. Replacing it with a real task-block-embedded brief plus a FORBIDDEN-noop directive flipped the loop: the very next iteration after the merge shipped #175 (266 LoC of substantive implementation), then #176 (333 LoC wire-in). Two daemon-authored PRs in 30 minutes, ~600 LoC total, no operator pre-spec. The first time this session the daemon picked its own next sub-step and implemented it autonomously.
+
+## 2026-05-11
+
+### What shipped
+
+- **#454** — `feat(self-diagnose): local-server-concurrency-mismatch invariant + gate chaos rows` _(+160/-0)_
+  > Startup invariant that fires when MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 but the backend probe body lacks vLLM/sglang concurrency hints — catches the one bypass path that #453's gate can't enforce.
+- **#453** — `feat(local-llm): LocalLlmConcurrencyGate serializes spawns across workers` _(+523/-1)_
+  > O_EXCL file-lock decorator around the local SpawnStrategy; default cap=1 matches mlx_lm.server's single-inference limit. Live-fire: 3-worker spawn completes with server stable (post-PR) vs. GPU-OOM crash at first concurrent decode (pre-PR).
+- **#452** — `fix(minsky-cli): MINSKY_ASSUME_TTY=1 escape hatch + non-interactive regression fix` _(+132/-5)_
+  > Splits the conflated TTY boolean into hasTtyForSudo + isInteractive. Adds MINSKY_ASSUME_TTY=1 for tmux-detach/passwordless-sudoers contexts; fixes regression where MINSKY_NON_INTERACTIVE=1 in a real TTY tripped the refuse path.
+- **#451** — `fix(aider): default-off reflection paths + diff edit format` _(+74/-1)_
+  > Hard-wires --no-auto-lint/--no-auto-test/--no-suggest-shell-commands/--no-detect-urls and --edit-format diff. Cuts per-iteration input from 40-70k tokens (multi-round v3) to 14k (single-round v4b).
+- **#446** — `fix(daemon): drop Files cell from buildLocalBrief` _(+27/-13)_
+  > Removes the **Files**: cell that aider's --yes auto-expanded into 8-12 chat-context additions per task. Hypothesis/Details still surface 1-3 file paths inline — the right working-set size for one iteration.
+
+### Metrics
+
+- **open_prs**: 39 → 34 _(Δ -5, **improved**)_
+- **open_issues**: 0 → 0 _(Δ 0, **unchanged**)_
+- **aider_input_tokens_per_iteration**: 55000 → 14000 _(Δ -41000, **improved**)_
+- **local_llm_oom_events_per_3worker_run**: 1 → 0 _(Δ -1, **improved**)_
+- **aider_rounds_per_iteration**: 2 → 1 _(Δ -1, **improved**)_
+
+### Day's narrative
+
+Three PRs compose into today's headline: 3-worker local-only spawn goes from "GPU-OOM crashes every time" to "all three workers complete." #453 installs a cross-process O_EXCL file-lock that serializes concurrent aider invocations at the client side, keeping mlx_lm.server's single in-flight slot from overflowing; #451 kills aider's four reflection paths (auto-lint, auto-test, shell-suggest, URL-detect) and pins diff edit format, collapsing per-iteration input from 40-70k to 14k tokens in a single round; #446 drops the **Files** cell that aider's --yes flag auto-expanded into 8-12 context additions per task. #454 closes the loop on the enforcement gate: a startup self-diagnose invariant now fires at boot when an operator sets MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 with a stock mlx_lm.server backend, converting a silent runtime OOM into an operator-actionable finding. #452 is independent hardening: it splits the conflated TTY boolean into hasTtyForSudo + isInteractive, adds MINSKY_ASSUME_TTY=1 for tmux-detach contexts, and fixes a regression where MINSKY_NON_INTERACTIVE=1 in a real TTY incorrectly tripped the refuse path.
