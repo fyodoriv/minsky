@@ -145,6 +145,19 @@ Then in [Claude Code](https://docs.claude.com/en/docs/claude-code) from this dir
 
 `/next-task` is queue mode by default — it picks the highest-priority unblocked task from [`TASKS.md`](./TASKS.md), ships it as a PR, loops to the next, and stops only when the queue is empty across all `~/apps/*/TASKS.md` and the audit cascade is clean.
 
+### Fresh-clone troubleshooting
+
+`pnpm minsky` detects the four likeliest fresh-clone failures before importing any module, replacing cryptic `ERR_MODULE_NOT_FOUND` stack traces with one-line operator-actionable messages:
+
+| Failure | Symptom | Recovery |
+|---|---|---|
+| `node_modules/` missing | `minsky: node_modules/ missing — run \`pnpm install\` from the repo root` | `pnpm install` |
+| `dist/index.js` not built | `minsky: dist not built (…) — run \`pnpm install\` …` | `pnpm install` |
+| `pnpm` not on PATH | `./setup.sh --doctor` exits RED: `pnpm missing` | `corepack enable` OR `brew install pnpm` OR `npm i -g pnpm` |
+| Node major < 20 | `./setup.sh --doctor` exits RED: `node X.x.x is below the >=20 engine requirement` | `nvm install 20 && nvm use 20` or `brew install node@20` |
+
+`pnpm minsky doctor` shows all four as substrate rows (plus the local-LLM stack). Any row RED → banner is RED and exits 1; fix the substrate before debugging the LLM stack.
+
 ## How it fits together
 
 ```text
