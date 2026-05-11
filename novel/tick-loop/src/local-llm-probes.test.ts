@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { detectLocalLlmStack, planLocalLlmBootstrap } from "./local-llm-bootstrap.js";
 import {
   type FetchFn,
   type KillFn,
@@ -471,5 +472,94 @@ describe("readPidFileAlive — malformed PID file", () => {
       killFn: () => {},
     });
     expect(result).toBeUndefined();
+  });
+});
+
+// ---- Integration: buildProductionProbes + detectLocalLlmStack + planLocalLlmBootstrap ----------
+//
+// Slice 35 — closes the Verification gap from the task block: "integration
+// test on a clean /tmp/<scratch> HOME with pipx/mlx/aider/model selectively
+// missing — assert the plan covers exactly the missing pieces."
+//
+// Each scenario passes synthetic `whichFn` / `existsSyncFn` / `fetchFn`
+// seams into `buildProductionProbes`, then runs `detectLocalLlmStack` +
+// `planLocalLlmBootstrap` end-to-end and asserts the plan's step types
+// match the missing pieces. This is the composition layer test — it
+// verifies that the three modules wire together correctly, not just that
+// each module works in isolation.
+
+const ECONNREFUSED: FetchFn = async () => {
+  const e = Object.assign(new Error("ECONNREFUSED 127.0.0.1:8080"), {
+    cause: { code: "ECONNREFUSED" },
+  });
+  throw e;
+};
+const FETCH_OK: FetchFn = async () => ({ ok: true, status: 200 });
+
+describe("buildProductionProbes + detectLocalLlmStack + planLocalLlmBootstrap — selectively-missing integration", () => {
+  it("fresh machine (nothing present) → full 5-step plan", async () => {
+    const probes = buildProductionProbes({
+      whichFn: async () => undefined,
+      existsSyncFn: () => false,
+      fetchFn: ECONNREFUSED,
+    });
+    const state = await detectLocalLlmStack(probes);
+    const plan = planLocalLlmBootstrap(state);
+    expect(plan.steps.map((s) => s.type)).toEqual([
+      "install-pipx",
+      "install-mlx-lm",
+      "install-aider",
+      "download-model",
+      "start-mlx-server",
+    ]);
+  });
+
+  it("only model missing → [download-model, start-mlx-server]", async () => {
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => false,
+      fetchFn: ECONNREFUSED,
+    });
+    const state = await detectLocalLlmStack(probes);
+    const plan = planLocalLlmBootstrap(state);
+    expect(plan.steps.map((s) => s.type)).toEqual(["download-model", "start-mlx-server"]);
+  });
+
+  it("stack installed but server stopped → [start-mlx-server]", async () => {
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => true,
+      fetchFn: ECONNREFUSED,
+    });
+    const state = await detectLocalLlmStack(probes);
+    const plan = planLocalLlmBootstrap(state);
+    expect(plan.steps.map((s) => s.type)).toEqual(["start-mlx-server"]);
+  });
+
+  it("full stack present and server reachable → empty plan (idempotent fast path)", async () => {
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => `/usr/local/bin/${bin}`,
+      existsSyncFn: () => true,
+      fetchFn: FETCH_OK,
+    });
+    const state = await detectLocalLlmStack(probes);
+    const plan = planLocalLlmBootstrap(state);
+    expect(plan.ready).toBe(true);
+    expect(plan.steps).toHaveLength(0);
+  });
+
+  it("pipx + mlx absent, aider present, model present, server stopped → [install-pipx, install-mlx-lm, start-mlx-server]", async () => {
+    const probes = buildProductionProbes({
+      whichFn: async (bin) => (bin === "aider" ? "/usr/local/bin/aider" : undefined),
+      existsSyncFn: () => true,
+      fetchFn: ECONNREFUSED,
+    });
+    const state = await detectLocalLlmStack(probes);
+    const plan = planLocalLlmBootstrap(state);
+    expect(plan.steps.map((s) => s.type)).toEqual([
+      "install-pipx",
+      "install-mlx-lm",
+      "start-mlx-server",
+    ]);
   });
 });

@@ -19,6 +19,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 32 (operator 2026-05-10 — code-shrinking: flatten `maybeShortCircuitOnReachableServer`'s `{ knownServerState? }` opt-bag to a positional `ServerState | undefined` — the conditional `hints` construction at the call site (3 lines + JSDoc pragma) was boilerplate to satisfy exactOptionalPropertyTypes; drop the unused `serverState` field from the reachable-branch return (caller only reads `serverState` on the unreachable branch — slice 30 plumbing) for a simpler discriminated union) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 33 (operator 2026-05-10 — detached-server dispatch: add startServerFn seam to ExecuteOpts so start-mlx-server steps are not waited-on (a server process never closes); wire production startMlxServerDetached that detached-spawns + writes PID to .minsky/local-llm.pid) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 34 (operator 2026-05-10 — PID-alive skip-earlier gate: after the slice-26 HTTP probe finds the server unreachable, read .minsky/local-llm.pid; if the process is alive (kill(pid,0) succeeds), return the env overlay immediately — server is still loading the model, no second spawn needed, claude probe + 5-probe detect pipeline skipped; saves ≥5 child-process spawns per invocation during the 30-60s model-loading window) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 35 (operator 2026-05-10 — round-trip elimination: parallelize detectForBootstrap+probeClaude+probeSubstrate in runDoctor via Promise.all — saves ~1-2s wall-clock vs sequential dispatch; integration tests for selectively-missing stack scenarios) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -700,15 +701,17 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
 
 async function runDoctor() {
   process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
-  const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
-  const claudeDecision = await probeClaude();
-  emitDoctorRows({ state, archState, claudeDecision, pythonPath });
+  // Slice 35 (round-trip elimination): detectForBootstrap (~1-2s),
+  // probeClaude (~5-20s), and probeSubstrate (~100ms) are independent —
+  // run in parallel via Promise.all, saving ~1-2s vs sequential dispatch.
   // Slice 1 of `minsky-fresh-clone-health-checks`: 4 substrate rows
   // (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) so
   // the operator can see the install-time substrate at the same time
   // as the local-LLM stack. ANY substrate red → daemon literally
   // cannot run, so banner is RED instead of YELLOW.
-  const substrateState = await probeSubstrate();
+  const [{ state, archState, planOpts, pythonPath }, claudeDecision, substrateState] =
+    await Promise.all([detectForBootstrap(), probeClaude(), probeSubstrate()]);
+  emitDoctorRows({ state, archState, claudeDecision, pythonPath });
   const substrateLines = renderDoctorSubstrateRows(substrateState);
   for (const l of substrateLines) {
     process.stdout.write(`${l}\n`);
