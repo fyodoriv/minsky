@@ -45,8 +45,9 @@
   - **Risk**: low-medium. The install-arm-homebrew step touches `/opt/homebrew/` and needs sudo; a failure leaves the machine in its prior state (Homebrew installer is idempotent-on-retry). Mitigation: single confirm prompt covers the step; operator can abort before sudo is requested; `MINSKY_NO_AUTO_BOOTSTRAP=1` escape hatch; stderr tail surfaces the installer output so the operator diagnoses sudo-denied vs network-fail vs disk-full. A more subtle risk: if the operator has an Intel-brew layout at `/usr/local/` AND we install native brew at `/opt/homebrew/`, the two can coexist but PATH resolution depends on `.zshrc` order — Minsky's planner uses `/opt/homebrew/bin/...` absolute paths to sidestep that entirely.
   - **Surfaced-by**: operator live-run 2026-05-08 on M3 Max Rosetta shell — `minsky bootstrap-local-llm` would have failed at `pipx install mlx-lm` with a pip wheel-resolution error because the Intel pipx venv tries to find x86_64 MLX wheels that don't exist. Slice 5 (PR #384) shipped; operator asked for the arch detection next.
 
-- [ ] `minsky-cli-arch-detection-hardening` — slice 7 edge-case hardening over slice 6's arch detection (operator 2026-05-08 "harden the solution even more")
+- [x] `minsky-cli-arch-detection-hardening` — slice 7 edge-case hardening over slice 6's arch detection (operator 2026-05-08 "harden the solution even more")
   - **ID**: minsky-cli-arch-detection-hardening
+  - **Status**: shipped
   - **Tags**: p0, operator-directive, minsky-cli, local-llm, auto-bootstrap, apple-silicon, rosetta, hardening, multi-machine-sync
   - **Pick-next**: yes — operator 2026-05-08, "Harden the solution even more, resolve edge cases. Let's actually follow full minsky rules on it".
   - **Estimate**: 0.5d
