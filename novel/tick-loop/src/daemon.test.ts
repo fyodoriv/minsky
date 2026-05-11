@@ -2329,8 +2329,12 @@ describe("buildLocalBrief — `daemon-aider-brief-shrinker`", () => {
       taskId: "real-task",
       tasksMdContent: withProgress,
     });
-    expect(brief).toContain("## Progress");
+    expect(brief).toContain("## Current slice");
     expect(brief).toContain("Slice 39: extend runDoctor to show model name");
+    // When Progress is present, Hypothesis/Details are suppressed so the
+    // model focuses on the live directive rather than the old context.
+    expect(brief).not.toContain("## Hypothesis");
+    expect(brief).not.toContain("## Details");
   });
 
   it("stays ≤2 KB on the small fixture", () => {

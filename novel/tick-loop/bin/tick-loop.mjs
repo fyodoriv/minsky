@@ -40,7 +40,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -108,6 +108,7 @@ import {
   runParallelSweeper,
   sandboxModeStartupHint,
   workerStartupLine,
+  workerWorktreeName,
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — daemon
   // writes hard-limit hits to .minsky/state.json so the next
   // `minsky` invocation can skip the live probe and use local-LLM.
@@ -582,16 +583,29 @@ function pickAndLogStrategicModel() {
   return pick.agent === "claude" ? pick.model : undefined;
 }
 
+// Compute the per-worker git-worktree directory path when workerConfig is set.
+// When no workerConfig (single-process root before auto-scale), returns undefined
+// so opencode/aider inherits the parent's cwd (minskyHome). With workerConfig,
+// the worktree path is <minskyHome>/.claude/worktrees/daemon-<id>-<taskId>
+// — the checked-out feature branch where the model should write its changes.
+function buildWorktreeDir(taskId) {
+  if (workerConfig === undefined) return undefined;
+  const name = workerWorktreeName({ workerId: workerConfig.workerId, taskId });
+  return join(minskyHome, ".claude", "worktrees", name);
+}
+
 function buildLocalStrategy() {
   if (dryRun) return new DryRunSpawnStrategy();
   if (localAgent === "opencode") {
     return new ProcessSpawnStrategy({
       command: opencodeBin,
       ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-      invocation: (input) =>
-        buildOpencodeInvocation({
+      invocation: (input) => {
+        const worktreeDir = buildWorktreeDir(input.taskId);
+        return buildOpencodeInvocation({
           brief: input.brief,
           command: opencodeBin,
+          ...(worktreeDir !== undefined ? { cwd: worktreeDir } : {}),
           // `MINSKY_LOCAL_LLM_MODEL_ID` is the bare HF / model id; for
           // opencode's `provider/model` argv it defaults to the
           // `lmstudio/<id>` form. When the operator wants a non-lmstudio
@@ -603,18 +617,22 @@ function buildLocalStrategy() {
                   ? localLlmModelId
                   : `lmstudio/${localLlmModelId}`,
               }),
-        }),
+        });
+      },
     });
   }
   return new ProcessSpawnStrategy({
     command: aiderBin,
     ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-    invocation: (input) =>
-      buildAiderInvocation({
+    invocation: (input) => {
+      const worktreeDir = buildWorktreeDir(input.taskId);
+      return buildAiderInvocation({
         brief: input.brief,
         command: aiderBin,
+        ...(worktreeDir !== undefined ? { cwd: worktreeDir } : {}),
         ...(localLlmModelId === undefined ? {} : { model: `openai/${localLlmModelId}` }),
-      }),
+      });
+    },
   });
 }
 
