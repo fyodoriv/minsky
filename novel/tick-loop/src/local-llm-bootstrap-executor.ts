@@ -89,6 +89,22 @@ export type SpawnFn = (
   },
 ) => Promise<ExecuteSpawnResult>;
 
+/**
+ * Detached-server seam — starts `mlx_lm.server` as a background
+ * process that outlives the `minsky` CLI process. The production
+ * implementation in `bin/minsky.mjs` uses `child_process.spawn` with
+ * `{ detached: true }` + `child.unref()` and writes the PID to
+ * `.minsky/local-llm.pid`. Returns a Promise that resolves with the
+ * server's PID immediately (does NOT wait for server readiness — the
+ * caller's next `minsky` invocation probes reachability via
+ * `buildServerProbe`). Tests inject a fake that resolves instantly.
+ *
+ * Slice 33: separate from `SpawnFn` because `SpawnFn` resolves on
+ * process-close — a long-running server would hang the executor forever
+ * if routed through the generic spawn seam.
+ */
+export type StartServerFn = (command: string, args: readonly string[]) => Promise<{ pid: number }>;
+
 /** Confirm seam — returns `true` to proceed, `false` to abort. */
 export type ConfirmFn = (summary: string) => Promise<boolean>;
 
@@ -108,6 +124,14 @@ export interface ExecuteOpts {
    * `node:child_process.spawn`; tests inject a fake.
    */
   readonly spawnFn: SpawnFn;
+  /**
+   * Detached-server seam for `start-mlx-server` steps. When provided,
+   * the executor routes `start-mlx-server` through this seam instead
+   * of `spawnFn` — the server must outlive the CLI process and must NOT
+   * be waited-on. When absent, falls back to `spawnFn` (test
+   * environments where the fake returns immediately).
+   */
+  readonly startServerFn?: StartServerFn;
   /** Log seam — typically `process.stdout.write` in production. */
   readonly log: LogFn;
 }
@@ -184,6 +208,30 @@ export async function executeBootstrapPlan(
 }
 
 /**
+ * Dispatch the `start-mlx-server` step via the detached-server seam.
+ * Extracted from {@link runOneStep} to keep its complexity ≤ biome's cap.
+ *
+ * (Internal — not exported.)
+ */
+async function runStartServerStep(
+  step: InstallStep,
+  cmd: string,
+  args: string[],
+  startServerFn: StartServerFn,
+): Promise<{ success: boolean; failedStep?: InstallStep["type"]; reason?: string }> {
+  try {
+    await startServerFn(cmd, args);
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      failedStep: step.type,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
  * Run one install step. Internal helper extracted from
  * {@link executeBootstrapPlan} so the outer loop's cognitive complexity
  * stays ≤ biome's cap of 10. Returns a discriminated union over
@@ -202,6 +250,14 @@ async function runOneStep(
   const [cmd, ...args] = step.command;
   if (cmd === undefined) {
     return { success: false, failedStep: step.type, reason: "empty command vector" };
+  }
+  // Slice 33: start-mlx-server must outlive the CLI process — route
+  // through startServerFn (detached spawn + PID write) when provided.
+  // Falls back to spawnFn for test environments where the fake returns
+  // immediately (no hang risk). The spawnFn path would wait for
+  // process-close, which never happens for a long-running server.
+  if (step.type === "start-mlx-server" && opts.startServerFn !== undefined) {
+    return runStartServerStep(step, cmd, args, opts.startServerFn);
   }
   // Slice 6: install-arm-homebrew wraps the Homebrew installer which
   // sudo-escalates to create /opt/homebrew/. That needs the parent's

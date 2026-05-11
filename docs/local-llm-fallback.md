@@ -10,6 +10,37 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 
 ## Install
 
+Run `minsky` from the repo root. On a fresh machine with no Claude credits remaining, the CLI auto-detects the situation and walks you through the entire install in a single prompt:
+
+```text
+$ minsky
+minsky: persisted hard-limit hit at 2026-05-10T… (12m ago); bootstrapping local-LLM
+
+Claude appears to be exhausted. To keep the daemon iterating, Minsky
+wants to install the local-LLM fallback stack:
+
+  1. Install pipx (package manager for Python CLIs)
+  2. Install mlx-lm (Apple Silicon inference server)
+  3. Install aider-chat (agentic coding harness)
+  4. Download model: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit (~17.2 GB)
+  5. Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)
+
+Estimated total: ~16 min wall-clock; ~17.2 GB download.
+
+Proceed? [Y/n]
+```
+
+Hit Enter (default Y) and the daemon starts automatically once the install completes. Re-running `minsky` on an already-set-up machine adds ≤500 ms — every check is `which` + `pgrep` + a single `GET /v1/models`.
+
+**Preview without installing**: `minsky bootstrap-local-llm --dry-run` prints the plan and exits without touching anything.
+
+**Explicit install**: `minsky bootstrap-local-llm` runs the plan immediately (useful after `MINSKY_NO_AUTO_BOOTSTRAP=1` was set).
+
+**Health check**: `minsky doctor` shows the state of every component.
+
+<details>
+<summary>Manual install (fallback if auto-bootstrap fails)</summary>
+
 ```bash
 # Apple Silicon native ML server
 pipx install mlx-lm
@@ -17,9 +48,16 @@ pipx install mlx-lm
 pipx install --python /opt/homebrew/bin/python3.12 aider-chat
 # Pull the model (~17.2 GB; ~8–12 min on a 1 Gbps link)
 hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+# Start the server
+mlx_lm.server --model mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit \
+  --host 127.0.0.1 --port 8080 &
+# Then run minsky normally
+MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred minsky
 ```
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
+
+</details>
 
 ### Why two separate Python environments
 

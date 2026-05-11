@@ -17,6 +17,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 30 (operator 2026-05-10 — round-trip elimination: capture the slice-27 server probe's `ServerState` when it falls through (unreachable) and thread it into `detectForBootstrap` so the `local-preferred` and persisted-hard-limit trigger paths — which call `runBootstrapLocalLlm({ force: false })` without `knownServerState` — also skip the third `fetch /v1/models` inside `detectLocalLlmStack`) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 31 (operator 2026-05-10 — code-shrinking: remove the now-dead `if (plan.ready && !force)` branch from `runBootstrapLocalLlm` — slice 30's prebuiltState threading guarantees `plan.ready === false` whenever `!force` (server forced unreachable in detect), and `!force` is false on the force=true path; the empty-plan case is already handled by `executeBootstrapPlan`'s own early-return) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 32 (operator 2026-05-10 — code-shrinking: flatten `maybeShortCircuitOnReachableServer`'s `{ knownServerState? }` opt-bag to a positional `ServerState | undefined` — the conditional `hints` construction at the call site (3 lines + JSDoc pragma) was boilerplate to satisfy exactOptionalPropertyTypes; drop the unused `serverState` field from the reachable-branch return (caller only reads `serverState` on the unreachable branch — slice 30 plumbing) for a simpler discriminated union) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 33 (operator 2026-05-10 — detached-server dispatch: add startServerFn seam to ExecuteOpts so start-mlx-server steps are not waited-on (a server process never closes); wire production startMlxServerDetached that detached-spawns + writes PID to .minsky/local-llm.pid) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -602,6 +603,7 @@ async function executePlanWithProductionIo(plan) {
   const result = await executeBootstrapPlan(plan, {
     confirm: confirmFn,
     spawnFn: spawnAdapter,
+    startServerFn: startMlxServerDetached,
     log: (s) => process.stderr.write(s),
   });
   if (!result.success) {
@@ -973,6 +975,44 @@ function spawnAdapter(command, args, opts = {}) {
       resolveDone({ exitCode: code ?? -1, stderrTail });
     });
   });
+}
+
+/**
+ * Start `mlx_lm.server` detached so the server process outlives the
+ * `minsky` CLI. Production `startServerFn` seam for
+ * {@link executeBootstrapPlan} (slice 33). Writes the server PID to
+ * `.minsky/local-llm.pid` so subsequent `minsky` invocations can probe
+ * liveness without re-running the bootstrap.
+ *
+ * The function does NOT wait for server readiness — `mlx_lm.server`
+ * takes 30–60 s to load the model. The caller's next `minsky` invocation
+ * detects reachability via `buildServerProbe` on the slice-26 fast-path.
+ *
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @returns {Promise<{ pid: number }>}
+ */
+async function startMlxServerDetached(command, args) {
+  const serverLogPath = resolve(MINSKY_HOME, ".minsky", "local-llm-server.log");
+  const serverLogFd = openSync(serverLogPath, "a");
+  const child = spawn(command, [...args], {
+    detached: true,
+    stdio: ["ignore", serverLogFd, serverLogFd],
+  });
+  child.unref();
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error(
+      "mlx_lm.server spawned but returned no PID — check that mlx_lm.server is on PATH",
+    );
+  }
+  const pidPath = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
+  writeFileSync(pidPath, String(pid), "utf8");
+  process.stderr.write(`minsky: mlx_lm.server started (PID ${pid}; log: ${serverLogPath})\n`);
+  process.stderr.write(
+    "minsky: server is loading the model (~30–60 s); daemon will probe reachability on first iteration\n",
+  );
+  return { pid };
 }
 
 /**

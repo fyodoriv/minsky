@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type ExecuteSpawnResult,
   type SpawnFn,
+  type StartServerFn,
   confirmAlwaysNo,
   confirmAlwaysYes,
   executeBootstrapPlan,
@@ -225,6 +226,69 @@ describe("executeBootstrapPlan — empty command vector edge case", () => {
     });
     expect(result.success).toBe(false);
     expect(result.reason).toMatch(/empty command/);
+  });
+});
+
+// ---- Slice 33: startServerFn seam for start-mlx-server -------------------
+
+const serverPlan: BootstrapPlan = {
+  ready: false,
+  totalEstimatedDurationMs: 60_000,
+  totalEstimatedDownloadMb: 0,
+  steps: [
+    {
+      type: "start-mlx-server",
+      description: "Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)",
+      estimatedDurationMs: 60_000,
+      command: ["mlx_lm.server", "--model", "x", "--host", "127.0.0.1", "--port", "8080"],
+    },
+  ],
+};
+
+describe("executeBootstrapPlan — slice 33 startServerFn seam", () => {
+  it("routes start-mlx-server through startServerFn when provided, not spawnFn", async () => {
+    const serverCalls: Array<{ cmd: string; args: readonly string[] }> = [];
+    const startServerFn: StartServerFn = vi.fn(async (cmd, args) => {
+      serverCalls.push({ cmd, args });
+      return { pid: 12345 };
+    });
+    const spawnFn = vi.fn(okSpawn);
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn,
+      startServerFn,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    expect(startServerFn).toHaveBeenCalledTimes(1);
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(serverCalls[0]?.cmd).toBe("mlx_lm.server");
+  });
+
+  it("falls back to spawnFn when startServerFn is absent", async () => {
+    const spawnFn = vi.fn(okSpawn);
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures startServerFn rejection as a failed step (does not throw)", async () => {
+    const startServerFn: StartServerFn = vi.fn(async () => {
+      throw new Error("mlx_lm.server: command not found");
+    });
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: okSpawn,
+      startServerFn,
+      log: sink,
+    });
+    expect(result.success).toBe(false);
+    expect(result.failedStep).toBe("start-mlx-server");
+    expect(result.reason).toMatch(/command not found/);
   });
 });
 
