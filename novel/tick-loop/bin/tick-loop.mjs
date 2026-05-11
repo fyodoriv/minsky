@@ -340,6 +340,25 @@ const claudePrintTimeoutMs = (() => {
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
 })();
+// Local-model efficiency (B): separate, longer watchdog for local
+// (aider/opencode) invocations. Local models are slower than Claude;
+// the 15-min default is too short for Qwen3-class models on real tasks.
+// Default 1800000 (30 min). MINSKY_CLAUDE_PRINT_TIMEOUT_MS overrides
+// when set — the universal escape hatch keeps working for both providers.
+const localWatchdogMs = (() => {
+  if (process.env["MINSKY_CLAUDE_PRINT_TIMEOUT_MS"] !== undefined) return claudePrintTimeoutMs;
+  const raw = process.env["MINSKY_LOCAL_WATCHDOG_MS"];
+  if (raw === undefined) return 1_800_000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1_800_000;
+  return parsed;
+})();
+// Local-model efficiency (C): per-task consecutive-timeout counter.
+// Incremented in the emit handler on each local-spawn-timeout; reset on
+// any non-timeout outcome. The invocation callbacks read this to prepend
+// a shrink directive on the third+ attempt.
+/** @type {Map<string, number>} */
+const consecutiveTimeoutsByTask = new Map();
 // Wire the OTEL publisher EARLY (was below; moved up for the slice-3
 // local-llm wrapper to capture the `emit` callback). When
 // `MINSKY_OTEL_ENDPOINT` is set, every span is forwarded to the OTLP
@@ -594,16 +613,40 @@ function buildWorktreeDir(taskId) {
   return join(minskyHome, ".claude", "worktrees", name);
 }
 
+// Local-model efficiency (A): time-budget prefix prepended to every local brief.
+// Tells the model to stay within ~800s and scope to one file / one step.
+const LOCAL_BRIEF_TIME_BUDGET_PREFIX =
+  "[LOCAL MODEL — ~800s budget. Prefer editing ONE existing file. If the task is complex, identify the single smallest first step and do only that step. Do not read files you do not need to edit.]\n\n";
+
+/**
+ * Build the augmented brief for a local model invocation: prepend the
+ * time-budget prefix (A) and, when consecutive timeouts ≥ 2, prepend the
+ * auto-shrink directive (C).
+ * @param {{ taskId: string, brief: string }} input
+ * @returns {string}
+ */
+function buildLocalBriefAugmented(input) {
+  const timeoutCount = consecutiveTimeoutsByTask.get(input.taskId) ?? 0;
+  const shrinkPrefix =
+    timeoutCount >= 2
+      ? `CONSECUTIVE TIMEOUT #${timeoutCount} — previous ${timeoutCount} attempt${timeoutCount === 1 ? "" : "s"} timed out. Do ONLY the first bullet of the slice description. Ignore the rest.\n\n`
+      : "";
+  process.stdout.write(
+    `[tick-loop] local-brief: prepended [LOCAL MODEL] time-budget prefix (task=${input.taskId}${timeoutCount >= 2 ? `, consecutive-timeout-shrink=#${timeoutCount}` : ""})\n`,
+  );
+  return `${LOCAL_BRIEF_TIME_BUDGET_PREFIX}${shrinkPrefix}${input.brief}`;
+}
+
 function buildLocalStrategy() {
   if (dryRun) return new DryRunSpawnStrategy();
   if (localAgent === "opencode") {
     return new ProcessSpawnStrategy({
       command: opencodeBin,
-      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+      ...(localWatchdogMs !== undefined ? { timeoutMs: localWatchdogMs } : {}),
       invocation: (input) => {
         const worktreeDir = buildWorktreeDir(input.taskId);
         return buildOpencodeInvocation({
-          brief: input.brief,
+          brief: buildLocalBriefAugmented(input),
           command: opencodeBin,
           ...(worktreeDir !== undefined ? { cwd: worktreeDir } : {}),
           // `MINSKY_LOCAL_LLM_MODEL_ID` is the bare HF / model id; for
@@ -623,11 +666,11 @@ function buildLocalStrategy() {
   }
   return new ProcessSpawnStrategy({
     command: aiderBin,
-    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    ...(localWatchdogMs !== undefined ? { timeoutMs: localWatchdogMs } : {}),
     invocation: (input) => {
       const worktreeDir = buildWorktreeDir(input.taskId);
       return buildAiderInvocation({
-        brief: input.brief,
+        brief: buildLocalBriefAugmented(input),
         command: aiderBin,
         ...(worktreeDir !== undefined ? { cwd: worktreeDir } : {}),
         ...(localLlmModelId === undefined ? {} : { model: `openai/${localLlmModelId}` }),
@@ -661,7 +704,7 @@ const spawnStrategy = (() => {
   if (!localLlmEnabled) return claudeStrat;
   const localStrat = maybeWrapLocalStrategyInGate(buildLocalStrategy());
   process.stdout.write(
-    `[tick-loop] local-llm fallback wired (agent=${localAgent}, probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
+    `[tick-loop] local-llm fallback wired (agent=${localAgent}, probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}, watchdog=${localWatchdogMs ?? "disabled"}ms${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
   );
   return new LlmProviderSpawnStrategy({
     claude: claudeStrat,
@@ -1179,6 +1222,24 @@ if (autoScaleEnabled) {
 // 'off' against a value they thought was 'enforce'.
 process.stdout.write(`${sandboxModeStartupHint(process.env)}\n`);
 
+// Local-model efficiency (C): track consecutive local-spawn-timeout failures
+// per task. Extracted into a named function so the emit callback stays under
+// biome's cognitive-complexity ceiling.
+/**
+ * @param {{ name: string, attributes: Record<string, unknown> }} event
+ */
+function observeIterationForTimeoutTracking(event) {
+  if (event.name !== "tick-loop.iteration") return;
+  const taskId = event.attributes["task.id"];
+  const reason = event.attributes["iteration.reason"];
+  if (typeof taskId !== "string" || taskId.length === 0) return;
+  if (typeof reason === "string" && reason.startsWith("local-spawn-timeout")) {
+    consecutiveTimeoutsByTask.set(taskId, (consecutiveTimeoutsByTask.get(taskId) ?? 0) + 1);
+  } else {
+    consecutiveTimeoutsByTask.delete(taskId);
+  }
+}
+
 const result = await runDaemon({
   tickInterval: args.tickIntervalMs,
   maxIterations: args.maxIterations,
@@ -1215,6 +1276,7 @@ const result = await runDaemon({
   // Outer lint-gate verification — always active; no env opt-in.
   preLintRun,
   emit: (event) => {
+    observeIterationForTimeoutTracking(event);
     // Plain-text line on stdout for terminal/journalctl visibility.
     process.stdout.write(`[span] ${event.name} ${JSON.stringify(event.attributes)}\n`);
     // Forward to OTEL when wired; the SDK ships to OpenObserve / whatever
