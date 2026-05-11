@@ -765,6 +765,7 @@ export {
 export {
   type ExistsSyncFn,
   type FetchFn,
+  type KillFn,
   PYTHON_CANDIDATES,
   type WhichFn,
   buildExistsProbe,
@@ -774,6 +775,7 @@ export {
   buildWhichProbe,
   modelCachePath,
   probePythonWithDefaults,
+  readPidFileAlive,
   selectPythonPath,
 } from "./local-llm-probes.js";
 

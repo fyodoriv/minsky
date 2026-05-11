@@ -13,9 +13,10 @@
  * Plus the `modelCachePath` pure helper.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type FetchFn,
+  type KillFn,
   PYTHON_CANDIDATES,
   type WhichFn,
   buildModelProbe,
@@ -24,6 +25,7 @@ import {
   buildWhichProbe,
   modelCachePath,
   probePythonWithDefaults,
+  readPidFileAlive,
   selectPythonPath,
 } from "./local-llm-probes.js";
 
@@ -380,5 +382,94 @@ describe("buildProductionProbes — prebuiltServerState override (slice 29)", ()
     });
     const server = await probes.probeServer();
     expect(server.reachable).toBe(true);
+  });
+});
+
+// ---- readPidFileAlive (slice 34) -----------------------------------------
+
+describe("readPidFileAlive — file absent", () => {
+  it("returns undefined when PID file does not exist", () => {
+    const killFn = vi.fn() as unknown as KillFn;
+    const result = readPidFileAlive("/nonexistent/local-llm.pid", {
+      existsSyncFn: () => false,
+      killFn,
+    });
+    expect(result).toBeUndefined();
+    expect(killFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("readPidFileAlive — process alive", () => {
+  it("returns the PID when kill(pid, 0) succeeds (no throw)", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => "12345",
+      killFn: () => {
+        /* no-op = process exists */
+      },
+    });
+    expect(result).toBe(12345);
+  });
+
+  it("trims whitespace/newlines around the PID", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => "  99999\n",
+      killFn: () => {},
+    });
+    expect(result).toBe(99999);
+  });
+});
+
+describe("readPidFileAlive — process dead", () => {
+  it("returns undefined when kill(pid, 0) throws (ESRCH)", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => "99999",
+      killFn: () => {
+        throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+      },
+    });
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("readPidFileAlive — malformed PID file", () => {
+  it("returns undefined for non-integer content", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => "not-a-pid",
+      killFn: () => {},
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined for zero PID", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => "0",
+      killFn: () => {},
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined for empty file", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => "",
+      killFn: () => {},
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when readFileSyncFn throws (EACCES)", () => {
+    const result = readPidFileAlive("/x/local-llm.pid", {
+      existsSyncFn: () => true,
+      readFileSyncFn: () => {
+        throw new Error("EACCES: permission denied");
+      },
+      killFn: () => {},
+    });
+    expect(result).toBeUndefined();
   });
 });

@@ -222,6 +222,7 @@ async function runStartServerStep(
   try {
     await startServerFn(cmd, args);
     return { success: true };
+    // rule-6: handled-locally — startServerFn rejection is a spawn-level failure (e.g. mlx_lm.server not on PATH); returned as failed-step so the caller emits it and continues
   } catch (err) {
     return {
       success: false,

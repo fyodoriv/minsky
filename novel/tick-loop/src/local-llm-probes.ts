@@ -50,7 +50,7 @@
  * @module tick-loop/local-llm-probes
  */
 
-import { existsSync as nodeExistsSync } from "node:fs";
+import { existsSync as nodeExistsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -273,6 +273,68 @@ export function probePythonWithDefaults(opts?: {
     opts?.candidates ?? PYTHON_CANDIDATES,
     opts?.existsSyncFn ?? nodeExistsSync,
   );
+}
+
+// ---- readPidFileAlive ----------------------------------------------------
+
+/** `process.kill` shape — injectable so tests avoid signalling real PIDs. */
+export type KillFn = (pid: number, signal: 0) => void;
+
+const defaultReadFileSync = (path: string, enc: "utf8") => readFileSync(path, enc);
+const defaultKillFn: KillFn = (pid, signal) => {
+  process.kill(pid, signal);
+};
+
+/**
+ * Read `.minsky/local-llm.pid` and check if the recorded process is alive.
+ * Returns the PID when alive; `undefined` when the file is absent, contains
+ * a non-integer, or the process is dead (ESRCH / any kill error).
+ *
+ * Used by `bin/minsky.mjs` as a **skip-earlier gate** (slice 34): after the
+ * slice-26 server HTTP probe returns unreachable, this check costs <1 ms
+ * (existsSync + readFileSync + kill(0)) and saves ≥5 child-process spawns
+ * (claude probe + 4× `which`) during the 30-60 s model-loading window where
+ * `mlx_lm.server` is alive but not yet serving HTTP.
+ *
+ * Anchors: Burns et al., "Borg, Omega, and Kubernetes", ACM Queue 2016 —
+ * liveness vs readiness probe distinction; `kill(pid, 0)` is the POSIX
+ * liveness primitive (SUSv4 §2.5).
+ *
+ * Synchronous: reads a tiny local file + one kernel call; no network I/O.
+ *
+ * @otel tick-loop.local-llm-probes.pid-file
+ */
+export function readPidFileAlive(
+  pidPath: string,
+  opts?: {
+    readonly existsSyncFn?: ExistsSyncFn;
+    readonly readFileSyncFn?: (path: string, encoding: "utf8") => string;
+    readonly killFn?: KillFn;
+  },
+): number | undefined {
+  const existsSyncFn = opts?.existsSyncFn ?? nodeExistsSync;
+  const readFileSyncFn = opts?.readFileSyncFn ?? defaultReadFileSync;
+  const killFn = opts?.killFn ?? defaultKillFn;
+
+  if (!existsSyncFn(pidPath)) return undefined;
+
+  let pid: number;
+  try {
+    const content = readFileSyncFn(pidPath, "utf8").trim();
+    pid = Number.parseInt(content, 10);
+    if (!Number.isFinite(pid) || pid <= 0) return undefined;
+    // rule-6: handled-locally — corrupted or unreadable PID file is non-fatal; treated as absent so the caller falls through to full bootstrap
+  } catch {
+    return undefined;
+  }
+
+  try {
+    killFn(pid, 0);
+    return pid;
+    // rule-6: handled-locally — ESRCH (process dead) or EPERM; both mean no live server process, treated as absent
+  } catch {
+    return undefined;
+  }
 }
 
 // ---- buildProductionProbes ----------------------------------------------

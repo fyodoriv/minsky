@@ -18,6 +18,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 31 (operator 2026-05-10 — code-shrinking: remove the now-dead `if (plan.ready && !force)` branch from `runBootstrapLocalLlm` — slice 30's prebuiltState threading guarantees `plan.ready === false` whenever `!force` (server forced unreachable in detect), and `!force` is false on the force=true path; the empty-plan case is already handled by `executeBootstrapPlan`'s own early-return) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 32 (operator 2026-05-10 — code-shrinking: flatten `maybeShortCircuitOnReachableServer`'s `{ knownServerState? }` opt-bag to a positional `ServerState | undefined` — the conditional `hints` construction at the call site (3 lines + JSDoc pragma) was boilerplate to satisfy exactOptionalPropertyTypes; drop the unused `serverState` field from the reachable-branch return (caller only reads `serverState` on the unreachable branch — slice 30 plumbing) for a simpler discriminated union) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 33 (operator 2026-05-10 — detached-server dispatch: add startServerFn seam to ExecuteOpts so start-mlx-server steps are not waited-on (a server process never closes); wire production startMlxServerDetached that detached-spawns + writes PID to .minsky/local-llm.pid) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 34 (operator 2026-05-10 — PID-alive skip-earlier gate: after the slice-26 HTTP probe finds the server unreachable, read .minsky/local-llm.pid; if the process is alive (kill(pid,0) succeeds), return the env overlay immediately — server is still loading the model, no second spawn needed, claude probe + 5-probe detect pipeline skipped; saves ≥5 child-process spawns per invocation during the 30-60s model-loading window) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -71,6 +72,7 @@ const TICK_LOOP_BIN = resolve(PKG_ROOT, "bin", "tick-loop.mjs");
 
 const MINSKY_HOME = process.env["MINSKY_HOME"] ?? resolve(PKG_ROOT, "..", "..");
 const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
+const LOCAL_LLM_PID_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
 
 // Slice 8 (`minsky-cli-fresh-clone-bootstrap`): pre-flight check that
 // the dist build artifacts exist BEFORE we dynamic-import them.
@@ -132,6 +134,7 @@ const {
   preferredPipxPath,
   probePythonWithDefaults,
   readLastHardLimit,
+  readPidFileAlive,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
 } = await import("../dist/index.js");
@@ -371,6 +374,18 @@ async function maybeBootstrapLocalLlm() {
   if (serverState.reachable) {
     process.stderr.write(
       `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback\n`,
+    );
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
+  // Slice 34 (skip-earlier gate): HTTP unreachable but PID file alive
+  // means the server is still loading the model (~30-60 s). Return the
+  // env overlay immediately — no second server spawn, no expensive claude
+  // probe + 5-probe detect pipeline. Saves ≥5 child-process spawns per
+  // invocation during the model-loading window.
+  const startingPid = readPidFileAlive(LOCAL_LLM_PID_PATH);
+  if (startingPid !== undefined) {
+    process.stderr.write(
+      `minsky: mlx_lm.server is loading the model (PID ${startingPid}); daemon will probe reachability on first iteration\n`,
     );
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
@@ -1006,8 +1021,7 @@ async function startMlxServerDetached(command, args) {
       "mlx_lm.server spawned but returned no PID — check that mlx_lm.server is on PATH",
     );
   }
-  const pidPath = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
-  writeFileSync(pidPath, String(pid), "utf8");
+  writeFileSync(LOCAL_LLM_PID_PATH, String(pid), "utf8");
   process.stderr.write(`minsky: mlx_lm.server started (PID ${pid}; log: ${serverLogPath})\n`);
   process.stderr.write(
     "minsky: server is loading the model (~30–60 s); daemon will probe reachability on first iteration\n",
