@@ -1117,6 +1117,82 @@ export function modelCatalogInvariantsHoldInvariant(opts) {
 }
 
 /**
+ * Detect operator over-promise on `MINSKY_LOCAL_SERVER_MAX_CONCURRENT`.
+ * Fires when the env var is set to N≥2 BUT the operator's local-LLM
+ * backend can only handle 1 concurrent inference (the default for
+ * mlx_lm.server and stock LM Studio). Symptom is GPU OOM under multi-
+ * worker fanout — the bypass the gate created.
+ *
+ * Heuristic: probe `${probeUrl}` and check whether the response body
+ * advertises a concurrency hint (custom backends like vLLM do; stock
+ * mlx_lm.server does not). When the body is silent on concurrency AND
+ * the env var is ≥2, fire — the operator probably set the env
+ * speculatively.
+ *
+ * @typedef {object} LocalServerConcurrencyMismatchOpts
+ * @property {string | undefined} envValue   The raw value of `MINSKY_LOCAL_SERVER_MAX_CONCURRENT` (or `undefined` when unset).
+ * @property {() => Promise<{ ok: boolean, body?: string }>} probe Network probe; returns the response body on success.
+ *
+ * @param {LocalServerConcurrencyMismatchOpts} opts
+ * @returns {Invariant}
+ */
+export function localServerConcurrencyMismatchInvariant(opts) {
+  const { envValue, probe } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const id = "local-server-concurrency-mismatch";
+    const parsed = parseConcurrencyEnv(envValue);
+    if (parsed === undefined) return { id, ok: true };
+    // Operator declared N≥2. Probe the backend; if the body doesn't
+    // mention concurrency hints, the backend is probably the stock
+    // single-inference flavor and the env value is wrong.
+    const result = await probe();
+    if (!result.ok || hasConcurrencyHint(result.body ?? "")) return { id, ok: true };
+    return {
+      id,
+      ok: false,
+      evidence: `MINSKY_LOCAL_SERVER_MAX_CONCURRENT=${parsed} but probe returned a body with no concurrent-inference hints (vLLM/sglang/LM-Studio-Pro advertise; stock mlx_lm.server does not). N≥2 will GPU-OOM on stock backends.`,
+      suggestedTaskTitle:
+        "MINSKY_LOCAL_SERVER_MAX_CONCURRENT set above 1 but backend looks single-inference",
+      suggestedFix:
+        "Unset MINSKY_LOCAL_SERVER_MAX_CONCURRENT (or set to 1) until you migrate to vLLM/sglang/LM-Studio-Pro. Verify with `curl http://127.0.0.1:8080/v1/models` — concurrent backends advertise concurrency hints in the response body.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "local-server-concurrency-mismatch";
+  return fn;
+}
+
+/**
+ * Parse `MINSKY_LOCAL_SERVER_MAX_CONCURRENT`. Returns `undefined` when
+ * the value is missing, blank, non-numeric, or ≤1 — i.e., no mismatch
+ * is possible.
+ *
+ * @param {string | undefined} envValue
+ * @returns {number | undefined}
+ */
+function parseConcurrencyEnv(envValue) {
+  if (envValue === undefined || envValue === "" || envValue === "1") return undefined;
+  const parsed = Number.parseInt(envValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 1) return undefined;
+  return parsed;
+}
+
+/**
+ * True when the probe body advertises a concurrent-inference hint
+ * (vLLM, sglang, LM-Studio Pro, or a generic max_concurrent_requests
+ * marker). Stock mlx_lm.server does not advertise these.
+ *
+ * @param {string} body
+ * @returns {boolean}
+ */
+function hasConcurrencyHint(body) {
+  return /concurren|prompt_concurrency|decode_concurrency|max_concurrent_requests|vllm|sglang/.test(
+    body.toLowerCase(),
+  );
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -1329,6 +1405,25 @@ export function defaultInvariants() {
     daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
     modelCatalogInvariantsHoldInvariant({
       validate: () => validateModelCatalog(MODEL_CATALOG),
+    }),
+    localServerConcurrencyMismatchInvariant({
+      envValue: process.env["MINSKY_LOCAL_SERVER_MAX_CONCURRENT"],
+      probe: async () => {
+        const probeUrl =
+          process.env["MINSKY_LOCAL_LLM_PROBE_URL"] ?? "http://127.0.0.1:8080/v1/models";
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 2000);
+          const res = await fetch(probeUrl, { signal: controller.signal });
+          clearTimeout(timer);
+          if (!res.ok) return { ok: false };
+          const body = await res.text();
+          return { ok: true, body };
+        } catch {
+          // rule-6: handled-locally — probe failures collapse to "no signal"; invariant does not fire under network errors
+          return { ok: false };
+        }
+      },
     }),
   ];
 }
