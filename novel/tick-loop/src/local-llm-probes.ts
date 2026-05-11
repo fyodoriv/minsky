@@ -315,6 +315,7 @@ export function buildProductionProbes(opts: {
     probePipx,
     probeMlxLm: buildWhichProbe("mlx_lm.server", opts.whichFn),
     probeAider: buildWhichProbe("aider", opts.whichFn),
+    probeHuggingfaceCli: buildWhichProbe("huggingface-cli", opts.whichFn),
     probeModel: buildModelProbe({
       ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
       ...(opts.existsSyncFn !== undefined ? { existsSyncFn: opts.existsSyncFn } : {}),

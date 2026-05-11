@@ -544,6 +544,11 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
   line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
   line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
+  line(
+    "huggingface-cli",
+    state.huggingfaceCli.present,
+    state.huggingfaceCli.path ?? state.huggingfaceCli.reason ?? "",
+  );
   line("model weights", state.model.present, state.model.detail ?? state.model.reason ?? "");
   line(
     "mlx-lm.server reachable",

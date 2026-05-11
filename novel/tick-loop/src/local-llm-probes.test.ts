@@ -230,22 +230,24 @@ describe("probePythonWithDefaults — production wiring", () => {
 // ---- buildProductionProbes integration ---------------------------------
 
 describe("buildProductionProbes", () => {
-  it("composes all 5 probes from the shared seams", async () => {
+  it("composes all 6 probes from the shared seams", async () => {
     const probes = buildProductionProbes({
       whichFn: async (bin) => `/usr/local/bin/${bin}`,
       existsSyncFn: () => true,
       fetchFn: async () => ({ ok: true, status: 200 }),
     });
-    const [pipx, mlx, aider, model, server] = await Promise.all([
+    const [pipx, mlx, aider, huggingfaceCli, model, server] = await Promise.all([
       probes.probePipx(),
       probes.probeMlxLm(),
       probes.probeAider(),
+      probes.probeHuggingfaceCli(),
       probes.probeModel(),
       probes.probeServer(),
     ]);
     expect(pipx.present).toBe(true);
     expect(mlx.present).toBe(true);
     expect(aider.present).toBe(true);
+    expect(huggingfaceCli.present).toBe(true);
     expect(model.present).toBe(true);
     expect(server.reachable).toBe(true);
   });
