@@ -6,6 +6,18 @@ Deterministic mock-tick daemon for the in-process 10-min smoke. Sub-task 2/3 of 
 
 Loops `claim → mock-anthropic-call → complete` on a configurable cadence; the test fake `TestFakeMockAnthropic` simulates 3+ chaos modes (5xx, network-timeout, malformed-output) for the supervisor-respawn boundary; OTEL spans flow through `@minsky/observability`'s sink shape (in v0 captured by `SpanRecorder` for in-process assertion).
 
+## Quick start
+
+This package is an internal workspace package — operators don't install it directly. Use the root repo:
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git && cd minsky
+pnpm install   # prepare hook: tsc -b builds all dist/ including this package
+pnpm minsky doctor   # verify health
+```
+
+`pnpm install` runs the root `prepare` hook (`tsc -b`) which builds every workspace package's `dist/` — including `@minsky/tick-loop` — so `pnpm minsky` works on a fresh clone with no separate build step. If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line recovery hint instead of a node `ERR_MODULE_NOT_FOUND` stack trace.
+
 ## Pattern conformance
 
 Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index):
