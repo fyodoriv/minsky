@@ -1,4 +1,6 @@
 name: fresh-clone
+# <!-- scope: human-approved fresh-clone-ci-regression-gate (TASKS.md Files list) -->
+# <!-- pattern: not-applicable — CI regression gate; rule #10 deterministic enforcement, same structural pattern as ci.yml's job suite -->
 
 # Simulates the stale-dist scenario on every PR so regressions in the
 # bootstrap substrate are caught by CI, not the operator.
