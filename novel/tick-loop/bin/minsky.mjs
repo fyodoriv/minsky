@@ -26,6 +26,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 39 (operator 2026-05-11 — doctor server row: fetch GET /v1/models when server is reachable, show data[0].id as "reachable — <model>" instead of raw URL; fetchServerModelId helper extracted to keep runDoctor under biome cognitive-complexity cap) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 40 (operator 2026-05-11 — opencode doctor row: detect opencode binary on PATH via whichFn + fetch version via `opencode --version`; emit ✓ opencode <version> or ✗ opencode not found — run: curl -fsSL https://opencode.ai/install | sh; probeOpencode runs in the existing Promise.all so doctor wall-clock is unchanged) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 41 (operator 2026-05-11 — opencode config doctor row: read opencode.json in CWD or ~/.config/opencode/config.json; check whether any provider has options.baseURL === "http://127.0.0.1:1234/v1"; emit ✓ opencode config  local provider wired or ✗ opencode config  not wired — run: minsky setup-opencode; runs in the existing Promise.all at zero marginal wall-clock cost) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 42 (operator 2026-05-11 — minsky setup-opencode command: merge lmstudio provider block into ~/.config/opencode/opencode.json; fix probe path bug (config.json→opencode.json) so doctor row goes GREEN after setup) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -160,6 +161,8 @@ if (first === "--help" || first === "-h" || first === "help") {
   runStop(argv.slice(1));
 } else if (first === "doctor") {
   await runDoctor();
+} else if (first === "setup-opencode") {
+  await runSetupOpencode();
 } else if (first === "bootstrap-local-llm") {
   // Slice 9: `--dry-run` short-circuits before any install attempt.
   // Pure detect + plan → render summary → exit 0. Read-only; safe in
@@ -201,6 +204,7 @@ Examples:
   minsky logs                     # follow worker 0's log live
   minsky stop 1                   # stop worker 1
   minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
+  minsky setup-opencode                  # wire lmstudio provider into ~/.config/opencode/opencode.json
 
 Sane defaults (override by passing the corresponding tick-loop flag):
   --worker-id        <positional, default 0>
@@ -873,6 +877,75 @@ async function runDoctor() {
 }
 
 /**
+ * Read `cfgPath` as JSON or return `{}`. Creates parent dir when absent.
+ * Prints a warning and returns `{}` when the file is malformed.
+ * @param {string} cfgPath
+ * @returns {Record<string, unknown>}
+ */
+function readOrInitOpencodeConfig(cfgPath) {
+  if (!existsSync(cfgPath)) {
+    mkdirSync(resolve(cfgPath, ".."), { recursive: true });
+    return {};
+  }
+  try {
+    return /** @type {Record<string, unknown>} */ (JSON.parse(readFileSync(cfgPath, "utf8")));
+  } catch {
+    process.stdout.write(`⚠ ${cfgPath} is malformed JSON — creating fresh config\n`);
+    return {};
+  }
+}
+
+/**
+ * Slice 42: write the lmstudio provider block into
+ * `~/.config/opencode/opencode.json` so opencode's local-LLM path is
+ * wired without manual editing.
+ *
+ * Idempotent: if the config already has a provider with
+ * `options.baseURL === "http://127.0.0.1:1234/v1"`, prints a no-op
+ * message and exits 0.
+ */
+async function runSetupOpencode() {
+  const GLOBAL_CFG = resolve(process.env["HOME"] ?? "/tmp", ".config", "opencode", "opencode.json");
+  const LOCAL_BASE = "http://127.0.0.1:1234/v1";
+  const LMSTUDIO_PROVIDER = {
+    npm: "@ai-sdk/openai-compatible",
+    name: "LM Studio (MLX)",
+    options: { baseURL: LOCAL_BASE },
+    models: { "qwen/qwen3-14b": { name: "Qwen3 14B MLX" } },
+  };
+
+  const binPath = await whichFn("opencode");
+  if (binPath === undefined) {
+    process.stdout.write(
+      "✗ opencode binary not found — install first:\n  curl -fsSL https://opencode.ai/install | sh\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const probe = await probeOpencodeConfig();
+  if (probe.wired) {
+    process.stdout.write(`✓ opencode config already wired — local provider at ${LOCAL_BASE}\n`);
+    return;
+  }
+
+  const cfg = readOrInitOpencodeConfig(GLOBAL_CFG);
+  if (!cfg["$schema"]) cfg["$schema"] = "https://opencode.ai/config.json";
+  const providerField = "providers" in cfg ? "providers" : "provider";
+  cfg[providerField] = {
+    .../** @type {Record<string, unknown>} */ (cfg[providerField] ?? {}),
+    lmstudio: LMSTUDIO_PROVIDER,
+  };
+  if (!cfg["model"]) cfg["model"] = "lmstudio/qwen/qwen3-14b";
+
+  writeFileSync(GLOBAL_CFG, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+  process.stdout.write(`✓ opencode config wired — ${GLOBAL_CFG}\n`);
+  process.stdout.write(`  provider: lmstudio → ${LOCAL_BASE}\n`);
+  process.stdout.write("  default model: lmstudio/qwen/qwen3-14b\n");
+  process.stdout.write("Run `minsky doctor` to verify.\n");
+}
+
+/**
  * Slice 3 of `minsky-cross-machine-dotfile-checks` — emit one row
  * per checked git config key. Renders `  ✓ <key>` when unset OR set
  * to a valid path; `  ⚠ <key>  — <value> does not exist; recover
@@ -1045,7 +1118,7 @@ async function probeOpencodeConfig() {
   const LOCAL_BASE = "http://127.0.0.1:1234/v1";
   const candidates = [
     resolve(process.cwd(), "opencode.json"),
-    resolve(process.env["HOME"] ?? "/tmp", ".config", "opencode", "config.json"),
+    resolve(process.env["HOME"] ?? "/tmp", ".config", "opencode", "opencode.json"),
   ];
   for (const cfgPath of candidates) {
     const result = checkOpencodeConfigFile(cfgPath, LOCAL_BASE);
