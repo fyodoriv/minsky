@@ -178,9 +178,9 @@ export class LocalLlmConcurrencyGate implements SpawnStrategy {
       if (this.nowFn() > result.expiresAt) {
         // Stale; force-clear and retry. Best-effort unlink — if
         // another waiter beats us to it, the next tryClaim retries.
-        // rule-6: handled-locally — best-effort clear; concurrent unlinker is fine
         try {
           unlinkSync(this.lockPath);
+          // rule-6: handled-locally — best-effort clear; concurrent unlinker race is acceptable
         } catch {
           /* concurrent unlink raced us; loop retries */
         }
@@ -233,8 +233,8 @@ export class LocalLlmConcurrencyGate implements SpawnStrategy {
     try {
       const text = readFileSync(this.lockPath, "utf8");
       body = JSON.parse(text) as GateLockBody;
+      // rule-6: handled-locally — unparseable body is recovered by the caller's stale-clear path
     } catch {
-      // Unparseable; treat as expired so next loop turn force-clears.
       return { acquired: false, heldBy: "unknown", expiresAt: 0 };
     }
     return { acquired: false, heldBy: body.workerId, expiresAt: body.expiresAt };
@@ -259,6 +259,7 @@ function bestEffortUnlink(path: string): () => void {
   return () => {
     try {
       unlinkSync(path);
+      // rule-6: handled-locally — release is best-effort; the file may already be gone (stale-recovery raced or already released)
     } catch {
       /* lock file already gone — concurrent unlinker beat us */
     }
