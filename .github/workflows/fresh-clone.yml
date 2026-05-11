@@ -48,7 +48,7 @@ jobs:
       - name: install (builds dist/ via prepare hook)
         run: pnpm install --frozen-lockfile
       - name: simulate stale-dist
-        run: rm -rf novel/tick-loop/dist
+        run: rm -rf novel/tick-loop/dist novel/tick-loop/tsconfig.tsbuildinfo
       - name: reinstall (must rebuild dist/ via prepare hook)
         run: pnpm install --frozen-lockfile
       - name: assert pnpm minsky doctor is all green
