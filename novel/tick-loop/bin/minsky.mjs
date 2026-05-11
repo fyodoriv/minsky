@@ -568,6 +568,11 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
   line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
   line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
+  line(
+    "huggingface-cli",
+    state.huggingfaceCli.present,
+    state.huggingfaceCli.path ?? state.huggingfaceCli.reason ?? "",
+  );
   // Slice 46: when absent, surface the huggingface-cli download hint so
   // the operator sees the exact command to recover without consulting docs.
   const modelDetail = state.model.present
