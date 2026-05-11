@@ -22,6 +22,7 @@ import {
   findingsToTasksMd,
   formatEtime,
   gitConfigParseableInvariant,
+  localServerConcurrencyMismatchInvariant,
   mapGhPrListToCiSnapshots,
   modelCatalogInvariantsHoldInvariant,
   parseEtime,
@@ -1082,5 +1083,67 @@ describe("modelCatalogInvariantsHoldInvariant — slice 7 of `claude-usage-aware
     const result = await modelCatalogInvariantsHoldInvariant({ validate })();
     if (result.ok) throw new Error("unreachable");
     expect(result.evidence).toContain("error A; error B; error C");
+  });
+});
+
+describe("localServerConcurrencyMismatchInvariant — slice 1 of `local-server-concurrency-aware-worker-spawn`", () => {
+  it("passes when env is unset (gate engaged, cap defaults to 1)", async () => {
+    const probe = async () => ({ ok: true, body: "{}" });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: undefined, probe });
+    const result = await inv();
+    expect(result.ok).toBe(true);
+    expect(result.id).toBe("local-server-concurrency-mismatch");
+  });
+
+  it("passes when env=1 (gate engaged)", async () => {
+    const probe = async () => ({ ok: true, body: "{}" });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: "1", probe });
+    const result = await inv();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when env=non-numeric (falls back to safe)", async () => {
+    const probe = async () => ({ ok: true, body: "{}" });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: "auto", probe });
+    const result = await inv();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when env≥2 AND probe body advertises concurrency (vLLM/sglang/Pro)", async () => {
+    const probe = async () => ({
+      ok: true,
+      body: '{"object":"list","data":[],"max_concurrent_requests":8}',
+    });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: "8", probe });
+    const result = await inv();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when env≥2 AND probe body has no concurrency hints (stock mlx_lm.server)", async () => {
+    const probe = async () => ({
+      ok: true,
+      body: '{"object":"list","data":[{"id":"mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"}]}',
+    });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: "5", probe });
+    const result = await inv();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("MINSKY_LOCAL_SERVER_MAX_CONCURRENT=5");
+    expect(result.evidence).toContain("GPU-OOM");
+    expect(result.suggestedFix).toContain("Unset MINSKY_LOCAL_SERVER_MAX_CONCURRENT");
+  });
+
+  it("passes when probe is down (no signal — don't fire spuriously)", async () => {
+    const probe = async () => ({ ok: false });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: "5", probe });
+    const result = await inv();
+    expect(result.ok).toBe(true);
+  });
+
+  it("recognises vllm hint", async () => {
+    const probe = async () => ({ ok: true, body: '{"backend":"vllm-openai-server"}' });
+    const inv = localServerConcurrencyMismatchInvariant({ envValue: "8", probe });
+    const result = await inv();
+    expect(result.ok).toBe(true);
   });
 });
