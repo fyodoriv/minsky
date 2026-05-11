@@ -311,7 +311,7 @@ async function runStartOrAttach(args) {
  *
  * @returns {Promise<Record<string, string>>}
  */
-async function maybeBootstrapLocalLlm() {
+async function maybeBootstrapLocalLlm(_opts = {}) {
   if (process.env["MINSKY_NO_AUTO_BOOTSTRAP"] === "1") {
     return {};
   }
@@ -365,8 +365,9 @@ async function maybeBootstrapLocalLlm() {
     );
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
+  const state = _opts.detectFn
+    ? await _opts.detectFn()
+    : await detectLocalLlmStack(buildProductionProbes({ whichFn }));
   // Safety net: re-check server after the full probe (handles the rare race
   // where the server started between the quick probe and the full-probe batch).
   if (state.server.reachable) {
