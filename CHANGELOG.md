@@ -12,6 +12,33 @@ The discipline:
 
 ---
 
+## 2026-05-11
+
+### What shipped
+
+- **#453** — `feat(local-llm): LocalLlmConcurrencyGate serializes spawns across workers` _(+523/-1)_
+  > O_EXCL file-lock decorator wraps the local SpawnStrategy; default cap=1 matches mlx_lm.server's single-inference limit. Live-fire post-PR: 3-worker run completed (4.8k+13k+19k input tokens, real diffs) where pre-PR all three OOM-crashed the Metal command buffer.
+- **#451** — `fix(aider): default-off reflection paths + diff edit format` _(+74/-1)_
+  > Hard-wires --no-auto-lint/--no-auto-test/--no-suggest-shell-commands/--no-detect-urls + --edit-format diff. Eliminates aider's multi-round context explosion (v3: 46k tokens, OOM; v4b: 14k in/423 out, single round, clean exit).
+- **#446** — `fix(daemon): drop Files cell from buildLocalBrief` _(+27/-13)_
+  > Removes the **Files** cell that aider's --yes was auto-adding as chat context (8-12 files → 0 auto-adds). Composes with #440 (--map-tokens 0) to cut the slim-brief path from 40-70k to ≤3k tokens.
+- **#454** — `feat(self-diagnose): local-server-concurrency-mismatch invariant + gate chaos rows` _(+160/-0)_
+  > Observability companion to #453: probes local server at startup; fires when MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 but the backend body lacks concurrent-inference hints. Operator gets a startup finding rather than a runtime OOM.
+- **#452** — `fix(minsky-cli): MINSKY_ASSUME_TTY=1 escape hatch + non-interactive regression fix` _(+132/-5)_
+  > Splits the conflated TTY question into hasTtyForSudo + isInteractive booleans; MINSKY_ASSUME_TTY=1 lets daemon/nohup/tmux contexts claim sudo-prompt capability when process.stdin.isTTY false-negatives.
+
+### Metrics
+
+- **aider input tokens per iteration (local-LLM path, live-fire)**: 46000 → 14000 _(Δ -32000, **improved**)_
+- **3-worker local spawn: workers completing with real diff**: 0 → 3 _(Δ +3, **improved**)_
+- **max concurrent in-flight LLM requests (gate cap)**: 3 → 1 _(Δ -2, **improved**)_
+
+### Day's narrative
+
+**Local-LLM operational stability day.** Three enforcement PRs collaborate to bring 3-worker parallel local-only spawn from "GPU OOM on every attempt" to "all three complete with real diff output": the O_EXCL file-lock concurrency gate (#453) serializes client-side spawns so mlx_lm.server never sees more than one in-flight inference at a time; aider reflection-path disabling (#451) eliminates the multi-round context explosion that blew a single request from ~46k to nowhere (server OOM mid-round-2) down to a single ~14k-token round with clean exit; and the Files-cell removal (#446) plugs the last auto-add vector, keeping the slim brief genuinely slim. The self-diagnose invariant (#454) closes the operator-bypass path — raise MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 without a vLLM/sglang backend and you get a startup finding rather than a silent OOM — completing the rule-#10 enforcement/observability pairing. PR #452 rounds out the set with a TTY-detection fix that unblocks daemon bootstrap in nohup/tmux contexts.
+
+---
+
 ## 2026-05-05
 
 ### What shipped
@@ -41,28 +68,3 @@ The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: th
 ### Day's narrative
 
 **The day the dogfood loop started compounding.** Morning was infrastructure: secret-scanning task block, P0 daemon-self-improvement filings (#170), the cap raise (#171) that ended a 22-hour budget-paused stall by trusting Anthropic's 429 instead of our heuristic threshold. The afternoon's structural unblock was #174 — the daemon's brief was a placeholder string (`"daemon brief for ${taskId}"`) that had trained claude to default to TASKS.md prose updates. Replacing it with a real task-block-embedded brief plus a FORBIDDEN-noop directive flipped the loop: the very next iteration after the merge shipped #175 (266 LoC of substantive implementation), then #176 (333 LoC wire-in). Two daemon-authored PRs in 30 minutes, ~600 LoC total, no operator pre-spec. The first time this session the daemon picked its own next sub-step and implemented it autonomously.
-
-## 2026-05-11
-
-### What shipped
-
-- **#453** — `feat(local-llm): LocalLlmConcurrencyGate serializes spawns across workers` _(+523/-1)_
-  > O_EXCL file-lock decorator wraps the local SpawnStrategy; default cap=1 matches mlx_lm.server's single-inference limit. Live-fire post-PR: 3-worker run completed (4.8k+13k+19k input tokens, real diffs) where pre-PR all three OOM-crashed the Metal command buffer.
-- **#451** — `fix(aider): default-off reflection paths + diff edit format` _(+74/-1)_
-  > Hard-wires --no-auto-lint/--no-auto-test/--no-suggest-shell-commands/--no-detect-urls + --edit-format diff. Eliminates aider's multi-round context explosion (v3: 46k tokens, OOM; v4b: 14k in/423 out, single round, clean exit).
-- **#446** — `fix(daemon): drop Files cell from buildLocalBrief` _(+27/-13)_
-  > Removes the **Files** cell that aider's --yes was auto-adding as chat context (8-12 files → 0 auto-adds). Composes with #440 (--map-tokens 0) to cut the slim-brief path from 40-70k to ≤3k tokens.
-- **#454** — `feat(self-diagnose): local-server-concurrency-mismatch invariant + gate chaos rows` _(+160/-0)_
-  > Observability companion to #453: probes local server at startup; fires when MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 but the backend body lacks concurrent-inference hints. Operator gets a startup finding rather than a runtime OOM.
-- **#452** — `fix(minsky-cli): MINSKY_ASSUME_TTY=1 escape hatch + non-interactive regression fix` _(+132/-5)_
-  > Splits the conflated TTY question into hasTtyForSudo + isInteractive booleans; MINSKY_ASSUME_TTY=1 lets daemon/nohup/tmux contexts claim sudo-prompt capability when process.stdin.isTTY false-negatives.
-
-### Metrics
-
-- **aider input tokens per iteration (local-LLM path, live-fire)**: 46000 → 14000 _(Δ -32000, **improved**)_
-- **3-worker local spawn: workers completing with real diff**: 0 → 3 _(Δ +3, **improved**)_
-- **max concurrent in-flight LLM requests (gate cap)**: 3 → 1 _(Δ -2, **improved**)_
-
-### Day's narrative
-
-**Local-LLM operational stability day.** Three enforcement PRs collaborate to bring 3-worker parallel local-only spawn from "GPU OOM on every attempt" to "all three complete with real diff output": the O_EXCL file-lock concurrency gate (#453) serializes client-side spawns so mlx_lm.server never sees more than one in-flight inference at a time; aider reflection-path disabling (#451) eliminates the multi-round context explosion that blew a single request from ~46k to nowhere (server OOM mid-round-2) down to a single ~14k-token round with clean exit; and the Files-cell removal (#446) plugs the last auto-add vector, keeping the slim brief genuinely slim. The self-diagnose invariant (#454) closes the operator-bypass path — raise MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 without a vLLM/sglang backend and you get a startup finding rather than a silent OOM — completing the rule-#10 enforcement/observability pairing. PR #452 rounds out the set with a TTY-detection fix that unblocks daemon bootstrap in nohup/tmux contexts.
