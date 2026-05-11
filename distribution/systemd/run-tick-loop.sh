@@ -25,6 +25,13 @@
 #                                     full real spawn (production default).
 #   MINSKY_TICK_INTERVAL_MS           (optional, default 300000 / 5 min)
 #   MINSKY_TICK_MAX_ITERATIONS        (optional, default unbounded)
+#   MINSKY_LOCAL_WATCHDOG_MS          (optional, default 1800000 / 30 min)
+#                                     per-iteration timeout for local-model
+#                                     invocations (aider / opencode). Higher
+#                                     than the claude watchdog (900s) because
+#                                     Qwen3-class models spend ~600s on prompt
+#                                     processing alone. Set lower (e.g. 120000)
+#                                     to fail-fast during debugging.
 #
 # Args (forwarded to the CLI):
 #   --max-iterations=N                cap iteration count
