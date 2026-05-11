@@ -1,5 +1,6 @@
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — preferredPythonPath for arch-consistent aider install) -->
+// <!-- scope: human-approved minsky-cli-arch-detection slice 10 (operator 2026-05-08 — MINSKY_FORCE_HARDWARE_ARCH override for buggy/renamed sysctl) -->
 /**
  * `@minsky/tick-loop/arch-probe` — pure architecture detection for the
  * local-LLM bootstrap. Slice 6 of P0 task `minsky-cli-arch-detection`
@@ -33,7 +34,14 @@
  * completes in ≤2 s wall-clock (dominated by the sysctl shell-out).
  * Blast radius: a single bootstrap attempt's arch check. Operator escape
  * hatch: `MINSKY_NO_AUTO_BOOTSTRAP=1` disables the pre-flight entirely;
- * `MINSKY_ARCH_PROBE=skip` (future) would skip just this module.
+ * `MINSKY_ARCH_PROBE=skip` (future) would skip just this module;
+ * `MINSKY_FORCE_HARDWARE_ARCH=arm64|x86_64` (slice 10) keeps the
+ * planner's arch awareness but bypasses the sysctl shell-out — useful
+ * on a future macOS where `hw.optional.arm64` is renamed and minsky
+ * isn't patched yet, or on a host where sysctl is broken / sandboxed.
+ * `parseForcedHardwareArch(env)` is the pure helper; the production
+ * `buildArchProbes` in `bin/minsky.mjs` swaps the hardware probe for
+ * one that returns the forced value (~200 ms saved per cold start).
  *
  * | # | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
  * |---|---|---|---|---|
@@ -96,6 +104,63 @@ export interface ArchState {
    * `install-arm-homebrew` when this is `true`.
    */
   readonly needsNativeBrew: boolean;
+}
+
+// ---- Env hatch — MINSKY_FORCE_HARDWARE_ARCH (slice 10) -------------------
+
+/**
+ * Slice 10 — operator escape hatch for the hardware-arch probe.
+ *
+ * When set to `"arm64"` or `"x86_64"`, the production `buildArchProbes`
+ * in `bin/minsky.mjs` swaps `probeHardwareArch` for one that returns
+ * the forced value, bypassing the ~200 ms `sysctl -n hw.optional.arm64`
+ * shell-out. The rest of the planner's arch awareness (shell-arch,
+ * brew paths, `needsNativeBrew`, install-arm-homebrew step) keeps
+ * working as if the probe had returned that value naturally.
+ *
+ * Use cases — distinct from slice 9's `MINSKY_ARCH_PROBE=skip` (which
+ * disables the arch awareness entirely and falls back to slice-5
+ * bare-name commands):
+ *   1. Future macOS where `sysctl -n hw.optional.arm64` is renamed —
+ *      operator forces `arm64` to keep the arm-brew install plan
+ *      working until minsky is patched.
+ *   2. Operator on a host where sysctl is broken, sandboxed, or
+ *      otherwise misbehaves — they know the hardware truth and want
+ *      the planner to act on it.
+ *   3. CI / dogfood loops on known-good hardware where the operator
+ *      wants the probe-derived plan but not the shell-out cost.
+ *
+ * Strict-equality on `"arm64"` and `"x86_64"` — symmetric with slice 8's
+ * `bootstrapTtyGate` `=1` and the future slice 9's `MINSKY_ARCH_PROBE=skip`
+ * strict-equality choice. Other spellings (`=Arm64`, `=ARM64`, `=arm`,
+ * `=apple-silicon`, `=intel`, leading/trailing whitespace) are rejected
+ * so a future widening is a deliberate change with a test update. The
+ * operator-facing env-var name uses the canonical `arm64` / `x86_64`
+ * tokens already documented in this module's `HardwareArch` type and
+ * in the doctor row's output, so there's exactly one spelling to learn.
+ *
+ * Returns `undefined` for the unset / empty / invalid case so the caller
+ * can treat both "env not set" and "env set to garbage" identically:
+ * fall through to the live sysctl probe. (We deliberately do NOT type
+ * a discriminated union or throw on garbage — silent fall-through is
+ * the safer choice when the operator's env may be inherited from
+ * another tool's namespace by accident; a thrown error would gate
+ * the entire bootstrap on a typo unrelated to local-LLM.)
+ *
+ * Pure function; same input → same output. Pattern conformance:
+ * Pre-condition gate per Meyer 1992 (Eiffel-style `require`); env-var
+ * shape mirrors the existing `MINSKY_NO_AUTO_BOOTSTRAP=1` /
+ * `MINSKY_NON_INTERACTIVE=1` / `MINSKY_ASSUME_TTY=1` family. Composes
+ * orthogonally with `MINSKY_ARCH_PROBE=skip` (slice 9): when both are
+ * set, `=skip` wins because the caller checks it first — the planner
+ * gets no archState at all, force is moot.
+ *
+ * @otel-exempt pure predicate — no span.
+ */
+export function parseForcedHardwareArch(env: string | undefined): HardwareArch | undefined {
+  if (env === "arm64") return "arm64";
+  if (env === "x86_64") return "x86_64";
+  return undefined;
 }
 
 // ---- Probes ---------------------------------------------------------------

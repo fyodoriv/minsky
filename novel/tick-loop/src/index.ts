@@ -803,6 +803,7 @@ export {
   describeArchState,
   detectArchState,
   needsArmHomebrewInstall,
+  parseForcedHardwareArch,
   preferredBrewPath,
   preferredPipxPath,
   preferredPythonPath,

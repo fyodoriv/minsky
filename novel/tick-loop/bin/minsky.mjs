@@ -4,6 +4,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path probe + H1 aider python + H2 non-TTY refuse) -->
+// <!-- scope: human-approved minsky-cli-arch-detection slice 10 (operator 2026-05-08 — MINSKY_FORCE_HARDWARE_ARCH override for buggy/renamed sysctl) -->
 // <!-- scope: human-approved minsky-cli-fresh-clone-bootstrap slice 8 (operator 2026-05-08 — "I've cloned minsky from scratch, ran pnpm install, then ran minsky and got module not found about tick-loop") -->
 // <!-- scope: human-approved minsky-fresh-clone-health-checks slice 1 (operator 2026-05-08 — "Next let's add as much stable self-healing as reasonable to minsky & install commands") -->
 // <!-- scope: human-approved minsky-runtime-resilience slice 2 (operator 2026-05-08 — slice 2 of the self-healing trilogy) -->
@@ -117,6 +118,7 @@ const {
   formatWorkersDirRecoveryMessage,
   needsLocalLlmBootstrap,
   parseBootstrapLocalLlmArgs,
+  parseForcedHardwareArch,
   pickLogPath,
   planLocalLlmBootstrap,
   planRequiresTty,
@@ -735,10 +737,14 @@ async function probeSubstrate() {
  * Build the production {@link import("../dist/arch-probe.js").ArchProbes}
  * seam. Slice 6 of `minsky-cli-arch-detection`. Wraps:
  *   - `probeShellArch`: maps Node's `process.arch` to the closed set.
- *   - `probeHardwareArch`: shells out to `sysctl -n hw.optional.arm64`.
+ *   - `probeHardwareArch`: shells out to `sysctl -n hw.optional.arm64`,
+ *     unless `MINSKY_FORCE_HARDWARE_ARCH=arm64|x86_64` is set (slice 10),
+ *     in which case the probe returns the forced value without
+ *     shelling out (~200 ms saved per cold start).
  *   - `probeNativeBrewPath` / `probeIntelBrewPath`: `existsSync`.
  */
 function buildArchProbes() {
+  const forcedHwArch = parseForcedHardwareArch(process.env["MINSKY_FORCE_HARDWARE_ARCH"]);
   return {
     probeShellArch: () => {
       // Node's `process.arch` is "arm64" on native Apple Silicon, "x64"
@@ -755,6 +761,11 @@ function buildArchProbes() {
       }
     },
     probeHardwareArch: async () => {
+      // Slice 10: `MINSKY_FORCE_HARDWARE_ARCH=arm64|x86_64` short-
+      // circuits the sysctl shell-out (~200 ms saved). Captured at
+      // `buildArchProbes` build-time so a mid-process env mutation
+      // doesn't change behavior between the doctor row and the plan.
+      if (forcedHwArch !== undefined) return forcedHwArch;
       // `sysctl -n hw.optional.arm64` returns "1" on Apple Silicon
       // (even under Rosetta — the hardware is reported truthfully),
       // "0" on Intel Macs, and the command itself is absent on non-

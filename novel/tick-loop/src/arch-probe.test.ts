@@ -25,6 +25,7 @@ import {
   describeArchState,
   detectArchState,
   needsArmHomebrewInstall,
+  parseForcedHardwareArch,
   preferredBrewPath,
   preferredPipxPath,
   preferredPythonPath,
@@ -504,5 +505,105 @@ describe("detectArchState — referential transparency", () => {
     const result = await detectArchState(probes);
     expect(latchResolved).toBe(true);
     expect(result.hardwareArch).toBe("arm64");
+  });
+});
+
+// ---- Slice 10 — MINSKY_FORCE_HARDWARE_ARCH env hatch --------------------
+
+describe("parseForcedHardwareArch — env hatch (slice 10)", () => {
+  it("returns 'arm64' when env is exactly 'arm64'", () => {
+    expect(parseForcedHardwareArch("arm64")).toBe("arm64");
+  });
+
+  it("returns 'x86_64' when env is exactly 'x86_64'", () => {
+    expect(parseForcedHardwareArch("x86_64")).toBe("x86_64");
+  });
+
+  it("returns undefined when env is undefined (default — slice 6/7 path unchanged)", () => {
+    expect(parseForcedHardwareArch(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when env is empty string (unset-but-defined sentinel)", () => {
+    expect(parseForcedHardwareArch("")).toBeUndefined();
+  });
+
+  it("rejects capitalised variants ('ARM64', 'X86_64', 'Arm64')", () => {
+    // Strict-equality contract — operator must type the documented value
+    // verbatim. Symmetric with slice 8's bootstrapTtyGate `=1` and the
+    // future slice 9's `=skip` strict-equality choice.
+    expect(parseForcedHardwareArch("ARM64")).toBeUndefined();
+    expect(parseForcedHardwareArch("X86_64")).toBeUndefined();
+    expect(parseForcedHardwareArch("Arm64")).toBeUndefined();
+  });
+
+  it("rejects whitespace-padded variants", () => {
+    // No trim — leading/trailing whitespace usually means a shell-script
+    // bug; we don't hide it.
+    expect(parseForcedHardwareArch(" arm64")).toBeUndefined();
+    expect(parseForcedHardwareArch("arm64 ")).toBeUndefined();
+    expect(parseForcedHardwareArch(" x86_64 ")).toBeUndefined();
+  });
+
+  it("rejects nicknames and aliases ('apple-silicon', 'intel', 'arm', 'x64', 'amd64')", () => {
+    // Closed set: only the canonical `HardwareArch` tokens are honored.
+    // A widening to accept aliases is a deliberate code change with
+    // a test update — keeps the env-var contract reading exactly one way.
+    expect(parseForcedHardwareArch("apple-silicon")).toBeUndefined();
+    expect(parseForcedHardwareArch("intel")).toBeUndefined();
+    expect(parseForcedHardwareArch("arm")).toBeUndefined();
+    expect(parseForcedHardwareArch("x64")).toBeUndefined();
+    expect(parseForcedHardwareArch("amd64")).toBeUndefined();
+  });
+
+  it("rejects unrelated truthy values ('1', 'true', 'force', 'yes')", () => {
+    expect(parseForcedHardwareArch("1")).toBeUndefined();
+    expect(parseForcedHardwareArch("true")).toBeUndefined();
+    expect(parseForcedHardwareArch("force")).toBeUndefined();
+    expect(parseForcedHardwareArch("yes")).toBeUndefined();
+  });
+
+  it("rejects 'other' — only operator-actionable arches force a probe override", () => {
+    // The 'other' bucket exists for graceful-degrade on unknown hosts;
+    // forcing it would be a planner-incoherent state (no install plan
+    // applies), so the env var refuses to land there.
+    expect(parseForcedHardwareArch("other")).toBeUndefined();
+  });
+});
+
+describe("detectArchState — slice 10 forced-arch composition (probe-override seam)", () => {
+  // The production seam (`buildArchProbes` in bin/minsky.mjs) swaps
+  // `probeHardwareArch` for one that returns the forced value. These
+  // tests pin that the swap composes correctly with the rest of the
+  // planner's arch awareness — the synthesised state behaves identically
+  // to a state where sysctl naturally returned the forced value.
+  it("synthesised arm64 state on a missing-/opt/homebrew host triggers needsNativeBrew", async () => {
+    // Operator on M-series with renamed sysctl — forces arm64 to keep
+    // the install-arm-homebrew step.
+    const state = await detectArchState(
+      buildProbes({
+        probeShellArch: () => "x86_64",
+        probeHardwareArch: async () => "arm64", // simulating forced
+        probeNativeBrewPath: () => undefined,
+      }),
+    );
+    expect(state.hardwareArch).toBe("arm64");
+    expect(state.needsNativeBrew).toBe(true);
+    expect(state.mismatch).toBe(true);
+    expect(needsArmHomebrewInstall(state)).toBe(true);
+  });
+
+  it("synthesised x86_64 state on Intel host yields the slice-5 path (no arm-brew step)", async () => {
+    const state = await detectArchState(
+      buildProbes({
+        probeShellArch: () => "x86_64",
+        probeHardwareArch: async () => "x86_64", // simulating forced
+        probeNativeBrewPath: () => undefined,
+        probeIntelBrewPath: () => "/usr/local/bin/brew",
+      }),
+    );
+    expect(state.hardwareArch).toBe("x86_64");
+    expect(state.needsNativeBrew).toBe(false);
+    expect(state.mismatch).toBe(false);
+    expect(needsArmHomebrewInstall(state)).toBe(false);
   });
 });
