@@ -1,3 +1,4 @@
+<!-- pattern: not-applicable — ephemeral PR body; not a tracked design artefact -->
 # local-model-efficiency: time-budget prefix + local watchdog + consecutive-timeout shrink
 
 ## Summary
