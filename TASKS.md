@@ -46,7 +46,6 @@
   - **Risk**: low. The `prepare` hook is the standard pnpm/npm pattern; failure modes are limited to tsc errors (which we'd want to surface anyway). The defensive dist-existence-check adds 2 lines of `existsSync` to `bin/minsky.mjs`'s startup — negligible cost (sub-millisecond).
   - **Surfaced-by**: operator live-run 2026-05-08 — fresh clone of `minsky` repo, ran `pnpm install`, then `minsky` (or `pnpm minsky`?) immediately failed with `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/.../novel/tick-loop/dist/index.js' imported from /Users/.../novel/tick-loop/bin/minsky.mjs`.
 
-
 - [ ] `minsky-fresh-clone-health-checks` — slice 1 of self-healing: detect-and-explain the four most likely fresh-clone failures (node_modules absent, pnpm absent, Node major mismatch, dist stale) instead of leaking cryptic stack traces
   - **ID**: minsky-fresh-clone-health-checks
   - **Tags**: p0, operator-directive, minsky-cli, self-healing, fresh-clone, dx, multi-machine-sync
