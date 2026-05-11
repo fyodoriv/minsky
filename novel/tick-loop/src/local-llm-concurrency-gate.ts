@@ -178,10 +178,11 @@ export class LocalLlmConcurrencyGate implements SpawnStrategy {
       if (this.nowFn() > result.expiresAt) {
         // Stale; force-clear and retry. Best-effort unlink — if
         // another waiter beats us to it, the next tryClaim retries.
+        // rule-6: handled-locally — best-effort clear; concurrent unlinker is fine
         try {
           unlinkSync(this.lockPath);
         } catch {
-          // rule-6: handled-locally — best-effort clear; concurrent unlinker is fine
+          /* concurrent unlink raced us; loop retries */
         }
         continue;
       }
@@ -211,13 +212,7 @@ export class LocalLlmConcurrencyGate implements SpawnStrategy {
       closeSync(fd);
       return {
         acquired: true,
-        release: () => {
-          try {
-            unlinkSync(this.lockPath);
-          } catch {
-            // rule-6: handled-locally — release is best-effort
-          }
-        },
+        release: bestEffortUnlink(this.lockPath),
       };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -249,4 +244,23 @@ export class LocalLlmConcurrencyGate implements SpawnStrategy {
 function dirname(p: string): string {
   const i = p.lastIndexOf("/");
   return i <= 0 ? "/" : p.slice(0, i);
+}
+
+/**
+ * Extracted to avoid a nested try/catch inside `tryClaim` (rule #6's
+ * sibling lint forbids try-depth > 1 in a single function).
+ * rule-6: handled-locally — release is best-effort; if the file was
+ * already removed by a stale-lock recovery in another worker, the
+ * unlink call EEXIST/ENOENT is fine to swallow.
+ *
+ * @otel-exempt — internal helper.
+ */
+function bestEffortUnlink(path: string): () => void {
+  return () => {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* lock file already gone — concurrent unlinker beat us */
+    }
+  };
 }
