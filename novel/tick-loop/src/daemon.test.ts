@@ -2322,6 +2322,17 @@ describe("buildLocalBrief — `daemon-aider-brief-shrinker`", () => {
     expect(brief).toContain("exit without writing");
   });
 
+  it("includes the Progress field when present (surfaces current-iteration directive)", () => {
+    const withProgress =
+      "# Tasks\n\n## P0\n\n- [ ] `real-task` — tagline\n  - **ID**: real-task\n  - **Tags**: p0\n  - **Progress**: Slices 1-38 shipped. Slice 39: extend runDoctor to show model name.\n  - **Hypothesis**: h.\n  - **Details**: d.\n";
+    const brief = buildLocalBrief({
+      taskId: "real-task",
+      tasksMdContent: withProgress,
+    });
+    expect(brief).toContain("## Progress");
+    expect(brief).toContain("Slice 39: extend runDoctor to show model name");
+  });
+
   it("stays ≤2 KB on the small fixture", () => {
     const brief = buildLocalBrief({ taskId: "real-task", tasksMdContent: small });
     expect(Buffer.byteLength(brief, "utf8")).toBeLessThanOrEqual(2048);

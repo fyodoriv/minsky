@@ -1322,6 +1322,7 @@ export function buildLocalBrief(args: {
     return `Task \`${args.taskId}\` not found in TASKS.md — exit without writing files.`;
   }
   const tagline = extractTaskTagline(block);
+  const progress = extractSlimField(block, "Progress");
   const hypothesis = extractSlimField(block, "Hypothesis");
   const details = extractSlimField(block, "Details");
   const lines: string[] = [
@@ -1331,6 +1332,9 @@ export function buildLocalBrief(args: {
   ];
   if (tagline !== undefined) {
     lines.push("", tagline);
+  }
+  if (progress !== undefined) {
+    lines.push("", "## Progress", progress);
   }
   if (hypothesis !== undefined) {
     lines.push("", "## Hypothesis", hypothesis);
