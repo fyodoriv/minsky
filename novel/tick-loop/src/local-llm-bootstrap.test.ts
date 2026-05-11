@@ -582,6 +582,49 @@ describe("detectLocalLlmStack — chaos-table row 1: probe seam throws", () => {
   });
 });
 
+// ---- planLocalLlmBootstrap — modelPath option (slice 46) -----------------
+
+describe("planLocalLlmBootstrap — modelPath option (slice 46)", () => {
+  const stoppedNoPath: LocalLlmStackState = {
+    ...serverStopped,
+    // model present but probe returned no path (path-less ComponentState)
+    model: { present: true },
+  };
+
+  it("uses state.model.path in start-mlx-server command", () => {
+    const stateWithPath: LocalLlmStackState = {
+      ...serverStopped,
+      model: { present: true, path: "/cache/models--mlx-community--Qwen3-Coder-30B" },
+    };
+    const plan = planLocalLlmBootstrap(stateWithPath);
+    const serverStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(serverStep?.command).toContain("/cache/models--mlx-community--Qwen3-Coder-30B");
+  });
+
+  it("falls back to options.modelPath when state.model.path is absent", () => {
+    const plan = planLocalLlmBootstrap(stoppedNoPath, { modelPath: "/opts/custom/path" });
+    const serverStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(serverStep?.command).toContain("/opts/custom/path");
+  });
+
+  it("uses state.model.path over options.modelPath when both are set", () => {
+    const stateWithPath: LocalLlmStackState = {
+      ...serverStopped,
+      model: { present: true, path: "/state/path" },
+    };
+    const plan = planLocalLlmBootstrap(stateWithPath, { modelPath: "/opts/path" });
+    const serverStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(serverStep?.command).toContain("/state/path");
+    expect(serverStep?.command).not.toContain("/opts/path");
+  });
+
+  it("falls back to DEFAULT_LOCAL_LLM_MODEL when neither state path nor modelPath is available", () => {
+    const plan = planLocalLlmBootstrap(stoppedNoPath);
+    const serverStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(serverStep?.command).toContain("mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit");
+  });
+});
+
 // ---- summarisePlan --------------------------------------------------------
 
 describe("summarisePlan", () => {

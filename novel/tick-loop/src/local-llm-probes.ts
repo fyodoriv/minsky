@@ -117,22 +117,44 @@ export function modelCachePath(modelId: string, home: string = homedir()): strin
  * (A more thorough probe would also check that the safetensors files
  * are non-empty; we trust huggingface-cli's atomic-rename discipline.)
  *
+ * Slice 46: when `envModelPath` is supplied (the value of the
+ * `MINSKY_LOCAL_MODEL_PATH` env var), the probe checks that path
+ * directly instead of scanning the HuggingFace cache. Useful when the
+ * model lives outside `~/.cache/huggingface/hub/` (e.g., a separate
+ * disk, a shared NFS mount, or a symlinked location).
+ *
  * @otel tick-loop.local-llm-probes.model
  */
 export function buildModelProbe(opts: {
   readonly modelId?: string;
   readonly existsSyncFn?: ExistsSyncFn;
   readonly home?: string;
+  /**
+   * Slice 46: explicit model path from the `MINSKY_LOCAL_MODEL_PATH`
+   * env var. When set, the probe checks this path instead of the
+   * default HuggingFace cache location.
+   */
+  readonly envModelPath?: string;
 }): () => Promise<ComponentState> {
   const modelId = opts.modelId ?? DEFAULT_LOCAL_LLM_MODEL;
   const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
   const home = opts.home ?? homedir();
   return async () => {
+    if (opts.envModelPath !== undefined) {
+      if (existsSyncFn(opts.envModelPath)) {
+        return { present: true, path: opts.envModelPath, detail: modelId };
+      }
+      return {
+        present: false,
+        reason: "MINSKY_LOCAL_MODEL_PATH not found",
+        detail: modelId,
+      };
+    }
     const path = modelCachePath(modelId, home);
     if (existsSyncFn(path)) {
       return { present: true, path, detail: modelId };
     }
-    return { present: false, reason: "huggingface-cache miss", detail: modelId };
+    return { present: false, reason: "not found", detail: modelId };
   };
 }
 
@@ -305,6 +327,12 @@ export function buildProductionProbes(opts: {
    * fail at "command not found". See `arch-probe.ts preferredPipxPath`.
    */
   readonly expectedPipxPath?: string;
+  /**
+   * Slice 46: value of the `MINSKY_LOCAL_MODEL_PATH` env var. When
+   * set, the model probe checks this path directly instead of scanning
+   * the HuggingFace cache. Threaded in by `bin/minsky.mjs`.
+   */
+  readonly envModelPath?: string;
 }): DetectProbes {
   const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
   const probePipx: () => Promise<ComponentState> =
@@ -318,6 +346,7 @@ export function buildProductionProbes(opts: {
     probeModel: buildModelProbe({
       ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
       ...(opts.existsSyncFn !== undefined ? { existsSyncFn: opts.existsSyncFn } : {}),
+      ...(opts.envModelPath !== undefined ? { envModelPath: opts.envModelPath } : {}),
     }),
     probeServer: buildServerProbe({
       ...(opts.url !== undefined ? { url: opts.url } : {}),

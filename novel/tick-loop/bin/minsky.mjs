@@ -429,11 +429,20 @@ async function detectForBootstrap() {
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
+  // Slice 46: thread MINSKY_LOCAL_MODEL_PATH into the model probe so
+  // operators with non-standard cache locations (separate disk, NFS
+  // mount, symlink) don't need to change HF_HOME.
+  const envModelPath = process.env["MINSKY_LOCAL_MODEL_PATH"];
+  if (envModelPath !== undefined) probeOpts.envModelPath = envModelPath;
   const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
   const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
+  // Slice 46: thread detected model path into plan so start-mlx-server
+  // uses the local cache path directly in --model, skipping HF network
+  // lookup at server start.
+  if (state.model.path !== undefined) planOpts.modelPath = state.model.path;
   return { state, archState, planOpts, pythonPath };
 }
 
@@ -544,7 +553,12 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
   line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
   line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
-  line("model weights", state.model.present, state.model.detail ?? state.model.reason ?? "");
+  // Slice 46: when absent, surface the huggingface-cli download hint so
+  // the operator sees the exact command to recover without consulting docs.
+  const modelDetail = state.model.present
+    ? (state.model.path ?? state.model.detail ?? "")
+    : `not found — run: huggingface-cli download ${state.model.detail ?? ""}`;
+  line("model weights", state.model.present, modelDetail);
   line(
     "mlx-lm.server reachable",
     state.server.reachable,

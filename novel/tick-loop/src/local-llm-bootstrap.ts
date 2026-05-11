@@ -222,6 +222,14 @@ export interface BootstrapPlanOptions {
    * compat by construction.
    */
   readonly archState?: import("./arch-probe.js").ArchState;
+  /**
+   * Slice 46: local filesystem path to pass to `mlx_lm.server --model`.
+   * When set, the start-mlx-server step uses this path instead of the
+   * model ID string, avoiding any HuggingFace network lookup at server
+   * start. The wiring layer (`bin/minsky.mjs`) supplies `state.model.path`
+   * when the probe found the model locally.
+   */
+  readonly modelPath?: string;
 }
 
 // ---- Constants ------------------------------------------------------------
@@ -382,7 +390,7 @@ function buildModelDownloadStep(modelId: string): InstallStep {
   };
 }
 
-function buildStartServerStep(): InstallStep {
+function buildStartServerStep(modelPath?: string): InstallStep {
   return {
     type: "start-mlx-server",
     description: "Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)",
@@ -392,10 +400,14 @@ function buildStartServerStep(): InstallStep {
     // in the executor (it needs detach + log redirection that argv-only
     // can't express). The argv here is the canonical shape the executor
     // dispatches; adjust there if the executor changes the launch path.
+    //
+    // Slice 46: when modelPath is supplied (local cache path from the
+    // model probe or MINSKY_LOCAL_MODEL_PATH), pass it directly to
+    // avoid any HuggingFace network lookup at server start.
     command: [
       "mlx_lm.server",
       "--model",
-      DEFAULT_LOCAL_LLM_MODEL,
+      modelPath ?? DEFAULT_LOCAL_LLM_MODEL,
       "--host",
       "127.0.0.1",
       "--port",
@@ -475,7 +487,10 @@ function buildInstallSteps(
   if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
   if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  if (!state.server.reachable) steps.push(buildStartServerStep());
+  // Slice 46: use the detected local path when available so mlx_lm.server
+  // doesn't need to resolve the model ID through the HuggingFace cache.
+  if (!state.server.reachable)
+    steps.push(buildStartServerStep(state.model.path ?? options.modelPath));
   return steps;
 }
 

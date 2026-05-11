@@ -72,7 +72,7 @@ describe("buildModelProbe — chaos-table row 5: cache missing", () => {
     });
     const state = await probe();
     expect(state.present).toBe(false);
-    expect(state.reason).toBe("huggingface-cache miss");
+    expect(state.reason).toBe("not found");
   });
 
   it("returns present + path when the cache directory exists", async () => {
@@ -85,6 +85,33 @@ describe("buildModelProbe — chaos-table row 5: cache missing", () => {
     expect(state.present).toBe(true);
     expect(state.path).toBe("/h/.cache/huggingface/hub/models--x--y");
     expect(state.detail).toBe("x/y");
+  });
+});
+
+// ---- buildModelProbe — slice 46: MINSKY_LOCAL_MODEL_PATH override -------
+
+describe("buildModelProbe — slice 46: envModelPath override", () => {
+  it("returns present using envModelPath when the path exists", async () => {
+    const probe = buildModelProbe({
+      modelId: "x/y",
+      existsSyncFn: (p) => p === "/custom/model/path",
+      envModelPath: "/custom/model/path",
+    });
+    const state = await probe();
+    expect(state.present).toBe(true);
+    expect(state.path).toBe("/custom/model/path");
+    expect(state.detail).toBe("x/y");
+  });
+
+  it("returns absent with MINSKY_LOCAL_MODEL_PATH reason when envModelPath is set but missing", async () => {
+    const probe = buildModelProbe({
+      modelId: "x/y",
+      existsSyncFn: () => false,
+      envModelPath: "/nonexistent/path",
+    });
+    const state = await probe();
+    expect(state.present).toBe(false);
+    expect(state.reason).toBe("MINSKY_LOCAL_MODEL_PATH not found");
   });
 });
 
