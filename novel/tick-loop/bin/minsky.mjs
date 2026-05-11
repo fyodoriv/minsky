@@ -23,6 +23,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 36 (operator 2026-05-11 — step-specific recovery hints in executePlanWithProductionIo: task Details "pipx install fails → loud-crash with the exact pipx error + a recovery hint (`brew install pipx`)") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 37 (operator 2026-05-11 — skip-earlier gate: when plan is [start-mlx-server] AND PID file is alive, skip the spurious second-server spawn and YELLOW banner — prevents double-start during 30-60s model-load window on `minsky bootstrap-local-llm` + `minsky doctor` paths that lacked slice-34's PID-alive check) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 38 (operator 2026-05-11 — skip-earlier gate: PID-alive check before detectForBootstrap on !force paths — saves ~4 child-process spawns (arch-probe sysctl + which×3) during 30-60s model-load window on local-preferred + persisted-hard-limit trigger paths; slice-34 already covers runtime-claude-hardlimit, slice-37 fires too late on the other two) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 39 (operator 2026-05-11 — doctor server row: fetch GET /v1/models when server is reachable, show data[0].id as "reachable — <model>" instead of raw URL; fetchServerModelId helper extracted to keep runDoctor under biome cognitive-complexity cap) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -724,9 +725,9 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
  * Emit the 8 doctor status rows. Extracted so `runDoctor` stays under
  * biome's cognitive-complexity cap.
  *
- * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined }} args
+ * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined, serverModel?: string }} args
  */
-function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
+function emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverModel }) {
   /** @param {string} label @param {boolean} ok @param {string} [detail] */
   const line = (label, ok, detail) => {
     const mark = ok ? "✓" : "✗";
@@ -741,7 +742,11 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   line(
     "mlx-lm.server reachable",
     state.server.reachable,
-    state.server.reachable ? state.server.url : (state.server.reason ?? ""),
+    state.server.reachable
+      ? serverModel != null
+        ? `reachable — ${serverModel}`
+        : state.server.url
+      : (state.server.reason ?? ""),
   );
   line(
     "python 3.12/3.13 for aider",
@@ -751,6 +756,20 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   // Row is GREEN when planner won't need arm-homebrew install.
   // Rosetta-with-brew still GREEN — absolute paths sidestep the mismatch.
   line("arch", !archState.needsNativeBrew, describeArchState(archState));
+}
+
+/** @param {{ reachable: boolean, url: string }} serverState @returns {Promise<string | undefined>} */
+async function fetchServerModelId(serverState) {
+  if (!serverState.reachable) return undefined;
+  try {
+    const resp = await fetch(serverState.url);
+    if (resp.ok) {
+      const json = await resp.json();
+      return /** @type {string | undefined} */ (json?.data?.[0]?.id);
+    }
+  } catch {
+    // non-fatal — server row falls back to url
+  }
 }
 
 async function runDoctor() {
@@ -765,7 +784,8 @@ async function runDoctor() {
   // cannot run, so banner is RED instead of YELLOW.
   const [{ state, archState, planOpts, pythonPath }, claudeDecision, substrateState] =
     await Promise.all([detectForBootstrap(), probeClaude(), probeSubstrate()]);
-  emitDoctorRows({ state, archState, claudeDecision, pythonPath });
+  const serverModel = await fetchServerModelId(state.server);
+  emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverModel });
   const substrateLines = renderDoctorSubstrateRows(substrateState);
   for (const l of substrateLines) {
     process.stdout.write(`${l}\n`);

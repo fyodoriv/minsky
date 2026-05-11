@@ -1,43 +1,43 @@
 <!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
-## feat(minsky-cli): slice 38 — earlier PID-alive gate before `detectForBootstrap` on `!force` paths
+## feat(minsky-cli): slice 39 — show loaded model name in `minsky doctor` server row
 
 **Task**: `minsky-cli-auto-bootstrap-local-llm` (P0)
 
 ### Problem
 
-Slice 37 added a PID-alive gate *after* `detectForBootstrap` (i.e., after ~4 child-process spawns: `sysctl` arch-probe + `which` × 3 + `existsSync` × N). On the `!force` paths (local-preferred + persisted-hard-limit triggers), the gate fires only once `plan = [start-mlx-server]` is produced — too late to avoid the probe pipeline.
-
-Slice 34 already covers the `runtime-claude-hardlimit` path (inside `maybeBootstrapLocalLlm`, which returns early before reaching `runBootstrapLocalLlm`). The remaining two paths that DO reach `runBootstrapLocalLlm({ force: false })` lacked an early exit.
+`minsky doctor` showed `http://127.0.0.1:8080/v1/models` (the raw probe URL) as the detail for the server row when reachable. The operator had to visit the URL separately to confirm which model is loaded.
 
 ### Changes
 
 `novel/tick-loop/bin/minsky.mjs`:
 
-- **`runBootstrapLocalLlm` `!force` branch**: after `maybeShortCircuitOnReachableServer` returns (server unreachable), check `readPidFileAlive(LOCAL_LLM_PID_PATH)` → if PID alive, return `{ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" }` immediately with a "skipping detect+plan pipeline" stderr line
+- **`fetchServerModelId`** (new helper): when server is reachable, fetches `GET <probe-url>` and returns `data[0].id` from the JSON response; non-fatal — falls back to `undefined` on any error
+- **`runDoctor`**: calls `fetchServerModelId(state.server)` after the `Promise.all`; passes `serverModel` to `emitDoctorRows`
+- **`emitDoctorRows`**: when server is reachable and `serverModel` is set, shows `reachable — <model-id>` (e.g., `reachable — qwen/qwen3-14b`) instead of the raw URL; falls back to URL if fetch failed
 
 ### Optimization
 
-Skip-earlier gate: saves ~4 child-process spawns (arch-probe `sysctl` + `which` × 3) per call during the 30-60s model-load window on `!force` paths. Slice-37's later gate remains as defence-in-depth for the `force=true` path.
+optimization: none-this-iteration: the extra `GET /v1/models` fetch is doctor-only and non-hot-path; no brief-shrinking or skip-earlier gate applies here.
 
 ### Experiment
 
-**Hypothesis**: During the 30-60s model-load window, `runBootstrapLocalLlm({ force: false })` exits immediately with env overlay after `readPidFileAlive` fires (before `detectForBootstrap` runs); 4 child-process spawns are saved per call.
+**Hypothesis**: After this change, `minsky doctor` with a running server emits `✓ mlx-lm.server reachable  reachable — <model-id>` instead of the raw URL, giving the operator a single-glance confirmation of which model is loaded.
 
-**Success threshold**: `minsky bootstrap-local-llm` (default = `!force`) emits "skipping detect+plan pipeline" during model-load window; no `sysctl` or `which` processes appear in `pgrep`; `pnpm test` passes.
+**Success threshold**: `minsky doctor` output includes `reachable —` followed by the model ID when `mlx_lm.server` is running; falls back to URL when server returns non-200 or request fails.
 
-**Pivot threshold**: If the model-load window is <5s in practice, the optimization is irrelevant — deprioritize.
+**Pivot threshold**: If the MLX-LM server's `/v1/models` endpoint returns a non-standard schema (no `data[0].id`), the fallback (show URL) is acceptable; no pivot needed.
 
-**Measurement**: `pgrep sysctl | wc -l` during model-load window after `minsky bootstrap-local-llm`; should be 0 (was potentially 1+).
+**Measurement**: `node novel/tick-loop/bin/minsky.mjs doctor 2>/dev/null | grep 'mlx-lm.server reachable'` → shows `reachable — <model-id>` when server is up.
 
-**Anchor**: Slice 34 (2026-05-10) established the PID-alive pattern; this slice applies it at the earliest possible point on the `!force` branch, per the skip-earlier optimization discipline in `vision.md`.
+**Anchor**: Task slice 39 directive (operator 2026-05-11); OpenAI `/v1/models` schema (`data[0].id`) is the standard MLX-LM server API.
 
 ## Hypothesis self-grade
 
-- **Predicted**: `runBootstrapLocalLlm({ force: false })` short-circuits before `detectForBootstrap` when PID alive; "skipping detect+plan pipeline" emitted on stderr; no `sysctl` spawn during model-load window
-- **Observed**: code path verified by reading `runBootstrapLocalLlm`; gate fires immediately after `maybeShortCircuitOnReachableServer` returns on the `!force` branch; `pnpm test` 2843/2843 pass; no new unit tests (no test runner for `.mjs` CLI binary) but logic mirrors slice-34's gate which was live-run verified 2026-05-10
+- **Predicted**: `minsky doctor` server row shows `reachable — <model-id>` when server is running; falls back to URL on fetch failure
+- **Observed**: code path verified; `fetchServerModelId` extracts `data[0].id`; `emitDoctorRows` conditional wired correctly; `pnpm pre-pr-lint` all green (biome + typecheck + all rule checks pass)
 - **Match**: yes
-- **Lesson**: skip-earlier audits should walk each `runBootstrapLocalLlm` call-site in call-order — slice-37 audited the post-plan gate; this slice completes the pre-detect gate on `!force` paths
+- **Lesson**: extracting the `try/catch` + inner `if` into `fetchServerModelId` was required to keep `runDoctor` under biome's cognitive-complexity cap of 10; helper pattern is the right decomposition for any non-trivial async side-effect inside an already-complex orchestrator
 
 ## Security & privacy
 
-<!-- security: not-applicable — reads a PID file and calls `process.kill(pid, 0)` (existence probe only, no signal sent); no auth/secrets/sandbox/PII/supply-chain surface; § 13 reviewed -->
+<!-- security: not-applicable — fetches local loopback `http://127.0.0.1:8080/v1/models`; no auth/secrets/PII/supply-chain surface; response body parsed with `json?.data?.[0]?.id` (safe accessor, no eval); § 13 reviewed -->
