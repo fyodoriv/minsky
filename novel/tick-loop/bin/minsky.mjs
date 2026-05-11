@@ -596,15 +596,14 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
 
 async function runDoctor() {
   process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
-  const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
-  const claudeDecision = await probeClaude();
+  const [{ state, archState, planOpts, pythonPath }, claudeDecision, substrateState] =
+    await Promise.all([detectForBootstrap(), probeClaude(), probeSubstrate()]);
   emitDoctorRows({ state, archState, claudeDecision, pythonPath });
   // Slice 1 of `minsky-fresh-clone-health-checks`: 4 substrate rows
   // (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) so
   // the operator can see the install-time substrate at the same time
   // as the local-LLM stack. ANY substrate red → daemon literally
   // cannot run, so banner is RED instead of YELLOW.
-  const substrateState = await probeSubstrate();
   const substrateLines = renderDoctorSubstrateRows(substrateState);
   for (const l of substrateLines) {
     process.stdout.write(`${l}\n`);
