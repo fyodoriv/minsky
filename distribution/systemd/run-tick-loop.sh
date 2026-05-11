@@ -87,6 +87,13 @@ done
 for gh_dir in /opt/homebrew/bin /usr/local/bin "${HOME}"/.local/bin; do
   [ -x "${gh_dir}/gh" ] && PATH="${gh_dir}:${PATH}" && break
 done
+# Same pattern for `opencode` — the local-LLM spawn target used when the
+# daemon falls back to Ollama/local models. Default install is
+# ~/.opencode/bin/opencode (the opencode CLI installer's standard location).
+# Surfaced via ENOENT in the daemon error log when launchd PATH lacks it.
+for opencode_dir in "${HOME}"/.opencode/bin "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
+  [ -x "${opencode_dir}/opencode" ] && PATH="${opencode_dir}:${PATH}" && break
+done
 export PATH
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
