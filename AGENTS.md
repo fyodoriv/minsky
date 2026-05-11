@@ -39,6 +39,10 @@ Then write the minimum code to pass (green). Then refactor.
 
 No exceptions. Apply at every level: code, persona behavior, orchestration logic, even the autonomic manager's own decisions.
 
+**Acceptance-scenario gate (spec-kit Article III reinforcement).** Before a test file is written, the acceptance criteria the test will assert must exist as Given/When/Then scenarios in either `user-stories/<id>.md` or `.minsky/specs/<task-id>.md`. A test without a traceable GWT scenario is orphaned — it can pass for the wrong reason and cannot be falsified against the original intent. Order: write GWT scenarios first (via `/task-spec`), then the test, then implement. Source: spec-kit `spec-template.md` § "User Scenarios & Testing"; conforming pattern: BDD acceptance-test specification (Wynne & Hellesøy, *The Cucumber Book*, 2012).
+
+**Independent testability gate.** Every user story or vertical slice — whether in `user-stories/*.md` or in a spec's story decomposition — must pass the spec-kit independent-testability test: "If you implement just this one story, do you have a viable, demonstrable unit of value?" If yes, the story is correctly bounded. If no, the story spans too many concerns and must be split before `/task-slice`. Source: spec-kit `spec-template.md` IMPORTANT comment block; conforming pattern: vertical-slice delivery (Cockburn, *Crystal Clear*, 2004, Ch. 3).
+
 ### 4. Everything measurable, everything visible
 
 New components emit OpenTelemetry. New metrics appear on a dashboard. If a metric matters enough to track, it's reachable from the Watch.
@@ -73,9 +77,13 @@ If the metric source doesn't exist yet, ship a **preparation PR** that lands the
 
 Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. Post-hoc metrics (chosen after seeing the result) are forbidden. See `vision.md` § 9 for the full rule + sources, including the pre-registration anchor (Munafò et al. 2017, *Nature Human Behaviour*).
 
+**NEEDS-CLARIFICATION inventory gate (spec-kit reinforcement).** Before a task is claimed and before code is written, every item in the task block or its spec that cannot be answered from existing files must be listed explicitly as `[NEEDS CLARIFICATION: <exact question>]` — not silently assumed away. Assumptions block falsifiability: an assumed input means the hypothesis was never fully stated. Use `/task-spec` to surface the inventory; resolve it via `/grill-task`; commit the resolved list to `.minsky/specs/<task-id>.md`. A task with unresolved NEEDS-CLARIFICATION items must stay in `needs-info` state (see `/triage`). Source: spec-kit `spec-template.md` "NEEDS CLARIFICATION" convention; conforming pattern: explicit-assumption logging (Cockburn, *Writing Effective Use Cases*, 2001, Ch. 5).
+
 ### 10. Deterministic enforcement (iron rule)
 
 Every constitutional rule must be enforced by a deterministic CI check — not a Skill, not an LLM, not "the agent will remember". Same input, same output, no model call in the chain. LLM-driven checks (Claude Skills like `claude-spec-monitor`) are *advisory only* and useful for *discovering* rule gaps; they are never load-bearing for *enforcing* rules. When a rule resists mechanisation, split it into a deterministic substrate (the lint catches presence/shape) plus an explicit human-judgement layer — never quietly delegated to a Skill. When a deterministic linter ships for a rule, any prior Skill-based enforcement is *removed* in the same PR (the ratchet rule — never two enforcement mechanisms competing). See `vision.md` § 10 for the full rule + sources.
+
+**Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
 
 ## Orchestrator discipline (sub-agent launches)
 
@@ -91,6 +99,7 @@ These rules apply to every Agent-tool-launched sub-agent. Human-authored PRs are
 
 Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasksmd/tasks.md).
 
+0. Run `/karpathy-disciplines` — prime working memory with the four engineering disciplines BEFORE reading the task block. This takes seconds and prevents the most common worker failure modes (silent assumption, scope creep, vague completion).
 1. Run `/next-task` (installed by `setup.sh` via `npx @tasks-md/cli install`)
 2. The command reads `TASKS.md`, picks the highest-priority unblocked task, claims it with `(@your-agent-id)`, and orients you
 3. Follow the constitutional rules above
