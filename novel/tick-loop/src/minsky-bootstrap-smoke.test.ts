@@ -16,4 +16,21 @@ describe("maybeBootstrapLocalLlm — DI seam", () => {
     });
     expect(result).toMatchObject({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
   });
+
+  it("returns empty env when detectFn reports server unreachable and claude probe reports healthy", async () => {
+    const fakeState = {
+      server: { reachable: false, reason: "connection refused" },
+      pipx: { present: true },
+      mlxLm: { present: true },
+      aider: { present: true },
+      huggingfaceCli: { present: true },
+      model: { present: true },
+    };
+    const result = await maybeBootstrapLocalLlm({
+      // biome-ignore lint/suspicious/noExplicitAny: DI seam — test overrides the detection fn
+      detectFn: async () => fakeState as any,
+      claudeProbeFn: async () => ({ verdict: "healthy", reason: "stub-healthy" }),
+    });
+    expect(result).toEqual({});
+  });
 });

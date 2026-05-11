@@ -372,7 +372,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   // spawns `claude --print "ping"` with a 10 s timeout and classifies
   // the stderr against `HARD_LIMIT_PATTERNS` (shared contract with
   // `llm-provider-selector`).
-  const decision = await probeClaude();
+  const decision = await (_opts.claudeProbeFn ? _opts.claudeProbeFn() : probeClaude());
   process.stderr.write(`minsky: claude probe → ${decision.verdict} (${decision.reason})\n`);
   if (!needsLocalLlmBootstrap(decision)) {
     // Claude is healthy OR transient error. Don't trigger a 17 GB
