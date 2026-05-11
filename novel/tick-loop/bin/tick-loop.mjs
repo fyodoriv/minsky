@@ -75,6 +75,7 @@ import {
   AutoScaleRunner,
   DryRunSpawnStrategy,
   LlmProviderSpawnStrategy,
+  LocalLlmConcurrencyGate,
   MODEL_CATALOG,
   ProcessSpawnStrategy,
   TestFakeMockAnthropic,
@@ -617,10 +618,30 @@ function buildLocalStrategy() {
   });
 }
 
+// Slice 2.5 of `local-server-concurrency-aware-worker-spawn`: when
+// multiple workers are spawned with local-LLM enabled, mlx_lm.server
+// (and LM Studio in default mode) GPU-OOM under concurrent inference.
+// Wrap the local strategy in `LocalLlmConcurrencyGate` so cross-process
+// O_EXCL-file-locking serializes the aider invocations. Default cap=1
+// matches mlx_lm.server's per-process single-inference limit; operator
+// can disable the gate via MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 when
+// running a concurrent-inference backend (vLLM, sglang, LM Studio Pro).
+function maybeWrapLocalStrategyInGate(localStratRaw) {
+  const cap = Number.parseInt(process.env.MINSKY_LOCAL_SERVER_MAX_CONCURRENT ?? "1", 10);
+  if (!Number.isFinite(cap) || cap > 1) return localStratRaw;
+  process.stdout.write(
+    "[tick-loop] local-llm concurrency gate wired (cap=1; override via MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 for vLLM/sglang/LM-Studio-Pro)\n",
+  );
+  return new LocalLlmConcurrencyGate({
+    inner: localStratRaw,
+    workerId: `worker-${workerConfig.workerId}`,
+  });
+}
+
 const spawnStrategy = (() => {
   const claudeStrat = buildClaudeStrategy();
   if (!localLlmEnabled) return claudeStrat;
-  const localStrat = buildLocalStrategy();
+  const localStrat = maybeWrapLocalStrategyInGate(buildLocalStrategy());
   process.stdout.write(
     `[tick-loop] local-llm fallback wired (agent=${localAgent}, probe=${localProbeUrl}, ttl=${localProbeTtlMs}ms, override=${llmProviderOverride || "auto"}${localRatio === undefined ? "" : `, localRatio=${localRatio}`}${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
   );
