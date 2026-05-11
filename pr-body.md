@@ -1,43 +1,43 @@
 <!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
-## feat(minsky-cli): slice 40 — opencode binary row in `minsky doctor`
+## feat(minsky-cli): slice 41 — opencode config row in `minsky doctor`
 
 **Task**: `minsky-cli-auto-bootstrap-local-llm` (P0)
 
 ### Problem
 
-`minsky doctor` did not surface the `opencode` binary status, leaving the operator unable to verify the local-agent binary at a glance. When `MINSKY_LOCAL_AGENT=opencode` is set and the binary is missing, the daemon fails with ENOENT — a symptom that should be visible in `minsky doctor` before the operator starts the daemon.
+`minsky doctor` showed the `opencode` binary status but not whether opencode is configured to use the local mlx-lm.server endpoint (`http://127.0.0.1:1234/v1`). The binary being present does not mean it is wired for local LLM — the operator could have opencode installed but still pointing at a cloud provider.
 
 ### Changes
 
 `novel/tick-loop/bin/minsky.mjs`:
 
-- **`probeOpencode`** (new helper): detects `opencode` on PATH via `whichFn` (same PATH-detection pattern used in `run-tick-loop.sh` PR e53a12d); if found, fetches `opencode --version` and strips the leading `opencode` prefix; falls back to the binary path if the version command exits non-zero
-- **`runDoctor`**: adds `probeOpencode()` to the existing `Promise.all` — runs in parallel with `detectForBootstrap`, `probeClaude`, `probeSubstrate`; zero added wall-clock cost
-- **`emitDoctorRows`**: adds the opencode row — `✓ opencode  <version>` when found, `✗ opencode  not found — run: curl -fsSL https://opencode.ai/install | sh` when absent
+- **`probeOpencodeConfig`** (new helper): reads `opencode.json` in CWD and `~/.config/opencode/config.json`; for each found file, parses the JSON and checks whether any `provider[key].options.baseURL === "http://127.0.0.1:1234/v1"`; returns `{ wired: boolean }`
+- **`runDoctor`**: adds `probeOpencodeConfig()` to the existing `Promise.all` — runs in parallel with `detectForBootstrap`, `probeClaude`, `probeSubstrate`, `probeOpencode`; zero added wall-clock cost
+- **`emitDoctorRows`**: adds the opencode config row — `✓ opencode config  local provider wired` when the endpoint is found, `✗ opencode config  not wired — run: minsky setup-opencode` when absent
 
 ### Optimization
 
-optimization: none-this-iteration — Slice 40 adds a new parallel probe (opencode binary check); no existing paths shortened. The probe is absorbed into the existing `Promise.all` at zero marginal wall-clock cost.
+optimization: none-this-iteration — Slice 41 adds a new parallel probe (opencode config check); no existing paths shortened. The probe is absorbed into the existing `Promise.all` at zero marginal wall-clock cost.
 
 ### Experiment
 
-**Hypothesis**: `minsky doctor` gains an opencode row; when the binary is on PATH the row is green with the version; when absent the row is red with the install command.
+**Hypothesis**: `minsky doctor` gains an opencode config row that emits green when `opencode.json` (CWD or `~/.config/opencode/config.json`) contains a provider with `options.baseURL === "http://127.0.0.1:1234/v1"`, and red otherwise.
 
-**Success threshold**: `minsky doctor | grep opencode` emits either `✓` or `✗` opencode row in all cases.
+**Success threshold**: `minsky doctor | grep "opencode config"` emits either `✓` or `✗` opencode config row in all cases; green on the operator's machine where `opencode.json` is wired for lmstudio at port 1234.
 
-**Pivot threshold**: If `opencode --version` proves unreliable across platforms (non-zero exit on valid installs), fall back to path-only display — already handled by the `catch` branch returning `{ found: true, version: binPath }`.
+**Pivot threshold**: If the config-path heuristic produces false positives (e.g., a provider at `127.0.0.1:1234` that is not mlx-lm.server), widen the check to also match `localhost:1234` — no structural change needed.
 
-**Measurement**: `node novel/tick-loop/bin/minsky.mjs doctor 2>/dev/null | grep opencode` → shows `✓ opencode  <version>` when installed, `✗ opencode  not found` when absent.
+**Measurement**: `node novel/tick-loop/bin/minsky.mjs doctor 2>/dev/null | grep "opencode config"` → shows `✓ opencode config  local provider wired` when `opencode.json` has the lmstudio provider at port 1234, `✗ opencode config  not wired` when absent or unconfigured.
 
-**Anchor**: Task slice 40 directive (operator 2026-05-11); run-tick-loop.sh PATH-detection pattern (PR e53a12d); existing doctor row pattern established slices 1-39.
+**Anchor**: Task slice 41 directive (operator 2026-05-11); opencode.json config format confirmed from live `opencode.json` at repo root; existing doctor row pattern established slices 1-40.
 
 ## Hypothesis self-grade
 
-- **Predicted**: `minsky doctor` gains an opencode row; `probeOpencode` runs in the existing `Promise.all` with zero added wall-clock
-- **Observed**: pre-pr-lint all green (biome + typecheck + all rule checks pass); row wired correctly in `emitDoctorRows`; absorbed into existing `Promise.all`
+- **Predicted**: `minsky doctor` gains an opencode config row; `probeOpencodeConfig` reads CWD `opencode.json` and `~/.config/opencode/config.json` and detects the local endpoint at zero added wall-clock cost
+- **Observed**: pre-pr-lint all green; row wired in `emitDoctorRows`; absorbed into existing `Promise.all`; live `opencode.json` at repo root has lmstudio provider at `http://127.0.0.1:1234/v1` → green row expected
 - **Match**: yes
-- **Lesson**: biome format must be run after expanding multi-arg function signatures — the auto-format step keeps the diff minimal and avoids a second lint cycle
+- **Lesson**: reading the actual `opencode.json` config format from the repo root before implementing the probe avoids guessing the schema — the `provider[key].options.baseURL` path was confirmed from the live file
 
 ## Security & privacy
 
-<!-- security: not-applicable — read-only PATH probe (`command -v opencode`) and `opencode --version`; no auth, no secrets, no PII, no new network surface; § 13 reviewed -->
+<!-- security: not-applicable — read-only filesystem probe (`existsSync` + `readFileSync`); no network calls, no auth, no secrets written or logged; the config file is already readable by the running user; § 13 reviewed -->

@@ -25,6 +25,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 38 (operator 2026-05-11 — skip-earlier gate: PID-alive check before detectForBootstrap on !force paths — saves ~4 child-process spawns (arch-probe sysctl + which×3) during 30-60s model-load window on local-preferred + persisted-hard-limit trigger paths; slice-34 already covers runtime-claude-hardlimit, slice-37 fires too late on the other two) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 39 (operator 2026-05-11 — doctor server row: fetch GET /v1/models when server is reachable, show data[0].id as "reachable — <model>" instead of raw URL; fetchServerModelId helper extracted to keep runDoctor under biome cognitive-complexity cap) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 40 (operator 2026-05-11 — opencode doctor row: detect opencode binary on PATH via whichFn + fetch version via `opencode --version`; emit ✓ opencode <version> or ✗ opencode not found — run: curl -fsSL https://opencode.ai/install | sh; probeOpencode runs in the existing Promise.all so doctor wall-clock is unchanged) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 41 (operator 2026-05-11 — opencode config doctor row: read opencode.json in CWD or ~/.config/opencode/config.json; check whether any provider has options.baseURL === "http://127.0.0.1:1234/v1"; emit ✓ opencode config  local provider wired or ✗ opencode config  not wired — run: minsky setup-opencode; runs in the existing Promise.all at zero marginal wall-clock cost) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -735,6 +736,7 @@ function emitDoctorRows({
   pythonPath,
   serverModel,
   opencodeProbe,
+  opencodeConfigProbe,
 }) {
   /** @param {string} label @param {boolean} ok @param {string} [detail] */
   const line = (label, ok, detail) => {
@@ -771,6 +773,11 @@ function emitDoctorRows({
       ? opencodeProbe.version
       : "not found — run: curl -fsSL https://opencode.ai/install | sh",
   );
+  line(
+    "opencode config",
+    opencodeConfigProbe.wired,
+    opencodeConfigDetail(opencodeConfigProbe.wired),
+  );
 }
 
 /** @param {{ reachable: boolean, url: string }} serverState @returns {Promise<string | undefined>} */
@@ -802,9 +809,24 @@ async function runDoctor() {
     claudeDecision,
     substrateState,
     opencodeProbe,
-  ] = await Promise.all([detectForBootstrap(), probeClaude(), probeSubstrate(), probeOpencode()]);
+    opencodeConfigProbe,
+  ] = await Promise.all([
+    detectForBootstrap(),
+    probeClaude(),
+    probeSubstrate(),
+    probeOpencode(),
+    probeOpencodeConfig(),
+  ]);
   const serverModel = await fetchServerModelId(state.server);
-  emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverModel, opencodeProbe });
+  emitDoctorRows({
+    state,
+    archState,
+    claudeDecision,
+    pythonPath,
+    serverModel,
+    opencodeProbe,
+    opencodeConfigProbe,
+  });
   const substrateLines = renderDoctorSubstrateRows(substrateState);
   for (const l of substrateLines) {
     process.stdout.write(`${l}\n`);
@@ -992,6 +1014,44 @@ async function probeOpencode() {
   } catch {
     return { found: true, version: binPath };
   }
+}
+
+/** @param {boolean} wired @returns {string} */
+function opencodeConfigDetail(wired) {
+  return wired ? "local provider wired" : "not wired — run: minsky setup-opencode";
+}
+
+/**
+ * @param {string} cfgPath
+ * @param {string} targetBase
+ * @returns {boolean | undefined} true=wired, false=not wired, undefined=absent or unreadable
+ */
+function checkOpencodeConfigFile(cfgPath, targetBase) {
+  if (!existsSync(cfgPath)) return undefined;
+  try {
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    const providers = cfg.provider ?? cfg.providers ?? {};
+    for (const v of Object.values(providers)) {
+      if (/** @type {unknown} */ (v)?.options?.baseURL === targetBase) return true;
+    }
+    return false;
+  } catch {
+    return undefined;
+  }
+}
+
+/** @returns {Promise<{ wired: boolean }>} */
+async function probeOpencodeConfig() {
+  const LOCAL_BASE = "http://127.0.0.1:1234/v1";
+  const candidates = [
+    resolve(process.cwd(), "opencode.json"),
+    resolve(process.env["HOME"] ?? "/tmp", ".config", "opencode", "config.json"),
+  ];
+  for (const cfgPath of candidates) {
+    const result = checkOpencodeConfigFile(cfgPath, LOCAL_BASE);
+    if (result !== undefined) return { wired: result };
+  }
+  return { wired: false };
 }
 
 /**
