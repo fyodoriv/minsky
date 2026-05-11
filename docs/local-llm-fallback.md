@@ -10,16 +10,35 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 
 ## Install
 
+Run `minsky` — it auto-detects Claude exhaustion, probes each component, and installs what's missing with one `[Y/n]` confirm:
+
+```bash
+minsky
+```
+
+First run on a fresh machine (1 Gbps link): ≤45 min wall-clock; model download dominates. Preview the install plan without running it:
+
+```bash
+minsky bootstrap-local-llm --dry-run
+```
+
+<details>
+<summary>Manual install (fallback if auto-bootstrap fails)</summary>
+
 ```bash
 # Apple Silicon native ML server
 pipx install mlx-lm
+# huggingface-cli for model download
+pipx install huggingface_hub[cli]
 # Aider — must be on python 3.12 or 3.13; 3.14 has numpy build issues
 pipx install --python /opt/homebrew/bin/python3.12 aider-chat
 # Pull the model (~17.2 GB; ~8–12 min on a 1 Gbps link)
-hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+huggingface-cli download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 ```
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
+
+</details>
 
 ### Why two separate Python environments
 

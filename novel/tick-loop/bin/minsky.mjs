@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 48 (operator 2026-05-08 — docs: minsky auto-bootstrap as primary install; fix hf→huggingface-cli; server-only skip-earlier gate in maybeBootstrapLocalLlm) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -105,6 +106,7 @@ if (!existsSync(NODE_MODULES_PATH)) {
 const {
   PATH_CONFIG_KEYS,
   buildProductionProbes,
+  buildServerProbe,
   checkGitConfigPaths,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
@@ -350,10 +352,23 @@ async function maybeBootstrapLocalLlm() {
     return await runBootstrapLocalLlm({ force: false });
   }
 
+  // Slice 48 skip-earlier gate: probe the server alone first (one fetch
+  // call, ≤2 s) before running the full 5-which + FS-stat + server batch.
+  // On the common "stack already set up" cold-start path this saves ~5
+  // subprocess spawns (command -v pipx/mlx_lm.server/aider/huggingface-cli
+  // + existsSync). Savings are ≥50 ms on the happy path; zero overhead on
+  // the install path (the full probe still runs inside detectForBootstrap).
+  const serverQuickState = await buildServerProbe({})();
+  if (serverQuickState.reachable) {
+    process.stderr.write(
+      `minsky: local-LLM server reachable at ${serverQuickState.url} — wiring fallback\n`,
+    );
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
   const probes = buildProductionProbes({ whichFn });
   const state = await detectLocalLlmStack(probes);
-  // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
-  // skip the install pipeline entirely.
+  // Safety net: re-check server after the full probe (handles the rare race
+  // where the server started between the quick probe and the full-probe batch).
   if (state.server.reachable) {
     process.stderr.write(
       `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
