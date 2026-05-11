@@ -22,6 +22,7 @@ import {
   type DetectProbes,
   type LocalLlmStackState,
   type ServerState,
+  decideTtyMode,
   detectLocalLlmStack,
   planLocalLlmBootstrap,
   planRequiresTty,
@@ -475,6 +476,59 @@ describe("planRequiresTty — slice 7 H2: non-TTY pre-flight check", () => {
     // modelMissing fixture has pipx/mlx/aider present, only model missing
     expect(plan.steps.some((s) => s.type === "install-arm-homebrew")).toBe(false);
     expect(planRequiresTty(plan)).toBe(false);
+  });
+});
+
+describe("decideTtyMode — slice 7 hardening: MINSKY_ASSUME_TTY escape hatch", () => {
+  it("real TTY, no overrides → interactive + has TTY for sudo (baseline)", () => {
+    const mode = decideTtyMode({ stdinIsTty: true, assumeTty: false, nonInteractive: false });
+    expect(mode).toEqual({ hasTtyForSudo: true, isInteractive: true });
+  });
+
+  it("no TTY, no overrides → no TTY for sudo + not interactive (slice 7 H2 refuse)", () => {
+    const mode = decideTtyMode({ stdinIsTty: false, assumeTty: false, nonInteractive: false });
+    expect(mode).toEqual({ hasTtyForSudo: false, isInteractive: false });
+  });
+
+  it("no TTY + MINSKY_ASSUME_TTY=1 → claims TTY for sudo, still auto-confirms prompt", () => {
+    // Operator's tmux-detach / nohup / SUDO_ASKPASS case: claims sudo can
+    // prompt even though stdin probe returns false. The [Y/n] prompt
+    // still auto-confirms because the real stdin can't be read.
+    const mode = decideTtyMode({ stdinIsTty: false, assumeTty: true, nonInteractive: false });
+    expect(mode).toEqual({ hasTtyForSudo: true, isInteractive: false });
+  });
+
+  it("real TTY + MINSKY_NON_INTERACTIVE=1 → has TTY for sudo, auto-confirms prompt", () => {
+    // Real TTY exists (sudo can prompt) but operator wants the [Y/n]
+    // auto-confirmed. Pre-hardening, the legacy single-flag isInteractive
+    // collapsed this into the non-TTY refuse path — regression. Post-
+    // hardening, the two questions are independent.
+    const mode = decideTtyMode({ stdinIsTty: true, assumeTty: false, nonInteractive: true });
+    expect(mode).toEqual({ hasTtyForSudo: true, isInteractive: false });
+  });
+
+  it("no TTY + MINSKY_NON_INTERACTIVE=1 (no assume) → still refuses (no false TTY claim)", () => {
+    // MINSKY_NON_INTERACTIVE=1 alone is NOT a sudo-can-prompt claim; the
+    // refuse path still fires because nothing has asserted that sudo can
+    // actually obtain a password.
+    const mode = decideTtyMode({ stdinIsTty: false, assumeTty: false, nonInteractive: true });
+    expect(mode).toEqual({ hasTtyForSudo: false, isInteractive: false });
+  });
+
+  it("both overrides set + no TTY → claims sudo TTY, auto-confirms prompt", () => {
+    const mode = decideTtyMode({ stdinIsTty: false, assumeTty: true, nonInteractive: true });
+    expect(mode).toEqual({ hasTtyForSudo: true, isInteractive: false });
+  });
+
+  it("real TTY + MINSKY_ASSUME_TTY=1 → redundant override is a no-op (baseline)", () => {
+    const mode = decideTtyMode({ stdinIsTty: true, assumeTty: true, nonInteractive: false });
+    expect(mode).toEqual({ hasTtyForSudo: true, isInteractive: true });
+  });
+
+  it("pure — same input → same output (no environment access, no I/O)", () => {
+    const a = decideTtyMode({ stdinIsTty: false, assumeTty: true, nonInteractive: false });
+    const b = decideTtyMode({ stdinIsTty: false, assumeTty: true, nonInteractive: false });
+    expect(a).toEqual(b);
   });
 });
 
