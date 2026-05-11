@@ -210,6 +210,33 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
   // default cuts the input tokens from 40-70k → ≤5k for the slim
   // brief's referenced files. Operators who want the repo-map back
   // override via `extraArgs: ["--map-tokens", "1024"]`.
+  //
+  // Real-fire 2026-05-10 (single-worker post-#446): aider auto-picked
+  // `whole` edit format. That forces the model to re-emit every byte of
+  // the referenced file on every iteration. On Qwen3-Coder-30B-A3B
+  // 4-bit, when the file already implements the requested behaviour,
+  // the model loops on "Looking more carefully, I see the file is
+  // already complete" until it fills the 8192-token max-tokens output
+  // budget — no edit produced. Pinning `--edit-format diff` flips aider
+  // to search/replace-block output: the model emits only the changed
+  // lines, and a clean no-op is allowed (zero diff blocks ⇒ iteration
+  // exits without thrashing). Operators who need whole-file edits can
+  // override via `extraArgs: ["--edit-format", "whole"]` (later flag
+  // wins per aider's argparse).
+  //
+  // Real-fire 2026-05-10 v3 (single-worker sampling-tuned): aider's
+  // multi-round reflection loops blew up context. Round 1 produced a
+  // real diff (3.6k input / 1.9k output); aider then ran auto-lint,
+  // detected ~14 file-path mentions in the response, auto-added them
+  // via `--yes`, and round 2 sent 46k tokens to mlx_lm.server which
+  // exceeded the 32k context window — "Empty response received from
+  // LLM" + iteration wasted. Disabling auto-lint, auto-test,
+  // shell-command suggestions, and URL detection eliminates 4 of 5
+  // reflection paths. The remaining path (file-mention auto-add via
+  // `find_filenames_in_text` in aider's source) is rarer and only
+  // fires on responses that resemble paths verbatim. Operators who
+  // want lint/test reflections back can override via
+  // `extraArgs: ["--auto-lint", "--auto-test"]`.
   const argv: readonly string[] = Object.freeze([
     "--model",
     model,
@@ -220,8 +247,14 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
     "--yes",
     "--no-show-model-warnings",
     "--no-auto-commits",
+    "--no-auto-lint",
+    "--no-auto-test",
+    "--no-suggest-shell-commands",
+    "--no-detect-urls",
     "--map-tokens",
     "0",
+    "--edit-format",
+    "diff",
     ...(opts.extraArgs ?? []),
     "--message",
     opts.brief,
