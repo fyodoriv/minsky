@@ -1,43 +1,46 @@
 <!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
-<!-- security: not-applicable — reads only PATH/filesystem probes and the operator's own opencode config; no auth, secrets, PII, or supply-chain surface; § 13 reviewed -->
+<!-- security: not-applicable — no new auth/secrets/sandbox/PII/supply-chain surface; integration test uses only synthetic seams (no real processes, no network calls, no filesystem writes); § 13 reviewed -->
 
-## feat(minsky-cli): slice 43 — auto-wire opencode config post-bootstrap
+## minsky-cli-auto-bootstrap-local-llm — slice 51
 
-**Task**: `minsky-cli-auto-bootstrap-local-llm` (P0)
+**Hypothesis**: The task Verification section requires an integration test that exercises the full `buildProductionProbes` → `detectLocalLlmStack` → `planLocalLlmBootstrap` pipeline with two synthetic HOME stubs — (1) fully-absent state → 7-step plan in dependency order, (2) idempotent fast-path → empty plan in O(1). Without this file, the verification gap is open: the unit tests in `local-llm-bootstrap.test.ts` cover the planner in isolation, and `local-llm-probes.test.ts` covers individual probes, but no test exercises the full composition across all three modules with the Apple Silicon Rosetta 7-step path (arm-homebrew first).
 
-### Problem
+**Success threshold**: `pnpm pre-pr-lint` green; 10 new integration tests pass; the 7-step path (including `install-arm-homebrew`) is covered by at least one test; the idempotent fast-path is covered by at least one test.
 
-After the LLM bootstrap plan runs successfully (installs mlx-lm, aider, model, starts server), the operator still had to manually run `minsky setup-opencode` to wire opencode's config. This breaks the "single `minsky` invocation from scratch" UX promise: the daemon is ready but opencode remains unconfigured.
+**Pivot threshold**: If the integration test reveals a bug in the existing pipeline (e.g., dependency-order invariant violated), fix the bug before shipping. If test is flaky (AbortError race in the `econnrefused` synthetic seam), replace with a simpler mock that resolves to `{ reachable: false }` directly.
 
-### Changes
+**Measurement**:
 
-`novel/tick-loop/bin/minsky.mjs`:
+```sh
+pnpm vitest run novel/tick-loop/src/local-llm-bootstrap.integration.test.ts
+# expected: 10 tests passed
+pnpm pre-pr-lint
+# expected: all green
+```
 
-- **`executePlanWithProductionIo`**: after `executeBootstrapPlan` returns `success: true`, probe `probeOpencodeConfig()` and `whichFn("opencode")` in parallel; if binary is on PATH and config is not yet wired, emit a progress line to stderr and call `runSetupOpencode()`. The pre-check gates the call so machines without opencode see no output and `process.exitCode` stays clean (bare `runSetupOpencode()` sets exitCode=1 on missing binary).
+**Anchor**: Task block Verification section ("integration test on a clean /tmp/<scratch> HOME with pipx/mlx/aider/model selectively missing — assert the plan covers exactly the missing pieces"); Munafò et al. 2017 (pre-registration).
+
+---
+
+### Changes (1 file)
+
+**`novel/tick-loop/src/local-llm-bootstrap.integration.test.ts`** (new)
+
+Integration test suite with 10 tests across three scenarios:
+
+- **Scenario 1a — absent HOME stub, no archState → 6-step plan**: Passes `whichFn: async () => undefined`, `existsSyncFn: () => false`, `fetchFn: ECONNREFUSED` into `buildProductionProbes`, runs `detectLocalLlmStack` + `planLocalLlmBootstrap`, asserts step order matches `[install-pipx, install-mlx-lm, install-aider, install-huggingface-cli, download-model, start-mlx-server]`.
+
+- **Scenario 1b — absent HOME stub, Apple Silicon Rosetta → 7-step plan**: Same seams, adds `archState: rosettaMissingBrew` to `planLocalLlmBootstrap`. Asserts `install-arm-homebrew` is first, then the 6-step chain. Verifies `arch -arm64` wrapper and `NONINTERACTIVE=1` in the brew installer command. Verifies dependency-order invariant across all 7 indices.
+
+- **Scenario 2 — idempotent fast-path HOME stub → empty plan**: Passes `whichFn: async (bin) => /usr/local/bin/${bin}`, `existsSyncFn: () => true`, `fetchFn: 200-ok`. Asserts `ready=true`, `steps.length === 0`, `totalEstimatedDurationMs === 0`. Verifies the short-circuit holds even when `archState.needsNativeBrew === true` (the `isStackReady` guard in `planLocalLlmBootstrap` runs before `buildInstallSteps`).
 
 ### Optimization
 
-optimization: none-this-iteration: the added probes are already parallel (Promise.all) and only fire on the non-fast-path (plan was non-empty); zero overhead on the idempotent re-run path
-
-### Experiment
-
-**Hypothesis**: After this slice, `minsky bootstrap-local-llm` on a machine with opencode installed but config not wired also runs `minsky setup-opencode` automatically, leaving `minsky doctor | grep "opencode config"` green without a manual step.
-
-**Success threshold**: `minsky doctor 2>&1 | grep "opencode config"` shows `✓ opencode config  local provider wired` after a bootstrap run, with no extra manual `setup-opencode` call.
-
-**Pivot threshold**: if the parallel probes add >50ms to the bootstrap exit path (measured via `time minsky bootstrap-local-llm --dry-run`), extract the opencode wiring into a background fire-and-forget instead of awaited inline.
-
-**Measurement**: `node novel/tick-loop/bin/minsky.mjs bootstrap-local-llm --dry-run && node novel/tick-loop/bin/minsky.mjs doctor 2>/dev/null | grep "opencode config"` — confirm the probe fires (stderr line) when opencode binary is present and config absent.
-
-**Anchor**: operator directive 2026-05-08 ("I expect it to automatically understand that claude is out of tokens and to switch to local modal + install+set it up first if needed"); slice 42 (`runSetupOpencode`) is the wiring function; rule #6 (stay-alive — fully configured opencode is part of the fallback substrate); rule #9 (pre-registered HDD).
+optimization: none-this-iteration — new test file only; no runtime code paths touched that admit byte-savings.
 
 ## Hypothesis self-grade
 
-- **Predicted**: `minsky bootstrap-local-llm` auto-wires opencode config when binary present and config absent; `minsky doctor` shows `✓ opencode config` without a manual step
-- **Observed**: pre-pr-lint all green; `executePlanWithProductionIo` now probes opencode state in parallel post-success and calls `runSetupOpencode()` when gated by binary presence; exitCode stays clean on machines without opencode
+- **Predicted**: 10 integration tests covering the two HOME stub scenarios (6/7-step absent + O(1) fast-path) pass green in CI; pre-pr-lint all green
+- **Observed**: `pnpm vitest run novel/tick-loop/src/local-llm-bootstrap.integration.test.ts` → 10/10 passed (17 ms); `pnpm pre-pr-lint` → all green
 - **Match**: yes
-- **Lesson**: gating the `runSetupOpencode` call on `opencodeBinPath !== undefined` is load-bearing — the function sets `exitCode=1` when the binary is missing, which would corrupt the bootstrap's success exit code
-
-## Security & privacy
-
-<!-- security: not-applicable — reads only PATH lookups and the operator's own `~/.config/opencode/opencode.json`; no network calls beyond what already existed in `runSetupOpencode`; no auth, secrets, PII, or new supply-chain surface; § 13 reviewed -->
+- **Lesson**: the `isStackReady` short-circuit fires before `buildInstallSteps` even when `archState.needsNativeBrew=true` — the "fast path wins regardless of arch state" invariant was implicit in the code but not covered by any test; this integration test makes it explicit
