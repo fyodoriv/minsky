@@ -1,0 +1,51 @@
+# <!-- scope: human-approved fresh-clone-ci-regression-gate TASKS.md block covers this file -->
+# <!-- pattern: not-applicable — GitHub Actions workflow; rule #10 enforcement gate for the fresh-clone bootstrap path -->
+name: fresh-clone-smoke
+
+# Validates the fresh-clone bootstrap path (`pnpm install` → `pnpm minsky doctor`)
+# that `minsky-cli-fresh-clone-bootstrap` (PR #473) and
+# `minsky-fresh-clone-health-checks` (PR #474) ship but never gate in CI.
+# Any PR touching `package.json`, `novel/tick-loop/package.json`,
+# `novel/tick-loop/bin/minsky.mjs`, or the doctor-substrate helpers now
+# fails CI before the operator discovers the regression on a new machine.
+# Anchor: Forsgren, Humble, Kim, *Accelerate*, 2018 — CI coverage of the
+# install path is a DORA deployment-frequency prerequisite; rule #10
+# (deterministic enforcement — a failing CI gate is louder than a failing
+# manual test).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fresh-clone-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-clone-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: initial install (triggers prepare → tsc -b → builds dist/)
+        run: pnpm install --frozen-lockfile
+      - name: simulate stale-dist (fresh-clone scenario)
+        run: rm -rf novel/tick-loop/dist
+      - name: reinstall — must rebuild dist/ via prepare hook
+        run: pnpm install --frozen-lockfile
+      - name: assert minsky doctor reports no RED rows
+        run: |
+          pnpm minsky doctor 2>&1 | tee doctor.out
+          count=$(grep -c "^RED" doctor.out || true)
+          [ "$count" = "0" ]
