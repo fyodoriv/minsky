@@ -1,4 +1,5 @@
 # <!-- pattern: not-applicable — CI workflow; covered by the `.github/workflows/` CI-workflow row in vision.md § "Pattern conformance index" -->
+# <!-- scope: human-approved fresh-clone-ci-regression-gate task pre-registers this path -->
 name: fresh-clone
 
 on:
