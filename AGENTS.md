@@ -10,6 +10,18 @@ You're working on **Minsky** — an integration distribution that connects exist
 
 See `vision.md` § "What Minsky is" for full identity.
 
+## Repository setup
+
+Fresh clone → working CLI in one command (no separate build step):
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git && cd minsky
+pnpm install   # prepare hook: (a) tsc -b builds all dist/; (b) lefthook installs git hooks
+pnpm minsky doctor   # verify health
+```
+
+`pnpm install` runs the root `prepare` hook which does `tsc -b` across all workspace packages (including `@minsky/tick-loop`) and then installs lefthook git hooks. If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line recovery hint — no `ERR_MODULE_NOT_FOUND` stack traces. See `README.md` § Quickstart for the multi-machine / local-LLM flow.
+
 ## Constitutional rules (non-negotiable)
 
 These come from `vision.md`. Violations are reported by the MAPE-K loop's specification monitor (`claude-spec-monitor`) — runtime specification monitoring per Havelund & Goldberg 2008.
