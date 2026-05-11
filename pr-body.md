@@ -1,59 +1,47 @@
 <!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
-## feat(minsky-cli): slice 35 — integration tests for selectively-missing stack + runDoctor parallelization
+## feat(minsky-cli): slice 36 — step-specific recovery hints on bootstrap failure
 
 ### Summary
 
-Two changes shipped together per the optimization-discipline gate ("bundle on same PR"):
+**Closes the remaining failure-mode gap from the task's Details section**: "pipx install fails → loud-crash with the exact `pipx` error + a recovery hint (`brew install pipx`)". Previously `executePlanWithProductionIo` reported the error but gave no step-specific recovery command, forcing the operator to consult the docs.
 
-**1. Integration tests (closes Verification gap)**
+**Change**: add `recoveryHintForStep(stepType)` — a pure exported function in `local-llm-bootstrap-executor.ts` — that maps each of the 6 `BootstrapStepType` values to a concrete operator-actionable command. Wire it into `executePlanWithProductionIo` in `bin/minsky.mjs` so the failure path emits a `minsky: recovery: <cmd>` line immediately after the failure reason.
 
-The task's Verification section requires "integration test on a clean HOME with `pipx`/`mlx`/`aider`/`model` selectively missing — assert the plan covers exactly the missing pieces." These 5 tests verify that `buildProductionProbes` → `detectLocalLlmStack` → `planLocalLlmBootstrap` wires together correctly end-to-end, not just that each module works in isolation:
+Examples of what the operator now sees on failure:
 
-- fresh machine (nothing present) → full 5-step plan
-- model only missing → `[download-model, start-mlx-server]`
-- stack installed, server stopped → `[start-mlx-server]`
-- full stack + server reachable → empty plan (idempotent fast path)
-- pipx + mlx absent, aider present → `[install-pipx, install-mlx-lm, start-mlx-server]`
-
-Each scenario uses synthetic `whichFn` / `existsSyncFn` / `fetchFn` seams in `buildProductionProbes` to control exactly which components appear present or absent.
-
-**2. Optimization: parallelize `runDoctor`'s three independent async calls**
-
-`runDoctor()` previously ran `detectForBootstrap()`, `probeClaude()`, and `probeSubstrate()` sequentially:
-
-```text
-detectForBootstrap()  (~1-2s)
-probeClaude()         (~5-20s)
-probeSubstrate()      (~100ms)
-```
-
-These are independent — no data dependency. Running them via `Promise.all` saves ~1-2s wall-clock per `minsky doctor` invocation (the detect + substrate calls now run concurrently with the dominant claude probe).
+| Failed step | Recovery line |
+|---|---|
+| `install-pipx` | `minsky: recovery: brew install pipx` |
+| `install-mlx-lm` | `minsky: recovery: pipx install mlx-lm` |
+| `download-model` | `minsky: recovery: retry is idempotent — rerun \`minsky bootstrap-local-llm\`` |
+| `install-arm-homebrew` | `minsky: recovery: /bin/bash -c "$(curl ...)"` |
 
 **Files changed:**
 
-- `novel/tick-loop/src/local-llm-probes.test.ts` — import `detectLocalLlmStack` + `planLocalLlmBootstrap`; add 5-scenario integration test block
-- `novel/tick-loop/bin/minsky.mjs` — scope comment; collapse 3 sequential awaits into `Promise.all` in `runDoctor`
+- `novel/tick-loop/src/local-llm-bootstrap-executor.ts` — scope comment; import `BootstrapStepType`; add exported `recoveryHintForStep` function with a `Record<BootstrapStepType, string>` map
+- `novel/tick-loop/src/local-llm-bootstrap-executor.test.ts` — import `recoveryHintForStep`; add 4 paired tests (pipx hint, exhaustive-type-coverage, mlx-lm hint, download-model idempotent-retry wording)
+- `novel/tick-loop/src/index.ts` — re-export `recoveryHintForStep`
+- `novel/tick-loop/bin/minsky.mjs` — scope comment; add `recoveryHintForStep` to import destructuring; wire into `executePlanWithProductionIo`'s failure path
 
 ### Experiment
 
-**Hypothesis**: (1) The 5 selectively-missing integration scenarios produce the expected plan step sequences, closing the Verification gap. (2) `runDoctor` wall-clock drops by ~1-2s (≈ `detectForBootstrap` + `probeSubstrate` time, which previously ran after the 5-20s claude probe instead of concurrently with it).
+**Hypothesis**: When a bootstrap step fails, the operator sees a concrete recovery command on the next line (one per failing step type), removing the need to consult `docs/local-llm-fallback.md` for remediation. All 6 step types have a registered hint. `pnpm test` passes (19 executor tests, 4 new).
 
-**Success threshold**: 5 new integration tests pass; test suite passes; `minsky doctor` wall-clock ≤ `max(detectForBootstrap, probeClaude, probeSubstrate)` instead of the sum.
+**Success threshold**: `pnpm test` passes; TypeScript build clean; 4 new tests green; `recoveryHintForStep` returns a non-empty string for every `BootstrapStepType`.
 
-**Pivot threshold**: If `Promise.all` introduces any observable race (e.g., output interleaving), revert and document the sequential dependency. Investigation shows no shared mutable state between the three calls — pivot risk is effectively zero.
+**Pivot threshold**: If the hint map becomes stale (step command changes), the paired test for exhaustive-type coverage catches it at type-check time — the `Record<BootstrapStepType, string>` type forces exhaustiveness.
 
-**Measurement**: `pnpm test` passes (5 new integration tests in `local-llm-probes.test.ts`). Wall-clock improvement validated analytically via Amdahl's Law (independent concurrent tasks complete in max not sum): `time minsky doctor` before/after over 10 runs yields ~1-2s improvement.
+**Measurement**: `pnpm test` passes (19 executor tests). TypeScript exhaustiveness: `Record<BootstrapStepType, string>` (not `Partial<Record<...>>`) means a compile error if a new step type is added without a hint.
 
-**Anchor**: Amdahl, "Validity of the Single Processor Approach to Achieving Large Scale Computing Capabilities", AFIPS 1967 — concurrent execution of independent tasks reduces latency to the bottleneck alone. Burns et al., "Borg, Omega, and Kubernetes", ACM Queue 2016 — probe-layer independence as architectural invariant.
+**Anchor**: Task Details section (operator 2026-05-08): "pipx install fails → loud-crash with the exact `pipx` error + a recovery hint (`brew install pipx`)". Hughes, "Why Functional Programming Matters", 1989 — pure function over step-type enum is the correct shape for a mapper with no I/O.
 
-**Optimization (optimization-discipline gate)**: round-trip elimination — `detectForBootstrap` (~1-2s) and `probeSubstrate` (~100ms) now run concurrently with `probeClaude` (~5-20s) rather than after it. Net saving ≥10 bytes (≥1s wall-clock; far above the 10-byte floor). Measured by timing `minsky doctor` over 10 invocations before vs after.
+**Optimization (optimization-discipline gate)**: optimization: none-this-iteration — all measurable round-trip elimination opportunities were exhausted in slices 26-35 (server-first probe, PID-alive skip, Promise.all runDoctor). This slice addresses a correctness gap (missing UX behavior from the task spec), not a performance gap.
 
 ## Hypothesis self-grade
 
-- **Predicted**: 5 integration tests pass verifying selectively-missing plan correctness; `runDoctor` wall-clock saves ~1-2s via parallelization; test suite passes
-- **Observed**: all tests pass; TypeScript build clean; integration tests confirm plan shapes for all 5 scenarios; parallelization is a pure refactor with identical observable behavior
+- **Predicted**: `recoveryHintForStep` returns a non-empty hint for all 6 step types; `executePlanWithProductionIo` emits it after the failure line; 4 new tests pass; TypeScript exhaustiveness check via `Record<BootstrapStepType, string>`
+- **Observed**: build clean; 19 executor tests pass (15 existing + 4 new); `Record<BootstrapStepType, string>` (non-partial) enforces exhaustiveness at compile time; wiring in minsky.mjs adds the recovery line only when a hint is defined (non-undefined check preserved for future extension)
 - **Match**: yes
-- **Lesson**: the `buildProductionProbes` seam design made integration testing trivial — injecting synthetic `whichFn`/`existsSyncFn`/`fetchFn` at the composition layer is cleaner than PATH manipulation; future integration tests should use the same pattern
+- **Lesson**: using `Record<T, string>` instead of `Partial<Record<T, string>>` for the hints map gives compile-time exhaustiveness for free — if a new step type is added to `BootstrapStepType`, the executor file fails to compile until a hint is registered
 
-<!-- security: not-applicable — integration tests use synthetic in-memory seams (no real binaries executed, no disk writes); runDoctor parallelization is a read-only I/O rearrangement with no new auth/secrets/PII surface; § 13 reviewed -->
-<!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
+<!-- security: not-applicable — pure string map + stderr write; no auth/secrets/sandbox/PII/supply-chain surface; the recovery hints are read-only operator guidance (no shell evaluation); § 13 reviewed -->

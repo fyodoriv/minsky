@@ -756,6 +756,7 @@ export {
   confirmAlwaysNo,
   confirmAlwaysYes,
   executeBootstrapPlan,
+  recoveryHintForStep,
   renderConfirmSummary,
 } from "./local-llm-bootstrap-executor.js";
 export {

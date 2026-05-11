@@ -18,8 +18,10 @@ import {
   confirmAlwaysNo,
   confirmAlwaysYes,
   executeBootstrapPlan,
+  recoveryHintForStep,
   renderConfirmSummary,
 } from "./local-llm-bootstrap-executor.js";
+import type { BootstrapStepType } from "./local-llm-bootstrap.js";
 import type { BootstrapPlan } from "./local-llm-bootstrap.js";
 
 // ---- Fixtures -------------------------------------------------------------
@@ -351,5 +353,36 @@ describe("executeBootstrapPlan — slice 6 stdinMode", () => {
     for (const call of spawnCalls) {
       expect(call.opts?.stdinMode).toBe("ignore");
     }
+  });
+});
+
+// ---- Slice 36: recoveryHintForStep ----------------------------------------
+
+describe("recoveryHintForStep — step-specific failure recovery hints", () => {
+  it("returns 'brew install pipx' for install-pipx", () => {
+    expect(recoveryHintForStep("install-pipx")).toBe("brew install pipx");
+  });
+
+  it("returns a non-empty string for every BootstrapStepType", () => {
+    const allStepTypes: BootstrapStepType[] = [
+      "install-arm-homebrew",
+      "install-pipx",
+      "install-mlx-lm",
+      "install-aider",
+      "download-model",
+      "start-mlx-server",
+    ];
+    for (const t of allStepTypes) {
+      const hint = recoveryHintForStep(t);
+      expect(hint, `expected hint for ${t}`).toMatch(/\S/);
+    }
+  });
+
+  it("install-mlx-lm hint starts with 'pipx install mlx-lm'", () => {
+    expect(recoveryHintForStep("install-mlx-lm")).toBe("pipx install mlx-lm");
+  });
+
+  it("download-model hint mentions idempotent retry", () => {
+    expect(recoveryHintForStep("download-model")).toMatch(/idempotent/);
   });
 });

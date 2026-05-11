@@ -20,6 +20,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 33 (operator 2026-05-10 — detached-server dispatch: add startServerFn seam to ExecuteOpts so start-mlx-server steps are not waited-on (a server process never closes); wire production startMlxServerDetached that detached-spawns + writes PID to .minsky/local-llm.pid) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 34 (operator 2026-05-10 — PID-alive skip-earlier gate: after the slice-26 HTTP probe finds the server unreachable, read .minsky/local-llm.pid; if the process is alive (kill(pid,0) succeeds), return the env overlay immediately — server is still loading the model, no second spawn needed, claude probe + 5-probe detect pipeline skipped; saves ≥5 child-process spawns per invocation during the 30-60s model-loading window) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 35 (operator 2026-05-10 — round-trip elimination: parallelize detectForBootstrap+probeClaude+probeSubstrate in runDoctor via Promise.all — saves ~1-2s wall-clock vs sequential dispatch; integration tests for selectively-missing stack scenarios) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 36 (operator 2026-05-11 — step-specific recovery hints in executePlanWithProductionIo: task Details "pipx install fails → loud-crash with the exact pipx error + a recovery hint (`brew install pipx`)") -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -136,6 +137,7 @@ const {
   probePythonWithDefaults,
   readLastHardLimit,
   readPidFileAlive,
+  recoveryHintForStep,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
 } = await import("../dist/index.js");
@@ -623,15 +625,34 @@ async function executePlanWithProductionIo(plan) {
     log: (s) => process.stderr.write(s),
   });
   if (!result.success) {
-    process.stderr.write(
-      `minsky: local-LLM bootstrap failed (${result.failedStep ?? "unknown"}: ${result.reason ?? "no reason"})\n`,
-    );
-    process.stderr.write(
-      "minsky: continuing without local-LLM fallback; daemon will use claude only\n",
-    );
+    emitBootstrapFailure(result);
     return {};
   }
   return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+}
+
+/**
+ * Emit the failure message + step-specific recovery hint. Extracted from
+ * {@link executePlanWithProductionIo} so the parent stays within biome's
+ * cognitive-complexity cap. Slice 36.
+ *
+ * @param {import("../dist/local-llm-bootstrap-executor.js").ExecuteResult} result
+ */
+function emitBootstrapFailure(result) {
+  process.stderr.write(
+    `minsky: local-LLM bootstrap failed (${result.failedStep ?? "unknown"}: ${result.reason ?? "no reason"})\n`,
+  );
+  // Slice 36: step-specific recovery hint so the operator sees a concrete
+  // command without consulting the docs.
+  if (result.failedStep !== undefined) {
+    const hint = recoveryHintForStep(result.failedStep);
+    if (hint !== undefined) {
+      process.stderr.write(`minsky: recovery: ${hint}\n`);
+    }
+  }
+  process.stderr.write(
+    "minsky: continuing without local-LLM fallback; daemon will use claude only\n",
+  );
 }
 
 /**

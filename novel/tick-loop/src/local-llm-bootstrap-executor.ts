@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 2 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 36 (operator 2026-05-11 — step-specific recovery hints: task Details "pipx install fails → loud-crash with the exact pipx error + a recovery hint (`brew install pipx`)") -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap-executor` — I/O boundary that
  * dispatches a {@link BootstrapPlan} to subprocess installs. Slice 2 of
@@ -46,7 +47,7 @@
  * @module tick-loop/local-llm-bootstrap-executor
  */
 
-import type { BootstrapPlan, InstallStep } from "./local-llm-bootstrap.js";
+import type { BootstrapPlan, BootstrapStepType, InstallStep } from "./local-llm-bootstrap.js";
 
 // ---- Types ----------------------------------------------------------------
 
@@ -342,3 +343,33 @@ export const confirmAlwaysYes: ConfirmFn = async () => true;
  * @otel-exempt constant function — no I/O, no decision logic.
  */
 export const confirmAlwaysNo: ConfirmFn = async () => false;
+
+// ---- Step-specific recovery hints (slice 36) --------------------------------
+
+/**
+ * Return a short operator-actionable recovery hint for a failed install
+ * step, or `undefined` if no hint is registered for that step type. Pure
+ * function — no I/O.
+ *
+ * Implements the task's failure-mode specification: "pipx install fails →
+ * loud-crash with the exact `pipx` error + a recovery hint (`brew install
+ * pipx`)". The wiring layer (`bin/minsky.mjs` `executePlanWithProductionIo`)
+ * emits this line after the failure line so the operator sees a concrete
+ * recovery command without reading the docs.
+ *
+ * @otel-exempt pure formatter; no I/O, no span — parent span covers
+ *   execution.
+ */
+export function recoveryHintForStep(stepType: BootstrapStepType): string | undefined {
+  const hints: Record<BootstrapStepType, string> = {
+    "install-arm-homebrew":
+      '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+    "install-pipx": "brew install pipx",
+    "install-mlx-lm": "pipx install mlx-lm",
+    "install-aider": "pipx install --python /opt/homebrew/bin/python3.12 aider-chat",
+    "download-model": "retry is idempotent — rerun `minsky bootstrap-local-llm`",
+    "start-mlx-server":
+      "mlx_lm.server --model mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit --host 127.0.0.1 --port 8080 &",
+  };
+  return hints[stepType];
+}
