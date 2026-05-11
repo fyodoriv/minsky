@@ -30,7 +30,6 @@
   - **Risk**: medium. The auto-install touches a 30 GB download and starts a long-lived background process. Mitigation: single confirm prompt before any mutation; `--dry-run` flag prints the plan without executing; `MINSKY_NO_AUTO_BOOTSTRAP=1` env var disables the pre-flight entirely; the detection layer is read-only.
   - **Surfaced-by**: operator request 2026-05-08 — "I have minsky on another machine in outdated stage with no claude tokens left. … I expect it to automatically understand that claude is out of tokens and to switch to local modal + install+set it up first if needed".
 
-
 - [ ] `minsky-cli-fresh-clone-bootstrap` — `git clone && pnpm install && minsky` works on a fresh checkout without a manual `pnpm build` step
   - **ID**: minsky-cli-fresh-clone-bootstrap
   - **Tags**: p0, operator-directive, minsky-cli, bootstrap, fresh-clone, dx, multi-machine-sync
