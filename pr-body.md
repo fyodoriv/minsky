@@ -1,3 +1,4 @@
+<!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
 ## feat(minsky-cli): slice 35 — integration tests for selectively-missing stack + runDoctor parallelization
 
 ### Summary
