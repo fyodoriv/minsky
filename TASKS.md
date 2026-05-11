@@ -13,7 +13,7 @@
 ## P0
 
 <!-- Operator directive 2026-05-08: shift Minsky's product identity from "repo-rooted stack" to "global, context-aware CLI". The two blocks immediately below capture the remaining shift: (1) make `minsky` self-bootstrap on a fresh machine — auto-detect Claude exhaustion and install the local-LLM stack with one confirm prompt; (2) polish the `minsky` (no-args) UX so it reads context, suggests actions, and asks for confirmation. README's "Not a global CLI" disclaimer is retired in the same PR that lands (2). The original (0) — clean up the WIP merge backlog so the other-machine `git pull` produces a coherent main — shipped: PRs #324 / #331 / #339 / #341 / #344 / #353 / #365 / #366 merged, #361 closed (substrate shipped elsewhere). -->
-- [ ] `local-model-efficiency` — Minsky always runs local models efficiently: time-budget prefix in every local brief, larger watchdog for local, and auto-shrink on repeated timeouts
+- [x] `local-model-efficiency` — Minsky always runs local models efficiently: time-budget prefix in every local brief, larger watchdog for local, and auto-shrink on repeated timeouts
   - **ID**: local-model-efficiency
   - **Tags**: p0, operator-directive, local-llm, daemon, efficiency
   - **Pick-next**: yes — operator 2026-05-11, "let's update minsky so that it's always aware of that and works with local models efficiently. From now on, it must always look for ways to run local models more efficiently"
