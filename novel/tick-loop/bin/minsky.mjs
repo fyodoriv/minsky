@@ -421,6 +421,21 @@ function readPersistedHardLimit() {
  * @returns {Promise<Record<string, string>>}
  */
 /**
+ * Slice 46: when MINSKY_LOCAL_MODEL_PATH is set and points to an existing
+ * path, override the model probe result so the planner treats the model
+ * as present (skips the download step) and uses that path for server start.
+ * Extracted from detectForBootstrap to stay under biome's complexity cap.
+ *
+ * @param {import("../dist/local-llm-bootstrap.js").LocalLlmStackState} state
+ * @param {string | undefined} modelPath
+ * @returns {import("../dist/local-llm-bootstrap.js").LocalLlmStackState}
+ */
+function applyModelPathOverride(state, modelPath) {
+  if (modelPath === undefined || state.model.present) return state;
+  return { ...state, model: { present: true, path: modelPath, detail: modelPath } };
+}
+
+/**
  * Build the planner + probe options together so `runBootstrapLocalLlm`
  * and `runDoctor` can share the wiring. Slice 7 H0 threads archState's
  * `preferredPipxPath` into the pipx probe so Intel-brew pipx doesn't
@@ -438,16 +453,30 @@ async function detectForBootstrap() {
   // bootstrap never downloaded.
   const modelIdEnv = process.env["MINSKY_LOCAL_LLM_MODEL_ID"]?.trim();
   const modelId = modelIdEnv !== undefined && modelIdEnv.length > 0 ? modelIdEnv : undefined;
+  // Slice 46: MINSKY_LOCAL_MODEL_PATH lets the operator point to a model
+  // stored outside the HF cache (e.g., manually downloaded or on a
+  // non-standard path). When set and the path exists, it overrides the
+  // HF-cache probe result and is passed as --model to mlx_lm.server.
+  const modelPathEnv = process.env["MINSKY_LOCAL_MODEL_PATH"]?.trim();
+  const modelPath =
+    modelPathEnv !== undefined && modelPathEnv.length > 0 && existsSync(modelPathEnv)
+      ? modelPathEnv
+      : undefined;
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
   if (modelId !== undefined) probeOpts.modelId = modelId;
-  const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
+  const state = applyModelPathOverride(
+    await detectLocalLlmStack(buildProductionProbes(probeOpts)),
+    modelPath,
+  );
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
   const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
-  if (modelId !== undefined) planOpts.modelId = modelId;
+  // Slice 46: MINSKY_LOCAL_MODEL_PATH takes precedence over MINSKY_LOCAL_LLM_MODEL_ID
+  const effectiveModelId = modelPath ?? modelId;
+  if (effectiveModelId !== undefined) planOpts.modelId = effectiveModelId;
   return { state, archState, planOpts, pythonPath };
 }
 
@@ -527,6 +556,25 @@ async function runBootstrapLocalLlm({ force }) {
 }
 
 /**
+ * Slice 46: resolve the effective model path for `mlx_lm.server --model`
+ * and `minsky doctor` display.
+ * Priority:
+ *   1. MINSKY_LOCAL_MODEL_PATH env var (direct filesystem path override)
+ *   2. HF cache probe result from detectLocalLlmStack (state.model.path)
+ * Returns the resolved path string, or undefined when absent.
+ *
+ * @param {import("../dist/local-llm-bootstrap.js").ComponentState} modelState
+ * @returns {string | undefined}
+ */
+function probeModelWeights(modelState) {
+  const envPath = process.env["MINSKY_LOCAL_MODEL_PATH"]?.trim();
+  if (envPath !== undefined && envPath.length > 0 && existsSync(envPath)) {
+    return envPath;
+  }
+  return modelState.present && modelState.path !== undefined ? modelState.path : undefined;
+}
+
+/**
  * Read-only doctor — prints the current state of the local-LLM stack +
  * Claude health and exits.
  */
@@ -547,7 +595,12 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
   line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
   line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
   line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
-  line("model weights", state.model.present, state.model.detail ?? state.model.reason ?? "");
+  const modelWeightsPath = probeModelWeights(state.model);
+  line(
+    "model weights",
+    modelWeightsPath !== undefined,
+    modelWeightsPath ?? `not found — run: huggingface-cli download ${state.model.detail}`,
+  );
   line(
     "mlx-lm.server reachable",
     state.server.reachable,
