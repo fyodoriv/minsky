@@ -55,3 +55,4 @@ These are independent — no data dependency. Running them via `Promise.all` sav
 - **Lesson**: the `buildProductionProbes` seam design made integration testing trivial — injecting synthetic `whichFn`/`existsSyncFn`/`fetchFn` at the composition layer is cleaner than PATH manipulation; future integration tests should use the same pattern
 
 <!-- security: not-applicable — integration tests use synthetic in-memory seams (no real binaries executed, no disk writes); runDoctor parallelization is a read-only I/O rearrangement with no new auth/secrets/PII surface; § 13 reviewed -->
+<!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
