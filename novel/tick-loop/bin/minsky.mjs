@@ -22,6 +22,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 35 (operator 2026-05-10 — round-trip elimination: parallelize detectForBootstrap+probeClaude+probeSubstrate in runDoctor via Promise.all — saves ~1-2s wall-clock vs sequential dispatch; integration tests for selectively-missing stack scenarios) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 36 (operator 2026-05-11 — step-specific recovery hints in executePlanWithProductionIo: task Details "pipx install fails → loud-crash with the exact pipx error + a recovery hint (`brew install pipx`)") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 37 (operator 2026-05-11 — skip-earlier gate: when plan is [start-mlx-server] AND PID file is alive, skip the spurious second-server spawn and YELLOW banner — prevents double-start during 30-60s model-load window on `minsky bootstrap-local-llm` + `minsky doctor` paths that lacked slice-34's PID-alive check) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 38 (operator 2026-05-11 — skip-earlier gate: PID-alive check before detectForBootstrap on !force paths — saves ~4 child-process spawns (arch-probe sysctl + which×3) during 30-60s model-load window on local-preferred + persisted-hard-limit trigger paths; slice-34 already covers runtime-claude-hardlimit, slice-37 fires too late on the other two) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -671,6 +672,22 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
     const result = await maybeShortCircuitOnReachableServer(knownServerState);
     if (result.overlay !== undefined) return result.overlay;
     prebuiltState = result.serverState;
+    // Slice 38 (skip-earlier gate): server unreachable + PID alive means
+    // mlx_lm.server is still loading the model. Return the env overlay
+    // immediately — skip the ~4 child-process detect+plan pipeline
+    // (arch-probe sysctl + which×3 + existsSync). The runtime-claude-
+    // hardlimit path already has this gate at slice-34 in
+    // maybeBootstrapLocalLlm (it never reaches runBootstrapLocalLlm when
+    // the PID is alive). local-preferred + persisted-hard-limit paths
+    // do reach here; before this slice they ran full detect then let
+    // slice-37 skip the start-server step — 4 spawns too late.
+    const earlyPid = readPidFileAlive(LOCAL_LLM_PID_PATH);
+    if (earlyPid !== undefined) {
+      process.stderr.write(
+        `minsky: mlx_lm.server is loading the model (PID ${earlyPid}); skipping detect+plan pipeline\n`,
+      );
+      return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    }
   }
   // Slice 29: thread the known server state into detect so
   // `buildProductionProbes`'s `prebuiltServerState` opt skips the
