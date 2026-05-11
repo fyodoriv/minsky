@@ -37,3 +37,4 @@ Three coupled changes:
 - **Lesson**: cognitive-complexity caps are a real forcing function — the initial inline try/catch pushed `runOneStep` complexity from 10 to 15; extracting `runStartServerStep` (4 lines) brought it back within budget with zero logic change
 
 <!-- security: not-applicable — no auth/secrets/sandbox/PII/supply-chain surface; slice 33 wires a spawn + writeFileSync for a local background process already approved by the operator's explicit confirm prompt -->
+<!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
