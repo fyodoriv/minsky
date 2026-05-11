@@ -62,8 +62,9 @@
   - **Risk**: low. The `prepare` hook is the standard pnpm/npm pattern; failure modes are limited to tsc errors (which we'd want to surface anyway). The defensive dist-existence-check adds 2 lines of `existsSync` to `bin/minsky.mjs`'s startup — negligible cost (sub-millisecond).
   - **Surfaced-by**: operator live-run 2026-05-08 — fresh clone of `minsky` repo, ran `pnpm install`, then `minsky` (or `pnpm minsky`?) immediately failed with `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/.../novel/tick-loop/dist/index.js' imported from /Users/.../novel/tick-loop/bin/minsky.mjs`.
 
-- [ ] `experiment-record-bin-checked-in` — eliminate `pnpm install` warning by moving `@minsky/experiment-record`'s `bin` to a checked-in launcher (mirror slice 8's pattern)
+- [x] `experiment-record-bin-checked-in` — eliminate `pnpm install` warning by moving `@minsky/experiment-record`'s `bin` to a checked-in launcher (mirror slice 8's pattern)
   - **ID**: experiment-record-bin-checked-in
+  - **Status**: shipped
   - **Tags**: p1, operator-directive, dx, fresh-clone, hardening
   - **Pick-next**: yes — operator 2026-05-08, "also on pnpm install it had a warning that it failed to create bin in experimental-record".
   - **Estimate**: 0.25d
