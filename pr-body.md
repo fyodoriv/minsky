@@ -1,3 +1,5 @@
+<!-- pattern: not-applicable — ephemeral PR description file; not a shipped artefact -->
+
 ## Summary
 
 Completes the final deliverables for `minsky-cli-fresh-clone-bootstrap`: drift test that pins the inline error literal against the canonical formatter, `AGENTS.md` "Repository setup" section, and `novel/tick-loop/README.md` "Quick start" section.
