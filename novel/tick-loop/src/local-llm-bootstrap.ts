@@ -500,6 +500,60 @@ export function planRequiresTty(plan: BootstrapPlan): boolean {
 }
 
 /**
+ * Output of {@link decideTtyMode} — splits the two questions the CLI
+ * wiring conflated before slice 7's hardening iteration:
+ *
+ *   - `hasTtyForSudo` — can `install-arm-homebrew`'s sudo prompt
+ *     reasonably succeed? `process.stdin.isTTY` is the canonical probe,
+ *     but it false-negatives in tmux-detach, nohup, ssh-tty-allocation,
+ *     and `< /dev/null` contexts where the operator has externally
+ *     arranged sudo elevation (passwordless sudoers, `SUDO_ASKPASS`).
+ *     `MINSKY_ASSUME_TTY=1` is the operator's "trust me, sudo can
+ *     prompt" override per the task block's pivot threshold.
+ *
+ *   - `isInteractive` — should the [Y/n] confirm read from stdin, or
+ *     auto-confirm via `confirmAlwaysYes`? Conservative: needs an
+ *     actual TTY (not the assumed-TTY override) AND `MINSKY_NON_
+ *     INTERACTIVE` unset. The auto-confirm path is the documented
+ *     non-interactive behavior since slice 1.
+ */
+export interface TtyMode {
+  readonly hasTtyForSudo: boolean;
+  readonly isInteractive: boolean;
+}
+
+/**
+ * Decide the two TTY-dependent behaviors from the three input signals:
+ * Node's `process.stdin.isTTY`, the `MINSKY_ASSUME_TTY=1` operator
+ * override, and the `MINSKY_NON_INTERACTIVE=1` auto-confirm flag.
+ *
+ * Slice 7 hardening iteration: extracted from `bin/minsky.mjs` so the
+ * truth table is paired-testable. The original slice-7 H2 wiring
+ * folded both decisions into one `isInteractive` boolean — that
+ * regressed `MINSKY_NON_INTERACTIVE=1` in a real TTY (it tripped the
+ * non-TTY refuse path even though sudo had a real stdin) and offered
+ * no escape hatch for tmux-detach / nohup contexts. The pivot
+ * threshold in the task block named `MINSKY_ASSUME_TTY=1` as the
+ * canonical override.
+ *
+ * Pattern conformance: Strategy / pure-decision-function — Hughes 1989
+ * — same input → same output, no I/O, no environment access. The
+ * caller (`bin/minsky.mjs`) reads the env vars and passes them in.
+ *
+ * @otel-exempt pure decision — no span.
+ */
+export function decideTtyMode(opts: {
+  readonly stdinIsTty: boolean;
+  readonly assumeTty: boolean;
+  readonly nonInteractive: boolean;
+}): TtyMode {
+  return {
+    hasTtyForSudo: opts.stdinIsTty || opts.assumeTty,
+    isInteractive: opts.stdinIsTty && !opts.nonInteractive,
+  };
+}
+
+/**
  * Plan the shortest sequence of install steps that takes the host from
  * `state` to a ready-to-iterate local-LLM stack. Pure decision function;
  * see the JSDoc at the top of this file for the contract and the

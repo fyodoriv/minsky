@@ -108,6 +108,7 @@ const {
   checkGitConfigPaths,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
+  decideTtyMode,
   describeArchState,
   detectArchState,
   detectLocalLlmStack,
@@ -200,6 +201,8 @@ Operator escape hatches (env vars):
   MINSKY_HARD_LIMIT_TTL_MIN=<minutes>   how long to trust persisted hard-limit (default 60)
   MINSKY_NO_AUTO_BOOTSTRAP=1            skip the local-LLM auto-bootstrap pre-flight
   MINSKY_NON_INTERACTIVE=1              auto-confirm the bootstrap install plan
+  MINSKY_ASSUME_TTY=1                   claim sudo can prompt even when stdin probe is false
+                                        (tmux-detach, nohup, passwordless sudoers, SUDO_ASKPASS)
 `);
 }
 
@@ -453,6 +456,9 @@ function emitNonTtyRefuseMessage() {
     '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n',
   );
   process.stderr.write("minsky: then rerun `minsky bootstrap-local-llm`\n");
+  process.stderr.write(
+    "minsky: OR if sudo is already non-interactively elevated (passwordless sudoers, SUDO_ASKPASS, tmux-detach), set MINSKY_ASSUME_TTY=1 to bypass this check\n",
+  );
 }
 
 /**
@@ -481,12 +487,21 @@ async function runBootstrapLocalLlm({ force }) {
     process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
-  const isInteractive =
-    process.stdin.isTTY === true && process.env["MINSKY_NON_INTERACTIVE"] !== "1";
+  // Slice 7 hardening: decideTtyMode splits the two TTY questions so
+  // MINSKY_ASSUME_TTY=1 (tmux-detach / nohup / passwordless-sudoers /
+  // SUDO_ASKPASS contexts) can claim sudo capability even when
+  // process.stdin.isTTY false-negatives. Also fixes the pre-hardening
+  // regression where MINSKY_NON_INTERACTIVE=1 in a real TTY tripped
+  // the non-TTY refuse path. Pure decision; see decideTtyMode JSDoc.
+  const { hasTtyForSudo, isInteractive } = decideTtyMode({
+    stdinIsTty: process.stdin.isTTY === true,
+    assumeTty: process.env["MINSKY_ASSUME_TTY"] === "1",
+    nonInteractive: process.env["MINSKY_NON_INTERACTIVE"] === "1",
+  });
   // Slice 7 H2: if the plan requires a TTY (install-arm-homebrew's
-  // sudo needs stdin inheritance) AND we're non-TTY, refuse with
-  // clear recovery instructions instead of hanging silently at sudo.
-  if (planRequiresTty(plan) && !isInteractive) {
+  // sudo needs stdin inheritance) AND we have no claimed TTY, refuse
+  // with clear recovery instructions instead of hanging silently at sudo.
+  if (planRequiresTty(plan) && !hasTtyForSudo) {
     emitNonTtyRefuseMessage();
     return {};
   }
