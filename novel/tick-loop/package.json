@@ -28,6 +28,7 @@
     "test/fixtures/**/*.md"
   ],
   "scripts": {
+    "prepare": "pnpm build",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --root .",
     "typecheck": "tsc --noEmit -p tsconfig.json"

@@ -4,6 +4,17 @@ This file tells any AI agent (Claude Code, OMC personas, future tools) how this 
 
 If you're an agent reading this for the first time: read `vision.md` next, then `TASKS.md`, then come back here.
 
+## Repository setup
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git
+cd minsky
+pnpm install   # prepare hook: (a) tsc -b builds all workspace dist/; (b) lefthook installs git hooks
+pnpm minsky doctor   # verify health
+```
+
+No separate build step needed. `pnpm install` runs the root `prepare` hook which calls `tsc -b` to compile every workspace package's `dist/` (including `@minsky/tick-loop`). If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line actionable message rather than a node stack trace.
+
 ## Identity
 
 You're working on **Minsky** — an integration distribution that connects existing tools into a viable cybernetic system that produces software 24/7 and stays alive indefinitely. Minsky is not a framework. We do not build what already exists.

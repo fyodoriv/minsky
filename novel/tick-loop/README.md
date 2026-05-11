@@ -48,6 +48,15 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0.
 - **Literature anchor**: Liu & Layland, *JACM* 1973 (periodic-task scheduling); Armstrong, *Programming Erlang*, 2007 (let-it-crash supervision).
 
+## Quick start
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git
+cd minsky
+pnpm install   # prepare hook builds dist; no manual build step needed
+pnpm minsky doctor
+```
+
 ## Usage
 
 ```ts
