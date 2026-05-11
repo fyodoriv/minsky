@@ -41,3 +41,29 @@ The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: th
 ### Day's narrative
 
 **The day the dogfood loop started compounding.** Morning was infrastructure: secret-scanning task block, P0 daemon-self-improvement filings (#170), the cap raise (#171) that ended a 22-hour budget-paused stall by trusting Anthropic's 429 instead of our heuristic threshold. The afternoon's structural unblock was #174 — the daemon's brief was a placeholder string (`"daemon brief for ${taskId}"`) that had trained claude to default to TASKS.md prose updates. Replacing it with a real task-block-embedded brief plus a FORBIDDEN-noop directive flipped the loop: the very next iteration after the merge shipped #175 (266 LoC of substantive implementation), then #176 (333 LoC wire-in). Two daemon-authored PRs in 30 minutes, ~600 LoC total, no operator pre-spec. The first time this session the daemon picked its own next sub-step and implemented it autonomously.
+
+---
+
+## 2026-05-11
+
+### What shipped
+
+- **#454** — `feat(self-diagnose): local-server-concurrency-mismatch invariant + gate chaos rows` _(+160/-0)_
+  > Startup invariant fires when MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 but the backend doesn't advertise concurrent-inference capability — detects the silent bypass-path footgun that would re-introduce the OOM PR #453 was built to prevent.
+- **#453** — `feat(local-llm): LocalLlmConcurrencyGate serializes spawns across workers` _(+523/-1)_
+  > O_EXCL file-lock SpawnStrategy decorator (cap=1 default) serializes concurrent aider spawns at the client side. Post-gate 3-worker live-fire: all 3 workers produced real diffs, mlx_lm.server stayed up — vs. Metal command-buffer OOM pre-PR.
+- **#452** — `fix(minsky-cli): MINSKY_ASSUME_TTY=1 escape hatch + non-interactive regression fix` _(+132/-5)_
+  > Splits TTY detection into two independent questions (hasTtyForSudo / isInteractive); MINSKY_ASSUME_TTY=1 lets non-TTY operator contexts proceed past the CLI refuse gate. Fixes regression where MINSKY_NON_INTERACTIVE=1 in a real TTY tripped the non-TTY refuse path.
+- **#451** — `fix(aider): default-off reflection paths + diff edit format` _(+74/-1)_
+  > Hard-wires --no-auto-lint/test/suggest-shell/detect-urls + --edit-format diff; kills multi-round reflection that drove round-2 tokens to 46k and the whole-file thrash that filled the 8192-token budget with no diff output.
+- **#446** — `fix(daemon): drop Files cell from buildLocalBrief` _(+27/-13)_
+  > Removes the Files cell from slim brief; aider's --yes auto-add was expanding 8-12 task-block paths into 50-66k per-worker contexts. Hypothesis/Details now contain only the 1-3 files the iteration needs.
+
+### Metrics
+
+- **local_3worker_spawn_workers_completed**: 0 → 3 _(Δ +3, **improved**)_
+- **local_llm_server_oom_crashes**: 1 → 0 _(Δ -1, **improved**)_
+
+### Day's narrative
+
+The local-LLM 3-worker path went from GPU OOM to deterministic stability via four compounding PRs. #446 drops the Files cell from the slim brief, cutting aider's auto-add explosion from 8–12 paths to the 1–3 files Hypothesis/Details organically mention. #451 hard-wires `--no-auto-lint/test/suggest-shell/detect-urls --edit-format diff`, killing multi-round reflection (which drove round-2 tokens to 46k) and the whole-file thrash loop that exhausted the output budget with no diff. #453 adds the key concurrency gate — an O_EXCL file-lock `SpawnStrategy` decorator capping in-flight local-LLM spawns to 1, matching mlx_lm.server's single-inference limit; post-gate live-fire ran all three workers through to real-diff completion (4.8k + 13k + 19k input tokens, server stable) vs. Metal command-buffer OOM pre-PR. #454 closes the observability gap with a startup invariant that fires when `MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2` but the backend doesn't advertise concurrent-inference capability, catching the silent bypass footgun before it can re-introduce the OOM. #452 ships alongside as independent CLI hardening: `MINSKY_ASSUME_TTY=1` decouples sudo-prompt availability from stdin interactivity, fixing a regression where `MINSKY_NON_INTERACTIVE=1` in a real TTY tripped the non-TTY refuse path.
