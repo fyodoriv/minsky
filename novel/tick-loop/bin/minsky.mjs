@@ -15,6 +15,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 28 (operator 2026-05-10 — round-trip elimination: thread slice-26's known-unreachable server state into `runBootstrapLocalLlm` so the runtime-claude-hardlimit trigger path skips slice-27's redundant `fetch /v1/models` probe when `maybeBootstrapLocalLlm` already confirmed the server is down) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 29 (operator 2026-05-10 — round-trip elimination: thread the actual slice-26 `ServerState` through `runBootstrapLocalLlm` → `detectForBootstrap` → `buildProductionProbes`'s new `prebuiltServerState` opt so the 5-stack `detectLocalLlmStack` skips its redundant `fetch /v1/models` on the claude-hardlimit cold-start path) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 30 (operator 2026-05-10 — round-trip elimination: capture the slice-27 server probe's `ServerState` when it falls through (unreachable) and thread it into `detectForBootstrap` so the `local-preferred` and persisted-hard-limit trigger paths — which call `runBootstrapLocalLlm({ force: false })` without `knownServerState` — also skip the third `fetch /v1/models` inside `detectLocalLlmStack`) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 31 (operator 2026-05-10 — code-shrinking: remove the now-dead `if (plan.ready && !force)` branch from `runBootstrapLocalLlm` — slice 30's prebuiltState threading guarantees `plan.ready === false` whenever `!force` (server forced unreachable in detect), and `!force` is false on the force=true path; the empty-plan case is already handled by `executeBootstrapPlan`'s own early-return) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -638,10 +639,6 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
   if (prebuiltState !== undefined) detectOpts.prebuiltServerState = prebuiltState;
   const { state, planOpts } = await detectForBootstrap(detectOpts);
   const plan = planLocalLlmBootstrap(state, planOpts);
-  if (plan.ready && !force) {
-    process.stderr.write("minsky: local-LLM stack already ready — skipping bootstrap\n");
-    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
-  }
   return executePlanWithProductionIo(plan);
 }
 
