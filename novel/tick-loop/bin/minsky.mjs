@@ -27,6 +27,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 40 (operator 2026-05-11 — opencode doctor row: detect opencode binary on PATH via whichFn + fetch version via `opencode --version`; emit ✓ opencode <version> or ✗ opencode not found — run: curl -fsSL https://opencode.ai/install | sh; probeOpencode runs in the existing Promise.all so doctor wall-clock is unchanged) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 41 (operator 2026-05-11 — opencode config doctor row: read opencode.json in CWD or ~/.config/opencode/config.json; check whether any provider has options.baseURL === "http://127.0.0.1:1234/v1"; emit ✓ opencode config  local provider wired or ✗ opencode config  not wired — run: minsky setup-opencode; runs in the existing Promise.all at zero marginal wall-clock cost) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 42 (operator 2026-05-11 — minsky setup-opencode command: merge lmstudio provider block into ~/.config/opencode/opencode.json; fix probe path bug (config.json→opencode.json) so doctor row goes GREEN after setup) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 43 (operator 2026-05-11 — auto-wire opencode config post-bootstrap: after executeBootstrapPlan succeeds, probe opencode binary + config in parallel; if binary present and config not wired, run runSetupOpencode() so minsky doctor opencode config row goes GREEN without a separate manual step) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -636,6 +637,17 @@ async function executePlanWithProductionIo(plan) {
   if (!result.success) {
     emitBootstrapFailure(result);
     return {};
+  }
+  // Slice 43: auto-wire opencode config post-bootstrap. Pre-check gates the
+  // runSetupOpencode call so machines without opencode see no output and
+  // exitCode stays clean (runSetupOpencode sets exitCode=1 on missing binary).
+  const [opencodeConfigProbe, opencodeBinPath] = await Promise.all([
+    probeOpencodeConfig(),
+    whichFn("opencode"),
+  ]);
+  if (!opencodeConfigProbe.wired && opencodeBinPath !== undefined) {
+    process.stderr.write("minsky: wiring opencode config for local LLM server...\n");
+    await runSetupOpencode();
   }
   return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
 }
