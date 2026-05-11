@@ -536,6 +536,16 @@ export {
   synthesiseHoldResult,
 } from "./llm-provider-spawn-strategy.js";
 
+// Slice 2.5 of `local-server-concurrency-aware-worker-spawn`: expose
+// the cross-process concurrency gate that serializes local-LLM spawns
+// when mlx_lm.server / LM Studio's single-inference limit would
+// otherwise GPU-OOM under multi-worker fanout.
+export {
+  type GateLockBody,
+  type LocalLlmConcurrencyGateOptions,
+  LocalLlmConcurrencyGate,
+} from "./local-llm-concurrency-gate.js";
+
 // Slice 2 of `daemon-parallel-worktree-launch`: per-worker namespacing
 // helpers exposed for the CLI (`bin/tick-loop.mjs`) so it can parse
 // `--worker-id` / `--workers-total` and announce parallel mode on startup.
