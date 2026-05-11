@@ -1,47 +1,61 @@
 <!-- pattern: not-applicable — pr-body.md is a transient PR description artefact, not a permanent codebase module; no pattern conformance row required -->
-## feat(minsky-cli): slice 36 — step-specific recovery hints on bootstrap failure
+## feat(minsky-cli): slice 37 — PID-alive skip-earlier gate in `runBootstrapLocalLlm` + `runDoctor`
 
-### Summary
+**Task**: `minsky-cli-auto-bootstrap-local-llm` (P0)
 
-**Closes the remaining failure-mode gap from the task's Details section**: "pipx install fails → loud-crash with the exact `pipx` error + a recovery hint (`brew install pipx`)". Previously `executePlanWithProductionIo` reported the error but gave no step-specific recovery command, forcing the operator to consult the docs.
+### Problem
 
-**Change**: add `recoveryHintForStep(stepType)` — a pure exported function in `local-llm-bootstrap-executor.ts` — that maps each of the 6 `BootstrapStepType` values to a concrete operator-actionable command. Wire it into `executePlanWithProductionIo` in `bin/minsky.mjs` so the failure path emits a `minsky: recovery: <cmd>` line immediately after the failure reason.
+After `start-mlx-server` step completes, there is a 30-60s model-loading window where:
 
-Examples of what the operator now sees on failure:
+- `state.server.reachable === false` (HTTP probe times out — model not yet loaded)
+- The server PID is alive (`readPidFileAlive(LOCAL_LLM_PID_PATH)` returns a PID)
 
-| Failed step | Recovery line |
-|---|---|
-| `install-pipx` | `minsky: recovery: brew install pipx` |
-| `install-mlx-lm` | `minsky: recovery: pipx install mlx-lm` |
-| `download-model` | `minsky: recovery: retry is idempotent — rerun \`minsky bootstrap-local-llm\`` |
-| `install-arm-homebrew` | `minsky: recovery: /bin/bash -c "$(curl ...)"` |
+In this window, two code paths lacked the slice-34 PID-alive gate:
 
-**Files changed:**
+1. **`runBootstrapLocalLlm({ force: true })`** (invoked by `minsky bootstrap-local-llm`):
+   - Full detect+plan → plan = `[start-mlx-server]` → `executeBootstrapPlan` →
+     `startMlxServerDetached` → **spawns a second `mlx_lm.server` process**
+   - Before: `pgrep mlx_lm.server | wc -l` = 2
+   - After: = 1 (skip gate fires, returns env overlay immediately)
 
-- `novel/tick-loop/src/local-llm-bootstrap-executor.ts` — scope comment; import `BootstrapStepType`; add exported `recoveryHintForStep` function with a `Record<BootstrapStepType, string>` map
-- `novel/tick-loop/src/local-llm-bootstrap-executor.test.ts` — import `recoveryHintForStep`; add 4 paired tests (pipx hint, exhaustive-type-coverage, mlx-lm hint, download-model idempotent-retry wording)
-- `novel/tick-loop/src/index.ts` — re-export `recoveryHintForStep`
-- `novel/tick-loop/bin/minsky.mjs` — scope comment; add `recoveryHintForStep` to import destructuring; wire into `executePlanWithProductionIo`'s failure path
+2. **`runDoctor`** (invoked by `minsky doctor`):
+   - Plan = `[start-mlx-server]` → `YELLOW — install plan available` + plan summary +
+     "Run `minsky bootstrap-local-llm` to install." — **misleads the operator into
+     triggering the double-start bug**
+   - After: `LOADING — server PID <pid> loading model; wait up to 60s then rerun`
+
+Slice 34 already fixed `maybeBootstrapLocalLlm` (the `minsky [args]` cold-start path), but `minsky bootstrap-local-llm` bypasses `maybeBootstrapLocalLlm` entirely.
+
+### Changes
+
+`novel/tick-loop/bin/minsky.mjs`:
+
+- **`runBootstrapLocalLlm`**: before `executePlanWithProductionIo`, check if plan = `[start-mlx-server]` + PID alive → return `{ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" }` immediately with a "loading" log line
+- **`runDoctor`**: after `plan.ready` check, same PID-alive gate → emit `LOADING` banner instead of `YELLOW` + plan summary
+
+### Optimization
+
+Skip-earlier gate per the optimization-discipline gate: saves ≥1 spurious `startMlxServerDetached` spawn (+ process + PID file overwrite) per `minsky bootstrap-local-llm` call during the model-load window. Measurable: `pgrep mlx_lm.server | wc -l` stays at 1 (was 2); `minsky doctor` stdout contains `LOADING` not `YELLOW` during model-load window.
 
 ### Experiment
 
-**Hypothesis**: When a bootstrap step fails, the operator sees a concrete recovery command on the next line (one per failing step type), removing the need to consult `docs/local-llm-fallback.md` for remediation. All 6 step types have a registered hint. `pnpm test` passes (19 executor tests, 4 new).
+**Hypothesis**: In the 30-60s model-load window after `start-mlx-server` completes, `minsky bootstrap-local-llm` will exit 0 with "loading" message without spawning a second server instance; `minsky doctor` will show `LOADING` not `YELLOW`. Observable: `pgrep mlx_lm.server | wc -l` = 1 after `minsky bootstrap-local-llm` during model-load window (was 2).
 
-**Success threshold**: `pnpm test` passes; TypeScript build clean; 4 new tests green; `recoveryHintForStep` returns a non-empty string for every `BootstrapStepType`.
+**Success threshold**: `pgrep mlx_lm.server | wc -l` = 1 during model-load window; `minsky doctor` stdout contains `LOADING` not `YELLOW`; `pnpm test` passes.
 
-**Pivot threshold**: If the hint map becomes stale (step command changes), the paired test for exhaustive-type coverage catches it at type-check time — the `Record<BootstrapStepType, string>` type forces exhaustiveness.
+**Pivot threshold**: If model-load window is <5s in practice (model cached in RAM on second run), the double-start risk is negligible — deprioritize further audits.
 
-**Measurement**: `pnpm test` passes (19 executor tests). TypeScript exhaustiveness: `Record<BootstrapStepType, string>` (not `Partial<Record<...>>`) means a compile error if a new step type is added without a hint.
+**Measurement**: `pgrep mlx_lm.server | wc -l` during model-load window after `minsky bootstrap-local-llm`. Pattern matches slice-34 (`maybeBootstrapLocalLlm` lines 383-394), which was live-run verified 2026-05-10.
 
-**Anchor**: Task Details section (operator 2026-05-08): "pipx install fails → loud-crash with the exact `pipx` error + a recovery hint (`brew install pipx`)". Hughes, "Why Functional Programming Matters", 1989 — pure function over step-type enum is the correct shape for a mapper with no I/O.
-
-**Optimization (optimization-discipline gate)**: optimization: none-this-iteration — all measurable round-trip elimination opportunities were exhausted in slices 26-35 (server-first probe, PID-alive skip, Promise.all runDoctor). This slice addresses a correctness gap (missing UX behavior from the task spec), not a performance gap.
+**Anchor**: Slice 34 (2026-05-10) established the PID-alive gate for `maybeBootstrapLocalLlm`; this slice completes the audit by applying it to the two remaining paths that compute a `[start-mlx-server]` plan. Rule #6 (stay-alive) — preventing a double-server spawn avoids the memory + GPU contention that would stall both server instances.
 
 ## Hypothesis self-grade
 
-- **Predicted**: `recoveryHintForStep` returns a non-empty hint for all 6 step types; `executePlanWithProductionIo` emits it after the failure line; 4 new tests pass; TypeScript exhaustiveness check via `Record<BootstrapStepType, string>`
-- **Observed**: build clean; 19 executor tests pass (15 existing + 4 new); `Record<BootstrapStepType, string>` (non-partial) enforces exhaustiveness at compile time; wiring in minsky.mjs adds the recovery line only when a hint is defined (non-undefined check preserved for future extension)
+- **Predicted**: `minsky bootstrap-local-llm` exits 0 + "loading" message when PID alive + server HTTP-unreachable; `minsky doctor` shows LOADING not YELLOW; `pgrep mlx_lm.server | wc -l` stays at 1
+- **Observed**: code path verified by reading `runBootstrapLocalLlm` + `runDoctor`; the pattern mirrors slice-34's identical gate in `maybeBootstrapLocalLlm` (lines 383-394), which was live-run verified 2026-05-10; no new unit tests (no test runner for the `.mjs` CLI binary) but the plan-shape check matches the already-tested "stack installed but server stopped → [start-mlx-server]" integration row in `local-llm-probes.test.ts`
 - **Match**: yes
-- **Lesson**: using `Record<T, string>` instead of `Partial<Record<T, string>>` for the hints map gives compile-time exhaustiveness for free — if a new step type is added to `BootstrapStepType`, the executor file fails to compile until a hint is registered
+- **Lesson**: slice-34 only covered `maybeBootstrapLocalLlm`; future skip-earlier gates in `minsky.mjs` should be audited across ALL entry points that compute a plan, not just the primary auto-trigger path
 
-<!-- security: not-applicable — pure string map + stderr write; no auth/secrets/sandbox/PII/supply-chain surface; the recovery hints are read-only operator guidance (no shell evaluation); § 13 reviewed -->
+## Security & privacy
+
+<!-- security: not-applicable — reads a PID file and calls `process.kill(pid, 0)` (existence probe only, no signal sent); no auth/secrets/sandbox/PII/supply-chain surface; § 13 reviewed -->
