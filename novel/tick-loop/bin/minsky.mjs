@@ -28,6 +28,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 41 (operator 2026-05-11 — opencode config doctor row: read opencode.json in CWD or ~/.config/opencode/config.json; check whether any provider has options.baseURL === "http://127.0.0.1:1234/v1"; emit ✓ opencode config  local provider wired or ✗ opencode config  not wired — run: minsky setup-opencode; runs in the existing Promise.all at zero marginal wall-clock cost) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 42 (operator 2026-05-11 — minsky setup-opencode command: merge lmstudio provider block into ~/.config/opencode/opencode.json; fix probe path bug (config.json→opencode.json) so doctor row goes GREEN after setup) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 43 (operator 2026-05-11 — auto-wire opencode config post-bootstrap: after executeBootstrapPlan succeeds, probe opencode binary + config in parallel; if binary present and config not wired, run runSetupOpencode() so minsky doctor opencode config row goes GREEN without a separate manual step) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 44 (operator 2026-05-11 — minsky stop-local-llm command: read .minsky/local-llm.pid, SIGTERM the server, clear the PID file; mirrors minsky stop <worker>; replace local readLivePid with imported readPidFileAlive — code dedup, saves ~680 bytes) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -183,6 +184,9 @@ if (first === "--help" || first === "-h" || first === "help") {
   if (Object.keys(result).length === 0) {
     process.exit(1);
   }
+} else if (first === "stop-local-llm") {
+  // Slice 44: stop the background mlx_lm.server — mirrors `minsky stop <worker>`.
+  runStopLocalLlm();
 } else if (first === "start") {
   // Back-compat: keep `start` as an alias of the no-subcommand form. Any
   // further args are forwarded to bin/tick-loop.mjs at spawn time.
@@ -205,6 +209,7 @@ Examples:
   minsky logs                     # follow worker 0's log live
   minsky stop 1                   # stop worker 1
   minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
+  minsky stop-local-llm                 # stop the background mlx_lm.server (SIGTERM + clear PID file)
   minsky setup-opencode                  # wire lmstudio provider into ~/.config/opencode/opencode.json
 
 Sane defaults (override by passing the corresponding tick-loop flag):
@@ -258,7 +263,7 @@ async function runStartOrAttach(args) {
 
   const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
   const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
-  const livePid = readLivePid(pidPath);
+  const livePid = readPidFileAlive(pidPath);
   if (livePid !== undefined) {
     process.stderr.write(
       `minsky: worker ${workerId} already running (PID ${livePid}) — attaching to ${logPath}\n`,
@@ -1435,7 +1440,7 @@ async function runLogs(args) {
 function runStop(args) {
   const { workerId } = parsePositionalAndForward(args);
   const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
-  const livePid = readLivePid(pidPath);
+  const livePid = readPidFileAlive(pidPath);
   if (livePid === undefined) {
     process.stderr.write(`minsky: worker ${workerId} is not running (no live PID at ${pidPath})\n`);
     process.exit(1);
@@ -1451,6 +1456,34 @@ function runStop(args) {
       process.stderr.write(
         `minsky: worker ${workerId} was already dead — cleared stale PID file\n`,
       );
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Slice 44: stop the background `mlx_lm.server` started by
+ * {@link startMlxServerDetached}. Reads `.minsky/local-llm.pid`, sends
+ * SIGTERM, and removes the file. Mirrors the `runStop` pattern for workers.
+ */
+function runStopLocalLlm() {
+  const livePid = readPidFileAlive(LOCAL_LLM_PID_PATH);
+  if (livePid === undefined) {
+    process.stderr.write(
+      `minsky: mlx_lm.server is not running (no live PID at ${LOCAL_LLM_PID_PATH})\n`,
+    );
+    process.exit(1);
+  }
+  try {
+    process.kill(livePid, "SIGTERM");
+    process.stderr.write(`minsky: sent SIGTERM to mlx_lm.server (PID ${livePid})\n`);
+    rmSync(LOCAL_LLM_PID_PATH, { force: true });
+    // rule-6: handled-locally — ESRCH is benign (already dead); still clear the PID file
+  } catch (err) {
+    if (isErrno(err, "ESRCH")) {
+      rmSync(LOCAL_LLM_PID_PATH, { force: true });
+      process.stderr.write("minsky: mlx_lm.server was already dead — cleared stale PID file\n");
       return;
     }
     throw err;
@@ -1505,27 +1538,6 @@ function withSaneDefaults(workerId, extraArgs) {
     out.push(`--paused-sentinel=/tmp/minsky-worker-${workerId}-never-paused`);
   }
   return out;
-}
-
-/**
- * Read the PID file and return the PID iff that process is alive.
- * Returns undefined when the file is missing OR the recorded PID is dead.
- * @param {string} pidPath
- * @returns {number | undefined}
- */
-function readLivePid(pidPath) {
-  if (!existsSync(pidPath)) return undefined;
-  try {
-    const raw = readFileSync(pidPath, "utf8").trim();
-    const pid = Number(raw);
-    if (!Number.isInteger(pid) || pid <= 0) return undefined;
-    // `process.kill(pid, 0)` checks existence without signaling.
-    process.kill(pid, 0);
-    return pid;
-    // rule-6: handled-locally — ESRCH = stale PID, ENOENT = race; both treated as "dead"
-  } catch {
-    return undefined;
-  }
 }
 
 /**
