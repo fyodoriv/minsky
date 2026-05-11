@@ -25,6 +25,7 @@ import {
   describeArchState,
   detectArchState,
   needsArmHomebrewInstall,
+  parseForcedShellArch,
   preferredBrewPath,
   preferredPipxPath,
   preferredPythonPath,
@@ -504,5 +505,40 @@ describe("detectArchState — referential transparency", () => {
     const result = await detectArchState(probes);
     expect(latchResolved).toBe(true);
     expect(result.hardwareArch).toBe("arm64");
+  });
+});
+
+// ---- parseForcedShellArch — slice 11 env override -------------------------
+
+describe("parseForcedShellArch — MINSKY_FORCE_SHELL_ARCH override (slice 11)", () => {
+  it('returns "arm64" for exact "arm64" input', () => {
+    expect(parseForcedShellArch("arm64")).toBe("arm64");
+  });
+
+  it('returns "x86_64" for exact "x86_64" input', () => {
+    expect(parseForcedShellArch("x86_64")).toBe("x86_64");
+  });
+
+  it("returns undefined for undefined (env var not set)", () => {
+    expect(parseForcedShellArch(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined for empty string (env var set but empty)", () => {
+    expect(parseForcedShellArch("")).toBeUndefined();
+  });
+
+  it("returns undefined for mixed-case / near-match spellings (strict equality only)", () => {
+    expect(parseForcedShellArch("Arm64")).toBeUndefined();
+    expect(parseForcedShellArch("ARM64")).toBeUndefined();
+    expect(parseForcedShellArch("arm")).toBeUndefined();
+    expect(parseForcedShellArch("apple-silicon")).toBeUndefined();
+    expect(parseForcedShellArch("intel")).toBeUndefined();
+  });
+
+  it('returns undefined for "other" (planner-incoherent forcing target)', () => {
+    // "other" is intentionally rejected — it maps to "Linux or unknown
+    // host" in the planner and applying it on macOS would make the
+    // doctor row read as Linux, which is confusing for the operator.
+    expect(parseForcedShellArch("other")).toBeUndefined();
   });
 });
