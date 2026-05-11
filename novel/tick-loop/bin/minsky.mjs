@@ -24,6 +24,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 37 (operator 2026-05-11 — skip-earlier gate: when plan is [start-mlx-server] AND PID file is alive, skip the spurious second-server spawn and YELLOW banner — prevents double-start during 30-60s model-load window on `minsky bootstrap-local-llm` + `minsky doctor` paths that lacked slice-34's PID-alive check) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 38 (operator 2026-05-11 — skip-earlier gate: PID-alive check before detectForBootstrap on !force paths — saves ~4 child-process spawns (arch-probe sysctl + which×3) during 30-60s model-load window on local-preferred + persisted-hard-limit trigger paths; slice-34 already covers runtime-claude-hardlimit, slice-37 fires too late on the other two) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 39 (operator 2026-05-11 — doctor server row: fetch GET /v1/models when server is reachable, show data[0].id as "reachable — <model>" instead of raw URL; fetchServerModelId helper extracted to keep runDoctor under biome cognitive-complexity cap) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 40 (operator 2026-05-11 — opencode doctor row: detect opencode binary on PATH via whichFn + fetch version via `opencode --version`; emit ✓ opencode <version> or ✗ opencode not found — run: curl -fsSL https://opencode.ai/install | sh; probeOpencode runs in the existing Promise.all so doctor wall-clock is unchanged) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -725,9 +726,16 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
  * Emit the 8 doctor status rows. Extracted so `runDoctor` stays under
  * biome's cognitive-complexity cap.
  *
- * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined, serverModel?: string }} args
+ * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined, serverModel?: string, opencodeProbe: { found: true; version: string } | { found: false } }} args
  */
-function emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverModel }) {
+function emitDoctorRows({
+  state,
+  archState,
+  claudeDecision,
+  pythonPath,
+  serverModel,
+  opencodeProbe,
+}) {
   /** @param {string} label @param {boolean} ok @param {string} [detail] */
   const line = (label, ok, detail) => {
     const mark = ok ? "✓" : "✗";
@@ -756,6 +764,13 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverMo
   // Row is GREEN when planner won't need arm-homebrew install.
   // Rosetta-with-brew still GREEN — absolute paths sidestep the mismatch.
   line("arch", !archState.needsNativeBrew, describeArchState(archState));
+  line(
+    "opencode",
+    opencodeProbe.found,
+    opencodeProbe.found
+      ? opencodeProbe.version
+      : "not found — run: curl -fsSL https://opencode.ai/install | sh",
+  );
 }
 
 /** @param {{ reachable: boolean, url: string }} serverState @returns {Promise<string | undefined>} */
@@ -782,10 +797,14 @@ async function runDoctor() {
   // the operator can see the install-time substrate at the same time
   // as the local-LLM stack. ANY substrate red → daemon literally
   // cannot run, so banner is RED instead of YELLOW.
-  const [{ state, archState, planOpts, pythonPath }, claudeDecision, substrateState] =
-    await Promise.all([detectForBootstrap(), probeClaude(), probeSubstrate()]);
+  const [
+    { state, archState, planOpts, pythonPath },
+    claudeDecision,
+    substrateState,
+    opencodeProbe,
+  ] = await Promise.all([detectForBootstrap(), probeClaude(), probeSubstrate(), probeOpencode()]);
   const serverModel = await fetchServerModelId(state.server);
-  emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverModel });
+  emitDoctorRows({ state, archState, claudeDecision, pythonPath, serverModel, opencodeProbe });
   const substrateLines = renderDoctorSubstrateRows(substrateState);
   for (const l of substrateLines) {
     process.stdout.write(`${l}\n`);
@@ -953,6 +972,26 @@ function classifyOrigin(originRaw) {
     }
   }
   return "unknown";
+}
+
+/**
+ * Slice 40 of `minsky-cli-auto-bootstrap-local-llm` — detect whether the
+ * `opencode` binary is on PATH and, if so, fetch its version string via
+ * `opencode --version`. Uses the same PATH-detection pattern as
+ * `run-tick-loop.sh` (PR e53a12d).
+ *
+ * @returns {Promise<{ found: true; version: string } | { found: false }>}
+ */
+async function probeOpencode() {
+  const binPath = await whichFn("opencode");
+  if (binPath === undefined) return { found: false };
+  try {
+    const { stdout } = await execAsync("opencode --version", { timeout: 3000 });
+    const version = stdout.trim().replace(/^opencode\s+/i, "");
+    return { found: true, version: version.length > 0 ? version : binPath };
+  } catch {
+    return { found: true, version: binPath };
+  }
 }
 
 /**
