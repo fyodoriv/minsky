@@ -21,6 +21,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 34 (operator 2026-05-10 — PID-alive skip-earlier gate: after the slice-26 HTTP probe finds the server unreachable, read .minsky/local-llm.pid; if the process is alive (kill(pid,0) succeeds), return the env overlay immediately — server is still loading the model, no second spawn needed, claude probe + 5-probe detect pipeline skipped; saves ≥5 child-process spawns per invocation during the 30-60s model-loading window) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 35 (operator 2026-05-10 — round-trip elimination: parallelize detectForBootstrap+probeClaude+probeSubstrate in runDoctor via Promise.all — saves ~1-2s wall-clock vs sequential dispatch; integration tests for selectively-missing stack scenarios) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 36 (operator 2026-05-11 — step-specific recovery hints in executePlanWithProductionIo: task Details "pipx install fails → loud-crash with the exact pipx error + a recovery hint (`brew install pipx`)") -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 37 (operator 2026-05-11 — skip-earlier gate: when plan is [start-mlx-server] AND PID file is alive, skip the spurious second-server spawn and YELLOW banner — prevents double-start during 30-60s model-load window on `minsky bootstrap-local-llm` + `minsky doctor` paths that lacked slice-34's PID-alive check) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -680,6 +681,21 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
   if (prebuiltState !== undefined) detectOpts.prebuiltServerState = prebuiltState;
   const { state, planOpts } = await detectForBootstrap(detectOpts);
   const plan = planLocalLlmBootstrap(state, planOpts);
+  // Slice 37 (skip-earlier gate): if the plan's only step is start-mlx-server AND
+  // the PID file is alive, the server is loading the model — skip the spawn to prevent
+  // a second mlx_lm.server instance during the 30-60s model-load window. The same
+  // gate is in `maybeBootstrapLocalLlm` (slice 34) for the auto-trigger paths; this
+  // slice adds it to the `force=true` path (`minsky bootstrap-local-llm`), which
+  // bypasses `maybeBootstrapLocalLlm` and therefore lacked the check.
+  if (plan.steps.length === 1 && plan.steps[0]?.type === "start-mlx-server") {
+    const loadingPid = readPidFileAlive(LOCAL_LLM_PID_PATH);
+    if (loadingPid !== undefined) {
+      process.stderr.write(
+        `minsky: mlx_lm.server is loading the model (PID ${loadingPid}); skipping start-mlx-server step\n`,
+      );
+      return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    }
+  }
   return executePlanWithProductionIo(plan);
 }
 
@@ -759,6 +775,19 @@ async function runDoctor() {
   if (plan.ready) {
     process.stdout.write("Local-LLM stack: GREEN — ready\n");
     return;
+  }
+  // Slice 37 (skip-earlier gate): if the plan's only step is start-mlx-server AND
+  // the PID file is alive, the server is loading the model — show LOADING instead of
+  // YELLOW. Without this check the doctor output misleadingly suggests the operator
+  // run `minsky bootstrap-local-llm`, which would attempt to start a second instance.
+  if (plan.steps.length === 1 && plan.steps[0]?.type === "start-mlx-server") {
+    const loadingPid = readPidFileAlive(LOCAL_LLM_PID_PATH);
+    if (loadingPid !== undefined) {
+      process.stdout.write(
+        `Local-LLM stack: LOADING — server PID ${loadingPid} loading model; wait up to 60s then rerun \`minsky doctor\`\n`,
+      );
+      return;
+    }
   }
   process.stdout.write("Local-LLM stack: YELLOW — install plan available\n");
   process.stdout.write(`${renderConfirmSummary(plan)}\n`);
