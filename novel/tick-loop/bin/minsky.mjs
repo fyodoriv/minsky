@@ -49,7 +49,15 @@
  */
 
 import { exec, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -503,6 +511,7 @@ async function runBootstrapLocalLlm({ force }) {
   const result = await executeBootstrapPlan(plan, {
     confirm: confirmFn,
     spawnFn: spawnAdapter,
+    startServerFn: startLocalLlmServer,
     log: (s) => process.stderr.write(s),
   });
   if (!result.success) {
@@ -834,6 +843,65 @@ async function whichFn(bin) {
 /** Quote a shell argument minimally (no globbing in our usage). */
 function shellQuote(s) {
   return /^[\w.\/-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Slice 45 — background-spawn `mlx_lm.server`, write its PID to
+ * `.minsky/local-llm.pid`, and poll `/v1/models` until ready (≤60 s).
+ *
+ * Plugs in as `startServerFn` in {@link executeBootstrapPlan} so the
+ * `start-mlx-server` step doesn't hang waiting for a long-lived process
+ * to exit. The server outlives the bootstrap via `detached: true` +
+ * `child.unref()`.
+ *
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
+ */
+async function startLocalLlmServer(command, args) {
+  const dotMinsky = resolve(MINSKY_HOME, ".minsky");
+  mkdirSync(dotMinsky, { recursive: true });
+  const pidFile = resolve(dotMinsky, "local-llm.pid");
+  const logFile = resolve(dotMinsky, "local-llm-server.log");
+  const logFd = openSync(logFile, "a");
+  process.stderr.write(
+    `minsky: starting ${command} ${args.join(" ")} in background (log: ${logFile})\n`,
+  );
+  const child = spawn(command, /** @type {string[]} */ ([...args]), {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+  });
+  child.unref();
+  closeSync(logFd);
+  if (child.pid !== undefined) {
+    writeFileSync(pidFile, String(child.pid), "utf8");
+    process.stderr.write(`minsky: mlx_lm.server PID ${child.pid} written to ${pidFile}\n`);
+  }
+  // Poll until the server is ready (up to 60 s, 3 s intervals).
+  const SERVER_URL = "http://127.0.0.1:8080/v1/models";
+  const POLL_INTERVAL_MS = 3_000;
+  const POLL_TIMEOUT_MS = 60_000;
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  process.stderr.write("minsky: waiting for mlx_lm.server to become ready (up to 60 s)…\n");
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 2_000);
+      const resp = await globalThis.fetch(SERVER_URL, { method: "GET", signal: ac.signal });
+      clearTimeout(timer);
+      if (resp.ok) {
+        process.stderr.write("minsky: mlx_lm.server ready\n");
+        return { exitCode: 0, stderrTail: "" };
+      }
+    } catch {
+      // Not ready yet — keep polling.
+    }
+  }
+  return {
+    exitCode: 1,
+    stderrTail: `mlx_lm.server did not become reachable at ${SERVER_URL} within ${POLL_TIMEOUT_MS / 1_000} s`,
+  };
 }
 
 /**

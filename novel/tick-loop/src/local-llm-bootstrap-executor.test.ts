@@ -289,3 +289,66 @@ describe("executeBootstrapPlan — slice 6 stdinMode", () => {
     }
   });
 });
+
+// ---- Slice 45: startServerFn seam for start-mlx-server -------------------
+
+describe("executeBootstrapPlan — slice 45 startServerFn seam", () => {
+  const startServerPlan: BootstrapPlan = {
+    ready: false,
+    totalEstimatedDurationMs: 60_000,
+    totalEstimatedDownloadMb: 0,
+    steps: [
+      {
+        type: "start-mlx-server",
+        description: "Start mlx_lm.server in the background",
+        estimatedDurationMs: 60_000,
+        command: [
+          "mlx_lm.server",
+          "--model",
+          "test-model",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "8080",
+        ],
+      },
+    ],
+  };
+
+  it("calls startServerFn (not spawnFn) for start-mlx-server step when provided", async () => {
+    const spawnCalls: string[] = [];
+    const startServerCalls: string[] = [];
+    const captureSpawn: SpawnFn = async (cmd) => {
+      spawnCalls.push(cmd);
+      return { exitCode: 0 };
+    };
+    const captureStartServer: SpawnFn = async (cmd) => {
+      startServerCalls.push(cmd);
+      return { exitCode: 0 };
+    };
+    const result = await executeBootstrapPlan(startServerPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      startServerFn: captureStartServer,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    expect(startServerCalls).toEqual(["mlx_lm.server"]);
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it("falls back to spawnFn for start-mlx-server when startServerFn is absent", async () => {
+    const spawnCalls: string[] = [];
+    const captureSpawn: SpawnFn = async (cmd) => {
+      spawnCalls.push(cmd);
+      return { exitCode: 0 };
+    };
+    const result = await executeBootstrapPlan(startServerPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    expect(spawnCalls).toEqual(["mlx_lm.server"]);
+  });
+});
