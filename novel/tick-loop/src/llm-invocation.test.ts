@@ -73,8 +73,14 @@ describe("llm-invocation / buildAiderInvocation", () => {
       "--yes",
       "--no-show-model-warnings",
       "--no-auto-commits",
+      "--no-auto-lint",
+      "--no-auto-test",
+      "--no-suggest-shell-commands",
+      "--no-detect-urls",
       "--map-tokens",
       "0",
+      "--edit-format",
+      "diff",
       "--message",
       "do work",
     ]);
@@ -101,6 +107,40 @@ describe("llm-invocation / buildAiderInvocation", () => {
     const all = inv.argv.filter((x) => x === "--map-tokens");
     expect(all.length).toBe(2);
   });
+
+  // 2026-05-10 single-worker live-fire: aider's auto-picked `whole`
+  // edit format made Qwen3-Coder-30B-A3B 4-bit loop on already-complete
+  // tasks until output filled 8192 tokens. Pinning `diff` lets the
+  // model emit search/replace blocks instead of re-emitting the whole
+  // file; no-op tasks exit with zero diff blocks.
+  it("--edit-format diff is hard-wired (whole-format thrashes Qwen3-Coder-30B-A3B 4-bit on no-op tasks)", () => {
+    const inv = buildAiderInvocation({ brief: "h" });
+    const idx = inv.argv.indexOf("--edit-format");
+    expect(idx).toBeGreaterThan(-1);
+    expect(inv.argv[idx + 1]).toBe("diff");
+  });
+
+  it("operator can override --edit-format via extraArgs (later flag wins)", () => {
+    const inv = buildAiderInvocation({
+      brief: "h",
+      extraArgs: ["--edit-format", "whole"],
+    });
+    const all = inv.argv.filter((x) => x === "--edit-format");
+    expect(all.length).toBe(2);
+  });
+
+  // 2026-05-10 v3 live-fire: aider's multi-round reflection paths
+  // (--auto-lint, --auto-test, --suggest-shell-commands, --detect-urls)
+  // sent 46k input tokens to mlx_lm.server on round 2 after the model
+  // mentioned ~14 file paths in its round-1 response. Disabling the 4
+  // reflection paths keeps iterations one-shot.
+  it.each(["--no-auto-lint", "--no-auto-test", "--no-suggest-shell-commands", "--no-detect-urls"])(
+    "%s is hard-wired (multi-round reflection mitigation)",
+    (flag) => {
+      const inv = buildAiderInvocation({ brief: "h" });
+      expect(inv.argv).toContain(flag);
+    },
+  );
 
   it("--message is the LAST argv element so brief is easy to read in ps", () => {
     const inv = buildAiderInvocation({ brief: "the brief" });
