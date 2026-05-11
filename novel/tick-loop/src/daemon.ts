@@ -1323,8 +1323,14 @@ export function buildLocalBrief(args: {
   }
   const tagline = extractTaskTagline(block);
   const progress = extractSlimField(block, "Progress");
-  const hypothesis = extractSlimField(block, "Hypothesis");
-  const details = extractSlimField(block, "Details");
+  // When Progress is present it is the current-iteration directive (e.g.
+  // "Slice N: do X in file Y"). The static Hypothesis/Details cells describe
+  // prior work that is already in the codebase; surfacing them alongside the
+  // Progress directive causes models to read the old context, conclude
+  // "already implemented", and exit without commits. Omit them when Progress
+  // is set so the model focuses exclusively on the live slice.
+  const hypothesis = progress === undefined ? extractSlimField(block, "Hypothesis") : undefined;
+  const details = progress === undefined ? extractSlimField(block, "Details") : undefined;
   const lines: string[] = [
     `# Task: \`${args.taskId}\``,
     "",
@@ -1334,7 +1340,7 @@ export function buildLocalBrief(args: {
     lines.push("", tagline);
   }
   if (progress !== undefined) {
-    lines.push("", "## Progress", progress);
+    lines.push("", "## Current slice", progress);
   }
   if (hypothesis !== undefined) {
     lines.push("", "## Hypothesis", hypothesis);
