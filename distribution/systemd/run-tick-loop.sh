@@ -25,6 +25,14 @@
 #                                     full real spawn (production default).
 #   MINSKY_TICK_INTERVAL_MS           (optional, default 300000 / 5 min)
 #   MINSKY_TICK_MAX_ITERATIONS        (optional, default unbounded)
+#   MINSKY_LOCAL_WATCHDOG_MS          (optional, default 1800000 / 30 min)
+#                                     per-iteration SIGKILL watchdog for local
+#                                     model (opencode/aider) subprocesses.
+#                                     Larger than the claude default (900s)
+#                                     because local models cold-load VRAM and
+#                                     have no streaming. Non-positive disables.
+#                                     Complements MINSKY_CLAUDE_PRINT_TIMEOUT_MS
+#                                     which applies only to the claude path.
 #
 # Args (forwarded to the CLI):
 #   --max-iterations=N                cap iteration count
