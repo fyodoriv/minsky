@@ -129,43 +129,46 @@ const {
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
-const argv = process.argv.slice(2);
-const first = argv[0];
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+if (isMain) {
+  const argv = process.argv.slice(2);
+  const first = argv[0];
 
-if (first === "--help" || first === "-h" || first === "help") {
-  printHelp();
-  process.exit(0);
-} else if (first === "logs") {
-  await runLogs(argv.slice(1));
-} else if (first === "stop") {
-  runStop(argv.slice(1));
-} else if (first === "doctor") {
-  await runDoctor();
-} else if (first === "bootstrap-local-llm") {
-  // Slice 9: `--dry-run` short-circuits before any install attempt.
-  // Pure detect + plan → render summary → exit 0. Read-only; safe in
-  // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
-  // block. Anchors the task block's Risk mitigation.
-  const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
-  if (subArgs.dryRun) {
-    await runBootstrapLocalLlmDryRun();
+  if (first === "--help" || first === "-h" || first === "help") {
+    printHelp();
     process.exit(0);
+  } else if (first === "logs") {
+    await runLogs(argv.slice(1));
+  } else if (first === "stop") {
+    runStop(argv.slice(1));
+  } else if (first === "doctor") {
+    await runDoctor();
+  } else if (first === "bootstrap-local-llm") {
+    // Slice 9: `--dry-run` short-circuits before any install attempt.
+    // Pure detect + plan → render summary → exit 0. Read-only; safe in
+    // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
+    // block. Anchors the task block's Risk mitigation.
+    const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
+    if (subArgs.dryRun) {
+      await runBootstrapLocalLlmDryRun();
+      process.exit(0);
+    }
+    const result = await runBootstrapLocalLlm({ force: true });
+    // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
+    // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
+    // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
+    // chaining works. The empty-object return is the refuse signal; a
+    // successful bootstrap returns the env overlay with MINSKY_LOCAL_LLM.
+    if (Object.keys(result).length === 0) {
+      process.exit(1);
+    }
+  } else if (first === "start") {
+    // Back-compat: keep `start` as an alias of the no-subcommand form. Any
+    // further args are forwarded to bin/tick-loop.mjs at spawn time.
+    await runStartOrAttach(argv.slice(1));
+  } else {
+    await runStartOrAttach(argv);
   }
-  const result = await runBootstrapLocalLlm({ force: true });
-  // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
-  // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
-  // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
-  // chaining works. The empty-object return is the refuse signal; a
-  // successful bootstrap returns the env overlay with MINSKY_LOCAL_LLM.
-  if (Object.keys(result).length === 0) {
-    process.exit(1);
-  }
-} else if (first === "start") {
-  // Back-compat: keep `start` as an alias of the no-subcommand form. Any
-  // further args are forwarded to bin/tick-loop.mjs at spawn time.
-  await runStartOrAttach(argv.slice(1));
-} else {
-  await runStartOrAttach(argv);
 }
 
 function printHelp() {
@@ -309,7 +312,7 @@ async function runStartOrAttach(args) {
  *
  * @returns {Promise<Record<string, string>>}
  */
-async function maybeBootstrapLocalLlm() {
+export async function maybeBootstrapLocalLlm(_opts = {}) {
   if (process.env["MINSKY_NO_AUTO_BOOTSTRAP"] === "1") {
     return {};
   }
@@ -350,8 +353,9 @@ async function maybeBootstrapLocalLlm() {
     return await runBootstrapLocalLlm({ force: false });
   }
 
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
+  const state = _opts.detectFn
+    ? await _opts.detectFn()
+    : await detectLocalLlmStack(buildProductionProbes({ whichFn }));
   // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
   // skip the install pipeline entirely.
   if (state.server.reachable) {
