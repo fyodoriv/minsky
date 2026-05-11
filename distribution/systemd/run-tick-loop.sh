@@ -25,6 +25,13 @@
 #                                     full real spawn (production default).
 #   MINSKY_TICK_INTERVAL_MS           (optional, default 300000 / 5 min)
 #   MINSKY_TICK_MAX_ITERATIONS        (optional, default unbounded)
+#   MINSKY_LOCAL_WATCHDOG_MS          (optional, default 1800000 / 30 min)
+#                                     Per-iteration timeout for local-model
+#                                     (aider/opencode) invocations. Claude
+#                                     keeps the MINSKY_CLAUDE_PRINT_TIMEOUT_MS
+#                                     default (900 s). Set
+#                                     MINSKY_CLAUDE_PRINT_TIMEOUT_MS to
+#                                     override both providers uniformly.
 #
 # Args (forwarded to the CLI):
 #   --max-iterations=N                cap iteration count
