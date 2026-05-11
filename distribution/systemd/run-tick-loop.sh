@@ -82,6 +82,11 @@ PATH="${node_path_extras}${PATH:-/usr/bin:/bin}"
 for claude_dir in "${HOME}"/.local/bin "${HOME}"/.npm-global/bin /opt/homebrew/bin /usr/local/bin; do
   [ -x "${claude_dir}/claude" ] && PATH="${claude_dir}:${PATH}" && break
 done
+# Same pattern for `gh` (GitHub CLI) — used by the file-collision check and
+# auto-merge sweep. Homebrew is the canonical install path on macOS.
+for gh_dir in /opt/homebrew/bin /usr/local/bin "${HOME}"/.local/bin; do
+  [ -x "${gh_dir}/gh" ] && PATH="${gh_dir}:${PATH}" && break
+done
 export PATH
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
