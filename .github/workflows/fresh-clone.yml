@@ -1,0 +1,52 @@
+# <!-- pattern: not-applicable — CI workflow; covered by the `.github/workflows/` CI-workflow row in vision.md § "Pattern conformance index" -->
+name: fresh-clone
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fresh-clone-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-clone-smoke:
+    # fresh-clone-ci-regression-gate: validates that pnpm install triggers the
+    # prepare hook (rebuilding novel/tick-loop/dist/), and that a subsequent
+    # rm -rf novel/tick-loop/dist + pnpm install recovers cleanly so that
+    # `pnpm minsky doctor` exits 0 with no RED rows. Catches regressions in
+    # the bootstrap substrate (prepare hook, dist rebuild, doctor substrate)
+    # that the manual-only Verification sections in minsky-cli-fresh-clone-
+    # bootstrap (PR #473) and minsky-fresh-clone-health-checks (PR #474)
+    # would not catch.
+    # Does NOT run on push to daemon/* branches — only push to main is
+    # triggered by the branches filter above; daemon branches generate many
+    # pushes and the gate adds ~2 min each.
+    # Anchor: Forsgren, Humble, Kim, Accelerate 2018 (CI coverage of the
+    # install path is a DORA deployment-frequency prerequisite); rule #10
+    # (deterministic enforcement).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: install (triggers prepare hook — builds dist/)
+        run: pnpm install --frozen-lockfile
+      - name: simulate stale-dist (rm -rf novel/tick-loop/dist)
+        run: rm -rf novel/tick-loop/dist
+      - name: reinstall (must rebuild dist/ via prepare hook)
+        run: pnpm install --frozen-lockfile
+      - name: assert minsky doctor exits 0 with no RED rows
+        run: |
+          pnpm minsky doctor 2>&1 | tee doctor.out
+          grep -c "RED" doctor.out | grep -q "^0$"

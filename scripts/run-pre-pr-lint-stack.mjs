@@ -178,6 +178,10 @@ export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
     ["maciek-smoke", "pipx Python install"],
     ["pr-self-grade", "PR body context (`## Hypothesis self-grade`)"],
     ["pr-security-review", "PR body context (`## Security & privacy` or typed opt-out)"],
+    [
+      "fresh-clone-smoke",
+      "pnpm install + rm -rf dist + pnpm install + minsky doctor — requires real checkout with network; not reproducible offline",
+    ],
   ]),
 );
 
