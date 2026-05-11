@@ -16,6 +16,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 29 (operator 2026-05-10 — round-trip elimination: thread the actual slice-26 `ServerState` through `runBootstrapLocalLlm` → `detectForBootstrap` → `buildProductionProbes`'s new `prebuiltServerState` opt so the 5-stack `detectLocalLlmStack` skips its redundant `fetch /v1/models` on the claude-hardlimit cold-start path) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 30 (operator 2026-05-10 — round-trip elimination: capture the slice-27 server probe's `ServerState` when it falls through (unreachable) and thread it into `detectForBootstrap` so the `local-preferred` and persisted-hard-limit trigger paths — which call `runBootstrapLocalLlm({ force: false })` without `knownServerState` — also skip the third `fetch /v1/models` inside `detectLocalLlmStack`) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 31 (operator 2026-05-10 — code-shrinking: remove the now-dead `if (plan.ready && !force)` branch from `runBootstrapLocalLlm` — slice 30's prebuiltState threading guarantees `plan.ready === false` whenever `!force` (server forced unreachable in detect), and `!force` is false on the force=true path; the empty-plan case is already handled by `executeBootstrapPlan`'s own early-return) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 32 (operator 2026-05-10 — code-shrinking: flatten `maybeShortCircuitOnReachableServer`'s `{ knownServerState? }` opt-bag to a positional `ServerState | undefined` — the conditional `hints` construction at the call site (3 lines + JSDoc pragma) was boilerplate to satisfy exactOptionalPropertyTypes; drop the unused `serverState` field from the reachable-branch return (caller only reads `serverState` on the unreachable branch — slice 30 plumbing) for a simpler discriminated union) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -556,22 +557,26 @@ async function runBootstrapLocalLlmDryRun() {
  * re-probed inside `detectLocalLlmStack`. Same skip semantics for the
  * reachable branch (still returns the env overlay).
  *
- * @param {{ knownServerState?: import("../dist/local-llm-bootstrap.js").ServerState }} [hints]
- * @returns {Promise<{ overlay: Record<string, string>, serverState: import("../dist/local-llm-bootstrap.js").ServerState } | { overlay?: undefined, serverState: import("../dist/local-llm-bootstrap.js").ServerState }>}
+ * Slice 32: flatten the parameter from `{ knownServerState? }` to a
+ * positional `ServerState | undefined` — the opt-bag was boilerplate
+ * to satisfy exactOptionalPropertyTypes at the call site. Also drop
+ * the unused `serverState` field from the reachable-branch return —
+ * the caller only reads `serverState` on the unreachable branch (slice
+ * 30 plumbing). Same discriminator (`overlay !== undefined`).
+ *
+ * @param {import("../dist/local-llm-bootstrap.js").ServerState | undefined} knownServerState
+ * @returns {Promise<{ overlay: Record<string, string> } | { overlay?: undefined, serverState: import("../dist/local-llm-bootstrap.js").ServerState }>}
  *   discriminated by `overlay` presence: when the server is reachable
  *   `overlay` is set (caller short-circuits); when unreachable only
  *   `serverState` is set (caller threads it into detect).
  */
-async function maybeShortCircuitOnReachableServer(hints = {}) {
-  const serverState = hints.knownServerState ?? (await buildServerProbe({})());
+async function maybeShortCircuitOnReachableServer(knownServerState) {
+  const serverState = knownServerState ?? (await buildServerProbe({})());
   if (!serverState.reachable) return { serverState };
   process.stderr.write(
     `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback (skipping detect+plan)\n`,
   );
-  return {
-    overlay: { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" },
-    serverState,
-  };
+  return { overlay: { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" } };
 }
 
 /**
@@ -623,10 +628,7 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
   // dropped the freshly-probed unreachable state and detect re-probed.
   let prebuiltState = knownServerState;
   if (!force) {
-    /** @type {Parameters<typeof maybeShortCircuitOnReachableServer>[0]} */
-    const hints = {};
-    if (knownServerState !== undefined) hints.knownServerState = knownServerState;
-    const result = await maybeShortCircuitOnReachableServer(hints);
+    const result = await maybeShortCircuitOnReachableServer(knownServerState);
     if (result.overlay !== undefined) return result.overlay;
     prebuiltState = result.serverState;
   }
