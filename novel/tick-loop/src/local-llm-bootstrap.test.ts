@@ -49,6 +49,7 @@ const fullyReady: LocalLlmStackState = {
   mlxLm: PRESENT,
   aider: PRESENT,
   model: { ...PRESENT, detail: "17.2 GB" },
+  huggingfaceCli: PRESENT,
   server: REACHABLE,
 };
 
@@ -57,6 +58,7 @@ const freshMachine: LocalLlmStackState = {
   mlxLm: ABSENT,
   aider: ABSENT,
   model: ABSENT,
+  huggingfaceCli: ABSENT,
   server: UNREACHABLE,
 };
 
@@ -65,6 +67,7 @@ const modelMissing: LocalLlmStackState = {
   mlxLm: PRESENT,
   aider: PRESENT,
   model: ABSENT,
+  huggingfaceCli: PRESENT,
   server: UNREACHABLE,
 };
 
@@ -73,6 +76,7 @@ const serverStopped: LocalLlmStackState = {
   mlxLm: PRESENT,
   aider: PRESENT,
   model: PRESENT,
+  huggingfaceCli: PRESENT,
   server: UNREACHABLE,
 };
 
@@ -89,13 +93,14 @@ describe("planLocalLlmBootstrap — chaos-table row 5: idempotent fast path", ()
 });
 
 describe("planLocalLlmBootstrap — chaos-table row 4: fresh machine", () => {
-  it("returns the full 5-step plan when nothing is present", () => {
+  it("returns the full 6-step plan when nothing is present", () => {
     const plan = planLocalLlmBootstrap(freshMachine);
     expect(plan.ready).toBe(false);
     expect(plan.steps.map((s) => s.type)).toEqual([
       "install-pipx",
       "install-mlx-lm",
       "install-aider",
+      "install-huggingface-cli",
       "download-model",
       "start-mlx-server",
     ]);
@@ -110,7 +115,7 @@ describe("planLocalLlmBootstrap — chaos-table row 4: fresh machine", () => {
     const plan = planLocalLlmBootstrap(freshMachine);
     expect(plan.totalEstimatedDurationMs).toBeGreaterThan(0);
     const downloadStep = plan.steps.find((s) => s.type === "download-model");
-    expect(downloadStep?.command).toEqual(["hf", "download", DEFAULT_LOCAL_LLM_MODEL]);
+    expect(downloadStep?.command).toEqual(["huggingface-cli", "download", DEFAULT_LOCAL_LLM_MODEL]);
   });
 });
 
@@ -145,6 +150,7 @@ describe("planLocalLlmBootstrap — dependency order", () => {
       mlxLm: ABSENT,
       aider: ABSENT,
       model: PRESENT,
+      huggingfaceCli: PRESENT,
       server: UNREACHABLE,
     });
     const types = plan.steps.map((s) => s.type);
@@ -167,6 +173,7 @@ describe("planLocalLlmBootstrap — dependency order", () => {
       mlxLm: ABSENT,
       aider: ABSENT,
       model: ABSENT,
+      huggingfaceCli: PRESENT,
       server: UNREACHABLE,
     });
     expect(plan.steps.some((s) => s.type === "install-pipx")).toBe(false);
@@ -546,19 +553,20 @@ describe("planLocalLlmBootstrap — referential transparency", () => {
     const emptyPlan = planLocalLlmBootstrap(fullyReady);
     const fullPlan = planLocalLlmBootstrap(freshMachine);
     expect(emptyPlan.steps).toHaveLength(0);
-    expect(fullPlan.steps).toHaveLength(5);
+    expect(fullPlan.steps).toHaveLength(6);
   });
 });
 
 // ---- detectLocalLlmStack — probe orchestration ----------------------------
 
 describe("detectLocalLlmStack — happy path", () => {
-  it("runs all 5 probes in parallel and assembles the state record", async () => {
+  it("runs all 6 probes in parallel and assembles the state record", async () => {
     const probes: DetectProbes = {
       probePipx: async () => PRESENT,
       probeMlxLm: async () => PRESENT,
       probeAider: async () => PRESENT,
       probeModel: async () => PRESENT,
+      probeHuggingfaceCli: async () => PRESENT,
       probeServer: async () => REACHABLE,
     };
     const state = await detectLocalLlmStack(probes);
@@ -576,6 +584,7 @@ describe("detectLocalLlmStack — chaos-table row 1: probe seam throws", () => {
       },
       probeAider: async () => PRESENT,
       probeModel: async () => PRESENT,
+      probeHuggingfaceCli: async () => PRESENT,
       probeServer: async () => REACHABLE,
     };
     await expect(detectLocalLlmStack(probes)).rejects.toThrow("mlx probe failure");
@@ -625,6 +634,58 @@ describe("planLocalLlmBootstrap — modelPath option (slice 46)", () => {
   });
 });
 
+// ---- planLocalLlmBootstrap — huggingface-cli gate (slice 47) -------------
+
+describe("planLocalLlmBootstrap — install-huggingface-cli gate (slice 47)", () => {
+  it("inserts install-huggingface-cli before download-model when cli is absent", () => {
+    const state: LocalLlmStackState = {
+      pipx: PRESENT,
+      mlxLm: PRESENT,
+      aider: PRESENT,
+      model: ABSENT,
+      huggingfaceCli: ABSENT,
+      server: UNREACHABLE,
+    };
+    const plan = planLocalLlmBootstrap(state);
+    const types = plan.steps.map((s) => s.type);
+    expect(types).toContain("install-huggingface-cli");
+    expect(types.indexOf("install-huggingface-cli")).toBeLessThan(types.indexOf("download-model"));
+  });
+
+  it("omits install-huggingface-cli when cli is already present", () => {
+    const plan = planLocalLlmBootstrap(modelMissing); // huggingfaceCli: PRESENT
+    expect(plan.steps.some((s) => s.type === "install-huggingface-cli")).toBe(false);
+    expect(plan.steps.map((s) => s.type)).toEqual(["download-model", "start-mlx-server"]);
+  });
+
+  it("install-huggingface-cli command uses huggingface_hub[cli] via pipx", () => {
+    const state: LocalLlmStackState = {
+      pipx: PRESENT,
+      mlxLm: PRESENT,
+      aider: PRESENT,
+      model: ABSENT,
+      huggingfaceCli: ABSENT,
+      server: UNREACHABLE,
+    };
+    const plan = planLocalLlmBootstrap(state);
+    const step = plan.steps.find((s) => s.type === "install-huggingface-cli");
+    expect(step?.command).toEqual(["pipx", "install", "huggingface_hub[cli]"]);
+  });
+
+  it("omits install-huggingface-cli when model is already present (cli not needed)", () => {
+    // Even if cli is absent, once the model is downloaded we don't need it.
+    const plan = planLocalLlmBootstrap(serverStopped); // model: PRESENT, huggingfaceCli: PRESENT
+    expect(plan.steps.some((s) => s.type === "install-huggingface-cli")).toBe(false);
+  });
+
+  it("download-model command uses huggingface-cli binary (not hf shorthand)", () => {
+    const plan = planLocalLlmBootstrap(modelMissing);
+    const step = plan.steps.find((s) => s.type === "download-model");
+    expect(step?.command[0]).toBe("huggingface-cli");
+    expect(step?.command).toEqual(["huggingface-cli", "download", DEFAULT_LOCAL_LLM_MODEL]);
+  });
+});
+
 // ---- summarisePlan --------------------------------------------------------
 
 describe("summarisePlan", () => {
@@ -644,8 +705,9 @@ describe("summarisePlan", () => {
     expect(out).toMatch(/1\. Install pipx/);
     expect(out).toMatch(/2\. Install mlx-lm/);
     expect(out).toMatch(/3\. Install aider-chat/);
-    expect(out).toMatch(/4\. Download mlx-community\/Qwen3-Coder-30B-A3B-Instruct-4bit/);
-    expect(out).toMatch(/5\. Start mlx_lm\.server/);
+    expect(out).toMatch(/4\. Install huggingface-cli/);
+    expect(out).toMatch(/5\. Download mlx-community\/Qwen3-Coder-30B-A3B-Instruct-4bit/);
+    expect(out).toMatch(/6\. Start mlx_lm\.server/);
     expect(out).toMatch(/~17\.1 GB download/);
   });
 

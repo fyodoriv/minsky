@@ -126,6 +126,8 @@ export interface LocalLlmStackState {
   readonly aider: ComponentState;
   /** Qwen3-Coder-30B-A3B-Instruct-4bit weights in the huggingface cache. */
   readonly model: ComponentState;
+  /** `huggingface-cli` binary — required for model download; installed via `pipx install huggingface_hub[cli]`. */
+  readonly huggingfaceCli: ComponentState;
   /** mlx-lm.server liveness — the only network-side probe. */
   readonly server: ServerState;
 }
@@ -140,6 +142,7 @@ export type BootstrapStepType =
   | "install-pipx"
   | "install-mlx-lm"
   | "install-aider"
+  | "install-huggingface-cli"
   | "download-model"
   | "start-mlx-server";
 
@@ -380,13 +383,24 @@ function buildAiderStep(pythonPath?: string, pipxPath?: string): InstallStep {
   return { type: "install-aider", description, estimatedDurationMs: 60_000, command };
 }
 
+function buildInstallHuggingfaceCliStep(pipxPath?: string): InstallStep {
+  const pipx = pipxPath ?? "pipx";
+  const viaPipxLabel = pipxPath !== undefined ? ` via ${pipxPath}` : "";
+  return {
+    type: "install-huggingface-cli",
+    description: `Install huggingface-cli${viaPipxLabel} via pipx (needed for model download)`,
+    estimatedDurationMs: 30_000,
+    command: [pipx, "install", "huggingface_hub[cli]"],
+  };
+}
+
 function buildModelDownloadStep(modelId: string): InstallStep {
   return {
     type: "download-model",
     description: `Download ${modelId} (~17 GB; ~8–12 min on a 1 Gbps link)`,
     estimatedDurationMs: 12 * 60_000,
     estimatedDownloadMb: DEFAULT_MODEL_DOWNLOAD_MB,
-    command: ["hf", "download", modelId],
+    command: ["huggingface-cli", "download", modelId],
   };
 }
 
@@ -486,7 +500,10 @@ function buildInstallSteps(
   if (!state.pipx.present) steps.push(buildPipxStep(brewPath));
   if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
-  if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
+  if (!state.model.present) {
+    if (!state.huggingfaceCli.present) steps.push(buildInstallHuggingfaceCliStep(pipxPath));
+    steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
+  }
   // Slice 46: use the detected local path when available so mlx_lm.server
   // doesn't need to resolve the model ID through the HuggingFace cache.
   if (!state.server.reachable)
@@ -635,6 +652,8 @@ export interface DetectProbes {
    * wiring; the seam returns whatever the caller threaded through.
    */
   readonly probeModel: () => Promise<ComponentState>;
+  /** `which huggingface-cli` — the CLI installed via `pipx install huggingface_hub[cli]`. */
+  readonly probeHuggingfaceCli: () => Promise<ComponentState>;
   /** `fetch <url>/v1/models` with a 5 s timeout. */
   readonly probeServer: () => Promise<ServerState>;
 }
@@ -653,14 +672,15 @@ export interface DetectProbes {
  * @otel tick-loop.local-llm-bootstrap.detect
  */
 export async function detectLocalLlmStack(probes: DetectProbes): Promise<LocalLlmStackState> {
-  const [pipx, mlxLm, aider, model, server] = await Promise.all([
+  const [pipx, mlxLm, aider, model, huggingfaceCli, server] = await Promise.all([
     probes.probePipx(),
     probes.probeMlxLm(),
     probes.probeAider(),
     probes.probeModel(),
+    probes.probeHuggingfaceCli(),
     probes.probeServer(),
   ]);
-  return { pipx, mlxLm, aider, model, server };
+  return { pipx, mlxLm, aider, model, huggingfaceCli, server };
 }
 
 // ---- summarisePlan --------------------------------------------------------
