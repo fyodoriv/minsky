@@ -580,6 +580,10 @@ async function runDoctor() {
   // the persisted hard-limit timestamp (if any) so the operator can
   // see at a glance why minsky might be on local-LLM mode.
   emitClaudeExhaustionRow();
+  // Slice 40 of `minsky-cli-auto-bootstrap-local-llm`: surface the
+  // opencode binary so the operator can see agent availability at a
+  // glance alongside the rest of the local-LLM stack.
+  await emitOpencodeRow();
   process.stdout.write("\n");
   if (anySubstrateRed) {
     process.stdout.write("Substrate: RED — install-time prerequisites missing\n");
@@ -643,6 +647,26 @@ function emitClaudeExhaustionRow() {
   process.stdout.write(
     `  ⚠ claude exhaustion (persisted)  — hit at ${persisted.ts} (${ageMin}m ago, reason: ${persisted.reason}); minsky will skip live probe and use local-LLM until TTL expires (override: MINSKY_HARD_LIMIT_TTL_MIN=<n>)\n`,
   );
+}
+
+/**
+ * Slice 40 of `minsky-cli-auto-bootstrap-local-llm` — emit one doctor
+ * row for the `opencode` binary. GREEN when installed and reachable on
+ * PATH (or MINSKY_LOCAL_LLM_OPENCODE_BIN); RED with install hint when
+ * absent.
+ */
+async function emitOpencodeRow() {
+  const bin = process.env.MINSKY_LOCAL_LLM_OPENCODE_BIN ?? "opencode";
+  const binPath = await whichFn(bin);
+  if (binPath === undefined) {
+    process.stdout.write(
+      "  ✗ opencode  not found — run: curl -fsSL https://opencode.ai/install | sh\n",
+    );
+    return;
+  }
+  const result = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 5000 });
+  const version = result.status === 0 && result.stdout?.trim() ? result.stdout.trim() : binPath;
+  process.stdout.write(`  ✓ opencode  ${version}\n`);
 }
 
 /**
