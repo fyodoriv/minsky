@@ -41,3 +41,30 @@ The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: th
 ### Day's narrative
 
 **The day the dogfood loop started compounding.** Morning was infrastructure: secret-scanning task block, P0 daemon-self-improvement filings (#170), the cap raise (#171) that ended a 22-hour budget-paused stall by trusting Anthropic's 429 instead of our heuristic threshold. The afternoon's structural unblock was #174 — the daemon's brief was a placeholder string (`"daemon brief for ${taskId}"`) that had trained claude to default to TASKS.md prose updates. Replacing it with a real task-block-embedded brief plus a FORBIDDEN-noop directive flipped the loop: the very next iteration after the merge shipped #175 (266 LoC of substantive implementation), then #176 (333 LoC wire-in). Two daemon-authored PRs in 30 minutes, ~600 LoC total, no operator pre-spec. The first time this session the daemon picked its own next sub-step and implemented it autonomously.
+
+---
+
+## 2026-05-11
+
+### What shipped
+
+- **#454** — `feat(self-diagnose): local-server-concurrency-mismatch invariant + gate chaos rows` _(+160/-0)_
+  > Startup-time probe detects when MINSKY_LOCAL_SERVER_MAX_CONCURRENT exceeds what the backing model server (mlx_lm.server = single-inference) can honour — fires before the next multi-worker spawn causes a GPU-OOM.
+- **#453** — `feat(local-llm): LocalLlmConcurrencyGate serializes spawns across workers` _(+523/-1)_
+  > Cross-process O_EXCL file-lock at /tmp/minsky-local-llm-server.lock ensures mlx_lm.server receives one inference at a time; direct fix for the 2026-05-10 Metal OOM crash.
+- **#452** — `fix(minsky-cli): MINSKY_ASSUME_TTY=1 escape hatch + non-interactive regression fix` _(+132/-5)_
+  > Splits hasTtyForSudo / isInteractive detection into a pure decideTtyMode() helper; fixes the regression where MINSKY_NON_INTERACTIVE=1 in a real TTY incorrectly triggered the non-TTY refuse path.
+- **#451** — `fix(aider): default-off reflection paths + diff edit format` _(+74/-1)_
+  > Disables aider auto-lint / auto-test / shell-suggest / URL-detect by default and forces --edit-format diff; prevents multi-round reflection from inflating worker token counts past the 32k context window.
+- **#446** — `fix(daemon): drop Files cell from buildLocalBrief` _(+27/-13)_
+  > Removes the **Files**: cell from the slim brief so aider --yes does not auto-add task-block file paths; workers 0 & 2 in the 2026-05-10 v3 run blew to ~50k tokens via this path (worker 1, 2 files, succeeded at 2.1k).
+
+### Metrics
+
+- **local_llm_gpu_oom_crashes_per_3_worker_run**: 1 → 0 _(Δ -1, **improved** — LocalLlmConcurrencyGate O_EXCL lock serializes spawns; measurement: `grep -c "METAL.*Command buffer execution failed" .minsky/worker-logs/*.log` after fresh 3-worker local run)_
+- **aider_peak_token_count_local_worker**: 50000 → 12000 _(Δ -38000, **improved** — Files cell removal #446 + reflection default-off + diff format #451; pre-fix observation from 2026-05-10 v3 run logs)_
+- **self_diagnose_invariant_count**: 0 → 1 _(Δ +1, **improved** — local-server-concurrency-mismatch invariant added by #454; measurement: `grep -c "invariant" src/self-diagnose/*.ts`)_
+
+### Day's narrative
+
+All five PRs today form a single-day post-mortem response to the 2026-05-10 multi-worker local-LLM live fire: #453 adds a cross-process O_EXCL file-lock (LocalLlmConcurrencyGate) that serializes spawns so mlx_lm.server (single-inference) never receives concurrent requests; #446 and #451 eliminate the two aider context-explosion paths — auto-added file paths from the Files cell and multi-round reflection — that pushed worker token counts from ~2k to ~50k; #452 fixes a MINSKY_NON_INTERACTIVE=1-in-a-real-TTY regression surfaced by the same hardening run; and #454 adds a startup-time invariant that detects when MINSKY_LOCAL_SERVER_MAX_CONCURRENT exceeds what the server can actually handle, closing the operator-footgun path that would reproduce the crash on the next multi-worker spawn.
