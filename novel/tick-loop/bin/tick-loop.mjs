@@ -340,6 +340,16 @@ const claudePrintTimeoutMs = (() => {
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
 })();
+// Local models run much slower than Claude; default 30min gives headroom
+// without letting a stuck local process freeze a worker for hours.
+// Overrides claudePrintTimeoutMs for the local-LLM path only.
+const localWatchdogMs = (() => {
+  const raw = process.env["MINSKY_LOCAL_WATCHDOG_MS"];
+  if (raw === undefined) return 1_800_000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+})();
 // Wire the OTEL publisher EARLY (was below; moved up for the slice-3
 // local-llm wrapper to capture the `emit` callback). When
 // `MINSKY_OTEL_ENDPOINT` is set, every span is forwarded to the OTLP
@@ -594,16 +604,60 @@ function buildWorktreeDir(taskId) {
   return join(minskyHome, ".claude", "worktrees", name);
 }
 
+// Consecutive-timeout shrink state — tracks how many times a given task has
+// timed out back-to-back. Updated in the emit callback; read in augmentLocalBrief.
+const consecutiveTimeouts = /** @type {Map<string, number>} */ (new Map());
+
+const LOCAL_BUDGET_PREFIX =
+  "[LOCAL MODEL — ~800s budget. Prefer editing ONE existing file. If the task is complex, identify the single smallest first step and do only that step. Do not read files you do not need to edit.]\n\n";
+
+/**
+ * Augment a brief for local-model dispatch: prepend the time-budget hint and,
+ * when the task has timed out ≥2 times consecutively, prepend a hard shrink
+ * directive so the model doesn't re-attempt the full scope.
+ *
+ * @param {string} brief
+ * @param {string} taskId
+ * @returns {string}
+ */
+function augmentLocalBrief(brief, taskId) {
+  const count = consecutiveTimeouts.get(taskId) ?? 0;
+  const shrinkPrefix =
+    count >= 2
+      ? `CONSECUTIVE TIMEOUT #${count} — previous ${count} attempt${count === 1 ? "" : "s"} timed out. Do ONLY the first bullet of the slice description. Ignore the rest.\n\n`
+      : "";
+  return `${LOCAL_BUDGET_PREFIX}${shrinkPrefix}${brief}`;
+}
+
+/**
+ * Update the consecutive-timeout counter for a task based on an iteration span.
+ * Increments on timeout; resets on successful completion.
+ *
+ * @param {{ name: string; attributes?: Record<string, unknown> }} event
+ */
+function trackConsecutiveTimeouts(event) {
+  if (event.name !== "tick-loop.iteration") return;
+  const attrs = event.attributes ?? {};
+  const taskId = attrs["task.id"];
+  if (typeof taskId !== "string" || taskId.length === 0) return;
+  const reason = String(attrs["iteration.reason"] ?? "");
+  if (reason.startsWith("claude-print-timeout") || reason.startsWith("local-spawn-timeout")) {
+    consecutiveTimeouts.set(taskId, (consecutiveTimeouts.get(taskId) ?? 0) + 1);
+  } else if (attrs["iteration.status"] === "completed") {
+    consecutiveTimeouts.delete(taskId);
+  }
+}
+
 function buildLocalStrategy() {
   if (dryRun) return new DryRunSpawnStrategy();
   if (localAgent === "opencode") {
     return new ProcessSpawnStrategy({
       command: opencodeBin,
-      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+      ...(localWatchdogMs !== undefined ? { timeoutMs: localWatchdogMs } : {}),
       invocation: (input) => {
         const worktreeDir = buildWorktreeDir(input.taskId);
         return buildOpencodeInvocation({
-          brief: input.brief,
+          brief: augmentLocalBrief(input.brief, input.taskId),
           command: opencodeBin,
           ...(worktreeDir !== undefined ? { cwd: worktreeDir } : {}),
           // `MINSKY_LOCAL_LLM_MODEL_ID` is the bare HF / model id; for
@@ -623,11 +677,11 @@ function buildLocalStrategy() {
   }
   return new ProcessSpawnStrategy({
     command: aiderBin,
-    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    ...(localWatchdogMs !== undefined ? { timeoutMs: localWatchdogMs } : {}),
     invocation: (input) => {
       const worktreeDir = buildWorktreeDir(input.taskId);
       return buildAiderInvocation({
-        brief: input.brief,
+        brief: augmentLocalBrief(input.brief, input.taskId),
         command: aiderBin,
         ...(worktreeDir !== undefined ? { cwd: worktreeDir } : {}),
         ...(localLlmModelId === undefined ? {} : { model: `openai/${localLlmModelId}` }),
@@ -1229,6 +1283,9 @@ const result = await runDaemon({
     if (autoScaleRunner !== undefined) {
       autoScaleRunner.observeEvent(event);
     }
+    // Consecutive-timeout shrink: track back-to-back timeouts per task so
+    // augmentLocalBrief can prepend a hard-shrink directive on the next brief.
+    trackConsecutiveTimeouts(event);
   },
 });
 

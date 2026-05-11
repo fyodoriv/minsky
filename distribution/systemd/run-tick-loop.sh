@@ -25,6 +25,10 @@
 #                                     full real spawn (production default).
 #   MINSKY_TICK_INTERVAL_MS           (optional, default 300000 / 5 min)
 #   MINSKY_TICK_MAX_ITERATIONS        (optional, default unbounded)
+#   MINSKY_LOCAL_WATCHDOG_MS          (optional, default 1800000 / 30 min) per-iteration
+#                                     SIGKILL timeout for local-model invocations.
+#                                     Larger than MINSKY_CLAUDE_PRINT_TIMEOUT_MS
+#                                     because local models run significantly slower.
 #
 # Args (forwarded to the CLI):
 #   --max-iterations=N                cap iteration count
