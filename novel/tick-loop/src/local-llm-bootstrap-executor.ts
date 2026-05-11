@@ -367,6 +367,7 @@ export function recoveryHintForStep(stepType: BootstrapStepType): string | undef
     "install-pipx": "brew install pipx",
     "install-mlx-lm": "pipx install mlx-lm",
     "install-aider": "pipx install --python /opt/homebrew/bin/python3.12 aider-chat",
+    "install-huggingface-cli": "pipx install huggingface-hub[cli]",
     "download-model": "retry is idempotent — rerun `minsky bootstrap-local-llm`",
     "start-mlx-server":
       "mlx_lm.server --model mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit --host 127.0.0.1 --port 8080 &",

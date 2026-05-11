@@ -22,7 +22,7 @@ pnpm pre-pr-lint
 
 ---
 
-### Changes (1 file)
+### Changes (7 files)
 
 **`novel/tick-loop/src/local-llm-bootstrap.integration.test.ts`** (new)
 
@@ -33,6 +33,30 @@ Integration test suite with 10 tests across three scenarios:
 - **Scenario 1b — absent HOME stub, Apple Silicon Rosetta → 7-step plan**: Same seams, adds `archState: rosettaMissingBrew` to `planLocalLlmBootstrap`. Asserts `install-arm-homebrew` is first, then the 6-step chain. Verifies `arch -arm64` wrapper and `NONINTERACTIVE=1` in the brew installer command. Verifies dependency-order invariant across all 7 indices.
 
 - **Scenario 2 — idempotent fast-path HOME stub → empty plan**: Passes `whichFn: async (bin) => /usr/local/bin/${bin}`, `existsSyncFn: () => true`, `fetchFn: 200-ok`. Asserts `ready=true`, `steps.length === 0`, `totalEstimatedDurationMs === 0`. Verifies the short-circuit holds even when `archState.needsNativeBrew === true` (the `isStackReady` guard in `planLocalLlmBootstrap` runs before `buildInstallSteps`).
+
+**`novel/tick-loop/src/local-llm-bootstrap.ts`** (modified)
+
+Adds `huggingfaceCli: ComponentState` to `LocalLlmStackState`, `install-huggingface-cli` to `BootstrapStepType`, `probeHuggingfaceCli` to `DetectProbes`, `buildHuggingfaceCliStep()` builder, and the `!state.huggingfaceCli.present` branch in `buildInstallSteps`. The integration test's Scenario 2 asserts `state.huggingfaceCli.present === true`; these type additions are the prerequisite.
+
+**`novel/tick-loop/src/local-llm-probes.ts`** (modified)
+
+Adds `probeHuggingfaceCli: buildWhichProbe("huggingface-cli", opts.whichFn)` to `buildProductionProbes` to wire the new seam.
+
+**`novel/tick-loop/src/local-llm-bootstrap.test.ts`** (modified)
+
+Updates all four fixture objects (`fullyReady`, `freshMachine`, `modelMissing`, `serverStopped`) to include `huggingfaceCli`. Updates the 5-step plan test to 6-step. Adds `huggingfaceCli` to the `detectLocalLlmStack` probe fixture.
+
+**`novel/tick-loop/src/local-llm-probes.test.ts`** (modified)
+
+Updates the `buildProductionProbes` integration block to 6 steps (adds `huggingface-cli` to the selectively-missing scenario).
+
+**`novel/tick-loop/src/local-llm-bootstrap-executor.ts`** (modified)
+
+Adds `"install-huggingface-cli": "pipx install huggingface-hub[cli]"` recovery hint.
+
+**`novel/tick-loop/bin/minsky.mjs`** (modified)
+
+Adds `huggingface-cli` doctor row to `emitDoctorRows`. Extracts `serverReachableDetail` helper to reduce inline ternary complexity.
 
 ### Optimization
 

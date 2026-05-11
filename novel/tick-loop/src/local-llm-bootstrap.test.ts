@@ -47,6 +47,7 @@ const fullyReady: LocalLlmStackState = {
   pipx: PRESENT,
   mlxLm: PRESENT,
   aider: PRESENT,
+  huggingfaceCli: PRESENT,
   model: { ...PRESENT, detail: "17.2 GB" },
   server: REACHABLE,
 };
@@ -55,6 +56,7 @@ const freshMachine: LocalLlmStackState = {
   pipx: ABSENT,
   mlxLm: ABSENT,
   aider: ABSENT,
+  huggingfaceCli: ABSENT,
   model: ABSENT,
   server: UNREACHABLE,
 };
@@ -63,6 +65,7 @@ const modelMissing: LocalLlmStackState = {
   pipx: PRESENT,
   mlxLm: PRESENT,
   aider: PRESENT,
+  huggingfaceCli: PRESENT,
   model: ABSENT,
   server: UNREACHABLE,
 };
@@ -71,6 +74,7 @@ const serverStopped: LocalLlmStackState = {
   pipx: PRESENT,
   mlxLm: PRESENT,
   aider: PRESENT,
+  huggingfaceCli: PRESENT,
   model: PRESENT,
   server: UNREACHABLE,
 };
@@ -88,13 +92,14 @@ describe("planLocalLlmBootstrap — chaos-table row 5: idempotent fast path", ()
 });
 
 describe("planLocalLlmBootstrap — chaos-table row 4: fresh machine", () => {
-  it("returns the full 5-step plan when nothing is present", () => {
+  it("returns the full 6-step plan when nothing is present", () => {
     const plan = planLocalLlmBootstrap(freshMachine);
     expect(plan.ready).toBe(false);
     expect(plan.steps.map((s) => s.type)).toEqual([
       "install-pipx",
       "install-mlx-lm",
       "install-aider",
+      "install-huggingface-cli",
       "download-model",
       "start-mlx-server",
     ]);
@@ -143,6 +148,7 @@ describe("planLocalLlmBootstrap — dependency order", () => {
       pipx: ABSENT,
       mlxLm: ABSENT,
       aider: ABSENT,
+      huggingfaceCli: ABSENT,
       model: PRESENT,
       server: UNREACHABLE,
     });
@@ -165,6 +171,7 @@ describe("planLocalLlmBootstrap — dependency order", () => {
       pipx: PRESENT,
       mlxLm: ABSENT,
       aider: ABSENT,
+      huggingfaceCli: ABSENT,
       model: ABSENT,
       server: UNREACHABLE,
     });
@@ -492,7 +499,7 @@ describe("planLocalLlmBootstrap — referential transparency", () => {
     const emptyPlan = planLocalLlmBootstrap(fullyReady);
     const fullPlan = planLocalLlmBootstrap(freshMachine);
     expect(emptyPlan.steps).toHaveLength(0);
-    expect(fullPlan.steps).toHaveLength(5);
+    expect(fullPlan.steps).toHaveLength(6);
   });
 });
 
@@ -504,6 +511,7 @@ describe("detectLocalLlmStack — happy path", () => {
       probePipx: async () => PRESENT,
       probeMlxLm: async () => PRESENT,
       probeAider: async () => PRESENT,
+      probeHuggingfaceCli: async () => PRESENT,
       probeModel: async () => PRESENT,
       probeServer: async () => REACHABLE,
     };
@@ -521,6 +529,7 @@ describe("detectLocalLlmStack — chaos-table row 1: probe seam throws", () => {
         throw new Error("mlx probe failure");
       },
       probeAider: async () => PRESENT,
+      probeHuggingfaceCli: async () => PRESENT,
       probeModel: async () => PRESENT,
       probeServer: async () => REACHABLE,
     };
@@ -547,8 +556,9 @@ describe("summarisePlan", () => {
     expect(out).toMatch(/1\. Install pipx/);
     expect(out).toMatch(/2\. Install mlx-lm/);
     expect(out).toMatch(/3\. Install aider-chat/);
-    expect(out).toMatch(/4\. Download mlx-community\/Qwen3-Coder-30B-A3B-Instruct-4bit/);
-    expect(out).toMatch(/5\. Start mlx_lm\.server/);
+    expect(out).toMatch(/4\. Install huggingface-cli/);
+    expect(out).toMatch(/5\. Download mlx-community\/Qwen3-Coder-30B-A3B-Instruct-4bit/);
+    expect(out).toMatch(/6\. Start mlx_lm\.server/);
     expect(out).toMatch(/~17\.1 GB download/);
   });
 

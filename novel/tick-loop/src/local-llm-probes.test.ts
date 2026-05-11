@@ -497,7 +497,7 @@ const ECONNREFUSED: FetchFn = async () => {
 const FETCH_OK: FetchFn = async () => ({ ok: true, status: 200 });
 
 describe("buildProductionProbes + detectLocalLlmStack + planLocalLlmBootstrap â€” selectively-missing integration", () => {
-  it("fresh machine (nothing present) â†’ full 5-step plan", async () => {
+  it("fresh machine (nothing present) â†’ full 6-step plan", async () => {
     const probes = buildProductionProbes({
       whichFn: async () => undefined,
       existsSyncFn: () => false,
@@ -509,6 +509,7 @@ describe("buildProductionProbes + detectLocalLlmStack + planLocalLlmBootstrap â€
       "install-pipx",
       "install-mlx-lm",
       "install-aider",
+      "install-huggingface-cli",
       "download-model",
       "start-mlx-server",
     ]);
@@ -548,7 +549,7 @@ describe("buildProductionProbes + detectLocalLlmStack + planLocalLlmBootstrap â€
     expect(plan.steps).toHaveLength(0);
   });
 
-  it("pipx + mlx absent, aider present, model present, server stopped â†’ [install-pipx, install-mlx-lm, start-mlx-server]", async () => {
+  it("pipx + mlx + huggingface-cli absent, aider present, model present, server stopped â†’ [install-pipx, install-mlx-lm, install-huggingface-cli, start-mlx-server]", async () => {
     const probes = buildProductionProbes({
       whichFn: async (bin) => (bin === "aider" ? "/usr/local/bin/aider" : undefined),
       existsSyncFn: () => true,
@@ -559,6 +560,7 @@ describe("buildProductionProbes + detectLocalLlmStack + planLocalLlmBootstrap â€
     expect(plan.steps.map((s) => s.type)).toEqual([
       "install-pipx",
       "install-mlx-lm",
+      "install-huggingface-cli",
       "start-mlx-server",
     ]);
   });

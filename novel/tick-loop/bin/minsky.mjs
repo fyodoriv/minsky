@@ -750,6 +750,16 @@ async function runBootstrapLocalLlm({ force, knownServerState }) {
  *
  * @param {{ state: import("../dist/local-llm-bootstrap.js").LocalLlmStackState, archState: import("../dist/arch-probe.js").ArchState, claudeDecision: import("../dist/claude-health-probe.js").ClaudeHealthDecision, pythonPath: string | undefined, serverModel?: string, opencodeProbe: { found: true; version: string } | { found: false } }} args
  */
+/**
+ * @param {{ reachable: boolean, url: string, reason?: string }} server
+ * @param {string | undefined} serverModel
+ * @returns {string}
+ */
+function serverReachableDetail(server, serverModel) {
+  if (!server.reachable) return server.reason ?? "";
+  return serverModel != null ? `reachable — ${serverModel}` : server.url;
+}
+
 function emitDoctorRows({
   state,
   archState,
@@ -769,15 +779,16 @@ function emitDoctorRows({
   line("pipx", state.pipx.present, state.pipx.path ?? state.pipx.reason ?? "");
   line("mlx_lm.server", state.mlxLm.present, state.mlxLm.path ?? state.mlxLm.reason ?? "");
   line("aider", state.aider.present, state.aider.path ?? state.aider.reason ?? "");
+  line(
+    "huggingface-cli",
+    state.huggingfaceCli.present,
+    state.huggingfaceCli.path ?? state.huggingfaceCli.reason ?? "",
+  );
   line("model weights", state.model.present, state.model.detail ?? state.model.reason ?? "");
   line(
     "mlx-lm.server reachable",
     state.server.reachable,
-    state.server.reachable
-      ? serverModel != null
-        ? `reachable — ${serverModel}`
-        : state.server.url
-      : (state.server.reason ?? ""),
+    serverReachableDetail(state.server, serverModel),
   );
   line(
     "python 3.12/3.13 for aider",
