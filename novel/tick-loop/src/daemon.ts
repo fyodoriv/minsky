@@ -1296,11 +1296,19 @@ export function buildDaemonBrief(args: {
  * stack (aider commits locally and the supervisor opens PRs), PR
  * self-grade and security-review templates (same reason), anti-noop
  * guard (aider's edit loop already implies "make a change"). Keeps:
- * task ID, tagline, Hypothesis, Details, Files.
+ * task ID, tagline, Hypothesis, Details.
  *
- * Target: ≤2 KB regardless of task block size (Hypothesis/Details/Files
- * cells are individually unbounded; the cap is enforced by truncating
- * each cell's value at 600 chars with a `…` ellipsis).
+ * The `**Files**:` cell is intentionally omitted: aider's `--yes` flag
+ * auto-adds every path it sees in the brief to its chat context, and
+ * task blocks routinely list 8-12 files in their `**Files**:` cell.
+ * Live-fire 2026-05-09 multi-worker run showed workers blowing past
+ * 50k tokens on auto-adds before mlx_lm.server crashed. Hypothesis and
+ * Details still surface 1-3 file paths inline, which is the right
+ * working-set size for a single iteration.
+ *
+ * Target: ≤2 KB regardless of task block size (Hypothesis/Details cells
+ * are individually unbounded; the cap is enforced by truncating each
+ * cell's value at 600 chars with a `…` ellipsis).
  *
  * @otel-exempt pure brief builder; instrumentation lives at the
  *   spawn-strategy dispatch span.
@@ -1316,7 +1324,6 @@ export function buildLocalBrief(args: {
   const tagline = extractTaskTagline(block);
   const hypothesis = extractSlimField(block, "Hypothesis");
   const details = extractSlimField(block, "Details");
-  const files = extractSlimField(block, "Files");
   const lines: string[] = [
     `# Task: \`${args.taskId}\``,
     "",
@@ -1330,9 +1337,6 @@ export function buildLocalBrief(args: {
   }
   if (details !== undefined) {
     lines.push("", "## Details", details);
-  }
-  if (files !== undefined) {
-    lines.push("", "## Files", files);
   }
   return lines.join("\n");
 }
