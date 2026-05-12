@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "prepare": "tsc -b && node scripts/install-lefthook-best-effort.mjs",
+    "prepare": "tsc -b --force && node scripts/install-lefthook-best-effort.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
