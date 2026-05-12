@@ -41,11 +41,11 @@
     "@minsky/experiment-record": "workspace:*",
     "@minsky/tick-loop": "workspace:*",
     "@minsky/token-monitor": "workspace:*",
-    "@types/node": "25.6.0",
+    "@types/node": "25.7.0",
     "@vitest/coverage-v8": "2.1.9",
     "js-yaml": "4.1.1",
     "lefthook": "1.10.10",
-    "markdownlint-cli2": "0.15.0",
+    "markdownlint-cli2": "0.22.1",
     "typescript": "5.7.2",
     "vitest": "2.1.9"
   }
