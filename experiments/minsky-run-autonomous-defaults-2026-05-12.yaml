@@ -1,0 +1,146 @@
+id: minsky-run-autonomous-defaults-2026-05-12
+hypothesis: |
+  Slices A (PR #489 — live spawn), B (PR #490 — host-daemon loop), and C
+  (PR #491 — CTO audit + seed-on-empty) build the *capability* surface
+  for cross-repo autonomous operation. They are correct but ergonomically
+  expert-only: to point the runner at a fresh repo for many hours the
+  operator must remember `--host <dir> --live --loop --cto-audit
+  --seed-on-empty --max-iterations=… --tick-interval-ms=…`. The cliff
+  to first autonomous run is too steep — the system already does the
+  right thing, the CLI is what's hiding it.
+
+  This PR (slice D) flips the defaults toward autonomy without removing
+  the safety latches:
+
+  (a) `minsky-run --host <dir>` now implies
+      `--live --loop --cto-audit --seed-on-empty` (the autonomous-default
+      aggregate). The aggregate is *opt-out*: `--no-live`, `--once`,
+      `--no-cto-audit`, `--no-seed-on-empty` restore the slice-A/B/C
+      explicit-flag behaviour byte-for-byte.
+
+  (b) A new `--hosts-dir <parent>` walks every bootstrapped subdirectory
+      of `<parent>` in drain-then-advance order (one host runs until its
+      queue is `empty-queue`, then the walker advances to the next host;
+      `max-iterations` is shared across the whole walk). Mutually
+      exclusive with `--host`. Files: `host-walker.ts`, `cwd-detect.ts`.
+
+  (c) `minsky-run` invoked with neither `--host` nor `--hosts-dir`
+      auto-detects from `process.cwd()`: a `.minsky/repo.yaml` →
+      single-host; otherwise a `--hosts-dir` walk over the cwd. The
+      operator's mental model collapses to "cd anywhere, run minsky-run".
+
+  (d) Before flipping to live spawn, a 3-second countdown banner prints
+      to TTY ("Starting autonomous run in 3 / 2 / 1… (Ctrl+C to abort)")
+      so the operator who *did not* intend live spawn can abort.
+      `--no-live`, `MINSKY_NON_INTERACTIVE=1`, or a non-TTY stdout
+      (CI / piped invocation) skip the countdown entirely — never
+      blocking automation.
+
+  Pre-registered effect: paired tests for `cwd-detect.ts` (9 cases) +
+  `host-walker.ts` (13 cases) + 5 new `aifn-840-shape` integration tests
+  (slice-D autonomous defaults; cto-audit + no-seed-on-empty banner;
+  --hosts-dir error on empty parent; --hosts-dir drain-then-advance;
+  --host + --hosts-dir mutual exclusion) pass; the slice-A/B/C surfaces
+  remain unchanged when the operator passes the explicit slice-B/C flags
+  (the `--no-live --loop --cto-audit ...` invocations in the existing
+  integration suite all still pass without modification beyond the
+  expected default-change updates).
+
+success: |
+  - `pnpm vitest run novel/cross-repo-runner` exits 0 with ≥ 161 passing
+    tests (was 141 after slice C; +9 cwd-detect + 13 host-walker +
+    3 new integration cases).
+  - `node scripts/check-rule-7-chaos-coverage.mjs` exits 0.
+  - `grep -q "applyAutonomousDefaults" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (the autonomous-defaults aggregate is wired).
+  - `grep -q -- "--hosts-dir" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (the multi-host walk flag exists).
+  - `grep -q -- "--no-live" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (the autonomous-defaults aggregate is opt-out, not opt-in).
+  - `grep -q "detectCwd" novel/cross-repo-runner/src/cwd-detect.ts`
+    exits 0 (cwd auto-detect substrate exists).
+  - `grep -q "walkHostsDir" novel/cross-repo-runner/src/host-walker.ts`
+    exits 0 (multi-host orchestrator substrate exists).
+  - `grep -q "maybePrintCountdownBanner" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (3-second countdown safety mitigation is wired).
+  - `node scripts/check-anchor-primary-source.mjs experiments/minsky-run-autonomous-defaults-2026-05-12.yaml`
+    exits 0.
+  - `node scripts/check-pivot-success-margin.mjs experiments/minsky-run-autonomous-defaults-2026-05-12.yaml`
+    exits 0.
+  - `node scripts/check-measurement-inspects-output.mjs experiments/minsky-run-autonomous-defaults-2026-05-12.yaml`
+    exits 0.
+
+pivot: |
+  Two pivot paths pre-registered:
+
+    1. If the flipped defaults cause measurable harm — operators
+       accidentally trigger live spawn against the wrong host >10 % of
+       runs (`unintended_live_spawn_rate` from `host-runs.jsonl`
+       cross-referenced with operator confirmations) — retire the
+       aggregate and revert to the explicit-flag surface from
+       slice B/C. The 3-second countdown banner survives as an
+       opt-in `--countdown` flag. Decision boundary: > 0.10
+       unintended-live-spawn rate over the trailing 30 days against
+       ≥ 5 distinct operators.
+
+    2. If `--hosts-dir` drain-then-advance produces tail latency on
+       parents with many hosts (operator wants round-robin or
+       priority-queue ordering instead of strict drain), fold a
+       `--walk-mode={drain,round-robin}` flag into the walker and keep
+       drain as the default. Decision boundary: ≥ 3 operator reports
+       requesting round-robin within the first 14 days, OR the
+       `host_starvation_p99_minutes` metric (defined as max time the
+       last host in the queue waits before its first iteration) exceeds
+       30 minutes for parents with ≥ 5 hosts.
+
+  Margin: success threshold ≤ 0.10 unintended-live-spawn rate; pivot 1
+  fires at > 0.20. The 10-percentage-point gap is the rule-#9 explicit
+  pivot margin (Ries 2011 build-measure-learn).
+
+measurement: |
+  npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 161 and .numFailedTests == 0" && grep -q "applyAutonomousDefaults" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q -- "--hosts-dir" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q -- "--no-live" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "detectCwd" novel/cross-repo-runner/src/cwd-detect.ts && grep -q "walkHostsDir" novel/cross-repo-runner/src/host-walker.ts && grep -q "maybePrintCountdownBanner" novel/cross-repo-runner/bin/minsky-run.mjs
+
+anchor: |
+  Cooper, A., *About Face: The Essentials of Interaction Design*,
+  Wiley, 4th edition, 2014 (sensible defaults — "the system should
+  do the right thing without configuration in the common case";
+  ISBN 978-1118766576). This is the literature anchor for flipping
+  the autonomous-default aggregate.
+  Norman, D. A., *The Design of Everyday Things: Revised and Expanded
+  Edition*, Basic Books, 2013 (the "Gulf of Execution" — the distance
+  between user intent and the action sequence required; the CLI's
+  current cliff is exactly this gulf; ISBN 978-0465050659).
+  Ries, E., *The Lean Startup*, Crown Business, 2011 (validated-
+  learning + explicit pivot threshold — the unintended-live-spawn
+  rate is the success metric, not "shipped a default flip";
+  ISBN 978-0307887894).
+  Martin, R. C., *Clean Architecture*, Prentice Hall, 2017 (I/O at
+  the edge — `cwd-detect.ts` and `host-walker.ts` are pure functions
+  over injected seams; the CLI bin wires the concrete fs / spawn
+  strategies; ISBN 978-0134494166).
+  Gamma, E., Helm, R., Johnson, R., Vlissides, J., *Design Patterns:
+  Elements of Reusable Object-Oriented Software*, Addison-Wesley,
+  1994 (Strategy — `runWalkLoop` in the walker is a Strategy seam
+  injected with `runLoopAsResult` so the unit tests don't spawn real
+  processes; ISBN 0-201-63361-2).
+  rule #1 (vision.md § 1 — don't reinvent; `walkHostsDir` reuses
+  `runHostLoop` from slice B + `runHostCtoAudit` from slice C via
+  the existing `RunHostLoopOpts` seams — no parallel orchestration
+  primitive).
+  rule #9 (vision.md § 9 — every change pre-registers a hypothesis +
+  pivot; this slice's pivot threshold (>0.10 unintended-live-spawn)
+  is the *behavioural* contract on the default flip).
+  user-stories/006-runner-on-any-repo.md (the cross-repo umbrella
+  story; this slice closes its ergonomics surface).
+  novel/cross-repo-runner/bin/minsky-run.mjs (the CLI entry point —
+  flipped defaults are wired here).
+  novel/cross-repo-runner/src/cwd-detect.ts (the cwd-mode detection
+  primitive — single-host vs multi-host).
+  novel/cross-repo-runner/src/host-walker.ts (the multi-host walk
+  orchestrator — drain-then-advance over `runHostLoop`).
+  novel/cross-repo-runner/test/integration/aifn-840-shape.test.ts
+  (the rule-#9 acceptance integration tests for slice D — 5 new
+  cases verifying autonomous-default aggregate, --hosts-dir walk,
+  and `--host` + `--hosts-dir` mutual exclusion).
+
+timeout_seconds: 60

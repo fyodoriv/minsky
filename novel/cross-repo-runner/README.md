@@ -63,16 +63,70 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 
 ## Usage
 
+The CLI has three modes, all driven from the same `minsky-run` entry point.
+
+### One-shot mode (explicit `<task-id>`)
+
 ```bash
-# Dry-run (default): writes the EXPERIMENT.yaml + emits the RunnerPlan to stdout.
+# Dry-run on a single named task. Safe default — writes the EXPERIMENT.yaml
+# + emits the RunnerPlan to stdout, never spawns Claude.
 minsky-run aifn-840-slash-command-labels --host ~/apps/iep-capabilities-3
 
-# Live-spawn placeholder (v0): also writes the EXPERIMENT.yaml + plan; in v1
-# this will spawn Claude Code wrapped in BudgetGuard.
+# Live-spawn the named task. Reads .minsky/repo.yaml, spawns Claude Code,
+# captures the verdict, writes one iteration record. Exits when done.
 minsky-run aifn-840-slash-command-labels --host ~/apps/iep-capabilities-3 --live
 ```
 
-The host must be bootstrapped first via `minsky-bootstrap <host-dir>`. The runner reads `.minsky/repo.yaml` and writes to `.minsky/experiments/<id>.yaml` + `.minsky/experiment-store/cross-repo/<id>.jsonl`.
+### Single-host autonomous mode (`--host <dir>` with no positional)
+
+Bare `--host <dir>` is the **autonomous default**: equivalent to
+`--host <dir> --live --loop --cto-audit --seed-on-empty`. The CLI prints
+a 3-second countdown banner ("Starting autonomous run in 3 / 2 / 1… —
+Ctrl+C to abort") to TTY before flipping to live spawn so an unintended
+invocation can be aborted. The countdown is skipped in non-interactive
+contexts (`MINSKY_NON_INTERACTIVE=1` or a non-TTY stdout).
+
+```bash
+# Drives the host indefinitely: live spawn, CTO audit after every
+# validated iteration, seeds new tasks when the queue empties.
+minsky-run --host ~/apps/iep-capabilities-3
+
+# The aggregate is opt-out — every flag can be disabled individually:
+minsky-run --host ~/apps/iep-capabilities-3 --no-live        # dry-run loop
+minsky-run --host ~/apps/iep-capabilities-3 --once           # single iteration
+minsky-run --host ~/apps/iep-capabilities-3 --no-cto-audit   # ship-only, no audit
+minsky-run --host ~/apps/iep-capabilities-3 --no-seed-on-empty  # exit on empty queue
+```
+
+### Multi-host walk mode (`--hosts-dir <parent>`)
+
+Point the CLI at a parent directory containing many bootstrapped sub-hosts
+and it walks them in **drain-then-advance** order: each host runs until
+its inner loop reports `empty-queue`, then the walker advances to the next
+host. `--max-iterations` is shared across the whole walk.
+
+```bash
+# Walk every bootstrapped subdir of ~/apps/, drain each before advancing.
+minsky-run --hosts-dir ~/apps
+
+# Mutually exclusive with --host. Passing both is exit 64.
+```
+
+### Cwd auto-detect (no `--host` / `--hosts-dir`)
+
+`minsky-run` invoked from a bootstrapped host (one with
+`.minsky/repo.yaml`) treats the cwd as `--host .`. From any other
+directory, it treats the cwd as `--hosts-dir .`. The operator's mental
+model is "cd anywhere, run minsky-run":
+
+```bash
+cd ~/apps/iep-capabilities-3 && minsky-run     # single-host mode
+cd ~/apps && minsky-run                        # multi-host walk
+```
+
+The host(s) must be bootstrapped first via `minsky-bootstrap <host-dir>`.
+The runner reads `.minsky/repo.yaml` and writes to
+`.minsky/experiments/<id>.yaml` + `.minsky/experiment-store/cross-repo/<id>.jsonl`.
 
 ## Failure modes & chaos verification
 
@@ -91,6 +145,8 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 5 | Sidecar `experiment-store/cross-repo/` doesn't exist | filesystem | `graceful-degrade` — runner creates the directory recursively before append | manual smoke test verifies the runner creates the missing directory and appends the record |
 | 6 | Two `minsky-run` invocations race against the same task on the same host | concurrency | `graceful-degrade` — both runs produce the same dry-run plan; v0's append-only iteration-store records two `planned` lines instead of one (operator deduplicates manually); v1's live-spawn boundary will add a per-host file-lock | manual integration assert: parallel invocations both exit 0 with identical plans |
 | 7 | Spawned Claude Code modifies host tracked files outside the task scope | sandbox-leak | `circuit-break-and-notify` — runner re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` and refuse to extract a PR URL | covered by `runner.test.ts` (`scope-leak when spawn writes a file outside allowedPaths` + `scope-leak captures EVERY leaked path` + `scope-leak does NOT extract PR URL` test cases) |
+| 8 | Operator runs `--hosts-dir` against a parent with no bootstrapped subdirs | bad-input | `loud-crash-supervisor-restart` — runner exits 1 with `no bootstrapped hosts found in <parent>` stderr; never spawns | covered by `host-walker.test.ts` (`returns empty-parent stopReason when no bootstrapped subdirs found` test case) + integration assert |
+| 9 | Operator runs bare `--host <dir>` and immediately notices the flip to live spawn was unintended | autonomous-defaults-misfire | `graceful-degrade` — 3-second countdown banner gives the operator a Ctrl-C window before any spawn fires; non-TTY / `MINSKY_NON_INTERACTIVE=1` skips the banner so CI is never blocked | covered by `aifn-840-shape.test.ts` (`slice-D autonomous defaults` + `--cto-audit --no-seed-on-empty + --loop` integration cases) — banner suppression is asserted by the test fixture's `MINSKY_NON_INTERACTIVE=1` env var |
 
 ## Threat model
 
@@ -104,10 +160,17 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 
 ## Tests
 
-43 paired vitest cases across 5 files:
+161+ paired vitest cases across 12 files (run `pnpm vitest run novel/cross-repo-runner`):
 
 - `task-finder.test.ts` (14) — parses tasks.md sections / ID / tags / details / rule-#9 fields; ID match; title-substring matching; not-found reporting
 - `experiment-synth.test.ts` (10) — happy-path YAML rendering; rule-#9 iron-rule violations (missing fields)
 - `spawn-plan.test.ts` (12) — plan shape; branch naming; env vars; system-prompt overlay; brief
 - `iteration-record.test.ts` (4) — JSONL rendering; verdict variants; null pr_url
-- `repo-config-loader.test.ts` (3) — flat-YAML parser; nested map; comments; happy/missing-required cases (subset; the `parseRepoConfig` validator's exhaustive cases ship in `@minsky/sidecar-bootstrap`)
+- `repo-config-loader.test.ts` (3) — flat-YAML parser; nested map; comments; happy/missing-required cases
+- `runner.test.ts` (slice A) — `runLive` happy-path / scope-leak / spawn-failed verdicts; allowed-paths fallback
+- `host-loop.test.ts` (slice B + C seams) — stop conditions; abort; cto-audit + seed-on-empty interactions
+- `host-cto-audit.test.ts` (slice C) — gate predicate; brief builder; recursion-guard
+- `cwd-detect.test.ts` (slice D, 9) — single-host vs multi-host detection from `process.cwd()`
+- `host-walker.test.ts` (slice D, 13) — drain-then-advance orchestrator; max-iterations sharing; empty-parent + all-hosts-drained stop reasons
+- `aifn-840-shape.test.ts` (20 integration cases) — end-to-end bootstrap → minsky-run smoke; autonomous-default aggregate; `--hosts-dir` walk; `--host` + `--hosts-dir` mutual exclusion
+- `dispatch-emit.test.ts` — decision C2 dispatch payload shape
