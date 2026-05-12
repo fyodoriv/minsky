@@ -299,6 +299,7 @@ async function runStartOrAttach(args) {
     env: { ...process.env, ...bootstrapEnv },
   });
   child.unref();
+  closeSync(logOutcome.fd);
   writeFileSync(activePidPath, String(child.pid ?? ""), "utf8");
   process.stderr.write(
     `minsky: started worker ${workerId} (PID ${child.pid}, log: ${activeLogPath})\n`,
