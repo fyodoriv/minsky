@@ -21,23 +21,26 @@ const ALL_GREEN: DoctorSubstrateRowState = {
   pnpmLockPresent: true,
   distPresent: true,
   pnpmOnPath: true,
+  workersDirWritable: true,
+  workersDirPath: "/home/op/minsky/.minsky/workers",
 };
 
 describe("renderDoctorSubstrateRows — all-green steady state", () => {
-  it("emits four ✓-prefixed rows when every substrate piece is present", () => {
+  it("emits five ✓-prefixed rows when every substrate piece is present", () => {
     const lines = renderDoctorSubstrateRows(ALL_GREEN);
-    expect(lines.length).toBe(4);
+    expect(lines.length).toBe(5);
     for (const l of lines) {
       expect(l).toMatch(/^ {2}✓ /);
     }
   });
 
-  it("includes labels covering the four substrate pieces", () => {
+  it("includes labels covering the five substrate pieces", () => {
     const out = renderDoctorSubstrateRows(ALL_GREEN).join("\n");
     expect(out).toMatch(/node_modules/);
     expect(out).toMatch(/pnpm-lock\.yaml/);
     expect(out).toMatch(/dist\/index\.js/);
     expect(out).toMatch(/pnpm on PATH/);
+    expect(out).toMatch(/workers dir writable/);
   });
 });
 
@@ -80,6 +83,27 @@ describe("renderDoctorSubstrateRows — pnpm not on PATH", () => {
     expect(row).toMatch(/^ {2}✗ /);
     // recovery: install pnpm; corepack or brew/npm
     expect(row).toMatch(/corepack enable|brew install pnpm|npm i -g pnpm/);
+  });
+});
+
+describe("renderDoctorSubstrateRows — workers dir not writable", () => {
+  // Slice 2 of `minsky-runtime-resilience` — 13th doctor row. The
+  // recovery hint must name the actual path so the operator can
+  // chmod/relocate without guessing where MINSKY_HOME points.
+
+  it("emits ✗ for workers-dir-writable with a path-aware recovery hint", () => {
+    const path = "/home/dotfile-victim/.minsky/workers";
+    const lines = renderDoctorSubstrateRows({
+      ...ALL_GREEN,
+      workersDirWritable: false,
+      workersDirPath: path,
+    });
+    const row = lines.find((l) => l.includes("workers dir writable"));
+    expect(row).toBeDefined();
+    expect(row).toMatch(/^ {2}✗ /);
+    expect(row).toContain(path);
+    expect(row).toMatch(/chmod u\+w/);
+    expect(row).toMatch(/MINSKY_HOME/);
   });
 });
 

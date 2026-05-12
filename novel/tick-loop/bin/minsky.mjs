@@ -49,7 +49,16 @@
  */
 
 import { exec, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  existsSync,
+  constants as fsConstants,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -752,7 +761,39 @@ async function probeSubstrate() {
     pnpmLockPresent: existsSync(resolve(MINSKY_HOME, "pnpm-lock.yaml")),
     distPresent: existsSync(DIST_INDEX_PATH),
     pnpmOnPath: pnpmPath !== undefined,
+    workersDirWritable: probeWorkersDirWritable(WORKERS_DIR),
+    workersDirPath: WORKERS_DIR,
   };
+}
+
+/**
+ * Slice 2 of `minsky-runtime-resilience` — read-only writability
+ * probe for the 13th doctor row. Walks up from `WORKERS_DIR` to the
+ * first existing ancestor and tests `W_OK`. Doesn't mutate (unlike
+ * `ensureWorkersDir`, which doctor is too read-only to call) so
+ * `minsky doctor` can be safely run on broken substrates without
+ * making half-created `.minsky/` trees.
+ *
+ * @param {string} workersDir
+ * @returns {boolean}
+ */
+function probeWorkersDirWritable(workersDir) {
+  let p = workersDir;
+  // Guard against infinite loop at fs root (resolve("/", "..") === "/").
+  for (let i = 0; i < 64; i += 1) {
+    if (existsSync(p)) {
+      try {
+        accessSync(p, fsConstants.W_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    const parent = resolve(p, "..");
+    if (parent === p) return false;
+    p = parent;
+  }
+  return false;
 }
 
 /**
