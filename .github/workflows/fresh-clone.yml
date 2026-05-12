@@ -56,4 +56,4 @@ jobs:
         run: |
           set -o pipefail
           pnpm minsky doctor 2>&1 | tee doctor.out
-          grep -c "RED" doctor.out | grep -q "^0$"
+          ! grep -q "RED" doctor.out
