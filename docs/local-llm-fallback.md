@@ -10,6 +10,21 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 
 ## Install
 
+**Automatic (recommended):** just run `minsky`. If Claude credits are exhausted and the local-LLM stack is not yet installed, `minsky` detects it and prints a one-prompt install plan:
+
+```bash
+minsky                           # detects Claude exhaustion; prompts once to install
+minsky bootstrap-local-llm      # force the install prompt regardless of Claude state
+minsky bootstrap-local-llm --dry-run  # preview the install plan (read-only; no side effects)
+```
+
+The plan installs `mlx-lm`, `aider-chat`, downloads the model (~17.2 GB), and starts `mlx_lm.server` in the background — all in one pass. The install is idempotent: re-running `minsky` on an already-set-up machine adds ≤500 ms and sets `MINSKY_LOCAL_LLM=1` automatically if the server is reachable.
+
+After bootstrap, run `pnpm minsky doctor` to verify the full stack. The doctor command shows **4 install-time substrate rows** (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) in addition to the local-LLM stack rows (mlx_lm.server / aider / model weights / etc.). Any substrate row RED → banner is RED and exits 1 — fix the substrate before debugging the LLM stack. See [`novel/tick-loop/README.md`](../novel/tick-loop/README.md) for details.
+
+<details>
+<summary>Manual install (fallback if auto-bootstrap fails)</summary>
+
 ```bash
 # Apple Silicon native ML server
 pipx install mlx-lm
@@ -20,6 +35,17 @@ hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 ```
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
+
+Then start the server and set the env for the daemon:
+
+```bash
+mlx_lm.server --model mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit \
+  --host 127.0.0.1 --port 8080 &
+export MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred
+minsky
+```
+
+</details>
 
 ### Why two separate Python environments
 
