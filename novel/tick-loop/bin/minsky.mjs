@@ -52,6 +52,7 @@
 import { exec, spawn, spawnSync } from "node:child_process";
 import {
   accessSync,
+  closeSync,
   existsSync,
   constants as fsConstants,
   mkdirSync,
@@ -430,6 +431,22 @@ function readPersistedHardLimit() {
  * @returns {Promise<Record<string, string>>}
  */
 /**
+/**
+ * Slice 46: when MINSKY_LOCAL_MODEL_PATH is set and points to an existing
+ * path, override the model probe result so the planner treats the model
+ * as present (skips the download step) and uses that path for server start.
+ * Extracted from detectForBootstrap to stay under biome's complexity cap.
+ *
+ * @param {import("../dist/local-llm-bootstrap.js").LocalLlmStackState} state
+ * @param {string | undefined} modelPath
+ * @returns {import("../dist/local-llm-bootstrap.js").LocalLlmStackState}
+ */
+function applyModelPathOverride(state, modelPath) {
+  if (modelPath === undefined || state.model.present) return state;
+  return { ...state, model: { present: true, path: modelPath, detail: modelPath } };
+}
+
+/**
  * Build the planner + probe options together so `runBootstrapLocalLlm`
  * and `runDoctor` can share the wiring. Slice 7 H0 threads archState's
  * `preferredPipxPath` into the pipx probe so Intel-brew pipx doesn't
@@ -440,14 +457,34 @@ function readPersistedHardLimit() {
 async function detectForBootstrap() {
   const archState = await detectArchState(buildArchProbes());
   const expectedPipxPath = preferredPipxPath(archState);
+  // Operator override: `MINSKY_LOCAL_LLM_MODEL_ID=<org/name>` retargets
+  // both the model probe AND the planner's download + server-start steps.
+  const modelIdEnv = process.env["MINSKY_LOCAL_LLM_MODEL_ID"]?.trim();
+  const modelId = modelIdEnv !== undefined && modelIdEnv.length > 0 ? modelIdEnv : undefined;
+  // Slice 46: MINSKY_LOCAL_MODEL_PATH lets the operator point to a model
+  // stored outside the HF cache (e.g., manually downloaded or on a
+  // non-standard path). When set and the path exists, it overrides the
+  // HF-cache probe result and is passed as --model to mlx_lm.server.
+  const modelPathEnv = process.env["MINSKY_LOCAL_MODEL_PATH"]?.trim();
+  const modelPath =
+    modelPathEnv !== undefined && modelPathEnv.length > 0 && existsSync(modelPathEnv)
+      ? modelPathEnv
+      : undefined;
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
   const probeOpts = { whichFn };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
-  const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
+  if (modelId !== undefined) probeOpts.modelId = modelId;
+  const state = applyModelPathOverride(
+    await detectLocalLlmStack(buildProductionProbes(probeOpts)),
+    modelPath,
+  );
   const pythonPath = probePythonWithDefaults();
   /** @type {import("../dist/local-llm-bootstrap.js").BootstrapPlanOptions} */
   const planOpts = { archState };
   if (pythonPath !== undefined) planOpts.pythonPath = pythonPath;
+  // Slice 46: MINSKY_LOCAL_MODEL_PATH takes precedence over MINSKY_LOCAL_LLM_MODEL_ID
+  const effectiveModelId = modelPath ?? modelId;
+  if (effectiveModelId !== undefined) planOpts.modelId = effectiveModelId;
   return { state, archState, planOpts, pythonPath };
 }
 
@@ -523,6 +560,7 @@ async function runBootstrapLocalLlm({ force }) {
   const result = await executeBootstrapPlan(plan, {
     confirm: confirmFn,
     spawnFn: spawnAdapter,
+    startServerFn: startLocalLlmServer,
     log: (s) => process.stderr.write(s),
   });
   if (!result.success) {
@@ -600,6 +638,8 @@ async function runDoctor() {
     process.stdout.write(`${l}\n`);
   }
   const anySubstrateRed = substrateLines.some((l) => l.startsWith("  ✗"));
+  // Slice 40: opencode binary row — GREEN when installed and reachable.
+  await emitOpencodeRow();
   // Slice 3 of `minsky-cross-machine-dotfile-checks`: detect git
   // config keys that point at filesystem paths synced via dotfiles
   // across machines with different usernames. Detect-only (per the
@@ -673,6 +713,26 @@ function emitClaudeExhaustionRow() {
   process.stdout.write(
     `  ⚠ claude exhaustion (persisted)  — hit at ${persisted.ts} (${ageMin}m ago, reason: ${persisted.reason}); minsky will skip live probe and use local-LLM until TTL expires (override: MINSKY_HARD_LIMIT_TTL_MIN=<n>)\n`,
   );
+}
+
+/**
+ * Slice 40 of `minsky-cli-auto-bootstrap-local-llm` — emit one doctor
+ * row for the `opencode` binary. GREEN when installed and reachable on
+ * PATH (or MINSKY_LOCAL_LLM_OPENCODE_BIN); RED with install hint when
+ * absent.
+ */
+async function emitOpencodeRow() {
+  const bin = process.env.MINSKY_LOCAL_LLM_OPENCODE_BIN ?? "opencode";
+  const binPath = await whichFn(bin);
+  if (binPath === undefined) {
+    process.stdout.write(
+      "  ✗ opencode  not found — run: curl -fsSL https://opencode.ai/install | sh\n",
+    );
+    return;
+  }
+  const result = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 5000 });
+  const version = result.status === 0 && result.stdout?.trim() ? result.stdout.trim() : binPath;
+  process.stdout.write(`  ✓ opencode  ${version}\n`);
 }
 
 /**
@@ -908,6 +968,65 @@ function spawnAdapter(command, args, opts = {}) {
       resolveDone({ exitCode: code ?? -1, stderrTail });
     });
   });
+}
+
+/**
+ * Slice 45 — background-spawn `mlx_lm.server`, write its PID to
+ * `.minsky/local-llm.pid`, and poll `/v1/models` until ready (≤60 s).
+ *
+ * Plugs in as `startServerFn` in {@link executeBootstrapPlan} so the
+ * `start-mlx-server` step doesn't hang waiting for a long-lived process
+ * to exit. The server outlives the bootstrap via `detached: true` +
+ * `child.unref()`.
+ *
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
+ */
+async function startLocalLlmServer(command, args) {
+  const dotMinsky = resolve(MINSKY_HOME, ".minsky");
+  mkdirSync(dotMinsky, { recursive: true });
+  const pidFile = resolve(dotMinsky, "local-llm.pid");
+  const logFile = resolve(dotMinsky, "local-llm-server.log");
+  const logFd = openSync(logFile, "a");
+  process.stderr.write(
+    `minsky: starting ${command} ${args.join(" ")} in background (log: ${logFile})\n`,
+  );
+  const child = spawn(command, /** @type {string[]} */ ([...args]), {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+  });
+  child.unref();
+  closeSync(logFd);
+  if (child.pid !== undefined) {
+    writeFileSync(pidFile, String(child.pid), "utf8");
+    process.stderr.write(`minsky: mlx_lm.server PID ${child.pid} written to ${pidFile}\n`);
+  }
+  // Poll until the server is ready (up to 60 s, 3 s intervals).
+  const SERVER_URL = "http://127.0.0.1:8080/v1/models";
+  const POLL_INTERVAL_MS = 3_000;
+  const POLL_TIMEOUT_MS = 60_000;
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  process.stderr.write("minsky: waiting for mlx_lm.server to become ready (up to 60 s)…\n");
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 2_000);
+      const resp = await globalThis.fetch(SERVER_URL, { method: "GET", signal: ac.signal });
+      clearTimeout(timer);
+      if (resp.ok) {
+        process.stderr.write("minsky: mlx_lm.server ready\n");
+        return { exitCode: 0, stderrTail: "" };
+      }
+    } catch {
+      // Not ready yet — keep polling.
+    }
+  }
+  return {
+    exitCode: 1,
+    stderrTail: `mlx_lm.server did not become reachable at ${SERVER_URL} within ${POLL_TIMEOUT_MS / 1_000} s`,
+  };
 }
 
 /**
