@@ -63,6 +63,8 @@ const TICK_LOOP_BIN = resolve(PKG_ROOT, "bin", "tick-loop.mjs");
 
 const MINSKY_HOME = process.env["MINSKY_HOME"] ?? resolve(PKG_ROOT, "..", "..");
 const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
+const isMain =
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 // Slice 8 (`minsky-cli-fresh-clone-bootstrap`): pre-flight check that
 // the dist build artifacts exist BEFORE we dynamic-import them.
@@ -78,7 +80,7 @@ const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
 // itself doesn't depend on dist/ existing. The paired tests in
 // `dist-existence-check.test.ts` pin the wording contract.
 const DIST_INDEX_PATH = resolve(PKG_ROOT, "dist", "index.js");
-if (!existsSync(DIST_INDEX_PATH)) {
+if (isMain && !existsSync(DIST_INDEX_PATH)) {
   process.stderr.write(
     `minsky: dist not built (${DIST_INDEX_PATH} missing) — run \`pnpm install\` from the repo root, or \`pnpm --filter @minsky/tick-loop build\` directly\n`,
   );
@@ -95,7 +97,7 @@ if (!existsSync(DIST_INDEX_PATH)) {
 // node_modules is missing) and emit a one-line operator-actionable
 // stderr message before the failing import is reached.
 const NODE_MODULES_PATH = resolve(MINSKY_HOME, "node_modules");
-if (!existsSync(NODE_MODULES_PATH)) {
+if (isMain && !existsSync(NODE_MODULES_PATH)) {
   process.stderr.write(
     `minsky: node_modules/ missing (${NODE_MODULES_PATH}) — run \`pnpm install\` from the repo root\n`,
   );
@@ -126,46 +128,48 @@ const {
   readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
-} = await import("../dist/index.js");
-const { formatLogLine } = await import("../dist/pretty-log.js");
+} = /** @type {any} */ (isMain ? await import("../dist/index.js") : {});
+const { formatLogLine } = /** @type {any} */ (isMain ? await import("../dist/pretty-log.js") : {});
 
-const argv = process.argv.slice(2);
-const first = argv[0];
+if (isMain) {
+  const argv = process.argv.slice(2);
+  const first = argv[0];
 
-if (first === "--help" || first === "-h" || first === "help") {
-  printHelp();
-  process.exit(0);
-} else if (first === "logs") {
-  await runLogs(argv.slice(1));
-} else if (first === "stop") {
-  runStop(argv.slice(1));
-} else if (first === "doctor") {
-  await runDoctor();
-} else if (first === "bootstrap-local-llm") {
-  // Slice 9: `--dry-run` short-circuits before any install attempt.
-  // Pure detect + plan → render summary → exit 0. Read-only; safe in
-  // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
-  // block. Anchors the task block's Risk mitigation.
-  const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
-  if (subArgs.dryRun) {
-    await runBootstrapLocalLlmDryRun();
+  if (first === "--help" || first === "-h" || first === "help") {
+    printHelp();
     process.exit(0);
+  } else if (first === "logs") {
+    await runLogs(argv.slice(1));
+  } else if (first === "stop") {
+    runStop(argv.slice(1));
+  } else if (first === "doctor") {
+    await runDoctor();
+  } else if (first === "bootstrap-local-llm") {
+    // Slice 9: `--dry-run` short-circuits before any install attempt.
+    // Pure detect + plan → render summary → exit 0. Read-only; safe in
+    // non-TTY contexts where slice 7 H2's TTY-refuse path would otherwise
+    // block. Anchors the task block's Risk mitigation.
+    const subArgs = parseBootstrapLocalLlmArgs(argv.slice(1));
+    if (subArgs.dryRun) {
+      await runBootstrapLocalLlmDryRun();
+      process.exit(0);
+    }
+    const result = await runBootstrapLocalLlm({ force: true });
+    // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
+    // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
+    // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
+    // chaining works. The empty-object return is the refuse signal; a
+    // successful bootstrap returns the env overlay with MINSKY_LOCAL_LLM.
+    if (Object.keys(result).length === 0) {
+      process.exit(1);
+    }
+  } else if (first === "start") {
+    // Back-compat: keep `start` as an alias of the no-subcommand form. Any
+    // further args are forwarded to bin/tick-loop.mjs at spawn time.
+    await runStartOrAttach(argv.slice(1));
+  } else {
+    await runStartOrAttach(argv);
   }
-  const result = await runBootstrapLocalLlm({ force: true });
-  // Slice 7 H2: when the operator explicitly ran `bootstrap-local-llm`
-  // AND the pre-flight refused (e.g., non-TTY + install-arm-homebrew
-  // needed), exit non-zero so `minsky bootstrap-local-llm && next-cmd`
-  // chaining works. The empty-object return is the refuse signal; a
-  // successful bootstrap returns the env overlay with MINSKY_LOCAL_LLM.
-  if (Object.keys(result).length === 0) {
-    process.exit(1);
-  }
-} else if (first === "start") {
-  // Back-compat: keep `start` as an alias of the no-subcommand form. Any
-  // further args are forwarded to bin/tick-loop.mjs at spawn time.
-  await runStartOrAttach(argv.slice(1));
-} else {
-  await runStartOrAttach(argv);
 }
 
 function printHelp() {
@@ -307,9 +311,20 @@ async function runStartOrAttach(args) {
  * Returns an env-overlay object the spawn merges with `process.env`. Empty
  * object means "no overlay needed" (caller passes the daemon's existing env).
  *
+ * @param {{ detectFn?: () => Promise<{ server: { reachable: boolean; url: string } }> }} [_opts]
  * @returns {Promise<Record<string, string>>}
  */
-async function maybeBootstrapLocalLlm() {
+export async function maybeBootstrapLocalLlm(_opts = {}) {
+  if (_opts.detectFn) {
+    const state = await _opts.detectFn();
+    if (state.server.reachable) {
+      process.stderr.write(
+        `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
+      );
+      return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    }
+    return {};
+  }
   if (process.env["MINSKY_NO_AUTO_BOOTSTRAP"] === "1") {
     return {};
   }
