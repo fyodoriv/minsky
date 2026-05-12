@@ -293,3 +293,169 @@ describe("runHostLoop — let-it-crash propagation", () => {
     ).rejects.toThrow("runLive exploded");
   });
 });
+
+describe("runHostLoop — CTO audit seam", () => {
+  function fakeCtoSignals() {
+    return {
+      hostRepo: "test/repo",
+      hostRoot: "/tmp/fake",
+      tasksMdPath: "TASKS.md",
+      reason: "post-iteration" as const,
+      completedTaskId: "x",
+      prUrl: null,
+      filesChanged: [],
+      utcDate: "2026-05-11",
+    };
+  }
+
+  test("fires post-iteration audit on validated verdict when seam is wired", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const auditCalls: { reason: string; completedTaskId: string | null }[] = [];
+    let n = 0;
+    await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 2,
+      tickIntervalMs: 0,
+      ctoAudit: ({ signals }) => {
+        auditCalls.push({ reason: signals.reason, completedTaskId: signals.completedTaskId });
+        return Promise.resolve({ outcome: "skipped", reason: "test-fake-skipped" });
+      },
+      buildCtoSignals: (args) => ({
+        ...fakeCtoSignals(),
+        reason: args.reason,
+        completedTaskId: args.completedTaskId,
+      }),
+    });
+    expect(auditCalls).toEqual([
+      { reason: "post-iteration", completedTaskId: "task-0" },
+      { reason: "post-iteration", completedTaskId: "task-1" },
+    ]);
+  });
+
+  test("does NOT fire post-iteration audit on scope-leak verdict", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let auditFired = false;
+    await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => ["src/**"],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "scope-leak", scopeLeakPaths: ["x.ts"] })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      ctoAudit: () => {
+        auditFired = true;
+        return Promise.resolve({ outcome: "skipped", reason: "should-not-fire" });
+      },
+      buildCtoSignals: (args) => ({ ...fakeCtoSignals(), reason: args.reason }),
+    });
+    expect(auditFired).toBe(false);
+  });
+
+  test("seedOnEmpty: empty-queue triggers seed audit + re-pick", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let pickCount = 0;
+    const auditCalls: { reason: string }[] = [];
+    const result = await runHostLoop({
+      pickTask: () => {
+        pickCount++;
+        // First call: empty. After audit, return a task. Then empty again to exit.
+        if (pickCount === 1) return null;
+        if (pickCount === 2) return baseTask;
+        return null;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      seedOnEmpty: true,
+      ctoAudit: ({ signals }) => {
+        auditCalls.push({ reason: signals.reason });
+        return Promise.resolve({ outcome: "skipped", reason: "test-fake-skipped" });
+      },
+      buildCtoSignals: (args) => ({ ...fakeCtoSignals(), reason: args.reason }),
+    });
+    expect(auditCalls.some((c) => c.reason === "queue-empty")).toBe(true);
+    expect(result.iterations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("seedOnEmpty=false: empty-queue exits immediately even with audit wired", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let auditFired = false;
+    const result = await runHostLoop({
+      pickTask: () => null,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      seedOnEmpty: false,
+      ctoAudit: () => {
+        auditFired = true;
+        return Promise.resolve({ outcome: "skipped", reason: "should-not-fire" });
+      },
+      buildCtoSignals: (args) => ({ ...fakeCtoSignals(), reason: args.reason }),
+    });
+    expect(auditFired).toBe(false);
+    expect(result.stopReason).toBe("empty-queue");
+  });
+
+  test("seed audit fires only ONCE per empty-queue event (bounded re-pick)", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let auditCount = 0;
+    const result = await runHostLoop({
+      // Always returns null — audit can't fix it.
+      pickTask: () => null,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      seedOnEmpty: true,
+      ctoAudit: () => {
+        auditCount++;
+        return Promise.resolve({ outcome: "skipped", reason: "test-fake-skipped" });
+      },
+      buildCtoSignals: (args) => ({ ...fakeCtoSignals(), reason: args.reason }),
+    });
+    expect(auditCount).toBe(1);
+    expect(result.stopReason).toBe("empty-queue");
+  });
+
+  test("audit NOT fired when seam is missing (slice-B-default behaviour preserved)", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const result = await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 1,
+      tickIntervalMs: 0,
+    });
+    // No audit options passed; loop completes normally.
+    expect(result.stopReason).toBe("max-iterations");
+    expect(result.iterations).toHaveLength(1);
+  });
+});
