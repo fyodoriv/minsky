@@ -4,22 +4,23 @@ This file tells any AI agent (Claude Code, OMC personas, future tools) how this 
 
 If you're an agent reading this for the first time: read `vision.md` next, then `TASKS.md`, then come back here.
 
-## Repository setup
-
-```bash
-git clone https://github.com/fyodoriv/minsky.git
-cd minsky
-pnpm install   # prepare hook: (a) tsc -b builds all workspace dist/; (b) lefthook installs git hooks
-pnpm minsky doctor   # verify health
-```
-
-No separate build step needed. `pnpm install` runs the root `prepare` hook which calls `tsc -b` to compile every workspace package's `dist/` (including `@minsky/tick-loop`). If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line actionable message rather than a node stack trace.
-
 ## Identity
 
 You're working on **Minsky** — an integration distribution that connects existing tools into a viable cybernetic system that produces software 24/7 and stays alive indefinitely. Minsky is not a framework. We do not build what already exists.
 
 See `vision.md` § "What Minsky is" for full identity.
+
+## Repository setup
+
+Fresh clone → working CLI in one command (no separate build step):
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git && cd minsky
+pnpm install   # prepare hook: (a) tsc -b builds all dist/; (b) lefthook installs git hooks
+pnpm minsky doctor   # verify health
+```
+
+`pnpm install` runs the root `prepare` hook which does `tsc -b` across all workspace packages (including `@minsky/tick-loop`) and then installs lefthook git hooks. If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line recovery hint — no `ERR_MODULE_NOT_FOUND` stack traces. See `README.md` § Quickstart for the multi-machine / local-LLM flow.
 
 ## Constitutional rules (non-negotiable)
 
