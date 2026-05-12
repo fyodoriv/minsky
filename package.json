@@ -48,5 +48,10 @@
     "markdownlint-cli2": "0.22.1",
     "typescript": "5.7.2",
     "vitest": "2.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "protobufjs@<8.0.2": ">=8.0.2"
+    }
   }
 }
