@@ -1,4 +1,5 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 2 (operator 2026-05-08) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 60 (2026-05-12 — detached server spawn + PID write to .minsky/local-llm.pid) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap-executor` — I/O boundary that
  * dispatches a {@link BootstrapPlan} to subprocess installs. Slice 2 of
@@ -65,6 +66,12 @@ export interface ExecuteSpawnResult {
   readonly exitCode: number;
   readonly stdoutTail?: string;
   readonly stderrTail?: string;
+  /**
+   * Set when the spawn was dispatched with `opts.detached === true`.
+   * The PID of the detached child process. Used by the executor to write
+   * the server PID file at `opts.serverPidPath`.
+   */
+  readonly pid?: number;
 }
 
 /**
@@ -77,6 +84,14 @@ export interface ExecuteSpawnResult {
  * behavior — most installers don't need stdin and letting them read
  * from the terminal would swallow keystrokes the CLI's Ctrl-C detach
  * handler wants.
+ *
+ * Slice 60 extension: `detached` spawns the process as a background
+ * daemon that outlives the parent. Used for the `start-mlx-server` step
+ * which is a long-running server — a foreground spawn would block until
+ * the server exits (never). When `detached === true`, the Promise
+ * resolves immediately after `spawn` fires (PID available) with
+ * `{ exitCode: 0, pid }` — exit code is always 0 because the process
+ * is still running; errors surface later via the `/v1/models` probe.
  */
 export type SpawnFn = (
   command: string,
@@ -86,6 +101,12 @@ export type SpawnFn = (
     env?: NodeJS.ProcessEnv;
     /** "ignore" (default) or "inherit" to pass the parent's stdin through. */
     stdinMode?: "ignore" | "inherit";
+    /**
+     * When true, spawn as a background daemon (detached + unref). Resolves
+     * immediately after the process is created; result carries `pid`.
+     * Production use: `start-mlx-server` step only.
+     */
+    detached?: boolean;
   },
 ) => Promise<ExecuteSpawnResult>;
 
@@ -110,6 +131,21 @@ export interface ExecuteOpts {
   readonly spawnFn: SpawnFn;
   /** Log seam — typically `process.stdout.write` in production. */
   readonly log: LogFn;
+  /**
+   * Slice 60: path to write the mlx-lm.server PID after a successful
+   * `start-mlx-server` step. Production wiring: `.minsky/local-llm.pid`.
+   * Requires `writeFileFn` — if absent, the PID write is skipped with
+   * a warning log line (non-fatal; the `/v1/models` probe is the
+   * primary liveness signal).
+   */
+  readonly serverPidPath?: string;
+  /**
+   * Slice 60: file-write seam for PID persistence. Production wiring:
+   * `(path, data) => fs.writeFileSync(path, data, "utf8")`. Tests
+   * inject a spy or no-op. Required when `serverPidPath` is set;
+   * ignored otherwise.
+   */
+  readonly writeFileFn?: (path: string, data: string) => void;
 }
 
 export interface ExecuteResult {
@@ -209,9 +245,16 @@ async function runOneStep(
   // non-interactive and keeps the slice-1 "ignore stdin" default.
   const stdinMode: "ignore" | "inherit" =
     step.type === "install-arm-homebrew" ? "inherit" : "ignore";
+  // Slice 60: start-mlx-server is a long-running daemon that never exits.
+  // Dispatching it as a foreground spawn would block indefinitely; we
+  // use detached mode so the process outlives the bootstrap call.
+  const isServerStart = step.type === "start-mlx-server";
   let result: ExecuteSpawnResult;
   try {
-    result = await opts.spawnFn(cmd, args, { stdinMode });
+    result = await opts.spawnFn(cmd, args, {
+      stdinMode,
+      ...(isServerStart ? { detached: true } : {}),
+    });
     // rule-6: handled-locally — pre-spawn errors (ENOENT/EACCES) typed as failed step, not loud-crash.
   } catch (err) {
     return {
@@ -228,7 +271,41 @@ async function runOneStep(
       reason: `exit code ${result.exitCode}${tail}`,
     };
   }
+  // Slice 60: persist the server PID so subsequent `minsky` invocations
+  // can do a secondary liveness check (kill -0 <pid>) alongside the
+  // /v1/models network probe. Non-fatal: a missing PID file doesn't
+  // stop the daemon from iterating. The null-guards are inside the
+  // helper (not here) to keep runOneStep's cognitive complexity ≤ 10.
+  if (isServerStart) {
+    maybeWriteServerPid(result.pid, opts.serverPidPath, opts.writeFileFn, opts.log);
+  }
   return { success: true };
+}
+
+/**
+ * Write the mlx-lm.server PID to `serverPidPath`. Accepts undefined
+ * for `pid` and `serverPidPath` — when either is absent, returns
+ * without writing (short-circuit, non-fatal). Extracted from
+ * `runOneStep` to keep its cognitive complexity under biome's cap.
+ */
+function maybeWriteServerPid(
+  pid: number | undefined,
+  serverPidPath: string | undefined,
+  writeFileFn: ((path: string, data: string) => void) | undefined,
+  log: LogFn,
+): void {
+  if (pid === undefined || serverPidPath === undefined) return;
+  if (writeFileFn === undefined) {
+    log(`  warning: serverPidPath set but writeFileFn not provided — PID ${pid} not persisted\n`);
+    return;
+  }
+  try {
+    writeFileFn(serverPidPath, String(pid));
+  } catch (err) {
+    log(
+      `  warning: could not write server PID to ${serverPidPath}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
 }
 
 /**

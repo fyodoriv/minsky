@@ -72,6 +72,11 @@ const TICK_LOOP_BIN = resolve(PKG_ROOT, "bin", "tick-loop.mjs");
 
 const MINSKY_HOME = process.env["MINSKY_HOME"] ?? resolve(PKG_ROOT, "..", "..");
 const WORKERS_DIR = resolve(MINSKY_HOME, ".minsky", "workers");
+// Slice 60: PID file for the background mlx-lm.server; written by the
+// bootstrap executor so subsequent `minsky` invocations can do a
+// secondary kill-0 liveness check. Lives in `.minsky/` alongside the
+// daemon workers dir for operator visibility.
+const SERVER_PID_PATH = resolve(MINSKY_HOME, ".minsky", "local-llm.pid");
 
 // Slice 8 (`minsky-cli-fresh-clone-bootstrap`): pre-flight check that
 // the dist build artifacts exist BEFORE we dynamic-import them.
@@ -556,6 +561,11 @@ async function runBootstrapLocalLlm({ force }) {
     confirm: confirmFn,
     spawnFn: spawnAdapter,
     log: (s) => process.stderr.write(s),
+    // Slice 60: write the server PID so `minsky` can do a secondary
+    // kill-0 liveness check on the next invocation (in addition to the
+    // /v1/models network probe from the skip-earlier gate).
+    serverPidPath: SERVER_PID_PATH,
+    writeFileFn: (path, data) => writeFileSync(path, data, "utf8"),
   });
   if (!result.success) {
     process.stderr.write(
@@ -911,12 +921,37 @@ function shellQuote(s) {
  * inherits the parent's stdin (lets sudo prompt for a password on the
  * operator's terminal). Default "ignore" matches slice-1 behavior.
  *
+ * Slice 60: when `opts.detached === true`, spawns as a background
+ * daemon (detached + unref) and resolves immediately after the process
+ * is created with `{ exitCode: 0, pid }`. Used for `start-mlx-server` —
+ * a long-running server that never exits, so a foreground wait would
+ * block indefinitely.
+ *
  * @param {string} command
  * @param {readonly string[]} args
- * @param {{ cwd?: string; env?: NodeJS.ProcessEnv; stdinMode?: "ignore" | "inherit" }} [opts]
+ * @param {{ cwd?: string; env?: NodeJS.ProcessEnv; stdinMode?: "ignore" | "inherit"; detached?: boolean }} [opts]
  * @returns {Promise<import("../dist/local-llm-bootstrap-executor.js").ExecuteSpawnResult>}
  */
 function spawnAdapter(command, args, opts = {}) {
+  // Slice 60: detached path for background daemons (mlx_lm.server).
+  // Output goes to /dev/null — the /v1/models probe is the liveness
+  // signal; the operator can check .minsky/local-llm.pid to find the
+  // process. Resolves on the 'spawn' event (PID is available) rather
+  // than 'close' (which would never fire).
+  if (opts.detached) {
+    return new Promise((resolveDone, rejectFail) => {
+      const child = spawn(command, args, {
+        env: opts.env ?? process.env,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      child.on("error", rejectFail);
+      child.on("spawn", () => {
+        child.unref();
+        resolveDone({ exitCode: 0, pid: child.pid });
+      });
+    });
+  }
   const stdinMode = opts.stdinMode ?? "ignore";
   return new Promise((resolveDone, rejectFail) => {
     const child = spawn(command, args, {

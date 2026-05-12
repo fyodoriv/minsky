@@ -228,6 +228,124 @@ describe("executeBootstrapPlan — empty command vector edge case", () => {
   });
 });
 
+// ---- Slice 60: start-mlx-server detached spawn + PID write ---------------
+
+describe("executeBootstrapPlan — slice 60: start-mlx-server dispatched as detached spawn", () => {
+  const serverPlan: BootstrapPlan = {
+    ready: false,
+    totalEstimatedDurationMs: 60_000,
+    totalEstimatedDownloadMb: 0,
+    steps: [
+      {
+        type: "start-mlx-server",
+        description: "Start mlx_lm.server in the background",
+        estimatedDurationMs: 60_000,
+        command: ["mlx_lm.server", "--model", "mlx-community/qwen3", "--port", "8080"],
+      },
+    ],
+  };
+
+  it("passes detached=true to spawnFn for start-mlx-server step", async () => {
+    const spawnCalls: Array<{ opts?: { detached?: boolean } }> = [];
+    const captureSpawn: SpawnFn = async (_cmd, _args, opts) => {
+      spawnCalls.push({ ...(opts !== undefined ? { opts } : {}) });
+      return { exitCode: 0, pid: 99999 };
+    };
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      log: sink,
+    });
+    expect(result.success).toBe(true);
+    expect(spawnCalls[0]?.opts?.detached).toBe(true);
+  });
+
+  it("does NOT pass detached=true for non-server steps", async () => {
+    const spawnCalls: Array<{ opts?: { detached?: boolean } }> = [];
+    const captureSpawn: SpawnFn = async (_cmd, _args, opts) => {
+      spawnCalls.push({ ...(opts !== undefined ? { opts } : {}) });
+      return { exitCode: 0 };
+    };
+    await executeBootstrapPlan(samplePlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: captureSpawn,
+      log: sink,
+    });
+    for (const call of spawnCalls) {
+      expect(call.opts?.detached).toBeFalsy();
+    }
+  });
+
+  it("calls writeFileFn with serverPidPath when pid is returned by spawnFn", async () => {
+    const written: Array<{ path: string; data: string }> = [];
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: async () => ({ exitCode: 0, pid: 42100 }),
+      log: sink,
+      serverPidPath: "/tmp/.minsky/local-llm.pid",
+      writeFileFn: (path, data) => written.push({ path, data }),
+    });
+    expect(result.success).toBe(true);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.path).toBe("/tmp/.minsky/local-llm.pid");
+    expect(written[0]?.data).toBe("42100");
+  });
+
+  it("logs a warning (not failure) when writeFileFn is absent and serverPidPath is set", async () => {
+    const logLines: string[] = [];
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: async () => ({ exitCode: 0, pid: 42100 }),
+      log: (s) => logLines.push(s),
+      serverPidPath: "/tmp/.minsky/local-llm.pid",
+      // writeFileFn intentionally absent
+    });
+    expect(result.success).toBe(true);
+    expect(logLines.some((l) => l.includes("warning") && l.includes("not persisted"))).toBe(true);
+  });
+
+  it("logs a warning (not failure) when writeFileFn throws", async () => {
+    const logLines: string[] = [];
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: async () => ({ exitCode: 0, pid: 42100 }),
+      log: (s) => logLines.push(s),
+      serverPidPath: "/tmp/.minsky/local-llm.pid",
+      writeFileFn: () => {
+        throw new Error("ENOSPC no space left on device");
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(logLines.some((l) => l.includes("warning") && l.includes("ENOSPC"))).toBe(true);
+  });
+
+  it("skips PID write when spawnFn returns no pid (detached but pid unavailable)", async () => {
+    const written: unknown[] = [];
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: async () => ({ exitCode: 0 }), // no pid field
+      log: sink,
+      serverPidPath: "/tmp/.minsky/local-llm.pid",
+      writeFileFn: (path, data) => written.push({ path, data }),
+    });
+    expect(result.success).toBe(true);
+    expect(written).toHaveLength(0);
+  });
+
+  it("skips PID write when serverPidPath is not configured", async () => {
+    const written: unknown[] = [];
+    const result = await executeBootstrapPlan(serverPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: async () => ({ exitCode: 0, pid: 42100 }),
+      log: sink,
+      // serverPidPath intentionally absent
+      writeFileFn: (path, data) => written.push({ path, data }),
+    });
+    expect(result.success).toBe(true);
+    expect(written).toHaveLength(0);
+  });
+});
+
 // ---- Slice 6: stdinMode plumbing for install-arm-homebrew ----------------
 
 describe("executeBootstrapPlan — slice 6 stdinMode", () => {
