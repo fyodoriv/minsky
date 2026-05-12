@@ -19,3 +19,15 @@ export {
   buildDispatchPayload,
 } from "./dispatch-emit.js";
 export type { DispatchPayload } from "./dispatch-emit.js";
+export {
+  extractAllowedPathsFromTaskBlock,
+  extractPrUrl,
+  runLive,
+} from "./runner.js";
+export type {
+  GitLike,
+  LiveSpawnOutcome,
+  LiveSpawnVerdict,
+  RunLiveInputs,
+  SpawnLike,
+} from "./runner.js";

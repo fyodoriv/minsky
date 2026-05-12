@@ -6,5 +6,5 @@
     "composite": true
   },
   "include": ["src"],
-  "references": [{ "path": "../sidecar-bootstrap" }]
+  "references": [{ "path": "../sidecar-bootstrap" }, { "path": "../tick-loop" }]
 }

@@ -1,0 +1,110 @@
+id: cross-repo-runner-v1-live-spawn-2026-05-11
+hypothesis: |
+  `cross-repo-runner-v0` (PR #129) and the PROJ-840 integration test
+  (PR #131) shipped a plan-only runner: `minsky-run <id> --host <dir>`
+  synthesises the EXPERIMENT.yaml, builds a `RunnerPlan`, writes a
+  `planned`-verdict iteration record. The `--live` flag printed a v0
+  placeholder telling the operator to open Claude Code manually. Two
+  chaos rows in the v0 READMEs deferred their substrate to a v1 task:
+    (a) `novel/cross-repo-runner/README.md` row 7 — sandbox-leak
+        detection requires a real spawn boundary;
+    (b) `novel/sidecar-bootstrap/README.md` row 5 — read-only
+        global-ignore fallback to per-clone `.git/info/exclude`.
+
+  This PR graduates the runner to v1 by wiring `runLive` (pure
+  orchestrator over `SpawnLike` + `GitLike` seams) to the real
+  `ProcessSpawnStrategy` from `@minsky/tick-loop` (rule #1 — reuse, do
+  not reinvent). The boundary captures `git rev-parse HEAD` →
+  `spawn claude --print` with the brief on stdin + `cwd: hostRoot` →
+  diff against baseline → record one of three verdicts: `validated`,
+  `scope-leak`, `spawn-failed`. Scope comes from the task block's
+  `**Touches**:` (fallback `**Files**:`) globs; empty scope disables
+  the leak check per rule #7 graceful-degrade. The sidecar-bootstrap's
+  global-ignore append walks an EACCES fallback to per-clone
+  `<host>/.git/info/exclude` via a new `decideIgnoreAppend` pure
+  function — chaos row 5's "deferred" deferral becomes "covered by
+  `ignore-write.test.ts`".
+
+  Pre-registered effect: paired tests for both new modules
+  (`runner.test.ts` + `ignore-write.test.ts`) pass; the integration
+  test learns a `--live` skip-path gated on
+  `MINSKY_LIVE_SPAWN_INTEGRATION=1 && which claude`; the rule-7
+  chaos-coverage lint stays at zero violations after the README
+  deferrals are replaced with real test paths.
+success: |
+  - `pnpm vitest run novel/cross-repo-runner novel/sidecar-bootstrap`
+    exits 0 with ≥ 149 passing tests (was ~118 before this PR; +21
+    runner tests, +20 ignore-write tests, +1 --live skip-path
+    integration test).
+  - `node scripts/check-rule-7-chaos-coverage.mjs` exits 0; both
+    deferred README rows now reference a real test path.
+  - `grep -q "runner.test.ts" novel/cross-repo-runner/README.md` exits 0
+    (chaos row 7 references the test file).
+  - `grep -q "ignore-write.test.ts" novel/sidecar-bootstrap/README.md`
+    exits 0 (chaos row 5 references the test file).
+  - `grep -q "ProcessSpawnStrategy" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (the CLI imports the real strategy from `@minsky/tick-loop`).
+  - `node scripts/check-anchor-primary-source.mjs experiments/cross-repo-runner-v1-live-spawn-2026-05-11.yaml`
+    exits 0.
+  - `node scripts/check-pivot-success-margin.mjs experiments/cross-repo-runner-v1-live-spawn-2026-05-11.yaml`
+    exits 0.
+  - `node scripts/check-measurement-inspects-output.mjs experiments/cross-repo-runner-v1-live-spawn-2026-05-11.yaml`
+    exits 0.
+pivot: |
+  Two pivot paths pre-registered:
+
+    1. If `ProcessSpawnStrategy.spawn` against `cwd: hostRoot` proves
+       brittle in practice (claude --print refuses to honour cwd,
+       authentication state leaks across hosts, or
+       `git diff --name-only` against the baseline misses tracked-but-
+       untouched paths > 20 % of the time), retreat to the v0
+       operator-driven mode — the CLI prints the plan and the operator
+       opens Claude Code manually. The pure `runLive` function stays
+       as a substrate the operator can re-use locally; the CLI just
+       loses its automated path. Decision boundary: < 0.20 success
+       rate (`validated` verdict / total `--live` invocations) over
+       30 days against ≥ 10 real host PRs.
+    2. If the chaos-row-7 scope-leak check has > 0.10 false-positive
+       rate (legitimate config edits in a host's standard locations
+       outside the declared `**Touches**:` globs that should be
+       allowed), relax the verdict to `inconclusive` instead of
+       `scope-leak` and surface a `scope-warning:` note for operator
+       review. The hard scope-leak verdict stays available behind an
+       opt-in `MINSKY_STRICT_SCOPE=1` env var.
+
+  Margin: success threshold ≥ 0.80; pivot 1 fires at < 0.20. The
+  60-percentage-point gap is the rule-#9 explicit pivot margin per
+  Ries 2011 build-measure-learn (clear separation between "ship more
+  of this" and "abandon the approach").
+measurement: |
+  bash -c 'cd /Users/fivanishche/apps/tooling/minsky/.worktrees/cross-repo-runner-v1-live-spawn && npx vitest run novel/cross-repo-runner novel/sidecar-bootstrap --reporter=json | jq -e ".numPassedTests >= 149 and .numFailedTests == 0" && node scripts/check-rule-7-chaos-coverage.mjs && grep -q "runner.test.ts" novel/cross-repo-runner/README.md && grep -q "ignore-write.test.ts" novel/sidecar-bootstrap/README.md && grep -q "ProcessSpawnStrategy" novel/cross-repo-runner/bin/minsky-run.mjs && echo "PASS" || (echo "FAIL" && exit 1)'
+anchor: |
+  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
+  (let-it-crash discipline only surfaces failures when the failure
+  axis is exercised — the v0 dry-run path cannot surface sandbox
+  leaks because no real spawn happens; ISBN 978-1934356005).
+  Basili, V. R., Caldiera, G., Rombach, H. D., "The Goal Question
+  Metric Approach", *Encyclopedia of Software Engineering*, 1994
+  (the Goal-Question-Metric framing — pre-registration that the v1
+  spawn's success metric is `validated`-verdict ratio, not just
+  "does the spawn complete").
+  Gamma, E., Helm, R., Johnson, R., Vlissides, J., *Design Patterns:
+  Elements of Reusable Object-Oriented Software*, Addison-Wesley,
+  1994 (Strategy pattern — `SpawnLike` + `GitLike` are the structural
+  seams; `ProcessSpawnStrategy` is the concrete; ISBN 0-201-63361-2).
+  Martin, R. C., *Clean Architecture*, Prentice Hall, 2017
+  (I/O at the edge — `runner.ts` is pure logic over the seams; the
+  CLI bin is the I/O boundary; ISBN 978-0134494166).
+  Howard, M., LeBlanc, D., *Writing Secure Code*, 2nd ed., Microsoft
+  Press, 2003 (STRIDE — the scope-leak detector is the **T**ampering
+  boundary check; sandbox containment is `circuit-break-and-notify`
+  per rule #7; ISBN 0-7356-1722-8).
+  rule #1 (vision.md § 1 — don't reinvent the wheel; `ProcessSpawnStrategy`
+  already exists in `@minsky/tick-loop`, so v1 imports it).
+  rule #6 (vision.md § 6 — let-it-crash; `runLive` never catches mid-
+  spawn; non-zero exit codes propagate as `spawn-failed` verdict).
+  rule #7 (vision.md § 7 — chaos coverage; rows 5 and 7 of the v0
+  READMEs are no longer deferred).
+  user-stories/006-runner-on-any-repo.md (the cross-repo-runner
+  umbrella story this v1 task closes against).
+timeout_seconds: 60

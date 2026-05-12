@@ -30,7 +30,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@minsky/sidecar-bootstrap": "workspace:*"
+    "@minsky/sidecar-bootstrap": "workspace:*",
+    "@minsky/tick-loop": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "25.6.0",
