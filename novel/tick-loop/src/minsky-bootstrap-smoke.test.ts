@@ -34,3 +34,29 @@ describe("maybeBootstrapLocalLlm — DI seam", () => {
     expect(result).toEqual({});
   });
 });
+
+describe("maybeBootstrapLocalLlm — skip-earlier gate seam (slice 59)", () => {
+  it("returns local-LLM env when serverProbeFn reports reachable (skips full detect)", async () => {
+    const result = await maybeBootstrapLocalLlm({
+      serverProbeFn: async () => ({ reachable: true, url: "http://127.0.0.1:8080/v1/models" }),
+    });
+    expect(result).toMatchObject({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
+  });
+
+  it("falls through to detectFn when serverProbeFn reports unreachable", async () => {
+    const fakeState = {
+      server: { reachable: true, url: "http://127.0.0.1:8080/v1/models" },
+      pipx: { present: true },
+      mlxLm: { present: true },
+      aider: { present: true },
+      huggingfaceCli: { present: true },
+      model: { present: true },
+    };
+    const result = await maybeBootstrapLocalLlm({
+      serverProbeFn: async () => ({ reachable: false, reason: "ECONNREFUSED" }),
+      // biome-ignore lint/suspicious/noExplicitAny: DI seam — test overrides the detection fn
+      detectFn: async () => fakeState as any,
+    });
+    expect(result).toMatchObject({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
+  });
+});

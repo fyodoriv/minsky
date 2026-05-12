@@ -309,6 +309,27 @@ async function runStartOrAttach(args) {
 // ---- Local-LLM auto-bootstrap pre-flight ---------------------------------
 
 /**
+ * Resolve the probe to use for the skip-earlier server gate. Extracted to
+ * keep `maybeBootstrapLocalLlm`'s cognitive complexity ≤ biome's cap of 10.
+ *
+ * Priority:
+ *   1. `_opts.serverProbeFn` — explicit seam for the skip-earlier gate alone
+ *      (slice 59: lets tests inject a synthetic probe without also injecting
+ *      `detectFn`).
+ *   2. `null` when only `detectFn` is set — the legacy seam owns all probes;
+ *      the quick probe is intentionally skipped.
+ *   3. `buildServerProbe({})` — production default.
+ *
+ * @param {{ detectFn?: unknown, serverProbeFn?: () => Promise<unknown> }} opts
+ * @returns {(() => Promise<unknown>) | null}
+ */
+function resolveQuickServerProbe(opts) {
+  if (opts.serverProbeFn) return opts.serverProbeFn;
+  if (opts.detectFn) return null;
+  return buildServerProbe({});
+}
+
+/**
  * Probe the local-LLM stack and run the install plan if needed. Idempotent
  * fast path: an already-running mlx-lm.server is detected with one fetch
  * call and we just return `MINSKY_LOCAL_LLM=1` so the spawned daemon picks
@@ -366,8 +387,9 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   // Slice 57 skip-earlier gate: probe the server alone first (one fetch
   // call, ≤2 s) before running the full 5-which + FS-stat + server batch.
   // On the common "stack already set up" cold-start path this saves ~5
-  // subprocess spawns. Skip when detectFn is injected — the seam owns probes.
-  const serverQuick = !_opts.detectFn ? await buildServerProbe({})() : null;
+  // subprocess spawns. See `resolveQuickServerProbe` for the seam priority.
+  const quickProbe = resolveQuickServerProbe(_opts);
+  const serverQuick = quickProbe ? await quickProbe() : null;
   if (serverQuick?.reachable) {
     process.stderr.write(
       `minsky: local-LLM server reachable at ${serverQuick.url} — wiring fallback\n`,
