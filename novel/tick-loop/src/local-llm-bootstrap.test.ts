@@ -3,12 +3,13 @@
  * detection orchestrator. Slice 1 of P0 task
  * `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Covers all 5 chaos-table rows from the module's JSDoc:
+ * Covers all 6 chaos-table rows from the module's JSDoc:
  *   1. Probe seam throws → loud-crash (`detectLocalLlmStack` rejects)
  *   2. Fully installed but server unreachable → single start step
  *   3. Model missing, everything else present → [download, start] plan
- *   4. Fresh machine, nothing present → full 5-step plan
+ *   4. Fresh machine, nothing present → full 6-step plan
  *   5. Idempotent fast path → empty plan + ready flag
+ *   6. huggingface-cli missing, model already cached → [install-hf-cli, start] plan
  *
  * Plus deterministic ordering + envelope-sum tests.
  */
@@ -80,6 +81,18 @@ const serverStopped: LocalLlmStackState = {
   server: UNREACHABLE,
 };
 
+// Chaos-table row 6: huggingface-cli not installed, but model already cached
+// (e.g. operator downloaded the model manually via another tool, or reinstalled
+// the OS and lost the pipx env while the HuggingFace cache survived).
+const huggingfaceCliMissing: LocalLlmStackState = {
+  pipx: PRESENT,
+  mlxLm: PRESENT,
+  aider: PRESENT,
+  huggingfaceCli: ABSENT,
+  model: { ...PRESENT, detail: "17.2 GB" },
+  server: UNREACHABLE,
+};
+
 // ---- planLocalLlmBootstrap — chaos-table rows -----------------------------
 
 describe("planLocalLlmBootstrap — chaos-table row 5: idempotent fast path", () => {
@@ -140,6 +153,38 @@ describe("planLocalLlmBootstrap — chaos-table row 2: server stopped but stack 
     expect(plan.steps).toHaveLength(1);
     expect(plan.steps[0]?.type).toBe("start-mlx-server");
     expect(plan.totalEstimatedDownloadMb).toBe(0);
+  });
+});
+
+describe("planLocalLlmBootstrap — chaos-table row 6: huggingface-cli missing, model cached", () => {
+  // Slice 52 (PR #479) added huggingface-cli as the 6th stack component.
+  // This detection state covers the case where the operator has the model
+  // weights on disk (e.g. manually downloaded, or HF cache survived an OS
+  // reinstall) but lost the pipx-installed huggingface-cli tool.  The plan
+  // must NOT re-download the model — it should only reinstall the tool and
+  // restart the server.
+  it("schedules [install-huggingface-cli, start-mlx-server] when only huggingface-cli is absent", () => {
+    const plan = planLocalLlmBootstrap(huggingfaceCliMissing);
+    expect(plan.ready).toBe(false);
+    expect(plan.steps.map((s) => s.type)).toEqual(["install-huggingface-cli", "start-mlx-server"]);
+  });
+
+  it("carries zero download envelope when model is already cached", () => {
+    const plan = planLocalLlmBootstrap(huggingfaceCliMissing);
+    expect(plan.totalEstimatedDownloadMb).toBe(0);
+  });
+
+  it("still schedules download-model when both huggingface-cli and model are absent", () => {
+    const plan = planLocalLlmBootstrap({
+      ...huggingfaceCliMissing,
+      model: ABSENT,
+    });
+    expect(plan.steps.map((s) => s.type)).toEqual([
+      "install-huggingface-cli",
+      "download-model",
+      "start-mlx-server",
+    ]);
+    expect(plan.totalEstimatedDownloadMb).toBeGreaterThan(0);
   });
 });
 
