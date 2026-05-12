@@ -16,17 +16,26 @@
 // (rule #6 — let dry-run be the safe default; failure surfaces in the
 // plan, not the side-effect).
 
+import { execFile as execFileCb } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+import { ProcessSpawnStrategy, globMatchesPath } from "@minsky/tick-loop";
 
 import {
   buildSpawnPlan,
+  extractAllowedPathsFromTaskBlock,
+  extractPrUrl,
   findTask,
   loadRepoConfig,
   renderIterationRecord,
+  runLive,
   synthesiseExperimentYaml,
 } from "../dist/index.js";
+
+const execFile = promisify(execFileCb);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MINSKY_REPO_ROOT = resolve(HERE, "..", "..", "..");
@@ -164,27 +173,163 @@ function emitDryRunReport(plan, hostRoot, hostRepo) {
   });
 }
 
-function emitLiveV0Placeholder(plan, hostRoot, hostRepo) {
-  process.stdout.write("\n=== runner plan (live mode requested — v0 placeholder) ===\n");
+/**
+ * v1 live-spawn boundary — wires `runLive` (pure orchestrator) to the real
+ * `ProcessSpawnStrategy` from `@minsky/tick-loop` and a `git execFile`
+ * probe for baseline capture + post-spawn diff. The `--live` flag is the
+ * opt-in (rule #6 — dry-run is the safe default).
+ *
+ * Scope: caller-supplied via the task block's `**Touches**:` or `**Files**:`
+ * field. Empty scope is "no scope declared" — chaos row 7's scope-leak
+ * detector short-circuits to `validated` regardless of diff (graceful-
+ * degrade per rule #7).
+ *
+ * Watchdog: 15 min default (mirrors the daemon's `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`),
+ * operator-overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
+ */
+async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
+  process.stdout.write("\n=== runner plan (live spawn) ===\n");
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-  process.stdout.write(
-    "\nv0 live-spawn placeholder: the EXPERIMENT.yaml has been written to the host sidecar.\n",
-  );
-  process.stdout.write(
-    `Next step: open Claude Code in ${hostRoot} with the system prompt above and the brief on stdin.\n`,
-  );
-  process.stdout.write(
-    "v1 will wire @minsky/tick-loop's ProcessSpawnStrategy + @minsky/budget-guard for fully autonomous spawn.\n",
-  );
+  process.stdout.write(`\nSpawning \`claude --print\` in ${hostRoot}...\n`);
+  const allowedPaths = extractAllowedPathsFromTaskBlock(rawTaskBlock);
+  if (allowedPaths.length === 0) {
+    process.stdout.write(
+      "ℹ no **Touches** or **Files** declared on the task — scope-leak check disabled.\n",
+    );
+  } else {
+    process.stdout.write(`ℹ scope: ${allowedPaths.join(", ")}\n`);
+  }
+  const timeoutMs = (() => {
+    const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
+    if (raw === undefined) return 15 * 60 * 1000;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+  })();
+  const strategy = new ProcessSpawnStrategy({
+    command: "claude",
+    args: ["--print"],
+    timeoutMs,
+    invocation: (input) => ({
+      command: "claude",
+      argv: ["--print"],
+      stdin: input.brief,
+      cwd: hostRoot,
+    }),
+  });
+  const git = makeGitProbe(hostRoot);
+  const outcome = await runLive({
+    plan,
+    allowedPaths,
+    spawn: strategy,
+    git,
+    globMatchesPath,
+  });
+  emitLiveOutcome(outcome);
   writeIterationRecord(hostRoot, {
     ts: new Date().toISOString(),
     experiment_id: plan.taskId,
     host_repo: hostRepo,
     branch: plan.branchName,
-    verdict: "planned",
-    pr_url: null,
-    notes: "live-mode v0 placeholder — operator manually drives Claude Code from here",
+    verdict: outcome.verdict,
+    pr_url: outcome.prUrl ?? extractPrUrl(outcome.stdoutTail),
+    notes: buildLiveNotes(outcome),
   });
+  return outcome.verdict === "validated" ? 0 : outcome.verdict === "scope-leak" ? 2 : 1;
+}
+
+function emitLiveOutcome(outcome) {
+  const banner =
+    outcome.verdict === "validated"
+      ? "✓ live spawn validated"
+      : outcome.verdict === "scope-leak"
+        ? "✗ live spawn scope-leak"
+        : "✗ live spawn failed";
+  process.stdout.write(`\n${banner} (exit=${outcome.exitCode}, ${outcome.durationMs}ms)\n`);
+  if (outcome.verdict === "scope-leak") {
+    process.stdout.write("  out-of-scope paths:\n");
+    for (const p of outcome.scopeLeakPaths) process.stdout.write(`    - ${p}\n`);
+  }
+  if (outcome.verdict === "spawn-failed" && outcome.stderrTail.length > 0) {
+    process.stdout.write(`  stderr tail:\n${indent(outcome.stderrTail, "    ")}\n`);
+  }
+  if (outcome.prUrl !== null) {
+    process.stdout.write(`  PR: ${outcome.prUrl}\n`);
+  }
+}
+
+function buildLiveNotes(outcome) {
+  const base = `live; exit=${outcome.exitCode}; ${outcome.durationMs}ms; baseline=${outcome.baselineRef}`;
+  if (outcome.verdict === "scope-leak") {
+    return `${base}; leaked=${outcome.scopeLeakPaths.length}: ${outcome.scopeLeakPaths.join(",")}`;
+  }
+  if (outcome.verdict === "spawn-failed") {
+    return `${base}; stderr-tail=${outcome.stderrTail.slice(-200)}`;
+  }
+  return base;
+}
+
+function indent(text, prefix) {
+  return text
+    .split("\n")
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
+}
+
+/**
+ * Build the GitLike probe over `child_process.execFile("git", …)`. Captures
+ * `git rev-parse HEAD` before the spawn; lists `git diff --name-only <baseline>`
+ * paths afterwards. Pure I/O wrapper; failures bubble to `runLive` per
+ * let-it-crash discipline (Armstrong 2007).
+ */
+function makeGitProbe(hostRoot) {
+  return {
+    async captureBaseline() {
+      try {
+        const { stdout } = await execFile("git", ["rev-parse", "HEAD"], { cwd: hostRoot });
+        return stdout.trim();
+      } catch {
+        // No commit yet (fresh `git init` without first commit) — use the
+        // empty-tree SHA as the baseline so the diff reports every staged
+        // file as "changed" (a conservative scope check for fresh hosts).
+        return "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+      }
+    },
+    async changedFiles({ sinceRef }) {
+      try {
+        const { stdout } = await execFile("git", ["diff", "--name-only", sinceRef, "--", "."], {
+          cwd: hostRoot,
+        });
+        return stdout
+          .split("\n")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+      } catch {
+        // `git diff` failing (e.g. detached HEAD vs invalid baseline) is
+        // treated as "no changes detected" — operator inspects manually.
+        return [];
+      }
+    },
+  };
+}
+
+/**
+ * Extract the raw task-block text from the host's TASKS.md by **ID** field.
+ * The block spans from the nearest `- [ ] ` checkbox above the ID line down
+ * to the next checkbox or `## ` heading. Mirrors the daemon's
+ * `extractTaskBlock` semantics for cross-repo input where the task ID is
+ * not embedded in the heading-backticks.
+ */
+function extractRawTaskBlock(tasksMd, taskId) {
+  const escaped = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const idRegex = new RegExp(`^\\s*-?\\s*\\*\\*ID\\*\\*:\\s*${escaped}\\s*$`, "m");
+  const match = tasksMd.match(idRegex);
+  if (match === null || match.index === undefined) return "";
+  const before = tasksMd.slice(0, match.index);
+  const lastCheckboxIdx = before.lastIndexOf("\n- [");
+  const start = lastCheckboxIdx < 0 ? 0 : lastCheckboxIdx + 1;
+  const tail = tasksMd.slice(start);
+  const next = tail.slice(2).search(/\n(?:- \[[ x]\] |## )/);
+  return next < 0 ? tail : tail.slice(0, next + 2);
 }
 
 async function runPlanned(taskId, hostRoot, live) {
@@ -208,10 +353,10 @@ async function runPlanned(taskId, hostRoot, live) {
   });
   writeExperimentYaml(plan.experimentYamlPath, synth.yaml);
   if (live) {
-    emitLiveV0Placeholder(plan, hostRoot, config.host_repo);
-  } else {
-    emitDryRunReport(plan, hostRoot, config.host_repo);
+    const rawBlock = extractRawTaskBlock(tasksMd, taskResult.task.id);
+    return await emitLiveSpawn(plan, hostRoot, config.host_repo, rawBlock);
   }
+  emitDryRunReport(plan, hostRoot, config.host_repo);
   return 0;
 }
 
