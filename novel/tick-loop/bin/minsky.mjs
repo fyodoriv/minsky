@@ -120,6 +120,7 @@ const {
   PATH_CONFIG_KEYS,
   buildProductionProbes,
   buildServerProbe,
+  buildServerReadinessPoll,
   checkGitConfigPaths,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
@@ -576,7 +577,39 @@ async function runBootstrapLocalLlm({ force }) {
     );
     return {};
   }
+  // Slice 62: wait for the server to be reachable after start-mlx-server is
+  // spawned detached. Non-fatal: poll timeout lets the daemon retry on first use.
+  const serverStarted = plan.steps.some((s) => s.type === "start-mlx-server");
+  if (serverStarted) await waitForServerReadiness();
   return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+}
+
+/**
+ * Slice 62: bounded readiness poll after `start-mlx-server` spawns detached.
+ * MLX model load takes 30-90 s; without this the daemon's first request gets
+ * ECONNREFUSED. Extracted from `runBootstrapLocalLlm` to keep its complexity ≤ 10.
+ * Optimisation: round-trip elimination — prevents N failed requests during the
+ * model-load window.
+ */
+async function waitForServerReadiness() {
+  process.stderr.write(
+    "minsky: waiting for local-LLM server to load model (may take 2-5 min)...\n",
+  );
+  const poll = buildServerReadinessPoll({
+    serverProbeFn: buildServerProbe({ serverPidPath: SERVER_PID_PATH }),
+    maxAttempts: 30,
+    intervalMs: 10_000,
+  });
+  const { reachable, attempts } = await poll();
+  if (reachable) {
+    process.stderr.write(
+      `minsky: local-LLM server ready (after ${attempts} probe${attempts === 1 ? "" : "s"})\n`,
+    );
+  } else {
+    process.stderr.write(
+      "minsky: timed out waiting for local-LLM server (5 min); daemon will retry on first use\n",
+    );
+  }
 }
 
 /**

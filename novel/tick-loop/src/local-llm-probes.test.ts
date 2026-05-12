@@ -21,6 +21,7 @@ import {
   buildModelProbe,
   buildProductionProbes,
   buildServerProbe,
+  buildServerReadinessPoll,
   buildWhichProbe,
   modelCachePath,
   probePythonWithDefaults,
@@ -371,5 +372,79 @@ describe("buildProductionProbes — expectedPipxPath override (slice 7 H0)", () 
     const [mlx, aider] = await Promise.all([probes.probeMlxLm(), probes.probeAider()]);
     expect(mlx.path).toBe("/usr/local/bin/mlx_lm.server");
     expect(aider.path).toBe("/usr/local/bin/aider");
+  });
+});
+
+// ---- buildServerReadinessPoll (slice 62) --------------------------------
+
+describe("buildServerReadinessPoll — reachable on first attempt", () => {
+  it("returns { reachable: true, attempts: 1 } without calling sleepFn", async () => {
+    let sleptMs = 0;
+    const poll = buildServerReadinessPoll({
+      serverProbeFn: async () => ({ reachable: true, url: "http://127.0.0.1:8080/v1/models" }),
+      sleepFn: async (ms) => {
+        sleptMs += ms;
+      },
+    });
+    const result = await poll();
+    expect(result).toEqual({ reachable: true, attempts: 1 });
+    expect(sleptMs).toBe(0);
+  });
+});
+
+describe("buildServerReadinessPoll — reachable on Nth attempt", () => {
+  it("retries until reachable and returns the correct attempt count", async () => {
+    let calls = 0;
+    const poll = buildServerReadinessPoll({
+      serverProbeFn: async () => {
+        calls += 1;
+        return calls >= 3
+          ? { reachable: true, url: "http://127.0.0.1:8080/v1/models" }
+          : { reachable: false, url: "http://127.0.0.1:8080/v1/models", reason: "ECONNREFUSED" };
+      },
+      sleepFn: async () => {},
+    });
+    const result = await poll();
+    expect(result).toEqual({ reachable: true, attempts: 3 });
+  });
+});
+
+describe("buildServerReadinessPoll — chaos-table row 1: timeout exhausted", () => {
+  it("returns { reachable: false, attempts: maxAttempts } when never reachable", async () => {
+    const poll = buildServerReadinessPoll({
+      serverProbeFn: async () => ({
+        reachable: false,
+        url: "http://127.0.0.1:8080/v1/models",
+        reason: "ECONNREFUSED",
+      }),
+      maxAttempts: 3,
+      sleepFn: async () => {},
+    });
+    const result = await poll();
+    expect(result).toEqual({ reachable: false, attempts: 3 });
+  });
+});
+
+describe("buildServerReadinessPoll — sleepFn called between attempts only", () => {
+  it("calls sleepFn with intervalMs between each failed attempt but not after success", async () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    const poll = buildServerReadinessPoll({
+      serverProbeFn: async () => {
+        calls += 1;
+        // Fail attempts 1-2, succeed on attempt 3.
+        return calls >= 3
+          ? { reachable: true, url: "http://127.0.0.1:8080/v1/models" }
+          : { reachable: false, url: "http://127.0.0.1:8080/v1/models", reason: "ECONNREFUSED" };
+      },
+      maxAttempts: 5,
+      intervalMs: 1234,
+      sleepFn: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+    await poll();
+    // Attempt 1 fails → sleep. Attempt 2 fails → sleep. Attempt 3 succeeds → no sleep.
+    expect(sleeps).toEqual([1234, 1234]);
   });
 });

@@ -783,6 +783,7 @@ export {
   buildModelProbe,
   buildProductionProbes,
   buildServerProbe,
+  buildServerReadinessPoll,
   buildWhichProbe,
   modelCachePath,
   probePythonWithDefaults,

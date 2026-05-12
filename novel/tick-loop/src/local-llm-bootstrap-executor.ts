@@ -301,6 +301,7 @@ function maybeWriteServerPid(
   }
   try {
     writeFileFn(serverPidPath, String(pid));
+    // rule-6: handled-locally — PID file write failure is non-fatal; the server still runs, the kill-0 guard just won't engage on next invocation
   } catch (err) {
     log(
       `  warning: could not write server PID to ${serverPidPath}: ${err instanceof Error ? err.message : String(err)}\n`,

@@ -206,8 +206,8 @@ async function probeNetwork(
   try {
     const resp = await fetchFn(url, { method: "GET", signal: ac.signal });
     if (resp.ok) return { reachable: true, url };
-    // rule-6: handled-locally — typed fetch errors into short reason; planner only branches on reachable.
     return { reachable: false, url, reason: `http ${resp.status}` };
+    // rule-6: handled-locally — fetch errors (ECONNREFUSED, AbortError, etc.) are typed into short reason strings; planner branches on reachable only
   } catch (err) {
     return { reachable: false, url, reason: classifyFetchError(err, timeoutMs) };
   } finally {
@@ -233,14 +233,15 @@ function readLivePidFromFile(
     const raw = read(pidPath, "utf8").trim();
     pid = Number.parseInt(raw, 10);
     if (!Number.isFinite(pid) || pid <= 0) return undefined;
+    // rule-6: handled-locally — ENOENT/EACCES on the PID file are expected (file deleted between runs); returning undefined lets the planner schedule start-mlx-server
   } catch {
-    return undefined; // file missing or unreadable
+    return undefined;
   }
   try {
     kill(pid, 0); // throws ESRCH when dead; EPERM when alive but unpermissioned
     return pid;
+    // rule-6: handled-locally — ESRCH (process dead) → return undefined; EPERM (alive but not signable) → treat as alive to avoid spawning duplicate
   } catch (err) {
-    // EPERM → process alive but we can't signal it — treat as alive.
     return (err as { code?: string }).code === "EPERM" ? pid : undefined;
   }
 }
@@ -433,5 +434,62 @@ export function buildExistsProbe(
       return { present: true, path };
     }
     return { present: false, reason: `${path} does not exist` };
+  };
+}
+
+// ---- buildServerReadinessPoll (slice 62) ---------------------------------
+
+/**
+ * Build a bounded server-readiness poll. Called after
+ * {@link executeBootstrapPlan} spawns `start-mlx-server` (detached) to
+ * wait until the MLX model is loaded into GPU VRAM (30-90 s on M-series
+ * hardware) before the daemon makes its first local-LLM request.
+ *
+ * Without this poll, the daemon gets `ECONNREFUSED` on its first request
+ * and falls back to Claude (or retries with backoff), wasting wall-clock
+ * time and potentially burning Claude credits. The poll blocks
+ * `runBootstrapLocalLlm` until the server is accepting connections.
+ *
+ * Optimisation category: **round-trip elimination** — prevents N failed
+ * requests from the daemon during the model-load window.
+ *
+ * Pattern conformance (rule #8):
+ *   - **Readiness probe** — Burns et al., "Borg, Omega, and Kubernetes",
+ *     *ACM Queue* 14 (1) 2016 — standard pattern for blocking consumers
+ *     until a dependency is ready. Conformance: full.
+ *   - **Adapter** — `sleepFn` seam keeps the function testable without
+ *     real timers; `serverProbeFn` seam reuses the existing probe contract.
+ *     Conformance: full.
+ *
+ * Failure mode (rule #7):
+ *
+ * | # | Failure mode | Expected behavior | Chaos test |
+ * |---|---|---|---|
+ * | 1 | Server never becomes reachable in window | Returns `{ reachable: false, attempts: maxAttempts }` — non-fatal; daemon retries on first use | "timeout exhausted" test |
+ *
+ * @param opts.serverProbeFn — the same probe produced by {@link buildServerProbe}.
+ * @param opts.maxAttempts — max probe calls before giving up (default 30 = 5 min at 10 s/interval).
+ * @param opts.intervalMs — ms to sleep between failed probes (default 10 000 ms).
+ * @param opts.sleepFn — injectable sleep seam; defaults to `setTimeout`.
+ *
+ * @otel tick-loop.local-llm-probes.readiness-poll
+ */
+export function buildServerReadinessPoll(opts: {
+  readonly serverProbeFn: () => Promise<ServerState>;
+  readonly maxAttempts?: number;
+  readonly intervalMs?: number;
+  readonly sleepFn?: (ms: number) => Promise<void>;
+}): () => Promise<{ reachable: boolean; attempts: number }> {
+  const maxAttempts = opts.maxAttempts ?? 30;
+  const intervalMs = opts.intervalMs ?? 10_000;
+  const sleepFn: (ms: number) => Promise<void> =
+    opts.sleepFn ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
+  return async () => {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const state = await opts.serverProbeFn();
+      if (state.reachable) return { reachable: true, attempts: attempt + 1 };
+      if (attempt < maxAttempts - 1) await sleepFn(intervalMs);
+    }
+    return { reachable: false, attempts: maxAttempts };
   };
 }
