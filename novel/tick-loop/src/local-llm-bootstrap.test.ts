@@ -115,7 +115,13 @@ describe("planLocalLlmBootstrap — chaos-table row 4: fresh machine", () => {
     const plan = planLocalLlmBootstrap(freshMachine);
     expect(plan.totalEstimatedDurationMs).toBeGreaterThan(0);
     const downloadStep = plan.steps.find((s) => s.type === "download-model");
-    expect(downloadStep?.command).toEqual(["hf", "download", DEFAULT_LOCAL_LLM_MODEL]);
+    expect(downloadStep?.command).toEqual(["huggingface-cli", "download", DEFAULT_LOCAL_LLM_MODEL]);
+  });
+
+  it("install-huggingface-cli step uses huggingface_hub[cli] package (not bare huggingface_hub)", () => {
+    const plan = planLocalLlmBootstrap(freshMachine);
+    const installStep = plan.steps.find((s) => s.type === "install-huggingface-cli");
+    expect(installStep?.command).toEqual(["pipx", "install", "huggingface_hub[cli]"]);
   });
 });
 
