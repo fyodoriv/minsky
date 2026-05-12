@@ -4,7 +4,13 @@
 
 > `minsky run <task-id> --host <host-dir>` — ship a task in a host repo under minsky's full constitution.
 
-Step 5 of 7 in the cross-repo-runner roadmap. Built on top of `@minsky/sidecar-bootstrap` (the host's `.minsky/` substrate) and the host-root-resolver (lints honour `MINSKY_HOST_ROOT`). The runner is the orchestrator that reads the host's overlay, finds the task, synthesises an `EXPERIMENT.yaml` per rule #9, and (in v1) spawns Claude Code wrapped in `BudgetGuard`.
+Step 5 of 7 in the cross-repo-runner roadmap. Built on top of `@minsky/sidecar-bootstrap` (the host's `.minsky/` substrate) and the host-root-resolver (lints honour `MINSKY_HOST_ROOT`). The runner is the orchestrator that reads the host's overlay, finds the task, synthesises an `EXPERIMENT.yaml` per rule #9, and (in v1) spawns Claude Code via `@minsky/tick-loop`'s `ProcessSpawnStrategy` against the host worktree.
+
+## `runLive` (v1 live-spawn boundary)
+
+`src/runner.ts` exports `runLive`, the pure orchestrator that wires three injected seams — `SpawnLike` (typically `@minsky/tick-loop`'s `ProcessSpawnStrategy`), `GitLike` (capture-baseline + changed-files probe), and a `globMatchesPath` matcher. The boundary is: capture `git rev-parse HEAD` → spawn `claude --print` with the brief on stdin and `cwd: hostRoot` → diff against baseline → record one of three verdicts: `validated` (no scope leak), `scope-leak` (writes outside the task's `**Touches**:` / `**Files**:` globs), or `spawn-failed` (non-zero exit). The CLI flag is `--live`; dry-run remains the safe default per rule #6.
+
+Allowed paths default to the task block's `**Touches**:` field (fallback to `**Files**:`); when neither is declared, the scope-leak check is disabled (`graceful-degrade` per rule #7 — operator opted out of scope enforcement). Watchdog defaults to 15 min, overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
 
 ## `dispatch-emit` (decision C2 hook, v0)
 
@@ -46,7 +52,7 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 4 | Task block missing rule-#9 fields (Hypothesis / Success / Pivot / Measurement / Anchor) | rule-#9 violation | `loud-crash-supervisor-restart` — runner exits 1 with all missing field names; `Rule #9 is iron — no exemption` message | covered by `experiment-synth.test.ts` (multi-missing assert test cases) |
 | 5 | Sidecar `experiment-store/cross-repo/` doesn't exist | filesystem | `graceful-degrade` — runner creates the directory recursively before append | manual smoke test verifies the runner creates the missing directory and appends the record |
 | 6 | Two `minsky-run` invocations race against the same task on the same host | concurrency | `graceful-degrade` — both runs produce the same dry-run plan; v0's append-only iteration-store records two `planned` lines instead of one (operator deduplicates manually); v1's live-spawn boundary will add a per-host file-lock | manual integration assert: parallel invocations both exit 0 with identical plans |
-| 7 | Spawned Claude Code modifies host tracked files outside the task scope | sandbox-leak (v1) | `circuit-break-and-notify` — runner re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` | (deferred — covered when `cross-repo-runner-v1-live-spawn` ships and the live-spawn path is exercised) |
+| 7 | Spawned Claude Code modifies host tracked files outside the task scope | sandbox-leak | `circuit-break-and-notify` — runner re-reads `git diff` after spawn; out-of-scope changes record `verdict: scope-leak` and refuse to extract a PR URL | covered by `runner.test.ts` (`scope-leak when spawn writes a file outside allowedPaths` + `scope-leak captures EVERY leaked path` + `scope-leak does NOT extract PR URL` test cases) |
 
 ## Threat model
 

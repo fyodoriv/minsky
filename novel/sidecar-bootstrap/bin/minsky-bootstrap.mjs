@@ -33,7 +33,14 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NO_HOST_SIGNALS, diagnose, inferRepoConfig, planBootstrap } from "../dist/index.js";
+import {
+  NO_HOST_SIGNALS,
+  classifyWriteError,
+  decideIgnoreAppend,
+  diagnose,
+  inferRepoConfig,
+  planBootstrap,
+} from "../dist/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MINSKY_REPO_ROOT = resolve(HERE, "..", "..", "..");
@@ -160,24 +167,72 @@ function applyCreateSymlink(action) {
   process.stdout.write(`✓ linked ${action.linkPath} -> ${action.target}\n`);
 }
 
-function applyAppendToIgnore(action) {
-  mkdirSync(dirname(action.ignoreFile), { recursive: true });
-  let prefix = "";
-  try {
-    const existing = readFileSync(action.ignoreFile, "utf8");
-    if (existing.length > 0 && !existing.endsWith("\n")) prefix = "\n";
-  } catch {
-    // file doesn't exist; we'll create it.
+/**
+ * Append the `.minsky/` sidecar marker to the operator's ignore substrate.
+ * Walks `decideIgnoreAppend`'s fallback ladder (chaos row 5):
+ *   1. Try the global git ignore (decision A2's primary surface).
+ *   2. On EACCES / EPERM / EROFS, retry against `<host>/.git/info/exclude`
+ *      (per-clone fallback documented in `docs/cross-repo-portability.md`).
+ *   3. On non-EACCES failures, surface the error without retrying — the
+ *      operator's `git`/fs setup needs manual attention.
+ */
+function applyAppendToIgnore(action, hostRoot) {
+  const perCloneExcludeFile = resolve(hostRoot, ".git", "info", "exclude");
+  const verdict = decideIgnoreAppend({
+    globalIgnoreFile: action.ignoreFile,
+    perCloneExcludeFile,
+    entry: action.entry,
+    writeFn: (path, payload) => attemptIgnoreAppend(path, payload),
+  });
+  if (verdict.kind === "wrote-global") {
+    process.stdout.write(`✓ appended "${action.entry}" to ${verdict.path}\n`);
+    return;
   }
-  writeFileSync(
-    action.ignoreFile,
-    `${prefix}# minsky sidecar (auto-added by minsky-bootstrap)\n${action.entry}\n`,
-    { flag: "a" },
-  );
-  process.stdout.write(`✓ appended "${action.entry}" to ${action.ignoreFile}\n`);
+  if (verdict.kind === "wrote-per-clone") {
+    process.stdout.write(
+      `⚠ global ignore unwritable; fell back to per-clone exclude: ${verdict.path}\n`,
+    );
+    process.stdout.write(
+      "  (chaos row 5 — global git ignore was read-only. Operator: fix the global file when convenient.)\n",
+    );
+    return;
+  }
+  if (verdict.kind === "skipped-already") {
+    process.stdout.write(`ℹ ${verdict.path} already contains "${action.entry}" — skipped\n`);
+    return;
+  }
+  const tried = verdict.tried.map((t) => `${t.path} (${t.verdict})`).join(", ");
+  process.stderr.write(`failed to append "${action.entry}" to any ignore substrate: ${tried}\n`);
+  process.exit(1);
 }
 
-function applyAction(action) {
+/**
+ * Adapter: do the actual `writeFileSync` and translate the result into the
+ * `WriteVerdict` shape `decideIgnoreAppend` walks. Production wiring; tests
+ * inject a synthetic writer directly into `decideIgnoreAppend`.
+ */
+function attemptIgnoreAppend(path, payload) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+  } catch (err) {
+    return classifyWriteError(err);
+  }
+  let prefix = "";
+  try {
+    const existing = readFileSync(path, "utf8");
+    if (existing.length > 0 && !existing.endsWith("\n")) prefix = "\n";
+  } catch {
+    // file doesn't exist; the write will create it.
+  }
+  try {
+    writeFileSync(path, `${prefix}${payload}`, { flag: "a" });
+    return "ok";
+  } catch (err) {
+    return classifyWriteError(err);
+  }
+}
+
+function applyAction(action, hostRoot) {
   switch (action.kind) {
     case "ensure-directory":
       return applyEnsureDirectory(action);
@@ -186,7 +241,7 @@ function applyAction(action) {
     case "create-symlink":
       return applyCreateSymlink(action);
     case "append-to-ignore":
-      return applyAppendToIgnore(action);
+      return applyAppendToIgnore(action, hostRoot);
     case "log-info":
       process.stdout.write(`ℹ ${action.message}\n`);
       return;
@@ -234,7 +289,7 @@ async function runBootstrap(hostRoot) {
   const lockDir = acquireLock(hostRoot);
   try {
     for (const action of plan.actions) {
-      applyAction(action);
+      applyAction(action, hostRoot);
     }
   } finally {
     releaseLock(lockDir);
