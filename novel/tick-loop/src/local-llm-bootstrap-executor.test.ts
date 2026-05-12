@@ -289,3 +289,133 @@ describe("executeBootstrapPlan — slice 6 stdinMode", () => {
     }
   });
 });
+
+// ---- Slice 58: start-mlx-server detached spawn path ---------------------
+
+const serverStep = {
+  type: "start-mlx-server" as const,
+  description: "Start mlx_lm.server in the background",
+  estimatedDurationMs: 60_000,
+  command: ["mlx_lm.server", "--model", "test-model", "--host", "127.0.0.1", "--port", "8080"],
+};
+
+const serverOnlyPlan: BootstrapPlan = {
+  ready: false,
+  totalEstimatedDurationMs: 60_000,
+  totalEstimatedDownloadMb: 0,
+  steps: [serverStep],
+};
+
+describe("executeBootstrapPlan — slice 58: start-mlx-server detached spawn", () => {
+  it("chaos row A: spawnDetachedFn called, PID written, server polled → success", async () => {
+    const spawnedPid = 99_999;
+    let spawnDetachedCalled = false;
+    let writtenPath: string | undefined;
+    let writtenPid: number | undefined;
+    let pollCalled = false;
+
+    const result = await executeBootstrapPlan(serverOnlyPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: okSpawn,
+      spawnDetachedFn: (_cmd, _args) => {
+        spawnDetachedCalled = true;
+        return { pid: spawnedPid };
+      },
+      writePidFn: (path, pid) => {
+        writtenPath = path;
+        writtenPid = pid;
+      },
+      pollServerFn: async (_url, _timeoutMs) => {
+        pollCalled = true;
+        return true;
+      },
+      localLlmPidPath: "/tmp/test-local-llm.pid",
+      log: sink,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.stepsRun).toBe(1);
+    expect(spawnDetachedCalled).toBe(true);
+    expect(writtenPid).toBe(spawnedPid);
+    expect(writtenPath).toBe("/tmp/test-local-llm.pid");
+    expect(pollCalled).toBe(true);
+  });
+
+  it("chaos row B: server poll returns false → failure with descriptive reason", async () => {
+    const result = await executeBootstrapPlan(serverOnlyPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: okSpawn,
+      spawnDetachedFn: () => ({ pid: 12_345 }),
+      pollServerFn: async () => false,
+      log: sink,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep).toBe("start-mlx-server");
+    expect(result.reason).toMatch(/did not become reachable/);
+  });
+
+  it("chaos row C: spawnDetachedFn throws → failure captured (no throw)", async () => {
+    const result = await executeBootstrapPlan(serverOnlyPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: okSpawn,
+      spawnDetachedFn: () => {
+        throw new Error("ENOENT: mlx_lm.server not found");
+      },
+      log: sink,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep).toBe("start-mlx-server");
+    expect(result.reason).toMatch(/ENOENT/);
+  });
+
+  it("chaos row D: no spawnDetachedFn → falls back to spawnFn (backward compat)", async () => {
+    let spawnFnCalled = false;
+    const result = await executeBootstrapPlan(serverOnlyPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: async () => {
+        spawnFnCalled = true;
+        return { exitCode: 0 };
+      },
+      log: sink,
+    });
+
+    expect(result.success).toBe(true);
+    expect(spawnFnCalled).toBe(true);
+  });
+
+  it("poll URL is derived from --host/--port in step command", async () => {
+    let polledUrl: string | undefined;
+    await executeBootstrapPlan(serverOnlyPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: okSpawn,
+      spawnDetachedFn: () => ({ pid: 1 }),
+      pollServerFn: async (url) => {
+        polledUrl = url;
+        return true;
+      },
+      log: sink,
+    });
+
+    expect(polledUrl).toBe("http://127.0.0.1:8080/v1/models");
+  });
+
+  it("PID write failure is non-fatal — step still succeeds", async () => {
+    const logs: string[] = [];
+    const result = await executeBootstrapPlan(serverOnlyPlan, {
+      confirm: confirmAlwaysYes,
+      spawnFn: okSpawn,
+      spawnDetachedFn: () => ({ pid: 42 }),
+      writePidFn: () => {
+        throw new Error("EACCES: permission denied");
+      },
+      pollServerFn: async () => true,
+      localLlmPidPath: "/tmp/test.pid",
+      log: (s) => logs.push(s),
+    });
+
+    expect(result.success).toBe(true);
+    expect(logs.some((l) => l.includes("PID file write failed"))).toBe(true);
+  });
+});

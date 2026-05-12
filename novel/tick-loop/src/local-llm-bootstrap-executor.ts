@@ -95,6 +95,36 @@ export type ConfirmFn = (summary: string) => Promise<boolean>;
 /** Log seam — `process.stdout.write` in production. */
 export type LogFn = (line: string) => void;
 
+/**
+ * Detached-spawn seam for the `start-mlx-server` step. Spawns the
+ * server process detached (does NOT wait for exit) and returns its PID.
+ * Production wiring calls `child_process.spawn({ detached: true })` +
+ * `child.unref()`; tests inject `(_cmd, _args) => ({ pid: 99999 })`.
+ *
+ * Throws on pre-spawn errors (ENOENT, EACCES) — captured by the caller
+ * as a failure result (chaos row C).
+ */
+export type SpawnDetachedFn = (
+  command: string,
+  args: readonly string[],
+  opts?: { cwd?: string; env?: NodeJS.ProcessEnv },
+) => { pid: number };
+
+/**
+ * Server readiness poll — retries GET against the server URL until it
+ * responds with HTTP 200 or `timeoutMs` elapses. Returns `true` on
+ * first success, `false` on timeout. Production wiring uses
+ * `globalThis.fetch`; tests inject `async () => true` / `async () => false`.
+ */
+export type PollServerFn = (url: string, timeoutMs: number) => Promise<boolean>;
+
+/**
+ * PID-file write seam — `writeFileSync(path, String(pid))` in
+ * production. Tests inject a capture function. Failure is non-fatal:
+ * the caller logs a warning and continues (PID file is informational).
+ */
+export type WritePidFn = (path: string, pid: number) => void;
+
 export interface ExecuteOpts {
   /**
    * Operator-confirm function. Receives the human-readable plan
@@ -110,6 +140,32 @@ export interface ExecuteOpts {
   readonly spawnFn: SpawnFn;
   /** Log seam — typically `process.stdout.write` in production. */
   readonly log: LogFn;
+  /**
+   * Slice 58: detached-spawn seam for the `start-mlx-server` step.
+   * When present, `runOneStep` dispatches to `runServerStep` which
+   * spawns the server detached (non-blocking), writes its PID, and
+   * polls for readiness. When absent, falls through to `spawnFn`
+   * (backward-compat for tests that don't need the detached path).
+   */
+  readonly spawnDetachedFn?: SpawnDetachedFn;
+  /**
+   * Server readiness poll — called after detached spawn. Returns `true`
+   * once the server is reachable. When absent, the step returns success
+   * immediately without polling (test fast path).
+   */
+  readonly pollServerFn?: PollServerFn;
+  /**
+   * PID-file write — called with the server's PID after detached spawn.
+   * Non-fatal on failure. When absent (or `localLlmPidPath` absent), no
+   * PID file is written.
+   */
+  readonly writePidFn?: WritePidFn;
+  /**
+   * Absolute path for the server PID file. Typically
+   * `<MINSKY_HOME>/.minsky/local-llm.pid`. No-op when `writePidFn` is
+   * absent.
+   */
+  readonly localLlmPidPath?: string;
 }
 
 export interface ExecuteResult {
@@ -184,6 +240,98 @@ export async function executeBootstrapPlan(
 }
 
 /**
+ * Extract the `http://<host>:<port>/v1/models` probe URL from the
+ * `start-mlx-server` command argv. Pure helper — reads `--host` and
+ * `--port` flags; falls back to `127.0.0.1:8080` when absent.
+ *
+ * @otel-exempt pure parser, no I/O, no span.
+ */
+function extractServerUrl(command: readonly string[]): string {
+  const hostIdx = command.indexOf("--host");
+  const portIdx = command.indexOf("--port");
+  const host = hostIdx !== -1 ? (command[hostIdx + 1] ?? "127.0.0.1") : "127.0.0.1";
+  const port = portIdx !== -1 ? (command[portIdx + 1] ?? "8080") : "8080";
+  return `http://${host}:${port}/v1/models`;
+}
+
+/**
+ * Attempt detached spawn; return `{ pid }` on success or an error string on failure.
+ * Extracted so `runServerStep` stays under biome's cognitive-complexity cap of 10.
+ */
+function trySpawnDetached(
+  cmd: string,
+  args: readonly string[],
+  spawnDetachedFn: SpawnDetachedFn,
+): { pid: number } | { err: string } {
+  try {
+    return { pid: spawnDetachedFn(cmd, args).pid };
+  } catch (err) {
+    return { err: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Write the server PID file, logging a non-fatal warning on failure.
+ * Extracted so `runServerStep` stays under biome's cognitive-complexity cap of 10.
+ */
+function tryWritePid(path: string, pid: number, opts: ExecuteOpts): void {
+  if (opts.writePidFn === undefined) return;
+  try {
+    opts.writePidFn(path, pid);
+  } catch (err) {
+    opts.log(
+      `  ⚠ PID file write failed (${err instanceof Error ? err.message : String(err)}) — continuing\n`,
+    );
+  }
+}
+
+/**
+ * Detached-spawn path for the `start-mlx-server` step. Extracted from
+ * `runOneStep` to keep the outer loop's cognitive complexity ≤ biome's
+ * cap of 10.
+ *
+ * Sequence:
+ *   1. Spawn the server process detached (non-blocking; returns PID).
+ *   2. Write PID to `opts.localLlmPidPath` via `opts.writePidFn` (non-fatal
+ *      on failure — log warning + continue; PID file is informational).
+ *   3. Poll `opts.pollServerFn` until reachable or timeout.
+ *
+ * Failure modes:
+ *   - Pre-spawn ENOENT/EACCES → captured as failure (chaos row C).
+ *   - PID write error → non-fatal; logged + continue.
+ *   - Poll timeout → failure: "server did not become reachable within timeout".
+ */
+async function runServerStep(
+  step: InstallStep,
+  opts: ExecuteOpts & { readonly spawnDetachedFn: SpawnDetachedFn },
+): Promise<{ success: boolean; failedStep?: InstallStep["type"]; reason?: string }> {
+  const [cmd, ...args] = step.command;
+  if (cmd === undefined) {
+    return { success: false, failedStep: step.type, reason: "empty command vector" };
+  }
+  const spawnResult = trySpawnDetached(cmd, args, opts.spawnDetachedFn);
+  if ("err" in spawnResult) {
+    return { success: false, failedStep: step.type, reason: spawnResult.err };
+  }
+  if (opts.localLlmPidPath !== undefined) {
+    tryWritePid(opts.localLlmPidPath, spawnResult.pid, opts);
+  }
+  if (opts.pollServerFn !== undefined) {
+    const probeUrl = extractServerUrl(step.command);
+    const timeoutMs = step.estimatedDurationMs ?? 60_000;
+    const reachable = await opts.pollServerFn(probeUrl, timeoutMs);
+    if (!reachable) {
+      return {
+        success: false,
+        failedStep: step.type,
+        reason: "server did not become reachable within timeout",
+      };
+    }
+  }
+  return { success: true };
+}
+
+/**
  * Run one install step. Internal helper extracted from
  * {@link executeBootstrapPlan} so the outer loop's cognitive complexity
  * stays ≤ biome's cap of 10. Returns a discriminated union over
@@ -202,6 +350,13 @@ async function runOneStep(
   const [cmd, ...args] = step.command;
   if (cmd === undefined) {
     return { success: false, failedStep: step.type, reason: "empty command vector" };
+  }
+  // Slice 58: start-mlx-server is a long-running server — dispatch to
+  // runServerStep (detached spawn + PID file + readiness poll) when the
+  // spawnDetachedFn seam is present. Without it, fall through to the
+  // regular spawnFn (backward compat for tests that don't supply the seam).
+  if (step.type === "start-mlx-server" && opts.spawnDetachedFn !== undefined) {
+    return await runServerStep(step, opts as ExecuteOpts & { spawnDetachedFn: SpawnDetachedFn });
   }
   // Slice 6: install-arm-homebrew wraps the Homebrew installer which
   // sudo-escalates to create /opt/homebrew/. That needs the parent's
