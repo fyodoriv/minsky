@@ -353,6 +353,34 @@ function resolveBootstrapFn(opts) {
 }
 
 /**
+ * Slice 65: handle the `MINSKY_LLM_PROVIDER=local-preferred` branch with
+ * the skip-earlier server gate. Extracted from `maybeBootstrapLocalLlm` to
+ * keep its cognitive complexity ≤ biome's cap of 10.
+ *
+ * When the server is already reachable, returns the env vars immediately
+ * (saves ~5 subprocess spawns from the full detect cycle). Otherwise falls
+ * through to `doBootstrap()`.
+ *
+ * @param {{ serverProbeFn?: () => Promise<unknown>, detectFn?: unknown }} opts
+ * @param {() => Promise<Record<string, string>>} doBootstrap
+ * @returns {Promise<Record<string, string>>}
+ */
+async function handleLocalPreferredEnv(opts, doBootstrap) {
+  const quickProbe = resolveQuickServerProbe(opts);
+  const serverQuick = quickProbe ? await quickProbe() : null;
+  if (serverQuick?.reachable) {
+    process.stderr.write(
+      `minsky: local-LLM server reachable at ${serverQuick.url} — wiring fallback (MINSKY_LLM_PROVIDER=local-preferred fast path)\n`,
+    );
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
+  process.stderr.write(
+    "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
+  );
+  return await doBootstrap();
+}
+
+/**
  * Probe the local-LLM stack and run the install plan if needed. Idempotent
  * fast path: an already-running mlx-lm.server is detected with one fetch
  * call and we just return `MINSKY_LOCAL_LLM=1` so the spawned daemon picks
@@ -393,22 +421,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   const doBootstrap = resolveBootstrapFn(_opts);
 
   if (process.env["MINSKY_LLM_PROVIDER"] === "local-preferred") {
-    // Slice 65 optimization: apply skip-earlier gate here too so a running
-    // server short-circuits the full detect cycle (~5 which calls saved).
-    const quickProbeLocalPreferred = resolveQuickServerProbe(_opts);
-    const serverQuickLocalPreferred = quickProbeLocalPreferred
-      ? await quickProbeLocalPreferred()
-      : null;
-    if (serverQuickLocalPreferred?.reachable) {
-      process.stderr.write(
-        `minsky: local-LLM server reachable at ${serverQuickLocalPreferred.url} — wiring fallback (MINSKY_LLM_PROVIDER=local-preferred fast path)\n`,
-      );
-      return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
-    }
-    process.stderr.write(
-      "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
-    );
-    return await doBootstrap();
+    return await handleLocalPreferredEnv(_opts, doBootstrap);
   }
 
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — consult
