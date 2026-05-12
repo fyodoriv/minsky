@@ -74,6 +74,48 @@ If `pnpm minsky` ran without the env var, the live probe (1-token `claude --prin
 
 `pnpm minsky doctor` shows the persisted state at any time; the `claude exhaustion (persisted)` row turns YELLOW with the timestamp + age + reason within TTL.
 
+## Observer layer (`minsky` from any folder, watched by a calling agent)
+
+Minsky ships an **observer plugin** distributed via
+[agentbrew](https://github.com/cbrwizard/agentbrew) so any Claude Code /
+Cursor / Devin / agentbrew-synced agent session can invoke the cross-repo
+runner from any folder and automatically watch the loop from outside.
+
+```bash
+# One-time install (idempotent — re-run on every machine):
+~/apps/tooling/minsky/distribution/install-observer.sh
+agentbrew sync --agentfile ~/apps/tooling/minsky/Agentfile.yaml
+
+# Then, from any shell in any bootstrapped host:
+cd ~/apps/my-repo && minsky          # autonomous run, observer-watched
+minsky status                        # list running minsky-run processes
+minsky stop                          # SIGTERM running processes; iteration drains cleanly
+```
+
+The plugin has four pieces:
+
+| Piece | Path | Purpose |
+|---|---|---|
+| PATH shim | `bin/minsky` | Resolves the minsky repo via `MINSKY_REPO` → `~/apps/tooling/minsky` → common fallbacks; forwards to `novel/cross-repo-runner/bin/minsky-run.mjs`. Zero dependencies. |
+| Skill | `skill-plugins/observer/minsky/SKILL.md` | The observer protocol — Watch / Restart / Safe-heal / Swift-PR / Log. Triggered by phrases like "run minsky here" in any agent session. |
+| Slash commands | `commands/minsky.md` + `commands/minsky-status.md` + `commands/minsky-stop.md` | `/minsky`, `/minsky-status`, `/minsky-stop` for Claude Code / Cursor / Devin. |
+| Agentfile | `Agentfile.yaml` | Declares `skillSources: [{ label: minsky-observer, path: ./skill-plugins/observer }]` so `agentbrew sync` deploys the skill to every detected agent's `skillsDir`. |
+
+The calling agent **watches the loop from outside** (Perrow 1984,
+*Normal Accidents* — independent-monitor pattern), restarts on bounded
+transient failures with error-budget discipline (Beyer et al. 2016,
+*SRE* — retry budget), attempts a heal ONLY when the fix is in the
+catalogued list + single-line + obvious, and — when the retry budget is
+exhausted — swiftly opens a **draft** P0 PR in the correct upstream
+repo (Minsky for runner bugs; the host for host-side bugs). Rate-limit
+≤ 2 observer-filed PRs per hour per repo, rule-#9 substrate required in
+every filed task block.
+
+Failure-mode escalation gate: scope-leak / rule-#9 violation / segfault
+are immediate escalate; stuck / crash / spawn-failed are bounded-retry
+then escalate. See `skill-plugins/observer/minsky/SKILL.md` § 5 for the
+full gate.
+
 ## Why this exists
 
 Most agent stacks ([OMC](https://github.com/Yeachan-Heo/oh-my-claudecode), [CrewAI](https://github.com/joaomdmoura/crewAI), [MetaGPT](https://github.com/geekan/MetaGPT), Microsoft Agent Framework, Composio AO) optimise the **inner** loop — make one task ship faster. Minsky optimises the **outer** loop. Three concrete promises, each with a track-record of being broken in real-world deployments and each addressed by a specific design choice here:

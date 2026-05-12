@@ -158,9 +158,19 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **STRIDE focus**: **T**ampering — out-of-scope file writes by the spawned child are detected via `git diff` post-spawn (scope-leak verdict); **E**levation of privilege — the runner runs as the operator's user, never `sudo`; spawned Claude inherits no extra capabilities beyond the operator's environment.
 - **Performance-first carve-out** (rule #13's relief valve): none declared.
 
+## `resolveMinskyRepo` (slice E — observer plugin shim)
+
+`src/shim-resolve.ts` exports `resolveMinskyRepo({ env, exists, homeDir })` — a pure, zero-dependency function consumed by the `bin/minsky` PATH shim (lives at the repo root) so any-folder operator invocations work without hand-resolving the minsky repo. Resolution chain (first match wins):
+
+1. `env.MINSKY_REPO` if set AND the path exists on disk.
+2. `~/apps/tooling/minsky` (Intuit canonical layout).
+3. `~/apps/minsky`, `~/code/minsky`, `~/src/minsky` (common community layouts).
+
+Returns `{ ok: true, repoPath, source }` (where `source` records which seam matched, surfaced in logs + the installer's audit print-out) OR `{ ok: false, hint }` with a message that tells the operator how to fix it. Tested by `shim-resolve.test.ts` (10 paired cases covering env-var hit/miss, the 4-step fallback chain, ordering, and home-trailing-slash handling). See the root `README.md` § "Observer layer" for the operator-side install + slash-command surface, and `skill-plugins/observer/minsky/SKILL.md` for the observer protocol the shim is part of.
+
 ## Tests
 
-161+ paired vitest cases across 12 files (run `pnpm vitest run novel/cross-repo-runner`):
+171+ paired vitest cases across 13 files (run `pnpm vitest run novel/cross-repo-runner`):
 
 - `task-finder.test.ts` (14) — parses tasks.md sections / ID / tags / details / rule-#9 fields; ID match; title-substring matching; not-found reporting
 - `experiment-synth.test.ts` (10) — happy-path YAML rendering; rule-#9 iron-rule violations (missing fields)
@@ -173,4 +183,5 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - `cwd-detect.test.ts` (slice D, 9) — single-host vs multi-host detection from `process.cwd()`
 - `host-walker.test.ts` (slice D, 13) — drain-then-advance orchestrator; max-iterations sharing; empty-parent + all-hosts-drained stop reasons
 - `aifn-840-shape.test.ts` (20 integration cases) — end-to-end bootstrap → minsky-run smoke; autonomous-default aggregate; `--hosts-dir` walk; `--host` + `--hosts-dir` mutual exclusion
+- `shim-resolve.test.ts` (slice E, 10) — `resolveMinskyRepo` env-var + 4-step fallback chain; ordering; home-trailing-slash edge case
 - `dispatch-emit.test.ts` — decision C2 dispatch payload shape
