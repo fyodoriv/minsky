@@ -52,4 +52,16 @@ describe("maybeBootstrapLocalLlm", () => {
       process.env["MINSKY_LLM_PROVIDER"] = prev;
     }
   });
+
+  it("slice 67: detectFn server-reachable fast-path still returns env overlay (seam unbroken by server-probe-first refactor)", async () => {
+    // The _opts.detectFn seam short-circuits before the slice 67 production
+    // path, so existing tests that inject a reachable state remain valid.
+    // This test explicitly names slice 67 so regressions are traceable.
+    const result = await maybeBootstrapLocalLlm({
+      detectFn: async () => ({
+        server: { reachable: true, url: "http://127.0.0.1:8080/v1/models" },
+      }),
+    });
+    expect(result).toEqual({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
+  });
 });

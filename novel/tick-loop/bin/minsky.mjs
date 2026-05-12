@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 67 (server-probe-first skip-earlier gate in maybeBootstrapLocalLlm) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -378,13 +379,19 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     return await runBootstrapLocalLlm({ force: false });
   }
 
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
+  // Slice 67 optimization (skip-earlier gate): probe the server alone before
+  // the full 5-way detectLocalLlmStack. In the common steady-state (server
+  // already running), this skips 4 component probes (pipx / mlx-lm / aider /
+  // model-weights) that are only needed when planning a bootstrap install.
+  // Saves 4 shell-out calls on the server-reachable path; on the server-down
+  // + Claude-healthy path, also saves those 4 calls since we hit the early
+  // return before runBootstrapLocalLlm.
+  const serverState = await buildProductionProbes({ whichFn }).probeServer();
   // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
   // skip the install pipeline entirely.
-  if (state.server.reachable) {
+  if (serverState.reachable) {
     process.stderr.write(
-      `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
+      `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback\n`,
     );
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
