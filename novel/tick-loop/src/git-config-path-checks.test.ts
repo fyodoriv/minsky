@@ -89,6 +89,25 @@ describe("checkGitConfigPaths — set + path missing", () => {
   });
 });
 
+describe("checkGitConfigPaths — set + EACCES (permission denied)", () => {
+  it("treats EACCES as broken (existsSync returns false on permission-denied paths, same as missing)", () => {
+    // existsSync returns false on EACCES, not throws — treat as broken path
+    const result = checkGitConfigPaths({
+      keysToCheck: FAKE_PATH_KEY_SET,
+      getGitConfigFn: (k) => {
+        if (k === "core.hooksPath") {
+          return { value: "/root/.git-hooks", origin: "global" };
+        }
+        return undefined;
+      },
+      existsSyncFn: () => false,
+    });
+    expect(result.brokenPaths).toHaveLength(1);
+    expect(result.brokenPaths[0]?.configKey).toBe("core.hooksPath");
+    expect(result.brokenPaths[0]?.recoveryCommand).toMatch(/--global --unset/);
+  });
+});
+
 describe("checkGitConfigPaths — different scopes produce different recovery commands", () => {
   it("system origin → `git config --system --unset`", () => {
     const result = checkGitConfigPaths({
