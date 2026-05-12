@@ -1,3 +1,4 @@
+<!-- pattern: not-applicable — PR description document, not a source artefact -->
 # feat(local-llm): slice 65 — integration tests for detect→plan pipeline + skip-earlier gate for local-preferred path
 
 Advances P0 task `minsky-cli-auto-bootstrap-local-llm` (slice 65 of N).
