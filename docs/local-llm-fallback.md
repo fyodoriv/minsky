@@ -21,6 +21,8 @@ hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
 
+After installing, run `pnpm minsky doctor` to verify the full stack. The doctor command now shows **4 install-time substrate rows** (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) in addition to the local-LLM stack rows (mlx_lm.server / aider / model weights / etc.). Any substrate row RED → banner is RED and exits 1 — fix the substrate before debugging the LLM stack. See [`novel/tick-loop/README.md`](../novel/tick-loop/README.md) (slice 1 of `minsky-fresh-clone-health-checks`) for details. The doctor also shows **3 git config sanity rows** (`core.hooksPath` / `core.attributesfile` / `core.excludesfile`) — YELLOW/⚠ when a dotfile-synced path doesn't exist on this machine, with a copy-paste-able recovery command per scope. See [slice 3 of `minsky-cross-machine-dotfile-checks`](../novel/tick-loop/README.md) in `novel/tick-loop/README.md` for details.
+
 ### Why two separate Python environments
 
 `mlx-lm` requires `tokenizers>=0.22.0,<=0.23.0` (transformers 4.57+); `aider-chat` pins `tokenizers==0.21.1`. They cannot share a single venv. The runbook above uses `pipx` which installs each into its own venv automatically — no further action needed. If you install them into a shared venv, `mlx_lm.server` will fail at import time with `ImportError: tokenizers>=0.22.0,<=0.23.0 is required`.
