@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { findTask, parseTasksMd } from "./task-finder.js";
+import { findTask, isHostTaskEligible, parseTasksMd, pickHostTask } from "./task-finder.js";
 
 const sampleTasksMd = `# Tasks
 
@@ -126,5 +126,136 @@ describe("findTask — not found", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.availableIds).toEqual([]);
+  });
+});
+
+describe("pickHostTask", () => {
+  test("returns the first rule-#9-compliant P0 task", () => {
+    const task = pickHostTask(sampleTasksMd);
+    expect(task).not.toBeNull();
+    expect(task?.id).toBe("proj-840-slash-command-labels");
+    expect(task?.priority).toBe("P0");
+  });
+
+  test("returns null when no rule-#9-compliant task exists", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Incomplete task
+  **ID**: incomplete-task
+  **Tags**: bug
+`;
+    expect(pickHostTask(tasksMd)).toBeNull();
+  });
+
+  test("returns null when TASKS.md is empty", () => {
+    expect(pickHostTask("# Tasks\n")).toBeNull();
+  });
+
+  test("prefers P0 over P1 even when P1 appears first in document order", () => {
+    const tasksMd = `# Tasks
+
+## P1
+
+- [ ] P1-first
+  **ID**: p1-first
+  **Hypothesis**: h
+  **Success**: s
+  **Pivot**: p
+  **Measurement**: m
+  **Anchor**: a
+
+## P0
+
+- [ ] P0-second
+  **ID**: p0-second
+  **Hypothesis**: h
+  **Success**: s
+  **Pivot**: p
+  **Measurement**: m
+  **Anchor**: a
+`;
+    const task = pickHostTask(tasksMd);
+    expect(task?.id).toBe("p0-second");
+  });
+
+  test("falls through to P1 when no P0 task is eligible", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Incomplete P0
+  **ID**: incomplete-p0
+  **Tags**: bug
+
+## P1
+
+- [ ] Complete P1
+  **ID**: complete-p1
+  **Hypothesis**: h
+  **Success**: s
+  **Pivot**: p
+  **Measurement**: m
+  **Anchor**: a
+`;
+    const task = pickHostTask(tasksMd);
+    expect(task?.id).toBe("complete-p1");
+    expect(task?.priority).toBe("P1");
+  });
+
+  test("ignores P2 / P3 tasks even when fully rule-#9 compliant", () => {
+    const tasksMd = `# Tasks
+
+## P2
+
+- [ ] P2 task
+  **ID**: p2-task
+  **Hypothesis**: h
+  **Success**: s
+  **Pivot**: p
+  **Measurement**: m
+  **Anchor**: a
+`;
+    expect(pickHostTask(tasksMd)).toBeNull();
+  });
+});
+
+describe("isHostTaskEligible", () => {
+  test("true when all 5 rule-#9 fields are present", () => {
+    expect(
+      isHostTaskEligible({
+        id: "x",
+        title: "t",
+        priority: "P0",
+        tags: [],
+        details: null,
+        hypothesis: "h",
+        success: "s",
+        pivot: "p",
+        measurement: "m",
+        anchor: "a",
+      }),
+    ).toBe(true);
+  });
+
+  test("false when any one rule-#9 field is missing", () => {
+    const base = {
+      id: "x",
+      title: "t",
+      priority: "P0",
+      tags: [],
+      details: null,
+      hypothesis: "h",
+      success: "s",
+      pivot: "p",
+      measurement: "m",
+      anchor: "a",
+    };
+    expect(isHostTaskEligible({ ...base, hypothesis: null })).toBe(false);
+    expect(isHostTaskEligible({ ...base, success: null })).toBe(false);
+    expect(isHostTaskEligible({ ...base, pivot: null })).toBe(false);
+    expect(isHostTaskEligible({ ...base, measurement: null })).toBe(false);
+    expect(isHostTaskEligible({ ...base, anchor: null })).toBe(false);
   });
 });

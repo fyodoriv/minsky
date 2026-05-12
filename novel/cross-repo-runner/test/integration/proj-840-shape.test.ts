@@ -319,6 +319,75 @@ describe("PROJ-840 integration: bootstrap + minsky-run end-to-end", () => {
     expect(result.stderr).toContain("proj-840-slash-command-labels");
   });
 
+  test("--loop --max-iterations=1: drains one task in dry-run mode and exits 0", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, [
+      "--host",
+      host.hostRoot,
+      "--loop",
+      "--max-iterations=1",
+      "--tick-interval-ms=0",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("host-daemon loop");
+    expect(result.stdout).toContain("stopReason: max-iterations");
+    expect(result.stdout).toContain("iterations: 1");
+    expect(result.stdout).toContain("proj-840-slash-command-labels");
+    // The iteration record should carry the loop's notes shape.
+    const recordPath = join(
+      host.hostRoot,
+      ".minsky/experiment-store/cross-repo/proj-840-slash-command-labels.jsonl",
+    );
+    expect(existsSync(recordPath)).toBe(true);
+    const lines = readFileSync(recordPath, "utf8").trim().split("\n");
+    const lastRecord = JSON.parse(lines[lines.length - 1] ?? "");
+    expect(lastRecord.verdict).toBe("validated");
+    expect(lastRecord.notes).toContain("loop iteration=0");
+    expect(lastRecord.notes).toContain("dry-run");
+  });
+
+  test("--loop on empty queue exits 0 with stopReason empty-queue", () => {
+    runBootstrap(host);
+    // Replace fixture TASKS.md with one whose only task lacks rule-#9 fields.
+    writeFileSync(
+      host.tasksMdPath,
+      [
+        "# Tasks",
+        "",
+        "## P1",
+        "",
+        "- [ ] Incomplete task missing all rule-9 fields",
+        "  **ID**: incomplete-task",
+        "  **Tags**: bug",
+        "",
+      ].join("\n"),
+    );
+    const result = runMinskyRun(host, [
+      "--host",
+      host.hostRoot,
+      "--loop",
+      "--max-iterations=5",
+      "--tick-interval-ms=0",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("stopReason: empty-queue");
+    expect(result.stdout).toContain("iterations: 0");
+  });
+
+  test("--loop with positional arg exits 64 (usage error)", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, ["some-task-id", "--host", host.hostRoot, "--loop"]);
+    expect(result.code).toBe(64);
+    expect(result.stderr).toContain("--loop mode picks tasks automatically");
+  });
+
+  test("--max-iterations rejects non-positive values with usage error", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, ["--host", host.hostRoot, "--loop", "--max-iterations=0"]);
+    expect(result.code).toBe(64);
+    expect(result.stderr).toContain("--max-iterations must be a positive integer");
+  });
+
   // --live integration: gated on the operator having a real `claude` CLI on
   // PATH AND opting in via MINSKY_LIVE_SPAWN_INTEGRATION=1. Default-skipped
   // in CI (we never want CI to consume real Claude budget). Local operators

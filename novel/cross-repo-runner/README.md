@@ -12,6 +12,29 @@ Step 5 of 7 in the cross-repo-runner roadmap. Built on top of `@minsky/sidecar-b
 
 Allowed paths default to the task block's `**Touches**:` field (fallback to `**Files**:`); when neither is declared, the scope-leak check is disabled (`graceful-degrade` per rule #7 — operator opted out of scope enforcement). Watchdog defaults to 15 min, overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
 
+## `--loop` (continuous host-mode iteration)
+
+`minsky-run --host <dir> --loop [--live]` keeps invoking `runLive` against the host's TASKS.md until one of five stop conditions fires (in priority order):
+
+1. **`aborted`** — SIGTERM / SIGINT (operator's `kill <pid>` or Ctrl-C). In-flight iteration finishes; loop exits.
+2. **`max-iterations`** — `--max-iterations=N` cap reached. Healthy stop.
+3. **`empty-queue`** — `pickHostTask` returns null (no rule-#9-compliant `P0`/`P1` task left). Healthy stop.
+4. **`scope-leak`** — first iteration whose verdict is `scope-leak` halts the loop so the operator can inspect before another spawn fires (rule #7 `circuit-break-and-notify`).
+5. **`spawn-failed`** — first non-zero spawn exit halts the loop so the operator can fix the systemic issue (auth, `claude` binary, network) before burning more budget.
+
+Flags:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--loop` | off | enable continuous mode; positional task-id forbidden |
+| `--max-iterations=N` | `Infinity` | cap on iteration count |
+| `--tick-interval-ms=M` | `300000` (5 min) | inter-iteration sleep; the operator can edit TASKS.md mid-loop and the next tick picks up the change |
+| `--live` | off | per-iteration live spawn (default is dry-run; `validated`-only verdict) |
+
+Exit codes: `0` healthy stop (any of aborted / max-iterations / empty-queue), `1` spawn-failed, `2` scope-leak, `64` usage error.
+
+Long-running ergonomics (launchd / systemd-user unit templates, auto-restart on crash, log rotation) are deferred to a follow-up. The in-process loop is the v0 functional surface; the supervisor substrate is the next slice.
+
 ## `dispatch-emit` (decision C2 hook, v0)
 
 `src/dispatch-emit.ts` exports `buildDispatchPayload({hostRepo, prNumber, experimentYamlUrl})` — the pure function that returns the `gh api .../dispatches` argv array the runner emits when it opens a host PR. The minsky-side workflow at `.github/workflows/cross-repo-check.yml` listens for that `repository_dispatch` (`event_type=cross-repo-pr`) and posts a `minsky-constitution` check-run on the host PR. v0 is build-only: the runner does not yet *call* `gh` with the argv (operator-driven; tracked as follow-up). Live `gh api .../check-runs` POST in the workflow is gated on `vars.MINSKY_BOT_INSTALLED=1`. See `experiments/cross-repo-ci-action-2026-05-04.yaml` for the rule-#9 pre-registration.
