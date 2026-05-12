@@ -1,6 +1,7 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 3 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08) -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H0 pipx path override) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 61 (operator 2026-05-08 — kill-0 PID liveness guard: skip start-mlx-server if process alive) -->
 /**
  * `@minsky/tick-loop/local-llm-probes` — production wiring for the
  * `DetectProbes` seam in `local-llm-bootstrap.ts`. Slice 3 substrate of
@@ -49,9 +50,10 @@
  * @module tick-loop/local-llm-probes
  */
 
-import { existsSync as nodeExistsSync } from "node:fs";
+import { existsSync as nodeExistsSync, readFileSync as nodeReadFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import process from "node:process";
 
 import {
   type ComponentState,
@@ -68,6 +70,15 @@ export type WhichFn = (bin: string) => Promise<string | undefined>;
 
 /** `existsSync` shape — same as `node:fs.existsSync`. */
 export type ExistsSyncFn = (path: string) => boolean;
+
+/** `readFileSync` shape — path + 'utf8' encoding, returns string. */
+export type ReadFileSyncFn = (path: string, encoding: "utf8") => string;
+
+/**
+ * `process.kill(pid, signal)` shape — only the two-arg form is used.
+ * Slice 61: seam for the kill-0 liveness check in `buildServerProbe`.
+ */
+export type KillFn = (pid: number, signal: number) => void;
 
 /** Subset of `fetch` shape sufficient for `GET <url>/v1/models`. */
 export type FetchFn = (
@@ -144,34 +155,98 @@ export function buildModelProbe(opts: {
  * Mirrors `scripts/check-mlx-server.mjs` but is in-process (no shell-out
  * cost on every detection call).
  *
+ * Slice 61: when `serverPidPath` is set and the network probe fails,
+ * attempts a kill-0 check against the PID file so the planner can skip
+ * `start-mlx-server` when a process is already alive (but not yet
+ * listening). The `pid` field in the returned `ServerState` carries the
+ * live PID; the planner treats a defined `pid` as "process already
+ * running — don't spawn another one".
+ *
  * @otel tick-loop.local-llm-probes.server
  */
 export function buildServerProbe(opts: {
   readonly url?: string;
   readonly timeoutMs?: number;
   readonly fetchFn?: FetchFn;
+  /**
+   * Slice 61: path to `.minsky/local-llm.pid`. When set and the network
+   * probe returns `reachable: false`, the probe reads the PID file and
+   * does `kill(pid, 0)`. If the process is alive the result includes
+   * `pid` so the planner can skip `start-mlx-server`.
+   */
+  readonly serverPidPath?: string;
+  /** Slice 61: seam for `readFileSync`. Defaults to `node:fs.readFileSync`. */
+  readonly readFileSyncFn?: ReadFileSyncFn;
+  /** Slice 61: seam for `process.kill`. Defaults to Node's built-in. */
+  readonly killFn?: KillFn;
 }): () => Promise<ServerState> {
   const url = opts.url ?? DEFAULT_LOCAL_LLM_PROBE_URL;
   const timeoutMs = opts.timeoutMs ?? 2_000;
   const fetchFn = opts.fetchFn ?? defaultFetchFn;
   return async () => {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), timeoutMs);
-    try {
-      const resp = await fetchFn(url, { method: "GET", signal: ac.signal });
-      if (resp.ok) {
-        return { reachable: true, url };
-      }
-      return { reachable: false, url, reason: `http ${resp.status}` };
-      // rule-6: handled-locally — typed fetch errors into short reason; planner only branches on reachable.
-    } catch (err) {
-      const reason = classifyFetchError(err, timeoutMs);
-      return { reachable: false, url, reason };
-    } finally {
-      clearTimeout(timer);
-    }
+    const networkResult = await probeNetwork(url, timeoutMs, fetchFn);
+    if (networkResult.reachable || opts.serverPidPath === undefined) return networkResult;
+    // Slice 61: network probe failed — check kill-0 before returning.
+    const livePid = readLivePidFromFile(opts.serverPidPath, opts.readFileSyncFn, opts.killFn);
+    return livePid !== undefined ? { ...networkResult, pid: livePid } : networkResult;
   };
 }
+
+/**
+ * Inner network probe — extracted from `buildServerProbe` to keep its
+ * closure's cognitive complexity ≤ biome's cap of 10 (slice 61).
+ */
+async function probeNetwork(
+  url: string,
+  timeoutMs: number,
+  fetchFn: FetchFn,
+): Promise<ServerState> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const resp = await fetchFn(url, { method: "GET", signal: ac.signal });
+    if (resp.ok) return { reachable: true, url };
+    // rule-6: handled-locally — typed fetch errors into short reason; planner only branches on reachable.
+    return { reachable: false, url, reason: `http ${resp.status}` };
+  } catch (err) {
+    return { reachable: false, url, reason: classifyFetchError(err, timeoutMs) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Slice 61: read PID from file and check liveness via kill-0. Returns the
+ * PID when the process is alive, `undefined` on any failure (file missing,
+ * parse error, or ESRCH — process dead). EPERM (process alive but
+ * unpermissioned) is treated as alive to avoid spawning a duplicate.
+ */
+function readLivePidFromFile(
+  pidPath: string,
+  readFn: ReadFileSyncFn | undefined,
+  killFn: KillFn | undefined,
+): number | undefined {
+  const read = readFn ?? nodeReadFileSync;
+  const kill = killFn ?? nodeKillFn;
+  let pid: number;
+  try {
+    const raw = read(pidPath, "utf8").trim();
+    pid = Number.parseInt(raw, 10);
+    if (!Number.isFinite(pid) || pid <= 0) return undefined;
+  } catch {
+    return undefined; // file missing or unreadable
+  }
+  try {
+    kill(pid, 0); // throws ESRCH when dead; EPERM when alive but unpermissioned
+    return pid;
+  } catch (err) {
+    // EPERM → process alive but we can't signal it — treat as alive.
+    return (err as { code?: string }).code === "EPERM" ? pid : undefined;
+  }
+}
+
+/** Production `kill` default — wraps `process.kill` for seam injectability. */
+const nodeKillFn: KillFn = (pid, signal) => process.kill(pid, signal);
 
 function classifyFetchError(err: unknown, timeoutMs: number): string {
   /** @type {{cause?: {code?: string}, code?: string, name?: string, message?: string}} */
@@ -305,6 +380,16 @@ export function buildProductionProbes(opts: {
    * fail at "command not found". See `arch-probe.ts preferredPipxPath`.
    */
   readonly expectedPipxPath?: string;
+  /**
+   * Slice 61: path to `.minsky/local-llm.pid`. Passed to `buildServerProbe`
+   * so the planner can skip `start-mlx-server` when the process is already
+   * running but not yet listening on the port.
+   */
+  readonly serverPidPath?: string;
+  /** Slice 61: seam for `readFileSync` (used by kill-0 PID check). */
+  readonly readFileSyncFn?: ReadFileSyncFn;
+  /** Slice 61: seam for `process.kill` (used by kill-0 PID check). */
+  readonly killFn?: KillFn;
 }): DetectProbes {
   const existsSyncFn = opts.existsSyncFn ?? nodeExistsSync;
   const probePipx: () => Promise<ComponentState> =
@@ -323,6 +408,9 @@ export function buildProductionProbes(opts: {
     probeServer: buildServerProbe({
       ...(opts.url !== undefined ? { url: opts.url } : {}),
       ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+      ...(opts.serverPidPath !== undefined ? { serverPidPath: opts.serverPidPath } : {}),
+      ...(opts.readFileSyncFn !== undefined ? { readFileSyncFn: opts.readFileSyncFn } : {}),
+      ...(opts.killFn !== undefined ? { killFn: opts.killFn } : {}),
     }),
   };
 }

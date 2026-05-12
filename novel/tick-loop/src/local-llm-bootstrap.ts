@@ -2,6 +2,7 @@
 // <!-- scope: human-approved minsky-cli-python-path-detection slice 5 (operator 2026-05-08 — live-run regression: hardcoded python path broke on Intel-brew machines) -->
 // <!-- scope: human-approved minsky-cli-arch-detection slice 6 (operator 2026-05-08 — "rosetta/intel must be resolved as well, do it now so that this tool can auto fix it") -->
 // <!-- scope: human-approved minsky-cli-arch-detection-hardening slice 7 (operator 2026-05-08 — H1 arch-consistent aider python + H2 planRequiresTty non-TTY refuse) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 61 (operator 2026-05-08 — kill-0 PID liveness guard: skip start-mlx-server if process alive) -->
 /**
  * `@minsky/tick-loop/local-llm-bootstrap` — pure detection + plan functions
  * for the local-LLM stack. Slice 1 of P0 task
@@ -497,7 +498,12 @@ function buildInstallSteps(
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
   if (!state.huggingfaceCli.present) steps.push(buildHuggingfaceCliStep(pipxPath));
   if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  if (!state.server.reachable) steps.push(buildStartServerStep());
+  // Slice 61: skip start-mlx-server when a live PID exists (kill-0 passed).
+  // The server is starting up but hasn't bound the port yet — spawning a
+  // second instance would create duplicate servers on the same port.
+  if (!state.server.reachable && state.server.pid === undefined) {
+    steps.push(buildStartServerStep());
+  }
   return steps;
 }
 

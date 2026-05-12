@@ -404,7 +404,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
 
   const state = _opts.detectFn
     ? await _opts.detectFn()
-    : await detectLocalLlmStack(buildProductionProbes({ whichFn }));
+    : await detectLocalLlmStack(buildProductionProbes({ whichFn, serverPidPath: SERVER_PID_PATH }));
   if (state.server.reachable) {
     process.stderr.write(
       `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
@@ -478,7 +478,7 @@ async function detectForBootstrap() {
   const archState = await detectArchState(buildArchProbes());
   const expectedPipxPath = preferredPipxPath(archState);
   /** @type {Parameters<typeof buildProductionProbes>[0]} */
-  const probeOpts = { whichFn };
+  const probeOpts = { whichFn, serverPidPath: SERVER_PID_PATH };
   if (expectedPipxPath !== undefined) probeOpts.expectedPipxPath = expectedPipxPath;
   const state = await detectLocalLlmStack(buildProductionProbes(probeOpts));
   const pythonPath = probePythonWithDefaults();

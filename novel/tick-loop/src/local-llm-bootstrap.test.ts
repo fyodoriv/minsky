@@ -149,6 +149,29 @@ describe("planLocalLlmBootstrap — chaos-table row 2: server stopped but stack 
   });
 });
 
+describe("planLocalLlmBootstrap — slice 61: skip start-mlx-server when pid alive", () => {
+  it("returns empty steps + ready=false when server unreachable but pid is set", () => {
+    const serverAlive: LocalLlmStackState = {
+      ...serverStopped,
+      server: {
+        reachable: false,
+        url: "http://127.0.0.1:8080/v1/models",
+        reason: "ECONNREFUSED",
+        pid: 99999,
+      },
+    };
+    const plan = planLocalLlmBootstrap(serverAlive);
+    expect(plan.ready).toBe(false);
+    expect(plan.steps.some((s) => s.type === "start-mlx-server")).toBe(false);
+    expect(plan.steps).toHaveLength(0);
+  });
+
+  it("still schedules start-mlx-server when server unreachable and pid is undefined", () => {
+    const plan = planLocalLlmBootstrap(serverStopped);
+    expect(plan.steps.some((s) => s.type === "start-mlx-server")).toBe(true);
+  });
+});
+
 describe("planLocalLlmBootstrap — dependency order", () => {
   it("always schedules pipx before mlx-lm + aider when pipx is absent", () => {
     const plan = planLocalLlmBootstrap({

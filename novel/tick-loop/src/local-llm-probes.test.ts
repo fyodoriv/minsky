@@ -140,6 +140,61 @@ describe("buildServerProbe — happy path", () => {
   });
 });
 
+// ---- buildServerProbe — slice 61: kill-0 PID liveness guard -------------
+
+describe("buildServerProbe — slice 61: live pid → pid in result, no start-mlx-server", () => {
+  it("includes pid when server unreachable but process is alive (kill-0 succeeds)", async () => {
+    const fetchFn: FetchFn = async () => {
+      const e = Object.assign(new Error("ECONNREFUSED"), { cause: { code: "ECONNREFUSED" } });
+      throw e;
+    };
+    const readFileSyncFn = (_path: string, _enc: "utf8") => "99999";
+    const killFn = (_pid: number, _sig: number) => {
+      /* kill-0 passes — process alive */
+    };
+    const probe = buildServerProbe({
+      fetchFn,
+      serverPidPath: "/tmp/fake.pid",
+      readFileSyncFn,
+      killFn,
+    });
+    const state = await probe();
+    expect(state.reachable).toBe(false);
+    expect(state.pid).toBe(99999);
+  });
+
+  it("omits pid when server unreachable and process is dead (kill-0 throws ESRCH)", async () => {
+    const fetchFn: FetchFn = async () => {
+      const e = Object.assign(new Error("ECONNREFUSED"), { cause: { code: "ECONNREFUSED" } });
+      throw e;
+    };
+    const readFileSyncFn = (_path: string, _enc: "utf8") => "99999";
+    const killFn = (_pid: number, _sig: number) => {
+      throw Object.assign(new Error("No such process"), { code: "ESRCH" });
+    };
+    const probe = buildServerProbe({
+      fetchFn,
+      serverPidPath: "/tmp/fake.pid",
+      readFileSyncFn,
+      killFn,
+    });
+    const state = await probe();
+    expect(state.reachable).toBe(false);
+    expect(state.pid).toBeUndefined();
+  });
+
+  it("omits pid when serverPidPath not provided (backward compat)", async () => {
+    const fetchFn: FetchFn = async () => {
+      const e = Object.assign(new Error("ECONNREFUSED"), { cause: { code: "ECONNREFUSED" } });
+      throw e;
+    };
+    const probe = buildServerProbe({ fetchFn });
+    const state = await probe();
+    expect(state.reachable).toBe(false);
+    expect(state.pid).toBeUndefined();
+  });
+});
+
 // ---- selectPythonPath / probePythonWithDefaults (slice 5) ---------------
 
 describe("selectPythonPath — first-hit picker", () => {
