@@ -41,3 +41,4 @@ optimization: none-this-iteration — all changes are additive; no hot path touc
 - **Lesson**: stale `.tsbuildinfo` masks missing exports on machines with existing dist/; `tsc -b --clean` is the diagnostic
 
 <!-- security: not-applicable — documentation + pure function export + test additions only; no new auth/secrets/network/PII surface; § 13 reviewed -->
+<!-- pattern: not-applicable — pr-body.md is a per-PR scratch file consumed by gh pr create, not a persistent project artefact -->
