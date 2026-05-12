@@ -79,7 +79,7 @@ pivot: |
   Ries 2011 build-measure-learn (clear separation between "ship more
   of this" and "abandon the approach").
 measurement: |
-  bash -c 'cd /Users/fivanishche/apps/tooling/minsky/.worktrees/cross-repo-runner-v1-live-spawn && npx vitest run novel/cross-repo-runner novel/sidecar-bootstrap --reporter=json | jq -e ".numPassedTests >= 149 and .numFailedTests == 0" && node scripts/check-rule-7-chaos-coverage.mjs && grep -q "runner.test.ts" novel/cross-repo-runner/README.md && grep -q "ignore-write.test.ts" novel/sidecar-bootstrap/README.md && grep -q "ProcessSpawnStrategy" novel/cross-repo-runner/bin/minsky-run.mjs && echo "PASS" || (echo "FAIL" && exit 1)'
+  npx vitest run novel/cross-repo-runner novel/sidecar-bootstrap --reporter=json | jq -e ".numPassedTests >= 149 and .numFailedTests == 0" && node scripts/check-rule-7-chaos-coverage.mjs && grep -q "runner.test.ts" novel/cross-repo-runner/README.md && grep -q "ignore-write.test.ts" novel/sidecar-bootstrap/README.md && grep -q "ProcessSpawnStrategy" novel/cross-repo-runner/bin/minsky-run.mjs
 anchor: |
   Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
   (let-it-crash discipline only surfaces failures when the failure
