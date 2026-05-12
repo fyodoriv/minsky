@@ -1,3 +1,4 @@
+<!-- pattern: not-applicable — PR description document, not a source artefact -->
 # feat(local-llm): slice 62 — server readiness poll after start-mlx-server
 
 ## Summary
