@@ -271,3 +271,19 @@ export function describeArchState(state: ArchState): string {
   }
   return `${shell} shell on non-Darwin host (Linux or other) — local-LLM bootstrap requires Apple Silicon`;
 }
+
+/**
+ * Parses the `MINSKY_FORCE_SHELL_ARCH` env var value into a `ShellArch`.
+ * Returns `undefined` for unrecognised or planner-incoherent values ("other"
+ * would make the doctor row read as Linux on macOS — confusing for the
+ * operator, so it is explicitly rejected).
+ *
+ * @pure — no side effects; testable without process.env access.
+ * @otel-exempt pure parser — no span.
+ */
+export function parseForcedShellArch(
+  value: string | undefined,
+): Exclude<ShellArch, "other"> | undefined {
+  if (value === "arm64" || value === "x86_64") return value;
+  return undefined;
+}

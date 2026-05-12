@@ -50,12 +50,15 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 
 ## Quick start
 
+This package is an internal workspace package — operators don't install it directly. Use the root repo:
+
 ```bash
-git clone https://github.com/fyodoriv/minsky.git
-cd minsky
-pnpm install   # prepare hook builds dist; no manual build step needed
-pnpm minsky doctor
+git clone https://github.com/fyodoriv/minsky.git && cd minsky
+pnpm install   # prepare hook: tsc -b builds all dist/ including this package
+pnpm minsky doctor   # verify health
 ```
+
+`pnpm install` runs the root `prepare` hook (`tsc -b`) which builds every workspace package's `dist/` — including `@minsky/tick-loop` — so `pnpm minsky` works on a fresh clone with no separate build step. If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line recovery hint instead of a node `ERR_MODULE_NOT_FOUND` stack trace.
 
 ## Usage
 
