@@ -1,3 +1,5 @@
+# <!-- scope: human-approved fresh-clone-ci-regression-gate — TASKS.md task block covers this path in **Files** -->
+# <!-- pattern: not-applicable — CI workflow file; runs on GitHub Actions runner, not a codebase artefact with its own pattern -->
 name: fresh-clone
 
 on:
