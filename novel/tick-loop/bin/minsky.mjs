@@ -123,6 +123,7 @@ const {
   describeArchState,
   detectArchState,
   detectLocalLlmStack,
+  checkTickLoopBinExists,
   ensureWorkersDir,
   executeBootstrapPlan,
   formatTickLoopBinMissingMessage,
@@ -230,8 +231,12 @@ async function runStartOrAttach(args) {
   // bin must exist or `spawn(node, [TICK_LOOP_BIN, ...])` would emit
   // ENOENT with a stack that doesn't point at the missing path.
   // Defensive backstop on top of slice 8's dist-existence check.
-  if (!existsSync(TICK_LOOP_BIN)) {
-    process.stderr.write(`${formatTickLoopBinMissingMessage(TICK_LOOP_BIN)}\n`);
+  const binOutcome = checkTickLoopBinExists({
+    tickLoopBinPath: TICK_LOOP_BIN,
+    existsSyncFn: existsSync,
+  });
+  if (!binOutcome.ok) {
+    process.stderr.write(`${formatTickLoopBinMissingMessage(binOutcome.tickLoopBinPath)}\n`);
     process.exit(1);
   }
 
