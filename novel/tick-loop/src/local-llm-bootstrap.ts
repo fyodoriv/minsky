@@ -57,8 +57,9 @@
  * | 1 | Probe seam throws | `detectLocalLlmStack`'s injected probe rejects | `loud-crash` per Armstrong 2007 — the planner does NOT catch; the rejection bubbles up to the supervisor (`bin/minsky.mjs`). Operator sees the misconfig at the I/O layer, not as a silent install plan. Rationale: a probe that throws is a programming bug in the executor, not a runtime fault | `local-llm-bootstrap.test.ts` "rejects when probe seam throws" |
  * | 2 | Stack fully installed but server unreachable | `pipx`+`mlx_lm`+`aider`+model present, `server.reachable=false` | `graceful-degrade` — plan returns a single `start-mlx-server` step, fast-path under 60 s | "fully installed but server stopped" test |
  * | 3 | Stack partially installed (model missing) | model absent, everything else present | `graceful-degrade` — plan returns `[download-model, start-mlx-server]` | "partial install — model missing" test |
- * | 4 | Stack absent entirely | nothing present | `graceful-degrade` — full 5-step plan in deterministic order | "fresh machine — full bootstrap" test |
+ * | 4 | Stack absent entirely | nothing present | `graceful-degrade` — full 6-step plan in deterministic order | "fresh machine — full bootstrap" test |
  * | 5 | Idempotent fast-path | everything present + reachable | empty plan (`steps.length === 0`) returned in O(1) | "idempotent — already running" test |
+ * | 6 | hf-cli removed post-install, model still cached | `huggingfaceCli.present=false`, `model.present=true` | `graceful-degrade` — plan returns `[install-huggingface-cli, start-mlx-server]`; model NOT re-downloaded | "hf-cli missing, model cached" test |
  *
  * @module tick-loop/local-llm-bootstrap
  */
@@ -725,10 +726,20 @@ const BOOTSTRAP_STEP_RECOVERY_HINTS: Record<BootstrapStepType, string> = {
   "start-mlx-server": `Try: mlx_lm.server --model ${DEFAULT_LOCAL_LLM_MODEL}  (ensure the model is downloaded first)`,
 };
 
+/**
+ * Returns a one-line actionable recovery hint for a given bootstrap step type.
+ *
+ * @otel-exempt pure property lookup — no I/O, no async; instrumenting adds noise with zero signal
+ */
 export function recoveryHintForBootstrapStep(type: BootstrapStepType): string | undefined {
   return BOOTSTRAP_STEP_RECOVERY_HINTS[type];
 }
 
+/**
+ * Renders a human-readable summary of a bootstrap plan for the confirm prompt.
+ *
+ * @otel-exempt pure string formatter — no I/O, no async; instrumenting adds noise with zero signal
+ */
 export function summarisePlan(plan: BootstrapPlan): string {
   if (plan.ready || plan.steps.length === 0) {
     return "Local-LLM stack already ready — nothing to do.";
