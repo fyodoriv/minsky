@@ -271,3 +271,17 @@ export function describeArchState(state: ArchState): string {
   }
   return `${shell} shell on non-Darwin host (Linux or other) — local-LLM bootstrap requires Apple Silicon`;
 }
+
+/**
+ * Parse the raw value of the `MINSKY_FORCE_SHELL_ARCH` env var.
+ * Returns `"arm64"` or `"x86_64"` on exact match; `undefined` otherwise.
+ * "other" is intentionally rejected — it would make `minsky doctor` read
+ * as Linux on macOS, confusing the operator.
+ *
+ * @otel-exempt pure parser — no span.
+ */
+export function parseForcedShellArch(value: string | undefined): "arm64" | "x86_64" | undefined {
+  if (value === "arm64") return "arm64";
+  if (value === "x86_64") return "x86_64";
+  return undefined;
+}
