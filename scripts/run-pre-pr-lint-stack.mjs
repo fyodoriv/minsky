@@ -279,6 +279,23 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
 });
 
 /**
+ * CI gates that live in their own workflow file rather than the
+ * `.github/workflows/ci.yml` `ci:` aggregator. These gates cannot be
+ * replicated locally. Each entry is registered here so every required CI gate
+ * has a single discoverable location in this canonical module (rule #2).
+ *
+ * @type {ReadonlyMap<string, string>}
+ */
+export const SEPARATE_WORKFLOW_GATES = Object.freeze(
+  new Map([
+    [
+      "fresh-clone-smoke",
+      ".github/workflows/fresh-clone.yml — stale-dist simulation (rm -rf dist + pnpm install + minsky doctor); needs GitHub Actions runner",
+    ],
+  ]),
+);
+
+/**
  * The manifest. Order is informational — `runStack` may run steps in parallel
  * up to a small fan-out. New CI jobs that should gate locally get a row here;
  * env-dependent jobs (see `CI_ENV_DEPENDENT_JOBS` above) are intentionally

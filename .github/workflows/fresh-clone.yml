@@ -1,0 +1,42 @@
+name: fresh-clone
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fresh-clone-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-clone-smoke:
+    # Simulates the stale-dist fresh-clone path documented in
+    # `minsky-cli-fresh-clone-bootstrap` (PR #473) + `minsky-fresh-clone-health-checks`
+    # (PR #474). Both tasks' Verification sections were manual-only; this job
+    # is the CI gate that makes the path regression-proof.
+    # Source: TASKS.md `fresh-clone-ci-regression-gate`; Forsgren, Humble, Kim,
+    #   *Accelerate*, 2018 — CI coverage of the install path is a DORA
+    #   deployment-frequency prerequisite.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: install (prepare hook builds dist/)
+        run: pnpm install --frozen-lockfile
+      - name: delete dist to simulate stale-dist fresh clone
+        run: rm -rf novel/tick-loop/dist
+      - name: reinstall (prepare must rebuild dist/)
+        run: pnpm install --frozen-lockfile
+      - name: assert minsky doctor exits 0 with no RED rows
+        run: pnpm minsky doctor 2>&1 | tee doctor.out && grep -c "RED" doctor.out | grep -q "^0$"
