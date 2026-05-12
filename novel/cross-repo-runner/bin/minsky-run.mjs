@@ -17,7 +17,7 @@
 // plan, not the side-effect).
 
 import { execFile as execFileCb } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -26,8 +26,10 @@ import { ProcessSpawnStrategy, globMatchesPath } from "@minsky/tick-loop";
 
 import {
   buildSpawnPlan,
+  detectCwd,
   extractAllowedPathsFromTaskBlock,
   extractPrUrl,
+  findBootstrappedSubdirs,
   findTask,
   loadRepoConfig,
   pickHostTask,
@@ -36,6 +38,7 @@ import {
   runHostLoop,
   runLive,
   synthesiseExperimentYaml,
+  walkHostsDir,
 } from "../dist/index.js";
 
 const execFile = promisify(execFileCb);
@@ -49,24 +52,29 @@ function usage() {
     [
       "minsky-run — run a task in a host repo under minsky's full constitution.",
       "",
-      "Usage:",
-      "  minsky-run <task-id> --host <host-dir>                   One-shot dry-run (default).",
-      "  minsky-run <task-id> --host <host-dir> --live            One-shot live spawn.",
-      "  minsky-run --host <host-dir> --loop [--live]             Continuous mode — picks the next",
-      "                                                            rule-#9-compliant P0/P1 task per iteration,",
-      "                                                            stops on empty-queue / SIGTERM / max-iterations.",
-      "  minsky-run --help                                        Print this message.",
+      "Modes:",
+      "  minsky-run                                    Autonomous (auto-detect cwd as host or hosts-dir).",
+      "  minsky-run --host <host-dir>                  Autonomous against a single host.",
+      "  minsky-run --hosts-dir <parent-dir>           Autonomous, drain-then-advance through bootstrapped subdirs.",
+      "  minsky-run <task-id> [--host <host-dir>]      One-shot (legacy explicit-task mode).",
+      "  minsky-run --help                             Print this message.",
       "",
-      "Flags:",
+      "Defaults (autonomous mode):",
+      "  Equivalent to --live --loop --cto-audit --seed-on-empty unless overridden.",
+      "  A 3-second countdown banner prints before the first live spawn.",
+      "  Set MINSKY_NON_INTERACTIVE=1 to suppress the banner (CI / supervisor use).",
+      "",
+      "Opt-outs (autonomous mode):",
+      "  --no-live    (alias --dry-run)   Disable claude --print spawn; synthetic results only.",
+      "  --once                            Disable loop; run one iteration and exit.",
+      "  --no-cto-audit                    Skip the post-iteration CTO audit.",
+      "  --no-seed-on-empty                Stop on empty-queue instead of seeding via CTO audit.",
+      "",
+      "Other flags:",
       "  --max-iterations=N        Cap loop iterations. Default Infinity.",
       "  --tick-interval-ms=M      Sleep between iterations. Default 300000 (5 min).",
-      "  --cto-audit               After each validated iteration, run a CTO-mode",
-      "                             audit that proposes follow-up rule-#9 tasks.",
-      "  --seed-on-empty           When the queue empties AND --cto-audit is on,",
-      "                             fire a seed audit + re-pick (one-shot) so the",
-      "                             loop continues with newly-proposed tasks.",
       "",
-      "The host must have been bootstrapped first via `minsky-bootstrap <host-dir>`.",
+      "The host(s) must have been bootstrapped first via `minsky-bootstrap <host-dir>`.",
       "",
     ].join("\n"),
   );
@@ -79,18 +87,39 @@ function valueAfter(arg, prefix) {
 const BOOL_FLAGS = {
   "--live": (s) => {
     s.live = true;
+    s.liveExplicit = true;
+  },
+  "--no-live": (s) => {
+    s.live = false;
+    s.liveExplicit = true;
   },
   "--dry-run": (s) => {
     s.live = false;
+    s.liveExplicit = true;
   },
   "--loop": (s) => {
     s.loop = true;
+    s.loopExplicit = true;
+  },
+  "--once": (s) => {
+    s.loop = false;
+    s.loopExplicit = true;
   },
   "--cto-audit": (s) => {
     s.ctoAudit = true;
+    s.ctoAuditExplicit = true;
+  },
+  "--no-cto-audit": (s) => {
+    s.ctoAudit = false;
+    s.ctoAuditExplicit = true;
   },
   "--seed-on-empty": (s) => {
     s.seedOnEmpty = true;
+    s.seedOnEmptyExplicit = true;
+  },
+  "--no-seed-on-empty": (s) => {
+    s.seedOnEmpty = false;
+    s.seedOnEmptyExplicit = true;
   },
 };
 
@@ -136,6 +165,10 @@ function consumeArg(args, i, state) {
     state.host = args[i + 1] ?? null;
     return i + 2;
   }
+  if (a === "--hosts-dir") {
+    state.hostsDir = args[i + 1] ?? null;
+    return i + 2;
+  }
   if (BOOL_FLAGS[a] !== undefined) {
     BOOL_FLAGS[a](state);
     return i + 1;
@@ -152,15 +185,20 @@ function consumeArg(args, i, state) {
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+  if (args.includes("--help") || args.includes("-h")) {
     return { kind: "help" };
   }
   const state = {
     host: null,
+    hostsDir: null,
     live: false,
     loop: false,
     ctoAudit: false,
     seedOnEmpty: false,
+    liveExplicit: false,
+    loopExplicit: false,
+    ctoAuditExplicit: false,
+    seedOnEmptyExplicit: false,
     maxIterations: Number.POSITIVE_INFINITY,
     tickIntervalMs: 300_000,
     positional: [],
@@ -170,31 +208,147 @@ function parseArgs(argv) {
     i = consumeArg(args, i, state);
   }
   if (state.error !== null) return { kind: "error", message: state.error };
-  if (state.host === null) {
-    return { kind: "error", message: "must pass --host <host-dir>" };
+  return dispatchParsed(state);
+}
+
+/**
+ * Route parser state to one of four modes:
+ *   - `help`  — operator asked, OR no args + no auto-detect signal
+ *   - `error` — conflicting flags / unbootstrapped host / missing target
+ *   - `run`   — one-shot mode (positional task-id supplied)
+ *   - `loop`  — single-host autonomous (legacy --loop OR new default when no task-id)
+ *   - `walk`  — multi-host autonomous (--hosts-dir OR cwd has bootstrapped subdirs)
+ */
+function dispatchParsed(state) {
+  if (state.host !== null && state.hostsDir !== null) {
+    return {
+      kind: "error",
+      message: "cannot pass both --host and --hosts-dir; choose one",
+    };
   }
-  if (state.loop) {
-    // Loop mode: no positional task-id required (picker selects each iteration).
-    if (state.positional.length > 0) {
+  const autoTarget =
+    state.host === null && state.hostsDir === null ? autoDetectTarget(state) : null;
+  if (autoTarget !== null && autoTarget.kind === "error") {
+    return { kind: "error", message: autoTarget.message };
+  }
+  const resolvedHost = state.host ?? autoTarget?.host ?? null;
+  const resolvedHostsDir = state.hostsDir ?? autoTarget?.hostsDir ?? null;
+  if (resolvedHostsDir !== null) return buildWalkDispatch(state, resolvedHostsDir);
+  if (resolvedHost === null) {
+    return {
+      kind: "error",
+      message:
+        "must pass --host <host-dir> or --hosts-dir <parent-dir>, OR run from a bootstrapped host / parent directory.\nHint: run `minsky-bootstrap <host-dir>` to bootstrap a repo.",
+    };
+  }
+  return buildHostDispatch(state, resolvedHost);
+}
+
+/**
+ * Build the dispatch result for `--hosts-dir` / cwd-auto-detect-walk mode.
+ * Extracted from {@link dispatchParsed} to keep complexity under biome's 10
+ * cap; same Strategy pattern (Gamma 1994) — one branch per kind.
+ */
+function buildWalkDispatch(state, resolvedHostsDir) {
+  if (state.positional.length > 0) {
+    return {
+      kind: "error",
+      message: `--hosts-dir mode picks tasks automatically; remove positional argument(s): ${state.positional.join(", ")}`,
+    };
+  }
+  const defaults = applyAutonomousDefaults(state);
+  return {
+    kind: "walk",
+    hostsDir: resolve(resolvedHostsDir),
+    ...defaults,
+    maxIterations: state.maxIterations,
+    tickIntervalMs: state.tickIntervalMs,
+  };
+}
+
+/**
+ * Build the dispatch result for single-host mode (one-shot via positional
+ * task-id, OR autonomous single-host loop when no positional). Extracted
+ * from {@link dispatchParsed} to keep complexity under biome's 10 cap.
+ */
+function buildHostDispatch(state, resolvedHost) {
+  if (state.positional.length === 1) {
+    const autonomousExplicit =
+      state.loopExplicit || state.ctoAuditExplicit || state.seedOnEmptyExplicit;
+    if (autonomousExplicit) {
       return {
         kind: "error",
-        message: `--loop mode picks tasks automatically; remove positional argument(s): ${state.positional.join(", ")}`,
+        message:
+          "positional task-id is incompatible with autonomous-mode flags (--loop / --cto-audit / --seed-on-empty). Either drop the positional to enter autonomous mode, or drop the autonomous flags to run one-shot.",
       };
     }
     return {
-      kind: "loop",
-      host: resolve(state.host),
+      kind: "run",
+      taskId: state.positional[0],
+      host: resolve(resolvedHost),
       live: state.live,
-      ctoAudit: state.ctoAudit,
-      seedOnEmpty: state.seedOnEmpty,
-      maxIterations: state.maxIterations,
-      tickIntervalMs: state.tickIntervalMs,
     };
   }
-  if (state.positional.length !== 1) {
-    return { kind: "error", message: "must pass exactly one <task-id> and --host <host-dir>" };
+  if (state.positional.length > 1) {
+    return {
+      kind: "error",
+      message: `expected at most one positional <task-id>, got: ${state.positional.join(", ")}`,
+    };
   }
-  return { kind: "run", taskId: state.positional[0], host: resolve(state.host), live: state.live };
+  const defaults = applyAutonomousDefaults(state);
+  return {
+    kind: "loop",
+    host: resolve(resolvedHost),
+    ...defaults,
+    maxIterations: state.maxIterations,
+    tickIntervalMs: state.tickIntervalMs,
+  };
+}
+
+/**
+ * Apply autonomous-mode defaults (slice-D flip): when no explicit flag
+ * was set, default to live=true, loop=true, ctoAudit=true, seedOnEmpty=true.
+ * Explicit flags (via --no-live, --once, --no-cto-audit, --no-seed-on-empty)
+ * still win.
+ */
+function applyAutonomousDefaults(state) {
+  return {
+    live: state.liveExplicit ? state.live : true,
+    loop: state.loopExplicit ? state.loop : true,
+    ctoAudit: state.ctoAuditExplicit ? state.ctoAudit : true,
+    seedOnEmpty: state.seedOnEmptyExplicit ? state.seedOnEmpty : true,
+  };
+}
+
+/**
+ * Auto-detect target when neither --host nor --hosts-dir is set. Probes
+ * cwd via `detectCwd`; returns the chosen target shape OR an error
+ * message the dispatcher surfaces.
+ */
+function autoDetectTarget(state) {
+  // If no args at all + no positional, this is the operator running
+  // `minsky-run` in their cwd with nothing else — auto-detect.
+  if (state.positional.length > 0) {
+    // Operator supplied a positional task-id but no --host. We need a host
+    // for one-shot mode. Auto-detect cwd as host (same logic).
+  }
+  const cwd = process.cwd();
+  const result = detectCwd({
+    cwd,
+    fs: {
+      exists: (path) => existsSync(path),
+      listDir: (path) => {
+        try {
+          return readdirSync(path);
+        } catch {
+          return [];
+        }
+      },
+    },
+  });
+  if (result.kind === "single-host") return { host: result.host };
+  if (result.kind === "multi-host") return { hostsDir: result.hostsDir };
+  return { kind: "error", message: result.hint };
 }
 
 function loadHostConfig(hostRoot) {
@@ -473,9 +627,6 @@ async function runPlanned(taskId, hostRoot, live) {
  * stay-alive across mid-task interruption).
  */
 async function runLoop(parsed) {
-  const { host: hostRoot, live, ctoAudit, seedOnEmpty, maxIterations, tickIntervalMs } = parsed;
-  const config = loadHostConfig(hostRoot);
-
   // SIGTERM bridge — operator's normal-exit signal. The loop's AbortSignal
   // fires when the supervisor (or `kill <pid>` from the operator) sends
   // SIGTERM; in-flight spawn finishes, then the loop exits with stopReason
@@ -485,6 +636,27 @@ async function runLoop(parsed) {
   const onSignal = () => controller.abort();
   process.on("SIGTERM", onSignal);
   process.on("SIGINT", onSignal);
+  const result = await runLoopAsResult(parsed, controller);
+  process.off("SIGTERM", onSignal);
+  process.off("SIGINT", onSignal);
+  emitLoopSummary(result);
+  if (result.stopReason === "scope-leak") return 2;
+  if (result.stopReason === "spawn-failed") return 1;
+  return 0;
+}
+
+/**
+ * Single-host loop core. Returns the `LoopResult` so the multi-host
+ * walker can compose this per host without re-installing SIGTERM
+ * handlers (those live one layer up — `runLoop` for single-host CLI,
+ * `runWalk` for multi-host).
+ *
+ * Extracted from the original `runLoop` body so slice D's multi-host
+ * walker can reuse it (rule #1 — single source of single-host logic).
+ */
+async function runLoopAsResult(parsed, controller) {
+  const { host: hostRoot, live, ctoAudit, seedOnEmpty, maxIterations, tickIntervalMs } = parsed;
+  const config = loadHostConfig(hostRoot);
 
   process.stdout.write(
     `\n=== host-daemon loop (host=${config.host_repo}, mode=${live ? "live" : "dry-run"}, ` +
@@ -594,15 +766,7 @@ async function runLoop(parsed) {
       : {}),
   });
 
-  process.off("SIGTERM", onSignal);
-  process.off("SIGINT", onSignal);
-
-  emitLoopSummary(result);
-  // Exit codes: 0 = healthy stop (empty-queue / max-iterations / aborted),
-  // 1 = spawn-failed (operator must inspect), 2 = scope-leak.
-  if (result.stopReason === "scope-leak") return 2;
-  if (result.stopReason === "spawn-failed") return 1;
-  return 0;
+  return result;
 }
 
 function readLiveSpawnTimeoutMs() {
@@ -635,14 +799,128 @@ async function main() {
     usage();
     return 64; // EX_USAGE
   }
+  if (parsed.kind === "walk") {
+    if (!existsSync(parsed.hostsDir)) {
+      process.stderr.write(`hosts-dir does not exist: ${parsed.hostsDir}\n`);
+      return 1;
+    }
+    return runWalk(parsed);
+  }
   if (!existsSync(parsed.host)) {
     process.stderr.write(`host directory does not exist: ${parsed.host}\n`);
     return 1;
   }
   if (parsed.kind === "loop") {
+    await maybePrintCountdownBanner(parsed.live, parsed.host);
     return runLoop(parsed);
   }
   return runPlanned(parsed.taskId, parsed.host, parsed.live);
+}
+
+/**
+ * 3-second pre-spawn countdown banner. Prints when:
+ *   - we're entering an autonomous live spawn (`live === true`), AND
+ *   - `MINSKY_NON_INTERACTIVE` is NOT set (supervisor / CI opt-out), AND
+ *   - stdout is a TTY (skip the banner when piped or under supervisor).
+ *
+ * SIGTERM/SIGINT during the 3s aborts before any spawn fires (the CLI's
+ * existing signal handlers catch it; we just sleep here).
+ */
+async function maybePrintCountdownBanner(live, target) {
+  if (!live) return;
+  if (process.env.MINSKY_NON_INTERACTIVE === "1") return;
+  if (process.env.MINSKY_NON_INTERACTIVE === "true") return;
+  if (!process.stdout.isTTY) return;
+  process.stdout.write(
+    `\n⚠  Starting AUTONOMOUS LIVE SPAWN against ${target}\n   Ctrl-C in the next 3s to abort. Set MINSKY_NON_INTERACTIVE=1 to skip this banner.\n`,
+  );
+  for (let i = 3; i > 0; i--) {
+    process.stdout.write(`   ${i}…\n`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  process.stdout.write("   spawning.\n\n");
+}
+
+/**
+ * Multi-host walker driver: iterates bootstrapped subdirs of `hostsDir`,
+ * runs `runLoop`-equivalent against each in drain-then-advance order.
+ * Reuses `runLoop`'s SIGTERM handler + strategy + git probe per host;
+ * `walkHostsDir` (pure orchestrator) decides advance vs halt.
+ */
+async function runWalk(parsed) {
+  const { hostsDir, live, ctoAudit, seedOnEmpty, loop, maxIterations, tickIntervalMs } = parsed;
+  const hosts = findBootstrappedSubdirs({
+    cwd: hostsDir,
+    fs: {
+      exists: (p) => existsSync(p),
+      listDir: (p) => {
+        try {
+          return readdirSync(p);
+        } catch {
+          return [];
+        }
+      },
+    },
+  });
+  if (hosts.length === 0) {
+    process.stderr.write(
+      `no bootstrapped hosts found under ${hostsDir} (looked for subdirs with .minsky/repo.yaml).\nRun \`minsky-bootstrap <host-dir>\` on each repo you want to govern.\n`,
+    );
+    return 1;
+  }
+
+  process.stdout.write(
+    `\n=== multi-host walk (hosts-dir=${hostsDir}, hosts=${hosts.length}, mode=${live ? "live" : "dry-run"}, cto-audit=${ctoAudit ? "on" : "off"}, seed-on-empty=${seedOnEmpty ? "on" : "off"}) ===\n`,
+  );
+  for (const h of hosts) process.stdout.write(`  • ${h}\n`);
+
+  await maybePrintCountdownBanner(live, `${hosts.length} hosts under ${hostsDir}`);
+
+  const controller = new AbortController();
+  const onSignal = () => controller.abort();
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
+
+  const walker = await walkHostsDir({
+    hosts,
+    maxTotalIterations: maxIterations,
+    signal: controller.signal,
+    runOneHost: async (hostRoot) => {
+      // Construct a fresh per-host parsed shape and reuse runLoop's
+      // construction logic via a thin closure. We need runLoop to RETURN
+      // the LoopResult instead of an exit code — refactor below to expose
+      // a `runLoopForHost(parsed)` that does.
+      const hostParsed = {
+        host: hostRoot,
+        live,
+        ctoAudit,
+        seedOnEmpty,
+        loop: loop !== false,
+        maxIterations,
+        tickIntervalMs,
+      };
+      return runLoopAsResult(hostParsed, controller);
+    },
+  });
+
+  process.off("SIGTERM", onSignal);
+  process.off("SIGINT", onSignal);
+
+  emitWalkerSummary(walker);
+  if (walker.stopReason === "scope-leak") return 2;
+  if (walker.stopReason === "spawn-failed") return 1;
+  return 0;
+}
+
+function emitWalkerSummary(walker) {
+  process.stdout.write("\n=== multi-host walk summary ===\n");
+  process.stdout.write(`stopReason: ${walker.stopReason}\n`);
+  process.stdout.write(`totalIterations: ${walker.totalIterations}\n`);
+  for (const v of walker.visits) {
+    process.stdout.write(
+      `  ${v.hostRoot}: ${v.loopResult.iterations.length} iter(s) → ${v.loopResult.stopReason}\n`,
+    );
+  }
 }
 
 main()
