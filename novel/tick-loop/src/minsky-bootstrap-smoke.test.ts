@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
   it("returns local-LLM env when detectFn reports server reachable", async () => {
@@ -81,6 +81,54 @@ describe("maybeBootstrapLocalLlm — bootstrapFn seam (slice 63)", () => {
     });
     expect(bootstrapCalled).toBe(false);
     expect(result).toEqual({});
+  });
+});
+
+// ---- slice 64: env-var early-exit paths -----------------------------------
+
+describe("maybeBootstrapLocalLlm — env escape hatches (slice 64)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns {} when MINSKY_NO_AUTO_BOOTSTRAP=1 without probing", async () => {
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", "1");
+    let called = false;
+    const result = await maybeBootstrapLocalLlm({
+      bootstrapFn: async () => {
+        called = true;
+        return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+      },
+    });
+    expect(called).toBe(false);
+    expect(result).toEqual({});
+  });
+
+  it("returns {} when MINSKY_LOCAL_LLM=1 (already opted in — skip re-bootstrap)", async () => {
+    vi.stubEnv("MINSKY_LOCAL_LLM", "1");
+    let called = false;
+    const result = await maybeBootstrapLocalLlm({
+      bootstrapFn: async () => {
+        called = true;
+        return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+      },
+    });
+    expect(called).toBe(false);
+    expect(result).toEqual({});
+  });
+
+  it("calls bootstrapFn directly when MINSKY_LLM_PROVIDER=local-preferred (skips live probe)", async () => {
+    vi.stubEnv("MINSKY_LLM_PROVIDER", "local-preferred");
+    const stubbedEnv = { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    let called = false;
+    const result = await maybeBootstrapLocalLlm({
+      bootstrapFn: async () => {
+        called = true;
+        return stubbedEnv;
+      },
+    });
+    expect(called).toBe(true);
+    expect(result).toMatchObject(stubbedEnv);
   });
 });
 

@@ -1,33 +1,38 @@
 <!-- pattern: not-applicable — PR description document, not a source artefact -->
-# feat(local-llm): slice 62 — server readiness poll after start-mlx-server
+# feat(local-llm): slice 64 — smoke tests for env-var early-exit paths in maybeBootstrapLocalLlm
 
 ## Summary
 
-- **Problem**: slice 60 spawns `mlx_lm.server` detached and immediately returns. The MLX model needs 30–90 s to load into GPU VRAM; without a post-spawn wait, the daemon's first local-LLM request gets `ECONNREFUSED` and falls back to Claude, wasting time and potentially burning credits.
-- **Fix**: `buildServerReadinessPoll` — a bounded poll (default 30 × 10 s = 5 min window) that re-probes `<url>/v1/models` until the server becomes reachable. `runBootstrapLocalLlm` calls it immediately after `start-mlx-server` completes.
-- **Non-fatal**: if the poll exhausts its window (server never came up), the daemon retries on its own first request via the existing provider-fallback logic.
-- **Tests**: 4 new tests covering first-attempt success, Nth-attempt success, timeout exhausted, and sleep-between-attempts-only invariant.
+- **Slice 64**: adds 3 paired smoke tests for the three env-var short-circuit paths in `maybeBootstrapLocalLlm` that had no coverage:
+  - `MINSKY_NO_AUTO_BOOTSTRAP=1` → returns `{}` without calling any probe or `bootstrapFn`
+  - `MINSKY_LOCAL_LLM=1` (already opted in) → returns `{}` without re-running bootstrap
+  - `MINSKY_LLM_PROVIDER=local-preferred` → calls `bootstrapFn` directly, skipping the live server/claude probe
+- Test count in `minsky-bootstrap-smoke.test.ts` increases from 6 to 9. All 9 pass.
+- Uses `vi.stubEnv` / `vi.unstubAllEnvs` (vitest built-in) for clean per-test env isolation.
+
+**Optimization**: none-this-iteration: test-only slice; no new production code path added.
 
 ## Hypothesis
 
-After `start-mlx-server` completes (PID written, process detached), the operator's terminal shows a `minsky: waiting…` message and blocks until the server is accepting connections. Post-fix, `minsky doctor` immediately after a fresh bootstrap shows `mlx-lm.server reachable`.
+The three env-var short-circuit paths in `maybeBootstrapLocalLlm` (`MINSKY_NO_AUTO_BOOTSTRAP=1`, `MINSKY_LOCAL_LLM=1`, `MINSKY_LLM_PROVIDER=local-preferred`) had no test coverage. Adding coverage will catch any future regressions in these critical operator escape-hatch / bootstrap-shortcut paths, particularly the `MINSKY_LLM_PROVIDER=local-preferred → bootstrapFn` wiring which exercises the DI seam added in slice 63.
 
-**Measurement**: `npx vitest run novel/tick-loop/src/local-llm-probes.test.ts` — 4 new tests added, all pass.
+**Success**: test count 6 → 9; all 9 pass; `pnpm pre-pr-lint` green.
 
-**Optimization**: round-trip elimination — prevents N failed `ECONNREFUSED` requests from the daemon during the model-load window (>10-byte save per avoided retry log line; ≥1 round-trip eliminated per bootstrap).
+**Pivot**: if `vi.stubEnv` causes interference with import-time env checks in `minsky.mjs`, restructure tests to inject env via `opts` instead of env mutation.
+
+**Measurement**: `pnpm vitest run novel/tick-loop/src/minsky-bootstrap-smoke.test.ts` — 9/9 pass.
+
+**Anchor**: Rule #9 (pre-registered HDD); paired-test discipline (task block § Details point f).
 
 ## Changed files
 
-- `novel/tick-loop/src/local-llm-probes.ts` — `buildServerReadinessPoll` function with `serverProbeFn` / `maxAttempts` / `intervalMs` / `sleepFn` seams
-- `novel/tick-loop/src/local-llm-probes.test.ts` — 4 new tests for `buildServerReadinessPoll`
-- `novel/tick-loop/src/index.ts` — re-exports `buildServerReadinessPoll`
-- `novel/tick-loop/bin/minsky.mjs` — wires poll in `runBootstrapLocalLlm` when `start-mlx-server` step ran
+- `novel/tick-loop/src/minsky-bootstrap-smoke.test.ts` — 3 new tests for env-var early-exit paths; `afterEach` + `vi` imported
 
 ## Hypothesis self-grade
 
-- **Predicted**: post-spawn `ECONNREFUSED` on the daemon's first request is eliminated; `runBootstrapLocalLlm` blocks until the server binds the port, reporting readiness within the 5-min window
-- **Observed**: 4/4 new tests pass; `sleepFn` called exactly between failed attempts (not after success), `attempts` counter accurate, timeout returns `{ reachable: false }` non-fatally
+- **Predicted**: 3 env-var paths have no coverage; adding them pins the `MINSKY_LLM_PROVIDER=local-preferred → bootstrapFn` wiring and the two no-op exits against future regressions
+- **Observed**: 9/9 tests pass including 3 new slice-64 tests; `vi.stubEnv` works cleanly with no test interference; `MINSKY_LLM_PROVIDER=local-preferred` correctly routes through `bootstrapFn` DI seam
 - **Match**: yes
-- **Lesson**: extracting the sleep seam as an injectable `sleepFn` made the timing logic trivially testable; the pattern should be reused whenever a bounded poll is added
+- **Lesson**: `vi.stubEnv` + `afterEach(() => vi.unstubAllEnvs())` is the correct pattern for env-var isolation in vitest — cleaner than manual save/restore; reuse for any future env-dependent tests
 
-<!-- security: not-applicable — polls a local HTTP endpoint only; no auth, no secrets, no external surface; § 13 reviewed -->
+<!-- security: not-applicable — test-only slice; no production code changed; no auth/secrets/sandbox/PII/supply-chain surface; § 13 reviewed -->
