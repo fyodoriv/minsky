@@ -332,6 +332,10 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     return {};
   }
 
+  // Slice 60 — DI seam so tests can verify the install-trigger paths
+  // without running a real bootstrap. Defaults to the production path.
+  const bootstrapFn = _opts.bootstrapFn ?? (() => runBootstrapLocalLlm({ force: false }));
+
   // Slice 5 of self-healing — `MINSKY_LLM_PROVIDER=local-preferred`
   // is the operator's "I know I'm exhausted, just install + use
   // local NOW" shortcut. The slice-4 --help text claimed this env
@@ -344,7 +348,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     process.stderr.write(
       "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
     );
-    return await runBootstrapLocalLlm({ force: false });
+    return await bootstrapFn();
   }
 
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — consult
@@ -361,7 +365,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     process.stderr.write(
       `minsky: persisted hard-limit hit at ${persisted.ts} (${ageMin}m ago, reason: ${persisted.reason}); skipping live probe and bootstrapping local-LLM\n`,
     );
-    return await runBootstrapLocalLlm({ force: false });
+    return await bootstrapFn();
   }
 
   const state = _opts.detectFn
@@ -395,7 +399,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   process.stderr.write(
     `minsky: claude unavailable (${decision.verdict}) AND local-LLM server not reachable\n`,
   );
-  return await runBootstrapLocalLlm({ force: false });
+  return await bootstrapFn();
 }
 
 /**

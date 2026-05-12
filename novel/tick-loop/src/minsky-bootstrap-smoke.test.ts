@@ -33,4 +33,31 @@ describe("maybeBootstrapLocalLlm — DI seam", () => {
     });
     expect(result).toEqual({});
   });
+
+  it("calls bootstrapFn and returns its result when claude probe reports hard-limit", async () => {
+    // Slice 60: bootstrapFn seam lets tests verify the install-trigger path
+    // without running a real 17 GB bootstrap. The sentinel value proves the
+    // result flows through from bootstrapFn unchanged.
+    const fakeState = {
+      server: { reachable: false, reason: "connection refused" },
+      pipx: { present: true },
+      mlxLm: { present: true },
+      aider: { present: true },
+      huggingfaceCli: { present: true },
+      model: { present: true },
+    };
+    const sentinel = { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    let bootstrapCalled = false;
+    const result = await maybeBootstrapLocalLlm({
+      // biome-ignore lint/suspicious/noExplicitAny: DI seam — test overrides the detection fn
+      detectFn: async () => fakeState as any,
+      claudeProbeFn: async () => ({ verdict: "exhausted", reason: "stub-exhausted" }),
+      bootstrapFn: async () => {
+        bootstrapCalled = true;
+        return sentinel;
+      },
+    });
+    expect(bootstrapCalled).toBe(true);
+    expect(result).toBe(sentinel);
+  });
 });
