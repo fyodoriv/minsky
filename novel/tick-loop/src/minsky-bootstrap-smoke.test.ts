@@ -25,4 +25,18 @@ describe("maybeBootstrapLocalLlm", () => {
 
     expect(result).toEqual({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
   });
+
+  it("returns empty env when detectFn reports server unreachable (no bootstrap via seam)", async () => {
+    // When detectFn is provided and server is unreachable, maybeBootstrapLocalLlm
+    // returns {} immediately — it does not trigger the full install pipeline
+    // (the production bootstrap path requires the live Claude probe which is
+    // only reached when detectFn is absent).
+    const result = await maybeBootstrapLocalLlm({
+      detectFn: async () => ({
+        server: { reachable: false, url: "http://127.0.0.1:8080/v1/models" },
+      }),
+    });
+
+    expect(result).toEqual({});
+  });
 });
