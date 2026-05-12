@@ -265,6 +265,7 @@ function trySpawnDetached(
 ): { pid: number } | { err: string } {
   try {
     return { pid: spawnDetachedFn(cmd, args).pid };
+    // rule-6: handled-locally — pre-spawn ENOENT/EACCES typed as err-string, bubbles to caller as a failed-step result
   } catch (err) {
     return { err: err instanceof Error ? err.message : String(err) };
   }
@@ -278,6 +279,7 @@ function tryWritePid(path: string, pid: number, opts: ExecuteOpts): void {
   if (opts.writePidFn === undefined) return;
   try {
     opts.writePidFn(path, pid);
+    // rule-6: handled-locally — PID file is informational; write failure is non-fatal and logged as a warning
   } catch (err) {
     opts.log(
       `  ⚠ PID file write failed (${err instanceof Error ? err.message : String(err)}) — continuing\n`,
