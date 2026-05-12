@@ -71,7 +71,7 @@ pivot: |
   fires at < 0.40. The 40-percentage-point gap is the rule-#9
   explicit pivot margin (Ries 2011 build-measure-learn).
 measurement: |
-  bash -c 'cd /Users/fivanishche/apps/tooling/minsky/.worktrees/cross-repo-cto-audit-host-mode && npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 135 and .numFailedTests == 0" && grep -q "runHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts && grep -q "shouldRunHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts && grep -q -- "--cto-audit" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "ctoAudit" novel/cross-repo-runner/src/host-loop.ts && echo PASS || (echo FAIL && exit 1)'
+  npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 135 and .numFailedTests == 0" && grep -q "runHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts && grep -q "shouldRunHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts && grep -q -- "--cto-audit" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "ctoAudit" novel/cross-repo-runner/src/host-loop.ts
 anchor: |
   Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
   *IEEE Computer* 36 (1), January 2003 (MAPE-K reference architecture
