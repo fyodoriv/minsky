@@ -65,6 +65,8 @@ export type IgnoreAppendVerdict =
  * Render the payload appended to the chosen file. Same shape regardless of
  * which path wins — the operator can grep `# minsky sidecar` to find the
  * line in either file.
+ *
+ * @otel-exempt pure string-rendering helper; no I/O.
  */
 export function renderIgnorePayload(entry: string): string {
   return `\n# minsky sidecar (auto-added by minsky-bootstrap)\n${entry}\n`;
