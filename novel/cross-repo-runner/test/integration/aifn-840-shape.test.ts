@@ -319,12 +319,13 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
     expect(result.stderr).toContain("aifn-840-slash-command-labels");
   });
 
-  test("--loop --max-iterations=1: drains one task in dry-run mode and exits 0", () => {
+  test("--loop --no-live --max-iterations=1: drains one task in dry-run mode and exits 0", () => {
     runBootstrap(host);
     const result = runMinskyRun(host, [
       "--host",
       host.hostRoot,
       "--loop",
+      "--no-live",
       "--max-iterations=1",
       "--tick-interval-ms=0",
     ]);
@@ -344,6 +345,24 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
     expect(lastRecord.verdict).toBe("validated");
     expect(lastRecord.notes).toContain("loop iteration=0");
     expect(lastRecord.notes).toContain("dry-run");
+  });
+
+  test("slice-D autonomous defaults: --host alone enables --live + --loop + --cto-audit + --seed-on-empty", () => {
+    runBootstrap(host);
+    // Use --no-live so the test stays hermetic (no real claude spawn) but
+    // verify the OTHER three autonomous defaults all fire by inspecting
+    // the banner.
+    const result = runMinskyRun(host, [
+      "--host",
+      host.hostRoot,
+      "--no-live",
+      "--max-iterations=1",
+      "--tick-interval-ms=0",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("host-daemon loop");
+    expect(result.stdout).toContain("cto-audit=on");
+    expect(result.stdout).toContain("seed-on-empty=on");
   });
 
   test("--loop on empty queue exits 0 with stopReason empty-queue", () => {
@@ -366,6 +385,7 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
       "--host",
       host.hostRoot,
       "--loop",
+      "--no-live",
       "--max-iterations=5",
       "--tick-interval-ms=0",
     ]);
@@ -374,20 +394,22 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
     expect(result.stdout).toContain("iterations: 0");
   });
 
-  test("--loop with positional arg exits 64 (usage error)", () => {
+  test("--loop with positional arg exits 64 (autonomous-vs-one-shot contradiction)", () => {
     runBootstrap(host);
     const result = runMinskyRun(host, ["some-task-id", "--host", host.hostRoot, "--loop"]);
     expect(result.code).toBe(64);
-    expect(result.stderr).toContain("--loop mode picks tasks automatically");
+    expect(result.stderr).toContain("incompatible with autonomous-mode flags");
   });
 
-  test("--cto-audit + --loop: banner mentions cto-audit=on", () => {
+  test("--cto-audit --no-seed-on-empty + --loop: banner mentions cto-audit=on seed-on-empty=off", () => {
     runBootstrap(host);
     const result = runMinskyRun(host, [
       "--host",
       host.hostRoot,
       "--loop",
+      "--no-live",
       "--cto-audit",
+      "--no-seed-on-empty",
       "--max-iterations=1",
       "--tick-interval-ms=0",
     ]);
@@ -417,6 +439,7 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
       "--host",
       host.hostRoot,
       "--loop",
+      "--no-live",
       "--cto-audit",
       "--seed-on-empty",
       "--max-iterations=1",
@@ -433,6 +456,110 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
     const result = runMinskyRun(host, ["--host", host.hostRoot, "--loop", "--max-iterations=0"]);
     expect(result.code).toBe(64);
     expect(result.stderr).toContain("--max-iterations must be a positive integer");
+  });
+
+  test("slice-D --hosts-dir errors clean when no bootstrapped subdirs found", () => {
+    // The fixture itself is the host; cwd above it is the system tmpdir. We
+    // construct a tmpdir with no bootstrapped subdirs and ask the CLI to walk it.
+    const emptyParent = mkdtempSync(join(tmpdir(), "minsky-empty-parent-"));
+    try {
+      const result = runMinskyRun(host, [
+        "--hosts-dir",
+        emptyParent,
+        "--no-live",
+        "--max-iterations=1",
+        "--tick-interval-ms=0",
+      ]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("no bootstrapped hosts found");
+      expect(result.stderr).toContain(emptyParent);
+    } finally {
+      rmSync(emptyParent, { recursive: true, force: true });
+    }
+  });
+
+  test("slice-D --hosts-dir walks bootstrapped subdirs in drain-then-advance order", () => {
+    // Create a parent dir with two bootstrapped sub-hosts. Each TASKS.md has a
+    // task WITHOUT rule-#9 fields, so `pickHostTask` returns null on the first
+    // tick — the inner loop returns `empty-queue` and the walker advances. With
+    // both sub-hosts producing `empty-queue`, the walker's stop reason is
+    // `all-hosts-drained`. (A rule-#9-compliant task in dry-run never drains
+    // because TASKS.md is not mutated; that's covered separately by the
+    // single-host slice-B tests above.)
+    const parent = mkdtempSync(join(tmpdir(), "minsky-parent-"));
+    const subHostA = join(parent, "host-a");
+    const subHostB = join(parent, "host-b");
+    const EMPTY_TASKS_MD = [
+      "# Tasks",
+      "",
+      "## P1",
+      "",
+      "- [ ] Placeholder task missing rule-9 fields",
+      "  **ID**: placeholder",
+      "  **Tags**: bug",
+      "",
+    ].join("\n");
+    try {
+      for (const sub of [subHostA, subHostB]) {
+        // Provision each sub-host with a tmpdir-style fixture.
+        const xdg = join(sub, ".config-isolated");
+        // Make the sub-host a git repo and write TASKS.md + package.json.
+        execFileSync("mkdir", ["-p", sub]);
+        const {
+          GIT_DIR: _gitDir,
+          GIT_WORK_TREE: _gitWorkTree,
+          GIT_INDEX_FILE: _gitIndexFile,
+          GIT_OBJECT_DIRECTORY: _gitObjectDirectory,
+          ...gitEnv
+        } = process.env;
+        void _gitDir;
+        void _gitWorkTree;
+        void _gitIndexFile;
+        void _gitObjectDirectory;
+        execFileSync("git", ["init", "--quiet"], { cwd: sub, env: gitEnv });
+        execFileSync(
+          "git",
+          [
+            "config",
+            "remote.origin.url",
+            `git@github.com:test/${sub === subHostA ? "host-a" : "host-b"}.git`,
+          ],
+          { cwd: sub, env: gitEnv },
+        );
+        writeFileSync(
+          join(sub, "package.json"),
+          JSON.stringify({ name: `host-${sub === subHostA ? "a" : "b"}`, scripts: {} }),
+        );
+        writeFileSync(join(sub, "TASKS.md"), EMPTY_TASKS_MD);
+        execFileSync("node", [BOOTSTRAP_BIN, sub], {
+          env: { ...process.env, XDG_CONFIG_HOME: xdg },
+        });
+      }
+      // --no-seed-on-empty: prevent the seeder from regenerating tasks. With
+      // an empty rule-#9 queue, the inner loop returns `empty-queue` ASAP and
+      // the walker advances.
+      const result = runMinskyRun(host, [
+        "--hosts-dir",
+        parent,
+        "--no-live",
+        "--no-seed-on-empty",
+        "--max-iterations=5",
+        "--tick-interval-ms=0",
+      ]);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("multi-host walk");
+      expect(result.stdout).toContain("host-a");
+      expect(result.stdout).toContain("host-b");
+      expect(result.stdout).toContain("stopReason: all-hosts-drained");
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  test("slice-D --host and --hosts-dir together is an error", () => {
+    const result = runMinskyRun(host, ["--host", host.hostRoot, "--hosts-dir", "/tmp/whatever"]);
+    expect(result.code).toBe(64);
+    expect(result.stderr).toContain("cannot pass both --host and --hosts-dir");
   });
 
   // --live integration: gated on the operator having a real `claude` CLI on
