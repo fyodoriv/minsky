@@ -1,0 +1,13 @@
+# Agentfile.yaml — Minsky (agentbrew manifest)
+#
+# Declares the skill source for the observer plugin + the MCP servers
+# this repo expects the operating agent to have wired up. Consumed by
+# `agentbrew sync --agentfile <path>`.
+#
+# See https://github.com/cbrwizard/agentbrew for the schema.
+
+skillSources:
+  # The observer plugin (SKILL.md at skill-plugins/observer/minsky/) —
+  # distributed to every detected agent's skillsDir via `agentbrew sync`.
+  - label: minsky-observer
+    path: ./skill-plugins/observer
