@@ -1,0 +1,135 @@
+#!/bin/bash
+# `minsky` — PATH-accessible shim for running the minsky cross-repo
+#   runner from any folder.
+#
+# Pattern: thin bash wrapper + delegating Node subprocess (Martin
+#   2017 — I/O at the edge; the resolver `resolveMinskyRepo` in
+#   `novel/cross-repo-runner/src/shim-resolve.ts` is pure, the shim
+#   here is the I/O boundary that probes the filesystem).
+# Source: minsky-observer-plugin-via-agentbrew task block + slice D
+#   (PR #492) autonomous defaults (`minsky-run` does cwd auto-detect,
+#   this shim just lets the operator invoke it from any shell).
+# Conformance: full — no business logic here, only DI + forwarding.
+#
+# Usage:
+#   minsky               → autonomous run against $(pwd); cwd-detect
+#                          decides single-host vs multi-host walk.
+#   minsky --host <dir>  → explicit single-host.
+#   minsky --hosts-dir <parent> → explicit multi-host walk.
+#   minsky --help        → forwarded to `minsky-run --help`.
+#   minsky status        → list running minsky-run processes on this host.
+#   minsky stop          → SIGTERM any running minsky-run processes.
+#
+# Resolution order (via `resolveMinskyRepo`):
+#   1. $MINSKY_REPO env var (if set + exists)
+#   2. ~/apps/tooling/minsky  (canonical Example layout)
+#   3. ~/apps/minsky, ~/code/minsky, ~/src/minsky (community layouts)
+#
+# Failure modes (rule #7):
+#   - No repo found: loud-crash-supervisor-restart; prints the exact
+#     resolver hint + exit 1. The operator sees "Set MINSKY_REPO=..."
+#     and can act. Silent fallback would hide the misconfiguration.
+#   - Node missing: loud-crash. The upstream `node` probe is single-
+#     execution; if node isn't installed, `minsky-run` can't work
+#     either, so the shim exits with a message pointing at
+#     `setup.sh`.
+#   - Subcommand `status`/`stop` with no running process: graceful
+#     degrade. `status` prints "no running minsky-run on this host";
+#     `stop` prints "nothing to stop" and exits 0 (idempotent).
+
+set -euo pipefail
+
+# ── 0. Node availability ─────────────────────────────────────
+if ! command -v node >/dev/null 2>&1; then
+  echo "minsky: node is not on PATH. Install Node 20+ and retry, or run ~/apps/tooling/minsky/setup.sh first." >&2
+  exit 1
+fi
+
+# ── 1. Handle subcommands that DON'T need the repo ──────────
+#
+# `minsky status` / `minsky stop` only need ps/grep/kill. Handle
+# them before we pay the repo-resolution cost so a fresh machine
+# without minsky checked out can still report "no running process".
+case "${1:-}" in
+  status)
+    # Find processes: node invocations of the runner bin. Use `pgrep -a`
+    # for PID + command line so the operator sees the args.
+    if pgrep -fal "cross-repo-runner/bin/minsky-run" 2>/dev/null; then
+      exit 0
+    fi
+    echo "no running minsky-run on this host"
+    exit 0
+    ;;
+  stop)
+    # SIGTERM every running minsky-run process. The runner's own signal
+    # handler (host-loop.ts → abort signal) finishes the in-flight
+    # iteration before exiting.
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      pkill -TERM -f "cross-repo-runner/bin/minsky-run"
+      echo "sent SIGTERM to all running minsky-run processes"
+      exit 0
+    fi
+    echo "nothing to stop"
+    exit 0
+    ;;
+esac
+
+# ── 2. Resolve the minsky repo via the pure `resolveMinskyRepo` ─
+#
+# The resolver lives in TypeScript; ship a tiny node inline-eval that
+# calls the compiled `dist/shim-resolve.js` OR falls back to tsx if the
+# package isn't built yet (dev ergonomics — the operator should never
+# have to `pnpm build` before the shim works).
+SHIM_HOME="${HOME:-/root}"
+SHIM_ENV_REPO="${MINSKY_REPO:-}"
+
+MINSKY_REPO_PATH="$(node --input-type=module -e "
+  import { existsSync } from 'node:fs';
+  import { homedir } from 'node:os';
+
+  // Inline copy of the resolver's deterministic chain. Keeps the
+  // shim zero-dependency: no need to resolve the minsky repo to
+  // locate the resolver that tells us where the minsky repo is.
+  const FALLBACKS = [
+    'apps/tooling/minsky',
+    'apps/minsky',
+    'code/minsky',
+    'src/minsky',
+  ];
+  const home = homedir();
+  const envRepo = process.env.MINSKY_REPO;
+  if (envRepo && envRepo.length > 0) {
+    if (existsSync(envRepo)) {
+      process.stdout.write(envRepo);
+      process.exit(0);
+    }
+    process.stderr.write(\`minsky: MINSKY_REPO=\${envRepo} but path does not exist\\n\`);
+    process.exit(1);
+  }
+  for (const rel of FALLBACKS) {
+    const full = \`\${home}/\${rel}\`;
+    if (existsSync(full)) {
+      process.stdout.write(full);
+      process.exit(0);
+    }
+  }
+  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), ~/apps/tooling/minsky, ~/apps/minsky, ~/code/minsky, ~/src/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/apps/tooling/minsky.\\n');
+  process.exit(1);
+" 2>&1)"
+RESOLVE_EXIT=$?
+if [ $RESOLVE_EXIT -ne 0 ]; then
+  echo "$MINSKY_REPO_PATH" >&2
+  exit 1
+fi
+export SHIM_HOME SHIM_ENV_REPO
+
+# ── 3. Locate the runner bin + forward ──────────────────────
+RUNNER_BIN="$MINSKY_REPO_PATH/novel/cross-repo-runner/bin/minsky-run.mjs"
+if [ ! -f "$RUNNER_BIN" ]; then
+  echo "minsky: resolved repo $MINSKY_REPO_PATH but runner bin not found at $RUNNER_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
+  exit 1
+fi
+
+# Forward every arg verbatim. The runner bin itself handles `--help`,
+# cwd auto-detect, countdown banner, autonomous defaults, etc.
+exec node "$RUNNER_BIN" "$@"
