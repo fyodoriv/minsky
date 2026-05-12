@@ -117,6 +117,7 @@ const {
   PATH_CONFIG_KEYS,
   buildProductionProbes,
   checkGitConfigPaths,
+  checkTickLoopBinExists,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
   decideTtyMode,
@@ -230,8 +231,12 @@ async function runStartOrAttach(args) {
   // bin must exist or `spawn(node, [TICK_LOOP_BIN, ...])` would emit
   // ENOENT with a stack that doesn't point at the missing path.
   // Defensive backstop on top of slice 8's dist-existence check.
-  if (!existsSync(TICK_LOOP_BIN)) {
-    process.stderr.write(`${formatTickLoopBinMissingMessage(TICK_LOOP_BIN)}\n`);
+  const tickLoopBinCheck = checkTickLoopBinExists({
+    tickLoopBinPath: TICK_LOOP_BIN,
+    existsSyncFn: existsSync,
+  });
+  if (tickLoopBinCheck.ok === false) {
+    process.stderr.write(`${formatTickLoopBinMissingMessage(tickLoopBinCheck.tickLoopBinPath)}\n`);
     process.exit(1);
   }
 
