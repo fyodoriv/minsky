@@ -176,15 +176,18 @@ function printHelp() {
   process.stdout.write("minsky — operator CLI for the tick-loop daemon\n");
   process.stdout.write(`
 Usage:
-  minsky [<worker-id>]      start-or-attach worker <id> (default 0); Ctrl+C detaches
-  minsky logs [<worker-id>] reattach to worker <id>'s log (never spawns)
-  minsky stop [<worker-id>] stop worker <id> (SIGTERM the daemon)
+  minsky [<worker-id>]                    start-or-attach worker <id> (default 0); Ctrl+C detaches
+  minsky logs [<worker-id>]               reattach to worker <id>'s log (never spawns)
+  minsky stop [<worker-id>]               stop worker <id> (SIGTERM the daemon)
+  minsky doctor                           read-only health check (claude + local-LLM stack)
+  minsky bootstrap-local-llm [--dry-run]  install the local-LLM stack (--dry-run: preview only)
 
 Examples:
-  minsky                          # start-or-attach worker 0
-  minsky 1                        # start-or-attach worker 1 (in another terminal)
-  minsky logs                     # follow worker 0's log live
-  minsky stop 1                   # stop worker 1
+  minsky                                # start-or-attach worker 0
+  minsky 1                              # start-or-attach worker 1 (in another terminal)
+  minsky logs                           # follow worker 0's log live
+  minsky stop 1                         # stop worker 1
+  minsky doctor                         # show claude + local-LLM stack health and exit
   minsky bootstrap-local-llm --dry-run  # preview the local-LLM install plan and exit (read-only)
 
 Sane defaults (override by passing the corresponding tick-loop flag):
@@ -346,6 +349,16 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
       "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
     );
     return await runBootstrapLocalLlm({ force: false });
+  }
+
+  // Slice 66: MINSKY_LLM_PROVIDER=claude-only → operator has explicitly
+  // opted out of local-LLM. Skip the server probe (~2 s) and Claude probe
+  // (~5–20 s) entirely and return {} immediately. The help text already
+  // documents this as "force claude (skip local-LLM probe)"; this guard
+  // closes the gap where the code ignored the env var and ran both probes
+  // before returning {} anyway.
+  if (process.env["MINSKY_LLM_PROVIDER"] === "claude-only") {
+    return {};
   }
 
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — consult

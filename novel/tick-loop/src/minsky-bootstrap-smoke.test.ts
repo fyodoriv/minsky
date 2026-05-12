@@ -39,4 +39,17 @@ describe("maybeBootstrapLocalLlm", () => {
 
     expect(result).toEqual({});
   });
+
+  it("slice 66: returns {} immediately when MINSKY_LLM_PROVIDER=claude-only (skip-earlier gate)", async () => {
+    // claude-only → skip server probe + Claude probe entirely.
+    // Passes no detectFn so only the env-var guard is exercised.
+    const prev = process.env["MINSKY_LLM_PROVIDER"];
+    process.env["MINSKY_LLM_PROVIDER"] = "claude-only";
+    try {
+      const result = await maybeBootstrapLocalLlm();
+      expect(result).toEqual({});
+    } finally {
+      process.env["MINSKY_LLM_PROVIDER"] = prev;
+    }
+  });
 });
