@@ -41,7 +41,7 @@ jobs:
       - name: initial install (triggers prepare → tsc -b → builds dist/)
         run: pnpm install --frozen-lockfile
       - name: simulate stale-dist (fresh-clone scenario)
-        run: rm -rf novel/tick-loop/dist
+        run: rm -rf novel/tick-loop/dist novel/tick-loop/tsconfig.tsbuildinfo
       - name: reinstall — must rebuild dist/ via prepare hook
         run: pnpm install --frozen-lockfile
       - name: assert minsky doctor reports no RED rows
