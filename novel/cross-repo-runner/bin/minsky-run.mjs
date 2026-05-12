@@ -32,6 +32,7 @@ import {
   loadRepoConfig,
   pickHostTask,
   renderIterationRecord,
+  runHostCtoAudit,
   runHostLoop,
   runLive,
   synthesiseExperimentYaml,
@@ -59,6 +60,11 @@ function usage() {
       "Flags:",
       "  --max-iterations=N        Cap loop iterations. Default Infinity.",
       "  --tick-interval-ms=M      Sleep between iterations. Default 300000 (5 min).",
+      "  --cto-audit               After each validated iteration, run a CTO-mode",
+      "                             audit that proposes follow-up rule-#9 tasks.",
+      "  --seed-on-empty           When the queue empties AND --cto-audit is on,",
+      "                             fire a seed audit + re-pick (one-shot) so the",
+      "                             loop continues with newly-proposed tasks.",
       "",
       "The host must have been bootstrapped first via `minsky-bootstrap <host-dir>`.",
       "",
@@ -79,6 +85,12 @@ const BOOL_FLAGS = {
   },
   "--loop": (s) => {
     s.loop = true;
+  },
+  "--cto-audit": (s) => {
+    s.ctoAudit = true;
+  },
+  "--seed-on-empty": (s) => {
+    s.seedOnEmpty = true;
   },
 };
 
@@ -147,6 +159,8 @@ function parseArgs(argv) {
     host: null,
     live: false,
     loop: false,
+    ctoAudit: false,
+    seedOnEmpty: false,
     maxIterations: Number.POSITIVE_INFINITY,
     tickIntervalMs: 300_000,
     positional: [],
@@ -171,6 +185,8 @@ function parseArgs(argv) {
       kind: "loop",
       host: resolve(state.host),
       live: state.live,
+      ctoAudit: state.ctoAudit,
+      seedOnEmpty: state.seedOnEmpty,
       maxIterations: state.maxIterations,
       tickIntervalMs: state.tickIntervalMs,
     };
@@ -457,7 +473,7 @@ async function runPlanned(taskId, hostRoot, live) {
  * stay-alive across mid-task interruption).
  */
 async function runLoop(parsed) {
-  const { host: hostRoot, live, maxIterations, tickIntervalMs } = parsed;
+  const { host: hostRoot, live, ctoAudit, seedOnEmpty, maxIterations, tickIntervalMs } = parsed;
   const config = loadHostConfig(hostRoot);
 
   // SIGTERM bridge — operator's normal-exit signal. The loop's AbortSignal
@@ -473,7 +489,8 @@ async function runLoop(parsed) {
   process.stdout.write(
     `\n=== host-daemon loop (host=${config.host_repo}, mode=${live ? "live" : "dry-run"}, ` +
       `max-iter=${maxIterations === Number.POSITIVE_INFINITY ? "∞" : maxIterations}, ` +
-      `tick=${tickIntervalMs}ms) ===\n`,
+      `tick=${tickIntervalMs}ms, cto-audit=${ctoAudit ? "on" : "off"}, ` +
+      `seed-on-empty=${seedOnEmpty ? "on" : "off"}) ===\n`,
   );
 
   let strategy = null;
@@ -553,6 +570,28 @@ async function runLoop(parsed) {
         notes: `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`,
       });
     },
+    seedOnEmpty: ctoAudit && seedOnEmpty,
+    ...(ctoAudit
+      ? {
+          ctoAudit: ({ signals, completedVerdict }) =>
+            runHostCtoAudit({
+              signals,
+              spawn: strategy ?? dryRunStrategy,
+              env: process.env,
+              completedVerdict,
+            }),
+          buildCtoSignals: (args) => ({
+            hostRepo: config.host_repo,
+            hostRoot,
+            tasksMdPath: config.tasks_md_path,
+            reason: args.reason,
+            completedTaskId: args.completedTaskId,
+            prUrl: args.prUrl,
+            filesChanged: args.filesChanged,
+            utcDate: new Date().toISOString().slice(0, 10),
+          }),
+        }
+      : {}),
   });
 
   process.off("SIGTERM", onSignal);

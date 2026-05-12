@@ -15,6 +15,7 @@
 // Conformance: full — pure function over injected I/O seams; the CLI bin
 //   is the I/O boundary that constructs the seams.
 
+import type { HostCtoAuditOutcome, HostCtoSignals } from "./host-cto-audit.js";
 import type { GitLike, LiveSpawnOutcome, SpawnLike } from "./runner.js";
 import type { ParsedTask } from "./task-finder.js";
 
@@ -130,6 +131,43 @@ export interface RunHostLoopOpts {
    * iteration regardless of verdict (rule #4 — visible-not-silent).
    */
   readonly recordIteration?: (record: LoopIterationResult) => void;
+  /**
+   * Optional CTO-audit seam. When set, the loop fires the audit (a) after
+   * every `validated`-verdict iteration AND (b) on `empty-queue` when
+   * `seedOnEmpty` is true. The audit is a pure orchestrator over an
+   * injected `SpawnLike` (typically a second `ProcessSpawnStrategy` with
+   * a CTO-mode brief). When omitted, the loop runs the slice-B
+   * stop-on-empty behaviour unchanged.
+   *
+   * The seam takes the trigger context + the just-completed verdict so
+   * the gate inside the audit (`shouldRunHostCtoAudit`) can decide.
+   */
+  readonly ctoAudit?: (args: {
+    readonly signals: HostCtoSignals;
+    readonly completedVerdict: "validated" | "scope-leak" | "spawn-failed" | null;
+  }) => Promise<HostCtoAuditOutcome>;
+  /**
+   * When true AND `ctoAudit` is set, an empty queue triggers a seed
+   * audit instead of returning `empty-queue` immediately. After the
+   * audit completes (regardless of outcome), the loop re-attempts
+   * `pickTask`; if STILL null, returns `empty-queue` (one re-pick budget
+   * to bound the retry loop). Default false — operators opt in to keep
+   * the slice-B default stop-on-empty behaviour.
+   */
+  readonly seedOnEmpty?: boolean;
+  /**
+   * Builder for the audit's `HostCtoSignals`. The loop has the trigger
+   * context (post-iteration vs queue-empty) and the just-completed
+   * iteration; the builder fills in `hostRepo` / `hostRoot` /
+   * `tasksMdPath` / `utcDate` from operator config. Required when
+   * `ctoAudit` is set.
+   */
+  readonly buildCtoSignals?: (args: {
+    readonly reason: "post-iteration" | "queue-empty";
+    readonly completedTaskId: string | null;
+    readonly prUrl: string | null;
+    readonly filesChanged: readonly string[];
+  }) => HostCtoSignals;
 }
 
 /**
@@ -219,7 +257,7 @@ async function runOneIteration(args: {
   readonly iterations: LoopIterationResult[];
 }): Promise<LoopStopReason | undefined> {
   const { opts, iteration, iterations } = args;
-  const task = opts.pickTask();
+  const task = await pickTaskOrSeed(opts);
   if (task === null) return "empty-queue";
   const plan = opts.buildPlan(task);
   const allowedPaths = opts.resolveAllowedPaths(task);
@@ -240,9 +278,59 @@ async function runOneIteration(args: {
   };
   iterations.push(iterationResult);
   opts.recordIteration?.(iterationResult);
+  await maybeFirePostIterationAudit(opts, task, outcome);
   if (outcome.verdict === "scope-leak") return "scope-leak";
   if (outcome.verdict === "spawn-failed") return "spawn-failed";
   return undefined;
+}
+
+/**
+ * Pick the next task, OR fire a queue-empty seed audit and re-pick if
+ * `seedOnEmpty` is enabled. One re-pick budget per iteration to bound
+ * the retry loop (if the audit ran but added no eligible tasks, we
+ * exit `empty-queue` next).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function pickTaskOrSeed(opts: RunHostLoopOpts): Promise<ParsedTask | null> {
+  const first = opts.pickTask();
+  if (first !== null) return first;
+  if (!opts.seedOnEmpty || opts.ctoAudit === undefined || opts.buildCtoSignals === undefined) {
+    return null;
+  }
+  const signals = opts.buildCtoSignals({
+    reason: "queue-empty",
+    completedTaskId: null,
+    prUrl: null,
+    filesChanged: [],
+  });
+  await opts.ctoAudit({ signals, completedVerdict: null });
+  // Re-attempt pick once. If still null, the audit didn't help (no PR
+  // merged yet, or audit produced no rule-#9-compliant blocks); the loop
+  // exits empty-queue normally.
+  return opts.pickTask();
+}
+
+/**
+ * Fire the post-iteration CTO audit when the verdict is `validated`. No-op
+ * when the seam isn't wired or when the verdict isn't validated.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeFirePostIterationAudit(
+  opts: RunHostLoopOpts,
+  task: ParsedTask,
+  outcome: LiveSpawnOutcome,
+): Promise<void> {
+  if (opts.ctoAudit === undefined || opts.buildCtoSignals === undefined) return;
+  if (outcome.verdict !== "validated") return;
+  const signals = opts.buildCtoSignals({
+    reason: "post-iteration",
+    completedTaskId: task.id,
+    prUrl: outcome.prUrl,
+    filesChanged: [],
+  });
+  await opts.ctoAudit({ signals, completedVerdict: outcome.verdict });
 }
 
 /**

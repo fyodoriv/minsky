@@ -38,3 +38,16 @@ export type {
   LoopStopReason,
   RunHostLoopOpts,
 } from "./host-loop.js";
+export {
+  HOST_CTO_AUDIT_PR_LABEL,
+  HOST_CTO_PROMPT_HEADER,
+  buildHostCtoBrief,
+  runHostCtoAudit,
+  shouldRunHostCtoAudit,
+} from "./host-cto-audit.js";
+export type {
+  HostCtoAuditOutcome,
+  HostCtoSignals,
+  HostCtoTriggerReason,
+  RunHostCtoAuditInputs,
+} from "./host-cto-audit.js";

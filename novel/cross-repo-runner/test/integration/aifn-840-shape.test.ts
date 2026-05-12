@@ -381,6 +381,53 @@ describe("AIFN-840 integration: bootstrap + minsky-run end-to-end", () => {
     expect(result.stderr).toContain("--loop mode picks tasks automatically");
   });
 
+  test("--cto-audit + --loop: banner mentions cto-audit=on", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, [
+      "--host",
+      host.hostRoot,
+      "--loop",
+      "--cto-audit",
+      "--max-iterations=1",
+      "--tick-interval-ms=0",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("cto-audit=on");
+    expect(result.stdout).toContain("seed-on-empty=off");
+  });
+
+  test("--cto-audit + --seed-on-empty: banner mentions seed-on-empty=on", () => {
+    runBootstrap(host);
+    // Use a TASKS.md whose only task lacks rule-#9 fields, so the queue is empty
+    // and the seed audit fires (dry-run strategy returns instantly).
+    writeFileSync(
+      host.tasksMdPath,
+      [
+        "# Tasks",
+        "",
+        "## P1",
+        "",
+        "- [ ] Incomplete task",
+        "  **ID**: incomplete-task",
+        "  **Tags**: bug",
+        "",
+      ].join("\n"),
+    );
+    const result = runMinskyRun(host, [
+      "--host",
+      host.hostRoot,
+      "--loop",
+      "--cto-audit",
+      "--seed-on-empty",
+      "--max-iterations=1",
+      "--tick-interval-ms=0",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("cto-audit=on");
+    expect(result.stdout).toContain("seed-on-empty=on");
+    expect(result.stdout).toContain("stopReason: empty-queue");
+  });
+
   test("--max-iterations rejects non-positive values with usage error", () => {
     runBootstrap(host);
     const result = runMinskyRun(host, ["--host", host.hostRoot, "--loop", "--max-iterations=0"]);

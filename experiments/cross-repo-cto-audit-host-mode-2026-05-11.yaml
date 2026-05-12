@@ -1,0 +1,104 @@
+id: cross-repo-cto-audit-host-mode-2026-05-11
+hypothesis: |
+  Slices A (PR #489) and B (PR #490) close the cross-repo *execution*
+  surface — a host operator can drain a rule-#9-compliant queue
+  continuously. The remaining gap is the *generation* surface: when
+  the queue empties, the daemon stops. The minsky-on-itself loop
+  (`@minsky/tick-loop`) solves this with `post-task-cto-audit.ts` —
+  a second `claude --print` invocation after each shipped iteration
+  that proposes 1–3 follow-up rule-#9-compliant task blocks.
+
+  This PR ships the cross-repo equivalent:
+  `novel/cross-repo-runner/src/host-cto-audit.ts` exports
+  `buildHostCtoBrief` (host-parameterised CTO prompt),
+  `shouldRunHostCtoAudit` (gate predicate covering verdict / env /
+  recursion-guard), and `runHostCtoAudit` (pure orchestrator over an
+  injected `SpawnLike`). Two new boolean CLI flags
+  (`--cto-audit`, `--seed-on-empty`) wire the audit into `runHostLoop`
+  via the new `ctoAudit` + `buildCtoSignals` + `seedOnEmpty` seams
+  on `RunHostLoopOpts`.
+
+  Behavior: with `--cto-audit`, every `validated`-verdict iteration
+  in `--loop` mode triggers a post-iteration audit; with
+  `--cto-audit --seed-on-empty`, an empty queue also triggers a seed
+  audit + one-shot re-pick so the loop self-seeds instead of exiting.
+  Default behavior (no flags) is byte-identical to slice B — the
+  seam is opt-in.
+
+  Pre-registered effect: paired tests for `host-cto-audit.ts` (22
+  cases) + extended `host-loop.test.ts` (6 new CTO-seam tests) + 2
+  new integration tests pass; the slice B + slice A surfaces are
+  unchanged when the new flags are absent.
+success: |
+  - `pnpm vitest run novel/cross-repo-runner` exits 0 with ≥ 135
+    passing tests (was 105 after slice B; +22 host-cto-audit +
+    6 host-loop CTO-seam + 2 new integration cases).
+  - `node scripts/check-rule-7-chaos-coverage.mjs` exits 0.
+  - `grep -q "runHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts`
+    exits 0.
+  - `grep -q "shouldRunHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts`
+    exits 0.
+  - `grep -q -- "--cto-audit" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0.
+  - `grep -q -- "--seed-on-empty" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0.
+  - `grep -q "ctoAudit" novel/cross-repo-runner/src/host-loop.ts` exits 0
+    (the seam is wired).
+  - `node scripts/check-anchor-primary-source.mjs experiments/cross-repo-cto-audit-host-mode-2026-05-11.yaml`
+    exits 0.
+  - `node scripts/check-pivot-success-margin.mjs experiments/cross-repo-cto-audit-host-mode-2026-05-11.yaml`
+    exits 0.
+  - `node scripts/check-measurement-inspects-output.mjs experiments/cross-repo-cto-audit-host-mode-2026-05-11.yaml`
+    exits 0.
+pivot: |
+  Two pivot paths pre-registered:
+
+    1. If the CTO audit's prompt produces vanity-metric task blocks
+       (counts-go-up tasks per Ries 2011) or fabricates non-existent
+       file paths > 20 % of the time on real hosts, retire the
+       auto-fire from `--loop` and keep `--cto-audit-once` as a
+       one-shot operator surface. The pure `runHostCtoAudit` survives
+       as substrate. Decision boundary: < 0.40 of audit-PRs ship
+       (`merged / opened`) over the trailing 60 days against ≥ 5
+       distinct host repos.
+    2. If `--seed-on-empty` produces flapping (audit proposes one
+       task, daemon ships it, queue empties, audit re-proposes
+       similar tasks ad infinitum), tighten the recursion guard or
+       require a `**Pick-next**: cto-audit-seed` operator approval
+       before seeding. The audit pure orchestrator survives.
+
+  Margin: success threshold ≥ 0.80 ship-rate of audit PRs; pivot 1
+  fires at < 0.40. The 40-percentage-point gap is the rule-#9
+  explicit pivot margin (Ries 2011 build-measure-learn).
+measurement: |
+  npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 135 and .numFailedTests == 0" && grep -q "runHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts && grep -q "shouldRunHostCtoAudit" novel/cross-repo-runner/src/host-cto-audit.ts && grep -q -- "--cto-audit" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "ctoAudit" novel/cross-repo-runner/src/host-loop.ts
+anchor: |
+  Kephart, J. O., Chess, D. M., "The Vision of Autonomic Computing",
+  *IEEE Computer* 36 (1), January 2003 (MAPE-K reference architecture
+  — the CTO audit IS the Plan phase of cross-repo work; `runLive` is
+  Execute; the audit identifies new work items the Execute phase
+  ships).
+  Goldratt, E. M., *The Goal: A Process of Ongoing Improvement*,
+  North River Press, 1984 (Theory of Constraints — the CTO audit
+  identifies the next constraint to lift; ISBN 978-0884271956).
+  Ries, E., *The Lean Startup*, Crown Business, 2011 (validated-
+  learning discipline — the audit's success metric is *PRs that ship*,
+  not PRs that get filed; ISBN 978-0307887894).
+  Gamma, E., Helm, R., Johnson, R., Vlissides, J., *Design Patterns:
+  Elements of Reusable Object-Oriented Software*, Addison-Wesley,
+  1994 (Strategy + Command — `ctoAudit` is a Strategy seam on
+  `RunHostLoopOpts`; the audit's `HostCtoSignals` are Command-pattern
+  data; ISBN 0-201-63361-2).
+  Martin, R. C., *Clean Architecture*, Prentice Hall, 2017 (I/O at
+  the edge — `host-cto-audit.ts` is pure; the CLI bin wires the
+  concrete spawn strategy; ISBN 978-0134494166).
+  rule #1 (vision.md § 1 — don't reinvent;
+  `@minsky/tick-loop`'s `post-task-cto-audit.ts` is the existing
+  primitive; this task adapts its shape for host mode without
+  forking the brief template).
+  rule #9 (vision.md § 9 — every proposed task block must carry the
+  rule-#9 substrate or it's not eligible; the brief explicitly
+  enumerates the 5 required fields).
+  user-stories/006-runner-on-any-repo.md (the cross-repo umbrella
+  story; this task closes its generation surface).
+timeout_seconds: 60
