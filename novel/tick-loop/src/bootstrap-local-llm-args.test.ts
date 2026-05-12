@@ -81,8 +81,49 @@ describe("parseBootstrapLocalLlmArgs", () => {
     });
   });
 
+  it("parses --model=<id> into modelId", () => {
+    expect(parseBootstrapLocalLlmArgs(["--model=mlx-community/Qwen3-4B-Instruct-4bit"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+      modelId: "mlx-community/Qwen3-4B-Instruct-4bit",
+    });
+  });
+
+  it("omits modelId when --model is not passed", () => {
+    expect(parseBootstrapLocalLlmArgs(["--dry-run"])).toEqual({ dryRun: true, noConfirm: false });
+    expect("modelId" in parseBootstrapLocalLlmArgs(["--dry-run"])).toBe(false);
+  });
+
+  it("treats --model= (empty value) as unset", () => {
+    expect(parseBootstrapLocalLlmArgs(["--model="])).toEqual({ dryRun: false, noConfirm: false });
+  });
+
+  it("does not match --models= or --model (no =) prefix variants", () => {
+    expect(parseBootstrapLocalLlmArgs(["--models=foo/bar"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+    });
+    expect(parseBootstrapLocalLlmArgs(["--model"])).toEqual({ dryRun: false, noConfirm: false });
+  });
+
+  it("last --model=<id> wins when passed multiple times (argv-tail wins)", () => {
+    expect(parseBootstrapLocalLlmArgs(["--model=foo/first", "--model=bar/second"])).toEqual({
+      dryRun: false,
+      noConfirm: false,
+      modelId: "bar/second",
+    });
+  });
+
+  it("composes --model with --dry-run and --no-confirm", () => {
+    expect(parseBootstrapLocalLlmArgs(["--dry-run", "--no-confirm", "--model=acme/tiny"])).toEqual({
+      dryRun: true,
+      noConfirm: true,
+      modelId: "acme/tiny",
+    });
+  });
+
   it("is pure — same input twice produces equal output", () => {
-    const args = ["--dry-run", "--no-confirm", "--other"];
+    const args = ["--dry-run", "--no-confirm", "--model=foo/bar", "--other"];
     expect(parseBootstrapLocalLlmArgs(args)).toEqual(parseBootstrapLocalLlmArgs(args));
   });
 });

@@ -1,13 +1,14 @@
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wiring) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 17 (operator 2026-05-08 — `--no-confirm` flag wiring) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 18 (operator 2026-05-08 — `--model=<id>` flag wiring) -->
 /**
  * `@minsky/tick-loop/bootstrap-local-llm-args` — pure parser for the
  * `minsky bootstrap-local-llm` subcommand's flag surface. Slice 9 / 17
- * of P0 task `minsky-cli-auto-bootstrap-local-llm`.
+ * / 18 of P0 task `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Parses two flags so far — `--dry-run` and `--no-confirm` (alias `-y`,
- * `--yes`) — but exists as a typed boundary so future flags
- * (`--model=…`, `--port=…`) land here instead of accreting in the bin
+ * Parses three flags so far — `--dry-run`, `--no-confirm` (alias `-y`,
+ * `--yes`), and `--model=<hf-id>` — but exists as a typed boundary so
+ * future flags (`--port=…`) land here instead of accreting in the bin
  * file. Pure-over-input; tests pass synthetic argv arrays. The wiring
  * at `bin/minsky.mjs` passes `process.argv.slice(2 + 1)` (skip node +
  * script + verb).
@@ -42,7 +43,28 @@ export interface BootstrapLocalLlmArgs {
    * surfaces over write surfaces).
    */
   readonly noConfirm: boolean;
+
+  /**
+   * `--model=<hf-id>` — override the pinned default model for this
+   * `bootstrap-local-llm` invocation. Threads through to (a) the
+   * model-cache probe so detection checks the right HF cache dir,
+   * (b) the `download-model` install step's `hf download <id>`
+   * command, and (c) the `start-mlx-server` step's `--model <id>`
+   * argv. When undefined, the planner uses `DEFAULT_LOCAL_LLM_MODEL`
+   * (`mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit`).
+   *
+   * Use case: the operator wants to bootstrap a smaller variant
+   * (e.g., `mlx-community/Qwen3-4B-Instruct-4bit` for a low-RAM
+   * box) without editing the pinned constant. Composes with
+   * `--dry-run` so the operator can preview the alternative plan.
+   *
+   * Empty values (`--model=`) parse as undefined to avoid wiring an
+   * empty model id into the install commands.
+   */
+  readonly modelId?: string;
 }
+
+const MODEL_FLAG_PREFIX = "--model=";
 
 /**
  * Parse the subcommand's flag surface. Pure — same input → same output.
@@ -50,8 +72,17 @@ export interface BootstrapLocalLlmArgs {
  * @otel-exempt pure parser; no I/O, no span.
  */
 export function parseBootstrapLocalLlmArgs(args: readonly string[]): BootstrapLocalLlmArgs {
+  // Last `--model=<id>` wins (matches argv-tail-overrides shell convention).
+  let modelId: string | undefined;
+  for (const a of args) {
+    if (a.startsWith(MODEL_FLAG_PREFIX)) {
+      const value = a.slice(MODEL_FLAG_PREFIX.length);
+      modelId = value.length > 0 ? value : undefined;
+    }
+  }
   return {
     dryRun: args.includes("--dry-run"),
     noConfirm: args.includes("--no-confirm") || args.includes("--yes") || args.includes("-y"),
+    ...(modelId !== undefined ? { modelId } : {}),
   };
 }
