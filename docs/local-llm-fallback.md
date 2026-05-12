@@ -21,7 +21,7 @@ hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
 
-After installing, run `pnpm minsky doctor` to verify the full stack. The doctor command now shows **4 install-time substrate rows** (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) in addition to the local-LLM stack rows (mlx_lm.server / aider / model weights / etc.). Any substrate row RED → banner is RED and exits 1 — fix the substrate before debugging the LLM stack. See [`novel/tick-loop/README.md`](../novel/tick-loop/README.md) (slice 1 of `minsky-fresh-clone-health-checks`) for details.
+After installing, run `pnpm minsky doctor` to verify the full stack. The doctor command now shows **4 install-time substrate rows** (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) in addition to the local-LLM stack rows (mlx_lm.server / aider / model weights / etc.). Any substrate row RED → banner is RED and exits 1 — fix the substrate before debugging the LLM stack. See [`novel/tick-loop/README.md`](../novel/tick-loop/README.md) (slice 1 of `minsky-fresh-clone-health-checks`) for details. If `MINSKY_HOME` points at a path the current user cannot write (common on multi-machine dotfile sync where the hardcoded path uses a different username), the daemon falls back to `/tmp` for worker logs and emits a one-line warning instead of crashing — see slice 2 of `minsky-runtime-resilience` in the same README for the full graceful-degrade behaviour.
 
 ### Why two separate Python environments
 
