@@ -148,13 +148,21 @@ function parseScalar(value: string): unknown {
   if (trimmed === "null") return null;
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
     try {
       return JSON.parse(trimmed);
       // rule-6: handled-locally — JSON.parse failure on a quoted scalar means the value contained an unsupported escape; fall back to literal-strip (host's repo.yaml is hand-editable, this is the graceful path)
     } catch {
       return trimmed.slice(1, -1);
     }
+  }
+  // YAML 1.2 § 7.3.2 single-quoted scalars — strip the surrounding quotes.
+  // The sidecar-bootstrap renderer emits double-quoted strings, but some
+  // hand-edits and re-renderers emit single-quoted ones; both are valid
+  // YAML for the flat-string subset we parse, so accepting both prevents
+  // a spurious "field must be one of …" validation failure downstream.
+  if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+    return trimmed.slice(1, -1);
   }
   return trimmed;
 }
