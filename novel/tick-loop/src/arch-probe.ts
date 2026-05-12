@@ -271,3 +271,22 @@ export function describeArchState(state: ArchState): string {
   }
   return `${shell} shell on non-Darwin host (Linux or other) — local-LLM bootstrap requires Apple Silicon`;
 }
+
+/**
+ * Parse the `MINSKY_FORCE_SHELL_ARCH` env-var value into a forced
+ * {@link ShellArch} override. Slice 11 of `minsky-cli-arch-detection`.
+ *
+ * Accepts ONLY exact lowercase `"arm64"` or `"x86_64"` — any other
+ * value (empty string, undefined, near-matches, `"other"`) returns
+ * `undefined` so the planner falls through to the hardware probe. The
+ * strict-equality contract prevents operator typos (`"Arm64"`,
+ * `"ARM64"`) from silently producing the wrong plan.
+ *
+ * @otel-exempt pure parser — no span.
+ */
+export function parseForcedShellArch(
+  raw: string | undefined,
+): Exclude<ShellArch, "other"> | undefined {
+  if (raw === "arm64" || raw === "x86_64") return raw;
+  return undefined;
+}

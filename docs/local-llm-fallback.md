@@ -187,6 +187,7 @@ Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-pause
 
 - `novel/budget-guard/src/index.ts` — the existing `circuit-break-and-notify` signal this fallback hooks into.
 - `novel/tick-loop/src/spawn-strategy.ts:175` — the single spawn point that slice 2 extends.
+- `novel/tick-loop/src/log-path-fallback.ts` — graceful-degrade on log-path failures (EACCES / EROFS / ENOSPC → `/tmp`); the daemon stays alive and routes providers normally even when `.minsky/workers/` is unwritable (`minsky-runtime-resilience` slice 2, `novel/tick-loop/README.md#slice-2`). See also `workers-dir-mkdir.ts` (mkdir errno classification) and `tick-loop-bin-existence-check.ts` (bin pre-flight).
 - `vision.md` rule #6 (stay alive — silence is failure).
 - `vision.md` rule #1 (don't reinvent — adopt MLX-LM, Qwen, aider as industry-standard).
 - `vision.md` rule #9 (pre-registered HDD — the 7-day provider-throughput query is the canonical metric).
