@@ -5,7 +5,7 @@
 // Source: user-stories/006-runner-on-any-repo.md.
 
 export { loadRepoConfig, parseFlatYaml } from "./repo-config-loader.js";
-export { findTask, parseTasksMd } from "./task-finder.js";
+export { findTask, isHostTaskEligible, parseTasksMd, pickHostTask } from "./task-finder.js";
 export type { ParsedTask, FindTaskResult } from "./task-finder.js";
 export { synthesiseExperimentYaml } from "./experiment-synth.js";
 export type { SynthResult } from "./experiment-synth.js";
@@ -31,3 +31,10 @@ export type {
   RunLiveInputs,
   SpawnLike,
 } from "./runner.js";
+export { runHostLoop } from "./host-loop.js";
+export type {
+  LoopIterationResult,
+  LoopResult,
+  LoopStopReason,
+  RunHostLoopOpts,
+} from "./host-loop.js";

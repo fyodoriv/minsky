@@ -43,6 +43,45 @@ export type FindTaskResult =
   | { ok: false; reason: string; availableIds: string[] };
 
 /**
+ * Pure function: select the first rule-#9-compliant `P0` or `P1` task
+ * from a parsed task list. A task is "rule-#9-compliant" when ALL five
+ * fields are present: `**Hypothesis**:`, `**Success**:`, `**Pivot**:`,
+ * `**Measurement**:`, `**Anchor**:`. P0 is selected before P1; within a
+ * priority section, document order wins (top-down — same convention as
+ * `@minsky/tick-loop`'s `pickTask`).
+ *
+ * Returns `null` when no eligible task exists — the {@link runHostLoop}
+ * caller uses this as the `empty-queue` stop signal.
+ *
+ * @otel cross-repo-runner.pick-host-task
+ */
+export function pickHostTask(tasksMdContent: string): ParsedTask | null {
+  const tasks = parseTasksMd(tasksMdContent);
+  const eligible = tasks.filter(isHostTaskEligible);
+  for (const priority of ["P0", "P1"] as const) {
+    const match = eligible.find((t) => t.priority === priority);
+    if (match !== undefined) return match;
+  }
+  return null;
+}
+
+/**
+ * Predicate: does this task carry all 5 rule-#9 fields? Used by
+ * {@link pickHostTask} to filter the queue.
+ *
+ * @otel-exempt pure predicate.
+ */
+export function isHostTaskEligible(task: ParsedTask): boolean {
+  return (
+    task.hypothesis !== null &&
+    task.success !== null &&
+    task.pivot !== null &&
+    task.measurement !== null &&
+    task.anchor !== null
+  );
+}
+
+/**
  * Pure function: walk the tasks.md content and return the task whose
  * `**ID**:` matches `query`, OR whose title contains `query` as a
  * substring (case-insensitive — for ticket-key matching like `AIFN-840`).
