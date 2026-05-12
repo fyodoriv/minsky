@@ -108,6 +108,14 @@ export interface ExecuteOpts {
    * `node:child_process.spawn`; tests inject a fake.
    */
   readonly spawnFn: SpawnFn;
+  /**
+   * Slice 45 — background-server seam. When provided, the executor
+   * calls this instead of `spawnFn` for `start-mlx-server` steps.
+   * Production wiring detaches the process, writes a PID file, and
+   * polls until the server is ready. Tests inject a synthetic stub.
+   * Falls back to `spawnFn` when absent (backward-compatible).
+   */
+  readonly startServerFn?: SpawnFn;
   /** Log seam — typically `process.stdout.write` in production. */
   readonly log: LogFn;
 }
@@ -209,9 +217,18 @@ async function runOneStep(
   // non-interactive and keeps the slice-1 "ignore stdin" default.
   const stdinMode: "ignore" | "inherit" =
     step.type === "install-arm-homebrew" ? "inherit" : "ignore";
+  // Slice 45: start-mlx-server must be detached (background) so the
+  // executor doesn't hang waiting for a long-lived server process to
+  // exit. When `startServerFn` is wired in production it spawns
+  // detached, writes a PID file, and polls until ready. Falls back to
+  // `spawnFn` when absent so existing tests keep passing unchanged.
+  const dispatchFn =
+    step.type === "start-mlx-server" && opts.startServerFn !== undefined
+      ? opts.startServerFn
+      : opts.spawnFn;
   let result: ExecuteSpawnResult;
   try {
-    result = await opts.spawnFn(cmd, args, { stdinMode });
+    result = await dispatchFn(cmd, args, { stdinMode });
     // rule-6: handled-locally — pre-spawn errors (ENOENT/EACCES) typed as failed step, not loud-crash.
   } catch (err) {
     return {
