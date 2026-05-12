@@ -10,16 +10,37 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 
 ## Install
 
+Run `minsky` (no args). On a fresh machine without Claude credits, the CLI auto-detects the missing stack and prints a one-line summary with a single `[Y/n]` prompt listing what it would install (disk envelope ~17.2 GB, wall-clock estimate). On confirm, it installs `pipx`, `mlx-lm`, `aider-chat`, downloads the model, starts `mlx_lm.server` in the background, and forwards to the daemon.
+
+To preview the plan without installing:
+
+```bash
+minsky bootstrap-local-llm --dry-run
+```
+
+To install explicitly (skips the Claude-exhaustion probe):
+
+```bash
+minsky bootstrap-local-llm
+```
+
+Set `MINSKY_NO_AUTO_BOOTSTRAP=1` to disable the pre-flight entirely; `MINSKY_NON_INTERACTIVE=1` auto-confirms the prompt (useful in CI or launchd contexts).
+
+<details>
+<summary>Manual install (fallback if <code>minsky bootstrap-local-llm</code> fails)</summary>
+
 ```bash
 # Apple Silicon native ML server
 pipx install mlx-lm
 # Aider — must be on python 3.12 or 3.13; 3.14 has numpy build issues
 pipx install --python /opt/homebrew/bin/python3.12 aider-chat
 # Pull the model (~17.2 GB; ~8–12 min on a 1 Gbps link)
-hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+huggingface-cli download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 ```
 
 Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
+
+</details>
 
 ### Why two separate Python environments
 
