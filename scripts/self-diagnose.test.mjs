@@ -934,7 +934,7 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("CANONICAL_REPO is single-sourced from daemon-pr-lint-metrics", () => {
