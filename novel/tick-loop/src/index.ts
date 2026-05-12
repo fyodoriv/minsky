@@ -756,6 +756,7 @@ export {
   detectLocalLlmStack,
   planLocalLlmBootstrap,
   planRequiresTty,
+  recoveryHintForBootstrapStep,
   summarisePlan,
 } from "./local-llm-bootstrap.js";
 export {

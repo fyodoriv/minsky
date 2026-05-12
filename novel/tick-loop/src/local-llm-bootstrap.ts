@@ -701,6 +701,34 @@ export async function detectLocalLlmStack(probes: DetectProbes): Promise<LocalLl
  *
  * @otel-exempt pure formatter; no span.
  */
+/**
+ * Slice 66: step-specific recovery hint for the bootstrap failure output.
+ * Addresses task Details (e): "pipx install fails → loud-crash with the
+ * exact pipx error + a recovery hint (`brew install pipx`)".
+ *
+ * Returns a one-line operator-facing hint for the given failed step type,
+ * or `undefined` when no targeted guidance is available. Pure — same input
+ * → same output.
+ *
+ * Called by `bin/minsky.mjs` failure path to append an actionable next step.
+ *
+ * @otel-exempt pure formatter; no span.
+ */
+const BOOTSTRAP_STEP_RECOVERY_HINTS: Record<BootstrapStepType, string> = {
+  "install-arm-homebrew":
+    'If the Homebrew installer fails, install it manually: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+  "install-pipx": "Try: pip3 install --user pipx  (or: pip install --user pipx)",
+  "install-mlx-lm": "Try: pipx install mlx-lm  (or: pip install mlx-lm)",
+  "install-aider": "Try: pipx install aider-chat --python python3.12  (or: pip install aider-chat)",
+  "install-huggingface-cli": "Try: pip3 install huggingface_hub[cli]",
+  "download-model": `Try: huggingface-cli download ${DEFAULT_LOCAL_LLM_MODEL}`,
+  "start-mlx-server": `Try: mlx_lm.server --model ${DEFAULT_LOCAL_LLM_MODEL}  (ensure the model is downloaded first)`,
+};
+
+export function recoveryHintForBootstrapStep(type: BootstrapStepType): string | undefined {
+  return BOOTSTRAP_STEP_RECOVERY_HINTS[type];
+}
+
 export function summarisePlan(plan: BootstrapPlan): string {
   if (plan.ready || plan.steps.length === 0) {
     return "Local-LLM stack already ready — nothing to do.";

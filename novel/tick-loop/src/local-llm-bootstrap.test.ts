@@ -26,6 +26,7 @@ import {
   detectLocalLlmStack,
   planLocalLlmBootstrap,
   planRequiresTty,
+  recoveryHintForBootstrapStep,
   summarisePlan,
 } from "./local-llm-bootstrap.js";
 
@@ -650,5 +651,69 @@ describe("summarisePlan", () => {
     const plan = planLocalLlmBootstrap(serverStopped);
     const out = summarisePlan(plan);
     expect(out).not.toMatch(/GB download/);
+  });
+});
+
+// ---- recoveryHintForBootstrapStep (slice 66) --------------------------------
+
+describe("recoveryHintForBootstrapStep — slice 66", () => {
+  it("returns a brew-install recovery hint for install-arm-homebrew", () => {
+    const hint = recoveryHintForBootstrapStep("install-arm-homebrew");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/install\.sh/);
+  });
+
+  it("returns a pip recovery hint for install-pipx", () => {
+    const hint = recoveryHintForBootstrapStep("install-pipx");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/pip/);
+    expect(hint).toMatch(/pipx/);
+  });
+
+  it("returns a pipx recovery hint for install-mlx-lm", () => {
+    const hint = recoveryHintForBootstrapStep("install-mlx-lm");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/mlx-lm/);
+  });
+
+  it("returns a pipx recovery hint for install-aider", () => {
+    const hint = recoveryHintForBootstrapStep("install-aider");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/aider/);
+  });
+
+  it("returns a pip recovery hint for install-huggingface-cli", () => {
+    const hint = recoveryHintForBootstrapStep("install-huggingface-cli");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/huggingface/);
+  });
+
+  it("returns a huggingface-cli recovery hint for download-model", () => {
+    const hint = recoveryHintForBootstrapStep("download-model");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/huggingface-cli download/);
+    expect(hint).toMatch(DEFAULT_LOCAL_LLM_MODEL);
+  });
+
+  it("returns a mlx_lm.server recovery hint for start-mlx-server", () => {
+    const hint = recoveryHintForBootstrapStep("start-mlx-server");
+    expect(hint).toBeDefined();
+    expect(hint).toMatch(/mlx_lm\.server/);
+    expect(hint).toMatch(DEFAULT_LOCAL_LLM_MODEL);
+  });
+
+  it("returns a string (not undefined) for every BootstrapStepType", () => {
+    const allTypes = [
+      "install-arm-homebrew",
+      "install-pipx",
+      "install-mlx-lm",
+      "install-aider",
+      "install-huggingface-cli",
+      "download-model",
+      "start-mlx-server",
+    ] as const;
+    for (const type of allTypes) {
+      expect(recoveryHintForBootstrapStep(type)).toBeDefined();
+    }
   });
 });

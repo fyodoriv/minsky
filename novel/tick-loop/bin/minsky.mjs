@@ -10,6 +10,7 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 66 (2026-05-12 — step-specific recovery hints in bootstrap failure output) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -140,6 +141,7 @@ const {
   preferredPipxPath,
   probePythonWithDefaults,
   readLastHardLimit,
+  recoveryHintForBootstrapStep,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
 } = await import("../dist/index.js");
@@ -583,6 +585,42 @@ async function runBootstrapLocalLlmDryRun() {
   process.stdout.write("(dry-run — no install attempted; rerun without --dry-run to install)\n");
 }
 
+/**
+ * Slice 66: emit the failure message + step-specific recovery hint.
+ * Extracted from `runBootstrapLocalLlm` to keep its cognitive complexity ≤ 10.
+ * Addresses task Details (e): "pipx install fails → loud-crash with the
+ * exact pipx error + a recovery hint (`brew install pipx`)".
+ *
+ * @param {import("../dist/local-llm-bootstrap-executor.js").ExecuteResult} result
+ */
+function emitBootstrapFailureMessage(result) {
+  process.stderr.write(
+    `minsky: local-LLM bootstrap failed (${result.failedStep ?? "unknown"}: ${result.reason ?? "no reason"})\n`,
+  );
+  const hint = result.failedStep ? recoveryHintForBootstrapStep(result.failedStep) : undefined;
+  if (hint !== undefined) {
+    process.stderr.write(`minsky: hint: ${hint}\n`);
+  }
+  process.stderr.write(
+    "minsky: continuing without local-LLM fallback; daemon will use claude only\n",
+  );
+}
+
+/**
+ * Slice 62 + 66: wait for server readiness after a successful bootstrap.
+ * Extracted from `runBootstrapLocalLlm` to keep its cognitive complexity ≤ 10.
+ *
+ * @param {import("../dist/local-llm-bootstrap.js").BootstrapPlan} plan
+ * @returns {Promise<Record<string, string>>}
+ */
+async function finaliseBootstrapSuccess(plan) {
+  // Slice 62: wait for the server to be reachable after start-mlx-server is
+  // spawned detached. Non-fatal: poll timeout lets the daemon retry on first use.
+  const serverStarted = plan.steps.some((s) => s.type === "start-mlx-server");
+  if (serverStarted) await waitForServerReadiness();
+  return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+}
+
 async function runBootstrapLocalLlm({ force }) {
   const { state, planOpts } = await detectForBootstrap();
   const plan = planLocalLlmBootstrap(state, planOpts);
@@ -620,19 +658,10 @@ async function runBootstrapLocalLlm({ force }) {
     writeFileFn: (path, data) => writeFileSync(path, data, "utf8"),
   });
   if (!result.success) {
-    process.stderr.write(
-      `minsky: local-LLM bootstrap failed (${result.failedStep ?? "unknown"}: ${result.reason ?? "no reason"})\n`,
-    );
-    process.stderr.write(
-      "minsky: continuing without local-LLM fallback; daemon will use claude only\n",
-    );
+    emitBootstrapFailureMessage(result);
     return {};
   }
-  // Slice 62: wait for the server to be reachable after start-mlx-server is
-  // spawned detached. Non-fatal: poll timeout lets the daemon retry on first use.
-  const serverStarted = plan.steps.some((s) => s.type === "start-mlx-server");
-  if (serverStarted) await waitForServerReadiness();
-  return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  return await finaliseBootstrapSuccess(plan);
 }
 
 /**
