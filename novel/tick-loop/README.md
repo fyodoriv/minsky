@@ -241,7 +241,7 @@ Production probe wiring at `novel/tick-loop/src/local-llm-probes.ts` binds the f
 
 #### Slice 54: testability seam + isMain guard (2026-05-12)
 
-`bin/minsky.mjs` gains an `isMain` guard (`import.meta.url === \`file://\${process.argv[1]}\``) so the file can be imported as a module without triggering top-level CLI side-effects (dist-check crash, node_modules-check, argument dispatch). `maybeBootstrapLocalLlm` is exported with an injectable `detectFn` seam so the smoke test (`src/minsky-bootstrap-smoke.test.ts`) can exercise the server-reachable fast-path (env overlay returned immediately) without running real probes. `bin/minsky.d.mts` carries the type declarations.
+`bin/minsky.mjs` gains an `isMain` guard (comparing `import.meta.url` against `process.argv[1]`) so the file can be imported as a module without triggering top-level CLI side-effects (dist-check crash, node_modules-check, argument dispatch). `maybeBootstrapLocalLlm` is exported with an injectable `detectFn` seam so the smoke test in `src/minsky-bootstrap-smoke.test.ts` can exercise the server-reachable fast-path (env overlay returned immediately) without running real probes. `bin/minsky.d.mts` carries the type declarations.
 
 #### Slice 58: detached-spawn + PID file + readiness poll for `start-mlx-server` (2026-05-12)
 
