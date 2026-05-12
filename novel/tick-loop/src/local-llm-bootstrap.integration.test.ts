@@ -185,6 +185,34 @@ describe("integration: detectLocalLlmStack + planLocalLlmBootstrap", () => {
     expect(types).toContain("start-mlx-server");
   });
 
+  it("plans install-huggingface-cli + start-mlx-server when only hf-cli is missing (model cached)", async () => {
+    await createFakeBin("pipx");
+    await createFakeBin("mlx_lm.server");
+    await createFakeBin("aider");
+    // huggingface-cli intentionally absent
+
+    const state = await detectLocalLlmStack(
+      buildProductionProbes({
+        whichFn: makeWhichFn(),
+        existsSyncFn: (p) => p === MODEL_CACHE_DIR, // model present, nothing else
+        fetchFn: serverDown,
+      }),
+    );
+
+    expect(state.huggingfaceCli.present).toBe(false);
+    expect(state.model.present).toBe(true);
+    expect(state.pipx.present).toBe(true);
+
+    const plan = planLocalLlmBootstrap(state);
+    const types = plan.steps.map((s) => s.type);
+    expect(types).not.toContain("install-pipx");
+    expect(types).not.toContain("install-mlx-lm");
+    expect(types).not.toContain("install-aider");
+    expect(types).toContain("install-huggingface-cli");
+    expect(types).not.toContain("download-model");
+    expect(types).toContain("start-mlx-server");
+  });
+
   it("plans install-aider when only aider is missing", async () => {
     await createFakeBin("pipx");
     await createFakeBin("mlx_lm.server");

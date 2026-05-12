@@ -3,12 +3,13 @@
  * detection orchestrator. Slice 1 of P0 task
  * `minsky-cli-auto-bootstrap-local-llm`.
  *
- * Covers all 5 chaos-table rows from the module's JSDoc:
+ * Covers all 6 chaos-table rows from the module's JSDoc:
  *   1. Probe seam throws → loud-crash (`detectLocalLlmStack` rejects)
  *   2. Fully installed but server unreachable → single start step
  *   3. Model missing, everything else present → [download, start] plan
  *   4. Fresh machine, nothing present → full 5-step plan
  *   5. Idempotent fast path → empty plan + ready flag
+ *   6. hf-cli missing, model cached → [install-hf-cli, start] — no re-download
  *
  * Plus deterministic ordering + envelope-sum tests.
  */
@@ -81,6 +82,17 @@ const serverStopped: LocalLlmStackState = {
   server: UNREACHABLE,
 };
 
+// Row 6: hf-cli removed after initial setup, but model weights are still cached.
+// The planner must schedule install-huggingface-cli without re-downloading the model.
+const hfCliMissingModelCached: LocalLlmStackState = {
+  pipx: PRESENT,
+  mlxLm: PRESENT,
+  aider: PRESENT,
+  huggingfaceCli: ABSENT,
+  model: { ...PRESENT, detail: "17.2 GB" },
+  server: UNREACHABLE,
+};
+
 // ---- planLocalLlmBootstrap — chaos-table rows -----------------------------
 
 describe("planLocalLlmBootstrap — chaos-table row 5: idempotent fast path", () => {
@@ -146,6 +158,18 @@ describe("planLocalLlmBootstrap — chaos-table row 2: server stopped but stack 
     expect(plan.ready).toBe(false);
     expect(plan.steps).toHaveLength(1);
     expect(plan.steps[0]?.type).toBe("start-mlx-server");
+    expect(plan.totalEstimatedDownloadMb).toBe(0);
+  });
+});
+
+describe("planLocalLlmBootstrap — chaos-table row 6: hf-cli missing, model cached", () => {
+  it("schedules [install-huggingface-cli, start-mlx-server] — does not re-download model", () => {
+    const plan = planLocalLlmBootstrap(hfCliMissingModelCached);
+    expect(plan.steps.map((s) => s.type)).toEqual(["install-huggingface-cli", "start-mlx-server"]);
+  });
+
+  it("has zero download envelope when model is already cached", () => {
+    const plan = planLocalLlmBootstrap(hfCliMissingModelCached);
     expect(plan.totalEstimatedDownloadMb).toBe(0);
   });
 });
