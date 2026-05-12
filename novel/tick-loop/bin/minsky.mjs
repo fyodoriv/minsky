@@ -225,7 +225,25 @@ Operator escape hatches (env vars):
  */
 async function runStartOrAttach(args) {
   const { workerId, extraArgs } = parsePositionalAndForward(args);
+  const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
+  const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
 
+  // skip-earlier-gate: check for a live PID before the cold-start
+  // pre-flights (bin existence + workers-dir mkdir). readLivePid returns
+  // undefined when the dir/file doesn't exist yet (handles ENOENT), so
+  // this is safe on a fresh clone. Saves 1 existsSync + 1 mkdirSync on
+  // every reattach — the most common invocation of `minsky`.
+  const livePid = readLivePid(pidPath);
+  if (livePid !== undefined) {
+    process.stderr.write(
+      `minsky: worker ${workerId} already running (PID ${livePid}) — attaching to ${logPath}\n`,
+    );
+    process.stderr.write("minsky: Ctrl+C detaches (daemon keeps running)\n\n");
+    await tailWithPretty(logPath, true);
+    return;
+  }
+
+  // Cold start — run the pre-flights before spawning.
   // Slice 2 of `minsky-runtime-resilience` — pre-flight: tick-loop
   // bin must exist or `spawn(node, [TICK_LOOP_BIN, ...])` would emit
   // ENOENT with a stack that doesn't point at the missing path.
@@ -246,18 +264,6 @@ async function runStartOrAttach(args) {
       `${formatWorkersDirRecoveryMessage({ dir: WORKERS_DIR, errCode: mkdirOutcome.errCode, recoveryHint: mkdirOutcome.recoveryHint })}\n`,
     );
     process.exit(1);
-  }
-
-  const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
-  const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
-  const livePid = readLivePid(pidPath);
-  if (livePid !== undefined) {
-    process.stderr.write(
-      `minsky: worker ${workerId} already running (PID ${livePid}) — attaching to ${logPath}\n`,
-    );
-    process.stderr.write("minsky: Ctrl+C detaches (daemon keeps running)\n\n");
-    await tailWithPretty(logPath, true);
-    return;
   }
   // Cold start — run the local-LLM auto-bootstrap pre-flight. Idempotent:
   // a fully-set-up machine adds <500ms and sets MINSKY_LOCAL_LLM=1 if the
