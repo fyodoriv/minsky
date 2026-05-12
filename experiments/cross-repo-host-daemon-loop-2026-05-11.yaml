@@ -78,7 +78,7 @@ pivot: |
   Ries 2011 build-measure-learn (clear separation between "ship more
   of this" and "abandon the approach").
 measurement: |
-  bash -c 'cd /Users/fivanishche/apps/tooling/minsky/.worktrees/cross-repo-host-daemon-loop && npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 105 and .numFailedTests == 0" && grep -q "runHostLoop" novel/cross-repo-runner/src/host-loop.ts && grep -q "pickHostTask" novel/cross-repo-runner/src/task-finder.ts && grep -q -- "--loop" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "SIGTERM" novel/cross-repo-runner/bin/minsky-run.mjs && echo PASS || (echo FAIL && exit 1)'
+  npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 105 and .numFailedTests == 0" && grep -q "runHostLoop" novel/cross-repo-runner/src/host-loop.ts && grep -q "pickHostTask" novel/cross-repo-runner/src/task-finder.ts && grep -q -- "--loop" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "SIGTERM" novel/cross-repo-runner/bin/minsky-run.mjs
 anchor: |
   Liu, C. L., Layland, J. W., "Scheduling Algorithms for
   Multiprogramming in a Hard Real-Time Environment", *Journal of the
