@@ -127,6 +127,69 @@ describe("findTask — not found", () => {
     if (result.ok) return;
     expect(result.availableIds).toEqual([]);
   });
+
+  test("parses nested-bullet metadata format (observer dogfood regression 2026-05-12)", () => {
+    // Discovered running `minsky --host ~/apps/tooling/minsky --no-live
+    // --max-iterations=1` on minsky's own TASKS.md: the parser returned 0
+    // tasks because every metadata line used the tasks.md-spec nested-bullet
+    // format (e.g. `  - **ID**: foo`) instead of the indented-only format
+    // (`  **ID**: foo`) used by the integration-test fixture. Both are valid
+    // tasks.md; the parser must accept both.
+    const nestedBulletTasksMd = [
+      "# Tasks",
+      "",
+      "## P0",
+      "",
+      "- [ ] `some-task` — a task in minsky's own TASKS.md shape",
+      "  - **ID**: some-task",
+      "  - **Tags**: p0, bug",
+      "  - **Hypothesis**: parser handles nested-bullet format",
+      "  - **Success**: parseTasksMd returns 1 task",
+      "  - **Pivot**: retire parser if fix breaks >3 existing tests",
+      "  - **Measurement**: `pnpm vitest run task-finder`",
+      "  - **Anchor**: tasks.md spec; rule #9",
+      "",
+    ].join("\n");
+    const tasks = parseTasksMd(nestedBulletTasksMd);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({
+      id: "some-task",
+      priority: "P0",
+      hypothesis: "parser handles nested-bullet format",
+      success: "parseTasksMd returns 1 task",
+      pivot: "retire parser if fix breaks >3 existing tests",
+      measurement: "`pnpm vitest run task-finder`",
+      anchor: "tasks.md spec; rule #9",
+    });
+    // And the task must be pick-eligible (all 5 rule-#9 fields present).
+    const picked = pickHostTask(nestedBulletTasksMd);
+    expect(picked).not.toBeNull();
+    expect(picked?.id).toBe("some-task");
+  });
+
+  test("parses asterisk-bullet metadata format (* instead of -)", () => {
+    // tasks.md spec allows either `- ` or `* ` as the bullet; the parser
+    // must handle both. This pair covers the full strip-leading-bullet
+    // contract.
+    const starBulletTasksMd = [
+      "# Tasks",
+      "",
+      "## P1",
+      "",
+      "- [ ] star-bullet",
+      "  * **ID**: star-bullet",
+      "  * **Hypothesis**: h",
+      "  * **Success**: s",
+      "  * **Pivot**: p",
+      "  * **Measurement**: m",
+      "  * **Anchor**: a",
+      "",
+    ].join("\n");
+    const tasks = parseTasksMd(starBulletTasksMd);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.id).toBe("star-bullet");
+    expect(tasks[0]?.hypothesis).toBe("h");
+  });
 });
 
 describe("pickHostTask", () => {

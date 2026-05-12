@@ -1,0 +1,132 @@
+id: observer-parser-nested-bullet-2026-05-12
+hypothesis: |
+  Surfaced by the minsky observer plugin (slice E / draft PR #493)
+  dogfooding itself on minsky's own repo at 2026-05-12T02:52Z: the
+  autonomous loop returned `stopReason: empty-queue, iterations: 0`
+  against minsky's live TASKS.md despite 71 well-formed task blocks
+  being present. Investigation traced the root cause to
+  `parseTasksMd` in `novel/cross-repo-runner/src/task-finder.ts`:
+  `assignMetadata()` calls `line.trim()` then tries to match regexes
+  like `^\*\*ID\*\*:\s*(.+)$` — but a line like `  - **ID**: foo`
+  (the nested-bullet format required by the tasks.md spec and used
+  throughout minsky's own TASKS.md) trims to `- **ID**: foo`, which
+  the regex doesn't match (the `- ` prefix is still there).
+
+  The integration-test fixture in `proj-840-shape.test.ts` uses the
+  indented-only format (no `- ` prefix on metadata lines), so the
+  full test suite passed green while the parser silently skipped
+  every task in every real-world `TASKS.md` file that follows the
+  tasks.md spec. Rule #7 discipline: this is "silent retry
+  suppressing failure" — the operator saw `empty-queue` and would
+  have assumed everything was fine.
+
+  Fix: strip an optional leading bullet (`-·` or `*·`) from the
+  trimmed line before applying the metadata regexes. One line,
+  paired with 2 new test cases that lock in both formats. Paired
+  with a second follow-up finding (documented, not fixed in this
+  PR): minsky's own P0 tasks use `**Verification**` /
+  `**Acceptance**` instead of the rule-9-required `**Success**`,
+  so even with this fix, `pickHostTask` against minsky's TASKS.md
+  still returns null. That's a separate task (either retrofit the
+  tasks OR accept Verification / Acceptance as Success aliases).
+
+  Pre-registered effect: (i) after the fix, parsing minsky's own
+  `TASKS.md` returns ≥ 50 tasks (was 0); (ii) the 22 existing
+  task-finder tests still pass (no regression on the indented-only
+  format); (iii) the new paired tests for nested-bullet and
+  asterisk-bullet formats pass; (iv) the full cross-repo-runner
+  test suite (135 baseline) grows by exactly 2 (the two new
+  format cases) to 137 without any other test breaking.
+
+success: |
+  - `pnpm vitest run novel/cross-repo-runner` exits 0 with ≥ 137
+    passing tests (was 135 on main; +2 from the nested-bullet and
+    asterisk-bullet test cases). No regressions — every existing
+    task-finder test still passes.
+  - `node -e 'import("novel/cross-repo-runner/dist/task-finder.js").then(m => process.exit(m.parseTasksMd(require("fs").readFileSync("TASKS.md","utf8")).length >= 50 ? 0 : 1))'`
+    exits 0 (parser returns ≥ 50 tasks from minsky's real TASKS.md;
+    currently 71).
+  - `grep -qF 'replace(/^[-*]' novel/cross-repo-runner/src/task-finder.ts`
+    exits 0 (the leading-bullet strip is wired; `-F` = fixed string,
+    avoids BRE-vs-source backslash ambiguity).
+  - `grep -q "nested-bullet" novel/cross-repo-runner/src/task-finder.test.ts`
+    exits 0 (the regression test exists and is named so future
+    observers can find it).
+  - `node scripts/check-anchor-primary-source.mjs experiments/observer-parser-nested-bullet-2026-05-12.yaml`
+    exits 0.
+  - `node scripts/check-pivot-success-margin.mjs experiments/observer-parser-nested-bullet-2026-05-12.yaml`
+    exits 0.
+  - `node scripts/check-measurement-inspects-output.mjs experiments/observer-parser-nested-bullet-2026-05-12.yaml`
+    exits 0.
+
+pivot: |
+  Two pivot paths pre-registered:
+
+    1. If stripping a leading bullet breaks ≥ 1 existing test in
+       `task-finder.test.ts` or `proj-840-shape.test.ts`, retire
+       this approach and ship a separate `parseTasksMdNestedBullet`
+       function that the runner tries as a fallback when the
+       default parser returns 0 tasks. Decision boundary: any
+       existing test that was green before this PR turns red.
+       The new format-coverage tests survive.
+
+    2. If the observer's "run minsky on itself and classify the
+       output" dogfood pattern discovers > 3 similar
+       silently-passing-but-wrong signals within the first 30 days
+       of observer-plugin deployment, it means the cross-repo-runner
+       parser was written against a too-narrow fixture set; refactor
+       the parser to be spec-driven (consume the tasks.md npm
+       package as the source of truth) rather than regex-driven.
+       Decision boundary: ≥ 3 class-equivalent observer findings
+       in 30 days → adopt @tasksmd/parse npm package.
+
+  Margin: success threshold ≥ 50 parsed tasks; pivot 1 fires on
+  any test regression (binary margin — 0% tolerance for regression
+  is the rule-#3 test-first contract).
+
+measurement: |
+  pnpm vitest run novel/cross-repo-runner --reporter=json 2>/dev/null | jq -e ".numPassedTests >= 137 and .numFailedTests == 0" && grep -qF 'replace(/^[-*]' novel/cross-repo-runner/src/task-finder.ts && grep -q nested-bullet novel/cross-repo-runner/src/task-finder.test.ts && pnpm -C novel/cross-repo-runner build >/dev/null 2>&1 && node -e 'import("./novel/cross-repo-runner/dist/task-finder.js").then(m => process.exit(m.parseTasksMd(require("fs").readFileSync("TASKS.md","utf8")).length >= 50 ? 0 : 1))'
+
+anchor: |
+  Perrow, C., *Normal Accidents: Living with High-Risk Technologies*,
+  Princeton University Press, 1984 (the observer-as-safety-layer
+  pattern: the independent monitor caught a failure the primary
+  control loop couldn't see about itself — the parser silently
+  passing every test while missing every real-world task is exactly
+  the "normal accident" class of failure; ISBN 978-0691004129).
+  Beck, K., *Test-Driven Development: By Example*, Addison-Wesley,
+  2002 (the two new fixture test cases close the gap between the
+  integration-test fixture and real-world TASKS.md format;
+  ISBN 978-0321146533).
+  Meszaros, G., *xUnit Test Patterns: Refactoring Test Code*,
+  Addison-Wesley, 2007 (Fake Fixture smell — the existing test
+  fixture was too convenient, diverging from the real-world input;
+  the fix is adding a paired "real world" fixture so regressions
+  surface; ISBN 978-0131495050).
+  Fowler, M., *Refactoring: Improving the Design of Existing Code*,
+  Addison-Wesley, 2nd ed., 2018 (the fix is Extract Variable +
+  Introduce Parameter Object restructuring for the normalised
+  line; ISBN 978-0134757599).
+  rule #3 (vision.md § 3 — test-first, metric-first, doc-first:
+  the red test exists before the fix; the metric is ≥ 50 tasks
+  parsed from minsky's own TASKS.md; the doc is this EXPERIMENT
+  + the inline comment on the fix line).
+  rule #7 (vision.md § 7 — silent retry suppressing failure is
+  itself a constitutional violation; the pre-fix parser was
+  silently skipping every task, producing `empty-queue` as a
+  false-healthy signal).
+  rule #9 (vision.md § 9 — pre-registered HDD; this bugfix
+  declares the recurrence metric (0 → ≥ 50 tasks parsed) and the
+  stability contract (no existing test regresses)).
+  TASKS.md task block `cross-repo-runner-parser-accepts-nested-bullet`
+  (the task this PR closes).
+  novel/cross-repo-runner/src/task-finder.ts — the file with the
+  fix.
+  novel/cross-repo-runner/src/task-finder.test.ts — the two new
+  paired tests locking in both formats.
+  .minsky/observer.log — the dogfood audit trail that surfaced
+  this bug (observer plugin from slice E).
+  user-stories/006-runner-on-any-repo.md — the parent user story
+  this parser serves.
+
+timeout_seconds: 60
