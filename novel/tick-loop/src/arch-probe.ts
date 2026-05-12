@@ -242,6 +242,27 @@ export function preferredPythonPath(state: ArchState): string | undefined {
 }
 
 /**
+ * Slice 11 — `MINSKY_FORCE_SHELL_ARCH` operator override. Maps the env
+ * var's string value to a strict `ShellArch` only when it exactly
+ * matches `"arm64"` or `"x86_64"`. Every other input (including
+ * `undefined`, empty string, mixed-case spellings, and `"other"`)
+ * returns `undefined` so callers fall through to the live `probeShellArch`
+ * detection. `"other"` is intentionally rejected — it maps to "Linux or
+ * unknown host" in the planner, and forcing that on macOS makes the
+ * doctor row read as Linux which is misleading.
+ *
+ * Pattern: Strict-equality validator (Saltzer & Schroeder 1975 — fail-safe
+ * defaults; unknown input → no override).
+ *
+ * @otel-exempt pure predicate — no span.
+ */
+export function parseForcedShellArch(value: string | undefined): ShellArch | undefined {
+  if (value === "arm64") return "arm64";
+  if (value === "x86_64") return "x86_64";
+  return undefined;
+}
+
+/**
  * Render the arch state as a single operator-facing line for the
  * `minsky doctor` output. Format matches the existing doctor rows:
  * short, actionable, no emojis. The caller (`bin/minsky.mjs`) prepends
