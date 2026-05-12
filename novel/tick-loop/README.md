@@ -304,6 +304,8 @@ Three runtime I/O failure modes were still crashing `minsky` instead of producin
 
 The three helpers are all pure-over-injection (Hughes 1989) with paired tests pinning each errno's expected behaviour (+19 tests). The bin-side wiring is three try-catches/checks around the existing I/O calls — happy path is unchanged, error paths now emit one-line operator-actionable messages.
 
+1. **13th doctor row — `workers dir writable`** — `renderDoctorSubstrateRows` grows a 5th substrate row (the 13th doctor row overall) that flags `.minsky/workers/` writability with a path-aware recovery hint (`chmod u+w <path>` OR set `MINSKY_HOME=<writable-path>`). `bin/minsky.mjs::probeSubstrate` computes the field via a read-only `accessSync(W_OK)` walker that walks up from `WORKERS_DIR` to the first existing ancestor — doctor stays side-effect-free even on broken substrates (unlike `ensureWorkersDir`, which mutates). When the row is RED, the existing any-substrate-red predicate escalates the doctor banner from YELLOW to RED with exit 1.
+
 Backward-compat: pure additions; the happy path is byte-identical to slice 1.
 
 #### Slice 3 of `minsky-cross-machine-dotfile-checks`: surface invalid git config paths from synced dotfiles (operator 2026-05-08 — slice 3 of the self-healing trilogy, completes the slice 1–2–3 sequence)
