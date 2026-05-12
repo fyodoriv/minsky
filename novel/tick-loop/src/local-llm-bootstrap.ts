@@ -384,7 +384,9 @@ function buildHuggingfaceCliStep(pipxPath?: string): InstallStep {
         ? `Install huggingface-cli via ${pipxPath} (model download tool)`
         : "Install huggingface-cli via pipx (model download tool)",
     estimatedDurationMs: 30_000,
-    command: [pipx, "install", "huggingface_hub"],
+    // `huggingface_hub[cli]` is required — the bare `huggingface_hub`
+    // package does not install the `huggingface-cli` binary.
+    command: [pipx, "install", "huggingface_hub[cli]"],
   };
 }
 
@@ -394,7 +396,9 @@ function buildModelDownloadStep(modelId: string): InstallStep {
     description: `Download ${modelId} (~17 GB; ~8–12 min on a 1 Gbps link)`,
     estimatedDurationMs: 12 * 60_000,
     estimatedDownloadMb: DEFAULT_MODEL_DOWNLOAD_MB,
-    command: ["hf", "download", modelId],
+    // The `hf` alias was removed in huggingface-hub ≥0.24; use the
+    // canonical `huggingface-cli` binary instead.
+    command: ["huggingface-cli", "download", modelId],
   };
 }
 

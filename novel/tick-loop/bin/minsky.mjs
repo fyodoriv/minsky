@@ -114,6 +114,7 @@ if (!existsSync(NODE_MODULES_PATH)) {
 const {
   PATH_CONFIG_KEYS,
   buildProductionProbes,
+  buildServerProbe,
   checkGitConfigPaths,
   classifyClaudeProbeOutput,
   confirmAlwaysYes,
@@ -362,11 +363,21 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     return await runBootstrapLocalLlm({ force: false });
   }
 
+  // Slice 57 skip-earlier gate: probe the server alone first (one fetch
+  // call, ≤2 s) before running the full 5-which + FS-stat + server batch.
+  // On the common "stack already set up" cold-start path this saves ~5
+  // subprocess spawns. Skip when detectFn is injected — the seam owns probes.
+  const serverQuick = !_opts.detectFn ? await buildServerProbe({})() : null;
+  if (serverQuick?.reachable) {
+    process.stderr.write(
+      `minsky: local-LLM server reachable at ${serverQuick.url} — wiring fallback\n`,
+    );
+    return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+  }
+
   const state = _opts.detectFn
     ? await _opts.detectFn()
     : await detectLocalLlmStack(buildProductionProbes({ whichFn }));
-  // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
-  // skip the install pipeline entirely.
   if (state.server.reachable) {
     process.stderr.write(
       `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
