@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "prepare": "tsc -b && node scripts/install-lefthook-best-effort.mjs",
+    "prepare": "tsc -b --force && node scripts/install-lefthook-best-effort.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -26,7 +26,7 @@
     "chaos:budget-exhaust": "node scripts/chaos-budget-exhaust.mjs",
     "cto-audit:metrics": "node scripts/cto-audit-metrics.mjs",
     "daemon-pr-lint:metrics": "node scripts/daemon-pr-lint-metrics.mjs",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.minsky\" \"#.obsidian\" \"#.claude\" \"#opencode.notes.md\" \"#.aider*\"",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.worktrees\" \"#.minsky\" \"#.obsidian\" \"#.claude\" \"#opencode.notes.md\" \"#.aider*\"",
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
     "dogfood": "./setup.sh --dogfood",
     "dogfood:doctor": "./setup.sh --doctor",
@@ -41,12 +41,17 @@
     "@minsky/experiment-record": "workspace:*",
     "@minsky/tick-loop": "workspace:*",
     "@minsky/token-monitor": "workspace:*",
-    "@types/node": "25.6.0",
+    "@types/node": "25.7.0",
     "@vitest/coverage-v8": "2.1.9",
     "js-yaml": "4.1.1",
-    "lefthook": "1.10.10",
-    "markdownlint-cli2": "0.15.0",
+    "lefthook": "2.1.6",
+    "markdownlint-cli2": "0.22.1",
     "typescript": "5.7.2",
     "vitest": "2.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "protobufjs@<8.0.2": ">=8.0.2"
+    }
   }
 }

@@ -1,0 +1,64 @@
+name: fresh-clone
+# <!-- scope: human-approved fresh-clone-ci-regression-gate (TASKS.md Files list) -->
+# <!-- pattern: not-applicable — CI regression gate; rule #10 deterministic enforcement, same structural pattern as ci.yml's job suite -->
+
+# Simulates the stale-dist scenario on every PR so regressions in the
+# bootstrap substrate are caught by CI, not the operator.
+#
+# Steps: (1) pnpm install — builds dist/ via prepare hook; (2) rm -rf
+# novel/tick-loop/dist — simulates a pre-build fresh clone / stale-dist
+# state; (3) pnpm install again — must rebuild dist/ via prepare hook;
+# (4) pnpm minsky doctor — must exit 0 with all rows GREEN.
+#
+# Runs on push to main and on pull_request targeting main only (not on
+# daemon-branch pushes — daemon branches push frequently and this gate
+# adds ~2 min; filtering to [main] excludes them at the workflow level).
+#
+# Anchor: minsky-cli-fresh-clone-bootstrap (PR #473) +
+#   minsky-fresh-clone-health-checks (PR #474) — both Verification sections
+#   note "live integration" (manual-only, no CI coverage); Forsgren, Humble,
+#   Kim, *Accelerate*, 2018 — CI coverage of the install path is a DORA
+#   deployment-frequency prerequisite; rule #10 (deterministic enforcement).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: fresh-clone-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-clone-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: install (builds dist/ via prepare hook)
+        run: pnpm install --frozen-lockfile
+      - name: simulate stale-dist
+        run: rm -rf novel/tick-loop/dist novel/tick-loop/tsconfig.tsbuildinfo
+      - name: reinstall (must rebuild dist/ via prepare hook)
+        run: pnpm install --frozen-lockfile
+      - name: assert pnpm minsky doctor is all green
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm minsky doctor 2>&1 | tee doctor.out
+          # Bug 2026-05-12: prior `grep -c "RED" doctor.out | grep -q "^0$"`
+          # always tripped `set -o pipefail` when RED was absent, because
+          # `grep -c` exits 1 when there are 0 matches even though stdout
+          # is "0". The negated `grep -q` is the correct shape: exit 0 iff
+          # RED is absent.
+          ! grep -q "RED" doctor.out

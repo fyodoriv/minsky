@@ -60,7 +60,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 9.12.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: pnpm
@@ -166,7 +166,7 @@ jobs:
           # `LEFTHOOK=0` is lefthook's documented escape hatch — disables
           # the binary entirely for the duration of the step.
           LEFTHOOK: "0"
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: mape-k-ingestion/${{ github.run_id }}
