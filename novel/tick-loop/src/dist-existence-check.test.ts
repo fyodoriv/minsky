@@ -8,6 +8,8 @@
  *   3. existsSync throws     → loud-crash up the stack (Armstrong 2007)
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   type DistCheckOutcome,
@@ -77,5 +79,26 @@ describe("formatDistMissingMessage", () => {
     // visually compact — operator should read it without scrolling.
     const msg = formatDistMissingMessage("/some/long/path/with/many/segments/dist/index.js");
     expect(msg.split("\n").length).toBe(1);
+  });
+});
+
+describe("bin/minsky.mjs drift — dist-missing message", () => {
+  // bin/minsky.mjs intentionally inlines the dist-missing error rather than
+  // importing formatDistMissingMessage — the whole point is that dist/ may be
+  // missing when the check runs. This drift test pins both copies so wording
+  // divergence fails CI instead of silently accumulating (vision.md rule #10).
+  it("inline error in bin/minsky.mjs matches formatDistMissingMessage structurally", () => {
+    const binPath = join(import.meta.dirname, "../bin/minsky.mjs");
+    // Normalize escaped template backticks so the source reads as the runtime string would
+    const binSource = readFileSync(binPath, "utf8").replace(/\\`/g, "`");
+
+    // Split canonical formatter output around a sentinel placeholder
+    const sentinel = "__P__";
+    const canonical = formatDistMissingMessage(sentinel);
+    const [before, after] = canonical.split(sentinel);
+
+    // Both structural halves must appear verbatim in the normalized bin source
+    expect(binSource).toContain(before);
+    expect(binSource).toContain(after);
   });
 });
