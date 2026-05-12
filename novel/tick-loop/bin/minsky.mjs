@@ -393,6 +393,18 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   const doBootstrap = resolveBootstrapFn(_opts);
 
   if (process.env["MINSKY_LLM_PROVIDER"] === "local-preferred") {
+    // Slice 65 optimization: apply skip-earlier gate here too so a running
+    // server short-circuits the full detect cycle (~5 which calls saved).
+    const quickProbeLocalPreferred = resolveQuickServerProbe(_opts);
+    const serverQuickLocalPreferred = quickProbeLocalPreferred
+      ? await quickProbeLocalPreferred()
+      : null;
+    if (serverQuickLocalPreferred?.reachable) {
+      process.stderr.write(
+        `minsky: local-LLM server reachable at ${serverQuickLocalPreferred.url} — wiring fallback (MINSKY_LLM_PROVIDER=local-preferred fast path)\n`,
+      );
+      return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    }
     process.stderr.write(
       "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
     );

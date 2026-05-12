@@ -130,6 +130,20 @@ describe("maybeBootstrapLocalLlm — env escape hatches (slice 64)", () => {
     expect(called).toBe(true);
     expect(result).toMatchObject(stubbedEnv);
   });
+
+  it("skips bootstrapFn when MINSKY_LLM_PROVIDER=local-preferred AND server reachable (slice 65 fast path)", async () => {
+    vi.stubEnv("MINSKY_LLM_PROVIDER", "local-preferred");
+    let called = false;
+    const result = await maybeBootstrapLocalLlm({
+      serverProbeFn: async () => ({ reachable: true, url: "http://127.0.0.1:8080/v1/models" }),
+      bootstrapFn: async () => {
+        called = true;
+        return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+      },
+    });
+    expect(called).toBe(false);
+    expect(result).toMatchObject({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
+  });
 });
 
 describe("maybeBootstrapLocalLlm — skip-earlier gate seam (slice 59)", () => {
