@@ -13,3 +13,13 @@ export { planBootstrap, renderRepoYaml } from "./plan.js";
 export type { BootstrapPlan, BootstrapAction, PlanInputs } from "./plan.js";
 export { diagnose } from "./doctor.js";
 export type { DoctorReport, DoctorReportRow, DoctorStatus, DoctorSignals } from "./doctor.js";
+export {
+  classifyWriteError,
+  decideIgnoreAppend,
+  renderIgnorePayload,
+} from "./ignore-write.js";
+export type {
+  IgnoreAppendInputs,
+  IgnoreAppendVerdict,
+  WriteVerdict,
+} from "./ignore-write.js";

@@ -16,6 +16,7 @@ export type IterationVerdict =
   | "inconclusive"
   | "budget-paused"
   | "scope-leak"
+  | "spawn-failed"
   | "aborted";
 
 export interface IterationRecord {
