@@ -88,4 +88,32 @@ lint_substrate_overrides:
     if (result.ok) return;
     expect(result.errors.some((e) => e.field === "default_branch")).toBe(true);
   });
+
+  test("single-quoted scalars load identically to double-quoted ones (YAML 1.2 § 7.3.2)", () => {
+    // Regression: parseScalar previously only stripped double-quotes, so a
+    // sidecar repaired with single-quoted strings (which is valid YAML and
+    // what some bootstrap renderers emit) would surface `'global-ignore'`
+    // including the surrounding single quotes to the validator — failing
+    // with "field must be one of …". Both quoting styles are equivalent in
+    // YAML 1.2 for the flat-string subset sidecar-bootstrap writes
+    // (https://yaml.org/spec/1.2.2/#732-single-quoted-style).
+    const singleQuoted = `host_repo: 'owner/repo'
+tasks_md_path: 'TASKS.md'
+commit_format: '<TYPE>: <DESCRIPTION>'
+pre_commit_command: 'yarn lint'
+branch_prefix: 'feat/'
+default_branch: 'master'
+ticket_format: null
+host_packages_path: 'src/'
+ignore_mechanism: 'global-ignore'
+lint_substrate_overrides: {}
+`;
+    const result = loadRepoConfig(singleQuoted);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.host_repo).toBe("owner/repo");
+    expect(result.config.tasks_md_path).toBe("TASKS.md");
+    expect(result.config.ignore_mechanism).toBe("global-ignore");
+    expect(result.config.default_branch).toBe("master");
+  });
 });
