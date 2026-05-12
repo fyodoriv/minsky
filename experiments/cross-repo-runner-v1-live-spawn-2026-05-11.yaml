@@ -11,19 +11,21 @@ hypothesis: |
     (b) `novel/sidecar-bootstrap/README.md` row 5 — read-only
         global-ignore fallback to per-clone `.git/info/exclude`.
 
-  This PR graduates the runner to v1 by wiring `runLive` (pure
-  orchestrator over `SpawnLike` + `GitLike` seams) to the real
-  `ProcessSpawnStrategy` from `@minsky/tick-loop` (rule #1 — reuse, do
-  not reinvent). The boundary captures `git rev-parse HEAD` →
-  `spawn claude --print` with the brief on stdin + `cwd: hostRoot` →
-  diff against baseline → record one of three verdicts: `validated`,
-  `scope-leak`, `spawn-failed`. Scope comes from the task block's
-  `**Touches**:` (fallback `**Files**:`) globs; empty scope disables
-  the leak check per rule #7 graceful-degrade. The sidecar-bootstrap's
-  global-ignore append walks an EACCES fallback to per-clone
+  This PR graduates the runner to v1 by wiring `runLive`
+  (`novel/cross-repo-runner/src/runner.ts`, a pure orchestrator over
+  `SpawnLike` + `GitLike` seams) to the real `ProcessSpawnStrategy`
+  from `@minsky/tick-loop` (rule #1 — reuse, do not reinvent). The
+  boundary captures `git rev-parse HEAD` → `spawn claude --print`
+  with the brief on stdin + `cwd: hostRoot` → diff against baseline
+  → record one of three verdicts: `validated`, `scope-leak`,
+  `spawn-failed`. Scope comes from the task block's `**Touches**:`
+  (fallback `**Files**:`) globs; empty scope disables the leak check
+  per rule #7 graceful-degrade. The sidecar-bootstrap's global-ignore
+  append walks an EACCES fallback to per-clone
   `<host>/.git/info/exclude` via a new `decideIgnoreAppend` pure
-  function — chaos row 5's "deferred" deferral becomes "covered by
-  `ignore-write.test.ts`".
+  function (`novel/sidecar-bootstrap/src/ignore-write.ts`) — chaos
+  row 5's "deferred" deferral becomes "covered by
+  `novel/sidecar-bootstrap/src/ignore-write.test.ts`".
 
   Pre-registered effect: paired tests for both new modules
   (`runner.test.ts` + `ignore-write.test.ts`) pass; the integration
