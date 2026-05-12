@@ -2,6 +2,8 @@
 
 OpenTelemetry-backed `Observability` adapter for Minsky.
 
+> **API note (`@opentelemetry/resources` v2.x)**: `new Resource({...})` was removed in v2. Use `resourceFromAttributes({...})` (same parameters, same return type).
+
 ## Pattern conformance
 
 Per [vision.md § Pattern conformance index](../../../vision.md#pattern-conformance-index) row 24:
