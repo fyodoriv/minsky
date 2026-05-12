@@ -524,6 +524,13 @@ async function runBootstrapLocalLlm({ force }) {
   const result = await executeBootstrapPlan(plan, {
     confirm: confirmFn,
     spawnFn: spawnAdapter,
+    // Slice 58: start-mlx-server needs detached spawn + PID file + readiness
+    // poll. The regular spawnFn waits for exit, which would block forever for
+    // a long-running server process.
+    spawnDetachedFn: spawnDetachedAdapter,
+    pollServerFn: pollServerWithRetry,
+    writePidFn: (path, pid) => writeFileSync(path, String(pid), "utf8"),
+    localLlmPidPath: resolve(MINSKY_HOME, ".minsky", "local-llm.pid"),
     log: (s) => process.stderr.write(s),
   });
   if (!result.success) {
@@ -867,6 +874,61 @@ function spawnAdapter(command, args, opts = {}) {
       resolveDone({ exitCode: code ?? -1, stderrTail });
     });
   });
+}
+
+/**
+ * Slice 58: detached-spawn adapter for the `start-mlx-server` step.
+ * Spawns the server as a background process that outlives the bootstrap
+ * call. stdio is fully ignored (no terminal attachment — the server
+ * writes its own logs to its working directory). Returns the PID
+ * synchronously; throws on pre-spawn error (ENOENT, EACCES).
+ *
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @param {{ cwd?: string; env?: NodeJS.ProcessEnv }} [opts]
+ * @returns {{ pid: number }}
+ */
+function spawnDetachedAdapter(command, args, opts = {}) {
+  const child = spawn(command, [...args], {
+    detached: true,
+    stdio: ["ignore", "ignore", "ignore"],
+    env: opts.env ?? process.env,
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+  });
+  child.unref();
+  return { pid: child.pid ?? -1 };
+}
+
+/**
+ * Slice 58: server readiness poll for `start-mlx-server`. Retries
+ * GET `url` every 3 s until HTTP 200 or `timeoutMs` elapses. The
+ * mlx_lm.server model-load phase dominates (~30–90 s on Qwen3-30B).
+ *
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<boolean>}
+ */
+async function pollServerWithRetry(url, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const retryIntervalMs = 3_000;
+  const probeTimeoutMs = 2_000;
+  while (Date.now() < deadline) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), probeTimeoutMs);
+    try {
+      const resp = await fetch(url, { method: "GET", signal: ac.signal });
+      if (resp.ok) return true;
+    } catch {
+      // connection refused or abort — retry after interval
+    } finally {
+      clearTimeout(timer);
+    }
+    const remaining = deadline - Date.now();
+    if (remaining > retryIntervalMs) {
+      await new Promise((r) => setTimeout(r, retryIntervalMs));
+    }
+  }
+  return false;
 }
 
 /**
