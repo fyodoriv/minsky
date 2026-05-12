@@ -52,6 +52,7 @@
 import { exec, spawn, spawnSync } from "node:child_process";
 import {
   accessSync,
+  closeSync,
   existsSync,
   constants as fsConstants,
   mkdirSync,
@@ -225,6 +226,24 @@ Operator escape hatches (env vars):
 async function runStartOrAttach(args) {
   const { workerId, extraArgs } = parsePositionalAndForward(args);
 
+  // Optimization: check for a live worker BEFORE cold-start pre-flights
+  // (bin existence + ensureWorkersDir). Reattach is the common case when
+  // a worker is already running; skipping 1 existsSync + 1 mkdirSync on
+  // every reattach. `readLivePid` handles ENOENT gracefully (returns
+  // undefined when .minsky/workers/<id>.pid doesn't exist yet) so this
+  // is safe on fresh clones too.
+  const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
+  const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
+  const livePid = readLivePid(pidPath);
+  if (livePid !== undefined) {
+    process.stderr.write(
+      `minsky: worker ${workerId} already running (PID ${livePid}) — attaching to ${logPath}\n`,
+    );
+    process.stderr.write("minsky: Ctrl+C detaches (daemon keeps running)\n\n");
+    await tailWithPretty(logPath, true);
+    return;
+  }
+  // Cold start path — only reached when no live worker is attached.
   // Slice 2 of `minsky-runtime-resilience` — pre-flight: tick-loop
   // bin must exist or `spawn(node, [TICK_LOOP_BIN, ...])` would emit
   // ENOENT with a stack that doesn't point at the missing path.
@@ -247,18 +266,7 @@ async function runStartOrAttach(args) {
     process.exit(1);
   }
 
-  const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
-  const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
-  const livePid = readLivePid(pidPath);
-  if (livePid !== undefined) {
-    process.stderr.write(
-      `minsky: worker ${workerId} already running (PID ${livePid}) — attaching to ${logPath}\n`,
-    );
-    process.stderr.write("minsky: Ctrl+C detaches (daemon keeps running)\n\n");
-    await tailWithPretty(logPath, true);
-    return;
-  }
-  // Cold start — run the local-LLM auto-bootstrap pre-flight. Idempotent:
+  // Run the local-LLM auto-bootstrap pre-flight. Idempotent:
   // a fully-set-up machine adds <500ms and sets MINSKY_LOCAL_LLM=1 if the
   // server is reachable; an unset machine prompts the operator with one
   // confirm and runs the install plan.
@@ -298,6 +306,11 @@ async function runStartOrAttach(args) {
     env: { ...process.env, ...bootstrapEnv },
   });
   child.unref();
+  // Close the parent's copy of the log fd. spawn() dup2'd it into the
+  // child's stdio table; the parent no longer needs it. Leaving it open
+  // would leak one fd per `minsky` invocation in the parent process.
+  // Pattern: `startLocalLlmServer` already follows this pattern (PR #531).
+  closeSync(logOutcome.fd);
   writeFileSync(activePidPath, String(child.pid ?? ""), "utf8");
   process.stderr.write(
     `minsky: started worker ${workerId} (PID ${child.pid}, log: ${activeLogPath})\n`,
