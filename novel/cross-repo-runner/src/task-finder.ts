@@ -205,7 +205,23 @@ function finaliseTask(p: PartialParsedTask): ParsedTask | null {
 }
 
 function assignMetadata(task: PartialParsedTask, line: string): void {
-  const stripped = line.trim();
+  // Strip a leading bullet marker (`- ` or `* `) so both tasks.md-spec
+  // formats parse identically:
+  //   (a) nested-bullet style (what this repo's own TASKS.md uses, and
+  //       what the upstream tasks.md spec describes):
+  //         - [ ] task
+  //           - **ID**: foo
+  //           - **Hypothesis**: …
+  //   (b) indented-only style (what the integration-test fixture uses):
+  //         - [ ] task
+  //           **ID**: foo
+  //           **Hypothesis**: …
+  // Discovered via observer dogfood 2026-05-12 — `pickHostTask` returned
+  // `empty-queue` against minsky's own TASKS.md because the trimmed line
+  // `- **ID**: foo` did not match the regex `^\*\*ID\*\*:\s*(.+)$`.
+  // Fix: after `trim()`, strip an optional leading `-·` / `*·` so the
+  // same regex set matches both formats.
+  const stripped = line.trim().replace(/^[-*]\s+/, "");
   const mappings: [RegExp, (val: string) => void][] = [
     [
       /^\*\*ID\*\*:\s*(.+)$/,

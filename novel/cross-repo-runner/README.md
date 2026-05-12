@@ -128,6 +128,30 @@ The host(s) must be bootstrapped first via `minsky-bootstrap <host-dir>`.
 The runner reads `.minsky/repo.yaml` and writes to
 `.minsky/experiments/<id>.yaml` + `.minsky/experiment-store/cross-repo/<id>.jsonl`.
 
+### Accepted tasks.md metadata formats
+
+`parseTasksMd` accepts both tasks.md-spec metadata formats. Both parse identically after 2026-05-12:
+
+1. **Nested-bullet** (the tasks.md spec's canonical form; what this repo's own `TASKS.md` uses):
+
+   ```markdown
+   - [ ] task title
+     - **ID**: task-id
+     - **Hypothesis**: …
+     - **Success**: …
+   ```
+
+2. **Indented-only** (legacy fixture form; used by `test/integration/aifn-840-shape.test.ts`):
+
+   ```markdown
+   - [ ] task title
+     **ID**: task-id
+     **Hypothesis**: …
+     **Success**: …
+   ```
+
+Leading `-` or `*` bullet markers on metadata lines are stripped before the regex set fires. Discovered via the observer plugin dogfooding itself on minsky's own repo on 2026-05-12; fix + paired regression tests land in the `cross-repo-runner-parser-accepts-nested-bullet` task's PR.
+
 ## Failure modes & chaos verification
 
 Per constitutional rule #7 (`vision.md` § 7).
