@@ -1,0 +1,107 @@
+id: cross-repo-host-daemon-loop-2026-05-11
+hypothesis: |
+  After `cross-repo-runner-v1-live-spawn` (PR #489) ships the one-shot
+  `--live` path, the next gap is the *continuous* path — a host
+  operator wants to invoke
+  `minsky-run --host ~/apps/oncall-hub --live --loop` once and have
+  the runner keep ticking through the host's rule-#9-compliant queue
+  until empty (or SIGTERM, or `--max-iterations` cap, or first
+  scope-leak / spawn-failed verdict). This PR ships the smallest
+  viable shape: a pure `runHostLoop` orchestrator
+  (`novel/cross-repo-runner/src/host-loop.ts`) that walks the same
+  `SpawnLike` / `GitLike` seams `runLive` already uses; a pure
+  `pickHostTask` selector
+  (`novel/cross-repo-runner/src/task-finder.ts`) that returns the
+  first rule-#9-compliant `P0` / `P1` task in document order; and
+  three new CLI flags on `minsky-run` (`--loop`,
+  `--max-iterations=N`, `--tick-interval-ms=M`) with a SIGTERM /
+  SIGINT bridge to an `AbortController` so the operator's
+  normal-exit signal aborts the in-flight iteration cleanly.
+
+  Reusing `runLive` per-iteration (rule #1) + a thin tick scheduler
+  in the same CLI (rule #6 — let-it-crash AT the iteration boundary,
+  not the loop body) is the minimal-change shape that closes the
+  user-story-006 continuous surface. Long-running supervisor
+  ergonomics (launchd / systemd-user unit templates, auto-restart on
+  crash, log rotation) are explicit follow-ups so this PR stays
+  reviewable.
+
+  Pre-registered effect: paired tests for `host-loop.ts`
+  (11 cases) + `pickHostTask` (7 cases) + the AIFN-840 integration
+  test's 4 new `--loop` cases all pass; the existing v0 surface
+  (one-shot dry-run / `--live`) is byte-identical for any invocation
+  that doesn't pass `--loop`.
+success: |
+  - `pnpm vitest run novel/cross-repo-runner` exits 0 with ≥ 105
+    passing tests (was 82 before slice A's PR #489 + this PR; +21
+    runner.test.ts + 17 ignore-write.test.ts + 11 host-loop.test.ts
+    + 7 pickHostTask in task-finder.test.ts + 4 new integration
+    cases for `--loop`).
+  - `node scripts/check-rule-7-chaos-coverage.mjs` exits 0 (the v0
+    deferrals retired in slice A stay retired here).
+  - `grep -q "runHostLoop" novel/cross-repo-runner/src/host-loop.ts`
+    exits 0.
+  - `grep -q "pickHostTask" novel/cross-repo-runner/src/task-finder.ts`
+    exits 0.
+  - `grep -q -- "--loop" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (the CLI flag exists).
+  - `grep -q "SIGTERM" novel/cross-repo-runner/bin/minsky-run.mjs`
+    exits 0 (the operator escape-hatch is wired).
+  - `node scripts/check-anchor-primary-source.mjs experiments/cross-repo-host-daemon-loop-2026-05-11.yaml`
+    exits 0.
+  - `node scripts/check-pivot-success-margin.mjs experiments/cross-repo-host-daemon-loop-2026-05-11.yaml`
+    exits 0.
+  - `node scripts/check-measurement-inspects-output.mjs experiments/cross-repo-host-daemon-loop-2026-05-11.yaml`
+    exits 0.
+pivot: |
+  Two pivot paths pre-registered:
+
+    1. If `runHostLoop` proves to need budget-guard / paused-sentinel
+       / file-claim integration to be useful (every host-mode
+       invocation immediately hits a state the host operator can't
+       observe), retire `--loop` as a v0 surface and ship the full
+       `runDaemon`-equivalent in a follow-up that imports the seams
+       from `@minsky/tick-loop`. The pure `runHostLoop` survives as
+       substrate. Decision boundary: < 0.20 success rate (`validated`-
+       verdict iterations / total iterations) over 30 days of
+       operator-driven `--loop` invocations against ≥ 3 distinct
+       host repos.
+    2. If the `--loop` flag's stop conditions are wrong (operators
+       want `scope-leak` and `spawn-failed` to be soft-warnings that
+       continue, not hard stops), relax the verdict-to-stop mapping
+       behind an opt-in `MINSKY_LOOP_STRICT=0` env var. The hard
+       stop stays the default so partial-failure operator review is
+       the default ergonomic.
+
+  Margin: success threshold ≥ 0.80; pivot 1 fires at < 0.20. The
+  60-percentage-point gap is the rule-#9 explicit pivot margin per
+  Ries 2011 build-measure-learn (clear separation between "ship more
+  of this" and "abandon the approach").
+measurement: |
+  npx vitest run novel/cross-repo-runner --reporter=json | jq -e ".numPassedTests >= 105 and .numFailedTests == 0" && grep -q "runHostLoop" novel/cross-repo-runner/src/host-loop.ts && grep -q "pickHostTask" novel/cross-repo-runner/src/task-finder.ts && grep -q -- "--loop" novel/cross-repo-runner/bin/minsky-run.mjs && grep -q "SIGTERM" novel/cross-repo-runner/bin/minsky-run.mjs
+anchor: |
+  Liu, C. L., Layland, J. W., "Scheduling Algorithms for
+  Multiprogramming in a Hard Real-Time Environment", *Journal of the
+  ACM* 20 (1), 1973 (periodic-task scheduling — `tickIntervalMs` is
+  the period, `runLive` is the task; same anchor `@minsky/tick-loop`'s
+  `runDaemon` cites for the minsky-on-itself surface).
+  Armstrong, J., *Programming Erlang*, Pragmatic Bookshelf, 2007
+  (let-it-crash AT the iteration boundary; SIGTERM is the supervisor's
+  normal-exit signal; ISBN 978-1934356005).
+  Gamma, E., Helm, R., Johnson, R., Vlissides, J., *Design Patterns:
+  Elements of Reusable Object-Oriented Software*, Addison-Wesley,
+  1994 (Strategy pattern — `SpawnLike` + `GitLike` are the structural
+  seams `runHostLoop` shares with `runLive`; ISBN 0-201-63361-2).
+  Martin, R. C., *Clean Architecture*, Prentice Hall, 2017 (I/O at
+  the edge — `host-loop.ts` is pure; the CLI bin is the I/O boundary;
+  ISBN 978-0134494166).
+  rule #1 (vision.md § 1 — don't reinvent; `runLive` from PR #489 is
+  the per-iteration primitive, not a new spawn surface).
+  rule #6 (vision.md § 6 — let-it-crash; uncaught throws from
+  `pickTask` / `buildPlan` / `runLive` propagate to the CLI top-level
+  handler).
+  user-stories/006-runner-on-any-repo.md (the cross-repo umbrella;
+  the dual-purpose framing's "same loop, same constitution,
+  parameterised by `MINSKY_HOST_ROOT`" claim becomes operative when
+  this PR ships).
+timeout_seconds: 60

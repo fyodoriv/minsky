@@ -30,7 +30,9 @@ import {
   extractPrUrl,
   findTask,
   loadRepoConfig,
+  pickHostTask,
   renderIterationRecord,
+  runHostLoop,
   runLive,
   synthesiseExperimentYaml,
 } from "../dist/index.js";
@@ -47,9 +49,16 @@ function usage() {
       "minsky-run — run a task in a host repo under minsky's full constitution.",
       "",
       "Usage:",
-      "  minsky-run <task-id> --host <host-dir>            Dry-run (default).",
-      "  minsky-run <task-id> --host <host-dir> --live     Live spawn.",
-      "  minsky-run --help                                 Print this message.",
+      "  minsky-run <task-id> --host <host-dir>                   One-shot dry-run (default).",
+      "  minsky-run <task-id> --host <host-dir> --live            One-shot live spawn.",
+      "  minsky-run --host <host-dir> --loop [--live]             Continuous mode — picks the next",
+      "                                                            rule-#9-compliant P0/P1 task per iteration,",
+      "                                                            stops on empty-queue / SIGTERM / max-iterations.",
+      "  minsky-run --help                                        Print this message.",
+      "",
+      "Flags:",
+      "  --max-iterations=N        Cap loop iterations. Default Infinity.",
+      "  --tick-interval-ms=M      Sleep between iterations. Default 300000 (5 min).",
       "",
       "The host must have been bootstrapped first via `minsky-bootstrap <host-dir>`.",
       "",
@@ -57,25 +66,75 @@ function usage() {
   );
 }
 
+function valueAfter(arg, prefix) {
+  return arg.startsWith(prefix) ? arg.slice(prefix.length) : undefined;
+}
+
+const BOOL_FLAGS = {
+  "--live": (s) => {
+    s.live = true;
+  },
+  "--dry-run": (s) => {
+    s.live = false;
+  },
+  "--loop": (s) => {
+    s.loop = true;
+  },
+};
+
+function applyMaxIterations(state, raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    state.error = `--max-iterations must be a positive integer, got: ${raw}`;
+    return false;
+  }
+  state.maxIterations = parsed;
+  return true;
+}
+
+function applyTickIntervalMs(state, raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    state.error = `--tick-interval-ms must be a non-negative integer, got: ${raw}`;
+    return false;
+  }
+  state.tickIntervalMs = parsed;
+  return true;
+}
+
+const KEY_VALUE_FLAGS = {
+  "--max-iterations=": applyMaxIterations,
+  "--tick-interval-ms=": applyTickIntervalMs,
+};
+
+function tryKeyValueFlag(state, arg) {
+  for (const prefix of Object.keys(KEY_VALUE_FLAGS)) {
+    const value = valueAfter(arg, prefix);
+    if (value !== undefined) {
+      return { matched: true, ok: KEY_VALUE_FLAGS[prefix](state, value) };
+    }
+  }
+  return { matched: false, ok: true };
+}
+
 function consumeArg(args, i, state) {
   const a = args[i];
+  if (a === undefined) return i + 1;
   if (a === "--host") {
     state.host = args[i + 1] ?? null;
     return i + 2;
   }
-  if (a === "--live") {
-    state.live = true;
+  if (BOOL_FLAGS[a] !== undefined) {
+    BOOL_FLAGS[a](state);
     return i + 1;
   }
-  if (a === "--dry-run") {
-    state.live = false;
-    return i + 1;
-  }
-  if (a?.startsWith("--")) {
+  const kv = tryKeyValueFlag(state, a);
+  if (kv.matched) return kv.ok ? i + 1 : args.length;
+  if (a.startsWith("--")) {
     state.error = `unknown flag: ${a}`;
     return args.length;
   }
-  if (a !== undefined) state.positional.push(a);
+  state.positional.push(a);
   return i + 1;
 }
 
@@ -84,12 +143,39 @@ function parseArgs(argv) {
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     return { kind: "help" };
   }
-  const state = { host: null, live: false, positional: [], error: null };
+  const state = {
+    host: null,
+    live: false,
+    loop: false,
+    maxIterations: Number.POSITIVE_INFINITY,
+    tickIntervalMs: 300_000,
+    positional: [],
+    error: null,
+  };
   for (let i = 0; i < args.length; ) {
     i = consumeArg(args, i, state);
   }
   if (state.error !== null) return { kind: "error", message: state.error };
-  if (state.positional.length !== 1 || state.host === null) {
+  if (state.host === null) {
+    return { kind: "error", message: "must pass --host <host-dir>" };
+  }
+  if (state.loop) {
+    // Loop mode: no positional task-id required (picker selects each iteration).
+    if (state.positional.length > 0) {
+      return {
+        kind: "error",
+        message: `--loop mode picks tasks automatically; remove positional argument(s): ${state.positional.join(", ")}`,
+      };
+    }
+    return {
+      kind: "loop",
+      host: resolve(state.host),
+      live: state.live,
+      maxIterations: state.maxIterations,
+      tickIntervalMs: state.tickIntervalMs,
+    };
+  }
+  if (state.positional.length !== 1) {
     return { kind: "error", message: "must pass exactly one <task-id> and --host <host-dir>" };
   }
   return { kind: "run", taskId: state.positional[0], host: resolve(state.host), live: state.live };
@@ -360,6 +446,145 @@ async function runPlanned(taskId, hostRoot, live) {
   return 0;
 }
 
+/**
+ * Continuous-mode driver: walks the host's queue using `pickHostTask`,
+ * invokes `runLive` per iteration via `runHostLoop`, sleeps between
+ * iterations, exits on empty-queue / SIGTERM / max-iterations / first
+ * scope-leak or spawn-failed.
+ *
+ * The picker re-reads TASKS.md each tick so the host operator can edit
+ * the queue mid-loop and the next iteration sees the change (rule #6 —
+ * stay-alive across mid-task interruption).
+ */
+async function runLoop(parsed) {
+  const { host: hostRoot, live, maxIterations, tickIntervalMs } = parsed;
+  const config = loadHostConfig(hostRoot);
+
+  // SIGTERM bridge — operator's normal-exit signal. The loop's AbortSignal
+  // fires when the supervisor (or `kill <pid>` from the operator) sends
+  // SIGTERM; in-flight spawn finishes, then the loop exits with stopReason
+  // `aborted`. Per rule #6 let-it-crash AT the iteration boundary, not the
+  // loop body — uncaught throws still propagate to the top-level handler.
+  const controller = new AbortController();
+  const onSignal = () => controller.abort();
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
+
+  process.stdout.write(
+    `\n=== host-daemon loop (host=${config.host_repo}, mode=${live ? "live" : "dry-run"}, ` +
+      `max-iter=${maxIterations === Number.POSITIVE_INFINITY ? "∞" : maxIterations}, ` +
+      `tick=${tickIntervalMs}ms) ===\n`,
+  );
+
+  let strategy = null;
+  if (live) {
+    strategy = new ProcessSpawnStrategy({
+      command: "claude",
+      args: ["--print"],
+      timeoutMs: readLiveSpawnTimeoutMs(),
+      invocation: (input) => ({
+        command: "claude",
+        argv: ["--print"],
+        stdin: input.brief,
+        cwd: hostRoot,
+      }),
+    });
+  }
+  const dryRunStrategy = {
+    spawn(input) {
+      return Promise.resolve({
+        exitCode: 0,
+        durationMs: 0,
+        stdoutTail: `loop dry-run for ${input.taskId}`,
+        stderrTail: "",
+      });
+    },
+  };
+  const git = makeGitProbe(hostRoot);
+
+  let lastTasksMd = "";
+  const result = await runHostLoop({
+    pickTask: () => {
+      lastTasksMd = loadHostTasks(hostRoot, config.tasks_md_path);
+      const task = pickHostTask(lastTasksMd);
+      if (task === null) return null;
+      const synth = synthesiseExperimentYaml(task);
+      if (!synth.ok) {
+        reportRule9Violation(task.id, synth.missingFields);
+        return null;
+      }
+      return task;
+    },
+    buildPlan: (task) => {
+      const plan = buildSpawnPlan({
+        hostRoot,
+        config,
+        task,
+        visionMdPath: VISION_MD_PATH,
+      });
+      const synth = synthesiseExperimentYaml(task);
+      if (synth.ok) writeExperimentYaml(plan.experimentYamlPath, synth.yaml);
+      return plan;
+    },
+    resolveAllowedPaths: (task) => {
+      const block = extractRawTaskBlock(lastTasksMd, task.id);
+      return extractAllowedPathsFromTaskBlock(block);
+    },
+    runLive: (inputs) => runLive(inputs),
+    spawn: strategy ?? dryRunStrategy,
+    git,
+    globMatchesPath,
+    maxIterations,
+    tickIntervalMs,
+    signal: controller.signal,
+    recordIteration: (record) => {
+      writeIterationRecord(hostRoot, {
+        ts: new Date().toISOString(),
+        experiment_id: record.taskId,
+        host_repo: config.host_repo,
+        branch: `${config.branch_prefix}${record.taskId}`,
+        verdict:
+          record.verdict === "validated"
+            ? "validated"
+            : record.verdict === "scope-leak"
+              ? "scope-leak"
+              : "spawn-failed",
+        pr_url: record.prUrl,
+        notes: `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`,
+      });
+    },
+  });
+
+  process.off("SIGTERM", onSignal);
+  process.off("SIGINT", onSignal);
+
+  emitLoopSummary(result);
+  // Exit codes: 0 = healthy stop (empty-queue / max-iterations / aborted),
+  // 1 = spawn-failed (operator must inspect), 2 = scope-leak.
+  if (result.stopReason === "scope-leak") return 2;
+  if (result.stopReason === "spawn-failed") return 1;
+  return 0;
+}
+
+function readLiveSpawnTimeoutMs() {
+  const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
+  if (raw === undefined) return 15 * 60 * 1000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+}
+
+function emitLoopSummary(result) {
+  process.stdout.write("\n=== host-daemon loop summary ===\n");
+  process.stdout.write(`stopReason: ${result.stopReason}\n`);
+  process.stdout.write(`iterations: ${result.iterations.length}\n`);
+  for (const r of result.iterations) {
+    const tag = r.verdict === "validated" ? "✓" : "✗";
+    process.stdout.write(
+      `  ${tag} #${r.iteration} ${r.taskId} → ${r.verdict} (${r.durationMs}ms)${r.prUrl !== null ? ` PR=${r.prUrl}` : ""}\n`,
+    );
+  }
+}
+
 async function main() {
   const parsed = parseArgs(process.argv);
   if (parsed.kind === "help") {
@@ -374,6 +599,9 @@ async function main() {
   if (!existsSync(parsed.host)) {
     process.stderr.write(`host directory does not exist: ${parsed.host}\n`);
     return 1;
+  }
+  if (parsed.kind === "loop") {
+    return runLoop(parsed);
   }
   return runPlanned(parsed.taskId, parsed.host, parsed.live);
 }
