@@ -187,6 +187,8 @@ Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-pause
 
 - `novel/budget-guard/src/index.ts` — the existing `circuit-break-and-notify` signal this fallback hooks into.
 - `novel/tick-loop/src/spawn-strategy.ts:175` — the single spawn point that slice 2 extends.
+- `novel/tick-loop/src/log-path-fallback.ts` — graceful-degrade: falls back to `/tmp/minsky-worker-<id>-<pid>.log` on EACCES/EROFS/ENOSPC so the local-LLM daemon still starts while the operator fixes `.minsky/workers/` (slice 2 of `minsky-runtime-resilience`; see `novel/tick-loop/README.md` § Slice 2).
+- `novel/tick-loop/src/workers-dir-mkdir.ts` — classifies `mkdirSync` errno into a recovery hint (chmod vs MINSKY_HOME); exits 1 with operator-actionable message instead of a raw Node.js stack trace if workers dir cannot be created (slice 2 of `minsky-runtime-resilience`).
 - `vision.md` rule #6 (stay alive — silence is failure).
 - `vision.md` rule #1 (don't reinvent — adopt MLX-LM, Qwen, aider as industry-standard).
 - `vision.md` rule #9 (pre-registered HDD — the 7-day provider-throughput query is the canonical metric).
