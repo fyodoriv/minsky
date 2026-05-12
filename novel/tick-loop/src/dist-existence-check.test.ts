@@ -8,12 +8,18 @@
  *   3. existsSync throws     → loud-crash up the stack (Armstrong 2007)
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   type DistCheckOutcome,
   checkDistExists,
   formatDistMissingMessage,
 } from "./dist-existence-check.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MINSKY_BIN_PATH = resolve(HERE, "..", "bin", "minsky.mjs");
 
 describe("checkDistExists — present", () => {
   it("returns { ok: true } when existsSyncFn returns true", () => {
@@ -77,5 +83,30 @@ describe("formatDistMissingMessage", () => {
     // visually compact — operator should read it without scrolling.
     const msg = formatDistMissingMessage("/some/long/path/with/many/segments/dist/index.js");
     expect(msg.split("\n").length).toBe(1);
+  });
+});
+
+describe("bin/minsky.mjs drift — dist-missing message", () => {
+  // `bin/minsky.mjs` deliberately inlines the dist-missing message rather
+  // than importing `formatDistMissingMessage` from `dist/` — the check
+  // cannot depend on the very dist/ it is checking for. Two copies therefore
+  // exist. This test pins them: wording divergence fails CI rather than
+  // silently drifting.
+  //
+  // Technique: split the canonical formatter output around a sentinel
+  // placeholder, normalize escaped backticks in the on-disk source
+  // (`\`` → `` ` ``), then assert both structural halves appear in the
+  // bin file. Catches wording changes without requiring exact path matches.
+  it("inline stderr literal matches formatDistMissingMessage's structural slices", () => {
+    const rawSrc = readFileSync(MINSKY_BIN_PATH, "utf8");
+    const normalizedSrc = rawSrc.replaceAll("\\`", "`");
+    const canonical = formatDistMissingMessage("__P__");
+    const parts = canonical.split("__P__");
+    expect(parts.length).toBe(2);
+    const [prefix, suffix] = parts as [string, string];
+    expect(prefix.length).toBeGreaterThan(0);
+    expect(suffix.length).toBeGreaterThan(0);
+    expect(normalizedSrc).toContain(prefix);
+    expect(normalizedSrc).toContain(suffix);
   });
 });
