@@ -35,6 +35,21 @@ Exit codes: `0` healthy stop (any of aborted / max-iterations / empty-queue), `1
 
 Long-running ergonomics (launchd / systemd-user unit templates, auto-restart on crash, log rotation) are deferred to a follow-up. The in-process loop is the v0 functional surface; the supervisor substrate is the next slice.
 
+## `--cto-audit` (auto-task-generation)
+
+`minsky-run --host <dir> --loop --cto-audit [--seed-on-empty]` adds the *generation* surface to the loop. After every `validated`-verdict iteration, a second `claude --print` invocation in CTO mode proposes 1–3 rule-#9-compliant task blocks for the host's TASKS.md (labeled `minsky:cto-audit` on the host PR). With `--seed-on-empty`, an empty queue also fires a seed audit + one-shot re-pick, so the daemon self-seeds instead of exiting on `empty-queue`.
+
+The audit is a pure orchestrator over the same `SpawnLike` seam the iteration uses (rule #1 — reuse the spawn primitive). Gate predicate (`shouldRunHostCtoAudit`) filters: scope-leak / spawn-failed iterations don't trigger an audit (the operator must fix the systemic issue first), the audit's own iteration doesn't trigger another audit (recursion guard on `cross-repo-cto-` / `cto-audit-` task ID prefixes), and `MINSKY_HOST_CTO_AUDIT=off` is the operator's hard kill-switch.
+
+The prompt header (`HOST_CTO_PROMPT_HEADER`) explicitly:
+
+- enumerates the 5 required rule-#9 fields (Hypothesis / Success / Pivot / Measurement / Anchor),
+- forbids vanity-metric tasks (Ries 2011 — counts that always go up: LOC, commits, hours, tasks-in-flight),
+- forbids fabrication of work (an empty audit is a valid outcome the operator can act on),
+- documents the audit-branch + label conventions so `gh pr list --label minsky:cto-audit` on the host counts toward the pre-registered ship-rate metric.
+
+Default behavior (no flags) is byte-identical to the slice-B loop. The audit is an opt-in surface — operator wires it explicitly.
+
 ## `dispatch-emit` (decision C2 hook, v0)
 
 `src/dispatch-emit.ts` exports `buildDispatchPayload({hostRepo, prNumber, experimentYamlUrl})` — the pure function that returns the `gh api .../dispatches` argv array the runner emits when it opens a host PR. The minsky-side workflow at `.github/workflows/cross-repo-check.yml` listens for that `repository_dispatch` (`event_type=cross-repo-pr`) and posts a `minsky-constitution` check-run on the host PR. v0 is build-only: the runner does not yet *call* `gh` with the argv (operator-driven; tracked as follow-up). Live `gh api .../check-runs` POST in the workflow is gated on `vars.MINSKY_BOT_INSTALLED=1`. See `experiments/cross-repo-ci-action-2026-05-04.yaml` for the rule-#9 pre-registration.
