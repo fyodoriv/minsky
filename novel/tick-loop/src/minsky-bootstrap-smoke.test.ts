@@ -35,6 +35,55 @@ describe("maybeBootstrapLocalLlm — DI seam", () => {
   });
 });
 
+describe("maybeBootstrapLocalLlm — bootstrapFn seam (slice 63)", () => {
+  it("calls bootstrapFn and returns its env when claude probe reports hard-limit", async () => {
+    const unreachableState = {
+      server: { reachable: false, reason: "ECONNREFUSED" },
+      pipx: { present: true },
+      mlxLm: { present: true },
+      aider: { present: true },
+      huggingfaceCli: { present: true },
+      model: { present: true },
+    };
+    const stubbedEnv = { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+    let bootstrapCalled = false;
+    const result = await maybeBootstrapLocalLlm({
+      // biome-ignore lint/suspicious/noExplicitAny: DI seam — test overrides the detection fn
+      detectFn: async () => unreachableState as any,
+      claudeProbeFn: async () => ({ verdict: "exhausted", reason: "stub-exhausted" }),
+      bootstrapFn: async () => {
+        bootstrapCalled = true;
+        return stubbedEnv;
+      },
+    });
+    expect(bootstrapCalled).toBe(true);
+    expect(result).toMatchObject(stubbedEnv);
+  });
+
+  it("does NOT call bootstrapFn when claude probe reports transient-error", async () => {
+    const unreachableState = {
+      server: { reachable: false, reason: "ECONNREFUSED" },
+      pipx: { present: true },
+      mlxLm: { present: true },
+      aider: { present: true },
+      huggingfaceCli: { present: true },
+      model: { present: true },
+    };
+    let bootstrapCalled = false;
+    const result = await maybeBootstrapLocalLlm({
+      // biome-ignore lint/suspicious/noExplicitAny: DI seam — test overrides the detection fn
+      detectFn: async () => unreachableState as any,
+      claudeProbeFn: async () => ({ verdict: "error", reason: "stub-transient" }),
+      bootstrapFn: async () => {
+        bootstrapCalled = true;
+        return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
+      },
+    });
+    expect(bootstrapCalled).toBe(false);
+    expect(result).toEqual({});
+  });
+});
+
 describe("maybeBootstrapLocalLlm — skip-earlier gate seam (slice 59)", () => {
   it("returns local-LLM env when serverProbeFn reports reachable (skips full detect)", async () => {
     const result = await maybeBootstrapLocalLlm({

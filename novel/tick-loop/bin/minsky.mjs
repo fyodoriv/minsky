@@ -336,6 +336,23 @@ function resolveQuickServerProbe(opts) {
 }
 
 /**
+ * Slice 63: resolve the bootstrap executor DI seam. Extracted from
+ * `maybeBootstrapLocalLlm` to keep its cognitive complexity ≤ biome's cap
+ * of 10 (the `??` operator itself contributes 1 to complexity).
+ *
+ * Production default: `() => runBootstrapLocalLlm({ force: false })`.
+ * Tests inject a synthetic `bootstrapFn` to exercise the critical
+ * "claude-exhausted → bootstrap" path without the real install pipeline.
+ *
+ * @param {{ bootstrapFn?: () => Promise<Record<string, string>> }} opts
+ * @returns {() => Promise<Record<string, string>>}
+ */
+function resolveBootstrapFn(opts) {
+  if (opts.bootstrapFn) return opts.bootstrapFn;
+  return () => runBootstrapLocalLlm({ force: false });
+}
+
+/**
  * Probe the local-LLM stack and run the install plan if needed. Idempotent
  * fast path: an already-running mlx-lm.server is detected with one fetch
  * call and we just return `MINSKY_LOCAL_LLM=1` so the spawned daemon picks
@@ -346,6 +363,11 @@ function resolveQuickServerProbe(opts) {
  *
  * Returns an env-overlay object the spawn merges with `process.env`. Empty
  * object means "no overlay needed" (caller passes the daemon's existing env).
+ *
+ * Slice 63: `_opts.bootstrapFn` is the DI seam for the bootstrap executor.
+ * Tests inject a synthetic `() => Promise<Record<string, string>>` so the
+ * "claude-exhausted → bootstrap" critical path is exercisable without the
+ * real install pipeline. Production default: `runBootstrapLocalLlm`.
  *
  * @returns {Promise<Record<string, string>>}
  */
@@ -366,11 +388,15 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   // tick-loop daemon — `minsky` itself ignored it. This slice
   // closes the gap: when set, skip the live probe AND trigger the
   // bootstrap pipeline directly, matching the documented behavior.
+  // Slice 63: resolve the bootstrap executor seam once so all three call sites
+  // below share the same reference. See resolveBootstrapFn for the seam logic.
+  const doBootstrap = resolveBootstrapFn(_opts);
+
   if (process.env["MINSKY_LLM_PROVIDER"] === "local-preferred") {
     process.stderr.write(
       "minsky: MINSKY_LLM_PROVIDER=local-preferred — skipping live probe and bootstrapping local-LLM\n",
     );
-    return await runBootstrapLocalLlm({ force: false });
+    return await doBootstrap();
   }
 
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — consult
@@ -387,7 +413,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     process.stderr.write(
       `minsky: persisted hard-limit hit at ${persisted.ts} (${ageMin}m ago, reason: ${persisted.reason}); skipping live probe and bootstrapping local-LLM\n`,
     );
-    return await runBootstrapLocalLlm({ force: false });
+    return await doBootstrap();
   }
 
   // Slice 57 skip-earlier gate: probe the server alone first (one fetch
@@ -432,7 +458,7 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   process.stderr.write(
     `minsky: claude unavailable (${decision.verdict}) AND local-LLM server not reachable\n`,
   );
-  return await runBootstrapLocalLlm({ force: false });
+  return await doBootstrap();
 }
 
 /**
