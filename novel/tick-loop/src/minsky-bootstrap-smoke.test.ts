@@ -64,4 +64,28 @@ describe("maybeBootstrapLocalLlm", () => {
     });
     expect(result).toEqual({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
   });
+
+  it("MINSKY_NO_AUTO_BOOTSTRAP=1: returns {} immediately (no server probe, no claude probe)", async () => {
+    const prev = process.env["MINSKY_NO_AUTO_BOOTSTRAP"];
+    process.env["MINSKY_NO_AUTO_BOOTSTRAP"] = "1";
+    try {
+      // No detectFn → would reach production path, but NO_AUTO_BOOTSTRAP guard
+      // fires before any probe. Passes no detectFn to exercise the real guard.
+      const result = await maybeBootstrapLocalLlm();
+      expect(result).toEqual({});
+    } finally {
+      process.env["MINSKY_NO_AUTO_BOOTSTRAP"] = prev;
+    }
+  });
+
+  it("MINSKY_LOCAL_LLM=1: returns {} immediately (already opted in, no re-bootstrap)", async () => {
+    const prev = process.env["MINSKY_LOCAL_LLM"];
+    process.env["MINSKY_LOCAL_LLM"] = "1";
+    try {
+      const result = await maybeBootstrapLocalLlm();
+      expect(result).toEqual({});
+    } finally {
+      process.env["MINSKY_LOCAL_LLM"] = prev;
+    }
+  });
 });

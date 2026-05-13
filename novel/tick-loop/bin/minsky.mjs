@@ -11,6 +11,7 @@
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 67 (server-probe-first skip-earlier gate in maybeBootstrapLocalLlm) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 68 (doctor persisted-hard-limit skip-earlier gate) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -605,7 +606,21 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
 async function runDoctor() {
   process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
   const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
-  const claudeDecision = await probeClaude();
+  // Slice 68 skip-earlier gate: when a persisted hard-limit is fresh (within
+  // TTL), the live `probeClaude()` spawn (~1-5s) adds nothing — the doctor
+  // already shows the persisted timestamp in `emitClaudeExhaustionRow`. Use
+  // the persisted verdict directly and skip the network round-trip.
+  const persisted = readPersistedHardLimit();
+  let claudeDecision;
+  if (persisted.exhausted) {
+    const ageMin = Math.round(persisted.ageMs / 60_000);
+    claudeDecision = {
+      verdict: /** @type {const} */ ("exhausted"),
+      reason: `persisted hard-limit (${ageMin}m ago) — skipping live probe`,
+    };
+  } else {
+    claudeDecision = await probeClaude();
+  }
   emitDoctorRows({ state, archState, claudeDecision, pythonPath });
   // Slice 1 of `minsky-fresh-clone-health-checks`: 4 substrate rows
   // (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) so
