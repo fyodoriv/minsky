@@ -67,3 +67,20 @@ The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: th
 ### Day's narrative
 
 The local-LLM 3-worker path went from GPU OOM to deterministic stability via four compounding PRs. #446 drops the Files cell from the slim brief, cutting aider's auto-add explosion from 8–12 paths to the 1–3 files Hypothesis/Details organically mention. #451 hard-wires `--no-auto-lint/test/suggest-shell/detect-urls --edit-format diff`, killing multi-round reflection (which drove round-2 tokens to 46k) and the whole-file thrash loop that exhausted the output budget with no diff. #453 adds the key concurrency gate — an O_EXCL file-lock `SpawnStrategy` decorator capping in-flight local-LLM spawns to 1, matching mlx_lm.server's single-inference limit; post-gate live-fire ran all three workers through to real-diff completion (4.8k + 13k + 19k input tokens, server stable) vs. Metal command-buffer OOM pre-PR. #454 closes the observability gap with a startup invariant that fires when `MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2` but the backend doesn't advertise concurrent-inference capability, catching the silent bypass footgun before it can re-introduce the OOM. #452 ships alongside as independent CLI hardening: `MINSKY_ASSUME_TTY=1` decouples sudo-prompt availability from stdin interactivity, fixing a regression where `MINSKY_NON_INTERACTIVE=1` in a real TTY tripped the non-TTY refuse path.
+
+---
+
+## 2026-05-13
+
+### What shipped
+
+_No PRs merged on this date._
+
+### Metrics
+
+- **open_prs**: 54 → 19 _(Δ -35, **improved**)_
+- **open_issues**: 0 → 0 _(Δ 0, **unchanged**)_
+
+### Day's narrative
+
+No PRs closed within the UTC day window, but the open-PR queue fell from 54 to 19 — a net reduction of 35 driven by a dense cluster of prior-session merges clearing the backlog. Active work-in-flight: log-path-fallback helper (runtime-resilience tail, post-#488), auto-bootstrap slice 57 (local LLM path, post-#479), and local-model-efficiency cleanup (post-#486). Issue board held at zero.
