@@ -9,8 +9,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  type ReadClaudeHealthyOutcome,
   type ReadHardLimitOutcome,
+  readLastClaudeHealthy,
   readLastHardLimit,
+  writeLastClaudeHealthy,
   writeLastHardLimit,
 } from "./claude-exhaustion-state.js";
 
@@ -182,5 +185,166 @@ describe("writeLastHardLimit — field present, overwrites", () => {
     const parsed = JSON.parse(written ?? "{}");
     expect(parsed.last_claude_hard_limit.ts).toBe("2026-05-08T19:00:00Z");
     expect(parsed.last_claude_hard_limit.reason).toBe("hit usage limit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readLastClaudeHealthy — slice 69 of minsky-cli-auto-bootstrap-local-llm
+// ---------------------------------------------------------------------------
+
+describe("readLastClaudeHealthy — state file absent", () => {
+  it("returns { healthy: false } when state file does not exist", () => {
+    const result = readLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () => {
+        throw new Error("ENOENT");
+      },
+      existsSyncFn: () => false,
+      nowFn: () => NOW_MS,
+      ttlMs: ONE_HOUR_MS,
+    });
+    expect(result).toEqual<ReadClaudeHealthyOutcome>({ healthy: false });
+  });
+});
+
+describe("readLastClaudeHealthy — field absent", () => {
+  it("returns { healthy: false } when last_claude_healthy is unset", () => {
+    const result = readLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () => '{"schema_version":"1","ledger":{}}',
+      existsSyncFn: () => true,
+      nowFn: () => NOW_MS,
+      ttlMs: ONE_HOUR_MS,
+    });
+    expect(result.healthy).toBe(false);
+  });
+});
+
+describe("readLastClaudeHealthy — field present, within TTL", () => {
+  it("returns { healthy: true, ageMs, ts } for a recent record", () => {
+    const tsRecent = new Date(NOW_MS - 5 * 60 * 1000).toISOString(); // 5 min ago
+    const result = readLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () =>
+        JSON.stringify({
+          schema_version: "1",
+          last_claude_healthy: { ts: tsRecent },
+        }),
+      existsSyncFn: () => true,
+      nowFn: () => NOW_MS,
+      ttlMs: ONE_HOUR_MS,
+    });
+    expect(result.healthy).toBe(true);
+    if (result.healthy) {
+      expect(result.ts).toBe(tsRecent);
+      expect(result.ageMs).toBe(5 * 60 * 1000);
+    }
+  });
+});
+
+describe("readLastClaudeHealthy — field present, stale (beyond TTL)", () => {
+  it("returns { healthy: false } when ts is older than TTL", () => {
+    const tsStale = new Date(NOW_MS - 2 * ONE_HOUR_MS).toISOString(); // 2 hours ago
+    const result = readLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () =>
+        JSON.stringify({
+          schema_version: "1",
+          last_claude_healthy: { ts: tsStale },
+        }),
+      existsSyncFn: () => true,
+      nowFn: () => NOW_MS,
+      ttlMs: ONE_HOUR_MS,
+    });
+    expect(result.healthy).toBe(false);
+  });
+});
+
+describe("readLastClaudeHealthy — corrupt JSON", () => {
+  it("returns { healthy: false } when state.json is unparseable (graceful-degrade)", () => {
+    const result = readLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () => "{not valid json",
+      existsSyncFn: () => true,
+      nowFn: () => NOW_MS,
+      ttlMs: ONE_HOUR_MS,
+    });
+    expect(result.healthy).toBe(false);
+  });
+});
+
+describe("readLastClaudeHealthy — invalid ts string", () => {
+  it("returns { healthy: false } when ts is not a parseable date", () => {
+    const result = readLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () =>
+        JSON.stringify({
+          schema_version: "1",
+          last_claude_healthy: { ts: "not-a-date" },
+        }),
+      existsSyncFn: () => true,
+      nowFn: () => NOW_MS,
+      ttlMs: ONE_HOUR_MS,
+    });
+    expect(result.healthy).toBe(false);
+  });
+});
+
+describe("writeLastClaudeHealthy — state file absent", () => {
+  it("creates a fresh state.json with the new field", () => {
+    let written: { path: string; content: string } | undefined;
+    writeLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () => {
+        throw new Error("ENOENT");
+      },
+      writeFileSyncFn: (p, c) => {
+        written = { path: p, content: c };
+      },
+      ts: "2026-05-13T10:00:00Z",
+    });
+    expect(written).toBeDefined();
+    expect(written?.path).toBe("/repo/.minsky/state.json");
+    const parsed = JSON.parse(written?.content ?? "{}");
+    expect(parsed.last_claude_healthy).toEqual({ ts: "2026-05-13T10:00:00Z" });
+  });
+});
+
+describe("writeLastClaudeHealthy — state file present, preserves other fields", () => {
+  it("preserves existing fields and adds last_claude_healthy", () => {
+    let written: string | undefined;
+    writeLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () =>
+        JSON.stringify({ schema_version: "1", ntfy: { topic: "minsky-abc" }, ledger: {} }),
+      writeFileSyncFn: (_p, c) => {
+        written = c;
+      },
+      ts: "2026-05-13T10:00:00Z",
+    });
+    const parsed = JSON.parse(written ?? "{}");
+    expect(parsed.schema_version).toBe("1");
+    expect(parsed.ntfy.topic).toBe("minsky-abc");
+    expect(parsed.last_claude_healthy).toEqual({ ts: "2026-05-13T10:00:00Z" });
+  });
+});
+
+describe("writeLastClaudeHealthy — field present, overwrites", () => {
+  it("overwrites the existing last_claude_healthy field", () => {
+    let written: string | undefined;
+    writeLastClaudeHealthy({
+      stateFilePath: "/repo/.minsky/state.json",
+      readFileSyncFn: () =>
+        JSON.stringify({
+          schema_version: "1",
+          last_claude_healthy: { ts: "old" },
+        }),
+      writeFileSyncFn: (_p, c) => {
+        written = c;
+      },
+      ts: "2026-05-13T10:00:00Z",
+    });
+    const parsed = JSON.parse(written ?? "{}");
+    expect(parsed.last_claude_healthy.ts).toBe("2026-05-13T10:00:00Z");
   });
 });

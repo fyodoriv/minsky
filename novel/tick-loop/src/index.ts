@@ -876,8 +876,11 @@ export {
 // live probe. Composes with the in-process per-iteration
 // `decideProvider` logic.
 export {
+  type ReadClaudeHealthyOutcome,
   type ReadHardLimitOutcome,
+  readLastClaudeHealthy,
   readLastHardLimit,
+  writeLastClaudeHealthy,
   writeLastHardLimit,
 } from "./claude-exhaustion-state.js";
 
