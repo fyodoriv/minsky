@@ -79,8 +79,7 @@ _No PRs merged on this date._
 ### Metrics
 
 - **open_prs**: 54 → 19 _(Δ -35, **improved**)_
-- **open_issues**: 0 → 0 _(Δ 0, **unchanged**)_
 
 ### Day's narrative
 
-No PRs closed within the UTC day window, but the open-PR queue fell from 54 to 19 — a net reduction of 35 driven by a dense cluster of prior-session merges clearing the backlog. Active work-in-flight: log-path-fallback helper (runtime-resilience tail, post-#488), auto-bootstrap slice 57 (local LLM path, post-#479), and local-model-efficiency cleanup (post-#486). Issue board held at zero.
+No code merged today; the queue reading tells the story. Open PRs contracted to 19 (Δ -35 from yesterday's 54) — the lowest queue depth since tracking began, and the compounded residual of 2026-05-12's ~50-PR sweep: 30 merges spanning cross-repo runner, observer plugin, runtime-resilience slices, and auto-bootstrap continuations, plus ~20 superseded drafts closed. At sub-20 WIP, the loop is operating inside Reinertsen's cycle-time inflection (Managing the Design Factory, 1997).
