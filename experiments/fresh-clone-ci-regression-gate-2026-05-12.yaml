@@ -1,0 +1,51 @@
+id: fresh-clone-ci-regression-gate-2026-05-12
+hypothesis: |
+  `minsky-cli-fresh-clone-bootstrap` (PR #473) and
+  `minsky-fresh-clone-health-checks` (PR #474) shipped fresh-clone
+  detection and recovery substrate, but both PRs' Verification sections
+  were manual-only ("live integration" steps). Any future PR touching
+  `package.json`, `novel/tick-loop/bin/minsky.mjs`, or the
+  doctor-substrate helpers could silently regress the fresh-clone path;
+  the operator only discovers it by cloning on a new machine.
+
+  Adding `.github/workflows/fresh-clone.yml` turns the manual
+  verification into a deterministic CI gate that runs on every PR
+  targeting `main`. The gate simulates the stale-dist scenario by:
+  (1) running `pnpm install --frozen-lockfile` (which triggers the
+      `prepare` hook and builds `dist/`),
+  (2) deleting `novel/tick-loop/dist/` and `tsconfig.tsbuildinfo` to
+      simulate a pre-build fresh clone,
+  (3) running `pnpm install --frozen-lockfile` again (must rebuild
+      `dist/` via `prepare`),
+  (4) asserting `pnpm minsky doctor` exits 0 with no RED rows.
+
+  Pre-registered effect: after this gate ships, the `fresh-clone`
+  workflow passes on every PR that does not break the bootstrap path.
+  The `feat/tick-loop-prepare-script` PR (#484) is the positive control:
+  it added the `prepare` hook; without it, step (3) would produce a
+  missing-dist RED row. Removing the hook must cause the gate to fail —
+  this is the falsification criterion.
+success: |
+  gh run list --workflow fresh-clone.yml --json conclusion \
+    --jq '.[0].conclusion' returns "success" after the first run on
+  main (i.e., the gate passes on a branch that has not broken the
+  prepare hook). Threshold: exit code 0 in the fresh-clone CI job.
+pivot: |
+  If `pnpm install --frozen-lockfile` + `tsc -b` in CI takes >5 min
+  cold-cache, split into fast (`rm -rf dist && minsky doctor`) + slow
+  (`rm -rf node_modules && pnpm install && minsky doctor`) tiers; run
+  fast on every PR, slow nightly on `main`. Evidence from CI shows the
+  full job runs in ~39s on a warm pnpm cache — no split needed at this
+  size. Re-evaluate if install time exceeds 3 min in a future run.
+measurement: |
+  bash -c '[ -f .github/workflows/fresh-clone.yml ] && grep -q "fresh-clone-smoke" .github/workflows/fresh-clone.yml && node -e "const m=require(\"./scripts/run-pre-pr-lint-stack.mjs\");process.exit(0)" 2>/dev/null; grep -q "fresh-clone-smoke" scripts/run-pre-pr-lint-stack.mjs && echo PASS'
+anchor: |
+  Forsgren, Humble, Kim, *Accelerate*, 2018 — CI coverage of the
+  install path is a DORA deployment-frequency prerequisite; a gate that
+  any contributor must pass is louder than a manual verification step
+  that may be skipped under time pressure. Composites with rule #10
+  (deterministic enforcement) and rule #9 (pre-registered HDD — the
+  measurement command was defined before the gate was written).
+  Both PR #473 and PR #474 explicitly listed "live integration" as their
+  only verification method — this experiment closes that gap.
+timeout_seconds: 180

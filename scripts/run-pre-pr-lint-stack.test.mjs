@@ -2,7 +2,7 @@
 // the manifest + an injected `runStep`; tests stub `runStep` and assert the
 // stage filter + green/red verdict logic.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,7 @@ import {
   CI_BASH_GATE_BUCKETS,
   CI_ENV_DEPENDENT_JOBS,
   CI_TO_MANIFEST_ALIAS,
+  SEPARATE_WORKFLOW_GATES,
   STACK_MANIFEST,
   appendBodyChecks,
   buildStepResult,
@@ -1111,5 +1112,37 @@ describe("withResolvedDiffBase (slice 31/N — manifest rewrite)", () => {
       countDiffBaseArgs(STACK_MANIFEST, "origin/main") +
       countEnvValues(STACK_MANIFEST, "origin/main");
     expect(total).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe("SEPARATE_WORKFLOW_GATES registration drift-protection", () => {
+  // Slice 32/N: `SEPARATE_WORKFLOW_GATES` is the single discoverable location
+  // for CI gates that live in their own workflow file (not `ci.yml`'s `needs:`
+  // aggregator). The constant was introduced in the `fresh-clone-ci-regression-gate`
+  // task; these tests prevent a future PR from silently emptying or corrupting it.
+  // Same shape as the `CI_ENV_DEPENDENT_JOBS` drift tests (slice 17/N): pin presence,
+  // non-empty descriptions, and physical existence of the workflow files.
+
+  test("fresh-clone-smoke is registered", () => {
+    expect(SEPARATE_WORKFLOW_GATES.has("fresh-clone-smoke")).toBe(true);
+  });
+
+  test("every entry carries a non-empty description (silent additions hide drift)", () => {
+    for (const [name, description] of SEPARATE_WORKFLOW_GATES) {
+      expect(typeof description).toBe("string");
+      expect(description.length, `${name} needs a one-line description`).toBeGreaterThan(0);
+    }
+  });
+
+  test("every entry's workflow file exists on disk (description starts with its path)", () => {
+    // Descriptions have the shape `<path> — <reason>`. Parse the path prefix.
+    for (const [name, description] of SEPARATE_WORKFLOW_GATES) {
+      const path = description.split(" — ")[0]?.trim();
+      expect(path, `${name}: description must start with workflow path`).toBeTruthy();
+      expect(
+        existsSync(resolve(REPO_ROOT, path ?? "")),
+        `${name}: workflow file '${path}' must exist`,
+      ).toBe(true);
+    }
   });
 });

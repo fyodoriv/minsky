@@ -178,10 +178,6 @@ export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
     ["maciek-smoke", "pipx Python install"],
     ["pr-self-grade", "PR body context (`## Hypothesis self-grade`)"],
     ["pr-security-review", "PR body context (`## Security & privacy` or typed opt-out)"],
-    [
-      "fresh-clone-smoke",
-      "destroys `novel/tick-loop/dist/` (simulates stale-build path); runs in `.github/workflows/fresh-clone.yml`, not `ci.yml` — can't replicate locally without wiping the build",
-    ],
   ]),
 );
 
@@ -283,6 +279,23 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
 });
 
 /**
+ * CI gates that live in their own workflow file rather than the
+ * `.github/workflows/ci.yml` `ci:` aggregator. These gates cannot be
+ * replicated locally. Each entry is registered here so every required CI gate
+ * has a single discoverable location in this canonical module (rule #2).
+ *
+ * @type {ReadonlyMap<string, string>}
+ */
+export const SEPARATE_WORKFLOW_GATES = Object.freeze(
+  new Map([
+    [
+      "fresh-clone-smoke",
+      ".github/workflows/fresh-clone.yml — stale-dist simulation (rm -rf dist + pnpm install + minsky doctor); needs GitHub Actions runner",
+    ],
+  ]),
+);
+
+/**
  * The manifest. Order is informational — `runStack` may run steps in parallel
  * up to a small fan-out. New CI jobs that should gate locally get a row here;
  * env-dependent jobs (see `CI_ENV_DEPENDENT_JOBS` above) are intentionally
@@ -328,7 +341,7 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-rule-3-doc-first.mjs"],
-    env: { RULE_3_DIFF_BASE: "origin/main", RULE_3_PR_BODY_PATH: "pr-body.md" },
+    env: { RULE_3_DIFF_BASE: "origin/main" },
   },
   {
     name: "rule-6-let-it-crash",
