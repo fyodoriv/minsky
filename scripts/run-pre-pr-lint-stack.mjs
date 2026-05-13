@@ -341,7 +341,7 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-rule-3-doc-first.mjs"],
-    env: { RULE_3_DIFF_BASE: "origin/main" },
+    env: { RULE_3_DIFF_BASE: "origin/main", RULE_3_PR_BODY_PATH: "pr-body.md" },
   },
   {
     name: "rule-6-let-it-crash",

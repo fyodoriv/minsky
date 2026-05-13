@@ -27,6 +27,10 @@ Per constitutional rule #7 (vision.md § 7).
 | 4 | TRACEPARENT propagation broken across subagent boundary | run a subprocess that doesn't honor `OTEL_PROPAGATORS` (upstream-malformed) | `circuit-break-and-notify` (future) | covered by `novel/adapters/observability/test/traceparent-subagent.test.ts` — asserts trace-id divergence under `OTEL_PROPAGATORS=""` and convergence under the default propagator |
 | 5 | Exporter throws synchronously on a malformed metric value (e.g., `Number.NaN`) | `counter.add(Number.NaN, ...)` (upstream-malformed) | `red` SelfTestResult — caught by the try / catch in `selfTest()` | unit test injects a stub exporter that throws on add |
 
+## Dependency notes
+
+Requires `@opentelemetry/resources` v1.x; uses `new Resource(attrs)` (v1 API). The v2 `resourceFromAttributes` helper does not exist in v1.
+
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: an OTEL-backed `Observability` strategy can emit one trace + one metric + one log under 100 ms p95 with a real exporter on a localhost collector.
