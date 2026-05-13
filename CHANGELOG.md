@@ -67,3 +67,61 @@ The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: th
 ### Day's narrative
 
 The local-LLM 3-worker path went from GPU OOM to deterministic stability via four compounding PRs. #446 drops the Files cell from the slim brief, cutting aider's auto-add explosion from 8–12 paths to the 1–3 files Hypothesis/Details organically mention. #451 hard-wires `--no-auto-lint/test/suggest-shell/detect-urls --edit-format diff`, killing multi-round reflection (which drove round-2 tokens to 46k) and the whole-file thrash loop that exhausted the output budget with no diff. #453 adds the key concurrency gate — an O_EXCL file-lock `SpawnStrategy` decorator capping in-flight local-LLM spawns to 1, matching mlx_lm.server's single-inference limit; post-gate live-fire ran all three workers through to real-diff completion (4.8k + 13k + 19k input tokens, server stable) vs. Metal command-buffer OOM pre-PR. #454 closes the observability gap with a startup invariant that fires when `MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2` but the backend doesn't advertise concurrent-inference capability, catching the silent bypass footgun before it can re-introduce the OOM. #452 ships alongside as independent CLI hardening: `MINSKY_ASSUME_TTY=1` decouples sudo-prompt availability from stdin interactivity, fixing a regression where `MINSKY_NON_INTERACTIVE=1` in a real TTY tripped the non-TTY refuse path.
+
+---
+
+## 2026-05-12
+
+### What shipped
+
+- **#495** — `chore(tasks): clean up shipped task blocks + file 5 P1 observer-filed observation tasks` _(+77/-32)_
+  > Retired completed task blocks; filed 5 new P1 observation tasks surfaced by the observer dogfood run.
+- **#494** — `observer: fix(cross-repo-runner): parseTasksMd accepts nested-bullet metadata format` _(+251/-1)_
+  > Fixes cross-repo task parsing: TASKS.md nested-bullet metadata (the format observer-filed tasks use) was silently dropped. Now parsed and forwarded.
+- **#493** — `feat(observer): observer plugin (skill + commands + PATH shim) for any-folder Minsky runs` _(+1147/-1)_
+  > Standalone observer plugin: skill, CLI commands, and PATH shim that lets any repo directory run against Minsky's tooling without being inside the Minsky repo.
+- **#492** — `feat(cross-repo-runner): autonomous defaults + --hosts-dir multi-host walk` _(+1250/-53)_
+  > Promotes the runner to fleet-scale: --hosts-dir walks all host directories in one pass; autonomous defaults eliminate per-host flag repetition.
+- **#491** — `feat(cross-repo-runner): --cto-audit auto-task-generation for host mode` _(+1064/-3)_
+  > CTO audit output is automatically converted to TASKS.md entries in host context — closes the loop between audit findings and actionable task filings.
+- **#490** — `feat(cross-repo-runner): --loop mode for continuous host iteration` _(+1201/-15)_
+  > Adds --loop flag for continuous iteration across hosts, turning the runner into a persistent fleet-monitoring process.
+- **#489** — `feat(cross-repo-runner): v1 live-spawn via ProcessSpawnStrategy (closes deferred chaos rows 5+7)` _(+1434/-39)_
+  > First live-spawn implementation via ProcessSpawnStrategy — closes chaos rows 5 and 7 that had been deferred; the runner now actually spawns and manages host processes.
+- **#488** — `feat(doctor): 13th substrate row — workers-dir writable (runtime-resilience slice 2 partial)` _(+93/-14)_
+  > Adds workers-dir writability as a startup health check; runtime-resilience slice 2 partial.
+- **#541** — `test(cross-machine-dotfile-checks): add EACCES test + close task` _(+35/-2)_
+  > Adds permission-denied error coverage for the cross-machine dotfile path checks; closes the `minsky-cross-machine-dotfile-checks` P0 task.
+- **#538** — `test(local-llm): chaos-table row 6 — hf-cli missing, model cached` _(+62/-0)_
+  > Tests the case where huggingface-cli was removed post-install but the model cache is intact; asserts the planner returns `[install-huggingface-cli, start-mlx-server]` without re-downloading the 17 GB model.
+- **#531** — `fix(runtime-resilience): close parent log fd after spawn` _(+12/-0)_
+  > Closes the parent's log file descriptor after spawning the daemon child process, preventing fd leak that caused spurious EBADF in long-running supervisor loops.
+- **#525** — `feat(bootstrap): add prepare script to novel/tick-loop/package.json` _(+4/-1)_
+  > Adds `prepare` script so `npm install` / `pnpm install` auto-builds `dist/` — eliminates the "dist missing" class of fresh-clone failures.
+- **#513** — `feat(local-llm): slice 60 — bootstrapFn seam + claude-exhausted smoke test` _(+89/-6)_
+  > Adds `bootstrapFn` DI seam to `maybeBootstrapLocalLlm` and a paired smoke test for the `MINSKY_LLM_PROVIDER=claude-exhausted` early-exit path.
+
+### Metrics
+
+_No metrics recorded for this date._
+
+### Day's narrative
+
+Two independent work-streams landed in parallel on 2026-05-12. The cross-repo-runner crossed from design to operational in four stacked PRs: `ProcessSpawnStrategy` live-spawn (#489) closed the deferred chaos-row 5+7 execution gap; `--loop` mode (#490) added continuous host-iteration; `--cto-audit` (#491) closed the automation loop by generating tasks directly from audit output in host context; and `--hosts-dir` multi-host walk (#492) promoted the runner from single-target to fleet-scale with autonomous defaults. The observer plugin (#493) lands alongside — a PATH shim + skill granting any folder access to Minsky's tooling without being in the Minsky repo. Separately, the local-LLM bootstrap stream advanced: #513 added the `bootstrapFn` DI seam that unlocks deterministic testing of the bootstrap path; #525 auto-builds `dist/` on install to eliminate the fresh-clone footgun; #531 closed an fd-leak; #538 closed the 6th chaos-table row (hf-cli missing with model cached); and #541 closed the cross-machine dotfile checks P0 task.
+
+---
+
+## 2026-05-13
+
+### What shipped
+
+- **(this PR)** — `feat+docs(local-llm): recovery hints + chaos table JSDoc completion (slices 66+68)`
+  > `recoveryHintForBootstrapStep()` added to `local-llm-bootstrap.ts` — returns an actionable one-liner (`brew install pipx`, `pip install huggingface_hub[cli]`, etc.) for each of the 7 install-step types; shown in failure output so the operator knows exactly what to run when a step fails. Chaos table row 6 added to module JSDoc (`huggingfaceCli.present=false, model.present=true` → `[install-huggingface-cli, start-mlx-server]`; model not re-downloaded); row 4 count corrected (5-step → 6-step); `@otel-exempt` JSDoc added to pure formatters. Six-row chaos table is now fully documented and all rows have paired tests.
+
+### Metrics
+
+_No metrics recorded for this date._
+
+### Day's narrative
+
+Local-LLM bootstrap chaos table closes at 6 rows. The completion work (slices 66+68) adds `recoveryHintForBootstrapStep()` — a step-type-indexed map returning a concrete fallback command for each failure mode in the install pipeline — and syncs the source module's JSDoc chaos table to match all 6 test rows. The sixth row (hf-cli removed post-install, model cache intact) is operationally important: the planner skips the 17 GB model re-download and re-installs only the `huggingface_hub[cli]` binary, making recovery from the most common dirty state fast and idempotent.
