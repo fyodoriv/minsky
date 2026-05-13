@@ -7,8 +7,11 @@
  *   1. tick-loop.mjs present → continue (no message)
  *   2. tick-loop.mjs absent  → emit clear error + exit 1
  *   3. existsSync throws     → loud-crash up the stack (Armstrong)
+ *   4. bin/minsky.mjs seam   → bare existsSync(TICK_LOOP_BIN) replaced (rule #8)
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   type TickLoopBinCheckOutcome,
@@ -71,5 +74,19 @@ describe("formatTickLoopBinMissingMessage", () => {
   it("renders as a single line (no embedded newlines)", () => {
     const msg = formatTickLoopBinMissingMessage("/some/long/path/segments/bin/tick-loop.mjs");
     expect(msg.split("\n").length).toBe(1);
+  });
+});
+
+describe("bin/minsky.mjs seam-wiring — checkTickLoopBinExists (rule #8)", () => {
+  // Regression test: bare existsSync(TICK_LOOP_BIN) was replaced by the
+  // injectable seam in PR #558. This test prevents reversion by failing CI
+  // if the direct call reappears (vision.md rule #10 — every recurring review
+  // comment becomes a lint rule or drift test).
+  it("minsky.mjs calls checkTickLoopBinExists, not bare existsSync(TICK_LOOP_BIN)", () => {
+    const binPath = join(import.meta.dirname, "../bin/minsky.mjs");
+    const binSource = readFileSync(binPath, "utf8");
+
+    expect(binSource).not.toContain("existsSync(TICK_LOOP_BIN)");
+    expect(binSource).toContain("checkTickLoopBinExists({");
   });
 });

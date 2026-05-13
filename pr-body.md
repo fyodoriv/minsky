@@ -1,17 +1,44 @@
+# feat(runtime-resilience): wire checkTickLoopBinExists seam in minsky.mjs
+
+Slice 2 of P0 task `minsky-runtime-resilience` — final seam-injection piece.
+
 ## Summary
 
-- Add missing `set + EACCES` test case to `git-config-path-checks.test.ts`, completing the 3 keys × 4 outcomes coverage called out in the Verification criteria (unset / set+exists / set+missing / set+EACCES)
-- Remove completed task `minsky-cross-machine-dotfile-checks` from TASKS.md — implementation shipped in PR #399; task block was not removed at that time
+- Replaces `existsSync(TICK_LOOP_BIN)` with `checkTickLoopBinExists({ tickLoopBinPath, existsSyncFn })` in `bin/minsky.mjs` — 5 lines changed.
+- All three runtime failure modes from the task spec now go through seam-injectable pure helpers.
+- Adds seam-wiring drift test to `tick-loop-bin-existence-check.test.ts` that pins the seam usage in `minsky.mjs` — fails CI if `existsSync(TICK_LOOP_BIN)` reappears (vision.md rule #10).
+
+## What
+
+`novel/tick-loop/src/tick-loop-bin-existence-check.ts` exports `checkTickLoopBinExists`; it was already re-exported from `index.ts` and `formatTickLoopBinMissingMessage` was already imported in `minsky.mjs`. But the existence gate itself still called `existsSync(TICK_LOOP_BIN)` directly — bypassing the injection seam that `ensureWorkersDir` and `pickLogPath` already use.
+
+| Failure mode | Helper | Behaviour |
+|---|---|---|
+| `bin/tick-loop.mjs` missing | `checkTickLoopBinExists` ← **this PR** | exits 1, names path + recovery |
+| `.minsky/workers/` unwritable | `ensureWorkersDir` | exits 1, names errno + recovery hint |
+| worker log unwritable | `pickLogPath` | falls back to `/tmp`, warns, daemon starts |
+
+## Hypothesis
+
+**Predicted**: `grep -c "existsSync(TICK_LOOP_BIN)" novel/tick-loop/bin/minsky.mjs` returns 0 post-fix (was 1). All pre-pr-lint checks remain green.
+
+**Success**: grep count = 0; `pnpm pre-pr-lint` green.
+
+**Pivot**: N/A — wire-in with no behaviour change on happy path; seam-wiring drift test locks the pattern in CI.
+
+**Measurement**: `grep -c "existsSync(TICK_LOOP_BIN)" novel/tick-loop/bin/minsky.mjs`
+
+**Anchor**: operator directive 2026-05-08 — rule #8 (pure-decision-over-injection); Beyer et al. (SRE) Ch. 6.
 
 ## Hypothesis self-grade
 
-- **Predicted**: adding the EACCES test case satisfies the final gap in the Verification criterion "3 keys × 4 outcomes (unset / set+exists / set+missing / set+EACCES)"; existing tests already covered 3 of 4 outcomes
-- **Observed**: test file now has 11 tests for `checkGitConfigPaths` (was 10); new `set + EACCES` describe block explicitly documents that `existsSync` returns `false` on permission-denied paths, making EACCES indistinguishable from "missing" at the helper boundary
+- **Predicted**: `grep -c "existsSync(TICK_LOOP_BIN)" novel/tick-loop/bin/minsky.mjs` returns 0 (was 1)
+- **Observed**: 0 — raw existsSync replaced with `checkTickLoopBinExists` seam
 - **Match**: yes
-- **Lesson**: pure-over-injection helpers make EACCES and "missing" identical at the seam; the test value is documentation, not coverage novelty — pin the behavior explicitly so a future reader doesn't need to check Node.js docs
+- **Lesson**: all three runtime failure modes now follow the pure-helper-over-injection pattern; seam-wiring drift test locks it in CI so no reversion can go undetected
 
-## Optimization
+## Security & privacy
 
-optimization: none-this-iteration: the new test adds 12 lines; the TASKS.md removal saves ~540 bytes — no 10-byte-minimum measurable saving in the daemon-loop sense
+<!-- security: not-applicable — internal CLI wiring of an existing existence check; no auth, secrets, network, or PII surface; § 13 reviewed -->
 
-<!-- security: not-applicable — test-only addition + TASKS.md task removal; no new runtime surface, no secrets, no auth, no PII -->
+optimization: none-this-iteration: skip-earlier-gate (readLivePid before pre-flights) is covered by the concurrently-open PR #549; this PR completes the seam injection pattern only.
