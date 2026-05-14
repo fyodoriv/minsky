@@ -82,6 +82,23 @@ describe("formatDistMissingMessage", () => {
   });
 });
 
+describe("tick-loop package.json drift — no package-level prepare", () => {
+  // Adding `prepare: pnpm build` to this package.json breaks `pnpm install`
+  // on a true fresh clone. pnpm runs each workspace package's `prepare` hook
+  // BEFORE the root package's `prepare: tsc -b --force` runs. When ALL dists
+  // are absent, tick-loop's `pnpm build` can't resolve @minsky/budget-guard
+  // or @minsky/token-monitor because their dist/ hasn't been generated yet.
+  // Lesson: root `tsc -b --force` handles dep-order correctly; package-level
+  // prepare is redundant here and actively harmful. (PR #525 tried + reverted.)
+  it("does NOT have a prepare script (would break fresh-clone-smoke)", () => {
+    const pkgPath = join(import.meta.dirname, "../package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.scripts?.["prepare"]).toBeUndefined();
+  });
+});
+
 describe("bin/minsky.mjs drift — dist-missing message", () => {
   // bin/minsky.mjs intentionally inlines the dist-missing error rather than
   // importing formatDistMissingMessage — the whole point is that dist/ may be
