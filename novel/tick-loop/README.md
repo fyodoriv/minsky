@@ -6,6 +6,17 @@ Deterministic mock-tick daemon for the in-process 10-min smoke. Sub-task 2/3 of 
 
 Loops `claim → mock-anthropic-call → complete` on a configurable cadence; the test fake `TestFakeMockAnthropic` simulates 3+ chaos modes (5xx, network-timeout, malformed-output) for the supervisor-respawn boundary; OTEL spans flow through `@minsky/observability`'s sink shape (in v0 captured by `SpanRecorder` for in-process assertion).
 
+## Quick start
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git
+cd minsky
+pnpm install   # the root `prepare` hook runs `tsc -b` which builds @minsky/tick-loop's dist
+pnpm minsky doctor   # verify health
+```
+
+No separate `pnpm build` step needed. The `prepare` hook (both the root's `tsc -b` and this package's own `"prepare": "pnpm build"` for standalone consumers) runs automatically after `pnpm install`.
+
 ## Pattern conformance
 
 Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conformance-index):
@@ -47,15 +58,6 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **Pivot threshold**: if the 4-task budget can't fit in 10 min CI, drop to single-task smoke + multi-task on self-hosted (sub-task 3).
 - **Measurement**: `pnpm vitest run novel/tick-loop --reporter=json | jq -e '.numPassedTests >= 4 and .numFailedTests == 0'` exits 0.
 - **Literature anchor**: Liu & Layland, *JACM* 1973 (periodic-task scheduling); Armstrong, *Programming Erlang*, 2007 (let-it-crash supervision).
-
-## Quick start
-
-```bash
-git clone https://github.com/fyodoriv/minsky.git
-cd minsky
-pnpm install   # prepare hook builds dist; no manual build step needed
-pnpm minsky doctor
-```
 
 ## Usage
 
