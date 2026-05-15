@@ -637,6 +637,69 @@ describe("detectLocalLlmStack — chaos-table row 1: probe seam throws", () => {
   });
 });
 
+describe("planLocalLlmBootstrap — modelId option (slice 46 planner wire-up)", () => {
+  // Slice 46 added MINSKY_LOCAL_LLM_MODEL_ID / MINSKY_LOCAL_MODEL_PATH env
+  // vars; `bin/minsky.mjs` sets `planOpts.modelId` from them.  Before this
+  // fix the planner never consumed that field — both `download-model` and
+  // `start-mlx-server` silently fell back to DEFAULT_LOCAL_LLM_MODEL even
+  // when a custom model was requested.
+
+  it("download-model step uses modelId when supplied", () => {
+    const plan = planLocalLlmBootstrap(modelMissing, {
+      modelId: "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    });
+    const downloadStep = plan.steps.find((s) => s.type === "download-model");
+    expect(downloadStep?.command).toEqual([
+      "hf",
+      "download",
+      "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    ]);
+  });
+
+  it("start-mlx-server --model arg uses modelId when supplied", () => {
+    const plan = planLocalLlmBootstrap(serverStopped, {
+      modelId: "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    });
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(startStep?.command[2]).toBe("mlx-community/Qwen2.5-Coder-14B-Instruct-4bit");
+  });
+
+  it("start-mlx-server accepts a local path (MINSKY_LOCAL_MODEL_PATH)", () => {
+    // When the model is already on disk at a non-standard path, minsky.mjs
+    // marks state.model.present=true (via applyModelPathOverride) and sets
+    // planOpts.modelId to the path so the server can find it.
+    const plan = planLocalLlmBootstrap(serverStopped, {
+      modelId: "/Users/operator/models/Qwen3-30B",
+    });
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(startStep?.command).toEqual([
+      "mlx_lm.server",
+      "--model",
+      "/Users/operator/models/Qwen3-30B",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "8080",
+    ]);
+  });
+
+  it("falls back to DEFAULT_LOCAL_LLM_MODEL when modelId is undefined", () => {
+    const plan = planLocalLlmBootstrap(serverStopped);
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    expect(startStep?.command[2]).toBe(DEFAULT_LOCAL_LLM_MODEL);
+  });
+
+  it("both download and start steps use the same modelId", () => {
+    const customId = "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit";
+    const plan = planLocalLlmBootstrap(modelMissing, { modelId: customId });
+    const downloadStep = plan.steps.find((s) => s.type === "download-model");
+    const startStep = plan.steps.find((s) => s.type === "start-mlx-server");
+    // download target and server --model must be consistent
+    expect(downloadStep?.command[2]).toBe(customId);
+    expect(startStep?.command[2]).toBe(customId);
+  });
+});
+
 // ---- summarisePlan --------------------------------------------------------
 
 describe("summarisePlan", () => {

@@ -225,6 +225,22 @@ export interface BootstrapPlanOptions {
    * compat by construction.
    */
   readonly archState?: import("./arch-probe.js").ArchState;
+
+  /**
+   * Model identifier to download and serve. Used by the `download-model`
+   * and `start-mlx-server` steps. When undefined, both steps default to
+   * {@link DEFAULT_LOCAL_LLM_MODEL}.
+   *
+   * Production wiring (`bin/minsky.mjs`) sets this from:
+   *   - `MINSKY_LOCAL_MODEL_PATH` (a local filesystem path — skips download)
+   *   - `MINSKY_LOCAL_LLM_MODEL_ID` (a HuggingFace org/name slug)
+   *
+   * Accepting the override here ensures `mlx_lm.server --model <id>`
+   * uses the same identifier that was downloaded — without this field
+   * the server start command silently falls back to DEFAULT_LOCAL_LLM_MODEL
+   * even when a custom model was specified.
+   */
+  readonly modelId?: string;
 }
 
 // ---- Constants ------------------------------------------------------------
@@ -398,7 +414,7 @@ function buildModelDownloadStep(modelId: string): InstallStep {
   };
 }
 
-function buildStartServerStep(): InstallStep {
+function buildStartServerStep(modelId: string = DEFAULT_LOCAL_LLM_MODEL): InstallStep {
   return {
     type: "start-mlx-server",
     description: "Start mlx_lm.server in the background (writes PID to .minsky/local-llm.pid)",
@@ -411,7 +427,7 @@ function buildStartServerStep(): InstallStep {
     command: [
       "mlx_lm.server",
       "--model",
-      DEFAULT_LOCAL_LLM_MODEL,
+      modelId,
       "--host",
       "127.0.0.1",
       "--port",
@@ -484,6 +500,7 @@ function buildInstallSteps(
   options: BootstrapPlanOptions,
 ): InstallStep[] {
   const { brewPath, pipxPath, pythonPath } = resolvePaths(options);
+  const modelId = options.modelId ?? DEFAULT_LOCAL_LLM_MODEL;
   const steps: InstallStep[] = [];
   if (options.archState !== undefined && needsArmHomebrewInstall(options.archState)) {
     steps.push(buildInstallArmHomebrewStep());
@@ -492,8 +509,8 @@ function buildInstallSteps(
   if (!state.mlxLm.present) steps.push(buildMlxLmStep(pipxPath));
   if (!state.aider.present) steps.push(buildAiderStep(pythonPath, pipxPath));
   if (!state.huggingfaceCli.present) steps.push(buildHuggingfaceCliStep(pipxPath));
-  if (!state.model.present) steps.push(buildModelDownloadStep(DEFAULT_LOCAL_LLM_MODEL));
-  if (!state.server.reachable) steps.push(buildStartServerStep());
+  if (!state.model.present) steps.push(buildModelDownloadStep(modelId));
+  if (!state.server.reachable) steps.push(buildStartServerStep(modelId));
   return steps;
 }
 
