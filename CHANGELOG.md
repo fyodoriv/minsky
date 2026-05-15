@@ -99,3 +99,20 @@ _No PRs merged on this date._
 ### Day's narrative
 
 No code merged today; queue grew 19 → 21 as two slices were filed — #561 (local-LLM persisted-Claude-healthy skip-earlier gate, slice 69) and #562 (auto-bootstrap prepare-script seam, detail c) — staging the next merge window. At depth 21 the queue remains well below the pre-sweep baseline of 54 and inside Reinertsen's cycle-time headroom (Managing the Design Factory, 1997).
+
+---
+
+## 2026-05-15
+
+### What shipped
+
+_No PRs merged on this date._
+
+### Metrics
+
+- **open_prs**: 21 → 25 _(Δ +4, **regressed**)_
+- **open_issues**: 0 → 0 _(Δ 0, **unchanged**)_
+
+### Day's narrative
+
+No code merged today; open PRs grew 21 → 25 (Δ +4, regressed) as four more slices were filed, extending the three-day accumulation run (19 → 21 → 25) since the 2026-05-13 sweep low. Queue depth remains well below the pre-sweep baseline of 54, but the sustained filing-without-merging trend puts the loop inside Reinertsen's rising-WIP zone (Managing the Design Factory, 1997) — the next merge window needs to open before cycle time begins to degrade.
