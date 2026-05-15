@@ -1,17 +1,22 @@
 ## Summary
 
-- Add missing `set + EACCES` test case to `git-config-path-checks.test.ts`, completing the 3 keys × 4 outcomes coverage called out in the Verification criteria (unset / set+exists / set+missing / set+EACCES)
-- Remove completed task `minsky-cross-machine-dotfile-checks` from TASKS.md — implementation shipped in PR #399; task block was not removed at that time
+- Add drift-guard test to `dist-existence-check.test.ts` that asserts `novel/tick-loop/package.json` has **no** `prepare` script.
+
+**Why this test matters:** Daemon iterations have twice attempted to add `prepare: pnpm build` to `novel/tick-loop/package.json` (PR #525, then again PR #562's revert). The failure mode is subtle — pnpm runs each workspace package's `prepare` hook **before** the root `prepare: tsc -b --force` runs. On a true fresh clone where all `dist/` directories are absent, tick-loop's build fails because `@minsky/budget-guard` and `@minsky/token-monitor` haven't been compiled yet. The root `tsc -b --force` already handles build-order correctly via TypeScript project references. Without a CI-enforced guard, the same regression will recur.
+
+## Hypothesis
+
+- **Predicted**: a single test that reads `novel/tick-loop/package.json` and asserts `scripts.prepare === undefined` will catch any future daemon iteration that re-adds the breaking script before it reaches CI
+- **Observed**: test passes on current main state; drift-guard is now a hard CI gate
+- **Measurement**: `pnpm vitest run novel/tick-loop/src/dist-existence-check.test.ts` — 9/9 pass including the new guard
 
 ## Hypothesis self-grade
 
-- **Predicted**: adding the EACCES test case satisfies the final gap in the Verification criterion "3 keys × 4 outcomes (unset / set+exists / set+missing / set+EACCES)"; existing tests already covered 3 of 4 outcomes
-- **Observed**: test file now has 11 tests for `checkGitConfigPaths` (was 10); new `set + EACCES` describe block explicitly documents that `existsSync` returns `false` on permission-denied paths, making EACCES indistinguishable from "missing" at the helper boundary
+- **Predicted**: drift-guard test pins `novel/tick-loop/package.json` to having no `prepare` script, preventing recurrence of the fresh-clone-smoke breakage
+- **Observed**: 9/9 `dist-existence-check` tests pass; `pnpm pre-pr-lint` exits 0
 - **Match**: yes
-- **Lesson**: pure-over-injection helpers make EACCES and "missing" identical at the seam; the test value is documentation, not coverage novelty — pin the behavior explicitly so a future reader doesn't need to check Node.js docs
+- **Lesson**: encode every recurring review comment as a test/lint rule (vision.md feedback-loop guardrail); instructions that don't compile don't stick
 
-## Optimization
+optimization: none-this-iteration: single test addition; no token, cached-prompt, or round-trip surface to shrink
 
-optimization: none-this-iteration: the new test adds 12 lines; the TASKS.md removal saves ~540 bytes — no 10-byte-minimum measurable saving in the daemon-loop sense
-
-<!-- security: not-applicable — test-only addition + TASKS.md task removal; no new runtime surface, no secrets, no auth, no PII -->
+<!-- security: not-applicable — test file only; reads package.json at test-time; no auth/secrets/sandbox/PII/supply-chain surface; § 13 reviewed -->
