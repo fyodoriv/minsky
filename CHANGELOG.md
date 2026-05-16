@@ -83,3 +83,19 @@ _No PRs merged on this date._
 ### Day's narrative
 
 No code merged today; the queue reading tells the story. Open PRs contracted to 19 (Δ -35 from yesterday's 54) — the lowest queue depth since tracking began, and the compounded residual of 2026-05-12's ~50-PR sweep: 30 merges spanning cross-repo runner, observer plugin, runtime-resilience slices, and auto-bootstrap continuations, plus ~20 superseded drafts closed. At sub-20 WIP, the loop is operating inside Reinertsen's cycle-time inflection (Managing the Design Factory, 1997).
+
+---
+
+## 2026-05-14
+
+### What shipped
+
+_No PRs merged on this date._
+
+### Metrics
+
+- **open_prs**: 19 → 21 _(Δ +2, **regressed**)_
+
+### Day's narrative
+
+No code merged today; queue grew 19 → 21 as two slices were filed — #561 (local-LLM persisted-Claude-healthy skip-earlier gate, slice 69) and #562 (auto-bootstrap prepare-script seam, detail c) — staging the next merge window. At depth 21 the queue remains well below the pre-sweep baseline of 54 and inside Reinertsen's cycle-time headroom (Managing the Design Factory, 1997).
