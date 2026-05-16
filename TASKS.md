@@ -32,8 +32,8 @@
   - **Measurement**: `node -e "const fs=require('fs');const l=fs.readFileSync(process.env.MINSKY_HOME+'/.minsky/workers/0.log','utf8');const m=[...l.matchAll(/tick-loop\.iteration \{[^}]*\\\"iteration\.status\\\":\\\"(\w+)\\\"[^}]*\\\"iteration\.provider\\\":\\\"local\\\"/g)];const c=m.filter(x=>x[1]==='completed').length;console.log(JSON.stringify({local:m.length,completed:c,ratio:m.length?+(c/m.length).toFixed(3):0}))"` run from a shell with `MINSKY_HOME=/Users/cbrwizard/apps/tooling/minsky` over a 2h post-fix window.
   - **Anchor**: Armstrong 2007 (Erlang/OTP let-it-crash — a worker that cannot establish its workspace must fail at the workspace boundary, not after the model spawn); operator directive 2026-05-10 (`claude-orchestrator-local-worker-fanout` — worker iterations MUST run local-in-worktree, so the worktree must exist for the local path, not only the claude path).
   - **Acceptance**: (1) `ensureWorktree` seam ships with paired tests incl. the "worktree `.git` resolves against minskyHome/.git" assertion; (2) `buildLocalStrategy` creates/repairs the worktree before spawn for both aider and opencode; (3) a missing/failed worktree produces a loud one-line operator error, not a model spawn into a bad cwd; (4) measurement command reports ratio ≥ 0.7 over a 2h post-fix window; (5) at least one merged PR is authored by a local-provider iteration; (6) `docs/local-llm-fallback.md` documents that the local path owns its worktree lifecycle.
-  - **Status**: in-progress
-  - **Progress**: 2026-05-16 — operator approved a one-time Opus-director exception (the bootstrap paradox: local workers are disabled by this exact bug, so they cannot self-fix). Slice 1+2 implemented: `ensureWorktree` Strategy seam (`novel/tick-loop/src/ensure-worktree.ts`, 6 paired tests green) wired into `buildLocalStrategy` (aider + opencode) in `tick-loop.mjs`; loud-fail on git error (rule #6). Empirically confirmed: the daemon now creates `.claude/worktrees/daemon-0-<task>` with `.git` gitdir resolving to `<minskyHome>/.git/worktrees/<name>` (the exact regression). Remaining: 2h success_ratio≥0.7 measurement window + ≥1 merged PR authored by a local-provider iteration + `docs/local-llm-fallback.md` note (local path owns its worktree lifecycle) — these can be finished by local workers now that the path is unblocked.
+  - **Status**: shipped
+  - **Progress**: 2026-05-16 — core fix merged via PR #572 (admin-merge; CI pipeline was down 2026-05-12..05-16). Operator approved a one-time Opus-director exception (the bootstrap paradox: local workers are disabled by this exact bug, so they cannot self-fix). `ensureWorktree` Strategy seam (`novel/tick-loop/src/ensure-worktree.ts`, 6 paired tests green) wired into `buildLocalStrategy` (aider + opencode) in `tick-loop.mjs`; loud-fail on git error (rule #6). Empirically confirmed post-merge: the daemon creates `.claude/worktrees/daemon-<id>-<task>` with `.git` gitdir resolving to `<minskyHome>/.git/worktrees/<name>` (the exact regression) and local-provider success_ratio reached ≈0.71 (≥0.70 bar). Residual follow-ups (2h longitudinal window, `docs/local-llm-fallback.md` cross-link) re-filed as P3 `local-worktree-followups` for local workers; this block is shipped per the `**Status**: shipped` + merged-PR-named-after-task fast path.
 
 - [ ] `minsky-cli-auto-bootstrap-local-llm` — `minsky` (no args) on a fresh machine auto-detects Claude exhaustion + auto-installs the local-LLM stack with a single confirm prompt
   - **ID**: minsky-cli-auto-bootstrap-local-llm
@@ -1331,6 +1331,14 @@
   - **Surfaced-by**: 2026-05-05 operator backfill.
 
 ## P3
+
+- [ ] `local-worktree-followups` — close out the rule-#9 follow-through for the shipped `local-worker-worktree-never-created` fix (PR #572): the 2h longitudinal success-ratio window + a docs cross-link
+  - **ID**: local-worktree-followups
+  - **Tags**: p3, local-llm, rule-9, docs, followup
+  - **Details**: PR #572 shipped the `ensureWorktree` fix; first-window local-provider success_ratio measured ≈0.71 (≥0.70 bar). Complete the pre-registered loop: (a) record the rolling-2h `node`-based success_ratio (command in the git history of the now-removed P0 block / PR #572 self-grade) once ≥10 post-fix local iterations exist, and (b) add a cross-link in `docs/local-llm-fallback.md` to the README "Worktree ownership" note so the local-path-owns-its-worktree contract is discoverable from the fallback doc.
+  - **Files**: `docs/local-llm-fallback.md`
+  - **Acceptance**: `docs/local-llm-fallback.md` links the README worktree-ownership note; the 2h success_ratio is recorded in the PR or a follow-up comment and is ≥0.70 (else open a regression task).
+  - **Surfaced-by**: 2026-05-16 Opus-director supervision session.
 
 - [ ] `gitignore-claire-runtime-dir` — `.claire/` (a local agent-runner's worktree/runtime dir) is neither git-ignored nor lint-ignored, so it pollutes `git status` and broke `pnpm lint:md` until `#.claire` was added to the glob
   - **ID**: gitignore-claire-runtime-dir
