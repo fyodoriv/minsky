@@ -162,6 +162,17 @@ function prepareScratchClone(scratch, pr) {
   // Share the live node_modules (gitignored; pnpm-resolved) so the gate
   // doesn't pay a full install per PR.
   symlinkSync(join(REPO, "node_modules"), join(scratch, "node_modules"));
+  // The --shared clone's `origin` is the local filesystem path, which has
+  // no `pull/*/head` refs. Repoint `origin` at the live repo's real
+  // (GitHub) remote so we can fetch the PR head + authoritative main;
+  // --shared alternates still reuse local objects so only the PR delta
+  // is fetched over the network.
+  const ghRemote = execFileSync("git", ["-C", REPO, "remote", "get-url", "origin"], {
+    encoding: "utf8",
+  }).trim();
+  execFileSync("git", ["-C", scratch, "remote", "set-url", "origin", ghRemote], {
+    encoding: "utf8",
+  });
   execFileSync("git", ["-C", scratch, "fetch", "--quiet", "origin", "main"], { encoding: "utf8" });
   execFileSync("git", ["-C", scratch, "checkout", "--quiet", "-B", "gate", "origin/main"], {
     encoding: "utf8",
