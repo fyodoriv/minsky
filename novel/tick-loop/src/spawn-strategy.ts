@@ -247,7 +247,17 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
 
   constructor(opts: ProcessSpawnStrategyOptions = {}) {
     this.command = opts.command ?? "claude";
-    this.args = opts.args ?? ["--print"];
+    // Default args: `--print` (non-interactive) + `--setting-sources project,local`.
+    // The `--setting-sources project,local` clause skips loading user-level
+    // CLAUDE.md (e.g. ~/.claude/CLAUDE.md) which on many operators' machines
+    // has grown past the model context window — claude returns
+    // "Prompt is too long" before the brief is even submitted, the spawn
+    // exits non-zero, and the daemon-loop's audit silently no-ops. Project
+    // + local sources still load so the host repo's own AGENTS.md/CLAUDE.md
+    // remain available; OAuth/keychain auth stays intact (which `--bare`
+    // would have broken). Callers needing the legacy behavior pass
+    // `args: ["--print"]` explicitly.
+    this.args = opts.args ?? ["--print", "--setting-sources", "project,local"];
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
     this.timeoutMs = opts.timeoutMs;
     this.invocation = opts.invocation;
