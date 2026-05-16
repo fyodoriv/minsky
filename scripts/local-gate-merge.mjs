@@ -154,6 +154,34 @@ export function decideMerge(input) {
 
 // ---- I/O seam (production defaults; tests inject fakes) -------------------
 
+/**
+ * `gh pr list` reports `mergeable` lazily — almost always `UNKNOWN` — so the
+ * `pickGateCandidates` CONFLICTING filter was a no-op in practice and
+ * textually-conflicted PRs slipped through to the 25-min scratch vet, each
+ * burning a whole bounded sweep slot on `merge-onto-main-conflict`. With
+ * `limit=2` the conductor then perpetually re-vetted the same 1-2 conflicted
+ * PRs and never reached a mergeable one (the candidate-starvation that kept
+ * the merge-rate at 0). `gh pr view` on a single PR forces GitHub to COMPUTE
+ * real mergeability — one cheap (~0.5s) call vs a wasted 25-min vet.
+ * Fail-open: a `gh` hiccup leaves the listed value so the deterministic vet
+ * stays the authority (never over-skip on infra noise — rule #6).
+ * @param {number} prNumber
+ * @param {string} listed  the (usually UNKNOWN) value from `gh pr list`
+ * @returns {string} MERGEABLE | CONFLICTING | UNKNOWN
+ */
+function resolveMergeable(prNumber, listed) {
+  try {
+    const out = execFileSync("gh", ["pr", "view", String(prNumber), "--json", "mergeable"], {
+      cwd: REPO,
+      encoding: "utf8",
+    });
+    return JSON.parse(out).mergeable ?? listed;
+    // rule-6: handled-locally — a `gh pr view` failure (rate-limit/transient 5xx) keeps the listed value; the full vet stays the authority, we never over-skip on infra noise.
+  } catch {
+    return listed;
+  }
+}
+
 /** @returns {PrSnapshot[]} */
 function defaultSnapshot() {
   const out = execFileSync(
@@ -170,7 +198,17 @@ function defaultSnapshot() {
     ],
     { cwd: REPO, encoding: "utf8" },
   );
-  return JSON.parse(out);
+  /** @type {PrSnapshot[]} */
+  const prs = JSON.parse(out);
+  // Resolve TRUE mergeability so `pickGateCandidates` can actually drop
+  // conflicts before they starve the bounded sweep. Only probe non-draft
+  // main-targeted PRs (the only ones pickGateCandidates would keep anyway)
+  // to bound the extra `gh` calls.
+  return prs.map((pr) =>
+    pr.isDraft || pr.baseRefName !== "main"
+      ? pr
+      : { ...pr, mergeable: resolveMergeable(pr.number, pr.mergeable) },
+  );
 }
 
 /**
