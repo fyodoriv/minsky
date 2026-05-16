@@ -88,9 +88,12 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
   // `tick-loop-spawn-args-fresh-session` integration test: gated on the
   // real `claude` binary being on PATH (skipped in CI hosts without it,
   // mirroring the gate convention introduced for the daemon-side test
-  // in `daemon.test.ts`). Asserts the *new* default args (`["--print"]`)
-  // produce a fresh-session response — NOT a "Select a session to resume"
-  // interactive picker prompt that the old `["--resume"]` default emitted.
+  // in `daemon.test.ts`). Asserts the *new* default args
+  // (`["--print","--setting-sources","project,local"]`) produce a
+  // fresh-session response — NOT a "Select a session to resume"
+  // interactive picker prompt that the legacy `["--resume"]` default
+  // emitted. The `--setting-sources project,local` clause skips user-
+  // level CLAUDE.md so the prompt fits within the model context.
   const hasClaude = (() => {
     try {
       execSync("which claude", { stdio: "ignore" });
@@ -102,7 +105,8 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
   it.skipIf(!hasClaude)(
     "default args spawn a fresh non-interactive Claude session that consumes stdin",
     async () => {
-      // Default args (no `args` override) → `["--print"]` per the fix.
+      // Default args (no `args` override) →
+      // `["--print","--setting-sources","project,local"]` per the fix.
       const strat = new ProcessSpawnStrategy({ command: "claude" });
       const result = await strat.spawn(
         emptyInput({
