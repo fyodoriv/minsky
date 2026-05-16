@@ -16,9 +16,27 @@ import {
   createBodyAwarePrePrLintRun,
   createPnpmPrePrLintRun,
   parseStackNdjson,
+  resolvePrePrStage,
   runPrePrLintGate,
   shouldRunPrePrLintGate,
 } from "./pre-pr-lint-gate.js";
+
+describe("resolvePrePrStage (env-gated worker pre-PR stage)", () => {
+  it('"full" ⇒ full (matches the autonomous merge authority)', () => {
+    expect(resolvePrePrStage("full")).toBe("full");
+  });
+  it("undefined ⇒ fast (back-compat default)", () => {
+    expect(resolvePrePrStage(undefined)).toBe("fast");
+  });
+  it('"fast" ⇒ fast', () => {
+    expect(resolvePrePrStage("fast")).toBe("fast");
+  });
+  it("any other value ⇒ fast (fail-safe, deterministic)", () => {
+    expect(resolvePrePrStage("FULL")).toBe("fast");
+    expect(resolvePrePrStage("")).toBe("fast");
+    expect(resolvePrePrStage("1")).toBe("fast");
+  });
+});
 
 describe("parseStackNdjson", () => {
   it("parses the canonical NDJSON output (per-step rows + trailing summary)", () => {

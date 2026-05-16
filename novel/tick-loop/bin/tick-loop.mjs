@@ -105,6 +105,7 @@ import {
   parseWorkerArgs,
   pickStrategicModel,
   predictExhaustionMs,
+  resolvePrePrStage,
   runDaemon,
   runParallelSweeper,
   sandboxModeStartupHint,
@@ -1029,9 +1030,15 @@ if (metricsRenderSeam !== undefined) {
 // `pr-security-review`) ride the same retry budget as the branch-code
 // lints — closing the loop the brief already documents (inner Claude
 // writes the file, outer gate validates it).
-const preLintRun = createBodyAwarePrePrLintRun({ cwd: minskyHome });
+// Stage is env-gated (MINSKY_PRE_PR_STAGE). Default "fast" (back-compat /
+// local-sprint budget); set "full" so the worker gate matches the
+// autonomous merge authority's --stage=full — required for Sonnet workers
+// so they only open PRs that will actually pass the merge-gate and land
+// (a fast-gated PR that fails the full merge-gate wastes the iteration).
+const prePrStage = resolvePrePrStage(process.env["MINSKY_PRE_PR_STAGE"]);
+const preLintRun = createBodyAwarePrePrLintRun({ cwd: minskyHome, stage: prePrStage });
 process.stdout.write(
-  "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n",
+  `[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=${prePrStage} — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n`,
 );
 
 // Slice 4 of `daemon-parallel-worktree-launch`: file-collision pre-spawn
