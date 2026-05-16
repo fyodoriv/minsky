@@ -47,6 +47,12 @@ import { join } from "node:path";
 
 const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
 const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
+// Per-vet hard timeout — a cold `--stage=full` (tsc -b --force across all
+// workspace projects + full vitest) is ~20 min; this bounds a hung/
+// pathological vet so one PR can never wedge the autonomous conductor
+// (the keystone "run reliably for 10h" guarantee). Generous default
+// (25 min) tolerates a slow-but-finishing vet; env-tunable.
+const VET_TIMEOUT_MS = Number(process.env["MINSKY_GATE_VET_TIMEOUT_MS"] ?? 1500000);
 
 /**
  * @typedef {object} PrSnapshot
@@ -217,7 +223,19 @@ function prepareScratchClone(scratch, pr) {
  * @returns {{stdout: string} | {vetError: string}}
  */
 function vetErrorToResult(err) {
-  const captured = /** @type {{stdout?: Buffer | string}} */ (err)?.stdout;
+  const e =
+    /** @type {{killed?: boolean, signal?: string, code?: string, stdout?: Buffer | string}} */ (
+      err
+    );
+  // Timed-out / killed vet: do NOT parse its partial stdout as a verdict —
+  // a half-finished gate has no summary anyway, but be explicit so the
+  // ledger shows the bound fired (the keystone 10h-reliability guarantee).
+  if (e?.killed === true || e?.signal === "SIGKILL" || e?.code === "ETIMEDOUT") {
+    return {
+      vetError: `vet-timeout (>${VET_TIMEOUT_MS}ms — bounded so it can't wedge the conductor)`,
+    };
+  }
+  const captured = e?.stdout;
   if (captured) return { stdout: captured.toString() };
   const msg = err instanceof Error ? err.message : String(err);
   return { vetError: msg.slice(0, 200) };
@@ -238,7 +256,13 @@ function defaultVet(pr) {
     const stdout = execFileSync(
       "node",
       ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"],
-      { cwd: scratch, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+      {
+        cwd: scratch,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: VET_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+      },
     );
     return { stdout };
   } catch (err) {

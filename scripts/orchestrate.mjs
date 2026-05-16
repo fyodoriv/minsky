@@ -30,6 +30,10 @@ import { runGateSweep } from "./local-gate-merge.mjs";
 
 const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
 const LEDGER = join(REPO, ".minsky", "orchestrate.jsonl");
+// PRs vetted per tick. Bounded (default 2) so a tick is at most
+// LIMIT × per-vet-timeout — the conductor cannot back up behind a long
+// sweep (keystone "run reliably for 10h"). Env-tunable.
+const SWEEP_LIMIT = Number(process.env["MINSKY_ORCH_LIMIT"] ?? 2);
 const WORKER_LABEL = "com.minsky.opus-sonnet-run";
 
 /**
@@ -85,7 +89,7 @@ export function tick(log) {
   let res = { merged: [], skipped: [] };
   let sweepError = "";
   try {
-    res = runGateSweep({ limit: 5, log });
+    res = runGateSweep({ limit: SWEEP_LIMIT, log });
   } catch (err) {
     sweepError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
     log(`orchestrate: sweep error (continuing): ${sweepError}\n`);
