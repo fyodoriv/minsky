@@ -1,5 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
+
+// `maybeBootstrapLocalLlm` early-returns on ambient MINSKY_* env
+// (minsky.mjs: `MINSKY_NO_AUTO_BOOTSTRAP`, `MINSKY_LOCAL_LLM`,
+// `MINSKY_LLM_PROVIDER`) BEFORE the DI seam is consulted. The daemon
+// spawns its workers with `MINSKY_LLM_PROVIDER=local-preferred
+// MINSKY_LOCAL_LLM=1` — the exact env P0 `local-worker-worktree-never-
+// created` targets — so without sandboxing these keys the DI-seam
+// assertions below return `{}` from the env short-circuit and fail in
+// any local-preferred shell (incl. the pre-push full-stage vitest).
+// Snapshot + clear the gating keys so the seam is exercised hermetically.
+const GATING_ENV_KEYS = ["MINSKY_NO_AUTO_BOOTSTRAP", "MINSKY_LOCAL_LLM", "MINSKY_LLM_PROVIDER"];
+let savedEnv: Record<string, string | undefined> = {};
+beforeEach(() => {
+  savedEnv = {};
+  for (const key of GATING_ENV_KEYS) {
+    savedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+afterEach(() => {
+  for (const key of GATING_ENV_KEYS) {
+    const prev = savedEnv[key];
+    if (prev === undefined) delete process.env[key];
+    else process.env[key] = prev;
+  }
+});
+
 describe("maybeBootstrapLocalLlm — DI seam", () => {
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {

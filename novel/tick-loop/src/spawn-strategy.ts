@@ -31,6 +31,7 @@
  */
 
 import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
 
 import type { LlmInvocation } from "./llm-invocation.js";
 
@@ -181,6 +182,20 @@ export interface ProcessSpawnStrategyOptions {
    */
   readonly spawnFn?: typeof nodeSpawn;
   /**
+   * Optional path-existence override — a seam tests can use to assert the
+   * cwd-missing guard without touching the OS. Production defaults to
+   * `node:fs.existsSync`.
+   *
+   * Why the guard exists: the local (aider / opencode) spawn path sets
+   * `cwd` to a per-worker git worktree (P0 `local-worker-worktree-never-created`).
+   * If that worktree was never created, Node's `child_process.spawn`
+   * emits a cryptic `spawn <cmd> ENOENT` that names the *command*, not the
+   * missing cwd — un-actionable for the operator. This guard fails loud
+   * AT the workspace boundary (rule #6 / Armstrong 2007) with a one-line
+   * message that names the missing directory, BEFORE the model is spawned.
+   */
+  readonly existsFn?: (path: string) => boolean;
+  /**
    * Per-iteration timeout in milliseconds. When set, the strategy SIGKILLs
    * any child still running after `timeoutMs` and resolves with
    * `exitCode: -1`, `stderrTail: '<timed out after Nms>'`, and
@@ -242,6 +257,7 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
   private readonly command: string;
   private readonly args: readonly string[];
   private readonly spawnFn: typeof nodeSpawn;
+  private readonly existsFn: (path: string) => boolean;
   private readonly timeoutMs: number | undefined;
   private readonly invocation: ((input: SpawnInput) => LlmInvocation) | undefined;
 
@@ -259,6 +275,7 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
     // `args: ["--print"]` explicitly.
     this.args = opts.args ?? ["--print", "--setting-sources", "project,local"];
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
+    this.existsFn = opts.existsFn ?? existsSync;
     this.timeoutMs = opts.timeoutMs;
     this.invocation = opts.invocation;
   }
@@ -282,6 +299,21 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
     const resolved = this.resolveInvocation(input);
     const timeoutMs = this.timeoutMs;
     return new Promise<SpawnResult>((resolve, reject) => {
+      // Workspace-boundary guard (rule #6 / Armstrong 2007): the local
+      // (aider / opencode) path cd's into a per-worker git worktree
+      // (P0 `local-worker-worktree-never-created`). If that worktree was
+      // never created, `node:child_process.spawn` would emit a cryptic
+      // `spawn <cmd> ENOENT` naming the command, not the missing cwd —
+      // un-actionable. Fail loud HERE, before the model is spawned, with
+      // a one-line operator-actionable message that names the directory.
+      if (resolved.cwd !== undefined && !this.existsFn(resolved.cwd)) {
+        reject(
+          new Error(
+            `tick-loop: cannot spawn "${resolved.command}" — worktree cwd "${resolved.cwd}" does not exist; the local spawn path must create its worktree before spawn (P0 local-worker-worktree-never-created)`,
+          ),
+        );
+        return;
+      }
       const child = this.spawnFn(resolved.command, [...resolved.argv], {
         env: input.env,
         stdio: ["pipe", "pipe", "pipe"],
