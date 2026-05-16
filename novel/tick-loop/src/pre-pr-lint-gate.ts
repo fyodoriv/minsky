@@ -152,6 +152,7 @@ export function shouldRunPrePrLintGate(args: {
  * full merge-gate wastes the whole iteration). Any other value ⇒
  * `"fast"` (fail-safe; rule #10 — deterministic, pure).
  * @param raw the raw env value (`process.env.MINSKY_PRE_PR_STAGE`)
+ * @otel-exempt pure deterministic string resolver; no I/O or side effect to instrument.
  */
 export function resolvePrePrStage(raw: string | undefined): "fast" | "full" {
   return raw === "full" ? "full" : "fast";
