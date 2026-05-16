@@ -113,9 +113,7 @@ export function scanMinskyProcesses(
 ): readonly MinskyProc[] {
   try {
     return parseMinskyProcs(probe.ps());
-    // rule-6: handled-locally — a broken `ps` (missing/permission) must
-    // degrade to an empty enumeration; it must never crash the TUI or a
-    // caller's launch path. This IS the let-it-crash boundary.
+    // rule-6: handled-locally — a broken `ps` (missing/permission) degrades to an empty enumeration; this host enumerator must never crash the TUI or a caller's launch path (this IS the let-it-crash boundary).
   } catch {
     return [];
   }
