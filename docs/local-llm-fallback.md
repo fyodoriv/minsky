@@ -11,6 +11,17 @@ When Claude's weekly budget exhausts, Minsky's daemon switches from `claude --pr
 ## Install
 
 ```bash
+minsky bootstrap-local-llm
+```
+
+That single command detects what is missing, prints a summary with a `[Y/n]` confirm, then installs pipx → mlx-lm → aider → model weights → starts `mlx_lm.server`. Idempotent: re-running on an already-set-up machine exits immediately. Use `--dry-run` to preview the plan without installing.
+
+Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB). Allow 8–12 min on a 1 Gbps link for the model download.
+
+<details>
+<summary>Manual install recipe (fallback if auto-bootstrap fails)</summary>
+
+```bash
 # Apple Silicon native ML server
 pipx install mlx-lm
 # Aider — must be on python 3.12 or 3.13; 3.14 has numpy build issues
@@ -19,7 +30,7 @@ pipx install --python /opt/homebrew/bin/python3.12 aider-chat
 hf download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 ```
 
-Disk envelope: `~/.cache/huggingface/hub/models--mlx-community--Qwen3-Coder-30B-A3B-Instruct-4bit` (~17.2 GB).
+</details>
 
 ### Why two separate Python environments
 

@@ -10,6 +10,9 @@
 // <!-- scope: human-approved minsky-cross-machine-dotfile-checks slice 3 (operator 2026-05-08 — slice 3 of the self-healing trilogy) -->
 // <!-- scope: human-approved minsky-claude-exhaustion-persisted-state slice 4 (operator 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens") -->
 // <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 9 (operator 2026-05-08 — `--dry-run` flag wires existing `confirmAlwaysNo` + read-only plan render) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 67 (server-probe-first skip-earlier gate in maybeBootstrapLocalLlm) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 68 (doctor persisted-hard-limit skip-earlier gate) -->
+// <!-- scope: human-approved minsky-cli-auto-bootstrap-local-llm slice 69 (persisted Claude-healthy skip-earlier gate) -->
 
 /**
  * `minsky` CLI — operator-facing wrapper around `bin/tick-loop.mjs`.
@@ -125,7 +128,9 @@ const {
   planRequiresTty,
   preferredPipxPath,
   probePythonWithDefaults,
+  readLastClaudeHealthy,
   readLastHardLimit,
+  writeLastClaudeHealthy,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
 } = /** @type {any} */ (isMain ? await import("../dist/index.js") : {});
@@ -378,31 +383,56 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     return await runBootstrapLocalLlm({ force: false });
   }
 
-  const probes = buildProductionProbes({ whichFn });
-  const state = await detectLocalLlmStack(probes);
-  // Fast path: server is reachable → set MINSKY_LOCAL_LLM=1 for the spawn,
-  // skip the install pipeline entirely.
-  if (state.server.reachable) {
+  // Slice 69 skip-earlier gate: when Claude was recently confirmed healthy
+  // (within TTL), skip both the server probe (~100–500 ms) and the claude
+  // probe (~5–20 s). Symmetric to slice 68's persisted-hard-limit gate.
+  // If Claude becomes exhausted within the TTL window, the daemon's
+  // per-iteration `decideProvider` catches it on the next spawn.
+  // Default TTL: 10 minutes; override via `MINSKY_CLAUDE_HEALTHY_TTL_MIN`.
+  const persistedHealthy = readPersistedClaudeHealthy();
+  if (persistedHealthy.healthy) {
+    const ageMin = Math.round(persistedHealthy.ageMs / 60_000);
     process.stderr.write(
-      `minsky: local-LLM server reachable at ${state.server.url} — wiring fallback\n`,
+      `minsky: Claude recently confirmed healthy (${ageMin}m ago) — skipping probes\n`,
+    );
+    return {};
+  }
+
+  return await probeServerThenClaude();
+}
+
+/**
+ * Slice 67 + 69 production probe path. Called only when env-var gates and
+ * persisted-state gates in {@link maybeBootstrapLocalLlm} have not fired.
+ * Extracted to keep `maybeBootstrapLocalLlm` under biome's cognitive
+ * complexity cap.
+ *
+ * @returns {Promise<Record<string, string>>}
+ */
+async function probeServerThenClaude() {
+  // Slice 67 optimization (skip-earlier gate): probe the server alone before
+  // the full 5-way detectLocalLlmStack. In the common steady-state (server
+  // already running), this skips 4 component probes (pipx / mlx-lm / aider /
+  // model-weights) that are only needed when planning a bootstrap install.
+  const serverState = await buildProductionProbes({ whichFn }).probeServer();
+  if (serverState.reachable) {
+    process.stderr.write(
+      `minsky: local-LLM server reachable at ${serverState.url} — wiring fallback\n`,
     );
     return { MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" };
   }
   // Server unreachable. Run a REAL synthetic claude probe (slice 4 —
   // operator pushback 2026-05-08: "So that all will work even if no
-  // message can be sent to claude right?"). The previous slice's
-  // `which claude` check returned `true` whenever the binary existed,
-  // falsely deferring to claude when credits were exhausted. This probe
-  // spawns `claude --print "ping"` with a 10 s timeout and classifies
-  // the stderr against `HARD_LIMIT_PATTERNS` (shared contract with
-  // `llm-provider-selector`).
+  // message can be sent to claude right?"). Spawns `claude --print "ping"`
+  // with a 10 s timeout and classifies stderr against `HARD_LIMIT_PATTERNS`.
   const decision = await probeClaude();
   process.stderr.write(`minsky: claude probe → ${decision.verdict} (${decision.reason})\n`);
   if (!needsLocalLlmBootstrap(decision)) {
-    // Claude is healthy OR transient error. Don't trigger a 17 GB
-    // download on a network blip — the daemon's per-iteration
-    // `decideProvider` will catch any hard-limit signal on the next
-    // claude spawn and switch to local then (graceful-degrade).
+    // Claude is healthy OR transient error. Don't trigger a 17 GB download on
+    // a network blip — the daemon's per-iteration `decideProvider` catches any
+    // hard-limit on the next claude spawn (graceful-degrade).
+    // Slice 69: persist the healthy verdict for the skip-earlier gate.
+    if (decision.verdict === "healthy") writePersistedClaudeHealthy();
     return {};
   }
   process.stderr.write(
@@ -431,6 +461,41 @@ function readPersistedHardLimit() {
     existsSyncFn: existsSync,
     nowFn: Date.now,
     ttlMs: ttlMin * 60_000,
+  });
+}
+
+/**
+ * Slice 69 of `minsky-cli-auto-bootstrap-local-llm`. Wraps
+ * {@link readLastClaudeHealthy} with the production seam.
+ *
+ * Default TTL: 10 minutes. Override via `MINSKY_CLAUDE_HEALTHY_TTL_MIN`
+ * (positive integer minutes; non-numeric values fall back to default).
+ *
+ * @returns {import("../dist/claude-exhaustion-state.js").ReadClaudeHealthyOutcome}
+ */
+function readPersistedClaudeHealthy() {
+  const raw = process.env["MINSKY_CLAUDE_HEALTHY_TTL_MIN"];
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  const ttlMin = Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+  return readLastClaudeHealthy({
+    stateFilePath: resolve(MINSKY_HOME, ".minsky", "state.json"),
+    readFileSyncFn: readFileSync,
+    existsSyncFn: existsSync,
+    nowFn: Date.now,
+    ttlMs: ttlMin * 60_000,
+  });
+}
+
+/**
+ * Slice 69: persist the "Claude healthy" verdict so the skip-earlier gate
+ * in {@link maybeBootstrapLocalLlm} can short-circuit on the next invocation.
+ */
+function writePersistedClaudeHealthy() {
+  writeLastClaudeHealthy({
+    stateFilePath: resolve(MINSKY_HOME, ".minsky", "state.json"),
+    readFileSyncFn: readFileSync,
+    writeFileSyncFn: writeFileSync,
+    ts: new Date().toISOString(),
   });
 }
 
@@ -598,7 +663,21 @@ function emitDoctorRows({ state, archState, claudeDecision, pythonPath }) {
 async function runDoctor() {
   process.stdout.write("minsky doctor — local-LLM stack health probe\n\n");
   const { state, archState, planOpts, pythonPath } = await detectForBootstrap();
-  const claudeDecision = await probeClaude();
+  // Slice 68 skip-earlier gate: when a persisted hard-limit is fresh (within
+  // TTL), the live `probeClaude()` spawn (~1-5s) adds nothing — the doctor
+  // already shows the persisted timestamp in `emitClaudeExhaustionRow`. Use
+  // the persisted verdict directly and skip the network round-trip.
+  const persisted = readPersistedHardLimit();
+  let claudeDecision;
+  if (persisted.exhausted) {
+    const ageMin = Math.round(persisted.ageMs / 60_000);
+    claudeDecision = {
+      verdict: /** @type {const} */ ("exhausted"),
+      reason: `persisted hard-limit (${ageMin}m ago) — skipping live probe`,
+    };
+  } else {
+    claudeDecision = await probeClaude();
+  }
   emitDoctorRows({ state, archState, claudeDecision, pythonPath });
   // Slice 1 of `minsky-fresh-clone-health-checks`: 4 substrate rows
   // (node_modules / pnpm-lock.yaml / dist/index.js / pnpm-on-PATH) so

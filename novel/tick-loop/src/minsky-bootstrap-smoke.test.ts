@@ -52,4 +52,40 @@ describe("maybeBootstrapLocalLlm", () => {
       process.env["MINSKY_LLM_PROVIDER"] = prev;
     }
   });
+
+  it("slice 67: detectFn server-reachable fast-path still returns env overlay (seam unbroken by server-probe-first refactor)", async () => {
+    // The _opts.detectFn seam short-circuits before the slice 67 production
+    // path, so existing tests that inject a reachable state remain valid.
+    // This test explicitly names slice 67 so regressions are traceable.
+    const result = await maybeBootstrapLocalLlm({
+      detectFn: async () => ({
+        server: { reachable: true, url: "http://127.0.0.1:8080/v1/models" },
+      }),
+    });
+    expect(result).toEqual({ MINSKY_LOCAL_LLM: "1", MINSKY_LLM_PROVIDER: "local-preferred" });
+  });
+
+  it("MINSKY_NO_AUTO_BOOTSTRAP=1: returns {} immediately (no server probe, no claude probe)", async () => {
+    const prev = process.env["MINSKY_NO_AUTO_BOOTSTRAP"];
+    process.env["MINSKY_NO_AUTO_BOOTSTRAP"] = "1";
+    try {
+      // No detectFn → would reach production path, but NO_AUTO_BOOTSTRAP guard
+      // fires before any probe. Passes no detectFn to exercise the real guard.
+      const result = await maybeBootstrapLocalLlm();
+      expect(result).toEqual({});
+    } finally {
+      process.env["MINSKY_NO_AUTO_BOOTSTRAP"] = prev;
+    }
+  });
+
+  it("MINSKY_LOCAL_LLM=1: returns {} immediately (already opted in, no re-bootstrap)", async () => {
+    const prev = process.env["MINSKY_LOCAL_LLM"];
+    process.env["MINSKY_LOCAL_LLM"] = "1";
+    try {
+      const result = await maybeBootstrapLocalLlm();
+      expect(result).toEqual({});
+    } finally {
+      process.env["MINSKY_LOCAL_LLM"] = prev;
+    }
+  });
 });

@@ -143,6 +143,99 @@ function parseField(raw: string): { readonly ts: string; readonly reason: string
   return { ts, reason };
 }
 
+// ---------------------------------------------------------------------------
+// Slice 69 of `minsky-cli-auto-bootstrap-local-llm`: persisted "Claude
+// healthy" state — symmetric counterpart to the hard-limit record above.
+// When `probeClaude()` returns "healthy", `minsky` writes this field so
+// the next invocation within the TTL (default 10 min) can skip BOTH the
+// server probe (~100–500 ms) and the claude probe (~5–20 s). Governance:
+// same fail-open / graceful-degrade contract as readLastHardLimit — any
+// read error returns { healthy: false } rather than crashing the CLI.
+// ---------------------------------------------------------------------------
+
+/** Result of {@link readLastClaudeHealthy}. */
+export type ReadClaudeHealthyOutcome =
+  | { readonly healthy: false }
+  | {
+      readonly healthy: true;
+      readonly ts: string;
+      readonly ageMs: number;
+    };
+
+/**
+ * Read the persisted Claude-healthy timestamp from
+ * `.minsky/state.json::last_claude_healthy`. Returns
+ * `{ healthy: false }` for any of: file absent, field absent, ts stale,
+ * JSON corrupt, ts unparseable. Returns `{ healthy: true, ts, ageMs }`
+ * only when the field is present AND its ts is within `ttlMs` of `nowFn()`.
+ *
+ * @otel-exempt pure decision function — caller's spawn carries the span.
+ */
+export function readLastClaudeHealthy(opts: {
+  readonly stateFilePath: string;
+  readonly readFileSyncFn: (path: string, encoding: "utf8") => string;
+  readonly existsSyncFn: (path: string) => boolean;
+  readonly nowFn: () => number;
+  readonly ttlMs: number;
+}): ReadClaudeHealthyOutcome {
+  if (!opts.existsSyncFn(opts.stateFilePath)) {
+    return { healthy: false };
+  }
+  const raw = readSafe(opts);
+  if (raw === undefined) return { healthy: false };
+  const ts = parseHealthyField(raw);
+  if (ts === undefined) return { healthy: false };
+  const tsMs = Date.parse(ts);
+  if (Number.isNaN(tsMs)) return { healthy: false };
+  const ageMs = opts.nowFn() - tsMs;
+  if (ageMs > opts.ttlMs) return { healthy: false };
+  return { healthy: true, ts, ageMs };
+}
+
+function parseHealthyField(raw: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+    // rule-6: handled-locally — corrupt JSON is chaos-table row 5; returning undefined falls through to healthy=false.
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const field = (parsed as { last_claude_healthy?: unknown }).last_claude_healthy;
+  if (typeof field !== "object" || field === null) return undefined;
+  const { ts } = field as { ts?: unknown };
+  if (typeof ts !== "string") return undefined;
+  return ts;
+}
+
+/**
+ * Write `last_claude_healthy` to `.minsky/state.json`. Preserves all other
+ * top-level state.json fields. Creates a minimal fresh state.json if absent.
+ *
+ * @otel-exempt pure I/O wrapper.
+ */
+export function writeLastClaudeHealthy(opts: {
+  readonly stateFilePath: string;
+  readonly readFileSyncFn: (path: string, encoding: "utf8") => string;
+  readonly writeFileSyncFn: (path: string, content: string) => void;
+  readonly ts: string;
+}): void {
+  /** @type {Record<string, unknown>} */
+  let state: Record<string, unknown>;
+  try {
+    const raw = opts.readFileSyncFn(opts.stateFilePath, "utf8");
+    const parsed = JSON.parse(raw);
+    state =
+      typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    // rule-6: handled-locally — file absent OR corrupt JSON: start from empty state.
+  } catch {
+    state = {};
+  }
+  if (!("schema_version" in state)) state["schema_version"] = "1";
+  state["last_claude_healthy"] = { ts: opts.ts };
+  opts.writeFileSyncFn(opts.stateFilePath, JSON.stringify(state, null, 2));
+}
+
 /**
  * Write `last_claude_hard_limit` to `.minsky/state.json`. Preserves
  * all other top-level state.json fields. Creates a minimal fresh
