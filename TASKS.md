@@ -721,6 +721,20 @@
 
 ## P1
 
+- [ ] `trusted-local-merge-gate` — deterministic local merge authority for the autonomous orchestrator (GitHub Actions is disabled / $10-mo cap; no PR can reach mergeStateStatus=CLEAN so `auto-merge-clean-prs.mjs` drains nothing)
+  - **ID**: trusted-local-merge-gate
+  - **Tags**: p1, operator-directive, autonomous-opus, ci-replacement, rule-10
+  - **Touches**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`
+  - **Status**: shipped
+  - **Surfaced-by**: 2026-05-16 operator "build the best autonomous opus … find a different solution instead of github actions; $10/mo total". Actions disabled since 2026-05-12 ⇒ branch-protection `ci` never runs ⇒ every PR is BLOCKED ⇒ the existing CLEAN-gated auto-merge is dead.
+  - **Details**: `scripts/local-gate-merge.mjs` (shipped) — pure decision seam (`pickGateCandidates` / `parseGateVerdict` / `decideMerge`) + injected I/O (`snapshotFn`/`vetFn`/`mergeFn`), mirroring `auto-merge-clean-prs.mjs` (rule #1: composes `run-pre-pr-lint-stack` + `gh`, no new gate logic; rule #10: same input ⇒ same output, no model in the merge decision). For each open non-draft, non-CONFLICTING, base=main PR: isolated `git clone --shared` scratch (never an in-repo worktree — that flips `core.bare`), merge PR head onto `origin/main`, run `run-pre-pr-lint-stack --stage=full --json`; green ⇒ `gh pr merge --squash --admin`. 13 paired tests green. Follow-up (this task's open work): wire it into the autonomous orchestrator loop (Phase 1 `claude-orchestrator-local-worker-fanout`) + a `--self-metric` reader over `.minsky/local-gate-merge.jsonl`.
+  - **Hypothesis**: a gate-green admin-merged PR does not regress `origin/main` — post-merge, a fresh `run-pre-pr-lint-stack --stage=full` on main stays green. Today (Actions off) 0 PRs auto-merge; post-gate the orchestrator merges every full-gate-green PR with a false-green rate of 0.
+  - **Success**: 0 post-merge `origin/main` regressions over ≥10 gate-merged PRs (false-green rate 0).
+  - **Pivot**: if ≥1 regression in the window, add an auto-revert-on-red post-merge re-vet OR fall back to label-gated (`minsky-auto-merge` required) — do not loosen the gate.
+  - **Measurement**: `node -e "const l=require('node:fs').readFileSync(process.env.MINSKY_HOME+'/.minsky/local-gate-merge.jsonl','utf8').trim().split('\n').filter(Boolean).map(JSON.parse);const m=l.flatMap(x=>x.merged);console.log(JSON.stringify({sweeps:l.length,merged:m.length}))"` for throughput; regression count = sweeps where a subsequent `--stage=full` on main went red attributable to a gate-merge.
+  - **Anchor**: Beyer et al. *SRE* 2016 Ch. 6 (the gate IS the release gate; visible-not-silent — the `.jsonl` ledger); rule #10 (deterministic enforcement, no model in the merge path); rule #1 (composes existing `run-pre-pr-lint-stack` + `gh`).
+  - **Acceptance**: (1) `scripts/local-gate-merge.mjs` + paired tests shipped [done]; (2) wired into the Phase-1 orchestrator as its merge authority; (3) `--self-metric` reads the ledger; (4) measurement shows false-green rate 0 over ≥10 merges.
+
 - [ ] `budget-guard-correctness` — Minsky's budget model is factually wrong and silently degrades off Claude on bad estimates; operator (2026-05-16): "this is critical … fivehour limit is completely wrong … there is no monthly limit in Claude … when it reaches limit, it must tell to validate it"
   - **ID**: budget-guard-correctness
   - **Tags**: p1, operator-directive, budget-guard, strategic-router, correctness
