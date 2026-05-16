@@ -1,4 +1,5 @@
-// @ts-check
+// Tests for local-gate-merge.mjs — pure decision functions + injected-seam
+// sweep. No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
 import {
   decideMerge,
@@ -106,11 +107,14 @@ describe("runGateSweep (injected seam)", () => {
   ].join("\n");
 
   it("merges only the gate-green PR; skips the red one; never merges in dry-run", () => {
-    const merged = [];
+    const merged = /** @type {number[]} */ ([]);
     const base = {
       snapshotFn: () => [pr({ number: 10 }), pr({ number: 11 })],
-      vetFn: (p) => ({ stdout: p.number === 10 ? greenStdout : redStdout }),
-      mergeFn: (p) => merged.push(p.number),
+      vetFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) => ({
+        stdout: p.number === 10 ? greenStdout : redStdout,
+      }),
+      mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
+        merged.push(p.number),
       log: () => {},
     };
     const real = runGateSweep(base);
@@ -152,11 +156,11 @@ describe("runGateSweep (injected seam)", () => {
   });
 
   it("respects --pr (onlyPr) and limit", () => {
-    const seen = [];
+    const seen = /** @type {number[]} */ ([]);
     runGateSweep({
       snapshotFn: () => [pr({ number: 1 }), pr({ number: 2 }), pr({ number: 3 })],
       onlyPr: 2,
-      vetFn: (p) => {
+      vetFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) => {
         seen.push(p.number);
         return { stdout: greenStdout };
       },

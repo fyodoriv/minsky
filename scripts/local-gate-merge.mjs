@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
-// <!-- scope: human-approved 2026-05-16 operator "build the best solution for
-// autonomous opus … find a different solution instead of github actions" -->
+// <!-- scope: human-approved 2026-05-16 operator "build the best solution for autonomous opus, find a different solution instead of github actions" -->
 //
 // Trusted local merge-gate. GitHub Actions is disabled on this repo, so the
 // branch-protection `ci` check never runs and NO PR ever reaches
@@ -41,7 +40,7 @@ import { appendFileSync, existsSync, mkdtempSync, rmSync, symlinkSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const REPO = process.env.MINSKY_HOME ?? "/Users/cbrwizard/apps/tooling/minsky";
+const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
 const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
 
 /**
@@ -100,11 +99,11 @@ export function parseGateVerdict(stdout) {
   for (const line of stdout.split("\n")) {
     const obj = parseJsonLine(line);
     if (!obj) continue;
-    if (obj.summary === true) {
+    if (obj["summary"] === true) {
       sawSummary = true;
-      summaryOk = obj.allPass === true;
-    } else if (obj.verdict === "fail" && typeof obj.name === "string") {
-      failedSteps.push(obj.name);
+      summaryOk = obj["allPass"] === true;
+    } else if (obj["verdict"] === "fail" && typeof obj["name"] === "string") {
+      failedSteps.push(obj["name"]);
     }
   }
   return { green: sawSummary && summaryOk && failedSteps.length === 0, failedSteps, sawSummary };
