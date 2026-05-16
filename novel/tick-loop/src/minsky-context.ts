@@ -181,6 +181,7 @@ async function raceTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs: numbe
     const result = await Promise.race([promise, timeout]);
     clearTimeout(timerId);
     return result;
+    // rule-6: handled-locally — probe threw; return safe fallback so caller always gets a value
   } catch {
     clearTimeout(timerId);
     return fallback;
