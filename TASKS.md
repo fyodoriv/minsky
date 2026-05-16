@@ -1337,7 +1337,7 @@
   - **Tags**: p3, dx, gitignore, hygiene
   - **Details**: `.claire/worktrees/**` is untracked runtime state (same class as `.claude/worktrees`, `.minsky`). Surfaced 2026-05-16 when `markdownlint-cli2` failed on `.claire/worktrees/daemon-0-fresh-clone-ci-regression-gate/pr-body.md` and blocked a push; worked around by adding `#.claire` to the `lint:md` glob in `package.json`. Add `.claire/` to `.gitignore` so it stops appearing as untracked and is consistently excluded like the sibling runtime dirs. Verify `git status --porcelain` no longer lists `.claire/` on a machine that has run the claire stack.
   - **Files**: `.gitignore`
-  - **Acceptance**: `.gitignore` contains `.claire/`; `git status --porcelain | grep -q '\.claire' ` is empty after a claire run; `git check-ignore .claire` exits 0.
+  - **Acceptance**: `.gitignore` contains `.claire/`; `git status --porcelain | grep -q '\.claire'` is empty after a claire run; `git check-ignore .claire` exits 0.
   - **Surfaced-by**: 2026-05-16 Opus-director supervision session (PR for `local-worker-worktree-never-created`).
 
 - [ ] `demo-pr-generator` — `minsky run --target=<oss-repo> --output-mode=pr-only` produces a single high-quality demo PR per OSS repo (the funnel)
