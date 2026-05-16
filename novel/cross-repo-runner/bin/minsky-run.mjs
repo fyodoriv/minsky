@@ -461,13 +461,14 @@ async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
   })();
+  const claudeArgs = readClaudeSpawnArgs();
   const strategy = new ProcessSpawnStrategy({
     command: "claude",
-    args: ["--print"],
+    args: claudeArgs,
     timeoutMs,
     invocation: (input) => ({
       command: "claude",
-      argv: ["--print"],
+      argv: claudeArgs,
       stdin: input.brief,
       cwd: hostRoot,
     }),
@@ -667,13 +668,14 @@ async function runLoopAsResult(parsed, controller) {
 
   let strategy = null;
   if (live) {
+    const claudeArgs = readClaudeSpawnArgs();
     strategy = new ProcessSpawnStrategy({
       command: "claude",
-      args: ["--print"],
+      args: claudeArgs,
       timeoutMs: readLiveSpawnTimeoutMs(),
       invocation: (input) => ({
         command: "claude",
-        argv: ["--print"],
+        argv: claudeArgs,
         stdin: input.brief,
         cwd: hostRoot,
       }),
@@ -774,6 +776,28 @@ function readLiveSpawnTimeoutMs() {
   if (raw === undefined) return 15 * 60 * 1000;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+}
+
+// Build the argv we pass to `claude` for live spawns. `--print` is the
+// non-interactive flag minsky has always used. We additionally pass
+// `--setting-sources project,local` so user-level CLAUDE.md (which on
+// many operators' machines has grown past the model context — see e.g.
+// the 74KB+ ~/.claude/CLAUDE.md that ships "Prompt is too long" before
+// the brief is even submitted) does NOT load. Project + local sources
+// still load so the host repo's own AGENTS.md/CLAUDE.md remain in
+// scope, and OAuth/keychain auth stays intact (which `--bare` would
+// have broken). Operators can override:
+//   MINSKY_CLAUDE_SETTING_SOURCES=""           → omit the flag entirely
+//   MINSKY_CLAUDE_SETTING_SOURCES="user,project,local" → restore user
+//
+// Source: rule #6 (let-it-crash AT the boundary, not silently — without
+// this flag the spawn no-ops on a context-overflow and the loop exits
+// `empty-queue iterations:0` with no operator-visible diagnostic).
+function readClaudeSpawnArgs() {
+  const raw = process.env.MINSKY_CLAUDE_SETTING_SOURCES;
+  const sources = raw === undefined ? "project,local" : raw;
+  if (sources === "") return ["--print"];
+  return ["--print", "--setting-sources", sources];
 }
 
 function emitLoopSummary(result) {
