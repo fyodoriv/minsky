@@ -172,6 +172,16 @@ The daemon's stock brief (`buildDaemonBrief` in `daemon.ts`) is ~7-10KB of conte
 
 The substrate works; the brief shape doesn't. **Pivot threshold (rule #9):** if rolling-7d p95 of `local-spawn-timeout` count > 5/day across all workers, ship `daemon-aider-brief-shrinker` (filed as P0 in TASKS.md) that produces a slim brief (~≤2 KB, no gates, no templates) specifically for the aider path. The threshold has already been tripped by the 2026-05-07 live run; the task is queued.
 
+## Worktree lifecycle — the local path owns it
+
+The **claude** spawn path gets a per-worker git worktree for free: `claude --worktree <name>` makes Claude Code create it. The **local** path (`MINSKY_LLM_PROVIDER=local-preferred`, aider / opencode) takes the `--worktree` arg out of the equation, so **the local path owns its own worktree lifecycle** — nothing else creates it.
+
+- `novel/tick-loop/src/ensure-worktree.ts` (`ensureWorktree`) idempotently runs `git -C <minskyHome> worktree add --force -B <branch> <worktreeDir> origin/main`, so the worktree's `.git` file resolves to `<minskyHome>/.git/worktrees/<name>`. `buildLocalStrategy` (`bin/tick-loop.mjs`, aider + opencode branches) calls it via `ensureLocalWorktree(taskId)` *before* the spawn and threads the resolved dir through as the invocation `cwd`.
+- Defense-in-depth at the workspace boundary (rule #6 / Armstrong 2007): even if the worktree is missing for any reason, `ProcessSpawnStrategy.spawn` checks the resolved `cwd` exists *before* calling `child_process.spawn`. A missing cwd fails loud with a one-line operator-actionable error that names the directory and the P0 task — never a cryptic `spawn aider ENOENT`, never a model spawned into a bad cwd.
+- Single-process mode (no `workerConfig`) keeps inheriting the parent cwd (`minskyHome`) — `ensureLocalWorktree` returns `undefined`, no worktree, no guard. The per-task worktree is a multi-worker concern only.
+
+Surfaced-by P0 `local-worker-worktree-never-created` (operator 2026-05-16 dogfood): before this, 100% of `local-preferred` iterations died at git/cwd setup before the Qwen3 call because the local path set `cwd` to a worktree nothing created.
+
 ## Failure modes & chaos verification
 
 Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-paused windows. Blast radius: a single worker iteration. Operator escape hatch: `MINSKY_LLM_PROVIDER=claude-only` env override forces the Claude path regardless of budget signal, so the operator can opt out of local fallback for a specific run.
@@ -179,6 +189,7 @@ Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-pause
 | Failure mode | Trigger | Expected behavior | Chaos test |
 | --- | --- | --- | --- |
 | local server unreachable during fallback | `mlx_lm.server` crashed | iteration logs the probe failure, returns `status: "local-unreachable"`, no PR opened — not a destructive failure | `pkill -f mlx_lm.server` mid-iteration, assert no PR opened, no force-push, no destructive commit |
+| worktree cwd missing on local spawn | per-worker worktree never created / pruned | `ensureWorktree` recreates it; if still missing, `ProcessSpawnStrategy.spawn` rejects loud naming the dir + P0 task — model never spawned into a bad cwd | inject `existsFn → false` with a builder `cwd`, assert reject names the dir and `spawnFn` is not called (`spawn-strategy.test.ts`) |
 | local model produces a destructive PR | aider auto-commits `rm -rf node_modules` or similar | `daemon-fix-own-pr-on-ci-failure` catches via CI red; after 3 retries, labels `daemon-stuck` and stops | run synthetic brief that asks for a destructive change; assert it lands as a PR with `daemon-stuck` label, not as a force-push |
 | switchback flap | budget oscillates near 85 % | 3-iteration claude-probe gates the return; flap suppressed | synthetic budget-state oscillation, assert provider transitions ≤2 in 24 h |
 | memory pressure | local model resident + 3 claude workers running | invariant: only one provider resident at a time per machine; daemon holds before spawning local while any claude child still alive | assert `pgrep claude` returns empty before `mlx_lm.server` is spawned |
