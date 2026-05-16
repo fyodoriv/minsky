@@ -41,7 +41,7 @@
 //   --limit=N   : cap how many candidates to process this sweep (default 5)
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -183,9 +183,6 @@ function defaultSnapshot() {
  */
 function prepareScratchClone(scratch, pr) {
   execFileSync("git", ["clone", "--shared", "--quiet", REPO, scratch], { encoding: "utf8" });
-  // Share the live node_modules (gitignored; pnpm-resolved) so the gate
-  // doesn't pay a full install per PR.
-  symlinkSync(join(REPO, "node_modules"), join(scratch, "node_modules"));
   // The --shared clone's `origin` is the local filesystem path, which has
   // no `pull/*/head` refs. Repoint `origin` at the live repo's real
   // (GitHub) remote so we can fetch the PR head + authoritative main;
@@ -212,6 +209,29 @@ function prepareScratchClone(scratch, pr) {
     });
   } catch {
     return { vetError: "merge-onto-main-conflict" };
+  }
+  // pnpm scatters a per-package node_modules symlink-farm across the whole
+  // workspace; `git clone` only carries the (gitignored-excluded) tracked
+  // tree, so a bare clone has NO node_modules anywhere. Symlinking just the
+  // root one (the prior approach) left every `novel/*` package unresolvable
+  // — tsc + vitest then failed `Cannot find module` for EVERY PR, so the
+  // conductor skipped them all (the zero-merge bottleneck). A real install
+  // is the only correct fix: with the global pnpm store already warm from
+  // the live repo, `--prefer-offline --frozen-lockfile` only re-creates the
+  // hardlink/symlink farm (seconds, no network) and is fully isolated to
+  // the scratch (multi-tenant safe — never writes the live node_modules).
+  try {
+    execFileSync(
+      "pnpm",
+      ["install", "--frozen-lockfile", "--prefer-offline", "--ignore-scripts", "--reporter=silent"],
+      { cwd: scratch, encoding: "utf8", timeout: VET_TIMEOUT_MS },
+    );
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    // An install failure is gate INFRA broken, not the PR being red — make
+    // that explicit so it is never misattributed as a PR gate-failure
+    // (rule #6: surface the boundary error, don't swallow it as a skip).
+    return { vetError: `scratch-install-failed: ${m.slice(0, 160)}` };
   }
   return null;
 }
