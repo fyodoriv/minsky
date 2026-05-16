@@ -8,10 +8,14 @@
 // drains nothing. This gate substitutes a DETERMINISTIC LOCAL verdict for the
 // dead CI: for each open, non-draft, non-CONFLICTING PR it merges the PR head
 // onto `origin/main` in an isolated `git clone --shared` scratch dir and runs
-// the canonical `run-pre-pr-lint-stack --stage=full --json`. Green ⇒
-// `gh pr merge --squash --admin` (admin bypasses the unreachable `ci`
-// requirement; the local full gate is the trust substitute). Cost: $0, no
-// Actions, no cloud runner — fits the project's $10/mo cap.
+// the canonical `run-pre-pr-lint-stack --stage=full --json`. Two-layer
+// merge authority (autonomous-opus): the deterministic gate is the cheap
+// pre-filter; an **Opus review** (`claude --print --model claude-opus-4-7`,
+// invoked ONLY on gate-green PRs for cost discipline) is the brain that
+// judges intent / hidden risk / scope creep. A PR merges (`gh pr merge
+// --squash --admin`) only when it is BOTH gate-green AND Opus-approved.
+// `--no-review` runs deterministic-only. Cost: $0 infra (Opus on the
+// Claude subscription) — fits the project's $10/mo cap; no Actions/runner.
 //
 // Pattern: pure decision functions (`pickGateCandidates`, `parseGateVerdict`,
 // `decideMerge`) over snapshots + a thin I/O seam (`snapshotFn` / `vetFn` /
@@ -30,10 +34,11 @@
 // Anchor: Beyer SRE 2016 (the gate IS the release gate); rule #10 / #1.
 //
 // Usage:
-//   node scripts/local-gate-merge.mjs [--dry-run] [--limit=N] [--pr=N]
-//   --dry-run : vet + print verdicts, do NOT call `gh pr merge`
-//   --pr=N    : gate only PR N
-//   --limit=N : cap how many candidates to process this sweep (default 5)
+//   node scripts/local-gate-merge.mjs [--dry-run] [--no-review] [--limit=N] [--pr=N]
+//   --dry-run   : vet + print verdicts, do NOT call `gh pr merge`
+//   --no-review : deterministic-only (skip the Opus brain layer)
+//   --pr=N      : gate only PR N
+//   --limit=N   : cap how many candidates to process this sweep (default 5)
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
@@ -110,8 +115,17 @@ export function parseGateVerdict(stdout) {
 }
 
 /**
- * Pure: final merge decision for one vetted PR.
- * @param {{pr: PrSnapshot, verdict: {green: boolean, failedSteps: string[], sawSummary: boolean}, vetError?: string}} input
+ * Pure: final merge decision for one vetted PR. Two-layer authority
+ * (autonomous-opus): the deterministic `--stage=full` gate is the cheap
+ * pre-filter; an optional **Opus review** is the brain — a PR only merges
+ * when it is BOTH gate-green AND (when a review is supplied) Opus-approved.
+ * `review` is omitted in deterministic-only mode (`--no-review`).
+ * @param {{
+ *   pr: PrSnapshot,
+ *   verdict: {green: boolean, failedSteps: string[], sawSummary: boolean},
+ *   vetError?: string,
+ *   review?: {approve: boolean, reason: string},
+ * }} input
  * @returns {{action: "merge" | "skip", reason: string}}
  */
 export function decideMerge(input) {
@@ -125,7 +139,11 @@ export function decideMerge(input) {
       reason: `gate red: ${input.verdict.failedSteps.join(",") || "summary not ok"}`,
     };
   }
-  return { action: "merge", reason: "local --stage=full gate green on PR-merged-onto-main" };
+  if (input.review && !input.review.approve) {
+    return { action: "skip", reason: `opus-review rejected: ${input.review.reason}` };
+  }
+  const brain = input.review ? ` + opus-approved (${input.review.reason})` : "";
+  return { action: "merge", reason: `gate green on PR-merged-onto-main${brain}` };
 }
 
 // ---- I/O seam (production defaults; tests inject fakes) -------------------
@@ -239,13 +257,67 @@ function defaultMerge(pr) {
 }
 
 /**
+ * Pure: parse the Opus reviewer's reply. Fail-safe — anything that is not
+ * an explicit `APPROVE` is a rejection (never merge on ambiguity).
+ * @param {string} text
+ * @returns {{approve: boolean, reason: string}}
+ */
+export function parseReview(text) {
+  const first = (text.trim().split("\n")[0] ?? "").trim();
+  const approve = /^APPROVE\b/i.test(first);
+  const reason =
+    first.replace(/^(APPROVE|REJECT)\b[:\-\s]*/i, "").slice(0, 160) ||
+    (approve ? "approved" : "no reason given");
+  return { approve, reason };
+}
+
+/**
+ * The Opus brain (autonomous-opus "gated" call). Reviews a PR that has
+ * ALREADY passed the deterministic `--stage=full` gate — judges intent,
+ * hidden risk, and scope creep. Only invoked on gate-green PRs (cost
+ * discipline). Fail-safe: any error ⇒ not approved ⇒ PR is not merged.
+ * @param {PrSnapshot} pr
+ * @returns {{approve: boolean, reason: string}}
+ */
+function defaultReview(pr) {
+  let diff;
+  try {
+    diff = execFileSync("gh", ["pr", "diff", String(pr.number)], {
+      cwd: REPO,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    }).slice(0, 60000);
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    return { approve: false, reason: `diff-fetch-failed: ${m.slice(0, 80)}` };
+  }
+  const rubric =
+    'You are the Opus orchestrator reviewing a Sonnet-worker PR that ALREADY passed the full deterministic gate (typecheck, tests, every lint) merged onto main. Judge ONLY: correctness of intent, hidden risk, scope creep, and whether it does what its title claims. Reply with ONE line: "APPROVE: <=12-word reason" or "REJECT: <=12-word reason".';
+  const prompt = `${rubric}\n\nTitle: ${pr.title}\n\nDiff (truncated):\n${diff}`;
+  try {
+    const out = execFileSync("claude", ["--print", "--model", "claude-opus-4-7", prompt], {
+      cwd: REPO,
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return parseReview(out);
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    return { approve: false, reason: `opus-review-error: ${m.slice(0, 80)}` };
+  }
+}
+
+/**
  * Vet one PR (I/O via vetFn) and produce its merge decision. Extracted to
  * keep `runGateSweep` under biome's cognitive-complexity cap.
+ * Opus review (`reviewFn`) is the brain and runs ONLY when the deterministic
+ * gate is green (cost discipline); when omitted the gate is deterministic-only.
  * @param {PrSnapshot} pr
  * @param {(pr: PrSnapshot) => {stdout: string} | {vetError: string}} vetFn
+ * @param {((pr: PrSnapshot) => {approve: boolean, reason: string}) | undefined} reviewFn
  * @returns {{action: "merge" | "skip", reason: string}}
  */
-function vetAndDecide(pr, vetFn) {
+function vetAndDecide(pr, vetFn, reviewFn) {
   const vetRes = vetFn(pr);
   if ("vetError" in vetRes) {
     return decideMerge({
@@ -254,12 +326,17 @@ function vetAndDecide(pr, vetFn) {
       vetError: vetRes.vetError,
     });
   }
-  return decideMerge({ pr, verdict: parseGateVerdict(vetRes.stdout) });
+  const verdict = parseGateVerdict(vetRes.stdout);
+  if (verdict.green && reviewFn) {
+    return decideMerge({ pr, verdict, review: reviewFn(pr) });
+  }
+  return decideMerge({ pr, verdict });
 }
 
 /**
  * @typedef {object} SweepCtx
  * @property {(pr: PrSnapshot) => {stdout: string} | {vetError: string}} vetFn
+ * @property {((pr: PrSnapshot) => {approve: boolean, reason: string}) | undefined} reviewFn
  * @property {(pr: PrSnapshot) => void} mergeFn
  * @property {boolean} dryRun
  * @property {(s: string) => void} log
@@ -273,7 +350,7 @@ function vetAndDecide(pr, vetFn) {
  */
 function processOnePr(pr, ctx) {
   ctx.log(`  vetting #${pr.number} (${pr.title.slice(0, 60)})…\n`);
-  const decision = vetAndDecide(pr, ctx.vetFn);
+  const decision = vetAndDecide(pr, ctx.vetFn, ctx.reviewFn);
   if (decision.action !== "merge") {
     ctx.log(`  #${pr.number}: SKIP — ${decision.reason}\n`);
     return { outcome: "skipped", number: pr.number, reason: decision.reason };
@@ -317,6 +394,8 @@ function appendLedger(mergedNumbers, skippedCount) {
  * @property {number} [onlyPr]
  * @property {() => PrSnapshot[]} [snapshotFn]
  * @property {(pr: PrSnapshot) => {stdout: string} | {vetError: string}} [vetFn]
+ * @property {(pr: PrSnapshot) => {approve: boolean, reason: string}} [reviewFn]
+ * @property {boolean} [noReview]  deterministic-only mode (skip the Opus brain)
  * @property {(pr: PrSnapshot) => void} [mergeFn]
  * @property {(s: string) => void} [log]
  */
@@ -331,6 +410,7 @@ function prepareSweep(opts) {
   /** @type {SweepCtx} */
   const ctx = {
     vetFn: opts.vetFn ?? defaultVet,
+    reviewFn: opts.noReview ? undefined : (opts.reviewFn ?? defaultReview),
     mergeFn: opts.mergeFn ?? defaultMerge,
     dryRun: opts.dryRun === true,
     log: opts.log ?? ((s) => process.stdout.write(s)),
@@ -378,10 +458,11 @@ const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}
 if (isMain) {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
+  const noReview = args.includes("--no-review");
   const limArg = args.find((a) => a.startsWith("--limit="));
   const prArg = args.find((a) => a.startsWith("--pr="));
-  /** @type {{dryRun: boolean, limit?: number, onlyPr?: number}} */
-  const opts = { dryRun };
+  /** @type {{dryRun: boolean, noReview: boolean, limit?: number, onlyPr?: number}} */
+  const opts = { dryRun, noReview };
   if (limArg) opts.limit = Number(limArg.split("=")[1]);
   if (prArg) opts.onlyPr = Number(prArg.split("=")[1]);
   const res = runGateSweep(opts);
