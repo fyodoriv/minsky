@@ -90,6 +90,7 @@ function parseProcLine(raw: string): MinskyProc | null {
  * children and all non-minsky noise. Any unparsable line is skipped
  * (fail-safe).
  * @param psText `\n`-separated `<pid> <command…>` lines
+ * @otel-exempt pure string parse — no I/O, nothing to trace.
  */
 export function parseMinskyProcs(psText: string): readonly MinskyProc[] {
   const out: MinskyProc[] = [];
@@ -105,12 +106,16 @@ export function parseMinskyProcs(psText: string): readonly MinskyProc[] {
  * Any failure (ps missing, permission) degrades to an empty list and
  * never throws (rule #6 — a broken scan must not crash the TUI / the
  * caller's launch path).
+ * @otel cross-repo-runner.scan-processes
  */
 export function scanMinskyProcesses(
   probe: ProcScanProbe = { ps: defaultPs },
 ): readonly MinskyProc[] {
   try {
     return parseMinskyProcs(probe.ps());
+    // rule-6: handled-locally — a broken `ps` (missing/permission) must
+    // degrade to an empty enumeration; it must never crash the TUI or a
+    // caller's launch path. This IS the let-it-crash boundary.
   } catch {
     return [];
   }
