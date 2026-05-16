@@ -683,6 +683,7 @@ export {
   type RunPrePrLintGateArgs,
   createBodyAwarePrePrLintRun,
   createPnpmPrePrLintRun,
+  resolvePrePrStage,
   runPrePrLintGate,
   shouldRunPrePrLintGate,
 } from "./pre-pr-lint-gate.js";

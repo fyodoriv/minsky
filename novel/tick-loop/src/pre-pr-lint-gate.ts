@@ -142,6 +142,21 @@ export function shouldRunPrePrLintGate(args: {
 
 // ---- Production binding ---------------------------------------------------
 
+/**
+ * Resolve the daemon's pre-PR gate stage from `MINSKY_PRE_PR_STAGE`.
+ * Default `"fast"` (back-compat; the local-model sprint budget). Set
+ * `"full"` so the worker's pre-PR gate matches the autonomous merge
+ * authority's `--stage=full` — then workers only open PRs that will
+ * actually pass the gate and merge (essential once workers are Sonnet:
+ * cloud, fast enough to afford full; a fast-gated PR that fails the
+ * full merge-gate wastes the whole iteration). Any other value ⇒
+ * `"fast"` (fail-safe; rule #10 — deterministic, pure).
+ * @param raw the raw env value (`process.env.MINSKY_PRE_PR_STAGE`)
+ */
+export function resolvePrePrStage(raw: string | undefined): "fast" | "full" {
+  return raw === "full" ? "full" : "fast";
+}
+
 /** Options for `createPnpmPrePrLintRun`. */
 export interface PnpmPrePrLintRunOptions {
   /**
