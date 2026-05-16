@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
+  beforeEach(() => {
+    // DI-seam tests exercise internal paths that prod guards (MINSKY_NO_AUTO_BOOTSTRAP,
+    // MINSKY_LOCAL_LLM) short-circuit before they can be reached. Stub them away so
+    // each test verifies the intended branch, not the ambient env.
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", "");
+    vi.stubEnv("MINSKY_LOCAL_LLM", "");
+    vi.stubEnv("MINSKY_LLM_PROVIDER", "");
+  });
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {
       server: { reachable: true, url: "http://127.0.0.1:1234" },
