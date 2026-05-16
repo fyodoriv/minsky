@@ -560,6 +560,12 @@ export {
   workerWorktreeName,
 } from "./worker-config.js";
 
+export {
+  type EnsureWorktreeDeps,
+  type EnsureWorktreeInput,
+  ensureWorktree,
+} from "./ensure-worktree.js";
+
 // Slice 3 of `daemon-parallel-worktree-launch`: per-task `**Touches**` glob
 // parser + pre-spawn collision check. Consumed by the supervisor to refuse
 // starting a worker on a task whose globs overlap an open daemon PR's file

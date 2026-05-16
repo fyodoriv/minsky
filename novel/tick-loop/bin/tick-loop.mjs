@@ -30,7 +30,7 @@
  * `runDaemon` is the pure orchestrator above.
  */
 
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, execFileSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
@@ -40,7 +40,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -96,6 +96,7 @@ import {
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
   ensureCtoAuditLabel,
+  ensureWorktree,
   formatRecommendations,
   fromRealBudgetGuard,
   isDaemonAuthoredBranch,
@@ -108,7 +109,6 @@ import {
   runParallelSweeper,
   sandboxModeStartupHint,
   workerStartupLine,
-  workerWorktreeName,
   // Slice 4 of `minsky-claude-exhaustion-persisted-state` — daemon
   // writes hard-limit hits to .minsky/state.json so the next
   // `minsky` invocation can skip the live probe and use local-LLM.
@@ -602,15 +602,24 @@ function pickAndLogStrategicModel() {
   return pick.agent === "claude" ? pick.model : undefined;
 }
 
-// Compute the per-worker git-worktree directory path when workerConfig is set.
-// When no workerConfig (single-process root before auto-scale), returns undefined
-// so opencode/aider inherits the parent's cwd (minskyHome). With workerConfig,
-// the worktree path is <minskyHome>/.claude/worktrees/daemon-<id>-<taskId>
-// — the checked-out feature branch where the model should write its changes.
-function buildWorktreeDir(taskId) {
+// P0 `local-worker-worktree-never-created`: the local (aider/opencode)
+// spawn path must CREATE the worktree it cd's into. The claude path gets
+// one from `claude --worktree`; the local path had no creator, so every
+// local iteration spawned the model into a missing / stale-pointer dir
+// and died at git setup before the model ran. Single-process (no
+// workerConfig) keeps inheriting the parent cwd (minskyHome) as before —
+// no worktree, returns undefined.
+function ensureLocalWorktree(taskId) {
   if (workerConfig === undefined) return undefined;
-  const name = workerWorktreeName({ workerId: workerConfig.workerId, taskId });
-  return join(minskyHome, ".claude", "worktrees", name);
+  return ensureWorktree(
+    { minskyHome, workerId: workerConfig.workerId, taskId },
+    {
+      exists: existsSync,
+      git: (args) => {
+        execFileSync("git", args, { stdio: "pipe" });
+      },
+    },
+  );
 }
 
 // Local-model efficiency (A): time-budget prefix prepended to every local brief.
@@ -644,7 +653,7 @@ function buildLocalStrategy() {
       command: opencodeBin,
       ...(localWatchdogMs !== undefined ? { timeoutMs: localWatchdogMs } : {}),
       invocation: (input) => {
-        const worktreeDir = buildWorktreeDir(input.taskId);
+        const worktreeDir = ensureLocalWorktree(input.taskId);
         return buildOpencodeInvocation({
           brief: buildLocalBriefAugmented(input),
           command: opencodeBin,
@@ -668,7 +677,7 @@ function buildLocalStrategy() {
     command: aiderBin,
     ...(localWatchdogMs !== undefined ? { timeoutMs: localWatchdogMs } : {}),
     invocation: (input) => {
-      const worktreeDir = buildWorktreeDir(input.taskId);
+      const worktreeDir = ensureLocalWorktree(input.taskId);
       return buildAiderInvocation({
         brief: buildLocalBriefAugmented(input),
         command: aiderBin,
