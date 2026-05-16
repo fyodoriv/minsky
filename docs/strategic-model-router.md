@@ -52,6 +52,8 @@ MINSKY_STRATEGIC_PIN_MODEL=claude-sonnet-4-6 pnpm minsky
 
 Bypasses the catalog walk; every iteration uses Sonnet regardless of remaining usage. Operator's literal pin always wins. Hard overrides (`forceClaude` / `preferLocal` / `circuit-break`) still upstream-gate it.
 
+**`MINSKY_LLM_PROVIDER=claude-only` is honored end-to-end** (budget-guard-correctness Slice C, 2026-05-16). Previously only the spawned tick-loop consumed it; `pnpm minsky`'s auto-bootstrap pre-flight (`maybeBootstrapLocalLlm`) ignored it and could still thread `MINSKY_LLM_PROVIDER=local-preferred` into the daemon whenever the local server was reachable / a hard-limit was persisted — silently overriding the operator on Minsky's (unreliable) budget estimate. The pre-flight now early-returns `{ MINSKY_LLM_PROVIDER: "claude-only" }` and skips the local probe entirely, so `MINSKY_LLM_PROVIDER=claude-only pnpm minsky` forces claude (sets `forceClaude`, which short-circuits before the budget circuit-break) without needing to bypass the wrapper.
+
 ### Refresh cadence
 
 ```bash

@@ -333,6 +333,21 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
     return {};
   }
 
+  // Operator explicitly forces claude. Documented in --help
+  // ("MINSKY_LLM_PROVIDER=claude-only force claude (skip local-LLM
+  // probe)") but previously unimplemented HERE: every path below
+  // (reachable-server / persisted-hard-limit / live-probe) could still
+  // thread MINSKY_LLM_PROVIDER=local-preferred into the spawned daemon,
+  // silently overriding the operator on Minsky's (unreliable) budget
+  // estimate (budget-guard-correctness Slice C). Honor it: skip the
+  // entire local pre-flight and thread claude-only through unchanged.
+  if (process.env["MINSKY_LLM_PROVIDER"] === "claude-only") {
+    process.stderr.write(
+      "minsky: MINSKY_LLM_PROVIDER=claude-only — honoring operator; skipping local-LLM pre-flight\n",
+    );
+    return { MINSKY_LLM_PROVIDER: "claude-only" };
+  }
+
   // Slice 60 — DI seam so tests can verify the install-trigger paths
   // without running a real bootstrap. Defaults to the production path.
   const bootstrapFn = _opts.bootstrapFn ?? (() => runBootstrapLocalLlm({ force: false }));
