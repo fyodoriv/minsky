@@ -45,6 +45,10 @@ export interface EnsureWorktreeInput {
  * original failure was a leftover dir whose `gitdir:` pointed at a repo
  * root that no longer exists.
  *
+ * @otel-exempt pure orchestration over injected git/fs; the outcome and
+ * any loud failure surface on the caller's `tick-loop.iteration` span
+ * (rule #6 — workspace-boundary crash), so a dedicated span here would
+ * only duplicate that signal.
  * @returns the absolute worktree directory (to be used as the spawn cwd).
  */
 export function ensureWorktree(input: EnsureWorktreeInput, deps: EnsureWorktreeDeps): string {
