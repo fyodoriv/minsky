@@ -64,3 +64,12 @@ export type {
 } from "./host-walker.js";
 export { resolveMinskyRepo } from "./shim-resolve.js";
 export type { ResolveResult, ResolveSource, ShimResolveInputs } from "./shim-resolve.js";
+export { assertWriteAllowed, classifyRepo } from "./repo-policy.js";
+export type {
+  AssertWriteAllowedInputs,
+  ClassifyRepoInputs,
+  RepoClass,
+  WriteDecision,
+  WriteKind,
+  WriteRefusalReason,
+} from "./repo-policy.js";

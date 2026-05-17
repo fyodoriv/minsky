@@ -197,9 +197,31 @@ Returns `{ ok: true, repoPath, source }` (where `source` records which seam matc
 
 `src/scan-processes.ts` exports pure `parseMinskyProcs(psText)` + the injected `scanMinskyProcesses(probe)` seam — the single machine-wide answer to "what minsky runs exist on this host right now?". It parses `ps` text into typed `MinskyProc` records (`kind: orchestrator | worker | gate`, repo root, per-run id), excluding `run-pre-pr-lint-stack` vet children and all non-minsky noise. Composes the OS `ps` rather than a bespoke registry (rule #1); the parse is pure with no I/O (rule #10); a broken/absent `ps` degrades to `[]` and never throws (rule #6) so it cannot take down the very TUI / launch path it serves. Foundational substrate for the runany P0 cluster (#588): the retro TUI dashboard, the multi-tenant no-conflict guard, and the zero-arg entrypoint all build on it instead of each re-deriving `ps` parsing. Tested by `scan-processes.test.ts` (7 paired cases: kind classification, multi-tenant repo derivation, worker run-id, vet-child exclusion, empty/garbage fail-safe, the injected seam, graceful-degrade).
 
+## `repo-policy` + `policy-ledger` (runany permission gate)
+
+`src/repo-policy.ts` is the deterministic least-authority seam for the
+run-anywhere conductor: `classifyRepo` returns `home | foreign` from
+normalized git origins (fail-safe to `foreign` when identity is
+unprovable), and `assertWriteAllowed` default-denies every write except
+the four explicitly-allowed cells — `home + push/pr` (full flow) and
+`foreign + pr` **iff** the diff is `TASKS.md`-only; a `foreign + push`
+or any non-`TASKS.md` foreign PR is refused with a typed reason. Pure,
+rule #10 (no model, no I/O); the caller does the git/gh work and asks
+this module yes/no. `src/policy-ledger.ts` turns one decision into the
+exact `.minsky/runany-policy.jsonl` record `scripts/runany-policy-audit.mjs`
+reads (`run-start` / `write-verdict`) — the wire contract between the
+gate and its pre-registered measurement. The conductor's only code
+write (`scripts/local-gate-merge.mjs`'s `gh pr merge`) is gated here: a
+target that is not provably home is refused, logged, and skipped — no
+gate ⇒ no code write (Saltzer & Schroeder 1975; rule #13). See
+`docs/run-anywhere.md` for the matrix and measurement command.
+
 ## Tests
 
-171+ paired vitest cases across 13 files (run `pnpm vitest run novel/cross-repo-runner`):
+171+ paired vitest cases across 15 files (run `pnpm vitest run novel/cross-repo-runner`):
+
+- `repo-policy.test.ts` (16) — full home/foreign × push/pr/taskmd matrix; origin normalization; fail-safe-to-foreign defaults
+- `policy-ledger.test.ts` (9) — record builders cross-checked against the audit's escape predicate; run-start marker; regression-is-scored-not-hidden
 
 - `task-finder.test.ts` (14) — parses tasks.md sections / ID / tags / details / rule-#9 fields; ID match; title-substring matching; not-found reporting
 - `experiment-synth.test.ts` (10) — happy-path YAML rendering; rule-#9 iron-rule violations (missing fields)
