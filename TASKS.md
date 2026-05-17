@@ -1230,6 +1230,19 @@
   - **Measurement**: `grep -c 'gate red: vitest' .minsky/orchestrate.out.log` over a fixed window before/after → trends to 0 for green PRs; vet p95 from `.minsky/orchestrate.jsonl` timing.
   - **Anchor**: Fowler 2011 *Eradicating Non-Determinism in Tests*; Nygard 2018 *Release It!* (resource contention / bulkhead); vision.md rule #6.
 
+- [ ] `worker-liveness-detect-by-label-not-argv` — `workerDaemonAlive()` greps `tick-loop.mjs --worker-id=0`; with `--spawn-additional-workers=N` the root argv has no `--worker-id=0`, so liveness detection is fragile/coincidental
+  - **ID**: worker-liveness-detect-by-label-not-argv
+  - **Tags**: orchestrator, healing, detection, reliability, rule-6
+  - **Competitive-goal**: a correct worker-liveness signal prevents spurious daemon kickstarts (avoids interrupting in-flight Opus iterations) → higher effective worker throughput on the `self-metrics-competitive-benchmark` scorecard.
+  - **Details**: 2026-05-17 scaled workers to 4 via plist `--spawn-additional-workers=3` (root = worker-0, children `--worker-id=1/2/3`). `scripts/orchestrate.mjs` `workerDaemonAlive()` (line ~53) and the external heartbeat both do `pgrep -f 'tick-loop.mjs --worker-id=0'` — the root proc's argv is now `--spawn-additional-workers=3` (no `--worker-id=0` substring) and no child is `--worker-id=0`, so the intended match is gone. It currently returns true only because a STRAY pre-reload worker proc (old `--worker-id=0 --workers-total=1` argv) happens to still be running; if that stray exits, `workerDaemonAlive()` flips false and the conductor kickstarts the (healthy) 4-worker daemon every tick — disruptive churn that SIGKILLs in-flight Opus iterations. Heartbeat already false-alarms `worker=DOWN`. Fix: detect daemon liveness by launchctl label (`launchctl print gui/$uid/com.minsky.opus-sonnet-run` state=running, runs/last-exit) — the daemon's actual supervisor truth — instead of an argv-substring grep that breaks on any arg-shape change. Update the heartbeat probe identically.
+  - **Files**: `scripts/orchestrate.mjs` (`workerDaemonAlive` → launchctl-label probe), heartbeat/monitor script, paired test in a new `scripts/orchestrate.test.mjs` (or extend) with injected probe
+  - **Acceptance**: `workerDaemonAlive()` returns true whenever `com.minsky.opus-sonnet-run` is launchd-running regardless of `--worker-id`/`--spawn-additional-workers` arg shape, and false only when the agent is genuinely down; paired test covers both via injected launchctl-state seam; no kickstart when the daemon is up under `--spawn-additional-workers`.
+  - **Hypothesis**: spurious worker-daemon kickstarts → 0 (currently latent: would fire every tick if the stray proc exits); in-flight Opus iterations no longer SIGKILLed by false heals.
+  - **Success**: with the 4-worker daemon up, `decideHeal` returns "ok" across 5 consecutive ticks even after the stray `--worker-id=0` proc is killed; heartbeat reports worker=up.
+  - **Pivot**: if launchctl-label parsing is brittle across macOS versions, fall back to a sentinel file the worker root touches each tick + an mtime-freshness check.
+  - **Measurement**: `grep -c 'healed.*true\|kickstarted com.minsky.opus-sonnet-run' .minsky/orchestrate.out.log` over a window with the daemon healthy → 0; ledger `healed:false` stays consistent after killing the stray proc.
+  - **Anchor**: vision.md rule #6 (supervisor owns restart — detect via the supervisor, not a brittle process-argv heuristic); Nygard 2018 *Release It!* (health checks must reflect real liveness, not a proxy that drifts).
+
 - [ ] `gate-merge-delete-branch-vs-worktree-pin` — `gh pr merge --delete-branch` errors when a daemon worktree pins the PR head branch; the server-side merge succeeds but the gate mis-records it as a failed merge
   - **ID**: gate-merge-delete-branch-vs-worktree-pin
   - **Tags**: gate, merge, worktree, reliability, false-negative
