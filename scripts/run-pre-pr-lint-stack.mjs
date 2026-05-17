@@ -239,6 +239,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "glossary-discipline",
       "hygiene",
       "lockfile-integrity",
+      "machine-budget",
       "maciek-smoke",
       "mape-k-budget-cap",
       "mape-k-constraints-md-size",
