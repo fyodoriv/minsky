@@ -1,8 +1,10 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   claudeBinaryReachableInvariant,
@@ -915,6 +917,38 @@ describe("parseIterationLogLine", () => {
 });
 
 describe("defaultInvariants", () => {
+  // Disclosed mandatory-gate unblock (composes with this PR's smoke-test +
+  // cross-repo-runner unblocks): `defaultInvariants()` builds probes that
+  // shell out to real `gh pr list` (no DI seam — it takes no args). In a
+  // sandboxed daemon worktree there is no route to the `gh` wrapper's
+  // enterprise host, so every `gh` call burns its full 10 s execFile timeout;
+  // with ~N network probes run sequentially that exceeds the 120 s test
+  // timeout and the test hangs-then-fails. Net effect: the full-stage
+  // pre-push gate red-blocks EVERY sandboxed daemon push fleet-wide — the
+  // exact "silently blocks the whole fleet's commit/push path" class the
+  // parent P0 (`commit-hook-chain-node-version-and-platform-resilience`)
+  // exists to eliminate. Fix is test-only and hermetic: shadow `gh` with a
+  // fail-fast stub on PATH so `ghJson` resolves to `null` in milliseconds
+  // (the offline outcome, just immediate). git/node/ps still resolve from
+  // the unmodified tail of PATH — only `gh` is shadowed. Zero production
+  // change; the real `defaultInvariants()`/`runInvariants` code paths still
+  // execute, just against a deterministic offline boundary.
+  /** @type {string} */
+  let ghStubDir;
+  /** @type {string} */
+  let originalPath;
+  beforeAll(() => {
+    ghStubDir = mkdtempSync(join(tmpdir(), "self-diagnose-gh-stub-"));
+    const ghStub = join(ghStubDir, "gh");
+    writeFileSync(ghStub, "#!/bin/sh\nexit 1\n");
+    chmodSync(ghStub, 0o755);
+    originalPath = process.env["PATH"] ?? "";
+    process.env["PATH"] = `${ghStubDir}:${originalPath}`;
+  });
+  afterAll(() => {
+    process.env["PATH"] = originalPath;
+    rmSync(ghStubDir, { recursive: true, force: true });
+  });
   it("returns at least 12 invariants (covering all the named gap-detectors)", () => {
     const invariants = defaultInvariants();
     expect(invariants.length).toBeGreaterThanOrEqual(12);
@@ -934,7 +968,14 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-  }, 120_000);
+    // The gh-stub above removes the dominant cost (the multi-minute
+    // enterprise-host dial timeout that tripped the old 120 s budget). The
+    // residual ~110 s is real local I/O the real suite legitimately does —
+    // 4× MaciekTokenMonitor.snapshot() over `~/.claude` usage JSONL, log
+    // parsing, git/ps. That's inherently slow, not broken, so the budget is
+    // raised to give margin under full-suite contention rather than masking a
+    // hang (a hang now fails fast at the stubbed boundary instead).
+  }, 240_000);
 });
 
 describe("CANONICAL_REPO is single-sourced from daemon-pr-lint-metrics", () => {

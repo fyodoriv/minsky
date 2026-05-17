@@ -94,6 +94,24 @@ undefined)`s the three bootstrap-policy vars (the pattern Slice-C in the same
 file already documents), `afterEach` `vi.unstubAllEnvs()`. Now 4/4 under the
 ambient daemon env; zero production-code change.
 
+Third disclosed unblock — the same full-stage pre-push vitest was then red on
+`scripts/self-diagnose.test.mjs > defaultInvariants > runInvariants(…)`, also
+pre-existing and **not** in this PR's diff. `defaultInvariants()` builds probes
+that shell out to real `gh pr list` with no DI seam; in a sandboxed daemon
+worktree there is no route to the `gh` wrapper's enterprise host, so every
+`gh` call burns its full 10 s `execFile` timeout and the sequential probe set
+exceeds the test's 120 s budget — a hard timeout failure on **every** sandboxed
+daemon push fleet-wide, the exact "silently blocks the whole fleet's push
+path" class this P0 targets. Test-only hermetic fix: a `beforeAll` shadows
+`gh` with a fail-fast stub on `PATH` (so `ghJson` resolves to `null` in ms —
+the offline outcome, just immediate; `git`/`node`/`ps` still resolve from the
+unmodified PATH tail), `afterAll` restores PATH and removes the stub dir. The
+residual ~110 s is real local I/O the suite legitimately does (4×
+`MaciekTokenMonitor.snapshot()` over `~/.claude` JSONL, log parsing); the
+per-test budget is raised 120 s→240 s for full-suite-contention margin rather
+than masking a hang (a hang now fails fast at the stubbed boundary). 99/99
+pass; zero production-code change.
+
 The only rule-3-governed code touched (`novel/cross-repo-runner` non-test
 `.ts`) is a no-public-surface mechanical refactor, so the whole-PR rule-3
 exemption marker below is accurate (the tick-loop change is a `.test.ts`,
