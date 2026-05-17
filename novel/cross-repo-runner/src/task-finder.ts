@@ -137,6 +137,21 @@ interface ParserState {
   tasks: ParsedTask[];
   currentPriority: string;
   currentTask: PartialParsedTask | null;
+  // Continuation tracking — when a `**Field**:` matches we remember the
+  // indent level of the field's bullet AND a setter that appends to the
+  // captured field. Subsequent lines whose indent is STRICTLY greater
+  // than the field's indent (i.e. they're nested under the bullet) get
+  // appended to the same field. The continuation closes when any of:
+  //   (a) the line matches a new `**Field**:` pattern
+  //   (b) the line indent ≤ the field indent (a sibling bullet)
+  //   (c) the line is a checkbox or `## P\d+` section heading
+  // Without this state the parser captures only the FIRST line of any
+  // bullet — see example-service-plugin task `fix-minsky-parser-multiline-details`
+  // for the field report (bulletproof-ux-dashboard brief truncated to
+  // "Walk the page state-by-state:" so claude --print had no actionable
+  // steps and shipped nothing).
+  currentFieldIndent: number | null;
+  currentFieldAppend: ((extra: string) => void) | null;
 }
 
 function processTaskLine(line: string, state: ParserState): void {
@@ -145,17 +160,29 @@ function processTaskLine(line: string, state: ParserState): void {
     flushTask(state.currentTask, state.tasks);
     state.currentPriority = priorityMatch[1];
     state.currentTask = null;
+    state.currentFieldIndent = null;
+    state.currentFieldAppend = null;
     return;
   }
   const checkboxMatch = line.match(/^-\s+\[\s*[ x]\s*\]\s+(.*)$/);
   if (checkboxMatch?.[1] !== undefined) {
     flushTask(state.currentTask, state.tasks);
     state.currentTask = startTask(checkboxMatch[1].trim(), state.currentPriority);
+    state.currentFieldIndent = null;
+    state.currentFieldAppend = null;
     return;
   }
   if (state.currentTask !== null) {
-    assignMetadata(state.currentTask, line);
+    assignMetadata(state.currentTask, line, state);
   }
+}
+
+// Count leading-whitespace characters (tabs + spaces) before the first
+// non-whitespace char. Used to detect continuation lines (indent strictly
+// greater than the parent bullet's indent → continuation).
+function leadingIndentWidth(line: string): number {
+  const match = line.match(/^[ \t]*/);
+  return match !== null ? match[0].length : 0;
 }
 
 /**
@@ -167,7 +194,13 @@ function processTaskLine(line: string, state: ParserState): void {
  * @otel cross-repo-runner.parse-tasks-md
  */
 export function parseTasksMd(content: string): ParsedTask[] {
-  const state: ParserState = { tasks: [], currentPriority: "", currentTask: null };
+  const state: ParserState = {
+    tasks: [],
+    currentPriority: "",
+    currentTask: null,
+    currentFieldIndent: null,
+    currentFieldAppend: null,
+  };
   for (const line of content.split("\n")) {
     processTaskLine(line, state);
   }
@@ -204,7 +237,11 @@ function finaliseTask(p: PartialParsedTask): ParsedTask | null {
   };
 }
 
-function assignMetadata(task: PartialParsedTask, line: string): void {
+function assignMetadata(
+  task: PartialParsedTask,
+  line: string,
+  state: ParserState,
+): void {
   // Strip a leading bullet marker (`- ` or `* `) so both tasks.md-spec
   // formats parse identically:
   //   (a) nested-bullet style (what this repo's own TASKS.md uses, and
@@ -221,7 +258,26 @@ function assignMetadata(task: PartialParsedTask, line: string): void {
   // `- **ID**: foo` did not match the regex `^\*\*ID\*\*:\s*(.+)$`.
   // Fix: after `trim()`, strip an optional leading `-·` / `*·` so the
   // same regex set matches both formats.
+  const indent = leadingIndentWidth(line);
   const stripped = line.trim().replace(/^[-*]\s+/, "");
+  // For each field setter we also register a continuation-append on
+  // `state` so subsequent indented lines flow into the same field. The
+  // append function is reset when a new field matches OR the indent
+  // drops back to ≤ the field's bullet indent.
+  const registerContinuation = (
+    write: (combined: string) => void,
+    read: () => string | null,
+  ): void => {
+    state.currentFieldIndent = indent;
+    state.currentFieldAppend = (extra) => {
+      const existing = read();
+      const next =
+        existing === null || existing.length === 0
+          ? extra
+          : `${existing}\n${extra}`;
+      write(next);
+    };
+  };
   const mappings: [RegExp, (val: string) => void][] = [
     [
       /^\*\*ID\*\*:\s*(.+)$/,
@@ -239,36 +295,72 @@ function assignMetadata(task: PartialParsedTask, line: string): void {
       /^\*\*Details\*\*:\s*(.+)$/,
       (val) => {
         task.details = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.details = combined;
+          },
+          () => task.details,
+        );
       },
     ],
     [
       /^\*\*Hypothesis\*\*:\s*(.+)$/,
       (val) => {
         task.hypothesis = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.hypothesis = combined;
+          },
+          () => task.hypothesis,
+        );
       },
     ],
     [
       /^\*\*Success\*\*:\s*(.+)$/,
       (val) => {
         task.success = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.success = combined;
+          },
+          () => task.success,
+        );
       },
     ],
     [
       /^\*\*Pivot\*\*:\s*(.+)$/,
       (val) => {
         task.pivot = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.pivot = combined;
+          },
+          () => task.pivot,
+        );
       },
     ],
     [
       /^\*\*Measurement\*\*:\s*(.+)$/,
       (val) => {
         task.measurement = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.measurement = combined;
+          },
+          () => task.measurement,
+        );
       },
     ],
     [
       /^\*\*Anchor\*\*:\s*(.+)$/,
       (val) => {
         task.anchor = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.anchor = combined;
+          },
+          () => task.anchor,
+        );
       },
     ],
   ];
@@ -277,6 +369,36 @@ function assignMetadata(task: PartialParsedTask, line: string): void {
     if (m?.[1] !== undefined) {
       assign(m[1]);
       return;
+    }
+  }
+  // Continuation handling: the line didn't open a new field. If we're
+  // currently inside a field's bullet (currentFieldAppend set) AND the
+  // line is more indented than the field's bullet (i.e. nested under
+  // it), this is a continuation — append it to the field's value. Stop
+  // on a sibling/parent bullet (indent ≤ field indent) by clearing the
+  // continuation state. Empty lines preserve continuation (markdown
+  // paragraph breaks are inside the bullet).
+  if (
+    state.currentFieldAppend !== null &&
+    state.currentFieldIndent !== null &&
+    line.trim().length > 0
+  ) {
+    if (indent > state.currentFieldIndent) {
+      // Preserve content but strip leading indent so the captured field
+      // reads as natural prose. Use field-bullet's indent + 2 as the
+      // "content-indent" floor; anything more indented is preserved
+      // verbatim (so nested numbered lists keep their offset).
+      const contentIndent = state.currentFieldIndent + 2;
+      const trimmedLeft = line.replace(
+        new RegExp(`^[ \\t]{0,${contentIndent}}`),
+        "",
+      );
+      state.currentFieldAppend(trimmedLeft);
+    } else {
+      // Indent dropped to ≤ the field's indent → this is a sibling
+      // bullet or end of nested block. Close the continuation.
+      state.currentFieldIndent = null;
+      state.currentFieldAppend = null;
     }
   }
 }
