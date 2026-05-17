@@ -12,13 +12,15 @@
 # Conformance: full — no business logic here, only DI + forwarding.
 #
 # Usage:
-#   minsky               → autonomous run against $(pwd); cwd-detect
-#                          decides single-host vs multi-host walk.
-#   minsky --host <dir>  → explicit single-host.
-#   minsky --hosts-dir <parent> → explicit multi-host walk.
+#   minsky               → zero-arg: detect cwd git root (or plain dir),
+#                          launch scripts/orchestrate.mjs scoped to that root.
+#                          Works from any folder — git repo, nested-repos
+#                          tree, monorepo, worktree, or plain directory.
+#   minsky --host <dir>  → explicit single-host (forwarded to minsky-run).
+#   minsky --hosts-dir <parent> → explicit multi-host walk (minsky-run).
 #   minsky --help        → forwarded to `minsky-run --help`.
-#   minsky status        → list running minsky-run processes on this host.
-#   minsky stop          → SIGTERM any running minsky-run processes.
+#   minsky status        → list running minsky (conductor + workers).
+#   minsky stop          → SIGTERM conductor + worker processes.
 #
 # Resolution order (via `resolveMinskyRepo`):
 #   1. $MINSKY_REPO env var (if set + exists)
@@ -52,21 +54,35 @@ fi
 # without minsky checked out can still report "no running process".
 case "${1:-}" in
   status)
-    # Find processes: node invocations of the runner bin. Use `pgrep -a`
-    # for PID + command line so the operator sees the args.
-    if pgrep -fal "cross-repo-runner/bin/minsky-run" 2>/dev/null; then
-      exit 0
+    # Find processes: conductor (scripts/orchestrate.mjs) + worker runners.
+    # Use `pgrep -a` for PID + command line so the operator sees the args.
+    FOUND=0
+    if pgrep -fal "scripts/orchestrate.mjs" 2>/dev/null; then
+      FOUND=1
     fi
-    echo "no running minsky-run on this host"
+    if pgrep -fal "cross-repo-runner/bin/minsky-run" 2>/dev/null; then
+      FOUND=1
+    fi
+    if [ "$FOUND" -eq 0 ]; then
+      echo "no running minsky on this host"
+    fi
     exit 0
     ;;
   stop)
-    # SIGTERM every running minsky-run process. The runner's own signal
+    # SIGTERM conductor + worker processes. The runner's own signal
     # handler (host-loop.ts → abort signal) finishes the in-flight
     # iteration before exiting.
+    STOPPED=0
+    if pgrep -f "scripts/orchestrate.mjs" >/dev/null 2>&1; then
+      pkill -TERM -f "scripts/orchestrate.mjs"
+      STOPPED=1
+    fi
     if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
       pkill -TERM -f "cross-repo-runner/bin/minsky-run"
-      echo "sent SIGTERM to all running minsky-run processes"
+      STOPPED=1
+    fi
+    if [ "$STOPPED" -eq 1 ]; then
+      echo "sent SIGTERM to all running minsky processes"
       exit 0
     fi
     echo "nothing to stop"
@@ -130,6 +146,32 @@ if [ ! -f "$RUNNER_BIN" ]; then
   exit 1
 fi
 
-# Forward every arg verbatim. The runner bin itself handles `--help`,
-# cwd auto-detect, countdown banner, autonomous defaults, etc.
+# ── 4. Zero-arg: detect cwd context → launch conductor ──────────────
+#
+# With no arguments, minsky detects the git root of the current working
+# directory (or falls back to cwd for non-git dirs) and launches the
+# orchestrator conductor scoped to that root. This satisfies the
+# "run from any folder" requirement (Saltzer & Schroeder 1975 —
+# least-surprise default; no env vars or flags required).
+#
+# Detection:
+#   git repo / monorepo / worktree → MINSKY_HOME = git root
+#   parent-of-repos / plain dir    → MINSKY_HOME = $PWD (parent or dir)
+#
+# The conductor (scripts/orchestrate.mjs) reads MINSKY_HOME and scopes
+# its ledger + sweep to that root. Per-tick errors are caught internally
+# so the process stays alive regardless of repo type.
+if [ $# -eq 0 ]; then
+  DETECTED_ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+  CONDUCTOR_BIN="$MINSKY_REPO_PATH/scripts/orchestrate.mjs"
+  if [ ! -f "$CONDUCTOR_BIN" ]; then
+    echo "minsky: conductor not found at $CONDUCTOR_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
+    exit 1
+  fi
+  MINSKY_HOME="$DETECTED_ROOT" exec node "$CONDUCTOR_BIN"
+fi
+
+# ── 5. Forward every arg verbatim to minsky-run ──────────────────────
+# The runner bin itself handles `--help`, cwd auto-detect, countdown
+# banner, autonomous defaults, etc.
 exec node "$RUNNER_BIN" "$@"

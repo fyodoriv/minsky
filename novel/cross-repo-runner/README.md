@@ -197,6 +197,32 @@ Returns `{ ok: true, repoPath, source }` (where `source` records which seam matc
 
 `src/scan-processes.ts` exports pure `parseMinskyProcs(psText)` + the injected `scanMinskyProcesses(probe)` seam — the single machine-wide answer to "what minsky runs exist on this host right now?". It parses `ps` text into typed `MinskyProc` records (`kind: orchestrator | worker | gate`, repo root, per-run id), excluding `run-pre-pr-lint-stack` vet children and all non-minsky noise. Composes the OS `ps` rather than a bespoke registry (rule #1); the parse is pure with no I/O (rule #10); a broken/absent `ps` degrades to `[]` and never throws (rule #6) so it cannot take down the very TUI / launch path it serves. Foundational substrate for the runany P0 cluster (#588): the retro TUI dashboard, the multi-tenant no-conflict guard, and the zero-arg entrypoint all build on it instead of each re-deriving `ps` parsing. Tested by `scan-processes.test.ts` (7 paired cases: kind classification, multi-tenant repo derivation, worker run-id, vet-child exclusion, empty/garbage fail-safe, the injected seam, graceful-degrade).
 
+## `detectAnyCwd` (runany — zero-arg entrypoint resolver)
+
+`src/cwd-detect.ts` exports `detectAnyCwd` (+ `findGitRootSubdirs`), the
+pure resolver behind `minsky` with **no arguments** run in **any folder**
+(P0 `runany-zero-arg-entrypoint`). It extends `detectCwd` with git-root
+and plain-dir fallbacks so the operator never needs a prior
+`minsky-bootstrap`, env var, or flag (Saltzer & Schroeder 1975 —
+least-surprise default). Priority chain (first match wins):
+
+1. **bootstrapped** (`.minsky/repo.yaml`) → `single-host` (unchanged path)
+2. **bootstrapped subdirs** → `multi-host` (unchanged path)
+3. **git root** (`.git` present in cwd) → `single-host`
+4. **git-root subdirs** → `multi-host`
+5. **plain dir** (no git, no bootstrap) → `single-host`, cwd as root
+
+`minsky-run` keeps using `detectCwd` (bootstrap still required there);
+only the `bin/minsky` zero-arg path uses the run-anywhere chain — it
+detects the git root via `git rev-parse --show-toplevel` (fallback
+`$PWD`) and launches the launchd conductor (`scripts/orchestrate.mjs`)
+with `MINSKY_HOME` scoped to that root. Composes the existing shim +
+runner + conductor (rule #1 — no new orchestrator). See
+[`docs/run-anywhere.md`](../../docs/run-anywhere.md) for the operator
+flow and the 5-fixture acceptance smoke. Tested by `cwd-detect.test.ts`
+(git-root fallback, bootstrap-precedence, multi-host git subdirs,
+plain-dir fallback, detached-worktree `.git`-file detection).
+
 ## Tests
 
 171+ paired vitest cases across 13 files (run `pnpm vitest run novel/cross-repo-runner`):
@@ -209,7 +235,7 @@ Returns `{ ok: true, repoPath, source }` (where `source` records which seam matc
 - `runner.test.ts` (slice A) — `runLive` happy-path / scope-leak / spawn-failed verdicts; allowed-paths fallback
 - `host-loop.test.ts` (slice B + C seams) — stop conditions; abort; cto-audit + seed-on-empty interactions
 - `host-cto-audit.test.ts` (slice C) — gate predicate; brief builder; recursion-guard
-- `cwd-detect.test.ts` (slice D, 9) — single-host vs multi-host detection from `process.cwd()`
+- `cwd-detect.test.ts` (slice D + runany, 16) — single-host vs multi-host detection from `process.cwd()`; `detectAnyCwd` git-root / plain-dir / worktree fallbacks
 - `host-walker.test.ts` (slice D, 13) — drain-then-advance orchestrator; max-iterations sharing; empty-parent + all-hosts-drained stop reasons
 - `aifn-840-shape.test.ts` (20 integration cases) — end-to-end bootstrap → minsky-run smoke; autonomous-default aggregate; `--hosts-dir` walk; `--host` + `--hosts-dir` mutual exclusion
 - `shim-resolve.test.ts` (slice E, 10) — `resolveMinskyRepo` env-var + 4-step fallback chain; ordering; home-trailing-slash edge case
