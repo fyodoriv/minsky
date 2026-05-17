@@ -50,14 +50,28 @@ export type FindTaskResult =
  * priority section, document order wins (top-down — same convention as
  * `@minsky/tick-loop`'s `pickTask`).
  *
+ * Pass `openPrBranches` to skip tasks that already have an open PR on
+ * their canonical branch (`<branch_prefix><task.id>`). This makes the
+ * task-finder self-healing across the merge-vs-cleanup-task race:
+ * after task T's PR opens, minsky's NEXT iteration picks task T+1
+ * (the next eligible) instead of re-doing T while waiting for the
+ * operator to delete T from TASKS.md.
+ *
  * Returns `null` when no eligible task exists — the {@link runHostLoop}
  * caller uses this as the `empty-queue` stop signal.
  *
  * @otel cross-repo-runner.pick-host-task
  */
-export function pickHostTask(tasksMdContent: string): ParsedTask | null {
+export function pickHostTask(
+  tasksMdContent: string,
+  options?: { openPrBranches?: ReadonlySet<string>; branchPrefix?: string },
+): ParsedTask | null {
   const tasks = parseTasksMd(tasksMdContent);
-  const eligible = tasks.filter(isHostTaskEligible);
+  const openPrBranches = options?.openPrBranches ?? new Set<string>();
+  const branchPrefix = options?.branchPrefix ?? "feat/";
+  const eligible = tasks
+    .filter(isHostTaskEligible)
+    .filter((t) => !openPrBranches.has(`${branchPrefix}${t.id}`));
   for (const priority of ["P0", "P1"] as const) {
     const match = eligible.find((t) => t.priority === priority);
     if (match !== undefined) return match;
