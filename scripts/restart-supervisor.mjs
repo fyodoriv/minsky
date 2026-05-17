@@ -88,7 +88,9 @@ export function parseDurationSec(raw, fallbackSec) {
 export function backoffMsFor(restartIndex, scheduleSec = DEFAULT_BACKOFF_SCHEDULE_SEC) {
   const last = scheduleSec.length - 1;
   const i = Math.min(Math.max(Math.trunc(restartIndex) || 0, 0), last);
-  return scheduleSec[i] * 1000;
+  // `?? 0` only to satisfy noUncheckedIndexedAccess — `i` is clamped to
+  // [0, last] so the entry is always defined for a non-empty ladder.
+  return (scheduleSec[i] ?? 0) * 1000;
 }
 
 /**
@@ -135,5 +137,84 @@ export function decideRestart(s) {
     // index 1, not 0 — so a fresh crash-loop still ramps.
     nextRestartIndex: healthy ? 1 : s.restartIndex + 1,
     reason: healthy ? "restart-after-health-reset" : "restart-backoff",
+  };
+}
+
+/**
+ * Startup self-throttle decision — the *production* wire-in of the
+ * escalating, capped, reset-on-health backoff. launchd's `KeepAlive`
+ * respawns the conductor on crash, but its `ThrottleInterval` is a
+ * single *flat* number; launchd cannot escalate. So the escalation lives
+ * with the retrier (Beyer SRE 2016 — the retry budget belongs to the
+ * thing being retried, not the supervisor): at boot the conductor reads
+ * its own persisted crash history and self-throttles before resuming.
+ *
+ * A clean exit-0 at the deadline does NOT come back through here —
+ * launchd `KeepAlive{SuccessfulExit:false}` won't respawn a 0 exit — so
+ * reaching this code means the previous life crashed or was killed.
+ * `prevStartMs == null` is the first-ever launch (no prior crash, no
+ * persisted state) ⇒ no sleep, fresh supervised-run origin.
+ *
+ * Decision is delegated to `decideRestart` (rule #1 — one decision core,
+ * no second drifting schedule). The deadline ceiling is the conductor's
+ * own in-process guard, not this boot gate, so a sentinel limit is
+ * passed here. On a sustained-health reset the supervised-run origin is
+ * refreshed too: a recovered run earns a fresh wall-clock budget, the
+ * same way it earns a fresh backoff ladder (documented tradeoff — keeps
+ * a long-lived-but-occasionally-crashing run from being killed by a
+ * crash that happened 9h ago).
+ *
+ * Pure (rule #10): no I/O. The caller owns reading/writing the state
+ * file; this only maps prior state + clock → sleep + next state.
+ *
+ * @param {{
+ *   prevStartMs: number | null,   // wall-clock the previous life started
+ *   prevOriginMs: number | null,  // wall-clock the supervised run first started
+ *   prevRestartIndex: number,     // consecutive restarts carried in
+ *   nowMs: number,                // current wall-clock
+ *   healthyResetMs?: number,
+ *   scheduleSec?: readonly number[],
+ * }} s
+ * @returns {{
+ *   sleepMs: number,
+ *   nextRestartIndex: number,
+ *   startMs: number,              // persist as the new life start
+ *   originMs: number,             // persist as the supervised-run origin
+ *   reason: "first-run" | "restart-backoff" | "restart-after-health-reset",
+ * }}
+ */
+export function decideStartupThrottle(s) {
+  if (s.prevStartMs === null) {
+    return {
+      sleepMs: 0,
+      nextRestartIndex: 1,
+      startMs: s.nowMs,
+      originMs: s.nowMs,
+      reason: "first-run",
+    };
+  }
+  const healthyResetMs = s.healthyResetMs ?? DEFAULT_HEALTHY_RESET_SEC * 1000;
+  const prevLifeMs = Math.max(0, s.nowMs - s.prevStartMs);
+  const d = decideRestart({
+    elapsedMs: 0, // deadline is the conductor's in-process guard, not here
+    timeLimitMs: Number.MAX_SAFE_INTEGER,
+    restartIndex: s.prevRestartIndex,
+    healthyMs: prevLifeMs,
+    healthyResetMs,
+    // Conditional spread, not `scheduleSec: s.scheduleSec` —
+    // exactOptionalPropertyTypes forbids passing an explicit `undefined`
+    // to an optional prop; omit it so decideRestart's own default applies.
+    ...(s.scheduleSec ? { scheduleSec: s.scheduleSec } : {}),
+  });
+  const healthReset = d.reason === "restart-after-health-reset";
+  return {
+    sleepMs: d.backoffMs,
+    nextRestartIndex: d.nextRestartIndex,
+    startMs: s.nowMs,
+    // Recovered run ⇒ fresh wall-clock budget; otherwise carry the
+    // original supervised-run origin so the deadline is a true ceiling
+    // across launchd restarts (not reset per process life).
+    originMs: healthReset || s.prevOriginMs === null ? s.nowMs : s.prevOriginMs,
+    reason: /** @type {"restart-backoff" | "restart-after-health-reset"} */ (d.reason),
   };
 }

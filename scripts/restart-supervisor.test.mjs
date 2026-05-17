@@ -10,6 +10,7 @@ import {
   DEFAULT_RUN_TIME_LIMIT_SEC,
   backoffMsFor,
   decideRestart,
+  decideStartupThrottle,
   parseDurationSec,
 } from "./restart-supervisor.mjs";
 
@@ -122,5 +123,112 @@ describe("decideRestart", () => {
       healthyResetMs: 1_200_000,
     };
     expect(decideRestart(args)).toEqual(decideRestart(args));
+  });
+});
+
+describe("decideStartupThrottle (production boot wire-in)", () => {
+  const resetMs = 1_200_000; // 20 min
+
+  it("first-ever launch: no sleep, fresh origin, index → 1", () => {
+    const t = decideStartupThrottle({
+      prevStartMs: null,
+      prevOriginMs: null,
+      prevRestartIndex: 0,
+      nowMs: 5_000,
+      healthyResetMs: resetMs,
+    });
+    expect(t).toEqual({
+      sleepMs: 0,
+      nextRestartIndex: 1,
+      startMs: 5_000,
+      originMs: 5_000,
+      reason: "first-run",
+    });
+  });
+
+  it("short-lived crash-loop escalates and carries the supervised-run origin", () => {
+    // Previous life started at 1_000_000, origin at 800_000, crashed
+    // ~20s later (well under the 20-min health window) → escalate.
+    const t = decideStartupThrottle({
+      prevStartMs: 1_000_000,
+      prevOriginMs: 800_000,
+      prevRestartIndex: 1,
+      nowMs: 1_020_000,
+      healthyResetMs: resetMs,
+    });
+    expect(t.sleepMs).toBe(backoffMsFor(1)); // 30s — escalated
+    expect(t.nextRestartIndex).toBe(2);
+    expect(t.reason).toBe("restart-backoff");
+    // Crucial for Acceptance #3: the deadline origin is NOT reset by a
+    // crash — the 10h ceiling is bounded across launchd respawns.
+    expect(t.originMs).toBe(800_000);
+    expect(t.startMs).toBe(1_020_000);
+  });
+
+  it("caps the escalation at the ladder ceiling", () => {
+    const t = decideStartupThrottle({
+      prevStartMs: 1_000_000,
+      prevOriginMs: 1_000_000,
+      prevRestartIndex: 9,
+      nowMs: 1_010_000,
+      healthyResetMs: resetMs,
+    });
+    expect(t.sleepMs).toBe(backoffMsFor(99)); // capped at 300s
+  });
+
+  it("recovered run (lived ≥ health window) resets backoff AND deadline origin", () => {
+    // Previous life ran 25 min before crashing — past the 20-min
+    // health window: fresh ladder AND a fresh wall-clock budget.
+    const t = decideStartupThrottle({
+      prevStartMs: 1_000_000,
+      prevOriginMs: 100_000, // a long-past origin
+      prevRestartIndex: 7,
+      nowMs: 1_000_000 + 25 * 60_000,
+      healthyResetMs: resetMs,
+    });
+    expect(t.sleepMs).toBe(backoffMsFor(0)); // base
+    expect(t.nextRestartIndex).toBe(1);
+    expect(t.reason).toBe("restart-after-health-reset");
+    expect(t.originMs).toBe(t.startMs); // fresh budget for the recovered run
+  });
+
+  it("missing persisted origin (legacy state) starts a fresh origin", () => {
+    const t = decideStartupThrottle({
+      prevStartMs: 1_000_000,
+      prevOriginMs: null, // old state file without originMs
+      prevRestartIndex: 2,
+      nowMs: 1_005_000,
+      healthyResetMs: resetMs,
+    });
+    expect(t.originMs).toBe(1_005_000);
+    expect(t.reason).toBe("restart-backoff");
+  });
+
+  it("defaults healthyResetMs to DEFAULT_HEALTHY_RESET_SEC when omitted", () => {
+    const justUnder = decideStartupThrottle({
+      prevStartMs: 0,
+      prevOriginMs: 0,
+      prevRestartIndex: 0,
+      nowMs: DEFAULT_HEALTHY_RESET_SEC * 1000 - 1,
+    });
+    expect(justUnder.reason).toBe("restart-backoff");
+    const atWindow = decideStartupThrottle({
+      prevStartMs: 0,
+      prevOriginMs: 0,
+      prevRestartIndex: 0,
+      nowMs: DEFAULT_HEALTHY_RESET_SEC * 1000,
+    });
+    expect(atWindow.reason).toBe("restart-after-health-reset");
+  });
+
+  it("is pure — same input, same output", () => {
+    const args = {
+      prevStartMs: 1_000,
+      prevOriginMs: 500,
+      prevRestartIndex: 3,
+      nowMs: 2_000,
+      healthyResetMs: resetMs,
+    };
+    expect(decideStartupThrottle(args)).toEqual(decideStartupThrottle(args));
   });
 });
