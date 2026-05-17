@@ -371,6 +371,26 @@ export {
   spawnTickDryRun,
 } from "./daemon.js";
 
+// Slice 1 of `native-agent-teams-with-tiered-adapter`: the capability-tier
+// Strategy seam + pure detection (rule #2). Real backends land in later
+// slices; this is the stable contract the orchestrator selects against.
+export type {
+  AgentCapabilityTier,
+  AgentTeamBackend,
+  AgentTeammateRef,
+  SpawnTeammateInput,
+} from "./agent-team-backend.js";
+export {
+  AGENT_TEAMS_ENV,
+  AGENT_TEAMS_MIN_VERSION,
+  type DetectAgentTeamsInput,
+  type DetectAgentTeamsResult,
+  detectAgentTeamsSupport,
+  isClaudeCodeAgent,
+  parseSemver,
+  semverGte,
+} from "./detect-agent-teams-support.js";
+
 // Sub-task of `daily-changelog-for-humans` — expose the changelog-runner
 // primitives so the CLI (`bin/tick-loop.mjs`) can wire the seam without
 // reaching past `dist/`. Mirrors the post-task-cto-audit re-export block.
