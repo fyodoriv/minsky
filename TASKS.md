@@ -874,6 +874,19 @@
 
 ## P1
 
+- [ ] `biome-unformatted-file-reached-main-gate-gap` — a biome-unformatted file (`novel/cross-repo-runner/src/task-finder.ts`) is present on `origin/main`, proving the repo-wide `biome ci .` `mustSucceed` gate did not block the merge that introduced it
+  - **ID**: biome-unformatted-file-reached-main-gate-gap
+  - **Tags**: p1, ci, feedback-loop, biome, gate-gap
+  - **Surfaced-by**: 2026-05-17 `daemon-task-rotation-on-completion` iteration — `pnpm pre-pr-lint` failed its whole-repo `biome ci .` step on `task-finder.ts`; `git diff origin/main -- task-finder.ts` is empty (file is byte-identical to `origin/main`) and repo-pinned biome 1.9.4 flags it on the `origin/main` blob too. Introduced by the merged `feat(task-finder)` PRs (#597/#598). The formatting itself is being fixed in this same PR (formatting-only, rule #9 trivially-correct); THIS task is the class-level fix.
+  - **Details**: the real defect is not the one file — it is that a `mustSucceed` biome violation reached `main` at all. Either (a) the merge bypassed the gate (admin-merge / `--no-verify` / red-but-merged), or (b) the local pre-commit biome step is diff-scoped while CI's is whole-repo, so a file formatted-clean-at-commit-time can be broken by a *later* biome version bump without any commit touching it. Investigate which, then close the hole: pin the biome version identically across pre-commit, `pnpm pre-pr-lint`, and `.github/workflows/ci.yml`, and add a test that asserts the three biome invocations resolve the same binary version (rule: every bug becomes a rule — feedback-loop guardrail).
+  - **Files**: `.github/workflows/ci.yml` (biome job), `scripts/run-pre-pr-lint-stack.mjs` (biome step), the pre-commit hook biome step, `biome.json`/`package.json` biome pin.
+  - **Hypothesis**: today ≥1 biome-unformatted file can sit on `main` undetected between biome-version bumps (observed: `task-finder.ts` on `origin/main`). After pinning biome identically across the three gates + the parity test, the count of biome-unformatted files on `main` (`node_modules/.bin/biome ci . | grep -c "differs"` on a fresh `origin/main` checkout) holds at 0 across a biome version bump.
+  - **Success**: 0 biome-format violations on a fresh `origin/main` checkout, verified in CI on every push (the whole-repo biome job already exists; the gap is version-pin parity).
+  - **Pivot**: if version-pin parity is already in place and the cause was an admin/bypass merge, instead add a branch-protection required-status-check audit rather than touching the biome wiring.
+  - **Measurement**: `git fetch origin && git -C $(mktemp -d) clone . && node_modules/.bin/biome ci . 2>&1 | grep -c "File content differs"` returns 0; CI biome job is green on `main`.
+  - **Anchor**: Feedback Loop Guardrails (global CLAUDE.md — "Every bug becomes a rule … prevent the category, not the instance"); rule #11 (no flaky/ungated checks).
+  - **Acceptance**: (1) biome version pinned identically across pre-commit, `pnpm pre-pr-lint`, and `ci.yml`; (2) a test asserts the three resolve the same biome version; (3) measurement shows 0 format violations on a fresh `main` checkout.
+
 - [ ] `tick-loop-transient-gh-401-must-not-crash-daemon` — a transient GitHub `401 Unauthorized` inside a tick-loop iteration crashes the whole Sonnet worker daemon (exit 1) instead of being handled
   - **ID**: tick-loop-transient-gh-401-must-not-crash-daemon
   - **Tags**: p1, reliability, daemon, stay-alive, rule-6
