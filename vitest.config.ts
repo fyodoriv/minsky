@@ -28,6 +28,16 @@ export default defineConfig({
   },
   test: {
     globals: false,
+    // The local merge-gate vets PRs in a scratch clone while the worker
+    // daemon + orchestrator run concurrently — the host is routinely 2-3x
+    // oversubscribed (load ~25 on 10 cores). Under that contention a
+    // timing-sensitive test can flake, which previously failed the gate's
+    // `vitest` step and made the conductor SKIP an otherwise-green PR
+    // (the residual merge-rate-0 tail after #590/#592/#593). Retry
+    // distinguishes a load flake (fails then passes) from a real failure
+    // (fails every attempt) — Fowler 2011 "Eradicating Non-Determinism in
+    // Tests".
+    retry: 2,
     include: [
       "novel/**/src/**/*.test.ts",
       "novel/**/test/**/*.test.ts",
