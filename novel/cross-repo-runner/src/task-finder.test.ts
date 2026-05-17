@@ -71,6 +71,71 @@ describe("parseTasksMd", () => {
   test("returns empty array for content with no tasks", () => {
     expect(parseTasksMd("# Tasks\n\n## P0\n\n## P1\n")).toEqual([]);
   });
+
+  test("captures multi-line continuation lines under **Details**:", () => {
+    // Regression — discovered 2026-05-16 on the example-service-plugin run:
+    // `bulletproof-ux-dashboard` had a numbered list under **Details**
+    // that the parser silently dropped, so claude --print received a
+    // brief with empty actionable steps and shipped nothing. The fix
+    // captures any line whose indent is strictly greater than the
+    // field-bullet's indent, until a sibling/parent bullet closes it.
+    const md = `# Tasks
+
+## P0
+
+- [ ] Sample task with multi-line details
+
+  - **ID**: sample-multiline
+  - **Tags**: regression
+  - **Hypothesis**: needs to survive multi-line
+  - **Success**: details captures all 4 lines
+  - **Pivot**: capture only first line
+  - **Measurement**: yarn vitest run task-finder
+  - **Anchor**: 2026-05-16 example-service-plugin run
+  - **Details**: Walk the page state-by-state:
+    1. \`default\` — the happy path
+    2. \`loading\` — skeleton
+    3. \`empty\` — no team
+    4. \`error\` — PagerDuty 500
+
+    Reuse \`src/shared/components/{Skeleton, EmptyState}\`.
+`;
+    const tasks = parseTasksMd(md);
+    expect(tasks.length).toBe(1);
+    const t = tasks[0];
+    expect(t?.details).toContain("Walk the page state-by-state");
+    expect(t?.details).toContain("1. `default`");
+    expect(t?.details).toContain("4. `error`");
+    expect(t?.details).toContain("Reuse");
+    expect(t?.anchor).toBe("2026-05-16 example-service-plugin run");
+    expect(t?.hypothesis).toBe("needs to survive multi-line");
+  });
+
+  test("continuation does not bleed across sibling **Field**: bullets", () => {
+    const md = `# Tasks
+
+## P0
+
+- [ ] Sample task
+
+  - **ID**: sample-no-bleed
+  - **Tags**: regression
+  - **Details**: First line of details.
+
+    Continuation paragraph still part of Details.
+  - **Hypothesis**: separate field, not in details
+  - **Success**: ok
+  - **Pivot**: ok
+  - **Measurement**: ok
+  - **Anchor**: ok
+`;
+    const tasks = parseTasksMd(md);
+    const t = tasks[0];
+    expect(t?.details).toContain("First line of details.");
+    expect(t?.details).toContain("Continuation paragraph still part of Details.");
+    expect(t?.details).not.toContain("separate field");
+    expect(t?.hypothesis).toBe("separate field, not in details");
+  });
 });
 
 describe("findTask — exact ID match", () => {
