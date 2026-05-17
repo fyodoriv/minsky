@@ -1230,6 +1230,19 @@
   - **Measurement**: `grep -c 'gate red: vitest' .minsky/orchestrate.out.log` over a fixed window before/after → trends to 0 for green PRs; vet p95 from `.minsky/orchestrate.jsonl` timing.
   - **Anchor**: Fowler 2011 *Eradicating Non-Determinism in Tests*; Nygard 2018 *Release It!* (resource contention / bulkhead); vision.md rule #6.
 
+- [ ] `gate-merge-delete-branch-vs-worktree-pin` — `gh pr merge --delete-branch` errors when a daemon worktree pins the PR head branch; the server-side merge succeeds but the gate mis-records it as a failed merge
+  - **ID**: gate-merge-delete-branch-vs-worktree-pin
+  - **Tags**: gate, merge, worktree, reliability, false-negative
+  - **Competitive-goal**: removes a false-negative in the merge path → cleaner autonomous-merge-rate signal + lower MTTR on the `self-metrics-competitive-benchmark` scorecard.
+  - **Details**: 2026-05-17 gate sweep on #580 logged `#580: merge call failed: Command failed: gh pr merge 580 --squash --admin --delete-branch — failed to delete local branch worktree-daemon-0-minsky-cli-context-aware-ux`. But `gh pr view 580` shows `state=MERGED merged=2026-05-17T02:18:33Z` — the server-side squash merge SUCCEEDED; only the post-merge LOCAL `git branch -d` failed because a parallel worker daemon worktree had that branch checked out (worktree pins the ref). `gh pr merge` does server-merge first, then local cleanup; the cleanup error makes `execFileSync` throw, so `processOnePr` records `merge-failed` for an already-merged PR. Harm: (a) the conductor may re-vet/re-attempt an already-merged PR (wasted bounded sweep slot), (b) the `merged[]` ledger undercounts real merges (corrupts the competitive scorecard's autonomous-merge-rate). Fix: in `defaultMerge`, detect "already merged" (treat as success — re-query `gh pr view --json state` on merge-call failure; MERGED ⇒ success), and/or pass merge without `--delete-branch` when the head branch is held by a worktree (`git worktree list --porcelain` check), leaving branch cleanup to a separate best-effort step (rule #6).
+  - **Files**: `scripts/local-gate-merge.mjs` (`defaultMerge` + `processOnePr` post-merge state re-check), paired test in `scripts/local-gate-merge.test.mjs`
+  - **Acceptance**: a PR whose head branch is worktree-pinned still records `merged` (not `merge-failed`) when GitHub reports `state=MERGED`; a genuinely failed merge still records `merge-failed`; paired tests cover both via injected `mergeFn`/state-probe.
+  - **Hypothesis**: ledger `merged[]` count matches GitHub's actual merged-PR count over a window (currently undercounts by the worktree-pinned cases); 0 re-attempts of already-merged PRs.
+  - **Success**: in a fixture where `mergeFn` throws a delete-branch error but the PR is server-MERGED, `processOnePr` returns `merged`; scorecard autonomous-merge-rate stops undercounting.
+  - **Pivot**: if post-merge state re-query is rate-limit-costly, drop `--delete-branch` entirely from the gate merge and reap merged branches in a periodic GC pass.
+  - **Measurement**: diff `grep -c '"merged":\[[0-9]' .minsky/orchestrate.jsonl`-derived count vs `gh pr list --state merged --search 'merged:>=<window>'` count → equal after fix.
+  - **Anchor**: vision.md rule #6 (cleanup best-effort, never gates the result) + rule #10; the merge is the result, branch deletion is incidental cleanup.
+
 - [ ] `gate-scratch-dir-gc` — sweep-start garbage-collect of stale `minsky-gate-*` scratch dirs, companion to the best-effort teardown
   - **ID**: gate-scratch-dir-gc
   - **Tags**: gate, hygiene, rule-6, reliability
