@@ -24,11 +24,41 @@
 //                      env MINSKY_ORCH_INTERVAL_MS also honored)
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { detectConductorRoot } from "../novel/cross-repo-runner/dist/index.js";
 import { runGateSweep } from "./local-gate-merge.mjs";
 
-const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
+/**
+ * Pure: resolve the root the conductor scopes to (its `MINSKY_HOME`).
+ * `MINSKY_HOME` env wins (set by launchd units / `minsky-bootstrap`);
+ * otherwise the conductor self-detects from `cwd` via the SAME pure
+ * zero-arg precedence chain `bin/minsky` documents (single source of
+ * truth — the shim no longer duplicates git-root detection in bash).
+ * Extracted + exported so the decision is unit-testable with an
+ * injected fs probe (rule #10 — no real I/O in the decision; the
+ * default probe is wired only at the call site below).
+ * @param {Record<string,string|undefined>} env
+ * @param {string} cwd
+ * @param {{exists:(p:string)=>boolean,listDir:(p:string)=>readonly string[]}} fsProbe
+ * @returns {string}
+ */
+export function resolveRepoRoot(env, cwd, fsProbe) {
+  const home = env["MINSKY_HOME"];
+  if (home !== undefined && home.length > 0) return home;
+  return detectConductorRoot({ cwd, fs: fsProbe });
+}
+
+const REPO = resolveRepoRoot(process.env, process.cwd(), {
+  exists: (p) => existsSync(p),
+  listDir: (p) => {
+    try {
+      return readdirSync(p);
+    } catch {
+      return [];
+    }
+  },
+});
 const LEDGER = join(REPO, ".minsky", "orchestrate.jsonl");
 // PRs vetted per tick. Bounded (default 2) so a tick is at most
 // LIMIT × per-vet-timeout — the conductor cannot back up behind a long
