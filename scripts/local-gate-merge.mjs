@@ -47,6 +47,70 @@ import { join } from "node:path";
 
 const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
 const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
+// The runany permission-gate verdict ledger. `scripts/runany-policy
+// -audit.mjs` is its only reader; the conductor appends `run-start` +
+// one `write-verdict` per merge attempt here so the pre-registered
+// Measurement of TASKS.md `runany-permission-scoped-writes` has real
+// data instead of a promise to "instrument later".
+const RUNANY_LEDGER = join(REPO, ".minsky", "runany-policy.jsonl");
+
+// The canonical rule-#10 permission gate + its ledger-record builders
+// live in `@minsky/cross-repo-runner` (slice 1, unit-tested in
+// isolation). Load the BUILT artifacts the same way `metrics-render
+// .mjs` loads `dashboard-web/dist` — `tsc -b` (prepare/typecheck) keeps
+// dist fresh in the live repo. Fail-safe (Saltzer & Schroeder 1975): a
+// missing dist (broken deploy / fresh clone pre-build) resolves to
+// `null` and the sweep refuses ALL merges loudly — no gate ⇒ no code
+// write — rather than silently merging ungated.
+const POLICY = await import("../novel/cross-repo-runner/dist/repo-policy.js")
+  .then((m) => ({ classifyRepo: m.classifyRepo, assertWriteAllowed: m.assertWriteAllowed }))
+  .catch(() => null);
+const LEDGER_BUILD = await import("../novel/cross-repo-runner/dist/policy-ledger.js")
+  .then((m) => ({
+    buildRunStartRecord: m.buildRunStartRecord,
+    buildWriteVerdictRecord: m.buildWriteVerdictRecord,
+  }))
+  .catch(() => null);
+
+// Memoized home-repo origin. REPO's `origin` is process-stable, so the
+// `git remote get-url` subprocess runs ONCE per process instead of once
+// per PR (it was previously re-shelled inside `prepareScratchClone` for
+// every candidate — N git round-trips per sweep → 1). `null` on an
+// origin-less / non-git REPO so `classifyRepo` fails safe to `foreign`.
+/** @type {string | null | undefined} */
+let _homeOrigin;
+/** @returns {string | null} */
+function homeRemoteOrigin() {
+  if (_homeOrigin !== undefined) return _homeOrigin;
+  try {
+    _homeOrigin =
+      execFileSync("git", ["-C", REPO, "remote", "get-url", "origin"], {
+        encoding: "utf8",
+      }).trim() || null;
+  } catch {
+    // rule #6: an origin-less / non-git REPO is a classification input,
+    // not a crash — `classifyRepo` treats `null` as "identity unprovable
+    // ⇒ foreign", the least-authority verdict.
+    _homeOrigin = null;
+  }
+  return _homeOrigin;
+}
+
+/**
+ * Best-effort append one record to the runany verdict ledger. Same
+ * contract as `appendLedger` (rule #6 — the ledger never gates the
+ * sweep; a write failure is swallowed). Guarded by `.minsky/` existing
+ * so a non-bootstrapped checkout writes nothing.
+ * @param {object} record
+ */
+function defaultRunanyEmit(record) {
+  if (!existsSync(join(REPO, ".minsky"))) return;
+  try {
+    appendFileSync(RUNANY_LEDGER, `${JSON.stringify(record)}\n`);
+  } catch {
+    /* rule #6: verdict ledger is best-effort, never gates the sweep */
+  }
+}
 // Per-vet hard timeout — a cold `--stage=full` (tsc -b --force across all
 // workspace projects + full vitest) is ~20 min; this bounds a hung/
 // pathological vet so one PR can never wedge the autonomous conductor
@@ -225,10 +289,15 @@ function prepareScratchClone(scratch, pr) {
   // no `pull/*/head` refs. Repoint `origin` at the live repo's real
   // (GitHub) remote so we can fetch the PR head + authoritative main;
   // --shared alternates still reuse local objects so only the PR delta
-  // is fetched over the network.
-  const ghRemote = execFileSync("git", ["-C", REPO, "remote", "get-url", "origin"], {
-    encoding: "utf8",
-  }).trim();
+  // is fetched over the network. Memoized (process-stable) so a sweep of
+  // N candidates shells `git remote get-url` once, not N times.
+  const ghRemote = homeRemoteOrigin();
+  if (ghRemote === null) {
+    // No resolvable origin ⇒ cannot fetch the PR head ⇒ this is gate
+    // INFRA broken, not the PR being red (rule #6 — surface the
+    // boundary error, never misattribute it as a PR skip).
+    return { vetError: "home-origin-unresolvable (no `origin` remote on REPO)" };
+  }
   execFileSync("git", ["-C", scratch, "remote", "set-url", "origin", ghRemote], {
     encoding: "utf8",
   });
@@ -444,7 +513,42 @@ function vetAndDecide(pr, vetFn, reviewFn) {
  * @property {(pr: PrSnapshot) => void} mergeFn
  * @property {boolean} dryRun
  * @property {(s: string) => void} log
+ * @property {() => string | null} homeOriginFn  origin of the merge-target repo
+ * @property {(record: object) => void} runanyEmit  verdict-ledger appender
  */
+
+/**
+ * Run the rule-#10 permission gate for THIS sweep's write. The merge
+ * target is always REPO (home); a `gh pr merge --squash --admin` writes
+ * squashed code onto `main`, i.e. a `push`-class code write. The gate
+ * is the deterministic backstop + the Pivot's git-layer guard: if
+ * REPO's origin is unprovable (`classifyRepo` ⇒ `foreign`) or the gate
+ * module failed to load, the merge is REFUSED so the conductor can
+ * never push code into a repo it cannot prove is home (Saltzer &
+ * Schroeder 1975). Returns the ledger record so the caller appends
+ * exactly one verdict per attempt (rule #7 — visible, not silent).
+ * @param {SweepCtx} ctx
+ * @returns {{allowed: boolean, reason: string, record: object | null}}
+ */
+function evalMergePolicy(ctx) {
+  if (POLICY === null || LEDGER_BUILD === null) {
+    return {
+      allowed: false,
+      reason: "runany-policy: gate module unavailable (dist not built) — fail-safe refuse",
+      record: null,
+    };
+  }
+  const origin = ctx.homeOriginFn();
+  const repoClass = POLICY.classifyRepo({ candidateOrigin: origin, homeOrigin: origin });
+  const decision = POLICY.assertWriteAllowed({ repoClass, writeKind: "push" });
+  const record = LEDGER_BUILD.buildWriteVerdictRecord({
+    repoClass,
+    writeKind: "push",
+    decision,
+    ts: new Date().toISOString(),
+  });
+  return { allowed: decision.allowed, reason: decision.logLine, record };
+}
 
 /**
  * Vet → decide → (dry-run log | merge) one PR.
@@ -462,6 +566,15 @@ function processOnePr(pr, ctx) {
   if (ctx.dryRun) {
     ctx.log(`  #${pr.number}: WOULD MERGE — ${decision.reason}\n`);
     return { outcome: "merged", number: pr.number, reason: decision.reason };
+  }
+  // Permission gate — the only code-write the conductor performs is this
+  // `gh pr merge` onto `main`; refuse it unless the target repo is
+  // provably home (Acceptance 2). One verdict appended per attempt.
+  const policy = evalMergePolicy(ctx);
+  if (policy.record !== null) ctx.runanyEmit(policy.record);
+  if (!policy.allowed) {
+    ctx.log(`  #${pr.number}: REFUSED — ${policy.reason}\n`);
+    return { outcome: "skipped", number: pr.number, reason: `policy-refused: ${policy.reason}` };
   }
   try {
     ctx.mergeFn(pr);
@@ -502,6 +615,8 @@ function appendLedger(mergedNumbers, skippedCount) {
  * @property {boolean} [noReview]  deterministic-only mode (skip the Opus brain)
  * @property {(pr: PrSnapshot) => void} [mergeFn]
  * @property {(s: string) => void} [log]
+ * @property {() => string | null} [homeOriginFn]  inject merge-target origin (tests)
+ * @property {(record: object) => void} [runanyEmit]  inject verdict appender (tests)
  */
 
 /**
@@ -518,6 +633,8 @@ function prepareSweep(opts) {
     mergeFn: opts.mergeFn ?? defaultMerge,
     dryRun: opts.dryRun === true,
     log: opts.log ?? ((s) => process.stdout.write(s)),
+    homeOriginFn: opts.homeOriginFn ?? homeRemoteOrigin,
+    runanyEmit: opts.runanyEmit ?? defaultRunanyEmit,
   };
   let candidates = pickGateCandidates((opts.snapshotFn ?? defaultSnapshot)());
   if (opts.onlyPr !== undefined) {
@@ -539,6 +656,16 @@ export function runGateSweep(opts = {}) {
   ctx.log(
     `local-gate-merge: ${candidates.length} candidate PR(s)${ctx.dryRun ? " (dry-run)" : ""}\n`,
   );
+
+  // Run-start marker delimits this sweep's verdicts so the audit's
+  // `--window=run` slice is exactly this run (rule #9 — the metric's
+  // window is the run, not the whole ledger). Non-dry only: a dry-run
+  // performs no write, so it must not start a verdict window.
+  if (!ctx.dryRun && LEDGER_BUILD !== null) {
+    ctx.runanyEmit(
+      LEDGER_BUILD.buildRunStartRecord(`gate-sweep-${Date.now()}`, new Date().toISOString()),
+    );
+  }
 
   const merged = [];
   const skipped = [];
