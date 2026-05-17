@@ -168,6 +168,38 @@ export interface RunHostLoopOpts {
     readonly prUrl: string | null;
     readonly filesChanged: readonly string[];
   }) => HostCtoSignals;
+  /**
+   * How many CONSECUTIVE `spawn-failed` iterations the loop tolerates
+   * before exiting with stop reason `spawn-failed`. Default 1 (current
+   * behavior — halt on first failure). Production reads `MINSKY_SPAWN_FAILED_BUDGET`
+   * at the CLI boundary; tests pass a literal.
+   *
+   * Rationale: a single failure on Claude-binary-not-found or net-blip
+   * shouldn't burn a watchdog respawn — the supervisor already restarts
+   * the daemon, so a 1-failure exit gives the watchdog a fresh process
+   * that may fail the same way again. A small budget (e.g. 3) lets the
+   * loop skip the broken task and continue; a long streak still halts so
+   * we don't burn Claude budget on a systemic failure.
+   *
+   * Consecutive — a successful or scope-leak iteration resets the count.
+   */
+  readonly spawnFailedBudget?: number;
+}
+
+/**
+ * Read the operator-tunable spawn-failed budget from the environment.
+ * Returns `undefined` when the env is unset / blank / non-numeric so the
+ * caller falls through to the in-code default. Exported so the CLI can
+ * resolve the budget at the I/O boundary; the loop itself stays pure.
+ *
+ * @otel-exempt pure env-reader.
+ */
+export function readSpawnFailedBudgetFromEnv(): number | undefined {
+  const raw = process.env["MINSKY_SPAWN_FAILED_BUDGET"];
+  if (raw === undefined || raw.length === 0) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 1) return undefined;
+  return parsed;
 }
 
 /**
@@ -189,26 +221,117 @@ export interface RunHostLoopOpts {
  * @otel cross-repo-runner.host-loop
  */
 export async function runHostLoop(opts: RunHostLoopOpts): Promise<LoopResult> {
-  const maxIterations = opts.maxIterations ?? Number.POSITIVE_INFINITY;
-  const tickIntervalMs = opts.tickIntervalMs ?? 300_000;
-  const sleep = opts.sleep ?? defaultSleep;
+  const config = resolveLoopConfig(opts);
   const iterations: LoopIterationResult[] = [];
+  const spawnFailState: SpawnFailState = { consecutive: 0 };
 
-  for (let i = 0; i < maxIterations; i++) {
-    const earlyStop = checkAbort(opts.signal);
-    if (earlyStop !== undefined) return { iterations, stopReason: earlyStop };
-    const stop = await runOneIteration({ opts, iteration: i, iterations });
-    if (stop !== undefined) return { iterations, stopReason: stop };
-    const sleepStop = await sleepBetween({
-      iteration: i,
-      maxIterations,
-      tickIntervalMs,
-      sleep,
-      signal: opts.signal,
-    });
-    if (sleepStop !== undefined) return { iterations, stopReason: sleepStop };
+  for (let i = 0; i < config.maxIterations; i++) {
+    const stop = await runIterationCycle({ opts, config, i, iterations, spawnFailState });
+    if (stop !== null) return { iterations, stopReason: stop };
   }
   return { iterations, stopReason: "max-iterations" };
+}
+
+interface ResolvedLoopConfig {
+  readonly maxIterations: number;
+  readonly tickIntervalMs: number;
+  readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+  readonly spawnFailedBudget: number;
+}
+
+/**
+ * Resolve operator-tunable knobs from {@link RunHostLoopOpts} into a
+ * config bundle with concrete defaults. Pulled out of {@link runHostLoop}
+ * so the loop body stays under the cognitive-complexity cap.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function resolveLoopConfig(opts: RunHostLoopOpts): ResolvedLoopConfig {
+  return {
+    maxIterations: opts.maxIterations ?? Number.POSITIVE_INFINITY,
+    tickIntervalMs: opts.tickIntervalMs ?? 300_000,
+    sleep: opts.sleep ?? defaultSleep,
+    // Budget resolution order: opts (test seam) → env (operator) → 1 (default).
+    // 1 = current behavior: halt on first spawn-failed (rule #6 let-it-crash).
+    spawnFailedBudget: opts.spawnFailedBudget ?? readSpawnFailedBudgetFromEnv() ?? 1,
+  };
+}
+
+/**
+ * One full cycle of the host loop: abort-check → run iteration →
+ * disposition → optional sleep. Returns the stop reason when the cycle
+ * halts the loop, `null` when the loop should continue. Pulled out of
+ * {@link runHostLoop} so the loop body stays under the cognitive-
+ * complexity cap.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function runIterationCycle(args: {
+  readonly opts: RunHostLoopOpts;
+  readonly config: ResolvedLoopConfig;
+  readonly i: number;
+  readonly iterations: LoopIterationResult[];
+  readonly spawnFailState: SpawnFailState;
+}): Promise<LoopStopReason | null> {
+  const { opts, config, i, iterations, spawnFailState } = args;
+  const earlyStop = checkAbort(opts.signal);
+  if (earlyStop !== undefined) return earlyStop;
+  const stop = await runOneIteration({ opts, iteration: i, iterations });
+  const disposition = handleIterationStop({
+    stop,
+    spawnFailState,
+    spawnFailedBudget: config.spawnFailedBudget,
+  });
+  if (disposition.kind === "halt") return disposition.stopReason;
+  if (disposition.kind === "skip-sleep") return null; // budget remains; retry immediately
+  return (
+    (await sleepBetween({
+      iteration: i,
+      maxIterations: config.maxIterations,
+      tickIntervalMs: config.tickIntervalMs,
+      sleep: config.sleep,
+      signal: opts.signal,
+    })) ?? null
+  );
+}
+
+interface SpawnFailState {
+  consecutive: number;
+}
+
+type IterationDisposition =
+  | { readonly kind: "halt"; readonly stopReason: LoopStopReason }
+  | { readonly kind: "skip-sleep" }
+  | { readonly kind: "continue" };
+
+/**
+ * Per-iteration stop disposition: halt with a stop reason, skip the
+ * inter-iteration sleep (budget-remains retry), or continue normally.
+ * Extracted so {@link runHostLoop} stays under the cognitive-complexity cap.
+ *
+ * Mutates `state.consecutive` — increments on spawn-failed, resets on any
+ * other completed iteration.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function handleIterationStop(args: {
+  readonly stop: LoopStopReason | undefined;
+  readonly spawnFailState: SpawnFailState;
+  readonly spawnFailedBudget: number;
+}): IterationDisposition {
+  const { stop, spawnFailState, spawnFailedBudget } = args;
+  if (stop === "spawn-failed") {
+    spawnFailState.consecutive += 1;
+    if (spawnFailState.consecutive >= spawnFailedBudget) {
+      return { kind: "halt", stopReason: "spawn-failed" };
+    }
+    return { kind: "skip-sleep" };
+  }
+  if (stop !== undefined) return { kind: "halt", stopReason: stop };
+  // Non-spawn-failed completion resets the streak — the next failure gets
+  // the full budget again.
+  spawnFailState.consecutive = 0;
+  return { kind: "continue" };
 }
 
 /**
