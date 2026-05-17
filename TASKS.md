@@ -1217,6 +1217,19 @@
 
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
 
+- [ ] `gate-host-load-shed` — shed concurrent host load during a merge-gate vet so vitest stops flaking under 2-3x oversubscription
+  - **ID**: gate-host-load-shed
+  - **Tags**: gate, reliability, performance, orchestrator
+  - **Competitive-goal**: raises minsky's autonomous-merge-rate + lowers change-fail-rate (DORA) on the `self-metrics-competitive-benchmark` scorecard by removing the last spurious-skip cause.
+  - **Details**: 2026-05-17 root-caused the residual merge-rate-0 tail: with #590/#592/#593 + the 60-min vet timeout, the orchestrator's scratch vet of the clean MERGEABLE #591 still SKIP'd `gate red: vitest`. Isolated reproduction of the EXACT scratch (origin/main + #591 + `pnpm install` + `vitest`) passed **3039/3040** — the gate failure was a **load flake**: the host runs the orchestrator + worker daemon + other tenants concurrently at load ~14-26 on 10 cores, and a timing-sensitive test flaked under contention. Mitigated in the same PR by `vitest retry: 2` (a flake fails-then-passes; a real bug fails every attempt — Fowler 2011). This companion adds the durable structural fix: during a gate vet, shed competing load — e.g. pause/`SIGSTOP` the worker daemon's active iteration for the vet's duration, or `taskpolicy`/nice the scratch vet onto reserved cores, or serialize gate-vet vs worker-tick so they never run vitest simultaneously. Retry masks the symptom; this removes the cause.
+  - **Files**: `scripts/local-gate-merge.mjs` (load-shed hook around `defaultVet`), `scripts/orchestrate.mjs` (coordinate with worker daemon), paired tests
+  - **Acceptance**: during a gate vet, host load attributable to the worker daemon drops measurably (or vet runs on reserved cores); a 10-run gate-vet sample of a known-green PR yields 0 spurious `vitest` skips (was: intermittent under load).
+  - **Hypothesis**: with load shedding, spurious `vitest` gate-red on green PRs → ~0; orchestrator autonomous-merge-rate per productive tick rises (retry alone leaves vet wall-time high under load).
+  - **Success**: 10 consecutive gate vets of a seeded green PR all reach `gate green` (no vitest flake); vet p95 wall-time drops vs. the unshed baseline.
+  - **Pivot**: if cooperative pause of the worker daemon is too invasive, fall back to retry-only (this PR) + raising `retry` to 3 and accept slower-but-correct vets.
+  - **Measurement**: `grep -c 'gate red: vitest' .minsky/orchestrate.out.log` over a fixed window before/after → trends to 0 for green PRs; vet p95 from `.minsky/orchestrate.jsonl` timing.
+  - **Anchor**: Fowler 2011 *Eradicating Non-Determinism in Tests*; Nygard 2018 *Release It!* (resource contention / bulkhead); vision.md rule #6.
+
 - [ ] `gate-scratch-dir-gc` — sweep-start garbage-collect of stale `minsky-gate-*` scratch dirs, companion to the best-effort teardown
   - **ID**: gate-scratch-dir-gc
   - **Tags**: gate, hygiene, rule-6, reliability
