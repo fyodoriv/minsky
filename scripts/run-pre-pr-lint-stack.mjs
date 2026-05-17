@@ -306,10 +306,22 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["typecheck"],
   },
   {
+    // Diff-scoped: `scripts/lint-md-diff.mjs` lints only the *.md files this
+    // branch committed vs the resolved diff base, NOT the live `**/*.md`
+    // working tree. The whole-tree `pnpm lint:md` flapped an unrelated
+    // vetted branch's `git push` whenever the concurrent swarm re-dirtied
+    // TASKS.md/vision.md inside the ~100 s pre-push window, and inherited
+    // committed-main markdownlint debt onto every push (TASKS.md
+    // `orchestrator-must-land-local-vetted-branches` Pivot b). `origin/main`
+    // here is rewritten to the resolved base by `withResolvedDiffBase`, same
+    // as the other diff-relative steps. CI's `markdownlint` job still runs
+    // whole-tree — paying down that committed debt is the task's separate
+    // step (c).
     name: "markdownlint",
     stages: ["fast", "full"],
-    cmd: "pnpm",
-    args: ["lint:md"],
+    cmd: "node",
+    args: ["scripts/lint-md-diff.mjs"],
+    env: { LINT_MD_DIFF_BASE: "origin/main" },
   },
   {
     name: "tasks-lint",

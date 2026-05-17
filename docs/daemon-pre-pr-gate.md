@@ -35,7 +35,7 @@ The fast stage (default) runs the nine lints that close the five empirically-nam
 
 - `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`.
 - `typecheck` — `tsc --noEmit` across the workspace.
-- `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`.
+- `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`. **Diff-scoped** (`scripts/lint-md-diff.mjs`): lints only the `*.md` files the branch committed vs the resolved diff base, not the live `**/*.md` tree, so concurrent swarm churn on TASKS.md/vision.md and inherited committed-main debt cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`). CI's `markdownlint` job still runs whole-tree.
 - `tasks-lint` — `@tasks-md/lint` against `TASKS.md`.
 - `rule-2-dep-coverage` — every cross-package import has a Strategy seam.
 - `rule-3-doc-first` — every `novel/**/*.ts` change touches a doc (or carries a deferral marker).
