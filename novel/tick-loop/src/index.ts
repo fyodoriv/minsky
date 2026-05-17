@@ -922,6 +922,16 @@ export {
   pickStrategicModel,
 } from "./strategic-model-router.js";
 
+// Slice 1 of `runany-dynamic-model-or-local-fallback`: the pure unified
+// "pin > dynamic > local" decision for the run-anywhere entrypoint,
+// composing the strategic picker under a multi-backend liveness gate.
+export {
+  type RemoteBackendLiveness,
+  type ResolveRunAnyModelInput,
+  type ResolveRunAnyModelOutput,
+  resolveRunAnyModel,
+} from "./runany-model-resolver.js";
+
 // Slice 6 of `claude-usage-aware-strategic-model-router`: ring-buffer
 // trajectory + linear-regression exhaustion predictor.
 export {

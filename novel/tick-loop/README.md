@@ -406,3 +406,31 @@ Two coupled changes (one-time operator-approved Opus-director bootstrap, 2026-05
 - **Agent-team backend seam (slice 1).** `agent-team-backend.ts` exports the pure `AgentTeamBackend` Strategy interface and the `AgentCapabilityTier` enum (`native-agent-teams` > `native-agent-view` > `native-subagents` > `process-fan-out`). `detect-agent-teams-support.ts` exports the pure `detectAgentTeamsSupport` resolver: it returns `native-agent-teams` only for Claude Code at `claude --version` >= `2.1.32` with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` enabled, `native-subagents` for any other Claude Code host, and `process-fan-out` for non-Claude agents (Devin, aider, opencode). It performs no I/O — the bin wires the real agent id, version string, and environment; tests inject fakes (rule #2). Slice 1 deliberately does not synthesise the `native-agent-view` tier: the `claude --bg` probe is a later slice and over-claiming an unverified capability would violate rule #6. Real backends implementing the seam land in subsequent slices.
 
 Pattern conformance: Strategy / Interface (Gamma 1994) for `AgentTeamBackend`; pure-function-over-injected-input (rule #2) for `detectAgentTeamsSupport`. Tests: `detect-agent-teams-support.test.ts` (14 cases — agent identity, semver boundary at exactly 2.1.32, env-flag spellings, fallbacks), `agent-team-backend.test.ts` (3 cases — contract guard + callback delivery), and three new `daemon.test.ts` regression cases (p1-in-P0 no longer shadows p0; eligible order honours tags; untagged P0 keeps file order).
+### Slice 1 of `runany-dynamic-model-or-local-fallback` — unified `resolveRunAnyModel`
+
+`novel/tick-loop/src/runany-model-resolver.ts` ships the pure
+`resolveRunAnyModel(input)` — the single "pin > dynamic > local" decision
+the run-anywhere entrypoint applies every iteration. It composes the
+shipped `pickStrategicModel` (budget→model) under a new multi-backend
+liveness gate and adds the one piece neither shipped decider covered: a
+liveness aggregation across **every** configured remote backend, not just
+claude.
+
+Order (the contract): (1) a valid operator pin
+(`MINSKY_STRATEGIC_PIN_MODEL`) is honored verbatim and short-circuits
+*before* any liveness/budget work; (2) when every entry in
+`remoteBackends` is unreachable, switch fully to local **regardless of
+budget** — closing the gap where `decideProvider`'s chaos-row-1 (a
+transient `ENETUNREACH` is deliberately not a quota signal) would wedge a
+fully-offline daemon on claude forever; (3) otherwise delegate to the
+strategic picker (which itself returns the local tier on budget
+exhaustion). Recovery is implicit — the function is pure, so the next
+iteration with any backend reachable returns the budget-driven pick again.
+An empty `remoteBackends` list (local-only operator) is **not** "all
+down" (vacuous-truth guard).
+
+The three acceptance scenarios are pre-registered (rule #9) and checked
+deterministically by `scripts/runany-model-audit.mjs --scenario=<pin|dynamic|all-down> --json`
+(exit 0 on pass). Operator-facing contract: `docs/run-anywhere.md`. The
+wire-in to `bin/minsky.mjs` / `scripts/orchestrate.mjs` and the live
+per-backend probe builder are follow-up slices under the same task.
