@@ -17,6 +17,7 @@
     { "path": "./novel/mape-k-loop" },
     { "path": "./novel/sidecar-bootstrap" },
     { "path": "./novel/tick-loop" },
+    { "path": "./novel/tui" },
     { "path": "./scripts" },
     { "path": "./user-stories" }
   ]

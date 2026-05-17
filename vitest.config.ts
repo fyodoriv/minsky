@@ -24,6 +24,7 @@ export default defineConfig({
       "@minsky/omc-tasksmd-bridge": r("./novel/bridges/omc-tasksmd/src/index.ts"),
       "@minsky/sidecar-bootstrap": r("./novel/sidecar-bootstrap/src/index.ts"),
       "@minsky/tick-loop": r("./novel/tick-loop/src/index.ts"),
+      "@minsky/tui": r("./novel/tui/src/index.ts"),
     },
   },
   test: {
