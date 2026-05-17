@@ -326,7 +326,29 @@ function defaultVet(pr) {
   } catch (err) {
     return vetErrorToResult(err);
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    bestEffortRmScratch(scratch);
+  }
+}
+
+/**
+ * Best-effort scratch teardown. A SIGKILL'd vet (timeout) can leave child
+ * procs still flushing into `scratch` for a few ms, so a recursive `rmSync`
+ * races them and throws `ENOTEMPTY`. Previously that throw escaped the
+ * `finally` and aborted the ENTIRE sweep (`sweepError: ENOTEMPTY`, 0
+ * merges) — a cleanup failure must never gate merging (rule #6). The dir
+ * lives under `tmpdir()` (OS-reaped), so a missed delete is harmless: one
+ * retry after a short pause, then give up quietly.
+ * @param {string} scratch
+ */
+function bestEffortRmScratch(scratch) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+      return;
+      // rule-6: handled-locally — scratch is ephemeral tmpdir; a cleanup race (ENOTEMPTY from a SIGKILL'd vet's draining children) must never abort the sweep, so swallow and let the OS reap the dir.
+    } catch {
+      if (attempt === 0) execFileSync("sleep", ["1"]);
+    }
   }
 }
 

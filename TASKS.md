@@ -1217,6 +1217,19 @@
 
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
 
+- [ ] `gate-scratch-dir-gc` — sweep-start garbage-collect of stale `minsky-gate-*` scratch dirs, companion to the best-effort teardown
+  - **ID**: gate-scratch-dir-gc
+  - **Tags**: gate, hygiene, rule-6, reliability
+  - **Competitive-goal**: lowers minsky's change-fail-rate / MTTR (DORA) by removing a class of sweep-aborting infra error → improves the autonomous-merge-rate metric on the competitive scorecard (`self-metrics-competitive-benchmark`).
+  - **Details**: 2026-05-17 the orchestrator tick logged `sweepError: ENOTEMPTY` from `defaultVet`'s `finally` `rmSync` racing a SIGKILL'd vet's draining children; the throw escaped the finally and aborted the whole sweep (0 merges). Fixed in the same PR by `bestEffortRmScratch` (one retry, then swallow — rule #6, tmpdir is OS-reaped). This companion adds the durable hygiene half: at sweep START, GC any `minsky-gate-*` dir under `tmpdir()` older than the vet timeout AND not owned by a live vet pid, so leaked scratch dirs (from crashes/SIGKILL/operator process-kills) cannot accumulate and cannot cause a future ENOTEMPTY against a half-gone sibling.
+  - **Files**: `scripts/local-gate-merge.mjs` (sweep-start GC pass + paired test in `scripts/local-gate-merge.test.mjs`)
+  - **Acceptance**: given seeded stale `minsky-gate-XXX` dirs (mtime > timeout, no live owner), a sweep start removes them; a fresh dir owned by a running vet is left untouched; paired unit test proves both.
+  - **Hypothesis**: with start-GC + best-effort teardown, `sweepError`-aborted ticks from scratch-dir races drop to ~0; autonomous-merge throughput per 10h run rises.
+  - **Success**: zero `ENOTEMPTY`/`sweepError` scratch entries in `.minsky/orchestrate.jsonl` across a 10h run after deploy (was: ≥1 in the first hour).
+  - **Pivot**: if mtime+pid ownership detection is unreliable cross-platform, GC only dirs older than 2× vet-timeout (coarser but safe) and accept slower reclamation.
+  - **Measurement**: `grep -c ENOTEMPTY .minsky/orchestrate.jsonl` before/after over equal windows → after = 0.
+  - **Anchor**: vision.md rule #6 (cleanup best-effort, never gates the loop); Nygard 2018 *Release It!* (housekeeping / resource leak prevention).
+
 <!-- Taskgrind-extraction cluster 2026-05-12: taskgrind (`~/apps/tooling/taskgrind`, 5656 LOC bash + 32 bats suites) is deprecated alongside bosun in favour of minsky. Before it's archived, this sweep extracts the 2 patterns where taskgrind has battle-tested behaviour minsky genuinely lacks. Anti-recs (DO NOT port) documented at /tmp/taskgrind-to-minsky-extraction-analysis.md: `caffeinate -ms` and `taskpolicy -B` (macOS-specific, supervisor's job per launchd `KeepAlive` / `ProcessType`); `lib/watchdog.sh` signal escalation (minsky's launchd/systemd supervisor handles restart per rule #6 — daemon has no internal watchdog by design); `self-copy protection` (TypeScript loaded once at module-instantiation, not byte-offset-lazy like bash); per-repo `slot_lock_file` (already covered by the more sophisticated `daemon-parallel-worktree-launch` P0, which uses per-TASK `flock` claims instead of per-REPO locks — see line 426). The 2 P2 tasks below are the residual high-confidence extractions where minsky has a clear gap and taskgrind's pattern is portable to TypeScript. -->
 
 - [ ] `gate-vet-timeout-circuit-breaker` — a PR that vet-times-out should be skipped for a cooldown instead of re-consuming a bounded sweep slot every tick
