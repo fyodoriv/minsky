@@ -262,6 +262,20 @@ Single-process daemon (no `--worker-id`) ignores the field entirely. Empty / abs
 
 Declare `**Touches**:` on tasks the daemon is likely to pick. Broad meta-tasks (e.g. `security-privacy-priority-substrate`) that span many directories should be decomposed into narrower sub-tasks rather than declaring `novel/**` as a glob — the latter would over-collide.
 
+## `**Competitive-goal**:` field on task blocks (north-star justification)
+
+Slice (d) of `self-metrics-competitive-benchmark`. Every non-trivial task is justified against the competitive scorecard: it must name which scorecard metric it moves and the predicted delta.
+
+Format:
+
+```markdown
+- **Competitive-goal**: autonomous-merge-rate +5pp vs OpenHands
+```
+
+Non-triviality is **not** a new heuristic — it reuses rule #9's existing boundary: a task block that declares `**Hypothesis**:` is by definition non-trivial (trivial typo/docs/no-op changes are rule-#9-exempt and carry no Hypothesis). So the rule is: **every Hypothesis-bearing task block must also declare `**Competitive-goal**:`**.
+
+Enforced by the deterministic rule-#10 ratchet `scripts/check-competitive-goal.mjs` (paired test `scripts/check-competitive-goal.test.mjs`). The ratchet is **dormant** until the policy marker `<!-- policy: competitive-goal-enforced -->` appears in `TASKS.md` — same dormant-first activation precedent as `check-cadence-pivot-threshold` (ship the machinery green, flip one line once the corpus is migrated). Landing a hard-fail against the unmigrated corpus would mass-break concurrent daemon PRs (a rule-#11 instant-red-gate violation), so the marker flip + lint-stack/CI wiring is a deliberate follow-up slice, not this one.
+
 ## Pushback is welcome
 
 If a task description is wrong, or a constitutional rule is being misapplied, push back. Add a `**Pushback**:` block to the task explaining the issue. The human or the MAPE-K loop will resolve it. Silent compliance with a bad spec is itself a constitutional violation.
