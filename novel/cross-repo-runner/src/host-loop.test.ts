@@ -3,13 +3,13 @@
 //
 // Source: TASKS.md `cross-repo-host-daemon-loop`; rule #3 (test-first).
 
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import type { LiveSpawnOutcome } from "./runner.js";
 import type { RunnerPlan } from "./spawn-plan.js";
 import type { ParsedTask } from "./task-finder.js";
 
-import { runHostLoop } from "./host-loop.js";
+import { readSpawnFailedBudgetFromEnv, runHostLoop } from "./host-loop.js";
 
 const baseTask: ParsedTask = {
   id: "fake-task-1",
@@ -126,7 +126,7 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.iterations[2]?.scopeLeakPaths).toEqual(["package.json"]);
   });
 
-  test("spawn-failed halts on the first non-zero spawn exit", async () => {
+  test("spawn-failed halts on the first non-zero spawn exit (default budget=1)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     let n = 0;
     const result = await runHostLoop({
@@ -143,6 +143,69 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.stopReason).toBe("spawn-failed");
     expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]?.verdict).toBe("spawn-failed");
+  });
+
+  // Spawn-failed budget — observed 2026-05-16 on oncall-hub-api: 20+
+  // watchdog respawns burned because the loop halted on the first failure
+  // (rule #6 let-it-crash) and the supervisor restarted the daemon to find
+  // the same systemic problem on the next iteration. A small budget lets
+  // the loop skip a likely-transient failure and continue to the next task.
+  test("spawn-failed budget=3: 3 consecutive failures halt; 4th attempt never fires", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome({ verdict: "spawn-failed", exitCode: 137 })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 10,
+      tickIntervalMs: 0,
+      spawnFailedBudget: 3,
+    });
+    expect(result.stopReason).toBe("spawn-failed");
+    expect(result.iterations).toHaveLength(3);
+    expect(result.iterations.every((it) => it.verdict === "spawn-failed")).toBe(true);
+  });
+
+  test("spawn-failed budget=3: streak resets on a successful iteration", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    // Sequence: fail, fail, OK (reset), fail, fail, fail (3rd consecutive → halt).
+    // With reset, the loop reaches iteration 6 before halting. Without reset
+    // it'd halt at iteration 4 (3 cumulative failures), proving reset works.
+    const verdicts: Array<"spawn-failed" | "validated"> = [
+      "spawn-failed",
+      "spawn-failed",
+      "validated",
+      "spawn-failed",
+      "spawn-failed",
+      "spawn-failed",
+      "validated", // never reached
+    ];
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => {
+        const v = verdicts[n - 1] ?? "validated";
+        return Promise.resolve(
+          makeOutcome(v === "spawn-failed" ? { verdict: v, exitCode: 137 } : {}),
+        );
+      },
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 10,
+      tickIntervalMs: 0,
+      spawnFailedBudget: 3,
+    });
+    expect(result.stopReason).toBe("spawn-failed");
+    expect(result.iterations).toHaveLength(6);
+    expect(result.iterations[2]?.verdict).toBe("validated");
+    expect(result.iterations[5]?.verdict).toBe("spawn-failed");
   });
 
   test("aborted when AbortSignal fires BEFORE the first iteration", async () => {
@@ -457,5 +520,52 @@ describe("runHostLoop — CTO audit seam", () => {
     // No audit options passed; loop completes normally.
     expect(result.stopReason).toBe("max-iterations");
     expect(result.iterations).toHaveLength(1);
+  });
+});
+
+describe("readSpawnFailedBudgetFromEnv", () => {
+  // Save-and-restore over delete (biome lint/performance/noDelete) — mirrors
+  // novel/budget-guard/src/http-server.test.ts; assigning undefined coerces
+  // to the string "undefined" in process.env so save-and-restore is the
+  // only safe way to clean up.
+  let savedBudget: string | undefined;
+  beforeEach(() => {
+    savedBudget = process.env["MINSKY_SPAWN_FAILED_BUDGET"];
+  });
+  afterEach(() => {
+    if (savedBudget === undefined) {
+      // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
+      delete process.env["MINSKY_SPAWN_FAILED_BUDGET"];
+    } else {
+      process.env["MINSKY_SPAWN_FAILED_BUDGET"] = savedBudget;
+    }
+  });
+
+  test("returns undefined when env is unset (loop falls back to default budget=1)", () => {
+    // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
+    delete process.env["MINSKY_SPAWN_FAILED_BUDGET"];
+    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
+  });
+
+  test("returns undefined when env is empty string", () => {
+    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "";
+    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
+  });
+
+  test("returns parsed integer when env is a valid positive integer", () => {
+    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "5";
+    expect(readSpawnFailedBudgetFromEnv()).toBe(5);
+  });
+
+  test("returns undefined on non-numeric env (no silent fallback to 0 — operator typo halts on first failure)", () => {
+    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "abc";
+    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
+  });
+
+  test("returns undefined on 0 or negative env (budget < 1 is meaningless — falls back to default)", () => {
+    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "0";
+    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
+    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "-1";
+    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
   });
 });
