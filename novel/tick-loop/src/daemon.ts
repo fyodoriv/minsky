@@ -70,6 +70,11 @@ import {
 } from "./snapshot-runner.js";
 import type { SpawnStrategy } from "./spawn-strategy.js";
 import {
+  type FixTasksMdMarkdownResult,
+  type MarkdownlintExec,
+  fixTasksMdMarkdown,
+} from "./tasks-md-lint-fix.js";
+import {
   type TouchesPrSnapshot,
   decideTouchesCollision,
   parseTouchesOrFiles,
@@ -246,6 +251,32 @@ export interface RunDaemonOpts {
    * invokes (rule #10 — single source of truth: `scripts/run-pre-pr-lint-stack.mjs`).
    */
   readonly preLintRun?: PrePrLintRun;
+  /**
+   * Optional `markdownlint-cli2` runner seam (rule #2) for the TASKS.md
+   * auto-lint-fix step (`daemon-tasks-md-auto-lint-fix`). When injected, the
+   * daemon runs `markdownlint-cli2 --fix TASKS.md` after every `completed`
+   * iteration — BEFORE `preLintRun` verifies the branch — so a progress /
+   * claim / completion write that left an MD012 double blank line is
+   * repaired at source instead of deadlocking the pre-PR lint gate (the
+   * `pre-pr-lint.failed_step:markdownlint` deadlock the task anchors).
+   *
+   * Emits a `tick-loop.tasks-md-lint-fix` span carrying
+   * `tasks-md-lint-fix.violations` + `.fixed`. When omitted, no fix runs —
+   * daemons predating this seam keep working unchanged.
+   *
+   * Production binding: `createMarkdownlintExec()` from
+   * `@minsky/tick-loop/tasks-md-lint-fix` (spawns the repo's own
+   * `markdownlint-cli2` devDependency — rule #1, canonical fixer).
+   */
+  readonly tasksMdLintExec?: MarkdownlintExec;
+  /**
+   * Path to TASKS.md for the `tasksMdLintExec` step. Default `"TASKS.md"`
+   * (cwd-relative — the daemon runs with cwd = repo root under
+   * systemd/launchd `WorkingDirectory`, same assumption as
+   * `createPnpmPrePrLintRun`'s default cwd). Only consulted when
+   * `tasksMdLintExec` is set.
+   */
+  readonly tasksMdPath?: string;
   /**
    * Optional per-worker config (slice 2 of `daemon-parallel-worktree-launch`).
    * When set:
@@ -453,6 +484,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
     await maybeRunMetricsRender(opts, outcome.result);
+    maybeRunTasksMdLintFix(opts, outcome.result);
     await maybeRunPrePrLintGate(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
@@ -780,6 +812,60 @@ function emitMetricsRenderSpan(
     base["metrics-render.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.metrics-render", attributes: base });
+}
+
+/**
+ * TASKS.md auto-lint-fix (`daemon-tasks-md-auto-lint-fix`): after a
+ * `completed` iteration the inner Claude has written TASKS.md (claim →
+ * `**Status**: in-progress`, progress overwrite, or completion removal),
+ * any of which can leave an MD012 double blank line at a block boundary.
+ * Running `markdownlint-cli2 --fix TASKS.md` HERE — before
+ * `maybeRunPrePrLintGate` verifies the branch — repairs that at source so
+ * the gate never deadlocks on `pre-pr-lint.failed_step:markdownlint` (the
+ * deadlock the task anchors: PR `minsky-cli-auto-bootstrap-local-llm`).
+ *
+ * Skip-fast when the seam isn't injected (daemons predating it) or the
+ * iteration didn't `complete` (no TASKS.md write happened — nothing to fix).
+ *
+ * Synchronous: `fixTasksMdMarkdown` is pure-over-injection and the spawn
+ * seam is `spawnSync`. Unfixable structural violations (e.g. MD001 heading
+ * order) are warned-not-blocked — the daemon's structural update is still
+ * correct; the operator resolves heading order in a separate pass.
+ *
+ * (Internal helper — no JSDoc tag required; the span emitter below carries
+ * the @otel signal.)
+ */
+function maybeRunTasksMdLintFix(opts: RunDaemonOpts, result: DaemonIterationResult): void {
+  if (opts.tasksMdLintExec === undefined) return;
+  if (result.status !== "completed") return;
+  const fixResult = fixTasksMdMarkdown({
+    tasksPath: opts.tasksMdPath ?? "TASKS.md",
+    execSyncFn: opts.tasksMdLintExec,
+    warn: (msg) => process.stderr.write(`${msg}\n`),
+  });
+  emitTasksMdLintFixSpan(opts, result.taskId, fixResult);
+}
+
+/**
+ * Emit a `tick-loop.tasks-md-lint-fix` span with `tasks-md-lint-fix.violations`
+ * + `.fixed` so the operator can see the auto-fix in the log and the
+ * `grep -c "failed_step.*markdownlint"` metric can confirm it dropped to 0
+ * (`daemon-tasks-md-auto-lint-fix` Acceptance #3/#4).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitTasksMdLintFixSpan(
+  opts: RunDaemonOpts,
+  taskId: string | undefined,
+  fixResult: FixTasksMdMarkdownResult,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "tasks-md-lint-fix.violations": fixResult.violations,
+    "tasks-md-lint-fix.fixed": fixResult.fixed,
+  };
+  if (taskId !== undefined) base["task.id"] = taskId;
+  opts.emit({ name: "tick-loop.tasks-md-lint-fix", attributes: base });
 }
 
 /**

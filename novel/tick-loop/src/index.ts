@@ -390,6 +390,17 @@ export {
   parseSemver,
   semverGte,
 } from "./detect-agent-teams-support.js";
+// `daemon-tasks-md-auto-lint-fix` — expose the pure helper + production
+// `MarkdownlintExec` binding so `bin/tick-loop.mjs` can wire the seam
+// without reaching past `dist/` (twin of the pre-pr-lint-gate re-export).
+export {
+  type FixTasksMdMarkdownOpts,
+  type FixTasksMdMarkdownResult,
+  type MarkdownlintExec,
+  createMarkdownlintExec,
+  fixTasksMdMarkdown,
+  parseSummaryCount,
+} from "./tasks-md-lint-fix.js";
 
 // Sub-task of `daily-changelog-for-humans` — expose the changelog-runner
 // primitives so the CLI (`bin/tick-loop.mjs`) can wire the seam without

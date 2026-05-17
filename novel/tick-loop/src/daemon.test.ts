@@ -1826,6 +1826,50 @@ describe("tick-loop / daemon / runDaemon", () => {
     expect(seenTasks).toEqual(["alpha"]);
     rmSync(tmp, { recursive: true, force: true });
   });
+  it("`daemon-tasks-md-auto-lint-fix`: emits tick-loop.tasks-md-lint-fix span with violations+fixed after a completed iteration", async () => {
+    const recorder = new SpanRecorder();
+    const execCalls: { fix: boolean }[] = [];
+    // Stub MarkdownlintExec: before=1 violation; --fix run reports 0 remaining.
+    const tasksMdLintExec = ({ fix }: { fix: boolean; tasksPath: string }): string => {
+      execCalls.push({ fix });
+      return `Summary: ${fix ? 0 : 1} error(s)\n`;
+    };
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      tasksMdLintExec,
+      tasksMdPath: "TASKS.md",
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    const span = recorder.spans.find((s) => s.name === "tick-loop.tasks-md-lint-fix");
+    expect(span?.attributes["tasks-md-lint-fix.violations"]).toBe(1);
+    expect(span?.attributes["tasks-md-lint-fix.fixed"]).toBe(1);
+    // read-only count THEN --fix (round-trip elimination: no 3rd re-count call).
+    expect(execCalls).toEqual([{ fix: false }, { fix: true }]);
+  });
+
+  it("`daemon-tasks-md-auto-lint-fix`: no span + no exec when the seam is not injected (back-compat)", async () => {
+    const recorder = new SpanRecorder();
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(recorder.spans.some((s) => s.name === "tick-loop.tasks-md-lint-fix")).toBe(false);
+  });
 });
 
 describe("tick-loop / daemon / pickTask", () => {

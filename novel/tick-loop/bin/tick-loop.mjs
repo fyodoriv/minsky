@@ -91,6 +91,7 @@ import {
   createFileBackedLastRenderedDate,
   createFileBackedSnapshotExists,
   createGitGhSignalsBuilder,
+  createMarkdownlintExec,
   createOpenPrFetcher,
   createPnpmMetricsRender,
   createPnpmSnapshotCapture,
@@ -1041,6 +1042,18 @@ process.stdout.write(
   `[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=${prePrStage} — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n`,
 );
 
+// `daemon-tasks-md-auto-lint-fix`: auto-fix TASKS.md whitespace lint
+// (MD012 double blank lines a progress/claim/completion write leaves)
+// after every completed iteration, BEFORE the pre-PR gate above verifies
+// — so the gate never deadlocks on `failed_step:markdownlint` and the
+// operator stops hand-fixing TASKS.md (commit eb7c44b). Spawns the repo's
+// own markdownlint-cli2 devDependency (rule #1 — canonical fixer).
+const tasksMdLintExec = createMarkdownlintExec();
+const tasksMdPath = resolve(minskyHome, "TASKS.md");
+process.stdout.write(
+  `[tick-loop] TASKS.md auto-lint-fix wired (markdownlint-cli2 --fix ${tasksMdPath} post-completed-iteration, pre-gate)\n`,
+);
+
 // Slice 4 of `daemon-parallel-worktree-launch`: file-collision pre-spawn
 // check. Only meaningful in parallel mode (workerConfig set). On every
 // iteration the daemon snapshots open daemon-authored PRs (branch shape
@@ -1291,6 +1304,9 @@ const result = await runDaemon({
   ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
   // Outer lint-gate verification — always active; no env opt-in.
   preLintRun,
+  // TASKS.md auto-lint-fix — always active; runs before the gate above.
+  tasksMdLintExec,
+  tasksMdPath,
   emit: (event) => {
     observeIterationForTimeoutTracking(event);
     // Plain-text line on stdout for terminal/journalctl visibility.
