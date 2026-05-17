@@ -58,6 +58,30 @@ Live regression against the real `markdownlint-cli2` (not the test stub):
   **no throw** (daemon proceeds — operator resolves heading order
   separately, brief Detail c).
 
+## Stale-main unblock (disclosed)
+
+This branch's base was 7 commits behind `origin/main`; it was rebased
+onto current main to pick up the hermetic env-stub fix the full-stage
+vitest needs (`minsky-bootstrap-smoke.test.ts` was hard-failing in the
+daemon-worker process the pre-push hook runs in). The rebase surfaced
+two **pre-existing full-stage-only** violations left by #606 (`21a495d`,
+merged via the fast-stage director-bootstrap path):
+
+- **rule-4-otel-coverage**: #606's new exported `listEligibleTasks` in
+  `daemon.ts` carried no `@otel`/JSDoc. Added an `@otel-exempt`
+  pure-parser annotation (matches the sibling `pickTask` + codebase
+  idiom).
+- **rule-5-glossary-discipline**: #606 added `ProcessType` (Apple
+  `launchd.plist(5)` key), `agent-capability-delegation-scan` and
+  `pr-agent-delegation-scan-current` (rule #14 coined lint/scan names)
+  to `vision.md` unregistered. Allowlisted with `#` justifications,
+  mirroring the exact existing precedent (`pr-replace-or-relocate-research`
+  + the systemd-directive block).
+
+Annotation + allowlist only — no behaviour change. This is a swarm-wide
+pre-push blocker (every daemon branch rebased onto main #606 hits it);
+unblocking it here unblocks the whole swarm.
+
 ## Hypothesis self-grade
 
 - **Predicted**: after this lands, `markdownlint-cli2 --fix TASKS.md`
