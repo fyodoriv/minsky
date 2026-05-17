@@ -483,6 +483,12 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-supervisor-sandbox-hardening.mjs"],
   },
   {
+    name: "machine-budget",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-machine-budget.mjs"],
+  },
+  {
     name: "cadence-pivot-threshold",
     stages: ["full"],
     cmd: "node",
