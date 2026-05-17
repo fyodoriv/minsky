@@ -34,6 +34,7 @@ import {
   buildLocalBrief,
   extractOpenP0TaskIds,
   extractTaskBlock,
+  listEligibleTasks,
   pickTask,
   runDaemon,
 } from "./daemon.js";
@@ -1855,6 +1856,48 @@ describe("tick-loop / daemon / pickTask", () => {
 
   it("returns undefined when nothing is pickable", () => {
     expect(pickTask("# Tasks\n\n## P0\n\n")).toBeUndefined();
+  });
+
+  // Regression for `daemon-priority-discipline-picktask-bug`: a block
+  // tagged `p1` that is physically placed inside the `## P0` section must
+  // NOT shadow genuine p0 work that appears later in the file. Effective
+  // priority is the `**Tags**:` p-token, not file position.
+  const FIXTURE_P1_TAGGED_IN_P0 = `# Tasks
+
+## P0
+
+- [ ] \`misplaced\` — p1-tagged block sitting first in the P0 section
+  - **ID**: misplaced
+  - **Tags**: p1, refactor
+  - **Hypothesis**: must not shadow genuine p0.
+
+- [ ] \`genuine-p0\` — correctly p0-tagged, later in the file
+  - **ID**: genuine-p0
+  - **Tags**: p0, reliability
+  - **Hypothesis**: must be picked first.
+
+## P1
+
+- [ ] \`real-p1\` — genuinely p1
+  - **ID**: real-p1
+  - **Tags**: p1
+  - **Hypothesis**: after all p0.
+`;
+
+  it("does not let a p1-tagged block in the P0 section shadow genuine p0 work", () => {
+    expect(pickTask(FIXTURE_P1_TAGGED_IN_P0)).toBe("genuine-p0");
+  });
+
+  it("orders eligible tasks by declared **Tags** priority, file order only as tiebreaker", () => {
+    expect(listEligibleTasks(FIXTURE_P1_TAGGED_IN_P0)).toEqual([
+      "genuine-p0",
+      "misplaced",
+      "real-p1",
+    ]);
+  });
+
+  it("keeps file order for untagged P0 tasks (no behavioural regression)", () => {
+    expect(listEligibleTasks(FIXTURE_TASKS_MD)).toEqual(["alpha", "beta", "gamma", "delta"]);
   });
 });
 

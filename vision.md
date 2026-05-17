@@ -730,6 +730,102 @@ Article 25 (data protection by design); SLSA Specification (slsa.dev/spec/v1.0/,
 model + mitigation hypothesis); rule #10 (deterministic enforcement — every
 minimum-bar item above has a CI lint).
 
+### 14. Delegate to agents; adopt their native capabilities; shrink to fit
+
+Minsky's job is _orchestration_, not capability ownership. The agent runtime it
+drives (Claude Code today; Devin, aider, opencode, and successors tomorrow)
+ships native primitives at high cadence — parallel teammates, shared task
+lists/standards, lifecycle hooks, subagents, model routing, sandboxing. **Every
+capability the agent provides natively is a capability Minsky must stop
+hand-rolling.** Always prefer the native solution when the running agent offers
+one; keep only a thin adapter (rule #2) for agents that lack it, behind a
+capability-tiered selection that defaults to native. Adoption that does _not_
+net-reduce Minsky's owned surface (modules, lines, maintenance) is rejected —
+this rule only ever shrinks Minsky.
+
+This is **periodic, not one-time**. Agent features ship far faster than the
+quarterly upstream scan in rule #1, so on a **monthly** cadence a recurring task
+`agent-capability-delegation-scan` audits each supported agent's changelog/docs
+for newly-released native capabilities that overlap a Minsky module, and files a
+`delegate-to-native-<capability>` task — **P0 when it lets Minsky delete a
+hand-rolled subsystem**. A `pr-agent-delegation-scan-current` lint (rule #10
+shape) fails the build when the scan is staler than the cadence, the same way
+`pr-replace-or-relocate-research` enforces rule #1. Where rule #1 asks "is this
+solvable upstream as a _library_?", rule #14 asks the sharper "does the agent
+_runtime_ now do this natively, so we can _delete_ our copy?"
+
+Iron only in direction, not in haste: a delegation is taken only if it preserves
+every other rule — it must not regress rule #6 (stay-alive: an experimental
+native feature does not become a daemon's single point of failure — gate it,
+keep the fallback tier), and each adoption is a pre-registered experiment under
+rule #9 (hypothesis: _owned surface drops by N modules/lines while behavioural
+parity holds_; pivot: native parity fails → keep the adapter, re-file as a watch
+task). Composes rule #1 (don't reinvent), rule #2 (every dependency behind an
+interface — the adapter seam is what makes "prefer native, fall back generic"
+possible), and rule #12 (iron scope discipline — this rule is its agent-facing
+engine).
+
+Sources: operator directive 2026-05-17 ("always keep researching ways to
+delegate more to agents and support their features more natively as they get
+released; periodically; always prefer to minimise Minsky's scope, subject to all
+other principles"); Wardley, _Wardley Maps_ (capabilities commoditise into the
+platform — stop owning what the platform now provides); Conway 1968 (system
+structure mirrors the boundary between what you own and what you delegate); the
+"replace yourself" lineage of rule #1; rule #9 (pre-registered HDD); rule #10
+(deterministic staleness lint); rule #12 (scope discipline — no exemption).
+
+### 15. Match the operator's machine-utilisation budget — no more, no less
+
+The operator declares a single number: the fraction of their machine Minsky may
+consume (**default 70%**; raised explicitly, e.g. to 80% for a swarm window).
+Minsky's job is to **match that budget** — scale parallel work _up_ until it is
+reached, and never silently exceed it. "Match" has two halves and both are
+mandatory:
+
+1. **Scale to it.** Worker concurrency auto-tunes toward the budget using
+   _effective_ throughput as the signal (active model subprocesses + PRs
+   produced/merged), not a nominal worker count — empirically on a 10-core box
+   ~10 Claude-Opus workers saturate usefully while ~20 gridlock to zero (the
+   collapse point is data, found per rule #9, not guessed). Growing past the
+   point where effective throughput rises is a violation, not ambition.
+2. **Remove artificial throttles so the budget is reachable.** A nominal budget
+   the OS prevents workers from using is not "matched". Minsky owns its runtime
+   knobs (launchd `ProcessType` — `Background` imposes macOS QoS CPU/IO
+   throttling and is wrong for a worker fleet; `Nice`; `ulimit`/file-descriptor
+   ceilings; `MINSKY_*` concurrency caps) and must set them so the configured
+   budget is physically achievable, then verify it empirically.
+
+**Machine changes propagate, they are not local hacks.** Any host-level setting
+Minsky changes to reach the budget (launchd plist QoS/nice, sysctl, shell rc,
+ulimits) MUST be mirrored as a task on the relevant repo's enterprise mirror —
+`dotfiles` for host/shell/launchd config, `agentbrew` for agent rules/skills —
+so the change is implemented durably upstream and Minsky _pulls_ it rather than
+re-applying a one-off every run (rule #1: don't hand-maintain what a managed
+repo should own). The in-session change is the stopgap; the cross-repo task is
+the real fix. The budget itself, its enforcement, and the propagation rule are
+also reflected in the agent rule/skill layer (CLAUDE.md / skills) so every agent
+working in any repo honours the same operator budget.
+
+Each scaling/throttle change is a pre-registered experiment (rule #9): the
+hypothesis is "effective throughput rises toward the budget without collapse",
+with the gridlock signature as the pivot. A deterministic check (rule #10)
+asserts the configured budget is parsed and that no artificial throttle
+(`ProcessType=Background`, an unintended `Nice`, a stale concurrency cap)
+contradicts it. Swarm mode is the _explicit, operator-gated, ≤weekly_ high end
+of this budget (it is never self-enabled); normal operation sits at the default.
+
+Sources: operator directive 2026-05-17 ("a user defines the % they're ok with,
+default 70%, Minsky must match that; allow workers ~80% during swarm; adjust
+machine settings if needed; sync machine changes to dotfiles/agentbrew + file
+enterprise-mirror tasks; update rules/skills"); Little's Law / queueing theory
+(throughput is bounded by service capacity — past saturation, added concurrency
+only adds contention); Apple `launchd.plist(5)` (`ProcessType` governs QoS
+scheduling — `Background` is throttled, `Standard`/`Adaptive` are not); rule #1
+(don't hand-maintain what a managed repo owns — propagate to dotfiles/agentbrew);
+rule #9 (pre-registered HDD for every scaling change); rule #10 (deterministic
+budget/throttle check); rule #12 (scope discipline — match the budget, do not
+sprawl past it).
+
 ## Pattern conformance index
 
 Operationalises rule #8. Each row maps a Minsky artifact (file path, package,
