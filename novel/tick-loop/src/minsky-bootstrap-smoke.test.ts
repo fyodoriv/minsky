@@ -1,6 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
+  // Daemon workers export MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM /
+  // MINSKY_NO_AUTO_BOOTSTRAP into the shell that runs the test suite
+  // (see `local-preferred-daemon-env-vars`). Without sandboxing, the
+  // `MINSKY_LLM_PROVIDER=claude-only` short-circuit in maybeBootstrapLocalLlm
+  // fires before the DI seams are reached and these tests fail under the
+  // daemon env (green on a bare shell, red on a daemon host). Stub the
+  // ambient daemon env to undefined per-test; vi.unstubAllEnvs() restores
+  // it. The Slice C test re-stubs MINSKY_LLM_PROVIDER itself after this.
+  beforeEach(() => {
+    vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
+    vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {
       server: { reachable: true, url: "http://127.0.0.1:1234" },
