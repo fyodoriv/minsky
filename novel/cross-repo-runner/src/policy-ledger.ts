@@ -68,7 +68,11 @@ export interface WriteVerdictRecord {
   readonly code: string;
 }
 
-/** `push` → `push-code`, `pr` → `open-pr` (the audit's vocabulary). */
+/**
+ * `push` → `push-code`, `pr` → `open-pr` (the audit's vocabulary).
+ *
+ * @otel cross-repo-runner.ledger-action
+ */
 export function ledgerAction(writeKind: WriteKind): LedgerAction {
   return writeKind === "push" ? "push-code" : "open-pr";
 }
@@ -77,6 +81,8 @@ export function ledgerAction(writeKind: WriteKind): LedgerAction {
  * Build the run-start marker. One per non-dry conductor sweep, appended
  * before any write-verdict, so the audit's `--window=run` slice is
  * exactly this run's verdicts.
+ *
+ * @otel cross-repo-runner.build-run-start-record
  */
 export function buildRunStartRecord(runId: string, ts: string): RunStartRecord {
   return { ts, event: "run-start", runId };
@@ -105,6 +111,8 @@ export interface WriteVerdictInputs {
  * action:"push-code", allowed:true}` record can never be emitted —
  * which is exactly why the audit's `foreign_code_pushes` counter stays
  * 0 by construction (the pre-registered success threshold).
+ *
+ * @otel cross-repo-runner.build-write-verdict-record
  */
 export function buildWriteVerdictRecord(i: WriteVerdictInputs): WriteVerdictRecord {
   const allowed = i.decision.allowed;
