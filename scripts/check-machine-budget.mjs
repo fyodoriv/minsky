@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved operator-machine-budget-autoscale slice 2 — rule-#10 deterministic gate (operator directive 2026-05-17) -->
 // Pattern: deterministic CI gate over the operator's machine-utilisation
 // budget contract (rule #10 — every prose-only invariant in vision.md /
 // the task block gets a deterministic linter as soon as the artefact it
