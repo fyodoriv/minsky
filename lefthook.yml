@@ -3,6 +3,17 @@
 pre-commit:
   parallel: true
   commands:
+    toolchain:
+      # TASKS.md `commit-hook-chain-node-version-and-platform-resilience`
+      # (slice 1). Asserts the running node matches `.node-version` and
+      # every hook-critical binary (biome's per-arch CLI, lefthook,
+      # scan-secrets) resolves for THIS platform/arch. On 2026-05-17 a
+      # node-version switch + a missing `@biomejs/cli-darwin-arm64`
+      # silently 100%-blocked every commit fleet-wide with an opaque
+      # MODULE_NOT_FOUND. This converts that class into one operator-
+      # actionable line (vision.md rule #6; rule #10 ratchet). Globless
+      # so it runs on every commit, not only when matching files stage.
+      run: node scripts/check-toolchain.mjs
     biome:
       glob: "*.{ts,js,json,jsonc,md}"
       run: pnpm biome check --error-on-warnings --no-errors-on-unmatched {staged_files}
