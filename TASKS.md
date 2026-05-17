@@ -1252,6 +1252,15 @@
 
 ## P2
 
+- [ ] `audit-tests-for-ambient-daemon-env-leak` — sweep the test suite for tests that read daemon-exported env vars (`MINSKY_LLM_PROVIDER`, `MINSKY_LOCAL_LLM`, `MINSKY_NO_AUTO_BOOTSTRAP`, …) without sandboxing them
+  - **ID**: audit-tests-for-ambient-daemon-env-leak
+  - **Tags**: p2, test-hygiene, rule-11, flaky-gate, daemon-env
+  - **Surfaced-by**: 2026-05-17 `daemon-task-rotation-on-completion` iteration — the full-stage pre-push gate failed on `novel/tick-loop/src/minsky-bootstrap-smoke.test.ts` (3 DI-seam tests) ONLY because the daemon worker env exports `MINSKY_LLM_PROVIDER=claude-only`, which `maybeBootstrapLocalLlm` reads. The 3 tests were byte-identical to `origin/main` (pre-existing) and pass in a clean shell but fail under the daemon env — a rule #11 env-dependent gate. Fixed in this PR by a suite `beforeEach` `vi.stubEnv(...)` sandbox; THIS task is the sweep for the same class elsewhere.
+  - **Details**: grep the suite for `process.env.MINSKY_` reads and any `bin/minsky.mjs` / bootstrap / provider-selection imports in tests that lack a `vi.stubEnv` / `beforeEach` env sandbox. Add the sandbox (or a shared test helper that neutralises the documented daemon-exported vars) wherever found. Consider a lint rule (`check-rule-11-no-flaky-gates` extension) that flags a test importing a known env-reading module without an env-stub in scope — feedback-loop guardrail: prevent the category, not the instance.
+  - **Files**: `novel/**/src/**/*.test.ts` that import bootstrap/provider modules; optionally a new shared `test/env-sandbox.ts`; `scripts/check-rule-11-no-flaky-gates.mjs`.
+  - **Hypothesis**: today ≥1 test (besides the now-fixed bootstrap-smoke) is env-dependent on daemon-exported vars; under the daemon env the full-stage gate is non-deterministic. After the sweep + the lint rule, `MINSKY_LLM_PROVIDER=claude-only npx vitest run` and a clean-env run produce identical pass sets (0 env-dependent failures).
+  - **Acceptance**: (1) every test reading a daemon-exported env var sandboxes it; (2) a lint rule flags the pattern; (3) the suite pass-set is identical with and without the daemon env exported.
+
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
 
 - [ ] `gate-host-load-shed` — shed concurrent host load during a merge-gate vet so vitest stops flaking under 2-3x oversubscription

@@ -1,6 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
+  // Daemon workers export MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM /
+  // MINSKY_NO_AUTO_BOOTSTRAP into the ambient process env. Without this
+  // sandbox the suite is env-dependent (rule #11): under the daemon env
+  // `maybeBootstrapLocalLlm` short-circuits on the ambient
+  // MINSKY_LLM_PROVIDER and the DI-seam assertions below fail. stubEnv
+  // (not `delete`): biome `noDelete` forbids the delete operator and
+  // `process.env.X = undefined` coerces to the string "undefined".
+  // The claude-only test re-stubs MINSKY_LLM_PROVIDER for its own case.
+  beforeEach(() => {
+    vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
+    vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {
       server: { reachable: true, url: "http://127.0.0.1:1234" },
