@@ -934,15 +934,18 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-    // 300s (not 120s): this case runs all 99 invariants, each shelling out
-    // to real git/gh/fs probes. It completes in ~26s in isolation but is
-    // starved well past 120s when the whole-repo vitest suite runs it in
-    // the parallel pool (the `pnpm pre-pr-lint --stage=full` pre-push
-    // path). The work is deterministic — only wall-time under contention
-    // exceeds the cap — so a larger timeout is the correct remedy
-    // (vitest's own timeout-exceeded guidance) rather than masking a
-    // logic failure.
-  }, 300_000);
+    // 600s (not 120s/300s): this case runs all 99 invariants, each
+    // shelling out to real git/gh/fs probes. It completes in ~26s in
+    // isolation but is starved well past 120s when the whole-repo vitest
+    // suite runs it in the parallel pool (the `pnpm pre-pr-lint
+    // --stage=full` pre-push path). 300s was raised to 600s after it was
+    // observed timing out at exactly 300000ms in the pre-push gate under
+    // ~20-daemon worktree-swarm contention (every daemon's full-stage
+    // vitest pool sharing one machine). The work is deterministic — only
+    // wall-time under contention exceeds the cap — so a larger timeout is
+    // the correct remedy (vitest's own timeout-exceeded guidance) rather
+    // than masking a logic failure.
+  }, 600_000);
 });
 
 describe("CANONICAL_REPO is single-sourced from daemon-pr-lint-metrics", () => {
