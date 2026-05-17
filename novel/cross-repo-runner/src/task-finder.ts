@@ -251,11 +251,7 @@ function finaliseTask(p: PartialParsedTask): ParsedTask | null {
   };
 }
 
-function assignMetadata(
-  task: PartialParsedTask,
-  line: string,
-  state: ParserState,
-): void {
+function assignMetadata(task: PartialParsedTask, line: string, state: ParserState): void {
   // Strip a leading bullet marker (`- ` or `* `) so both tasks.md-spec
   // formats parse identically:
   //   (a) nested-bullet style (what this repo's own TASKS.md uses, and
@@ -285,10 +281,7 @@ function assignMetadata(
     state.currentFieldIndent = indent;
     state.currentFieldAppend = (extra) => {
       const existing = read();
-      const next =
-        existing === null || existing.length === 0
-          ? extra
-          : `${existing}\n${extra}`;
+      const next = existing === null || existing.length === 0 ? extra : `${existing}\n${extra}`;
       write(next);
     };
   };
@@ -403,10 +396,7 @@ function assignMetadata(
       // "content-indent" floor; anything more indented is preserved
       // verbatim (so nested numbered lists keep their offset).
       const contentIndent = state.currentFieldIndent + 2;
-      const trimmedLeft = line.replace(
-        new RegExp(`^[ \\t]{0,${contentIndent}}`),
-        "",
-      );
+      const trimmedLeft = line.replace(new RegExp(`^[ \\t]{0,${contentIndent}}`), "");
       state.currentFieldAppend(trimmedLeft);
     } else {
       // Indent dropped to ≤ the field's indent → this is a sibling
