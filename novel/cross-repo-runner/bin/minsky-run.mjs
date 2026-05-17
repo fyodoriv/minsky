@@ -412,9 +412,7 @@ function listOpenPrBranches(hostRepo) {
       { encoding: "utf8", env: { ...process.env, GH_HOST: "github.example.com" } },
     );
     const prs = JSON.parse(out);
-    return new Set(
-      prs.map((pr) => pr.headRefName).filter((name) => typeof name === "string"),
-    );
+    return new Set(prs.map((pr) => pr.headRefName).filter((name) => typeof name === "string"));
   } catch {
     // `gh` not on PATH, repo unreachable, malformed JSON — degrade to
     // an empty set so the loop continues with the legacy behaviour.
@@ -862,8 +860,7 @@ function readClaudeSpawnArgs() {
   // Operators can override:
   //   MINSKY_CLAUDE_PERMISSION_MODE=""             → omit the flag entirely
   //   MINSKY_CLAUDE_PERMISSION_MODE=acceptEdits    → milder (edits only)
-  const permMode =
-    process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "bypassPermissions";
+  const permMode = process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "bypassPermissions";
   const base = ["--print"];
   if (sources !== "") base.push("--setting-sources", sources);
   if (permMode !== "") base.push("--permission-mode", permMode);
