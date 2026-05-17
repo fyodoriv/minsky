@@ -106,6 +106,12 @@ describe("runGateSweep (injected seam)", () => {
     JSON.stringify({ name: "typecheck", verdict: "fail" }),
     JSON.stringify({ summary: true, allPass: false, stepCount: 1 }),
   ].join("\n");
+  // Hermetic permission-gate seams: a stable home origin (so the
+  // merge-target classifies `home` → allowed, deterministically, with
+  // NO `git` subprocess) and a no-op verdict sink (so unit runs never
+  // append to the real repo's `.minsky/runany-policy.jsonl`).
+  const homeOriginFn = () => "git@github.com:fyodoriv/minsky.git";
+  const runanyEmit = () => {};
 
   it("merges only the gate-green PR; skips the red one; never merges in dry-run", () => {
     const merged = /** @type {number[]} */ ([]);
@@ -118,6 +124,8 @@ describe("runGateSweep (injected seam)", () => {
         merged.push(p.number),
       noReview: true,
       log: () => {},
+      homeOriginFn,
+      runanyEmit,
     };
     const real = runGateSweep(base);
     expect(merged).toEqual([10]);
@@ -139,6 +147,8 @@ describe("runGateSweep (injected seam)", () => {
         mergeCalls += 1;
       },
       log: () => {},
+      homeOriginFn,
+      runanyEmit,
     });
     expect(mergeCalls).toBe(0);
     expect(res.skipped[0]?.reason).toContain("merge-onto-main-conflict");
@@ -153,6 +163,8 @@ describe("runGateSweep (injected seam)", () => {
       },
       noReview: true,
       log: () => {},
+      homeOriginFn,
+      runanyEmit,
     });
     expect(res.merged).toEqual([]);
     expect(res.skipped[0]?.reason).toContain("merge-failed");
@@ -169,8 +181,70 @@ describe("runGateSweep (injected seam)", () => {
       },
       mergeFn: () => {},
       log: () => {},
+      homeOriginFn,
+      runanyEmit,
     });
     expect(seen).toEqual([2]);
+  });
+});
+
+describe("runGateSweep — runany permission gate (Acceptance 2)", () => {
+  const greenStdout = JSON.stringify({ summary: true, allPass: true, stepCount: 1 });
+
+  it("home merge-target → merge proceeds; emits run-start + an allowed push-code verdict", () => {
+    const records = /** @type {object[]} */ ([]);
+    let merged = 0;
+    const res = runGateSweep({
+      snapshotFn: () => [pr({ number: 70 })],
+      vetFn: () => ({ stdout: greenStdout }),
+      mergeFn: () => {
+        merged += 1;
+      },
+      noReview: true,
+      log: () => {},
+      homeOriginFn: () => "git@github.com:fyodoriv/minsky.git",
+      runanyEmit: (/** @type {object} */ r) => records.push(r),
+    });
+    expect(merged).toBe(1);
+    expect(res.merged.map((m) => m.number)).toEqual([70]);
+    const start = records.find((r) => /** @type {any} */ (r).event === "run-start");
+    const verdict = records.find((r) => /** @type {any} */ (r).event === "write-verdict");
+    expect(start).toBeTruthy();
+    expect(verdict).toMatchObject({
+      event: "write-verdict",
+      repoClass: "home",
+      action: "push-code",
+      allowed: true,
+      code: "ok",
+    });
+  });
+
+  it("unprovable origin → classifies foreign → REFUSES the merge, mergeFn NOT called, refused verdict emitted", () => {
+    const records = /** @type {object[]} */ ([]);
+    let merged = 0;
+    const res = runGateSweep({
+      snapshotFn: () => [pr({ number: 71 })],
+      vetFn: () => ({ stdout: greenStdout }),
+      mergeFn: () => {
+        merged += 1;
+      },
+      noReview: true,
+      log: () => {},
+      // null origin + no root ⇒ classifyRepo fail-safe ⇒ foreign.
+      homeOriginFn: () => null,
+      runanyEmit: (/** @type {object} */ r) => records.push(r),
+    });
+    expect(merged).toBe(0); // code never pushed to a non-home repo
+    expect(res.merged).toEqual([]);
+    expect(res.skipped[0]?.reason).toContain("policy-refused");
+    const verdict = records.find((r) => /** @type {any} */ (r).event === "write-verdict");
+    expect(verdict).toMatchObject({
+      event: "write-verdict",
+      repoClass: "foreign",
+      action: "push-code",
+      allowed: false,
+      code: "foreign-push-refused",
+    });
   });
 });
 
