@@ -9,6 +9,8 @@ export { findTask, isHostTaskEligible, parseTasksMd, pickHostTask } from "./task
 export type { ParsedTask, FindTaskResult } from "./task-finder.js";
 export { synthesiseExperimentYaml } from "./experiment-synth.js";
 export type { SynthResult } from "./experiment-synth.js";
+export { parseMinskyProcs, scanMinskyProcesses } from "./scan-processes.js";
+export type { MinskyProc, ProcScanProbe } from "./scan-processes.js";
 export { buildSpawnPlan } from "./spawn-plan.js";
 export type { RunnerPlan, SpawnPlanInputs } from "./spawn-plan.js";
 export { renderIterationRecord } from "./iteration-record.js";

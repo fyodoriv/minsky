@@ -193,6 +193,10 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 
 Returns `{ ok: true, repoPath, source }` (where `source` records which seam matched, surfaced in logs + the installer's audit print-out) OR `{ ok: false, hint }` with a message that tells the operator how to fix it. Tested by `shim-resolve.test.ts` (10 paired cases covering env-var hit/miss, the 4-step fallback chain, ordering, and home-trailing-slash handling). See the root `README.md` § "Observer layer" for the operator-side install + slash-command surface, and `skill-plugins/observer/minsky/SKILL.md` for the observer protocol the shim is part of.
 
+## `scanMinskyProcesses` (runany substrate — host-wide run enumeration)
+
+`src/scan-processes.ts` exports pure `parseMinskyProcs(psText)` + the injected `scanMinskyProcesses(probe)` seam — the single machine-wide answer to "what minsky runs exist on this host right now?". It parses `ps` text into typed `MinskyProc` records (`kind: orchestrator | worker | gate`, repo root, per-run id), excluding `run-pre-pr-lint-stack` vet children and all non-minsky noise. Composes the OS `ps` rather than a bespoke registry (rule #1); the parse is pure with no I/O (rule #10); a broken/absent `ps` degrades to `[]` and never throws (rule #6) so it cannot take down the very TUI / launch path it serves. Foundational substrate for the runany P0 cluster (#588): the retro TUI dashboard, the multi-tenant no-conflict guard, and the zero-arg entrypoint all build on it instead of each re-deriving `ps` parsing. Tested by `scan-processes.test.ts` (7 paired cases: kind classification, multi-tenant repo derivation, worker run-id, vet-child exclusion, empty/garbage fail-safe, the injected seam, graceful-degrade).
+
 ## Tests
 
 171+ paired vitest cases across 13 files (run `pnpm vitest run novel/cross-repo-runner`):
