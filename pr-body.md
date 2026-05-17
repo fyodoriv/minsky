@@ -28,9 +28,10 @@ before the gate that deadlocks on it even runs.
   devDependency (rule #1 — canonical fixer, not reinvented).
 - **Wired into `daemon.ts`** — `maybeRunTasksMdLintFix` runs after every
   `completed` iteration, before `maybeRunPrePrLintGate`, emitting a
-  `tick-loop.tasks-md-lint-fix` span with `tasks-md-lint-fix.violations`
-  + `.fixed`. Opt-in seam (`tasksMdLintExec`) — daemons predating it are
-  unchanged. Production seam wired in `bin/tick-loop.mjs`.
+  `tick-loop.tasks-md-lint-fix` span carrying both the
+  `tasks-md-lint-fix.violations` and `.fixed` attributes. Opt-in seam
+  (`tasksMdLintExec`) — daemons predating it are unchanged. Production
+  seam wired in `bin/tick-loop.mjs`.
 - **Tests** — `tasks-md-lint-fix.test.ts` covers the 4 brief input states
   (clean, MD012, MD012+unfixable-MD001+warning, dry-run-no-mutation) plus
   `parseSummaryCount` crash handling; 2 daemon-wiring tests assert the
