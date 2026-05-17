@@ -711,6 +711,7 @@ export {
   type DuplicateDecision,
   type PrSnapshot,
   decideDuplicate,
+  parseGhPrListForDuplicateDetection,
   prTitleNamesTask,
 } from "./duplicate-pr-detector.js";
 
