@@ -3,6 +3,16 @@
 pre-commit:
   parallel: true
   commands:
+    toolchain:
+      # TASKS.md `commit-hook-chain-node-version-and-platform-resilience`
+      # slice 1 (vision.md rule #6 — fail loud at the actionable boundary).
+      # Runs every commit (no `glob` ⇒ unconditional) so a node-version /
+      # platform-dep drift surfaces as a one-line `fnm use` / `pnpm install`
+      # remediation INSTEAD OF an opaque MODULE_NOT_FOUND from biome/lefthook
+      # that silently 100%-blocks every commit fleet-wide. The same guard runs
+      # at `postinstall` (rule #10 — one guard, every gate); wiring it into
+      # `pnpm pre-pr-lint`/CI is a tracked follow-up slice.
+      run: node scripts/check-toolchain.mjs
     biome:
       glob: "*.{ts,js,json,jsonc,md}"
       run: pnpm biome check --error-on-warnings --no-errors-on-unmatched {staged_files}
