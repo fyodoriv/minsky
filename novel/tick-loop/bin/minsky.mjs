@@ -353,6 +353,13 @@ function buildContextProbes() {
     },
 
     probeClaudeState: async () => {
+      // Fresh-checkout fast path: if `claude` is not on PATH the planner
+      // must route to bootstrap-local-LLM (mirrors `claude-health-probe`'s
+      // `needsLocalLlmBootstrap` contract), and the persisted hard-limit
+      // state is moot — short-circuit BEFORE the `.minsky/state.json` read
+      // (round-trip elimination: skips one existsSync + readFileSync on
+      // every no-claude invocation).
+      if (!claudeBinaryOnPath()) return "binary-missing";
       // Use persisted hard-limit state only (file read ≤1 ms, no live probe).
       // The live probe can take 5–20 s; skipping it keeps context gather under 500 ms.
       const persisted = readPersistedHardLimit();
@@ -1096,6 +1103,30 @@ function buildArchProbes() {
     probeIntelBrewPath: () =>
       existsSync("/usr/local/bin/brew") ? "/usr/local/bin/brew" : undefined,
   };
+}
+
+/**
+ * Synchronous PATH scan for the `claude` binary — no subprocess spawn (unlike
+ * {@link whichFn}), so it stays inside the 500 ms context-probe budget and
+ * adds zero round-trips. Scans each PATH entry for an executable `claude`.
+ *
+ * @returns {boolean} true when `claude` is found and executable on PATH.
+ */
+function claudeBinaryOnPath() {
+  const raw = process.env["PATH"];
+  if (!raw) return false;
+  // POSIX-only daemon surface (the rest of this file assumes `sh` / `:` PATH).
+  for (const dir of raw.split(":")) {
+    if (dir.length === 0) continue;
+    try {
+      accessSync(resolve(dir, "claude"), fsConstants.X_OK);
+      return true;
+      // rule-6: handled-locally — not in this dir / not executable: keep scanning.
+    } catch {
+      // next dir
+    }
+  }
+  return false;
 }
 
 /** `which <bin>` adapter — uses `command -v` (POSIX) for portability. */
