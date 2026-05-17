@@ -52,7 +52,7 @@ savings: one fewer import path + no `index.test.ts`).
 - `node -e "import('@minsky/competitive-benchmark').then(m=>console.log(m.METRICS.length, m.COMPETITORS.length))"`
   → `11 6`.
 
-Before this, if the resolved worktree `cwd` was missing for *any* reason (prune race, stale gitdir, an `ensureWorktree` regression), Node's `child_process.spawn` emitted a cryptic `spawn aider ENOENT` that names the *command*, not the missing directory — un-actionable for the operator, and the model was effectively spawned against a bad cwd. That cryptic-ENOENT was exactly the symptom the operator hit across ~100 dogfood iterations.
+## Hypothesis self-grade
 
 - **Predicted**: a single zero-dependency cited metric catalogue (a) + competitor corpus (b), consumed by the slice-c runner/dashboard/meta-rule, removes divergent definitions of "who we compare against" and makes the scorecard buildable with ≥4 competitors × ≥5 shared metrics.
 - **Observed**: `pnpm typecheck` exit 0; `npx vitest run novel/competitive-benchmark/` → 30/30 green; `COMPETITORS.length` = 6 (≥4) across both `ResultSource` arms; `METRICS.length` = 11 (≥5) across all three families.
@@ -70,12 +70,3 @@ the gate before merge — visible-not-silent, not a silent drop. Untrusted
 numeric/string inputs are propagated, never coerced, so a malformed corpus
 surfaces in the scorecard rather than masking as a false parity. No
 auth/network/filesystem/supply-chain surface added.
-
-<!-- rule-3: doc-deferred-to-followup-task: local-worker-worktree-never-created -->
-
-## Hypothesis self-grade
-
-Predicted: rebasing this PR onto current main with `-X ours` preserves main's evolution while landing the PR's unique additions; gate vetting passes; admin-merge lands the work in main.
-Observed: rebase clean; pre-pr-lint --stage=full green; admin-squash-merge succeeded.
-Match: partial
-Lesson: drain-merge auto-stubs unblock daemon-spawned PRs whose original bodies lacked the gate's required sections; the stub documents the rebase + merge action rather than fabricating original-author claims.

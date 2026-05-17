@@ -153,6 +153,8 @@ importers:
 
   novel/competitive-benchmark: {}
 
+  novel/competitive-benchmark: {}
+
   novel/cross-repo-runner:
     dependencies:
       '@minsky/sidecar-bootstrap':
