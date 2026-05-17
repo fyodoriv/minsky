@@ -796,8 +796,20 @@ function readLiveSpawnTimeoutMs() {
 function readClaudeSpawnArgs() {
   const raw = process.env.MINSKY_CLAUDE_SETTING_SOURCES;
   const sources = raw === undefined ? "project,local" : raw;
-  if (sources === "") return ["--print"];
-  return ["--print", "--setting-sources", sources];
+  // `--permission-mode acceptEdits` lets claude --print actually USE its tools
+  // (Edit/Write/Bash/etc) without an interactive permission prompt; without it,
+  // the default permission mode requires a human at the keyboard, so claude
+  // produces validated text output but never edits files, commits, or opens a
+  // PR. Discovered 2026-05-16 — bulletproof-ux-dashboard iter 9 produced
+  // `verdict: validated, pr_url: null` because claude wrote a 5-page analysis
+  // but never invoked any Edit tool. Operators can override:
+  //   MINSKY_CLAUDE_PERMISSION_MODE=""             → omit the flag entirely
+  //   MINSKY_CLAUDE_PERMISSION_MODE=bypassPermissions  → fully permissive
+  const permMode = process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "acceptEdits";
+  const base = ["--print"];
+  if (sources !== "") base.push("--setting-sources", sources);
+  if (permMode !== "") base.push("--permission-mode", permMode);
+  return base;
 }
 
 function emitLoopSummary(result) {
