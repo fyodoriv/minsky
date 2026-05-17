@@ -58,6 +58,14 @@ pnpm install   # prepare hook builds dist; no manual build step needed
 pnpm minsky doctor
 ```
 
+## Context-aware `minsky` no-args UX (P0 `minsky-cli-context-aware-ux`)
+
+Three modules implement the context-aware `minsky` (no-args) flow:
+
+- **`minsky-context`** — `gatherMinskyContext(probes, timeoutMs?)` runs 7 parallel detection probes (worker liveness, last-iteration age, Claude quota state, local-LLM availability, git cleanliness, open/conflicting PR counts, task-queue state) with per-probe timeout and graceful-degrade to safe defaults.
+- **`minsky-action-plan`** — `planMinskyAction(context)` maps a `MinskyContext` snapshot to a `MinskyActionPlan` via 8 priority-ordered scenarios (worker-already-running → claude-exhausted → git-dirty → wip-needs-cleanup → queue-empty → daemon-mid-iteration → clean-fresh-checkout). Pure function: no I/O.
+- **`minsky-prompt`** — `renderPlan(plan)` (pure string render) + `runInteractive(plan, opts)` (TTY prompt with digit-selection or non-TTY auto-confirm). `MINSKY_NON_INTERACTIVE=1` is resolved in the caller (`bin/minsky.mjs`) before passing `isTty` to keep this module pure-over-injection.
+
 ## Usage
 
 ```ts

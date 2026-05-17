@@ -908,3 +908,29 @@ export {
   predictExhaustionMs,
   recentHistory,
 } from "./usage-history.js";
+
+// `minsky-cli-context-aware-ux` — context-aware `minsky` (no-args) UX.
+// Slices 1–3: context gather, action planner, interactive prompt.
+export {
+  type ClaudeContextState,
+  type ContextProbes,
+  type GitContextState,
+  type LocalLlmContextState,
+  type MinskyContext,
+  type PrStats,
+  type QueueContextState,
+  type WorkerRunState,
+  gatherMinskyContext,
+} from "./minsky-context.js";
+export {
+  type ActionId,
+  type MinskyAction,
+  type MinskyActionPlan,
+  type Scenario,
+  planMinskyAction,
+} from "./minsky-action-plan.js";
+export {
+  type PromptOpts,
+  renderPlan,
+  runInteractive,
+} from "./minsky-prompt.js";
