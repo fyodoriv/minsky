@@ -1,6 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
+  // The DI-seam tests inject detectFn/claudeProbeFn/bootstrapFn but the SUT
+  // still consults process.env for the bootstrap-policy env vars. Daemon
+  // workers run with MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM exported (the
+  // pre-push hook runs the full vitest suite in that polluted env), so
+  // without this sandbox the first three cases take the SUT's ambient
+  // `MINSKY_LLM_PROVIDER=claude-only` early-return path and fail with
+  // `{ MINSKY_LLM_PROVIDER: 'claude-only' }`. vi.stubEnv(name, undefined)
+  // deletes the var (biome `noDelete` forbids `delete process.env.X`, and
+  // `= undefined` coerces to the string "undefined" in Node);
+  // unstubAllEnvs() restores the originals. Slice-C's own stubEnv overrides
+  // this baseline for that one case.
+  beforeEach(() => {
+    vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
+    vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {
       server: { reachable: true, url: "http://127.0.0.1:1234" },
