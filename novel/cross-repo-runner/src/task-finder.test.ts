@@ -282,6 +282,69 @@ describe("pickHostTask", () => {
 `;
     expect(pickHostTask(tasksMd)).toBeNull();
   });
+
+  test("skips tasks whose canonical branch has an open PR", () => {
+    // Regression — discovered 2026-05-16 on oncall-hub-plugin run:
+    // after a salvage-merge of feat/<task.id> the loop kept re-picking
+    // the same task on every iteration until TASKS.md was manually
+    // cleaned. The fix lets the runner pass an openPrBranches set so
+    // pickHostTask self-heals across the merge-vs-cleanup-task race.
+    const tasksMd = `# Tasks
+
+## P1
+
+- [ ] First task (already shipped, has open PR)
+  - **ID**: first-task
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+- [ ] Second task (next in line)
+  - **ID**: second-task
+  - **Hypothesis**: h2
+  - **Success**: s2
+  - **Pivot**: p2
+  - **Measurement**: m2
+  - **Anchor**: a2
+`;
+    // Without the filter: first-task wins.
+    expect(pickHostTask(tasksMd)?.id).toBe("first-task");
+    // With the filter: first-task is skipped, second-task wins.
+    const openPrBranches = new Set<string>(["feat/first-task"]);
+    expect(
+      pickHostTask(tasksMd, { openPrBranches, branchPrefix: "feat/" })?.id,
+    ).toBe("second-task");
+  });
+
+  test("openPrBranches respects custom branchPrefix", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] First task
+  - **ID**: first-task
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    // Skip when branch prefix matches.
+    expect(
+      pickHostTask(tasksMd, {
+        openPrBranches: new Set(["chore/first-task"]),
+        branchPrefix: "chore/",
+      }),
+    ).toBeNull();
+    // No skip when prefix doesn't match (default is feat/).
+    expect(
+      pickHostTask(tasksMd, {
+        openPrBranches: new Set(["chore/first-task"]),
+      })?.id,
+    ).toBe("first-task");
+  });
 });
 
 describe("isHostTaskEligible", () => {
