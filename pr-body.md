@@ -10,13 +10,18 @@ to `v24.14.0`, so lefthook's own launcher failed to resolve. Net effect:
 `orchestrate.jsonl` showed 0 autonomous merges and `openPRs` stuck for a 10h
 run — every other P0's throughput is gated behind a working commit path.
 
-This is **slice 1** of `commit-hook-chain-node-version-and-platform-resilience`
-(P0): the durable class fix per CLAUDE.md Feedback-Loop Guardrails ("every bug
-becomes a rule — prevent the *class*, not the instance") and vision.md rule #6
-("fail loudly at the actionable boundary"). It converts both divergence shapes
-into one operator-actionable line at commit time instead of an opaque trace.
+This is **slices 1–2** of
+`commit-hook-chain-node-version-and-platform-resilience` (P0): the durable
+class fix per CLAUDE.md Feedback-Loop Guardrails ("every bug becomes a rule —
+prevent the *class*, not the instance") and vision.md rule #6 ("fail loudly at
+the actionable boundary"). Slice 1 converts both divergence shapes into one
+operator-actionable line at **commit** time; slice 2 wires the same assertion
+into the repo's **verify** gate (`pnpm check`) so a broken toolchain also
+loud-fails — and short-circuits the expensive lint/typecheck/coverage triplet —
+before any other P0 work is attempted, closing the parent task's § Success
+clause "`npm run verify` … exit ≠0 with an actionable remediation line".
 
-## What this slice ships
+## What these slices ship
 
 - `.node-version` + `.nvmrc` pinned to the fleet's `24.14.0`.
 - `scripts/check-toolchain.mjs` — a pure classifier (`parseMajorMinor`,
@@ -32,15 +37,31 @@ into one operator-actionable line at commit time instead of an opaque trace.
 - `lefthook.yml` — a globless `toolchain` pre-commit command so the assertion
   runs on every commit and aborts with the actionable line (its remediation
   forbids `--no-verify`, which also bypasses scan-secrets).
-- `package.json` — a `check-toolchain` script as the documented manual
-  entrypoint.
+- `package.json` (slice 1) — a `check-toolchain` script as the documented
+  manual entrypoint.
+- `package.json` (slice 2) — `check` is now
+  `pnpm check-toolchain && pnpm lint && pnpm typecheck && pnpm test:coverage`.
+  `pnpm check` is the repo's local verify gate (CI invokes the individual
+  `biome`/`typecheck`/`test` jobs directly, not `check`), so this satisfies the
+  parent task's § Details (b) "wired into `npm run verify`" **without** routing
+  through `STACK_MANIFEST`: the manifest's `full` stage is pinned bidirectional
+  to the CI aggregator's `needs:` (`run-pre-pr-lint-stack.test.mjs` § "ci.yml
+  drift-protection"), and CI runs node `20` while `.node-version` pins `24.14.0`
+  — a `toolchain` manifest step would false-fail every CI run. `check-toolchain`
+  is intentionally a **local-fleet-only** guard, so the npm `check` script is
+  its correct verify host. The `&&` placement makes it the *first* gate:
+  a broken toolchain aborts in ~0.13 s with the actionable line instead of
+  after minutes of opaque `MODULE_NOT_FOUND` from `biome ci .` / `tsc -b` /
+  `vitest --coverage`.
 
-Deferred to reviewed follow-up slices, each already enumerated in the parent
-task's § Details: (b) wiring into `pnpm pre-pr-lint` / a verify gate (the
-`STACK_MANIFEST` parity harness makes that self-contained); (c) pinning
+Still deferred to reviewed follow-up slices, each already enumerated in the
+parent task's § Details: (b-postinstall) wiring into the `prepare`/install path
+is blocked on the same CI-node-20 constraint (a fresh-clone `pnpm install` in
+CI runs node 20 and would fail an install-time toolchain assert) and needs an
+`if-local` guard, sized as its own slice; (c) pinning
 `@biomejs/cli-darwin-arm64` into `optionalDependencies` + regenerating
 `pnpm-lock.yaml`; and the lefthook phase-split that runs this assertion
-*before* the heavy biome/typecheck/test steps.
+*before* the heavy biome/typecheck/test pre-commit steps.
 
 ## Disclosed out-of-task change (mandatory-gate unblock)
 
@@ -58,6 +79,28 @@ only). `task-finder`'s 28 tests + the 17 new toolchain tests all pass (45/45),
 confirming zero behavior change. Not folded into a separate PR because the gate
 is non-optional and would block this slice indefinitely otherwise.
 
+Second disclosed unblock — the **full-stage** pre-push hook (stricter than
+`pnpm pre-pr-lint`: adds the whole vitest suite) was red on a pre-existing
+test-isolation bug in `novel/tick-loop/src/minsky-bootstrap-smoke.test.ts`,
+unrelated to this task. Its first three DI-seam cases call the SUT without
+sandboxing `process.env`; daemon workers export `MINSKY_LLM_PROVIDER`, so the
+pre-push vitest ran them in that polluted env and the SUT took its ambient
+`claude-only` early-return path (`expected { MINSKY_LLM_PROVIDER:
+'claude-only' } to match …`). Verified pre-existing: the file fails 3/4 under
+the ambient daemon env and passes 4/4 with the env unset — i.e. **every**
+daemon push fleet-wide fails this gate regardless of branch (again the exact
+class this P0 targets). Minimal fix: a `beforeEach` that `vi.stubEnv(...,
+undefined)`s the three bootstrap-policy vars (the pattern Slice-C in the same
+file already documents), `afterEach` `vi.unstubAllEnvs()`. Now 4/4 under the
+ambient daemon env; zero production-code change.
+
+The only rule-3-governed code touched (`novel/cross-repo-runner` non-test
+`.ts`) is a no-public-surface mechanical refactor, so the whole-PR rule-3
+exemption marker below is accurate (the tick-loop change is a `.test.ts`,
+outside rule-3's scope; `check-toolchain` is in `scripts/`, also outside it).
+
+<!-- rule-3: refactor-no-public-surface -->
+
 ## Measurement
 
 - `npx vitest run scripts/check-toolchain.test.mjs` → **17/17 pass**, covering
@@ -69,20 +112,35 @@ is non-optional and would block this slice indefinitely otherwise.
   (`node-version-mismatch` / `*-unresolved`) → exit `1` with a self-contained
   `[code] remediation` line and **no** `MODULE_NOT_FOUND` in the output
   (asserted by the `formatReport` test).
+- Slice 2 wire-in: `check` in `package.json` now begins with
+  `pnpm check-toolchain &&` — verified by string inspection of the committed
+  diff. The new first gate's pass-path runtime is **0.13 s** (3-run `/usr/bin/time
+  -p`, steady), so on a broken toolchain `pnpm check` aborts in ~0.13 s with
+  the actionable line *instead of* running the full `biome ci .` + `tsc -b` +
+  `vitest --coverage` triplet (minutes, opaque `MODULE_NOT_FOUND`). The
+  negative-exit + actionable-line contract `pnpm check` now inherits is the
+  same one proven by the 17/17 classifier tests above.
 
 ## Hypothesis self-grade
 
-- **Predicted**: a deterministic toolchain classifier wired into pre-commit
+- **Predicted**: a deterministic toolchain classifier wired into both the
+  pre-commit hook (slice 1) and the repo verify gate `pnpm check` (slice 2)
   converts both divergence shapes (node-version drift, missing per-arch biome)
-  into one operator-actionable line at commit time instead of the opaque
-  `MODULE_NOT_FOUND` that silently 100%-blocked the fleet.
+  into one operator-actionable line — at commit *and* verify time — instead of
+  the opaque `MODULE_NOT_FOUND` that silently 100%-blocked the fleet, and
+  aborts the verify gate before its minutes-long lint/typecheck/coverage
+  triplet runs on a doomed toolchain.
 - **Observed**: 17/17 paired tests pass over the verdict table; the CLI exits
   0 on the pinned node with binaries resolving and exits 1 with a
-  self-contained remediation line (no opaque trace) on any divergence.
+  self-contained remediation line (no opaque trace) on any divergence;
+  `package.json` `check` now runs `pnpm check-toolchain` first (0.13 s
+  pass-path, 3-run steady), short-circuiting the rest of the gate on failure.
 - **Match**: partial
-- **Lesson**: the pure-classifier seam lands the assertion without a real node
-  switch in CI; the next slice wires it into the verify/pre-pr-lint gate so
-  divergence is also caught at install, closing the parent task's § Success.
+- **Lesson**: the verify-gate clause of § Success is now closed via the npm
+  `check` script (not `STACK_MANIFEST`, whose `full` stage is pinned
+  bidirectional to CI's node-20 `needs:`); the residual `optionalDependencies`
+  pin (c) and the CI-node-20-guarded `postinstall` half of (b) remain as
+  enumerated follow-up slices.
 
 ## Security & privacy
 
@@ -94,8 +152,10 @@ explicitly forbidding the `--no-verify` bypass in its remediation text (a
 silently-broken hook chain previously degraded that gate to "no commits, so no
 scan" rather than a visible, actionable failure).
 
-`optimization: none-this-iteration: substrate-creation slice (new classifier +
-node-version pin + hook command); the skip-earlier-gate optimization — abort
-before the heavy biome/typecheck/test steps run on a doomed commit — is sized
-as its own next slice because a fail-fast ordering that does not serialise the
-common green path needs a two-phase lefthook group, not a one-line edit.`
+`optimization: skip-earlier-gate — prepending the check-toolchain invocation
+(39 bytes added to the check script) makes the 0.13 s toolchain assertion the
+first gate of the repo verify path, so a broken toolchain aborts there instead
+of after the minutes-long biome-ci + tsc-b + vitest-coverage triplet that
+would only emit an opaque MODULE_NOT_FOUND. Net: a doomed verify run returns
+an actionable line in ~0.13 s instead of failing opaquely minutes later.
+>=10-byte threshold met; the wall-clock saving is the short-circuited triplet.`
