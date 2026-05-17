@@ -16,7 +16,7 @@
 // (rule #6 — let dry-run be the safe default; failure surfaces in the
 // plan, not the side-effect).
 
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -386,6 +386,42 @@ function writeExperimentYaml(planPath, yaml) {
   process.stdout.write(`✓ wrote ${planPath}\n`);
 }
 
+// Fetch the set of head-ref names with open PRs on a host repo. Used by
+// the host-daemon loop to skip tasks whose canonical branch already has
+// an open PR — avoids the re-pick loop after a salvage-merge while the
+// operator's TASKS.md cleanup is still in flight. Falls back to an empty
+// set if `gh` is unavailable or the host_repo is unreachable (graceful-
+// degrade per rule #7 — the worst case is the prior behaviour: re-pick
+// the same task, not a hard failure).
+function listOpenPrBranches(hostRepo) {
+  try {
+    const out = execFileSync(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--repo",
+        hostRepo,
+        "--state",
+        "open",
+        "--json",
+        "headRefName",
+        "--limit",
+        "100",
+      ],
+      { encoding: "utf8", env: { ...process.env, GH_HOST: "github.example.com" } },
+    );
+    const prs = JSON.parse(out);
+    return new Set(
+      prs.map((pr) => pr.headRefName).filter((name) => typeof name === "string"),
+    );
+  } catch {
+    // `gh` not on PATH, repo unreachable, malformed JSON — degrade to
+    // an empty set so the loop continues with the legacy behaviour.
+    return new Set();
+  }
+}
+
 function writeIterationRecord(hostRoot, record) {
   const storeDir = resolve(hostRoot, ".minsky", "experiment-store", "cross-repo");
   mkdirSync(storeDir, { recursive: true });
@@ -697,7 +733,19 @@ async function runLoopAsResult(parsed, controller) {
   const result = await runHostLoop({
     pickTask: () => {
       lastTasksMd = loadHostTasks(hostRoot, config.tasks_md_path);
-      const task = pickHostTask(lastTasksMd);
+      // Self-healing: skip tasks that already have an open PR on the
+      // canonical branch (<branch_prefix><task.id>). Without this, after
+      // a task's PR lands the loop re-picks the same task on every
+      // iteration until the operator deletes it from TASKS.md. Discovered
+      // 2026-05-16 on example-service-plugin — bulletproof-ux-dashboard was
+      // re-picked 3 times after PR #296 opened, wasting 30+ minutes
+      // until manual TASKS.md cleanup in PR #297. Source: plugin task
+      // `minsky-claim-by-open-pr`.
+      const openPrBranches = listOpenPrBranches(config.host_repo);
+      const task = pickHostTask(lastTasksMd, {
+        openPrBranches,
+        branchPrefix: config.branch_prefix,
+      });
       if (task === null) return null;
       const synth = synthesiseExperimentYaml(task);
       if (!synth.ok) {
