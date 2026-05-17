@@ -24,6 +24,15 @@
  * filter is applied externally (by the caller passing only daemon-authored
  * PRs in `prs`) — the pure function doesn't know about authorship.
  *
+ * Slice 2/N (mirrors `daemon-pr-state.ts`'s decision→parser→execFile→plumb
+ * slicing): `parseGhPrListForDuplicateDetection` is the pure parser for
+ * `gh pr list --search "<task-id> in:title" --state all --json
+ * number,title,state,closedAt` raw output → the `PrSnapshot[]` shape
+ * `decideDuplicate` consumes. Splitting the parse surface from the I/O
+ * surface keeps it unit-testable against frozen JSON fixtures without
+ * spawning `gh`. Slice 3+ wires `execFile("gh", […])` and feeds this
+ * parser; slice 4+ plumbs the verdict into `runClaimedIteration`.
+ *
  * @otel-exempt pure decision; the I/O wrapper feeds `gh pr list` results
  * in and runs the verdict.
  */
@@ -109,4 +118,97 @@ export function prTitleNamesTask(title: string, taskId: string): boolean {
   const escaped = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const re = new RegExp(`(^|[^a-z0-9-])${escaped}([^a-z0-9-]|$)`);
   return re.test(title);
+}
+
+// ---- gh pr list JSON parser (slice 2/N) -----------------------------------
+
+/**
+ * Pure parser for `gh pr list --search "<task-id> in:title" --state all
+ * --json number,title,state,closedAt` raw JSON output → the
+ * `PrSnapshot[]` shape `decideDuplicate` consumes.
+ *
+ * Slice 2/N for `daemon-duplicate-work-detection`. Mirrors
+ * `parseGhPrListForDaemonPrState` in `daemon-pr-state.ts`: the parse
+ * surface is split from the I/O surface so it is unit-testable against
+ * frozen JSON fixtures without spawning subprocesses. Slice 3+ wires
+ * `execFile("gh", […])` and feeds this parser; slice 4+ plumbs the
+ * verdict into `runClaimedIteration` (after `pickAndClaim`, before the
+ * spawn that runs `gh pr create`).
+ *
+ * Graceful-degrade per rule #6/#7: invalid JSON, non-array root, or
+ * malformed entries yield `[]` rather than throwing — a `gh` outage or
+ * unexpected schema must not crash the daemon iteration (the conservative
+ * default is "no duplicate found → proceed", which the daemon's other
+ * gates still backstop).
+ *
+ * Schema mapping:
+ *   - `state` is GitHub's `PullRequestState` enum: `OPEN` | `CLOSED` |
+ *     `MERGED`. Unknown/absent values drop the entry (the decision can't
+ *     classify it). `MERGED` is set only when the PR actually merged;
+ *     closed-as-not-planned is `CLOSED` (deliberately *not* treated as a
+ *     shipped duplicate — a discarded PR's task is still open work).
+ *   - `closedAt` is `gh`'s zero-value `"0001-01-01T00:00:00Z"` for open
+ *     PRs; it is dropped so `decideDuplicate` sees `closedAt: undefined`
+ *     (it only consults `closedAt` for `MERGED` anyway). A real ISO
+ *     timestamp is passed through verbatim.
+ *
+ * @otel-exempt pure parser; the I/O wrapper handles span emission.
+ */
+export function parseGhPrListForDuplicateDetection(rawJson: string): readonly PrSnapshot[] {
+  const parsed = safeParseJson(rawJson);
+  if (!Array.isArray(parsed)) return [];
+
+  const result: PrSnapshot[] = [];
+  for (const entry of parsed) {
+    const snapshot = snapshotFromGhEntry(entry);
+    if (snapshot !== undefined) result.push(snapshot);
+  }
+  return result;
+}
+
+function safeParseJson(rawJson: string): unknown {
+  try {
+    return JSON.parse(rawJson);
+    // rule-6: handled-locally — parser graceful-degrade contract documented in JSDoc.
+  } catch {
+    return undefined;
+  }
+}
+
+function snapshotFromGhEntry(entry: unknown): PrSnapshot | undefined {
+  if (entry === null || typeof entry !== "object") return undefined;
+  const e = entry as Record<string, unknown>;
+
+  const number = e["number"];
+  if (typeof number !== "number") return undefined;
+  const title = e["title"];
+  if (typeof title !== "string") return undefined;
+  const state = normaliseState(e["state"]);
+  if (state === undefined) return undefined;
+
+  const closedAt = normaliseClosedAt(e["closedAt"]);
+  return closedAt === undefined ? { number, title, state } : { number, title, state, closedAt };
+}
+
+function normaliseState(value: unknown): PrSnapshot["state"] | undefined {
+  switch (value) {
+    case "OPEN":
+    case "MERGED":
+    case "CLOSED":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * `gh pr list --json closedAt` emits the zero-value `0001-01-01T…` for
+ * open PRs. Drop it (and empty/non-string values) so `decideDuplicate`
+ * sees `undefined` rather than a bogus 2000-years-ago timestamp that
+ * `decideFromMerged` would treat as "merged long ago".
+ */
+function normaliseClosedAt(value: unknown): string | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  if (value.startsWith("0001-01-01")) return undefined;
+  return value;
 }
