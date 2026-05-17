@@ -36,16 +36,41 @@ Everything is MIT, every dependency lives behind an interface (`novel/adapters/`
 Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/bin/minsky.mjs`). Sane defaults + auto-bootstrap:
 
 ```bash
-pnpm minsky                  # start-or-attach worker 0 (default); auto-detects
-                             # Claude exhaustion + offers to install local-LLM
-                             # fallback (~17 GB Qwen3 weights via mlx-lm + aider)
-                             # with one [Y/n] confirm prompt
+pnpm minsky                  # context-aware: reads machine state (worker /
+                             # daemon / claude / git / queue) and proposes the
+                             # next action with one [Enter]-to-confirm prompt
+                             # (or a numbered multi-select). Non-TTY (launchd /
+                             # CI) runs the recommended action without prompting.
 pnpm minsky doctor           # read-only health probe — claude / pipx / mlx-lm /
                              # aider / model weights / mlx-lm.server reachable
 pnpm minsky bootstrap-local-llm  # explicitly run the local-LLM install plan
 pnpm minsky logs             # tail worker 0's log live
 pnpm minsky stop             # SIGTERM the daemon; leave the log
 ```
+
+### What `minsky` (no args) does
+
+Bare `minsky` is the primary UX. It gathers seven signals in parallel
+(worker-0 PID liveness, last-iteration age, persisted claude-exhaustion
+state, local-LLM server reachability, `git status`, open/conflicting PR
+counts, TASKS.md queue depth — each probe timeout-bounded at 500 ms), maps
+them to one of these scenarios, and proposes the matching default action:
+
+| Scenario | Detected when | Recommended action |
+|---|---|---|
+| `worker-already-running` | worker-0 PID alive | attach to its log |
+| `claude-exhausted-with-local-stack` | claude out + local-LLM up | start worker on local-LLM |
+| `claude-exhausted-no-stack` | claude out + no local-LLM | bootstrap local-LLM |
+| `git-dirty-cant-iterate` | uncommitted changes | start anyway (daemon uses worktrees) |
+| `wip-needs-cleanup` | conflicting PR(s) open | start worker (resolves conflicts) |
+| `queue-empty` | no unclaimed TASKS.md tasks | run health check |
+| `daemon-mid-iteration` | worker ran <2 h ago | resume worker 0 |
+| `clean-fresh-checkout` | none of the above | start worker 0 |
+
+On a TTY you confirm with `[Enter]` (recommended) or type a number for an
+alternative. On a non-TTY surface (launchd / systemd / cron / piped, or
+`MINSKY_NON_INTERACTIVE=1`) the recommended action runs immediately with no
+stdin block — so the daemon's unattended surface never hangs.
 
 The auto-bootstrap pre-flight is idempotent — re-running `pnpm minsky` on a set-up machine adds <500 ms wall-clock (one fetch against `127.0.0.1:8080/v1/models`) and threads `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred` into the spawned daemon.
 
@@ -60,7 +85,7 @@ The auto-bootstrap pre-flight is idempotent — re-running `pnpm minsky` on a se
 | `MINSKY_NO_AUTO_BOOTSTRAP=1` | Skip the pre-flight entirely. Daemon spawns claude regardless of state. |
 | `MINSKY_NON_INTERACTIVE=1` | Auto-confirm the bootstrap install plan. Useful for CI / daemonized contexts. Combined with `install-arm-homebrew` (which needs sudo TTY), the bootstrap refuses non-interactive and prints a manual one-liner instead of hanging. |
 
-The CLI is intentionally repo-rooted (not a global `npm install -g` package) so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. To run from outside the repo, alias it: `alias minsky="pnpm --dir ~/apps/minsky minsky"`.
+`minsky` is repo-rooted so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. To drive it from any folder, alias it (`alias minsky="pnpm --dir ~/apps/minsky minsky"`) or use the [observer layer](#observer-layer-minsky-from-any-folder-watched-by-a-calling-agent) below — both keep the single-word UX.
 
 **Multi-machine flow** (cloning to a second machine where claude tokens are exhausted):
 

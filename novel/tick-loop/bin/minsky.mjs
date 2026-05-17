@@ -441,6 +441,33 @@ async function runContextAware() {
 }
 
 /**
+ * Pure: the `process.env` overlay an action needs before its `run*`
+ * delegate spawns the daemon. Extracted as a testable seam (rule #2 —
+ * pure-over-injection) so the round-trip-elimination invariant below is
+ * regression-tested instead of buried in a switch arm.
+ *
+ * `start-worker-local-llm` is only ever chosen from the
+ * `claude-exhausted-with-local-stack` scenario, which `planMinskyAction`
+ * reaches ONLY when the context probe already found the local-LLM server
+ * reachable (`probeLocalLlmState() === "running"`). Threading
+ * `MINSKY_LOCAL_LLM=1` alongside `local-preferred` makes the spawn's
+ * `maybeBootstrapLocalLlm` early-return at its `MINSKY_LOCAL_LLM === "1"`
+ * guard instead of falling through to `bootstrapFn()` →
+ * `detectLocalLlmStack`, which would re-`fetch` the same
+ * `127.0.0.1/v1/models` endpoint the context layer just probed. One
+ * eliminated round-trip per local-stack worker start.
+ *
+ * @param {import("../dist/minsky-action-plan.js").ActionId} actionId
+ * @returns {Record<string, string>} env overlay (empty when none needed)
+ */
+export function envOverlayForAction(actionId) {
+  if (actionId === "start-worker-local-llm") {
+    return { MINSKY_LLM_PROVIDER: "local-preferred", MINSKY_LOCAL_LLM: "1" };
+  }
+  return {};
+}
+
+/**
  * Dispatch the chosen action ID to the appropriate `run*` function.
  *
  * @param {import("../dist/minsky-action-plan.js").ActionId} actionId
@@ -452,8 +479,10 @@ async function executeChosenAction(actionId) {
       await runStartOrAttach([]);
       break;
     case "start-worker-local-llm":
-      // Set the env var so the spawned tick-loop picks up local-preferred mode.
-      process.env["MINSKY_LLM_PROVIDER"] = "local-preferred";
+      // Context probe already confirmed the local-LLM server reachable
+      // (scenario claude-exhausted-with-local-stack). MINSKY_LOCAL_LLM=1
+      // short-circuits the spawn's maybeBootstrapLocalLlm re-probe.
+      Object.assign(process.env, envOverlayForAction("start-worker-local-llm"));
       await runStartOrAttach([]);
       break;
     case "bootstrap-local-llm":
