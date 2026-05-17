@@ -85,7 +85,7 @@
   - **Pivot**: if backoff-reset-on-health oscillates, use a fixed escalating schedule with no reset (simpler, still bounded) and document the throughput tradeoff.
   - **Measurement**: `node scripts/chaos-restart-schedule.mjs --json` → `{schedule_followed:true, reset_on_health:true, stopped_at_limit:true, restarts_after_limit:0}`.
   - **Anchor**: Armstrong 2007 (supervisor restart); Beyer SRE 2016 (retry budget / backoff); rule #6 (stay alive, but bounded); operator 2026-05-16 directive.
-  - **Files**: `scripts/orchestrate.mjs` (deadline + backoff), `bin/minsky` (wrapper), `distribution/launchd/com.minsky.runany.plist.tmpl`, `scripts/chaos-restart-schedule.mjs` (+ test), `docs/run-anywhere.md`.
+  - **Files**: `scripts/restart-supervisor.mjs` (pure decision core: escalating-capped backoff + reset-on-health + deadline; + test), `scripts/orchestrate.mjs` (deadline guard), `bin/minsky` (wrapper), `distribution/launchd/com.minsky.runany.plist.tmpl`, `scripts/chaos-restart-schedule.mjs` (+ test), `docs/run-anywhere.md`.
   - **Acceptance**: (1) escalating backoff schedule implemented + tested; (2) backoff resets after sustained health; (3) hard time-limit clean stop, 0 restarts after; (4) chaos measurement all-true.
 
 - [ ] `runany-dynamic-model-or-local-fallback` — model auto-selected by remaining tokens unless the operator explicitly pinned model(s); full automatic switch to local models when tokens are exhausted OR all remote backends are down/inaccessible
