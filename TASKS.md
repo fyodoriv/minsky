@@ -36,6 +36,32 @@
 
 <!-- Operator directive 2026-05-16: single-command run-anywhere multi-tenant minsky. `minsky` (zero args) in ANY project folder runs the orchestrator on that folder + subfolders, with: home-repo full push/PR; foreign-repo PR-only-into-TASKS.md; self-monitoring of minsky-on-itself; auto-restart with bounded backoff to a time limit; dynamic model-by-budget unless pinned; multi-tenant safe (dozens of concurrent processes, zero conflict); full local-model fallback. The 5 `runany-*` P0s below are that cluster — implement in order; each composes existing substrates rather than reinventing (rule #1). -->
 
+- [ ] Auto-enrich tasks missing rule-#9 fields instead of returning `empty-queue`
+  - **ID**: auto-enrich-tasks-on-empty-queue
+  - **Tags**: p0, cross-repo-runner, task-finder, resilience
+  - **Touches**: `novel/cross-repo-runner/src/task-finder.ts`, `novel/cross-repo-runner/src/host-loop.ts`
+  - **Details**: `pickHostTask()` requires all 5 rule-#9 fields. Standard TASKS.md repos get `empty-queue` after 0 iterations. Observed 2026-05-16 on agentbrew (29 tasks, 0 iterations). Fix: auto-enrich via Claude when tasks exist but none eligible. `--no-auto-enrich` opt-out.
+  - **Hypothesis**: converts `empty-queue` from terminal to self-healing on standard TASKS.md repos.
+  - **Success**: `minsky --host <repo>` with 10+ non-rule-#9 tasks completes ≥1 iteration.
+  - **Pivot**: relax `isHostTaskEligible()` to accept `**Acceptance**` as implicitly eligible.
+  - **Measurement**: `minsky-run --host <repo> --max-iterations=1 --no-live | grep 'iterations:'` → `1`.
+  - **Anchor**: agentbrew 2026-05-16 incident; tasks.md spec standard fields ≠ rule-#9.
+  - **Files**: `novel/cross-repo-runner/src/{task-finder,host-loop}.ts`, tests, `bin/minsky-run.mjs`.
+  - **Acceptance**: (1) enrichment fires; (2) written back; (3) passes eligibility; (4) opt-out works; (5) tested.
+
+- [ ] Stuck-task detection — skip after N consecutive no-diff iterations
+  - **ID**: stuck-task-detection-skip-after-n
+  - **Tags**: p1, cross-repo-runner, host-loop, resilience
+  - **Touches**: `novel/cross-repo-runner/src/host-loop.ts`
+  - **Details**: Loop re-picks same task forever on no-diff spawns. 2026-05-16: 43 iters, 135 min, 0 PRs. Root cause fixed (#594), class recurs. Fix: skip after N=3 validated+null-PR+empty-diff. `--max-no-diff-retries=N`.
+  - **Hypothesis**: cap at 3 → ~30 min waste vs 8+ hours.
+  - **Success**: `--max-iterations=10` with no-diff task → skips after 3, ≥2 tasks attempted.
+  - **Pivot**: raise to 5 or per-task `**Max-retries**:`.
+  - **Measurement**: `minsky-run --max-iterations=10 --no-live | grep 'skipped after'` → ≥1.
+  - **Anchor**: agentbrew 2026-05-16; Perrow 1984.
+  - **Files**: `novel/cross-repo-runner/src/host-loop.ts` + test, `bin/minsky-run.mjs`.
+  - **Acceptance**: (1) skip after N; (2) logged; (3) configurable; (4) resets per run; (5) tested.
+
 - [ ] `runany-zero-arg-entrypoint` — `minsky` with NO args, run in any folder, starts the orchestrator scoped to that folder + all subfolders (no params ever required)
   - **ID**: runany-zero-arg-entrypoint
   - **Tags**: p0, operator-directive, runany, cli, orchestrator
@@ -1955,4 +1981,3 @@
   - **Anchor**: 2026-05-16 oncall-hub-plugin run — supervisor at `/tmp/minsky-oncall-hub-plugin/supervisor.sh` had to restart minsky after every spawn-failed because of the halt-on-failure semantics. 9 iterations took 4h wall-clock to ship 7 PRs because of the restart overhead. With soft-failures-continue, the same workload would run in one `minsky --host` invocation. Rule #6 (let-it-crash AT the right boundary — a single iteration's failure is the WORKER's boundary, not the LOOP's; the loop should be resilient to individual failures). Beyer et al., *SRE*, 2016, Ch. 6 (degraded-but-running > failed-and-stopped for long-lived workloads).
   - **Risk**: low. Opt-in via env var (default behavior unchanged), gated by paired tests. Failure mode is the masked-real-problem case in the Pivot, mitigated by the `MAX_CONSECUTIVE` safety.
   - **Surfaced-by**: 2026-05-16 oncall-hub-plugin autonomous run — see `/tmp/minsky-oncall-hub-plugin/supervisor.log` for the restart-every-iteration pattern that this task obviates.
-
