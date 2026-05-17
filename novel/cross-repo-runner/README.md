@@ -236,3 +236,14 @@ gate ⇒ no code write (Saltzer & Schroeder 1975; rule #13). See
 - `aifn-840-shape.test.ts` (20 integration cases) — end-to-end bootstrap → minsky-run smoke; autonomous-default aggregate; `--hosts-dir` walk; `--host` + `--hosts-dir` mutual exclusion
 - `shim-resolve.test.ts` (slice E, 10) — `resolveMinskyRepo` env-var + 4-step fallback chain; ordering; home-trailing-slash edge case
 - `dispatch-emit.test.ts` — decision C2 dispatch payload shape
+
+## Lint conformance
+
+This package is covered by the repo-wide `biome ci .` gate that
+`pnpm pre-pr-lint` runs (rule #10 — same gate humans and the daemon
+pass). String construction in `spawn-plan.ts`'s system-prompt overlay
+uses plain double-quoted strings unless `${…}` interpolation is present
+(biome `noUnusedTemplateLiteral`); `task-finder.ts` /
+`task-finder.test.ts` / `bin/minsky-run.mjs` follow biome's formatter.
+Run `pnpm biome check --write novel/cross-repo-runner` before committing
+changes to this package.
