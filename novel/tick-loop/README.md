@@ -66,6 +66,8 @@ Three modules implement the context-aware `minsky` (no-args) flow:
 - **`minsky-action-plan`** — `planMinskyAction(context)` maps a `MinskyContext` snapshot to a `MinskyActionPlan` via 8 priority-ordered scenarios (worker-already-running → claude-exhausted → git-dirty → wip-needs-cleanup → queue-empty → daemon-mid-iteration → clean-fresh-checkout). Pure function: no I/O.
 - **`minsky-prompt`** — `renderPlan(plan)` (pure string render) + `runInteractive(plan, opts)` (TTY prompt with digit-selection or non-TTY auto-confirm). `MINSKY_NON_INTERACTIVE=1` is resolved in the caller (`bin/minsky.mjs`) before passing `isTty` to keep this module pure-over-injection.
 
+**Action → spawn env contract.** When the chosen action is dispatched, `bin/minsky.mjs`'s pure `envOverlayForAction(actionId)` returns the `process.env` overlay the action's `run*` delegate needs. `start-worker-local-llm` is only ever chosen from the `claude-exhausted-with-local-stack` scenario — which `planMinskyAction` reaches **only** when `gatherMinskyContext` already found the local-LLM server reachable. The overlay therefore threads `MINSKY_LOCAL_LLM=1` alongside `MINSKY_LLM_PROVIDER=local-preferred`, so the spawn's `maybeBootstrapLocalLlm` early-returns at its `MINSKY_LOCAL_LLM === "1"` guard instead of re-running `detectLocalLlmStack` (which would re-probe the `127.0.0.1/v1/models` endpoint the context layer just hit — one eliminated round-trip per local-stack start). All other actions return an empty overlay.
+
 ## Usage
 
 ```ts
