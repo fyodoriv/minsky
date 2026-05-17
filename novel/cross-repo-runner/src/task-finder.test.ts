@@ -378,9 +378,9 @@ describe("pickHostTask", () => {
     expect(pickHostTask(tasksMd)?.id).toBe("first-task");
     // With the filter: first-task is skipped, second-task wins.
     const openPrBranches = new Set<string>(["feat/first-task"]);
-    expect(
-      pickHostTask(tasksMd, { openPrBranches, branchPrefix: "feat/" })?.id,
-    ).toBe("second-task");
+    expect(pickHostTask(tasksMd, { openPrBranches, branchPrefix: "feat/" })?.id).toBe(
+      "second-task",
+    );
   });
 
   test("openPrBranches respects custom branchPrefix", () => {
