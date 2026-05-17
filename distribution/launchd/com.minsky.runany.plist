@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Minsky run-anywhere conductor — launchd LaunchAgent for macOS.
+
+Task: `runany-self-restart-bounded-timelimit` (TASKS.md P0). The OS half
+of a two-layer supervisor (rule #1 — compose, don't duplicate):
+
+  - launchd KeepAlive{SuccessfulExit:false} = OTP "transient" restart
+    (Armstrong 2007): respawn ONLY on non-zero exit. The conductor's
+    clean exit 0 at MINSKY_RUN_TIME_LIMIT is therefore a true terminal
+    stop — launchd does NOT bring it back (Acceptance #3: 0 restarts
+    after the deadline).
+  - ThrottleInterval is a single FLAT floor (5s) — launchd cannot
+    escalate. The escalating, capped, reset-on-sustained-health backoff
+    lives in the conductor's in-process startup self-throttle
+    (decideStartupThrottle, scripts/restart-supervisor.mjs; wired in
+    scripts/orchestrate.mjs), which reads its own persisted crash
+    history at boot. ThrottleInterval is just the minimum gap launchd
+    enforces between respawns; the conductor adds the rest on top.
+
+Placeholders substituted by setup.sh via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+Note on filename: this is a template (it carries the ${MINSKY_HOME}
+envsubst placeholder, same as the other com.minsky.*.plist units) but is
+named `.plist` not `.plist.tmpl` so setup.sh's Darwin `*.plist` glob
+(setup.sh:409) renders + bootstraps it; a `.tmpl` suffix would make it
+inert. See docs/run-anywhere.md.
+
+Install (handled by `pnpm dogfood` / setup.sh):
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.minsky.runany.plist
+  launchctl enable gui/$(id -u)/com.minsky.runany
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.runany</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <!-- Hard wall-clock ceiling (rule #6 — stay alive, but bounded).
+             At this elapsed time (measured against the persisted
+             supervised-run origin, carried across launchd restarts) the
+             conductor stops scheduling, drains, and exits 0 cleanly;
+             KeepAlive{SuccessfulExit:false} then does NOT respawn it.
+             Accepts `<n>s|m|h`; default 10h is applied by
+             scripts/restart-supervisor.mjs when this is unset/typo'd
+             (rule #7 graceful degrade). Lower it for a bounded soak. -->
+        <key>MINSKY_RUN_TIME_LIMIT</key>
+        <string>10h</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-runany.sh</string>
+    </array>
+
+    <!-- Restart only on non-zero exit (transient policy, Armstrong 2007).
+         The deadline-driven clean exit 0 is intentionally NOT respawned. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Flat minimum gap between respawns; the escalating backoff is the
+         conductor's in-process self-throttle, not this number. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>${MINSKY_HOME}/.minsky/runany.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${MINSKY_HOME}/.minsky/runany.err.log</string>
+</dict>
+</plist>
