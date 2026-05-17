@@ -30,6 +30,7 @@ import {
   type CtoAuditSeam,
   type MetricsRenderSeam,
   type SnapshotSeam,
+  type TaskRotationSeam,
   buildDaemonBrief,
   buildLocalBrief,
   extractOpenP0TaskIds,
@@ -51,6 +52,7 @@ import {
   type SpawnInput,
   type SpawnStrategy,
 } from "./spawn-strategy.js";
+import type { MergedPrSnapshot } from "./task-completion-detector.js";
 
 // ---- Parsers used by the brief↔manifest fast-stage drift test (slice 22/N) -
 // Lifted to module scope so the test body's cognitive complexity stays under
@@ -1462,6 +1464,210 @@ describe("tick-loop / daemon / runDaemon", () => {
     });
     // metrics render fired despite the snapshot-capture failure.
     expect(mr.renderCalls).toHaveLength(1);
+  });
+
+  // ---- task-rotation wire-in (P0 `daemon-task-rotation-on-completion`) ----
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunTaskRotation`.
+  // The wrapper's own ladder (env-off / blank-id / block-absent / verdict
+  // mapping) is exhaustively tested in `daemon-task-rotation.test.ts`; here
+  // we only verify that the daemon dispatches into `runTaskRotation` for a
+  // task-bearing iteration, skips when the seam is omitted or no task was
+  // picked, and emits the `tick-loop.task-rotation` span. `alpha` is the
+  // first P0 task picked from the fixtures below.
+
+  const ROTATION_TASKS_SHIPPED = `# Tasks
+
+## P0
+
+- [ ] \`alpha\` — alpha task
+  - **ID**: alpha
+  - **Status**: shipped
+  - **Hypothesis**: alpha completes via mock.
+`;
+
+  const ROTATION_TASKS_IN_PROGRESS = `# Tasks
+
+## P0
+
+- [ ] \`alpha\` — alpha task
+  - **ID**: alpha
+  - **Status**: in-progress
+  - **Hypothesis**: alpha completes via mock.
+`;
+
+  const ROTATION_TASKS_NO_ALPHA = `# Tasks
+
+## P0
+
+- [ ] \`zeta\` — unrelated task
+  - **ID**: zeta
+  - **Hypothesis**: a prior iteration already rotated alpha's block out.
+`;
+
+  /**
+   * Build a `TaskRotationSeam` whose three sub-seams record their calls.
+   * `getTasksMd` returns `opts.tasksMd`; `listMergedPrs` returns
+   * `opts.mergedPrs ?? []`; `applyRemoval` records the removal request.
+   */
+  function makeTaskRotationSeam(opts: {
+    tasksMd: string;
+    mergedPrs?: readonly MergedPrSnapshot[];
+  }): {
+    readonly seam: TaskRotationSeam;
+    readonly getCalls: { count: number };
+    readonly listCalls: { count: number };
+    readonly removals: Array<{ taskId: string; viaPrNumber: number; commitMessage: string }>;
+  } {
+    const getCalls = { count: 0 };
+    const listCalls = { count: 0 };
+    const removals: Array<{ taskId: string; viaPrNumber: number; commitMessage: string }> = [];
+    const merged = opts.mergedPrs ?? [];
+    return {
+      seam: {
+        getTasksMd: async () => {
+          getCalls.count++;
+          return opts.tasksMd;
+        },
+        listMergedPrs: async () => {
+          listCalls.count++;
+          return merged;
+        },
+        applyRemoval: async (input) => {
+          removals.push({
+            taskId: input.taskId,
+            viaPrNumber: input.viaPrNumber,
+            commitMessage: input.commitMessage,
+          });
+        },
+      },
+      getCalls,
+      listCalls,
+      removals,
+    };
+  }
+
+  it("task-rotation wire-in: shipped task block + matching merged PR → removed; applyRemoval called, span names the shipping PR", async () => {
+    const recorder = new SpanRecorder();
+    const rot = makeTaskRotationSeam({
+      tasksMd: ROTATION_TASKS_SHIPPED,
+      mergedPrs: [{ number: 412, title: "feat(alpha): ship the alpha substrate" }],
+    });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(ROTATION_TASKS_SHIPPED),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      taskRotation: rot.seam,
+    });
+    expect(rot.getCalls.count).toBe(1);
+    expect(rot.listCalls.count).toBe(1);
+    expect(rot.removals).toHaveLength(1);
+    expect(rot.removals[0]?.taskId).toBe("alpha");
+    expect(rot.removals[0]?.viaPrNumber).toBe(412);
+    expect(rot.removals[0]?.commitMessage).toContain("auto-remove `alpha`");
+    expect(rot.removals[0]?.commitMessage).toContain("#412");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["task-rotation.outcome"]).toBe("removed");
+    expect(spans[0]?.attributes["task.id"]).toBe("alpha");
+    expect(spans[0]?.attributes["task-rotation.via_pr"]).toBe(412);
+  });
+
+  it("task-rotation wire-in: explicit `**Status**: in-progress` vetoes removal (kept); applyRemoval NOT called", async () => {
+    const recorder = new SpanRecorder();
+    const rot = makeTaskRotationSeam({
+      tasksMd: ROTATION_TASKS_IN_PROGRESS,
+      mergedPrs: [{ number: 412, title: "feat(alpha): ship the alpha substrate" }],
+    });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(ROTATION_TASKS_IN_PROGRESS),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      taskRotation: rot.seam,
+    });
+    expect(rot.listCalls.count).toBe(1);
+    expect(rot.removals).toHaveLength(0);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["task-rotation.outcome"]).toBe("kept");
+  });
+
+  it("task-rotation wire-in: block already rotated out → skipped(block-absent) BEFORE the listMergedPrs gh round-trip (round-trip elimination)", async () => {
+    const recorder = new SpanRecorder();
+    // The daemon picks `alpha` from FIXTURE_TASKS_MD, but a prior iteration
+    // already rotated alpha's block out — the rotation seam's TASKS.md no
+    // longer contains it. The wrapper must short-circuit at `block-absent`
+    // WITHOUT spending the `gh pr list` subprocess (the optimization).
+    const rot = makeTaskRotationSeam({
+      tasksMd: ROTATION_TASKS_NO_ALPHA,
+      mergedPrs: [{ number: 412, title: "feat(alpha): ship the alpha substrate" }],
+    });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      taskRotation: rot.seam,
+    });
+    expect(rot.getCalls.count).toBe(1);
+    expect(rot.listCalls.count).toBe(0);
+    expect(rot.removals).toHaveLength(0);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["task-rotation.outcome"]).toBe("skipped");
+    expect(spans[0]?.attributes["task-rotation.skip_reason"]).toBe("block-absent");
+  });
+
+  it("task-rotation wire-in: omitted seam (daemons predating this seam) keeps working unchanged — no task-rotation span", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 2,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(0);
+  });
+
+  it("task-rotation wire-in: paused iteration does NOT fire (no taskId — the single operator-quiet guard)", async () => {
+    const rot = makeTaskRotationSeam({ tasksMd: ROTATION_TASKS_SHIPPED });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(ROTATION_TASKS_SHIPPED),
+      pausedSentinelReader: pausedNow(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      taskRotation: rot.seam,
+    });
+    expect(rot.getCalls.count).toBe(0);
+    expect(rot.removals).toHaveLength(0);
   });
 
   it("worker mode: passes extraArgs (--worktree daemon-N-taskId) to the spawn strategy", async () => {

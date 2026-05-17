@@ -43,6 +43,13 @@ import {
   type RunChangelogOutcome,
   runChangelog,
 } from "./changelog-runner.js";
+import {
+  type ApplyRemoval,
+  type GetTasksMd,
+  type ListMergedPrs,
+  type RunTaskRotationOutcome,
+  runTaskRotation,
+} from "./daemon-task-rotation.js";
 import { type MockAnthropicClient, type TickSpan, tick } from "./index.js";
 import {
   type GetLastRenderedDate,
@@ -229,6 +236,21 @@ export interface RunDaemonOpts {
    */
   readonly metricsRender?: MetricsRenderSeam;
   /**
+   * Optional task-rotation watchdog seam (rule #2, P0
+   * `daemon-task-rotation-on-completion`). When injected, the daemon runs
+   * `runTaskRotation` once per iteration that picked a task: it reads
+   * TASKS.md, and — only if the iteration's task block still exists —
+   * lists merged PRs and runs the conservative `decideTaskCompletion`. On
+   * a `remove` verdict it commits a TASKS.md with the shipped task's block
+   * stripped so no daemon re-picks it (the 9h dogfood window 2026-05-07
+   * caught worker-1 re-creating already-merged #309 as #343). When
+   * omitted, no rotation runs — supervisor daemons predating this seam
+   * keep working unchanged. Independent of every other seam; the wrapper's
+   * own ladder (`MINSKY_TASK_ROTATION=off` → blank id → block-absent) is
+   * the operator veto + round-trip-elimination gate.
+   */
+  readonly taskRotation?: TaskRotationSeam;
+  /**
    * Optional outer lint-gate verification seam (rule #2). When injected, the
    * daemon runs one post-iteration lint check after every `completed` iteration
    * to verify the branch is lint-clean. Failure emits a
@@ -407,6 +429,33 @@ export interface MetricsRenderSeam {
   readonly getLastRenderedDate: GetLastRenderedDate;
 }
 
+/**
+ * Optional task-rotation seam (rule #2, P0
+ * `daemon-task-rotation-on-completion`). When injected, the daemon
+ * dispatches into `runTaskRotation` once per task-bearing iteration.
+ * Three sub-seams:
+ *   - `getTasksMd` — reads the current TASKS.md content. Production
+ *     binding does an `fs.readFile`; tests inject a string.
+ *   - `listMergedPrs` — wraps `gh pr list --state merged --json
+ *     number,title`. Reached ONLY when the iteration's task block still
+ *     exists (round-trip elimination — the wrapper short-circuits at
+ *     `block-absent` before this subprocess for every steady-state
+ *     iteration that carries a stale id).
+ *   - `applyRemoval` — writes the block-stripped TASKS.md and commits it
+ *     (`fs.writeFile` + `git commit --only TASKS.md`). The commit message
+ *     is supplied pre-formatted by the wrapper so the git log names the
+ *     criteria-checker decision (visible-not-silent, Helland 2007).
+ *
+ * Idempotency comes from TASKS.md itself, not a separate lock dir (rule
+ * #2 — once the block is gone, the next iteration's `getTasksMd` no
+ * longer contains it and the wrapper skips at `block-absent`).
+ */
+export interface TaskRotationSeam {
+  readonly getTasksMd: GetTasksMd;
+  readonly listMergedPrs: ListMergedPrs;
+  readonly applyRemoval: ApplyRemoval;
+}
+
 // ---- runDaemon ------------------------------------------------------------
 
 /**
@@ -453,6 +502,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
     await maybeRunMetricsRender(opts, outcome.result);
+    await maybeRunTaskRotation(opts, outcome.result);
     await maybeRunPrePrLintGate(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
@@ -780,6 +830,83 @@ function emitMetricsRenderSpan(
     base["metrics-render.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.metrics-render", attributes: base });
+}
+
+/**
+ * Wire-in for the task-rotation watchdog (rule #2 — the daemon
+ * orchestrates, `runTaskRotation` decides + commits; P0
+ * `daemon-task-rotation-on-completion`). Skip-fast when:
+ *   - the seam isn't injected (daemons predating this seam),
+ *   - the iteration carries no `taskId`. `taskId` is unset for every
+ *     operator-quiet shape (`paused` / `budget-paused` /
+ *     `missing-tasks-md` all return before `pickTask`), so this single
+ *     guard IS the complete operator-quiet filter — no redundant status
+ *     branches. We deliberately DO fire on `failed` and on
+ *     `no-task`-with-`taskId` (claim-collision / collision-prevented): a
+ *     worker that keeps failing on, or keeps being blocked off, an
+ *     already-shipped task is the exact re-pick-waste this watchdog
+ *     targets, and `decideTaskCompletion` is conservative enough (needs a
+ *     real merged PR whose title names the task + all `**Acceptance**`
+ *     ✅) that firing on those shapes can only ever help.
+ *
+ * The wrapper owns its own cheapest-gate-first ladder
+ * (`MINSKY_TASK_ROTATION=off` → blank id → block-absent), so the
+ * `listMergedPrs` `gh` round-trip is reached only when the block still
+ * exists. The daemon may safely call this every task-bearing iteration.
+ *
+ * Outcome is emitted as a `tick-loop.task-rotation` span so the dashboard
+ * can chart rotation firing-rate + skip-reason distribution + the rolling
+ * duplicate-PR-creation count the task's Measurement tracks.
+ *
+ * Extracted so `runDaemon` stays dispatch-only (rule #6, biome ≤10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunTaskRotation(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+): Promise<void> {
+  if (opts.taskRotation === undefined) return;
+  if (result.taskId === undefined) return;
+
+  const outcome = await runTaskRotation({
+    taskId: result.taskId,
+    env: process.env,
+    getTasksMd: opts.taskRotation.getTasksMd,
+    listMergedPrs: opts.taskRotation.listMergedPrs,
+    applyRemoval: opts.taskRotation.applyRemoval,
+  });
+  emitTaskRotationSpan(opts, result.taskId, outcome);
+}
+
+/**
+ * Emit a `tick-loop.task-rotation` span describing the watchdog's
+ * outcome. One span per invocation (skipped / kept / no-merged-pr /
+ * removed) so the dashboard can chart firing-rate + skip-reason
+ * distribution and — on `removed` — the shipping PR number that drove the
+ * auto-removal (the audit trail the task's Hypothesis requires).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitTaskRotationSpan(
+  opts: RunDaemonOpts,
+  taskId: string,
+  outcome: RunTaskRotationOutcome,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "task.id": taskId,
+    "task-rotation.outcome": outcome.outcome,
+  };
+  if (outcome.outcome === "skipped") {
+    base["task-rotation.skip_reason"] = outcome.reason;
+  } else if (outcome.outcome === "removed") {
+    base["task-rotation.via_pr"] = outcome.viaPrNumber;
+    base["task-rotation.reason"] = outcome.reason;
+  } else {
+    base["task-rotation.reason"] = outcome.reason;
+  }
+  opts.emit({ name: "tick-loop.task-rotation", attributes: base });
 }
 
 /**

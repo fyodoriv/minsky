@@ -364,6 +364,7 @@ export {
   type MetricsRenderSeam,
   type RunDaemonOpts,
   type SnapshotSeam,
+  type TaskRotationSeam,
   claim,
   listEligibleTasks,
   pickTask,
