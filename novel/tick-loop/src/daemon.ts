@@ -1451,19 +1451,77 @@ export function pickTask(tasksMd: string): string | undefined {
  *
  * @otel-exempt pure helper of `pickTask`.
  */
-export function listEligibleTasks(tasksMd: string): readonly string[] {
-  const sliced = sliceP0P1(tasksMd);
-  const blocks = splitBlocks(sliced);
-  const out: string[] = [];
-  for (const block of blocks) {
-    const id = parseId(block);
-    if (id === undefined) continue;
-    if (block.includes("(@minsky-tick-loop)")) continue;
-    if (/\*\*Blocked by\*\*:/i.test(block)) continue;
-    if (/\*\*Blocked\*\*:/.test(block)) continue;
-    out.push(id);
+/** Eligibility gate shared with pickTask: skip claimed + blocked blocks. */
+function isEligibleBlock(block: string): boolean {
+  if (block.includes("(@minsky-tick-loop)")) return false;
+  if (/\*\*Blocked by\*\*:/i.test(block)) return false;
+  if (/\*\*Blocked\*\*:/.test(block)) return false;
+  return true;
+}
+
+interface RankedTask {
+  readonly id: string;
+  readonly pri: number;
+  readonly idx: number;
+}
+
+/**
+ * Collect eligible task blocks with their effective priority. Effective
+ * priority = the `**Tags**:` p-token when present, else the section the
+ * block physically sits in — so a `p1`-tagged block misplaced inside
+ * `## P0` sorts AFTER genuine p0 work (the
+ * `daemon-priority-discipline-picktask-bug` fix). `idx` preserves file
+ * order as the stable tiebreaker within one priority.
+ */
+function collectRankedTasks(sliced: string): RankedTask[] {
+  const ranked: RankedTask[] = [];
+  let idx = 0;
+  for (const { sectionPri, body } of splitByPrioritySection(sliced)) {
+    for (const block of splitBlocks(body)) {
+      const id = parseId(block);
+      if (id === undefined || !isEligibleBlock(block)) continue;
+      ranked.push({ id, pri: parseTagPriority(block) ?? sectionPri, idx: idx++ });
+    }
   }
-  return out;
+  return ranked;
+}
+
+export function listEligibleTasks(tasksMd: string): readonly string[] {
+  const ranked = collectRankedTasks(sliceP0P1(tasksMd));
+  ranked.sort((a, b) => a.pri - b.pri || a.idx - b.idx);
+  return ranked.map((r) => r.id);
+}
+
+/**
+ * Split the P0+P1-sliced TASKS.md into its priority sections so each task
+ * block carries the priority of the heading it lives under (0 = P0, 1 =
+ * P1). The `## P1` heading is the boundary; absent it, everything is P0.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function splitByPrioritySection(sliced: string): readonly { sectionPri: number; body: string }[] {
+  const p1 = sliced.search(/\n##\s+P1\b/);
+  if (p1 < 0) return [{ sectionPri: 0, body: sliced }];
+  return [
+    { sectionPri: 0, body: sliced.slice(0, p1) },
+    { sectionPri: 1, body: sliced.slice(p1) },
+  ];
+}
+
+/**
+ * Parse the priority declared in a task block's `**Tags**:` line (a
+ * `p0`..`p3` token), or `undefined` when the block declares none. This is
+ * what lets pickTask honour declared priority over physical file order.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function parseTagPriority(block: string): number | undefined {
+  const tags = block.match(/\*\*Tags\*\*:\s*([^\n]*)/i);
+  const group = tags?.[1];
+  if (group === undefined) return undefined;
+  const p = group.match(/\bp([0-3])\b/i);
+  const digit = p?.[1];
+  return digit === undefined ? undefined : Number(digit);
 }
 
 /**
