@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- pattern: not-applicable — launchd LaunchAgent unit mirroring com.minsky.tick-loop.plist; the OTP transient-restart Supervisor semantics (Armstrong 2007) are already declared at vision.md § "Pattern conformance index" for the supervisor unit-files, this is just the runany unit the supervisor topology covers. -->
 <!--
 Minsky run-anywhere conductor — launchd LaunchAgent for macOS.
 

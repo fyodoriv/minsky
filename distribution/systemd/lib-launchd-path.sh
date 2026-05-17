@@ -1,5 +1,6 @@
 # shellcheck shell=bash
 # <!-- scope: human-approved task runany-self-restart-bounded-timelimit — rule #1 dedup of the launchd PATH block for the task's supervising wrapper (Touches: distribution/launchd/**); operator 2026-05-16 directive -->
+# <!-- pattern: not-applicable — sourced PATH-resolution helper (no process, no pattern surface); the Supervisor restart pattern (Armstrong 2007) is declared at vision.md § "Pattern conformance index" for the supervisor unit-files this helper supports. -->
 # `lib-launchd-path.sh` — sourced helper: prepend operator-local node /
 # gh / claude / opencode install dirs onto PATH.
 #

@@ -1,5 +1,6 @@
 #!/bin/bash
 # <!-- scope: human-approved task runany-self-restart-bounded-timelimit — the supervising wrapper the task Details + Touches (distribution/launchd/**) explicitly direct; operator 2026-05-16 directive -->
+# <!-- pattern: not-applicable — thin process-launcher runner the supervisor exec's, mirroring run-tick-loop.sh; the Supervisor restart pattern (Armstrong 2007) is already declared at vision.md § "Pattern conformance index" for the supervisor unit-files. -->
 # Bash bootstrap for the `com.minsky.runany` launchd LaunchAgent (macOS)
 # and `minsky-runany.service` (systemd) — the supervised wrapper for the
 # run-anywhere conductor (`scripts/orchestrate.mjs`).
