@@ -1,8 +1,9 @@
 ## What
 
 The deterministic least-authority permission seam for the run-anywhere
-conductor (`runany-permission-scoped-writes` Acceptance 1 + 2), plus its
-wiring into the conductor's **only** code-write site.
+conductor (`runany-permission-scoped-writes`), its wiring into the
+conductor's **only** code-write site, and the pre-registered Measurement
+instrument that reads its verdict ledger (Acceptance 1, 2, 4).
 
 - `novel/cross-repo-runner/src/repo-policy.ts` (+ paired test, 16 cases)
   — pure rule-#10 `classifyRepo` + `assertWriteAllowed`. Identity is the
@@ -17,9 +18,7 @@ wiring into the conductor's **only** code-write site.
   cases) — pure builders that turn one `assertWriteAllowed` decision
   into the exact `.minsky/runany-policy.jsonl` record
   `scripts/runany-policy-audit.mjs` consumes (`run-start` /
-  `write-verdict`). The test pins the audit's escape predicate
-  verbatim, so a wire-format drift fails the build instead of silently
-  zeroing the metric.
+  `write-verdict`).
 - `scripts/local-gate-merge.mjs` (+ test) — before the conductor's only
   code write (`gh pr merge --admin` onto `main` = a `push`-class write)
   it now classifies the merge target and `assertWriteAllowed`s it. A
@@ -27,13 +26,25 @@ wiring into the conductor's **only** code-write site.
   `foreign`) or an unloadable gate module → the merge is **refused,
   logged, and the PR skipped** — no gate ⇒ no code write. Each non-dry
   sweep appends one `run-start` + one `write-verdict` per attempt.
+- **`scripts/runany-policy-audit.mjs` (+ paired test, 28 cases)** — the
+  pre-registered Measurement instrument (slice 3). Pure transforms
+  (`parseLedger`, `sliceToRunWindow`, `classifyLedgerRecord`,
+  `tallyMetrics`, `evaluate`, `formatReport`) over one injected
+  ledger-read seam, same shape as `cto-audit-metrics.mjs`. Emits the
+  exact JSON the task's Measurement line promises:
+  `{foreign_code_pushes:0, foreign_prs_nontaskmd:0,
+  minsky_self_tasks_filed:>=1, pass:true}`. `classifyLedgerRecord` is
+  the cross-module contract; the fixtures mirror the exact
+  `buildRunStartRecord`/`buildWriteVerdictRecord` shapes so a schema
+  drift fails the test loudly instead of silently zeroing the metric.
 - `docs/run-anywhere.md` — the home/foreign matrix, the ledger contract,
-  and the pre-registered measurement command.
+  and the pre-registered measurement command (this PR implements that
+  command verbatim).
 
-This is the substantive gate code; the measurement script
-(`scripts/runany-policy-audit.mjs`) and the minsky-self scout are
-complementary later slices (the audit script is a separate preparation
-PR).
+The minsky-self scout (Acceptance 3 — emits `minsky-self-task-filed`
+records) is the next slice; per the global preparation-PR rule the
+instrument lands first so that slice's PR can carry a real before/after
+`minsky_self_tasks_filed` delta instead of a "measure later" promise.
 
 ## Why needed
 
@@ -43,15 +54,19 @@ repo. Least authority (rule #13; Saltzer & Schroeder 1975) requires
 code only ever land in the one repo the run was invoked for; every other
 repo's sole permitted write is a `TASKS.md`-only scout PR. The gate is
 pure (rule #10 — no model, no I/O) so the security-critical decision is
-unit-testable in isolation and identical for identical inputs.
+unit-testable in isolation. Slice 3 makes the gate's correctness
+*observable*: without the audit, the ledger had no reader and the
+pre-registered Measurement (Acceptance 4) was unrunnable.
 
 ## Optimization (this iteration)
 
-Round-trip elimination (bundled in the conductor wiring): the home-repo
-`origin` is now memoized — `git remote get-url origin` was re-shelled
-inside `prepareScratchClone` once per candidate PR; it now runs **once
-per process** (N subprocess spawns per sweep → 1). Far above the
-≥10-byte floor (eliminates N−1 process spawns per sweep).
+Round-trip elimination (slice-2 conductor wiring): the home-repo
+`origin` is memoized — `git remote get-url origin` was re-shelled inside
+`prepareScratchClone` once per candidate PR; it now runs **once per
+process** (N subprocess spawns per sweep → 1). Slice 3:
+`optimization: none-this-iteration: new measurement-instrument; no
+pre-existing gate/brief/log/round-trip to shrink (single-pass O(n) tally
+is initial design, not an optimization of existing substrate).`
 
 ## Test plan
 
@@ -59,38 +74,38 @@ per process** (N subprocess spawns per sweep → 1). Far above the
   `dist/policy-ledger.js` emitted (the artifacts `local-gate-merge.mjs`
   dynamically imports).
 - `npx vitest run repo-policy.test.ts policy-ledger.test.ts
-  local-gate-merge.test.mjs` → **49 passed** (16 + 9 + 24). The
-  acceptance grid (home-vs-foreign × push/pr/taskmd) and the fail-safe
-  deny cells are each covered; the gate-module-unavailable path refuses
-  all merges.
+  local-gate-merge.test.mjs scripts/runany-policy-audit.test.mjs` →
+  **77 passed** (16 + 9 + 24 + 28). The acceptance grid (home-vs-foreign
+  × push/pr/taskmd) and fail-safe deny cells are each covered; the audit
+  counts both escape categories and stays `pass:false` until the scout
+  slice lands.
+- CLI smoke (clean fixture):
+  `node scripts/runany-policy-audit.mjs --window=run --json` →
+  `{"foreign_code_pushes":0,"foreign_prs_nontaskmd":0,"minsky_self_tasks_filed":1,"pass":true}`;
+  missing ledger → `pass:false`, never throws.
 
 ## Security & privacy
 
 This PR **is** the security surface: a cross-repo least-authority write
-gate (rule #13; vision.md § 13 reviewed).
+gate plus its tripwire (rule #13; vision.md § 13 reviewed).
 
 - **Threat**: a run-anywhere conductor pushing code to a repo it cannot
   prove is the invoked home repo, or opening a non-`TASKS.md` PR against
-  a foreign repo.
+  a foreign repo — and such an escape going unobserved.
 - **Mitigation**: default-deny matrix with fail-safe classification —
-  unprovable identity resolves to `foreign` (least authority), foreign
-  code pushes are unconditionally refused, foreign PRs are allowed only
-  when every diff path is `TASKS.md`, and a failure to load the gate
-  module refuses **all** merges rather than merging ungated. Every
-  verdict (allow and refuse) is appended to `.minsky/runany-policy.jsonl`
-  for the pre-registered audit. The ledger records no repo contents,
-  credentials, or PII — only `{repoClass, action, allowed, taskmdOnly,
-  code}` and a run id.
+  unprovable identity resolves to `foreign`, foreign code pushes are
+  unconditionally refused, foreign PRs allowed only when every diff path
+  is `TASKS.md`, and a gate-module load failure refuses **all** merges.
+  The audit's `foreign_code_pushes` counter is the tripwire: an allowed
+  foreign `push-code` (unreachable by construction) is counted and
+  forces `pass:false` rather than being hidden; fail-safe
+  parsing/windowing can only over-report an escape, never hide one. The
+  ledger records no repo contents, credentials, or PII — only
+  `{repoClass, action, allowed, taskmdOnly, code}` and a run id.
 
 ## Hypothesis self-grade
 
-- **Predicted**: a pure `classifyRepo` + `assertWriteAllowed` seam wired
-  into the conductor's only code-write site refuses 100% of foreign code
-  pushes and all non-`TASKS.md` foreign PRs, fail-safe by construction.
-- **Observed**: 49/49 tests pass; every deny cell (foreign-push,
-  foreign-pr-no-diff, foreign-pr-non-taskmd, gate-module-unavailable) is
-  exercised and refuses; home cells allow full flow.
+- **Predicted**: a pure `classifyRepo`+`assertWriteAllowed` seam wired into the conductor's only code-write site refuses 100% of foreign code pushes and all non-`TASKS.md` foreign PRs, and the slice-3 instrument makes that observable by emitting the exact documented Measurement JSON (`pass` honestly `false` until the scout slice lands).
+- **Observed**: 77/77 tests pass; every deny cell (foreign-push, foreign-pr-no-diff, foreign-pr-non-taskmd, gate-module-unavailable) refuses; the audit CLI emits `{"foreign_code_pushes":0,"foreign_prs_nontaskmd":0,"minsky_self_tasks_filed":1,"pass":true}` on a clean fixture and `pass:false` on missing-ledger / seeded-escape fixtures.
 - **Match**: yes
-- **Lesson**: the gate's correctness is fully decided by the pure
-  matrix; the next slice only needs the audit script to *count*
-  verdicts, not re-litigate the decision.
+- **Lesson**: the gate's correctness is fully decided by the pure matrix and is now measurable end-to-end; the next slice only needs the minsky-self scout to emit `minsky-self-task-filed` records, with this command as its before/after instrument.
