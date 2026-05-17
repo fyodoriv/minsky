@@ -12,6 +12,7 @@ import {
   daemonPrLintPassRateInvariant,
   daemonPrStuckDirtyInvariant,
   daemonPrStuckOnCiInvariant,
+  daemonPrThrashInvariant,
   daemonShippedRatioInvariant,
   daemonTaskIdStalenessInvariant,
   daemonTaskScopeExplosionInvariant,
@@ -679,6 +680,66 @@ describe("daemonPrStuckDirtyInvariant", () => {
     const openDaemonPrs = async () => [{ number: 1, mergeableState: "dirty", ageHours: 2.5 }];
     const result = await daemonPrStuckDirtyInvariant({ openDaemonPrs })();
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("daemonPrThrashInvariant", () => {
+  // Paired cases per the task's Verification field:
+  // pr-fresh / pr-aged-fresh-commits / pr-aged-many-commits / pr-merged.
+
+  it("pr-fresh: passes for a young PR with few commits", async () => {
+    const openDaemonPrs = async () => [
+      { number: 1, commitCount: 2, ageHours: 0.5, mergeable: "CONFLICTING" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+    expect(result.id).toBe("daemon-pr-thrash");
+  });
+
+  it("pr-aged-fresh-commits: passes for an old PR that has NOT over-accumulated commits", async () => {
+    const openDaemonPrs = async () => [
+      { number: 2, commitCount: 3, ageHours: 9, mergeable: "CONFLICTING" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("pr-aged-many-commits: fires for an old, commit-stacked, non-MERGEABLE PR", async () => {
+    const openDaemonPrs = async () => [
+      { number: 322, commitCount: 11, ageHours: 5, mergeable: "CONFLICTING" },
+      { number: 99, commitCount: 2, ageHours: 0.1, mergeable: "MERGEABLE" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-pr-thrash");
+    expect(result.evidence).toContain("#322");
+    expect(result.evidence).toContain("11 commits");
+    expect(result.evidence).not.toContain("#99");
+    expect(result.suggestedFix).toContain("rebase #322 or close it");
+    expect(result.suggestedFix).toContain("do NOT add more commits");
+  });
+
+  it("pr-merged: passes when an old, commit-stacked PR is MERGEABLE (about to land, not thrashing)", async () => {
+    const openDaemonPrs = async () => [
+      { number: 400, commitCount: 12, ageHours: 6, mergeable: "MERGEABLE" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("respects custom maxCommits / maxAgeHours when injected (pivot lever)", async () => {
+    const openDaemonPrs = async () => [
+      { number: 7, commitCount: 8, ageHours: 3, mergeable: "CONFLICTING" },
+    ];
+    const fireResult = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(fireResult.ok).toBe(false);
+    const pivotResult = await daemonPrThrashInvariant({
+      openDaemonPrs,
+      maxCommits: 10,
+      maxAgeHours: 4,
+    })();
+    expect(pivotResult.ok).toBe(true);
   });
 });
 
