@@ -237,9 +237,42 @@ export function extractPrUrl(stdoutTail: string): string | null {
  * @otel-exempt pure parser helper.
  */
 export function extractAllowedPathsFromTaskBlock(taskBlock: string): readonly string[] {
+  const declared = parseDeclaredFields(taskBlock);
+  // Preserve today's "no scope = no leak" semantics: a task that declared
+  // no scope stays empty, even with the implicit-paths union enabled.
+  if (declared.length === 0) return declared;
+  const implicit = readImplicitAllowedPaths();
+  if (implicit.length === 0) return declared;
+  const declaredSet = new Set(declared);
+  const additions = implicit.filter((path) => !declaredSet.has(path));
+  return [...declared, ...additions];
+}
+
+function parseDeclaredFields(taskBlock: string): readonly string[] {
   const touches = parseTouchesField(taskBlock);
   if (touches.length > 0) return touches;
   return parseFilesField(taskBlock);
+}
+
+// Implicit allowed-paths union — closes the scope-leak loophole observed on
+// example-service-api 2026-05-16: every devin worker is brief-instructed to remove
+// the shipped task block from TASKS.md, but no task author lists `TASKS.md`
+// in **Files**: (it's repo-meta, not code surface). Union those brief-mandated
+// cleanup paths with the declared scope so they don't trigger scope-leak.
+//
+// Env knob (MINSKY_IMPLICIT_ALLOWED_PATHS):
+//   - unset       → use DEFAULT_IMPLICIT_ALLOWED_PATHS
+//   - empty ("")  → disable the union (return [] — declared paths only)
+//   - "a, b, c"   → replace the default set with the comma list
+//
+// @otel-exempt pure env-reader.
+const DEFAULT_IMPLICIT_ALLOWED_PATHS: readonly string[] = ["TASKS.md", "AGENTS.md"];
+
+function readImplicitAllowedPaths(): readonly string[] {
+  const raw = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+  if (raw === undefined) return DEFAULT_IMPLICIT_ALLOWED_PATHS;
+  if (raw.length === 0) return [];
+  return splitCommaGlobs(raw);
 }
 
 function parseTouchesField(taskBlock: string): readonly string[] {

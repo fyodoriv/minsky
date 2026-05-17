@@ -7,7 +7,7 @@
 // Conformance: full — every test injects in-memory fakes for the
 //   `SpawnLike` + `GitLike` seams; no shell-outs, no fs writes.
 
-import { describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 import type { RunnerPlan } from "./spawn-plan.js";
 
@@ -236,7 +236,29 @@ describe("extractPrUrl", () => {
   });
 });
 
-describe("extractAllowedPathsFromTaskBlock", () => {
+describe("extractAllowedPathsFromTaskBlock — parser", () => {
+  // The 5 tests below are about the PARSER's extraction shape, not the
+  // implicit-allowed-paths union policy. Disable the implicit set here so
+  // the existing contract assertions stay focused on what's parsed from
+  // the block's text. The union behaviour is tested separately below.
+  //
+  // Save-and-restore over delete (biome lint/performance/noDelete): mirrors
+  // novel/budget-guard/src/http-server.test.ts and avoids the "undefined as
+  // string" coercion trap on process.env[X] = undefined.
+  let savedImplicit: string | undefined;
+  beforeAll(() => {
+    savedImplicit = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+    process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = "";
+  });
+  afterAll(() => {
+    if (savedImplicit === undefined) {
+      // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
+      delete process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+    } else {
+      process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = savedImplicit;
+    }
+  });
+
   test("returns [] when neither field is present", () => {
     expect(extractAllowedPathsFromTaskBlock("- [ ] Task\n  - **ID**: x")).toEqual([]);
   });
@@ -277,6 +299,83 @@ describe("extractAllowedPathsFromTaskBlock", () => {
       "  - **Touches**:    `src/**`  ,   `test/foo.ts`  ",
     ].join("\n");
     expect(extractAllowedPathsFromTaskBlock(block)).toEqual(["src/**", "test/foo.ts"]);
+  });
+});
+
+describe("extractAllowedPathsFromTaskBlock — implicit allowed paths", () => {
+  // The implicit-paths union closes the scope-leak loophole observed on
+  // example-service-api 2026-05-16: every devin worker is brief-instructed to
+  // remove the shipped task block from TASKS.md, but no task author lists
+  // TASKS.md in **Files**: (it's repo-meta, not code surface). The union
+  // appends `TASKS.md` + `AGENTS.md` to whatever the block declared so
+  // brief-mandated cleanup paths don't trigger scope-leak verdicts.
+
+  // Save-and-restore over delete (biome lint/performance/noDelete) — mirrors
+  // the parser block above so per-test env overrides don't leak.
+  let savedImplicit: string | undefined;
+  beforeEach(() => {
+    savedImplicit = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+  });
+  afterEach(() => {
+    if (savedImplicit === undefined) {
+      // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
+      delete process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+    } else {
+      process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = savedImplicit;
+    }
+  });
+
+  test("default: TASKS.md + AGENTS.md are appended to declared Touches", () => {
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Touches**: `src/foo.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "src/foo.ts",
+      "TASKS.md",
+      "AGENTS.md",
+    ]);
+  });
+
+  test("default: TASKS.md + AGENTS.md are appended to declared Files (fallback path)", () => {
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Files**: `server/db-example-model.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "server/db-example-model.ts",
+      "TASKS.md",
+      "AGENTS.md",
+    ]);
+  });
+
+  test("no-declaration blocks stay empty (implicit paths are additive, not load-bearing)", () => {
+    // detectScopeLeak short-circuits on empty allowed-paths — preserving
+    // today's "no scope = no leak" semantics for tasks that declared no scope.
+    expect(extractAllowedPathsFromTaskBlock("- [ ] Task\n  - **ID**: x")).toEqual([]);
+  });
+
+  test("dedup: when declared paths already include TASKS.md, no duplicate is added", () => {
+    const block = [
+      "- [ ] Task",
+      "  - **ID**: x",
+      "  - **Touches**: `TASKS.md`, `src/foo.ts`, `AGENTS.md`",
+    ].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "TASKS.md",
+      "src/foo.ts",
+      "AGENTS.md",
+    ]);
+  });
+
+  test("env override replaces the implicit set", () => {
+    process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = "docs/, CHANGELOG.md";
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Touches**: `src/foo.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "src/foo.ts",
+      "docs/",
+      "CHANGELOG.md",
+    ]);
+  });
+
+  test("env empty string disables the implicit union", () => {
+    process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = "";
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Touches**: `src/foo.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual(["src/foo.ts"]);
   });
 });
 
