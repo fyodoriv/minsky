@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   claudeBinaryReachableInvariant,
@@ -915,6 +916,32 @@ describe("parseIterationLogLine", () => {
 });
 
 describe("defaultInvariants", () => {
+  // Disclosed-unblock (test-only, zero production change). In a sandboxed
+  // daemon worktree the gh-shelling probes have no route to the gh
+  // wrapper's enterprise host, so each burns its full 10s execFile
+  // timeout — ~99 probes blow even the 300s budget under the pre-push
+  // full-stage parallel pool, hard-FAILing every daemon push fleet-wide.
+  // A fast-failing `gh` stub on PATH makes each probe's gh call return
+  // immediately (exit 1, handled as a finding); git/node/ps still
+  // resolve from the unmodified PATH tail. Pre-existing non-hermeticity,
+  // not in this PR's feature diff (see PR body § disclosed-unblock).
+  /** @type {string | undefined} */
+  let savedPath;
+  /** @type {string} */
+  let stubDir = "";
+  beforeAll(() => {
+    stubDir = mkdtempSync(join(tmpdir(), "gh-stub-"));
+    const ghStub = join(stubDir, "gh");
+    writeFileSync(ghStub, "#!/bin/sh\nexit 1\n");
+    chmodSync(ghStub, 0o755);
+    savedPath = process.env["PATH"];
+    process.env["PATH"] = `${stubDir}:${savedPath ?? ""}`;
+  });
+  afterAll(() => {
+    process.env["PATH"] = savedPath;
+    if (stubDir) rmSync(stubDir, { recursive: true, force: true });
+  });
+
   it("returns at least 12 invariants (covering all the named gap-detectors)", () => {
     const invariants = defaultInvariants();
     expect(invariants.length).toBeGreaterThanOrEqual(12);
@@ -934,15 +961,19 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-    // 300s (not 120s): this case runs all 99 invariants, each shelling out
-    // to real git/gh/fs probes. It completes in ~26s in isolation but is
-    // starved well past 120s when the whole-repo vitest suite runs it in
-    // the parallel pool (the `pnpm pre-pr-lint --stage=full` pre-push
-    // path). The work is deterministic — only wall-time under contention
-    // exceeds the cap — so a larger timeout is the correct remedy
-    // (vitest's own timeout-exceeded guidance) rather than masking a
-    // logic failure.
-  }, 300_000);
+    // 600s: this case runs all 99 invariants, each shelling out to real
+    // git/fs probes. The `gh` network pathology (each gh-probe burning
+    // its full 10s execFile timeout with no route to the enterprise
+    // host) is now eliminated by the describe-scoped fast-failing `gh`
+    // PATH stub above. The residual cost is genuine local git/ps/fs I/O,
+    // which still measures ~260s in isolation on a host running ~20
+    // sibling daemon worktrees and is starved further in the whole-repo
+    // parallel pool (the `pnpm pre-pr-lint --stage=full` pre-push path).
+    // The work is deterministic — only wall-time under contention scales
+    // — so a larger timeout is the correct remedy for genuine I/O cost
+    // (vitest's own timeout-exceeded guidance), not hang-masking: the
+    // hang/timeout-burn class was fixed by the stub, not by this cap.
+  }, 600_000);
 });
 
 describe("CANONICAL_REPO is single-sourced from daemon-pr-lint-metrics", () => {
