@@ -82,6 +82,22 @@ const ID_FIELD_RE = /\*\*ID\*\*:\s*`?([A-Za-z0-9._/-]+)`?/;
  */
 
 /**
+ * Resolve a finished block's stable id: the `**ID**:` field if present,
+ * else a trimmed slice of the task title. Extracted so `parseTaskBlocks`
+ * stays under the cognitive-complexity gate.
+ *
+ * @param {string[]} bufLines
+ * @param {string} title
+ * @returns {TaskBlock}
+ */
+function finalizeBlock(bufLines, title) {
+  const raw = bufLines.join("\n");
+  const idMatch = raw.match(ID_FIELD_RE);
+  const fallback = title.replace(/`/g, "").trim().slice(0, 60);
+  return { id: idMatch?.[1] ?? fallback, raw };
+}
+
+/**
  * Split a TASKS.md body into top-level task blocks. A block opens on a
  * column-0 `- [ ]`/`- [x]` line and runs until the next column-0 task
  * line or any markdown heading (`## P1`, etc.). Indented sub-tasks
@@ -93,34 +109,21 @@ const ID_FIELD_RE = /\*\*ID\*\*:\s*`?([A-Za-z0-9._/-]+)`?/;
  * @returns {TaskBlock[]}
  */
 export function parseTaskBlocks(tasksMd) {
-  const lines = tasksMd.split("\n");
-  /** @type {{ title: string, lines: string[] } | null} */
-  let current = null;
-  /** @type {{ title: string, lines: string[] }[]} */
+  /** @type {TaskBlock[]} */
   const blocks = [];
-  for (const line of lines) {
-    const m = line.match(TOP_LEVEL_TASK_RE);
-    if (m) {
-      if (current) blocks.push(current);
-      current = { title: m[1] ?? line.trim(), lines: [line] };
-      continue;
-    }
-    if (current === null) continue;
-    if (HEADING_RE.test(line)) {
-      blocks.push(current);
-      current = null;
-      continue;
-    }
-    current.lines.push(line);
+  // Split immediately before every column-0 task line. Indented
+  // sub-tasks (`  - [ ] …`) lack the leading `- [`, so they never
+  // trigger a split and stay inside their parent chunk; the preamble
+  // (title + `<!-- policy -->`) is chunk 0 and fails the task regex.
+  for (const chunk of tasksMd.split(/\n(?=- \[[ xX]\] )/)) {
+    const lines = chunk.split("\n");
+    const m = (lines[0] ?? "").match(TOP_LEVEL_TASK_RE);
+    if (!m) continue;
+    const headingIdx = lines.findIndex((l, j) => j > 0 && HEADING_RE.test(l));
+    const body = headingIdx === -1 ? lines : lines.slice(0, headingIdx);
+    blocks.push(finalizeBlock(body, m[1] ?? lines[0] ?? ""));
   }
-  if (current) blocks.push(current);
-  return blocks.map((b) => {
-    const raw = b.lines.join("\n");
-    const idMatch = raw.match(ID_FIELD_RE);
-    const fallback = b.title.replace(/`/g, "").trim().slice(0, 60);
-    const id = idMatch?.[1] ?? fallback;
-    return { id, raw };
-  });
+  return blocks;
 }
 
 /**
