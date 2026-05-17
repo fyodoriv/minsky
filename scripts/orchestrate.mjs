@@ -27,9 +27,18 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { runGateSweep } from "./local-gate-merge.mjs";
+import { DEFAULT_RUN_TIME_LIMIT_SEC, parseDurationSec } from "./restart-supervisor.mjs";
 
 const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
 const LEDGER = join(REPO, ".minsky", "orchestrate.jsonl");
+// Hard wall-clock ceiling for this run (rule #6 — stay alive, but
+// bounded). After it, the conductor stops cleanly (exit 0) instead of
+// scheduling another tick; launchd's KeepAlive/runany supervision owns
+// crash-restart backoff (see scripts/restart-supervisor.mjs). Env
+// `MINSKY_RUN_TIME_LIMIT` accepts `<n>s|m|h` (default 10h).
+const RUN_START_MS = Date.now();
+const RUN_TIME_LIMIT_MS =
+  parseDurationSec(process.env["MINSKY_RUN_TIME_LIMIT"], DEFAULT_RUN_TIME_LIMIT_SEC) * 1000;
 // PRs vetted per tick. Bounded (default 2) so a tick is at most
 // LIMIT × per-vet-timeout — the conductor cannot back up behind a long
 // sweep (keystone "run reliably for 10h"). Env-tunable.
@@ -126,6 +135,20 @@ function schedule(intervalMs, log) {
     // tick() catches its own sweep/heal errors; this guards the unexpected.
     const m = err instanceof Error ? err.message : String(err);
     log(`orchestrate: tick threw (continuing): ${m.slice(0, 200)}\n`);
+  }
+  // Bounded stay-alive (rule #6): once the hard wall-clock ceiling is
+  // reached, do NOT reschedule — returning drains the setTimeout chain
+  // (the only thing keeping the loop alive) so Node exits 0 cleanly. No
+  // zombie, no infinite restart past the deadline.
+  const elapsedMs = Date.now() - RUN_START_MS;
+  if (elapsedMs >= RUN_TIME_LIMIT_MS) {
+    log(
+      `orchestrate: MINSKY_RUN_TIME_LIMIT reached (${Math.round(
+        elapsedMs / 1000,
+      )}s ≥ ${RUN_TIME_LIMIT_MS / 1000}s) — clean stop, exit 0\n`,
+    );
+    process.exitCode = 0;
+    return;
   }
   setTimeout(() => schedule(intervalMs, log), intervalMs);
 }
