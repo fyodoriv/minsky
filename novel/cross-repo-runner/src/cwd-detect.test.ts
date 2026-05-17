@@ -8,9 +8,11 @@ import type { CwdFsProbe } from "./cwd-detect.js";
 
 import {
   detectAnyCwd,
+  detectConductorRoot,
   detectCwd,
   findBootstrappedSubdirs,
   findGitRootSubdirs,
+  resolveConductorRoot,
 } from "./cwd-detect.js";
 
 function fakeFs(
@@ -216,5 +218,65 @@ describe("findBootstrappedSubdirs", () => {
       ),
     });
     expect(subdirs).toEqual(["/tmp/parent/child"]);
+  });
+});
+
+describe("resolveConductorRoot — collapse detect result to one root", () => {
+  test("single-host → the host path", () => {
+    expect(resolveConductorRoot({ kind: "single-host", host: "/repo" }, "/fallback")).toBe("/repo");
+  });
+
+  test("multi-host → the parent hostsDir (conductor sweeps the tree)", () => {
+    expect(
+      resolveConductorRoot({ kind: "multi-host", hostsDir: "/parent", hostCount: 3 }, "/fallback"),
+    ).toBe("/parent");
+  });
+
+  test("error arm → the supplied fallback cwd (degenerate, unreachable via detectAnyCwd)", () => {
+    expect(resolveConductorRoot({ kind: "error", hint: "nope" }, "/fallback")).toBe("/fallback");
+  });
+});
+
+describe("detectConductorRoot — single source of truth for zero-arg root", () => {
+  test("bootstrapped cwd → cwd (bootstrapped wins over git-root)", () => {
+    expect(
+      detectConductorRoot({
+        cwd: "/repo",
+        fs: fakeFs({ "/repo/.minsky/repo.yaml": "exists", "/repo/.git": "exists" }),
+      }),
+    ).toBe("/repo");
+  });
+
+  test("git repo (no bootstrap) → cwd", () => {
+    expect(
+      detectConductorRoot({
+        cwd: "/gitrepo",
+        fs: fakeFs({ "/gitrepo/.git": "exists" }),
+      }),
+    ).toBe("/gitrepo");
+  });
+
+  test("nested-repos tree → the parent dir (multi-host root)", () => {
+    expect(
+      detectConductorRoot({
+        cwd: "/tree",
+        fs: fakeFs({ "/tree/a/.git": "exists", "/tree/b/.git": "exists" }, { "/tree": ["a", "b"] }),
+      }),
+    ).toBe("/tree");
+  });
+
+  test("plain dir (no git, no bootstrap) → cwd itself", () => {
+    expect(detectConductorRoot({ cwd: "/plain", fs: fakeFs({}, { "/plain": ["docs"] }) })).toBe(
+      "/plain",
+    );
+  });
+
+  test("detached worktree (.git is a file) → cwd", () => {
+    expect(
+      detectConductorRoot({
+        cwd: "/wt",
+        fs: fakeFs({ "/wt/.git": "exists" }),
+      }),
+    ).toBe("/wt");
   });
 });

@@ -14,16 +14,18 @@ minsky stop       # SIGTERM conductor + workers
 
 ## How detection works
 
-| CWD type | Detected as | `MINSKY_HOME` |
-|----------|-------------|---------------|
-| Git repo (has `.git`) | single-host | `git rev-parse --show-toplevel` |
-| Detached worktree (`.git` file) | single-host | worktree root |
-| Monorepo (single `.git` at root) | single-host | git root |
-| Parent of git repos | multi-host parent | `$PWD` |
-| Plain directory (no git) | single-host | `$PWD` |
+| CWD type | Detected as | Conductor root |
+|----------|-------------|----------------|
+| Git repo (has `.git`) | single-host | cwd |
+| Detached worktree (`.git` file) | single-host | cwd (worktree root) |
+| Monorepo (single `.git` at root) | single-host | cwd |
+| Parent of git repos | multi-host parent | cwd (sweeps the tree) |
+| Plain directory (no git) | single-host | cwd |
 
-The conductor (`scripts/orchestrate.mjs`) reads `MINSKY_HOME` and scopes
-its ledger and sweep to that root.
+The conductor (`scripts/orchestrate.mjs`) self-detects this root via the
+pure `detectConductorRoot` resolver and scopes its ledger and sweep to
+it. An explicit `MINSKY_HOME` env var (set by launchd units or
+`minsky-bootstrap`) still wins — detection is the zero-config fallback.
 
 ## Implementation
 
@@ -35,13 +37,15 @@ Detection priority (from `novel/cross-repo-runner/src/cwd-detect.ts`):
 4. **Git-root subdirs** → multi-host via `detectAnyCwd`
 5. **Plain dir** → single-host, cwd as root
 
-The `bin/minsky` shim uses `git rev-parse --show-toplevel` for git-root
-detection and falls back to `$PWD` when not in a git repository.
+Detection runs in **one tested place**: `detectConductorRoot` in
+`cwd-detect.ts`, called by the conductor at startup. The `bin/minsky`
+shim no longer duplicates git-root detection in bash — it just exec's
+the conductor (one fewer subprocess per zero-arg launch).
 
 ## Lifecycle
 
 ```text
-minsky &        → conductor starts, MINSKY_HOME=<detected-root>
+minsky &        → conductor starts, self-scoped to <detected-root>
 minsky status   → shows conductor PID + worker PIDs
 minsky stop     → SIGTERM both conductor and workers
 ```

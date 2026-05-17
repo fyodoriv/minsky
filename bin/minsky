@@ -146,29 +146,29 @@ if [ ! -f "$RUNNER_BIN" ]; then
   exit 1
 fi
 
-# ── 4. Zero-arg: detect cwd context → launch conductor ──────────────
+# ── 4. Zero-arg: launch the self-scoping conductor ──────────────────
 #
-# With no arguments, minsky detects the git root of the current working
-# directory (or falls back to cwd for non-git dirs) and launches the
-# orchestrator conductor scoped to that root. This satisfies the
-# "run from any folder" requirement (Saltzer & Schroeder 1975 —
-# least-surprise default; no env vars or flags required).
+# With no arguments, minsky launches the orchestrator conductor scoped
+# to the current working directory. This satisfies the "run from any
+# folder" requirement (Saltzer & Schroeder 1975 — least-surprise
+# default; no env vars or flags required).
 #
-# Detection:
-#   git repo / monorepo / worktree → MINSKY_HOME = git root
-#   parent-of-repos / plain dir    → MINSKY_HOME = $PWD (parent or dir)
-#
-# The conductor (scripts/orchestrate.mjs) reads MINSKY_HOME and scopes
-# its ledger + sweep to that root. Per-tick errors are caught internally
-# so the process stays alive regardless of repo type.
+# The conductor self-detects its root via the pure `detectConductorRoot`
+# resolver (cross-repo-runner) — the SAME zero-arg precedence chain
+# (bootstrapped → bootstrapped-subdirs → git-root → git-root-subdirs →
+# plain-dir). Detection lives in ONE tested place (TS), not duplicated
+# in bash; this also drops the extra `git rev-parse` subprocess the
+# shim used to fork on every zero-arg launch (round-trip elimination —
+# the only subprocesses now are the repo-resolve eval + the conductor).
+# Per-tick errors are caught internally so the process stays alive
+# regardless of repo type.
 if [ $# -eq 0 ]; then
-  DETECTED_ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
   CONDUCTOR_BIN="$MINSKY_REPO_PATH/scripts/orchestrate.mjs"
   if [ ! -f "$CONDUCTOR_BIN" ]; then
     echo "minsky: conductor not found at $CONDUCTOR_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
     exit 1
   fi
-  MINSKY_HOME="$DETECTED_ROOT" exec node "$CONDUCTOR_BIN"
+  exec node "$CONDUCTOR_BIN"
 fi
 
 # ── 5. Forward every arg verbatim to minsky-run ──────────────────────

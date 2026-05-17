@@ -55,9 +55,11 @@ export type {
 } from "./host-cto-audit.js";
 export {
   detectAnyCwd,
+  detectConductorRoot,
   detectCwd,
   findBootstrappedSubdirs,
   findGitRootSubdirs,
+  resolveConductorRoot,
 } from "./cwd-detect.js";
 export type { CwdDetectInputs, CwdDetectResult, CwdFsProbe } from "./cwd-detect.js";
 export { walkHostsDir } from "./host-walker.js";
