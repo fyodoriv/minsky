@@ -116,6 +116,7 @@ describe("runGateSweep (injected seam)", () => {
       }),
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
+      noReview: true,
       log: () => {},
     };
     const real = runGateSweep(base);
@@ -150,6 +151,7 @@ describe("runGateSweep (injected seam)", () => {
       mergeFn: () => {
         throw new Error("gh exploded");
       },
+      noReview: true,
       log: () => {},
     });
     expect(res.merged).toEqual([]);
