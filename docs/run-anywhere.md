@@ -52,3 +52,41 @@ minsky stop     → SIGTERM both conductor and workers
 
 The conductor uses a self-scheduling `setTimeout` loop (never `while(true)`)
 so `minsky stop` always finds a clean shutdown point.
+
+The conductor's startup line carries the resolved root so an operator (or
+the measurement harness below) can confirm scope at a glance:
+
+```text
+orchestrate: start 2026-05-17T… root=/path/to/any/project interval=1200000ms
+```
+
+## Measurement (Acceptance 4)
+
+The runnable proof that zero-arg launch works in every folder type:
+
+```bash
+node scripts/runany-zero-arg-measure.mjs   # → "5/5 ok", exit 0
+```
+
+It builds the 5 distinct fixtures in a tmpdir — plain git repo,
+nested-repos tree (parent-of-repos), plain dir, monorepo (single git
+root), detached worktree (`.git` file) — launches the conductor
+zero-arg in each exactly as `bin/minsky` does (`MINSKY_HOME` unset so
+scope self-resolves from cwd), confirms the startup line reports
+`root=<the launch folder>` while the process is still alive, then
+SIGTERMs it (the `minsky stop` equivalent). `--keep` leaves the
+fixture tree on disk for inspection.
+
+`MINSKY_ORCH_DRY=1` is a **validation-only** env, not part of the
+zero-arg UX (an interactive `minsky` with no env still runs a real
+merge sweep — the directive's "no params ever required" still holds).
+It makes the gate sweep vet-only — no live `gh pr merge`, no ledger
+write — so the harness is safe to re-run on any machine. The pure
+decision is `resolveSweepDryRun` (`scripts/orchestrate.mjs`); it wires
+the already-built `dryRun` seam in `local-gate-merge.mjs` (rule #1 — no
+new code path) and short-circuits before the merge round-trip.
+
+Note: a real zero-arg launch also heals the Sonnet worker daemon if it
+is down. The harness reproduces this faithfully, so it will kickstart
+`com.minsky.opus-sonnet-run` when that agent is loaded but down — run
+it when that is acceptable, or pre-start the worker.

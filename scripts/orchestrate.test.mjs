@@ -3,7 +3,7 @@
 // (pgrep / launchctl / runGateSweep) is validated by the `--once` run.
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
-import { decideHeal, resolveRepoRoot } from "./orchestrate.mjs";
+import { decideHeal, resolveRepoRoot, resolveSweepDryRun } from "./orchestrate.mjs";
 
 describe("decideHeal (conductor self-heal decision)", () => {
   it("worker alive ⇒ ok (no heal)", () => {
@@ -43,5 +43,31 @@ describe("resolveRepoRoot (conductor scope decision)", () => {
       listDir: (p) => (p === "/tree" ? ["a", "b"] : []),
     };
     expect(resolveRepoRoot({}, "/tree", treeProbe)).toBe("/tree");
+  });
+});
+
+describe("resolveSweepDryRun (validation-only dry-sweep gate)", () => {
+  it('MINSKY_ORCH_DRY="1" ⇒ dry sweep (no merge, no ledger)', () => {
+    expect(resolveSweepDryRun({ MINSKY_ORCH_DRY: "1" })).toBe(true);
+  });
+
+  it('MINSKY_ORCH_DRY="true" ⇒ dry sweep', () => {
+    expect(resolveSweepDryRun({ MINSKY_ORCH_DRY: "true" })).toBe(true);
+  });
+
+  it("unset ⇒ real sweep (zero-arg user path is never dry)", () => {
+    expect(resolveSweepDryRun({})).toBe(false);
+  });
+
+  it('non-truthy values ("0", "", "yes") ⇒ real sweep', () => {
+    expect(resolveSweepDryRun({ MINSKY_ORCH_DRY: "0" })).toBe(false);
+    expect(resolveSweepDryRun({ MINSKY_ORCH_DRY: "" })).toBe(false);
+    expect(resolveSweepDryRun({ MINSKY_ORCH_DRY: "yes" })).toBe(false);
+  });
+
+  it("is pure — same input, same output", () => {
+    expect(resolveSweepDryRun({ MINSKY_ORCH_DRY: "1" })).toBe(
+      resolveSweepDryRun({ MINSKY_ORCH_DRY: "1" }),
+    );
   });
 });

@@ -67,6 +67,31 @@ const SWEEP_LIMIT = Number(process.env["MINSKY_ORCH_LIMIT"] ?? 2);
 const WORKER_LABEL = "com.minsky.opus-sonnet-run";
 
 /**
+ * Pure: decide whether the gate sweep runs dry (vet + verdict, NO
+ * `gh pr merge`, NO ledger write). `MINSKY_ORCH_DRY` is a
+ * validation-only env — it is NOT part of the zero-arg user UX (the
+ * directive's "no params ever required" still holds: an interactive
+ * `minsky` with no env runs a real sweep). It exists so the
+ * `runany-zero-arg-entrypoint` measurement harness (and anyone
+ * validating zero-arg launch in a real repo) can confirm "conductor
+ * up, scoped to cwd tree" without a live merge round-trip. Wires the
+ * already-built `dryRun` seam in `local-gate-merge.mjs` (rule #1 — no
+ * new code path); `runGateSweep` short-circuits before `ctx.mergeFn`
+ * and skips `appendLedger` under it (skip-earlier gate).
+ * @param {Record<string, string | undefined>} env
+ * @returns {boolean}
+ */
+export function resolveSweepDryRun(env) {
+  const v = env["MINSKY_ORCH_DRY"];
+  return v === "1" || v === "true";
+}
+
+// Validation-only: `MINSKY_ORCH_DRY=1` runs the sweep dry (no merge,
+// no ledger). Read once at module load (pure decision in
+// `resolveSweepDryRun`); the zero-arg user path leaves it unset.
+const SWEEP_DRY = resolveSweepDryRun(process.env);
+
+/**
  * Pure: given whether the Sonnet worker daemon process is alive, decide
  * the conductor action. Extracted so the loop body stays trivial and the
  * decision is unit-testable (rule #10 — no I/O in the decision).
@@ -119,7 +144,7 @@ export function tick(log) {
   let res = { merged: [], skipped: [] };
   let sweepError = "";
   try {
-    res = runGateSweep({ limit: SWEEP_LIMIT, log });
+    res = runGateSweep({ limit: SWEEP_LIMIT, dryRun: SWEEP_DRY, log });
   } catch (err) {
     sweepError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
     log(`orchestrate: sweep error (continuing): ${sweepError}\n`);
@@ -175,7 +200,9 @@ if (isMain) {
     tick(log);
     log("orchestrate: --once done\n");
   } else {
-    log(`orchestrate: start ${new Date().toISOString()} interval=${intervalMs}ms\n`);
+    log(
+      `orchestrate: start ${new Date().toISOString()} root=${REPO} interval=${intervalMs}ms${SWEEP_DRY ? " dry=1" : ""}\n`,
+    );
     schedule(intervalMs, log);
   }
 }
