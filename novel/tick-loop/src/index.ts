@@ -742,6 +742,24 @@ export {
   titleNamesTask,
 } from "./task-completion-detector.js";
 
+// Daemon task-rotation I/O wrapper (slice b/c of
+// `daemon-task-rotation-on-completion`, P0). Reads TASKS.md, splices the
+// iteration's task block, lists merged PRs only when a block exists
+// (round-trip elimination), runs `decideTaskCompletion`, and on a `remove`
+// verdict writes + commits the block-stripped TASKS.md with a commit
+// message that names the criteria-checker decision. The daemon.ts wire-in
+// (after `runMetricsRender`) is the follow-up slice.
+export {
+  type ApplyRemoval,
+  type GetTasksMd,
+  type ListMergedPrs,
+  type RunTaskRotationArgs,
+  type RunTaskRotationOutcome,
+  rotationCommitMessage,
+  runTaskRotation,
+  spliceTaskBlock,
+} from "./daemon-task-rotation.js";
+
 // Local-LLM auto-bootstrap (P0 from operator 2026-05-08, "git pull && minsky"
 // UX target): pure detect + plan functions plus the executor that dispatches
 // pipx / mlx-lm / aider / huggingface-cli / mlx_lm.server installs in
