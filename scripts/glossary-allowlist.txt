@@ -90,3 +90,14 @@ scan-secrets
 ProtectSystem
 PrivateTmp
 RestrictAddressFamilies
+
+# launchd plist(5) key — third-party (Apple) syntax cited verbatim in vision.md
+# rule #6 supervisor-QoS prose, same basis as the systemd directive block above.
+ProcessType
+
+# Future-lint / recurring-scan names cited in vision.md rule #14 (agent-runtime
+# delegation scan, added by #606). Same basis as pr-replace-or-relocate-research
+# (rule #1 sibling above): the rule's prose enforces today; the named lint/task
+# lands later.
+agent-capability-delegation-scan
+pr-agent-delegation-scan-current

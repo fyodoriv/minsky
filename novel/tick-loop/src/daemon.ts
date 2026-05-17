@@ -1572,6 +1572,13 @@ function collectRankedTasks(sliced: string): RankedTask[] {
   return ranked;
 }
 
+/**
+ * All unblocked, unclaimed P0/P1 task IDs from a TASKS.md source, ranked
+ * by Tags priority then document order (the same heuristic `pickTask`
+ * applies to return only the head). Pure string→list transform.
+ *
+ * @otel-exempt pure parser; the span lives at the daemon call-site.
+ */
 export function listEligibleTasks(tasksMd: string): readonly string[] {
   const ranked = collectRankedTasks(sliceP0P1(tasksMd));
   ranked.sort((a, b) => a.pri - b.pri || a.idx - b.idx);
