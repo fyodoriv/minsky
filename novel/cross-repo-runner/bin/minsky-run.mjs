@@ -482,7 +482,7 @@ function emitDryRunReport(plan, hostRoot, hostRepo) {
  * detector short-circuits to `validated` regardless of diff (graceful-
  * degrade per rule #7).
  *
- * Watchdog: 15 min default (mirrors the daemon's `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`),
+ * Watchdog: 30 min default (raised from 15 min 2026-05-18 — devin iterations with
  * operator-overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
  */
 async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
@@ -499,9 +499,9 @@ async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
   }
   const timeoutMs = (() => {
     const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
-    if (raw === undefined) return 15 * 60 * 1000;
+    if (raw === undefined) return 30 * 60 * 1000;
     const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
   })();
   const agentCfg = buildAgentConfig(hostRoot);
   const strategy = new ProcessSpawnStrategy({
@@ -816,10 +816,13 @@ async function runLoopAsResult(parsed, controller) {
 }
 
 function readLiveSpawnTimeoutMs() {
+  // Raised from 15min to 30min (2026-05-18): devin iterations with
+  // PR-creation instructions regularly take 10-15min; the 15min watchdog
+  // was killing productive iterations (watchdog-timeout-kills-productive-devin P0).
   const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
-  if (raw === undefined) return 15 * 60 * 1000;
+  if (raw === undefined) return 30 * 60 * 1000;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
 }
 
 // Build the argv we pass to `claude` for live spawns. `--print` is the
