@@ -936,7 +936,12 @@ function buildAgentConfig(hostRoot) {
     "";
 
   if (cmd === "devin") {
-    const base = ["--print"];
+    // --permission-mode dangerous: auto-approve edit/write/exec tools.
+    // Without this, devin in --print mode rejects ALL write operations
+    // ("Running in non-interactive mode. Use --permission-mode dangerous").
+    // Fixed 2026-05-18 (devin-spawn-missing-permission-mode-bypass P0).
+    const permMode = process.env.MINSKY_DEVIN_PERMISSION_MODE ?? "dangerous";
+    const base = ["--print", "--permission-mode", permMode];
     if (model !== "") base.push("--model", model);
     // Devin: brief → temp file → --prompt-file. No stdin.
     const promptDir = mkdtempSync(join(tmpdir(), "minsky-devin-"));

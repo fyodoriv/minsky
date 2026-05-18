@@ -726,6 +726,19 @@
   - **Anchor**: `novel/tick-loop/src/post-task-cto-audit.ts:163` (the gate that currently passes TASKS.md-only commits); `minsky-cross-machine-dotfile-checks` iteration 2026-05-12 (exhibit: TASKS.md-only output triggered this audit, which produced this task block — a self-referential proof that the guard is needed); rule #9 (pre-registered HDD — measurement command above); rule #10 (deterministic enforcement — the fix is a one-line predicate, not a hint); Ries 2011 (vanity metric guard — the CTO audit PR count must measure leverage, not iteration volume).
   - **Risk**: low. One-line predicate addition behind paired tests. The guard is conservative — it only fires when ALL changed files are TASKS.md AND no PR was opened. Any iteration that ships even one line of code bypasses the guard.
   - **Surfaced-by**: CTO audit 2026-05-12 — the `minsky-cross-machine-dotfile-checks` iteration produced only `TASKS.md` changes (no PR), yet `shouldRunCtoAudit` returned `true` and the full audit spawn ran. The audit's brief confirmed "Files changed (1): TASKS.md; PR: (no PR opened)" — zero code artifact to analyze. Self-referential: this task block is the audit's output from a wasted audit cycle.
+- [ ] `devin-spawn-missing-permission-mode-bypass` — minsky-run.mjs spawns Devin without `--permission-mode bypass` so every Devin worker is blocked from `edit`/`write`/`exec` on the very first call ("Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools."). Devin workers cannot ship ANY task while this is the case, including walker-drains-one-host-forever.
+  - **ID**: devin-spawn-missing-permission-mode-bypass
+  - **Tags**: p0, milestone-m1, reliability, cross-repo-runner, devin, blocker, prereq
+  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever: every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded. 
+
+Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails. 
+
+While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration. 
+
+FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-file`, push `"--permission-mode", "bypass"` (or `"dangerous"` — same thing per devin docs alias rules). Optional follow-up: plumb a `MINSKY_DEVIN_PERMISSION_MODE` env override identical to the existing `MINSKY_CLAUDE_PERMISSION_MODE` so the operator can dial down if needed.
+  - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs
+  - **Acceptance**: (1) After fix, `minsky-run --host <host> --live` against a Devin agent successfully runs `edit`/`write`/`exec` tools without permission rejection. (2) Test: spawn a 1-iter loop against a fixture host whose only task asks the worker to `echo hi > /tmp/devin-perm-test`; verify the file gets written. (3) `grep 'Running in non-interactive mode' ~/.minsky/daemon.log` drops from ≥1 to 0 across a 10-iteration walk.
+
 
 
 ## P1
