@@ -39,7 +39,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { cpus, getPriority, homedir } from "node:os";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -96,6 +96,7 @@ import {
   createPnpmMetricsRender,
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
+  detectOsThrottles,
   ensureCtoAuditLabel,
   ensureWorktree,
   formatRecommendations,
@@ -271,6 +272,94 @@ if (recs.length > 0) {
   console.error(formatRecommendations(recs));
 } else {
   console.error("[config-analyzer] OK — no recommendations.");
+}
+
+// `operator-machine-budget-autoscale` slice 4/N — runtime OS-throttle
+// wire-in. Slice 3 shipped the pure `detectOsThrottles` core; this is
+// its caller (task part (c), the detect+report half — *applying* the
+// corrections is a later slice). The budget % is resolved from
+// `MINSKY_MACHINE_BUDGET_PCT` (default 70 — vision.md rule #15) at this
+// I/O boundary; the live machine facts are gathered best-effort and
+// the verdict logged so `tail .minsky/tick-loop.out.log` shows at boot
+// whether the box can physically hit the budget the autoscaler targets.
+//
+// Optimization (operator 2026-05-05, one measurable/iter): a budget at
+// or below the detector's trivial threshold is *always* reachable —
+// `detectOsThrottles` short-circuits before touching any fact — so the
+// live-fact gather is skipped entirely, eliminating one
+// `sh -c 'ulimit -n'` subprocess fork plus the os.getPriority/os.cpus
+// round-trips per daemon boot. Round-trip elimination, well over the
+// ≥10-byte anti-vanity floor (a whole fork avoided).
+const MACHINE_BUDGET_TRIVIAL_PCT = 10; // parity with TRIVIAL_BUDGET_PCT (slice 3)
+const machineBudgetPct = (() => {
+  const raw = process.env["MINSKY_MACHINE_BUDGET_PCT"];
+  if (raw === undefined || raw === "") return 70;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 100 ? parsed : 70;
+})();
+if (machineBudgetPct <= MACHINE_BUDGET_TRIVIAL_PCT) {
+  console.error(
+    `[machine-budget] budget=${machineBudgetPct}% is trivial (≤${MACHINE_BUDGET_TRIVIAL_PCT}%) — OS throttles intended; live-fact probe skipped`,
+  );
+} else {
+  // Each fact is best-effort: an unreadable one stays `undefined`, which
+  // `detectOsThrottles` treats as *absent* (fail-safe, Saltzer &
+  // Schroeder 1975) — never a false throttle, never a false "reachable".
+  const cores = (() => {
+    try {
+      return cpus().length;
+    } catch {
+      return undefined;
+    }
+  })();
+  const niceValue = (() => {
+    try {
+      return getPriority();
+    } catch {
+      return undefined;
+    }
+  })();
+  const ulimitNofile = (() => {
+    try {
+      const out = execFileSync("/bin/sh", ["-c", "ulimit -n"], {
+        encoding: "utf-8",
+        timeout: 2000,
+      }).trim();
+      const n = Number.parseInt(out, 10);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  // Effective launchd ProcessType is not exposed in the process env;
+  // leaving it undefined keeps this honest — the slice-2 static gate
+  // already covers the repo-tracked plist template, and the detector is
+  // fail-safe on an absent fact.
+  const throttleReport = detectOsThrottles({
+    budgetPct: machineBudgetPct,
+    cores: cores ?? 1,
+    niceValue,
+    ulimitNofile,
+    env: process.env,
+  });
+  if (throttleReport.budgetReachable) {
+    console.error(
+      `[machine-budget] budget=${machineBudgetPct}% reachable — no live OS throttle contradicts it`,
+    );
+  } else {
+    console.error(
+      `[machine-budget] budget=${machineBudgetPct}% UNREACHABLE — ${throttleReport.throttles.length} live OS throttle(s):`,
+    );
+    for (const t of throttleReport.throttles) {
+      console.error(`[machine-budget]   • ${t.kind}: ${t.observed} — ${t.reason}`);
+    }
+    console.error(
+      "[machine-budget] corrections (the cross-repo slice mirrors these to ~/apps/dotfiles & ~/apps/agentbrew):",
+    );
+    for (const correction of throttleReport.corrections) {
+      console.error(`[machine-budget]   $ ${correction}`);
+    }
+  }
 }
 
 // Sub-task 2/3: wire the real `BudgetGuard` from `@minsky/budget-guard`.
