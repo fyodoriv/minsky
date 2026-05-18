@@ -4,19 +4,9 @@ description: Start the Minsky autonomous run loop on the current folder (or a na
 
 # /minsky — run Minsky on this folder, observed
 
-Invoke the `minsky` skill from `skill-plugins/observer/minsky/SKILL.md`
-(distributed via agentbrew). The skill walks the full protocol:
-
-1. **Start** — pick the right invocation (§1). Default: `minsky` with
-   no args runs against `$(pwd)` via cwd auto-detect.
-2. **Watch** — tail stdout, classify every 30s (§2).
-3. **Restart** — bounded retries on transient failures (§3).
-4. **Safe-heal** — only catalogued, single-line, operator-confirmed
-   fixes (§4).
-5. **Swift-PR** — draft P0 PR in the correct upstream repo within
-   5 minutes on budget-exhaust / scope-leak / rule-9 violation (§5).
-6. **Log** — `.minsky/observer.log` captures every action (§6).
-7. **Stop** — `minsky stop` when the operator says so (§7).
+Launch minsky as a background daemon that survives terminal close, IDE
+restart, and SSH disconnect. Uses `minsky --daemon` so the agent returns
+immediately and can observe/heal via `minsky status` and `minsky logs`.
 
 ## Steps
 
@@ -27,22 +17,65 @@ Invoke the `minsky` skill from `skill-plugins/observer/minsky/SKILL.md`
 pwd && test -f .minsky/repo.yaml && echo "BOOTSTRAPPED" || echo "NEEDS_BOOTSTRAP"
 ```
 
-If `NEEDS_BOOTSTRAP`, ask the operator: "`$(pwd)` is not a bootstrapped
-Minsky host. Run `minsky-bootstrap $(pwd)` first?" Do NOT proceed
-without confirmation.
+If `NEEDS_BOOTSTRAP`, run the bootstrap:
 
-### 2. Start + observe
+```bash
+node ~/apps/tooling/minsky/novel/sidecar-bootstrap/bin/minsky-bootstrap.mjs "$(pwd)"
+```
+
+### 2. Check if already running
 
 <!-- turbo -->
 ```bash
-minsky 2>&1 | tee -a .minsky/observer.log
+minsky status
 ```
 
-Follow the observer protocol from the `minsky` skill. Each iteration
-line goes to the log; the observer reads the tail to classify.
+If already running, report to the operator and skip to step 4 (observe).
+Do NOT start a second daemon.
 
-### 3. On failure
+### 3. Start daemon
 
-Follow §3 → §4 → §5 of the skill. Never silently retry. Always either
-heal visibly, restart visibly, OR escalate visibly via `gh pr create
---draft`.
+<!-- turbo -->
+```bash
+minsky --daemon --max-iterations=120
+```
+
+For multi-host (all repos in a parent dir):
+
+```bash
+minsky --daemon --hosts-dir ~/apps/tooling --max-iterations=120
+```
+
+The daemon logs to `~/.minsky/daemon.log`, writes PID to
+`~/.minsky/daemon.pid`, and is SIGHUP-immune. Safe to close the IDE.
+
+### 4. Verify it started
+
+<!-- turbo -->
+```bash
+sleep 3 && minsky status
+```
+
+Expect `running (PID ...)` with uptime and log tail. If not running,
+check `minsky logs` for the error.
+
+### 5. On failure
+
+Check logs:
+
+```bash
+minsky logs
+```
+
+If the daemon died, restart it (step 3). If it's stuck on a spawn
+failure (e.g., devin auth expired), fix the root cause then restart.
+
+Follow §3 → §4 → §5 of the `minsky` skill for heal/escalate protocol.
+Never silently retry. Always either heal visibly, restart visibly, OR
+escalate visibly via `gh pr create --draft`.
+
+### 6. Stop
+
+```bash
+minsky stop
+```

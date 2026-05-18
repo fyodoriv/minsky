@@ -15,6 +15,22 @@ pnpm minsky doctor   # verify health
 
 No separate build step needed. `pnpm install` runs the root `prepare` hook which calls `tsc -b` to compile every workspace package's `dist/` (including `@minsky/tick-loop`). If `dist/` is missing at runtime, `pnpm minsky` exits 1 with a one-line actionable message rather than a node stack trace.
 
+## Running minsky
+
+```bash
+minsky --daemon --hosts-dir ~/apps/tooling  # background daemon across repos
+minsky --local --daemon                     # local-only (zero cloud tokens)
+minsky status                               # PID, uptime, log tail
+minsky logs                                 # tail -f daemon log
+minsky stop                                 # SIGTERM → graceful drain
+```
+
+**`--daemon`** backgrounds the process (logs to `~/.minsky/daemon.log`, PID file at `~/.minsky/daemon.pid`). SIGHUP-immune — survives terminal close / IDE restart.
+
+**`--local`** forces local-only mode (`MINSKY_LLM_PROVIDER=local-only`). No cloud agent, no budget guard. Use when tokens are exhausted.
+
+**`MINSKY_CLOUD_AGENT=devin`** (env var in `~/.zshrc.ai-tools`) switches the cloud agent from Claude Code to Devin CLI. Same stdin/stdout contract; different billing.
+
 ## Identity
 
 You're working on **Minsky** — an integration distribution that connects existing tools into a viable cybernetic system that produces software 24/7 and stays alive indefinitely. Minsky is not a framework. We do not build what already exists.

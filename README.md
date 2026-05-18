@@ -36,31 +36,43 @@ Everything is MIT, every dependency lives behind an interface (`novel/adapters/`
 Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/bin/minsky.mjs`). Sane defaults + auto-bootstrap:
 
 ```bash
-pnpm minsky                  # start-or-attach worker 0 (default); auto-detects
-                             # Claude exhaustion + offers to install local-LLM
-                             # fallback (~17 GB Qwen3 weights via mlx-lm + aider)
-                             # with one [Y/n] confirm prompt
-pnpm minsky doctor           # read-only health probe — claude / pipx / mlx-lm /
-                             # aider / model weights / mlx-lm.server reachable
-pnpm minsky bootstrap-local-llm  # explicitly run the local-LLM install plan
-pnpm minsky logs             # tail worker 0's log live
-pnpm minsky stop             # SIGTERM the daemon; leave the log
+minsky                               # autonomous run (foreground, SIGHUP-immune)
+minsky --daemon                      # background daemon (survives terminal close / IDE restart)
+minsky --daemon --hosts-dir ~/apps   # daemon across multiple repos
+minsky --local                       # local-only mode (zero cloud tokens)
+minsky --local --daemon              # local-only background daemon
+minsky status                        # PID, uptime, last 10 log lines
+minsky logs                          # tail -f the daemon log
+minsky stop                          # SIGTERM → graceful drain
+pnpm minsky doctor                   # health probe — claude / local-LLM / model weights
 ```
 
-The auto-bootstrap pre-flight is idempotent — re-running `pnpm minsky` on a set-up machine adds <500 ms wall-clock (one fetch against `127.0.0.1:8080/v1/models`) and threads `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred` into the spawned daemon.
+### Daemon mode (`--daemon`)
 
-**Operator escape hatches** (env vars; see `pnpm minsky --help`):
+`minsky --daemon` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Windsurf/Cursor restart, and SSH disconnect. Guards against double-start (PID check).
+
+### Local-only mode (`--local`)
+
+`minsky --local` runs exclusively on local models (aider/opencode against MLX/LM Studio). No cloud agent spawned, no budget guard, no claude probing — zero cloud spend. Use when tokens are exhausted. Combinable with `--daemon`.
+
+### Cloud agent selection (`MINSKY_CLOUD_AGENT`)
+
+The cloud agent is selectable per machine. Default `claude` (Claude Code CLI). Set `MINSKY_CLOUD_AGENT=devin` to use Devin CLI (`devin --print`) instead — same stdin/stdout contract, different billing. Pin the model with `MINSKY_CLOUD_AGENT_MODEL`.
+
+**Operator escape hatches** (env vars; see `minsky --help`):
 
 | Env var | Effect |
 |---|---|
-| `MINSKY_LLM_PROVIDER=local-preferred` | "I know I'm exhausted" — skip live claude probe, install + use local-LLM directly. Use this on a fresh machine where you already know claude tokens are out. |
-| `MINSKY_LLM_PROVIDER=claude-only` | Skip the local-LLM probe; force claude even on a hard-limit signal. |
-| `MINSKY_LOCAL_LLM=1` | Wire the local-LLM fallback wrapper, but assume the stack is already installed (no bootstrap). |
-| `MINSKY_HARD_LIMIT_TTL_MIN=<n>` | How long to trust persisted hard-limit hits (default 60). After a hit gets persisted to `.minsky/state.json`, every subsequent `minsky` within the TTL skips the live probe and goes straight to local. |
-| `MINSKY_NO_AUTO_BOOTSTRAP=1` | Skip the pre-flight entirely. Daemon spawns claude regardless of state. |
-| `MINSKY_NON_INTERACTIVE=1` | Auto-confirm the bootstrap install plan. Useful for CI / daemonized contexts. Combined with `install-arm-homebrew` (which needs sudo TTY), the bootstrap refuses non-interactive and prints a manual one-liner instead of hanging. |
+| `MINSKY_CLOUD_AGENT=devin` | Use Devin CLI instead of Claude Code for cloud iterations. |
+| `MINSKY_CLOUD_AGENT_MODEL=<id>` | Model to pass via `--model` to the cloud agent. |
+| `MINSKY_LLM_PROVIDER=local-only` | Hard local mode (same as `--local` flag). |
+| `MINSKY_LLM_PROVIDER=local-preferred` | Prefer local when reachable, fall back to cloud. |
+| `MINSKY_LLM_PROVIDER=claude-only` | Force cloud even on a hard-limit signal. |
+| `MINSKY_LOCAL_LLM=1` | Wire the local-LLM fallback wrapper. |
+| `MINSKY_HARD_LIMIT_TTL_MIN=<n>` | Trust persisted hard-limit hits for N minutes (default 60). |
+| `MINSKY_NON_INTERACTIVE=1` | Auto-confirm prompts. Required for `--daemon` (set automatically). |
 
-The CLI is intentionally repo-rooted (not a global `npm install -g` package) so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. To run from outside the repo, alias it: `alias minsky="pnpm --dir ~/apps/minsky minsky"`.
+The CLI is intentionally repo-rooted (not a global `npm install -g` package) so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. The `bin/minsky` PATH shim resolves the repo automatically from any folder.
 
 **Multi-machine flow** (cloning to a second machine where claude tokens are exhausted):
 
@@ -87,16 +99,18 @@ runner from any folder and automatically watch the loop from outside.
 agentbrew sync --agentfile ~/apps/tooling/minsky/Agentfile.yaml
 
 # Then, from any shell in any bootstrapped host:
-cd ~/apps/my-repo && minsky          # autonomous run, observer-watched
-minsky status                        # list running minsky-run processes
-minsky stop                          # SIGTERM running processes; iteration drains cleanly
+minsky --daemon --hosts-dir ~/apps   # background daemon across all repos
+minsky --local --daemon              # same, but local models only (zero tokens)
+minsky status                        # PID + uptime + log tail
+minsky logs                          # follow the daemon log live
+minsky stop                          # SIGTERM → graceful drain
 ```
 
 The plugin has four pieces:
 
 | Piece | Path | Purpose |
 |---|---|---|
-| PATH shim | `bin/minsky` | Resolves the minsky repo via `MINSKY_REPO` → `~/apps/tooling/minsky` → common fallbacks; forwards to `novel/cross-repo-runner/bin/minsky-run.mjs`. Zero dependencies. |
+| PATH shim | `bin/minsky` | Resolves the minsky repo; handles `--daemon` (background + PID file + log), `--local` (zero-cloud env), `status`/`stop`/`logs` subcommands; forwards to `minsky-run.mjs`. SIGHUP-immune. |
 | Skill | `skill-plugins/observer/minsky/SKILL.md` | The observer protocol — Watch / Restart / Safe-heal / Swift-PR / Log. Triggered by phrases like "run minsky here" in any agent session. |
 | Slash commands | `commands/minsky.md` + `commands/minsky-status.md` + `commands/minsky-stop.md` | `/minsky`, `/minsky-status`, `/minsky-stop` for Claude Code / Cursor / Devin. |
 | Agentfile | `Agentfile.yaml` | Declares `skillSources: [{ label: minsky-observer, path: ./skill-plugins/observer }]` so `agentbrew sync` deploys the skill to every detected agent's `skillsDir`. |
