@@ -597,6 +597,28 @@ const PIN_PATH_UNUSED_REMAINING = Object.freeze({
 const PIN_PATH_UNUSED_BACKENDS = Object.freeze([]);
 const PIN_PATH_UNUSED_LOCAL_PROBE = Object.freeze({ reachable: true, observedAtMs: 0 });
 
+// Slice 4 of `runany-dynamic-model-or-local-fallback` (Acceptance #3):
+// when the budget guard has circuit-broken the only configured remote
+// (claude), the run-anywhere contract is "switch fully to local". This
+// model-router layer does not run a live local probe (the wrapper's
+// `LlmProviderSpawnStrategy` owns the TTL-cached probe + bootstrap, per
+// `minsky-cli-auto-bootstrap-local-llm`), so the probe state passed to
+// `resolveRunAnyModel` here is honestly `false` with a reason that says
+// the actual liveness/bootstrap is deferred to the wrapper. The
+// all-remote-down branch returns local regardless of this flag — it
+// only annotates the visible-not-silent reason string (Beyer SRE 2016).
+const RUNANY_LOCAL_PROBE_DEFERRED = Object.freeze({
+  reachable: false,
+  observedAtMs: 0,
+  reason: "deferred-to-wrapper-probe",
+});
+// One frozen claude-down backend list reused across every circuit-break
+// iteration (no per-tick allocation on the degraded path — round-trip /
+// GC elimination, same pattern as the audit harness's down fixture).
+const RUNANY_CLAUDE_DOWN_BACKENDS = Object.freeze([
+  Object.freeze({ id: "claude", reachable: false, reason: "budget-circuit-break" }),
+]);
+
 /**
  * Slice 5 of `claude-usage-aware-strategic-model-router` — invoke the
  * pure picker against a fresh remaining-fractions snapshot, log the
@@ -613,29 +635,86 @@ const PIN_PATH_UNUSED_LOCAL_PROBE = Object.freeze({ reachable: true, observedAtM
  *
  * @returns {string | undefined}
  */
-function pickAndLogStrategicModel() {
-  // Slice 3 of `runany-dynamic-model-or-local-fallback` (Acceptance #1 +
-  // rule #9 skip-earlier gate): when the operator pinned a *catalog*
-  // model, route the decision through the unified `resolveRunAnyModel`
-  // and return *before* the budget-snapshot read, the usage-history
-  // ring-buffer append, and the exhaustion prediction. A pinned run is
-  // honored verbatim regardless of budget/liveness, so all that
-  // dynamic-machinery work — plus its ~400-byte `tick-loop.strategic-pick`
-  // span — is pure waste every iteration. The catalog-membership guard
-  // keeps a *bogus* pin on the unchanged budget-aware dynamic path
-  // (chaos row 3 — a typo'd pin must not pin to a placeholder budget).
-  if (strategicPin.length > 0 && MODEL_CATALOG.some((e) => e.id === strategicPin)) {
-    const pinned = resolveRunAnyModel({
-      remaining: PIN_PATH_UNUSED_REMAINING,
-      remoteBackends: PIN_PATH_UNUSED_BACKENDS,
-      localProbeResult: PIN_PATH_UNUSED_LOCAL_PROBE,
-      operatorPin: strategicPin,
-    });
-    process.stdout.write(
-      `[span] tick-loop.runany-resolve {"model":"${pinned.model}","agent":"${pinned.agent}","source":"${pinned.source}"}\n`,
-    );
-    return pinned.agent === "claude" ? pinned.model : undefined;
+/**
+ * Emit the unified `tick-loop.runany-resolve` span for a
+ * {@link resolveRunAnyModel} decision and map it to the model id the
+ * `invocation` callback wants (`undefined` ⇒ local; the wrapper takes
+ * over). Shared by the pin (slice 3) and all-remote-down (slice 4)
+ * short-circuits so the span format + agent→model mapping live in one
+ * place (log-line dedup; one definition can't drift from the other).
+ *
+ * @param {{model:string,agent:string,source:string,reason:string}} d
+ * @param {boolean} withReason include the (longer) reason field — on for
+ *   the degraded all-remote-down path (operator needs the cause), off
+ *   for the pin path (the source alone is self-explanatory + shorter).
+ * @returns {string | undefined}
+ */
+function dispatchRunAnyDecision(d, withReason) {
+  const reasonField = withReason
+    ? `,"reason":"${d.reason.replace(/"/g, '\\"').slice(0, 160)}"`
+    : "";
+  process.stdout.write(
+    `[span] tick-loop.runany-resolve {"model":"${d.model}","agent":"${d.agent}","source":"${d.source}"${reasonField}}\n`,
+  );
+  return d.agent === "claude" ? d.model : undefined;
+}
+
+/**
+ * Slice 3 of `runany-dynamic-model-or-local-fallback` (Acceptance #1 +
+ * rule #9 skip-earlier gate): when the operator pinned a *catalog*
+ * model, the decision is honored verbatim regardless of budget/liveness.
+ * Extracted from {@link pickAndLogStrategicModel} so its
+ * cognitive-complexity stays under biome's cap. The catalog-membership
+ * guard keeps a *bogus* pin on the unchanged dynamic path (chaos row 3).
+ *
+ * @returns {{handled:boolean, model?:string}} `handled:false` ⇒ no
+ *   catalog pin; caller falls through to the budget-aware path.
+ */
+function tryPinnedRunAnyModel() {
+  if (strategicPin.length === 0 || !MODEL_CATALOG.some((e) => e.id === strategicPin)) {
+    return { handled: false };
   }
+  const pinned = resolveRunAnyModel({
+    remaining: PIN_PATH_UNUSED_REMAINING,
+    remoteBackends: PIN_PATH_UNUSED_BACKENDS,
+    localProbeResult: PIN_PATH_UNUSED_LOCAL_PROBE,
+    operatorPin: strategicPin,
+  });
+  return { handled: true, model: dispatchRunAnyDecision(pinned, false) };
+}
+
+/**
+ * Slice 4 of `runany-dynamic-model-or-local-fallback` (Acceptance #3 +
+ * rule #9 skip-earlier gate): the budget guard circuit-broke claude —
+ * the only configured remote is inaccessible (budget exhausted). The
+ * run-anywhere contract is "switch fully + visibly to local". Route
+ * through the unified `resolveRunAnyModel` so the decision is one path
+ * with a visible `all-remote-down` source + reason (Beyer SRE 2016
+ * visible-not-silent). The wrapper's TTL-cached probe + bootstrap is
+ * the real local-liveness gate; this layer only routes + logs.
+ * Extracted to keep {@link pickAndLogStrategicModel} under the cap.
+ *
+ * @param {{action?:string}} lastDecision the budget guard's last decision.
+ * @returns {{handled:boolean, model?:string}} `handled:false` ⇒ remote
+ *   is not circuit-broken; caller falls through to the dynamic path.
+ */
+function tryCircuitBrokenRunAnyModel(lastDecision) {
+  if (lastDecision.action !== "circuit-break") return { handled: false };
+  const downDecision = resolveRunAnyModel({
+    remaining: PIN_PATH_UNUSED_REMAINING,
+    remoteBackends: RUNANY_CLAUDE_DOWN_BACKENDS,
+    localProbeResult: RUNANY_LOCAL_PROBE_DEFERRED,
+  });
+  return { handled: true, model: dispatchRunAnyDecision(downDecision, true) };
+}
+
+function pickAndLogStrategicModel() {
+  // Slice 3: pin short-circuits *before* the budget-snapshot read, the
+  // usage-history ring-buffer append, and the exhaustion prediction —
+  // a pinned run is honored verbatim, so all that dynamic machinery
+  // (plus its ~400-byte span) is pure waste every iteration.
+  const pin = tryPinnedRunAnyModel();
+  if (pin.handled) return pin.model;
   // v0: synchronous picker driven by `realGuard.lastDecision()` which
   // is populated by the BudgetGuard's tick loop. The remaining %
   // snapshot is the most recent decision's snapshot.
@@ -644,6 +723,29 @@ function pickAndLogStrategicModel() {
     // Cold start — no snapshot yet; let claude pick its session default.
     return undefined;
   }
+  // Slice 4: all-remote-down short-circuits before the snapshot math,
+  // the ring-buffer append, and the exhaustion regression (same
+  // optimization class as slice 3's pin path).
+  const down = tryCircuitBrokenRunAnyModel(lastDecision);
+  if (down.handled) return down.model;
+  return pickDynamicStrategicModel(lastDecision);
+}
+
+/**
+ * The unchanged budget-aware dynamic path (slices 5+6 of
+ * `claude-usage-aware-strategic-model-router`): derive remaining
+ * fractions from the budget snapshot, run the pure picker, append to
+ * the usage-history ring buffer, emit the rich `tick-loop.strategic-pick`
+ * span, and return the model id (or `undefined` ⇒ local). Extracted
+ * verbatim from {@link pickAndLogStrategicModel} so the slice-3/4
+ * short-circuit guards added there keep the caller under biome's
+ * cognitive-complexity cap (rule: clean up the complexity your own
+ * change introduced). Behaviour is byte-for-byte identical.
+ *
+ * @param {{snapshot: any}} lastDecision the budget guard's last decision.
+ * @returns {string | undefined}
+ */
+function pickDynamicStrategicModel(lastDecision) {
   const snap = lastDecision.snapshot;
   const remaining = {
     fivehour: snap.windowSizeTokens > 0 ? snap.tokensRemainingInWindow / snap.windowSizeTokens : 0,

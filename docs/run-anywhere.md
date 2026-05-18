@@ -75,7 +75,7 @@ Thresholds (transcribed verbatim from the task's Success line):
 Slices 1+2: the pure `resolveRunAnyModel` decider, its tests, and the
 `runany-model-audit.mjs` measurement harness.
 
-Slice 3 (this slice): the **pin-path wire-in** into the run-anywhere
+Slice 3: the **pin-path wire-in** into the run-anywhere
 entrypoint. `pickAndLogStrategicModel()` in
 `novel/tick-loop/bin/tick-loop.mjs` now consults `resolveRunAnyModel`
 *first*: when `MINSKY_STRATEGIC_PIN_MODEL` names a catalog model, the
@@ -89,7 +89,28 @@ on the unchanged budget-aware dynamic path (typo guard) — that path is
 byte-for-byte identical to before this slice, so the dynamic and
 all-down behaviour is unaffected.
 
+Slice 4 (this slice): the **all-remote-down wire-in** into the
+run-anywhere entrypoint (Acceptance #3). When the budget guard has
+circuit-broken claude — the only configured remote is inaccessible
+(budget exhausted) — `pickAndLogStrategicModel()` now routes the
+decision through `resolveRunAnyModel` and returns **before** the
+remaining-fractions snapshot math, the usage-history ring-buffer
+append, and the exhaustion regression (rule #9 skip-earlier gate: a
+down-remote iteration pays zero dynamic-machinery cost, same
+optimization class as slice 3's pin path). The switch to local happens
+in *that very iteration* (≤1-iteration switch) and emits a compact
+`[span] tick-loop.runany-resolve` line with `"source":"all-remote-down"`
+and a visible reason (Beyer SRE 2016 visible-not-silent) instead of the
+~400-byte `tick-loop.strategic-pick` span. Recovery is implicit: the
+next iteration where the guard is no longer circuit-broken falls through
+to the unchanged dynamic path (Acceptance #4). The actual local
+liveness/bootstrap is owned by the wrapper's TTL-cached probe
+(`minsky-cli-auto-bootstrap-local-llm`); this layer routes + logs only.
+The budget-band dynamic path (no pin, remote reachable) is still
+byte-for-byte identical to before this slice.
+
 Follow-up slices (tracked under the same task): routing the *dynamic*
 path through the resolver too, and the live multi-backend probe builder
-that populates `remoteBackends` so the all-remote-down branch fires at
-runtime (Acceptance #3).
+that populates `remoteBackends` from a real per-backend network probe
+(not just the budget-circuit-break proxy) so the all-remote-down branch
+also fires on a network-level outage of a multi-remote fleet.
