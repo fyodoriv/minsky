@@ -12,10 +12,53 @@
 <!-- policy: Every task should carry a **Milestone**: M1/M2/M3/M4/M5 field (see MILESTONES.md). Tasks without a milestone field default to M1. M1 = Stable + Measurable + One-Command; M2 = Fast Mode single-task delivery; M3 = GitHub Actions free CI; M4 = Enterprise Reliability 99.9%; M5 = Managed Product. -->
 <!-- policy: MILESTONE ALIGNMENT GATE (supersedes all other policies). Before picking ANY implementation task, the agent MUST verify that the following 7 surfaces are up-to-date and aligned with the current milestone in MILESTONES.md: (1) README.md — reflects current milestone's install/run/benefits; (2) Quickstart in README — matches the actual one-command flow for the current milestone; (3) vision.md — milestone goals are reflected in success criteria; (4) user-stories/ — each milestone exit criterion has a corresponding user story with metric + integration test; (5) Integration tests — user-story tests exist and pass for the current milestone's shipped criteria; (6) Logs + observability — OTEL spans, daemon logs, and orchestrate.jsonl capture the data needed to verify the current milestone's exit criteria; (7) METRICS.md — every metric the current milestone depends on has a real observation (not a stub). If ANY of these 7 surfaces is stale or misaligned, the agent's FIRST task is to update them — not to pick an implementation task. This is operator directive 2026-05-18 and is iron: no exemption. Run `node scripts/check-milestone-alignment.mjs` (when it exists) or manually audit the 7 surfaces. -->
 
-
 ## P0
 
 <!-- Operator directive 2026-05-18 (ABSOLUTE PRIORITY — supersedes ALL other P0s including self-metrics-competitive-benchmark): the milestone-alignment-gate task below must be picked FIRST by any agent. No implementation task may be claimed until the 7 surfaces are verified aligned. This is the pre-condition for all other work. -->
+
+<!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
+
+- [ ] `walker-drains-one-host-forever` — the multi-host walker never advances past the first host with tasks because the host loop runs max-iter=∞ and the same task keeps getting re-picked after each iteration; other hosts (including minsky itself) are starved
+  - **ID**: walker-drains-one-host-forever
+  - **Tags**: p0, milestone-m1, reliability, walker, cross-repo, blocker
+  - **Milestone**: M1
+  - **Competitive-goal**: a walker that never reaches 6 of 7 hosts makes multi-repo mode useless; directly zeroes autonomous-merge-rate on all non-first hosts.
+  - **Surfaced-by**: 2026-05-18 live daemon (PID 3748): 10 iteration records all against agentbrew, 0 against minsky/dotfiles/tasks.md despite all having tasks. The host loop runs `max-iter=∞` so agentbrew's one task (which keeps getting re-picked because it validates but opens no PR and isn't removed) blocks the entire walk indefinitely.
+  - **Details**: two compounding bugs: (a) the walker uses drain-then-advance semantics but `max-iter=∞` + a non-completing task = infinite drain on the first host; fix: add a per-host iteration cap (e.g., `--max-iterations-per-host=3`, default 3) so after N iterations the walker advances regardless; (b) `pickHostTask` keeps returning the same task because it validates but the task block is never removed from TASKS.md (the devin spawn doesn't remove it on completion); fix: after a `validated` iteration for a task, mark it as `in-progress` or rotate to the next eligible task.
+  - **Files**: `novel/cross-repo-runner/src/host-walker.ts` (per-host cap), `novel/cross-repo-runner/src/host-loop.ts` (task rotation after validated), `novel/cross-repo-runner/bin/minsky-run.mjs` (wire `--max-iterations-per-host` flag)
+  - **Hypothesis**: today 100% of iterations go to the first alphabetical host with tasks. After fix, iterations distribute across all hosts with tasks (round-robin within each walk).
+  - **Success**: in a 7-host walk where 3 hosts have tasks, all 3 hosts receive ≥1 iteration per walk.
+  - **Pivot**: if per-host cap is too blunt, implement priority-weighted host selection instead of alphabetical order.
+  - **Measurement**: `grep 'iter(s)' ~/.minsky/daemon.log | awk '{print $1}' | sort -u | wc -l` → ≥3 distinct hosts with iterations (was: 1).
+  - **Anchor**: 2026-05-18 live daemon log (10 iterations, all agentbrew, 0 minsky). Liu & Layland 1973 (fair scheduling — round-robin with bounded drain).
+
+- [ ] `devin-spawn-no-pr-opened` — devin iterations produce `validated` verdicts but never open a PR; the task is never completed and gets re-picked forever
+  - **ID**: devin-spawn-no-pr-opened
+  - **Tags**: p0, milestone-m1, devin, spawn, pr, blocker
+  - **Milestone**: M1
+  - **Competitive-goal**: a spawn that validates but never opens a PR produces zero autonomous-merge-rate — the #1 scorecard metric.
+  - **Surfaced-by**: 2026-05-18 live daemon: 3 validated iterations on agentbrew, all with `pr_url: null`. Devin ran for 5-6 min per iteration, produced changes, but never ran `gh pr create`. The brief likely doesn't instruct devin to open a PR, or devin's `--print` mode doesn't support PR creation natively.
+  - **Details**: check (a) whether the daemon brief for the cross-repo runner instructs the agent to open a PR (it may only instruct "make the changes"); (b) whether `devin --print` can run `gh pr create` (or if `--permission-mode dangerous` is needed for that); (c) whether the scope-leak check is rejecting the PR step. The minsky-run.mjs already has PR extraction logic (`extractPrUrl` from stdout) — verify devin's stdout includes a PR URL when it creates one.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (brief template — must instruct PR creation), `novel/cross-repo-runner/src/runner.ts` (PR URL extraction from devin output)
+  - **Hypothesis**: the daemon brief doesn't instruct the agent to open a PR. After adding explicit `gh pr create` instructions to the brief, ≥80% of validated iterations produce a non-null `pr_url`.
+  - **Success**: 3 consecutive validated iterations on any host produce `pr_url != null` in the experiment store jsonl.
+  - **Pivot**: if devin `--print` mode can't run `gh pr create`, add a post-spawn step in the runner that opens the PR from the runner's own process (like minsky-run.mjs's existing `openPrIfNeeded` path).
+  - **Measurement**: `jq -r 'select(.verdict=="validated") | .pr_url' .minsky/experiment-store/cross-repo/*.jsonl | grep -c -v null` → ≥3 (was: 0).
+  - **Anchor**: 2026-05-18 live daemon (3 validated, 0 PRs). AGENTS.md agent-support-matrix (devin: `--prompt-file`, not stdin).
+
+- [ ] `watchdog-timeout-kills-productive-devin` — the 900s (15min) watchdog SIGKILLs devin mid-work; devin iterations take 5-6min when productive but the watchdog fires on slow iterations, wasting the entire iteration
+  - **ID**: watchdog-timeout-kills-productive-devin
+  - **Tags**: p0, milestone-m1, devin, watchdog, reliability
+  - **Milestone**: M1
+  - **Competitive-goal**: a killed productive iteration wastes 15min of devin time with zero output — directly regresses cost-per-PR and stability.
+  - **Surfaced-by**: 2026-05-18 live daemon: one `spawn-failed` at exactly 900014ms (the 900s watchdog) while the other iterations completed in 335-382s. The watchdog killed what was likely a productive-but-slow iteration.
+  - **Details**: the default `claudePrintTimeoutMs` is 900_000 (15 min), set in `tick-loop.mjs:340`. But minsky-run.mjs (the cross-repo runner) doesn't use the tick-loop's spawn strategy — it has its own spawn path. Check which timeout the cross-repo runner uses and whether it's too aggressive for devin. Devin may legitimately take >15min on complex tasks. The existing P2 task `worker-watchdog-scale-by-pinned-model-latency` addresses this for the tick-loop but not for the cross-repo runner.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (spawn timeout configuration), `novel/tick-loop/bin/tick-loop.mjs` (reference — already has `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` env override)
+  - **Hypothesis**: raising the cross-repo runner's spawn timeout to 1800s (30min) eliminates watchdog-killed productive iterations while still catching truly stuck spawns.
+  - **Success**: 0 `spawn-failed` at exactly 900s over 10 consecutive iterations; productive iterations that take 10-20min complete normally.
+  - **Pivot**: if 30min is too long for stuck detection, implement a "progress watchdog" that checks whether the spawn has produced any stdout in the last 5min instead of a fixed wall-clock timeout.
+  - **Measurement**: `jq 'select(.verdict=="spawn-failed") | .notes' .minsky/experiment-store/cross-repo/*.jsonl | grep -c '900'` → 0 (was: 1).
+  - **Anchor**: 2026-05-18 live daemon (900014ms spawn-failed). Existing P2 `worker-watchdog-scale-by-pinned-model-latency`.
 
 - [ ] `milestone-alignment-gate-enforcement` — build the alignment check + fill all gaps between MILESTONES.md and the 7 surfaces (README, quickstart, vision, user-stories, integration tests, logs/observability, METRICS.md) for M1
   - **ID**: milestone-alignment-gate-enforcement
@@ -687,6 +730,46 @@
 
 ## P1
 
+<!-- Observations filed 2026-05-18 from live daemon session (P1 findings). -->
+
+- [ ] `graphql-repo-slug-mismatch-non-fatal` — `GraphQL: Could not resolve to a Repository` errors appear for repos that exist (`fyodoriv/minsky`) because the gh token context doesn't match; cosmetic but noisy — 5 errors per walk
+  - **ID**: graphql-repo-slug-mismatch-non-fatal
+  - **Tags**: p1, milestone-m1, reliability, observability, gh-auth
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-18 live daemon: 5 GraphQL errors across walks for `fyodoriv/minsky` and `fyodoriv/mirror-setup` — both repos exist (verified via `gh api graphql` from interactive shell). The launchd process resolves a different gh credential than the interactive shell (same root cause as existing P1 `orchestrator-gh-graphql-401-token-source-divergence`).
+  - **Details**: the cross-repo runner calls `gh pr list` with GraphQL to check for duplicate PRs before spawning. When the launchd gh token doesn't have GraphQL access, this fails but is non-fatal (the runner continues). Fix: make the duplicate-PR check fall back to REST API when GraphQL fails, or suppress the error and proceed (the check is advisory, not blocking).
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (GraphQL call sites), paired tests
+  - **Hypothesis**: after fallback to REST, 0 GraphQL errors per walk while duplicate-PR detection still works.
+  - **Success**: 0 `GraphQL: Could not resolve` in daemon.log over 3 consecutive walks.
+  - **Pivot**: if REST fallback is complex, suppress the error to a debug-level log (not stdout) and skip duplicate-PR detection when GraphQL is unavailable.
+  - **Measurement**: `grep -c 'GraphQL.*Could not resolve' ~/.minsky/daemon.log` → 0 per walk (was: ~5).
+  - **Anchor**: 2026-05-18 live daemon log. Composes with existing P1 `orchestrator-gh-graphql-401-token-source-divergence`.
+
+- [ ] `daemon-log-lacks-iteration-detail` — daemon.log shows experiment-file writes but not the iteration verdict, duration, task picked, or agent used; diagnosing spawn-failed requires reading the jsonl experiment store separately
+  - **ID**: daemon-log-lacks-iteration-detail
+  - **Tags**: p1, milestone-m1, observability, logs, ux
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-18 live daemon: to determine that devin ran for 5.6min and produced a `validated` verdict, the operator had to `cat .minsky/experiment-store/cross-repo/*.jsonl` — the daemon.log only shows `✓ wrote experiment` and `✓ appended iteration record`, not the verdict or duration.
+  - **Details**: after each iteration, the daemon should log a one-line summary: `iteration #N: task=<id> agent=devin verdict=validated duration=335s pr=null`. This is the same data already in the jsonl — just surface it in the daemon.log for glanceability.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (add per-iteration summary log line)
+  - **Hypothesis**: after adding the summary line, `grep 'iteration #' ~/.minsky/daemon.log` shows every iteration with its verdict, duration, and agent in one place.
+  - **Success**: `tail -5 ~/.minsky/daemon.log` during a run shows the last iteration's verdict + duration without needing to read the experiment store.
+  - **Pivot**: if the log format is too noisy, make the summary a `--verbose` option.
+  - **Measurement**: `grep -c 'iteration #' ~/.minsky/daemon.log` matches the jsonl record count.
+  - **Anchor**: 2026-05-18 live daemon. Card & Mackinlay 1999 (glanceable — the operator should see iteration health without digging).
+
+- [ ] `observer-launchd-exits-on-nonzero` — the observer-watch.sh script exits immediately when any minsky command returns non-zero (stale PID, already running) despite removing `set -e`; the launchd agent dies after one failed restart attempt
+  - **ID**: observer-launchd-exits-on-nonzero
+  - **Tags**: p1, milestone-m1, observer, reliability, launchd
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-18 live session: observer launchd agent started, detected daemon down, tried to restart, `minsky --daemon` returned "daemon already running (PID XXXX)" (stale PID), and the observer exited despite the `set -uo pipefail` (no -e) fix. Root cause: launchd captures the exit code and `pipefail` causes the pipe chain to propagate non-zero from `minsky --daemon`.
+  - **Details**: the observer script needs to be fully defensive: every minsky command should be wrapped with `|| true` or explicit error handling. Additionally, the `KeepAlive` key in the launchd plist should be set to `true` so launchd restarts the observer if it exits unexpectedly.
+  - **Files**: `scripts/observer-watch.sh` (defensive error handling), `~/Library/LaunchAgents/com.minsky.observer.plist` (add KeepAlive)
+  - **Hypothesis**: after making the observer fully defensive, it survives all minsky command failures and runs for the full 4h watch period.
+  - **Success**: observer runs for ≥1h without exiting unexpectedly; `launchctl list | grep minsky.observer` shows the service active for the full period.
+  - **Pivot**: if bash is too fragile for the observer, rewrite it as a node.js script that inherits minsky's error-handling patterns.
+  - **Measurement**: `wc -l /tmp/minsky-observer.log` ≥ 60 lines (one per minute for 1h) after the fix.
+  - **Anchor**: 2026-05-18 live session. Armstrong 2007 (let-it-crash at the right boundary — the observer must NOT crash on expected non-zero exits from the system it watches).
 
 <!-- Moved from P0 2026-05-18: M2 tasks deprioritized until M1 ships (see MILESTONES.md). -->
 - [ ] `native-agent-teams-with-tiered-adapter` — minsky drives Claude Code's native "agent teams" (lead + independent teammates + shared task list + mailbox + hooks) as its multi-worker backend when available, behind a capability-tiered agent adapter that still supports non-native agents (Devin, etc.) via the existing process-fan-out — native always preferred
