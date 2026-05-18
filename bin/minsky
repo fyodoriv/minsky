@@ -172,6 +172,57 @@ case "${1:-}" in
       fi
       echo ""
 
+      # Human help needed
+      echo "  🆘 NEEDS HUMAN ACTION"
+      echo "  ────────────────────────────────────────────────────────"
+      _help_needed=0
+
+      # Check for scope-leak (most recent iteration)
+      _last_verdict=""
+      if [ -n "$host_dir" ] && [ -d "$host_dir/.minsky/experiment-store/cross-repo" ]; then
+        for f in "$host_dir"/.minsky/experiment-store/cross-repo/*.jsonl; do
+          [ -f "$f" ] || continue
+          v=$(tail -1 "$f" | grep -o '"verdict":"[^"]*"' | sed 's/"verdict":"//;s/"//')
+          [ "$v" = "scope-leak" ] && _last_verdict="scope-leak"
+        done
+      fi
+      if [ "$_last_verdict" = "scope-leak" ]; then
+        echo "  ⚠️  Last iteration scope-leaked. Commit your changes, then: minsky stop && minsky"
+        _help_needed=1
+      fi
+
+      # Check for repeated spawn-failed
+      if [ -f "$MINSKY_DAEMON_LOG" ]; then
+        _recent_fails=$(tail -20 "$MINSKY_DAEMON_LOG" | grep -c 'spawn-failed' 2>/dev/null || echo 0)
+        if [ "$_recent_fails" -ge 3 ]; then
+          echo "  ⚠️  3+ recent spawn failures. Check: devin --version / claude --version"
+          _help_needed=1
+        fi
+      fi
+
+      # Check for blocked tasks in TASKS.md
+      if [ -n "$host_dir" ] && [ -f "$host_dir/TASKS.md" ]; then
+        _blocked=$(grep -c '\*\*Blocked\*\*:' "$host_dir/TASKS.md" 2>/dev/null || echo 0)
+        if [ "$_blocked" -gt 0 ]; then
+          echo "  📋 $_blocked tasks marked as blocked — review TASKS.md"
+          _help_needed=1
+        fi
+      fi
+
+      # Check for stale daemon (no new log lines in 20+ min)
+      if [ -f "$MINSKY_DAEMON_LOG" ]; then
+        _log_age=$(( $(date +%s) - $(stat -f %m "$MINSKY_DAEMON_LOG" 2>/dev/null || stat -c %Y "$MINSKY_DAEMON_LOG" 2>/dev/null || echo 0) ))
+        if [ "$_log_age" -gt 1200 ]; then
+          echo "  ⚠️  Daemon log not updated in $((_log_age / 60))min — may be stuck"
+          _help_needed=1
+        fi
+      fi
+
+      if [ "$_help_needed" -eq 0 ]; then
+        echo "  ✅ No human action needed — minsky is running autonomously"
+      fi
+      echo ""
+
       # Log tail
       echo "  📝 LOG (last 5 lines)"
       echo "  ────────────────────────────────────────────────────────"
@@ -267,6 +318,53 @@ set -- "${MINSKY_ARGS[@]}"
 # Note: `nohup` binary achieves the same but CyberArk EPM blocks it
 # on some corporate Macs — this builtin approach is equivalent.
 trap '' HUP
+
+# ── 3b. Smart auto-attach ────────────────────────────────────
+# When invoked without subcommands and a daemon is already running,
+# attach to it with `watch` instead of failing or starting a duplicate.
+# This makes `minsky` in a folder always do the right thing:
+#   - daemon running for this host? → attach (watch)
+#   - no daemon? → start one in daemon mode + attach (watch)
+# Operator directive 2026-05-18: "run minsky in a folder → it just works"
+
+_daemon_running_for_host() {
+  # Returns 0 if a daemon is running and targeting a path that contains $1
+  [ -f "$MINSKY_DAEMON_PID" ] || return 1
+  local pid
+  pid=$(cat "$MINSKY_DAEMON_PID" 2>/dev/null) || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  # Check if the running daemon targets the requested host
+  ps -p "$pid" -o args= 2>/dev/null | grep -q "$1" 2>/dev/null
+}
+
+# If no subcommand and no --daemon flag, try smart auto-attach
+if [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop" ] && [ "${1:-}" != "logs" ] && [ "${1:-}" != "watch" ] && [ "${1:-}" != "doctor" ]; then
+  # Determine the target host from args or cwd
+  _target_host=""
+  for _a in "$@"; do
+    case "$_a" in
+      --host) _next_is_host=1 ;;
+      --host=*) _target_host="${_a#--host=}" ;;
+      *) [ "${_next_is_host:-}" = "1" ] && _target_host="$_a" && _next_is_host="" ;;
+    esac
+  done
+  [ -z "$_target_host" ] && _target_host="$(pwd)"
+
+  if _daemon_running_for_host "$_target_host"; then
+    _pid=$(cat "$MINSKY_DAEMON_PID")
+    echo "minsky: daemon already running (PID $_pid) for $(basename "$_target_host")"
+    echo "        attaching with watch... (Ctrl-C to detach, daemon keeps running)"
+    echo ""
+    sleep 1
+    exec "$0" watch "$_target_host"
+  fi
+
+  # No daemon running — start one and attach
+  echo "minsky: no daemon running for $(basename "$_target_host"). Starting..."
+  "$0" --daemon --host "$_target_host"
+  sleep 2
+  exec "$0" watch "$_target_host"
+fi
 
 # ── 4. Daemon mode (--daemon) ────────────────────────────────
 # `minsky --daemon [args...]` backgrounds the runner, logs to

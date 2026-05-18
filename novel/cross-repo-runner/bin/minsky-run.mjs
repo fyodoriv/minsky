@@ -83,8 +83,9 @@ function usage() {
       "  --no-seed-on-empty                Stop on empty-queue instead of seeding via CTO audit.",
       "",
       "Other flags:",
-      "  --max-iterations=N        Cap loop iterations. Default Infinity.",
-      "  --tick-interval-ms=M      Sleep between iterations. Default 300000 (5 min).",
+      "  --max-iterations=N             Cap total loop iterations across all hosts. Default Infinity.",
+      "  --max-iterations-per-host=N    Cap iterations per host per walk pass (walk mode only). Default 3.",
+      "  --tick-interval-ms=M           Sleep between iterations. Default 300000 (5 min).",
       "",
       "The host(s) must have been bootstrapped first via `minsky-bootstrap <host-dir>`.",
       "",
@@ -155,9 +156,20 @@ function applyTickIntervalMs(state, raw) {
   return true;
 }
 
+function applyMaxIterationsPerHost(state, raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    state.error = `--max-iterations-per-host must be a positive integer, got: ${raw}`;
+    return false;
+  }
+  state.maxIterationsPerHost = parsed;
+  return true;
+}
+
 const KEY_VALUE_FLAGS = {
   "--max-iterations=": applyMaxIterations,
   "--tick-interval-ms=": applyTickIntervalMs,
+  "--max-iterations-per-host=": applyMaxIterationsPerHost,
 };
 
 function tryKeyValueFlag(state, arg) {
@@ -213,6 +225,13 @@ function parseArgs(argv) {
     seedOnEmptyExplicit: false,
     maxIterations: Number.POSITIVE_INFINITY,
     tickIntervalMs: 300_000,
+    // Per-host iteration cap for multi-host walk mode. Default 3 — after
+    // a host has run N iterations, the walker advances regardless of
+    // whether that host's queue is empty. This is the *bounded drain*
+    // half of the `walker-drains-one-host-forever` fix (the other half
+    // is the validated-task rotation inside `runHostLoop`). Single-host
+    // (--host) mode ignores this flag — `--max-iterations` caps it instead.
+    maxIterationsPerHost: 3,
     positional: [],
     error: null,
   };
@@ -275,6 +294,7 @@ function buildWalkDispatch(state, resolvedHostsDir) {
     ...defaults,
     maxIterations: state.maxIterations,
     tickIntervalMs: state.tickIntervalMs,
+    maxIterationsPerHost: state.maxIterationsPerHost,
   };
 }
 
@@ -726,7 +746,7 @@ async function runLoopAsResult(parsed, controller) {
 
   let lastTasksMd = "";
   const result = await runHostLoop({
-    pickTask: () => {
+    pickTask: (pickOpts) => {
       lastTasksMd = loadHostTasks(hostRoot, config.tasks_md_path);
       // Self-healing: skip tasks that already have an open PR on the
       // canonical branch (<branch_prefix><task.id>). Without this, after
@@ -737,9 +757,17 @@ async function runLoopAsResult(parsed, controller) {
       // until manual TASKS.md cleanup in PR #297. Source: plugin task
       // `minsky-claim-by-open-pr`.
       const openPrBranches = listOpenPrBranches(config.host_repo);
+      // Thread the loop's validated-task set into pickHostTask so a
+      // worker that validates but does NOT open a PR (devin pre-fix,
+      // a brief that doesn't instruct `gh pr create`, or a CI failure
+      // that prevented the PR step) does not get the same task picked
+      // again on the next iteration. `walker-drains-one-host-forever`
+      // fix (b) — the in-loop counterpart to the per-host iteration
+      // cap in `runWalk`.
       const task = pickHostTask(lastTasksMd, {
         openPrBranches,
         branchPrefix: config.branch_prefix,
+        skipTaskIds: pickOpts?.skipTaskIds,
       });
       if (task === null) return null;
       const synth = synthesiseExperimentYaml(task);
@@ -1086,7 +1114,16 @@ async function maybePrintCountdownBanner(live, target) {
  * `walkHostsDir` (pure orchestrator) decides advance vs halt.
  */
 async function runWalk(parsed) {
-  const { hostsDir, live, ctoAudit, seedOnEmpty, loop, maxIterations, tickIntervalMs } = parsed;
+  const {
+    hostsDir,
+    live,
+    ctoAudit,
+    seedOnEmpty,
+    loop,
+    maxIterations,
+    tickIntervalMs,
+    maxIterationsPerHost,
+  } = parsed;
   const hosts = findBootstrappedSubdirs({
     cwd: hostsDir,
     fs: {
@@ -1125,11 +1162,13 @@ async function runWalk(parsed) {
     signal: controller.signal,
     runOneHost: async (hostRoot) => {
       // Per-host iteration cap: in multi-host walk mode, each host gets
-      // at most 3 iterations per walk pass to ensure fair scheduling
-      // across all hosts. Without this, a host with a non-completing task
-      // starves all other hosts indefinitely (walker-drains-one-host-forever
-      // bug, 2026-05-18). The total walker cap is still maxTotalIterations.
-      const perHostCap = Math.min(3, maxIterations);
+      // at most `maxIterationsPerHost` iterations per walk pass to ensure
+      // fair scheduling across all hosts. Without this, a host with a
+      // non-completing task starves all other hosts indefinitely
+      // (walker-drains-one-host-forever bug, 2026-05-18). The total
+      // walker cap is still `maxTotalIterations`. Operator-tunable via
+      // `--max-iterations-per-host=N` (default 3).
+      const perHostCap = Math.min(maxIterationsPerHost, maxIterations);
       // Construct a fresh per-host parsed shape and reuse runLoop's
       // construction logic via a thin closure. We need runLoop to RETURN
       // the LoopResult instead of an exit code — refactor below to expose

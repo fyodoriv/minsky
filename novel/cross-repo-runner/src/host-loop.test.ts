@@ -256,6 +256,132 @@ describe("runHostLoop — happy path", () => {
   });
 });
 
+describe("runHostLoop — validated-task rotation (walker-drains-one-host-forever fix b)", () => {
+  test("threads validated task IDs into the next pickTask call as skipTaskIds", async () => {
+    // Reproduces the walker-drains-one-host-forever bug shape: a single
+    // task always returned from pickTask, with the worker validating
+    // (no PR opened). Without skipTaskIds, the loop would re-pick the
+    // same task on every iteration. With it, the loop sees an empty
+    // queue on iteration 1 and exits cleanly — the operator can then
+    // advance to other hosts.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const skipsObserved: ReadonlySet<string>[] = [];
+    const result = await runHostLoop({
+      pickTask: (pickOpts) => {
+        // Record what the loop passed to us so we can assert it.
+        skipsObserved.push(pickOpts?.skipTaskIds ?? new Set());
+        // Simulate "task block never gets removed": always return the
+        // same task. The loop's rotation logic should mark it as
+        // already-validated after iteration 0 and rotate past it.
+        if (pickOpts?.skipTaskIds?.has(baseTask.id) === true) return null;
+        return baseTask;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome({ verdict: "validated", prUrl: null })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+    });
+    expect(result.stopReason).toBe("empty-queue");
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]?.taskId).toBe(baseTask.id);
+    // First pick: empty skip set. Second pick (after validated iter 0):
+    // skip set contains the validated task ID.
+    expect(skipsObserved).toHaveLength(2);
+    expect(Array.from(skipsObserved[0] ?? [])).toEqual([]);
+    expect(skipsObserved[1]?.has(baseTask.id)).toBe(true);
+  });
+
+  test("rotates through multiple validated tasks before exiting empty-queue", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const queue: ReadonlyArray<ParsedTask> = [
+      { ...baseTask, id: "task-a" },
+      { ...baseTask, id: "task-b" },
+      { ...baseTask, id: "task-c" },
+    ];
+    const result = await runHostLoop({
+      pickTask: (pickOpts) => {
+        const skip = pickOpts?.skipTaskIds ?? new Set<string>();
+        return queue.find((t) => !skip.has(t.id)) ?? null;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome({ verdict: "validated", prUrl: null })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 10,
+      tickIntervalMs: 0,
+    });
+    // Without rotation: 10 iterations on task-a (capped by maxIterations).
+    // With rotation: 3 iterations on a, b, c, then empty-queue.
+    expect(result.stopReason).toBe("empty-queue");
+    expect(result.iterations.map((i) => i.taskId)).toEqual(["task-a", "task-b", "task-c"]);
+  });
+
+  test("does NOT add scope-leak verdicts to the skip set (loop halts anyway)", async () => {
+    // Defensive: scope-leak halts the loop, so we never call pickTask
+    // again. But assert the invariant explicitly — only `validated`
+    // verdicts get rotated past.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const skipsObserved: ReadonlySet<string>[] = [];
+    const result = await runHostLoop({
+      pickTask: (pickOpts) => {
+        skipsObserved.push(pickOpts?.skipTaskIds ?? new Set());
+        return baseTask;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => ["src/**"],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "scope-leak", scopeLeakPaths: ["x.ts"] })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+    });
+    expect(result.stopReason).toBe("scope-leak");
+    // Only one pick happened (the loop halted on scope-leak), and the
+    // skip set was empty going in.
+    expect(skipsObserved).toHaveLength(1);
+    expect(Array.from(skipsObserved[0] ?? [])).toEqual([]);
+  });
+
+  test("a fresh runHostLoop invocation starts with an empty skip set", async () => {
+    // Multi-host walker semantics: each walk pass calls runHostLoop
+    // fresh, so a task that was validated-but-skipped on pass 1 gets
+    // a fresh attempt on pass 2 (so a transient validate-without-PR
+    // doesn't permanently block the task across walks).
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let firstPickInRun: ReadonlySet<string> | undefined;
+    const runOnce = () =>
+      runHostLoop({
+        pickTask: (pickOpts) => {
+          if (firstPickInRun === undefined) firstPickInRun = pickOpts?.skipTaskIds ?? new Set();
+          return null;
+        },
+        buildPlan: (t) => makePlan(t.id),
+        resolveAllowedPaths: () => [],
+        runLive: () => Promise.resolve(makeOutcome()),
+        spawn,
+        git,
+        globMatchesPath,
+        maxIterations: 1,
+        tickIntervalMs: 0,
+      });
+
+    await runOnce();
+    expect(Array.from(firstPickInRun ?? [])).toEqual([]);
+
+    firstPickInRun = undefined;
+    await runOnce();
+    expect(Array.from(firstPickInRun ?? [])).toEqual([]);
+  });
+});
+
 describe("runHostLoop — let-it-crash propagation", () => {
   test("rethrows pickTask errors per rule #6 (no catch)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
