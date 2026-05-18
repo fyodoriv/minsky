@@ -12,14 +12,29 @@ the operator's eyes while minsky runs autonomously.
 
 ## 0. Pre-flight (before starting)
 
+Minsky runs on **any machine** with Node ≥20. It adapts to different
+folder layouts, agents (Claude/Devin/aider), models, and OS (macOS/Linux)
+via two config sources:
+
+| Config | Location | What it controls |
+|---|---|---|
+| **Per-machine** | `~/.minsky/config.json` | `cloud_agent`, `cloud_agent_model`, `local_agent`, `local_agent_model`, `ollama_base_url` |
+| **Per-repo** | `<repo>/.minsky/repo.yaml` | `host_repo` slug, `branch_prefix`, `tasks_md_path`, `pre_commit_command` |
+
+**Pre-flight checks** — run these before starting on ANY machine:
+
 ```bash
-# 1. Check config — which agent/model will minsky use?
-cat ~/.minsky/config.json
-# 2. Kill anything stale
+# 1. Where is minsky? (auto-resolved, but verify)
+which minsky || echo "minsky not on PATH — add bin/minsky to PATH or set MINSKY_REPO"
+# 2. What config does THIS machine have?
+cat ~/.minsky/config.json 2>/dev/null || echo "no config — minsky will prompt or use defaults (claude)"
+# 3. Kill anything stale
 minsky stop 2>/dev/null; rm -f ~/.minsky/daemon.pid
-# 3. Verify agents are available
-claude --version 2>&1 | head -1   # or devin --version
-# 4. Check disk space and machine load
+# 4. Which agents are available on this machine?
+claude --version 2>&1 | head -1 || echo "no claude"
+devin --version 2>&1 | head -1 || echo "no devin"
+which ollama >/dev/null && ollama list 2>/dev/null | head -3 || echo "no ollama"
+# 5. Check disk space and machine load
 df -h / | tail -1; uptime
 ```
 
@@ -27,6 +42,23 @@ df -h / | tail -1; uptime
 field determines which agent runs. NEVER override it with an env var
 unless the operator explicitly says to — the config file is the source
 of truth for this machine.
+
+**Different machines, different configs** — examples:
+
+```jsonc
+// Machine A: Devin + Opus (Windsurf machine)
+{ "cloud_agent": "devin", "cloud_agent_model": "claude-opus-4-7-max" }
+
+// Machine B: Claude Code + Sonnet (daily driver)
+{ "cloud_agent": "claude", "cloud_agent_model": "claude-sonnet-4-5" }
+
+// Machine C: local-only (GPU server, no cloud)
+{ "local_agent": "aider", "local_agent_model": "ollama_chat/qwen3-coder:30b" }
+```
+
+If `~/.minsky/config.json` doesn't exist, minsky defaults to `claude`
+for cloud and `aider` for local. The interactive model-cost picker
+(planned) will create this file on first run.
 
 ## 1. Start
 
@@ -38,18 +70,23 @@ a single repo. When in doubt, ask.
 
 | User intent | Command |
 |---|---|
-| "run minsky on minsky" / "minsky on itself" | `minsky --daemon --host ~/apps/tooling/minsky` |
+| "run minsky on minsky" / "minsky on itself" | `minsky --daemon --host $MINSKY_REPO` (or wherever minsky is cloned) |
 | "run minsky here" (from inside a repo) | `minsky --daemon --host $(pwd)` |
 | "run minsky on ~/apps/foo" | `minsky --daemon --host ~/apps/foo` |
-| "run minsky on ALL repos" (explicit) | `minsky --daemon --hosts-dir ~/apps/tooling` |
+| "run minsky on ALL repos" (explicit) | `minsky --daemon --hosts-dir <parent-dir>` |
 | "dry run" | `minsky --no-live --once` (blocking OK for dry-run) |
+
+**Path resolution**: `minsky` (the PATH shim) auto-discovers the minsky
+repo via `$MINSKY_REPO` env → `~/apps/tooling/minsky` → `~/apps/minsky`
+→ `~/code/minsky` → `~/src/minsky`. If your layout differs, set
+`export MINSKY_REPO=/your/path/to/minsky` in your shell profile.
 
 After starting, **immediately verify TWO things**:
 1. The daemon is running (`running (PID ...)`)
 2. It targets the **correct folder** (check the `--host` or `--hosts-dir` in the process args)
 
 ```bash
-minsky --daemon --host ~/apps/tooling/minsky 2>&1
+minsky --daemon --host <TARGET_REPO> 2>&1
 sleep 3
 # Verify: must show "running" AND the correct --host path
 minsky status 2>&1 | head -5
@@ -63,14 +100,14 @@ than the operator requested, STOP and restart with the correct `--host`:
 ```bash
 # WRONG: operator said "minsky on minsky" but daemon shows --hosts-dir
 minsky stop 2>&1 || true; rm -f ~/.minsky/daemon.pid
-minsky --daemon --host ~/apps/tooling/minsky 2>&1
+minsky --daemon --host <CORRECT_REPO> 2>&1
 ```
 
 If `minsky status` shows "stale PID file", clean up and retry:
 
 ```bash
 rm -f ~/.minsky/daemon.pid
-minsky --daemon --host ~/apps/tooling/minsky 2>&1
+minsky --daemon --host <TARGET_REPO> 2>&1
 ```
 
 ## 2. Monitor loop (the core of this skill)
@@ -96,9 +133,11 @@ running on the **wrong target** — stop and restart immediately.
 ### Read iteration results (the real signal)
 
 ```bash
-# Find all experiment records and show the latest verdict + PR URL
-find ~/apps/tooling -path '*.minsky/experiment-store/cross-repo/*.jsonl' -exec tail -1 {} \; 2>/dev/null | while read line; do
-  echo "$line" | python3 -c "import sys,json;d=json.load(sys.stdin);print(f'{d[\"host_repo\"]:30} v={d[\"verdict\"]:12} pr={d.get(\"pr_url\") or \"null\":8} {d[\"notes\"][:40]}')" 2>/dev/null
+# Find all experiment records — use the host dir the daemon is targeting
+HOST_DIR="$(ps aux | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)"
+for f in "$HOST_DIR"/.minsky/experiment-store/cross-repo/*.jsonl; do
+  [ -f "$f" ] || continue
+  tail -1 "$f" | python3 -c "import sys,json;d=json.load(sys.stdin);print(f'{d[\"host_repo\"]:30} v={d[\"verdict\"]:12} pr={d.get(\"pr_url\") or \"null\":8} {d[\"notes\"][:40]}')" 2>/dev/null
 done
 ```
 
@@ -132,7 +171,7 @@ Every 2-3 iterations, give a **one-line** summary:
 minsky stop 2>&1 || true
 rm -f ~/.minsky/daemon.pid
 sleep 2
-minsky --daemon --hosts-dir ~/apps/tooling 2>&1
+minsky --daemon --host <TARGET_REPO> 2>&1
 sleep 3
 minsky status 2>&1 | head -3   # verify
 ```
@@ -181,7 +220,7 @@ hold:
 | `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
 | `stale PID file (PID XXXX not running)` | `rm -f ~/.minsky/daemon.pid` then retry. This is the #1 most common issue. |
 | `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, clean PID file; if alive, the daemon is fine. |
-| `unexpected argument` from devin | Minsky build is stale — `cd ~/apps/tooling/minsky && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
+| `unexpected argument` from devin | Minsky build is stale — `cd $MINSKY_REPO && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
 | `MODULE_NOT_FOUND` from biome/lefthook | Node version mismatch or missing platform deps. Run `pnpm install` in the minsky repo. |
 | `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
 
@@ -205,8 +244,8 @@ often concurrently editing TASKS.md, so a slow PR risks merge conflicts.
 
 | Failure source | Upstream |
 |---|---|
-| Runner bug (spawn logic, CTO audit, walker, shim) | `~/apps/tooling/minsky` |
-| `minsky-bootstrap` / sidecar bug | `~/apps/tooling/minsky` |
+| Runner bug (spawn logic, CTO audit, walker, shim) | the minsky repo (`$MINSKY_REPO`) |
+| `minsky-bootstrap` / sidecar bug | the minsky repo (`$MINSKY_REPO`) |
 | Host-specific (task missing rule-#9 fields, host config broken) | the host repo itself |
 | Claude API outage | neither — tell the operator + stop restarting |
 
@@ -268,7 +307,7 @@ MINSKY_NON_INTERACTIVE=1 minsky --max-iterations=1 --tick-interval-ms=0
 
 ```bash
 # Always draft — rule-9 requires the fix to be human-reviewed.
-cd ~/apps/tooling/minsky   # or the host repo
+cd $MINSKY_REPO   # or the host repo
 git switch -c observer-<short-id>-$(date +%Y-%m-%d)
 # Optional: append the P0 task block to TASKS.md (only for the
 # minsky repo itself — don't modify host TASKS.md from outside)
@@ -382,7 +421,8 @@ Every command should complete in <30s or be run non-blocking:
 
 ```bash
 # Quick session summary
-for f in ~/apps/tooling/*/.minsky/experiment-store/cross-repo/*.jsonl; do
+# Adjust the path to match your hosts-dir or single --host target
+for f in <HOSTS_DIR>/*/.minsky/experiment-store/cross-repo/*.jsonl; do
   [ -f "$f" ] || continue
   total=$(wc -l < "$f")
   validated=$(grep -c '"validated"' "$f")
@@ -408,5 +448,5 @@ If you're ending your agent session but minsky should keep running:
 2. The daemon is SIGHUP-immune — it survives terminal close.
 3. Log the current state: `minsky status 2>&1 > /tmp/minsky-handoff.txt`
 4. Tell the next session: "minsky daemon PID XXXX is running on
-   ~/apps/tooling. Config: devin + opus. Check `minsky status` and
+   <hosts-dir>. Config: <agent> + <model>. Check `minsky status` and
    `tail ~/.minsky/daemon.log`."
