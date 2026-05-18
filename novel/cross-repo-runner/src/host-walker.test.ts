@@ -85,12 +85,22 @@ describe("walkHostsDir — halt-on-failure semantics", () => {
     expect(result.visits[1]?.hostRoot).toBe("/tmp/b");
   });
 
-  test("spawn-failed in any host halts the walker", async () => {
+  test("spawn-failed in one host skips to next host (does not halt walker)", async () => {
+    let callCount = 0;
     const result = await walkHostsDir({
-      hosts: ["/tmp/a"],
-      runOneHost: () => Promise.resolve(loopResult("spawn-failed", 0)),
+      hosts: ["/tmp/a", "/tmp/b"],
+      runOneHost: (host) => {
+        callCount++;
+        if (host === "/tmp/a") return Promise.resolve(loopResult("spawn-failed", 0));
+        return Promise.resolve(loopResult("empty-queue", 2));
+      },
     });
-    expect(result.stopReason).toBe("spawn-failed");
+    expect(callCount).toBe(2);
+    expect(result.stopReason).toBe("all-hosts-drained");
+    expect(result.visits).toHaveLength(2);
+    expect(result.visits[0]?.loopResult.stopReason).toBe("spawn-failed");
+    expect(result.visits[1]?.loopResult.stopReason).toBe("empty-queue");
+    expect(result.totalIterations).toBe(2);
   });
 
   test("inner-aborted halts the walker (signal already fired)", async () => {
