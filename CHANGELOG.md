@@ -12,6 +12,32 @@ The discipline:
 
 ---
 
+## 2026-05-18
+
+### What shipped
+
+- **MILESTONES.md** — product roadmap with 5 milestones (M1–M5), 13 M1 exit criteria, per-milestone capability tables ("what you can trust minsky to do"), permanent design boundaries ("what minsky will never do"), competitive landscape with 6 real autonomous-coding competitors, and a milestone dependency graph.
+- **Rule #15 (AGENTS.md § 15)** — Milestone Alignment Gate. Before picking ANY implementation task, agents must verify 7 surfaces are aligned with the current milestone: README, quickstart, vision, user-stories, integration tests, logs/observability, METRICS.md. This is now the #1 priority in all minsky work (operator directive 2026-05-18).
+- **8 new P0 tasks** in TASKS.md — `milestone-alignment-gate-enforcement` (absolute first priority), `minsky-init-one-command-bootstrap`, `minsky-uninstall-clean-removal`, `minsky-default-8h-repo-transformation`, `readme-rewrite-5-min-install-guide`, `minsky-remote-task-submission`, `fleet-stability-centralized-reporting`, `competitive-landscape-real-competitors`.
+- **README.md** — added honest "What minsky can and cannot do today" capability table, updated Status section to reflect reality (broken items listed), added MILESTONES.md to Read-first table.
+- **METRICS.md** — added honest status banner acknowledging all 10 metrics are stubs.
+- **ARCHITECTURE.md** — added milestone context, updated reading-next section.
+- **AGENTS.md** — added MILESTONES.md to reading order, updated reading-next section.
+- **CHANGELOG.md** — this entry.
+- **TASKS.md policy** — added milestone alignment gate policy (supersedes all other policies) and milestone field policy.
+
+### Metrics
+
+- **open tasks**: 129 → 137 _(Δ +8 — all new M1-aligned P0 tasks; 0 tasks closed today — this was a planning day)_
+- **METRICS.md stubs**: 10/10 _(unchanged — wiring real observations is the `fleet-stability-centralized-reporting` task)_
+- **test count**: 3,135 passing / 180 files _(unchanged — no code shipped today)_
+
+### Day's narrative
+
+**The day minsky got a roadmap.** Until today, minsky had 129 tasks with no milestone alignment — work was vibes-driven. The operator directed a full strategic planning session: define 5 milestones with concrete exit criteria, add honest capability tables per milestone, analyze the real competitive landscape (Devin, OpenHands, SWE-agent, Aider, Cursor Agent, Codex CLI — not just the multi-agent frameworks), establish the 7-surface alignment gate as the #1 priority, and update every doc to reflect reality. The key insight: minsky's README made claims that weren't verified, METRICS.md was all stubs, and there was no way to measure whether minsky was getting better or worse. M1 fixes all of that. No code shipped today, but the organizational substrate for all future code is now in place.
+
+---
+
 ## 2026-05-05
 
 ### What shipped

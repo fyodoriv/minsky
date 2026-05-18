@@ -2,6 +2,8 @@
 
 This document describes how Minsky's pieces fit together. Every choice here is downstream of `vision.md`; if you find a conflict between this file and the constitution, the constitution wins and this file is wrong.
 
+**Current milestone**: M1 (Stable, Measurable, One-Command) — see [`MILESTONES.md`](./MILESTONES.md) for the roadmap and per-milestone capability tables. Architecture decisions in this document serve M1 first; M2+ features are noted as future.
+
 ## Layered model
 
 > **Pattern:** Viable System Model (Beer, *Brain of the Firm*, 1972). Conformance: full. See `vision.md` § "Pattern conformance index" row 2.
@@ -338,9 +340,11 @@ These don't block writing `vision.md` and `ARCHITECTURE.md`, but they do block w
 
 ## Reading next
 
+- `MILESTONES.md` — product roadmap, per-milestone capability tables, what minsky will never do
 - `vision.md` — the constitution this document serves
-- `AGENTS.md` (forthcoming) — how any agent should behave when working in this repo
-- `TASKS.md` (forthcoming) — current work queue
-- `research.md` (forthcoming) — living dependency scan
-- `competitors/` (forthcoming) — gap analysis vs OMC, MetaGPT, AO, Intent, etc.
-- `user-stories/` (forthcoming) — one file per story with metric, integration test, proof
+- `AGENTS.md` — how any agent should behave when working in this repo (includes rule #15: milestone alignment gate)
+- `TASKS.md` — current work queue (137 open tasks; milestone-alignment-gate task is always first)
+- `METRICS.md` — 10 canonical metrics (currently stubs — M1 wires real observations)
+- `research.md` — living dependency scan
+- `competitors/` — gap analysis vs autonomous coding competitors
+- `user-stories/` — one file per story with metric, integration test, proof

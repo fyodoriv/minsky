@@ -31,6 +31,28 @@ Everything is MIT, every dependency lives behind an interface (`novel/adapters/`
 - **Not for one-off quick fixes.** Every change in this repo carries the iron-rule overhead (hypothesis + measurement + pivot). If your fix can't justify that, it belongs in another repo.
 - **Not an IDE plugin** · **not a productivity tool** · **not a chatbot.** Minsky targets the supervisor layer, not the editor.
 
+## What minsky can and cannot do today (honest)
+
+Minsky is **pre-alpha** (`v0.0.0`). This table reflects what actually works right now, not aspirations. See [`MILESTONES.md`](./MILESTONES.md) for the full per-milestone capability breakdown.
+
+| Task type | Today | Target milestone |
+|---|---|---|
+| 🟢 **Run a daemon that picks tasks from TASKS.md and opens PRs** | Works. ~60-90% iteration success rate on a single repo. | M1 targets 90% |
+| 🟢 **File tasks from a repo audit** (missing tests, stale docs, lint issues) | Works via the 8h default session. Core workflow. | M1 |
+| 🟢 **Fix lint / type errors** | Works. Deterministic success criteria. | M1 |
+| 🟢 **Add missing tests** for existing code | Works. Test-first is constitutional. | M1 |
+| 🟡 **Run overnight unattended** | Works but fragile. Commit hooks, token limits, and GH auth can crash the daemon. | M1 targets 90% stability |
+| 🟡 **Single-file bug fixes** | Works when localized. Struggles with multi-file root causes. | M2 improves this |
+| 🟡 **Switch between Claude, Devin, and local models** | Partially working. Claude is primary, Devin experimental, local bootstraps but quality varies. | M1 |
+| 🔴 **Multi-file refactors** | Likely to produce partial changes that break the build. | M2 |
+| 🔴 **UI/frontend changes** | No screenshot capture or visual verification yet. | M2 |
+| 🔴 **Run on GitHub Actions** | Not yet. | M3 |
+| ⛔ **Security-sensitive changes** | Won't do. Marked human-blocked. | Never autonomous |
+| ⛔ **Destructive operations** (force push, delete, deploy) | Won't do. Hard-blocked. | Never autonomous |
+| ⛔ **Architecture decisions** | Won't do. Files research tasks for humans. | Never autonomous |
+
+**Bottom line**: today minsky is useful for **repo maintenance** (filing tasks, fixing lint, adding tests, updating docs) running overnight on your machine. It is NOT yet reliable enough for production single-task delivery, not available as a GitHub Action, and not a replacement for a developer on non-trivial work.
+
 ## The `minsky` CLI (operator UX)
 
 Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/bin/minsky.mjs`). Sane defaults + auto-bootstrap:
@@ -141,28 +163,27 @@ Most agent stacks ([OMC](https://github.com/Yeachan-Heo/oh-my-claudecode), [Crew
 
 The named patterns aren't decoration — they're the debuggability promise. When something breaks at 3am, *"this is supervision-tree pattern, restart strategy is one-for-one"* is a debuggable answer; *"this is how I happened to wire it"* is not.
 
-## Status
+## Status — Pre-alpha (`v0.0.0`, working toward [M1](./MILESTONES.md))
 
-**Pre-alpha. Active development.** What works today:
+**What works today** (3,135 tests passing):
 
-- ✅ Core decision logic + watchdog loop in `@minsky/budget-guard`
-- ✅ Flag-file envelope (`${MINSKY_HOME}/.minsky/budget.flag`) and HTTP envelope (`localhost:9876/budget`)
-- ✅ OpenTelemetry adapter with `selfTest()` (`@minsky/observability`); OpenObserve install + dashboard `OpenObserveStrategy` (live PromQL read path)
-- ✅ Handoff record format + parser + validator (`@minsky/handoff-spec`)
-- ✅ Supervisor unit-file templates for systemd + launchd (`distribution/`)
-- ✅ Maciek `TokenMonitor` Strategy (`@minsky/token-monitor` — reads `~/.claude/projects/<cwd>/<session>.jsonl` directly)
-- ✅ MAPE-K autonomic loop v0 (`@minsky/mape-k-loop` — pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` + assembled `tick`; sustained-gain + oscillation guards) + `mape-k-orchestrator` (rule-#9 self-improvement loop wiring; experiment-tracker → orchestrator ingestion closes the quarterly-close path)
-- ✅ Tick-loop daemon v0 (`@minsky/tick-loop` — production default = `ProcessSpawnStrategy`; real `BudgetGuard` via facade; `MINSKY_TICK_DRY_RUN=1` opt-in dry-run for the rollout window)
-- ✅ Persona spawner v0 (`@minsky/persona-spawner` — Adapter over `omc /team <persona>`; dispatch table maps task tags to OMC personas)
-- ✅ Notifier v0 (`@minsky/notifier` — Adapter over push channels; `NtfyNotifier` Strategy + `StubNotifier` test fake)
-- ✅ Spec monitor — deterministic CI lints (load-bearing per rule #10, see `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` + `scripts/check-anchor-primary-source.mjs` + `scripts/check-pivot-success-margin.mjs` + `scripts/check-measurement-inspects-output.mjs` + `scripts/check-skill-rule-cap.mjs`) plus the residual-judgement advisory Claude Skill at `novel/spec-monitor/SKILL.md`
-- ✅ Web dashboard with Lighthouse Mobile ≥0.85 CI gate (`@minsky/dashboard-web`, `.github/workflows/lighthouse.yml`); `GET /watch.json` data surface + `POST /control` pause/resume control endpoint
-- ✅ Apple Shortcuts watch surface (`distribution/shortcuts/` — JSON manifests + on-device build runbook; pause/resume pair; host parameterized via Ask-Each-Time + Variable)
-- ✅ Rule #9 automation layer — per-PR experiment runner (`scripts/run-experiment.mjs` + `.github/workflows/experiment.yml`), weekly–monthly tracker (`@minsky/experiment-record` + `.github/workflows/experiment-tracker.yml`), and the experiment-record format
-- ✅ Read-only OMC → tasks.md bridge (`@minsky/omc-tasksmd-bridge` v0)
-- ✅ Iron rule #9 (pre-registered hypothesis-driven development) + rule #10 (deterministic CI enforcement) wired across `vision.md` / `AGENTS.md` / `TASKS.md` policy
+- ✅ Tick-loop daemon picks tasks from TASKS.md, spawns Claude Code / Devin / aider, opens PRs
+- ✅ Budget guard monitors token usage (5h window + weekly), auto-pauses before limits
+- ✅ Local-model fallback (aider + ollama) when cloud tokens exhausted
+- ✅ Local merge gate (replaces GitHub Actions — deterministic, no CI cost)
+- ✅ Orchestrator conducts parallel workers (Opus director + Sonnet workers)
+- ✅ Observer plugin lets any agent session watch and heal the loop
+- ✅ 180 test files, 12+ deterministic CI lints, Vitest coverage gate
 
-The 24/7-autonomy P0 path is end-to-end shippable: real-spawn daemon + real budget-guard gating + persona spawner + observability backend + Watch data surface + Watch control surface + push notifier + first user-story integration test driving the real daemon. What's still in flight — see [`TASKS.md`](./TASKS.md): the bidirectional OMC ↔ tasks.md watcher (`omc-tasksmd-bridge-v1-watcher`) and the next quarterly MAPE-K calibration cycle (`review-q3-2026`).
+**What's broken / in progress** (see [MILESTONES.md § M1](./MILESTONES.md)):
+
+- 🔴 Stability is ~60-90% — commit hooks, token crashes, and GH auth divergence can break the daemon
+- 🔴 All 10 METRICS.md entries are stubs — nothing is actually measured yet
+- 🔴 Install requires 5+ manual steps — no one-command bootstrap
+- 🔴 No competitive benchmarks — we don't know how minsky compares to Devin, OpenHands, or Aider
+- 🔴 README (this file) is too long and makes claims that aren't verified
+
+See [`MILESTONES.md`](./MILESTONES.md) for the full roadmap, per-milestone capability tables, and what minsky will never do.
 
 ## Quickstart
 
@@ -235,12 +256,14 @@ Stafford Beer's [Viable System Model](https://en.wikipedia.org/wiki/Viable_syste
 
 | File | Purpose |
 | --- | --- |
-| [`vision.md`](./vision.md) | Constitution: ten non-negotiable rules, glossary, pattern-conformance index, success criteria |
+| [`MILESTONES.md`](./MILESTONES.md) | Product roadmap: 5 milestones (M1–M5), exit criteria, per-milestone capability tables, what minsky will never do |
+| [`vision.md`](./vision.md) | Constitution: non-negotiable rules, glossary, pattern-conformance index, success criteria |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | All dependencies wired through interfaces; data flow; supervision tree |
 | [`AGENTS.md`](./AGENTS.md) | How any agent (Claude Code, OMC, future tools) should behave when working in this repo |
-| [`TASKS.md`](./TASKS.md) | Current work queue ([tasks.md](https://github.com/tasksmd/tasks.md) spec); every task carries Hypothesis / Success / Pivot / Measurement / Anchor per rule #9 |
+| [`TASKS.md`](./TASKS.md) | Current work queue ([tasks.md](https://github.com/tasksmd/tasks.md) spec); 137 open tasks across P0–P3 |
+| [`METRICS.md`](./METRICS.md) | Canonical observability surface — 10 metrics (currently stubs; M1 wires real observations) |
 | [`research.md`](./research.md) | Living dependency scan; replacement candidates |
-| [`competitors/`](./competitors/) | Gap analysis vs OMC, CrewAI, MetaGPT, Microsoft Agent Framework, Composio AO |
+| [`competitors/`](./competitors/) | Gap analysis vs OMC, CrewAI, MetaGPT, MS Agent Framework, Composio AO — *plus Devin, OpenHands, SWE-agent, Aider, Cursor Agent, Codex CLI (M1 additions)* |
 | [`user-stories/`](./user-stories/) | One file per story; metric, integration test, proof, failure modes |
 
 Two governance disciplines are load-bearing: every Minsky-coined term resolves to a published source via the [Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) (rule #5), and every artifact maps to a published pattern via the [Pattern conformance index](./vision.md#pattern-conformance-index) (rule #8). Both are enforced by deterministic CI lints per [rule #10](./vision.md#10-deterministic-enforcement--every-rule-is-a-ci-lint-not-a-hope) (in flight).

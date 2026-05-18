@@ -2,7 +2,7 @@
 
 This file tells any AI agent (Claude Code, OMC personas, future tools) how this repository expects to be worked on. It complements `vision.md` (the constitution) and `ARCHITECTURE.md` (the wiring).
 
-If you're an agent reading this for the first time: read `vision.md` next, then `TASKS.md`, then come back here.
+If you're an agent reading this for the first time: read `MILESTONES.md` first (the roadmap + capability tables), then `vision.md` (the constitution), then `TASKS.md` (the work queue), then come back here.
 
 ## Repository setup
 
@@ -141,6 +141,24 @@ Every constitutional rule must be enforced by a deterministic CI check — not a
 
 **Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
 
+### 15. Milestone alignment gate (supersedes task picking)
+
+Before picking ANY implementation task, verify that **seven surfaces** are up-to-date and aligned with the current milestone in `MILESTONES.md`. If any surface is stale or misaligned, updating it IS your first task — not picking an implementation task. This is iron: no exemption.
+
+The seven surfaces:
+
+1. **`README.md`** — reflects the current milestone's install, run, benefits, and competitive positioning. The quickstart section must match the actual one-command flow that works today, not a future aspiration.
+2. **Quickstart** — whatever `README.md` says you can do, you can actually do it right now. If the quickstart says `npx minsky init`, that command must work.
+3. **`vision.md`** — milestone goals are reflected in the success criteria section. Milestones and vision must not contradict.
+4. **`user-stories/`** — each exit criterion in the current milestone's table in `MILESTONES.md` has a corresponding user story file with a metric, integration test reference, proof, and failure modes. Missing user stories for shipped milestone criteria are a gap.
+5. **Integration tests** — user-story tests in `user-stories/*.test.ts` exist and pass for every exit criterion the current milestone claims as shipped. A milestone criterion without a passing integration test is not shipped.
+6. **Logs + observability** — OTEL spans, daemon logs (`orchestrate.jsonl`), and any other observability surfaces capture the data needed to verify the current milestone's exit criteria. If a milestone criterion requires measuring X, the system must actually emit X.
+7. **`METRICS.md`** — every metric the current milestone depends on has a **real observation** (not a `(stub)`). Stub metrics mean the milestone cannot be verified and therefore cannot be considered progressing.
+
+**Enforcement**: when `scripts/check-milestone-alignment.mjs` exists, run it. Until then, manually audit the 7 surfaces. The audit output goes into the PR body as a `Milestone alignment check` section.
+
+**Operator directive 2026-05-18**: this gate is the #1 priority in all minsky work. Implementation tasks that skip it are constitutional violations.
+
 ## Orchestrator discipline (sub-agent launches)
 
 When the harness launches sub-agents in parallel (worktree-isolated PRs), two rules are non-negotiable. Both came from the post-batch audit of the #22-#26 cycle and are now mechanically enforced.
@@ -275,6 +293,8 @@ If a task description is wrong, or a constitutional rule is being misapplied, pu
 
 ## Reading next
 
-- `TASKS.md` — what to do
+- `MILESTONES.md` — the roadmap, per-milestone capability tables, what minsky will never do
+- `TASKS.md` — what to do (137 open tasks; the milestone-alignment-gate task is always first)
+- `METRICS.md` — the 10 canonical metrics (currently stubs — M1 wires real observations)
 - `research.md` — what's in the stack and why
 - `user-stories/` — what success looks like, with metrics

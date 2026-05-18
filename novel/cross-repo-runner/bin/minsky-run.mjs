@@ -1099,7 +1099,8 @@ async function runWalk(parsed) {
 
   emitWalkerSummary(walker);
   if (walker.stopReason === "scope-leak") return 2;
-  if (walker.stopReason === "spawn-failed") return 1;
+  // spawn-failed on individual hosts no longer halts the walker (2026-05-18);
+  // failures are recorded per-visit and surfaced in the summary.
   return 0;
 }
 
