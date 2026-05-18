@@ -88,8 +88,11 @@ import {
   createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
+  createFileBackedGetTasksMd,
   createFileBackedLastRenderedDate,
   createFileBackedSnapshotExists,
+  createGhMergedPrList,
+  createGitBackedApplyRemoval,
   createGitGhSignalsBuilder,
   createOpenPrFetcher,
   createPnpmMetricsRender,
@@ -944,6 +947,31 @@ const metricsRenderSeam = (() => {
   };
 })();
 
+// `daemon-task-rotation-on-completion` (P0) — CLI-side construction of the
+// `TaskRotationSeam` (the substrate shipped dead in slices a/b/c; this is
+// the production binding that makes the watchdog actually fire). Unlike
+// the CTO-audit / changelog seams it is NOT env-gated: the bug it fixes
+// (daemons re-picking shipped tasks — 9h dogfood window 2026-05-07,
+// worker-1 re-created #309 as #343) only stops happening if the watchdog
+// runs by default. The conservative decision (`decideTaskCompletion`
+// needs a real merged PR naming the task + all `**Acceptance**` ✅) plus
+// the wrapper's built-in `MINSKY_TASK_ROTATION=off` operator veto are the
+// safety floor; no extra opt-in is warranted.
+//
+// Optimization (skip-earlier gate): construction is gated on `!dryRun`.
+// A dry-run iteration must never mutate TASKS.md / land a `git commit`,
+// and gating here eliminates the `gh pr list` subprocess + git round-trip
+// `maybeRunTaskRotation` would otherwise spend on every dry-run tick
+// (the wrapper's `block-absent` ladder can't short-circuit that until
+// AFTER the TASKS.md read — gating at construction skips it entirely).
+const taskRotationSeam = dryRun
+  ? undefined
+  : {
+      getTasksMd: createFileBackedGetTasksMd(args.tasksMdPath),
+      listMergedPrs: createGhMergedPrList(),
+      applyRemoval: createGitBackedApplyRemoval(args.tasksMdPath, { cwd: minskyHome }),
+    };
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -1016,6 +1044,15 @@ if (metricsRenderSeam !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no daily metrics render wired (set MINSKY_CHANGELOG_ENABLE=1 to refresh METRICS.md daily)\n",
+  );
+}
+if (taskRotationSeam !== undefined) {
+  process.stdout.write(
+    "[tick-loop] task-rotation watchdog wired (file-backed TASKS.md reader + gh pr list --state merged + git commit --only TASKS.md; operator veto: MINSKY_TASK_ROTATION=off)\n",
+  );
+} else {
+  process.stdout.write(
+    "[tick-loop] no task-rotation watchdog wired (dry-run — TASKS.md is never auto-mutated under MINSKY_TICK_DRY_RUN)\n",
   );
 }
 
@@ -1289,6 +1326,9 @@ const result = await runDaemon({
   // Optional daily-metrics-render seam; same umbrella as the snapshot seam
   // (it consumes the snapshot file and writes METRICS.md).
   ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
+  // Optional task-rotation watchdog seam; constructed unless dry-run (so a
+  // shipped task's TASKS.md block is auto-removed and no daemon re-picks it).
+  ...(taskRotationSeam !== undefined ? { taskRotation: taskRotationSeam } : {}),
   // Outer lint-gate verification — always active; no env opt-in.
   preLintRun,
   emit: (event) => {

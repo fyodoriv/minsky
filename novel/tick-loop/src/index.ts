@@ -761,6 +761,21 @@ export {
   spliceTaskBlock,
 } from "./daemon-task-rotation.js";
 
+// CLI-side construction of the `TaskRotationSeam` (file-backed TASKS.md
+// reader + `gh pr list --state merged` lister + `git commit --only
+// TASKS.md` remover). Twin of `metrics-render-cli-wiring` — keeps
+// `bin/tick-loop.mjs` thin: the bin only forwards the TASKS.md path / repo
+// root and gates construction on `!dryRun`. Without this binding the
+// slice-a/b/c watchdog is dead code (`RunDaemonOpts.taskRotation` never
+// injected → `maybeRunTaskRotation` early-returns every iteration).
+export {
+  type GhMergedPrListOptions,
+  type GitBackedApplyRemovalOptions,
+  createFileBackedGetTasksMd,
+  createGhMergedPrList,
+  createGitBackedApplyRemoval,
+} from "./task-rotation-cli-wiring.js";
+
 // Local-LLM auto-bootstrap (P0 from operator 2026-05-08, "git pull && minsky"
 // UX target): pure detect + plan functions plus the executor that dispatches
 // pipx / mlx-lm / aider / huggingface-cli / mlx_lm.server installs in
