@@ -48,6 +48,10 @@ import {
   synthesiseExperimentYaml,
   walkHostsDir,
 } from "../dist/index.js";
+import {
+  computeDynamicSettings,
+  parseTimingsFromJsonl,
+} from "../dist/dynamic-timeouts.js";
 
 const execFile = promisify(execFileCb);
 
@@ -497,12 +501,7 @@ async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
   } else {
     process.stdout.write(`ℹ scope: ${allowedPaths.join(", ")}\n`);
   }
-  const timeoutMs = (() => {
-    const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
-    if (raw === undefined) return 30 * 60 * 1000;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
-  })();
+  const timeoutMs = readLiveSpawnTimeoutMs(hostRoot);
   const agentCfg = buildAgentConfig(hostRoot);
   const strategy = new ProcessSpawnStrategy({
     command: agentCfg.command,
@@ -709,7 +708,7 @@ async function runLoopAsResult(parsed, controller) {
     strategy = new ProcessSpawnStrategy({
       command: loopAgentCfg.command,
       args: loopAgentCfg.args,
-      timeoutMs: readLiveSpawnTimeoutMs(),
+      timeoutMs: readLiveSpawnTimeoutMs(hostRoot),
       invocation: loopAgentCfg.invocation,
     });
   }
@@ -815,14 +814,54 @@ async function runLoopAsResult(parsed, controller) {
   return result;
 }
 
-function readLiveSpawnTimeoutMs() {
-  // Raised from 15min to 30min (2026-05-18): devin iterations with
-  // PR-creation instructions regularly take 10-15min; the 15min watchdog
-  // was killing productive iterations (watchdog-timeout-kills-productive-devin P0).
+/**
+ * Dynamic timeout: computes from iteration history if available,
+ * falls back to conservative default. Env var overrides everything.
+ *
+ * Principle (2026-05-18 operator directive): all timeouts must be
+ * dynamically calculated from actual machine performance, not
+ * hardcoded. Different machines + agents have different latencies.
+ */
+function readLiveSpawnTimeoutMs(hostRoot) {
+  // Env override always wins (escape hatch).
   const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
-  if (raw === undefined) return 30 * 60 * 1000;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60 * 1000;
+  if (raw !== undefined) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  // Dynamic: compute from this host's iteration history.
+  return computeDynamicSettingsForHost(hostRoot).spawnTimeoutMs;
+}
+
+/**
+ * Load iteration history from all experiment-store jsonl files for a host
+ * and compute dynamic settings (watchdog, tick interval).
+ */
+function computeDynamicSettingsForHost(hostRoot) {
+  try {
+    const storeDir = join(hostRoot, ".minsky", "experiment-store", "cross-repo");
+    if (!existsSync(storeDir)) return computeDynamicSettings([]);
+    const files = readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"));
+    let allTimings = [];
+    for (const f of files) {
+      try {
+        const content = readFileSync(join(storeDir, f), "utf8");
+        allTimings = allTimings.concat(parseTimingsFromJsonl(content));
+      } catch { /* skip unreadable files */ }
+    }
+    const settings = computeDynamicSettings(allTimings);
+    if (settings.source === "history") {
+      process.stdout.write(
+        `[dynamic-timeouts] computed from ${settings.sampleSize} iterations: ` +
+        `watchdog=${Math.round(settings.spawnTimeoutMs / 1000)}s, ` +
+        `tick=${Math.round(settings.tickIntervalMs / 1000)}s, ` +
+        `p95=${settings.p95Ms ? Math.round(settings.p95Ms / 1000) + "s" : "n/a"}\n`,
+      );
+    }
+    return settings;
+  } catch {
+    return computeDynamicSettings([]);
+  }
 }
 
 // Build the argv we pass to `claude` for live spawns. `--print` is the
