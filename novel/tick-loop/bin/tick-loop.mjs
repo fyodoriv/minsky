@@ -30,7 +30,7 @@
  * `runDaemon` is the pure orchestrator above.
  */
 
-import { execFile as execFileCb, execFileSync } from "node:child_process";
+import { execFile as execFileCb, execFileSync, execSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
@@ -1088,6 +1088,27 @@ process.stdout.write(
   `[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=${prePrStage} — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n`,
 );
 
+// TASKS.md auto-lint-fix seam (`daemon-tasks-md-auto-lint-fix`): production
+// binding for `runDaemon`'s `tasksMdLintExec`. The seam contract is "run one
+// shell command, return combined stdout+stderr, never throw on non-zero" —
+// the command itself carries `2>&1 || true` (see `buildMarkdownlintCommand`
+// in `@minsky/tick-loop/tasks-md-lint-fix`), so `execSync` won't throw on
+// markdownlint's violations-present non-zero exit. The catch is rule #7
+// graceful-degrade: if `npx markdownlint-cli2` can't spawn at all, return
+// "" — the pure helper parses that as zero violations and the daemon
+// proceeds with its (structurally-correct) commit rather than deadlocking.
+const tasksMdLintExec = (command) => {
+  try {
+    return execSync(command, { cwd: minskyHome, encoding: "utf8" });
+  } catch {
+    return "";
+  }
+};
+const tasksMdPath = resolve(minskyHome, "TASKS.md");
+process.stdout.write(
+  `[tick-loop] TASKS.md auto-lint-fix wired (markdownlint-cli2 --fix ${tasksMdPath} after every completed iteration — daemon-tasks-md-auto-lint-fix)\n`,
+);
+
 // Slice 4 of `daemon-parallel-worktree-launch`: file-collision pre-spawn
 // check. Only meaningful in parallel mode (workerConfig set). On every
 // iteration the daemon snapshots open daemon-authored PRs (branch shape
@@ -1338,6 +1359,11 @@ const result = await runDaemon({
   ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
   // Outer lint-gate verification — always active; no env opt-in.
   preLintRun,
+  // TASKS.md auto-lint-fix — always active; runs once per completed
+  // iteration before the pre-PR gate so a progress/claim/completion write
+  // that left an MD012 double blank can't deadlock the gate.
+  tasksMdLintExec,
+  tasksMdPath,
   emit: (event) => {
     observeIterationForTimeoutTracking(event);
     // Plain-text line on stdout for terminal/journalctl visibility.
