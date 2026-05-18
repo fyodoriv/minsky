@@ -43,6 +43,13 @@ import {
   type RunChangelogOutcome,
   runChangelog,
 } from "./changelog-runner.js";
+import {
+  type ApplyRemoval,
+  type GetTasksMd,
+  type ListMergedPrs,
+  type RunTaskRotationOutcome,
+  runTaskRotation,
+} from "./daemon-task-rotation.js";
 import { type MockAnthropicClient, type TickSpan, tick } from "./index.js";
 import {
   type GetLastRenderedDate,
@@ -229,6 +236,23 @@ export interface RunDaemonOpts {
    */
   readonly metricsRender?: MetricsRenderSeam;
   /**
+   * Optional task-rotation seam (rule #2). When injected, the daemon fires
+   * `runTaskRotation` once per iteration for the iteration's `taskId`; the
+   * wrapper's own cheapest-gate-first skip order (env-off → no-task-id →
+   * block-absent, the last short-circuiting BEFORE the `gh pr list`
+   * round-trip) means an injected seam costs one TASKS.md read on the
+   * common steady-state iteration and nothing more. When omitted, no
+   * rotation runs — supervisor daemons predating this seam keep working
+   * unchanged. Substrate for `daemon-task-rotation-on-completion`
+   * Details (b): the daemon auto-removes a shipped task's block so N
+   * workers stop re-picking it (the 9h 2026-05-07 dogfood failure mode —
+   * worker-1 re-created #309 as #343). Conservative by construction: the
+   * pure `decideTaskCompletion` only returns `remove` when a merged PR
+   * names the task ID AND every `**Acceptance**:` checkbox parses ✅, so
+   * an injected seam cannot mis-fire on an in-flight task.
+   */
+  readonly taskRotation?: TaskRotationSeam;
+  /**
    * Optional outer lint-gate verification seam (rule #2). When injected, the
    * daemon runs one post-iteration lint check after every `completed` iteration
    * to verify the branch is lint-clean. Failure emits a
@@ -407,6 +431,39 @@ export interface MetricsRenderSeam {
   readonly getLastRenderedDate: GetLastRenderedDate;
 }
 
+/**
+ * Optional task-rotation seam (rule #2). When injected, the daemon
+ * dispatches into `runTaskRotation` once per iteration. Three sub-seams,
+ * passed straight through to the I/O wrapper (slice b/c,
+ * `daemon-task-rotation.ts`):
+ *   - `getTasksMd` — reads the current TASKS.md content. Production
+ *     binding does an `fs.readFile`; tests inject a string.
+ *   - `listMergedPrs` — lists recent merged PRs (production wraps
+ *     `gh pr list --state merged --json number,title`; tests inject an
+ *     array). Only consulted when the task block is still present —
+ *     `runTaskRotation`'s `block-absent` short-circuit fires first, so
+ *     the steady state (block already rotated out) never pays the `gh`
+ *     round-trip (round-trip elimination, see the wrapper module doc).
+ *   - `applyRemoval` — persists the block-stripped TASKS.md and commits
+ *     it. Production does `fs.writeFile` + `git commit --only TASKS.md`;
+ *     tests record the call. The commit message is supplied
+ *     pre-formatted by the wrapper (`rotationCommitMessage`) so the git
+ *     log names the criteria-checker decision (rule #9 visible-not-
+ *     silent, Helland 2007 — the Hypothesis's "removal commit message
+ *     names the criteria-checker decision").
+ *
+ * The conservatism lives entirely in the pure `decideTaskCompletion`
+ * (slice a, PR #350): `remove` requires a merged PR naming the task ID
+ * AND every `**Acceptance**:` checkbox parsing ✅ (or an explicit
+ * `**Status**: shipped`). This seam only supplies I/O — it cannot widen
+ * the removal criteria.
+ */
+export interface TaskRotationSeam {
+  readonly getTasksMd: GetTasksMd;
+  readonly listMergedPrs: ListMergedPrs;
+  readonly applyRemoval: ApplyRemoval;
+}
+
 // ---- runDaemon ------------------------------------------------------------
 
 /**
@@ -453,6 +510,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
     await maybeRunMetricsRender(opts, outcome.result);
+    await maybeRunTaskRotation(opts, outcome.result);
     await maybeRunPrePrLintGate(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
@@ -780,6 +838,80 @@ function emitMetricsRenderSpan(
     base["metrics-render.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.metrics-render", attributes: base });
+}
+
+/**
+ * Wire-in for the task-rotation watchdog (rule #2 — the daemon
+ * orchestrates, `runTaskRotation` decides + applies). Skip-fast when:
+ *   - the seam isn't injected (production daemons predating this seam),
+ *   - the iteration has no `taskId` (no-task / paused / missing-tasks-md
+ *     — there is nothing to check for rotation; this mirrors
+ *     `maybeRunCtoAudit`'s `taskId === undefined` guard and avoids the
+ *     wrapper's redundant `no-task-id` round-trip).
+ *
+ * Deliberately NOT gated on `result.status === "completed"`: a task's
+ * substrate can ship via *another* worker's merged PR while THIS
+ * iteration failed (the exact N-worker race the task targets — worker-1
+ * re-picked `daemon-pre-pr-lint-gate` after #309 merged elsewhere). The
+ * removal decision is a function of the global merged-PR set + the task
+ * block, not this iteration's outcome, so gating on `completed` would
+ * re-introduce the bug for failed iterations. Conservatism is enforced
+ * inside the pure `decideTaskCompletion` (a merged PR must name the task
+ * ID AND every `**Acceptance**:` box must parse ✅), not here.
+ *
+ * `runTaskRotation` owns the remaining cheapest-gate-first skip order
+ * (`MINSKY_TASK_ROTATION=off` → `block-absent`, the latter short-
+ * circuiting BEFORE the `gh pr list` round-trip). Outcome is emitted as
+ * a `tick-loop.task-rotation` span so the dashboard can chart firing-
+ * rate + skip-reason distribution + the `removed`/`kept`/`no-merged-pr`
+ * verdict mix (the pre-registered rolling-duplicate-PR metric's signal).
+ *
+ * Extracted so `runDaemon` stays dispatch-only (rule #6, biome ≤10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function maybeRunTaskRotation(
+  opts: RunDaemonOpts,
+  result: DaemonIterationResult,
+): Promise<void> {
+  if (opts.taskRotation === undefined) return;
+  if (result.taskId === undefined) return;
+
+  const outcome = await runTaskRotation({
+    taskId: result.taskId,
+    env: process.env,
+    getTasksMd: opts.taskRotation.getTasksMd,
+    listMergedPrs: opts.taskRotation.listMergedPrs,
+    applyRemoval: opts.taskRotation.applyRemoval,
+  });
+  emitTaskRotationSpan(opts, result.taskId, outcome);
+}
+
+/**
+ * Emit a `tick-loop.task-rotation` span describing the watchdog's
+ * outcome. One span per invocation (skipped or acted), so the dashboard
+ * can chart firing-rate + skip-reason distribution + verdict mix; a
+ * `removed` span additionally carries the merged PR number so the audit
+ * trail links the rotation to the shipping PR (rule #9 visible-not-
+ * silent).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitTaskRotationSpan(
+  opts: RunDaemonOpts,
+  taskId: string,
+  outcome: RunTaskRotationOutcome,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "task.id": taskId,
+    "task-rotation.outcome": outcome.outcome,
+    "task-rotation.reason": outcome.reason,
+  };
+  if (outcome.outcome === "removed") {
+    base["task-rotation.via_pr"] = outcome.viaPrNumber;
+  }
+  opts.emit({ name: "tick-loop.task-rotation", attributes: base });
 }
 
 /**
@@ -1486,6 +1618,14 @@ function collectRankedTasks(sliced: string): RankedTask[] {
   return ranked;
 }
 
+/**
+ * Rank the eligible P0/P1 task IDs of `tasksMd` by priority (Tags
+ * override → section), then file order as the stable tiebreaker. Pure
+ * string → ID list; the daemon's spawn span wraps the iteration that
+ * consumes this, not the ranking itself.
+ *
+ * @otel-exempt pure task-list ranking; no I/O or spans.
+ */
 export function listEligibleTasks(tasksMd: string): readonly string[] {
   const ranked = collectRankedTasks(sliceP0P1(tasksMd));
   ranked.sort((a, b) => a.pri - b.pri || a.idx - b.idx);
