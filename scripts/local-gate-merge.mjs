@@ -739,7 +739,7 @@ export function runGateSweep(opts = {}) {
 
 /**
  * @typedef {object} LandLocalOpts
- * @property {string} branchName
+ * @property {string | undefined} [branchName]
  * @property {boolean} [dryRun]
  * @property {boolean} [noReview]
  * @property {(branchName: string) => number} [commitsAheadFn]
@@ -748,6 +748,59 @@ export function runGateSweep(opts = {}) {
  * @property {(branchName: string) => void} [landFn]
  * @property {(s: string) => void} [log]
  */
+
+/**
+ * Pure: collapse a vet result (gate stdout or vetError) plus the optional
+ * Opus review into the land decision. Extracted from `landLocalBranch` so
+ * that function stays within the cognitive-complexity budget and this
+ * branch-resolution logic is independently exercisable (rule #2 — the
+ * seam stays pure and testable; same input ⇒ same verdict, rule #10).
+ * @param {{stdout: string} | {vetError: string}} vetRes
+ * @param {{
+ *   branchName: string,
+ *   noReview?: boolean | undefined,
+ *   reviewFn?: ((branchName: string) => {approve: boolean, reason: string}) | undefined,
+ * }} cfg
+ * @returns {{action: "land" | "abort", reason: string}}
+ */
+export function decideLandFromVet(vetRes, cfg) {
+  if ("vetError" in vetRes) {
+    return decideLand({
+      verdict: { green: false, failedSteps: [], sawSummary: false },
+      vetError: vetRes.vetError,
+    });
+  }
+  const verdict = parseGateVerdict(vetRes.stdout);
+  const reviewFn = cfg.noReview ? undefined : cfg.reviewFn;
+  if (verdict.green && reviewFn) {
+    return decideLand({ verdict, review: reviewFn(cfg.branchName) });
+  }
+  return decideLand({ verdict });
+}
+
+/**
+ * Side-effecting land step isolated from `landLocalBranch` so that
+ * function's cognitive complexity stays within the linter budget. Push +
+ * open PR + admin-merge via the injected (or default) land fn; a thrown
+ * land call is reported, never crashes the conductor (rule #6 — handled
+ * locally, the deterministic gate already authorised the land).
+ * @param {string} branchName
+ * @param {((branchName: string) => void) | undefined} landFn
+ * @param {(s: string) => void} log
+ * @param {string} reason
+ * @returns {{outcome: "landed" | "aborted", reason: string}}
+ */
+function executeLand(branchName, landFn, log, reason) {
+  try {
+    (landFn ?? defaultLandBranch)(branchName);
+    log(`land-local ${branchName}: LANDED — ${reason}\n`);
+    return { outcome: "landed", reason };
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    log(`land-local ${branchName}: land call failed: ${m.slice(0, 160)}\n`);
+    return { outcome: "aborted", reason: `land-failed: ${m.slice(0, 120)}` };
+  }
+}
 
 /**
  * Take a fully-committed LOCAL branch green through the same scratch
@@ -777,20 +830,11 @@ export function landLocalBranch(opts) {
   }
   log(`land-local ${branchName}: ${pre.reason}; vetting via scratch --stage=full…\n`);
   const vetRes = (opts.vetFn ?? defaultVetLocalBranch)(branchName);
-  let decision;
-  if ("vetError" in vetRes) {
-    decision = decideLand({
-      verdict: { green: false, failedSteps: [], sawSummary: false },
-      vetError: vetRes.vetError,
-    });
-  } else {
-    const verdict = parseGateVerdict(vetRes.stdout);
-    const reviewFn = opts.noReview ? undefined : opts.reviewFn;
-    decision =
-      verdict.green && reviewFn
-        ? decideLand({ verdict, review: reviewFn(branchName) })
-        : decideLand({ verdict });
-  }
+  const decision = decideLandFromVet(vetRes, {
+    branchName,
+    noReview: opts.noReview,
+    reviewFn: opts.reviewFn,
+  });
   if (decision.action !== "land") {
     log(`land-local ${branchName}: ABORT — ${decision.reason}\n`);
     return { outcome: "aborted", reason: decision.reason };
@@ -799,15 +843,7 @@ export function landLocalBranch(opts) {
     log(`land-local ${branchName}: WOULD LAND — ${decision.reason}\n`);
     return { outcome: "landed", reason: decision.reason };
   }
-  try {
-    (opts.landFn ?? defaultLandBranch)(branchName);
-    log(`land-local ${branchName}: LANDED — ${decision.reason}\n`);
-    return { outcome: "landed", reason: decision.reason };
-  } catch (err) {
-    const m = err instanceof Error ? err.message : String(err);
-    log(`land-local ${branchName}: land call failed: ${m.slice(0, 160)}\n`);
-    return { outcome: "aborted", reason: `land-failed: ${m.slice(0, 120)}` };
-  }
+  return executeLand(branchName, opts.landFn, log, decision.reason);
 }
 
 // ---- CLI -----------------------------------------------------------------
