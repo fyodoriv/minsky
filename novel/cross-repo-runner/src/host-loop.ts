@@ -75,13 +75,46 @@ export interface LoopResult {
  * orchestrator, `sleep` is the inter-iteration wait, `now` is the
  * monotonic clock, `signal` is the operator's SIGTERM bridge.
  */
+/**
+ * Optional context passed to {@link RunHostLoopOpts.pickTask} on every
+ * call. The loop fills in `skipTaskIds` with the set of task IDs that
+ * have ALREADY completed `verdict: validated` earlier in this same
+ * {@link runHostLoop} invocation. The picker honours the skip-set by
+ * not returning those tasks again — this prevents the
+ * `walker-drains-one-host-forever` regression where a worker that
+ * validates but never actually removes the block from TASKS.md (or
+ * never opens a PR, so the `openPrBranches` self-heal doesn't fire)
+ * keeps getting the same task picked, starving every other host the
+ * walker should reach next.
+ *
+ * The skip-set is loop-session-scoped: it's cleared on every fresh
+ * `runHostLoop` invocation. The next walker pass gets a fresh chance
+ * to re-attempt a still-listed task (operator may have edited TASKS.md
+ * in the meantime); this is intentional per rule #6 — let the system
+ * self-heal across passes instead of persisting failure state.
+ *
+ * Existing pickers that ignore the arg keep working (parameter
+ * bivariance — a `() => null` is assignable here), so test fakes that
+ * predate this contract don't need to change.
+ */
+export interface PickTaskArgs {
+  readonly skipTaskIds?: ReadonlySet<string>;
+}
+
 export interface RunHostLoopOpts {
   /**
    * Per-iteration task selection. Production wires
-   * `() => pickHostTask(readFileSync(hostTasksMdPath, "utf8"))`; tests
-   * inject a queue-walker fake that returns successive tasks.
+   * `(args) => pickHostTask(readFileSync(hostTasksMdPath, "utf8"), { ...args })`;
+   * tests inject a queue-walker fake that returns successive tasks.
+   *
+   * The loop calls this with `args.skipTaskIds` filled in (the set of
+   * task IDs already validated earlier in this run). Picker
+   * implementations should treat the argument as advisory: it's
+   * legal to ignore it (existing test fakes do), in which case the
+   * loop falls back on the {@link RunHostLoopOpts.maxIterations} cap
+   * to bound any drain-then-advance regression.
    */
-  readonly pickTask: () => ParsedTask | null;
+  readonly pickTask: (args: PickTaskArgs) => ParsedTask | null;
   /**
    * Per-iteration plan builder. Production wires `buildSpawnPlan` from
    * `spawn-plan.ts` (slice A); tests inject a fake. The builder receives
@@ -193,11 +226,20 @@ export async function runHostLoop(opts: RunHostLoopOpts): Promise<LoopResult> {
   const tickIntervalMs = opts.tickIntervalMs ?? 300_000;
   const sleep = opts.sleep ?? defaultSleep;
   const iterations: LoopIterationResult[] = [];
+  // Task IDs that completed with `validated` in this run. Threaded into
+  // every subsequent `pickTask` call as `skipTaskIds` so the picker
+  // advances to the next eligible task — `walker-drains-one-host-forever`
+  // fix (b). Cleared on every fresh `runHostLoop` invocation, so the
+  // walker's NEXT pass over this host gets a fresh chance to re-attempt
+  // any validated-but-still-listed task (the persistent fix is for the
+  // worker to actually open a PR / remove the block; this is the
+  // self-healing fallback that keeps the walk from starving other hosts).
+  const validatedTaskIds = new Set<string>();
 
   for (let i = 0; i < maxIterations; i++) {
     const earlyStop = checkAbort(opts.signal);
     if (earlyStop !== undefined) return { iterations, stopReason: earlyStop };
-    const stop = await runOneIteration({ opts, iteration: i, iterations });
+    const stop = await runOneIteration({ opts, iteration: i, iterations, validatedTaskIds });
     if (stop !== undefined) return { iterations, stopReason: stop };
     const sleepStop = await sleepBetween({
       iteration: i,
@@ -255,9 +297,10 @@ async function runOneIteration(args: {
   readonly opts: RunHostLoopOpts;
   readonly iteration: number;
   readonly iterations: LoopIterationResult[];
+  readonly validatedTaskIds: Set<string>;
 }): Promise<LoopStopReason | undefined> {
-  const { opts, iteration, iterations } = args;
-  const task = await pickTaskOrSeed(opts);
+  const { opts, iteration, iterations, validatedTaskIds } = args;
+  const task = await pickTaskOrSeed(opts, validatedTaskIds);
   if (task === null) return "empty-queue";
   const plan = opts.buildPlan(task);
   const allowedPaths = opts.resolveAllowedPaths(task);
@@ -281,6 +324,15 @@ async function runOneIteration(args: {
   await maybeFirePostIterationAudit(opts, task, outcome);
   if (outcome.verdict === "scope-leak") return "scope-leak";
   if (outcome.verdict === "spawn-failed") return "spawn-failed";
+  // After a validated iteration, mark the task so the next pickTask
+  // call rotates past it. Without this, a worker that validates but
+  // does NOT open a PR (e.g. devin in --print mode pre-fix-2026-05-18,
+  // or a brief that doesn't instruct `gh pr create`) keeps getting
+  // the same task picked forever, blocking the walker from reaching
+  // other hosts. `walker-drains-one-host-forever` fix (b).
+  if (outcome.verdict === "validated") {
+    validatedTaskIds.add(task.id);
+  }
   return undefined;
 }
 
@@ -290,10 +342,17 @@ async function runOneIteration(args: {
  * the retry loop (if the audit ran but added no eligible tasks, we
  * exit `empty-queue` next).
  *
+ * `skipTaskIds` is threaded into both the initial pick AND the post-
+ * audit re-pick so a validated-but-not-removed task does not get re-
+ * picked even when the seed audit fires.
+ *
  * (Internal helper — no JSDoc tag required.)
  */
-async function pickTaskOrSeed(opts: RunHostLoopOpts): Promise<ParsedTask | null> {
-  const first = opts.pickTask();
+async function pickTaskOrSeed(
+  opts: RunHostLoopOpts,
+  skipTaskIds: ReadonlySet<string>,
+): Promise<ParsedTask | null> {
+  const first = opts.pickTask({ skipTaskIds });
   if (first !== null) return first;
   if (!opts.seedOnEmpty || opts.ctoAudit === undefined || opts.buildCtoSignals === undefined) {
     return null;
@@ -308,7 +367,7 @@ async function pickTaskOrSeed(opts: RunHostLoopOpts): Promise<ParsedTask | null>
   // Re-attempt pick once. If still null, the audit didn't help (no PR
   // merged yet, or audit produced no rule-#9-compliant blocks); the loop
   // exits empty-queue normally.
-  return opts.pickTask();
+  return opts.pickTask({ skipTaskIds });
 }
 
 /**
