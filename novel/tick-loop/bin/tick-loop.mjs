@@ -107,6 +107,10 @@ import {
   pickStrategicModel,
   predictExhaustionMs,
   resolvePrePrStage,
+  // Slice 3 of `runany-dynamic-model-or-local-fallback` — the unified
+  // pin>dynamic>local decider, wired into the run-anywhere entrypoint
+  // (slices 1+2 shipped the pure decider + audit harness).
+  resolveRunAnyModel,
   runDaemon,
   runParallelSweeper,
   sandboxModeStartupHint,
@@ -579,6 +583,20 @@ function buildClaudeStrategy() {
   });
 }
 
+// `resolveRunAnyModel`'s pin path (step 1) short-circuits *before* it
+// reads `remaining` / `remoteBackends` / `localProbeResult`, so the pin
+// wire-in above passes these frozen placeholders purely to satisfy the
+// input type — no per-iteration allocation, no real probe (round-trip
+// elimination on the hot pinned-iteration path).
+const PIN_PATH_UNUSED_REMAINING = Object.freeze({
+  fivehour: 1,
+  weekly: 1,
+  monthly: 1,
+  observedAt: "1970-01-01T00:00:00Z",
+});
+const PIN_PATH_UNUSED_BACKENDS = Object.freeze([]);
+const PIN_PATH_UNUSED_LOCAL_PROBE = Object.freeze({ reachable: true, observedAtMs: 0 });
+
 /**
  * Slice 5 of `claude-usage-aware-strategic-model-router` — invoke the
  * pure picker against a fresh remaining-fractions snapshot, log the
@@ -596,6 +614,28 @@ function buildClaudeStrategy() {
  * @returns {string | undefined}
  */
 function pickAndLogStrategicModel() {
+  // Slice 3 of `runany-dynamic-model-or-local-fallback` (Acceptance #1 +
+  // rule #9 skip-earlier gate): when the operator pinned a *catalog*
+  // model, route the decision through the unified `resolveRunAnyModel`
+  // and return *before* the budget-snapshot read, the usage-history
+  // ring-buffer append, and the exhaustion prediction. A pinned run is
+  // honored verbatim regardless of budget/liveness, so all that
+  // dynamic-machinery work — plus its ~400-byte `tick-loop.strategic-pick`
+  // span — is pure waste every iteration. The catalog-membership guard
+  // keeps a *bogus* pin on the unchanged budget-aware dynamic path
+  // (chaos row 3 — a typo'd pin must not pin to a placeholder budget).
+  if (strategicPin.length > 0 && MODEL_CATALOG.some((e) => e.id === strategicPin)) {
+    const pinned = resolveRunAnyModel({
+      remaining: PIN_PATH_UNUSED_REMAINING,
+      remoteBackends: PIN_PATH_UNUSED_BACKENDS,
+      localProbeResult: PIN_PATH_UNUSED_LOCAL_PROBE,
+      operatorPin: strategicPin,
+    });
+    process.stdout.write(
+      `[span] tick-loop.runany-resolve {"model":"${pinned.model}","agent":"${pinned.agent}","source":"${pinned.source}"}\n`,
+    );
+    return pinned.agent === "claude" ? pinned.model : undefined;
+  }
   // v0: synchronous picker driven by `realGuard.lastDecision()` which
   // is populated by the BudgetGuard's tick loop. The remaining %
   // snapshot is the most recent decision's snapshot.

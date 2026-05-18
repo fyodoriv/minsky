@@ -72,8 +72,24 @@ Thresholds (transcribed verbatim from the task's Success line):
 
 ## Status
 
-Slice 1 (this slice): the pure `resolveRunAnyModel` decider, its tests,
-and the `runany-model-audit.mjs` measurement harness. The wire-in to the
-run-anywhere entrypoint (`bin/minsky.mjs` / `scripts/orchestrate.mjs`)
-and the live multi-backend probe builder are follow-up slices tracked
-under the same task.
+Slices 1+2: the pure `resolveRunAnyModel` decider, its tests, and the
+`runany-model-audit.mjs` measurement harness.
+
+Slice 3 (this slice): the **pin-path wire-in** into the run-anywhere
+entrypoint. `pickAndLogStrategicModel()` in
+`novel/tick-loop/bin/tick-loop.mjs` now consults `resolveRunAnyModel`
+*first*: when `MINSKY_STRATEGIC_PIN_MODEL` names a catalog model, the
+decision short-circuits **before** the budget-snapshot read, the
+usage-history ring-buffer append, and the exhaustion prediction —
+honoring the pin verbatim every iteration (Acceptance #1) and emitting a
+compact `[span] tick-loop.runany-resolve` line instead of the ~400-byte
+`tick-loop.strategic-pick` span (rule #9 skip-earlier gate: a pinned run
+pays zero dynamic-machinery cost). A pin that names no catalog row stays
+on the unchanged budget-aware dynamic path (typo guard) — that path is
+byte-for-byte identical to before this slice, so the dynamic and
+all-down behaviour is unaffected.
+
+Follow-up slices (tracked under the same task): routing the *dynamic*
+path through the resolver too, and the live multi-backend probe builder
+that populates `remoteBackends` so the all-remote-down branch fires at
+runtime (Acceptance #3).
