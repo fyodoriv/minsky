@@ -15,6 +15,8 @@
 #   minsky               → autonomous run (foreground, SIGHUP-immune).
 #   minsky --daemon       → autonomous run (background, survives terminal
 #                           close + IDE restart). Logs to ~/.minsky/daemon.log.
+#   minsky --local        → local-only mode (no cloud tokens). Combinable
+#                           with --daemon: `minsky --local --daemon`.
 #   minsky --host <dir>  → explicit single-host.
 #   minsky --hosts-dir <parent> → explicit multi-host walk.
 #   minsky --help        → forwarded to `minsky-run --help`.
@@ -163,6 +165,21 @@ if [ ! -f "$RUNNER_BIN" ]; then
   echo "minsky: resolved repo $MINSKY_REPO_PATH but runner bin not found at $RUNNER_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
   exit 1
 fi
+
+# ── 3b. Parse --local flag ─────────────────────────────────
+# `minsky --local [args...]` sets the env vars for local-only mode
+# and strips --local from the args before forwarding. Combinable
+# with --daemon: `minsky --local --daemon --hosts-dir ~/apps/tooling`.
+MINSKY_ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = "--local" ]; then
+    export MINSKY_LLM_PROVIDER="local-only"
+    export MINSKY_LOCAL_LLM=1
+  else
+    MINSKY_ARGS+=("$arg")
+  fi
+done
+set -- "${MINSKY_ARGS[@]}"
 
 # Survive terminal close (SIGHUP). IDE terminals (Windsurf, Cursor,
 # VS Code) send SIGHUP to child processes when the terminal tab or

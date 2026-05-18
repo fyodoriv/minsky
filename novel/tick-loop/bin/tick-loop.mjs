@@ -397,6 +397,12 @@ const localLlmEnabled = (() => {
 const llmProviderOverride = (process.env.MINSKY_LLM_PROVIDER ?? "").trim().toLowerCase();
 const forceClaude = llmProviderOverride === "claude-only";
 const preferLocal = llmProviderOverride === "local-preferred";
+// `local-only` — hard local mode: skip the cloud strategy entirely.
+// The spawn strategy is the local strategy directly (no
+// LlmProviderSpawnStrategy wrapper, no budget guard, no claude probing).
+// Use when cloud tokens are exhausted or the operator wants zero cloud
+// spend. CLI shorthand: `minsky --local`.
+const forceLocalOnly = llmProviderOverride === "local-only";
 // `support-opencode-lmstudio-mlx-qwen3-14b-stack` slice 2 — `MINSKY_LOCAL_AGENT`
 // selects which CLI the local-dispatch path invokes. Default `aider` for
 // back-compat. When set to `opencode`, the local strategy spawns
@@ -740,7 +746,17 @@ function maybeWrapLocalStrategyInGate(localStratRaw) {
   });
 }
 
+// Extracted to stay under biome's cognitive-complexity cap (rule #6, ≤10).
+function buildLocalOnlyStrategy() {
+  const localStrat = maybeWrapLocalStrategyInGate(buildLocalStrategy());
+  process.stdout.write(
+    `[tick-loop] local-only mode (agent=${localAgent}, probe=${localProbeUrl}, watchdog=${localWatchdogMs ?? "disabled"}ms${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
+  );
+  return localStrat;
+}
+
 const spawnStrategy = (() => {
+  if (forceLocalOnly) return buildLocalOnlyStrategy();
   const claudeStrat = buildClaudeStrategy();
   if (!localLlmEnabled) return claudeStrat;
   const localStrat = maybeWrapLocalStrategyInGate(buildLocalStrategy());
