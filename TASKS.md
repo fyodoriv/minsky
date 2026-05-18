@@ -913,7 +913,6 @@
 
 ## P1
 
-<<<<<<< HEAD
 - [ ] `orchestrator-gh-graphql-401-token-source-divergence` — orchestrator sweep 401s on GitHub GraphQL every tick because the launchd process resolves a different (server-rejected) gh credential than an interactive shell
   - **ID**: orchestrator-gh-graphql-401-token-source-divergence
   - **Tags**: p1, reliability, orchestrator, auth, gate, rule-6, needs-user-approval
