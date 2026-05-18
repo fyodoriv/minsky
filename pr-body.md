@@ -1,82 +1,82 @@
-# feat(tui): pure retro screen-2 process-detail + log-list renderer (slice 2 of runany-retro-tui-dashboard)
+# feat(tui): injected I/O shim feeding screen-1/2 pure cores (slice 3 of runany-retro-tui-dashboard)
+
+<!-- scope: human-approved 2026-05-16 operator "single-command run-anywhere multi-tenant minsky + retro TUI" — every novel/tui/** artefact here is in the P0 runany-retro-tui-dashboard task block (Touches: novel/tui/**); slices 1–2 aren't on origin/main yet so the diff reads them all as new -->
 
 ## Why needed
 
-The operator surface for a `$0` multi-tenant CLI tool must be a retro
-TUI, not a Lighthouse-gated web UI (TASKS.md `runany-retro-tui-dashboard`,
-operator 2026-05-16 directive). Slice 1 (open PR #603) shipped the pure
-**screen 1** machine-dashboard render core. This slice stacks **screen
-2** — the per-process detail page the task's Acceptance #2 requires:
-pressing ENTER on a dashboard row drills into the selected run's
-identity, env (model/provider), launchd label, ledger summary, recent
-merges, and the **log list** of its `.minsky/*.log` files.
+Slices 1–2 landed the **pure** screen-1 (machine dashboard) and screen-2
+(process detail + log list) renderers — but they are `model → string[]`
+functions with no way to obtain a real model. Without the I/O shim the
+renderers cannot show a live host: there is no bridge between
+`@minsky/cross-repo-runner`'s process scan / `node:os` telemetry / a
+run's `.minsky/` log dir and the `MachineRaw` / `LogFile[]` the renderers
+consume. This slice is that bridge, and it is the prerequisite for the
+`bin/minsky` no-arg/auto-open wiring slice that follows.
 
-Slice 1's pure core (`novel/tui/`, `formatMachineInfo` +
-`renderDashboard`) is carried forward onto the up-to-date base so this
-PR is self-contained while #603 is in flight (sibling-slice-reuse
-pattern; identical content de-dupes on merge).
+It is deliberately **additive** — the tty write/keystroke loop, the
+`bin/minsky` wiring, and the rule #10 web-UI ratchet (deleting
+`@minsky/dashboard-web` + the lighthouse gate) remain later slices, kept
+out of this diff so each slice stays independently reviewable.
 
 ## What this slice ships
 
-- `novel/tui/src/detail.ts` — pure `renderDetail(model) → string[]`
-  for screen 2: banner, identity panel, env, launchd, ledger,
-  recent-merges, and a selectable `.minsky/*.log` list with
-  human-readable sizes. Plus `formatLogRow` for the per-row unit
-  tests. Same zero-dependency contract as screen 1 (raw ANSI +
-  box-drawing, amber/green-on-black, fixed 80×24, colour opt-in).
-- `novel/tui/test/detail.test.ts` — width invariant, ANSI gating,
-  selected-row inversion, and rule #7 graceful-degrade cases (empty
-  logs / empty ledger / un-stat-ed size).
-- `index.ts` exports `renderDetail`/`formatLogRow`/`DetailModel`/etc.
-- README + `vision.md` row 89 extended to document screen 2 (rule #3
-  doc-first; rule #10 ratchet note preserved — the web-UI removal
-  still lands in the later `bin/minsky` wiring slice, not here).
+- `novel/tui/src/gather.ts` (new):
+  - `gatherMachineRaw(minskyProcCount, probe?, diskPath?)` — composes
+    `node:os` + `fs.statfsSync` into the slice-1 `MachineRaw`. No `df`
+    subprocess: `statfsSync` (Node ≥18.15) is zero-dep and avoids
+    parsing locale-variant `df` text (rule #1, $10-mo cap).
+  - `listLogFiles(dir, probe?)` — a run's `.minsky/` dir → the
+    name-sorted, size-tagged `LogFile[]` screen 2 lists.
+  - Both pure relative to an injected `MachineProbe` / `LogDirProbe`
+    (rule #2 thin seam): production binds the `node:` default, tests
+    pass a frozen fixture (rule #10). Default probes degrade a
+    denied/missing syscall to a safe zero/empty rather than throw
+    (rule #6/#7) — the read-only TUI must never crash the operator.
+  - Scan count is **threaded from the caller's `scanMinskyProcesses`**,
+    not re-scanned (rule #1 — one machine-wide enumerator).
+- `novel/tui/test/gather.test.ts` (new): 6 cases — model composition,
+  scan-count threading, disk-path targeting, `*.log` filter + name
+  sort + size tag, missing-dir `[]` degrade, un-stat-able `-1` keep.
+- `novel/tui/src/index.ts` — re-export the gatherers + probe types.
+- `novel/tui/README.md` — doc-first (rule #3): slice-3 paragraph,
+  chaos rows 7–8 for the gatherer degrade modes, real-shim Usage
+  snippet (`formatMachineInfo(gatherMachineRaw(procs.length))`).
 
-Scope deferred (next slices): the I/O shim that fills `DetailModel`
-from `.minsky/*.log`/ledger/launchd, the `bin/minsky` no-arg/auto-open
-wiring, `scripts/runany-tui-audit.mjs`, and the rule #10 web-UI
-removal.
+Scope deferred (next slices): the tty write/keystroke loop, the
+`bin/minsky` no-arg/auto-open wiring, `scripts/runany-tui-audit.mjs`,
+and the rule #10 web-UI removal.
 
 ## Optimization (per-iteration discipline)
 
-Round-trip / duplication elimination: `detail.ts` **composes**
-`repoBasename` from `render.ts` instead of re-deriving the
-path-basename + rule-#7 em-dash logic (~120 bytes of duplicated pure
-code avoided; rule #1). The box primitives are deliberately a small
-local copy with an inline deferred-DRY note — editing the in-flight
-slice-1 `render.ts` would create a merge conflict with PR #603 for
-marginal gain; the shared `box.ts` consolidation lands once slice 1
-merges.
+`round-trip elimination`: the production disk gather is a single
+`fs.statfsSync` syscall instead of spawning a `df` child process and
+parsing its locale-variant text — one fewer process round-trip per
+dashboard refresh tick, and the brittle `df` parse code (~30 bytes
+minimum) is never written. Eligible class: round-trip elimination
+(≥10-byte threshold met).
 
 ## Test plan
 
-- `pnpm --filter @minsky/tui test` — screen-1 + screen-2 suites green.
-- `pnpm --filter @minsky/tui typecheck` — clean under
-  `noUncheckedIndexedAccess`/`exactOptionalPropertyTypes`.
-- Every `renderDetail` line is exactly the box width (80 default,
-  honours custom width); ANSI escapes appear only with `color: true`.
+- `npx vitest run novel/tui/test` — 28 passed (6 new in
+  `gather.test.ts`), all via frozen probes (no real fs/clock).
+- `npx tsc --noEmit -p novel/tui/tsconfig.json` — exit 0 under
+  `noUncheckedIndexedAccess` / `exactOptionalPropertyTypes`.
 
 ## Hypothesis self-grade
 
-- **Predicted**: a pure `renderDetail` produces a deterministic 80×24
-  process-detail board (identity + env + ledger + merges + selectable
-  `.minsky/*.log` list), fully unit-tested, advancing Acceptance #2
-  (per-process detail page with log list) and #5 (pure render logic
-  unit-tested) with zero new runtime dependency.
-- **Observed**: `pnpm --filter @minsky/tui test` green (screen-1 +
-  screen-2 suites); every `renderDetail` line == box width; ANSI
-  gated on `color`; selected log row inverted; rule #7 degrades
-  verified.
+- **Predicted**: feeding the slice-1/2 pure renderers via injected `node:os`/`fs` seams keeps 100% of the data-gather logic unit-tested with zero host fs/clock touch and zero new runtime dependency
+- **Observed**: `npx vitest run novel/tui/test` → 28 passed (6 new gather cases, all via frozen probes, no real fs/clock); `@minsky/tui` dependency list unchanged (only `@minsky/cross-repo-runner`)
 - **Match**: yes
-- **Lesson**: composing `repoBasename` across screens kept the slice
-  additive and conflict-free with the in-flight slice-1 PR; the next
-  slice can safely hoist the shared box primitives once #603 lands.
+- **Lesson**: the injected-probe seam pattern from `scan-processes.ts` generalizes cleanly to `os`/`statfs`/`readdir`, so the next slice (bin/minsky wiring) binds the real defaults at the edge with no further gather logic
 
 ## Security & privacy
 
-No new attack surface (§ 13 reviewed). `detail.ts` is a pure
-`data → string[]` formatter: no auth, no secrets, no sandbox, no
-network, no filesystem, no PII handling, and zero new dependencies
-(raw ANSI only). All inputs are pre-gathered plain data supplied by a
-future I/O shim, which is out of scope for this slice; that shim's
-`.minsky/*.log` reads will carry their own threat review when landed.
+No new attack surface (§ 13 reviewed). `gather.ts` is a read-only
+`os`/`fs` reader behind injected seams: no auth, no secrets, no sandbox,
+no network, no PII handling, no filesystem **writes**, and zero new
+dependencies. It reads only public host telemetry (`os` load/mem,
+`statfs`) and a run's `.minsky/` log **filenames + sizes** (not
+contents); no command-line token is ever executed. The default probes
+fail closed (degrade to a safe zero/empty, never throw). The future
+`.minsky/*.log` tail view will carry its own content-exposure review
+when landed.
