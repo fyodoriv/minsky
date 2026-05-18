@@ -1,6 +1,5 @@
-// <!-- scope: human-approved P0 task `daemon-task-rotation-on-completion`
-//      (TASKS.md, surfaced-by 9h monitoring window 2026-05-07) — production
-//      CLI-side binding slice; twin of `metrics-render-cli-wiring`. -->
+// <!-- scope: human-approved P0 task `daemon-task-rotation-on-completion` (TASKS.md, 9h monitoring window 2026-05-07) — production CLI binding slice; twin of metrics-render-cli-wiring -->
+//
 
 /**
  * `@minsky/tick-loop/task-rotation-cli-wiring` — CLI-side construction of
@@ -184,9 +183,7 @@ export function createGhMergedPrList(opts: GhMergedPrListOptions = {}): ListMerg
     let stdout: string;
     try {
       stdout = await runGhPrList(args);
-      // rule-6: handled-locally — a `gh` outage must NOT delete a TASKS.md
-      // block. Degrade to no-merged-PRs (the detector then returns
-      // `no-merged-pr`); the next iteration retries.
+      // rule-6: handled-locally — a `gh` outage must NOT delete a TASKS.md block; degrading to [] makes the detector return `no-merged-pr` (nothing auto-removed) and the next iteration retries (Armstrong 2007 — let it crash only at boundaries where crashing is safer than degrading; here it is not).
     } catch {
       return [];
     }
