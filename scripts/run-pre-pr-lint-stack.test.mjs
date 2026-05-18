@@ -1101,9 +1101,19 @@ describe("withResolvedDiffBase (slice 31/N — manifest rewrite)", () => {
 
   test("steps without origin/main references pass through unchanged (referential equality)", () => {
     const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
-    const biome = STACK_MANIFEST.find((s) => s.name === "biome");
-    const swappedBiome = swapped.find((s) => s.name === "biome");
-    expect(swappedBiome).toBe(biome);
+    // `typecheck` has no diff-base/`--since` reference, so the pure transform
+    // must return the very same object. (`biome` is now diff-scoped via
+    // `--since=origin/main` and IS rewritten — see the next test.)
+    const typecheck = STACK_MANIFEST.find((s) => s.name === "typecheck");
+    const swappedTypecheck = swapped.find((s) => s.name === "typecheck");
+    expect(swappedTypecheck).toBe(typecheck);
+  });
+
+  test("rewrites the biome step's `--since=origin/main` to the resolved base", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    const biome = swapped.find((s) => s.name === "biome");
+    expect(biome?.args).toContain("--since=main");
+    expect(biome?.args).not.toContain("--since=origin/main");
   });
 
   test("regression-floor: pre-slice-31 manifest references origin/main in ≥7 sites", () => {

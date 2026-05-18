@@ -33,7 +33,7 @@ Each component has one job. The manifest is the seam (rule #2 — single source 
 
 The fast stage (default) runs the nine lints that close the five empirically-named daemon-PR failure modes (markdownlint MD001, rule-12 scope opt-out, rule-3 doc-first, rule-6 catch annotations, rule-7 chaos parsing — the brief's pre-fix observation set), plus the four cheap structural checks that keep the whole tree compiling:
 
-- `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`.
+- `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`. **Diff-scoped** via biome's native `--changed --since=<base>`: lints only the files the branch changed vs the resolved diff base, not the whole 400+-file tree, so inherited committed-main biome debt (e.g. `scripts/collect-metrics.mjs`) cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`, the Pivot's "extend it to the whole stack"). CI's `biome` job still runs whole-tree.
 - `typecheck` — `tsc --noEmit` across the workspace.
 - `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`. **Diff-scoped** (`scripts/lint-md-diff.mjs`): lints only the `*.md` files the branch committed vs the resolved diff base, not the live `**/*.md` tree, so concurrent swarm churn on TASKS.md/vision.md and inherited committed-main debt cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`). CI's `markdownlint` job still runs whole-tree.
 - `tasks-lint` — `@tasks-md/lint` against `TASKS.md`.
