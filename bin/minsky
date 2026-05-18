@@ -12,13 +12,17 @@
 # Conformance: full — no business logic here, only DI + forwarding.
 #
 # Usage:
-#   minsky               → autonomous run against $(pwd); cwd-detect
-#                          decides single-host vs multi-host walk.
+#   minsky               → autonomous run (foreground, SIGHUP-immune).
+#   minsky --daemon       → autonomous run (background, survives terminal
+#                           close + IDE restart). Logs to ~/.minsky/daemon.log.
+#   minsky --local        → local-only mode (no cloud tokens). Combinable
+#                           with --daemon: `minsky --local --daemon`.
 #   minsky --host <dir>  → explicit single-host.
 #   minsky --hosts-dir <parent> → explicit multi-host walk.
 #   minsky --help        → forwarded to `minsky-run --help`.
-#   minsky status        → list running minsky-run processes on this host.
+#   minsky status        → show running minsky processes + tail of daemon log.
 #   minsky stop          → SIGTERM any running minsky-run processes.
+#   minsky logs          → tail -f the daemon log.
 #
 # Resolution order (via `resolveMinskyRepo`):
 #   1. $MINSKY_REPO env var (if set + exists)
@@ -33,7 +37,7 @@
 #     execution; if node isn't installed, `minsky-run` can't work
 #     either, so the shim exits with a message pointing at
 #     `setup.sh`.
-#   - Subcommand `status`/`stop` with no running process: graceful
+#   - Subcommand `status`/`stop`/`logs` with no running process: graceful
 #     degrade. `status` prints "no running minsky-run on this host";
 #     `stop` prints "nothing to stop" and exits 0 (idempotent).
 
@@ -45,19 +49,42 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# ── Daemon paths ──────────────────────────────────────────────
+MINSKY_STATE_DIR="${HOME}/.minsky"
+MINSKY_DAEMON_LOG="${MINSKY_STATE_DIR}/daemon.log"
+MINSKY_DAEMON_PID="${MINSKY_STATE_DIR}/daemon.pid"
+
 # ── 1. Handle subcommands that DON'T need the repo ──────────
 #
-# `minsky status` / `minsky stop` only need ps/grep/kill. Handle
-# them before we pay the repo-resolution cost so a fresh machine
-# without minsky checked out can still report "no running process".
+# `minsky status` / `minsky stop` / `minsky logs` only need
+# ps/grep/kill/tail. Handle them before we pay the repo-resolution
+# cost so a fresh machine without minsky checked out can still
+# report "no running process".
 case "${1:-}" in
   status)
-    # Find processes: node invocations of the runner bin. Use `pgrep -a`
-    # for PID + command line so the operator sees the args.
-    if pgrep -fal "cross-repo-runner/bin/minsky-run" 2>/dev/null; then
-      exit 0
+    echo "=== minsky daemon ==="
+    if [ -f "$MINSKY_DAEMON_PID" ]; then
+      pid=$(cat "$MINSKY_DAEMON_PID")
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "running (PID $pid)"
+        ps -p "$pid" -o etime=,command= 2>/dev/null | head -1
+      else
+        echo "stale PID file (PID $pid not running)"
+        rm -f "$MINSKY_DAEMON_PID"
+      fi
+    else
+      # Fall back to pgrep for processes started without --daemon
+      if pgrep -fal "cross-repo-runner/bin/minsky-run" 2>/dev/null; then
+        echo "(no PID file — started without --daemon)"
+      else
+        echo "not running"
+      fi
     fi
-    echo "no running minsky-run on this host"
+    if [ -f "$MINSKY_DAEMON_LOG" ]; then
+      echo ""
+      echo "=== last 10 log lines ==="
+      tail -10 "$MINSKY_DAEMON_LOG"
+    fi
     exit 0
     ;;
   stop)
@@ -67,10 +94,19 @@ case "${1:-}" in
     if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
       pkill -TERM -f "cross-repo-runner/bin/minsky-run"
       echo "sent SIGTERM to all running minsky-run processes"
+      rm -f "$MINSKY_DAEMON_PID"
       exit 0
     fi
     echo "nothing to stop"
     exit 0
+    ;;
+  logs)
+    if [ -f "$MINSKY_DAEMON_LOG" ]; then
+      exec tail -f "$MINSKY_DAEMON_LOG"
+    fi
+    echo "no daemon log found at $MINSKY_DAEMON_LOG"
+    echo "start minsky with --daemon to enable logging"
+    exit 1
     ;;
 esac
 
@@ -130,6 +166,79 @@ if [ ! -f "$RUNNER_BIN" ]; then
   exit 1
 fi
 
+# ── 3b. Parse --local flag ─────────────────────────────────
+# `minsky --local [args...]` sets the env vars for local-only mode
+# and strips --local from the args before forwarding. Combinable
+# with --daemon: `minsky --local --daemon --hosts-dir ~/apps/tooling`.
+MINSKY_ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = "--local" ]; then
+    export MINSKY_LLM_PROVIDER="local-only"
+    export MINSKY_LOCAL_LLM=1
+  else
+    MINSKY_ARGS+=("$arg")
+  fi
+done
+set -- "${MINSKY_ARGS[@]}"
+
+# Survive terminal close (SIGHUP). IDE terminals (Windsurf, Cursor,
+# VS Code) send SIGHUP to child processes when the terminal tab or
+# window closes. An autonomous minsky run (10h+) must not die because
+# the operator restarted their IDE. `trap '' HUP` sets the signal
+# disposition to "ignore" in this shell; POSIX guarantees ignored
+# signals survive exec, so the node process inherits the immunity.
+# SIGTERM from `minsky stop` is unaffected (not trapped here).
+# Note: `nohup` binary achieves the same but CyberArk EPM blocks it
+# on some corporate Macs — this builtin approach is equivalent.
+trap '' HUP
+
+# ── 4. Daemon mode (--daemon) ────────────────────────────────
+# `minsky --daemon [args...]` backgrounds the runner, logs to
+# ~/.minsky/daemon.log, writes a PID file, and exits immediately.
+# The process survives terminal close + IDE restart (SIGHUP-immune
+# from the trap above + fully detached from the controlling TTY).
+#
+# Lifecycle:
+#   minsky --daemon --hosts-dir ~/apps/tooling   → start
+#   minsky status                                → PID + uptime + log tail
+#   minsky logs                                  → tail -f daemon.log
+#   minsky stop                                  → SIGTERM → graceful drain
+if [ "${1:-}" = "--daemon" ]; then
+  shift  # consume --daemon, forward remaining args to minsky-run
+
+  # Guard: don't start a second daemon
+  if [ -f "$MINSKY_DAEMON_PID" ]; then
+    existing_pid=$(cat "$MINSKY_DAEMON_PID")
+    if kill -0 "$existing_pid" 2>/dev/null; then
+      echo "minsky: daemon already running (PID $existing_pid). Stop it first: minsky stop" >&2
+      exit 1
+    fi
+    rm -f "$MINSKY_DAEMON_PID"
+  fi
+
+  mkdir -p "$MINSKY_STATE_DIR"
+
+  # Background the runner. stdin from /dev/null, stdout+stderr to the
+  # daemon log (append — preserves history across restarts). The
+  # subshell + disown detaches from the controlling terminal's process
+  # group so the node process is not a child of this shell.
+  MINSKY_NON_INTERACTIVE=1 node "$RUNNER_BIN" "$@" \
+    < /dev/null \
+    >> "$MINSKY_DAEMON_LOG" 2>&1 &
+  daemon_pid=$!
+  disown "$daemon_pid" 2>/dev/null || true
+  echo "$daemon_pid" > "$MINSKY_DAEMON_PID"
+
+  echo "minsky daemon started (PID $daemon_pid)"
+  echo "  log: $MINSKY_DAEMON_LOG"
+  echo "  status: minsky status"
+  echo "  follow: minsky logs"
+  echo "  stop:   minsky stop"
+  exit 0
+fi
+
+# ── 5. Foreground mode (default) ─────────────────────────────
 # Forward every arg verbatim. The runner bin itself handles `--help`,
 # cwd auto-detect, countdown banner, autonomous defaults, etc.
+# SIGHUP-immune from the trap above.
 exec node "$RUNNER_BIN" "$@"

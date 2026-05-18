@@ -3,12 +3,18 @@
  * brief + invocation parameters into the argv / stdin shape each LLM CLI
  * expects. Slice 2 of `local-llm-fallback-on-budget-pause` per TASKS.md.
  *
- * Two providers, two argv shapes:
+ * Three cloud + one local provider, four argv shapes:
  *
  * - **Claude Code** (`claude --print`): brief on stdin, `--print` flag on
  *   argv. Per `claude --help`: "Print response and exit (useful for pipes)".
  *   Optional per-worker `--worktree <name>` already produced by
  *   `claudeArgsForWorker` (`worker-config.ts`).
+ *
+ * - **Devin CLI** (`devin --print`): brief on stdin, `--print` flag on
+ *   argv, `--permission-mode dangerous` for unattended operation. Per
+ *   `devin --help`: "Runs in non-interactive mode: processes the prompt
+ *   and exits". Semantically identical to claude --print; selectable
+ *   per machine via `MINSKY_CLOUD_AGENT=devin`.
  *
  * - **Aider** (`aider --message <brief> --yes ...`): brief lives on argv
  *   via `--message`; stdin is unused. Aider auto-commits to the current
@@ -263,6 +269,72 @@ export function buildAiderInvocation(opts: BuildAiderInvocationOpts): LlmInvocat
     command: opts.command ?? "aider",
     argv,
     stdin: undefined,
+    ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
+  };
+}
+
+// ---- buildDevinPrintInvocation ---------------------------------------------
+
+export interface BuildDevinPrintInvocationOpts {
+  /** The brief text to feed devin on stdin. Required (devin --print's input). */
+  readonly brief: string;
+  /**
+   * Per-iteration extra args, appended after the fixed flags. Used by the
+   * wiring layer for per-worker overrides (worktree path, session id, etc.).
+   */
+  readonly extraArgs?: readonly string[];
+  /**
+   * Override `devin` command path (default: bare `"devin"` resolved via
+   * PATH). Tests inject a fixture binary.
+   */
+  readonly command?: string;
+  /**
+   * Optional model override. When set, passes `--model <id>` to
+   * `devin --print`. Devin CLI accepts full model ids
+   * (`claude-opus-4-7-max`, `claude-sonnet-4-5-20250514`). When unset,
+   * devin uses the session default (or the `DEVIN_MODEL` env var).
+   */
+  readonly model?: string;
+  /**
+   * Per-iteration cwd — devin's tool-use loop edits files in the current
+   * directory, so the daemon's per-worker worktree path must be passed
+   * when in multi-worker mode. When `undefined`, the spawn-strategy uses
+   * the parent process's cwd.
+   */
+  readonly cwd?: string;
+}
+
+/**
+ * Build the invocation for `devin --print` (Devin CLI's documented headless /
+ * non-interactive mode — "Runs in non-interactive mode: processes the prompt
+ * and exits"). Brief on stdin, `--print` first, `--permission-mode dangerous`
+ * (daemon runs unattended), optional `--model <id>`, then per-iteration extras.
+ *
+ * Devin CLI's `--print` mode is semantically identical to Claude Code's
+ * `claude --print`: brief on stdin, response on stdout, non-zero exit on
+ * error. This symmetry is intentional — the daemon's `ProcessSpawnStrategy`
+ * and `LlmProviderSpawnStrategy` consume the same `LlmInvocation` shape
+ * regardless of which cloud agent produced it.
+ *
+ * `--permission-mode dangerous` is hard-wired because the supervisor runs
+ * unattended — no human is present to approve tool calls. Operators who
+ * want more restrictive permissions override via
+ * `extraArgs: ["--permission-mode", "normal"]` (later flag wins per
+ * devin's argparse).
+ *
+ * @otel tick-loop.llm-invocation.build-devin-print
+ */
+export function buildDevinPrintInvocation(opts: BuildDevinPrintInvocationOpts): LlmInvocation {
+  return {
+    command: opts.command ?? "devin",
+    argv: Object.freeze([
+      "--print",
+      "--permission-mode",
+      "dangerous",
+      ...(opts.model === undefined ? [] : ["--model", opts.model]),
+      ...(opts.extraArgs ?? []),
+    ]),
+    stdin: opts.brief,
     ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
   };
 }

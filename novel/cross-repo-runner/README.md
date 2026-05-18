@@ -64,6 +64,7 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 ## Usage
 
 The CLI has three modes, all driven from the same `minsky-run` entry point.
+The `bin/minsky` shim adds `--daemon` mode for background operation (see below).
 
 ### One-shot mode (explicit `<task-id>`)
 

@@ -534,6 +534,7 @@ export {
 export {
   type BuildAiderInvocationOpts,
   type BuildClaudePrintInvocationOpts,
+  type BuildDevinPrintInvocationOpts,
   type BuildOpencodeInvocationOpts,
   type LlmInvocation,
   DEFAULT_AIDER_MODEL,
@@ -542,6 +543,7 @@ export {
   DEFAULT_OPENCODE_MODEL,
   buildAiderInvocation,
   buildClaudePrintInvocation,
+  buildDevinPrintInvocation,
   buildOpencodeInvocation,
 } from "./llm-invocation.js";
 

@@ -861,9 +861,11 @@ function readClaudeSpawnArgs() {
   //   MINSKY_CLAUDE_PERMISSION_MODE=""             → omit the flag entirely
   //   MINSKY_CLAUDE_PERMISSION_MODE=acceptEdits    → milder (edits only)
   const permMode = process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "bypassPermissions";
+  const model = process.env.MINSKY_CLAUDE_MODEL ?? "";
   const base = ["--print"];
   if (sources !== "") base.push("--setting-sources", sources);
   if (permMode !== "") base.push("--permission-mode", permMode);
+  if (model !== "") base.push("--model", model);
   return base;
 }
 
