@@ -28,6 +28,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { runGateSweep } from "./local-gate-merge.mjs";
 import {
+  DEFAULT_HEALTHY_RESET_SEC,
   DEFAULT_RUN_TIME_LIMIT_SEC,
   decideStartupThrottle,
   parseDurationSec,
@@ -55,6 +56,11 @@ const RUN_START_MS = Date.now();
 let runOriginMs = RUN_START_MS;
 const RUN_TIME_LIMIT_MS =
   parseDurationSec(process.env["MINSKY_RUN_TIME_LIMIT"], DEFAULT_RUN_TIME_LIMIT_SEC) * 1000;
+// Sustained-healthy window that resets the backoff ladder to base.
+// Operator-tunable like the deadline (same parseDurationSec contract —
+// a typo'd value falls back to the 20m default, rule #7); `<n>s|m|h`.
+const HEALTHY_RESET_MS =
+  parseDurationSec(process.env["MINSKY_HEALTHY_RESET"], DEFAULT_HEALTHY_RESET_SEC) * 1000;
 // PRs vetted per tick. Bounded (default 2) so a tick is at most
 // LIMIT × per-vet-timeout — the conductor cannot back up behind a long
 // sweep (keystone "run reliably for 10h"). Env-tunable.
@@ -235,6 +241,7 @@ if (isMain) {
       prevOriginMs: prev.prevOriginMs,
       prevRestartIndex: prev.prevRestartIndex,
       nowMs: Date.now(),
+      healthyResetMs: HEALTHY_RESET_MS,
     });
     writeRestartState({
       startMs: t.startMs,
