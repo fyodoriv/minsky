@@ -1077,6 +1077,12 @@ async function runWalk(parsed) {
     maxTotalIterations: maxIterations,
     signal: controller.signal,
     runOneHost: async (hostRoot) => {
+      // Per-host iteration cap: in multi-host walk mode, each host gets
+      // at most 3 iterations per walk pass to ensure fair scheduling
+      // across all hosts. Without this, a host with a non-completing task
+      // starves all other hosts indefinitely (walker-drains-one-host-forever
+      // bug, 2026-05-18). The total walker cap is still maxTotalIterations.
+      const perHostCap = Math.min(3, maxIterations);
       // Construct a fresh per-host parsed shape and reuse runLoop's
       // construction logic via a thin closure. We need runLoop to RETURN
       // the LoopResult instead of an exit code — refactor below to expose
@@ -1087,7 +1093,7 @@ async function runWalk(parsed) {
         ctoAudit,
         seedOnEmpty,
         loop: loop !== false,
-        maxIterations,
+        maxIterations: perHostCap,
         tickIntervalMs,
       };
       return runLoopAsResult(hostParsed, controller);
