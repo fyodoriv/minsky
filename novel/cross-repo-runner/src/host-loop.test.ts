@@ -297,7 +297,7 @@ describe("runHostLoop — validated-task rotation (walker-drains-one-host-foreve
 
   test("rotates through multiple validated tasks before exiting empty-queue", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
-    const queue: ReadonlyArray<ParsedTask> = [
+    const queue: readonly ParsedTask[] = [
       { ...baseTask, id: "task-a" },
       { ...baseTask, id: "task-b" },
       { ...baseTask, id: "task-c" },

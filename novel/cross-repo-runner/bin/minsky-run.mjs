@@ -800,17 +800,26 @@ async function runLoopAsResult(parsed, controller) {
     tickIntervalMs,
     signal: controller.signal,
     recordIteration: (record) => {
+      const verdict =
+        record.verdict === "validated"
+          ? "validated"
+          : record.verdict === "scope-leak"
+            ? "scope-leak"
+            : "spawn-failed";
+      const durSec = Math.round(record.durationMs / 1000);
+      const pr = record.prUrl || "—";
+      const agent = readSpawnCommand();
+      // Per-iteration summary line for daemon.log glanceability
+      // (daemon-log-lacks-iteration-detail P1, 2026-05-18)
+      process.stdout.write(
+        `⏱ iteration #${record.iteration}: task=${record.taskId} agent=${agent} verdict=${verdict} duration=${durSec}s pr=${pr}\n`,
+      );
       writeIterationRecord(hostRoot, {
         ts: new Date().toISOString(),
         experiment_id: record.taskId,
         host_repo: config.host_repo,
         branch: `${config.branch_prefix}${record.taskId}`,
-        verdict:
-          record.verdict === "validated"
-            ? "validated"
-            : record.verdict === "scope-leak"
-              ? "scope-leak"
-              : "spawn-failed",
+        verdict,
         pr_url: record.prUrl,
         notes: `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`,
       });
