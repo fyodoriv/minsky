@@ -63,6 +63,12 @@ MINSKY_DAEMON_PID="${MINSKY_STATE_DIR}/daemon.pid"
 case "${1:-}" in
   status)
     echo "=== minsky daemon ==="
+    # Stability number (from experiment store)
+    _host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+    if [ -n "$_host_dir" ] && command -v node >/dev/null 2>&1; then
+      _stability=$(node "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/../scripts/stability-number.mjs" "$_host_dir" 2>/dev/null || echo "")
+      [ -n "$_stability" ] && echo "Stability: $_stability"
+    fi
     if [ -f "$MINSKY_DAEMON_PID" ]; then
       pid=$(cat "$MINSKY_DAEMON_PID")
       if kill -0 "$pid" 2>/dev/null; then
@@ -112,6 +118,8 @@ case "${1:-}" in
     # Live dashboard: status + iterations + log in a single refreshing view.
     # Refreshes every 10s. Ctrl-C to exit (daemon keeps running).
     HOST_ARG="${2:-}"
+    # Resolve scripts dir for stability-number.mjs
+    MINSKY_REPO_SCRIPTS="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/scripts"
     while true; do
       clear
       echo "╔══════════════════════════════════════════════════════════════╗"
@@ -138,12 +146,28 @@ case "${1:-}" in
       fi
       echo ""
 
-      # Dynamic timeouts
+      # Stability + dynamic timeouts
+      if [ -n "$host_dir" ] && command -v node >/dev/null 2>&1; then
+        _stab=$(node "$MINSKY_REPO_SCRIPTS/stability-number.mjs" "$host_dir" 2>/dev/null || echo "no data")
+        echo "  📈 Stability: $_stab"
+      fi
       dt_line=$(grep 'dynamic-timeouts' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1)
       if [ -n "$dt_line" ]; then
         echo "  ⏱  $dt_line"
-        echo ""
       fi
+
+      # Current task (from last experiment yaml write)
+      _current_task=$(grep 'wrote.*experiments.*yaml' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1 | grep -oE '[a-z][-a-z0-9]*\.yaml' | sed 's/\.yaml//')
+      if [ -n "$_current_task" ]; then
+        echo "  🔧 Current: $_current_task"
+      fi
+
+      # Last iteration summary (from the new ⏱ line)
+      _last_iter=$(grep '^⏱ iteration' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1)
+      if [ -n "$_last_iter" ]; then
+        echo "  $_last_iter"
+      fi
+      echo ""
 
       # Latest iterations (from experiment store)
       echo "  📊 RECENT ITERATIONS"
