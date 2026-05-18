@@ -75,8 +75,9 @@ merged via the fast-stage director-bootstrap path):
   `launchd.plist(5)` key), `agent-capability-delegation-scan` and
   `pr-agent-delegation-scan-current` (rule #14 coined lint/scan names)
   to `vision.md` unregistered. Allowlisted with `#` justifications,
-  mirroring the exact existing precedent (`pr-replace-or-relocate-research`
-  + the systemd-directive block).
+  mirroring the exact existing precedent: the allowlisted
+  `pr-replace-or-relocate-research` entry alongside the
+  systemd-directive block.
 
 Annotation + allowlist only — no behaviour change. This is a swarm-wide
 pre-push blocker (every daemon branch rebased onto main #606 hits it);
