@@ -141,6 +141,16 @@ Every constitutional rule must be enforced by a deterministic CI check — not a
 
 **Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
 
+### 3b. Integration tests for CLI features (reinforcement)
+
+Every CLI-facing feature (`bin/minsky` subcommands, `minsky watch`, `minsky status`, any operator-visible UX) must ship with an integration test in `test/integration/`. The test must:
+
+1. Exercise the real script/binary (not a mock).
+2. Use fixture data (temp dirs with synthetic jsonl/yaml) for deterministic results.
+3. Assert on the output format the operator sees.
+
+A dashboard feature without an integration test is a regression waiting to happen. Paired unit tests in `novel/*/src/*.test.ts` are not sufficient — the integration test catches the wiring between the bash shim, node scripts, and file-system state.
+
 ### 14b. Dynamic settings (no hardcoded timeouts)
 
 All timeouts, intervals, thresholds, and resource limits must be **dynamically computed** from actual iteration history on the current machine — never hardcoded. Different machines have different CPUs, network latencies, and model routing speeds. A watchdog that's correct for Claude on a fast machine kills Devin on a slow one.

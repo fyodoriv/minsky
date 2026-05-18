@@ -43,6 +43,7 @@ export default defineConfig({
       "novel/**/test/**/*.test.ts",
       "scripts/**/*.test.mjs",
       "user-stories/**/*.test.ts",
+      "test/**/*.test.ts",
       "distribution/shortcuts/test/**/*.test.mjs",
     ],
     coverage: {
