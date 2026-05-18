@@ -306,7 +306,11 @@ for arg in "$@"; do
     MINSKY_ARGS+=("$arg")
   fi
 done
-set -- "${MINSKY_ARGS[@]}"
+if [ "${#MINSKY_ARGS[@]}" -gt 0 ]; then
+  set -- "${MINSKY_ARGS[@]}"
+else
+  set --
+fi
 
 # Survive terminal close (SIGHUP). IDE terminals (Windsurf, Cursor,
 # VS Code) send SIGHUP to child processes when the terminal tab or

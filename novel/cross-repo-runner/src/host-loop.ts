@@ -342,17 +342,24 @@ async function runOneIteration(args: {
  * the retry loop (if the audit ran but added no eligible tasks, we
  * exit `empty-queue` next).
  *
- * `skipTaskIds` is threaded into both the initial pick AND the post-
- * audit re-pick so a validated-but-not-removed task does not get re-
- * picked even when the seed audit fires.
+ * `validatedTaskIds` is the loop's live skip-set. We snapshot it into a
+ * fresh `ReadonlySet` before each call so the picker sees an immutable
+ * point-in-time view; without the snapshot, a picker that stores the
+ * argument (e.g. a test fake recording call history, or a future
+ * stateful picker) would observe mutations from later iterations and
+ * misattribute them to earlier calls. Source: rule #6 (pure data flow
+ * at the boundary — pickers should not be coupled to internal loop
+ * timing) and the test
+ * `host-loop.test.ts › threads validated task IDs into the next pickTask
+ * call as skipTaskIds`, which fails without the snapshot.
  *
  * (Internal helper — no JSDoc tag required.)
  */
 async function pickTaskOrSeed(
   opts: RunHostLoopOpts,
-  skipTaskIds: ReadonlySet<string>,
+  validatedTaskIds: ReadonlySet<string>,
 ): Promise<ParsedTask | null> {
-  const first = opts.pickTask({ skipTaskIds });
+  const first = opts.pickTask({ skipTaskIds: new Set(validatedTaskIds) });
   if (first !== null) return first;
   if (!opts.seedOnEmpty || opts.ctoAudit === undefined || opts.buildCtoSignals === undefined) {
     return null;
@@ -366,8 +373,10 @@ async function pickTaskOrSeed(
   await opts.ctoAudit({ signals, completedVerdict: null });
   // Re-attempt pick once. If still null, the audit didn't help (no PR
   // merged yet, or audit produced no rule-#9-compliant blocks); the loop
-  // exits empty-queue normally.
-  return opts.pickTask({ skipTaskIds });
+  // exits empty-queue normally. Snapshot again — the audit may have run
+  // long enough that the operator added another task in the meantime,
+  // but the skip-set semantics shouldn't change between the two calls.
+  return opts.pickTask({ skipTaskIds: new Set(validatedTaskIds) });
 }
 
 /**
