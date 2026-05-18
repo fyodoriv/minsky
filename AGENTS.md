@@ -141,6 +141,19 @@ Every constitutional rule must be enforced by a deterministic CI check — not a
 
 **Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
 
+### 14b. Dynamic settings (no hardcoded timeouts)
+
+All timeouts, intervals, thresholds, and resource limits must be **dynamically computed** from actual iteration history on the current machine — never hardcoded. Different machines have different CPUs, network latencies, and model routing speeds. A watchdog that's correct for Claude on a fast machine kills Devin on a slow one.
+
+The implementation (`novel/cross-repo-runner/src/dynamic-timeouts.ts`):
+
+- **Spawn watchdog** = p95(successful iteration durations) × 1.5, clamped to [2min, 45min]. With <5 data points, defaults to 20min.
+- **Tick interval** = p50(successful iteration durations) × 0.1, clamped to [30s, 5min].
+- History source: `.minsky/experiment-store/cross-repo/*.jsonl` — the same iteration records the runner already writes.
+- Env var `MINSKY_LIVE_SPAWN_TIMEOUT_MS` overrides the dynamic value (escape hatch).
+
+When adding any new configurable constant, follow this pattern: compute from data first, hard-default second, env-override third. Log the computed value so the operator sees it in the daemon log.
+
 ### 15. Milestone alignment gate (supersedes task picking)
 
 Before picking ANY implementation task, verify that **seven surfaces** are up-to-date and aligned with the current milestone in `MILESTONES.md`. If any surface is stale or misaligned, updating it IS your first task — not picking an implementation task. This is iron: no exemption.
