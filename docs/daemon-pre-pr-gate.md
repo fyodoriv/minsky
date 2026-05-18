@@ -122,6 +122,22 @@ node scripts/self-diagnose.mjs --json | jq '.[] | select(.id == "daemon-pr-lint-
 
 If a `pr-body.md` file is sitting at the repo root, the script auto-appends the two body-only checks (`pr-self-grade`, `pr-security-review`) — same retry budget as the rest of the gate, no flag required. `--body=<other-path>` overrides the discovery.
 
+## Landing a local vetted branch (`land-local`)
+
+The swarm's workers land only because they push from the `.claude/worktrees/<branch>` checkouts the orchestrator provisions. A fully-committed branch produced by a non-worktree contributor (an Opus-director keystone fix) is otherwise un-landable while the swarm runs: the live-tree pre-push gate flaps on concurrent churn, and an isolated `git worktree` has no `node_modules`. `--no-verify` is forbidden.
+
+`land-local` generalises the orchestrator's proven PR scratch-vet (`local-gate-merge.mjs`) to a local ref — same isolated `git clone --shared` scratch with a real `pnpm install`, the same `--stage=full --json` deterministic gate, then push + open PR + admin-merge:
+
+```bash
+# Take a fully-committed local branch green through the scratch gate and land it:
+node scripts/orchestrate.mjs land-local fix/picktask-priority-agent-teams-slice1
+
+# Vet only (verdict printed; no push / PR / merge):
+node scripts/orchestrate.mjs land-local <branch> --dry-run
+```
+
+A cheap `git rev-list --count origin/main..<branch>` preflight elides the ~20-min scratch vet for a branch with nothing ahead of `origin/main`. The deterministic gate is always the authority; an Opus brain review is wired in a follow-up (deterministic-only by default — `--no-review` parity with the sweep). Because GitHub Actions is disabled on this repo and the merge is `--admin`, the scratch `--stage=full` verdict is the gate, not GitHub.
+
 ## When the invariant fires
 
 `scripts/self-diagnose.mjs` runs the `daemon-pr-lint-pass-rate` invariant on every supervisor tick. Below 0.8 (default; threshold pinned in slice 3/N), it returns an `Unmet` verdict with two named root causes and a TASKS.md task-block draft:
