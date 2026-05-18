@@ -108,6 +108,82 @@ case "${1:-}" in
     echo "start minsky with --daemon to enable logging"
     exit 1
     ;;
+  watch)
+    # Live dashboard: status + iterations + log in a single refreshing view.
+    # Refreshes every 10s. Ctrl-C to exit (daemon keeps running).
+    HOST_ARG="${2:-}"
+    while true; do
+      clear
+      echo "╔══════════════════════════════════════════════════════════════╗"
+      echo "║  minsky watch — $(date '+%H:%M:%S')  (Ctrl-C to detach, daemon keeps running)  ║"
+      echo "╚══════════════════════════════════════════════════════════════╝"
+      echo ""
+
+      # Status
+      if [ -f "$MINSKY_DAEMON_PID" ]; then
+        daemon_pid=$(cat "$MINSKY_DAEMON_PID" 2>/dev/null)
+        if kill -0 "$daemon_pid" 2>/dev/null; then
+          uptime=$(ps -p "$daemon_pid" -o etime= 2>/dev/null | tr -d ' ')
+          target=$(ps -p "$daemon_pid" -o args= 2>/dev/null | grep -oE '\-\-host [^ ]+' | head -1)
+          agent_count=$(pgrep -f 'devin.*--print\|claude.*--print' 2>/dev/null | wc -l | tr -d ' ')
+          echo "  🟢 DAEMON  PID=$daemon_pid  uptime=$uptime  agents=$agent_count"
+          echo "     target: $target"
+        else
+          echo "  🔴 DAEMON  stale PID $daemon_pid (not running)"
+          echo "     fix: rm -f ~/.minsky/daemon.pid && minsky --daemon --host <repo>"
+        fi
+      else
+        echo "  ⚫ DAEMON  not running"
+        echo "     start: minsky --daemon --host <repo>"
+      fi
+      echo ""
+
+      # Dynamic timeouts
+      dt_line=$(grep 'dynamic-timeouts' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1)
+      if [ -n "$dt_line" ]; then
+        echo "  ⏱  $dt_line"
+        echo ""
+      fi
+
+      # Latest iterations (from experiment store)
+      echo "  📊 RECENT ITERATIONS"
+      echo "  ────────────────────────────────────────────────────────"
+      host_dir="${HOST_ARG:-}"
+      if [ -z "$host_dir" ]; then
+        # try to detect from daemon args
+        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+      fi
+      if [ -n "$host_dir" ] && [ -d "$host_dir/.minsky/experiment-store/cross-repo" ]; then
+        for f in "$host_dir"/.minsky/experiment-store/cross-repo/*.jsonl; do
+          [ -f "$f" ] || continue
+          task=$(basename "$f" .jsonl)
+          count=$(wc -l < "$f" | tr -d ' ')
+          last=$(tail -1 "$f" 2>/dev/null)
+          if [ -n "$last" ]; then
+            verdict=$(echo "$last" | grep -o '"verdict":"[^"]*"' | sed 's/"verdict":"//;s/"//')
+            ts=$(echo "$last" | grep -o '"ts":"[^"]*"' | sed 's/"ts":"//;s/"//;s/T/ /' | cut -c1-19)
+            pr=$(echo "$last" | grep -o '"pr_url":"[^"]*"' | sed 's/"pr_url":"//;s/"//')
+            if [ "$pr" = "null" ] || [ -z "$pr" ]; then pr="—"; fi
+            printf "  %-42s %s %-12s pr=%s  (%s total)\n" "$task" "$ts" "$verdict" "$pr" "$count"
+          fi
+        done
+      else
+        echo "  (no experiment data yet)"
+      fi
+      echo ""
+
+      # Log tail
+      echo "  📝 LOG (last 5 lines)"
+      echo "  ────────────────────────────────────────────────────────"
+      if [ -f "$MINSKY_DAEMON_LOG" ]; then
+        tail -5 "$MINSKY_DAEMON_LOG" | sed 's/^/  /'
+      else
+        echo "  (no log)"
+      fi
+
+      sleep 10
+    done
+    ;;
 esac
 
 # ── 2. Resolve the minsky repo via the pure `resolveMinskyRepo` ─
