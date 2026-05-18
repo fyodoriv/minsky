@@ -17,8 +17,16 @@
 // plan, not the side-effect).
 
 import { execFile as execFileCb, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -480,7 +488,7 @@ function emitDryRunReport(plan, hostRoot, hostRepo) {
 async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
   process.stdout.write("\n=== runner plan (live spawn) ===\n");
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-  process.stdout.write(`\nSpawning \`claude --print\` in ${hostRoot}...\n`);
+  process.stdout.write(`\nSpawning \`${readSpawnCommand()} --print\` in ${hostRoot}...\n`);
   const allowedPaths = extractAllowedPathsFromTaskBlock(rawTaskBlock);
   if (allowedPaths.length === 0) {
     process.stdout.write(
@@ -495,17 +503,12 @@ async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
   })();
-  const claudeArgs = readClaudeSpawnArgs();
+  const agentCfg = buildAgentConfig(hostRoot);
   const strategy = new ProcessSpawnStrategy({
-    command: "claude",
-    args: claudeArgs,
+    command: agentCfg.command,
+    args: agentCfg.args,
     timeoutMs,
-    invocation: (input) => ({
-      command: "claude",
-      argv: claudeArgs,
-      stdin: input.brief,
-      cwd: hostRoot,
-    }),
+    invocation: agentCfg.invocation,
   });
   const git = makeGitProbe(hostRoot);
   const outcome = await runLive({
@@ -702,17 +705,12 @@ async function runLoopAsResult(parsed, controller) {
 
   let strategy = null;
   if (live) {
-    const claudeArgs = readClaudeSpawnArgs();
+    const loopAgentCfg = buildAgentConfig(hostRoot);
     strategy = new ProcessSpawnStrategy({
-      command: "claude",
-      args: claudeArgs,
+      command: loopAgentCfg.command,
+      args: loopAgentCfg.args,
       timeoutMs: readLiveSpawnTimeoutMs(),
-      invocation: (input) => ({
-        command: "claude",
-        argv: claudeArgs,
-        stdin: input.brief,
-        cwd: hostRoot,
-      }),
+      invocation: loopAgentCfg.invocation,
     });
   }
   const dryRunStrategy = {
@@ -839,34 +837,134 @@ function readLiveSpawnTimeoutMs() {
 // Source: rule #6 (let-it-crash AT the boundary, not silently — without
 // this flag the spawn no-ops on a context-overflow and the loop exits
 // `empty-queue iterations:0` with no operator-visible diagnostic).
-function readClaudeSpawnArgs() {
+/**
+ * Per-machine minsky config at `~/.minsky/config.json`. Loaded once
+ * at startup; env vars override any key for one-session overrides.
+ *
+ * Keys: cloud_agent, cloud_agent_model, local_agent, local_agent_model.
+ * Edit directly or (future) via `minsky config set <key> <value>`.
+ */
+function loadMinskyConfig() {
+  const configPath = resolve(process.env.HOME ?? "/root", ".minsky", "config.json");
+  try {
+    return JSON.parse(readFileSync(configPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+const _minskyConfig = loadMinskyConfig();
+
+/**
+ * Resolve the CLI command to spawn. Priority:
+ *   1. MINSKY_CLOUD_AGENT env var (one-session override)
+ *   2. ~/.minsky/config.json `cloud_agent` (persistent per-machine)
+ *   3. "claude" (default)
+ */
+function readSpawnCommand() {
+  const agent = process.env.MINSKY_CLOUD_AGENT ?? _minskyConfig.cloud_agent ?? "claude";
+  return agent.toLowerCase() === "devin" ? "devin" : "claude";
+}
+
+/**
+ * Build the argv and invocation factory for the resolved spawn command.
+ *
+ * Claude Code: feeds the brief via stdin (child.stdin.end(brief)).
+ * Devin CLI:   writes the brief to a temp file and passes --prompt-file
+ *              (devin panics on stdin pipe as of 2026.5.6-8).
+ *
+ * Returns { args, buildInvocation(hostRoot) } so both the one-shot and
+ * loop paths can use the same factory.
+ */
+function buildAgentConfig(hostRoot) {
+  // When MINSKY_LLM_PROVIDER=local-only (set by `minsky --local`),
+  // use the local agent (aider + ollama) instead of the cloud agent.
+  const isLocal = process.env.MINSKY_LLM_PROVIDER === "local-only";
+  if (isLocal) return buildLocalAgentConfig(hostRoot);
+
+  const cmd = readSpawnCommand();
+  // Model resolution priority:
+  //   1. MINSKY_CLOUD_AGENT_MODEL env (one-session override)
+  //   2. MINSKY_CLAUDE_MODEL env (legacy)
+  //   3. ~/.minsky/config.json cloud_agent_model (persistent)
+  //   4. "" (use CLI default)
+  const model =
+    process.env.MINSKY_CLOUD_AGENT_MODEL ??
+    process.env.MINSKY_CLAUDE_MODEL ??
+    _minskyConfig.cloud_agent_model ??
+    "";
+
+  if (cmd === "devin") {
+    const base = ["--print"];
+    if (model !== "") base.push("--model", model);
+    // Devin: brief → temp file → --prompt-file. No stdin.
+    const promptDir = mkdtempSync(join(tmpdir(), "minsky-devin-"));
+    return {
+      command: cmd,
+      args: base,
+      invocation: (input) => {
+        const promptPath = join(promptDir, `${input.taskId}.md`);
+        writeFileSync(promptPath, input.brief, "utf8");
+        return {
+          command: cmd,
+          argv: [...base, "--prompt-file", promptPath],
+          stdin: undefined, // do NOT pipe stdin — devin panics
+          cwd: hostRoot,
+        };
+      },
+    };
+  }
+
+  // Claude Code: brief via stdin (the original path)
   const raw = process.env.MINSKY_CLAUDE_SETTING_SOURCES;
   const sources = raw === undefined ? "project,local" : raw;
-  // `--permission-mode bypassPermissions` lets claude --print actually USE
-  // its tools (Edit/Write/Bash/etc) without an interactive permission
-  // prompt; without it, the default permission mode requires a human at
-  // the keyboard, so claude produces validated text output but never
-  // edits files, commits, or opens a PR. The FINAL STEP block in
-  // renderSystemPromptOverlay (spawn-plan.ts) calls explicit Bash
-  // commands (git/gh) — those need bypassPermissions, not the milder
-  // acceptEdits (which only auto-accepts Edit/Write tool uses).
-  //
-  // Discovered 2026-05-16 — bulletproof-ux-dashboard iter 9 produced
-  // verdict=validated, pr_url=null because claude wrote a 5-page
-  // analysis but never invoked any Edit tool; iter 10 (post-acceptEdits)
-  // produced 348 lines of real edits but still didn't commit/push/PR
-  // because the Bash tool was still gated.
-  //
-  // Operators can override:
-  //   MINSKY_CLAUDE_PERMISSION_MODE=""             → omit the flag entirely
-  //   MINSKY_CLAUDE_PERMISSION_MODE=acceptEdits    → milder (edits only)
   const permMode = process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "bypassPermissions";
-  const model = process.env.MINSKY_CLAUDE_MODEL ?? "";
   const base = ["--print"];
   if (sources !== "") base.push("--setting-sources", sources);
   if (permMode !== "") base.push("--permission-mode", permMode);
   if (model !== "") base.push("--model", model);
-  return base;
+  return {
+    command: cmd,
+    args: base,
+    invocation: (input) => ({
+      command: cmd,
+      argv: base,
+      stdin: input.brief,
+      cwd: hostRoot,
+    }),
+  };
+}
+
+/**
+ * Build agent config for local-only mode (aider + ollama).
+ * Reads local_agent, local_agent_model, local_agent_args from
+ * ~/.minsky/config.json. The brief is passed via aider's --message
+ * flag (written to a temp file to avoid shell escaping issues).
+ */
+function buildLocalAgentConfig(hostRoot) {
+  const agent = _minskyConfig.local_agent ?? "aider";
+  const model = _minskyConfig.local_agent_model ?? "";
+  const extraArgs = _minskyConfig.local_agent_args ?? [];
+
+  // aider path: --message via temp file, no stdin
+  const promptDir = mkdtempSync(join(tmpdir(), "minsky-local-"));
+  const base = [...extraArgs];
+
+  process.stdout.write(`  [local-only] agent=${agent} model=${model}\n`);
+
+  return {
+    command: agent,
+    args: base,
+    invocation: (input) => {
+      const promptPath = join(promptDir, `${input.taskId}.md`);
+      writeFileSync(promptPath, input.brief, "utf8");
+      return {
+        command: agent,
+        argv: [...base, "--message-file", promptPath, "--yes"],
+        stdin: undefined,
+        cwd: hostRoot,
+      };
+    },
+  };
 }
 
 function emitLoopSummary(result) {
@@ -925,7 +1023,7 @@ async function maybePrintCountdownBanner(live, target) {
   if (process.env.MINSKY_NON_INTERACTIVE === "true") return;
   if (!process.stdout.isTTY) return;
   process.stdout.write(
-    `\n⚠  Starting AUTONOMOUS LIVE SPAWN against ${target}\n   Ctrl-C in the next 3s to abort. Set MINSKY_NON_INTERACTIVE=1 to skip this banner.\n`,
+    `\n⚠  Starting AUTONOMOUS LIVE SPAWN against ${target}\n   Agent: ${readSpawnCommand()}${_minskyConfig.cloud_agent_model || process.env.MINSKY_CLOUD_AGENT_MODEL ? ` (model: ${process.env.MINSKY_CLOUD_AGENT_MODEL ?? _minskyConfig.cloud_agent_model})` : ""}\n   Ctrl-C in the next 3s to abort. Set MINSKY_NON_INTERACTIVE=1 to skip this banner.\n`,
   );
   for (let i = 3; i > 0; i--) {
     process.stdout.write(`   ${i}…\n`);

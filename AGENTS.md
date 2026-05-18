@@ -27,9 +27,38 @@ minsky stop                                 # SIGTERM → graceful drain
 
 **`--daemon`** backgrounds the process (logs to `~/.minsky/daemon.log`, PID file at `~/.minsky/daemon.pid`). SIGHUP-immune — survives terminal close / IDE restart.
 
-**`--local`** forces local-only mode (`MINSKY_LLM_PROVIDER=local-only`). No cloud agent, no budget guard. Use when tokens are exhausted.
+**`--local`** forces local-only mode (`MINSKY_LLM_PROVIDER=local-only`). Uses the local agent (aider + ollama) from `~/.minsky/config.json`. Zero cloud tokens.
 
-**`MINSKY_CLOUD_AGENT=devin`** (env var in `~/.zshrc.ai-tools`) switches the cloud agent from Claude Code to Devin CLI. Same stdin/stdout contract; different billing.
+### Per-machine agent config — `~/.minsky/config.json`
+
+**Always check this file first** when starting minsky on any machine. It determines which agents and models run.
+
+```json
+{
+  "cloud_agent": "devin",               // "devin" | "claude"
+  "cloud_agent_model": "claude-opus-4-7-max",  // passed as --model
+  "local_agent": "aider",               // local-only mode agent
+  "local_agent_model": "ollama_chat/qwen3-coder:30b",
+  "local_agent_args": ["--model", "ollama_chat/qwen3-coder:30b", "--no-auto-commits"],
+  "ollama_base_url": "http://localhost:11434"
+}
+```
+
+**Resolution priority** (highest wins, per key):
+
+| Layer | When | Example |
+|---|---|---|
+| Env var (one session) | `MINSKY_CLOUD_AGENT=claude minsky ...` | override for one run |
+| `~/.minsky/config.json` | persistent per-machine | edit file to change permanently |
+| Default | no config, no env | `claude` for cloud, `aider` for local |
+
+**Agent support matrix:**
+
+| Agent | Cloud | Local | Brief delivery | Model flag |
+|---|---|---|---|---|
+| `claude` | ✅ | — | stdin | `--model` |
+| `devin` | ✅ | — | `--prompt-file` (stdin panics) | `--model` |
+| `aider` | — | ✅ | `--message-file` | `--model` via config args |
 
 ## Identity
 
