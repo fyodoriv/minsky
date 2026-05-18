@@ -10,6 +10,7 @@
     { "path": "./novel/adapters/types" },
     { "path": "./novel/bridges/omc-tasksmd" },
     { "path": "./novel/budget-guard" },
+    { "path": "./novel/competitive-benchmark" },
     { "path": "./novel/cross-repo-runner" },
     { "path": "./novel/dashboard-web" },
     { "path": "./novel/experiment-record" },
