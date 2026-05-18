@@ -325,16 +325,28 @@ export interface BuildDevinPrintInvocationOpts {
  * @otel tick-loop.llm-invocation.build-devin-print
  */
 export function buildDevinPrintInvocation(opts: BuildDevinPrintInvocationOpts): LlmInvocation {
+  // Devin CLI panics on stdin pipe as of 2026.5.6-8 (documented in
+  // AGENTS.md agent-support-matrix). Write the brief to a temp file
+  // and pass --prompt-file instead — same pattern minsky-run.mjs uses.
+  const { mkdtempSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+  const { join } = require("node:path") as typeof import("node:path");
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const promptDir = mkdtempSync(join(tmpdir(), "minsky-devin-"));
+  const promptPath = join(promptDir, "brief.md");
+  writeFileSync(promptPath, opts.brief, "utf8");
+
   return {
     command: opts.command ?? "devin",
     argv: Object.freeze([
       "--print",
       "--permission-mode",
       "dangerous",
+      "--prompt-file",
+      promptPath,
       ...(opts.model === undefined ? [] : ["--model", opts.model]),
       ...(opts.extraArgs ?? []),
     ]),
-    stdin: opts.brief,
+    stdin: undefined, // do NOT pipe stdin — devin panics
     ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
   };
 }

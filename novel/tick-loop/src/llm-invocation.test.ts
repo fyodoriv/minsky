@@ -56,10 +56,17 @@ describe("llm-invocation / buildClaudePrintInvocation", () => {
 });
 
 describe("llm-invocation / buildDevinPrintInvocation — slice (a)+(b) of `devin-cloud-agent-spawn-strategy`", () => {
-  it("returns command='devin' with brief on stdin (same I/O contract as claude --print)", () => {
+  it("returns command='devin' with brief via --prompt-file (not stdin — devin panics on stdin pipe)", () => {
     const inv = buildDevinPrintInvocation({ brief: "hello" });
     expect(inv.command).toBe("devin");
-    expect(inv.stdin).toBe("hello");
+    expect(inv.stdin).toBeUndefined();
+    expect(inv.argv).toContain("--prompt-file");
+    // The prompt file should exist and contain the brief
+    const promptIdx = inv.argv.indexOf("--prompt-file");
+    const promptPath = inv.argv[promptIdx + 1];
+    expect(promptPath).toBeDefined();
+    const { readFileSync } = require("node:fs");
+    expect(readFileSync(promptPath as string, "utf8")).toBe("hello");
   });
 
   it("argv has --print and --permission-mode dangerous as fixed flags", () => {
@@ -105,10 +112,14 @@ describe("llm-invocation / buildDevinPrintInvocation — slice (a)+(b) of `devin
     expect("cwd" in inv).toBe(false);
   });
 
-  it("preserves brief verbatim including whitespace and special chars", () => {
+  it("preserves brief verbatim including whitespace and special chars (in prompt file)", () => {
     const brief = "task brief\n  with\ttabs\n  and emoji 🚀";
     const inv = buildDevinPrintInvocation({ brief });
-    expect(inv.stdin).toBe(brief);
+    expect(inv.stdin).toBeUndefined();
+    const promptIdx = inv.argv.indexOf("--prompt-file");
+    const promptPath = inv.argv[promptIdx + 1];
+    const { readFileSync } = require("node:fs");
+    expect(readFileSync(promptPath as string, "utf8")).toBe(brief);
   });
 
   it("argv is frozen (cannot be mutated)", () => {
@@ -116,11 +127,19 @@ describe("llm-invocation / buildDevinPrintInvocation — slice (a)+(b) of `devin
     expect(Object.isFrozen(inv.argv)).toBe(true);
   });
 
-  it("referential transparency: same input → same output", () => {
+  it("structural equivalence: same input → same shape (prompt file paths differ per call)", () => {
     const a = buildDevinPrintInvocation({ brief: "x", model: "claude-opus-4-7-max" });
     const b = buildDevinPrintInvocation({ brief: "x", model: "claude-opus-4-7-max" });
-    expect(a).toEqual(b);
-    expect(a.argv).not.toBe(b.argv);
+    expect(a.command).toBe(b.command);
+    expect(a.stdin).toBe(b.stdin); // both undefined
+    // Fixed flags match (ignoring the unique --prompt-file path)
+    expect(a.argv.filter(s => !s.includes("minsky-devin-")))
+      .toEqual(b.argv.filter(s => !s.includes("minsky-devin-")));
+    // Both prompt files contain the same brief
+    const { readFileSync } = require("node:fs");
+    const aPath = a.argv[a.argv.indexOf("--prompt-file") + 1] as string;
+    const bPath = b.argv[b.argv.indexOf("--prompt-file") + 1] as string;
+    expect(readFileSync(aPath, "utf8")).toBe(readFileSync(bPath, "utf8"));
   });
 });
 
