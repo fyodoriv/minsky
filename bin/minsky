@@ -12,7 +12,11 @@
 # Conformance: full — no business logic here, only DI + forwarding.
 #
 # Usage:
-#   minsky               → autonomous run (foreground, SIGHUP-immune).
+#   minsky               → zero-arg: launch the self-scoping conductor
+#                          (scripts/orchestrate.mjs) scoped to the cwd
+#                          tree. Works from ANY folder — git repo,
+#                          nested-repos tree, monorepo, worktree, or
+#                          plain dir. No env vars or flags required.
 #   minsky --daemon       → autonomous run (background, survives terminal
 #                           close + IDE restart). Logs to ~/.minsky/daemon.log.
 #   minsky --local        → local-only mode (no cloud tokens). Combinable
@@ -80,6 +84,16 @@ case "${1:-}" in
         echo "not running"
       fi
     fi
+    # Zero-arg launches start the conductor (scripts/orchestrate.mjs),
+    # not minsky-run — report it too so `minsky status` from the same
+    # folder sees what `minsky` (zero-arg) just started.
+    echo ""
+    echo "=== minsky conductor ==="
+    if pgrep -fal "scripts/orchestrate.mjs" 2>/dev/null; then
+      :
+    else
+      echo "not running"
+    fi
     if [ -f "$MINSKY_DAEMON_LOG" ]; then
       echo ""
       echo "=== last 10 log lines ==="
@@ -88,12 +102,24 @@ case "${1:-}" in
     exit 0
     ;;
   stop)
-    # SIGTERM every running minsky-run process. The runner's own signal
+    # SIGTERM every running minsky-run process AND the zero-arg
+    # conductor (scripts/orchestrate.mjs). The runner's own signal
     # handler (host-loop.ts → abort signal) finishes the in-flight
-    # iteration before exiting.
+    # iteration before exiting; the conductor catches SIGTERM and stops
+    # its supervised loop. Idempotent: prints "nothing to stop" + exit 0
+    # when neither is up.
+    STOPPED=0
+    if pgrep -f "scripts/orchestrate.mjs" >/dev/null 2>&1; then
+      pkill -TERM -f "scripts/orchestrate.mjs"
+      echo "sent SIGTERM to the minsky conductor"
+      STOPPED=1
+    fi
     if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
       pkill -TERM -f "cross-repo-runner/bin/minsky-run"
       echo "sent SIGTERM to all running minsky-run processes"
+      STOPPED=1
+    fi
+    if [ "$STOPPED" -eq 1 ]; then
       rm -f "$MINSKY_DAEMON_PID"
       exit 0
     fi
@@ -235,6 +261,36 @@ if [ "${1:-}" = "--daemon" ]; then
   echo "  follow: minsky logs"
   echo "  stop:   minsky stop"
   exit 0
+fi
+
+# ── 4b. Zero-arg: launch the self-scoping conductor ──────────────────
+#
+# With NO arguments, `minsky` launches the orchestrator conductor
+# (scripts/orchestrate.mjs) scoped to the current working directory.
+# This satisfies the "run from any folder, no params ever" requirement
+# (Saltzer & Schroeder 1975 — least-surprise default; no env vars or
+# flags required).
+#
+# The conductor self-detects its root via the pure `detectConductorRoot`
+# resolver (cross-repo-runner) — the zero-arg precedence chain
+# (bootstrapped → bootstrapped-subdirs → git-root → git-root-subdirs →
+# plain-dir). Detection lives in ONE tested place (TS), not duplicated
+# in bash; the shim forks zero extra detection subprocesses on a
+# zero-arg launch (round-trip elimination — it just exec's the
+# conductor). Per-tick errors are caught internally so the process
+# stays alive regardless of repo type.
+#
+# Note: zero-arg now routes to the conductor, NOT minsky-run. Explicit
+# modes (--host / --hosts-dir / --daemon / --local / any args) still
+# fall through to the foreground/daemon forwarding below (rule #1 —
+# compose, don't replace; the conductor is additive).
+if [ $# -eq 0 ]; then
+  CONDUCTOR_BIN="$MINSKY_REPO_PATH/scripts/orchestrate.mjs"
+  if [ ! -f "$CONDUCTOR_BIN" ]; then
+    echo "minsky: conductor not found at $CONDUCTOR_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
+    exit 1
+  fi
+  exec node "$CONDUCTOR_BIN"
 fi
 
 # ── 5. Foreground mode (default) ─────────────────────────────
