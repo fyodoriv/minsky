@@ -30,28 +30,47 @@ of truth for this machine.
 
 ## 1. Start
 
-**Always use `--daemon` mode** so minsky survives terminal close:
+**Always use `--daemon` mode** so minsky survives terminal close.
+**Always use `--host <dir>` for a specific repo** — NOT `--hosts-dir`
+unless the operator explicitly asked for multi-repo mode. The most
+common mistake is launching `--hosts-dir` when the operator wanted
+a single repo. When in doubt, ask.
 
 | User intent | Command |
 |---|---|
-| "run minsky on all repos" | `minsky --daemon --hosts-dir ~/apps/tooling` |
-| "run minsky here" | `minsky --daemon` |
+| "run minsky on minsky" / "minsky on itself" | `minsky --daemon --host ~/apps/tooling/minsky` |
+| "run minsky here" (from inside a repo) | `minsky --daemon --host $(pwd)` |
 | "run minsky on ~/apps/foo" | `minsky --daemon --host ~/apps/foo` |
+| "run minsky on ALL repos" (explicit) | `minsky --daemon --hosts-dir ~/apps/tooling` |
 | "dry run" | `minsky --no-live --once` (blocking OK for dry-run) |
 
-After starting, **immediately verify** it launched:
+After starting, **immediately verify TWO things**:
+1. The daemon is running (`running (PID ...)`)
+2. It targets the **correct folder** (check the `--host` or `--hosts-dir` in the process args)
 
 ```bash
-minsky --daemon --hosts-dir ~/apps/tooling 2>&1
+minsky --daemon --host ~/apps/tooling/minsky 2>&1
 sleep 3
-minsky status 2>&1 | head -5   # must show "running (PID ...)"
+# Verify: must show "running" AND the correct --host path
+minsky status 2>&1 | head -5
+ps aux | grep minsky-run | grep -v grep | head -1
+# ^^^ the process args must contain the folder the operator requested
+```
+
+**Target verification** — if the process args show a different folder
+than the operator requested, STOP and restart with the correct `--host`:
+
+```bash
+# WRONG: operator said "minsky on minsky" but daemon shows --hosts-dir
+minsky stop 2>&1 || true; rm -f ~/.minsky/daemon.pid
+minsky --daemon --host ~/apps/tooling/minsky 2>&1
 ```
 
 If `minsky status` shows "stale PID file", clean up and retry:
 
 ```bash
 rm -f ~/.minsky/daemon.pid
-minsky --daemon --hosts-dir ~/apps/tooling 2>&1
+minsky --daemon --host ~/apps/tooling/minsky 2>&1
 ```
 
 ## 2. Monitor loop (the core of this skill)
@@ -62,9 +81,17 @@ Poll status and logs with short commands:
 ### Health check (run every 30-60s)
 
 ```bash
-# One-liner health probe
-minsky status 2>&1 | head -3 && ps aux | grep 'devin.*print\|claude.*print' | grep -v grep | wc -l | xargs echo "agent procs:" && tail -3 ~/.minsky/daemon.log
+# One-liner health probe — checks running + correct target + agent activity
+minsky status 2>&1 | head -3 \
+  && echo "target: $(ps aux | grep minsky-run | grep -v grep | grep -oE '\-\-host[s-dir]* [^ ]+' | head -1)" \
+  && ps aux | grep 'devin.*print\|claude.*print' | grep -v grep | wc -l | xargs echo "agent procs:" \
+  && tail -3 ~/.minsky/daemon.log
 ```
+
+**CRITICAL**: every health check must confirm the `target:` line shows
+the folder the operator requested. If it shows `--hosts-dir` when the
+operator wanted `--host <specific-repo>` (or vice versa), the daemon is
+running on the **wrong target** — stop and restart immediately.
 
 ### Read iteration results (the real signal)
 
@@ -79,8 +106,9 @@ done
 
 | Signal | Meaning | Action |
 |---|---|---|
-| `running (PID ...)` in status | healthy | no action |
+| `running (PID ...)` in status | healthy | verify target folder matches operator request |
 | `stale PID file` in status | daemon died | clean PID + restart (§3) |
+| target shows wrong `--host` or `--hosts-dir` | **wrong target** | **stop immediately** + restart with correct `--host` |
 | `recs` count increasing | iterations completing | healthy — report to operator |
 | `verdict: validated, pr_url: null` | devin worked but no PR | known bug — iterations still useful, will be fixed |
 | `verdict: validated, pr_url: https://...` | **PR opened!** 🎉 | report to operator immediately |
