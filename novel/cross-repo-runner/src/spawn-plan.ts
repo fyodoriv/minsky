@@ -73,7 +73,18 @@ export function buildSpawnPlan(inputs: SpawnPlanInputs): RunnerPlan {
       hostRepo: config.host_repo,
       preCommitCommand: config.pre_commit_command,
     }),
-    brief: renderBrief({ task, hostRepo: config.host_repo, branchName }),
+    brief: [
+      renderBrief({ task, hostRepo: config.host_repo, branchName }),
+      "",
+      "---",
+      "",
+      renderSystemPromptOverlay({
+        visionMdPath: visionMdPath ?? ".minsky/vision.md",
+        taskId: task.id,
+        hostRepo: config.host_repo,
+        preCommitCommand: config.pre_commit_command,
+      }),
+    ].join("\n"),
     preCommitCommand: config.pre_commit_command,
   };
 }
