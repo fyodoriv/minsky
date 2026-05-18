@@ -20,11 +20,21 @@ operator surface. The **pure render core** ships across two slices:
 
 Both renderers are pure (`model → string[]`); colour is opt-in so the
 layout is deterministically unit-tested and the future TTY shim flips
-`color: true` at the I/O edge. The I/O shim (gather `os` telemetry,
-read `.minsky/*.log` / ledger / launchd, write the tty, read
-keystrokes), the `bin/minsky` no-arg/auto-open wiring, and the rule
-#10 ratchet that retires `@minsky/dashboard-web` land in later slices
-of TASKS.md `runany-retro-tui-dashboard`.
+`color: true` at the I/O edge.
+
+- **I/O shim** (`gatherMachineRaw`, `listLogFiles`): the injected edge
+  that fills the screen-1/2 models from real data — `node:os` +
+  `fs.statfsSync` → `MachineRaw` (no `df` subprocess), and a run's
+  `.minsky/` dir → the name-sorted, size-tagged `LogFile[]`. Each
+  gatherer is pure relative to an injected `MachineProbe` /
+  `LogDirProbe` (production binds the `node:` default; tests pass a
+  frozen fixture), and the default probes degrade a denied syscall to a
+  safe zero/empty rather than throw (rule #6/#7).
+
+The remaining tty write/keystroke loop, the `bin/minsky`
+no-arg/auto-open wiring, and the rule #10 ratchet that retires
+`@minsky/dashboard-web` land in later slices of TASKS.md
+`runany-retro-tui-dashboard`.
 
 ## Pattern conformance
 
@@ -65,6 +75,8 @@ Per constitutional rule #7 (vision.md § 7).
 | 4 | Repo path empty or `/` | upstream-malformed | REPO column renders `—` (explicit, not blank) | `novel/tui/test/render.test.ts` |
 | 5 | Zero running minsky processes | steady-idle | coherent notice board at full box width | `novel/tui/test/render.test.ts` |
 | 6 | Process row wider than the REPO column | layout-overflow | basename truncated with an ellipsis; line still exactly box-width | `novel/tui/test/render.test.ts` |
+| 7 | `os`/`statfs` syscall denied or missing | resource / perm fault | default `MachineProbe` degrades to safe zeros; panel renders `0%`, no throw | `novel/tui/test/gather.test.ts` |
+| 8 | Run's `.minsky/` dir missing / a log un-stat-able | telemetry-missing | `listLogFiles` → `[]` (notice board) / size kept `-1` (row renders `?`) | `novel/tui/test/gather.test.ts` |
 
 ## Threat model
 
@@ -110,13 +122,15 @@ Howard & LeBlanc, *Writing Secure Code*, 2003.
 ```ts
 import {
   formatMachineInfo,
+  gatherMachineRaw,
   renderDashboard,
   scanMinskyProcesses,
 } from "@minsky/tui";
 
-// The scan substrate is composed from @minsky/cross-repo-runner.
+// The scan substrate is composed from @minsky/cross-repo-runner; the
+// I/O shim reads os/statfs at the edge (default node: probe).
 const procs = scanMinskyProcesses();
-const machine = formatMachineInfo(rawTelemetry); // raw os/df at the edge
+const machine = formatMachineInfo(gatherMachineRaw(procs.length));
 for (const line of renderDashboard({ machine, procs, selectedIndex: 0 }, { color: process.stdout.isTTY })) {
   process.stdout.write(`${line}\n`);
 }

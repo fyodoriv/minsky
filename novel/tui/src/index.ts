@@ -12,9 +12,10 @@
  *   retro 80x24 dashboard renderer for screen 1 (new in slice 1).
  * - `renderDetail` / `formatLogRow` — the pure retro screen-2 renderer
  *   (process detail + `.minsky/*.log` list) (new in slice 2).
+ * - `gatherMachineRaw` / `listLogFiles` — the injected I/O shim that
+ *   feeds the screen-1/2 pure cores their real data (new in slice 3).
  *
- * The I/O shim (gather `os` telemetry, read `.minsky/*.log` / ledger /
- * launchd, write to the tty, read keystrokes) and the `bin/minsky`
+ * The remaining tty write/keystroke loop and the `bin/minsky`
  * no-arg/auto-open wiring land in later slices of TASKS.md
  * `runany-retro-tui-dashboard`; that wiring slice also fires the rule
  * #10 ratchet (remove `@minsky/dashboard-web` + the lighthouse gate in
@@ -46,3 +47,11 @@ export {
   type DetailRenderOpts,
   type LogFile,
 } from "./detail.js";
+export {
+  defaultLogDirProbe,
+  defaultMachineProbe,
+  gatherMachineRaw,
+  listLogFiles,
+  type LogDirProbe,
+  type MachineProbe,
+} from "./gather.js";
