@@ -17,6 +17,7 @@ import {
   DEFAULT_OPENCODE_MODEL,
   buildAiderInvocation,
   buildClaudePrintInvocation,
+  buildDevinPrintInvocation,
   buildOpencodeInvocation,
 } from "./llm-invocation.js";
 
@@ -51,6 +52,75 @@ describe("llm-invocation / buildClaudePrintInvocation", () => {
   it("argv is frozen (cannot be mutated)", () => {
     const inv = buildClaudePrintInvocation({ brief: "h" });
     expect(Object.isFrozen(inv.argv)).toBe(true);
+  });
+});
+
+describe("llm-invocation / buildDevinPrintInvocation — slice (a)+(b) of `devin-cloud-agent-spawn-strategy`", () => {
+  it("returns command='devin' with brief on stdin (same I/O contract as claude --print)", () => {
+    const inv = buildDevinPrintInvocation({ brief: "hello" });
+    expect(inv.command).toBe("devin");
+    expect(inv.stdin).toBe("hello");
+  });
+
+  it("argv has --print and --permission-mode dangerous as fixed flags", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h" });
+    expect(inv.argv[0]).toBe("--print");
+    expect(inv.argv).toContain("--permission-mode");
+    expect(inv.argv).toContain("dangerous");
+  });
+
+  it("--model is included when opts.model is set", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h", model: "claude-opus-4-7-max" });
+    expect(inv.argv).toContain("--model");
+    expect(inv.argv).toContain("claude-opus-4-7-max");
+  });
+
+  it("--model is omitted when opts.model is undefined (devin uses DEVIN_MODEL env or session default)", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h" });
+    expect(inv.argv).not.toContain("--model");
+  });
+
+  it("appends extraArgs after fixed flags", () => {
+    const inv = buildDevinPrintInvocation({
+      brief: "h",
+      extraArgs: ["--worktree", "daemon-1-foo"],
+    });
+    expect(inv.argv).toContain("--worktree");
+    expect(inv.argv).toContain("daemon-1-foo");
+    expect(inv.argv.indexOf("--worktree")).toBeGreaterThan(inv.argv.indexOf("dangerous"));
+  });
+
+  it("override command for fixture binary", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h", command: "/private/devin" });
+    expect(inv.command).toBe("/private/devin");
+  });
+
+  it("cwd override flows through to invocation.cwd", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h", cwd: "/path/to/worktree" });
+    expect(inv.cwd).toBe("/path/to/worktree");
+  });
+
+  it("cwd absent stays undefined (no cwd key on object)", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h" });
+    expect("cwd" in inv).toBe(false);
+  });
+
+  it("preserves brief verbatim including whitespace and special chars", () => {
+    const brief = "task brief\n  with\ttabs\n  and emoji 🚀";
+    const inv = buildDevinPrintInvocation({ brief });
+    expect(inv.stdin).toBe(brief);
+  });
+
+  it("argv is frozen (cannot be mutated)", () => {
+    const inv = buildDevinPrintInvocation({ brief: "h" });
+    expect(Object.isFrozen(inv.argv)).toBe(true);
+  });
+
+  it("referential transparency: same input → same output", () => {
+    const a = buildDevinPrintInvocation({ brief: "x", model: "claude-opus-4-7-max" });
+    const b = buildDevinPrintInvocation({ brief: "x", model: "claude-opus-4-7-max" });
+    expect(a).toEqual(b);
+    expect(a.argv).not.toBe(b.argv);
   });
 });
 

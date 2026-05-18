@@ -6,30 +6,26 @@ description: Report what Minsky is doing on this host right now — any running 
 
 ## Steps
 
-### 1. Show running processes
+### 1. Show daemon status
 
 <!-- turbo -->
 ```bash
 minsky status
 ```
 
-Output is either `pgrep -a` of every running `minsky-run` process
-(with PID + full argv so the operator sees which host each one is
-driving) or `no running minsky-run on this host`.
+Shows PID, uptime, and last 10 log lines when a daemon is running.
+Also detects foreground processes started without `--daemon`.
 
-### 2. Tail the observer log, if one exists
+### 2. Tail the daemon log if more context needed
 
 <!-- turbo -->
 ```bash
-test -f .minsky/observer.log && tail -20 .minsky/observer.log || echo "no observer log in $(pwd)"
+tail -30 ~/.minsky/daemon.log 2>/dev/null || echo "no daemon log"
 ```
-
-Each line is JSON: `{ts, action, reason, pid?, pr?}`. The newest
-entries are at the bottom.
 
 ### 3. Summarise for the operator
 
-Produce a one-line verdict: "Minsky is running against `<host>`,
-currently on iteration N, last verdict `validated`. No observer
-actions needed." OR "Nothing running; log shows 3 restarts at <ts>
-then a PR was filed at <url>."
+Produce a one-line verdict: "Minsky daemon running (PID X, uptime Yh),
+walking N hosts, last iteration on `<host>` verdict `validated`." OR
+"Not running. Last run ended at <ts> with stopReason `<reason>`.
+Restart with: `minsky --daemon --hosts-dir ~/apps/tooling`"

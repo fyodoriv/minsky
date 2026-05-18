@@ -84,6 +84,7 @@ import {
   buildAiderInvocation,
   buildChildWorkerArgs,
   buildClaudePrintInvocation,
+  buildDevinPrintInvocation,
   buildOpencodeInvocation,
   createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
@@ -409,6 +410,20 @@ const localAgent = (() => {
   return raw === "opencode" ? "opencode" : "aider";
 })();
 const opencodeBin = process.env.MINSKY_LOCAL_LLM_OPENCODE_BIN ?? "opencode";
+// `devin-cloud-agent-spawn-strategy` slice (c) — `MINSKY_CLOUD_AGENT`
+// selects which CLI the cloud-dispatch path invokes. Default `claude` for
+// back-compat. When set to `devin`, the cloud strategy spawns
+// `devin --print --model <model> --permission-mode dangerous` (brief on
+// stdin, same I/O contract as claude --print) instead of `claude --print`.
+// Per-machine config via dotfiles: `export MINSKY_CLOUD_AGENT=devin` in
+// zshrc.ai-tools. Invalid values normalise to `claude` (rule #7
+// graceful-degrade — don't crash over a typo).
+const cloudAgent = (() => {
+  const raw = (process.env.MINSKY_CLOUD_AGENT ?? "").trim().toLowerCase();
+  return raw === "devin" ? "devin" : "claude";
+})();
+const cloudAgentModel = (process.env.MINSKY_CLOUD_AGENT_MODEL ?? "").trim() || undefined;
+const devinBin = process.env.MINSKY_DEVIN_BIN ?? "devin";
 // Slice 3 — per-agent probe URL default. LM Studio's documented default
 // port is 1234 (`http://127.0.0.1:1234/v1/models`); mlx-lm.server's is
 // 8080. When the operator pins `MINSKY_LOCAL_LLM_PROBE_URL` explicitly,
@@ -520,26 +535,42 @@ async function probeLocalLlm() {
 }
 
 function buildClaudeStrategy() {
-  return dryRun
-    ? new DryRunSpawnStrategy()
-    : new ProcessSpawnStrategy({
-        command: "claude",
-        ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-        invocation: (input) => {
-          // Slice 5: strategic picker computes the model per-iteration
-          // when `MINSKY_STRATEGIC_ROUTER=1`. The picker is pure; the
-          // remaining-fractions snapshot is fresh per spawn (cheap —
-          // Maciek parses cached JSONL).
-          const strategicModel = strategicRouterEnabled ? pickAndLogStrategicModel() : undefined;
-          return buildClaudePrintInvocation({
-            brief: input.brief,
-            ...(strategicModel === undefined ? {} : { model: strategicModel }),
-            ...(input.extraArgs && input.extraArgs.length > 0
-              ? { extraArgs: input.extraArgs }
-              : {}),
-          });
-        },
+  if (dryRun) return new DryRunSpawnStrategy();
+  // `devin-cloud-agent-spawn-strategy` slice (c): dispatch between
+  // claude --print and devin --print based on MINSKY_CLOUD_AGENT env.
+  if (cloudAgent === "devin") {
+    process.stdout.write(
+      `[tick-loop] cloud-agent=devin (bin=${devinBin}${cloudAgentModel ? `, model=${cloudAgentModel}` : ""})\n`,
+    );
+    return new ProcessSpawnStrategy({
+      command: devinBin,
+      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+      invocation: (input) => {
+        return buildDevinPrintInvocation({
+          brief: input.brief,
+          ...(cloudAgentModel === undefined ? {} : { model: cloudAgentModel }),
+          command: devinBin,
+          ...(input.extraArgs && input.extraArgs.length > 0 ? { extraArgs: input.extraArgs } : {}),
+        });
+      },
+    });
+  }
+  return new ProcessSpawnStrategy({
+    command: "claude",
+    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    invocation: (input) => {
+      // Slice 5: strategic picker computes the model per-iteration
+      // when `MINSKY_STRATEGIC_ROUTER=1`. The picker is pure; the
+      // remaining-fractions snapshot is fresh per spawn (cheap —
+      // Maciek parses cached JSONL).
+      const strategicModel = strategicRouterEnabled ? pickAndLogStrategicModel() : undefined;
+      return buildClaudePrintInvocation({
+        brief: input.brief,
+        ...(strategicModel === undefined ? {} : { model: strategicModel }),
+        ...(input.extraArgs && input.extraArgs.length > 0 ? { extraArgs: input.extraArgs } : {}),
       });
+    },
+  });
 }
 
 /**
