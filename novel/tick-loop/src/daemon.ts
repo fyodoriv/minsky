@@ -1583,6 +1583,14 @@ function collectRankedTasks(sliced: string): RankedTask[] {
   return ranked;
 }
 
+/**
+ * Rank every eligible P0+P1 task ID in priority-then-file order. The
+ * claim-aware candidate walk (`pickAndClaim`) and `pickTask` consume
+ * this list. Pure over the in-memory TASKS.md string.
+ *
+ * @otel-exempt pure ranking helper; the `tick-loop.*` spans live at the
+ *   call-sites (`pickAndClaim` / `runClaimedIteration`).
+ */
 export function listEligibleTasks(tasksMd: string): readonly string[] {
   const ranked = collectRankedTasks(sliceP0P1(tasksMd));
   ranked.sort((a, b) => a.pri - b.pri || a.idx - b.idx);
