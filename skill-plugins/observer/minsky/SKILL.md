@@ -1,82 +1,135 @@
 ---
 name: minsky
-description: Start the Minsky autonomous run loop on the current folder (or a named folder) and observe it from the calling agent session. The caller watches the loop, restarts on transient crash, attempts safe bounded healing only when the fix is obvious (env-var typo, missing directory), logs every action, and — when a failure pattern exceeds the retry budget — swiftly opens a draft P0 PR upstream (Minsky's repo for cross-repo-runner bugs; the host repo for host-side bugs) so the fix-forward loop stays visible to maintainers. Use when the user says "run minsky here", "start minsky", "minsky on this folder", "observe minsky", "watch the minsky loop", or similar.
+description: Start the Minsky autonomous run loop and PROACTIVELY monitor it. The caller launches minsky, then enters a monitoring loop — checking health every 30s, reading experiment records for verdicts + PR URLs, healing stale PIDs and spawn failures, restarting on crash, and reporting progress to the operator. Use when the user says "run minsky", "start minsky", "observe minsky", "watch minsky", "monitor minsky", "keep minsky running", or similar. CRITICAL — never block on a long-running command. Always use non-blocking spawns + periodic status checks.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # Minsky observer
 
-The operator-side wrapper + observer protocol for the Minsky cross-repo
-runner. This skill turns the calling agent session (Claude Code, Cursor,
-Devin, any agent agentbrew syncs to) into a **safety supervisor** sitting
-one layer above `minsky-run`: watches the loop, heals the easy cases,
-escalates the hard cases by opening a PR in the right upstream repo.
+You are the **safety supervisor** sitting one layer above the minsky
+daemon. Your job: launch it, watch it, heal it, report on it. You are
+the operator's eyes while minsky runs autonomously.
 
-> **Pattern anchor** — Perrow 1984, *Normal Accidents* (an independent
-> monitor outside the primary control loop catches failures the loop
-> can't see about itself); Beyer et al. 2016, *Site Reliability
-> Engineering* § "Error Budgets" (the retry budget + swift-PR threshold
-> are the observer's error-budget enforcement); rule #6 (operator
-> escape hatch — the observer never silently degrades, it always either
-> heals visibly or escalates visibly).
+## 0. Pre-flight (before starting)
+
+```bash
+# 1. Check config — which agent/model will minsky use?
+cat ~/.minsky/config.json
+# 2. Kill anything stale
+minsky stop 2>/dev/null; rm -f ~/.minsky/daemon.pid
+# 3. Verify agents are available
+claude --version 2>&1 | head -1   # or devin --version
+# 4. Check disk space and machine load
+df -h / | tail -1; uptime
+```
+
+**CRITICAL**: check `~/.minsky/config.json` first. The `cloud_agent`
+field determines which agent runs. NEVER override it with an env var
+unless the operator explicitly says to — the config file is the source
+of truth for this machine.
 
 ## 1. Start
 
-Pick the invocation based on the user's intent:
+**Always use `--daemon` mode** so minsky survives terminal close:
 
 | User intent | Command |
 |---|---|
-| "run minsky here", "start minsky" (inside a bootstrapped host) | `minsky` |
-| "run minsky on ~/apps/foo" | `minsky --host ~/apps/foo` |
-| "walk all bootstrapped repos under ~/apps" | `minsky --hosts-dir ~/apps` |
-| "dry run / just tell me what it would do" | `minsky --no-live --once` |
+| "run minsky on all repos" | `minsky --daemon --hosts-dir ~/apps/tooling` |
+| "run minsky here" | `minsky --daemon` |
+| "run minsky on ~/apps/foo" | `minsky --daemon --host ~/apps/foo` |
+| "dry run" | `minsky --no-live --once` (blocking OK for dry-run) |
 
-`minsky` (the PATH shim) resolves the Minsky repo via `MINSKY_REPO`
-env var → `~/apps/tooling/minsky` fallback → common community layouts;
-from there it forwards to `novel/cross-repo-runner/bin/minsky-run.mjs`
-with autonomous defaults (`--live --loop --cto-audit --seed-on-empty`).
-A 3-second countdown banner prints before the first live spawn unless
-`MINSKY_NON_INTERACTIVE=1`.
+After starting, **immediately verify** it launched:
 
-If the host isn't bootstrapped yet, the runner exits 1 with `Run
-minsky-bootstrap <host> first`. Run `minsky-bootstrap $(pwd)` and try
-again.
+```bash
+minsky --daemon --hosts-dir ~/apps/tooling 2>&1
+sleep 3
+minsky status 2>&1 | head -5   # must show "running (PID ...)"
+```
 
-## 2. Watch
+If `minsky status` shows "stale PID file", clean up and retry:
 
-Capture the runner's stdout — tail it; do NOT block on it. The
-autonomous loop prints one banner per host-iteration and one
-`iteration record written` line per successful spawn. Watch for the
-markers below and classify every 30s tick:
+```bash
+rm -f ~/.minsky/daemon.pid
+minsky --daemon --hosts-dir ~/apps/tooling 2>&1
+```
 
-| Signal | Meaning | Observer action |
+## 2. Monitor loop (the core of this skill)
+
+**NEVER block on a minsky command.** NEVER `sleep` for more than 30s.
+Poll status and logs with short commands:
+
+### Health check (run every 30-60s)
+
+```bash
+# One-liner health probe
+minsky status 2>&1 | head -3 && ps aux | grep 'devin.*print\|claude.*print' | grep -v grep | wc -l | xargs echo "agent procs:" && tail -3 ~/.minsky/daemon.log
+```
+
+### Read iteration results (the real signal)
+
+```bash
+# Find all experiment records and show the latest verdict + PR URL
+find ~/apps/tooling -path '*.minsky/experiment-store/cross-repo/*.jsonl' -exec tail -1 {} \; 2>/dev/null | while read line; do
+  echo "$line" | python3 -c "import sys,json;d=json.load(sys.stdin);print(f'{d[\"host_repo\"]:30} v={d[\"verdict\"]:12} pr={d.get(\"pr_url\") or \"null\":8} {d[\"notes\"][:40]}')" 2>/dev/null
+done
+```
+
+### Signal classification
+
+| Signal | Meaning | Action |
 |---|---|---|
-| `stopReason: empty-queue` | Queue drained, either exit or seed | normal; no action |
-| `stopReason: max-iterations` | Operator-set cap hit | normal; no action |
-| `stopReason: aborted` | SIGTERM received | normal; no action |
-| `stopReason: scope-leak` | Spawn wrote outside allowed paths | **halt** — do NOT restart. File upstream PR (§5). |
-| `stopReason: spawn-failed` | Non-zero exit from `claude --print` | restart once with 10s backoff; if 3 in 60s, escalate |
-| no output for >15 min + process alive | stuck | SIGTERM + restart once; if recurs within 60 min, escalate |
-| process exited with no `stopReason` | crash | restart once with 10s backoff; if 3 in 60s, escalate |
+| `running (PID ...)` in status | healthy | no action |
+| `stale PID file` in status | daemon died | clean PID + restart (§3) |
+| `recs` count increasing | iterations completing | healthy — report to operator |
+| `verdict: validated, pr_url: null` | devin worked but no PR | known bug — iterations still useful, will be fixed |
+| `verdict: validated, pr_url: https://...` | **PR opened!** 🎉 | report to operator immediately |
+| `verdict: spawn-failed, 900...ms` | watchdog killed a slow iteration | known issue — daemon continues automatically |
+| `verdict: spawn-failed, <5000ms` | spawn died immediately | check agent auth (`claude/devin --version`) |
+| `verdict: scope-leak` | agent wrote outside allowed paths | **halt** — do NOT restart. File PR (§5). |
+| daemon process gone, no stale PID | clean exit | check `stopReason` in log, restart if needed |
+| no new records for 20+ min | stuck iteration | check if agent process is alive; if CPU=0% for 5min, SIGTERM daemon + restart |
 
-Update the operator every 2-3 iterations with a one-line summary
-("iteration 7: validated `proj-840-slash-command-labels` → PR opened;
-queue has 3 more P0 tasks").
+### Report to operator
+
+Every 2-3 iterations, give a **one-line** summary:
+
+> "minsky: 3 iterations on agentbrew (2 validated, 1 watchdog-killed), now on dotfiles. Daemon healthy 15min. 0 PRs opened (known bug)."
 
 ## 3. Restart (bounded)
 
-`minsky-run` is idempotent by design — restarting it simply picks the
-next eligible task. The observer's restart policy:
+### Stale PID cleanup (most common issue)
 
-- **Budget**: ≤3 restarts per 60-minute window per failure class.
-- **Backoff**: 10 s, 30 s, 120 s (exponential).
-- **Signal**: SIGTERM first (the runner's abort handler drains the
-  in-flight iteration); SIGKILL only after a 30 s grace window.
-- **State**: always print `restart N of 3 (reason: <class>)` so the
-  operator sees every restart. Silent retry is a rule #7 violation.
+```bash
+minsky stop 2>&1 || true
+rm -f ~/.minsky/daemon.pid
+sleep 2
+minsky --daemon --hosts-dir ~/apps/tooling 2>&1
+sleep 3
+minsky status 2>&1 | head -3   # verify
+```
 
-If the budget is exhausted, STOP — do NOT restart further. Jump to §5
-(Swift-PR).
+### Restart policy
+
+- **Budget**: ≤5 restarts per 60-minute window.
+- **Backoff**: 10s, 30s, 60s, 120s, 120s.
+- **Always** clean the PID file before restart.
+- **Always** verify with `minsky status` after restart.
+- **Always** print: `⚠️ restart N/5 (reason: <class>)`.
+
+If budget exhausted → **STOP** and jump to §5 (Swift-PR).
+
+## 3b. Anti-stuck patterns (learned 2026-05-18)
+
+| Pattern | Symptom | Fix |
+|---|---|---|
+| **Stale PID** | `minsky --daemon` says "already running" but status says "stale" | `rm -f ~/.minsky/daemon.pid` then retry |
+| **Walker stuck on one host** | daemon.log shows same host for 10+ iterations | Per-host cap should be 3 (fixed 2026-05-18); if still stuck, restart daemon |
+| **Devin stdin panic** | `spawn-failed` at <5s, stderr "unexpected argument" | Fixed 2026-05-18 (`--prompt-file` instead of stdin). If seen, pull latest minsky and rebuild. |
+| **15min watchdog kills** | `spawn-failed` at exactly 900000ms | Devin iterations take 5-15min; watchdog is too aggressive. Known P0. Daemon auto-continues. |
+| **GraphQL errors** | `Could not resolve to a Repository` in log | Cosmetic — gh token context mismatch. Non-fatal. Ignore. |
+| **Two minsky-run processes** | `ps aux` shows 2 PIDs for minsky-run | `minsky stop` kills all; old daemon wasn't fully terminated. Always verify with `ps aux` after stop. |
+| **scope-leak from dirty tree** | `scope-leak` after you edited files | Commit your changes first, then restart. Minsky detects uncommitted changes as scope violations. |
 
 ## 4. Safe-heal (very bounded)
 
@@ -98,6 +151,11 @@ hold:
 | `Run minsky-bootstrap <host> first` | Same — run the bootstrap. |
 | `node: command not found` | Out of scope — tell the operator to `nvm install 20` and exit. |
 | `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
+| `stale PID file (PID XXXX not running)` | `rm -f ~/.minsky/daemon.pid` then retry. This is the #1 most common issue. |
+| `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, clean PID file; if alive, the daemon is fine. |
+| `unexpected argument` from devin | Minsky build is stale — `cd ~/apps/tooling/minsky && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
+| `MODULE_NOT_FOUND` from biome/lefthook | Node version mismatch or missing platform deps. Run `pnpm install` in the minsky repo. |
+| `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
 
 **NEVER**:
 
@@ -234,3 +292,93 @@ Before considering the observing job done:
 - [ ] If any PR was filed, its URL was printed to the operator.
 - [ ] No silent retries (rule #7 discipline).
 - [ ] The operator has a one-sentence summary of what happened.
+
+## 8. Tips & tricks (operational knowledge)
+
+### Command timeout discipline
+
+**NEVER run a minsky command as a blocking call that could hang.**
+Every command should complete in <30s or be run non-blocking:
+
+- `minsky status` — always fast (<2s). Safe to block.
+- `minsky stop` — fast (<5s). Safe to block.
+- `minsky --daemon` — returns immediately (daemon backgrounds). Safe.
+- `minsky --host X --once --no-live` — can take minutes. Run non-blocking or with a timeout.
+- `minsky --host X --once --live` — can take 5-15 min. NEVER block on this.
+- `tail -N ~/.minsky/daemon.log` — always fast. Safe.
+- `ps aux | grep devin` — always fast. Safe.
+
+### Key files to read
+
+| File | What it tells you |
+|---|---|
+| `~/.minsky/config.json` | Which agent + model this machine uses |
+| `~/.minsky/daemon.log` | Daemon stdout — host walks, experiment writes |
+| `~/.minsky/daemon.pid` | PID of the running daemon (stale = daemon died) |
+| `<host>/.minsky/experiment-store/cross-repo/*.jsonl` | Per-task iteration records (verdict, PR URL, duration) |
+| `<host>/.minsky/experiments/*.yaml` | Per-task experiment YAML (hypothesis, measurement) |
+| `<host>/.minsky/observer.log` | Your own audit trail |
+| `<host>/.minsky/repo.yaml` | Host config (repo slug, branch prefix, pre-commit) |
+
+### Per-agent quirks
+
+**Devin** (`cloud_agent: "devin"`):
+- Brief delivery: `--prompt-file` (NOT stdin — devin panics on stdin pipe).
+- Typical iteration time: 5-15 min (longer than Claude due to API routing).
+- Watchdog: 900s (15 min) default — will kill slow-but-productive iterations. Known P0.
+- PR creation: devin needs explicit instructions in the brief to run `gh pr create`.
+- Permission mode: `--permission-mode dangerous` (unattended daemon).
+
+**Claude Code** (`cloud_agent: "claude"`):
+- Brief delivery: stdin (`child.stdin.end(brief)`).
+- Typical iteration time: 3-10 min.
+- Watchdog: 900s default, overridable via `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`.
+- May hang with 0% CPU — the 2026-05-07 hang ran 1h56m. The watchdog exists for this.
+
+**Aider / local** (`--local` mode):
+- Brief delivery: `--message-file` (written to temp file).
+- Typical iteration time: 10-30 min (local models are slower).
+- Watchdog: 1800s (30 min) default.
+- Requires ollama running: `ollama serve` must be active.
+
+### Multi-host walk behavior
+
+- Hosts are walked **alphabetically** by directory name.
+- Each host gets **at most 3 iterations** per walk pass (per-host cap).
+- After all hosts are drained, the walker **loops** (starts over from the first host).
+- `spawn-failed` on one host **skips** to the next (doesn't halt the walk).
+- `scope-leak` on any host **halts** the entire walk.
+- `empty-queue` on a host → advance to next host.
+
+### Interpreting experiment records
+
+```bash
+# Quick session summary
+for f in ~/apps/tooling/*/.minsky/experiment-store/cross-repo/*.jsonl; do
+  [ -f "$f" ] || continue
+  total=$(wc -l < "$f")
+  validated=$(grep -c '"validated"' "$f")
+  failed=$(grep -c '"spawn-failed"' "$f")
+  prs=$(grep -c '"pr_url":"http' "$f")
+  host=$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$f")")")")")
+  task=$(basename "$f" .jsonl)
+  echo "$host/$task: $total total, $validated validated, $failed failed, $prs PRs"
+done
+```
+
+### When to commit before starting minsky
+
+If you've made changes to the minsky repo (or any host repo) that are
+uncommitted, **commit them first**. The scope-leak detector will flag
+uncommitted changes as violations and halt the walk. This is the #1
+cause of `scope-leak` in dogfood mode.
+
+### Session handoff
+
+If you're ending your agent session but minsky should keep running:
+1. Verify `minsky status` shows running.
+2. The daemon is SIGHUP-immune — it survives terminal close.
+3. Log the current state: `minsky status 2>&1 > /tmp/minsky-handoff.txt`
+4. Tell the next session: "minsky daemon PID XXXX is running on
+   ~/apps/tooling. Config: devin + opus. Check `minsky status` and
+   `tail ~/.minsky/daemon.log`."
