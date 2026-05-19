@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -200,8 +201,91 @@ describe("M1 TDD: config-setup", () => {
     expect(src).toContain("config.json");
   });
 
-  test.todo("minsky-init-one-command-bootstrap — npx minsky init works");
-  test.todo("minsky-uninstall-clean-removal — minsky uninstall leaves zero residue");
+  test("bin/minsky has init subcommand", () => {
+    const src = readFileSync(join(REPO_ROOT, "bin", "minsky"), "utf8");
+    expect(src).toContain("init)");
+    expect(src).toContain("default_host");
+  });
+
+  test("bin/minsky has uninstall subcommand (distinct from uninstall-daemon)", () => {
+    const src = readFileSync(join(REPO_ROOT, "bin", "minsky"), "utf8");
+    expect(src).toContain("uninstall)");
+    expect(src).toContain("uninstall-daemon");
+  });
+
+  test("bin/minsky uses portable shell helpers, not python3", () => {
+    // Rule-#17 guard: corporate `python3` wrappers can take 30+ seconds to
+    // bootstrap a uv cache on a fresh HOME, which dominated the runtime of
+    // `minsky report` from a clean test env. The shim must stay zero-deps
+    // at the install layer — node + bash builtins only, no python3.
+    // Discovered 2026-05-19; fix at `_minsky_realpath` + `_minsky_config_value`.
+    const src = readFileSync(join(REPO_ROOT, "bin", "minsky"), "utf8");
+    // Strip comments so the documented-but-not-executed reference doesn't
+    // trip this check.
+    const codeOnly = src
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("#"))
+      .join("\n");
+    expect(codeOnly).not.toMatch(/python3 -c/);
+    // Positive assertion: the helpers exist.
+    expect(src).toContain("_minsky_realpath()");
+    expect(src).toContain("_minsky_config_value()");
+  });
+
+  test("minsky init writes ~/.minsky/config.json with default_host=cwd", () => {
+    const host = makeHost();
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    execFileSync(binPath, ["init"], { cwd: host, env, encoding: "utf8", timeout: 30_000 });
+    const cfgPath = join(env.HOME ?? "", ".minsky", "config.json");
+    expect(existsSync(cfgPath)).toBe(true);
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { default_host?: string };
+    // Use realpath comparison — macOS resolves /var → /private/var when bash
+    // does `cd ... && pwd`, while node's mkdtempSync returns /var/... directly.
+    expect(cfg.default_host).toBeDefined();
+    expect(realpathSync(cfg.default_host ?? "")).toBe(realpathSync(host));
+  });
+
+  test("minsky init refuses to write when cwd is not a git repo", () => {
+    const dir = mkdtempSync(join(tmpdir(), "m1-init-bad-"));
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    expect(() =>
+      execFileSync(binPath, ["init"], { cwd: dir, env, encoding: "utf8", timeout: 30_000 }),
+    ).toThrow();
+    const cfgPath = join(env.HOME ?? "", ".minsky", "config.json");
+    expect(existsSync(cfgPath)).toBe(false);
+  });
+
+  test("minsky uninstall removes ~/.minsky/config.json with --force", () => {
+    const env = cleanEnv();
+    // Pre-seed a config to be removed
+    mkdirSync(join(env.HOME ?? "", ".minsky"), { recursive: true });
+    writeFileSync(
+      join(env.HOME ?? "", ".minsky", "config.json"),
+      JSON.stringify({ default_host: "/tmp/x" }),
+    );
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    execFileSync(binPath, ["uninstall", "--force"], { env, encoding: "utf8", timeout: 30_000 });
+    expect(existsSync(join(env.HOME ?? "", ".minsky", "config.json"))).toBe(false);
+  });
+
+  test("minsky uninstall WITHOUT --force prints dry-run and keeps config", () => {
+    const env = cleanEnv();
+    mkdirSync(join(env.HOME ?? "", ".minsky"), { recursive: true });
+    writeFileSync(
+      join(env.HOME ?? "", ".minsky", "config.json"),
+      JSON.stringify({ default_host: "/tmp/x" }),
+    );
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["uninstall"], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(out).toContain("dry-run");
+    expect(existsSync(join(env.HOME ?? "", ".minsky", "config.json"))).toBe(true);
+  });
 });
 
 // ─── Category: Task Queue ───────────────────────────────────
@@ -319,6 +403,119 @@ describe("M1 TDD: daemon-health", () => {
   test.todo("daemon-network-resilience-detector — network loss pauses iteration timer");
 });
 
+// ─── Category: Minsky Doctor ────────────────────────────────
+
+describe("M1 TDD: minsky-doctor", () => {
+  test("bin/minsky has doctor subcommand", () => {
+    const src = readFileSync(join(REPO_ROOT, "bin", "minsky"), "utf8");
+    expect(src).toContain("doctor)");
+  });
+
+  test("minsky doctor runs node version + git + gh checks", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["doctor"], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(out).toMatch(/node/i);
+    expect(out).toMatch(/git/i);
+    expect(out).toMatch(/gh|GitHub CLI/i);
+  });
+
+  test("minsky doctor reports green/yellow/red status per check", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["doctor"], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    // ASCII status markers (avoid relying on emoji rendering).
+    // green=PASS, yellow=WARN, red=FAIL.
+    expect(out).toMatch(/PASS|WARN|FAIL/);
+  });
+
+  test("minsky doctor exits 0 when no critical checks fail", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    // On a developer machine with node + git installed, doctor should exit 0.
+    // We don't enforce gh/devin/claude — those are optional.
+    expect(() =>
+      execFileSync(binPath, ["doctor"], { env, encoding: "utf8", timeout: 30_000 }),
+    ).not.toThrow();
+  });
+
+  test("minsky doctor reports daemon status (running or stopped)", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["doctor"], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(out).toMatch(/daemon/i);
+  });
+});
+
+// ─── Category: Minsky Report ────────────────────────────────
+
+describe("M1 TDD: minsky-report", () => {
+  test("bin/minsky has report subcommand", () => {
+    const src = readFileSync(join(REPO_ROOT, "bin", "minsky"), "utf8");
+    expect(src).toContain("report)");
+  });
+
+  test("scripts/minsky-report.mjs exists", () => {
+    expect(existsSync(join(REPO_ROOT, "scripts", "minsky-report.mjs"))).toBe(true);
+  });
+
+  test("minsky report --baseline prints latest snapshot as JSON", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["report", "--baseline", "--repo", REPO_ROOT], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    // Should be parseable JSON and contain at least one metric key.
+    const parsed = JSON.parse(out) as Record<string, { value: unknown }>;
+    expect(Object.keys(parsed).length).toBeGreaterThanOrEqual(1);
+    // Every metric must have a `value`.
+    for (const key of Object.keys(parsed)) {
+      expect(parsed[key]).toHaveProperty("value");
+    }
+  });
+
+  test("minsky report --delta prints baseline-vs-prev diff", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["report", "--delta", "--repo", REPO_ROOT], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    // Output should mention specific metric names from the snapshots.
+    expect(out).toMatch(/loop-uptime|task-throughput|self-improvement-velocity/);
+    // Should include arrow-style directional indicator (up/down/same).
+    expect(out).toMatch(/↑|↓|→|=|\bup\b|\bdown\b|\bsame\b/i);
+  });
+
+  test("minsky report (no flag) prints human-readable summary", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["report", "--repo", REPO_ROOT], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(out).toMatch(/loop-uptime|task-throughput|self-improvement-velocity/);
+    // Not pure JSON — should contain prose / formatting.
+    expect(() => JSON.parse(out)).toThrow();
+  });
+});
+
 // ─── Category: End-to-End Fixtures ──────────────────────────
 
 describe("M1 TDD: fixture-driven e2e", () => {
@@ -368,7 +565,12 @@ describe("M1 TDD: fixture-driven e2e", () => {
     const store = join(dir, ".minsky", "experiment-store", "cross-repo");
     const jsonls = readdirSync(store).filter((f) => f.endsWith(".jsonl"));
     expect(jsonls.length).toBeGreaterThanOrEqual(1);
-    const lines = readFileSync(join(store, jsonls[0]!), "utf8").trim().split("\n").filter(Boolean);
+    const firstJsonl = jsonls[0];
+    expect(firstJsonl).toBeDefined();
+    const lines = readFileSync(join(store, firstJsonl ?? ""), "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
     expect(lines.length).toBe(1);
   });
 });
