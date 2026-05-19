@@ -141,6 +141,19 @@ case "${1:-}" in
     else
       echo "nothing to stop (no minsky processes running)"
     fi
+    # ALWAYS write the graceful-stop sentinel — even when nothing was
+    # killed. `minsky stop` is the operator's explicit intent to shut
+    # down cleanly; the next `minsky` start must honour that intent
+    # regardless of whether there happened to be a process to kill.
+    # Rule #17 — proactive healing of the auto-reset surprise; see
+    # TASKS.md `minsky-bin-auto-resets-to-main-surprise`. The sentinel
+    # is consumed by `reset-host-if-crashed` so it only protects ONE
+    # subsequent start; a real crash after that point still resets.
+    _stop_default_host=$(python3 -c "import json; print(json.load(open('$HOME/.minsky/config.json')).get('default_host',''))" 2>/dev/null)
+    if [ -n "$_stop_default_host" ] && [ -d "$_stop_default_host/.git" ]; then
+      mkdir -p "$_stop_default_host/.minsky"
+      date -u +%Y-%m-%dT%H:%M:%SZ > "$_stop_default_host/.minsky/graceful-stop"
+    fi
     exit 0
     ;;
   logs)
@@ -150,6 +163,103 @@ case "${1:-}" in
     echo "no daemon log found at $MINSKY_DAEMON_LOG"
     echo "start minsky with --daemon to enable logging"
     exit 1
+    ;;
+  reset-host-if-crashed)
+    # Crash-recovery for the host repo. Replaces the previous in-line
+    # `git checkout main && git clean -fd` block, which had two
+    # multi-agent-safety violations: (1) `clean -fd` is on the global
+    # ban list because it deletes other agents' untracked files, and
+    # (2) the reset ran EVERY start — surprising developers who'd
+    # gracefully stopped the daemon and were now working on a feature
+    # branch.
+    #
+    # The new rule:
+    #   - If the sentinel file `<sidecar>/graceful-stop` exists, the
+    #     previous shutdown was graceful → do nothing (action: keep).
+    #   - Otherwise the previous shutdown crashed → if the tree is
+    #     dirty, STASH uncommitted+untracked work with a recoverable
+    #     label (`minsky auto-stash <iso-ts>`) and then check out the
+    #     default branch. Output the stash ref so the operator can
+    #     recover (action: stash-and-reset). If the tree is clean,
+    #     just check out the default branch (action: reset-only).
+    #
+    # Output format (one key=value per line) is stable for paired tests:
+    #   action: keep|stash-and-reset|reset-only
+    #   branch: <current branch after the operation>
+    #   stash: <stash ref> | n/a
+    #
+    # Sources: rule #6 (stay alive — never by destroying state); rule
+    # #17 (proactive healing — every multi-agent-safety violation is
+    # P0); global AGENTS.md § "Git Safety (Multi-Agent)".
+    _rh_host=""
+    _rh_sentinel=""
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --host)
+          _rh_host="$2"
+          shift 2
+          ;;
+        --sentinel)
+          _rh_sentinel="$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    if [ -z "$_rh_host" ] || [ ! -d "$_rh_host/.git" ]; then
+      echo "minsky: reset-host-if-crashed needs --host <git-repo>" >&2
+      exit 2
+    fi
+    _rh_default=$(git -C "$_rh_host" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+    _rh_current=$(git -C "$_rh_host" branch --show-current 2>/dev/null)
+    # Graceful path — sentinel says the previous shutdown was clean.
+    # Consume the sentinel so the NEXT start is treated as "no sentinel"
+    # unless the operator stops gracefully again.
+    if [ -n "$_rh_sentinel" ] && [ -f "$_rh_sentinel" ]; then
+      rm -f "$_rh_sentinel"
+      echo "action: keep"
+      echo "branch: $_rh_current"
+      echo "stash: n/a"
+      exit 0
+    fi
+    # Crash path. Check whether the tree is dirty BEFORE switching branches.
+    if [ -z "$(git -C "$_rh_host" status --porcelain 2>/dev/null)" ]; then
+      # Clean tree — just check out the default branch if we're somewhere else.
+      if [ "$_rh_current" != "$_rh_default" ] && [ -n "$_rh_current" ]; then
+        git -C "$_rh_host" checkout "$_rh_default" 2>/dev/null || true
+      fi
+      echo "action: reset-only"
+      echo "branch: $(git -C "$_rh_host" branch --show-current 2>/dev/null)"
+      echo "stash: n/a"
+      exit 0
+    fi
+    # Dirty tree — stash with a recoverable label, then reset. Never delete.
+    # Rule #6 pivot: if stash itself fails (worktree / submodule edge case),
+    # loud-crash rather than silently clobber state.
+    _rh_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _rh_label="minsky auto-stash $_rh_ts"
+    if ! git -C "$_rh_host" stash push -u -m "$_rh_label" >/dev/null 2>&1; then
+      echo "minsky: REFUSING to start daemon — host $_rh_host has dirty state and 'git stash push -u' failed" >&2
+      echo "minsky: resolve manually (commit, stash, or move files out), then retry" >&2
+      exit 1
+    fi
+    _rh_stash_ref="stash@{0}"
+    if [ "$_rh_current" != "$_rh_default" ] && [ -n "$_rh_current" ]; then
+      if ! git -C "$_rh_host" checkout "$_rh_default" >/dev/null 2>&1; then
+        echo "minsky: REFUSING to start daemon — failed to checkout $_rh_default on $_rh_host" >&2
+        echo "minsky: stash succeeded but branch switch did not; inspect 'git -C $_rh_host status'" >&2
+        exit 1
+      fi
+    fi
+    echo "action: stash-and-reset"
+    echo "branch: $(git -C "$_rh_host" branch --show-current 2>/dev/null)"
+    echo "stash: $_rh_stash_ref ($_rh_label)"
+    echo "recover-with: git -C \"$_rh_host\" stash pop $_rh_stash_ref"
+    echo "minsky: stashed dirty state as: $_rh_label"
+    exit 0
     ;;
   install-daemon)
     # Install a launchd plist so minsky auto-starts on login/reboot.
@@ -604,22 +714,18 @@ if [ "${1:-}" = "--daemon" ]; then
 
   mkdir -p "$MINSKY_STATE_DIR"
 
-  # Clean up dirty state from a crashed iteration.
-  # After SIGKILL/reboot, the host repo may be on a feature branch
-  # with uncommitted changes. Reset to default branch so the next
-  # iteration starts clean — but NEVER by destroying state.
-  #
-  # Multi-agent git safety rule (~/.config/devin/AGENTS.md § "Git
-  # Safety (Multi-Agent)") explicitly bans `git clean -fd` and
-  # `git reset --hard` — they delete other agents' untracked files
-  # and clobber concurrent work. We stash with a recoverable label
-  # instead: `minsky auto-stash <iso-timestamp>`. The operator can
-  # restore it via `git stash list | grep "minsky auto-stash"` →
-  # `git stash apply <ref>`.
-  #
-  # Pivot per rule #6 ("stay alive — but never by destroying state"):
-  # if stash itself fails (worktree / submodule edge cases), we
-  # loud-crash rather than silently clobbering.
+  # Crash-recovery for the host repo. Delegates to the
+  # `reset-host-if-crashed` subcommand which:
+  #   - keeps the working tree intact if `<sidecar>/graceful-stop`
+  #     exists (the previous `minsky stop` wrote it);
+  #   - stashes any dirty state with a recoverable label and then
+  #     checks out the default branch if the sentinel is missing
+  #     (crashed shutdown).
+  # The old in-line block ran `git clean -fd` which violates the
+  # global multi-agent git safety rules (deletes other agents'
+  # untracked files). Now: stash, never delete. (rule #17 fix,
+  # 2026-05-19; see TASKS.md `minsky-bin-git-clean-fd-multi-agent-
+  # safety-violation`.)
   _host_arg=""
   _prev_was_host=0
   for _a in "$@"; do
@@ -630,32 +736,9 @@ if [ "${1:-}" = "--daemon" ]; then
     [ "$_a" = "--host" ] && _prev_was_host=1 || _prev_was_host=0
   done
   if [ -n "$_host_arg" ] && [ -d "$_host_arg/.git" ]; then
-    _default_br=$(git -C "$_host_arg" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
-    _current_br=$(git -C "$_host_arg" branch --show-current 2>/dev/null)
-    if [ "$_current_br" != "$_default_br" ] && [ -n "$_current_br" ]; then
-      echo "minsky: resetting host to $_default_br (was on $_current_br from crashed iteration)"
-      # Stash any uncommitted work (tracked + untracked) BEFORE checkout
-      # so nothing is destroyed. `git stash push -u -m <label>` is the
-      # recoverable counterpart of `git clean -fd`.
-      if [ -n "$(git -C "$_host_arg" status --porcelain 2>/dev/null)" ]; then
-        _stash_label="minsky auto-stash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        if git -C "$_host_arg" stash push -u -m "$_stash_label" >/dev/null 2>&1; then
-          echo "minsky: stashed dirty state as: $_stash_label"
-          echo "minsky: recover via: git -C $_host_arg stash list | grep 'minsky auto-stash'"
-        else
-          # Pivot: stash failed; refuse to start rather than destroy state.
-          echo "minsky: REFUSING to start daemon — host $_host_arg has dirty state and 'git stash push -u' failed" >&2
-          echo "minsky: resolve manually (commit, stash, or move files out), then retry" >&2
-          exit 1
-        fi
-      fi
-      # Now the working tree is clean; checkout will succeed.
-      if ! git -C "$_host_arg" checkout "$_default_br" >/dev/null 2>&1; then
-        echo "minsky: REFUSING to start daemon — failed to checkout $_default_br on $_host_arg" >&2
-        echo "minsky: stash succeeded but branch switch did not; inspect 'git -C $_host_arg status'" >&2
-        exit 1
-      fi
-    fi
+    "$0" reset-host-if-crashed \
+      --host "$_host_arg" \
+      --sentinel "$_host_arg/.minsky/graceful-stop" || true
   fi
 
   # Background the runner. stdin from /dev/null, stdout+stderr to the

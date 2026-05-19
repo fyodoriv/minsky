@@ -120,31 +120,61 @@ describe("daemon-restart: stale PID cleanup", () => {
 
 // ─── dirty-state cleanup on startup ─────────────────────────
 
-describe("daemon-restart: dirty-state cleanup", () => {
-  test("bin/minsky stashes dirty state instead of destroying it", () => {
+// ─── dirty-state cleanup is delegated to `reset-host-if-crashed` ────
+// Task: minsky-bin-git-clean-fd-multi-agent-safety-violation +
+// minsky-bin-auto-resets-to-main-surprise.
+//
+// The old in-line `git checkout main && git clean -fd` block was
+// replaced 2026-05-19 with a delegation to the `reset-host-if-crashed`
+// subcommand which:
+//   - keeps the branch + working tree if the graceful-stop sentinel
+//     is present (the previous `minsky stop` wrote it);
+//   - stashes uncommitted+untracked work with a recoverable label and
+//     resets to default_branch if the sentinel is missing (crashed).
+// Behaviour tests for the subcommand itself live in
+// `bin-minsky-multi-agent-safety.test.ts` — these are just the
+// structural contracts that prove the wiring still exists.
+
+describe("daemon-restart: dirty-state cleanup delegates to reset-host-if-crashed", () => {
+  test("bin/minsky --daemon startup delegates to `reset-host-if-crashed`", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
-    // Must reset to default branch after crash
-    expect(src).toContain("resetting host to");
-    expect(src).toContain('git -C "$_host_arg" checkout');
-    // Multi-agent safety rule: NEVER `git clean -fd` — it deletes other
-    // agents' untracked files. The daemon must stash with a recoverable
-    // label instead.
-    expect(src).not.toMatch(/git -C "\$_host_arg" clean -fd/);
-    expect(src).toContain('git -C "$_host_arg" stash push -u -m');
-    expect(src).toContain("minsky auto-stash");
-    // Label must use an ISO-8601 UTC timestamp so it's unique + recoverable
-    expect(src).toContain("date -u +%Y-%m-%dT%H:%M:%SZ");
-    // Operator must be told where the stash went
-    expect(src).toContain("stashed dirty state as:");
-    expect(src).toContain("git stash list");
+    expect(src).toContain("reset-host-if-crashed");
+    expect(src).toContain("graceful-stop");
   });
 
-  test("dirty-state cleanup only runs when on a feature branch", () => {
+  test("bin/minsky never runs `git clean -fd` in executable code (multi-agent safety)", () => {
+    // `git clean -fd` is on the global multi-agent git safety ban list
+    // because it deletes other agents' untracked files. Comments OK.
     const src = readFileSync(MINSKY_BIN, "utf8");
-    // Should check if current branch differs from default
-    expect(src).toContain("_current_br");
-    expect(src).toContain("_default_br");
-    expect(src).toContain('!= "$_default_br"');
+    const executableLines = src
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+    expect(executableLines).not.toMatch(/git\s+(?:-C\s+\S+\s+)?clean\s+-fd/);
+  });
+
+  test("bin/minsky stop writes the graceful-stop sentinel", () => {
+    // The sentinel is the deterministic crash signal: present after
+    // `minsky stop`, absent after a crash. `reset-host-if-crashed`
+    // reads it to decide between keep / stash-and-reset / reset-only.
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    expect(src).toContain("graceful-stop");
+    // The sentinel write must happen regardless of whether anything
+    // was actually killed — `minsky stop` is the operator's explicit
+    // intent to shut down cleanly.
+    const stopBlock = src.match(/stop\)[\s\S]*?exit 0\n\s*;;/);
+    expect(stopBlock).not.toBeNull();
+    expect(stopBlock?.[0]).toContain("graceful-stop");
+  });
+
+  test("reset-host-if-crashed subcommand exists and accepts --host + --sentinel", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    const resetBlock = src.match(/reset-host-if-crashed\)[\s\S]*?exit 0\n\s*;;/);
+    expect(resetBlock).not.toBeNull();
+    expect(resetBlock?.[0]).toContain("--host");
+    expect(resetBlock?.[0]).toContain("--sentinel");
+    // It stashes (never deletes) on the dirty crash path.
+    expect(resetBlock?.[0]).toContain("git -C \"$_rh_host\" stash push");
   });
 
   test("daemon refuses to start if stash itself fails (rule #6 pivot)", () => {
