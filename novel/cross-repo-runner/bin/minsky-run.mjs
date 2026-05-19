@@ -460,6 +460,92 @@ function writeIterationRecord(hostRoot, record) {
   process.stdout.write(`✓ appended iteration record to ${filePath}\n`);
 }
 
+/**
+ * Build the `GhLike` probe over `child_process.execFile("gh", …)`. Used by
+ * `runLive`'s post-spawn PR-creation backstop (devin-spawn-no-pr-opened
+ * pivot, 2026-05-18). Both methods are best-effort: every failure path
+ * (gh-not-on-PATH, auth-expired, branch-not-pushed, network, malformed
+ * JSON) returns `null` so the runner falls back to the legacy behaviour
+ * (`validated` + `pr_url: null`) without crashing the iteration. Per
+ * rule #7 graceful-degrade — the backstop is the safety net, not the
+ * primary path.
+ *
+ * @otel-exempt thin gh-CLI wrapper.
+ */
+function makeGhProbe(hostRoot) {
+  // GH_HOST mirrors `listOpenPrBranches` — the operator's GHE hostname.
+  // Operators on github.com don't need to unset this because `gh` falls
+  // back to the authenticated default host.
+  const ghEnv = { ...process.env, GH_HOST: process.env.GH_HOST ?? "github.example.com" };
+  return {
+    async findOpenPr({ hostRepo, branch }) {
+      try {
+        const { stdout } = await execFile(
+          "gh",
+          [
+            "pr",
+            "list",
+            "--repo",
+            hostRepo,
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "url",
+            "--limit",
+            "1",
+          ],
+          { env: ghEnv, cwd: hostRoot },
+        );
+        const prs = JSON.parse(stdout);
+        if (!Array.isArray(prs) || prs.length === 0) return null;
+        const url = prs[0]?.url;
+        return typeof url === "string" && url.length > 0 ? url : null;
+      } catch {
+        return null;
+      }
+    },
+    async createPr({ hostRepo, branch, base, title, body, workingDir }) {
+      try {
+        const { stdout } = await execFile(
+          "gh",
+          [
+            "pr",
+            "create",
+            "--repo",
+            hostRepo,
+            "--head",
+            branch,
+            "--base",
+            base,
+            "--title",
+            title,
+            "--body",
+            body,
+          ],
+          { env: ghEnv, cwd: workingDir },
+        );
+        const url = extractPrUrl(stdout);
+        return url;
+      } catch (err) {
+        // gh pr create can fail for many reasons — the most common is
+        // "branch not pushed" or "PR already exists for branch". When
+        // we see "already exists", parse the URL from stderr; otherwise
+        // surface a short diagnostic so the iteration's notes field
+        // captures the failure mode (operator-actionable).
+        const stderr = err?.stderr ?? "";
+        const fallback = extractPrUrl(stderr);
+        if (fallback !== null) return fallback;
+        process.stdout.write(
+          `[pr-backstop] gh pr create failed for ${hostRepo}#${branch}: ${String(stderr).slice(0, 200)}\n`,
+        );
+        return null;
+      }
+    },
+  };
+}
+
 function reportTaskNotFound(taskResult) {
   process.stderr.write(`${taskResult.reason}\n`);
   if (taskResult.availableIds.length === 0) return;
@@ -509,7 +595,7 @@ function emitDryRunReport(plan, hostRoot, hostRepo) {
  * Watchdog: 30 min default (raised from 15 min 2026-05-18 — devin iterations with
  * operator-overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
  */
-async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
+async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock, defaultBranch) {
   process.stdout.write("\n=== runner plan (live spawn) ===\n");
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
   process.stdout.write(`\nSpawning \`${readSpawnCommand()} --print\` in ${hostRoot}...\n`);
@@ -530,12 +616,16 @@ async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
     invocation: agentCfg.invocation,
   });
   const git = makeGitProbe(hostRoot);
+  const gh = makeGhProbe(hostRoot);
   const outcome = await runLive({
     plan,
     allowedPaths,
     spawn: strategy,
     git,
     globMatchesPath,
+    gh,
+    hostRepo,
+    defaultBranch,
   });
   emitLiveOutcome(outcome);
   writeIterationRecord(hostRoot, {

@@ -434,6 +434,20 @@ for f in <HOSTS_DIR>/*/.minsky/experiment-store/cross-repo/*.jsonl; do
 done
 ```
 
+### Always test with daemon stopped
+
+After any change to `bin/minsky`, test BOTH states:
+```bash
+minsky stop; rm -f ~/.minsky/daemon.pid   # daemon off
+minsky watch                               # must not crash
+minsky status                              # must not crash
+minsky --daemon --host $(pwd)              # start
+minsky watch                               # must render with data
+```
+The empty-state path (no daemon, no PID, no log) is where most
+`unbound variable` bugs hide. `set -u` catches them but only at
+runtime.
+
 ### When to commit before starting minsky
 
 If you've made changes to the minsky repo (or any host repo) that are

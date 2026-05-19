@@ -423,21 +423,24 @@ describe("runLive — PR-creation backstop (devin-spawn-no-pr-opened pivot)", ()
     });
     expect(result.prUrl).toBe("https://github.com/test/repo/pull/200");
     expect(calls.length).toBe(2);
-    expect(calls[0].kind).toBe("findOpenPr");
-    expect(calls[1].kind).toBe("createPr");
-    if (calls[1].kind === "createPr") {
-      expect(calls[1].hostRepo).toBe("test/repo");
-      expect(calls[1].branch).toBe("feat/fake-task-1");
-      expect(calls[1].base).toBe("main");
-      expect(calls[1].title).toContain("fake-task-1");
-      // Body must satisfy `check-pr-self-grade.mjs` — header + four fields.
-      expect(calls[1].body).toMatch(/Hypothesis self-grade/i);
-      expect(calls[1].body).toMatch(/Predicted:/i);
-      expect(calls[1].body).toMatch(/Observed:/i);
-      expect(calls[1].body).toMatch(/Match:\s*partial/i);
-      expect(calls[1].body).toMatch(/Lesson:/i);
-      expect(calls[1].workingDir).toBe("/tmp/fake-host");
+    const findCall = calls[0];
+    const createCall = calls[1];
+    expect(findCall?.kind).toBe("findOpenPr");
+    expect(createCall?.kind).toBe("createPr");
+    if (createCall === undefined || createCall.kind !== "createPr") {
+      throw new Error("test fixture invariant violated — createPr call missing");
     }
+    expect(createCall.hostRepo).toBe("test/repo");
+    expect(createCall.branch).toBe("feat/fake-task-1");
+    expect(createCall.base).toBe("main");
+    expect(createCall.title).toContain("fake-task-1");
+    // Body must satisfy `check-pr-self-grade.mjs` — header + four fields.
+    expect(createCall.body).toMatch(/Hypothesis self-grade/i);
+    expect(createCall.body).toMatch(/Predicted:/i);
+    expect(createCall.body).toMatch(/Observed:/i);
+    expect(createCall.body).toMatch(/Match:\s*partial/i);
+    expect(createCall.body).toMatch(/Lesson:/i);
+    expect(createCall.workingDir).toBe("/tmp/fake-host");
   });
 
   test("createPr failure preserves legacy behaviour (validated + null prUrl)", async () => {
