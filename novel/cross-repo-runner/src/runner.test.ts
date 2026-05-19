@@ -317,6 +317,214 @@ describe("runLive — baseline capture", () => {
   });
 });
 
+describe("runLive — PR-creation backstop (devin-spawn-no-pr-opened pivot)", () => {
+  type GhCall =
+    | { kind: "findOpenPr"; hostRepo: string; branch: string }
+    | {
+        kind: "createPr";
+        hostRepo: string;
+        branch: string;
+        base: string;
+        title: string;
+        body: string;
+        workingDir: string;
+      };
+
+  function fakeGh(args: {
+    existingPr?: string | null;
+    createdPr?: string | null;
+  }): { gh: import("./runner.js").GhLike; calls: GhCall[] } {
+    const calls: GhCall[] = [];
+    const gh: import("./runner.js").GhLike = {
+      findOpenPr(input): Promise<string | null> {
+        calls.push({ kind: "findOpenPr", ...input });
+        return Promise.resolve(args.existingPr ?? null);
+      },
+      createPr(input): Promise<string | null> {
+        calls.push({ kind: "createPr", ...input });
+        return Promise.resolve(args.createdPr ?? null);
+      },
+    };
+    return { gh, calls };
+  }
+
+  test("falls back to stdout-only when no gh seam is injected", async () => {
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "no URL here" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+  });
+
+  test("stdout PR URL wins; gh seam is NEVER called when one is found", async () => {
+    const { gh, calls } = fakeGh({});
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({
+        exitCode: 0,
+        stdoutTail: "Opened https://github.com/test/repo/pull/77",
+      }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/77");
+    expect(calls.length).toBe(0);
+  });
+
+  test("findOpenPr URL wins when stdout is empty and PR already exists", async () => {
+    const { gh, calls } = fakeGh({
+      existingPr: "https://github.com/test/repo/pull/123",
+    });
+    const result = await runLive({
+      plan: makePlan({ branchName: "feat/fake-task-1" }),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/123");
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toEqual({
+      kind: "findOpenPr",
+      hostRepo: "test/repo",
+      branch: "feat/fake-task-1",
+    });
+  });
+
+  test("createPr is invoked when stdout empty AND no existing PR", async () => {
+    const { gh, calls } = fakeGh({
+      existingPr: null,
+      createdPr: "https://github.com/test/repo/pull/200",
+    });
+    const result = await runLive({
+      plan: makePlan({
+        branchName: "feat/fake-task-1",
+        taskId: "fake-task-1",
+        workingDirectory: "/tmp/fake-host",
+      }),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/200");
+    expect(calls.length).toBe(2);
+    expect(calls[0].kind).toBe("findOpenPr");
+    expect(calls[1].kind).toBe("createPr");
+    if (calls[1].kind === "createPr") {
+      expect(calls[1].hostRepo).toBe("test/repo");
+      expect(calls[1].branch).toBe("feat/fake-task-1");
+      expect(calls[1].base).toBe("main");
+      expect(calls[1].title).toContain("fake-task-1");
+      // Body must satisfy `check-pr-self-grade.mjs` — header + four fields.
+      expect(calls[1].body).toMatch(/Hypothesis self-grade/i);
+      expect(calls[1].body).toMatch(/Predicted:/i);
+      expect(calls[1].body).toMatch(/Observed:/i);
+      expect(calls[1].body).toMatch(/Match:\s*partial/i);
+      expect(calls[1].body).toMatch(/Lesson:/i);
+      expect(calls[1].workingDir).toBe("/tmp/fake-host");
+    }
+  });
+
+  test("createPr failure preserves legacy behaviour (validated + null prUrl)", async () => {
+    const { gh } = fakeGh({ existingPr: null, createdPr: null });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+  });
+
+  test("backstop is SKIPPED on scope-leak (verdict supersedes the cascade)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: ["src/**"],
+      spawn: fakeSpawn({ exitCode: 0 }),
+      git: fakeGit({ changed: ["src/foo.ts", "outside.txt"] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("scope-leak");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  test("backstop is SKIPPED on spawn-failed (verdict supersedes the cascade)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 1, stderrTail: "boom" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("spawn-failed");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  test("backstop is no-op when hostRepo is omitted (defensive)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      // hostRepo deliberately omitted
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  test("backstop is no-op when defaultBranch is omitted (defensive)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      // defaultBranch deliberately omitted
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+});
+
 // Silence unused-var warning on baseEnv — left in place for any future
 // test that needs an env override fixture.
 void baseEnv;
