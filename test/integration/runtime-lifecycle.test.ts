@@ -42,14 +42,27 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Create a bootstrapped fixture host with a TASKS.md containing one task. */
-function createFixtureHost(opts?: { taskId?: string; taskFields?: Record<string, string> }): string {
+/** Create a bootstrapped fixture host with a TASKS.md containing one task.
+ *
+ * `taskFields` MERGES into the defaults — pass keys you want to override.
+ * To OMIT a required field (e.g. to exercise rule-#9 enforcement), set
+ * `taskFieldsReplace: true` so the caller controls the exact field set
+ * instead of merging. Without this distinction, every "incomplete task"
+ * test silently merged the missing fields back in from defaults, making
+ * the rule-#9-enforcement assertion vacuous. (Rule #17 fix —
+ * 2026-05-19.)
+ */
+function createFixtureHost(opts?: {
+  taskId?: string;
+  taskFields?: Record<string, string>;
+  taskFieldsReplace?: boolean;
+}): string {
   const dir = mkdtempSync(join(tmpdir(), "minsky-e2e-"));
   const taskId = opts?.taskId ?? "test-fixture-task";
 
   // Init a git repo
   execSync(
-    "git init -b main && git config user.email 'test@test' && git config user.name 'test' && git commit --allow-empty -m 'chore: init fixture'",
+    "git init -b main && git config user.email 'test@test' && git config user.name 'test' && git commit --allow-empty -m 'chore: init fixture' --no-verify",
     { cwd: dir, stdio: "pipe" },
   );
 
@@ -74,8 +87,8 @@ function createFixtureHost(opts?: { taskId?: string; taskFields?: Record<string,
     ].join("\n"),
   );
 
-  // TASKS.md with one rule-#9-compliant task
-  const fields = {
+  // TASKS.md with one rule-#9-compliant task (or whatever the caller specifies).
+  const defaults: Record<string, string> = {
     ID: taskId,
     Tags: "p0, test",
     Hypothesis: "test hypothesis",
@@ -85,8 +98,10 @@ function createFixtureHost(opts?: { taskId?: string; taskFields?: Record<string,
     Anchor: "rule #9",
     Details: "implement the test fixture task",
     Files: "test.txt",
-    ...opts?.taskFields,
   };
+  const fields: Record<string, string> = opts?.taskFieldsReplace
+    ? { ID: taskId, ...(opts?.taskFields ?? {}) }
+    : { ...defaults, ...(opts?.taskFields ?? {}) };
   const taskBlock = [
     "# Tasks",
     "",
@@ -214,8 +229,8 @@ describe("runtime lifecycle: rule-9 enforcement", () => {
   test("task without Hypothesis field is rejected (no iteration record)", () => {
     const dir = createFixtureHost({
       taskId: "incomplete-task",
+      taskFieldsReplace: true,
       taskFields: {
-        ID: "incomplete-task",
         Tags: "p0",
         // Deliberately missing: Hypothesis, Success, Pivot, Measurement, Anchor
         Details: "this task has no rule-9 fields",

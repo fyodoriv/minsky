@@ -487,6 +487,78 @@ pnpm m1:observability        # which M1 tasks have observability gaps
 pnpm m1:coverage             # 6-layer composite coverage number
 ```
 
+### Proactive healing — observe-and-fix is ONE action (rule #17 — iron, no exemption)
+
+**You don't observe errors. You fix them.** Every error surfaced by the
+daemon, by `pnpm test`, by `pnpm typecheck`, by `gh pr checks`, by
+`minsky status`, by ANY tool while watching minsky is treated as work
+to be done in the SAME session, not noted for later.
+
+The discipline:
+
+1. **Observation = work item.** When you see `GraphQL 401`, `spawn-failed`,
+   `ETIMEDOUT`, `scope-leak`, stack traces, hung processes, stale state —
+   you do not "make a mental note", you do not "we'll address this next
+   sprint". You do not even ask whether to fix it. You FIX IT NOW or you
+   file a structured task block with `**Blocked**:` if completing it
+   needs an external action — but never both: never silently move on.
+
+2. **Fix the class, not the instance.** A 401 today means the auth path
+   is fragile. Don't restart and pray — find the swallowing-catch, the
+   missing timeout, the unbounded retry, the un-deduped error spam. Each
+   fix lands as: (a) a failing test that reproduces the class, (b) the
+   smallest minimal patch, (c) the lint rule or invariant that prevents
+   the entire category from recurring. Rule #10 enforcement is the goal:
+   "the same bug cannot reach CI twice." Anchor: Forsgren, Humble, Kim,
+   *Accelerate*, 2018 (DORA — change-fail rate is reduced by preventing
+   classes, not patching instances).
+
+3. **Heal before reporting.** Every status message to the operator must
+   already contain the verb "fixed", "patched", "rolled out", or
+   "filed-blocked-because". A status that's only "I observed X" is a
+   constitutional violation of rule #17 — it shifts work onto the
+   operator the agent could have done.
+
+4. **The same loop applies to minsky itself.** When the daemon spits a
+   recurring failure mode (`spawn-failed` × 5, `scope-leak` × 3), the
+   observer's next action is to: (a) read the root cause from
+   `~/.minsky/daemon.log`, (b) land a fix in `novel/cross-repo-runner/`
+   or `novel/tick-loop/` with a failing-test-first per rule #3, (c)
+   `minsky update` to roll it forward, (d) re-verify stability rises.
+   File a TASKS.md block ONLY if the fix requires external action
+   (a credential, a sysctl, an upstream PR) — in which case the block
+   carries `**Blocked**: <code>` and the unblock path is the first line.
+
+5. **Anti-pattern: the watcher who narrates.** A monitoring session that
+   produces a 10-bullet summary of failures and zero merged fixes is the
+   exact thing rule #17 forbids. It looks like attentive work; it's
+   actually load shed to the operator. The deterministic gate is:
+   *if observed-errors > 0 and PRs-opened + tasks-filed = 0, the
+   session is a violation.* Lint: `scripts/check-rule-17-proactive-heal.mjs`
+   (P0, TASKS.md `rule-17-proactive-heal-lint`).
+
+This is the same shape as rule #6 ("stay alive"; let-it-crash +
+supervisor restart) but elevated to the observer's own conduct: if the
+observer is silently degrading by watching-without-fixing, the
+supervisor (the operator) loses information about the real failure
+rate.
+
+**Trigger phrases that activate rule #17 IMMEDIATELY (don't ask, just
+fix):**
+- "fix bugs before they happen" / "be proactive"
+- "make sure minsky gracefully picks them up"
+- "heal minsky on the way"
+- "make it persist" / "make it iron rule"
+
+Sources: Forsgren/Humble/Kim, *Accelerate*, 2018 (change-fail rate);
+Beyer et al., *SRE*, 2016, Ch. 3 (error budgets — observation that
+doesn't move the budget is dead weight); Armstrong, *Programming Erlang*,
+2007 (let-it-crash applies to the observer itself); operator directive
+2026-05-19 ("why aren't they being fixed by you right away? I expect
+that"); rule #6 (stay alive); rule #10 (deterministic enforcement);
+rule #16 (default by default — proactive healing is the default
+observer behaviour, not an opt-in mode).
+
 ### Default by default (rule #16 — always follow)
 
 Every new behavior ships as the default. Never hide behind an opt-in flag.

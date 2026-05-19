@@ -1,42 +1,27 @@
 // Paired tests for runtime invariants.
 // Each test exercises the EXACT bug class that 95% unit coverage missed.
+//
+// 2026-05-19 rule-#17 fix: the import list previously named 25 invariants,
+// only 6 of which were implemented in runtime-invariants.ts. The other 19
+// were aspirational — never used in any test body, only listed in the
+// import block. This produced 25 TS2305 errors that broke the
+// `novel/cross-repo-runner` tsc build, which in turn failed every
+// integration test that does a build-from-source check (e.g.
+// `aifn-840-shape.test.ts`). Per rule #17, every observed-but-unfixed
+// build error is a violation: fix the imports to match the actual public
+// surface, file the aspirational invariants as TASKS.md entries instead
+// of leaving them in a dead import block.
 
 import { describe, expect, test } from "vitest";
 
 import {
   agentArgvSanityCheck,
-  agentBinaryExists,
-  agentArgvHasModel,
   briefIncludesPrInstructions,
-  briefNotEmpty,
-  briefNotTooLarge,
-  briefIncludesTaskId,
-  briefIncludesHypothesis,
-  briefIncludesExitInstructions,
   checkRuntimeInvariants,
   daemonPidConsistent,
-  daemonLogFresh,
-  defaultBranchExists,
-  diskSpaceAdequate,
-  experimentStoreExists,
   formatInvariantSummary,
   gitTreeCleanBeforeSpawn,
-  hostHasP0Tasks,
-  hostRepoYamlValid,
-  hostTasksMdExists,
-  lastIterationNotSuspiciouslyFast,
-  lastIterationNotTooSlow,
-  noDuplicateDaemons,
-  noScopeLeakStreak,
-  noSpawnFailedStreak,
-  openPrCountReasonable,
-  perHostCapConfigured,
-  prProductionRate,
-  sidecarNotDirty,
-  stabilityAboveThreshold,
   taskNotStuckInRepickLoop,
-  watchdogReasonable,
-  worktreeCountReasonable,
   type InvariantContext,
 } from "./runtime-invariants.js";
 

@@ -160,6 +160,18 @@ Examples of "default by default":
 
 The burden of proof is on the opt-in side: "why ISN'T this the default?" not "why SHOULD this be the default?"
 
+### 12. Proactive healing (rule #17 — iron, no exemption)
+
+**Observation IS the fix.** Every error you see — `spawn-failed`, `scope-leak`, `ETIMEDOUT`, `GraphQL 401`, stack traces, hung processes, flaky tests, red CI checks — is treated as work to ship in the SAME session, the SAME PR if possible. "Observe and report" is forbidden. "Mental note for later" is forbidden.
+
+Four mandatory parts:
+1. **Same-session action.** The agent who observed the error owns the fix before its session ends. If the fix needs an external action, file a `TASKS.md` block with `**Blocked**: <one-word-code>` and the unblock path on the first line — never both fix-attempted and silently-moved-on.
+2. **Fix the class, not the instance.** Land the lint or invariant that prevents the entire category (rule #10 shape). A 401 today means the auth path is fragile — add a CI lint, not just a retry.
+3. **Heal before reporting.** Every status message to the operator must carry an active verb: `fixed`, `patched`, `rolled out`, or `filed-blocked-because`. A bulleted summary of failures with zero merged fixes is the exact pattern this rule forbids.
+4. **Deterministic gate.** `scripts/check-rule-17-proactive-heal.mjs` runs on every PR: if observed-error tokens > 0 and `(prs-opened + tasks-filed + commits-landed) == 0`, the PR is rejected. Same shape as rule #9's missing-`EXPERIMENT.yaml`.
+
+Trigger phrases that activate this rule IMMEDIATELY (don't ask, just fix): "fix bugs before they happen", "be proactive", "heal minsky", "make sure minsky picks them up", "make it persist", "make it iron rule".
+
 ### 3a. Runtime invariants (coverage ≠ correctness)
 
 High unit-test coverage (95%+) is necessary but NOT sufficient. Every bug found in production during the 2026-05-18 session (devin stdin panic, permission mode missing, walker starvation, scope-leak false positives, brief missing PR instructions, watchdog kills) had passing unit tests — because unit tests mock the integration seams where real bugs live.
