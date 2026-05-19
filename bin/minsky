@@ -143,7 +143,7 @@ case "${1:-}" in
 
     # 3. Rebuild
     echo "  3/4 Rebuilding..."
-    (cd "$_repo_dir" && pnpm install --frozen-lockfile 2>&1 | tail -1)
+    (cd "$_repo_dir" && pnpm install 2>&1 | tail -3)
     echo "       ✅ Built"
 
     # 4. Restart daemon with same host
