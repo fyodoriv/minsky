@@ -53,3 +53,56 @@ describe("full-coverage-report smoke", () => {
     expect(out).toMatch(/L\d|coverage|composite/i);
   });
 });
+
+// ─── Honesty invariants — every percentage MUST be in [0, 100] ────
+// The 2026-05-19 audit found L2 reporting 240% and the composite
+// reporting 133% — a metric that exceeds its denominator is
+// structurally meaningless. Rule #4 demands HONEST measurement; rule
+// #11 forbids load-bearing metrics that aren't bounded. These tests
+// pin the rule so a future regression can't silently re-inflate the
+// numbers.
+
+describe("full-coverage-report honesty invariants", () => {
+  test("composite_pct is in [0, 100]", () => {
+    const parsed = JSON.parse(run(["--json"]));
+    expect(parsed.composite_pct).toBeGreaterThanOrEqual(0);
+    expect(parsed.composite_pct).toBeLessThanOrEqual(100);
+  });
+
+  test("every layer pct is in [0, 100] (no >100% values)", () => {
+    const parsed = JSON.parse(run(["--json"]));
+    for (const [name, info] of Object.entries(parsed.layers)) {
+      expect(
+        info.pct,
+        `layer ${name} pct=${info.pct} exceeds 100% — rule-#4 honesty violation`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        info.pct,
+        `layer ${name} pct=${info.pct} exceeds 100% — rule-#4 honesty violation`,
+      ).toBeLessThanOrEqual(100);
+    }
+  });
+
+  test("every layer's tested/covered count ≤ total", () => {
+    const parsed = JSON.parse(run(["--json"]));
+    for (const [name, info] of Object.entries(parsed.layers)) {
+      const numerator = info.tested ?? info.covered ?? info.withTests;
+      const denom = info.total;
+      if (typeof numerator !== "number" || typeof denom !== "number") continue;
+      expect(
+        numerator,
+        `layer ${name} numerator=${numerator} exceeds denominator=${denom}`,
+      ).toBeLessThanOrEqual(denom);
+    }
+  });
+
+  test("composite is the weighted sum of layer percentages (sanity check the math)", () => {
+    const parsed = JSON.parse(run(["--json"]));
+    let expected = 0;
+    for (const info of Object.values(parsed.layers)) {
+      expected += info.pct * info.weight;
+    }
+    // Allow 1pp rounding wiggle.
+    expect(Math.abs(parsed.composite_pct - expected)).toBeLessThanOrEqual(1);
+  });
+});
