@@ -328,10 +328,16 @@ describe("runtime lifecycle: stability number", () => {
 
 describe("runtime lifecycle: CLI commands", () => {
   test("bin/minsky status exits 0", () => {
+    // MINSKY_NON_INTERACTIVE=1 prevents the auto-attach branch from
+    // starting a daemon. cleanEnv() isolates HOME so the test doesn't
+    // touch the operator's real ~/.minsky/ state. Both are required —
+    // observed 2026-05-19 that under parallel vitest workers, this
+    // test could otherwise spawn an unwanted daemon.
     const minskyBin = join(REPO_ROOT, "bin", "minsky");
     const output = execSync(`bash -c '${minskyBin} status 2>&1; true'`, {
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 15_000,
+      env: cleanEnv(),
     });
     expect(output.toLowerCase()).toContain("minsky");
   });
