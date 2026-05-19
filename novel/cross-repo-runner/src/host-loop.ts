@@ -49,6 +49,14 @@ export type LoopStopReason =
 /**
  * One iteration's contribution to the loop result. Mirrors the daemon's
  * `DaemonIterationResult` shape but scoped to the cross-repo verdicts.
+ *
+ * `stderrTail` and `exitCode` were added 2026-05-19 (rule #17 — proactive
+ * healing) so the loop's `recordIteration` callback can surface the WHY
+ * of a `spawn-failed` to the operator. Previously the runner captured
+ * the agent's stderr but the loop threw it away before the daemon log
+ * line was printed — leaving operators with `verdict=spawn-failed` and
+ * no way to diagnose. Now the iteration record carries enough data to
+ * print "stderr tail: ..." inline.
  */
 export interface LoopIterationResult {
   readonly iteration: number;
@@ -57,6 +65,8 @@ export interface LoopIterationResult {
   readonly durationMs: number;
   readonly scopeLeakPaths: readonly string[];
   readonly prUrl: string | null;
+  readonly stderrTail: string;
+  readonly exitCode: number;
 }
 
 /**
@@ -325,6 +335,8 @@ async function runOneIteration(args: {
     durationMs: outcome.durationMs,
     scopeLeakPaths: outcome.scopeLeakPaths,
     prUrl: outcome.prUrl,
+    stderrTail: outcome.stderrTail,
+    exitCode: outcome.exitCode,
   };
   iterations.push(iterationResult);
   opts.recordIteration?.(iterationResult);

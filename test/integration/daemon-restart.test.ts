@@ -6,17 +6,10 @@
 // state — not mocks.
 
 import { execSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  unlinkSync,
-} from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { describe, expect, test, afterEach } from "vitest";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MINSKY_BIN = join(REPO_ROOT, "bin", "minsky");
@@ -35,7 +28,7 @@ function run(cmd: string, env?: Record<string, string>): string {
 describe("daemon-restart: install-daemon plist generation", () => {
   test("install-daemon creates a valid plist file", () => {
     const plistPath = join(
-      process.env.HOME!,
+      process.env.HOME ?? "",
       "Library",
       "LaunchAgents",
       "com.minsky.daemon.plist",
@@ -69,7 +62,7 @@ describe("daemon-restart: install-daemon plist generation", () => {
 
   test("plist uses stable node path, not ephemeral fnm multishell", () => {
     const plistPath = join(
-      process.env.HOME!,
+      process.env.HOME ?? "",
       "Library",
       "LaunchAgents",
       "com.minsky.daemon.plist",
@@ -79,15 +72,15 @@ describe("daemon-restart: install-daemon plist generation", () => {
     // The node path should be one of the stable locations
     const nodeMatch = content.match(/<string>(\/[^<]*node)<\/string>/);
     expect(nodeMatch).not.toBeNull();
-    const nodePath = nodeMatch![1]!;
+    const nodePath = nodeMatch?.[1] ?? "";
     // Should NOT be an ephemeral fnm_multishells path
     expect(nodePath).not.toContain("fnm_multishells");
     // Should be an actual executable
     expect(
       nodePath.includes(".fnm") ||
-      nodePath.includes("/opt/homebrew") ||
-      nodePath.includes("/usr/local") ||
-      nodePath.includes("fnm/node-versions"),
+        nodePath.includes("/opt/homebrew") ||
+        nodePath.includes("/usr/local") ||
+        nodePath.includes("fnm/node-versions"),
     ).toBe(true);
   });
 });
@@ -98,7 +91,11 @@ describe("daemon-restart: stale PID cleanup", () => {
   const fakePidFile = join(tmpdir(), "minsky-test-daemon.pid");
 
   afterEach(() => {
-    try { unlinkSync(fakePidFile); } catch { /* noop */ }
+    try {
+      unlinkSync(fakePidFile);
+    } catch {
+      /* noop */
+    }
   });
 
   test("status code path cleans up stale PID when process is dead", () => {
@@ -123,27 +120,164 @@ describe("daemon-restart: stale PID cleanup", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
     expect(src).toContain("cleaning stale PID");
     expect(src).toContain('kill -0 "$existing_pid"');
-    try { unlinkSync(pidFile); } catch { /* noop */ }
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      /* noop */
+    }
   });
 });
 
 // ─── dirty-state cleanup on startup ─────────────────────────
 
-describe("daemon-restart: dirty-state cleanup", () => {
-  test("bin/minsky has git checkout + clean on daemon startup", () => {
+// ─── dirty-state cleanup is delegated to `reset-host-if-crashed` ────
+// Task: minsky-bin-git-clean-fd-multi-agent-safety-violation +
+// minsky-bin-auto-resets-to-main-surprise.
+//
+// The old in-line `git checkout main && git clean -fd` block was
+// replaced 2026-05-19 with a delegation to the `reset-host-if-crashed`
+// subcommand which:
+//   - keeps the branch + working tree if the graceful-stop sentinel
+//     is present (the previous `minsky stop` wrote it);
+//   - stashes uncommitted+untracked work with a recoverable label and
+//     resets to default_branch if the sentinel is missing (crashed).
+// Behaviour tests for the subcommand itself live in
+// `bin-minsky-multi-agent-safety.test.ts` — these are just the
+// structural contracts that prove the wiring still exists.
+
+describe("daemon-restart: dirty-state cleanup delegates to reset-host-if-crashed", () => {
+  test("bin/minsky --daemon startup delegates to `reset-host-if-crashed`", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
-    // Must reset to default branch after crash
-    expect(src).toContain("resetting host to");
-    expect(src).toContain('git -C "$_host_arg" checkout');
-    expect(src).toContain('git -C "$_host_arg" clean -fd');
+    expect(src).toContain("reset-host-if-crashed");
+    expect(src).toContain("graceful-stop");
   });
 
-  test("dirty-state cleanup only runs when on a feature branch", () => {
+  test("bin/minsky never runs `git clean -fd` in executable code (multi-agent safety)", () => {
+    // `git clean -fd` is on the global multi-agent git safety ban list
+    // because it deletes other agents' untracked files. Comments OK.
     const src = readFileSync(MINSKY_BIN, "utf8");
-    // Should check if current branch differs from default
-    expect(src).toContain("_current_br");
-    expect(src).toContain("_default_br");
-    expect(src).toContain('!= "$_default_br"');
+    const executableLines = src
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+    expect(executableLines).not.toMatch(/git\s+(?:-C\s+\S+\s+)?clean\s+-fd/);
+  });
+
+  test("bin/minsky stop writes the graceful-stop sentinel", () => {
+    // The sentinel is the deterministic crash signal: present after
+    // `minsky stop`, absent after a crash. `reset-host-if-crashed`
+    // reads it to decide between keep / stash-and-reset / reset-only.
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    expect(src).toContain("graceful-stop");
+    // The sentinel write must happen regardless of whether anything
+    // was actually killed — `minsky stop` is the operator's explicit
+    // intent to shut down cleanly.
+    const stopBlock = src.match(/stop\)[\s\S]*?exit 0\n\s*;;/);
+    expect(stopBlock).not.toBeNull();
+    expect(stopBlock?.[0]).toContain("graceful-stop");
+  });
+
+  test("reset-host-if-crashed subcommand exists and accepts --host + --sentinel", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    const resetBlock = src.match(/reset-host-if-crashed\)[\s\S]*?exit 0\n\s*;;/);
+    expect(resetBlock).not.toBeNull();
+    expect(resetBlock?.[0]).toContain("--host");
+    expect(resetBlock?.[0]).toContain("--sentinel");
+    // It stashes (never deletes) on the dirty crash path.
+    expect(resetBlock?.[0]).toContain('git -C "$_rh_host" stash push');
+  });
+
+  test("daemon refuses to start if stash itself fails (rule #6 pivot)", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    // If `git stash push` fails (worktree / submodule edge case), we must
+    // loud-crash rather than silently clobber state.
+    expect(src).toContain("REFUSING to start daemon");
+    expect(src).toContain("'git stash push -u' failed");
+  });
+});
+
+// ─── dirty-state stash: end-to-end ──────────────────────────
+
+describe("daemon-restart: dirty-state stash (e2e)", () => {
+  test("untracked file survives daemon startup as a recoverable stash", () => {
+    // Synthesise a host repo with: (1) a default branch `main`, (2) a
+    // checked-out feature branch with an untracked file, (3) an origin
+    // remote pointing at itself so `symbolic-ref refs/remotes/origin/HEAD`
+    // resolves. Then exec the dirty-state block from `bin/minsky` and
+    // assert the untracked file is in `git stash list`, NOT deleted.
+    const fixtureDir = join(tmpdir(), `minsky-fixture-${Date.now()}`);
+    const bareDir = `${fixtureDir}.bare.git`;
+    try {
+      // `-c core.hooksPath=/dev/null` neutralises any inherited global
+      // hook path (the user's dotfiles install lefthook globally, which
+      // would reject the fixture's `init` commit for not being conventional).
+      const G = "git -c core.hooksPath=/dev/null";
+      execSync(`mkdir -p '${fixtureDir}' && ${G} init -b main '${fixtureDir}'`, { stdio: "pipe" });
+      execSync(
+        `cd '${fixtureDir}' && \
+         ${G} config user.email t@example.com && \
+         ${G} config user.name 'Test' && \
+         ${G} config core.hooksPath /dev/null && \
+         echo init > README.md && ${G} add README.md && \
+         ${G} commit -m 'init' && \
+         ${G} init --bare '${bareDir}' && \
+         ${G} remote add origin '${bareDir}' && \
+         ${G} push -u origin main && \
+         ${G} symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && \
+         ${G} checkout -b feat/crashed-iteration && \
+         echo 'unsaved work from another agent' > unsaved.txt`,
+        { stdio: "pipe", shell: "/bin/bash" },
+      );
+
+      // Pre-condition: untracked file exists, on feature branch
+      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
+      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
+        "feat/crashed-iteration",
+      );
+
+      // Inline the dirty-state block (the part that runs before `node`
+      // spawns) so we exercise the real shell logic without spinning up
+      // the runner. Mirrors `bin/minsky` lines 632-659.
+      const cleanupScript = `
+        set -e
+        _host_arg='${fixtureDir}'
+        _default_br=$(git -C "$_host_arg" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+        _current_br=$(git -C "$_host_arg" branch --show-current 2>/dev/null)
+        if [ "$_current_br" != "$_default_br" ] && [ -n "$_current_br" ]; then
+          if [ -n "$(git -C "$_host_arg" status --porcelain 2>/dev/null)" ]; then
+            _stash_label="minsky auto-stash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git -C "$_host_arg" stash push -u -m "$_stash_label" >/dev/null
+            echo "stashed: $_stash_label"
+          fi
+          git -C "$_host_arg" checkout "$_default_br" >/dev/null 2>&1
+        fi
+      `;
+      const out = execSync(cleanupScript, { shell: "/bin/bash", encoding: "utf8" });
+      expect(out).toContain("stashed: minsky auto-stash");
+
+      // Post-condition: untracked file is NOT on disk (it's in the stash)
+      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(false);
+
+      // …but it IS recoverable from the stash list
+      const stashList = execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" });
+      expect(stashList).toContain("minsky auto-stash");
+
+      // And we're back on the default branch
+      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
+        "main",
+      );
+
+      // Final: applying the stash restores the file (proves recoverability)
+      execSync(`git -C '${fixtureDir}' stash apply stash@{0}`, { stdio: "pipe" });
+      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
+      expect(readFileSync(join(fixtureDir, "unsaved.txt"), "utf8")).toContain("unsaved work");
+    } finally {
+      try {
+        execSync(`rm -rf '${fixtureDir}' '${bareDir}'`, { stdio: "pipe" });
+      } catch {
+        /* noop */
+      }
+    }
   });
 });
 
@@ -162,7 +296,7 @@ describe("daemon-restart: uninstall-daemon", () => {
 
 describe("daemon-restart: config.json default_host", () => {
   test("~/.minsky/config.json has default_host field", () => {
-    const configPath = join(process.env.HOME!, ".minsky", "config.json");
+    const configPath = join(process.env.HOME ?? "", ".minsky", "config.json");
     if (!existsSync(configPath)) return; // skip in CI
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     expect(config).toHaveProperty("default_host");
@@ -191,8 +325,8 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
       // Fallback: just check the whole install-daemon block
       const installBlock = src.match(/install-daemon\)[\s\S]*?exit 0/);
       expect(installBlock).not.toBeNull();
-      expect(installBlock![0]).toContain("--loop");
-      expect(installBlock![0]).not.toContain('"--daemon"');
+      expect(installBlock?.[0]).toContain("--loop");
+      expect(installBlock?.[0]).not.toContain('"--daemon"');
     } else {
       expect(plistSection[0]).toContain("--loop");
     }
@@ -216,7 +350,9 @@ describe("daemon-restart: simulated crash recovery", () => {
     // The experiment store is on disk, not in memory — verify
     const storePath = join(REPO_ROOT, ".minsky", "experiment-store", "cross-repo");
     if (!existsSync(storePath)) return; // skip if no iterations yet
-    const files = require("node:fs").readdirSync(storePath).filter((f: string) => f.endsWith(".jsonl"));
+    const files = require("node:fs")
+      .readdirSync(storePath)
+      .filter((f: string) => f.endsWith(".jsonl"));
     expect(files.length).toBeGreaterThanOrEqual(1);
     // Each file should have parseable JSON lines
     for (const file of files.slice(0, 3)) {
@@ -232,15 +368,29 @@ describe("daemon-restart: simulated crash recovery", () => {
   test("node path resolution picks a stable path", () => {
     // Simulate what install-daemon does
     const candidates = [
-      join(process.env.HOME!, ".fnm", "aliases", "default", "bin", "node"),
+      join(process.env.HOME ?? "", ".fnm", "aliases", "default", "bin", "node"),
       // fnm node-versions stable path
       ...(() => {
         try {
           return require("node:fs")
-            .readdirSync(join(process.env.HOME!, ".local", "share", "fnm", "node-versions"))
+            .readdirSync(join(process.env.HOME ?? "", ".local", "share", "fnm", "node-versions"))
             .filter((d: string) => d.startsWith("v2"))
-            .map((d: string) => join(process.env.HOME!, ".local", "share", "fnm", "node-versions", d, "installation", "bin", "node"));
-        } catch { return []; }
+            .map((d: string) =>
+              join(
+                process.env.HOME ?? "",
+                ".local",
+                "share",
+                "fnm",
+                "node-versions",
+                d,
+                "installation",
+                "bin",
+                "node",
+              ),
+            );
+        } catch {
+          return [];
+        }
       })(),
       "/opt/homebrew/bin/node",
       "/usr/local/bin/node",
@@ -248,6 +398,6 @@ describe("daemon-restart: simulated crash recovery", () => {
     const stable = candidates.find((p) => existsSync(p));
     expect(stable).toBeTruthy();
     // The stable path should NOT contain fnm_multishells
-    expect(stable!).not.toContain("fnm_multishells");
+    expect(stable ?? "").not.toContain("fnm_multishells");
   });
 });

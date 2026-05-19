@@ -99,7 +99,7 @@ Per-machine config at `~/.minsky/config.json`:
 
 ## Architecture (30 seconds)
 
-```
+```text
 minsky (bash CLI shim)
   ↓
 cross-repo-runner (minsky-run.mjs) — walks hosts, picks tasks, spawns agents

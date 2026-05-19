@@ -1,43 +1,28 @@
 // Paired tests for runtime invariants.
 // Each test exercises the EXACT bug class that 95% unit coverage missed.
+//
+// 2026-05-19 rule-#17 fix: the import list previously named 25 invariants,
+// only 6 of which were implemented in runtime-invariants.ts. The other 19
+// were aspirational — never used in any test body, only listed in the
+// import block. This produced 25 TS2305 errors that broke the
+// `novel/cross-repo-runner` tsc build, which in turn failed every
+// integration test that does a build-from-source check (e.g.
+// `aifn-840-shape.test.ts`). Per rule #17, every observed-but-unfixed
+// build error is a violation: fix the imports to match the actual public
+// surface, file the aspirational invariants as TASKS.md entries instead
+// of leaving them in a dead import block.
 
 import { describe, expect, test } from "vitest";
 
 import {
+  type InvariantContext,
   agentArgvSanityCheck,
-  agentBinaryExists,
-  agentArgvHasModel,
   briefIncludesPrInstructions,
-  briefNotEmpty,
-  briefNotTooLarge,
-  briefIncludesTaskId,
-  briefIncludesHypothesis,
-  briefIncludesExitInstructions,
   checkRuntimeInvariants,
   daemonPidConsistent,
-  daemonLogFresh,
-  defaultBranchExists,
-  diskSpaceAdequate,
-  experimentStoreExists,
   formatInvariantSummary,
   gitTreeCleanBeforeSpawn,
-  hostHasP0Tasks,
-  hostRepoYamlValid,
-  hostTasksMdExists,
-  lastIterationNotSuspiciouslyFast,
-  lastIterationNotTooSlow,
-  noDuplicateDaemons,
-  noScopeLeakStreak,
-  noSpawnFailedStreak,
-  openPrCountReasonable,
-  perHostCapConfigured,
-  prProductionRate,
-  sidecarNotDirty,
-  stabilityAboveThreshold,
   taskNotStuckInRepickLoop,
-  watchdogReasonable,
-  worktreeCountReasonable,
-  type InvariantContext,
 } from "./runtime-invariants.js";
 
 function baseCtx(overrides: Partial<InvariantContext> = {}): InvariantContext {
@@ -83,9 +68,7 @@ describe("agentArgvSanityCheck", () => {
   });
 
   test("claude agent → ok regardless of argv (not devin)", () => {
-    const r = agentArgvSanityCheck(
-      baseCtx({ agentCommand: "claude", agentArgv: ["--print"] }),
-    );
+    const r = agentArgvSanityCheck(baseCtx({ agentCommand: "claude", agentArgv: ["--print"] }));
     expect(r.ok).toBe(true);
   });
 });
@@ -182,7 +165,7 @@ describe("checkRuntimeInvariants", () => {
     );
     const errors = results.filter((r) => !r.ok && r.severity === "error");
     expect(errors.length).toBeGreaterThanOrEqual(1);
-    expect(errors[0]!.id).toBe("agent-argv-sanity");
+    expect(errors[0]?.id).toBe("agent-argv-sanity");
   });
 
   test("multiple issues at once → multiple failures", () => {
@@ -212,18 +195,14 @@ describe("formatInvariantSummary", () => {
   });
 
   test("errors → 🚨 message with details", () => {
-    const results = checkRuntimeInvariants(
-      baseCtx({ agentArgv: ["--print"] }),
-    );
+    const results = checkRuntimeInvariants(baseCtx({ agentArgv: ["--print"] }));
     const summary = formatInvariantSummary(results);
     expect(summary).toContain("🚨");
     expect(summary).toContain("ERROR");
   });
 
   test("warns only → ⚠️ message", () => {
-    const results = checkRuntimeInvariants(
-      baseCtx({ gitClean: false }),
-    );
+    const results = checkRuntimeInvariants(baseCtx({ gitClean: false }));
     const summary = formatInvariantSummary(results);
     expect(summary).toContain("⚠️");
     expect(summary).toContain("warn");

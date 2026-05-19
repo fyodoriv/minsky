@@ -13,7 +13,7 @@
 //   6. METRICS.md — tracked in the project metrics
 
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -32,27 +32,48 @@ const SIGNAL_KEYWORDS = {
   metrics_md: ["metrics.md", "metrics"],
 };
 
-// Classify each task by what observability it needs
+/**
+ * Classify each task by what observability it needs.
+ * @param {string} taskId
+ * @param {string} block
+ */
 function classifyTask(taskId, block) {
   const lower = block.toLowerCase();
 
   // What signals does the task MENTION?
+  /** @type {Record<string, boolean>} */
   const mentioned = {};
   for (const [name, keywords] of Object.entries(SIGNAL_KEYWORDS)) {
     mentioned[name] = keywords.some((kw) => lower.includes(kw.toLowerCase()));
   }
 
   // What signals does this task NEED? (heuristic by task type)
+  /** @type {Record<string, boolean>} */
   const needed = {
     otel_span: true, // every task should emit a span
     daemon_log: lower.includes("daemon") || lower.includes("iteration") || lower.includes("spawn"),
-    dashboard: lower.includes("status") || lower.includes("watch") || lower.includes("dashboard") || lower.includes("stability"),
-    experiment_store: lower.includes("iteration") || lower.includes("spawn") || lower.includes("validated"),
-    self_diagnose: lower.includes("bug") || lower.includes("error") || lower.includes("fail") || lower.includes("crash") || lower.includes("stuck"),
-    metrics_md: lower.includes("metric") || lower.includes("stability") || lower.includes("throughput") || lower.includes("rate"),
+    dashboard:
+      lower.includes("status") ||
+      lower.includes("watch") ||
+      lower.includes("dashboard") ||
+      lower.includes("stability"),
+    experiment_store:
+      lower.includes("iteration") || lower.includes("spawn") || lower.includes("validated"),
+    self_diagnose:
+      lower.includes("bug") ||
+      lower.includes("error") ||
+      lower.includes("fail") ||
+      lower.includes("crash") ||
+      lower.includes("stuck"),
+    metrics_md:
+      lower.includes("metric") ||
+      lower.includes("stability") ||
+      lower.includes("throughput") ||
+      lower.includes("rate"),
   };
 
   // Generate the plan
+  /** @type {string[]} */
   const gaps = [];
   for (const [signal, isNeeded] of Object.entries(needed)) {
     if (isNeeded && !mentioned[signal]) {
@@ -65,12 +86,15 @@ function classifyTask(taskId, block) {
 }
 
 // Extract all M1 tasks
+/** @type {ReturnType<typeof classifyTask>[]} */
 const tasks = [];
 const taskRegex = /- \[ \] `([^`]+)`(.*?)(?=\n- \[ \] |\n## |\Z)/gs;
+/** @type {RegExpExecArray | null} */
 let match;
+// biome-ignore lint/suspicious/noAssignInExpressions: standard JS regex iteration idiom
 while ((match = taskRegex.exec(content)) !== null) {
-  const taskId = match[1];
-  const block = match[2];
+  const taskId = match[1] ?? "";
+  const block = match[2] ?? "";
   if (block.includes("**Milestone**: M1") || !block.includes("**Milestone**")) {
     tasks.push(classifyTask(taskId, block));
   }
@@ -83,19 +107,22 @@ const zeroGaps = tasks.filter((t) => t.gaps.length === 0).length;
 const totalGaps = tasks.reduce((s, t) => s + t.gaps.length, 0);
 
 if (jsonMode) {
-  console.log(JSON.stringify({ total, avgScore: Number(avgScore), zeroGaps, totalGaps, tasks }, null, 2));
+  console.log(
+    JSON.stringify({ total, avgScore: Number(avgScore), zeroGaps, totalGaps, tasks }, null, 2),
+  );
 } else {
-  console.log(`\n🔭 M1 Observability Plan\n`);
+  console.log("\n🔭 M1 Observability Plan\n");
   console.log(`   Total M1 tasks: ${total}`);
   console.log(`   Avg observability score: ${avgScore}/6`);
   console.log(`   Fully observed (0 gaps): ${zeroGaps}/${total}`);
   console.log(`   Total gaps to close: ${totalGaps}\n`);
 
   // Per-signal gap count
+  /** @type {Record<string, number>} */
   const signalGaps = {};
   for (const t of tasks) {
     for (const g of t.gaps) {
-      signalGaps[g] = (signalGaps[g] || 0) + 1;
+      signalGaps[g] = (signalGaps[g] ?? 0) + 1;
     }
   }
   console.log("   Gap by signal type:");
@@ -108,7 +135,9 @@ if (jsonMode) {
   // Task-level detail
   if (!gapsOnly) {
     console.log("   Per-task gaps:");
-    for (const t of tasks.filter((t) => t.gaps.length > 0).sort((a, b) => b.gaps.length - a.gaps.length)) {
+    for (const t of tasks
+      .filter((t) => t.gaps.length > 0)
+      .sort((a, b) => b.gaps.length - a.gaps.length)) {
       console.log(`     ${t.taskId}`);
       console.log(`       score: ${t.score}/6, gaps: ${t.gaps.join(", ")}`);
     }
