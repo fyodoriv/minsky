@@ -114,6 +114,81 @@ case "${1:-}" in
     echo "start minsky with --daemon to enable logging"
     exit 1
     ;;
+  install-daemon)
+    # Install a launchd plist so minsky auto-starts on login/reboot.
+    # Reads default_host from ~/.minsky/config.json.
+    _real_bin=$(python3 -c "import os; print(os.path.realpath('$0'))" 2>/dev/null || echo "$0")
+    _default_host=$(python3 -c "import json; print(json.load(open('$HOME/.minsky/config.json')).get('default_host',''))" 2>/dev/null)
+    if [ -z "$_default_host" ]; then
+      _default_host="${2:-$(pwd)}"
+      echo "No default_host in ~/.minsky/config.json — using: $_default_host"
+    fi
+
+    _plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+    # Resolve the node binary and runner script — launchd runs the node
+    # process DIRECTLY (foreground), not via --daemon which backgrounds.
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _node_bin=$(which node)
+    _runner="$_repo_dir/novel/cross-repo-runner/bin/minsky-run.mjs"
+    cat > "$_plist" << PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.minsky.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$_node_bin</string>
+    <string>$_runner</string>
+    <string>--host</string>
+    <string>$_default_host</string>
+    <string>--loop</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Standard</string>
+  <key>StandardOutPath</key>
+  <string>$MINSKY_DAEMON_LOG</string>
+  <key>StandardErrorPath</key>
+  <string>$MINSKY_DAEMON_LOG</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$HOME/.local/bin:$HOME/.fnm/aliases/default/bin</string>
+    <key>HOME</key>
+    <string>$HOME</string>
+    <key>MINSKY_NON_INTERACTIVE</key>
+    <string>1</string>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
+PLIST_EOF
+
+    launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$_plist"
+    echo "✅ Installed com.minsky.daemon"
+    echo "   plist: $_plist"
+    echo "   host: $_default_host"
+    echo "   auto-starts on login + restarts on crash"
+    echo ""
+    echo "   Check: launchctl list | grep minsky.daemon"
+    echo "   Remove: minsky uninstall-daemon"
+    exit 0
+    ;;
+  uninstall-daemon)
+    _plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+    launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
+    rm -f "$_plist"
+    echo "✅ Removed com.minsky.daemon"
+    echo "   minsky will no longer auto-start on login/reboot"
+    exit 0
+    ;;
   update)
     # Graceful pause → pull latest → rebuild → restart from same spot.
     # The experiment-store preserves iteration history so the daemon
@@ -463,10 +538,35 @@ if [ "${1:-}" = "--daemon" ]; then
       echo "minsky: daemon already running (PID $existing_pid). Stop it first: minsky stop" >&2
       exit 1
     fi
+    # Stale PID from a crash/reboot — clean up
+    echo "minsky: cleaning stale PID $existing_pid (process not running)"
     rm -f "$MINSKY_DAEMON_PID"
   fi
 
   mkdir -p "$MINSKY_STATE_DIR"
+
+  # Clean up dirty state from a crashed iteration.
+  # After SIGKILL/reboot, the host repo may be on a feature branch
+  # with uncommitted changes. Reset to default branch so the next
+  # iteration starts clean.
+  _host_arg=""
+  _prev_was_host=0
+  for _a in "$@"; do
+    if [ "$_prev_was_host" = "1" ]; then
+      _host_arg="$_a"
+      break
+    fi
+    [ "$_a" = "--host" ] && _prev_was_host=1 || _prev_was_host=0
+  done
+  if [ -n "$_host_arg" ] && [ -d "$_host_arg/.git" ]; then
+    _default_br=$(git -C "$_host_arg" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
+    _current_br=$(git -C "$_host_arg" branch --show-current 2>/dev/null)
+    if [ "$_current_br" != "$_default_br" ] && [ -n "$_current_br" ]; then
+      echo "minsky: resetting host to $_default_br (was on $_current_br from crashed iteration)"
+      git -C "$_host_arg" checkout "$_default_br" 2>/dev/null || true
+      git -C "$_host_arg" clean -fd 2>/dev/null || true
+    fi
+  fi
 
   # Background the runner. stdin from /dev/null, stdout+stderr to the
   # daemon log (append — preserves history across restarts). The
