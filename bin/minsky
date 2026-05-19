@@ -128,7 +128,19 @@ case "${1:-}" in
     # Resolve the node binary and runner script — launchd runs the node
     # process DIRECTLY (foreground), not via --daemon which backgrounds.
     _repo_dir=$(dirname "$(dirname "$_real_bin")")
-    _node_bin=$(which node)
+    # Resolve a STABLE node path — fnm's multishell paths are ephemeral
+    # (change every terminal session). Use the fnm alias or homebrew path.
+    if [ -x "$HOME/.fnm/aliases/default/bin/node" ]; then
+      _node_bin="$HOME/.fnm/aliases/default/bin/node"
+    elif _fnm_node=$(ls "$HOME/.local/share/fnm/node-versions"/v2*/installation/bin/node 2>/dev/null | sort -V | tail -1) && [ -x "$_fnm_node" ]; then
+      _node_bin="$_fnm_node"
+    elif [ -x "/opt/homebrew/bin/node" ]; then
+      _node_bin="/opt/homebrew/bin/node"
+    elif [ -x "/usr/local/bin/node" ]; then
+      _node_bin="/usr/local/bin/node"
+    else
+      _node_bin=$(which node)
+    fi
     _runner="$_repo_dir/novel/cross-repo-runner/bin/minsky-run.mjs"
     cat > "$_plist" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
