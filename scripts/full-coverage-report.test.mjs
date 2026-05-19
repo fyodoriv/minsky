@@ -11,6 +11,7 @@ import { describe, expect, test } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "full-coverage-report.mjs");
 
+/** @param {string[]} args */
 function run(args) {
   const stdout = execFileSync("node", [SCRIPT, ...args], {
     encoding: "utf8",

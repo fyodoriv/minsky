@@ -14,6 +14,10 @@ import { describe, expect, test } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "collect-metrics.mjs");
 
+/**
+ * @param {string[]} args
+ * @param {NodeJS.ProcessEnv} [env]
+ */
 function run(args, env) {
   try {
     const stdout = execFileSync("node", [SCRIPT, ...args], {
@@ -24,10 +28,11 @@ function run(args, env) {
     });
     return { stdout, status: 0 };
   } catch (err) {
+    const e = /** @type {{ stdout?: string; stderr?: string; status?: number }} */ (err);
     return {
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? "",
-      status: err.status ?? 1,
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? "",
+      status: e.status ?? 1,
     };
   }
 }

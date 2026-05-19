@@ -11,6 +11,7 @@ import { describe, expect, test } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "m1-observability-plan.mjs");
 
+/** @param {string[]} args */
 function run(args) {
   try {
     const stdout = execFileSync("node", [SCRIPT, ...args], {
@@ -19,7 +20,8 @@ function run(args) {
     });
     return { stdout, status: 0 };
   } catch (err) {
-    return { stdout: err.stdout ?? "", status: err.status ?? 1 };
+    const e = /** @type {{ stdout?: string; status?: number }} */ (err);
+    return { stdout: e.stdout ?? "", status: e.status ?? 1 };
   }
 }
 

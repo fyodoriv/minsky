@@ -73,24 +73,20 @@ describe("parseRule9Blocks", () => {
 
   test("legacy block missing 4 fields ⇒ all 4 reported", () => {
     const blocks = parseRule9Blocks(MISSING_FOUR);
-    expect(blocks[0]?.missingFields.sort()).toEqual([
-      "Anchor",
-      "Hypothesis",
-      "Measurement",
-      "Pivot",
-      "Success/Acceptance",
-    ].sort());
+    expect([...(blocks[0]?.missingFields ?? [])].sort()).toEqual(
+      ["Anchor", "Hypothesis", "Measurement", "Pivot", "Success/Acceptance"].sort(),
+    );
   });
 
   test("multiple blocks parsed correctly", () => {
-    const blocks = parseRule9Blocks(COMPLIANT + "\n" + MISSING_SUCCESS);
+    const blocks = parseRule9Blocks(`${COMPLIANT}\n${MISSING_SUCCESS}`);
     expect(blocks).toHaveLength(2);
     expect(blocks[0]?.id).toBe("task-a");
     expect(blocks[1]?.id).toBe("task-c");
   });
 
   test("block boundary uses `**ID**:` line — body of one block does not bleed into the next", () => {
-    const blocks = parseRule9Blocks(COMPLIANT + "\n" + MISSING_SUCCESS);
+    const blocks = parseRule9Blocks(`${COMPLIANT}\n${MISSING_SUCCESS}`);
     // The first block does NOT contain the second block's `**ID**: task-c`
     expect(blocks[0]?.body).not.toContain("**ID**: task-c");
   });
@@ -98,7 +94,7 @@ describe("parseRule9Blocks", () => {
 
 describe("classifyRule9Blocks", () => {
   test("compliant blocks count toward `clean`", () => {
-    const blocks = parseRule9Blocks(COMPLIANT + "\n" + COMPLIANT_ACCEPTANCE);
+    const blocks = parseRule9Blocks(`${COMPLIANT}\n${COMPLIANT_ACCEPTANCE}`);
     const r = classifyRule9Blocks(blocks, new Set());
     expect(r.clean).toBe(2);
     expect(r.blocking).toEqual([]);
@@ -120,9 +116,7 @@ describe("classifyRule9Blocks", () => {
   });
 
   test("mix of clean + grandfathered + blocking is reported correctly", () => {
-    const blocks = parseRule9Blocks(
-      COMPLIANT + "\n" + MISSING_SUCCESS + "\n" + MISSING_FOUR,
-    );
+    const blocks = parseRule9Blocks(`${COMPLIANT}\n${MISSING_SUCCESS}\n${MISSING_FOUR}`);
     // task-a clean, task-c grandfathered, task-d blocking
     const r = classifyRule9Blocks(blocks, new Set(["task-c"]));
     expect(r.clean).toBe(1);

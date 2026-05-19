@@ -210,6 +210,7 @@ const l6Pct =
 // Rule #4 demands HONEST measurement; rule #11 forbids load-bearing
 // metrics that aren't bounded.
 const weights = { l1: 0.3, l2: 0.25, l3: 0.1, l4: 0.15, l5: 0.1, l6: 0.1 };
+/** @param {number} n @returns {number} */
 function cap(n) {
   return Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
 }

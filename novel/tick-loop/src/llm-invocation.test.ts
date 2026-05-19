@@ -133,8 +133,9 @@ describe("llm-invocation / buildDevinPrintInvocation — slice (a)+(b) of `devin
     expect(a.command).toBe(b.command);
     expect(a.stdin).toBe(b.stdin); // both undefined
     // Fixed flags match (ignoring the unique --prompt-file path)
-    expect(a.argv.filter(s => !s.includes("minsky-devin-")))
-      .toEqual(b.argv.filter(s => !s.includes("minsky-devin-")));
+    expect(a.argv.filter((s) => !s.includes("minsky-devin-"))).toEqual(
+      b.argv.filter((s) => !s.includes("minsky-devin-")),
+    );
     // Both prompt files contain the same brief
     const { readFileSync } = require("node:fs");
     const aPath = a.argv[a.argv.indexOf("--prompt-file") + 1] as string;

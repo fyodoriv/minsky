@@ -189,9 +189,27 @@ describe("validateModelCatalog (slice 3 — invariant pinner)", () => {
 
   it("accepts a valid catalog (qualityTier ascending, floors descending)", () => {
     const result = validateModelCatalog([
-      mkEntry({ id: "haiku", qualityTier: 1, fivehourFloor: 0.8, weeklyFloor: 0.6, monthlyFloor: 0.5 }),
-      mkEntry({ id: "sonnet", qualityTier: 2, fivehourFloor: 0.4, weeklyFloor: 0.3, monthlyFloor: 0.2 }),
-      mkEntry({ id: "opus", qualityTier: 3, fivehourFloor: 0.1, weeklyFloor: 0.1, monthlyFloor: 0.0 }),
+      mkEntry({
+        id: "haiku",
+        qualityTier: 1,
+        fivehourFloor: 0.8,
+        weeklyFloor: 0.6,
+        monthlyFloor: 0.5,
+      }),
+      mkEntry({
+        id: "sonnet",
+        qualityTier: 2,
+        fivehourFloor: 0.4,
+        weeklyFloor: 0.3,
+        monthlyFloor: 0.2,
+      }),
+      mkEntry({
+        id: "opus",
+        qualityTier: 3,
+        fivehourFloor: 0.1,
+        weeklyFloor: 0.1,
+        monthlyFloor: 0.0,
+      }),
     ]);
     expect(result.ok).toBe(true);
     expect(result.errors).toHaveLength(0);
