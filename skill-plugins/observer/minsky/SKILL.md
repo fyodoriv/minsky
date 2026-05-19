@@ -153,7 +153,7 @@ done
 | `verdict: validated, pr_url: https://...` | **PR opened!** 🎉 | report to operator immediately |
 | `verdict: spawn-failed, 900...ms` | watchdog killed a slow iteration | known issue — daemon continues automatically |
 | `verdict: spawn-failed, <5000ms` | spawn died immediately | check agent auth (`claude/devin --version`) |
-| `verdict: scope-leak` | agent wrote outside allowed paths | **halt** — do NOT restart. File PR (§5). |
+| `verdict: scope-leak` | agent touched files outside declared scope | **normal** — soft mode logs the out-of-scope files + preserves the PR. Only investigate if the same files leak 3+ times. |
 | daemon process gone, no stale PID | clean exit | check `stopReason` in log, restart if needed |
 | no new records for 20+ min | stuck iteration | check if agent process is alive; if CPU=0% for 5min, SIGTERM daemon + restart |
 
