@@ -908,6 +908,13 @@ async function runLoopAsResult(parsed, controller) {
       process.stdout.write(
         `⏱ iteration #${record.iteration}: task=${record.taskId} agent=${agent} verdict=${verdict} duration=${durSec}s pr=${pr}\n`,
       );
+      // Smart scope-leak: log the out-of-scope files as a follow-up
+      // suggestion, not a failure. "Should these be in a separate PR?"
+      if (record.scopeLeakPaths && record.scopeLeakPaths.length > 0) {
+        process.stdout.write(
+          `  📋 out-of-scope files (consider separate PR): ${record.scopeLeakPaths.join(", ")}\n`,
+        );
+      }
       writeIterationRecord(hostRoot, {
         ts: new Date().toISOString(),
         experiment_id: record.taskId,

@@ -238,26 +238,23 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
     };
   }
   const scopeLeakPaths = await detectScopeLeak(inputs, baselineRef);
-  if (scopeLeakPaths.length > 0) {
-    return {
-      verdict: "scope-leak",
-      stdoutTail: result.stdoutTail,
-      stderrTail: result.stderrTail,
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      scopeLeakPaths,
-      prUrl: null,
-      baselineRef,
-    };
-  }
+  // Smart scope-leak handling (2026-05-19 operator directive):
+  // Working on a task naturally touches more files than planned.
+  // Instead of discarding ALL work (old behavior), we:
+  //   - Still try to find/create the PR (preserve the work)
+  //   - Record the out-of-scope paths in the verdict (for follow-up)
+  //   - The host-loop decides whether to halt (hard) or continue (warn)
+  // The scope-leak paths become a follow-up signal ("these files
+  // changed — should they be in a separate PR?"), not a kill switch.
+  const prUrl = await ensurePrUrl(inputs, result.stdoutTail);
   return {
-    verdict: "validated",
+    verdict: scopeLeakPaths.length > 0 ? "scope-leak" : "validated",
     stdoutTail: result.stdoutTail,
     stderrTail: result.stderrTail,
     exitCode: result.exitCode,
     durationMs: result.durationMs,
-    scopeLeakPaths: [],
-    prUrl: await ensurePrUrl(inputs, result.stdoutTail),
+    scopeLeakPaths,
+    prUrl,
     baselineRef,
   };
 }
