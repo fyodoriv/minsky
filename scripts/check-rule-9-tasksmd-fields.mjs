@@ -187,7 +187,7 @@ function main() {
       "  - **Measurement**:   exact runnable command/query that produces the metric\n" +
       "  - **Anchor**:        literature citation / vision.md § / rule #N\n" +
       "If the task is genuinely pre-rule-9 and the metric source doesn't exist yet,\n" +
-      "ship a preparation PR first (rule #9 § \"preparation-PR pattern\").\n",
+      'ship a preparation PR first (rule #9 § "preparation-PR pattern").\n',
   );
   process.exit(1);
 }

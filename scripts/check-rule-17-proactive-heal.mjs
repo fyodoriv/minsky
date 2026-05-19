@@ -143,13 +143,7 @@ export function checkRule17ProactiveHeal({ body, diffSummary }) {
     observedErrors: observed,
     healEvidence: [],
     violation: true,
-    verdict:
-      `${observed.length} observed-error token(s) present (${observed.join(", ")}) and zero healing evidence (no fix/patch/Blocked/PRs/commits/tasks).\n` +
-      "Per rule #17 (vision.md § Proactive healing — observation IS the fix), every observed error must be answered in the same session by either:\n" +
-      "  (a) a fix commit (subject starts with `fix(` or `fix:`),\n" +
-      "  (b) a `**Blocked**: <one-word-code>` task block in TASKS.md describing the unblock path,\n" +
-      "  (c) a non-empty diff that lands the fix.\n" +
-      'Observation without action is the "watcher who narrates" anti-pattern the rule forbids.',
+    verdict: `${observed.length} observed-error token(s) present (${observed.join(", ")}) and zero healing evidence (no fix/patch/Blocked/PRs/commits/tasks).\nPer rule #17 (vision.md § Proactive healing — observation IS the fix), every observed error must be answered in the same session by either:\n  (a) a fix commit (subject starts with \`fix(\` or \`fix:\`),\n  (b) a \`**Blocked**: <one-word-code>\` task block in TASKS.md describing the unblock path,\n  (c) a non-empty diff that lands the fix.\nObservation without action is the "watcher who narrates" anti-pattern the rule forbids.`,
   };
 }
 
@@ -159,6 +153,7 @@ export function checkRule17ProactiveHeal({ body, diffSummary }) {
  * @param {string[]} argv
  * @returns {{ diffBase: string, summary: string | null, repo: string, body: string | null }}
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: CLI argv parser with N flag-handlers — refactor tracked in TASKS.md `scripts-complexity-refactor`
 function parseArgs(argv) {
   /** @type {{ diffBase: string, summary: string | null, repo: string, body: string | null }} */
   const out = {

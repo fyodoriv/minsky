@@ -959,6 +959,7 @@ async function runLoopAsResult(parsed, controller) {
     // Override: MINSKY_SCOPE_LEAK_MODE=hard for strict enforcement.
     scopeLeakMode: process.env.MINSKY_SCOPE_LEAK_MODE === "hard" ? "hard" : "warn",
     signal: controller.signal,
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: core iteration recorder; multiple verdict branches + observability emit. Refactor tracked in TASKS.md `minsky-run-record-iteration-extract-verdict-mapper`.
     recordIteration: (record) => {
       const verdict =
         record.verdict === "validated"
@@ -996,7 +997,7 @@ async function runLoopAsResult(parsed, controller) {
             process.stdout.write(`    ${line}\n`);
           }
         } else {
-          process.stdout.write(`  stderr tail: (empty — agent exited silently)\n`);
+          process.stdout.write("  stderr tail: (empty — agent exited silently)\n");
         }
       }
       writeIterationRecord(hostRoot, {
@@ -1141,6 +1142,7 @@ function readSpawnCommand() {
  * Returns { args, buildInvocation(hostRoot) } so both the one-shot and
  * loop paths can use the same factory.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: agent-factory branching across local/devin/claude/aider — refactor tracked in TASKS.md `minsky-run-record-iteration-extract-verdict-mapper`.
 function buildAgentConfig(hostRoot) {
   // When MINSKY_LLM_PROVIDER=local-only (set by `minsky --local`),
   // use the local agent (aider + ollama) instead of the cloud agent.

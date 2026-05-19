@@ -767,13 +767,7 @@
 - [ ] `devin-spawn-missing-permission-mode-bypass` — minsky-run.mjs spawns Devin without `--permission-mode bypass` so every Devin worker is blocked from `edit`/`write`/`exec` on the very first call ("Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools."). Devin workers cannot ship ANY task while this is the case, including walker-drains-one-host-forever.
   - **ID**: devin-spawn-missing-permission-mode-bypass
   - **Tags**: p0, milestone-m1, reliability, cross-repo-runner, devin, blocker, prereq
-  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever: every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded.
-
-Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails.
-
-While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration.
-
-FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-file`, push `"--permission-mode", "bypass"` (or `"dangerous"` — same thing per devin docs alias rules). Optional follow-up: plumb a `MINSKY_DEVIN_PERMISSION_MODE` env override identical to the existing `MINSKY_CLAUDE_PERMISSION_MODE` so the operator can dial down if needed.
+  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever — every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded. Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails. While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration. FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-file`, push `"--permission-mode", "bypass"` (or `"dangerous"` — same thing per devin docs alias rules). Optional follow-up: plumb a `MINSKY_DEVIN_PERMISSION_MODE` env override identical to the existing `MINSKY_CLAUDE_PERMISSION_MODE` so the operator can dial down if needed.
   - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs
   - **Acceptance**: (1) After fix, `minsky-run --host <host> --live` against a Devin agent successfully runs `edit`/`write`/`exec` tools without permission rejection. (2) Test: spawn a 1-iter loop against a fixture host whose only task asks the worker to `echo hi > /tmp/devin-perm-test`; verify the file gets written. (3) `grep 'Running in non-interactive mode' ~/.minsky/daemon.log` drops from ≥1 to 0 across a 10-iteration walk.
 
@@ -2311,6 +2305,32 @@ FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-fi
 
 
 ## P3
+
+- [ ] `scripts-complexity-refactor` — 6 `noExcessiveCognitiveComplexity` biome errors are silenced with `// biome-ignore` annotations in scripts/ and 2 in novel/cross-repo-runner/bin/minsky-run.mjs. Refactor each into smaller helpers so the rule passes natively.
+  - **ID**: scripts-complexity-refactor
+  - **Tags**: p3, cleanup, biome, refactor, observed-2026-05-19
+  - **Milestone**: M1
+  - **Hypothesis**: extracting helper functions for each silenced site will keep behavior identical (covered by existing unit/integration tests) while removing the silencer annotations. Each refactor is a tracer-bullet — one site at a time.
+  - **Success**: 0 `noExcessiveCognitiveComplexity` errors in `npx biome ci .` with all `// biome-ignore lint/complexity/noExcessiveCognitiveComplexity` annotations removed. All existing tests still pass.
+  - **Pivot**: if a refactor makes a function HARDER to read (subjective code review fails), revert and keep the biome-ignore annotation. Threshold: 2 of 6 refactors are reverted ⇒ accept the silencers as the long-term posture and rewrite the biome rule threshold for this codebase.
+  - **Measurement**: `npx biome ci . 2>&1 | grep -c noExcessiveCognitiveComplexity` should go from 6 → 0.
+  - **Anchor**: rule #4 (everything measurable, MEASURED — silencers count as debt); rule #17 (proactive healing — every silencer is a known-issue receipt).
+  - **Details**: Affected functions: `scripts/check-no-hardcoded-user-paths.mjs::checkNoHardcodedUserPaths` (cc=41), `scripts/check-no-hardcoded-user-paths.mjs::walkFiles` (cc=14), `scripts/check-rule-17-proactive-heal.mjs::parseArgs` (cc=12), `scripts/collect-metrics.mjs::main` (cc=12), `novel/cross-repo-runner/bin/minsky-run.mjs::recordIteration` (cc=20), `novel/cross-repo-runner/bin/minsky-run.mjs::buildAgentConfig` (cc=11). The first 4 are pure data-transforms; the last 2 are runtime callbacks — refactor those LAST and with extra care (paired tests in `runtime-paths-coverage.test.ts`).
+  - **Files**: scripts/check-no-hardcoded-user-paths.mjs, scripts/check-rule-17-proactive-heal.mjs, scripts/collect-metrics.mjs, novel/cross-repo-runner/bin/minsky-run.mjs.
+  - **Acceptance**: `npx biome ci .` reports 0 errors; the 6 `biome-ignore lint/complexity/noExcessiveCognitiveComplexity` annotations are removed; full test suite stays green.
+
+- [ ] `minsky-run-record-iteration-extract-verdict-mapper` — extract the verdict-resolution + iteration-record logic from the inline `recordIteration` callback in `novel/cross-repo-runner/bin/minsky-run.mjs` so it can be unit-tested in isolation
+  - **ID**: minsky-run-record-iteration-extract-verdict-mapper
+  - **Tags**: p3, cleanup, refactor, observability, observed-2026-05-19
+  - **Milestone**: M1
+  - **Hypothesis**: today the iteration recorder lives as a 60+ line closure inside `runLoopAsResult`, which means we can't unit-test verdict mapping. Extracting `mapVerdict(record) → verdict` + `formatIterationLine(record) → string` will get cc from 20 → ≤10 and enable focused tests.
+  - **Success**: cc ≤ 10 on the new factored functions; both helpers have ≥5 paired unit tests; the existing `runtime-paths-coverage.test.ts > iteration record includes verdict + duration + agent` test still passes unchanged.
+  - **Pivot**: if extraction creates a confusing 4-arg helper, revert and keep the inline + the biome-ignore annotation. Threshold: extracted helper has ≥4 parameters ⇒ inline-with-silencer is the better posture.
+  - **Measurement**: `npx biome ci novel/cross-repo-runner/bin/minsky-run.mjs 2>&1 | grep -c "complexity of 20"` should go to 0.
+  - **Anchor**: rule #3 (test-first — extracting makes the recorder testable); rule #4 (silencer counts as debt).
+  - **Details**: This was filed alongside `scripts-complexity-refactor` because it's the harder of the two minsky-run.mjs silencers. The `buildAgentConfig` silencer (cc=11) is folded into `scripts-complexity-refactor`.
+  - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs, novel/cross-repo-runner/src/iteration-record.ts (new, if extraction goes that way).
+  - **Acceptance**: `recordIteration` is a single dispatch line (≤5 LOC) that calls extracted helpers; both helpers are exported and have paired unit tests; full integration suite green.
 
 - [ ] `local-worktree-followups` — close out the rule-#9 follow-through for the shipped `local-worker-worktree-never-created` fix (PR #572): the 2h longitudinal success-ratio window + a docs cross-link
   - **ID**: local-worktree-followups

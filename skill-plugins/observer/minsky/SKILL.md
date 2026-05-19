@@ -82,6 +82,7 @@ repo via `$MINSKY_REPO` env → `~/apps/tooling/minsky` → `~/apps/minsky`
 `export MINSKY_REPO=/your/path/to/minsky` in your shell profile.
 
 After starting, **immediately verify TWO things**:
+
 1. The daemon is running (`running (PID ...)`)
 2. It targets the **correct folder** (check the `--host` or `--hosts-dir` in the process args)
 
@@ -390,6 +391,7 @@ Every command should complete in <30s or be run non-blocking:
 ### Per-agent quirks
 
 **Devin** (`cloud_agent: "devin"`):
+
 - Brief delivery: `--prompt-file` (NOT stdin — devin panics on stdin pipe).
 - Typical iteration time: 5-15 min (longer than Claude due to API routing).
 - Watchdog: 900s (15 min) default — will kill slow-but-productive iterations. Known P0.
@@ -397,12 +399,14 @@ Every command should complete in <30s or be run non-blocking:
 - Permission mode: `--permission-mode dangerous` (unattended daemon).
 
 **Claude Code** (`cloud_agent: "claude"`):
+
 - Brief delivery: stdin (`child.stdin.end(brief)`).
 - Typical iteration time: 3-10 min.
 - Watchdog: 900s default, overridable via `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`.
 - May hang with 0% CPU — the 2026-05-07 hang ran 1h56m. The watchdog exists for this.
 
 **Aider / local** (`--local` mode):
+
 - Brief delivery: `--message-file` (written to temp file).
 - Typical iteration time: 10-30 min (local models are slower).
 - Watchdog: 1800s (30 min) default.
@@ -437,6 +441,7 @@ done
 ### Always test with daemon stopped
 
 After any change to `bin/minsky`, test BOTH states:
+
 ```bash
 minsky stop; rm -f ~/.minsky/daemon.pid   # daemon off
 minsky watch                               # must not crash
@@ -444,6 +449,7 @@ minsky status                              # must not crash
 minsky --daemon --host $(pwd)              # start
 minsky watch                               # must render with data
 ```
+
 The empty-state path (no daemon, no PID, no log) is where most
 `unbound variable` bugs hide. `set -u` catches them but only at
 runtime.
@@ -545,6 +551,7 @@ rate.
 
 **Trigger phrases that activate rule #17 IMMEDIATELY (don't ask, just
 fix):**
+
 - "fix bugs before they happen" / "be proactive"
 - "make sure minsky gracefully picks them up"
 - "heal minsky on the way"
@@ -569,6 +576,7 @@ Every new behavior ships as the default. Never hide behind an opt-in flag.
 - Opt-out flags go to DEPRECATED.md the moment they're never used
 
 Examples already shipped:
+
 - Scope-leak soft mode → default (daemon never halts on scope-leak)
 - Launchd persistence → auto-installed on first `minsky` run
 - Dynamic timeouts → computed from iteration history, not hardcoded
@@ -589,6 +597,7 @@ cause of `scope-leak` in dogfood mode.
 ### Session handoff
 
 If you're ending your agent session but minsky should keep running:
+
 1. Verify `minsky status` shows running.
 2. The daemon is SIGHUP-immune — it survives terminal close.
 3. Log the current state: `minsky status 2>&1 > /tmp/minsky-handoff.txt`

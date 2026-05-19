@@ -10,6 +10,7 @@ import { describe, expect, test } from "vitest";
 
 import { checkNoHardcodedUserPaths } from "./check-no-hardcoded-user-paths.mjs";
 
+/** @param {Record<string, string>} entries */
 function asFiles(entries) {
   return new Map(Object.entries(entries));
 }

@@ -27,13 +27,7 @@
 // `scripts/full-coverage-report.mjs` counts them.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -57,11 +51,10 @@ function makeFixtureHost(opts?: { tasksMd?: string; remoteUrl?: string }): strin
   execFileSync("git", ["init", "-b", "main"], { cwd: dir, stdio: "pipe" });
   execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir, stdio: "pipe" });
   execFileSync("git", ["config", "user.name", "t"], { cwd: dir, stdio: "pipe" });
-  execFileSync(
-    "git",
-    ["commit", "--allow-empty", "-m", "chore: init", "--no-verify"],
-    { cwd: dir, stdio: "pipe" },
-  );
+  execFileSync("git", ["commit", "--allow-empty", "-m", "chore: init", "--no-verify"], {
+    cwd: dir,
+    stdio: "pipe",
+  });
   if (opts?.remoteUrl) {
     execFileSync("git", ["remote", "add", "origin", opts.remoteUrl], { cwd: dir, stdio: "pipe" });
   }
@@ -108,11 +101,11 @@ describe("L4: runLoopAsResult — single-host loop with --once + --no-live", () 
     // The function `runLoopAsResult` is the single-host loop entry. We
     // observe it by the banner it prints on every loop iteration.
     const dir = makeFixtureHost();
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(out).toContain("=== host-daemon loop");
     expect(out).toContain("max-iter=1");
     expect(out).toContain("stopReason: max-iterations");
@@ -162,11 +155,11 @@ describe("L4: buildAgentConfig + buildLocalAgentConfig + readSpawnCommand", () =
     const env = cleanEnv();
     // No config.json in $HOME → buildAgentConfig falls through to its
     // built-in default `devin`.
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env, timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env,
+      timeout: 10_000,
+    });
     // dry-run prints `agent=claude` because `--no-live` overrides via
     // dryRunStrategy; the cloud-agent decision is observable in the
     // banner (live mode would print agent=devin).
@@ -182,11 +175,11 @@ describe("L4: buildAgentConfig + buildLocalAgentConfig + readSpawnCommand", () =
     const dir = makeFixtureHost();
     const env = cleanEnv();
     env.MINSKY_LLM_PROVIDER = "local-only";
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env, timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env,
+      timeout: 10_000,
+    });
     // Loop completes; the local config path was traversed without
     // throwing (the seam is exercised even in dry-run because
     // buildAgentConfig is called during `runLoopAsResult` setup).
@@ -207,11 +200,11 @@ describe("L4: readLiveSpawnTimeoutMs + computeDynamicSettingsForHost", () => {
     env.MINSKY_LIVE_SPAWN_TIMEOUT_MS = "60000";
     // In dry-run the timeout isn't actually used, but the env-read path
     // is exercised on every loop boot.
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env, timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env,
+      timeout: 10_000,
+    });
     expect(out).toContain("stopReason: max-iterations");
   });
 
@@ -233,13 +226,13 @@ describe("L4: readLiveSpawnTimeoutMs + computeDynamicSettingsForHost", () => {
     );
     writeFileSync(
       join(dir, ".minsky", "experiment-store", "cross-repo", "seed.jsonl"),
-      records.join("\n") + "\n",
+      `${records.join("\n")}\n`,
     );
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(out).toContain("[dynamic-timeouts]");
   });
 });
@@ -281,13 +274,7 @@ describe("L4: writeIterationRecord", () => {
       env: cleanEnv(),
       timeout: 10_000,
     });
-    const jsonl = join(
-      dir,
-      ".minsky",
-      "experiment-store",
-      "cross-repo",
-      "rtpath-fixture.jsonl",
-    );
+    const jsonl = join(dir, ".minsky", "experiment-store", "cross-repo", "rtpath-fixture.jsonl");
     expect(existsSync(jsonl)).toBe(true);
     const content = readFileSync(jsonl, "utf8").trim();
     expect(content.length).toBeGreaterThan(0);
@@ -306,11 +293,11 @@ describe("L4: emitLiveSpawn (live-mode banner)", () => {
     // <task-id>` and verdict=validated. Observing those tokens proves
     // we reach the live-or-dry-run branch in `runLoopAsResult`.
     const dir = makeFixtureHost();
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(out).toContain("verdict=validated");
   });
 });
@@ -323,11 +310,11 @@ describe("L4: pickHostTask + loadMinskyConfig", () => {
     // extensively at the unit layer. At the integration layer, we
     // assert the integration: an empty queue → empty-queue verdict.
     const dir = makeFixtureHost({ tasksMd: "# Tasks\n\n## P0\n" });
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(out).toContain("empty-queue");
   });
 
@@ -338,11 +325,11 @@ describe("L4: pickHostTask + loadMinskyConfig", () => {
     const dir = makeFixtureHost();
     const env = cleanEnv();
     expect(existsSync(join(env.HOME ?? "", ".minsky", "config.json"))).toBe(false);
-    const out = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env, timeout: 10_000 },
-    );
+    const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env,
+      timeout: 10_000,
+    });
     expect(out).toContain("stopReason: max-iterations");
   });
 });
