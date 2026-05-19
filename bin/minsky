@@ -122,8 +122,9 @@ case "${1:-}" in
     MINSKY_REPO_SCRIPTS="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/scripts"
     while true; do
       clear
+      _ver=$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo "?")
       echo "╔══════════════════════════════════════════════════════════════╗"
-      echo "║  minsky watch — $(date '+%H:%M:%S')  (Ctrl-C to detach, daemon keeps running)  ║"
+      echo "║  minsky watch — $(date '+%H:%M:%S') [$_ver]  Ctrl-C to detach              ║"
       echo "╚══════════════════════════════════════════════════════════════╝"
       echo ""
 
