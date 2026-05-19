@@ -86,14 +86,18 @@ describe("STACK_MANIFEST", () => {
     expect(uniq.size).toBe(names.length);
   });
 
-  test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-7 / rule-12", () => {
+  test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-7 / rule-12 / rule-17", () => {
     // Pre-registered scope of the daemon's pre-PR gate (TASKS.md
     // `daemon-pre-pr-lint-gate` Pivot — fast lints close ~80% of the failure
     // modes the operator cleans up). Drift here is what the manifest is
     // supposed to detect; pin the set explicitly. rule-7 was promoted to
     // fast 2026-05-06 (slice 8/N) — it is the 5th of 5 empirically-named
     // failure modes in the brief and walks `novel/**/README.md` only
-    // (~0.3s wall-clock, well under the 5-min pivot budget).
+    // (~0.3s wall-clock, well under the 5-min pivot budget). rule-17 was
+    // added 2026-05-19 (proactive-healing): a deterministic gate against
+    // PR bodies that surface observed-error tokens without any healing
+    // evidence (a fix commit, a `**Blocked**:` task block, or a non-
+    // empty diff). Same shape as rule-12.
     const fastNames = selectSteps("fast")
       .map((s) => s.name)
       .sort();
@@ -102,6 +106,7 @@ describe("STACK_MANIFEST", () => {
         "biome",
         "markdownlint",
         "rule-12-scope-discipline",
+        "rule-17-proactive-heal",
         "rule-2-dep-coverage",
         "rule-3-doc-first",
         "rule-6-let-it-crash",

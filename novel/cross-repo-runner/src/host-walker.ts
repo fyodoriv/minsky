@@ -34,11 +34,7 @@ import type { LoopResult, LoopStopReason } from "./host-loop.js";
  * visit audit trail and surfaced in the summary. This prevents one
  * bad host from blocking the entire fleet.
  */
-export type WalkerStopReason =
-  | "all-hosts-drained"
-  | "max-iterations"
-  | "aborted"
-  | "scope-leak";
+export type WalkerStopReason = "all-hosts-drained" | "max-iterations" | "aborted" | "scope-leak";
 
 /**
  * Per-host audit trail. The walker collects one of these per host visit

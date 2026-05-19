@@ -14,10 +14,10 @@
 //   operator directive 2026-05-18 ("status + logs + changelog in one terminal").
 
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { describe, expect, test, beforeAll } from "vitest";
+import { join } from "node:path";
+import { beforeAll, describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
@@ -35,9 +35,14 @@ describe("stability-number.mjs", () => {
       { ts: new Date().toISOString(), verdict: "validated", notes: "200000ms", pr_url: null },
       { ts: new Date().toISOString(), verdict: "spawn-failed", notes: "4000ms", pr_url: null },
       { ts: new Date().toISOString(), verdict: "scope-leak", notes: "300000ms", pr_url: null },
-      { ts: new Date().toISOString(), verdict: "validated", notes: "150000ms", pr_url: "https://github.com/test/pr/1" },
+      {
+        ts: new Date().toISOString(),
+        verdict: "validated",
+        notes: "150000ms",
+        pr_url: "https://github.com/test/pr/1",
+      },
     ];
-    const jsonl = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    const jsonl = `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
     writeFileSync(join(storeDir, "test-task.jsonl"), jsonl);
   });
 

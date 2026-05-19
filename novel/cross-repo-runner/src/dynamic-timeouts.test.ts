@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  type IterationTiming,
   computeDynamicSettings,
   parseTimingsFromJsonl,
-  type IterationTiming,
 } from "./dynamic-timeouts.js";
 
 describe("computeDynamicSettings", () => {

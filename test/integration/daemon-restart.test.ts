@@ -6,17 +6,10 @@
 // state — not mocks.
 
 import { execSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  unlinkSync,
-} from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { describe, expect, test, afterEach } from "vitest";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MINSKY_BIN = join(REPO_ROOT, "bin", "minsky");
@@ -34,12 +27,7 @@ function run(cmd: string, env?: Record<string, string>): string {
 
 describe("daemon-restart: install-daemon plist generation", () => {
   test("install-daemon creates a valid plist file", () => {
-    const plistPath = join(
-      process.env.HOME!,
-      "Library",
-      "LaunchAgents",
-      "com.minsky.daemon.plist",
-    );
+    const plistPath = join(process.env.HOME!, "Library", "LaunchAgents", "com.minsky.daemon.plist");
     // The plist should already exist (installed in the previous step)
     // or we generate it fresh
     if (!existsSync(plistPath)) {
@@ -68,26 +56,21 @@ describe("daemon-restart: install-daemon plist generation", () => {
   });
 
   test("plist uses stable node path, not ephemeral fnm multishell", () => {
-    const plistPath = join(
-      process.env.HOME!,
-      "Library",
-      "LaunchAgents",
-      "com.minsky.daemon.plist",
-    );
+    const plistPath = join(process.env.HOME!, "Library", "LaunchAgents", "com.minsky.daemon.plist");
     if (!existsSync(plistPath)) return; // skip in CI
     const content = readFileSync(plistPath, "utf8");
     // The node path should be one of the stable locations
     const nodeMatch = content.match(/<string>(\/[^<]*node)<\/string>/);
     expect(nodeMatch).not.toBeNull();
-    const nodePath = nodeMatch![1]!;
+    const nodePath = nodeMatch?.[1]!;
     // Should NOT be an ephemeral fnm_multishells path
     expect(nodePath).not.toContain("fnm_multishells");
     // Should be an actual executable
     expect(
       nodePath.includes(".fnm") ||
-      nodePath.includes("/opt/homebrew") ||
-      nodePath.includes("/usr/local") ||
-      nodePath.includes("fnm/node-versions"),
+        nodePath.includes("/opt/homebrew") ||
+        nodePath.includes("/usr/local") ||
+        nodePath.includes("fnm/node-versions"),
     ).toBe(true);
   });
 });
@@ -98,7 +81,11 @@ describe("daemon-restart: stale PID cleanup", () => {
   const fakePidFile = join(tmpdir(), "minsky-test-daemon.pid");
 
   afterEach(() => {
-    try { unlinkSync(fakePidFile); } catch { /* noop */ }
+    try {
+      unlinkSync(fakePidFile);
+    } catch {
+      /* noop */
+    }
   });
 
   test("status code path cleans up stale PID when process is dead", () => {
@@ -123,7 +110,11 @@ describe("daemon-restart: stale PID cleanup", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
     expect(src).toContain("cleaning stale PID");
     expect(src).toContain('kill -0 "$existing_pid"');
-    try { unlinkSync(pidFile); } catch { /* noop */ }
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      /* noop */
+    }
   });
 });
 
@@ -191,8 +182,8 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
       // Fallback: just check the whole install-daemon block
       const installBlock = src.match(/install-daemon\)[\s\S]*?exit 0/);
       expect(installBlock).not.toBeNull();
-      expect(installBlock![0]).toContain("--loop");
-      expect(installBlock![0]).not.toContain('"--daemon"');
+      expect(installBlock?.[0]).toContain("--loop");
+      expect(installBlock?.[0]).not.toContain('"--daemon"');
     } else {
       expect(plistSection[0]).toContain("--loop");
     }
@@ -216,7 +207,9 @@ describe("daemon-restart: simulated crash recovery", () => {
     // The experiment store is on disk, not in memory — verify
     const storePath = join(REPO_ROOT, ".minsky", "experiment-store", "cross-repo");
     if (!existsSync(storePath)) return; // skip if no iterations yet
-    const files = require("node:fs").readdirSync(storePath).filter((f: string) => f.endsWith(".jsonl"));
+    const files = require("node:fs")
+      .readdirSync(storePath)
+      .filter((f: string) => f.endsWith(".jsonl"));
     expect(files.length).toBeGreaterThanOrEqual(1);
     // Each file should have parseable JSON lines
     for (const file of files.slice(0, 3)) {
@@ -239,8 +232,22 @@ describe("daemon-restart: simulated crash recovery", () => {
           return require("node:fs")
             .readdirSync(join(process.env.HOME!, ".local", "share", "fnm", "node-versions"))
             .filter((d: string) => d.startsWith("v2"))
-            .map((d: string) => join(process.env.HOME!, ".local", "share", "fnm", "node-versions", d, "installation", "bin", "node"));
-        } catch { return []; }
+            .map((d: string) =>
+              join(
+                process.env.HOME!,
+                ".local",
+                "share",
+                "fnm",
+                "node-versions",
+                d,
+                "installation",
+                "bin",
+                "node",
+              ),
+            );
+        } catch {
+          return [];
+        }
       })(),
       "/opt/homebrew/bin/node",
       "/usr/local/bin/node",
