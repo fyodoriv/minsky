@@ -64,7 +64,12 @@ case "${1:-}" in
   status)
     echo "=== minsky daemon ==="
     # Stability number (from experiment store)
-    _host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+    # `set -e -o pipefail` aborts the script when any pipe stage exits
+    # non-zero. With no daemon running, `grep -v grep` finds zero matches
+    # and exits 1 → pipefail kills `status` with exit 1. The `|| true`
+    # absorbs the empty-match case so `status` always reaches the rest
+    # of the block. Discovered 2026-05-19 — rule-#17 fix.
+    _host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1 || true)
     if [ -n "$_host_dir" ] && command -v node >/dev/null 2>&1; then
       _stability=$(node "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/../scripts/stability-number.mjs" "$_host_dir" 2>/dev/null || echo "")
       [ -n "$_stability" ] && echo "Stability: $_stability"
