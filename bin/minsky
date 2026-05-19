@@ -132,14 +132,18 @@ case "${1:-}" in
       echo "  1/4 No daemon running — skip"
     fi
 
+    # Resolve the real minsky repo dir (follows symlinks)
+    _real_bin=$(python3 -c "import os; print(os.path.realpath('$0'))" 2>/dev/null || echo "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+
     # 2. Pull latest
-    echo "  2/4 Pulling latest..."
-    git -C "$(dirname "$0")/.." pull --rebase 2>&1 | head -5
+    echo "  2/4 Pulling latest from $_repo_dir..."
+    git -C "$_repo_dir" pull --rebase 2>&1 | head -5
     echo "       ✅ Pulled"
 
     # 3. Rebuild
     echo "  3/4 Rebuilding..."
-    (cd "$(dirname "$0")/.." && pnpm install --frozen-lockfile 2>&1 | tail -1)
+    (cd "$_repo_dir" && pnpm install --frozen-lockfile 2>&1 | tail -1)
     echo "       ✅ Built"
 
     # 4. Restart daemon with same host
