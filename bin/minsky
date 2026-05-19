@@ -607,7 +607,19 @@ if [ "${1:-}" = "--daemon" ]; then
   # Clean up dirty state from a crashed iteration.
   # After SIGKILL/reboot, the host repo may be on a feature branch
   # with uncommitted changes. Reset to default branch so the next
-  # iteration starts clean.
+  # iteration starts clean — but NEVER by destroying state.
+  #
+  # Multi-agent git safety rule (~/.config/devin/AGENTS.md § "Git
+  # Safety (Multi-Agent)") explicitly bans `git clean -fd` and
+  # `git reset --hard` — they delete other agents' untracked files
+  # and clobber concurrent work. We stash with a recoverable label
+  # instead: `minsky auto-stash <iso-timestamp>`. The operator can
+  # restore it via `git stash list | grep "minsky auto-stash"` →
+  # `git stash apply <ref>`.
+  #
+  # Pivot per rule #6 ("stay alive — but never by destroying state"):
+  # if stash itself fails (worktree / submodule edge cases), we
+  # loud-crash rather than silently clobbering.
   _host_arg=""
   _prev_was_host=0
   for _a in "$@"; do
@@ -622,8 +634,27 @@ if [ "${1:-}" = "--daemon" ]; then
     _current_br=$(git -C "$_host_arg" branch --show-current 2>/dev/null)
     if [ "$_current_br" != "$_default_br" ] && [ -n "$_current_br" ]; then
       echo "minsky: resetting host to $_default_br (was on $_current_br from crashed iteration)"
-      git -C "$_host_arg" checkout "$_default_br" 2>/dev/null || true
-      git -C "$_host_arg" clean -fd 2>/dev/null || true
+      # Stash any uncommitted work (tracked + untracked) BEFORE checkout
+      # so nothing is destroyed. `git stash push -u -m <label>` is the
+      # recoverable counterpart of `git clean -fd`.
+      if [ -n "$(git -C "$_host_arg" status --porcelain 2>/dev/null)" ]; then
+        _stash_label="minsky auto-stash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        if git -C "$_host_arg" stash push -u -m "$_stash_label" >/dev/null 2>&1; then
+          echo "minsky: stashed dirty state as: $_stash_label"
+          echo "minsky: recover via: git -C $_host_arg stash list | grep 'minsky auto-stash'"
+        else
+          # Pivot: stash failed; refuse to start rather than destroy state.
+          echo "minsky: REFUSING to start daemon — host $_host_arg has dirty state and 'git stash push -u' failed" >&2
+          echo "minsky: resolve manually (commit, stash, or move files out), then retry" >&2
+          exit 1
+        fi
+      fi
+      # Now the working tree is clean; checkout will succeed.
+      if ! git -C "$_host_arg" checkout "$_default_br" >/dev/null 2>&1; then
+        echo "minsky: REFUSING to start daemon — failed to checkout $_default_br on $_host_arg" >&2
+        echo "minsky: stash succeeded but branch switch did not; inspect 'git -C $_host_arg status'" >&2
+        exit 1
+      fi
     fi
   fi
 
