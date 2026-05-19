@@ -155,7 +155,7 @@ describe("runLive — scope-leak detection (chaos row 7)", () => {
     expect(result.scopeLeakPaths).toEqual(["package.json", "README.md", "test/a.ts"]);
   });
 
-  test("scope-leak does NOT extract PR URL (leak supersedes success)", async () => {
+  test("scope-leak PRESERVES PR URL (smart mode — work is valuable even with out-of-scope files)", async () => {
     const result = await runLive({
       plan: makePlan(),
       allowedPaths: ["src/**"],
@@ -167,7 +167,10 @@ describe("runLive — scope-leak detection (chaos row 7)", () => {
       globMatchesPath: fakeGlobMatch,
     });
     expect(result.verdict).toBe("scope-leak");
-    expect(result.prUrl).toBeNull();
+    // PR URL is now preserved even on scope-leak (2026-05-19 operator directive:
+    // "quite often when working on some task you touch more files than planned")
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/99");
+    expect(result.scopeLeakPaths).toContain("arbitrary.bin");
   });
 });
 
@@ -459,7 +462,7 @@ describe("runLive — PR-creation backstop (devin-spawn-no-pr-opened pivot)", ()
     expect(result.prUrl).toBeNull();
   });
 
-  test("backstop is SKIPPED on scope-leak (verdict supersedes the cascade)", async () => {
+  test("backstop RUNS on scope-leak (smart mode — preserve the PR even with out-of-scope files)", async () => {
     const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
     const result = await runLive({
       plan: makePlan(),
@@ -472,8 +475,10 @@ describe("runLive — PR-creation backstop (devin-spawn-no-pr-opened pivot)", ()
       defaultBranch: "main",
     });
     expect(result.verdict).toBe("scope-leak");
-    expect(result.prUrl).toBeNull();
-    expect(calls.length).toBe(0);
+    // Smart mode: PR URL is resolved even on scope-leak
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/99");
+    // The gh backstop was called to find the PR
+    expect(calls.length).toBeGreaterThanOrEqual(1);
   });
 
   test("backstop is SKIPPED on spawn-failed (verdict supersedes the cascade)", async () => {
