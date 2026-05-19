@@ -36,23 +36,12 @@
   - **Measurement**: `git checkout -b feat/test && minsky && minsky stop && test "$(git branch --show-current)" = "feat/test" || echo "REGRESSED"`.
   - **Anchor**: rule #17 (proactive healing — surprise-default is a class of bug); rule #6 (stay alive — but predictably); operator directive 2026-05-19 ("make sure minsky gracefully picks them up" — gracefully, not destructively).
 
-- [ ] `daemon-survives-machine-restart` — after a sudden machine reboot, power loss, or kernel panic, minsky must auto-resume from where it left off with zero operator intervention
-  - **ID**: daemon-survives-machine-restart
-  - **Tags**: p0, milestone-m1, reliability, stay-alive, launchd, rule-6
-  - **Milestone**: M1
-  - **Competitive-goal**: a daemon that dies on reboot and needs manual restart is not a 24/7 system. Devin (cloud) survives reboots by design; minsky must match that for self-hosted.
-  - **Surfaced-by**: 2026-05-19 operator directive — "make it fully support sudden machine restarts".
-  - **Details**: three deliverables:
-    (a) **launchd KeepAlive plist** — `~/Library/LaunchAgents/com.minsky.daemon.plist` with `KeepAlive=true`, `RunAtLoad=true`, pointing at `minsky --daemon --host <configured-host>`. The host is read from `~/.minsky/config.json::default_host` (new field). On macOS, launchd is the supervisor — it restarts the daemon after reboot, crash, or SIGKILL. No manual `minsky start` needed after reboot.
-    (b) **Stale PID cleanup on boot** — the daemon's startup path must detect and clean stale PID files from a previous crash. Today `minsky --daemon` fails if `daemon.pid` exists even when the PID is dead. Fix: on startup, check `kill -0 <pid>`; if dead, remove the PID file and proceed.
-    (c) **Iteration resume** — the experiment-store already preserves iteration history across restarts. Verify: after a simulated crash (SIGKILL the daemon), `minsky --daemon` picks up the next unfinished task, not the one that was in-flight when it crashed. The in-flight iteration's partial state (branch, uncommitted files) must be cleaned up on resume (`git checkout <default_branch> && git clean -fd`).
-    (d) **systemd equivalent** — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `WantedBy=default.target` for Linux machines.
-  - **Files**: `~/Library/LaunchAgents/com.minsky.daemon.plist` (new), `bin/minsky` (stale PID cleanup), `novel/cross-repo-runner/bin/minsky-run.mjs` (resume-after-crash cleanup), `distribution/systemd/minsky-daemon.service` (new), `~/.minsky/config.json` (add `default_host` field)
-  - **Hypothesis**: today, after a machine reboot, minsky is not running and the operator must manually start it. After this fix, minsky auto-starts within 30s of login (macOS) or boot (Linux) and picks up the next task within 1 iteration.
-  - **Success**: (1) `sudo reboot` on a machine with minsky configured → within 60s of login, `minsky status` shows `running`; (2) `kill -9 <daemon-pid>` → within 10s, `minsky status` shows `running` with a new PID; (3) after SIGKILL, the next iteration works on a new task (not stuck on the crashed one's dirty state).
-  - **Pivot**: if launchd KeepAlive proves unreliable (some macOS versions throttle restarts), fall back to a cron `@reboot` entry that runs `minsky --daemon --host <default_host>`.
-  - **Measurement**: `kill -9 $(cat ~/.minsky/daemon.pid) && sleep 15 && minsky status | grep -c 'running'` → 1 (daemon auto-restarted). After simulated reboot: `launchctl list | grep -c minsky.daemon` → 1.
-  - **Anchor**: Armstrong 2007 (let-it-crash + supervisor restart — launchd IS the supervisor); Beyer SRE 2016 (the daemon must be cattle, not pets — restart is the normal path, not an exception); rule #6 (stay alive).
+<!-- daemon-survives-machine-restart completed 2026-05-19; close-out PR supersedes #647 #649 #655. All four acceptance criteria shipped to main and live-verified on host fyodoriv/minsky:
+  (a) launchd KeepAlive plist generator + auto-install on first daemon run — bin/minsky `install-daemon` / smart-attach auto-install path; `KeepAlive=true`, `RunAtLoad=true`, `ThrottleInterval=10`, `MINSKY_NON_INTERACTIVE=1`. Commits 1f7fa08 + 3dc10d5.
+  (b) Stale PID cleanup on boot — bin/minsky `--daemon` startup AND `minsky status` paths use `kill -0 <pid>` probe + `rm -f` if dead. Commit 1f7fa08.
+  (c) Iteration resume + dirty-state cleanup on a crashed feature branch — superseded by the recoverable-stash variant in `reset-host-if-crashed` (commits 1dd0df7 + 6bca40a). Honours the `<sidecar>/graceful-stop` sentinel; never runs `git clean -fd` (multi-agent git-safety rule); refuses to start if `git stash push -u` itself fails (rule #6 pivot).
+  (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
+  18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host /Users/fivanishche/apps/tooling/minsky`). -->
 
 - [ ] `walker-drains-one-host-forever` — the multi-host walker never advances past the first host with tasks because the host loop runs max-iter=∞ and the same task keeps getting re-picked after each iteration; other hosts (including minsky itself) are starved
   - **ID**: walker-drains-one-host-forever
