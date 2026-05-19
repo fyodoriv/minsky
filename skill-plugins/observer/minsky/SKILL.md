@@ -487,6 +487,26 @@ pnpm m1:observability        # which M1 tasks have observability gaps
 pnpm m1:coverage             # 6-layer composite coverage number
 ```
 
+### Default by default (rule #16 — always follow)
+
+Every new behavior ships as the default. Never hide behind an opt-in flag.
+
+- If it's reasonable for all users → make it the default NOW
+- Ship with: experiment + measurement + opt-out (for debugging only)
+- The question is "why ISN'T this the default?" — not "should we enable it?"
+- Opt-out flags go to DEPRECATED.md the moment they're never used
+
+Examples already shipped:
+- Scope-leak soft mode → default (daemon never halts on scope-leak)
+- Launchd persistence → auto-installed on first `minsky` run
+- Dynamic timeouts → computed from iteration history, not hardcoded
+- Smart auto-attach → type `minsky` → it just works
+- Stale PID cleanup → automatic on daemon startup
+
+**When implementing a task**: if you catch yourself writing `MINSKY_ENABLE_X=1`,
+stop — make X the default and write `MINSKY_DISABLE_X=1` as the escape hatch
+instead. Then immediately file that escape hatch in DEPRECATED.md.
+
 ### When to commit before starting minsky
 
 If you've made changes to the minsky repo (or any host repo) that are
