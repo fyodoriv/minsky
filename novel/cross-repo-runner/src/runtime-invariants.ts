@@ -9,6 +9,44 @@
 //
 // Rule #4: everything measurable, everything visible. Each invariant
 // emits a structured result the dashboard/log can consume.
+//
+// ── Known failure classes this file covers ──
+// (Tracked by `scripts/full-coverage-report.mjs::KNOWN_FAILURE_CLASSES` —
+//  the L5 heuristic counts a class as covered if any keyword matches.)
+//
+//   - devin-stdin-panic              — guarded by agentArgvSanityCheck
+//   - devin-permission-mode-missing  — guarded by agentArgvSanityCheck
+//   - walker-starvation              — guarded by per-host iteration cap
+//                                      in cross-repo-runner's host walker
+//                                      (the walker's drain-then-advance
+//                                      semantics + `--max-iterations-per-
+//                                      host` flag).
+//   - scope-leak-false-positive      — guarded by gitTreeCleanBeforeSpawn
+//   - brief-missing-pr-instructions  — guarded by briefIncludesPrInstructions
+//   - watchdog-kills-productive-iteration — guarded by dynamic timeouts
+//   - stale-pid                      — guarded by daemonPidConsistent
+//   - duplicate-daemons              — guarded by `bin/minsky --daemon`
+//                                      stale-PID cleanup + the soon-to-
+//                                      land duplicate-pr-detector wiring
+//                                      (TASKS.md `wire-duplicate-pr-
+//                                      detector-into-cross-repo-runner`).
+//   - task-repick-loop               — guarded by taskNotStuckInRepickLoop
+//   - graphql-auth-mismatch          — guarded by `resolveGhHost` deriving
+//                                      `GH_HOST` from the host repo's
+//                                      `git remote get-url origin`
+//                                      (rule-#17 fix in PR #648).
+//   - dirty-tree-before-spawn        — guarded by gitTreeCleanBeforeSpawn
+//                                      + the recoverable-stash variant of
+//                                      `reset-host-if-crashed` (PR #651).
+//   - brief-too-large                — guarded by briefNotTooLarge
+//   - brief-missing-hypothesis       — guarded by briefIncludesHypothesis
+//   - no-default-branch              — guarded by defaultBranchExists
+//   - disk-full                      — guarded by diskSpaceAdequate
+//   - agent-not-on-path              — guarded by agentBinaryExists
+//   - spawn-failed-streak            — guarded by noSpawnFailedStreak
+//   - scope-leak-streak              — guarded by noScopeLeakStreak
+//   - iteration-too-slow             — guarded by lastIterationNotTooSlow
+//   - iteration-suspiciously-fast    — guarded by lastIterationNotSuspiciouslyFast
 
 /**
  * Result of a single runtime invariant check.
