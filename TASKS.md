@@ -795,6 +795,34 @@ FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-fi
 
 ## P1
 
+<!-- Observations filed 2026-05-19 — rule-17 sweep, two pre-existing flakes the daemon was bleeding. -->
+
+- [ ] `spawn-strategy-claude-smoke-test-skip-on-rate-limit` — the `default args spawn a fresh non-interactive Claude session` test fires a real `claude --print` that hard-fails when the operator's Claude subscription is rate-limited (`You've hit your limit · resets May 31`). The test currently asserts `exitCode === 0`, which is wrong: a rate-limited environment should `it.skipIf` the test, same shape as the existing `hasClaude` skip-guard.
+  - **ID**: spawn-strategy-claude-smoke-test-skip-on-rate-limit
+  - **Tags**: p1, rule-11, rule-17, flaky-test, env-dependent
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-19 Devin session — the test failed locally because Claude is rate-limited until 2026-05-31; same failure on `main`. This is a rule-#11 violation (load-bearing flaky gate) AND a rule-#17 violation (observed-but-unfixed).
+  - **Details**: at `novel/tick-loop/src/spawn-strategy.test.ts` ~line 100, the test guards on `hasClaude` (PATH presence) but not on quota. Add a second guard: probe `echo test | claude --print --max-tokens 1` once at module load, and `it.skipIf` the test when stdout matches `You've hit your limit` / `rate-limited` / similar. Convert the env-dependent assertion into a deterministic skip rather than a deterministic failure.
+  - **Files**: `novel/tick-loop/src/spawn-strategy.test.ts`.
+  - **Hypothesis**: the test fails 100% of the time on rate-limited operators today; after the skip-guard, it passes (skipped) 100% of the time when rate-limited, and exercises the real assertion only when quota allows. Pre-fix: 1 false-failure per CI run when quota is gone. Post-fix: 0.
+  - **Success**: rate-limited environment → test reports `skipped`; non-rate-limited → test runs and asserts as before.
+  - **Pivot**: if the rate-limit probe itself is too slow / costs tokens, gate on an env var `MINSKY_SKIP_CLAUDE_SMOKE=1` instead of an empirical probe.
+  - **Measurement**: `claude --print 'ok' 2>&1 | grep -q "hit your limit" && npx vitest run novel/tick-loop/src/spawn-strategy.test.ts -t "fresh non-interactive" | grep -q "skipped"`.
+  - **Anchor**: rule #11 (no flaky load-bearing gates); rule #17 (proactive healing — observed flake is a fix); operator directive 2026-05-19 (continue same proactive healing process).
+
+- [ ] `local-gate-merge-minsky-home-hardcoded-path` — `scripts/local-gate-merge.mjs` line 48 hardcodes `MINSKY_HOME` default to `/Users/cbrwizard/apps/tooling/minsky`, breaking the gate for every operator who isn't `cbrwizard`
+  - **ID**: local-gate-merge-minsky-home-hardcoded-path
+  - **Tags**: p1, rule-17, rule-1, hardcoded-path, multi-user-portability
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-19 Devin session — running `node scripts/local-gate-merge.mjs --pr=648` from a non-cbrwizard machine produced `spawnSync gh ENOENT` because the script `cwd`-ed into `/Users/cbrwizard/apps/tooling/minsky` (which doesn't exist on this machine).
+  - **Details**: replace the hardcoded fallback with `dirname(fileURLToPath(import.meta.url)) + "/.."` so the script always derives `REPO` from its own location. Same pattern `bin/minsky` already uses for resolving `MINSKY_REPO_ROOT`.
+  - **Files**: `scripts/local-gate-merge.mjs:48`.
+  - **Hypothesis**: deriving `REPO` from `import.meta.url` works for every operator on every machine; the hardcoded path works for one operator on one machine. Pre-fix: 0/N operators ≠ cbrwizard can use the gate. Post-fix: N/N.
+  - **Success**: `node scripts/local-gate-merge.mjs --pr=N` succeeds (or runs to a real verdict) on a machine where `~/apps/tooling/minsky` is the repo path AND on a machine where `~/code/minsky` is.
+  - **Pivot**: keep `MINSKY_HOME` env override (operator escape hatch), only change the default.
+  - **Measurement**: `node -e 'console.log(require("node:path").resolve(require("node:url").fileURLToPath(import.meta.url), ".."))' /Users/fivanishche/apps/tooling/minsky/scripts/local-gate-merge.mjs` → prints `/Users/fivanishche/apps/tooling/minsky/scripts`.
+  - **Anchor**: rule #17 (proactive healing); rule #1 (don't reinvent the wheel — the same `import.meta.url` pattern is in `bin/minsky` already); operator directive 2026-05-19.
+
 <!-- Observations filed 2026-05-18 from live daemon session (P1 findings). -->
 
 - [ ] `graphql-repo-slug-mismatch-non-fatal` — `GraphQL: Could not resolve to a Repository` errors appear for repos that exist (`fyodoriv/minsky`) because the gh token context doesn't match; cosmetic but noisy — 5 errors per walk
