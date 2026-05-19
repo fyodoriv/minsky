@@ -559,9 +559,19 @@ if [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop
     exec "$0" watch "$_target_host"
   fi
 
-  # No daemon running — start one and attach
+  # No daemon running — start one, auto-install launchd persistence, attach.
+  # Persistence is DEFAULT — minsky should survive reboots without extra steps.
   echo "minsky: no daemon running for $(basename "$_target_host"). Starting..."
   "$0" --daemon --host "$_target_host"
+
+  # Auto-install launchd plist if not already installed (macOS only).
+  # This makes the daemon survive reboots by default. The operator
+  # can remove it with `minsky uninstall-daemon`.
+  if [ "$(uname)" = "Darwin" ] && ! launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
+    echo "minsky: installing launchd persistence (survives reboot)..."
+    "$0" install-daemon "$_target_host" 2>/dev/null || true
+  fi
+
   sleep 2
   exec "$0" watch "$_target_host"
 fi
