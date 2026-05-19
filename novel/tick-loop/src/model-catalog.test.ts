@@ -168,6 +168,34 @@ describe("validateModelCatalog (slice 3 — invariant pinner)", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join(" ")).toContain("fivehourFloor 0.5 > prev floor 0.3");
   });
+
+  it("rejects a catalog where weeklyFloor is not monotone descending", () => {
+    const result = validateModelCatalog([
+      mkEntry({ id: "a", qualityTier: 1, weeklyFloor: 0.2 }),
+      mkEntry({ id: "b", qualityTier: 2, weeklyFloor: 0.4 }),
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toContain("weeklyFloor 0.4 > prev floor 0.2");
+  });
+
+  it("rejects a catalog where monthlyFloor is not monotone descending", () => {
+    const result = validateModelCatalog([
+      mkEntry({ id: "a", qualityTier: 1, monthlyFloor: 0.1 }),
+      mkEntry({ id: "b", qualityTier: 2, monthlyFloor: 0.3 }),
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toContain("monthlyFloor 0.3 > prev floor 0.1");
+  });
+
+  it("accepts a valid catalog (qualityTier ascending, floors descending)", () => {
+    const result = validateModelCatalog([
+      mkEntry({ id: "haiku", qualityTier: 1, fivehourFloor: 0.8, weeklyFloor: 0.6, monthlyFloor: 0.5 }),
+      mkEntry({ id: "sonnet", qualityTier: 2, fivehourFloor: 0.4, weeklyFloor: 0.3, monthlyFloor: 0.2 }),
+      mkEntry({ id: "opus", qualityTier: 3, fivehourFloor: 0.1, weeklyFloor: 0.1, monthlyFloor: 0.0 }),
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
 });
 
 function mkEntry(overrides: Partial<ModelCatalogEntry>): ModelCatalogEntry {

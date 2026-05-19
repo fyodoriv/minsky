@@ -58,6 +58,57 @@ export interface GitLike {
 }
 
 /**
+ * Structural subset of the gh-CLI surface the runner needs to implement
+ * the post-spawn PR-creation backstop (`devin-spawn-no-pr-opened` pivot,
+ * 2026-05-18). The hypothesis-fix is in `spawn-plan.ts` (the brief now
+ * includes `gh pr create` instructions); this seam is the pivot
+ * threshold's safety net for when the spawned agent honours the commit
+ * + push steps but skips `gh pr create` (the field-reported failure
+ * mode on devin --print runs).
+ *
+ * Production wires a `child_process.execFile("gh", …)` wrapper in
+ * `minsky-run.mjs`; tests inject an in-memory fake. The interface is
+ * intentionally optional on {@link RunLiveInputs} — when omitted, the
+ * runner falls back to the pre-pivot behaviour (extract from stdout only).
+ *
+ * Pattern: dependency-injection-via-structural-typing (Martin 2003 — depend
+ * on interfaces, not implementations) + rule #2 (vision.md § 2 — every
+ * external dep behind an interface; `gh` is the dep, this is the seam).
+ */
+export interface GhLike {
+  /**
+   * Returns the URL of an open PR on the host repo whose `headRefName`
+   * matches `branch`, or `null` when no such PR exists. Used to short-
+   * circuit the create-step when devin opened a PR but the URL was
+   * truncated from stdout (typical for long-running iterations whose
+   * stdout cap is hit before the PR-create line lands).
+   */
+  findOpenPr(args: {
+    readonly hostRepo: string;
+    readonly branch: string;
+  }): Promise<string | null>;
+  /**
+   * Opens a PR on the host repo from `branch` against `base`. Returns the
+   * PR URL on success, `null` on any failure (network, gh auth, branch
+   * not pushed, branch lacks commits, etc.). Failures are silent — the
+   * runner treats this as best-effort, never let-it-crash.
+   *
+   * The runner-side backstop is the LAST line of defence: it runs only
+   * after the spawn exited 0 with no scope leak AND no PR URL was found
+   * in stdout. Logging the failure is the caller's responsibility (the
+   * CLI surfaces it via `notes` in the iteration record).
+   */
+  createPr(args: {
+    readonly hostRepo: string;
+    readonly branch: string;
+    readonly base: string;
+    readonly title: string;
+    readonly body: string;
+    readonly workingDir: string;
+  }): Promise<string | null>;
+}
+
+/**
  * Inputs to {@link runLive}.
  */
 export interface RunLiveInputs {
@@ -84,6 +135,27 @@ export interface RunLiveInputs {
    * the parser, no new glob dialect).
    */
   readonly globMatchesPath: (glob: string, path: string) => boolean;
+  /**
+   * Optional gh-CLI seam for the post-spawn PR-creation backstop
+   * (`devin-spawn-no-pr-opened` pivot, 2026-05-18). When provided, the
+   * runner attempts to find or open a PR for `plan.branchName` if the
+   * spawn exited 0 with no scope leak AND no PR URL was extracted from
+   * stdout. When omitted, the runner falls back to extract-from-stdout-
+   * only behaviour. The seam is optional so existing tests continue to
+   * pass without an injected fake.
+   */
+  readonly gh?: GhLike;
+  /**
+   * The fully-qualified host repo identifier (`owner/repo`) the backstop
+   * uses when calling `gh.findOpenPr` / `gh.createPr`. Required when `gh`
+   * is provided; ignored otherwise.
+   */
+  readonly hostRepo?: string;
+  /**
+   * The default branch to target when the backstop opens a PR. Required
+   * when `gh` is provided; ignored otherwise.
+   */
+  readonly defaultBranch?: string;
 }
 
 /**
@@ -134,10 +206,15 @@ export interface LiveSpawnOutcome {
  * short-circuits and the run is `validated` regardless of the diff (the
  * operator opted out of scope enforcement by not declaring it).
  *
- * Step 4 (PR URL) — extract the LAST `https://github.com/.+/pull/\d+` URL
- * from stdout if present. The spawn typically prints the PR URL as its
- * last line; we take the last match so any earlier matches inside example
- * output (e.g. the brief's "see PR #N" prose) don't shadow the real one.
+ * Step 4 (PR URL resolution — three-stage cascade) — first extract the LAST
+ * `https://github.com/.+/pull/\d+` URL from stdout if present (the spawn
+ * typically prints the PR URL as its last line; we take the last match so
+ * any earlier matches inside example output don't shadow the real one).
+ * If that returns null AND `gh` is injected, ask whether an open PR
+ * already exists for the plan's branch (handles bounded-stdout-tail
+ * truncation). If still null, ask `gh` to open the PR — the
+ * `devin-spawn-no-pr-opened` pivot, 2026-05-18, when the agent commits
+ * + pushes but skips `gh pr create`.
  *
  * @otel cross-repo-runner.run-live
  */
@@ -180,9 +257,96 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
     exitCode: result.exitCode,
     durationMs: result.durationMs,
     scopeLeakPaths: [],
-    prUrl: extractPrUrl(result.stdoutTail),
+    prUrl: await ensurePrUrl(inputs, result.stdoutTail),
     baselineRef,
   };
+}
+
+/**
+ * Resolve the PR URL the iteration record will store. Three-stage cascade:
+ *
+ *   1. Extract from the spawn's stdout tail (the happy path — devin /
+ *      claude printed the URL after `gh pr create`).
+ *   2. If null and a `gh` seam is injected, ask whether an open PR
+ *      already exists for the plan's branch (handles the case where the
+ *      spawn opened a PR but its URL fell off the bounded stdout tail).
+ *   3. If still null, ask the seam to open a PR. This is the
+ *      `devin-spawn-no-pr-opened` pivot — when the agent commits + pushes
+ *      but skips `gh pr create`, the runner backstop opens it.
+ *
+ * Any failure inside the seam returns null and the verdict stays
+ * `validated` with `prUrl: null` (the legacy behaviour). The runner does
+ * NOT let-it-crash on the backstop because the gh probe is best-effort:
+ * gh-not-on-PATH / gh-auth-expired / branch-not-pushed are all
+ * recoverable in the next iteration. (Per rule #7 graceful-degrade.)
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function ensurePrUrl(
+  inputs: RunLiveInputs,
+  stdoutTail: string,
+): Promise<string | null> {
+  const fromStdout = extractPrUrl(stdoutTail);
+  if (fromStdout !== null) return fromStdout;
+  if (inputs.gh === undefined) return null;
+  if (inputs.hostRepo === undefined) return null;
+  if (inputs.defaultBranch === undefined) return null;
+  const branch = inputs.plan.branchName;
+  const hostRepo = inputs.hostRepo;
+  const existing = await inputs.gh.findOpenPr({ hostRepo, branch });
+  if (existing !== null) return existing;
+  return inputs.gh.createPr({
+    hostRepo,
+    branch,
+    base: inputs.defaultBranch,
+    title: defaultBackstopTitle(inputs.plan.taskId),
+    body: defaultBackstopBody(inputs.plan.taskId),
+    workingDir: inputs.plan.workingDirectory,
+  });
+}
+
+/**
+ * Title for the runner-opened backstop PR. Conventional-commit prefix
+ * `chore:` so commit-style PR checks pass; the task id is suffixed for
+ * traceability in `gh pr list` output.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function defaultBackstopTitle(taskId: string): string {
+  return `chore: backstop PR for ${taskId} (agent did not run gh pr create)`;
+}
+
+/**
+ * Body for the runner-opened backstop PR. Includes the
+ * `Hypothesis self-grade` block required by `check-pr-self-grade.mjs`
+ * (rule #9 — pre-registered hypothesis + observation). The values are
+ * meta-statements about the runner's behaviour: the predicted outcome
+ * was "agent ships its own PR", the observed outcome was "agent did
+ * not call gh pr create", and the lesson is the runner's backstop is
+ * required for the success metric (`pr_url != null`) to move.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function defaultBackstopBody(taskId: string): string {
+  return [
+    `Auto-opened by minsky-run.mjs's post-spawn PR-creation backstop because the`,
+    `spawned agent finished with exit 0 but did not run \`gh pr create\` (or the`,
+    `URL did not appear in the bounded stdout tail).`,
+    "",
+    `Task: \`${taskId}\``,
+    "",
+    `Review the commits on this branch carefully — the agent's edits are present,`,
+    `but its PR description / self-grade is not. Edit this PR body to reflect`,
+    `the actual hypothesis / observation before requesting review.`,
+    "",
+    `## Hypothesis self-grade`,
+    "",
+    `- Predicted: agent runs to completion and opens a PR via \`gh pr create\``,
+    `- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR`,
+    `- Match: partial`,
+    `- Lesson: the brief's \`gh pr create\` step is necessary but not always sufficient; the runner backstop is the durable safety net (devin-spawn-no-pr-opened pivot, 2026-05-18)`,
+    "",
+  ].join("\n");
 }
 
 /**
