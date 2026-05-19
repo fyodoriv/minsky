@@ -114,6 +114,47 @@ case "${1:-}" in
     echo "start minsky with --daemon to enable logging"
     exit 1
     ;;
+  update)
+    # Graceful pause → pull latest → rebuild → restart from same spot.
+    # The experiment-store preserves iteration history so the daemon
+    # resumes from the next unfinished task after restart.
+    echo "minsky update — pause, pull, rebuild, resume"
+    echo ""
+
+    # 1. Stop daemon gracefully
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      echo "  1/4 Stopping daemon..."
+      pkill -TERM -f "cross-repo-runner/bin/minsky-run"
+      rm -f "$MINSKY_DAEMON_PID"
+      sleep 2
+      echo "       ✅ Daemon stopped"
+    else
+      echo "  1/4 No daemon running — skip"
+    fi
+
+    # 2. Pull latest
+    echo "  2/4 Pulling latest..."
+    git -C "$(dirname "$0")/.." pull --rebase 2>&1 | head -5
+    echo "       ✅ Pulled"
+
+    # 3. Rebuild
+    echo "  3/4 Rebuilding..."
+    (cd "$(dirname "$0")/.." && pnpm install --frozen-lockfile 2>&1 | tail -1)
+    echo "       ✅ Built"
+
+    # 4. Restart daemon with same host
+    # Detect the host from the last daemon's args
+    LAST_HOST=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+    if [ -z "$LAST_HOST" ]; then
+      LAST_HOST="${2:-$(pwd)}"
+    fi
+    echo "  4/4 Restarting on $LAST_HOST..."
+    "$0" --daemon --host "$LAST_HOST"
+    echo ""
+    echo "✅ Update complete. Daemon resumed from where it left off."
+    echo "   Run 'minsky watch' to monitor."
+    exit 0
+    ;;
   watch)
     # Live dashboard: status + iterations + log in a single refreshing view.
     # Refreshes every 10s. Ctrl-C to exit (daemon keeps running).

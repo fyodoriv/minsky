@@ -888,6 +888,10 @@ async function runLoopAsResult(parsed, controller) {
     globMatchesPath,
     maxIterations,
     tickIntervalMs,
+    // Scope-leak soft mode (default): devin naturally touches related
+    // files outside **Files**: — warn + continue instead of halting.
+    // Override: MINSKY_SCOPE_LEAK_MODE=hard for strict enforcement.
+    scopeLeakMode: process.env.MINSKY_SCOPE_LEAK_MODE === "hard" ? "hard" : "warn",
     signal: controller.signal,
     recordIteration: (record) => {
       const verdict =
