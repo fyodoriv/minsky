@@ -18,23 +18,7 @@
 
 <!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
 
-<!-- Observations filed 2026-05-19 by Devin session (rule-17-proactive-healing PR #648). 2 new P0 bugs surfaced by the live restart of `minsky` while developing the rule-17 fixes. -->
-
-- [ ] `minsky-bin-auto-resets-to-main-surprise` — `bin/minsky` auto-switches the host to `default_branch` on start, surprising developers working on feature branches
-  - **ID**: minsky-bin-auto-resets-to-main-surprise
-  - **Tags**: p0, rule-17, daemon-startup, ux, minsky-bin
-  - **Milestone**: M1
-  - **Status**: blocked
-  - **Blocked**: needs-pr-648-merged-first
-  - **Unblock**: after PR #648 (rule-17-proactive-healing) lands, this task can proceed.
-  - **Surfaced-by**: 2026-05-19 Devin session — running `minsky` to restart the daemon during PR #648 development silently `git checkout main`-ed the repo, losing the feature-branch context the developer was using.
-  - **Details**: at `bin/minsky:622–626`, the start-up always resets to `default_branch`. The original intent (daemon recovers from a crashed feature-branch iteration) is correct, but the rule's blast radius is too wide: it triggers EVERY time `minsky` starts, not only after a crash. Fix: detect whether the daemon was previously running on this branch (i.e. there was no clean shutdown) — only reset then. A graceful `minsky stop` followed by `minsky` should leave the branch alone.
-  - **Files**: `bin/minsky` (lines 607–626 — the same block as the previous task; can ship together).
-  - **Hypothesis**: gating the auto-reset on "previous shutdown was crashed" (detected via a sentinel file written on graceful stop + cleared after the reset runs) preserves developer ergonomics while keeping the crash-recovery property.
-  - **Success**: `git checkout feat/my-work && minsky stop && minsky` → still on `feat/my-work` (graceful path). `git checkout feat/my-work && kill -9 <pid> && minsky` → resets to main (crash path).
-  - **Pivot**: if the sentinel file approach is unreliable, add a `--no-reset` flag (default off) so the operator can opt out per-invocation.
-  - **Measurement**: `git checkout -b feat/test && minsky && minsky stop && test "$(git branch --show-current)" = "feat/test" || echo "REGRESSED"`.
-  - **Anchor**: rule #17 (proactive healing — surprise-default is a class of bug); rule #6 (stay alive — but predictably); operator directive 2026-05-19 ("make sure minsky gracefully picks them up" — gracefully, not destructively).
+<!-- Observations filed 2026-05-19 by Devin session (rule-17-proactive-healing PR #648). 2 new P0 bugs surfaced by the live restart of `minsky` while developing the rule-17 fixes. Both shipped: `minsky-bin-git-clean-fd-multi-agent-safety-violation` in PR #650, `minsky-bin-auto-resets-to-main-surprise` in PR #651 (graceful-stop sentinel + reset-host-if-crashed subcommand). -->
 
 <!-- daemon-survives-machine-restart completed 2026-05-19; close-out PR supersedes #647 #649 #655. All four acceptance criteria shipped to main and live-verified on host fyodoriv/minsky:
   (a) launchd KeepAlive plist generator + auto-install on first daemon run — bin/minsky `install-daemon` / smart-attach auto-install path; `KeepAlive=true`, `RunAtLoad=true`, `ThrottleInterval=10`, `MINSKY_NON_INTERACTIVE=1`. Commits 1f7fa08 + 3dc10d5.
