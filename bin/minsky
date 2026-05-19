@@ -54,6 +54,56 @@ MINSKY_STATE_DIR="${HOME}/.minsky"
 MINSKY_DAEMON_LOG="${MINSKY_STATE_DIR}/daemon.log"
 MINSKY_DAEMON_PID="${MINSKY_STATE_DIR}/daemon.pid"
 
+# ── Portable helpers (zero deps — no python3, no uv) ─────────
+# We previously shelled out to `python3 -c "import os; print(os.path.realpath(...))"`
+# but a corporate `python3` wrapper (Intuit dotfiles) bootstraps a uv cache
+# on first call with a fresh HOME. That added 30+ seconds to `minsky report`
+# when invoked from a clean test environment. This script must stay portable
+# and FAST — replace all python3 calls with shell-only equivalents.
+# Discovered 2026-05-19 — rule-#17 fix.
+_minsky_realpath() {
+  # Resolve symlinks for $1. Works on macOS + Linux. Falls back to $1
+  # if both `realpath` and `readlink -f` are missing.
+  local _p="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$_p" 2>/dev/null && return 0
+  fi
+  # macOS readlink doesn't have -f; emulate it.
+  while [ -L "$_p" ]; do
+    local _next
+    _next=$(readlink "$_p" 2>/dev/null) || break
+    case "$_next" in
+      /*) _p="$_next" ;;
+      *) _p="$(dirname "$_p")/$_next" ;;
+    esac
+  done
+  # Resolve relative path to absolute.
+  ( cd "$(dirname "$_p")" 2>/dev/null && printf "%s/%s" "$(pwd -P)" "$(basename "$_p")" )
+}
+
+_minsky_config_value() {
+  # Read `$1` (key) from $MINSKY_STATE_DIR/config.json without a JSON parser.
+  # Handles only top-level string values — sufficient for `default_host`,
+  # `cloud_agent`, etc. Returns empty string on missing file or missing key.
+  local _key="$1"
+  local _cfg="${2:-$MINSKY_STATE_DIR/config.json}"
+  [ -f "$_cfg" ] || { printf ""; return 0; }
+  # awk: find a line `"key": "value"`, strip quotes/commas, print value.
+  awk -v key="$_key" '
+    BEGIN { FS="\""; found=0 }
+    $0 ~ "\"" key "\"[ \t]*:" {
+      # Match either string ("...") or bare token after the colon
+      idx = index($0, ":")
+      rest = substr($0, idx+1)
+      gsub(/^[ \t]+|[ \t,]+$/, "", rest)
+      gsub(/^"|"$/, "", rest)
+      print rest
+      found = 1
+      exit
+    }
+  ' "$_cfg" 2>/dev/null
+}
+
 # ── 1. Handle subcommands that DON'T need the repo ──────────
 #
 # `minsky status` / `minsky stop` / `minsky logs` only need
@@ -154,7 +204,7 @@ case "${1:-}" in
     # TASKS.md `minsky-bin-auto-resets-to-main-surprise`. The sentinel
     # is consumed by `reset-host-if-crashed` so it only protects ONE
     # subsequent start; a real crash after that point still resets.
-    _stop_default_host=$(python3 -c "import json; print(json.load(open('$HOME/.minsky/config.json')).get('default_host',''))" 2>/dev/null)
+    _stop_default_host=$(_minsky_config_value "default_host")
     if [ -n "$_stop_default_host" ] && [ -d "$_stop_default_host/.git" ]; then
       mkdir -p "$_stop_default_host/.minsky"
       date -u +%Y-%m-%dT%H:%M:%SZ > "$_stop_default_host/.minsky/graceful-stop"
@@ -266,11 +316,251 @@ case "${1:-}" in
     echo "minsky: stashed dirty state as: $_rh_label"
     exit 0
     ;;
+  init)
+    # `minsky init [host]` — write per-machine config so subsequent
+    # `minsky` invocations know which repo to run against.
+    #
+    # Behavior:
+    #   - host defaults to `pwd` (the most ergonomic case: cd into a
+    #     repo, run `minsky init`, you're done).
+    #   - host MUST be a git repo. If it isn't, refuse with exit 2 and
+    #     a hint — silent fallback would leave a config pointing at a
+    #     non-repo and surprise the operator on the first daemon start.
+    #   - writes ~/.minsky/config.json with `default_host` set.
+    #   - preserves any existing keys (cloud_agent, etc.) — non-destructive.
+    #   - prints next steps (`minsky` to start the daemon) so the operator
+    #     never has to consult docs.
+    #
+    # Source: M1 milestone exit criterion §3 (one-command bootstrap);
+    # rule #1 (loud-crash on misconfig); rule #15 (UX = ergonomic
+    # defaults).
+    _init_host="${2:-$(pwd)}"
+    # Resolve to absolute path so the config doesn't depend on cwd.
+    _init_host=$(cd "$_init_host" 2>/dev/null && pwd)
+    if [ -z "$_init_host" ] || [ ! -d "$_init_host/.git" ]; then
+      echo "minsky init: '${2:-$(pwd)}' is not a git repo" >&2
+      echo "  hint: cd into a git repo first, or run: minsky init /path/to/repo" >&2
+      exit 2
+    fi
+    mkdir -p "$MINSKY_STATE_DIR"
+    _cfg="$MINSKY_STATE_DIR/config.json"
+    # Preserve existing config keys; only update default_host.
+    # Rule #17: avoid python3 (slow + uv-bootstrap on fresh HOME). Use
+    # node which is already a hard dep of the runner. Inline script keeps
+    # this file zero-dep at the install layer.
+    if [ -f "$_cfg" ]; then
+      MINSKY_INIT_HOST="$_init_host" node --input-type=module -e "
+import { readFileSync, writeFileSync } from 'node:fs';
+const path = '$_cfg';
+const cfg = JSON.parse(readFileSync(path, 'utf8'));
+cfg.default_host = process.env.MINSKY_INIT_HOST;
+writeFileSync(path, JSON.stringify(cfg, null, 2));
+" 2>/dev/null || printf '{\n  "default_host": "%s"\n}\n' "$_init_host" > "$_cfg"
+    else
+      printf '{\n  "default_host": "%s"\n}\n' "$_init_host" > "$_cfg"
+    fi
+    echo "✅ minsky initialized"
+    echo "   default_host: $_init_host"
+    echo "   config:       $_cfg"
+    echo ""
+    echo "Next: run 'minsky' (with no args) to start the daemon on $(basename "$_init_host")"
+    exit 0
+    ;;
+  uninstall)
+    # `minsky uninstall [--force]` — remove all per-machine state.
+    #
+    # Behavior:
+    #   - default (no flags): DRY-RUN. Prints what would be removed
+    #     and exits 0. Operator must add --force to actually delete.
+    #     This is rule #6 (stay alive — never destroy state without
+    #     explicit confirmation).
+    #   - --force: stops the daemon, uninstalls launchd plist, removes
+    #     ~/.minsky/ entirely (config, logs, PID file, daemon state).
+    #     Does NOT touch the host repo or any experiment-store data
+    #     inside it — those are the operator's data.
+    #
+    # Distinct from `uninstall-daemon` which only removes the launchd
+    # plist (preserves config + logs). `uninstall` is the full reset.
+    #
+    # Source: M1 milestone exit criterion §12 (clean uninstall).
+    _force=0
+    for _a in "$@"; do
+      [ "$_a" = "--force" ] && _force=1
+    done
+    if [ "$_force" = "0" ]; then
+      echo "minsky uninstall (dry-run) — would remove:"
+      [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ] && \
+        echo "  - launchd plist: $HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+      [ -d "$MINSKY_STATE_DIR" ] && echo "  - state dir:     $MINSKY_STATE_DIR"
+      if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+        echo "  - running daemon (PID $(pgrep -f cross-repo-runner/bin/minsky-run | head -1))"
+      fi
+      echo ""
+      echo "Re-run with --force to actually uninstall:"
+      echo "  minsky uninstall --force"
+      exit 0
+    fi
+    # Force path — full removal.
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      "$0" stop >/dev/null 2>&1 || true
+    fi
+    if [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+      "$0" uninstall-daemon >/dev/null 2>&1 || true
+    fi
+    if [ -d "$MINSKY_STATE_DIR" ]; then
+      rm -rf "$MINSKY_STATE_DIR"
+    fi
+    echo "✅ minsky uninstalled"
+    echo "   - launchd plist removed"
+    echo "   - $MINSKY_STATE_DIR removed"
+    echo "   - daemon stopped"
+    echo ""
+    echo "Note: host repo data (.minsky/ inside your repos) is untouched."
+    exit 0
+    ;;
+  doctor)
+    # `minsky doctor [--quiet]` — health probe for this machine.
+    #
+    # Checks (each prints PASS / WARN / FAIL):
+    #   PASS  node       — node 20+ on PATH
+    #   PASS  git        — git on PATH
+    #   PASS  gh         — gh CLI installed (optional but recommended)
+    #   WARN  config     — ~/.minsky/config.json exists (optional)
+    #   PASS  daemon     — daemon running (optional but informative)
+    #   WARN  agents     — at least one of devin/claude/aider on PATH
+    #   PASS  host       — default_host (if configured) is a git repo
+    #
+    # Exit codes:
+    #   0 — all critical checks (node, git) pass
+    #   1 — at least one critical check failed
+    #
+    # Distinct from `setup.sh --doctor` which probes adapter selfTests
+    # against `.minsky/state.json` (the framework substrate). `minsky
+    # doctor` is the operator-facing health check: "is this machine
+    # ready to run minsky".
+    #
+    # Source: M1 milestone exit criterion §13 (self-heal).
+    _crit_fail=0
+    _quiet=0
+    for _a in "$@"; do
+      [ "$_a" = "--quiet" ] && _quiet=1
+    done
+
+    _doctor_print() {
+      # _doctor_print STATUS NAME MESSAGE
+      # STATUS: PASS | WARN | FAIL
+      [ "$_quiet" = "1" ] && [ "$1" = "PASS" ] && return 0
+      printf "  %-4s  %-12s %s\n" "$1" "$2" "$3"
+    }
+
+    [ "$_quiet" = "0" ] && echo "minsky doctor — checking host machine readiness" && echo ""
+
+    # CRITICAL — node 20+
+    if command -v node >/dev/null 2>&1; then
+      _v=$(node --version 2>/dev/null | sed 's/^v//')
+      _major=$(echo "$_v" | cut -d. -f1)
+      if [ "$_major" -ge 20 ] 2>/dev/null; then
+        _doctor_print PASS "node" "$_v"
+      else
+        _doctor_print FAIL "node" "$_v (need 20+)"
+        _crit_fail=1
+      fi
+    else
+      _doctor_print FAIL "node" "not on PATH"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — git
+    if command -v git >/dev/null 2>&1; then
+      _doctor_print PASS "git" "$(git --version 2>/dev/null | head -1)"
+    else
+      _doctor_print FAIL "git" "not on PATH"
+      _crit_fail=1
+    fi
+
+    # OPTIONAL — gh
+    if command -v gh >/dev/null 2>&1; then
+      _doctor_print PASS "gh" "$(gh --version 2>/dev/null | head -1)"
+    else
+      _doctor_print WARN "gh" "not on PATH (PR creation will be skipped)"
+    fi
+
+    # OPTIONAL — config
+    _cfg="$MINSKY_STATE_DIR/config.json"
+    if [ -f "$_cfg" ]; then
+      _host=$(_minsky_config_value "default_host" "$_cfg")
+      if [ -n "$_host" ]; then
+        _doctor_print PASS "config" "$_cfg (default_host=$_host)"
+      else
+        _doctor_print WARN "config" "$_cfg exists but default_host is empty"
+      fi
+    else
+      _doctor_print WARN "config" "not found (run: minsky init)"
+    fi
+
+    # OPTIONAL — daemon running
+    if [ -f "$MINSKY_DAEMON_PID" ]; then
+      _pid=$(cat "$MINSKY_DAEMON_PID" 2>/dev/null)
+      if kill -0 "$_pid" 2>/dev/null; then
+        _doctor_print PASS "daemon" "running (PID $_pid)"
+      else
+        _doctor_print WARN "daemon" "stale PID file"
+      fi
+    else
+      _doctor_print WARN "daemon" "not running (run: minsky)"
+    fi
+
+    # OPTIONAL — at least one agent
+    _agent_count=0
+    _agent_list=""
+    for _agent in devin claude aider codex; do
+      if command -v "$_agent" >/dev/null 2>&1; then
+        _agent_count=$((_agent_count + 1))
+        _agent_list="$_agent_list $_agent"
+      fi
+    done
+    if [ "$_agent_count" -ge 1 ]; then
+      _doctor_print PASS "agents" "$_agent_count installed:$_agent_list"
+    else
+      _doctor_print WARN "agents" "no agents on PATH (devin / claude / aider / codex)"
+    fi
+
+    # OPTIONAL — default_host is a git repo
+    if [ -n "${_host:-}" ]; then
+      if [ -d "$_host/.git" ]; then
+        _doctor_print PASS "host" "$_host (valid git repo)"
+      else
+        _doctor_print WARN "host" "$_host is not a git repo"
+      fi
+    fi
+
+    [ "$_quiet" = "0" ] && echo ""
+    if [ "$_crit_fail" = "0" ]; then
+      [ "$_quiet" = "0" ] && echo "✅ doctor: ready"
+      exit 0
+    else
+      echo "❌ doctor: critical checks failed — minsky cannot run on this machine until they pass"
+      exit 1
+    fi
+    ;;
+  report)
+    # `minsky report [--baseline | --delta] [--repo <path>]` — print
+    # the latest metric snapshot, the diff against the previous, or
+    # a human-readable summary. Delegates to scripts/minsky-report.mjs
+    # which holds the pure formatting logic (covered by paired unit
+    # tests in scripts/minsky-report.test.mjs).
+    #
+    # Source: M1 milestone exit criterion §7.
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    shift  # consume `report`, forward remaining args
+    exec node "$_repo_dir/scripts/minsky-report.mjs" "$@"
+    ;;
   install-daemon)
     # Install a launchd plist so minsky auto-starts on login/reboot.
     # Reads default_host from ~/.minsky/config.json.
-    _real_bin=$(python3 -c "import os; print(os.path.realpath('$0'))" 2>/dev/null || echo "$0")
-    _default_host=$(python3 -c "import json; print(json.load(open('$HOME/.minsky/config.json')).get('default_host',''))" 2>/dev/null)
+    _real_bin=$(_minsky_realpath "$0")
+    _default_host=$(_minsky_config_value "default_host")
     if [ -z "$_default_host" ]; then
       _default_host="${2:-$(pwd)}"
       echo "No default_host in ~/.minsky/config.json — using: $_default_host"
@@ -372,7 +662,7 @@ PLIST_EOF
     fi
 
     # Resolve the real minsky repo dir (follows symlinks)
-    _real_bin=$(python3 -c "import os; print(os.path.realpath('$0'))" 2>/dev/null || echo "$0")
+    _real_bin=$(_minsky_realpath "$0")
     _repo_dir=$(dirname "$(dirname "$_real_bin")")
 
     # 2. Pull latest
