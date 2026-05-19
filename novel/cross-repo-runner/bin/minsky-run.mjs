@@ -981,6 +981,24 @@ async function runLoopAsResult(parsed, controller) {
           `  📋 out-of-scope files (consider separate PR): ${record.scopeLeakPaths.join(", ")}\n`,
         );
       }
+      // Rule #17 (proactive healing) — surface the WHY of a spawn-failed
+      // so the operator can act. Previously the runner captured the
+      // agent's stderr but the loop threw it away before this log line
+      // was written, leaving operators with `verdict=spawn-failed` and
+      // zero diagnostic. Now: print exit code + stderr tail (last
+      // 1 KB) inline.
+      if (record.verdict === "spawn-failed") {
+        process.stdout.write(`  exit=${record.exitCode}\n`);
+        if (record.stderrTail.length > 0) {
+          const tail = record.stderrTail.slice(-1024);
+          process.stdout.write(`  stderr tail (last ${tail.length} bytes):\n`);
+          for (const line of tail.split("\n")) {
+            process.stdout.write(`    ${line}\n`);
+          }
+        } else {
+          process.stdout.write(`  stderr tail: (empty — agent exited silently)\n`);
+        }
+      }
       writeIterationRecord(hostRoot, {
         ts: new Date().toISOString(),
         experiment_id: record.taskId,
