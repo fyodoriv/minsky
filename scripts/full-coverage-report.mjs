@@ -90,8 +90,8 @@ const l2Pct = Math.round((featuresTestedCount / RUNTIME_FEATURES.length) * 100);
 // `install-daemon` and `uninstall-daemon` exist but are tested by the
 // daemon-restart suite directly; not listed here to keep L3 focused
 // on the operator-facing surface.
-// 2026-05-19 (M1 push): added `init`, `uninstall`, `doctor`, `report`
-// — first-class M1 subcommands, all tested by `m1-red-green.test.ts`.
+// 2026-05-19 (M1 push): added `init`, `uninstall`, `doctor`, `report`,
+// `benchmark` — first-class M1 subcommands, all tested by `m1-red-green.test.ts`.
 const CLI_SUBCOMMANDS = [
   "status",
   "stop",
@@ -101,6 +101,7 @@ const CLI_SUBCOMMANDS = [
   "uninstall",
   "doctor",
   "report",
+  "benchmark",
 ];
 // Track in a Set so a subcommand referenced in N files counts once.
 const subcommandsCovered = new Set();
