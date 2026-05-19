@@ -25,10 +25,16 @@
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runGateSweep } from "./local-gate-merge.mjs";
 
-const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
+// Derive the repo root from this script's own location — the hardcoded
+// `/Users/cbrwizard/apps/tooling/minsky` fallback only worked for one
+// operator. Same rule-#17 fix as `scripts/local-gate-merge.mjs`
+// (PR #651, 2026-05-19). The `MINSKY_HOME` env override remains as the
+// operator escape hatch.
+const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LEDGER = join(REPO, ".minsky", "orchestrate.jsonl");
 // PRs vetted per tick. Bounded (default 2) so a tick is at most
 // LIMIT × per-vet-timeout — the conductor cannot back up behind a long

@@ -371,6 +371,54 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-rule-17-proactive-heal.test.mjs
 
+  no-hardcoded-user-paths:
+    # rule-#1 + rule-#17 deterministic gate against hardcoded user paths.
+    # `MINSKY_HOME ?? "/Users/cbrwizard/…"` fallbacks broke the script for
+    # every operator who isn't `cbrwizard` and were healed twice in PRs
+    # #651 and #654. Without this lint, the same class returns the next
+    # time someone hardcodes their own `$HOME` in a script. Comments are
+    # exempt (audit trail); current-user, `ubuntu`, and `runner` are
+    # exempt (CI / local-machine self-references).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-hardcoded-user-paths lint
+        run: node scripts/check-no-hardcoded-user-paths.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-hardcoded-user-paths.test.mjs
+
+  rule-9-tasksmd-fields:
+    # Rule #9 (vision.md § "Pre-registered hypothesis-driven development
+    # — iron rule"): every task block in TASKS.md must carry Hypothesis,
+    # Success (or Acceptance), Pivot, Measurement, and Anchor. Without
+    # all five the rule degrades to a wish-list. The 2026-05-19 audit
+    # found 32 of 152 task blocks violating; those are grandfathered in
+    # the lint's allowlist with a backfill task to drain the list. NEW
+    # tasks added after 2026-05-19 are never grandfathered.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-9-tasksmd-fields lint
+        run: node scripts/check-rule-9-tasksmd-fields.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-9-tasksmd-fields.test.mjs
+
   rule-6-let-it-crash:
     # rule #10: deterministic enforcement of rule #6 (let-it-crash). Walks
     # every novel/**/*.ts file added/modified in the PR; flags try/catch
@@ -1415,6 +1463,8 @@ jobs:
       - rule-12-scope-discipline
       - rule-13-sibling-anchors
       - rule-17-proactive-heal
+      - no-hardcoded-user-paths
+      - rule-9-tasksmd-fields
       - sandbox-env-declared
       - sbom-shape
       - supervisor-sandbox-hardening
@@ -1466,6 +1516,8 @@ jobs:
                    "${{ needs.rule-12-scope-discipline.result }}" \
                    "${{ needs.rule-13-sibling-anchors.result }}" \
                    "${{ needs.rule-17-proactive-heal.result }}" \
+                   "${{ needs.no-hardcoded-user-paths.result }}" \
+                   "${{ needs.rule-9-tasksmd-fields.result }}" \
                    "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.supervisor-sandbox-hardening.result }}" \
