@@ -826,6 +826,91 @@ rule #9 (pre-registered HDD for every scaling change); rule #10 (deterministic
 budget/throttle check); rule #12 (scope discipline — match the budget, do not
 sprawl past it).
 
+### 16. Default by default — never hide a useful behaviour behind an opt-in flag
+
+Every behaviour Minsky ships is the **default**. Opt-in flags
+(`MINSKY_ENABLE_X=1`) are forbidden for any behaviour that is reasonable
+for all users; if it is reasonable for all users, it is the default —
+the flag, if it exists at all, is `MINSKY_DISABLE_X=1` and is filed in
+`DEPRECATED.md` the moment its disable-count drops to zero. The
+question the rule forces is not "should we enable X?" but "why isn't X
+the default already?" — and if the answer is "it's experimental",
+either gate it behind an explicit experiment-id per rule #9 (so the
+flag is the experiment's manipulation variable, not a permanent hiding
+place) or do not ship it.
+
+Examples already shipped as defaults (not opt-in): scope-leak soft
+mode; launchd auto-install on first run; dynamic timeouts computed
+from iteration history; stale-PID cleanup on daemon startup; smart
+auto-attach when the operator types `minsky`. Each replaced a flag.
+
+Sources: Saltzer & Schroeder 1975 ("fail-safe defaults" — the system's
+default state must be the safe / useful one, not the absence of one);
+operator directive 2026-05-19 ("default by default — every behaviour
+ships as the default, not behind opt-in flags"); rule #1 (don't hand-
+maintain what should be automatic); rule #10 (deterministic enforcement
+— a CI lint catches `MINSKY_ENABLE_*` introductions; see
+`scripts/check-rule-16-default-by-default.mjs`).
+
+### 17. Proactive healing — observation IS the fix (iron, no exemption)
+
+When Minsky — or any agent watching Minsky, including the human-driven
+session that just typed `minsky watch` — surfaces an error (`GraphQL
+401`, `spawn-failed`, `ETIMEDOUT`, `scope-leak`, a stack trace, a hung
+process, stale state, a flaky test, a `gh pr checks` red), the **only
+acceptable next action is to fix it or file a structured blocked-task
+in the same session**. "Observe and report" is forbidden. "Mental note
+for later" is forbidden. The bug, the lint, the auth divergence, the
+timeout — each is treated as work to ship in the SAME session, the
+SAME PR if possible, and the fix lands the lint or invariant that
+prevents the entire *class* of failure from recurring (rule #10 shape).
+
+The discipline has four mandatory parts:
+
+1. **Same-session action.** The agent that observed the error owns its
+   resolution before its session ends. If the fix needs an external
+   action (a credential, a sysctl change, an upstream PR, an operator
+   approval), the agent files a `TASKS.md` block with
+   `**Blocked**: <one-word-code>` and the unblock path as the first
+   line — never both fix-attempted and silently-moved-on.
+
+2. **Fix the class.** Every recurring error gets a deterministic CI lint
+   that catches the structural shape (rule #10). A 401 today means the
+   auth path swallowed an error or retried without bound — find the
+   swallowing-catch, write the lint, ratchet. Repeat-instances of an
+   already-classed bug are themselves rule-#17 violations: the lint
+   should already have caught them.
+
+3. **Heal before reporting.** Operator-facing status messages must carry
+   an active verb (`fixed`, `patched`, `rolled out`, `filed-blocked-
+   because`). A 10-bullet narrative of failures with zero merged fixes
+   is the exact pattern the rule forbids — it looks like attentive
+   monitoring; it is load shed onto the operator.
+
+4. **Deterministic gate.** `scripts/check-rule-17-proactive-heal.mjs`
+   runs on every PR and on every observer-session summary: if
+   `observed-errors > 0` and `(prs-opened + tasks-filed + commits-
+   landed) == 0`, the gate exits non-zero. The session is rejected the
+   same way a missing `EXPERIMENT.yaml` is rejected under rule #9.
+
+Why a separate rule from rule #6 (stay alive): rule #6 governs the
+daemon's substrate (let-it-crash, supervisor restart). Rule #17 governs
+the agent's *conduct on top of* that substrate. A daemon can be alive
+and stable while its observer silently degrades by narrating failures
+instead of healing them — that is the failure mode rule #17 catches.
+
+Sources: operator directive 2026-05-19 ("why aren't they being fixed by
+you right away? I expect that … make it persist, make it iron rule
+that cannot be broken"); Forsgren, Humble, Kim, *Accelerate*, 2018
+(DORA — change-fail rate falls when fixes prevent classes, not
+instances); Beyer et al., *SRE*, 2016, Ch. 3 (error budgets:
+observation that doesn't move the budget is dead weight); Armstrong
+2007 (let-it-crash applies to the observer's own conduct — if the
+observer's job is to crash the right call paths, it must not silently
+suppress them in its own narration); rule #6 (stay alive); rule #10
+(deterministic enforcement); rule #16 (default by default — proactive
+healing is the default observer behaviour, never opt-in).
+
 ## Pattern conformance index
 
 Operationalises rule #8. Each row maps a Minsky artifact (file path, package,

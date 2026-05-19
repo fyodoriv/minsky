@@ -18,6 +18,40 @@
 
 <!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
 
+<!-- Observations filed 2026-05-19 by Devin session (rule-17-proactive-healing PR #648). 2 new P0 bugs surfaced by the live restart of `minsky` while developing the rule-17 fixes. -->
+
+- [ ] `minsky-bin-git-clean-fd-multi-agent-safety-violation` — `bin/minsky` runs `git clean -fd` on every daemon start, which violates the multi-agent git safety rules
+  - **ID**: minsky-bin-git-clean-fd-multi-agent-safety-violation
+  - **Tags**: p0, rule-17, multi-agent-safety, destructive-default, minsky-bin
+  - **Milestone**: M1
+  - **Status**: blocked
+  - **Blocked**: needs-pr-648-merged-first
+  - **Unblock**: after PR #648 (rule-17-proactive-healing) lands, this task can proceed.
+  - **Surfaced-by**: 2026-05-19 Devin session — restarting `minsky` while on a feature branch with uncommitted untracked files would have deleted those files via `git clean -fd` at `bin/minsky:626`. The branch reset itself (`git checkout main` at line 625) is also surprising for active development sessions.
+  - **Details**: lines 607–626 of `bin/minsky` implement "crash recovery" that resets the host to `default_branch` and runs `git clean -fd`. The global multi-agent git safety rules in `~/.config/devin/AGENTS.md` explicitly forbid `git clean -fd` — "deletes other agents' untracked files". The daemon's auto-recovery should: (a) check whether the working tree has uncommitted changes BEFORE clobbering, (b) stash them with a recoverable label (`stash push -u -m "minsky auto-stash <ts>"`), (c) print where the stash went, (d) restore the branch. Never delete.
+  - **Files**: `bin/minsky` (lines 607–626 — the crash-recovery block).
+  - **Hypothesis**: replacing `git clean -fd` with `git stash push -u -m` preserves uncommitted work across daemon restarts and eliminates the multi-agent-safety violation. Pre-fix: 1 known data-loss path. Post-fix: 0 known paths + a recoverable stash if anything was uncommitted.
+  - **Success**: starting `minsky` with uncommitted untracked files in the host repo → files end up in `git stash list` labelled `minsky auto-stash <iso-timestamp>` (not deleted); the daemon log prints the stash label so the operator can restore.
+  - **Pivot**: if stash is unsafe in some path (worktrees, submodules), fall back to refusing to start the daemon when dirty-state is detected (loud-crash per rule #6 — never silently destroy).
+  - **Measurement**: `cd /tmp && minsky-fixture-host && touch unsaved.txt && minsky --daemon --host . && minsky stop && test -f unsaved.txt || echo "DATA LOSS"`.
+  - **Anchor**: rule #6 (stay alive — but never by destroying state); rule #17 (proactive healing — every observed multi-agent-safety violation is a P0 fix); `~/.config/devin/AGENTS.md` § "Git Safety (Multi-Agent)" — `git clean -fd` is in the explicit ban list.
+
+- [ ] `minsky-bin-auto-resets-to-main-surprise` — `bin/minsky` auto-switches the host to `default_branch` on start, surprising developers working on feature branches
+  - **ID**: minsky-bin-auto-resets-to-main-surprise
+  - **Tags**: p0, rule-17, daemon-startup, ux, minsky-bin
+  - **Milestone**: M1
+  - **Status**: blocked
+  - **Blocked**: needs-pr-648-merged-first
+  - **Unblock**: after PR #648 (rule-17-proactive-healing) lands, this task can proceed.
+  - **Surfaced-by**: 2026-05-19 Devin session — running `minsky` to restart the daemon during PR #648 development silently `git checkout main`-ed the repo, losing the feature-branch context the developer was using.
+  - **Details**: at `bin/minsky:622–626`, the start-up always resets to `default_branch`. The original intent (daemon recovers from a crashed feature-branch iteration) is correct, but the rule's blast radius is too wide: it triggers EVERY time `minsky` starts, not only after a crash. Fix: detect whether the daemon was previously running on this branch (i.e. there was no clean shutdown) — only reset then. A graceful `minsky stop` followed by `minsky` should leave the branch alone.
+  - **Files**: `bin/minsky` (lines 607–626 — the same block as the previous task; can ship together).
+  - **Hypothesis**: gating the auto-reset on "previous shutdown was crashed" (detected via a sentinel file written on graceful stop + cleared after the reset runs) preserves developer ergonomics while keeping the crash-recovery property.
+  - **Success**: `git checkout feat/my-work && minsky stop && minsky` → still on `feat/my-work` (graceful path). `git checkout feat/my-work && kill -9 <pid> && minsky` → resets to main (crash path).
+  - **Pivot**: if the sentinel file approach is unreliable, add a `--no-reset` flag (default off) so the operator can opt out per-invocation.
+  - **Measurement**: `git checkout -b feat/test && minsky && minsky stop && test "$(git branch --show-current)" = "feat/test" || echo "REGRESSED"`.
+  - **Anchor**: rule #17 (proactive healing — surprise-default is a class of bug); rule #6 (stay alive — but predictably); operator directive 2026-05-19 ("make sure minsky gracefully picks them up" — gracefully, not destructively).
+
 - [ ] `daemon-survives-machine-restart` — after a sudden machine reboot, power loss, or kernel panic, minsky must auto-resume from where it left off with zero operator intervention
   - **ID**: daemon-survives-machine-restart
   - **Tags**: p0, milestone-m1, reliability, stay-alive, launchd, rule-6

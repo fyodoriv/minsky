@@ -259,6 +259,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
       "rule-13-sibling-anchors",
+      "rule-17-proactive-heal",
       "sandbox-env-declared",
       "sbom-shape",
       "secret-scan",
@@ -349,6 +350,13 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-rule-12-scope-discipline.mjs"],
     env: { RULE_12_DIFF_BASE: "origin/main" },
+  },
+  {
+    name: "rule-17-proactive-heal",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-17-proactive-heal.mjs"],
+    env: { RULE_17_DIFF_BASE: "origin/main" },
   },
   // ---- full stage ----------------------------------------------------------
   {

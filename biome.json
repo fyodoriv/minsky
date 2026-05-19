@@ -8,6 +8,7 @@
       ".minsky",
       ".obsidian",
       ".claude",
+      ".worktrees",
       "**/*.d.ts",
       "novel/bridges/omc-tasksmd/test/fixtures/.omc/state/team/fixture-team/tasks/malformed.json"
     ]

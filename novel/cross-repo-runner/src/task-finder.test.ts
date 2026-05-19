@@ -442,9 +442,7 @@ describe("pickHostTask", () => {
     // Without skip: first-task wins.
     expect(pickHostTask(tasksMd)?.id).toBe("first-task");
     // With first-task in skipTaskIds: rotates to second-task.
-    expect(
-      pickHostTask(tasksMd, { skipTaskIds: new Set(["first-task"]) })?.id,
-    ).toBe("second-task");
+    expect(pickHostTask(tasksMd, { skipTaskIds: new Set(["first-task"]) })?.id).toBe("second-task");
     // With both in skipTaskIds: no eligible task → null.
     expect(
       pickHostTask(tasksMd, { skipTaskIds: new Set(["first-task", "second-task"]) }),
