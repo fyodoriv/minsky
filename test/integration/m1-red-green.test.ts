@@ -516,6 +516,81 @@ describe("M1 TDD: minsky-report", () => {
   });
 });
 
+// ─── Category: Minsky Benchmark ─────────────────────────────
+
+describe("M1 TDD: minsky-benchmark", () => {
+  test("bin/minsky has benchmark subcommand", () => {
+    const src = readFileSync(join(REPO_ROOT, "bin", "minsky"), "utf8");
+    expect(src).toContain("benchmark)");
+  });
+
+  test("scripts/minsky-benchmark.mjs exists", () => {
+    expect(existsSync(join(REPO_ROOT, "scripts", "minsky-benchmark.mjs"))).toBe(true);
+  });
+
+  test("minsky benchmark --help prints usage", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(binPath, ["benchmark", "--help"], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(out).toMatch(/usage|--iterations|--agent/i);
+  });
+
+  test("minsky benchmark --iterations 3 against a fixture host runs 3 iterations", () => {
+    // Fixture host: a TASKS.md task that the runner will pick up. We use the
+    // existing makeHost helper so the benchmark exercises the real runner pipeline.
+    const host = makeHost(COMPLIANT_TASK);
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(
+      binPath,
+      ["benchmark", "--iterations", "3", "--host", host, "--no-live"],
+      { env, encoding: "utf8", timeout: 120_000 },
+    );
+    // Output should include a summary with pass-rate / iterations count.
+    expect(out).toMatch(/iterations:\s*3/i);
+    expect(out).toMatch(/pass-rate|pass rate/i);
+  });
+
+  test("minsky benchmark --json outputs parseable JSON with verdict counts", () => {
+    const host = makeHost(COMPLIANT_TASK);
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    const out = execFileSync(
+      binPath,
+      ["benchmark", "--iterations", "2", "--host", host, "--no-live", "--json"],
+      { env, encoding: "utf8", timeout: 120_000 },
+    );
+    const parsed = JSON.parse(out) as {
+      iterations: number;
+      verdict_counts: Record<string, number>;
+      pass_rate: number;
+      mean_duration_ms: number;
+    };
+    expect(parsed.iterations).toBe(2);
+    expect(parsed).toHaveProperty("verdict_counts");
+    expect(parsed).toHaveProperty("pass_rate");
+    expect(parsed.pass_rate).toBeGreaterThanOrEqual(0);
+    expect(parsed.pass_rate).toBeLessThanOrEqual(100);
+    expect(parsed).toHaveProperty("mean_duration_ms");
+  });
+
+  test("minsky benchmark refuses --iterations < 1", () => {
+    const env = cleanEnv();
+    const binPath = join(REPO_ROOT, "bin", "minsky");
+    expect(() =>
+      execFileSync(binPath, ["benchmark", "--iterations", "0", "--no-live"], {
+        env,
+        encoding: "utf8",
+        timeout: 30_000,
+      }),
+    ).toThrow();
+  });
+});
+
 // ─── Category: End-to-End Fixtures ──────────────────────────
 
 describe("M1 TDD: fixture-driven e2e", () => {

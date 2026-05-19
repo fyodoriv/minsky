@@ -556,6 +556,19 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
     shift  # consume `report`, forward remaining args
     exec node "$_repo_dir/scripts/minsky-report.mjs" "$@"
     ;;
+  benchmark)
+    # `minsky benchmark [--iterations N] [--host PATH] [--no-live] [--json]`
+    # Run N iterations of the cross-repo runner and report verdict
+    # distribution + pass-rate + mean duration. Pure helpers (verdict
+    # classification, output parsing, aggregation) live in scripts/
+    # minsky-benchmark.mjs and are covered by paired unit tests.
+    #
+    # Source: M1 milestone exit criterion §10.
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    shift  # consume `benchmark`, forward remaining args
+    exec node "$_repo_dir/scripts/minsky-benchmark.mjs" "$@"
+    ;;
   install-daemon)
     # Install a launchd plist so minsky auto-starts on login/reboot.
     # Reads default_host from ~/.minsky/config.json.
