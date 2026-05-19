@@ -141,6 +141,22 @@ Every constitutional rule must be enforced by a deterministic CI check — not a
 
 **Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
 
+### 3a. Runtime invariants (coverage ≠ correctness)
+
+High unit-test coverage (95%+) is necessary but NOT sufficient. Every bug found in production during the 2026-05-18 session (devin stdin panic, permission mode missing, walker starvation, scope-leak false positives, brief missing PR instructions, watchdog kills) had passing unit tests — because unit tests mock the integration seams where real bugs live.
+
+**Runtime invariants** (`novel/cross-repo-runner/src/runtime-invariants.ts`) run before EVERY iteration and check the **system** — not the pure functions. They verify:
+
+- Agent argv includes required flags for the configured agent (catches devin without `--permission-mode`)
+- Brief includes PR creation instructions (catches the no-PR-opened bug class)
+- Git tree is clean before spawn (catches scope-leak false positives)
+- Task not stuck in a re-pick loop (catches walker starvation)
+- Daemon PID is actually alive (catches stale PID, the #1 ops failure)
+
+When a runtime invariant fails with `severity: "error"`, the iteration **must not proceed** — the bug class it guards against wastes the entire iteration's compute. When it fails with `severity: "warn"`, log it and continue (the operator sees it in `minsky watch`).
+
+**Adding new invariants**: every bug found in production becomes a runtime invariant in the same PR that fixes it. The pattern: `(ctx: InvariantContext) => InvariantResult`. Pure function, no I/O — the caller builds the context.
+
 ### 3b. Integration tests for CLI features (reinforcement)
 
 Every CLI-facing feature (`bin/minsky` subcommands, `minsky watch`, `minsky status`, any operator-visible UX) must ship with an integration test in `test/integration/`. The test must:
