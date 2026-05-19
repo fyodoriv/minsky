@@ -16,6 +16,8 @@ function loopResult(stopReason: LoopStopReason, iterationCount = 0): LoopResult 
     durationMs: 0,
     scopeLeakPaths: [] as readonly string[],
     prUrl: null,
+    stderrTail: "",
+    exitCode: 0,
   }));
   return { iterations, stopReason };
 }

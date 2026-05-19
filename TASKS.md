@@ -16,25 +16,45 @@
 
 <!-- Operator directive 2026-05-18 (ABSOLUTE PRIORITY — supersedes ALL other P0s including self-metrics-competitive-benchmark): the milestone-alignment-gate task below must be picked FIRST by any agent. No implementation task may be claimed until the 7 surfaces are verified aligned. This is the pre-condition for all other work. -->
 
+- [ ] `spawn-failed-exit-minus-one-silent-empty-stderr` — every devin spawn exits with `exit=-1` and empty stderr; daemon retries forever and stability is stuck at 10%
+  - **ID**: spawn-failed-exit-minus-one-silent-empty-stderr
+  - **Tags**: p0, rule-17, rule-1, spawn, agent, observed-2026-05-19, blocker
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-19 Devin session — observed via the new stderr-visibility code shipped in PR #653. Daemon log on host fyodoriv/minsky shows: `⏱ iteration #N: ... verdict=spawn-failed duration=Ns pr=— / exit=-1 / stderr tail: (empty — agent exited silently)` — repeated for 4+ iterations across multiple `host-daemon loop` restarts. Stability metric stuck at 10% (5/52 successful, 7d rolling) directly because of this.
+  - **Hypothesis**: devin CLI is exiting via a signal (not a clean exit code), most likely SIGPIPE / SIGTERM-from-parent, before producing any stderr. The `-1` is node's spawn synthesis when `code===null && signal!==null` in the `close` event. Suspects (most→least likely): (a) devin's non-interactive mode requires `DEVIN_API_KEY` set, but the launchd plist doesn't propagate it (only `PATH`, `HOME`, `MINSKY_NON_INTERACTIVE` are exported); (b) devin's TTY detect-and-bail when stdin is `/dev/null`; (c) prompt-file is on tmpfs that's been GC'd before devin reads it; (d) corporate EPM/zscaler killing the spawned process; (e) devin binary missing from the resolved PATH inside launchd.
+  - **Success**: 0 spawn-failed verdicts in 50 consecutive iterations; daemon stability metric reaches 50%+; AT LEAST one of `signal`, `stderr`, or `stdout` non-empty for every spawn-failed verdict (so the next iteration of debugging has data to work with).
+  - **Pivot**: if 3 fix attempts (covering hypotheses a-c) all fail, revert to claude-as-default and treat devin spawning as a known-broken cloud agent path. Threshold: spawn-failed rate stays >50% after 3 PRs landing fixes.
+  - **Measurement**: `tail -300 ~/.minsky/daemon.log | grep -c 'spawn-failed' && tail -300 ~/.minsky/daemon.log | grep -c 'exit=-1'` — both should drop to 0 once root cause is fixed. Also `pnpm stability-number ~/apps/tooling/minsky` should rise above 50%.
+  - **Anchor**: rule #1 (loud-crash > silent failure); rule #17 (proactive healing); MILESTONES.md M1 §1 (90% stability across 5 runs × 10h).
+  - **Details**: (a) Add stderr/stdout/signal capture to the spawn handler in `novel/cross-repo-runner/bin/minsky-run.mjs` so the iteration log records `signal:` and the FULL stderr (currently only the tail). (b) In the launchd plist generator (`bin/minsky install-daemon`), propagate ALL `DEVIN_*`, `CLAUDE_*`, `OPENAI_*`, `ANTHROPIC_*` env vars from the operator's shell at install time so the daemon child can authenticate. (c) Test in isolation: `bash -c 'unset $(env | grep -E ^MINSKY_ | cut -d= -f1); printf "echo hi" | devin --print --prompt-file /tmp/p.md --permission-mode dangerous </dev/null 2>&1'` — confirm it prints something. (d) If devin really requires a TTY, swap to a pty wrapper or move to claude-default.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (spawn capture), `bin/minsky` (install-daemon env propagation), `novel/cross-repo-runner/test/spawn-error-capture.test.ts` (new — verifies signal field is set when child killed by signal).
+  - **Acceptance**: (1) Run `minsky --daemon --host ~/apps/tooling/minsky` for 1 hour; observe ≥3 successful task spawns (verdict ∈ {pr-open, no-change, scope-leak} — anything that's NOT spawn-failed); (2) Every spawn-failed entry in the daemon log includes a non-empty `signal:` or `stderr:` field; (3) New regression test asserting `runtime-paths-coverage.test.ts > spawn capture > signal field present when child SIGKILL'd`.
+  - **Note**: blocked by nothing — the diagnostic capture (a) lands first; then we KNOW the failure mode; then fix.
+
+
 <!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
 
-- [ ] `daemon-survives-machine-restart` — after a sudden machine reboot, power loss, or kernel panic, minsky must auto-resume from where it left off with zero operator intervention
-  - **ID**: daemon-survives-machine-restart
-  - **Tags**: p0, milestone-m1, reliability, stay-alive, launchd, rule-6
+<!-- Observations filed 2026-05-19 by Devin session (rule-17-proactive-healing PR #648). 2 new P0 bugs surfaced by the live restart of `minsky` while developing the rule-17 fixes. Both shipped: `minsky-bin-git-clean-fd-multi-agent-safety-violation` in PR #650, `minsky-bin-auto-resets-to-main-surprise` in PR #651 (graceful-stop sentinel + reset-host-if-crashed subcommand). -->
+
+<!-- daemon-survives-machine-restart completed 2026-05-19; close-out PR supersedes #647 #649 #655. All four acceptance criteria shipped to main and live-verified on host fyodoriv/minsky:
+  (a) launchd KeepAlive plist generator + auto-install on first daemon run — bin/minsky `install-daemon` / smart-attach auto-install path; `KeepAlive=true`, `RunAtLoad=true`, `ThrottleInterval=10`, `MINSKY_NON_INTERACTIVE=1`. Commits 1f7fa08 + 3dc10d5.
+  (b) Stale PID cleanup on boot — bin/minsky `--daemon` startup AND `minsky status` paths use `kill -0 <pid>` probe + `rm -f` if dead. Commit 1f7fa08.
+  (c) Iteration resume + dirty-state cleanup on a crashed feature branch — superseded by the recoverable-stash variant in `reset-host-if-crashed` (commits 1dd0df7 + 6bca40a). Honours the `<sidecar>/graceful-stop` sentinel; never runs `git clean -fd` (multi-agent git-safety rule); refuses to start if `git stash push -u` itself fails (rule #6 pivot).
+  (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
+  18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host /Users/fivanishche/apps/tooling/minsky`). -->
+
+- [ ] `wire-duplicate-pr-detector-into-cross-repo-runner` — the daemon spawned 4 duplicate close-out PRs (#647, #649, #655, #656) for `daemon-survives-machine-restart` because `cross-repo-runner` never consults `decideDuplicate` from `novel/tick-loop/src/duplicate-pr-detector.ts`
+  - **ID**: wire-duplicate-pr-detector-into-cross-repo-runner
+  - **Tags**: p0, rule-17, rule-1, daemon, wiring-gap, observed-2026-05-19
   - **Milestone**: M1
-  - **Competitive-goal**: a daemon that dies on reboot and needs manual restart is not a 24/7 system. Devin (cloud) survives reboots by design; minsky must match that for self-hosted.
-  - **Surfaced-by**: 2026-05-19 operator directive — "make it fully support sudden machine restarts".
-  - **Details**: three deliverables:
-    (a) **launchd KeepAlive plist** — `~/Library/LaunchAgents/com.minsky.daemon.plist` with `KeepAlive=true`, `RunAtLoad=true`, pointing at `minsky --daemon --host <configured-host>`. The host is read from `~/.minsky/config.json::default_host` (new field). On macOS, launchd is the supervisor — it restarts the daemon after reboot, crash, or SIGKILL. No manual `minsky start` needed after reboot.
-    (b) **Stale PID cleanup on boot** — the daemon's startup path must detect and clean stale PID files from a previous crash. Today `minsky --daemon` fails if `daemon.pid` exists even when the PID is dead. Fix: on startup, check `kill -0 <pid>`; if dead, remove the PID file and proceed.
-    (c) **Iteration resume** — the experiment-store already preserves iteration history across restarts. Verify: after a simulated crash (SIGKILL the daemon), `minsky --daemon` picks up the next unfinished task, not the one that was in-flight when it crashed. The in-flight iteration's partial state (branch, uncommitted files) must be cleaned up on resume (`git checkout <default_branch> && git clean -fd`).
-    (d) **systemd equivalent** — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `WantedBy=default.target` for Linux machines.
-  - **Files**: `~/Library/LaunchAgents/com.minsky.daemon.plist` (new), `bin/minsky` (stale PID cleanup), `novel/cross-repo-runner/bin/minsky-run.mjs` (resume-after-crash cleanup), `distribution/systemd/minsky-daemon.service` (new), `~/.minsky/config.json` (add `default_host` field)
-  - **Hypothesis**: today, after a machine reboot, minsky is not running and the operator must manually start it. After this fix, minsky auto-starts within 30s of login (macOS) or boot (Linux) and picks up the next task within 1 iteration.
-  - **Success**: (1) `sudo reboot` on a machine with minsky configured → within 60s of login, `minsky status` shows `running`; (2) `kill -9 <daemon-pid>` → within 10s, `minsky status` shows `running` with a new PID; (3) after SIGKILL, the next iteration works on a new task (not stuck on the crashed one's dirty state).
-  - **Pivot**: if launchd KeepAlive proves unreliable (some macOS versions throttle restarts), fall back to a cron `@reboot` entry that runs `minsky --daemon --host <default_host>`.
-  - **Measurement**: `kill -9 $(cat ~/.minsky/daemon.pid) && sleep 15 && minsky status | grep -c 'running'` → 1 (daemon auto-restarted). After simulated reboot: `launchctl list | grep -c minsky.daemon` → 1.
-  - **Anchor**: Armstrong 2007 (let-it-crash + supervisor restart — launchd IS the supervisor); Beyer SRE 2016 (the daemon must be cattle, not pets — restart is the normal path, not an exception); rule #6 (stay alive).
+  - **Surfaced-by**: 2026-05-19 Devin session — while cleaning up duplicate close-out PRs (4 PRs all closing the same already-shipped task), discovered `decideDuplicate` and `parseGhPrListForDuplicateDetection` already exist in `novel/tick-loop/src/duplicate-pr-detector.ts` (with 20 paired tests) but are NOT imported anywhere in `novel/cross-repo-runner/`. The current de-dup mechanism (`listOpenPrBranches` → match by `<branch_prefix><task-id>`) misses this class because the daemon-authored close-out PRs use auto-generated unique branch names (`feat/<task-id>-close-final-2026-05-19` etc.) that don't match the canonical name.
+  - **Details**: (a) Import `decideDuplicate` + `parseGhPrListForDuplicateDetection` from `@minsky/tick-loop` into `novel/cross-repo-runner/bin/minsky-run.mjs`. (b) In the `pickTask` callback of `runHostLoop`, after `pickHostTask` returns a candidate, run `gh pr list --search "<task-id> in:title" --state all --json number,title,state,closedAt --limit 50` (cached per iteration), parse with `parseGhPrListForDuplicateDetection`, decide with `decideDuplicate`. (c) On `kind: "merged-recent"` → return `null` (skip — the task block hasn't been pruned yet but the work shipped). On `kind: "open"` → log + return `null`. On `kind: "none"` → proceed. (d) Cache the gh-result for the iteration so each pickTask doesn't re-fetch.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (new import + pickTask seam); `novel/tick-loop/src/index.ts` (re-export `decideDuplicate` + `parseGhPrListForDuplicateDetection` if not already public).
+  - **Hypothesis**: wiring `decideDuplicate` into the cross-repo-runner pickTask path eliminates duplicate close-out PRs (the daemon-side counterpart of rule #17 — observed bug should not recur). Pre-fix: 4 duplicate PRs in 12 hours for one task. Post-fix: the daemon detects the merged-recent close-out and skips the task on subsequent iterations, expecting 0 duplicates per task per 7-day window.
+  - **Success**: zero duplicate close-out PRs in the next 100 daemon iterations (measured by counting close-out PRs whose task ID has an existing merged close-out in the last 7 days).
+  - **Pivot**: if the `gh pr list --search` query is too slow (>5s p95) or hits rate limits, fall back to a `~/.minsky/recently-merged.jsonl` cache the daemon writes after every merge it detects, and consult that instead.
+  - **Measurement**: `gh pr list --state merged --search "daemon-survives-machine-restart in:title" --json number,closedAt --limit 50 | jq 'length'` → expect to see ≤ 1 per task per 7-day window post-fix.
+  - **Anchor**: rule #17 (proactive healing — observed bug demands a fix in the same session); rule #1 (don't reinvent — `duplicate-pr-detector.ts` already exists with paired tests); 2026-05-19 operator directive ("continue getting minsky to follow its own principles").
 
 - [ ] `devin-spawn-no-pr-opened` — devin iterations produce `validated` verdicts but never open a PR; the task is never completed and gets re-picked forever
   - **ID**: devin-spawn-no-pr-opened
@@ -733,19 +753,41 @@
 - [ ] `devin-spawn-missing-permission-mode-bypass` — minsky-run.mjs spawns Devin without `--permission-mode bypass` so every Devin worker is blocked from `edit`/`write`/`exec` on the very first call ("Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools."). Devin workers cannot ship ANY task while this is the case, including walker-drains-one-host-forever.
   - **ID**: devin-spawn-missing-permission-mode-bypass
   - **Tags**: p0, milestone-m1, reliability, cross-repo-runner, devin, blocker, prereq
-  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever: every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded.
-
-Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails.
-
-While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration.
-
-FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-file`, push `"--permission-mode", "bypass"` (or `"dangerous"` — same thing per devin docs alias rules). Optional follow-up: plumb a `MINSKY_DEVIN_PERMISSION_MODE` env override identical to the existing `MINSKY_CLAUDE_PERMISSION_MODE` so the operator can dial down if needed.
+  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever — every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded. Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails. While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration. FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-file`, push `"--permission-mode", "bypass"` (or `"dangerous"` — same thing per devin docs alias rules). Optional follow-up: plumb a `MINSKY_DEVIN_PERMISSION_MODE` env override identical to the existing `MINSKY_CLAUDE_PERMISSION_MODE` so the operator can dial down if needed.
   - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs
   - **Acceptance**: (1) After fix, `minsky-run --host <host> --live` against a Devin agent successfully runs `edit`/`write`/`exec` tools without permission rejection. (2) Test: spawn a 1-iter loop against a fixture host whose only task asks the worker to `echo hi > /tmp/devin-perm-test`; verify the file gets written. (3) `grep 'Running in non-interactive mode' ~/.minsky/daemon.log` drops from ≥1 to 0 across a 10-iteration walk.
 
 
 
 ## P1
+
+<!-- Observations filed 2026-05-19 — rule-17 sweep, two pre-existing flakes the daemon was bleeding. -->
+
+- [ ] `spawn-strategy-claude-smoke-test-skip-on-rate-limit` — the `default args spawn a fresh non-interactive Claude session` test fires a real `claude --print` that hard-fails when the operator's Claude subscription is rate-limited (`You've hit your limit · resets May 31`). The test currently asserts `exitCode === 0`, which is wrong: a rate-limited environment should `it.skipIf` the test, same shape as the existing `hasClaude` skip-guard.
+  - **ID**: spawn-strategy-claude-smoke-test-skip-on-rate-limit
+  - **Tags**: p1, rule-11, rule-17, flaky-test, env-dependent
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-19 Devin session — the test failed locally because Claude is rate-limited until 2026-05-31; same failure on `main`. This is a rule-#11 violation (load-bearing flaky gate) AND a rule-#17 violation (observed-but-unfixed).
+  - **Details**: at `novel/tick-loop/src/spawn-strategy.test.ts` ~line 100, the test guards on `hasClaude` (PATH presence) but not on quota. Add a second guard: probe `echo test | claude --print --max-tokens 1` once at module load, and `it.skipIf` the test when stdout matches `You've hit your limit` / `rate-limited` / similar. Convert the env-dependent assertion into a deterministic skip rather than a deterministic failure.
+  - **Files**: `novel/tick-loop/src/spawn-strategy.test.ts`.
+  - **Hypothesis**: the test fails 100% of the time on rate-limited operators today; after the skip-guard, it passes (skipped) 100% of the time when rate-limited, and exercises the real assertion only when quota allows. Pre-fix: 1 false-failure per CI run when quota is gone. Post-fix: 0.
+  - **Success**: rate-limited environment → test reports `skipped`; non-rate-limited → test runs and asserts as before.
+  - **Pivot**: if the rate-limit probe itself is too slow / costs tokens, gate on an env var `MINSKY_SKIP_CLAUDE_SMOKE=1` instead of an empirical probe.
+  - **Measurement**: `claude --print 'ok' 2>&1 | grep -q "hit your limit" && npx vitest run novel/tick-loop/src/spawn-strategy.test.ts -t "fresh non-interactive" | grep -q "skipped"`.
+  - **Anchor**: rule #11 (no flaky load-bearing gates); rule #17 (proactive healing — observed flake is a fix); operator directive 2026-05-19 (continue same proactive healing process).
+
+- [ ] `local-gate-merge-minsky-home-hardcoded-path` — `scripts/local-gate-merge.mjs` line 48 hardcodes `MINSKY_HOME` default to `/Users/cbrwizard/apps/tooling/minsky`, breaking the gate for every operator who isn't `cbrwizard`
+  - **ID**: local-gate-merge-minsky-home-hardcoded-path
+  - **Tags**: p1, rule-17, rule-1, hardcoded-path, multi-user-portability
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-19 Devin session — running `node scripts/local-gate-merge.mjs --pr=648` from a non-cbrwizard machine produced `spawnSync gh ENOENT` because the script `cwd`-ed into `/Users/cbrwizard/apps/tooling/minsky` (which doesn't exist on this machine).
+  - **Details**: replace the hardcoded fallback with `dirname(fileURLToPath(import.meta.url)) + "/.."` so the script always derives `REPO` from its own location. Same pattern `bin/minsky` already uses for resolving `MINSKY_REPO_ROOT`.
+  - **Files**: `scripts/local-gate-merge.mjs:48`.
+  - **Hypothesis**: deriving `REPO` from `import.meta.url` works for every operator on every machine; the hardcoded path works for one operator on one machine. Pre-fix: 0/N operators ≠ cbrwizard can use the gate. Post-fix: N/N.
+  - **Success**: `node scripts/local-gate-merge.mjs --pr=N` succeeds (or runs to a real verdict) on a machine where `~/apps/tooling/minsky` is the repo path AND on a machine where `~/code/minsky` is.
+  - **Pivot**: keep `MINSKY_HOME` env override (operator escape hatch), only change the default.
+  - **Measurement**: `node -e 'console.log(require("node:path").resolve(require("node:url").fileURLToPath(import.meta.url), ".."))' /Users/fivanishche/apps/tooling/minsky/scripts/local-gate-merge.mjs` → prints `/Users/fivanishche/apps/tooling/minsky/scripts`.
+  - **Anchor**: rule #17 (proactive healing); rule #1 (don't reinvent the wheel — the same `import.meta.url` pattern is in `bin/minsky` already); operator directive 2026-05-19.
 
 <!-- Observations filed 2026-05-18 from live daemon session (P1 findings). -->
 
@@ -2249,6 +2291,32 @@ FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-fi
 
 
 ## P3
+
+- [ ] `scripts-complexity-refactor` — 6 `noExcessiveCognitiveComplexity` biome errors are silenced with `// biome-ignore` annotations in scripts/ and 2 in novel/cross-repo-runner/bin/minsky-run.mjs. Refactor each into smaller helpers so the rule passes natively.
+  - **ID**: scripts-complexity-refactor
+  - **Tags**: p3, cleanup, biome, refactor, observed-2026-05-19
+  - **Milestone**: M1
+  - **Hypothesis**: extracting helper functions for each silenced site will keep behavior identical (covered by existing unit/integration tests) while removing the silencer annotations. Each refactor is a tracer-bullet — one site at a time.
+  - **Success**: 0 `noExcessiveCognitiveComplexity` errors in `npx biome ci .` with all `// biome-ignore lint/complexity/noExcessiveCognitiveComplexity` annotations removed. All existing tests still pass.
+  - **Pivot**: if a refactor makes a function HARDER to read (subjective code review fails), revert and keep the biome-ignore annotation. Threshold: 2 of 6 refactors are reverted ⇒ accept the silencers as the long-term posture and rewrite the biome rule threshold for this codebase.
+  - **Measurement**: `npx biome ci . 2>&1 | grep -c noExcessiveCognitiveComplexity` should go from 6 → 0.
+  - **Anchor**: rule #4 (everything measurable, MEASURED — silencers count as debt); rule #17 (proactive healing — every silencer is a known-issue receipt).
+  - **Details**: Affected functions: `scripts/check-no-hardcoded-user-paths.mjs::checkNoHardcodedUserPaths` (cc=41), `scripts/check-no-hardcoded-user-paths.mjs::walkFiles` (cc=14), `scripts/check-rule-17-proactive-heal.mjs::parseArgs` (cc=12), `scripts/collect-metrics.mjs::main` (cc=12), `novel/cross-repo-runner/bin/minsky-run.mjs::recordIteration` (cc=20), `novel/cross-repo-runner/bin/minsky-run.mjs::buildAgentConfig` (cc=11). The first 4 are pure data-transforms; the last 2 are runtime callbacks — refactor those LAST and with extra care (paired tests in `runtime-paths-coverage.test.ts`).
+  - **Files**: scripts/check-no-hardcoded-user-paths.mjs, scripts/check-rule-17-proactive-heal.mjs, scripts/collect-metrics.mjs, novel/cross-repo-runner/bin/minsky-run.mjs.
+  - **Acceptance**: `npx biome ci .` reports 0 errors; the 6 `biome-ignore lint/complexity/noExcessiveCognitiveComplexity` annotations are removed; full test suite stays green.
+
+- [ ] `minsky-run-record-iteration-extract-verdict-mapper` — extract the verdict-resolution + iteration-record logic from the inline `recordIteration` callback in `novel/cross-repo-runner/bin/minsky-run.mjs` so it can be unit-tested in isolation
+  - **ID**: minsky-run-record-iteration-extract-verdict-mapper
+  - **Tags**: p3, cleanup, refactor, observability, observed-2026-05-19
+  - **Milestone**: M1
+  - **Hypothesis**: today the iteration recorder lives as a 60+ line closure inside `runLoopAsResult`, which means we can't unit-test verdict mapping. Extracting `mapVerdict(record) → verdict` + `formatIterationLine(record) → string` will get cc from 20 → ≤10 and enable focused tests.
+  - **Success**: cc ≤ 10 on the new factored functions; both helpers have ≥5 paired unit tests; the existing `runtime-paths-coverage.test.ts > iteration record includes verdict + duration + agent` test still passes unchanged.
+  - **Pivot**: if extraction creates a confusing 4-arg helper, revert and keep the inline + the biome-ignore annotation. Threshold: extracted helper has ≥4 parameters ⇒ inline-with-silencer is the better posture.
+  - **Measurement**: `npx biome ci novel/cross-repo-runner/bin/minsky-run.mjs 2>&1 | grep -c "complexity of 20"` should go to 0.
+  - **Anchor**: rule #3 (test-first — extracting makes the recorder testable); rule #4 (silencer counts as debt).
+  - **Details**: This was filed alongside `scripts-complexity-refactor` because it's the harder of the two minsky-run.mjs silencers. The `buildAgentConfig` silencer (cc=11) is folded into `scripts-complexity-refactor`.
+  - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs, novel/cross-repo-runner/src/iteration-record.ts (new, if extraction goes that way).
+  - **Acceptance**: `recordIteration` is a single dispatch line (≤5 LOC) that calls extracted helpers; both helpers are exported and have paired unit tests; full integration suite green.
 
 - [ ] `local-worktree-followups` — close out the rule-#9 follow-through for the shipped `local-worker-worktree-never-created` fix (PR #572): the 2h longitudinal success-ratio window + a docs cross-link
   - **ID**: local-worktree-followups

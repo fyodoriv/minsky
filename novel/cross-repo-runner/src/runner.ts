@@ -279,10 +279,7 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
  *
  * (Internal helper — no JSDoc tag required.)
  */
-async function ensurePrUrl(
-  inputs: RunLiveInputs,
-  stdoutTail: string,
-): Promise<string | null> {
+async function ensurePrUrl(inputs: RunLiveInputs, stdoutTail: string): Promise<string | null> {
   const fromStdout = extractPrUrl(stdoutTail);
   if (fromStdout !== null) return fromStdout;
   if (inputs.gh === undefined) return null;
@@ -327,20 +324,20 @@ function defaultBackstopTitle(taskId: string): string {
 function defaultBackstopBody(taskId: string): string {
   return [
     `Auto-opened by minsky-run.mjs's post-spawn PR-creation backstop because the`,
-    `spawned agent finished with exit 0 but did not run \`gh pr create\` (or the`,
-    `URL did not appear in the bounded stdout tail).`,
+    "spawned agent finished with exit 0 but did not run `gh pr create` (or the",
+    "URL did not appear in the bounded stdout tail).",
     "",
     `Task: \`${taskId}\``,
     "",
     `Review the commits on this branch carefully — the agent's edits are present,`,
-    `but its PR description / self-grade is not. Edit this PR body to reflect`,
-    `the actual hypothesis / observation before requesting review.`,
+    "but its PR description / self-grade is not. Edit this PR body to reflect",
+    "the actual hypothesis / observation before requesting review.",
     "",
-    `## Hypothesis self-grade`,
+    "## Hypothesis self-grade",
     "",
-    `- Predicted: agent runs to completion and opens a PR via \`gh pr create\``,
-    `- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR`,
-    `- Match: partial`,
+    "- Predicted: agent runs to completion and opens a PR via `gh pr create`",
+    "- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR",
+    "- Match: partial",
     `- Lesson: the brief's \`gh pr create\` step is necessary but not always sufficient; the runner backstop is the durable safety net (devin-spawn-no-pr-opened pivot, 2026-05-18)`,
     "",
   ].join("\n");
