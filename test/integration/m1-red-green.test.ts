@@ -25,6 +25,20 @@ import { describe, expect, test } from "vitest";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const RUNNER_BIN = join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs");
 
+/** Sanitized env for spawned subprocesses — strips all MINSKY_* vars
+ *  so tests don't inherit the operator's daemon config or a running
+ *  daemon's state. Prevents cross-contamination in parallel CI runs. */
+function cleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("MINSKY_")) delete env[key];
+  }
+  env.MINSKY_NON_INTERACTIVE = "1";
+  // Point HOME to a temp dir so tests don't read ~/.minsky/config.json
+  env.HOME = mkdtempSync(join(tmpdir(), "m1-home-"));
+  return env;
+}
+
 function makeHost(tasksMd?: string): string {
   const dir = mkdtempSync(join(tmpdir(), "m1-tdd-"));
   execSync(
@@ -304,7 +318,7 @@ describe("M1 TDD: fixture-driven e2e", () => {
       {
         encoding: "utf8",
         timeout: 60_000,
-        env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+        env: cleanEnv(),
       },
     );
     const store = join(dir, ".minsky", "experiment-store", "cross-repo");

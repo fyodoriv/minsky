@@ -37,6 +37,11 @@ export default defineConfig({
     // distinguishes a load flake (fails then passes) from a real failure
     // (fails every attempt) — Fowler 2011 "Eradicating Non-Determinism in
     // Tests".
+    // retry: 2 masks flaky tests. Target: 0 once all tests are deterministic.
+    // Current justification: vitest under host oversubscription (daemon +
+    // multiple agents) produces timing flakes on slow tests. Integration
+    // tests use cleanEnv() + mkdtemp isolation to prevent state leaks.
+    // Track: when retry:0 produces 100% green over 7d CI, remove the retry.
     retry: 2,
     include: [
       "novel/**/src/**/*.test.ts",
