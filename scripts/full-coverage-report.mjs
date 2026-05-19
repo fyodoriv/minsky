@@ -12,8 +12,8 @@
 //   L5: Runtime invariants coverage (invariants / known failure classes)
 //   L6: Scripts coverage (scripts with paired .test.mjs files)
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +28,9 @@ if (existsSync(coverageSummary)) {
   try {
     const data = JSON.parse(readFileSync(coverageSummary, "utf8"));
     l1Pct = data?.total?.statements?.pct ?? 0;
-  } catch { l1Pct = 0; }
+  } catch {
+    l1Pct = 0;
+  }
 }
 
 // ── L2: Integration test coverage ──
@@ -87,18 +89,30 @@ const l2Pct = Math.round((featuresTestedCount / RUNTIME_FEATURES.length) * 100);
 // 2026-05-19 per rule #4 (everything measurable, MEASURED honestly).
 // `install-daemon` and `uninstall-daemon` exist but are tested by the
 // daemon-restart suite directly; not listed here to keep L3 focused
-// on the operator-facing surface (status / stop / logs / watch).
-const CLI_SUBCOMMANDS = ["status", "stop", "logs", "watch"];
-const shimContent = existsSync(join(ROOT, "bin", "minsky"))
-  ? readFileSync(join(ROOT, "bin", "minsky"), "utf8")
-  : "";
+// on the operator-facing surface.
+// 2026-05-19 (M1 push): added `init`, `uninstall`, `doctor`, `report`
+// — first-class M1 subcommands, all tested by `m1-red-green.test.ts`.
+const CLI_SUBCOMMANDS = [
+  "status",
+  "stop",
+  "logs",
+  "watch",
+  "init",
+  "uninstall",
+  "doctor",
+  "report",
+];
 // Track in a Set so a subcommand referenced in N files counts once.
 const subcommandsCovered = new Set();
 for (const file of integrationFiles) {
   const content = readFileSync(join(integrationDir, file), "utf8");
   for (const cmd of CLI_SUBCOMMANDS) {
     if (subcommandsCovered.has(cmd)) continue;
-    if (content.includes(`"${cmd}"`) || content.includes(`'${cmd}'`) || content.includes(cmd + ")")) {
+    if (
+      content.includes(`"${cmd}"`) ||
+      content.includes(`'${cmd}'`) ||
+      content.includes(`${cmd})`)
+    ) {
       subcommandsCovered.add(cmd);
     }
   }
@@ -161,7 +175,9 @@ const KNOWN_FAILURE_CLASSES = [
   "iteration-too-slow",
   "iteration-suspiciously-fast",
 ];
-const invariantContent = existsSync(join(ROOT, "novel", "cross-repo-runner", "src", "runtime-invariants.ts"))
+const invariantContent = existsSync(
+  join(ROOT, "novel", "cross-repo-runner", "src", "runtime-invariants.ts"),
+)
   ? readFileSync(join(ROOT, "novel", "cross-repo-runner", "src", "runtime-invariants.ts"), "utf8")
   : "";
 let invariantsCovered = 0;
@@ -183,7 +199,8 @@ for (const script of scriptFiles) {
   const testFile = script.replace(".mjs", ".test.mjs");
   if (existsSync(join(scriptsDir, testFile))) scriptsWithTests++;
 }
-const l6Pct = scriptFiles.length > 0 ? Math.round((scriptsWithTests / scriptFiles.length) * 100) : 0;
+const l6Pct =
+  scriptFiles.length > 0 ? Math.round((scriptsWithTests / scriptFiles.length) * 100) : 0;
 
 // ── Composite score ──
 // Weighted by importance to runtime correctness. Each layer is capped
@@ -191,7 +208,7 @@ const l6Pct = scriptFiles.length > 0 ? Math.round((scriptsWithTests / scriptFile
 // meaningless (the operator-spotted "133% composite" bug, 2026-05-19).
 // Rule #4 demands HONEST measurement; rule #11 forbids load-bearing
 // metrics that aren't bounded.
-const weights = { l1: 0.30, l2: 0.25, l3: 0.10, l4: 0.15, l5: 0.10, l6: 0.10 };
+const weights = { l1: 0.3, l2: 0.25, l3: 0.1, l4: 0.15, l5: 0.1, l6: 0.1 };
 function cap(n) {
   return Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
 }
@@ -203,35 +220,79 @@ const l5PctCapped = cap(l5Pct);
 const l6PctCapped = cap(l6Pct);
 const composite = Math.round(
   l1PctCapped * weights.l1 +
-  l2PctCapped * weights.l2 +
-  l3PctCapped * weights.l3 +
-  l4PctCapped * weights.l4 +
-  l5PctCapped * weights.l5 +
-  l6PctCapped * weights.l6,
+    l2PctCapped * weights.l2 +
+    l3PctCapped * weights.l3 +
+    l4PctCapped * weights.l4 +
+    l5PctCapped * weights.l5 +
+    l6PctCapped * weights.l6,
 );
 
 const report = {
   composite_pct: composite,
   layers: {
-    l1_unit_test_v8: { pct: l1PctCapped, weight: weights.l1, note: "v8 statement coverage on novel/*/src/*.ts" },
-    l2_integration_tests: { pct: l2PctCapped, weight: weights.l2, tested: featuresTestedCount, total: RUNTIME_FEATURES.length, note: "runtime features exercised by test/integration/" },
-    l3_cli_shim: { pct: l3PctCapped, weight: weights.l3, tested: subcommandsTested, total: CLI_SUBCOMMANDS.length, note: "bin/minsky subcommands exercised" },
-    l4_minsky_run: { pct: l4PctCapped, weight: weights.l4, tested: pathsExercised, total: MINSKY_RUN_PATHS.length, note: "minsky-run.mjs major code paths" },
-    l5_runtime_invariants: { pct: l5PctCapped, weight: weights.l5, covered: invariantsCovered, total: KNOWN_FAILURE_CLASSES.length, note: "known failure classes with runtime invariant" },
-    l6_scripts: { pct: l6PctCapped, weight: weights.l6, withTests: scriptsWithTests, total: scriptFiles.length, note: "scripts/*.mjs with paired .test.mjs" },
+    l1_unit_test_v8: {
+      pct: l1PctCapped,
+      weight: weights.l1,
+      note: "v8 statement coverage on novel/*/src/*.ts",
+    },
+    l2_integration_tests: {
+      pct: l2PctCapped,
+      weight: weights.l2,
+      tested: featuresTestedCount,
+      total: RUNTIME_FEATURES.length,
+      note: "runtime features exercised by test/integration/",
+    },
+    l3_cli_shim: {
+      pct: l3PctCapped,
+      weight: weights.l3,
+      tested: subcommandsTested,
+      total: CLI_SUBCOMMANDS.length,
+      note: "bin/minsky subcommands exercised",
+    },
+    l4_minsky_run: {
+      pct: l4PctCapped,
+      weight: weights.l4,
+      tested: pathsExercised,
+      total: MINSKY_RUN_PATHS.length,
+      note: "minsky-run.mjs major code paths",
+    },
+    l5_runtime_invariants: {
+      pct: l5PctCapped,
+      weight: weights.l5,
+      covered: invariantsCovered,
+      total: KNOWN_FAILURE_CLASSES.length,
+      note: "known failure classes with runtime invariant",
+    },
+    l6_scripts: {
+      pct: l6PctCapped,
+      weight: weights.l6,
+      withTests: scriptsWithTests,
+      total: scriptFiles.length,
+      note: "scripts/*.mjs with paired .test.mjs",
+    },
   },
 };
 
 if (jsonMode) {
   console.log(JSON.stringify(report, null, 2));
 } else {
-  console.log(`\n📊 Full Coverage Report (all layers)\n`);
+  console.log("\n📊 Full Coverage Report (all layers)\n");
   console.log(`   COMPOSITE: ${composite}%\n`);
   console.log(`   L1 Unit tests (v8):       ${String(l1Pct).padStart(3)}%  (weight ${weights.l1})`);
-  console.log(`   L2 Integration tests:     ${String(l2Pct).padStart(3)}%  (${featuresTestedCount}/${RUNTIME_FEATURES.length} features)`);
-  console.log(`   L3 CLI shim:              ${String(l3Pct).padStart(3)}%  (${Math.min(subcommandsTested, CLI_SUBCOMMANDS.length)}/${CLI_SUBCOMMANDS.length} subcommands)`);
-  console.log(`   L4 minsky-run.mjs:        ${String(l4Pct).padStart(3)}%  (${pathsExercised}/${MINSKY_RUN_PATHS.length} paths)`);
-  console.log(`   L5 Runtime invariants:     ${String(l5Pct).padStart(3)}%  (${invariantsCovered}/${KNOWN_FAILURE_CLASSES.length} failure classes)`);
-  console.log(`   L6 Scripts:               ${String(l6Pct).padStart(3)}%  (${scriptsWithTests}/${scriptFiles.length} with tests)`);
+  console.log(
+    `   L2 Integration tests:     ${String(l2Pct).padStart(3)}%  (${featuresTestedCount}/${RUNTIME_FEATURES.length} features)`,
+  );
+  console.log(
+    `   L3 CLI shim:              ${String(l3Pct).padStart(3)}%  (${Math.min(subcommandsTested, CLI_SUBCOMMANDS.length)}/${CLI_SUBCOMMANDS.length} subcommands)`,
+  );
+  console.log(
+    `   L4 minsky-run.mjs:        ${String(l4Pct).padStart(3)}%  (${pathsExercised}/${MINSKY_RUN_PATHS.length} paths)`,
+  );
+  console.log(
+    `   L5 Runtime invariants:     ${String(l5Pct).padStart(3)}%  (${invariantsCovered}/${KNOWN_FAILURE_CLASSES.length} failure classes)`,
+  );
+  console.log(
+    `   L6 Scripts:               ${String(l6Pct).padStart(3)}%  (${scriptsWithTests}/${scriptFiles.length} with tests)`,
+  );
   console.log();
 }
