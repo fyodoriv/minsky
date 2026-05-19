@@ -100,7 +100,7 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.iterations.map((i) => i.taskId)).toEqual(["task-0", "task-1", "task-2"]);
   });
 
-  test("scope-leak halts on the first leaked iteration", async () => {
+  test("scope-leak halts on the first leaked iteration (hard mode)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     let n = 0;
     const result = await runHostLoop({
@@ -120,6 +120,7 @@ describe("runHostLoop — stop conditions", () => {
       globMatchesPath,
       maxIterations: 10,
       tickIntervalMs: 0,
+      scopeLeakMode: "hard",
     });
     expect(result.stopReason).toBe("scope-leak");
     expect(result.iterations).toHaveLength(3);
@@ -322,10 +323,7 @@ describe("runHostLoop — validated-task rotation (walker-drains-one-host-foreve
     expect(result.iterations.map((i) => i.taskId)).toEqual(["task-a", "task-b", "task-c"]);
   });
 
-  test("does NOT add scope-leak verdicts to the skip set (loop halts anyway)", async () => {
-    // Defensive: scope-leak halts the loop, so we never call pickTask
-    // again. But assert the invariant explicitly — only `validated`
-    // verdicts get rotated past.
+  test("does NOT add scope-leak verdicts to the skip set in hard mode (loop halts)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     const skipsObserved: ReadonlySet<string>[] = [];
     const result = await runHostLoop({
@@ -342,12 +340,33 @@ describe("runHostLoop — validated-task rotation (walker-drains-one-host-foreve
       globMatchesPath,
       maxIterations: 5,
       tickIntervalMs: 0,
+      scopeLeakMode: "hard",
     });
     expect(result.stopReason).toBe("scope-leak");
-    // Only one pick happened (the loop halted on scope-leak), and the
-    // skip set was empty going in.
     expect(skipsObserved).toHaveLength(1);
     expect(Array.from(skipsObserved[0] ?? [])).toEqual([]);
+  });
+
+  test("scope-leak in warn mode (default) continues iterating", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => ["src/**"],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "scope-leak", scopeLeakPaths: ["x.ts"] })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 3,
+      tickIntervalMs: 0,
+      // scopeLeakMode defaults to undefined → treated as "warn"
+    });
+    // Soft mode: loop continues through all 3 iterations despite scope-leak
+    expect(result.stopReason).toBe("max-iterations");
+    expect(result.iterations).toHaveLength(3);
+    expect(result.iterations.every((i) => i.verdict === "scope-leak")).toBe(true);
   });
 
   test("a fresh runHostLoop invocation starts with an empty skip set", async () => {

@@ -189,6 +189,13 @@ export interface RunHostLoopOpts {
    */
   readonly seedOnEmpty?: boolean;
   /**
+   * Scope-leak handling mode. Default `"warn"` — log the leak paths
+   * and continue iterating (devin naturally touches related files
+   * outside the task's **Files** declaration). Set `"hard"` to halt
+   * the loop on scope-leak (legacy behavior).
+   */
+  readonly scopeLeakMode?: "warn" | "hard";
+  /**
    * Builder for the audit's `HostCtoSignals`. The loop has the trigger
    * context (post-iteration vs queue-empty) and the just-completed
    * iteration; the builder fills in `hostRepo` / `hostRoot` /
@@ -322,7 +329,15 @@ async function runOneIteration(args: {
   iterations.push(iterationResult);
   opts.recordIteration?.(iterationResult);
   await maybeFirePostIterationAudit(opts, task, outcome);
-  if (outcome.verdict === "scope-leak") return "scope-leak";
+  // Scope-leak: configurable soft vs hard mode.
+  // Soft (default): log warning + continue — devin naturally touches
+  // related files outside **Files**: declaration.
+  // Hard: halt the loop (legacy behavior, opt-in via opts.scopeLeakMode).
+  if (outcome.verdict === "scope-leak") {
+    if (opts.scopeLeakMode === "hard") return "scope-leak";
+    // Soft mode: log the leak paths, record the iteration, continue.
+    // The iteration record already has scopeLeakPaths for post-hoc review.
+  }
   if (outcome.verdict === "spawn-failed") return "spawn-failed";
   // After a validated iteration, mark the task so the next pickTask
   // call rotates past it. Without this, a worker that validates but
