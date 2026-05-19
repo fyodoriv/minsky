@@ -156,6 +156,58 @@ function runNode(
   }
 }
 
+// Shared fixture: two empty bootstrapped sub-hosts under a parent dir.
+// Used by the slice-D walker tests below — extracted to keep the
+// surrounding test functions under biome's cognitive-complexity cap
+// (≤10). The inner per-sub setup loop is the cyclomatic hotspot (env
+// destructuring, conditional remote-origin slug, git init/config/bootstrap
+// sequence); keeping it here means each test stays at the readability
+// floor "create temp parent → provision → run minsky-run → assert".
+function provisionTwoEmptyHosts(parent: string): { subHostA: string; subHostB: string } {
+  const subHostA = join(parent, "host-a");
+  const subHostB = join(parent, "host-b");
+  const EMPTY_TASKS_MD = [
+    "# Tasks",
+    "",
+    "## P1",
+    "",
+    "- [ ] Placeholder task missing rule-9 fields",
+    "  **ID**: placeholder",
+    "  **Tags**: bug",
+    "",
+  ].join("\n");
+  for (const sub of [subHostA, subHostB]) {
+    provisionEmptyHost(sub, EMPTY_TASKS_MD, sub === subHostA ? "host-a" : "host-b");
+  }
+  return { subHostA, subHostB };
+}
+
+function provisionEmptyHost(sub: string, tasksMd: string, slug: string): void {
+  const xdg = join(sub, ".config-isolated");
+  execFileSync("mkdir", ["-p", sub]);
+  const {
+    GIT_DIR: _gitDir,
+    GIT_WORK_TREE: _gitWorkTree,
+    GIT_INDEX_FILE: _gitIndexFile,
+    GIT_OBJECT_DIRECTORY: _gitObjectDirectory,
+    ...gitEnv
+  } = process.env;
+  void _gitDir;
+  void _gitWorkTree;
+  void _gitIndexFile;
+  void _gitObjectDirectory;
+  execFileSync("git", ["init", "--quiet"], { cwd: sub, env: gitEnv });
+  execFileSync("git", ["config", "remote.origin.url", `git@github.com:test/${slug}.git`], {
+    cwd: sub,
+    env: gitEnv,
+  });
+  writeFileSync(join(sub, "package.json"), JSON.stringify({ name: slug, scripts: {} }));
+  writeFileSync(join(sub, "TASKS.md"), tasksMd);
+  execFileSync("node", [BOOTSTRAP_BIN, sub], {
+    env: { ...process.env, XDG_CONFIG_HOME: xdg },
+  });
+}
+
 describe("PROJ-840 integration: bootstrap + minsky-run end-to-end", () => {
   /** @type {FixtureHost} */
   let host: FixtureHost;
@@ -551,6 +603,77 @@ describe("PROJ-840 integration: bootstrap + minsky-run end-to-end", () => {
       expect(result.stdout).toContain("host-a");
       expect(result.stdout).toContain("host-b");
       expect(result.stdout).toContain("stopReason: all-hosts-drained");
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  // walker-drains-one-host-forever measurement-format invariant.
+  //
+  // The task block's rule-#9 `Measurement:` field is the literal command
+  //   `grep 'iter(s)' ~/.minsky/daemon.log | awk '{print $1}' | sort -u | wc -l`
+  // → ≥3 distinct hosts with iterations (was: 1).
+  //
+  // That command only works while the walker summary writes a line shaped
+  //   `  <host-root>: N iter(s) → <stop-reason>`
+  // per host. If a future refactor renames the token (e.g. `iterations` or
+  // `iter`), drops the leading whitespace, or moves the host-root off the
+  // start of the line, the grep returns zero matches → `wc -l` reports 0 →
+  // the measurement silently reads as "still 1 host" even when the bug is
+  // fixed. That false-negative-on-the-success-threshold is the failure
+  // mode this test pins: the format the rule-#9 measurement depends on
+  // must not drift, even though the test that proves the fairness fix
+  // (`slice-D --hosts-dir walks bootstrapped subdirs ...`, above) is
+  // already in place.
+  //
+  // Pattern: structural-invariant test (Beck XP 1999 — pin the contract
+  //   the operator command depends on); rule #3 (test-first / metric-first
+  //   — the metric IS the test fixture here, not an afterthought).
+  test("walker summary emits the `iter(s)` token the rule-#9 measurement command grep'd for", () => {
+    const parent = mkdtempSync(join(tmpdir(), "minsky-measurement-fmt-"));
+    try {
+      provisionTwoEmptyHosts(parent);
+      const result = runMinskyRun(host, [
+        "--hosts-dir",
+        parent,
+        "--no-live",
+        "--no-seed-on-empty",
+        "--max-iterations=5",
+        "--tick-interval-ms=0",
+      ]);
+      expect(result.code).toBe(0);
+
+      // The rule-#9 measurement command:
+      //   grep 'iter(s)' ~/.minsky/daemon.log | awk '{print $1}' | sort -u | wc -l
+      // Replicate the same filter against the summary stdout: every visited
+      // host MUST contribute exactly one line matching the
+      // `<leading-whitespace><host>: N iter(s) → <reason>` shape, and the
+      // count of distinct host paths must equal the number of hosts walked.
+      const summaryLines = result.stdout.split("\n").filter((line) => line.includes("iter(s)"));
+      expect(summaryLines).toHaveLength(2);
+      // Pin the exact token (`iter(s)` — not `iter`, not `iteration(s)`,
+      // not `iterations`) so a future textual refactor that breaks the
+      // measurement command fires this test, not a silent false-negative
+      // in production. The token is bracketed by spaces in the emitter
+      // (` N iter(s) → reason`); the regex pins that exact context so a
+      // rename to `iter` alone or `iterations` would no longer match.
+      for (const line of summaryLines) {
+        expect(line).toMatch(/ iter\(s\) /);
+        expect(line).toMatch(/→ \w/);
+      }
+      // The measurement command pipes through `awk '{print $1}' | sort -u`.
+      // `awk '{print $1}'` reads the FIRST whitespace-delimited field. The
+      // emitter writes `  <host>: N iter(s) → <reason>` — two leading
+      // spaces, then the host root, then a colon. `awk` strips the leading
+      // whitespace and returns `<host>:` (colon included) as $1. We pin
+      // that shape so the operator's grep|awk|sort pipeline counts hosts,
+      // not iteration counts or stop reasons.
+      const awkFirstField = summaryLines.map((line) => line.trim().split(/\s+/)[0]);
+      const distinctHosts = new Set(awkFirstField);
+      expect(distinctHosts.size).toBe(2);
+      for (const field of awkFirstField) {
+        expect(field).toMatch(/:$/);
+      }
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
