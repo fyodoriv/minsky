@@ -121,12 +121,22 @@ describe("daemon-restart: stale PID cleanup", () => {
 // ─── dirty-state cleanup on startup ─────────────────────────
 
 describe("daemon-restart: dirty-state cleanup", () => {
-  test("bin/minsky has git checkout + clean on daemon startup", () => {
+  test("bin/minsky stashes dirty state instead of destroying it", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
     // Must reset to default branch after crash
     expect(src).toContain("resetting host to");
     expect(src).toContain('git -C "$_host_arg" checkout');
-    expect(src).toContain('git -C "$_host_arg" clean -fd');
+    // Multi-agent safety rule: NEVER `git clean -fd` — it deletes other
+    // agents' untracked files. The daemon must stash with a recoverable
+    // label instead.
+    expect(src).not.toMatch(/git -C "\$_host_arg" clean -fd/);
+    expect(src).toContain('git -C "$_host_arg" stash push -u -m');
+    expect(src).toContain("minsky auto-stash");
+    // Label must use an ISO-8601 UTC timestamp so it's unique + recoverable
+    expect(src).toContain("date -u +%Y-%m-%dT%H:%M:%SZ");
+    // Operator must be told where the stash went
+    expect(src).toContain("stashed dirty state as:");
+    expect(src).toContain("git stash list");
   });
 
   test("dirty-state cleanup only runs when on a feature branch", () => {
@@ -135,6 +145,99 @@ describe("daemon-restart: dirty-state cleanup", () => {
     expect(src).toContain("_current_br");
     expect(src).toContain("_default_br");
     expect(src).toContain('!= "$_default_br"');
+  });
+
+  test("daemon refuses to start if stash itself fails (rule #6 pivot)", () => {
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    // If `git stash push` fails (worktree / submodule edge case), we must
+    // loud-crash rather than silently clobber state.
+    expect(src).toContain("REFUSING to start daemon");
+    expect(src).toContain("'git stash push -u' failed");
+  });
+});
+
+// ─── dirty-state stash: end-to-end ──────────────────────────
+
+describe("daemon-restart: dirty-state stash (e2e)", () => {
+  test("untracked file survives daemon startup as a recoverable stash", () => {
+    // Synthesise a host repo with: (1) a default branch `main`, (2) a
+    // checked-out feature branch with an untracked file, (3) an origin
+    // remote pointing at itself so `symbolic-ref refs/remotes/origin/HEAD`
+    // resolves. Then exec the dirty-state block from `bin/minsky` and
+    // assert the untracked file is in `git stash list`, NOT deleted.
+    const fixtureDir = join(tmpdir(), `minsky-fixture-${Date.now()}`);
+    const bareDir = `${fixtureDir}.bare.git`;
+    try {
+      // `-c core.hooksPath=/dev/null` neutralises any inherited global
+      // hook path (the user's dotfiles install lefthook globally, which
+      // would reject the fixture's `init` commit for not being conventional).
+      const G = "git -c core.hooksPath=/dev/null";
+      execSync(`mkdir -p '${fixtureDir}' && ${G} init -b main '${fixtureDir}'`, { stdio: "pipe" });
+      execSync(
+        `cd '${fixtureDir}' && \
+         ${G} config user.email t@example.com && \
+         ${G} config user.name 'Test' && \
+         ${G} config core.hooksPath /dev/null && \
+         echo init > README.md && ${G} add README.md && \
+         ${G} commit -m 'init' && \
+         ${G} init --bare '${bareDir}' && \
+         ${G} remote add origin '${bareDir}' && \
+         ${G} push -u origin main && \
+         ${G} symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main && \
+         ${G} checkout -b feat/crashed-iteration && \
+         echo 'unsaved work from another agent' > unsaved.txt`,
+        { stdio: "pipe", shell: "/bin/bash" },
+      );
+
+      // Pre-condition: untracked file exists, on feature branch
+      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
+      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
+        "feat/crashed-iteration",
+      );
+
+      // Inline the dirty-state block (the part that runs before `node`
+      // spawns) so we exercise the real shell logic without spinning up
+      // the runner. Mirrors `bin/minsky` lines 632-659.
+      const cleanupScript = `
+        set -e
+        _host_arg='${fixtureDir}'
+        _default_br=$(git -C "$_host_arg" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+        _current_br=$(git -C "$_host_arg" branch --show-current 2>/dev/null)
+        if [ "$_current_br" != "$_default_br" ] && [ -n "$_current_br" ]; then
+          if [ -n "$(git -C "$_host_arg" status --porcelain 2>/dev/null)" ]; then
+            _stash_label="minsky auto-stash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git -C "$_host_arg" stash push -u -m "$_stash_label" >/dev/null
+            echo "stashed: $_stash_label"
+          fi
+          git -C "$_host_arg" checkout "$_default_br" >/dev/null 2>&1
+        fi
+      `;
+      const out = execSync(cleanupScript, { shell: "/bin/bash", encoding: "utf8" });
+      expect(out).toContain("stashed: minsky auto-stash");
+
+      // Post-condition: untracked file is NOT on disk (it's in the stash)
+      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(false);
+
+      // …but it IS recoverable from the stash list
+      const stashList = execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" });
+      expect(stashList).toContain("minsky auto-stash");
+
+      // And we're back on the default branch
+      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
+        "main",
+      );
+
+      // Final: applying the stash restores the file (proves recoverability)
+      execSync(`git -C '${fixtureDir}' stash apply stash@{0}`, { stdio: "pipe" });
+      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
+      expect(readFileSync(join(fixtureDir, "unsaved.txt"), "utf8")).toContain("unsaved work");
+    } finally {
+      try {
+        execSync(`rm -rf '${fixtureDir}' '${bareDir}'`, { stdio: "pipe" });
+      } catch {
+        /* noop */
+      }
+    }
   });
 });
 
