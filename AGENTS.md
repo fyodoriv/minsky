@@ -143,6 +143,23 @@ Every constitutional rule must be enforced by a deterministic CI check — not a
 
 **Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
 
+### 11. Default by default (rule #16)
+
+When you implement a new behavior or fix, **make it the default immediately** — not an opt-in flag behind an env var. If a behavior is reasonable for all users, it should be on by default the moment it ships.
+
+Examples of "default by default":
+- Scope-leak soft mode → default (not `MINSKY_SCOPE_LEAK_MODE=warn`)
+- Launchd persistence → auto-installed on first `minsky` run (not a separate `install-daemon` step)
+- Dynamic timeouts → computed automatically (not `MINSKY_CLAUDE_PRINT_TIMEOUT_MS=...`)
+- Smart auto-attach → just works when you type `minsky` (not `minsky --attach-or-start`)
+
+**Every new default ships with:**
+1. **An experiment** in `.minsky/experiments/<id>.yaml` with hypothesis + success threshold
+2. **A measurement** — a runnable command that verifies the default works
+3. **An opt-out** — an env var or flag to disable (for debugging only, documented in DEPRECATED.md as soon as it's never used)
+
+The burden of proof is on the opt-in side: "why ISN'T this the default?" not "why SHOULD this be the default?"
+
 ### 3a. Runtime invariants (coverage ≠ correctness)
 
 High unit-test coverage (95%+) is necessary but NOT sufficient. Every bug found in production during the 2026-05-18 session (devin stdin panic, permission mode missing, walker starvation, scope-leak false positives, brief missing PR instructions, watchdog kills) had passing unit tests — because unit tests mock the integration seams where real bugs live.
