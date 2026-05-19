@@ -146,6 +146,13 @@ case "${1:-}" in
       fi
       echo ""
 
+      # Resolve host dir early (needed by stability + iterations + help)
+      host_dir="${HOST_ARG:-}"
+      if [ -z "$host_dir" ]; then
+        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+      fi
+      host_dir="${host_dir:-}"
+
       # Stability + dynamic timeouts
       if [ -n "$host_dir" ] && command -v node >/dev/null 2>&1; then
         _stab=$(node "$MINSKY_REPO_SCRIPTS/stability-number.mjs" "$host_dir" 2>/dev/null || echo "no data")
@@ -172,11 +179,6 @@ case "${1:-}" in
       # Latest iterations (from experiment store)
       echo "  📊 RECENT ITERATIONS"
       echo "  ────────────────────────────────────────────────────────"
-      host_dir="${HOST_ARG:-}"
-      if [ -z "$host_dir" ]; then
-        # try to detect from daemon args
-        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
-      fi
       if [ -n "$host_dir" ] && [ -d "$host_dir/.minsky/experiment-store/cross-repo" ]; then
         for f in "$host_dir"/.minsky/experiment-store/cross-repo/*.jsonl; do
           [ -f "$f" ] || continue
