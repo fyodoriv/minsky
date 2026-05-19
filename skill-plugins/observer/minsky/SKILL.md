@@ -448,6 +448,45 @@ The empty-state path (no daemon, no PID, no log) is where most
 `unbound variable` bugs hide. `set -u` catches them but only at
 runtime.
 
+### Reading CI results (integration + runtime tests)
+
+CI runs 4 test layers. Check them before concluding "tests pass":
+
+```bash
+# Quick: did the last push's CI pass?
+gh run list --limit 1 --json conclusion,name --jq '.[0]'
+
+# Detailed: which jobs passed/failed?
+gh run view --json jobs --jq '.jobs[] | {name, conclusion}'
+
+# Integration test results specifically:
+gh run view --json jobs --jq '.jobs[] | select(.name == "integration-tests") | {conclusion, steps: [.steps[] | {name, conclusion}]}'
+
+# Download M1 metrics artifact from CI:
+gh run download --name m1-metrics --dir /tmp/m1-ci-metrics
+cat /tmp/m1-ci-metrics/m1-metrics.json | python3 -m json.tool
+```
+
+**CI jobs and what they cover:**
+
+| Job | What it tests | Timeout |
+|---|---|---|
+| `test` | Unit tests + v8 coverage (3000+ tests) | 5min |
+| `integration-tests` | Fixture-driven e2e + M1 TDD suite | 10min |
+| `markdownlint` | Markdown formatting | 1min |
+| `typecheck` | TypeScript compilation | 2min |
+
+**Local equivalents:**
+
+```bash
+pnpm test                    # unit tests (fast)
+pnpm test:integration        # integration tests (slow, 120s timeout)
+pnpm test:m1-tdd             # M1 red-green acceptance tests
+pnpm m1:metrics              # which M1 measurements pass
+pnpm m1:observability        # which M1 tasks have observability gaps
+pnpm m1:coverage             # 6-layer composite coverage number
+```
+
 ### When to commit before starting minsky
 
 If you've made changes to the minsky repo (or any host repo) that are
