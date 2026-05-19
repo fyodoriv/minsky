@@ -94,16 +94,53 @@ case "${1:-}" in
     exit 0
     ;;
   stop)
-    # SIGTERM every running minsky-run process. The runner's own signal
-    # handler (host-loop.ts → abort signal) finishes the in-flight
-    # iteration before exiting.
+    # Thorough shutdown: kill ALL minsky processes + their agent children
+    # + bootout the launchd service. Zero ghost processes after this.
+    _killed=0
+
+    # 1. Bootout launchd service (prevents auto-restart via KeepAlive)
+    if launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
+      launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
+      echo "  ✅ launchd com.minsky.daemon stopped"
+      _killed=1
+    fi
+
+    # 2. SIGTERM all minsky-run node processes
     if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
       pkill -TERM -f "cross-repo-runner/bin/minsky-run"
-      echo "sent SIGTERM to all running minsky-run processes"
-      rm -f "$MINSKY_DAEMON_PID"
-      exit 0
+      echo "  ✅ SIGTERM sent to minsky-run processes"
+      _killed=1
     fi
-    echo "nothing to stop"
+
+    # 3. Kill orphaned agent children (devin/claude/aider spawned by minsky)
+    #    These are children of minsky-run that may outlive the parent.
+    for _agent_pat in 'devin.*--prompt-file.*/minsky-devin' 'claude.*--print' 'aider.*--message-file'; do
+      if pgrep -f "$_agent_pat" >/dev/null 2>&1; then
+        pkill -TERM -f "$_agent_pat" 2>/dev/null || true
+        echo "  ✅ SIGTERM sent to agent children matching: $_agent_pat"
+        _killed=1
+      fi
+    done
+
+    # 4. Clean up PID file
+    rm -f "$MINSKY_DAEMON_PID"
+
+    # 5. Wait briefly, then verify nothing remains
+    if [ "$_killed" = "1" ]; then
+      sleep 2
+      _remaining=$(pgrep -f "cross-repo-runner/bin/minsky-run" 2>/dev/null | wc -l | tr -d ' ')
+      _agents=$(pgrep -f "devin.*--prompt-file.*/minsky-devin" 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$_remaining" != "0" ] || [ "$_agents" != "0" ]; then
+        echo "  ⚠️  ${_remaining} runner(s) + ${_agents} agent(s) still alive — sending SIGKILL"
+        pkill -9 -f "cross-repo-runner/bin/minsky-run" 2>/dev/null || true
+        pkill -9 -f "devin.*--prompt-file.*/minsky-devin" 2>/dev/null || true
+        sleep 1
+      fi
+      echo ""
+      echo "minsky stopped. Zero processes remaining."
+    else
+      echo "nothing to stop (no minsky processes running)"
+    fi
     exit 0
     ;;
   logs)
@@ -522,9 +559,19 @@ if [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop
     exec "$0" watch "$_target_host"
   fi
 
-  # No daemon running — start one and attach
+  # No daemon running — start one, auto-install launchd persistence, attach.
+  # Persistence is DEFAULT — minsky should survive reboots without extra steps.
   echo "minsky: no daemon running for $(basename "$_target_host"). Starting..."
   "$0" --daemon --host "$_target_host"
+
+  # Auto-install launchd plist if not already installed (macOS only).
+  # This makes the daemon survive reboots by default. The operator
+  # can remove it with `minsky uninstall-daemon`.
+  if [ "$(uname)" = "Darwin" ] && ! launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
+    echo "minsky: installing launchd persistence (survives reboot)..."
+    "$0" install-daemon "$_target_host" 2>/dev/null || true
+  fi
+
   sleep 2
   exec "$0" watch "$_target_host"
 fi
