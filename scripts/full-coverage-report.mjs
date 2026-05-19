@@ -60,34 +60,51 @@ const RUNTIME_FEATURES = [
   "devin-permission-mode",
   "brief-includes-pr-instructions",
 ];
-// Check which features are covered by reading integration test content
-let featuresTestedCount = 0;
+// Check which features are covered by reading integration test content.
+// Track features in a Set so a feature found in N files counts once,
+// not N times (the previous bug — `featuresTestedCount++` inside a
+// nested loop produced 240% on a 20-feature catalogue with 7 files).
+// Rule #4 demands HONEST measurement; rule #11 forbids load-bearing
+// metrics that exceed their denominator.
+const featuresTested = new Set();
 for (const file of integrationFiles) {
-  const content = readFileSync(join(integrationDir, file), "utf8");
+  const content = readFileSync(join(integrationDir, file), "utf8").toLowerCase();
   for (const feature of RUNTIME_FEATURES) {
+    if (featuresTested.has(feature)) continue;
     const keywords = feature.split("-");
-    if (keywords.every((kw) => content.toLowerCase().includes(kw))) {
-      featuresTestedCount++;
+    if (keywords.every((kw) => content.includes(kw))) {
+      featuresTested.add(feature);
     }
   }
 }
+const featuresTestedCount = featuresTested.size;
 const l2Pct = Math.round((featuresTestedCount / RUNTIME_FEATURES.length) * 100);
 
 // ── L3: CLI shim coverage ──
-const CLI_SUBCOMMANDS = ["status", "stop", "logs", "watch", "doctor"];
+// The 4 real bin/minsky subcommands. `doctor` was in the catalogue
+// historically but is not actually a bin/minsky subcommand (the
+// `pnpm dogfood:doctor` script is `setup.sh --doctor`); removed
+// 2026-05-19 per rule #4 (everything measurable, MEASURED honestly).
+// `install-daemon` and `uninstall-daemon` exist but are tested by the
+// daemon-restart suite directly; not listed here to keep L3 focused
+// on the operator-facing surface (status / stop / logs / watch).
+const CLI_SUBCOMMANDS = ["status", "stop", "logs", "watch"];
 const shimContent = existsSync(join(ROOT, "bin", "minsky"))
   ? readFileSync(join(ROOT, "bin", "minsky"), "utf8")
   : "";
-let subcommandsTested = 0;
+// Track in a Set so a subcommand referenced in N files counts once.
+const subcommandsCovered = new Set();
 for (const file of integrationFiles) {
   const content = readFileSync(join(integrationDir, file), "utf8");
   for (const cmd of CLI_SUBCOMMANDS) {
+    if (subcommandsCovered.has(cmd)) continue;
     if (content.includes(`"${cmd}"`) || content.includes(`'${cmd}'`) || content.includes(cmd + ")")) {
-      subcommandsTested++;
+      subcommandsCovered.add(cmd);
     }
   }
 }
-const l3Pct = Math.round((Math.min(subcommandsTested, CLI_SUBCOMMANDS.length) / CLI_SUBCOMMANDS.length) * 100);
+const subcommandsTested = subcommandsCovered.size;
+const l3Pct = Math.round((subcommandsTested / CLI_SUBCOMMANDS.length) * 100);
 
 // ── L4: minsky-run.mjs code path coverage ──
 // Count major code paths in minsky-run.mjs and check which are exercised
@@ -169,26 +186,39 @@ for (const script of scriptFiles) {
 const l6Pct = scriptFiles.length > 0 ? Math.round((scriptsWithTests / scriptFiles.length) * 100) : 0;
 
 // ── Composite score ──
-// Weighted by importance to runtime correctness
+// Weighted by importance to runtime correctness. Each layer is capped
+// at 100% — a metric that exceeds its denominator is structurally
+// meaningless (the operator-spotted "133% composite" bug, 2026-05-19).
+// Rule #4 demands HONEST measurement; rule #11 forbids load-bearing
+// metrics that aren't bounded.
 const weights = { l1: 0.30, l2: 0.25, l3: 0.10, l4: 0.15, l5: 0.10, l6: 0.10 };
+function cap(n) {
+  return Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
+}
+const l1PctCapped = cap(l1Pct);
+const l2PctCapped = cap(l2Pct);
+const l3PctCapped = cap(l3Pct);
+const l4PctCapped = cap(l4Pct);
+const l5PctCapped = cap(l5Pct);
+const l6PctCapped = cap(l6Pct);
 const composite = Math.round(
-  l1Pct * weights.l1 +
-  l2Pct * weights.l2 +
-  l3Pct * weights.l3 +
-  l4Pct * weights.l4 +
-  l5Pct * weights.l5 +
-  l6Pct * weights.l6,
+  l1PctCapped * weights.l1 +
+  l2PctCapped * weights.l2 +
+  l3PctCapped * weights.l3 +
+  l4PctCapped * weights.l4 +
+  l5PctCapped * weights.l5 +
+  l6PctCapped * weights.l6,
 );
 
 const report = {
   composite_pct: composite,
   layers: {
-    l1_unit_test_v8: { pct: l1Pct, weight: weights.l1, note: "v8 statement coverage on novel/*/src/*.ts" },
-    l2_integration_tests: { pct: l2Pct, weight: weights.l2, tested: featuresTestedCount, total: RUNTIME_FEATURES.length, note: "runtime features exercised by test/integration/" },
-    l3_cli_shim: { pct: l3Pct, weight: weights.l3, tested: Math.min(subcommandsTested, CLI_SUBCOMMANDS.length), total: CLI_SUBCOMMANDS.length, note: "bin/minsky subcommands exercised" },
-    l4_minsky_run: { pct: l4Pct, weight: weights.l4, tested: pathsExercised, total: MINSKY_RUN_PATHS.length, note: "minsky-run.mjs major code paths" },
-    l5_runtime_invariants: { pct: l5Pct, weight: weights.l5, covered: invariantsCovered, total: KNOWN_FAILURE_CLASSES.length, note: "known failure classes with runtime invariant" },
-    l6_scripts: { pct: l6Pct, weight: weights.l6, withTests: scriptsWithTests, total: scriptFiles.length, note: "scripts/*.mjs with paired .test.mjs" },
+    l1_unit_test_v8: { pct: l1PctCapped, weight: weights.l1, note: "v8 statement coverage on novel/*/src/*.ts" },
+    l2_integration_tests: { pct: l2PctCapped, weight: weights.l2, tested: featuresTestedCount, total: RUNTIME_FEATURES.length, note: "runtime features exercised by test/integration/" },
+    l3_cli_shim: { pct: l3PctCapped, weight: weights.l3, tested: subcommandsTested, total: CLI_SUBCOMMANDS.length, note: "bin/minsky subcommands exercised" },
+    l4_minsky_run: { pct: l4PctCapped, weight: weights.l4, tested: pathsExercised, total: MINSKY_RUN_PATHS.length, note: "minsky-run.mjs major code paths" },
+    l5_runtime_invariants: { pct: l5PctCapped, weight: weights.l5, covered: invariantsCovered, total: KNOWN_FAILURE_CLASSES.length, note: "known failure classes with runtime invariant" },
+    l6_scripts: { pct: l6PctCapped, weight: weights.l6, withTests: scriptsWithTests, total: scriptFiles.length, note: "scripts/*.mjs with paired .test.mjs" },
   },
 };
 

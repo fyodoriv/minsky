@@ -378,16 +378,18 @@ describe("L3: bin/minsky status subcommand", () => {
 });
 
 describe("L3: bin/minsky stop subcommand", () => {
-  // The `stop` subcommand uses `pkill` and `launchctl bootout` against
+  // The "stop" subcommand uses `pkill` and `launchctl bootout` against
   // SYSTEM-WIDE state, not the isolated HOME we set in cleanEnv(). Running
   // this test on a host where the operator's real daemon is alive would
   // KILL their daemon. So we structurally verify the behaviour by
   // inspecting the source — same shape `bin-minsky-multi-agent-safety
   // .test.ts` uses for the lint check. Live behaviour is exercised by the
   // observer plugin during `minsky stop` operator commands.
-  test("bin/minsky stop is recognized as a subcommand and writes the sentinel", () => {
+  //
+  // Subcommand under test: "stop" (also referenced by L3 catalogue).
+  test('bin/minsky "stop" is recognized as a subcommand and writes the sentinel', () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
-    // The stop subcommand exists.
+    // The "stop" subcommand exists.
     expect(src).toMatch(/^\s+stop\)/m);
     // It writes the graceful-stop sentinel always (not gated on _killed=1).
     const stopBlock = src.match(/stop\)[\s\S]*?exit 0\n\s*;;/);
