@@ -30,6 +30,18 @@ import { describe, expect, test, beforeAll, afterAll } from "vitest";
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const RUNNER_BIN = join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs");
 
+/** Sanitized env — strips MINSKY_* vars + isolates HOME to prevent
+ *  cross-contamination with a running daemon or parallel CI runs. */
+function cleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("MINSKY_")) delete env[key];
+  }
+  env.MINSKY_NON_INTERACTIVE = "1";
+  env.HOME = mkdtempSync(join(tmpdir(), "rt-home-"));
+  return env;
+}
+
 /** Create a bootstrapped fixture host with a TASKS.md containing one task. */
 function createFixtureHost(opts?: { taskId?: string; taskFields?: Record<string, string> }): string {
   const dir = mkdtempSync(join(tmpdir(), "minsky-e2e-"));
@@ -104,7 +116,7 @@ describe("runtime lifecycle: dry-run (no agent spawn)", () => {
       {
         encoding: "utf8",
         timeout: 60_000,
-        env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+        env: cleanEnv(),
       },
     );
     expect(result).toContain("test-fixture-task");
@@ -141,7 +153,7 @@ describe("runtime lifecycle: empty queue", () => {
       {
         encoding: "utf8",
         timeout: 60_000,
-        env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+        env: cleanEnv(),
       },
     );
     expect(result).toContain("empty-queue");
@@ -159,7 +171,7 @@ describe("runtime lifecycle: loop mode", () => {
       {
         encoding: "utf8",
         timeout: 60_000,
-        env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+        env: cleanEnv(),
       },
     );
     // Should see iteration records for 2 iterations
@@ -185,7 +197,7 @@ describe("runtime lifecycle: host config", () => {
       {
         encoding: "utf8",
         timeout: 60_000,
-        env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+        env: cleanEnv(),
       },
     );
     const expDir = join(dir, ".minsky", "experiments");
@@ -218,7 +230,7 @@ describe("runtime lifecycle: rule-9 enforcement", () => {
         {
           encoding: "utf8",
           timeout: 60_000,
-          env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+          env: cleanEnv(),
         },
       );
     } catch {
@@ -264,7 +276,7 @@ describe("runtime lifecycle: dynamic timeouts", () => {
       {
         encoding: "utf8",
         timeout: 60_000,
-        env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
+        env: cleanEnv(),
       },
     );
     // Dynamic timeouts should compute from the seeded data
