@@ -18,7 +18,7 @@
 // Conformance: full — drives the real CLI executor against a real
 //   filesystem fixture; no mocking.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -508,6 +508,62 @@ describe("PROJ-840 integration: bootstrap + minsky-run end-to-end", () => {
     const result = runMinskyRun(host, ["--host", host.hostRoot, "--loop", "--max-iterations=0"]);
     expect(result.code).toBe(64);
     expect(result.stderr).toContain("--max-iterations must be a positive integer");
+  });
+
+  // walker-drains-one-host-forever fix-a regression guard: the
+  // --max-iterations-per-host CLI flag MUST reject non-positive values
+  // with EX_USAGE (64), the same shape as --max-iterations. Without
+  // the rejection, an operator typo (e.g. `--max-iterations-per-host=0`)
+  // would silently disable the per-host cap and re-introduce the
+  // single-host-starves-fleet regression. The default value (3) and
+  // the walker behaviour under the cap are pinned separately by
+  // host-walker.test.ts.
+  test("--max-iterations-per-host rejects non-positive values with usage error", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, [
+      "--hosts-dir",
+      "/tmp/whatever-no-bootstrap-needed",
+      "--max-iterations-per-host=0",
+    ]);
+    expect(result.code).toBe(64);
+    expect(result.stderr).toContain("--max-iterations-per-host must be a positive integer");
+  });
+
+  test("--max-iterations-per-host rejects negative values with usage error", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, [
+      "--hosts-dir",
+      "/tmp/whatever-no-bootstrap-needed",
+      "--max-iterations-per-host=-1",
+    ]);
+    expect(result.code).toBe(64);
+    expect(result.stderr).toContain("--max-iterations-per-host must be a positive integer");
+  });
+
+  test("--max-iterations-per-host rejects non-numeric values with usage error", () => {
+    runBootstrap(host);
+    const result = runMinskyRun(host, [
+      "--hosts-dir",
+      "/tmp/whatever-no-bootstrap-needed",
+      "--max-iterations-per-host=abc",
+    ]);
+    expect(result.code).toBe(64);
+    expect(result.stderr).toContain("--max-iterations-per-host must be a positive integer");
+  });
+
+  test("--help documents --max-iterations-per-host with default 3", () => {
+    // `usage()` writes to stderr (see `minsky-run.mjs:62-...`) AND exits 0,
+    // so the runMinskyRun helper's success branch can't capture stderr.
+    // Use spawnSync directly so we can read both streams in the success
+    // path. Help-text bit-rot guard: if a future refactor moves the flag
+    // out of the help block or changes the default, this test fires.
+    const result = spawnSync("node", [RUNNER_BIN, "--help"], {
+      env: { ...process.env, XDG_CONFIG_HOME: host.xdgConfigHome },
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("--max-iterations-per-host=N");
+    expect(result.stderr).toContain("Default 3");
   });
 
   test("slice-D --hosts-dir errors clean when no bootstrapped subdirs found", () => {
