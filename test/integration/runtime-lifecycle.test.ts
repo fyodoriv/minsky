@@ -14,18 +14,11 @@
 // Anchor: Havelund & Goldberg 2008 (runtime specification monitoring);
 //   operator directive 2026-05-18 ("ensure tests cover 95% of runtime").
 
-import { execSync, execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  readdirSync,
-} from "node:fs";
-import { join } from "node:path";
+import { execFileSync, execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { describe, expect, test, beforeAll, afterAll } from "vitest";
+import { join } from "node:path";
+import { beforeAll, describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const RUNNER_BIN = join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs");
@@ -148,7 +141,9 @@ describe("runtime lifecycle: dry-run (no agent spawn)", () => {
     const storeDir = join(fixtureHost, ".minsky", "experiment-store", "cross-repo");
     const jsonls = readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"));
     expect(jsonls.length).toBeGreaterThanOrEqual(1);
-    const content = readFileSync(join(storeDir, jsonls[0]!), "utf8");
+    const firstJsonl = jsonls[0];
+    if (firstJsonl === undefined) throw new Error("expected >=1 .jsonl record");
+    const content = readFileSync(join(storeDir, firstJsonl), "utf8");
     expect(content).toContain("test-fixture-task");
     expect(content).toContain("verdict");
   });
@@ -162,15 +157,11 @@ describe("runtime lifecycle: empty queue", () => {
     // Empty the TASKS.md
     writeFileSync(join(dir, "TASKS.md"), "# Tasks\n\n## P0\n\n");
 
-    const result = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      {
-        encoding: "utf8",
-        timeout: 60_000,
-        env: cleanEnv(),
-      },
-    );
+    const result = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      timeout: 60_000,
+      env: cleanEnv(),
+    });
     expect(result).toContain("empty-queue");
   });
 });
@@ -182,7 +173,15 @@ describe("runtime lifecycle: loop mode", () => {
     const dir = createFixtureHost();
     const result = execFileSync(
       "node",
-      [RUNNER_BIN, "--host", dir, "--loop", "--max-iterations=2", "--no-live", "--tick-interval-ms=0"],
+      [
+        RUNNER_BIN,
+        "--host",
+        dir,
+        "--loop",
+        "--max-iterations=2",
+        "--no-live",
+        "--tick-interval-ms=0",
+      ],
       {
         encoding: "utf8",
         timeout: 60_000,
@@ -192,8 +191,12 @@ describe("runtime lifecycle: loop mode", () => {
     // Should see iteration records for 2 iterations
     const storeDir = join(dir, ".minsky", "experiment-store", "cross-repo");
     const jsonls = readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"));
-    if (jsonls.length > 0) {
-      const lines = readFileSync(join(storeDir, jsonls[0]!), "utf8").trim().split("\n").filter(Boolean);
+    const firstJsonl = jsonls[0];
+    if (firstJsonl !== undefined) {
+      const lines = readFileSync(join(storeDir, firstJsonl), "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean);
       expect(lines.length).toBeLessThanOrEqual(2);
     }
     // Should contain summary
@@ -206,19 +209,17 @@ describe("runtime lifecycle: loop mode", () => {
 describe("runtime lifecycle: host config", () => {
   test("repo.yaml fields are reflected in the experiment yaml", () => {
     const dir = createFixtureHost();
-    execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      {
-        encoding: "utf8",
-        timeout: 60_000,
-        env: cleanEnv(),
-      },
-    );
+    execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      timeout: 60_000,
+      env: cleanEnv(),
+    });
     const expDir = join(dir, ".minsky", "experiments");
     const files = readdirSync(expDir).filter((f) => f.endsWith(".yaml"));
     expect(files.length).toBeGreaterThanOrEqual(1);
-    const content = readFileSync(join(expDir, files[0]!), "utf8");
+    const firstYaml = files[0];
+    if (firstYaml === undefined) throw new Error("expected >=1 .yaml record");
+    const content = readFileSync(join(expDir, firstYaml), "utf8");
     expect(content).toContain("test/fixture"); // host_repo from repo.yaml
   });
 });
@@ -239,15 +240,11 @@ describe("runtime lifecycle: rule-9 enforcement", () => {
     });
     // Should exit non-zero or produce no iteration record
     try {
-      execFileSync(
-        "node",
-        [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-        {
-          encoding: "utf8",
-          timeout: 60_000,
-          env: cleanEnv(),
-        },
-      );
+      execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+        encoding: "utf8",
+        timeout: 60_000,
+        env: cleanEnv(),
+      });
     } catch {
       // Expected — rule-9 violation exits non-zero
     }
@@ -255,8 +252,9 @@ describe("runtime lifecycle: rule-9 enforcement", () => {
     const storeDir = join(dir, ".minsky", "experiment-store", "cross-repo");
     const jsonls = readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"));
     // Either no jsonl at all, or the jsonl has no records for this task
-    if (jsonls.length > 0) {
-      const content = readFileSync(join(storeDir, jsonls[0]!), "utf8");
+    const firstJsonl = jsonls[0];
+    if (firstJsonl !== undefined) {
+      const content = readFileSync(join(storeDir, firstJsonl), "utf8");
       // If there IS a record, it should indicate the rule-9 violation
       if (content.includes("incomplete-task")) {
         expect(content).toMatch(/rule.?9|missing/i);
@@ -283,17 +281,13 @@ describe("runtime lifecycle: dynamic timeouts", () => {
         notes: `loop iteration=${i}; ${(i + 1) * 100000}ms; live`,
       }),
     );
-    writeFileSync(join(storeDir, "seed-task.jsonl"), records.join("\n") + "\n");
+    writeFileSync(join(storeDir, "seed-task.jsonl"), `${records.join("\n")}\n`);
 
-    const result = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      {
-        encoding: "utf8",
-        timeout: 60_000,
-        env: cleanEnv(),
-      },
-    );
+    const result = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      timeout: 60_000,
+      env: cleanEnv(),
+    });
     // Dynamic timeouts should compute from the seeded data
     expect(result).toContain("dynamic-timeouts");
   });
@@ -307,12 +301,20 @@ describe("runtime lifecycle: stability number", () => {
     const storeDir = join(dir, ".minsky", "experiment-store", "cross-repo");
     // Seed: 7 validated + 3 spawn-failed = 70%
     const records = [
-      ...Array.from({ length: 7 }, () => ({ ts: new Date().toISOString(), verdict: "validated", notes: "100000ms" })),
-      ...Array.from({ length: 3 }, () => ({ ts: new Date().toISOString(), verdict: "spawn-failed", notes: "4000ms" })),
+      ...Array.from({ length: 7 }, () => ({
+        ts: new Date().toISOString(),
+        verdict: "validated",
+        notes: "100000ms",
+      })),
+      ...Array.from({ length: 3 }, () => ({
+        ts: new Date().toISOString(),
+        verdict: "spawn-failed",
+        notes: "4000ms",
+      })),
     ];
     writeFileSync(
       join(storeDir, "stability-test.jsonl"),
-      records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      `${records.map((r) => JSON.stringify(r)).join("\n")}\n`,
     );
 
     const scriptPath = join(REPO_ROOT, "scripts", "stability-number.mjs");

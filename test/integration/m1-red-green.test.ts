@@ -9,17 +9,17 @@
 // Pattern: Acceptance-TDD (Freeman & Pryce, GOOS, 2009).
 // Rule #3: test-first, metric-first, doc-first.
 
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  writeFileSync,
   readdirSync,
+  writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
@@ -56,36 +56,49 @@ function makeHost(tasksMd?: string): string {
   return dir;
 }
 
-const COMPLIANT_TASK = `# Tasks\n\n## P0\n\n- [ ] \`red-green-task\` — test task\n  - **ID**: red-green-task\n  - **Tags**: p0\n  - **Hypothesis**: test\n  - **Success**: test passes\n  - **Pivot**: revert\n  - **Measurement**: echo ok\n  - **Anchor**: rule #9\n  - **Details**: do the thing\n  - **Files**: test.txt\n`;
+const COMPLIANT_TASK =
+  "# Tasks\n\n## P0\n\n- [ ] `red-green-task` — test task\n  - **ID**: red-green-task\n  - **Tags**: p0\n  - **Hypothesis**: test\n  - **Success**: test passes\n  - **Pivot**: revert\n  - **Measurement**: echo ok\n  - **Anchor**: rule #9\n  - **Details**: do the thing\n  - **Files**: test.txt\n";
 
 // ─── Category: Spawn/Agent ──────────────────────────────────
 
 describe("M1 TDD: spawn-agent", () => {
   test("devin spawn includes --permission-mode dangerous", () => {
     // Verifies: devin-spawn-missing-permission-mode-bypass
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     const devinBlock = src.match(/if \(cmd === "devin"\)[\s\S]*?return \{/);
     expect(devinBlock).not.toBeNull();
-    expect(devinBlock![0]).toContain("--permission-mode");
+    expect(devinBlock?.[0]).toContain("--permission-mode");
   });
 
   test("devin spawn uses --prompt-file not stdin", () => {
     // Verifies: devin --prompt-file fix
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     expect(src).toContain("--prompt-file");
     expect(src).toContain("stdin: undefined");
   });
 
   test("dynamic timeout computed from history not hardcoded", () => {
     // Verifies: watchdog-timeout-kills-productive-devin + dynamic-timeouts
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     expect(src).toContain("computeDynamicSettingsForHost");
     expect(src).toContain("dynamic-timeouts");
   });
 
   test("brief includes system-prompt overlay with PR instructions", () => {
     // Verifies: devin-spawn-no-pr-opened
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts"),
+      "utf8",
+    );
     expect(src).toContain("renderSystemPromptOverlay");
     // The brief should include the overlay content
     expect(src).toContain("renderBrief");
@@ -98,20 +111,29 @@ describe("M1 TDD: spawn-agent", () => {
 describe("M1 TDD: walker-loop", () => {
   test("walker has per-host iteration cap", () => {
     // Verifies: walker-drains-one-host-forever
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     expect(src).toContain("maxIterationsPerHost");
     expect(src).toContain("perHostCap");
   });
 
   test("spawn-failed skips to next host not halts walker", () => {
     // Verifies: walker skip-on-spawn-failed
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "src", "host-walker.ts"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "src", "host-walker.ts"),
+      "utf8",
+    );
     expect(src).not.toContain('if (inner === "spawn-failed") return "spawn-failed"');
   });
 
   test("iteration record includes verdict + duration + agent", () => {
     // Verifies: daemon-log-lacks-iteration-detail
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     expect(src).toContain("iteration #${record.iteration}");
     expect(src).toContain("agent=${agent}");
     expect(src).toContain("verdict=${verdict}");
@@ -170,7 +192,10 @@ describe("M1 TDD: cli-ux", () => {
 describe("M1 TDD: config-setup", () => {
   test("~/.minsky/config.json resolution chain exists", () => {
     // Verifies: per-machine config support
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     expect(src).toContain("loadMinskyConfig");
     expect(src).toContain("config.json");
   });
@@ -184,7 +209,10 @@ describe("M1 TDD: config-setup", () => {
 describe("M1 TDD: task-queue", () => {
   test("pickHostTask skips tasks with open PRs", () => {
     // Verifies: daemon-duplicate-work-detection precursor
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
+      "utf8",
+    );
     expect(src).toContain("listOpenPrBranches");
     expect(src).toContain("openPrBranches");
   });
@@ -197,14 +225,20 @@ describe("M1 TDD: task-queue", () => {
 
 describe("M1 TDD: brief-quality", () => {
   test("brief includes FINAL STEP with git push + gh pr create", () => {
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts"),
+      "utf8",
+    );
     expect(src).toContain("FINAL STEP");
     expect(src).toContain("gh pr create");
     expect(src).toContain("git push");
   });
 
   test("brief includes hypothesis from task block", () => {
-    const src = readFileSync(join(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts"), "utf8");
+    const src = readFileSync(
+      join(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts"),
+      "utf8",
+    );
     expect(src).toContain("Hypothesis");
   });
 });
@@ -296,7 +330,9 @@ describe("M1 TDD: fixture-driven e2e", () => {
       env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
     });
     expect(out).toContain("red-green-task");
-    const exps = readdirSync(join(dir, ".minsky", "experiments")).filter((f) => f.endsWith(".yaml"));
+    const exps = readdirSync(join(dir, ".minsky", "experiments")).filter((f) =>
+      f.endsWith(".yaml"),
+    );
     expect(exps.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -314,7 +350,15 @@ describe("M1 TDD: fixture-driven e2e", () => {
     const dir = makeHost(COMPLIANT_TASK);
     execFileSync(
       "node",
-      [RUNNER_BIN, "--host", dir, "--loop", "--max-iterations=1", "--no-live", "--tick-interval-ms=0"],
+      [
+        RUNNER_BIN,
+        "--host",
+        dir,
+        "--loop",
+        "--max-iterations=1",
+        "--no-live",
+        "--tick-interval-ms=0",
+      ],
       {
         encoding: "utf8",
         timeout: 60_000,

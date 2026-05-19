@@ -15,6 +15,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  type InvariantContext,
   agentArgvSanityCheck,
   briefIncludesPrInstructions,
   checkRuntimeInvariants,
@@ -22,7 +23,6 @@ import {
   formatInvariantSummary,
   gitTreeCleanBeforeSpawn,
   taskNotStuckInRepickLoop,
-  type InvariantContext,
 } from "./runtime-invariants.js";
 
 function baseCtx(overrides: Partial<InvariantContext> = {}): InvariantContext {
@@ -68,9 +68,7 @@ describe("agentArgvSanityCheck", () => {
   });
 
   test("claude agent → ok regardless of argv (not devin)", () => {
-    const r = agentArgvSanityCheck(
-      baseCtx({ agentCommand: "claude", agentArgv: ["--print"] }),
-    );
+    const r = agentArgvSanityCheck(baseCtx({ agentCommand: "claude", agentArgv: ["--print"] }));
     expect(r.ok).toBe(true);
   });
 });
@@ -167,7 +165,7 @@ describe("checkRuntimeInvariants", () => {
     );
     const errors = results.filter((r) => !r.ok && r.severity === "error");
     expect(errors.length).toBeGreaterThanOrEqual(1);
-    expect(errors[0]!.id).toBe("agent-argv-sanity");
+    expect(errors[0]?.id).toBe("agent-argv-sanity");
   });
 
   test("multiple issues at once → multiple failures", () => {
@@ -197,18 +195,14 @@ describe("formatInvariantSummary", () => {
   });
 
   test("errors → 🚨 message with details", () => {
-    const results = checkRuntimeInvariants(
-      baseCtx({ agentArgv: ["--print"] }),
-    );
+    const results = checkRuntimeInvariants(baseCtx({ agentArgv: ["--print"] }));
     const summary = formatInvariantSummary(results);
     expect(summary).toContain("🚨");
     expect(summary).toContain("ERROR");
   });
 
   test("warns only → ⚠️ message", () => {
-    const results = checkRuntimeInvariants(
-      baseCtx({ gitClean: false }),
-    );
+    const results = checkRuntimeInvariants(baseCtx({ gitClean: false }));
     const summary = formatInvariantSummary(results);
     expect(summary).toContain("⚠️");
     expect(summary).toContain("warn");

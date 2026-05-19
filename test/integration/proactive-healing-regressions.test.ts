@@ -18,7 +18,7 @@
 //   becomes a regression test); rule #17 (vision.md § proactive
 //   healing); operator directive 2026-05-19.
 
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -32,8 +32,8 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
-  resolveGhHost,
   type ResolveGhHostResult,
+  resolveGhHost,
 } from "../../novel/cross-repo-runner/dist/index.js";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
@@ -162,11 +162,11 @@ describe("rule #17 — --once exits after one iteration", () => {
   test("dry-run + --once exits within 5 seconds (was hanging 60s+)", () => {
     const dir = makeFixtureHost();
     const t0 = Date.now();
-    const stdout = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const stdout = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     const elapsed = Date.now() - t0;
     expect(elapsed).toBeLessThan(10_000);
     expect(stdout).toContain("stopReason: max-iterations");
@@ -175,11 +175,11 @@ describe("rule #17 — --once exits after one iteration", () => {
 
   test("--once is reported as max-iter=1 in the loop banner", () => {
     const dir = makeFixtureHost();
-    const stdout = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const stdout = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(stdout).toContain("max-iter=1");
   });
 
@@ -202,11 +202,11 @@ describe("rule #17 — dry-run mode never calls gh / never blocks on network", (
     const dir = makeFixtureHost();
     expect(existsSync(join(dir, ".git"))).toBe(true);
     expect(() => execSync("git remote get-url origin", { cwd: dir, stdio: "pipe" })).toThrow();
-    const stdout = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const stdout = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(stdout).toContain("validated");
     const records = readdirSync(join(dir, ".minsky", "experiment-store", "cross-repo"));
     expect(records.length).toBeGreaterThanOrEqual(1);
@@ -214,11 +214,11 @@ describe("rule #17 — dry-run mode never calls gh / never blocks on network", (
 
   test("fixture with bogus origin URL still completes (no network call)", () => {
     const dir = makeFixtureHost({ remoteUrl: "https://example.invalid/team/repo.git" });
-    const stdout = execFileSync(
-      "node",
-      [RUNNER_BIN, "--host", dir, "--once", "--no-live"],
-      { encoding: "utf8", env: cleanEnv(), timeout: 10_000 },
-    );
+    const stdout = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
     expect(stdout).toContain("validated");
   });
 });

@@ -133,10 +133,7 @@ export const taskNotStuckInRepickLoop: InvariantCheck = (ctx) => {
       id,
       ok: false,
       severity: "warn",
-      message:
-        `task ${ctx.taskId} has been picked ${ctx.taskIterationCount} times ` +
-        `without a validated outcome — possible re-pick loop. ` +
-        `Last verdict: ${ctx.lastIterationVerdict}`,
+      message: `task ${ctx.taskId} has been picked ${ctx.taskIterationCount} times without a validated outcome — possible re-pick loop. Last verdict: ${ctx.lastIterationVerdict}`,
     };
   }
   return { id, ok: true, severity: "warn", message: "task not stuck" };
@@ -153,7 +150,8 @@ export const daemonPidConsistent: InvariantCheck = (ctx) => {
       id,
       ok: false,
       severity: "warn",
-      message: "daemon PID file exists but process is not alive — stale PID. " +
+      message:
+        "daemon PID file exists but process is not alive — stale PID. " +
         "Fix: rm -f ~/.minsky/daemon.pid",
     };
   }
@@ -190,7 +188,7 @@ export function formatInvariantSummary(results: InvariantResult[]): string {
   const total = results.length;
 
   if (errors.length > 0) {
-    return `🚨 runtime-invariants: ${errors.length} ERROR(s) — ${errors.map((e) => e.id + ": " + e.message).join("; ")}`;
+    return `🚨 runtime-invariants: ${errors.length} ERROR(s) — ${errors.map((e) => `${e.id}: ${e.message}`).join("; ")}`;
   }
   if (warns.length > 0) {
     return `⚠️ runtime-invariants: ${warns.length}/${total} warn — ${warns.map((w) => w.id).join(", ")}`;

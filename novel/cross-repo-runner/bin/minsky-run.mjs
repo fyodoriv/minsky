@@ -32,6 +32,7 @@ import { promisify } from "node:util";
 
 import { ProcessSpawnStrategy, globMatchesPath } from "@minsky/tick-loop";
 
+import { computeDynamicSettings, parseTimingsFromJsonl } from "../dist/dynamic-timeouts.js";
 import {
   buildSpawnPlan,
   detectCwd,
@@ -49,10 +50,6 @@ import {
   synthesiseExperimentYaml,
   walkHostsDir,
 } from "../dist/index.js";
-import {
-  computeDynamicSettings,
-  parseTimingsFromJsonl,
-} from "../dist/dynamic-timeouts.js";
 
 const execFile = promisify(execFileCb);
 
@@ -93,7 +90,7 @@ function ghEnvForHost(hostRoot) {
   });
   const env = { ...process.env };
   if (resolved.host !== null) env.GH_HOST = resolved.host;
-  else delete env.GH_HOST;
+  else env.GH_HOST = undefined;
   GH_ENV_CACHE.set(hostRoot, env);
   return env;
 }
@@ -377,9 +374,7 @@ function buildHostDispatch(state, resolvedHost) {
   // is set so the loop exits via `max-iterations` stop reason. The
   // explicit `--max-iterations=N` flag still wins.
   const maxIterations =
-    !defaults.loop && state.maxIterations === Number.POSITIVE_INFINITY
-      ? 1
-      : state.maxIterations;
+    !defaults.loop && state.maxIterations === Number.POSITIVE_INFINITY ? 1 : state.maxIterations;
   return {
     kind: "loop",
     host: resolve(resolvedHost),
@@ -917,9 +912,7 @@ async function runLoopAsResult(parsed, controller) {
       // ~2.5% flake rate per CI run (rule #11 — no flaky load-bearing
       // gates). Rule #17 fix: tests and bootstrap probes that exercise
       // `--no-live` should not hit the GitHub API at all.
-      const openPrBranches = live
-        ? listOpenPrBranches(config.host_repo, hostRoot)
-        : new Set();
+      const openPrBranches = live ? listOpenPrBranches(config.host_repo, hostRoot) : new Set();
       // Thread the loop's validated-task set into pickHostTask so a
       // worker that validates but does NOT open a PR (devin pre-fix,
       // a brief that doesn't instruct `gh pr create`, or a CI failure
@@ -1058,15 +1051,17 @@ function computeDynamicSettingsForHost(hostRoot) {
       try {
         const content = readFileSync(join(storeDir, f), "utf8");
         allTimings = allTimings.concat(parseTimingsFromJsonl(content));
-      } catch { /* skip unreadable files */ }
+      } catch {
+        /* skip unreadable files */
+      }
     }
     const settings = computeDynamicSettings(allTimings);
     if (settings.source === "history") {
       process.stdout.write(
         `[dynamic-timeouts] computed from ${settings.sampleSize} iterations: ` +
-        `watchdog=${Math.round(settings.spawnTimeoutMs / 1000)}s, ` +
-        `tick=${Math.round(settings.tickIntervalMs / 1000)}s, ` +
-        `p95=${settings.p95Ms ? Math.round(settings.p95Ms / 1000) + "s" : "n/a"}\n`,
+          `watchdog=${Math.round(settings.spawnTimeoutMs / 1000)}s, ` +
+          `tick=${Math.round(settings.tickIntervalMs / 1000)}s, ` +
+          `p95=${settings.p95Ms ? `${Math.round(settings.p95Ms / 1000)}s` : "n/a"}\n`,
       );
     }
     return settings;
