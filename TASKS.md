@@ -18,6 +18,24 @@
 
 <!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
 
+- [ ] `daemon-survives-machine-restart` — after a sudden machine reboot, power loss, or kernel panic, minsky must auto-resume from where it left off with zero operator intervention
+  - **ID**: daemon-survives-machine-restart
+  - **Tags**: p0, milestone-m1, reliability, stay-alive, launchd, rule-6
+  - **Milestone**: M1
+  - **Competitive-goal**: a daemon that dies on reboot and needs manual restart is not a 24/7 system. Devin (cloud) survives reboots by design; minsky must match that for self-hosted.
+  - **Surfaced-by**: 2026-05-19 operator directive — "make it fully support sudden machine restarts".
+  - **Details**: three deliverables:
+    (a) **launchd KeepAlive plist** — `~/Library/LaunchAgents/com.minsky.daemon.plist` with `KeepAlive=true`, `RunAtLoad=true`, pointing at `minsky --daemon --host <configured-host>`. The host is read from `~/.minsky/config.json::default_host` (new field). On macOS, launchd is the supervisor — it restarts the daemon after reboot, crash, or SIGKILL. No manual `minsky start` needed after reboot.
+    (b) **Stale PID cleanup on boot** — the daemon's startup path must detect and clean stale PID files from a previous crash. Today `minsky --daemon` fails if `daemon.pid` exists even when the PID is dead. Fix: on startup, check `kill -0 <pid>`; if dead, remove the PID file and proceed.
+    (c) **Iteration resume** — the experiment-store already preserves iteration history across restarts. Verify: after a simulated crash (SIGKILL the daemon), `minsky --daemon` picks up the next unfinished task, not the one that was in-flight when it crashed. The in-flight iteration's partial state (branch, uncommitted files) must be cleaned up on resume (`git checkout <default_branch> && git clean -fd`).
+    (d) **systemd equivalent** — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `WantedBy=default.target` for Linux machines.
+  - **Files**: `~/Library/LaunchAgents/com.minsky.daemon.plist` (new), `bin/minsky` (stale PID cleanup), `novel/cross-repo-runner/bin/minsky-run.mjs` (resume-after-crash cleanup), `distribution/systemd/minsky-daemon.service` (new), `~/.minsky/config.json` (add `default_host` field)
+  - **Hypothesis**: today, after a machine reboot, minsky is not running and the operator must manually start it. After this fix, minsky auto-starts within 30s of login (macOS) or boot (Linux) and picks up the next task within 1 iteration.
+  - **Success**: (1) `sudo reboot` on a machine with minsky configured → within 60s of login, `minsky status` shows `running`; (2) `kill -9 <daemon-pid>` → within 10s, `minsky status` shows `running` with a new PID; (3) after SIGKILL, the next iteration works on a new task (not stuck on the crashed one's dirty state).
+  - **Pivot**: if launchd KeepAlive proves unreliable (some macOS versions throttle restarts), fall back to a cron `@reboot` entry that runs `minsky --daemon --host <default_host>`.
+  - **Measurement**: `kill -9 $(cat ~/.minsky/daemon.pid) && sleep 15 && minsky status | grep -c 'running'` → 1 (daemon auto-restarted). After simulated reboot: `launchctl list | grep -c minsky.daemon` → 1.
+  - **Anchor**: Armstrong 2007 (let-it-crash + supervisor restart — launchd IS the supervisor); Beyer SRE 2016 (the daemon must be cattle, not pets — restart is the normal path, not an exception); rule #6 (stay alive).
+
 - [ ] `walker-drains-one-host-forever` — the multi-host walker never advances past the first host with tasks because the host loop runs max-iter=∞ and the same task keeps getting re-picked after each iteration; other hosts (including minsky itself) are starved
   - **ID**: walker-drains-one-host-forever
   - **Tags**: p0, milestone-m1, reliability, walker, cross-repo, blocker
@@ -729,11 +747,11 @@
 - [ ] `devin-spawn-missing-permission-mode-bypass` — minsky-run.mjs spawns Devin without `--permission-mode bypass` so every Devin worker is blocked from `edit`/`write`/`exec` on the very first call ("Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools."). Devin workers cannot ship ANY task while this is the case, including walker-drains-one-host-forever.
   - **ID**: devin-spawn-missing-permission-mode-bypass
   - **Tags**: p0, milestone-m1, reliability, cross-repo-runner, devin, blocker, prereq
-  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever: every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded. 
+  - **Details**: Root cause confirmed live 2026-05-18 from a spawned Devin worker assigned walker-drains-one-host-forever: every `edit`/`write`/`exec`/`ask_user_question`/`request_scope` call returned `Tool execution was rejected: Running in non-interactive mode. Use --permission-mode dangerous to auto-approve all tools.` Only `read`, `grep`, `glob`, and pre-approved MCP tools (`mcp__tasks-mcp__*`, `mcp__playwright__*`, …) succeeded.
 
-Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails. 
+Source of the bug: `novel/cross-repo-runner/bin/minsky-run.mjs` `buildAgentConfig` Devin branch (lines 938–957) constructs `argv = ["--print", "--model", model, "--prompt-file", promptPath]`. There is NO `--permission-mode` flag. Per Devin CLI docs (`~/.local/share/devin/cli/_versions/2026.5.6-8/share/devin/docs/reference/permissions.mdx` line 19–22, 26): Normal mode (the default) auto-approves only read-only ops; bash/edit/write require explicit human approval which is impossible under `--print` with no TTY. The Claude Code branch right below it already passes `--permission-mode bypassPermissions` (line 962–965) and works for the same reason this fails.
 
-While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration. 
+While this remains unfixed, the entire Devin-agent surface of the fleet is a zero-throughput no-op — the daemon logs will show `spawn-failed` (or worse, `validated` with no actual edits) on every iteration.
 
 FIX (one line): in `buildAgentConfig` for `cmd === "devin"`, before `--prompt-file`, push `"--permission-mode", "bypass"` (or `"dangerous"` — same thing per devin docs alias rules). Optional follow-up: plumb a `MINSKY_DEVIN_PERMISSION_MODE` env override identical to the existing `MINSKY_CLAUDE_PERMISSION_MODE` so the operator can dial down if needed.
   - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs
