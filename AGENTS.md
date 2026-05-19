@@ -4,6 +4,8 @@ This file tells any AI agent (Claude Code, OMC personas, future tools) how this 
 
 If you're an agent reading this for the first time: read `MILESTONES.md` first (the roadmap + capability tables), then `vision.md` (the constitution), then `TASKS.md` (the work queue), then come back here.
 
+**Before implementing any feature**, check `DEPRECATED.md` — it lists features that should NOT receive new work (hard scope-leak mode, observer-watch.sh, dogfood scripts, dashboard-web, hardcoded timeout env vars, manual stop/start flows). Use the replacement instead.
+
 ## Repository setup
 
 ```bash
