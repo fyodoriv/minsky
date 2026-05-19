@@ -20,6 +20,10 @@ import { describe, expect, test } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "stability-number.mjs");
 
+/**
+ * @param {string[]} args
+ * @param {string} cwd
+ */
 function run(args, cwd) {
   try {
     const stdout = execFileSync("node", [SCRIPT, ...args], {
@@ -29,10 +33,12 @@ function run(args, cwd) {
     });
     return { stdout, status: 0 };
   } catch (err) {
-    return { stdout: err.stdout ?? "", status: err.status ?? 1 };
+    const e = /** @type {{ stdout?: string; status?: number }} */ (err);
+    return { stdout: e.stdout ?? "", status: e.status ?? 1 };
   }
 }
 
+/** @param {object[]} records */
 function makeFixtureHost(records) {
   const dir = mkdtempSync(join(tmpdir(), "stability-number-"));
   const storeDir = join(dir, ".minsky", "experiment-store", "cross-repo");
@@ -40,7 +46,7 @@ function makeFixtureHost(records) {
   if (records.length > 0) {
     writeFileSync(
       join(storeDir, "test.jsonl"),
-      records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      `${records.map((/** @type {object} */ r) => JSON.stringify(r)).join("\n")}\n`,
     );
   }
   return dir;

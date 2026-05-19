@@ -863,7 +863,7 @@ in the same session**. "Observe and report" is forbidden. "Mental note
 for later" is forbidden. The bug, the lint, the auth divergence, the
 timeout — each is treated as work to ship in the SAME session, the
 SAME PR if possible, and the fix lands the lint or invariant that
-prevents the entire *class* of failure from recurring (rule #10 shape).
+prevents the entire _class_ of failure from recurring (rule #10 shape).
 
 The discipline has four mandatory parts:
 
@@ -895,15 +895,15 @@ The discipline has four mandatory parts:
 
 Why a separate rule from rule #6 (stay alive): rule #6 governs the
 daemon's substrate (let-it-crash, supervisor restart). Rule #17 governs
-the agent's *conduct on top of* that substrate. A daemon can be alive
+the agent's _conduct on top of_ that substrate. A daemon can be alive
 and stable while its observer silently degrades by narrating failures
 instead of healing them — that is the failure mode rule #17 catches.
 
 Sources: operator directive 2026-05-19 ("why aren't they being fixed by
 you right away? I expect that … make it persist, make it iron rule
-that cannot be broken"); Forsgren, Humble, Kim, *Accelerate*, 2018
+that cannot be broken"); Forsgren, Humble, Kim, _Accelerate_, 2018
 (DORA — change-fail rate falls when fixes prevent classes, not
-instances); Beyer et al., *SRE*, 2016, Ch. 3 (error budgets:
+instances); Beyer et al., _SRE_, 2016, Ch. 3 (error budgets:
 observation that doesn't move the budget is dead weight); Armstrong
 2007 (let-it-crash applies to the observer's own conduct — if the
 observer's job is to crash the right call paths, it must not silently

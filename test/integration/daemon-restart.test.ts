@@ -27,7 +27,12 @@ function run(cmd: string, env?: Record<string, string>): string {
 
 describe("daemon-restart: install-daemon plist generation", () => {
   test("install-daemon creates a valid plist file", () => {
-    const plistPath = join(process.env.HOME!, "Library", "LaunchAgents", "com.minsky.daemon.plist");
+    const plistPath = join(
+      process.env.HOME ?? "",
+      "Library",
+      "LaunchAgents",
+      "com.minsky.daemon.plist",
+    );
     // The plist should already exist (installed in the previous step)
     // or we generate it fresh
     if (!existsSync(plistPath)) {
@@ -56,13 +61,18 @@ describe("daemon-restart: install-daemon plist generation", () => {
   });
 
   test("plist uses stable node path, not ephemeral fnm multishell", () => {
-    const plistPath = join(process.env.HOME!, "Library", "LaunchAgents", "com.minsky.daemon.plist");
+    const plistPath = join(
+      process.env.HOME ?? "",
+      "Library",
+      "LaunchAgents",
+      "com.minsky.daemon.plist",
+    );
     if (!existsSync(plistPath)) return; // skip in CI
     const content = readFileSync(plistPath, "utf8");
     // The node path should be one of the stable locations
     const nodeMatch = content.match(/<string>(\/[^<]*node)<\/string>/);
     expect(nodeMatch).not.toBeNull();
-    const nodePath = nodeMatch?.[1]!;
+    const nodePath = nodeMatch?.[1] ?? "";
     // Should NOT be an ephemeral fnm_multishells path
     expect(nodePath).not.toContain("fnm_multishells");
     // Should be an actual executable
@@ -174,7 +184,7 @@ describe("daemon-restart: dirty-state cleanup delegates to reset-host-if-crashed
     expect(resetBlock?.[0]).toContain("--host");
     expect(resetBlock?.[0]).toContain("--sentinel");
     // It stashes (never deletes) on the dirty crash path.
-    expect(resetBlock?.[0]).toContain("git -C \"$_rh_host\" stash push");
+    expect(resetBlock?.[0]).toContain('git -C "$_rh_host" stash push');
   });
 
   test("daemon refuses to start if stash itself fails (rule #6 pivot)", () => {
@@ -286,7 +296,7 @@ describe("daemon-restart: uninstall-daemon", () => {
 
 describe("daemon-restart: config.json default_host", () => {
   test("~/.minsky/config.json has default_host field", () => {
-    const configPath = join(process.env.HOME!, ".minsky", "config.json");
+    const configPath = join(process.env.HOME ?? "", ".minsky", "config.json");
     if (!existsSync(configPath)) return; // skip in CI
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     expect(config).toHaveProperty("default_host");
@@ -358,16 +368,16 @@ describe("daemon-restart: simulated crash recovery", () => {
   test("node path resolution picks a stable path", () => {
     // Simulate what install-daemon does
     const candidates = [
-      join(process.env.HOME!, ".fnm", "aliases", "default", "bin", "node"),
+      join(process.env.HOME ?? "", ".fnm", "aliases", "default", "bin", "node"),
       // fnm node-versions stable path
       ...(() => {
         try {
           return require("node:fs")
-            .readdirSync(join(process.env.HOME!, ".local", "share", "fnm", "node-versions"))
+            .readdirSync(join(process.env.HOME ?? "", ".local", "share", "fnm", "node-versions"))
             .filter((d: string) => d.startsWith("v2"))
             .map((d: string) =>
               join(
-                process.env.HOME!,
+                process.env.HOME ?? "",
                 ".local",
                 "share",
                 "fnm",
@@ -388,6 +398,6 @@ describe("daemon-restart: simulated crash recovery", () => {
     const stable = candidates.find((p) => existsSync(p));
     expect(stable).toBeTruthy();
     // The stable path should NOT contain fnm_multishells
-    expect(stable!).not.toContain("fnm_multishells");
+    expect(stable ?? "").not.toContain("fnm_multishells");
   });
 });

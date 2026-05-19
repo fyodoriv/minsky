@@ -43,7 +43,10 @@ const EXECUTABLE_EXTS = new Set([".ts", ".mjs", ".cjs", ".js", ".sh", ".bash"]);
 /** Path skip-list (vendored / generated). */
 const SKIP_FRAGMENTS = ["/dist/", "/node_modules/", "/.minsky/", "/.worktrees/"];
 
-/** Allow tests to keep their own fixture paths. */
+/** Allow tests to keep their own fixture paths.
+ *  @param {string} p
+ *  @returns {boolean}
+ */
 function isTestPath(p) {
   return /\.(test|spec|fixture)\.(ts|mjs|cjs|js)$/.test(p);
 }
@@ -65,6 +68,7 @@ function isTestPath(p) {
  * }} input
  * @returns {{ violations: readonly Violation[] }}
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: lint scanner with multiple nested filters — refactor tracked in TASKS.md `scripts-complexity-refactor`
 export function checkNoHardcodedUserPaths({ files, currentUser }) {
   /** @type {Violation[]} */
   const violations = [];
@@ -83,6 +87,7 @@ export function checkNoHardcodedUserPaths({ files, currentUser }) {
       for (const re of [macUserRe, linuxUserRe]) {
         re.lastIndex = 0;
         let match;
+        // biome-ignore lint/suspicious/noAssignInExpressions: standard JS regex iteration idiom
         while ((match = re.exec(line)) !== null) {
           const user = match[1];
           if (user === undefined) continue;
@@ -94,7 +99,7 @@ export function checkNoHardcodedUserPaths({ files, currentUser }) {
             path,
             line: i + 1,
             match: match[0],
-            content: line.length > 200 ? line.slice(0, 200) + "…" : line,
+            content: line.length > 200 ? `${line.slice(0, 200)}…` : line,
           });
         }
       }
@@ -109,6 +114,7 @@ export function checkNoHardcodedUserPaths({ files, currentUser }) {
  * @param {string} dir
  * @returns {string[]}
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: directory walker with skip-list filters — refactor tracked in TASKS.md `scripts-complexity-refactor`
 function walkFiles(dir) {
   /** @type {string[]} */
   const out = [];
@@ -154,9 +160,7 @@ function loadFiles(repo) {
 }
 
 function currentUser() {
-  return (
-    process.env["USER"] ?? process.env["LOGNAME"] ?? process.env["USERNAME"] ?? ""
-  );
+  return process.env["USER"] ?? process.env["LOGNAME"] ?? process.env["USERNAME"] ?? "";
 }
 
 function main() {
@@ -181,7 +185,7 @@ function main() {
   }
   process.stderr.write(
     "\nFix: replace with a path derived from the script's own location, e.g.\n" +
-      "  const REPO = resolve(dirname(fileURLToPath(import.meta.url)), \"..\");\n" +
+      '  const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");\n' +
       "or read from an env var (e.g. `process.env.MINSKY_HOME`) with no hardcoded fallback.\n" +
       "Comments referencing a historical user path are allowed (audit trail).\n",
   );

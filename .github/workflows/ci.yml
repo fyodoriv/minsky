@@ -24,7 +24,7 @@ jobs:
       # Pinned to 0.15.0 (matches the package.json devDependency). Rule #7
       # (chaos engineering — trust no unverified dependency); ARCHITECTURE.md
       # § "Versioning & dependency evolution".
-      - run: npx -y markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+      - run: npx -y markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.worktrees" "#.minsky" "#.obsidian" "#.claude"
 
   tasks-lint:
     runs-on: ubuntu-latest
