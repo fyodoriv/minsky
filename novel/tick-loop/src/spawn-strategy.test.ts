@@ -102,7 +102,33 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
       return false;
     }
   })();
-  it.skipIf(!hasClaude)(
+  // `spawn-strategy-claude-smoke-test-skip-on-rate-limit` (P1, 2026-05-19):
+  // PATH presence is necessary but NOT sufficient — claude can also be
+  // unauthenticated, rate-limited, or running in a misconfigured project
+  // env. In any of these cases the binary returns non-zero output that
+  // would make the assertions below hard-fail with no diagnostic value
+  // (the binary IS there, it just can't do its job). Probe once at
+  // module load with a 1-token request and skip the test when the probe
+  // is unsuccessful — converts the env-dependent assertion into a
+  // deterministic skip rather than a deterministic failure (rule #11
+  // forbids load-bearing flaky gates).
+  // Pivot per the TASKS.md task: if the probe itself becomes too slow
+  // / costs tokens, gate on `MINSKY_SKIP_CLAUDE_SMOKE=1` instead.
+  const claudeProbeOk = (() => {
+    if (!hasClaude) return false;
+    if (process.env["MINSKY_SKIP_CLAUDE_SMOKE"] === "1") return false;
+    try {
+      execSync("claude --print --max-tokens 1 'ok'", {
+        stdio: "ignore",
+        timeout: 30_000,
+        input: "",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  it.skipIf(!claudeProbeOk)(
     "default args spawn a fresh non-interactive Claude session that consumes stdin",
     async () => {
       // Default args (no `args` override) →
