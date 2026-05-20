@@ -34,6 +34,7 @@ function fakeSpawn(result: {
   stdoutTail?: string;
   stderrTail?: string;
   durationMs?: number;
+  signal?: NodeJS.Signals;
 }): import("./runner.js").SpawnLike {
   return {
     spawn(): Promise<{
@@ -41,12 +42,18 @@ function fakeSpawn(result: {
       durationMs: number;
       stdoutTail: string;
       stderrTail: string;
+      signal?: NodeJS.Signals;
     }> {
       return Promise.resolve({
         exitCode: result.exitCode ?? 0,
         durationMs: result.durationMs ?? 100,
         stdoutTail: result.stdoutTail ?? "",
         stderrTail: result.stderrTail ?? "",
+        // Mirror the runtime convention from `@minsky/tick-loop`'s
+        // `ProcessSpawnStrategy`: only include `signal` when actually
+        // set (don't synthesise `signal: undefined`, which violates
+        // `exactOptionalPropertyTypes`).
+        ...(result.signal !== undefined ? { signal: result.signal } : {}),
       });
     },
   };
@@ -187,6 +194,39 @@ describe("runLive — spawn-failed (chaos row: non-zero spawn exit)", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderrTail).toBe("claude: ENOENT");
     expect(result.scopeLeakPaths).toEqual([]);
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is threaded from SpawnLike into LiveSpawnOutcome", async () => {
+    // The runner's diagnostic gap before this fix: a child killed by
+    // SIGKILL surfaced as `exit=-1 stderr=(empty)` with no signal.
+    // Verify the signal makes the round trip through `runLive` so the
+    // host-loop + daemon log can render it.
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: -1, stderrTail: "", signal: "SIGKILL" }),
+      git: fakeGit({}),
+      globMatchesPath: fakeGlobMatch,
+    });
+    expect(result.verdict).toBe("spawn-failed");
+    expect(result.exitCode).toBe(-1);
+    expect(result.signal).toBe("SIGKILL");
+    expect(result.stderrTail).toBe("");
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is omitted (not synthesised undefined) when SpawnLike does not provide one", async () => {
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 1, stderrTail: "boom" }),
+      git: fakeGit({}),
+      globMatchesPath: fakeGlobMatch,
+    });
+    expect(result.verdict).toBe("spawn-failed");
+    expect(result.exitCode).toBe(1);
+    // Property must be genuinely absent so downstream JSON.stringify
+    // doesn't emit "signal":null for the common exit-with-code path.
+    expect(result).not.toHaveProperty("signal");
   });
 
   test("spawn-failed skips the git diff step (rule #6 let-it-crash boundary)", async () => {

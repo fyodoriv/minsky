@@ -12,6 +12,8 @@ Step 5 of 7 in the cross-repo-runner roadmap. Built on top of `@minsky/sidecar-b
 
 Allowed paths default to the task block's `**Touches**:` field (fallback to `**Files**:`); when neither is declared, the scope-leak check is disabled (`graceful-degrade` per rule #7 — operator opted out of scope enforcement). Watchdog defaults to 15 min, overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
 
+`spawn-failed` carries `signal?: NodeJS.Signals` (e.g. `"SIGKILL"` / `"SIGTERM"` / `"SIGHUP"`) when the child died from a signal rather than a clean exit code — threaded from `@minsky/tick-loop`'s `SpawnResult.signal` through `LiveSpawnOutcome` and out to the iteration record's `notes` field as `exit=N signal=SIG`. Without this, `exit=-1` collapsed "exited with no code" and "killed by signal" into one indistinguishable bucket; the daemon log now distinguishes SIGKILL-from-watchdog vs SIGTERM-from-parent vs SIGHUP-from-terminal-close. Surfaced-by `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19, vision.md § Glossary).
+
 ## `--loop` (continuous host-mode iteration)
 
 `minsky-run --host <dir> --loop [--live]` keeps invoking `runLive` against the host's TASKS.md until one of five stop conditions fires (in priority order):

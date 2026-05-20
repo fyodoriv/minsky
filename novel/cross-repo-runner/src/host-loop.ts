@@ -67,6 +67,15 @@ export interface LoopIterationResult {
   readonly prUrl: string | null;
   readonly stderrTail: string;
   readonly exitCode: number;
+  /**
+   * POSIX signal that killed the spawned child, if any. Threaded
+   * from `LiveSpawnOutcome.signal` so the daemon log's
+   * `recordIteration` callback can render `signal=SIGKILL` next
+   * to `exit=-1` — without this field, every signal-killed devin
+   * iteration looked identical to "exited with no code". Surfaced-by
+   * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+   */
+  readonly signal?: NodeJS.Signals;
 }
 
 /**
@@ -337,6 +346,10 @@ async function runOneIteration(args: {
     prUrl: outcome.prUrl,
     stderrTail: outcome.stderrTail,
     exitCode: outcome.exitCode,
+    // Pass the signal field through — exactOptionalPropertyTypes means
+    // we must omit the key entirely when undefined (don't synthesise
+    // `signal: undefined`, which the type doesn't allow).
+    ...(outcome.signal !== undefined ? { signal: outcome.signal } : {}),
   };
   iterations.push(iterationResult);
   opts.recordIteration?.(iterationResult);

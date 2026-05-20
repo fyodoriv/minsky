@@ -39,6 +39,15 @@ export interface SpawnLike {
     readonly durationMs: number;
     readonly stdoutTail: string;
     readonly stderrTail: string;
+    /**
+     * The POSIX signal that terminated the child, if any. Surfaced-by
+     * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19) —
+     * lets the runner distinguish `exit=-1 from clean null code` vs
+     * `exit=-1 from SIGTERM/SIGKILL/SIGHUP` when the cloud agent is
+     * silently killed by the OS / parent process / EPM hook. Optional
+     * to keep test fakes back-compatible.
+     */
+    readonly signal?: NodeJS.Signals;
   }>;
 }
 
@@ -187,6 +196,14 @@ export interface LiveSpawnOutcome {
   readonly prUrl: string | null;
   /** Baseline ref captured before the spawn — useful for operator audit. */
   readonly baselineRef: string;
+  /**
+   * POSIX signal that killed the child, if any. Threaded from the
+   * underlying `SpawnLike` so the iteration record can log
+   * `signal=SIGKILL`/`SIGTERM`/`SIGHUP` instead of the meaningless
+   * `exit=-1` collapse. Surfaced-by
+   * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+   */
+  readonly signal?: NodeJS.Signals;
 }
 
 /**
@@ -235,6 +252,11 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
       scopeLeakPaths: [],
       prUrl: null,
       baselineRef,
+      // Thread the POSIX signal so the iteration log can show *why*
+      // the spawn died (SIGKILL from watchdog vs SIGTERM from parent
+      // vs SIGHUP from terminal vs null = exited with code).
+      // `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+      ...(result.signal !== undefined ? { signal: result.signal } : {}),
     };
   }
   const scopeLeakPaths = await detectScopeLeak(inputs, baselineRef);

@@ -1447,6 +1447,8 @@ table.
 | Steady-state hypothesis                                                                                  | (chaos-engineering term)                         | Basiri et al. 2016 (above)                                                                                                                                         |
 | Blast radius                                                                                             | (established term)                               | AWS Well-Architected, Reliability pillar; Beyer et al., _SRE_ Ch. 17 2016                                                                                          |
 | Operator escape hatch / kill switch                                                                      | (established term)                               | Beyer et al., _SRE_ Ch. 17 2016                                                                                                                                    |
+| `scope-leak`                                                                                             | scope-creep verdict per rule #12                 | rule #12 (vision.md § "Constitutional rules") — agent touched files outside the declared `Files:` set; deterministic gate `scripts/check-rule-12-scope-discipline.mjs` |
+| `spawn-failed`                                                                                           | infrastructural-failure verdict                  | rule #1 (loud-crash > silent failure) + Armstrong 2007 (let-it-crash) — agent process couldn't start / was killed by signal / exited without producing output       |
 
 ### Retired terms (do not use in new prose)
 
