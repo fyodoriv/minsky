@@ -625,7 +625,17 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
 $(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' || true)
 EOF
 
-    cat > "$_plist" << PLIST_EOF
+    # Generate the new plist content into a tempfile so we can
+    # idempotency-check against the existing file before overwriting +
+    # reloading launchd. Without this, every `minsky install-daemon`
+    # call ran `launchctl bootout` + `bootstrap` even when the plist
+    # was unchanged — which kills the running daemon on every call,
+    # making the new auto-install-on-pull hook destructive. With this:
+    # same content → silent no-op (no kill); different content →
+    # overwrite + reload as before. `MINSKY_INSTALL_DAEMON_QUIET=1`
+    # suppresses the "already up to date" line for hook callers.
+    _plist_tmp="$(mktemp)"
+    cat > "$_plist_tmp" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -664,6 +674,20 @@ EOF
 </dict>
 </plist>
 PLIST_EOF
+
+    # Idempotency: if the existing plist is byte-identical to the
+    # newly-generated one, skip the bootout/bootstrap reload — that
+    # reload kills the running daemon process, which a no-op call
+    # MUST NOT do. `cmp -s` is silent + portable + fast.
+    if [ -f "$_plist" ] && cmp -s "$_plist_tmp" "$_plist"; then
+      rm -f "$_plist_tmp"
+      if [ "${MINSKY_INSTALL_DAEMON_QUIET:-0}" != "1" ]; then
+        echo "✅ com.minsky.daemon plist already up to date (no reload)"
+        echo "   plist: $_plist"
+      fi
+      exit 0
+    fi
+    mv "$_plist_tmp" "$_plist"
 
     launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$_plist"

@@ -361,6 +361,28 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
     // Operator-visibility line at install time: count + warn when 0.
     expect(src).toContain("propagated $_propagated_env_count agent-auth env vars");
   });
+
+  test("auto-install-on-pull: install-daemon is idempotent — same plist content skips bootout/bootstrap (no daemon kill)", () => {
+    // The new post-merge auto-install hook calls `minsky
+    // install-daemon` on every pull. Without idempotency, that would
+    // launchctl-bootout + bootstrap on every call — killing the
+    // running daemon on every pull, which the rule-#16 default-by-
+    // default contract forbids ("auto stuff that helps but doesn't
+    // break"). Idempotency means: same plist content → silent no-op.
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    // The script must write the new plist to a tempfile FIRST, then
+    // compare with the existing plist before calling launchctl.
+    expect(src).toContain("_plist_tmp=");
+    expect(src).toContain("mktemp");
+    // `cmp -s` is the portable + fast byte-equality check.
+    expect(src).toMatch(/cmp -s.*_plist_tmp.*_plist/);
+    // When same → exit 0 BEFORE bootout/bootstrap. When different →
+    // mv the tempfile into place + reload as before.
+    expect(src).toMatch(/cmp -s[\s\S]*?already up to date[\s\S]*?exit 0[\s\S]*?launchctl bootout/);
+    // Quiet-mode env var lets the auto-install hook suppress the
+    // "already up to date" line on every pull (would be too noisy).
+    expect(src).toContain("MINSKY_INSTALL_DAEMON_QUIET");
+  });
 });
 
 // ─── end-to-end: simulated crash recovery ───────────────────

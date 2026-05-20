@@ -32,3 +32,23 @@ pre-push:
       # share the manifest in `scripts/run-pre-pr-lint-stack.mjs`. Rule #10 —
       # the daemon and the human pass through the same gate.
       run: pnpm pre-pr-lint --stage=full
+
+# Auto-install on `git pull` — both the merge fast-path (post-merge) and
+# the rebase / amend path (post-rewrite). The script is rule-#6 best-effort:
+# every action is wrapped in a try/catch and exit code is ALWAYS 0 so a
+# failed auto-install can never block git itself. Override surface (per
+# rule #16 default-by-default): `MINSKY_NO_AUTO_INSTALL=1`,
+# `~/.minsky/no-auto-install` sentinel, or `CI=true`. See
+# `scripts/post-merge-auto-install.mjs` for the decision matrix.
+post-merge:
+  commands:
+    auto-install:
+      run: node scripts/post-merge-auto-install.mjs
+
+post-rewrite:
+  commands:
+    auto-install:
+      # post-rewrite fires after `git pull --rebase` and `git commit
+      # --amend`. The decision function is idempotent — multiple
+      # firings on the same delta are safe.
+      run: node scripts/post-merge-auto-install.mjs
