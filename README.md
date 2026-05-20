@@ -41,28 +41,17 @@ The first run installs launchd persistence so minsky survives reboots; later run
 
 ## Why Minsky?
 
-Seven things you get with minsky running on a repo:
+Seven things you get with minsky running on a repo. Each links to a dedicated user-story page with acceptance criteria, metric, and chaos coverage.
 
-- **Continuous, unattended repo improvement — with safety guards that hold.**
-  Minsky reads `TASKS.md`, picks the highest-priority task with complete rule-9 fields, and gets to work. Every PR is a draft for your review; every iteration passes 15 lint gates including secret-scan, scope-discipline (rule #12), and security review (rule #13). No agent can push to `main`. No PR merges without your approval. The safety boundary is mechanical — enforced by deterministic linters, not by agent good behaviour.
+- **Continuous, unattended improvement** — daemon picks tasks, ships draft PRs, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
+- **Issues surfaced as draft tasks** *(opt-out via `MINSKY_CTO_AUDIT=off`)* — a CTO-audit pass after each iteration proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
+- **Right model for each task** *(per-task backend today; multi-persona M2)* — claude for prose, devin for refactors, local Ollama for mechanical lint fixes. ([details →](user-stories/008-per-task-backend-and-personas.md))
+- **Forced research at PR time** *(rule #1, enforced)* — every PR cites the existing libraries it considered; the linter blocks reinvention. ([details →](user-stories/009-forced-research-rule-1.md))
+- **A tool that improves itself** — reads own daemon metrics, files tasks against own stability, ships the fixes. ([details →](user-stories/003-mape-k-improves-prompts.md))
+- **Keeps iterating when the cloud runs dry** *(detection today; mid-run swap is P0)* — quota exceeded → local Ollama → loop continues until your tokens return. ([details →](user-stories/004-budget-auto-pause.md))
+- **Async Q&A across timezones** *(P0)* — agents write to `.minsky/qa-log.md`; you reply by editing the file. ([details →](user-stories/010-async-human-qa-via-file.md))
 
-- **Issues your agents notice get surfaced — instead of buried in logs.** *(opt-out via `MINSKY_CTO_AUDIT=off`)*
-  After each iteration, an optional CTO-audit pass (`novel/cross-repo-runner/src/host-cto-audit.ts`) reviews the diff for things worth tracking — a test that started flaking, a deprecation warning, a TODO that's been around for 6 months. Anything it spots becomes a draft TASKS.md entry for your review. You decide what's worth keeping; the daemon never silently mutates your backlog.
-
-- **Match the model to the task — pay Sonnet prices only for Sonnet work.** *(per-task backend today; multi-persona pipelines are an M2 milestone)*
-  Minsky picks the agent backend per task (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`): claude for prose-heavy work, devin for cross-repo refactors, local for mechanical lint fixes. You don't pay $4 for an iteration that a $0.20 model could have done. The "researcher → planner → implementer → QA → reviewer" pipeline on a single task is in flight as M2.
-
-- **"Don't reinvent the wheel" enforced at PR time.** *(rule #1, enforced)*
-  `scripts/check-rule-1-novel-justification.mjs` rejects any new `novel/` code whose README doesn't cite the existing libraries considered and explain why each didn't fit. Every PR ships with a research trail you can audit before you merge. Forced research, mechanically.
-
-- **A tool that improves itself.**
-  Minsky reads its own daemon metrics every iteration, files tasks against its own stability, and ships fixes through the same agent backends operators use. The daemon refactors the daemon — most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
-
-- **Keep iterating when the cloud agent runs dry.** *(detection today; mid-run swap is P0 `runtime-token-limit-auto-pivot-local-and-back`)*
-  When the cloud agent returns "quota exceeded", minsky detects exhaustion (`novel/tick-loop/src/claude-exhaustion-state.ts`) and swaps to a local Ollama model so the loop keeps making progress. When your tokens return, minsky swaps back. The loop never stops because you ran out of budget.
-
-- **Async Q&A that respects your timezone.** *(P0 `minsky-human-comm-via-file`)*
-  Agents drop questions into `.minsky/qa-log.md`. You answer when you open your laptop — by editing the file. The agent picks up your answer via `fs.watch` and continues. No sync meeting, no 4-hour-blocked iteration, no daily DMs to chase.
+Safety guards are mechanical — every PR is a draft for your review, every iteration passes 15 lint gates including secret-scan, scope-discipline, and security review. No agent can push to `main`. No PR merges without your approval.
 
 ## About the name
 
