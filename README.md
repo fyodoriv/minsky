@@ -7,6 +7,8 @@
 
 Minsky attaches to a git repo and improves it over time, applying scientifically proven software-engineering practices — TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, error budgets — each backed by a literature citation ([PRACTICES](docs/PRACTICES.md)). It identifies issues, works on each one until it's fixed, then researches what to do next — by default it runs until you stop it.
 
+**[Seven reasons you'd want this →](#why-minsky)** &nbsp;·&nbsp; Or skip to [getting started](#getting-started).
+
 ## Getting started
 
 **Recommended — let your agent install it.** If you're inside Claude Code, Cursor, Windsurf, Devin, Codex, or any AI coding agent that can read files and run commands, paste this:
@@ -35,6 +37,31 @@ The first run installs launchd persistence so minsky survives reboots; later run
 7. Picks the next task. Repeats.
 
 > **What's a "host"?** A host is a single git repository that minsky operates on — picks tasks from its `TASKS.md`, spawns agents inside its worktree, opens PRs against its remote. Selected via `default_host` in `~/.minsky/config.json`, or `--host <path>` flag, or the current working directory by default. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
+
+## Why Minsky?
+
+Because doing autonomous coding by hand is exhausting. Seven specific exhaustions:
+
+- **Asking your agent "what should I work on next?" after every task gets old fast.**
+  Minsky reads `TASKS.md`, picks the highest-priority item with complete rule-9 fields, and starts. When it finishes, it picks the next one. No prompt required.
+
+- **The agent that knows the codebase best is also the one who should be writing tickets.**
+  After every iteration, a CTO-audit pass (`novel/cross-repo-runner/src/host-cto-audit.ts`) reviews the diff, files new tasks for things it noticed, and re-sorts priorities. The backlog grooms itself. Most P0s currently in `TASKS.md` were surfaced by daemon iterations, not by humans.
+
+- **No single model is good at architecture, implementation, and review at the same time.** *(per-task backend selection today; per-task multi-persona pipelines are an M2 milestone)*
+  Minsky picks the right agent backend per task (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) — claude for prose-heavy work, devin for cross-repo refactors, local for cheap mechanical iteration. The "researcher → planner → implementer → QA → reviewer" pipeline on a single task is being threaded through.
+
+- **The 100th time an agent reinvents the wheel is the 100th time a human says "why didn't you just use lodash?"** *(rule #1, enforced)*
+  Rule #1 forbids reinventing the wheel. `scripts/check-rule-1-novel-justification.mjs` rejects any new `novel/` code whose README doesn't cite the existing libraries / patterns considered and explain why each didn't fit. Forced research, mechanically.
+
+- **Shipping a tool that gets worse over time is not a flex.**
+  Minsky reads its own daemon metrics every iteration, files tasks against itself when something is off (the spawn-failed-exit-minus-one P0 was filed by a Devin session, not by Fyodor), and ships fixes to its own bugs. The daemon refactors the daemon.
+
+- **Your Anthropic invoice running out at 2am should not end the night.** *(detection today; mid-run swap is P0 `runtime-token-limit-auto-pivot-local-and-back`)*
+  When the cloud agent returns "quota exceeded", minsky detects exhaustion (`novel/tick-loop/src/claude-exhaustion-state.ts`) and swaps to a local Ollama model so the loop keeps making progress until your tokens return. The bidirectional mid-run swap-and-swap-back is in flight.
+
+- **"Let me know if you have questions" is a useless contract with an agent in another timezone.** *(P0 `minsky-human-comm-via-file`)*
+  Agents drop questions into `.minsky/qa-log.md`. You edit the file when you wake up. The agent picks up your answer via `fs.watch` and continues — no sync meeting, no 4-hour-blocked iteration, no daily DMs.
 
 ## Why "Minsky"?
 
