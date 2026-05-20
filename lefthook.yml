@@ -25,13 +25,26 @@ pre-commit:
 pre-push:
   commands:
     pre-pr-lint:
-      # Canonical pre-PR lint stack — single source of truth shared with the
-      # daemon's brief gate (TASKS.md `daemon-pre-pr-lint-gate`). Humans run
-      # `--stage=full` (adds vitest + diff-relative + dormant-config lints);
-      # the daemon brief runs `--stage=fast` for spawn-budget reasons. Both
-      # share the manifest in `scripts/run-pre-pr-lint-stack.mjs`. Rule #10 —
-      # the daemon and the human pass through the same gate.
-      run: pnpm pre-pr-lint --stage=full
+      # `--stage=fast` (NOT `--stage=full`): pre-push must stay under ~10s
+      # wall-clock so developers don't dread `git push`. `--stage=fast` skips
+      # vitest (~35s for the 3,135-test suite) and the dormant-config lints
+      # that don't change per-PR; it keeps biome / typecheck / markdownlint /
+      # rule-9-tasksmd-fields / rule-3-doc-first / rule-6-let-it-crash /
+      # rule-7-chaos-coverage / rule-12-scope-discipline / rule-17-proactive-
+      # heal / no-hardcoded-user-paths / tasks-lint / threat-model-section /
+      # pr-self-grade / pr-security-review. Total: ~5-7s on a warm cache.
+      #
+      # Defense-in-depth: `scripts/local-gate-merge.mjs` runs the FULL stage
+      # (`--stage=full`) in a scratch `git clone --shared` BEFORE any PR
+      # merges to main. Nothing that fails `--stage=full` ever reaches main
+      # — the only reason to ALSO run `--stage=full` on pre-push was paranoia,
+      # and it cost ~35s × every-push-by-every-developer in friction.
+      #
+      # Policy enforced by P1 `pre-push-hook-stays-fast` (vision.md rule #10
+      # deterministic enforcement): any future PR that puts `--stage=full`
+      # back into pre-push must justify in the PR body why a 40s pre-push is
+      # acceptable, AND propose a corresponding speedup elsewhere.
+      run: pnpm pre-pr-lint --stage=fast
 
 # Auto-install on `git pull` — both the merge fast-path (post-merge) and
 # the rebase / amend path (post-rewrite). The script is rule-#6 best-effort:
