@@ -166,6 +166,26 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
     expect(elapsed).toBeGreaterThanOrEqual(150);
   });
 
+  it("spawn-failed-signal-capture: child killed by signal surfaces the signal in SpawnResult so daemon log can diagnose what killed it", async () => {
+    // Surface for the spawn-failed-exit-minus-one-silent-empty-stderr P0:
+    // when devin (or any cloud agent) gets SIGTERM/SIGKILL/SIGHUP'd by an
+    // external party (parent process, launchd, OOM killer, dotfiles env
+    // hook), we currently lose all diagnostic — exitCode collapses to -1
+    // (because code === null when a signal kills the child) and we have
+    // no way to distinguish "watchdog SIGKILL" from "mysterious SIGTERM".
+    const script =
+      "setTimeout(() => process.kill(process.pid, 'SIGKILL'), 100); setInterval(() => {}, 1000);";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["-e", script],
+      timeoutMs: 5_000,
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(-1);
+    expect(result.signal).toBe("SIGKILL");
+    expect(result.timedOut).toBeUndefined();
+  });
+
   it("daemon-claude-print-hang-watchdog: a fast child finishes before the watchdog and timedOut is undefined", async () => {
     const strat = new ProcessSpawnStrategy({
       command: process.execPath,

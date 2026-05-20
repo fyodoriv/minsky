@@ -9,6 +9,8 @@ import type { LiveSpawnOutcome } from "./runner.js";
 import type { RunnerPlan } from "./spawn-plan.js";
 import type { ParsedTask } from "./task-finder.js";
 
+import type { LoopIterationResult } from "./host-loop.js";
+
 import { runHostLoop } from "./host-loop.js";
 
 const baseTask: ParsedTask = {
@@ -144,6 +146,65 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.stopReason).toBe("spawn-failed");
     expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]?.verdict).toBe("spawn-failed");
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is threaded from outcome into LoopIterationResult", async () => {
+    // Without the threading, every signal-killed iteration would surface
+    // as `exit=-1 signal=undefined`, which is exactly the diagnostic
+    // collapse this task fixes. The host-loop must preserve `signal`
+    // when present so the daemon log + iteration record can render it.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const records: LoopIterationResult[] = [];
+    const result = await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () =>
+        Promise.resolve(
+          makeOutcome({
+            verdict: "spawn-failed",
+            exitCode: -1,
+            stderrTail: "",
+            signal: "SIGKILL",
+          }),
+        ),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 10,
+      tickIntervalMs: 0,
+      recordIteration: (rec) => records.push(rec),
+    });
+    expect(result.stopReason).toBe("spawn-failed");
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]?.signal).toBe("SIGKILL");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.signal).toBe("SIGKILL");
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: omits signal when outcome has none (no key synthesised)", async () => {
+    // exactOptionalPropertyTypes: a `null` outcome.signal becomes
+    // `iterationResult.signal === undefined` via the property-omission
+    // spread. Verify the key is genuinely absent so downstream JSON
+    // serialisation doesn't emit `"signal":null` for the common
+    // exit-with-code path.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const records: LoopIterationResult[] = [];
+    await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "spawn-failed", exitCode: 1, stderrTail: "boom" })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 1,
+      tickIntervalMs: 0,
+      recordIteration: (rec) => records.push(rec),
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).not.toHaveProperty("signal");
   });
 
   test("aborted when AbortSignal fires BEFORE the first iteration", async () => {

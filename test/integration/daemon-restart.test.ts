@@ -341,6 +341,26 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
     expect(src).toContain("MINSKY_NON_INTERACTIVE");
   });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: install-daemon propagates DEVIN_*/CLAUDE_*/OPENAI_*/ANTHROPIC_* env vars from the operator shell into the plist", () => {
+    // Before this fix, the launchd plist only exposed PATH + HOME +
+    // MINSKY_NON_INTERACTIVE. The daemon child therefore spawned
+    // devin/claude/openai/anthropic CLIs with EMPTY auth, surfaced
+    // as `verdict=spawn-failed exit=-1 stderr=(empty)` (P0 task
+    // 2026-05-19). The fix iterates over the operator's shell env
+    // and emits one EnvironmentVariables key per matching var.
+    const src = readFileSync(MINSKY_BIN, "utf8");
+    // The bash loop that scans the operator's env for auth-relevant
+    // names — fail loudly if a future refactor drops it.
+    expect(src).toMatch(/DEVIN_\*\|CLAUDE_\*\|OPENAI_\*\|ANTHROPIC_\*/);
+    expect(src).toContain("_xml_env_pairs");
+    // The emitted plist body must reference the accumulated pairs at
+    // the END of the EnvironmentVariables dict — not as a sibling of
+    // PATH/HOME, otherwise launchd silently drops them.
+    expect(src).toMatch(/MINSKY_NON_INTERACTIVE[\s\S]*?\$\{_xml_env_pairs\}/);
+    // Operator-visibility line at install time: count + warn when 0.
+    expect(src).toContain("propagated $_propagated_env_count agent-auth env vars");
+  });
 });
 
 // ─── end-to-end: simulated crash recovery ───────────────────

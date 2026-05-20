@@ -597,6 +597,34 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
       _node_bin=$(which node)
     fi
     _runner="$_repo_dir/novel/cross-repo-runner/bin/minsky-run.mjs"
+    # Propagate agent-auth env vars from the operator's current shell
+    # so the daemon child inherits them via launchd's `EnvironmentVariables`.
+    # Without this, devin/claude/openai/anthropic CLIs spawn under launchd
+    # with EMPTY auth, exit non-zero (often signal-killed), and surface
+    # as `verdict=spawn-failed exit=-1 stderr=(empty)` — the entire
+    # `spawn-failed-exit-minus-one-silent-empty-stderr` P0 (2026-05-19).
+    # Iterate over DEVIN_*, CLAUDE_*, OPENAI_*, ANTHROPIC_* and emit
+    # one `<key>NAME</key><string>VALUE</string>` pair per var. XML-escape
+    # the value (only `&` and `<` need escaping inside a `<string>` literal
+    # per the plist DTD) so secrets that contain those characters don't
+    # corrupt the plist. Names already pass the `^[A-Z][A-Z0-9_]*$` shape
+    # (env-var naming rule), so they need no escaping.
+    _xml_env_pairs=""
+    while IFS='=' read -r _env_name _env_value; do
+      case "$_env_name" in
+        DEVIN_*|CLAUDE_*|OPENAI_*|ANTHROPIC_*)
+          # XML-escape `&` first (so subsequent `<`/`>` escapes don't
+          # double-escape their introduced `&`), then `<` and `>`.
+          _env_value_esc=$(printf '%s' "$_env_value" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+          _xml_env_pairs="${_xml_env_pairs}
+    <key>${_env_name}</key>
+    <string>${_env_value_esc}</string>"
+          ;;
+      esac
+    done <<EOF
+$(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' || true)
+EOF
+
     cat > "$_plist" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -629,7 +657,7 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
     <key>HOME</key>
     <string>$HOME</string>
     <key>MINSKY_NON_INTERACTIVE</key>
-    <string>1</string>
+    <string>1</string>${_xml_env_pairs}
   </dict>
   <key>ThrottleInterval</key>
   <integer>10</integer>
@@ -642,6 +670,19 @@ PLIST_EOF
     echo "✅ Installed com.minsky.daemon"
     echo "   plist: $_plist"
     echo "   host: $_default_host"
+    # Count propagated agent-auth env vars (DEVIN_*, CLAUDE_*, OPENAI_*,
+    # ANTHROPIC_*) and report them so the operator can spot at install
+    # time when the shell didn't have the expected creds — without this
+    # line, missing env vars only surface much later as silent
+    # `exit=-1 stderr=(empty)` iterations. `spawn-failed-exit-minus-one-
+    # silent-empty-stderr` (2026-05-19) makes this visibility iron.
+    _propagated_env_count=$(env | grep -E '^(DEVIN_|CLAUDE_|OPENAI_|ANTHROPIC_)' | wc -l | tr -d ' ')
+    if [ "$_propagated_env_count" = "0" ]; then
+      echo "   ⚠ NO DEVIN_*/CLAUDE_*/OPENAI_*/ANTHROPIC_* env vars in your shell —"
+      echo "     daemon spawns may silent-fail. Export them and re-run install-daemon."
+    else
+      echo "   ✅ propagated $_propagated_env_count agent-auth env vars from shell"
+    fi
     echo "   auto-starts on login + restarts on crash"
     echo ""
     echo "   Check: launchctl list | grep minsky.daemon"
