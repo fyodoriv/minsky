@@ -22,6 +22,7 @@ export default defineConfig({
       "@minsky/handoff-spec": r("./novel/handoff-spec/src/index.ts"),
       "@minsky/mape-k-loop": r("./novel/mape-k-loop/src/index.ts"),
       "@minsky/notifier": r("./novel/adapters/notifier/src/index.ts"),
+      "@minsky/observer-heals": r("./novel/observer/heals/src/index.ts"),
       "@minsky/omc-tasksmd-bridge": r("./novel/bridges/omc-tasksmd/src/index.ts"),
       "@minsky/sidecar-bootstrap": r("./novel/sidecar-bootstrap/src/index.ts"),
       "@minsky/tick-loop": r("./novel/tick-loop/src/index.ts"),
