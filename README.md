@@ -13,17 +13,13 @@ Minsky attaches to a git repo and improves it over time, using established softw
 # Install
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install
 
-# Run — starts the daemon (if needed), installs launchd persistence,
-# and drops you into the live dashboard. Same command works on first run
-# AND every run after: if a daemon is already running for this folder,
-# you attach to it. Ctrl-C detaches; the daemon keeps running.
+# Run
 minsky
-
-# Stop everything (zero ghost processes — kills runners + agent children)
-minsky stop
 ```
 
-That's it. Minsky reads your `TASKS.md`, picks the highest-priority task, spawns an AI agent (Devin, Claude, or local), and opens a PR. Repeats 24/7. Survives reboots.
+The first run installs launchd persistence so minsky survives reboots; later runs in the same folder attach to the existing daemon. `Ctrl-C` detaches the dashboard without stopping the daemon; `minsky stop` shuts everything down (zero ghost processes).
+
+One-command `npx minsky` install is tracked as P1 `minsky-npx-install-and-run` — until it ships, the clone-and-install flow above is the canonical path.
 
 ## What it actually does
 
@@ -36,6 +32,10 @@ That's it. Minsky reads your `TASKS.md`, picks the highest-priority task, spawns
 7. Picks the next task. Repeats.
 
 > **What's a "host"?** A host is a single git repository that minsky operates on — picks tasks from its `TASKS.md`, spawns agents inside its worktree, opens PRs against its remote. Selected via `default_host` in `~/.minsky/config.json`, or `--host <path>` flag, or the current working directory by default. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
+
+## Why "Minsky"?
+
+Marvin Minsky (1927–2016) was a cognitive scientist whose 1986 book *The Society of Mind* proposed that intelligence emerges from many simple specialized agents working together. The tool borrows the metaphor: many AI agents working through a shared queue produce more than any single agent could.
 
 ## What works today (honest)
 
@@ -63,6 +63,14 @@ That's it. Minsky reads your `TASKS.md`, picks the highest-priority task, spawns
 - **Destructive operations** (force push, delete, deploy) — hard-blocked
 - **Architecture decisions** — files research tasks for humans
 - **Run without your approval** — every PR is a draft, you review
+
+## Principles
+
+- **Soft by default** — when an iteration produces a scope-leak or spawn-failed verdict, the daemon logs it and moves on; it doesn't halt the whole loop. Halting on every weird event would mean a single bad task can wedge the daemon for the entire night you're asleep.
+- **Sensible defaults, escape hatches for debugging** — every behaviour that is universally helpful ships **on** by default (launchd auto-install on first run, scope-leak soft-mode, dynamic timeouts, auto-install on `git pull`). Opt-out env vars exist (`MINSKY_NO_AUTO_INSTALL=1` etc.) but are intended only for debugging. Each default is **scoped** to a specific trigger so two defaults never compete.
+- **Gradual improvement** — `minsky update` after every fix; the daemon resumes from the same task it was working on. Iteration history is preserved across restarts.
+- **Honest metrics** — stability % is computed from real iteration data (`successful / total`); never a hand-typed number, never a stub.
+- **Test the runtime, not just functions** — 95% unit coverage doesn't catch the bugs that bite production (auth env vars missing, plist sibling-vs-dict, GH 401 crash). Runtime invariants check the actual system before every iteration.
 
 ## How long does it run?
 
@@ -156,27 +164,24 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 
 ## Key files
 
-Each file lives in one of three places: **inside your host repo** (your data), **inside this minsky repo** (the source), or **in your home directory** (per-machine config).
+Minsky adds **one tracked file to your host repo** (`TASKS.md`) and one gitignored dotfolder (`.minsky/`). Everything else lives in your home directory or inside the minsky repo itself.
 
-| File | Where | What it is | What you do with it |
-|---|---|---|---|
-| `TASKS.md` | Root of your **host repo** | The work queue (tasks.md spec): P0/P1/P2/P3 sections, each task block with `**ID**` / `**Tags**` / `**Hypothesis**` / etc. | Add tasks you want minsky to pick up; mark items `Blocked: needs-user-approval` to gate them; minsky writes new tasks here via CTO audit. |
-| `~/.minsky/config.json` | Your home dir (per-machine) | Agent preferences: which cloud agent, which model, default_host path | Edit once to choose claude vs devin and your default host repo; minsky reads it on every start. |
-| `.minsky/` directory | Inside your **host repo** (gitignored) | Sidecar: experiment store (iteration records), restart sentinels, metric snapshots, daemon PID file | Don't touch — minsky owns it. Survives uninstall (your iteration history). Safe to delete only if you want a fresh start on that host. |
-| `~/.minsky/daemon.log` | Your home dir (per-machine) | Daemon stdout/stderr log: iteration verdicts, watchdog timers, spawn diagnostics | Tail via `minsky logs` or `minsky watch`; grep for `spawn-failed` / `Blocked` to debug. |
-| `AGENTS.md` | Root of your **host repo** | Per-repo rules for AI agents (commit format, test commands, doc conventions) | Customize when adopting minsky on a new repo so the agents follow your codebase's conventions. |
-| `MILESTONES.md` | Root of **this minsky repo** | The product roadmap with M1–M5 exit criteria | Read to understand where minsky is heading; check progress before betting on a capability. |
-| `vision.md` | Root of **this minsky repo** | The constitution — 17 rules every contribution follows | Read if you want to contribute; cite by rule number in PRs. |
-| `DEPRECATED.md` | Root of **this minsky repo** | Features that have been retired or superseded | Read before implementing anything to avoid working on a deprecated surface. |
-| `competitors/` | Inside **this minsky repo** | Per-competitor analysis (Devin, OpenHands, Aider, Cursor, etc.) | Read when picking a tool; minsky's positioning is built around these. |
+**In your host repo:**
 
-## Principles
+| File | Tracked? | What you do with it |
+|---|---|---|
+| `TASKS.md` | yes | Your work queue — add tasks, mark `Blocked: needs-user-approval` to gate them. Minsky picks tasks from here and writes new ones via CTO audit. |
+| `.minsky/` | no (gitignored) | Sidecar dotfolder for iteration history, sentinels, daemon PID. Minsky owns it; don't touch. Safe to delete only for a fresh start on that host. |
+| `AGENTS.md` | optional | Per-repo rules for AI agents (commit format, test commands). Customize when adopting minsky on a repo with its own conventions. |
 
-- **Soft by default** — when an iteration produces a scope-leak or spawn-failed verdict, the daemon logs it and moves on; it doesn't halt the whole loop. Halting on every weird event would mean a single bad task can wedge the daemon for the entire night you're asleep.
-- **Sensible defaults, escape hatches for debugging** — every behavior that is universally helpful to a clean operator setup ships **on** by default (launchd auto-install on first run, scope-leak soft-mode, dynamic timeouts, auto-install on `git pull`). Opt-out env vars exist (e.g. `MINSKY_NO_AUTO_INSTALL=1`) but are intended only for debugging; they're not a config surface most operators ever touch. Each default is **scoped** to a specific trigger (launchd install fires on first `minsky` invocation; auto-install fires on `git pull`) so two defaults never compete.
-- **Gradual improvement** — `minsky update` after every fix; the daemon resumes from the same task it was working on. Iteration history in `.minsky/experiment-store/` is preserved across restarts.
-- **Honest metrics** — stability % is computed from real iteration data (`successful / total`); never a hand-typed number, never a stub.
-- **Test the runtime, not just functions** — 95% unit coverage doesn't catch the bugs that bite production (devin auth env vars missing, plist sibling-vs-dict bug, GH 401 crash). Runtime invariants in `novel/cross-repo-runner/src/runtime-invariants.ts` check the actual system before every iteration.
+**In your home directory** (per-machine, never in any repo):
+
+| File | What you do with it |
+|---|---|
+| `~/.minsky/config.json` | Edit once to choose claude vs devin and your default host. Minsky reads it on every start. |
+| `~/.minsky/daemon.log` | View live via `minsky watch`; grep for `spawn-failed` / `Blocked` when debugging. |
+
+**Inside the minsky repo itself** (read-only from a host-repo user's perspective): `MILESTONES.md` (roadmap), `vision.md` (the constitution), `DEPRECATED.md` (retired features), `competitors/` (per-competitor analysis). You don't edit these unless you're contributing to minsky.
 
 ## Picking up upstream fixes
 
