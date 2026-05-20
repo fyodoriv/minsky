@@ -20,12 +20,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
-import {
-  computeWindowStats,
-  parseWindowMs,
-  percentile,
-  readLedger,
-} from "./heal-mttr-report.mjs";
+import { computeWindowStats, parseWindowMs, percentile, readLedger } from "./heal-mttr-report.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "heal-mttr-report.mjs");
@@ -68,7 +63,8 @@ const T_NOW = "2026-05-20T20:00:00.000Z";
 const T_NOW_MS = new Date(T_NOW).getTime();
 
 /**
- * @param {{ deltaMs: number; outcome: string; durationMs?: number }} opts
+ * @param {{ deltaMs: number; outcome: "healed" | "verified-failed" | "skipped"; durationMs?: number }} opts
+ * @returns {import("./heal-mttr-report.mjs").HealEvent}
  */
 function event({ deltaMs, outcome, durationMs = 1000 }) {
   const tsObserved = T_NOW_MS - deltaMs;
@@ -188,14 +184,7 @@ describe("computeWindowStats", () => {
 describe("heal-mttr-report CLI smoke", () => {
   test("no ledger ⇒ all windows report no-data in JSON mode", () => {
     const dir = mkdtempSync(join(tmpdir(), "heal-mttr-empty-"));
-    const r = run([
-      "--host-dir",
-      dir,
-      "--window=24h",
-      "--window=7d",
-      "--now=" + T_NOW,
-      "--json",
-    ]);
+    const r = run(["--host-dir", dir, "--window=24h", "--window=7d", `--now=${T_NOW}`, "--json"]);
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed).toHaveLength(2);
@@ -210,13 +199,7 @@ describe("heal-mttr-report CLI smoke", () => {
       event({ deltaMs: 10 * 86400 * 1000, outcome: "skipped" }),
     ];
     const dir = makeFixtureHost(events);
-    const r = run([
-      "--host-dir",
-      dir,
-      "--window=7d",
-      "--now=" + T_NOW,
-      "--json",
-    ]);
+    const r = run(["--host-dir", dir, "--window=7d", `--now=${T_NOW}`, "--json"]);
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed[0].successful).toBe(1);
@@ -227,12 +210,7 @@ describe("heal-mttr-report CLI smoke", () => {
   test("text mode produces a one-line summary per window", () => {
     const events = [event({ deltaMs: 1 * 3600 * 1000, outcome: "healed" })];
     const dir = makeFixtureHost(events);
-    const r = run([
-      "--host-dir",
-      dir,
-      "--window=24h",
-      "--now=" + T_NOW,
-    ]);
+    const r = run(["--host-dir", dir, "--window=24h", `--now=${T_NOW}`]);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("24h:");
     expect(r.stdout).toContain("1/1 healed");
@@ -241,12 +219,7 @@ describe("heal-mttr-report CLI smoke", () => {
 
   test("default windows are 24h/7d/30d when --window omitted", () => {
     const dir = mkdtempSync(join(tmpdir(), "heal-mttr-default-"));
-    const r = run([
-      "--host-dir",
-      dir,
-      "--now=" + T_NOW,
-      "--json",
-    ]);
+    const r = run(["--host-dir", dir, `--now=${T_NOW}`, "--json"]);
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed).toHaveLength(3);

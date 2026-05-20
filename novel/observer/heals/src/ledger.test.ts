@@ -47,9 +47,11 @@ describe("ledger.recordHealEvent", () => {
     const { seams, appended } = makeSeams(new Set(["/tmp/host/.minsky"]));
     recordHealEvent({ event: sampleEvent, seams });
     expect(appended).toHaveLength(1);
-    expect(appended[0]?.path).toBe("/tmp/host/.minsky/heal-events.jsonl");
-    expect(appended[0]?.data.endsWith("\n")).toBe(true);
-    const parsed = JSON.parse(appended[0]!.data.trim()) as HealEvent;
+    const first = appended[0];
+    if (!first) throw new Error("expected one appended entry");
+    expect(first.path).toBe("/tmp/host/.minsky/heal-events.jsonl");
+    expect(first.data.endsWith("\n")).toBe(true);
+    const parsed = JSON.parse(first.data.trim()) as HealEvent;
     expect(parsed).toEqual(sampleEvent);
   });
 
@@ -77,9 +79,11 @@ describe("ledger.recordHealEvent", () => {
     recordHealEvent({ event: e2, seams });
     recordHealEvent({ event: e3, seams });
     expect(appended).toHaveLength(3);
-    expect(JSON.parse(appended[0]!.data.trim()).ts_observed).toBe(e1.ts_observed);
-    expect(JSON.parse(appended[1]!.data.trim()).ts_observed).toBe(e2.ts_observed);
-    expect(JSON.parse(appended[2]!.data.trim()).ts_observed).toBe(e3.ts_observed);
+    const [row0, row1, row2] = appended;
+    if (!row0 || !row1 || !row2) throw new Error("expected three appended entries");
+    expect(JSON.parse(row0.data.trim()).ts_observed).toBe(e1.ts_observed);
+    expect(JSON.parse(row1.data.trim()).ts_observed).toBe(e2.ts_observed);
+    expect(JSON.parse(row2.data.trim()).ts_observed).toBe(e3.ts_observed);
   });
 });
 
