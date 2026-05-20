@@ -5,16 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-## What it competes with
-
-| Tool | Their advantage | Minsky's advantage |
-|---|---|---|
-| **Devin** ($20/mo) | Polished cloud UX | Self-hosted, 24/7 daemon, multi-agent, $0 local |
-| **OpenHands** (OSS) | Higher SWE-bench | Daemon mode, budget mgmt, multi-repo |
-| **Aider** (OSS) | Best local models | Minsky uses aider as its local backend |
-| **Cursor Agent** | IDE integration | Headless, survives IDE close, multi-repo |
-
-Full per-competitor analysis lives in [`competitors/`](./competitors/).
+Minsky's daemon reads the `TASKS.md` file at the root of any git repo you point it at, picks the highest-priority task, spawns an AI agent (Devin, Claude, or a local model) to implement it on a feature branch, then opens a draft PR for you to review. It repeats this loop 24/7 — survives reboots, terminal close, and token-budget exhaustion (auto-fallback to a local model when the cloud agent runs dry). You add tasks (or let minsky audit the repo and add some for you); you wake up to draft PRs to merge.
 
 ## Getting started
 
