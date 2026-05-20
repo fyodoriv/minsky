@@ -802,7 +802,13 @@ PLIST_EOF
       # Resolve host dir early (needed by stability + iterations + help)
       host_dir="${HOST_ARG:-}"
       if [ -z "$host_dir" ]; then
-        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+        # The pipeline returns no matches when no daemon is running; `|| true`
+        # absorbs the empty-result exit-1 so `set -euo pipefail` doesn't abort
+        # the entire dashboard. Same fix shipped at line 122 for `status`.
+        # Discovered 2026-05-20 — fresh-install reader runs `minsky watch`
+        # with no daemon, dashboard exits after rendering only the DAEMON
+        # line, never gets to show RECENT ITERATIONS or NEEDS HUMAN ACTION.
+        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1 || true)
       fi
       host_dir="${host_dir:-}"
 
