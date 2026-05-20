@@ -94,19 +94,19 @@ const timedOut = results.filter((r) => r.status === "timeout").length;
 const total = results.length;
 
 if (jsonMode) {
-  console.log(JSON.stringify({ total, passed, failed, timedOut, results }, null, 2));
+  console.info(JSON.stringify({ total, passed, failed, timedOut, results }, null, 2));
 } else {
-  console.log("\n📊 M1 Metrics Dashboard\n");
-  console.log(`   Total measurable tasks: ${total}`);
-  console.log(`   ✅ Pass: ${passed}  ❌ Fail: ${failed}  ⏱ Timeout: ${timedOut}\n`);
+  console.info("\n📊 M1 Metrics Dashboard\n");
+  console.info(`   Total measurable tasks: ${total}`);
+  console.info(`   ✅ Pass: ${passed}  ❌ Fail: ${failed}  ⏱ Timeout: ${timedOut}\n`);
 
   for (const r of results) {
     const icon = r.status === "pass" ? "✅" : r.status === "fail" ? "❌" : "⏱";
-    console.log(`   ${icon} ${r.id}`);
+    console.info(`   ${icon} ${r.id}`);
     if (r.status !== "pass") {
-      console.log(`      cmd: ${r.command}`);
-      console.log(`      out: ${r.output.slice(0, 80)}`);
+      console.info(`      cmd: ${r.command}`);
+      console.info(`      out: ${r.output.slice(0, 80)}`);
     }
   }
-  console.log();
+  console.info();
 }

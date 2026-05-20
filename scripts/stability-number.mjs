@@ -12,11 +12,11 @@ const storeDir = resolve(hostDir, ".minsky", "experiment-store", "cross-repo");
 
 if (!existsSync(storeDir)) {
   if (jsonMode) {
-    console.log(
+    console.info(
       JSON.stringify({ stability_pct: null, source: "no-data", successful: 0, total: 0 }),
     );
   } else {
-    console.log("Stability: no data yet (run minsky for ≥1 hour to measure)");
+    console.info("Stability: no data yet (run minsky for ≥1 hour to measure)");
   }
   process.exit(0);
 }
@@ -43,7 +43,7 @@ for (const file of readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"))) {
 
 if (records.length === 0) {
   if (jsonMode) {
-    console.log(
+    console.info(
       JSON.stringify({
         stability_pct: null,
         source: "no-recent-data",
@@ -53,7 +53,7 @@ if (records.length === 0) {
       }),
     );
   } else {
-    console.log("Stability: no data in last 7d (run minsky to generate data)");
+    console.info("Stability: no data in last 7d (run minsky to generate data)");
   }
   process.exit(0);
 }
@@ -63,7 +63,7 @@ const total = records.length;
 const pct = Math.round((successful / total) * 100);
 
 if (jsonMode) {
-  console.log(
+  console.info(
     JSON.stringify({
       stability_pct: pct,
       successful,
@@ -73,5 +73,5 @@ if (jsonMode) {
     }),
   );
 } else {
-  console.log(`${pct}% (${successful}/${total} successful, 7d rolling)`);
+  console.info(`${pct}% (${successful}/${total} successful, 7d rolling)`);
 }
