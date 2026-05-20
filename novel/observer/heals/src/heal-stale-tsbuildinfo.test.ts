@@ -120,4 +120,24 @@ describe("heal-stale-tsbuildinfo", () => {
     const { seams } = makeSeams({});
     expect(healStale.detect(seams).present).toBe(false);
   });
+
+  // Regression for chaos-test bug: a stale `listTsbuildinfoFn` snapshot
+  // (e.g. cached from before apply() ran) must not crash detect() when
+  // verify() re-scans after files have been removed.
+  test("detect skips paths in the listFn snapshot that no longer exist", () => {
+    const { seams } = makeSeams({
+      "/host/.tsbuildinfo": staleContent,
+    });
+    // Inject a list that includes a path that DOES NOT exist on disk.
+    const cachedList = ["/host/.tsbuildinfo", "/host/already-gone/.tsbuildinfo"];
+    seams.listTsbuildinfoFn = () => cachedList;
+    // Should not throw — should report present (only the existing stale file).
+    const detected = healStale.detect(seams);
+    expect(detected.present).toBe(true);
+
+    // After apply removes the existing file, both listed paths are gone —
+    // detect must report present:false without throwing.
+    healStale.apply(seams);
+    expect(healStale.detect(seams).present).toBe(false);
+  });
 });

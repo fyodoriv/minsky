@@ -65,6 +65,11 @@ const parseContent = (
 export function detect(seams: StaleTsbuildinfoSeams): DetectResult {
   const paths = seams.listTsbuildinfoFn(seams.hostDir);
   const stalePaths = paths.filter((path) => {
+    // Skip paths that no longer exist — `listTsbuildinfoFn` may report
+    // a stale snapshot if the caller already removed some files. This
+    // keeps `verify()` (which calls `detect()` again) correct after
+    // `apply()` has unlinked the stale files.
+    if (!seams.existsSyncFn(path)) return false;
     const raw = seams.readFileSyncFn(path, "utf8");
     const content = parseContent(raw);
     return isStale(content, seams.currentNodeMajor);
