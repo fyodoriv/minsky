@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-Minsky reads tasks from your repo's `TASKS.md`, runs an AI agent to implement each one, and opens a draft PR for you to review. Then it picks the next task.
+Minsky runs AI coding agents on tasks in your repo's `TASKS.md`. It picks the highest-priority task, spawns an agent to implement it on a feature branch, and opens a draft PR for you to review.
 
 ## Getting started
 
