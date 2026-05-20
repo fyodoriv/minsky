@@ -109,7 +109,7 @@ describe("aggregateBenchmark", () => {
 
   test("undefined verdict counts as 'unknown' and is fail", () => {
     const r = aggregateBenchmark([{ verdict: undefined, durationMs: 0 }]);
-    expect(r.verdict_counts.unknown).toBe(1);
+    expect(r.verdict_counts["unknown"]).toBe(1);
     expect(r.pass_rate).toBe(0);
   });
 });

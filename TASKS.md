@@ -31,7 +31,6 @@
   - **Acceptance**: (1) Run `minsky --daemon --host ~/apps/tooling/minsky` for 1 hour; observe ≥3 successful task spawns (verdict ∈ {pr-open, no-change, scope-leak} — anything that's NOT spawn-failed); (2) Every spawn-failed entry in the daemon log includes a non-empty `signal:` or `stderr:` field; (3) New regression test asserting `runtime-paths-coverage.test.ts > spawn capture > signal field present when child SIGKILL'd`.
   - **Note**: blocked by nothing — the diagnostic capture (a) lands first; then we KNOW the failure mode; then fix.
 
-
 <!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
 
 <!-- Observations filed 2026-05-19 by Devin session (rule-17-proactive-healing PR #648). 2 new P0 bugs surfaced by the live restart of `minsky` while developing the rule-17 fixes. Both shipped: `minsky-bin-git-clean-fd-multi-agent-safety-violation` in PR #650, `minsky-bin-auto-resets-to-main-surprise` in PR #651 (graceful-stop sentinel + reset-host-if-crashed subcommand). -->
@@ -777,18 +776,6 @@
 
 <!-- Observations filed 2026-05-19 — rule-17 sweep, two pre-existing flakes the daemon was bleeding. -->
 
-- [ ] `spawn-strategy-claude-smoke-test-skip-on-rate-limit` — the `default args spawn a fresh non-interactive Claude session` test fires a real `claude --print` that hard-fails when the operator's Claude subscription is rate-limited (`You've hit your limit · resets May 31`). The test currently asserts `exitCode === 0`, which is wrong: a rate-limited environment should `it.skipIf` the test, same shape as the existing `hasClaude` skip-guard.
-  - **ID**: spawn-strategy-claude-smoke-test-skip-on-rate-limit
-  - **Tags**: p1, rule-11, rule-17, flaky-test, env-dependent
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-19 Devin session — the test failed locally because Claude is rate-limited until 2026-05-31; same failure on `main`. This is a rule-#11 violation (load-bearing flaky gate) AND a rule-#17 violation (observed-but-unfixed).
-  - **Details**: at `novel/tick-loop/src/spawn-strategy.test.ts` ~line 100, the test guards on `hasClaude` (PATH presence) but not on quota. Add a second guard: probe `echo test | claude --print --max-tokens 1` once at module load, and `it.skipIf` the test when stdout matches `You've hit your limit` / `rate-limited` / similar. Convert the env-dependent assertion into a deterministic skip rather than a deterministic failure.
-  - **Files**: `novel/tick-loop/src/spawn-strategy.test.ts`.
-  - **Hypothesis**: the test fails 100% of the time on rate-limited operators today; after the skip-guard, it passes (skipped) 100% of the time when rate-limited, and exercises the real assertion only when quota allows. Pre-fix: 1 false-failure per CI run when quota is gone. Post-fix: 0.
-  - **Success**: rate-limited environment → test reports `skipped`; non-rate-limited → test runs and asserts as before.
-  - **Pivot**: if the rate-limit probe itself is too slow / costs tokens, gate on an env var `MINSKY_SKIP_CLAUDE_SMOKE=1` instead of an empirical probe.
-  - **Measurement**: `claude --print 'ok' 2>&1 | grep -q "hit your limit" && npx vitest run novel/tick-loop/src/spawn-strategy.test.ts -t "fresh non-interactive" | grep -q "skipped"`.
-  - **Anchor**: rule #11 (no flaky load-bearing gates); rule #17 (proactive healing — observed flake is a fix); operator directive 2026-05-19 (continue same proactive healing process).
 
 - [ ] `local-gate-merge-minsky-home-hardcoded-path` — `scripts/local-gate-merge.mjs` line 48 hardcodes `MINSKY_HOME` default to `/Users/cbrwizard/apps/tooling/minsky`, breaking the gate for every operator who isn't `cbrwizard`
   - **ID**: local-gate-merge-minsky-home-hardcoded-path

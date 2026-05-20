@@ -91,6 +91,23 @@ export interface SpawnResult {
    */
   readonly timedOut?: boolean;
   /**
+   * The signal that terminated the child, if any. `undefined` when the
+   * child exited via a clean exit code, a string like `"SIGTERM"` /
+   * `"SIGKILL"` / `"SIGHUP"` when the OS / another process / a self-
+   * suicide killed it.
+   *
+   * Surfaced-by `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19) —
+   * before this field, `exitCode: -1` collapsed two distinct failure modes
+   * ("child exited with no code" vs "child was signal-killed") into one
+   * indistinguishable bucket, so the daemon log couldn't tell us why every
+   * devin spawn was failing.
+   *
+   * When `timedOut: true`, this is `"SIGKILL"` (the watchdog kill) — the
+   * daemon should still prefer `timedOut` for that case since it carries
+   * the additional "we exceeded the watchdog" semantic.
+   */
+  readonly signal?: NodeJS.Signals;
+  /**
    * Optional provider tag set by `LlmProviderSpawnStrategy` (slice 3 of
    * `local-llm-fallback-on-budget-pause`) — `"claude"` / `"local"` /
    * `"hold"`. The daemon copies this into the `DaemonIterationResult`
@@ -319,11 +336,12 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
         reject(err);
       });
 
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         if (watchdog !== undefined) clearTimeout(watchdog);
         resolve(
           buildSpawnResult({
             code,
+            signal,
             timedOut,
             timeoutMs,
             startedAt,
@@ -391,6 +409,7 @@ function writeStdin(
  */
 function buildSpawnResult(input: {
   readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
   readonly timedOut: boolean;
   readonly timeoutMs: number | undefined;
   readonly startedAt: number;
@@ -407,6 +426,11 @@ function buildSpawnResult(input: {
     stdoutTail: tailOf(input.stdoutChunks, TAIL_CAP_BYTES),
     stderrTail,
     ...(input.timedOut ? { timedOut: true } : {}),
+    // Surface the signal that killed the child (if any). Lets the daemon
+    // log distinguish SIGTERM-from-parent vs SIGKILL-from-watchdog vs
+    // SIGHUP-from-terminal-close — the spawn-failed-exit-minus-one-
+    // silent-empty-stderr diagnostic gap.
+    ...(input.signal !== null ? { signal: input.signal } : {}),
   };
 }
 

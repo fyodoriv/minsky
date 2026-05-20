@@ -102,7 +102,33 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
       return false;
     }
   })();
-  it.skipIf(!hasClaude)(
+  // `spawn-strategy-claude-smoke-test-skip-on-rate-limit` (P1, 2026-05-19):
+  // PATH presence is necessary but NOT sufficient — claude can also be
+  // unauthenticated, rate-limited, or running in a misconfigured project
+  // env. In any of these cases the binary returns non-zero output that
+  // would make the assertions below hard-fail with no diagnostic value
+  // (the binary IS there, it just can't do its job). Probe once at
+  // module load with a 1-token request and skip the test when the probe
+  // is unsuccessful — converts the env-dependent assertion into a
+  // deterministic skip rather than a deterministic failure (rule #11
+  // forbids load-bearing flaky gates).
+  // Pivot per the TASKS.md task: if the probe itself becomes too slow
+  // / costs tokens, gate on `MINSKY_SKIP_CLAUDE_SMOKE=1` instead.
+  const claudeProbeOk = (() => {
+    if (!hasClaude) return false;
+    if (process.env["MINSKY_SKIP_CLAUDE_SMOKE"] === "1") return false;
+    try {
+      execSync("claude --print --max-tokens 1 'ok'", {
+        stdio: "ignore",
+        timeout: 30_000,
+        input: "",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  it.skipIf(!claudeProbeOk)(
     "default args spawn a fresh non-interactive Claude session that consumes stdin",
     async () => {
       // Default args (no `args` override) →
@@ -164,6 +190,26 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy", () => {
     // Resolution should land just past the timeout, not hours later.
     expect(elapsed).toBeLessThan(2_000);
     expect(elapsed).toBeGreaterThanOrEqual(150);
+  });
+
+  it("spawn-failed-signal-capture: child killed by signal surfaces the signal in SpawnResult so daemon log can diagnose what killed it", async () => {
+    // Surface for the spawn-failed-exit-minus-one-silent-empty-stderr P0:
+    // when devin (or any cloud agent) gets SIGTERM/SIGKILL/SIGHUP'd by an
+    // external party (parent process, launchd, OOM killer, dotfiles env
+    // hook), we currently lose all diagnostic — exitCode collapses to -1
+    // (because code === null when a signal kills the child) and we have
+    // no way to distinguish "watchdog SIGKILL" from "mysterious SIGTERM".
+    const script =
+      "setTimeout(() => process.kill(process.pid, 'SIGKILL'), 100); setInterval(() => {}, 1000);";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      args: ["-e", script],
+      timeoutMs: 5_000,
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(-1);
+    expect(result.signal).toBe("SIGKILL");
+    expect(result.timedOut).toBeUndefined();
   });
 
   it("daemon-claude-print-hang-watchdog: a fast child finishes before the watchdog and timedOut is undefined", async () => {

@@ -986,10 +986,14 @@ async function runLoopAsResult(parsed, controller) {
       // so the operator can act. Previously the runner captured the
       // agent's stderr but the loop threw it away before this log line
       // was written, leaving operators with `verdict=spawn-failed` and
-      // zero diagnostic. Now: print exit code + stderr tail (last
-      // 1 KB) inline.
+      // zero diagnostic. Now: print exit code + signal + stderr tail
+      // (last 1 KB) inline. `signal=` was added 2026-05-19 for the
+      // `spawn-failed-exit-minus-one-silent-empty-stderr` P0 — the
+      // entire diagnostic class where exit=-1 collapsed "exited with
+      // no code" and "killed by signal" into one bucket.
       if (record.verdict === "spawn-failed") {
-        process.stdout.write(`  exit=${record.exitCode}\n`);
+        const signalSuffix = record.signal ? ` signal=${record.signal}` : "";
+        process.stdout.write(`  exit=${record.exitCode}${signalSuffix}\n`);
         if (record.stderrTail.length > 0) {
           const tail = record.stderrTail.slice(-1024);
           process.stdout.write(`  stderr tail (last ${tail.length} bytes):\n`);
@@ -1000,6 +1004,17 @@ async function runLoopAsResult(parsed, controller) {
           process.stdout.write("  stderr tail: (empty — agent exited silently)\n");
         }
       }
+      // Compose the iteration-record `notes` field. For spawn-failed
+      // iterations we append `exit=N signal=SIG` so operators reading
+      // `experiment-store/cross-repo/<id>.jsonl` later (or aggregating
+      // across machines) can see the signal without re-scrolling the
+      // daemon log. Validated iterations keep the original minimal
+      // shape to avoid breaking downstream JSONL grep patterns.
+      const baseNotes = `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`;
+      const diagSuffix =
+        record.verdict === "spawn-failed"
+          ? `; exit=${record.exitCode}${record.signal ? ` signal=${record.signal}` : ""}`
+          : "";
       writeIterationRecord(hostRoot, {
         ts: new Date().toISOString(),
         experiment_id: record.taskId,
@@ -1007,7 +1022,7 @@ async function runLoopAsResult(parsed, controller) {
         branch: `${config.branch_prefix}${record.taskId}`,
         verdict,
         pr_url: record.prUrl,
-        notes: `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`,
+        notes: `${baseNotes}${diagSuffix}`,
       });
     },
     seedOnEmpty: ctoAudit && seedOnEmpty,

@@ -471,10 +471,43 @@ describe("M1 TDD: minsky-report", () => {
     expect(existsSync(join(REPO_ROOT, "scripts", "minsky-report.mjs"))).toBe(true);
   });
 
+  // Make a temp host with two seeded metric snapshots so the report
+  // tests can exercise --baseline / --delta / summary without depending
+  // on the live repo's gitignored `.minsky/metric-snapshots/`. Without
+  // this, fresh-clone-based gates (e.g. `local-gate-merge.mjs`) saw
+  // every report test fail with "no snapshots in <repo>/.minsky/...",
+  // wedging every PR through the gate. Surfaced 2026-05-20 by the
+  // signal-capture P0's pre-merge gate run.
+  function makeReportHost(): string {
+    const dir = mkdtempSync(join(tmpdir(), "m1-report-"));
+    const snapDir = join(dir, ".minsky", "metric-snapshots");
+    mkdirSync(snapDir, { recursive: true });
+    // Earliest-first: the runner picks the lexicographically-largest
+    // file as `latest`, second-largest as `previous`.
+    writeFileSync(
+      join(snapDir, "2026-05-18.json"),
+      JSON.stringify({
+        "loop-uptime": { value: "40.0% active days", higherIsBetter: true },
+        "task-throughput": { value: "10.0 commits/day", higherIsBetter: true },
+        "self-improvement-velocity": { value: "30 mape-k commits", higherIsBetter: true },
+      }),
+    );
+    writeFileSync(
+      join(snapDir, "2026-05-19.json"),
+      JSON.stringify({
+        "loop-uptime": { value: "50.0% active days", higherIsBetter: true },
+        "task-throughput": { value: "16.8 commits/day", higherIsBetter: true },
+        "self-improvement-velocity": { value: "50 mape-k commits", higherIsBetter: true },
+      }),
+    );
+    return dir;
+  }
+
   test("minsky report --baseline prints latest snapshot as JSON", () => {
     const env = cleanEnv();
+    const host = makeReportHost();
     const binPath = join(REPO_ROOT, "bin", "minsky");
-    const out = execFileSync(binPath, ["report", "--baseline", "--repo", REPO_ROOT], {
+    const out = execFileSync(binPath, ["report", "--baseline", "--repo", host], {
       env,
       encoding: "utf8",
       timeout: 30_000,
@@ -490,8 +523,9 @@ describe("M1 TDD: minsky-report", () => {
 
   test("minsky report --delta prints baseline-vs-prev diff", () => {
     const env = cleanEnv();
+    const host = makeReportHost();
     const binPath = join(REPO_ROOT, "bin", "minsky");
-    const out = execFileSync(binPath, ["report", "--delta", "--repo", REPO_ROOT], {
+    const out = execFileSync(binPath, ["report", "--delta", "--repo", host], {
       env,
       encoding: "utf8",
       timeout: 30_000,
@@ -504,8 +538,9 @@ describe("M1 TDD: minsky-report", () => {
 
   test("minsky report (no flag) prints human-readable summary", () => {
     const env = cleanEnv();
+    const host = makeReportHost();
     const binPath = join(REPO_ROOT, "bin", "minsky");
-    const out = execFileSync(binPath, ["report", "--repo", REPO_ROOT], {
+    const out = execFileSync(binPath, ["report", "--repo", host], {
       env,
       encoding: "utf8",
       timeout: 30_000,

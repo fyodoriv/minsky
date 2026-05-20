@@ -31,6 +31,30 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
 
+/**
+ * @typedef {Object} IterationOutcome
+ * @property {string | undefined} verdict
+ * @property {number} durationMs
+ * @property {number | null} [exitCode]
+ */
+
+/**
+ * @typedef {Object} BenchmarkReport
+ * @property {number} iterations
+ * @property {Record<string, number>} verdict_counts
+ * @property {number} pass_rate
+ * @property {number} mean_duration_ms
+ */
+
+/**
+ * @typedef {Object} CliOptions
+ * @property {number} iterations
+ * @property {string | undefined} host
+ * @property {boolean} live
+ * @property {boolean} json
+ * @property {boolean} help
+ */
+
 /** Pass-set (rule-of-thumb): verdicts that mean the runner did its
  *  job without an infrastructural failure. Anything else counts as
  *  a "fail" for the M1 pass-rate definition. Documented inline so
@@ -51,7 +75,11 @@ export const PASS_VERDICTS = Object.freeze(
   new Set(["pr-open", "no-change", "empty-queue", "validated"]),
 );
 
-/** Classify a verdict string. Returns "pass" / "fail" / "unknown". */
+/**
+ * Classify a verdict string. Returns "pass" / "fail" / "unknown".
+ * @param {string | undefined | null} verdict
+ * @returns {"pass" | "fail" | "unknown"}
+ */
 export function classifyVerdict(verdict) {
   if (!verdict) return "unknown";
   if (PASS_VERDICTS.has(verdict)) return "pass";
@@ -61,7 +89,10 @@ export function classifyVerdict(verdict) {
 /** Extract the verdict from one runner stdout block. Looks for
  *  `verdict=<x>` (the format emitted by `⏱ iteration #...` lines)
  *  and falls back to `stopReason: <x>`. Returns undefined if
- *  neither is present. */
+ *  neither is present.
+ *  @param {string} stdout
+ *  @returns {string | undefined}
+ */
 export function parseRunnerOutput(stdout) {
   const m1 = stdout.match(/verdict=([a-z][\w-]*)/);
   if (m1) return m1[1];
@@ -72,8 +103,12 @@ export function parseRunnerOutput(stdout) {
 
 /** Aggregate per-iteration outcomes into the report shape consumed
  *  by `--json` and the human summary. Pure: takes the array, returns
- *  the report. */
+ *  the report.
+ *  @param {IterationOutcome[]} outcomes
+ *  @returns {BenchmarkReport}
+ */
 export function aggregateBenchmark(outcomes) {
+  /** @type {Record<string, number>} */
   const verdictCounts = {};
   let totalDurationMs = 0;
   let passCount = 0;
@@ -94,7 +129,10 @@ export function aggregateBenchmark(outcomes) {
   };
 }
 
-/** Format the report as a human-readable summary. */
+/** Format the report as a human-readable summary.
+ *  @param {BenchmarkReport} report
+ *  @returns {string}
+ */
 export function formatBenchmarkSummary(report) {
   let out = "minsky benchmark — summary\n";
   out += `${"─".repeat(50)}\n`;
@@ -110,7 +148,10 @@ export function formatBenchmarkSummary(report) {
 
 /** Run one iteration of the runner and return `{ verdict, durationMs, exitCode }`.
  *  Side-effects: spawns `node novel/cross-repo-runner/bin/minsky-run.mjs`.
- *  Pure helpers above don't depend on this — they take outcomes as input. */
+ *  Pure helpers above don't depend on this — they take outcomes as input.
+ *  @param {{ host: string; live: boolean }} input
+ *  @returns {IterationOutcome}
+ */
 function runOneIteration({ host, live }) {
   const runnerBin = join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs");
   const args = ["--host", host, "--once"];
@@ -133,12 +174,15 @@ function runOneIteration({ host, live }) {
 }
 
 /** Resolve the host repo: explicit --host wins, then ~/.minsky/config.json,
- *  then cwd. Returns undefined if none is a git repo. */
+ *  then cwd. Returns undefined if none is a git repo.
+ *  @param {{ explicitHost: string | undefined }} input
+ *  @returns {string}
+ */
 function resolveHost({ explicitHost }) {
   if (explicitHost) return explicitHost;
   // Read default_host from ~/.minsky/config.json without parsing JSON
   // formally — we use a regex for robustness.
-  const cfgPath = join(process.env.HOME ?? "", ".minsky", "config.json");
+  const cfgPath = join(process.env["HOME"] ?? "", ".minsky", "config.json");
   if (existsSync(cfgPath)) {
     try {
       const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
@@ -152,11 +196,16 @@ function resolveHost({ explicitHost }) {
 
 /** Apply one CLI flag at index `i` of `args` to the accumulator `acc`.
  *  Returns the new index (advanced past any value the flag consumes).
- *  Extracted from `parseArgs` to keep cognitive complexity ≤10. */
+ *  Extracted from `parseArgs` to keep cognitive complexity ≤10.
+ *  @param {string[]} args
+ *  @param {number} i
+ *  @param {CliOptions} acc
+ *  @returns {number}
+ */
 function applyFlag(args, i, acc) {
   switch (args[i]) {
     case "--iterations":
-      acc.iterations = Number.parseInt(args[i + 1], 10);
+      acc.iterations = Number.parseInt(args[i + 1] ?? "", 10);
       return i + 1;
     case "--host":
       acc.host = args[i + 1];
@@ -179,8 +228,13 @@ function applyFlag(args, i, acc) {
   }
 }
 
+/**
+ * @param {string[]} argv
+ * @returns {CliOptions}
+ */
 function parseArgs(argv) {
   const args = argv.slice(2);
+  /** @type {CliOptions} */
   const acc = { iterations: 5, host: undefined, live: false, json: false, help: false };
   let i = 0;
   while (i < args.length) {
@@ -214,6 +268,10 @@ function printUsage() {
   );
 }
 
+/**
+ * @param {string[]} argv
+ * @returns {number}
+ */
 function main(argv) {
   const opts = parseArgs(argv);
   if (opts.help) {
@@ -233,6 +291,7 @@ function main(argv) {
     );
     return 2;
   }
+  /** @type {IterationOutcome[]} */
   const outcomes = [];
   for (let i = 0; i < opts.iterations; i++) {
     outcomes.push(runOneIteration({ host, live: opts.live }));
