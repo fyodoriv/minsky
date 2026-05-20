@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-Minsky runs AI coding agents on tasks in your repo's `TASKS.md`. It picks the highest-priority task, spawns an agent to implement it on a feature branch, and opens a draft PR for you to review.
+Minsky attaches to a git repo and improves it over time, using established software-engineering practices. It identifies issues, works on each one until it's fixed, then researches what to do next — by default it runs until you stop it.
 
 ## Getting started
 
