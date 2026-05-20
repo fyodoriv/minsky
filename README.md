@@ -9,17 +9,20 @@ Minsky attaches to a git repo and improves it over time, applying scientifically
 
 ## Getting started
 
-```bash
-# Install
-git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install
+**Recommended — let your agent install it.** If you're inside Claude Code, Cursor, Windsurf, Devin, Codex, or any AI coding agent that can read files and run commands, paste this:
 
-# Run
-minsky
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
+
+The agent reads [INSTALL.md](./INSTALL.md), clones minsky, registers your current folder as the host, asks you once about anonymized telemetry, and starts the daemon. Total: ~60 seconds, one human prompt.
+
+**Manual install** — for when you don't have an agent handy:
+
+```bash
+git clone https://github.com/fyodoriv/minsky.git ~/apps/tooling/minsky
+cd ~/apps/tooling/minsky && pnpm install && bin/minsky
 ```
 
 The first run installs launchd persistence so minsky survives reboots; later runs in the same folder attach to the existing daemon. `Ctrl-C` detaches the dashboard without stopping the daemon; `minsky stop` shuts everything down (zero ghost processes).
-
-One-command `npx minsky` install is tracked as P1 `minsky-npx-install-and-run` — until it ships, the clone-and-install flow above is the canonical path.
 
 ## What it actually does
 
