@@ -20,7 +20,7 @@ No separate build step needed. `pnpm install` runs the root `prepare` hook which
 ## Running minsky
 
 ```bash
-minsky --daemon --hosts-dir ~/apps/tooling  # background daemon across repos
+minsky --daemon --hosts-dir <repos-parent-dir>  # background daemon across repos
 minsky --local --daemon                     # local-only (zero cloud tokens)
 minsky status                               # PID, uptime, log tail
 minsky logs                                 # tail -f daemon log

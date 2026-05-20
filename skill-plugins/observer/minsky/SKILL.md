@@ -77,7 +77,7 @@ a single repo. When in doubt, ask.
 | "dry run" | `minsky --no-live --once` (blocking OK for dry-run) |
 
 **Path resolution**: `minsky` (the PATH shim) auto-discovers the minsky
-repo via `$MINSKY_REPO` env → `~/apps/tooling/minsky` → `~/apps/minsky`
+repo via `$MINSKY_REPO` env → `<minsky-repo>` → `~/apps/minsky`
 → `~/code/minsky` → `~/src/minsky`. If your layout differs, set
 `export MINSKY_REPO=/your/path/to/minsky` in your shell profile.
 

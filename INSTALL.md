@@ -39,13 +39,13 @@ If the command errors, the operator's current folder isn't a git repo. Ask: "Min
 
 ## Step 3 — clone and install minsky
 
-The canonical location is `~/apps/tooling/minsky`. If the operator has a different convention, follow it; otherwise:
+Pick an install location. The default is `$HOME/minsky`; if the operator has a different convention (e.g., `~/code/minsky`, `~/src/minsky`), follow it. Record your choice in the `INSTALL_DIR` shell variable so the rest of the runbook stays consistent:
 
 ```bash
-mkdir -p ~/apps/tooling
-cd ~/apps/tooling
-[ -d minsky ] || git clone https://github.com/fyodoriv/minsky.git
-cd minsky
+INSTALL_DIR="${INSTALL_DIR:-$HOME/minsky}"
+mkdir -p "$(dirname "$INSTALL_DIR")"
+[ -d "$INSTALL_DIR" ] || git clone https://github.com/fyodoriv/minsky.git "$INSTALL_DIR"
+cd "$INSTALL_DIR"
 pnpm install
 ```
 
@@ -59,7 +59,7 @@ case "$SHELL" in
   *)       RC=~/.profile ;;
 esac
 
-LINE='export PATH="$HOME/apps/tooling/minsky/bin:$PATH"'
+LINE="export PATH=\"$INSTALL_DIR/bin:\$PATH\""
 grep -qF "$LINE" "$RC" 2>/dev/null || echo "$LINE" >> "$RC"
 ```
 
@@ -120,7 +120,7 @@ Until then: server submission is a no-op. The file lives only on the operator's 
 
 ```bash
 cd "$HOST_PATH"
-~/apps/tooling/minsky/bin/minsky
+"$INSTALL_DIR/bin/minsky"
 ```
 
 The first invocation:
@@ -142,7 +142,7 @@ Tell the operator, in this exact format (substitute the bracketed values):
 ```text
 Minsky install complete.
 
-  Location:       ~/apps/tooling/minsky
+  Location:       <INSTALL_DIR>
   Host:           <HOST_PATH>
   Agent backend:  <AGENT>
   Telemetry:      <yes|no, recorded at <TIMESTAMP>>
@@ -152,7 +152,7 @@ Minsky install complete.
   Uninstall:      `minsky uninstall` (interactive; --force for scripts).
 
 Next: add tasks to <HOST_PATH>/TASKS.md with the rule-9 fields documented at
-~/apps/tooling/minsky/vision.md, and Minsky will pick them up.
+<INSTALL_DIR>/vision.md, and Minsky will pick them up.
 ```
 
 Then exit cleanly. Do not pick a task from the operator's host repo. Do not modify code in the host repo. Do not push to any remote. The daemon is now running and will do that work itself in the background.
@@ -163,8 +163,8 @@ Then exit cleanly. Do not pick a task from the operator's host repo. Do not modi
 | --- | --- | --- |
 | `command not found: pnpm` | corepack not enabled | `corepack enable pnpm` (may need sudo on Linux) |
 | `pnpm install` fails with engine error | Node < 22 | upgrade Node; do not auto-install — ask first |
-| `command not found: minsky` after PATH update | shell not re-sourced | use the absolute path `~/apps/tooling/minsky/bin/minsky` for the current shell |
-| Daemon won't start | launchd / systemd permissions | run `~/apps/tooling/minsky/bin/minsky doctor` and surface the report to the operator |
+| `command not found: minsky` after PATH update | shell not re-sourced | use the absolute path `$INSTALL_DIR/bin/minsky` for the current shell |
+| Daemon won't start | launchd / systemd permissions | run `$INSTALL_DIR/bin/minsky doctor` and surface the report to the operator |
 | `git clone` fails behind a corporate proxy | network policy | ask the operator for their HTTPS proxy URL and `git config --global http.proxy "$URL"` |
 | `~/.minsky/config.json` already exists with a different `default_host` | operator has Minsky on another host | DO NOT overwrite; ask the operator whether to add this host (multi-host mode requires `--hosts-dir`) |
 

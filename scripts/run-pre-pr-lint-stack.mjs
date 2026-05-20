@@ -261,6 +261,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-13-sibling-anchors",
       "rule-17-proactive-heal",
       "no-hardcoded-user-paths",
+      "no-personal-paths-in-docs",
       "rule-9-tasksmd-fields",
       "sandbox-env-declared",
       "sbom-shape",
@@ -365,6 +366,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-hardcoded-user-paths.mjs"],
+  },
+  {
+    name: "no-personal-paths-in-docs",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-personal-paths-in-docs.mjs"],
   },
   {
     name: "rule-9-tasksmd-fields",
