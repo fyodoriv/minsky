@@ -11,23 +11,42 @@
 # Install
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install
 
-# Run (starts daemon + survives reboots + opens live dashboard)
+# Run — starts the daemon (if needed), installs launchd persistence,
+# and drops you into the live dashboard. Same command works on first run
+# AND every run after: if a daemon is already running for this folder,
+# you attach to it. Ctrl-C detaches; the daemon keeps running.
 minsky
 
-# Monitor
-minsky watch
-
-# Update after fixes
-minsky update
-
-# Stop everything (zero ghost processes)
+# Stop everything (zero ghost processes — kills runners + agent children)
 minsky stop
-
-# Uninstall
-minsky stop && minsky uninstall-daemon && rm -rf .minsky/
 ```
 
 That's it. Minsky reads your `TASKS.md`, picks the highest-priority task, spawns an AI agent (Devin, Claude, or local), and opens a PR. Repeats 24/7. Survives reboots.
+
+### Picking up upstream fixes
+
+When new fixes land on `main`, pull them in:
+
+```bash
+git pull
+```
+
+A post-merge git hook handles most of the redeploy work automatically:
+
+| Change in the pull | Auto-runs on `git pull` |
+|---|---|
+| `pnpm-lock.yaml` or `package.json` | `pnpm install` (refreshes `dist/`) |
+| `bin/minsky` (and your plist exists) | Regenerates the launchd plist (no daemon kill) |
+| `distribution/systemd/*.{service,target}` | `systemctl --user daemon-reload` (Linux) |
+| Any of the above | `pre-pr-lint --stage=fast` as advisory sanity check |
+
+**What it does NOT auto-do:** restart the running daemon. The current iteration may be mid-spawn and killing it would waste compute, so picking up new daemon-loop behavior still requires:
+
+```bash
+minsky update   # graceful stop → pull → rebuild → restart from next iteration
+```
+
+Tracked as P0 `minsky-auto-restart-daemon-on-pull` in `TASKS.md` — the goal is to make `minsky update` redundant by having the daemon notice the sentinel between iterations and gracefully restart itself. Opt out of any auto-install behavior with `MINSKY_NO_AUTO_INSTALL=1` (one-shot) or `touch ~/.minsky/no-auto-install` (per-machine).
 
 ---
 
@@ -69,14 +88,19 @@ That's it. Minsky reads your `TASKS.md`, picks the highest-priority task, spawns
 ## CLI reference
 
 ```bash
-minsky                    # start daemon + auto-install persistence + open dashboard
-minsky watch              # live dashboard (stability %, iterations, alerts)
+minsky                    # start-or-attach: daemon + auto-install persistence + dashboard
+minsky watch              # attach to live dashboard (Ctrl-C detaches, daemon keeps running)
 minsky status             # quick health: PID, uptime, stability %
 minsky logs               # tail daemon log
 minsky stop               # thorough shutdown (launchd + runners + agents)
 minsky update             # stop → git pull → rebuild → restart from same spot
+minsky doctor             # check host readiness (node, git, gh, config, agents)
+minsky report             # baseline / delta against .minsky/metric-snapshots/
+minsky benchmark          # run the cross-repo runner N times and report pass-rate
+minsky init               # one-command bootstrap on any git repo
+minsky uninstall          # full removal (dry-run by default; --force to delete)
 minsky install-daemon     # install launchd plist (auto-done on first run)
-minsky uninstall-daemon   # remove launchd plist
+minsky uninstall-daemon   # remove launchd plist only (preserves config + logs)
 ```
 
 ## Configuration
@@ -136,6 +160,18 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 | **OpenHands** (OSS) | Higher SWE-bench | Daemon mode, budget mgmt, multi-repo |
 | **Aider** (OSS) | Best local models | Minsky uses aider as its local backend |
 | **Cursor Agent** | IDE integration | Headless, survives IDE close, multi-repo |
+
+## Uninstall
+
+```bash
+# Preview what would be removed (safe — no deletion)
+minsky uninstall
+
+# Full removal: stops daemon, removes launchd plist, deletes ~/.minsky/
+minsky uninstall --force
+```
+
+The host repo and its `.minsky/` experiment store (your iteration history) are not touched — those are your data. Only per-machine state under `~/.minsky/` and `~/Library/LaunchAgents/com.minsky.daemon.plist` are removed.
 
 ## License
 
