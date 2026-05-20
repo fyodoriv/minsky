@@ -31,7 +31,6 @@
   - **Acceptance**: (1) Run `minsky --daemon --host ~/apps/tooling/minsky` for 1 hour; observe ≥3 successful task spawns (verdict ∈ {pr-open, no-change, scope-leak} — anything that's NOT spawn-failed); (2) Every spawn-failed entry in the daemon log includes a non-empty `signal:` or `stderr:` field; (3) New regression test asserting `runtime-paths-coverage.test.ts > spawn capture > signal field present when child SIGKILL'd`.
   - **Note**: blocked by nothing — the diagnostic capture (a) lands first; then we KNOW the failure mode; then fix.
 
-
 <!-- Observations filed 2026-05-18 from live daemon session (PID 3748, devin agent, --hosts-dir ~/apps/tooling). 3 P0 + 3 P1 findings. -->
 
 <!-- Observations filed 2026-05-19 by Devin session (rule-17-proactive-healing PR #648). 2 new P0 bugs surfaced by the live restart of `minsky` while developing the rule-17 fixes. Both shipped: `minsky-bin-git-clean-fd-multi-agent-safety-violation` in PR #650, `minsky-bin-auto-resets-to-main-surprise` in PR #651 (graceful-stop sentinel + reset-host-if-crashed subcommand). -->
