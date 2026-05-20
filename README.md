@@ -192,6 +192,66 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 .minsky/ sidecar — config, experiment store, iteration records
 ```
 
+## How Minsky works inside
+
+Six things that make minsky distinctive at the implementation level. File paths included so any claim is auditable.
+
+### 1. Multi-layer team of workers
+
+A task can be worked by a single backend OR by a pipeline of specialised personas. Per-task backend selection ships today; multi-persona-per-task pipelines land at M2.
+
+- **Per-task backend selection** (shipped). `novel/tick-loop/src/llm-provider-spawn-strategy.ts` reads the task's `**Tags**` field and picks the right agent: claude-sonnet for prose-heavy work, devin for cross-repo refactors, local Ollama for mechanical lint fixes. You don't pay $4 for a task a $0.20 model could do.
+- **Multi-persona pipelines per task** *(M2 — tracked at `multi-persona-pipeline-handoff-spec`)*. When `novel/handoff-spec/` ships, a complex task spawns researcher → planner → developer → QA → reviewer in sequence. Each persona writes its handoff to `.minsky/handoffs/<task-id>/<persona>-<iso-ts>.md` for the next persona to read. Failure in any persona halts the pipeline and files `pipeline-failed-<task>-<persona>` for operator review.
+
+### 2. MAPE-K control loop (Kephart & Chess 2003, IBM autonomic computing)
+
+The tick-loop daemon literally maps to the four MAPE-K phases plus the shared Knowledge base. This isn't decorative — adding a new phase means adding to the right file.
+
+- **Monitor** — `novel/cross-repo-runner/src/runtime-invariants.ts` checks system state before every iteration (PATH resolves, agent binary works, no zombie processes from previous iterations).
+- **Analyze** — `novel/cross-repo-runner/src/task-finder.ts` reads `TASKS.md` and picks the highest-priority task with complete rule-9 fields.
+- **Plan** — `novel/tick-loop/src/spawn-strategy.ts` decides which backend to invoke with what prompt.
+- **Execute** — `novel/tick-loop/src/daemon.ts` spawns the agent process and waits for the iteration verdict.
+- **Knowledge** — `.minsky/experiment-store/` (per-host iteration records, append-only JSONL per task) + `~/.minsky/config.json` (per-machine config).
+
+### 3. Constitution = 18 rules, each enforced as a CI lint
+
+`vision.md` documents the constitution. Every rule has a corresponding `scripts/check-rule-N-*.mjs` linter in the `pre-pr-lint` stack. PRs that violate a rule are rejected by CI before merge — not by a reviewer's good behaviour.
+
+The load-bearing ones:
+
+- **Rule #1 — don't reinvent the wheel** (`scripts/check-rule-1-novel-justification.mjs`) — rejects any new `novel/*` code whose README doesn't cite the existing libraries it considered and explain why each didn't fit.
+- **Rule #9 — pre-registered hypothesis-driven development** (`scripts/check-rule-9-tasksmd-fields.mjs`, iron rule) — every P0/P1 task must declare Hypothesis / Success / Pivot / Measurement / Anchor on single lines before work begins. Tasks missing any field are silently dropped by the picker.
+- **Rule #12 — scope discipline** (`scripts/check-rule-12-scope-discipline.mjs`, iron rule) — PRs that touch files outside the task's declared scope are rejected.
+- **Rule #17 — proactive healing** (`scripts/check-rule-17-proactive-heal.mjs`, iron rule) — PRs that observe a problem without ALSO landing a fix in the same diff are rejected.
+- **Rule #18 — fake data and deprecations explicitly marked** *(P0 `fake-data-and-deprecation-marker-discipline`)* — every stub and every `@deprecated` export must carry a canonical marker comment with a linked task id, so future readers can't mistake a temporary mock for production code.
+
+Full list with literature citations in [`docs/PRACTICES.md`](docs/PRACTICES.md).
+
+### 4. Soft-by-default failure modes
+
+The daemon is designed to keep running. A single bad iteration shouldn't be able to wedge the whole loop for an overnight session. Three concentric supervisors:
+
+- **Iteration-level** — when an iteration ends in `spawn-failed`, `scope-leak`, or `validated`, the verdict is logged and the loop moves on to the next task. No exception propagates.
+- **Daemon-level** — the launchd plist (macOS) / systemd-user unit (Linux) runs with `KeepAlive=true`. If the Node process dies, the supervisor respawns it within seconds, preserving `.minsky/` state.
+- **Network-level** — when the cloud agent returns "quota exceeded", `novel/tick-loop/src/claude-exhaustion-state.ts` records the exhaustion. The next iteration falls back to a local Ollama model. *(Mid-run swap-and-swap-back is tracked at P0 `runtime-token-limit-auto-pivot-local-and-back`.)*
+
+This is the Erlang let-it-crash pattern (Armstrong 2007), composed with an OS-level supervisor.
+
+### 5. Dynamic watchdog (p95 from history)
+
+The iteration timeout isn't hardcoded. `novel/cross-repo-runner/src/dynamic-timeouts.ts` reads recent iteration durations from `.minsky/experiment-store/`, computes the p95, multiplies by 1.5, and uses that as the watchdog. Slower machine? Larger budget. Faster machine? Tighter loop. Same code, zero per-machine config.
+
+The watchdog and the iteration cadence (`tick`) are both re-derived from the same history every iteration, so the loop adapts continuously rather than at install time.
+
+### 6. Self-improvement on itself
+
+Minsky runs on its own repo with the same daemon every operator runs on theirs. The `host-cto-audit.ts` pass after each iteration reviews the diff for things worth tracking and proposes new tasks for operator review. Most P0s in this repo's `TASKS.md` were surfaced by daemon iterations:
+
+- `spawn-failed-exit-minus-one-silent-empty-stderr` — found by a daemon iteration that observed 4 consecutive spawn-failed verdicts and filed the task with the diagnostic capture.
+- `walker-drains-one-host-forever` — found by daemon observation when the multi-host walker never advanced past the first host.
+
+The daemon refactors the daemon. Opt-out via `MINSKY_CTO_AUDIT=off` in `~/.minsky/config.json`.
+
 ## Key files
 
 Minsky adds **one tracked file to your host repo** (`TASKS.md`) and one gitignored dotfolder (`.minsky/`). Everything else lives in your home directory or inside the minsky repo itself.
