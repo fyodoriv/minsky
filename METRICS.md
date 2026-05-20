@@ -40,9 +40,19 @@ Formula: `git log --all --since="30 days ago" --oneline --grep="mape-k" | wc -l`
 
 _Budget: 1d_
 
-**Value:** (stub) — requires OTEL backend for supervisor restart-to-claim latency spans (M1 gap); `orchestrate.jsonl` proxy tracked in `fleet-stability-centralized-reporting`
+**Value:** (stub) — requires OTEL backend for supervisor restart-to-claim latency spans (M1 gap); `orchestrate.jsonl` proxy tracked in `fleet-stability-centralized-reporting`. For the catalogued-failures subset, see `mttr-self-heal` below.
 
 Formula: `histogram_quantile(0.95, supervisor_restart_to_claim_latency_seconds[7d])`
+
+## mttr-self-heal — Mean time to recovery for catalogued automated heals, 30d
+
+_Budget: 7d · Source: `scripts/heal-mttr-report.mjs`_
+
+**Value:** no heal-events yet — measurable once any catalogued helper fires (real p95 number appears here once `.minsky/heal-events.jsonl` is non-empty)
+
+Formula: p95 of `duration_ms` across heal-events with `outcome=healed` over the trailing 30 days, per host. Computed by `node scripts/heal-mttr-report.mjs --window=30d --json | jq '.[0].mttr_p95_ms'`. M1.13 acceptance: p95 < 300_000 ms (5 min).
+
+Substrate: `novel/observer/heals/` (the 4 automated helpers — stale-pid, missing-node-modules, stale-tsbuildinfo, stuck-command). User-story: `user-stories/007-agent-self-heals-catalogued-failures.md`.
 
 ## wrist-dwell — Wrist dwell (inverted)
 
