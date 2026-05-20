@@ -201,29 +201,41 @@ If budget exhausted → **STOP** and jump to §5 (Swift-PR).
 
 ## 4. Safe-heal (very bounded)
 
-The observer may ONLY attempt a code / config fix when ALL of these
-hold:
+The observer may attempt a code / config fix when ALL of these hold:
 
 1. The failure pattern is in the catalogue below (exact signal match).
-2. The fix is single-file, single-line, and obviously correct to a
-   third party reading the repro.
-3. The operator confirms (or is absent AND the risk is zero — e.g.
-   setting an env var in the current shell).
+2. The Status column says `automated` — call the helper at the listed
+   path. Status `operator-recipe` means run the recipe text manually.
+   Status `blocked-by-policy` means escalate; do NOT automate.
+3. For `automated` heals: the helper writes only to `.minsky/`,
+   `node_modules/`, or `.tsbuildinfo` artifacts (regeneratable by
+   definition). NEVER to source code, NEVER outside the worktree.
+
+After this PR (M1.13 phase 1): **11 catalogued failure modes**,
+classified as **4 automated**, **6 operator-recipe**, **1
+blocked-by-policy**. Phase 2 (`promote-remaining-heal-recipes`)
+promotes the remaining 6 where policy allows.
 
 ### Heal catalogue
 
-| Signal (in stderr / banner) | Safe-heal recipe |
-|---|---|
-| `MINSKY_REPO=<path> but path does not exist` | Unset `MINSKY_REPO` in the current shell + retry. |
-| `host is not bootstrapped` | Run `minsky-bootstrap <host>`. Wait for it to finish, then retry `minsky`. |
-| `Run minsky-bootstrap <host> first` | Same — run the bootstrap. |
-| `node: command not found` | Out of scope — tell the operator to `nvm install 20` and exit. |
-| `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
-| `stale PID file (PID XXXX not running)` | `rm -f ~/.minsky/daemon.pid` then retry. This is the #1 most common issue. |
-| `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, clean PID file; if alive, the daemon is fine. |
-| `unexpected argument` from devin | Minsky build is stale — `cd $MINSKY_REPO && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
-| `MODULE_NOT_FOUND` from biome/lefthook | Node version mismatch or missing platform deps. Run `pnpm install` in the minsky repo. |
-| `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
+| Status | Signal (in stderr / banner) | Safe-heal recipe |
+|---|---|---|
+| `operator-recipe` | `MINSKY_REPO=<path> but path does not exist` | Unset `MINSKY_REPO` in the current shell + retry. (Shell env in user's interactive session — promotion blocked by policy.) |
+| `operator-recipe` | `host is not bootstrapped` | Run `minsky-bootstrap <host>`. Wait for it to finish, then retry `minsky`. |
+| `operator-recipe` | `Run minsky-bootstrap <host> first` | Same — run the bootstrap. |
+| `blocked-by-policy` | `node: command not found` | Out of scope — tell the operator to `nvm install 20` and exit. Promotion permanently blocked (modifying user shell env is out-of-policy). |
+| `operator-recipe` | `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
+| **`automated`** | `stale PID file (PID XXXX not running)` | `novel/observer/heals/heal-stale-pid.mjs` — detects via `kill(0, pid) → ESRCH`, applies via `unlinkSync(pidPath)`. The #1 most common issue. |
+| `operator-recipe` | `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, the stale-pid heal above runs; if alive, the daemon is fine. |
+| `operator-recipe` | `unexpected argument` from devin | Minsky build is stale — `cd $MINSKY_REPO && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
+| **`automated`** | `MODULE_NOT_FOUND` from biome/lefthook (worktree) | `novel/observer/heals/heal-worktree-missing-node-modules.mjs` — detects worktree + missing `node_modules/` + present `package.json`; applies `pnpm install --prefer-offline`. |
+| **`automated`** | `.tsbuildinfo` references prior node version | `novel/observer/heals/heal-stale-tsbuildinfo.mjs` — detects via version mismatch in `.tsbuildinfo` JSON; applies via `unlinkSync` per stale file (recursive). |
+| `operator-recipe` | `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
+| **`automated`** | Shell polled ≥3 times with no new output | `novel/observer/heals/heal-stuck-command.mjs` — invoked by the agent runtime's shell-polling loop (not the daemon). Detects via `pollsWithoutOutput >= 3`; applies via `kill_shell + retry narrowly`. See `templates/AGENTS.md` § "Stuck-command detection & recovery". |
+
+**MTTR for automated heals** is published as `mttr-self-heal` in
+METRICS.md. Source: `.minsky/heal-events.jsonl` per host, aggregated
+by `node scripts/heal-mttr-report.mjs --window=30d --json`.
 
 **NEVER**:
 
