@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-Minsky attaches to a git repo and improves it over time, using established software-engineering practices. It identifies issues, works on each one until it's fixed, then researches what to do next — by default it runs until you stop it.
+Minsky attaches to a git repo and improves it over time, applying scientifically proven software-engineering practices — TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, error budgets — each backed by a literature citation ([PRACTICES](docs/PRACTICES.md)). It identifies issues, works on each one until it's fixed, then researches what to do next — by default it runs until you stop it.
 
 ## Getting started
 
