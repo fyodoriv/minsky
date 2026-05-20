@@ -40,28 +40,28 @@ The first run installs launchd persistence so minsky survives reboots; later run
 
 ## Why Minsky?
 
-Because doing autonomous coding by hand is exhausting. Seven specific exhaustions:
+Seven things you get with minsky running on a repo:
 
-- **Asking your agent "what should I work on next?" after every task gets old fast.**
-  Minsky reads `TASKS.md`, picks the highest-priority item with complete rule-9 fields, and starts. When it finishes, it picks the next one. No prompt required.
+- **Continuous, unattended repo improvement — with safety guards that hold.**
+  Minsky reads `TASKS.md`, picks the highest-priority task with complete rule-9 fields, and gets to work. Every PR is a draft for your review; every iteration passes 15 lint gates including secret-scan, scope-discipline (rule #12), and security review (rule #13). No agent can push to `main`. No PR merges without your approval. The safety boundary is mechanical — enforced by deterministic linters, not by agent good behaviour.
 
-- **The agent that knows the codebase best is also the one who should be writing tickets.**
-  After every iteration, a CTO-audit pass (`novel/cross-repo-runner/src/host-cto-audit.ts`) reviews the diff, files new tasks for things it noticed, and re-sorts priorities. The backlog grooms itself. Most P0s currently in `TASKS.md` were surfaced by daemon iterations, not by humans.
+- **Issues your agents notice get surfaced — instead of buried in logs.** *(opt-out via `MINSKY_CTO_AUDIT=off`)*
+  After each iteration, an optional CTO-audit pass (`novel/cross-repo-runner/src/host-cto-audit.ts`) reviews the diff for things worth tracking — a test that started flaking, a deprecation warning, a TODO that's been around for 6 months. Anything it spots becomes a draft TASKS.md entry for your review. You decide what's worth keeping; the daemon never silently mutates your backlog.
 
-- **No single model is good at architecture, implementation, and review at the same time.** *(per-task backend selection today; per-task multi-persona pipelines are an M2 milestone)*
-  Minsky picks the right agent backend per task (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) — claude for prose-heavy work, devin for cross-repo refactors, local for cheap mechanical iteration. The "researcher → planner → implementer → QA → reviewer" pipeline on a single task is being threaded through.
+- **Match the model to the task — pay Sonnet prices only for Sonnet work.** *(per-task backend today; multi-persona pipelines are an M2 milestone)*
+  Minsky picks the agent backend per task (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`): claude for prose-heavy work, devin for cross-repo refactors, local for mechanical lint fixes. You don't pay $4 for an iteration that a $0.20 model could have done. The "researcher → planner → implementer → QA → reviewer" pipeline on a single task is in flight as M2.
 
-- **The 100th time an agent reinvents the wheel is the 100th time a human says "why didn't you just use lodash?"** *(rule #1, enforced)*
-  Rule #1 forbids reinventing the wheel. `scripts/check-rule-1-novel-justification.mjs` rejects any new `novel/` code whose README doesn't cite the existing libraries / patterns considered and explain why each didn't fit. Forced research, mechanically.
+- **"Don't reinvent the wheel" enforced at PR time.** *(rule #1, enforced)*
+  `scripts/check-rule-1-novel-justification.mjs` rejects any new `novel/` code whose README doesn't cite the existing libraries considered and explain why each didn't fit. Every PR ships with a research trail you can audit before you merge. Forced research, mechanically.
 
-- **Shipping a tool that gets worse over time is not a flex.**
-  Minsky reads its own daemon metrics every iteration, files tasks against itself when something is off (the spawn-failed-exit-minus-one P0 was filed by a Devin session, not by Fyodor), and ships fixes to its own bugs. The daemon refactors the daemon.
+- **A tool that improves itself.**
+  Minsky reads its own daemon metrics every iteration, files tasks against its own stability, and ships fixes through the same agent backends operators use. The daemon refactors the daemon — most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
 
-- **Your Anthropic invoice running out at 2am should not end the night.** *(detection today; mid-run swap is P0 `runtime-token-limit-auto-pivot-local-and-back`)*
-  When the cloud agent returns "quota exceeded", minsky detects exhaustion (`novel/tick-loop/src/claude-exhaustion-state.ts`) and swaps to a local Ollama model so the loop keeps making progress until your tokens return. The bidirectional mid-run swap-and-swap-back is in flight.
+- **Keep iterating when the cloud agent runs dry.** *(detection today; mid-run swap is P0 `runtime-token-limit-auto-pivot-local-and-back`)*
+  When the cloud agent returns "quota exceeded", minsky detects exhaustion (`novel/tick-loop/src/claude-exhaustion-state.ts`) and swaps to a local Ollama model so the loop keeps making progress. When your tokens return, minsky swaps back. The loop never stops because you ran out of budget.
 
-- **"Let me know if you have questions" is a useless contract with an agent in another timezone.** *(P0 `minsky-human-comm-via-file`)*
-  Agents drop questions into `.minsky/qa-log.md`. You edit the file when you wake up. The agent picks up your answer via `fs.watch` and continues — no sync meeting, no 4-hour-blocked iteration, no daily DMs.
+- **Async Q&A that respects your timezone.** *(P0 `minsky-human-comm-via-file`)*
+  Agents drop questions into `.minsky/qa-log.md`. You answer when you open your laptop — by editing the file. The agent picks up your answer via `fs.watch` and continues. No sync meeting, no 4-hour-blocked iteration, no daily DMs to chase.
 
 ## Why "Minsky"?
 
