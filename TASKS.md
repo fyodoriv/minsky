@@ -1764,6 +1764,18 @@
 
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
 
+- [ ] `pre-pr-lint-stack-vitest-hangs-vs-standalone` — `pnpm pre-pr-lint --stage=full` hangs in its `vitest` subprocess (10+ minutes, no output) while `npx vitest run` standalone completes in 33s with 3507/3518 passing
+  - **ID**: pre-pr-lint-stack-vitest-hangs-vs-standalone
+  - **Tags**: p2, infra, pre-pr-lint, vitest, observed-2026-05-20
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-20 verify cycle for `agents-can-self-heal-minsky-m1-13` (PR opening from `plan/agents-self-heal-minsky`). Standalone `npx vitest run --testTimeout=15000 --bail=1 --reporter=verbose` completed in 33.56s with `3507 passed | 2 skipped | 9 todo (3518)`. The same vitest invoked by `scripts/run-pre-pr-lint-stack.mjs`'s `vitest` step (via `pnpm test`) hung for >10 min in two separate runs; killing the process and re-running standalone reproduced the green result. All other 45 gates in the lint stack ran <2.5s.
+  - **Details**: Diagnose why `pnpm test` invoked by the lint stack hangs but the same vitest invoked directly doesn't. Suspects: (a) the lint stack runs vitest under `tee` to a file, which may block stdin pipe / buffering; (b) `vitest.config.ts` has `retry: 2` which can multiply duration on a flaky test, possibly compounding under the stack's runner; (c) coverage instrumentation kicks in only via `pnpm test` (not `npx vitest run`) and hangs on a specific worker; (d) lefthook pre-pr-lint pre-push gates re-invoke vitest recursively. Find the root cause; fix it OR add a `--reporter=basic --bail=1` to the lint stack's vitest invocation so it surfaces hangs as test failures within 60s.
+  - **Files**: `scripts/run-pre-pr-lint-stack.mjs` (the lint stack runner), `vitest.config.ts` (retry config), `package.json` (`test` script), `lefthook.yml` (pre-push wiring).
+  - **Hypothesis**: a specific test or worker in the full vitest suite blocks indefinitely when stdout is piped through `tee`, but not when output goes directly to the terminal. Falsifiable: `pnpm test 2>&1 | tee /tmp/x.log` reproduces the hang while `pnpm test` (no pipe) completes; OR running `npx vitest run` with the exact `pnpm test` args reproduces the hang.
+  - **Success**: `pnpm pre-pr-lint --stage=full` completes (success or failure) within 5 minutes wall-clock on the M2-class fleet host. Falsifiable: run 10 times; ≥9 complete within 5 min OR a deterministic failure is reported.
+  - **Pivot**: if the hang is in vitest itself (not the stack's runner), file upstream + work around by running `npx vitest run` instead of `pnpm test` in the stack.
+  - **Measurement**: `time pnpm pre-pr-lint --stage=full` wall-clock; sample 10 runs; histogram p50/p95.
+  - **Anchor**: vision.md row 73 (`scripts/run-pre-pr-lint-stack.mjs` — the lint stack runner pattern); AGENTS.md rule #10 (deterministic enforcement — a gate that can't terminate isn't a gate); operator directive 2026-05-20 (verify M1.13 PR before push).
 
 <!-- Moved from P0 2026-05-18: M4 tasks deprioritized until M1+M2+M3 ship (see MILESTONES.md). -->
 - [ ] `operator-machine-budget-autoscale` — minsky reads a single operator-defined machine-utilisation budget (default 70%, raised explicitly for swarm), auto-scales worker concurrency to *match* it via effective-throughput feedback, strips OS throttles that make the budget unreachable, and propagates host changes to dotfiles/agentbrew so they're durable (vision.md rule #15 operationalised)
