@@ -20,8 +20,9 @@ The agent reads [INSTALL.md](./INSTALL.md), clones minsky, registers your curren
 **Manual install** — for when you don't have an agent handy:
 
 ```bash
-git clone https://github.com/fyodoriv/minsky.git ~/apps/tooling/minsky
-cd ~/apps/tooling/minsky && pnpm install && bin/minsky
+git clone https://github.com/fyodoriv/minsky.git
+cd minsky && pnpm install
+./bin/minsky
 ```
 
 The first run installs launchd persistence so minsky survives reboots; later runs in the same folder attach to the existing daemon. `Ctrl-C` detaches the dashboard without stopping the daemon; `minsky stop` shuts everything down (zero ghost processes).

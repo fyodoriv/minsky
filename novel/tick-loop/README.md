@@ -340,7 +340,7 @@ PRs #394/#395 shipped graceful-degrade for the lefthook permission denial caused
 
 ```text
   ✓ git config core.hooksPath
-  ⚠ git config core.attributesfile  — /Users/dotfiles-user/.gitattributes (global) does not exist; recover with `git config --global --unset core.attributesfile`
+  ⚠ git config core.attributesfile  — $HOME/.gitattributes (global) does not exist; recover with `git config --global --unset core.attributesfile`
   ✓ git config core.excludesfile
 ```
 

@@ -191,7 +191,7 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 `src/shim-resolve.ts` exports `resolveMinskyRepo({ env, exists, homeDir })` — a pure, zero-dependency function consumed by the `bin/minsky` PATH shim (lives at the repo root) so any-folder operator invocations work without hand-resolving the minsky repo. Resolution chain (first match wins):
 
 1. `env.MINSKY_REPO` if set AND the path exists on disk.
-2. `~/apps/tooling/minsky` (Example canonical layout).
+2. `<minsky-repo>` (Example canonical layout).
 3. `~/apps/minsky`, `~/code/minsky`, `~/src/minsky` (common community layouts).
 
 Returns `{ ok: true, repoPath, source }` (where `source` records which seam matched, surfaced in logs + the installer's audit print-out) OR `{ ok: false, hint }` with a message that tells the operator how to fix it. Tested by `shim-resolve.test.ts` (10 paired cases covering env-var hit/miss, the 4-step fallback chain, ordering, and home-trailing-slash handling). See the root `README.md` § "Observer layer" for the operator-side install + slash-command surface, and `skill-plugins/observer/minsky/SKILL.md` for the observer protocol the shim is part of.
