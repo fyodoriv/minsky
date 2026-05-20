@@ -133,7 +133,7 @@ function collectWristDwell() {
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates ≥10 metric collectors with fallback logic — refactor tracked in TASKS.md `scripts-complexity-refactor`
 async function main() {
-  console.log(`Collecting metrics for ${TODAY}...\n`);
+  console.info(`Collecting metrics for ${TODAY}...\n`);
 
   const collectors = {
     "loop-uptime": collectLoopUptime,
@@ -161,16 +161,16 @@ async function main() {
       const result = fn();
       if (result !== null) {
         snapshot[id] = result;
-        console.log(
+        console.info(
           `  ✅ ${id}: ${typeof result.value === "string" ? result.value : JSON.stringify(result.value)}`,
         );
         collected++;
       } else {
-        console.log(`  ⚠️  ${id}: no data available`);
+        console.info(`  ⚠️  ${id}: no data available`);
         failed++;
       }
     } catch (err) {
-      console.log(`  ❌ ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      console.info(`  ❌ ${id}: ${err instanceof Error ? err.message : String(err)}`);
       failed++;
     }
   }
@@ -180,11 +180,11 @@ async function main() {
   const snapshotPath = resolve(SNAPSHOT_DIR, `${TODAY}.json`);
   writeFileSync(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
 
-  console.log(`\n${collected}/${collected + failed} metrics collected → ${snapshotPath}`);
+  console.info(`\n${collected}/${collected + failed} metrics collected → ${snapshotPath}`);
 
   // Also write a summary to stdout as JSON for piping
   if (process.argv.includes("--json")) {
-    console.log(
+    console.info(
       JSON.stringify({ date: TODAY, path: snapshotPath, collected, failed, snapshot }, null, 2),
     );
   }
