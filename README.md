@@ -63,7 +63,7 @@ Seven things you get with minsky running on a repo:
 - **Async Q&A that respects your timezone.** *(P0 `minsky-human-comm-via-file`)*
   Agents drop questions into `.minsky/qa-log.md`. You answer when you open your laptop — by editing the file. The agent picks up your answer via `fs.watch` and continues. No sync meeting, no 4-hour-blocked iteration, no daily DMs to chase.
 
-## Why "Minsky"?
+## About the name
 
 Marvin Minsky (1927–2016) was a cognitive scientist whose 1986 book *The Society of Mind* proposed that intelligence emerges from many simple specialized agents working together. The tool borrows the metaphor: many AI agents working through a shared queue produce more than any single agent could.
 
@@ -87,12 +87,14 @@ Marvin Minsky (1927–2016) was a cognitive scientist whose 1986 book *The Socie
 | Multi-file refactors | 🔴 Not yet | M2 milestone |
 | GitHub Actions CI | 🔴 Not yet | M3 milestone |
 
-## What it will NEVER do
+## What it won't do
+
+Hard rules. Not "tries not to" — mechanically blocked.
 
 - **Security-sensitive changes** — marked human-blocked, always
 - **Destructive operations** (force push, delete, deploy) — hard-blocked
 - **Architecture decisions** — files research tasks for humans
-- **Run without your approval** — every PR is a draft, you review
+- **Merge anything without your approval** — every PR is a draft; you review and merge
 
 ## Principles
 
@@ -102,7 +104,9 @@ Marvin Minsky (1927–2016) was a cognitive scientist whose 1986 book *The Socie
 - **Honest metrics** — stability % is computed from real iteration data (`successful / total`); never a hand-typed number, never a stub.
 - **Test the runtime, not just functions** — 95% unit coverage doesn't catch the bugs that bite production (auth env vars missing, plist sibling-vs-dict, GH 401 crash). Runtime invariants check the actual system before every iteration.
 
-## How long does it run?
+## Edge cases
+
+### How long does it run?
 
 **Forever, by default.** There is no built-in time limit. The daemon:
 
@@ -116,7 +120,7 @@ The only ways to stop it are: `minsky stop`, machine power-off, or `minsky unins
 
 Cap the runtime explicitly with `--max-iterations=N` (default: `Infinity`) or stop after one task with `minsky --once`.
 
-## What if `TASKS.md` is empty or doesn't exist?
+### What if `TASKS.md` is empty or doesn't exist?
 
 Minsky doesn't sit idle. The default flow is `--seed-on-empty` (on by default):
 
@@ -126,7 +130,7 @@ Minsky doesn't sit idle. The default flow is `--seed-on-empty` (on by default):
 
 Opt out with `--no-seed-on-empty` — minsky will then halt cleanly when the queue runs dry.
 
-## How does minsky talk to humans?
+### How does minsky talk to humans?
 
 Today, three channels:
 
@@ -180,7 +184,9 @@ Per-machine config at `~/.minsky/config.json`:
 
 Switch agents with `MINSKY_CLOUD_AGENT=devin minsky` (one-shot) or edit the config (persistent). When the cloud budget hits zero, minsky auto-falls-back to the local agent (P0 `runtime-token-limit-auto-pivot-local-and-back` makes this seamless).
 
-## Architecture (30 seconds)
+## How Minsky works inside
+
+The 30-second sketch:
 
 ```text
 minsky (bash CLI shim)
@@ -192,9 +198,7 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 .minsky/ sidecar — config, experiment store, iteration records
 ```
 
-## How Minsky works inside
-
-Six things that make minsky distinctive at the implementation level. File paths included so any claim is auditable.
+The deeper sketch — six things that make minsky distinctive at the implementation level, with file paths so any claim is auditable.
 
 ### 1. Multi-layer team of workers
 
