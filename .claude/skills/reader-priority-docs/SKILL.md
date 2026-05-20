@@ -45,14 +45,34 @@ Every section in a tool-facing doc serves one of these tiers. Tag every section 
 
 | Tier | Reader question | Time budget | What goes here |
 |---|---|---|---|
-| **1** | Does this solve my problem? | 30 sec | One-line hook, demo, problem statement, screenshot/gif |
-| **2** | Am I the target user? | 1 min | Competitor comparison, positioning, anti-positioning ("not for X") |
-| **3** | How do I try it? | 2 min | Install + run (≤2 commands), the main behaviour walkthrough, glossary of one or two key terms the walkthrough uses |
-| **4** | Should I commit to it? | 5 min | Honest capability table, known limits, edge cases (empty input, max runtime, error modes, communication channels) |
+| **1** | What is this and does it solve my problem? | 30 sec | One-line hook AND a 2-3 sentence concrete explanation of what the tool actually DOES (not what it competes with) |
+| **2** | How do I try it? | 2 min | Install + run (≤2 commands), the minimum so the reader sees the thing work |
+| **3** | What does it actually do? | 2 min | Mental-model walkthrough (numbered steps), glossary of one or two key terms the walkthrough uses |
+| **4** | Should I commit to it? | 5 min | Honest capability table, known limits, edge cases (empty input, max runtime, error modes, communication channels). AND — **only when applicable** (see next section) — competitor comparison / positioning |
 | **5** | How do I use it day-to-day? | reference | CLI reference, configuration, architecture overview, key files |
 | **6** | How do I maintain it? | reference | Update workflow, uninstall, contribute, principles, license |
 
 A section that doesn't fit any tier probably shouldn't be in the README — move it to a dedicated doc and link to it from the relevant tier.
+
+**The critical sequencing rule (tier 1 ≠ positioning)**: tier 1 must establish "what IS this" — not "what it competes with". A reader who doesn't yet know what the tool does cannot judge a competitor table; the table just adds cognitive load and signals the author optimised for "marketing positioning" before "reader comprehension". Positioning is tier 4 at best, and often shouldn't be in the README at all (see the next section).
+
+## When does positioning belong in the README at all?
+
+Positioning (competitor comparison tables, "vs X" sections, "we're the only Y that Z" claims) belongs in the README **only when ALL three conditions hold**:
+
+1. **The tool has earned the comparison** — it's competitive on the headline dimensions readers will compare. An unstable / early-stage tool that loses on the dimensions the reader cares about is better off NOT inviting the comparison; the reader googles for "X vs Y" and finds the analysis if they want it.
+2. **The competitive landscape is reasonably stable** — the named competitors exist, are well-known, and aren't moving targets. Comparing to a competitor that ships weekly makes your README go stale weekly.
+3. **The reader's primary question is "which tool should I pick?"** — i.e., this README is genuinely a choice doc (e.g., the project is a well-known alternative to a well-known incumbent). If the reader's primary question is "what is this and how do I use it?", positioning is a distraction.
+
+When ANY of those conditions fails, positioning moves OUT of the README:
+
+- Per-competitor analysis lives in `competitors/` (or `comparisons/`, or `vs.md`) as a dedicated directory — link from "Key files" at tier 5
+- A one-line "see `competitors/` for full comparisons" pointer near the bottom of the README is fine
+- Up-front competitor comparison in the README's main flow is not fine
+
+The deferral rule: **build the tool worth comparing first, then add the comparison**. Positioning is a confidence move; only make it when you can back it up. For unstable or pre-1.0 tools, the absence of a positioning section in the README is itself a signal that the team is focused on the work, not the marketing.
+
+Anti-pattern surfaced 2026-05-20 (operator review of minsky's own README): "you don't really explain what it does and go into what it competes with" — a tagline followed immediately by a competitor table, with no explanation paragraph in between, asks the reader to evaluate positioning before they understand the tool. The fix (applied in the same commit that updated this skill): remove the competitor section entirely from the README (the three conditions all failed: stability ~10-24%, M1 not yet shipped, competitors evolving weekly), restore an explanation paragraph after the tagline, and keep `competitors/` as a dedicated directory linked from "Key files".
 
 ## The procedure
 
@@ -61,12 +81,13 @@ A section that doesn't fit any tier probably shouldn't be in the README — move
 Open the doc. For each `## section`, write the tier number in a margin comment:
 
 ```markdown
-## Getting started        <!-- tier 3: how do I try it -->
-## Competitors            <!-- tier 2: am I the target user -->
+## What minsky does       <!-- tier 1: what IS this -->
+## Getting started        <!-- tier 2: how do I try it -->
+## What it actually does  <!-- tier 3: walkthrough -->
 ## Picking up upstream fixes  <!-- tier 6: maintenance -->
 ```
 
-If a section serves two tiers (e.g., "What it does" is tier 1 elevator + tier 3 walkthrough), split it into two sections at different tiers.
+If a section serves two tiers (e.g., a hook + walkthrough crammed together), split it into two sections at different tiers.
 
 ### Step 2 — Sort by tier
 
@@ -74,9 +95,10 @@ Reorder sections so all tier-1 sections come first, tier-6 sections come last. W
 
 ### Step 3 — Audit for tier mismatches
 
-The most common bug: tier-5 / tier-6 content sitting in tier-1 / tier-2 position. Examples (real ones from minsky's history):
+The most common bug: tier-4 / tier-5 / tier-6 content sitting in tier-1 / tier-2 position. Examples (real ones from minsky's history):
 
-- "Picking up upstream fixes" (tier 6) right after "Getting started" (tier 3) — WRONG. Maintenance content blocks the try-it-out flow.
+- "Picking up upstream fixes" (tier 6) right after "Getting started" (tier 2) — WRONG. Maintenance content blocks the try-it-out flow.
+- "Competitors" (tier 4, sometimes) right after the tagline — WRONG. The reader doesn't yet know what the tool DOES, so they can't judge the comparison. See "When does positioning belong in the README at all?" above.
 - "Architecture overview" (tier 5) right after the hook (tier 1) — WRONG. Internals before behaviour.
 - "Roadmap / coming soon" inside the install section — WRONG. Forward-looking content belongs at tier 6 or in a separate `ROADMAP.md`.
 - "Honest capability table" (tier 4) above "What it actually does" (tier 3) — WRONG. The reader needs to know what it does before judging what works.
@@ -107,13 +129,11 @@ A clean tool README in reader-priority order:
 
 <badges>
 
-## What it competes with             <!-- tier 2: positioning -->
+<2-3 sentence concrete explanation of what the tool actually DOES.    <!-- tier 1: what IS this -->
+Specific behaviour the reader will see, not vague positioning. The
+elevator pitch was the hook; this paragraph is the concrete reality.>
 
-| Tool | Their advantage | This tool's advantage |
-|---|---|---|
-| ... | ... | ... |
-
-## Getting started                   <!-- tier 3: install + run -->
+## Getting started                   <!-- tier 2: install + run -->
 
 ```bash
 <install>
@@ -141,6 +161,17 @@ A clean tool README in reader-priority order:
 ### How long does it run?
 ### What if <main input> is empty?
 ### How does it talk to humans?
+
+<!-- OPTIONAL — tier 4 positioning, ONLY when the 3 conditions hold (see -->
+<!-- "When does positioning belong in the README at all?" above). For most -->
+<!-- early-stage tools this section is omitted; the competitor analysis    -->
+<!-- lives in `competitors/` and is linked from "Key files" instead.       -->
+<!--                                                                        -->
+<!-- ## What it competes with             <!-- tier 4: positioning -->       -->
+<!--                                                                        -->
+<!-- | Tool | Their advantage | This tool's advantage |                     -->
+<!-- |---|---|---|                                                          -->
+<!-- | ... | ... | ... |                                                    -->
 
 ## CLI reference                     <!-- tier 5: reference -->
 
@@ -172,8 +203,10 @@ When auditing an existing doc, grep for these red flags:
 
 | Red flag | Why it's wrong | Fix |
 |---|---|---|
-| "Picking up upstream fixes" / "Updating" / "Upgrade guide" in the first 5 sections | Tier 6 maintenance blocking tier 3 try-it-out | Move to tier 6 |
-| `> Tracked as P0 X in TASKS.md` callouts in install / quickstart | Tracker chatter polluting tier 3 | Move to tier 6 "Roadmap" or delete |
+| "Picking up upstream fixes" / "Updating" / "Upgrade guide" in the first 5 sections | Tier 6 maintenance blocking tier 2 try-it-out | Move to tier 6 |
+| Competitor / "vs X" / positioning table appears before the reader knows what the tool DOES | Tier 4 positioning at tier 1 position; reader can't judge the table | Either remove (apply the 3-condition test) or move to tier 4 AFTER the walkthrough |
+| Tagline followed immediately by a competitor section, no explanation paragraph between | Reader leaves the tier-1 section without knowing what the tool actually does | Add a tier-1 explanation paragraph (2-3 sentences of concrete behaviour) between tagline and the next `##` |
+| `> Tracked as P0 X in TASKS.md` callouts in install / quickstart | Tracker chatter polluting tier 2 | Move to tier 6 "Roadmap" or delete |
 | Configuration table before any usage example | Tier 5 reference before tier 3 walkthrough | Keep table; move below walkthrough |
 | "Architecture" or "Internals" diagram in the first 3 sections | Tier 5 internals before tier 3 behaviour | Move to tier 5 |
 | "What it will never do" before "What it does" | Tier 4 limits before tier 3 walkthrough | Reorder |
@@ -184,9 +217,9 @@ When auditing an existing doc, grep for these red flags:
 
 Before claiming a doc is reader-priority-ordered, verify:
 
-- [ ] First section after the title answers "does this solve my problem?" (tier 1)
-- [ ] Competitor / positioning section appears before the deep walkthrough (tier 2 before tier 3)
-- [ ] Within 2 minutes of reading, the reader has seen the install + run commands (tier 3 reached)
+- [ ] First content after the title is a tier-1 explanation paragraph — concrete sentences saying what the tool DOES (not what it competes with)
+- [ ] No competitor / positioning section appears above the walkthrough — either the 3 conditions hold and the table is at tier 4, or the table is out entirely
+- [ ] Within 2 minutes of reading, the reader has seen the install + run commands (tier 2 reached)
 - [ ] No tier-5 or tier-6 content appears above the "What it actually does" / behaviour walkthrough
 - [ ] Operator-only content (update, uninstall, maintenance) lives at the bottom (tier 6)
 - [ ] No forward-references to tracker IDs appear in the install / quick-start section
