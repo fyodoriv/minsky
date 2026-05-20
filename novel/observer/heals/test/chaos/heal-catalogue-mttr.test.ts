@@ -130,10 +130,7 @@ const CHAOS_CASES: ChaosCase[] = [
       const dir = mkdtempSync(join(tmpdir(), "chaos-tsbuildinfo-"));
       tmpDirs.push(dir);
       const tsbiPath = join(dir, ".tsbuildinfo");
-      fs.writeFileSync(
-        tsbiPath,
-        JSON.stringify({ version: "5.0.0-node-18-abcdef" }),
-      );
+      fs.writeFileSync(tsbiPath, JSON.stringify({ version: "5.0.0-node-18-abcdef" }));
       const seams: healStaleTsbuildinfo.StaleTsbuildinfoSeams = {
         hostDir: dir,
         currentNodeMajor: "20",

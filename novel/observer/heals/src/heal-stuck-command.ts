@@ -29,6 +29,7 @@ export type StuckCommandSeams = {
   probeFn: (pid: number, signal: 0) => void;
 };
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function detect(seams: StuckCommandSeams): DetectResult {
   if (seams.pollsWithoutOutput < STUCK_THRESHOLD) {
     return { present: false };
@@ -43,11 +44,12 @@ export function detect(seams: StuckCommandSeams): DetectResult {
   };
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function apply(seams: StuckCommandSeams): ApplyResult {
   try {
     seams.probeFn(seams.processPid, 0);
+    // rule-6: handled-locally — probe throwing ESRCH means the process raced to natural exit before we got to kill it; returning applied:false IS the correct outcome (no-op).
   } catch {
-    // Process already exited — no-op (raced with natural exit).
     return {
       applied: false,
       changedFiles: [],
@@ -61,6 +63,7 @@ export function apply(seams: StuckCommandSeams): ApplyResult {
       changedFiles: [],
       notes: `killed pid ${seams.processPid}`,
     };
+    // rule-6: handled-locally — kill failure (permission denied, ESRCH race) is reported in the ApplyResult.notes for the ledger; not a daemon-wide fault to supervise.
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -71,13 +74,13 @@ export function apply(seams: StuckCommandSeams): ApplyResult {
   }
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function verify(seams: StuckCommandSeams): VerifyResult {
   try {
     seams.probeFn(seams.processPid, 0);
-    // kill(0) succeeded — pid is still alive.
     return { healed: false, residualSignal: "process-still-alive" };
+    // rule-6: handled-locally — ESRCH from probe is the success signal here (the process is dead, which is the goal of this heal). Not an error.
   } catch {
-    // ESRCH → pid is dead, which is the goal.
     return { healed: true };
   }
 }

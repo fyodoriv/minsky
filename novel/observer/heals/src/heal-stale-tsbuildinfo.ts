@@ -31,10 +31,7 @@ type TsbuildinfoContent = {
   // tsc's actual .tsbuildinfo has more fields; we only care about version.
 };
 
-const isStale = (
-  content: TsbuildinfoContent | null,
-  currentNodeMajor: string,
-): boolean => {
+const isStale = (content: TsbuildinfoContent | null, currentNodeMajor: string): boolean => {
   if (content === null) return true; // unparseable → safe to remove
   if (typeof content.version !== "string") return true;
   // tsc records its own version in .tsbuildinfo, not node's. But the
@@ -42,26 +39,28 @@ const isStale = (
   // tsc version embedded in the file references a different node hash.
   // Heuristic: any string mentioning a node major different from current
   // is stale.
+  const { version } = content;
+  if (typeof version !== "string") return true;
   const nodeMajors = ["16", "17", "18", "19", "20", "21", "22"].filter(
     (v) => v !== currentNodeMajor,
   );
-  return nodeMajors.some((v) => content.version!.includes(`node-${v}`));
+  return nodeMajors.some((v) => version.includes(`node-${v}`));
 };
 
-const parseContent = (
-  raw: string,
-): TsbuildinfoContent | null => {
+const parseContent = (raw: string): TsbuildinfoContent | null => {
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed === "object" && parsed !== null) {
       return parsed as TsbuildinfoContent;
     }
     return null;
+    // rule-6: handled-locally — JSON.parse throw on garbage tsbuildinfo means the file is unreadable; the caller treats null as "stale", which is the safe action (regeneratable build artifact). Not a fault.
   } catch {
     return null;
   }
 };
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function detect(seams: StaleTsbuildinfoSeams): DetectResult {
   const paths = seams.listTsbuildinfoFn(seams.hostDir);
   const stalePaths = paths.filter((path) => {
@@ -84,6 +83,7 @@ export function detect(seams: StaleTsbuildinfoSeams): DetectResult {
   };
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function apply(seams: StaleTsbuildinfoSeams): ApplyResult {
   const paths = seams.listTsbuildinfoFn(seams.hostDir);
   const changedFiles: string[] = [];
@@ -106,6 +106,7 @@ export function apply(seams: StaleTsbuildinfoSeams): ApplyResult {
   };
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function verify(seams: StaleTsbuildinfoSeams): VerifyResult {
   const remaining = detect(seams);
   if (remaining.present) {

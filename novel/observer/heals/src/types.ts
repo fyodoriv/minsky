@@ -26,9 +26,7 @@ export type ApplyResult = {
 };
 
 /** Result of `verify()` — re-detect after apply. If healed:false, the apply did not fix the underlying symptom. */
-export type VerifyResult =
-  | { healed: true }
-  | { healed: false; residualSignal: string };
+export type VerifyResult = { healed: true } | { healed: false; residualSignal: string };
 
 /** Outcome of a complete heal cycle, written to the ledger. */
 export type HealOutcome = "healed" | "verified-failed" | "skipped";

@@ -27,7 +27,12 @@ export type LedgerSeams = {
   dirnameFn: (path: string) => string;
 };
 
-/** Append one HealEvent as a JSONL line. Auto-creates parent dir if missing. */
+/**
+ * Append one HealEvent as a JSONL line. Auto-creates parent dir if missing.
+ * @otel-exempt I/O at edge — caller's `observer.heal` span already wraps the
+ * complete detect→apply→verify→record cycle; instrumenting the ledger writer
+ * separately would double-count the heal duration.
+ */
 export function recordHealEvent(args: {
   event: HealEvent;
   seams: LedgerSeams;
@@ -40,7 +45,10 @@ export function recordHealEvent(args: {
   args.seams.appendFileSyncFn(args.seams.ledgerPath, line);
 }
 
-/** Build a HealEvent from per-helper context. Helper-call timing is the source of truth. */
+/**
+ * Build a HealEvent from per-helper context. Helper-call timing is the source of truth.
+ * @otel-exempt pure data-transform — no I/O, no caller-visible side effect, no span warranted.
+ */
 export function buildHealEvent(args: {
   tsObservedMs: number;
   tsFixedMs: number;

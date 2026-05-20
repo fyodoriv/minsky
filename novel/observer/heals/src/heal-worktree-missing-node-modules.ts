@@ -26,16 +26,12 @@ export type WorktreeMissingSeams = {
   cwd: string;
   existsSyncFn: (path: string) => boolean;
   /** Synchronously execute a command. Tests inject a stub. */
-  execFn: (
-    command: string,
-    args: readonly string[],
-    options: { cwd: string },
-  ) => ExecResult;
+  execFn: (command: string, args: readonly string[], options: { cwd: string }) => ExecResult;
 };
 
-const isUnderWorktrees = (cwd: string): boolean =>
-  cwd.includes("/.worktrees/");
+const isUnderWorktrees = (cwd: string): boolean => cwd.includes("/.worktrees/");
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function detect(seams: WorktreeMissingSeams): DetectResult {
   if (!isUnderWorktrees(seams.cwd)) {
     return { present: false };
@@ -55,12 +51,9 @@ export function detect(seams: WorktreeMissingSeams): DetectResult {
   };
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function apply(seams: WorktreeMissingSeams): ApplyResult {
-  const result = seams.execFn(
-    "pnpm",
-    ["install", "--prefer-offline"],
-    { cwd: seams.cwd },
-  );
+  const result = seams.execFn("pnpm", ["install", "--prefer-offline"], { cwd: seams.cwd });
   if (result.exitCode !== 0) {
     return {
       applied: false,
@@ -75,6 +68,7 @@ export function apply(seams: WorktreeMissingSeams): ApplyResult {
   };
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (agent runtime or observer.heal). */
 export function verify(seams: WorktreeMissingSeams): VerifyResult {
   // The catalogue signal was MODULE_NOT_FOUND from biome/lefthook —
   // verify by checking the binary that triggered the original failure.

@@ -4,10 +4,7 @@
 
 import { describe, expect, test } from "vitest";
 import * as healMissing from "./heal-worktree-missing-node-modules.js";
-import type {
-  ExecResult,
-  WorktreeMissingSeams,
-} from "./heal-worktree-missing-node-modules.js";
+import type { ExecResult, WorktreeMissingSeams } from "./heal-worktree-missing-node-modules.js";
 
 type ExecCall = { command: string; args: readonly string[]; cwd: string };
 
@@ -109,10 +106,7 @@ describe("heal-worktree-missing-node-modules", () => {
 
   test("returns present:false when node_modules already exists", () => {
     const cwd = "/host/.worktrees/feature-x";
-    const files = new Set([
-      `${cwd}/package.json`,
-      `${cwd}/node_modules`,
-    ]);
+    const files = new Set([`${cwd}/package.json`, `${cwd}/node_modules`]);
     const { seams } = makeSeams(cwd, files, () => success);
     expect(healMissing.detect(seams).present).toBe(false);
   });

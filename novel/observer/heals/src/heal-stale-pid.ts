@@ -23,6 +23,11 @@ export type StalePidSeams = {
   killFn: (pid: number, signal: 0) => void; // throws ESRCH if pid is dead
 };
 
+/**
+ * @otel-exempt pure-with-I/O-at-edge — OTEL span owned by caller (agent runtime
+ * or observer.heal()), not the helper. Caller wraps the full detect→apply→verify
+ * cycle in one observer.heal span and writes the result to the ledger.
+ */
 export function detect(seams: StalePidSeams): DetectResult {
   if (!seams.existsSyncFn(seams.pidFilePath)) {
     return { present: false };
@@ -41,12 +46,13 @@ export function detect(seams: StalePidSeams): DetectResult {
     seams.killFn(pid, 0);
     // pid is alive — not stale.
     return { present: false };
+    // rule-6: handled-locally — kill(0) throwing ESRCH IS the success signal for this detector (pid is dead); not an error to supervise.
   } catch {
-    // ESRCH (or any other error from kill 0) → pid is dead.
     return { present: true, signal: "stale-pid", evidence: { pid } };
   }
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (see detect). */
 export function apply(seams: StalePidSeams): ApplyResult {
   if (!seams.existsSyncFn(seams.pidFilePath)) {
     return { applied: false, changedFiles: [], notes: "no pid file present" };
@@ -59,6 +65,7 @@ export function apply(seams: StalePidSeams): ApplyResult {
   };
 }
 
+/** @otel-exempt pure-with-I/O-at-edge — span owned by caller (see detect). */
 export function verify(seams: StalePidSeams): VerifyResult {
   if (seams.existsSyncFn(seams.pidFilePath)) {
     return { healed: false, residualSignal: "pid-file-still-present" };

@@ -296,4 +296,3 @@ Must return 0 before any commit to the files in Step 2-7.
 - **Quality score**: 8/10 (correctness 9, quality 8, testing 8, completeness 7).
 - **Approval rationale**: All blocking concerns resolved with concrete, auditable changes. Acceptance criteria are runnable. Spec format conforms to existing constitutional rules. The plan is ready for the first code commit (Step 0: create `.minsky/specs/agents-can-self-heal-minsky-m1-13.md` with ≥6 GWT scenarios).
 - **Residual non-blocking recommendations** (filed as follow-up tasks alongside main PR): (1) P1 task to enumerate the 6 operator-recipes in SKILL.md and assess each for Phase-2 automation feasibility before `promote-remaining-heal-recipes` is claimed; (2) P2 task to add per-helper timeout enforcement to prevent lock races on slow helpers; (3) Document the chaos test's fixture-seam pattern in Step 6 code comments.
-
