@@ -11,19 +11,17 @@ Minsky attaches to a git repo and improves it over time, applying scientifically
 
 ## Getting started
 
-**Recommended — let your agent install it.** If you're inside Claude Code, Cursor, Windsurf, Devin, Codex, or any AI coding agent that can read files and run commands, paste this:
+**Through your AI agent.** Copy-paste:
 
 > Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-The agent reads [INSTALL.md](./INSTALL.md), clones minsky, registers your current folder as the host, asks you once about anonymized telemetry, and starts the daemon. Total: ~60 seconds, one human prompt.
-
-**Manual install** — for when you don't have an agent handy. Paste the whole block; the `&&` chain keeps `cd` in scope:
+**Manual:**
 
 ```bash
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-The first run installs launchd persistence so minsky survives reboots; later runs in the same folder attach to the existing daemon. `Ctrl-C` detaches the dashboard without stopping the daemon; `minsky stop` shuts everything down (zero ghost processes).
+Full install runbook: [INSTALL.md](INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
 
 ## What it actually does
 
@@ -50,10 +48,6 @@ Seven things you get with minsky running on a repo. Each links to a dedicated us
 - **Async Q&A across timezones** *(P0)* — agents write to `.minsky/qa-log.md`; you reply by editing the file. ([details →](user-stories/010-async-human-qa-via-file.md))
 
 Safety guards are mechanical — every PR is a draft for your review, every iteration passes 15 lint gates including secret-scan, scope-discipline, and security review. No agent can push to `main`. No PR merges without your approval.
-
-## About the name
-
-Marvin Minsky (1927–2016) was a cognitive scientist whose 1986 book *The Society of Mind* proposed that intelligence emerges from many simple specialized agents working together. The tool borrows the metaphor: many AI agents working through a shared queue produce more than any single agent could.
 
 ## What works today (honest)
 
@@ -84,94 +78,6 @@ Hard rules. Not "tries not to" — mechanically blocked.
 - **Architecture decisions** — files research tasks for humans
 - **Merge anything without your approval** — every PR is a draft; you review and merge
 
-## Principles
-
-- **Soft by default** — when an iteration produces a scope-leak or spawn-failed verdict, the daemon logs it and moves on; it doesn't halt the whole loop. Halting on every weird event would mean a single bad task can wedge the daemon for the entire night you're asleep.
-- **Sensible defaults, escape hatches for debugging** — every behaviour that is universally helpful ships **on** by default (launchd auto-install on first run, scope-leak soft-mode, dynamic timeouts, auto-install on `git pull`). Opt-out env vars exist (`MINSKY_NO_AUTO_INSTALL=1` etc.) but are intended only for debugging. Each default is **scoped** to a specific trigger so two defaults never compete.
-- **Gradual improvement** — `minsky update` after every fix; the daemon resumes from the same task it was working on. Iteration history is preserved across restarts.
-- **Honest metrics** — stability % is computed from real iteration data (`successful / total`); never a hand-typed number, never a stub.
-- **Test the runtime, not just functions** — 95% unit coverage doesn't catch the bugs that bite production (auth env vars missing, plist sibling-vs-dict, GH 401 crash). Runtime invariants check the actual system before every iteration.
-
-## Edge cases
-
-### How long does it run?
-
-**Forever, by default.** There is no built-in time limit. The daemon:
-
-- Survives reboots — launchd / systemd respawn it on boot (`KeepAlive=true`)
-- Survives crashes — the supervisor respawns the daemon on any non-zero exit
-- Survives terminal close — the parent process traps `SIGHUP` so closing your IDE doesn't kill it
-- Survives token limits — when claude hits its quota, minsky auto-switches to local models and keeps going (tracked in P0 `runtime-token-limit-auto-pivot-local-and-back`)
-- Survives empty queues — see below
-
-The only ways to stop it are: `minsky stop`, machine power-off, or `minsky uninstall`.
-
-Cap the runtime explicitly with `--max-iterations=N` (default: `Infinity`) or stop after one task with `minsky --once`.
-
-### What if `TASKS.md` is empty or doesn't exist?
-
-Minsky doesn't sit idle. The default flow is `--seed-on-empty` (on by default):
-
-1. **`TASKS.md` missing** — `minsky init` creates a starter `TASKS.md` with the tasks.md spec headers and one example task.
-2. **`TASKS.md` exists but no rule-#9-compliant tasks are left** — minsky runs a **CTO audit**: reads the repo (test count, lint health, doc coverage, dependency age, security warnings), proposes new tasks based on what it finds, and writes them back to `TASKS.md`. Then picks one of the newly-seeded tasks and starts working.
-3. **CTO audit produces zero tasks too** — minsky exits the iteration with `empty-queue` and waits for the next tick (default 5 min) before retrying.
-
-Opt out with `--no-seed-on-empty` — minsky will then halt cleanly when the queue runs dry.
-
-### How does minsky talk to humans?
-
-Today, three channels:
-
-1. **Draft PRs** — every task ships as a draft PR you review. The agent's PR body includes a `self-grade` block with hypothesis + measurement + risk.
-2. **`Blocked` markers in `TASKS.md`** — when an agent encounters a step it can't safely automate (security-sensitive change, force push, vendor selection), it adds `**Blocked**: needs-user-approval — <reason>` to the task block and moves on. Grep your `TASKS.md` for `Blocked` to see what's waiting on you.
-3. **Daemon log** — `~/.minsky/daemon.log` tails warnings (`spawn-failed`, `scope-leak`, `gh 401`). View live via `minsky watch`.
-
-**Coming soon — fast file-based Q&A** (P0 `minsky-human-comm-via-file`): a `.minsky/qa-log.md` file the agent writes questions to and watches for your answers. You edit the file in your normal editor and save; the agent picks up your answer within 500 ms. Designed for back-and-forth that's too quick for a PR review but too detailed for a TASKS.md `Blocked` field.
-
-## CLI reference
-
-```bash
-minsky                    # start-or-attach: daemon + auto-install persistence + dashboard
-minsky watch              # attach to live dashboard (Ctrl-C detaches, daemon keeps running)
-minsky status             # quick health: PID, uptime, stability %
-minsky logs               # tail daemon log
-minsky stop               # thorough shutdown (launchd + runners + agents)
-minsky update             # stop → git pull → rebuild → restart from same spot
-minsky doctor             # check host readiness (node, git, gh, config, agents)
-minsky report             # baseline / delta against .minsky/metric-snapshots/
-minsky benchmark          # run the cross-repo runner N times and report pass-rate
-minsky init               # one-command bootstrap on any git repo
-minsky uninstall          # full removal (dry-run by default; --force to delete)
-minsky install-daemon     # install launchd plist (auto-done on first run)
-minsky uninstall-daemon   # remove launchd plist only (preserves config + logs)
-```
-
-## Configuration
-
-Per-machine config at `~/.minsky/config.json`:
-
-```json
-{
-  "cloud_agent": "devin",
-  "cloud_agent_model": "claude-opus-4-7-max",
-  "default_host": "/path/to/your/repo"
-}
-```
-
-- **`cloud_agent`** — which CLI runs in cloud mode: `devin` | `claude`
-- **`cloud_agent_model`** — passed as `--model` to the cloud agent
-- **`default_host`** — the git repo minsky operates on by default (the "host"). Override per-invocation with `--host <path>`.
-
-### Agent comparison
-
-| Agent | Mode | How brief is sent | Strengths | Recommended for |
-|---|---|---|---|---|
-| `claude` | Cloud (Anthropic subscription) | stdin | Highest task-completion rate; OAuth/keychain auth | Default cloud workload |
-| `devin` | Cloud (Windsurf subscription) | `--prompt-file` (stdin panics) | Polished IDE-style PR output | Cloud workload when claude is rate-limited |
-| `aider` | Local (Ollama / MLX) | `--message-file` | $0 cost, runs on M-series Mac | Token-budget fallback; long sessions |
-
-Switch agents with `MINSKY_CLOUD_AGENT=devin minsky` (one-shot) or edit the config (persistent). When the cloud budget hits zero, minsky auto-falls-back to the local agent (P0 `runtime-token-limit-auto-pivot-local-and-back` makes this seamless).
-
 ## How Minsky works inside
 
 The 30-second sketch:
@@ -186,128 +92,31 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 .minsky/ sidecar — config, experiment store, iteration records
 ```
 
-The deeper sketch — six things that make minsky distinctive at the implementation level, with file paths so any claim is auditable.
+Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 
-### 1. Multi-layer team of workers
+- **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) ships today; multi-persona pipelines per task are an M2 milestone tracked at `multi-persona-pipeline-handoff-spec`.
+- **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
+- **Constitution = 18 rules, each enforced as a CI lint** — rule #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing), #18 (fake-data markers) are the load-bearing ones.
+- **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
+- **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration; same code adapts to any machine.
+- **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
 
-A task can be worked by a single backend OR by a pipeline of specialised personas. Per-task backend selection ships today; multi-persona-per-task pipelines land at M2.
+## More
 
-- **Per-task backend selection** (shipped). `novel/tick-loop/src/llm-provider-spawn-strategy.ts` reads the task's `**Tags**` field and picks the right agent: claude-sonnet for prose-heavy work, devin for cross-repo refactors, local Ollama for mechanical lint fixes. You don't pay $4 for a task a $0.20 model could do.
-- **Multi-persona pipelines per task** *(M2 — tracked at `multi-persona-pipeline-handoff-spec`)*. When `novel/handoff-spec/` ships, a complex task spawns researcher → planner → developer → QA → reviewer in sequence. Each persona writes its handoff to `.minsky/handoffs/<task-id>/<persona>-<iso-ts>.md` for the next persona to read. Failure in any persona halts the pipeline and files `pipeline-failed-<task>-<persona>` for operator review.
+- **[INSTALL.md](INSTALL.md)** — agent-readable install runbook
+- **[docs/uninstall.md](docs/uninstall.md)** — full removal, daemon stop, sidecar cleanup
+- **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
+- **[docs/cli-reference.md](docs/cli-reference.md)** — every command, every flag, every env var
+- **[docs/configuration.md](docs/configuration.md)** — `~/.minsky/config.json`, agent comparison
+- **[docs/edge-cases.md](docs/edge-cases.md)** — empty queues, runtime limits, comm channels, crashes
+- **[docs/PRACTICES.md](docs/PRACTICES.md)** — scientifically proven practices with citations
+- **[vision.md](vision.md)** — the constitution (18 rules), pattern conformance index
+- **[TASKS.md](TASKS.md)** — open tasks with rule-9 fields
+- **[MILESTONES.md](MILESTONES.md)** — M1–M5 exit criteria
+- **[DEPRECATED.md](DEPRECATED.md)** — retired features (don't invest in these)
 
-### 2. MAPE-K control loop (Kephart & Chess 2003, IBM autonomic computing)
-
-The tick-loop daemon literally maps to the four MAPE-K phases plus the shared Knowledge base. This isn't decorative — adding a new phase means adding to the right file.
-
-- **Monitor** — `novel/cross-repo-runner/src/runtime-invariants.ts` checks system state before every iteration (PATH resolves, agent binary works, no zombie processes from previous iterations).
-- **Analyze** — `novel/cross-repo-runner/src/task-finder.ts` reads `TASKS.md` and picks the highest-priority task with complete rule-9 fields.
-- **Plan** — `novel/tick-loop/src/spawn-strategy.ts` decides which backend to invoke with what prompt.
-- **Execute** — `novel/tick-loop/src/daemon.ts` spawns the agent process and waits for the iteration verdict.
-- **Knowledge** — `.minsky/experiment-store/` (per-host iteration records, append-only JSONL per task) + `~/.minsky/config.json` (per-machine config).
-
-### 3. Constitution = 18 rules, each enforced as a CI lint
-
-`vision.md` documents the constitution. Every rule has a corresponding `scripts/check-rule-N-*.mjs` linter in the `pre-pr-lint` stack. PRs that violate a rule are rejected by CI before merge — not by a reviewer's good behaviour.
-
-The load-bearing ones:
-
-- **Rule #1 — don't reinvent the wheel** (`scripts/check-rule-1-novel-justification.mjs`) — rejects any new `novel/*` code whose README doesn't cite the existing libraries it considered and explain why each didn't fit.
-- **Rule #9 — pre-registered hypothesis-driven development** (`scripts/check-rule-9-tasksmd-fields.mjs`, iron rule) — every P0/P1 task must declare Hypothesis / Success / Pivot / Measurement / Anchor on single lines before work begins. Tasks missing any field are silently dropped by the picker.
-- **Rule #12 — scope discipline** (`scripts/check-rule-12-scope-discipline.mjs`, iron rule) — PRs that touch files outside the task's declared scope are rejected.
-- **Rule #17 — proactive healing** (`scripts/check-rule-17-proactive-heal.mjs`, iron rule) — PRs that observe a problem without ALSO landing a fix in the same diff are rejected.
-- **Rule #18 — fake data and deprecations explicitly marked** *(P0 `fake-data-and-deprecation-marker-discipline`)* — every stub and every `@deprecated` export must carry a canonical marker comment with a linked task id, so future readers can't mistake a temporary mock for production code.
-
-Full list with literature citations in [`docs/PRACTICES.md`](docs/PRACTICES.md).
-
-### 4. Soft-by-default failure modes
-
-The daemon is designed to keep running. A single bad iteration shouldn't be able to wedge the whole loop for an overnight session. Three concentric supervisors:
-
-- **Iteration-level** — when an iteration ends in `spawn-failed`, `scope-leak`, or `validated`, the verdict is logged and the loop moves on to the next task. No exception propagates.
-- **Daemon-level** — the launchd plist (macOS) / systemd-user unit (Linux) runs with `KeepAlive=true`. If the Node process dies, the supervisor respawns it within seconds, preserving `.minsky/` state.
-- **Network-level** — when the cloud agent returns "quota exceeded", `novel/tick-loop/src/claude-exhaustion-state.ts` records the exhaustion. The next iteration falls back to a local Ollama model. *(Mid-run swap-and-swap-back is tracked at P0 `runtime-token-limit-auto-pivot-local-and-back`.)*
-
-This is the Erlang let-it-crash pattern (Armstrong 2007), composed with an OS-level supervisor.
-
-### 5. Dynamic watchdog (p95 from history)
-
-The iteration timeout isn't hardcoded. `novel/cross-repo-runner/src/dynamic-timeouts.ts` reads recent iteration durations from `.minsky/experiment-store/`, computes the p95, multiplies by 1.5, and uses that as the watchdog. Slower machine? Larger budget. Faster machine? Tighter loop. Same code, zero per-machine config.
-
-The watchdog and the iteration cadence (`tick`) are both re-derived from the same history every iteration, so the loop adapts continuously rather than at install time.
-
-### 6. Self-improvement on itself
-
-Minsky runs on its own repo with the same daemon every operator runs on theirs. The `host-cto-audit.ts` pass after each iteration reviews the diff for things worth tracking and proposes new tasks for operator review. Most P0s in this repo's `TASKS.md` were surfaced by daemon iterations:
-
-- `spawn-failed-exit-minus-one-silent-empty-stderr` — found by a daemon iteration that observed 4 consecutive spawn-failed verdicts and filed the task with the diagnostic capture.
-- `walker-drains-one-host-forever` — found by daemon observation when the multi-host walker never advanced past the first host.
-
-The daemon refactors the daemon. Opt-out via `MINSKY_CTO_AUDIT=off` in `~/.minsky/config.json`.
-
-## Key files
-
-Minsky adds **one tracked file to your host repo** (`TASKS.md`) and one gitignored dotfolder (`.minsky/`). Everything else lives in your home directory or inside the minsky repo itself.
-
-**In your host repo:**
-
-| File | Tracked? | What you do with it |
-|---|---|---|
-| `TASKS.md` | yes | Your work queue — add tasks, mark `Blocked: needs-user-approval` to gate them. Minsky picks tasks from here and writes new ones via CTO audit. |
-| `.minsky/` | no (gitignored) | Sidecar dotfolder for iteration history, sentinels, daemon PID. Minsky owns it; don't touch. Safe to delete only for a fresh start on that host. |
-| `AGENTS.md` | optional | Per-repo rules for AI agents (commit format, test commands). Customize when adopting minsky on a repo with its own conventions. |
-
-**In your home directory** (per-machine, never in any repo):
-
-| File | What you do with it |
-|---|---|
-| `~/.minsky/config.json` | Edit once to choose claude vs devin and your default host. Minsky reads it on every start. |
-| `~/.minsky/daemon.log` | View live via `minsky watch`; grep for `spawn-failed` / `Blocked` when debugging. |
-
-**Inside the minsky repo itself** (read-only from a host-repo user's perspective): `MILESTONES.md` (roadmap), `vision.md` (the constitution), `DEPRECATED.md` (retired features), `competitors/` (per-competitor analysis). You don't edit these unless you're contributing to minsky.
-
-## Picking up upstream fixes
-
-When new fixes land on `main`, pull them in:
-
-```bash
-git pull
-```
-
-A post-merge git hook handles most of the redeploy work automatically:
-
-| Change in the pull | Auto-runs on `git pull` |
-|---|---|
-| `pnpm-lock.yaml` or `package.json` | `pnpm install` (refreshes `dist/`) |
-| `bin/minsky` (and your plist exists) | Regenerates the launchd plist (no daemon kill) |
-| `distribution/systemd/*.{service,target}` | `systemctl --user daemon-reload` (Linux) |
-| Any of the above | `pre-pr-lint --stage=fast` as advisory sanity check |
-
-**What it does NOT auto-do:** restart the running daemon. The current iteration may be mid-spawn and killing it would waste compute, so picking up new daemon-loop behavior still requires:
-
-```bash
-minsky update   # graceful stop → pull → rebuild → restart from next iteration
-```
-
-Tracked as P0 `minsky-auto-restart-daemon-on-pull` in `TASKS.md` — the goal is to make `minsky update` redundant by having the daemon notice the sentinel between iterations and gracefully restart itself. Opt out of any auto-install behavior with `MINSKY_NO_AUTO_INSTALL=1` (one-shot) or `touch ~/.minsky/no-auto-install` (per-machine).
-
-## Uninstall
-
-```bash
-# Preview what would be removed (safe — no deletion)
-minsky uninstall
-
-# Full removal: stops daemon, removes launchd plist, deletes ~/.minsky/
-minsky uninstall --force
-```
-
-The host repo and its `.minsky/` experiment store (your iteration history) are not touched — those are your data. Only per-machine state under `~/.minsky/` and `~/Library/LaunchAgents/com.minsky.daemon.plist` are removed.
-
-> A single-command `minsky uninstall` with an interactive YES prompt (no `--force` needed) is tracked as P0 `minsky-uninstall-one-command-with-stop`.
-
-## Roadmap
-
-The README points to several in-flight P0/P1 tasks above. The full list lives in `TASKS.md`; `MILESTONES.md` carries the M1–M5 exit criteria.
+About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](LICENSE).
