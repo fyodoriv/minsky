@@ -9,7 +9,7 @@
 // Conformance: full — each collector is a pure async function that
 //   takes an exec seam; the CLI binding is the only I/O surface.
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -36,16 +36,42 @@ function runNum(cmd) {
 
 // ---- Collectors ----
 
-/** loop-uptime: compute from daemon.log if available, else from git activity */
+/** loop-uptime: iteration-success ratio over 30d (real measurement via
+ * `scripts/stability-report.mjs`); falls back to active-commit-days proxy
+ * when the experiment-store has no data (fresh checkouts).
+ */
 function collectLoopUptime() {
-  // Proxy: days with at least one commit in the last 30 days / 30
+  // Try the real measurement first: iteration-success ratio over 30d
+  // from .minsky/experiment-store/cross-repo/*.jsonl via the shared
+  // helper. Single-window invocation returns a one-element array.
+  try {
+    const stdout = execFileSync(
+      "node",
+      ["scripts/stability-report.mjs", "--window=30d", "--json"],
+      { cwd: ROOT, encoding: "utf8", timeout: 5_000 },
+    );
+    const parsed = JSON.parse(stdout);
+    const row = parsed[0];
+    if (row?.ratio !== null && row?.ratio !== undefined) {
+      const pct = Math.round(row.ratio * 100);
+      return {
+        value: `${pct}% (${row.successful}/${row.total} validated iterations over 30d)`,
+        higherIsBetter: true,
+      };
+    }
+  } catch {
+    // Fall through to the proxy below.
+  }
+  // Fallback: active-days proxy (pre-stability-report behavior) so fresh
+  // checkouts without experiment-store data still produce a value.
+  // Reuses the existing `runNum()` helper — no new helper introduced.
   const activeDays = runNum(
     `git log --since="30 days ago" --format="%ad" --date=format:"%Y-%m-%d" | sort -u | wc -l`,
   );
   if (activeDays === null) return null;
   const ratio = Math.min(activeDays / 30, 1.0);
   return {
-    value: `${(ratio * 100).toFixed(1)}% active days (${activeDays}/30d)`,
+    value: `${(ratio * 100).toFixed(1)}% active days (${activeDays}/30d) — fallback proxy; experiment-store has no recent data`,
     higherIsBetter: true,
   };
 }
