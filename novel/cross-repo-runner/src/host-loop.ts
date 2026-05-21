@@ -49,6 +49,14 @@ export type LoopStopReason =
 /**
  * One iteration's contribution to the loop result. Mirrors the daemon's
  * `DaemonIterationResult` shape but scoped to the cross-repo verdicts.
+ *
+ * `stderrTail` and `exitCode` were added 2026-05-19 (rule #17 — proactive
+ * healing) so the loop's `recordIteration` callback can surface the WHY
+ * of a `spawn-failed` to the operator. Previously the runner captured
+ * the agent's stderr but the loop threw it away before the daemon log
+ * line was printed — leaving operators with `verdict=spawn-failed` and
+ * no way to diagnose. Now the iteration record carries enough data to
+ * print "stderr tail: ..." inline.
  */
 export interface LoopIterationResult {
   readonly iteration: number;
@@ -57,6 +65,17 @@ export interface LoopIterationResult {
   readonly durationMs: number;
   readonly scopeLeakPaths: readonly string[];
   readonly prUrl: string | null;
+  readonly stderrTail: string;
+  readonly exitCode: number;
+  /**
+   * POSIX signal that killed the spawned child, if any. Threaded
+   * from `LiveSpawnOutcome.signal` so the daemon log's
+   * `recordIteration` callback can render `signal=SIGKILL` next
+   * to `exit=-1` — without this field, every signal-killed devin
+   * iteration looked identical to "exited with no code". Surfaced-by
+   * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+   */
+  readonly signal?: NodeJS.Signals;
 }
 
 /**
@@ -75,13 +94,46 @@ export interface LoopResult {
  * orchestrator, `sleep` is the inter-iteration wait, `now` is the
  * monotonic clock, `signal` is the operator's SIGTERM bridge.
  */
+/**
+ * Optional context passed to {@link RunHostLoopOpts.pickTask} on every
+ * call. The loop fills in `skipTaskIds` with the set of task IDs that
+ * have ALREADY completed `verdict: validated` earlier in this same
+ * {@link runHostLoop} invocation. The picker honours the skip-set by
+ * not returning those tasks again — this prevents the
+ * `walker-drains-one-host-forever` regression where a worker that
+ * validates but never actually removes the block from TASKS.md (or
+ * never opens a PR, so the `openPrBranches` self-heal doesn't fire)
+ * keeps getting the same task picked, starving every other host the
+ * walker should reach next.
+ *
+ * The skip-set is loop-session-scoped: it's cleared on every fresh
+ * `runHostLoop` invocation. The next walker pass gets a fresh chance
+ * to re-attempt a still-listed task (operator may have edited TASKS.md
+ * in the meantime); this is intentional per rule #6 — let the system
+ * self-heal across passes instead of persisting failure state.
+ *
+ * Existing pickers that ignore the arg keep working (parameter
+ * bivariance — a `() => null` is assignable here), so test fakes that
+ * predate this contract don't need to change.
+ */
+export interface PickTaskArgs {
+  readonly skipTaskIds?: ReadonlySet<string>;
+}
+
 export interface RunHostLoopOpts {
   /**
    * Per-iteration task selection. Production wires
-   * `() => pickHostTask(readFileSync(hostTasksMdPath, "utf8"))`; tests
-   * inject a queue-walker fake that returns successive tasks.
+   * `(args) => pickHostTask(readFileSync(hostTasksMdPath, "utf8"), { ...args })`;
+   * tests inject a queue-walker fake that returns successive tasks.
+   *
+   * The loop calls this with `args.skipTaskIds` filled in (the set of
+   * task IDs already validated earlier in this run). Picker
+   * implementations should treat the argument as advisory: it's
+   * legal to ignore it (existing test fakes do), in which case the
+   * loop falls back on the {@link RunHostLoopOpts.maxIterations} cap
+   * to bound any drain-then-advance regression.
    */
-  readonly pickTask: () => ParsedTask | null;
+  readonly pickTask: (args: PickTaskArgs) => ParsedTask | null;
   /**
    * Per-iteration plan builder. Production wires `buildSpawnPlan` from
    * `spawn-plan.ts` (slice A); tests inject a fake. The builder receives
@@ -156,6 +208,13 @@ export interface RunHostLoopOpts {
    */
   readonly seedOnEmpty?: boolean;
   /**
+   * Scope-leak handling mode. Default `"warn"` — log the leak paths
+   * and continue iterating (devin naturally touches related files
+   * outside the task's **Files** declaration). Set `"hard"` to halt
+   * the loop on scope-leak (legacy behavior).
+   */
+  readonly scopeLeakMode?: "warn" | "hard";
+  /**
    * Builder for the audit's `HostCtoSignals`. The loop has the trigger
    * context (post-iteration vs queue-empty) and the just-completed
    * iteration; the builder fills in `hostRepo` / `hostRoot` /
@@ -193,11 +252,20 @@ export async function runHostLoop(opts: RunHostLoopOpts): Promise<LoopResult> {
   const tickIntervalMs = opts.tickIntervalMs ?? 300_000;
   const sleep = opts.sleep ?? defaultSleep;
   const iterations: LoopIterationResult[] = [];
+  // Task IDs that completed with `validated` in this run. Threaded into
+  // every subsequent `pickTask` call as `skipTaskIds` so the picker
+  // advances to the next eligible task — `walker-drains-one-host-forever`
+  // fix (b). Cleared on every fresh `runHostLoop` invocation, so the
+  // walker's NEXT pass over this host gets a fresh chance to re-attempt
+  // any validated-but-still-listed task (the persistent fix is for the
+  // worker to actually open a PR / remove the block; this is the
+  // self-healing fallback that keeps the walk from starving other hosts).
+  const validatedTaskIds = new Set<string>();
 
   for (let i = 0; i < maxIterations; i++) {
     const earlyStop = checkAbort(opts.signal);
     if (earlyStop !== undefined) return { iterations, stopReason: earlyStop };
-    const stop = await runOneIteration({ opts, iteration: i, iterations });
+    const stop = await runOneIteration({ opts, iteration: i, iterations, validatedTaskIds });
     if (stop !== undefined) return { iterations, stopReason: stop };
     const sleepStop = await sleepBetween({
       iteration: i,
@@ -255,9 +323,10 @@ async function runOneIteration(args: {
   readonly opts: RunHostLoopOpts;
   readonly iteration: number;
   readonly iterations: LoopIterationResult[];
+  readonly validatedTaskIds: Set<string>;
 }): Promise<LoopStopReason | undefined> {
-  const { opts, iteration, iterations } = args;
-  const task = await pickTaskOrSeed(opts);
+  const { opts, iteration, iterations, validatedTaskIds } = args;
+  const task = await pickTaskOrSeed(opts, validatedTaskIds);
   if (task === null) return "empty-queue";
   const plan = opts.buildPlan(task);
   const allowedPaths = opts.resolveAllowedPaths(task);
@@ -275,12 +344,35 @@ async function runOneIteration(args: {
     durationMs: outcome.durationMs,
     scopeLeakPaths: outcome.scopeLeakPaths,
     prUrl: outcome.prUrl,
+    stderrTail: outcome.stderrTail,
+    exitCode: outcome.exitCode,
+    // Pass the signal field through — exactOptionalPropertyTypes means
+    // we must omit the key entirely when undefined (don't synthesise
+    // `signal: undefined`, which the type doesn't allow).
+    ...(outcome.signal !== undefined ? { signal: outcome.signal } : {}),
   };
   iterations.push(iterationResult);
   opts.recordIteration?.(iterationResult);
   await maybeFirePostIterationAudit(opts, task, outcome);
-  if (outcome.verdict === "scope-leak") return "scope-leak";
+  // Scope-leak: configurable soft vs hard mode.
+  // Soft (default): log warning + continue — devin naturally touches
+  // related files outside **Files**: declaration.
+  // Hard: halt the loop (legacy behavior, opt-in via opts.scopeLeakMode).
+  if (outcome.verdict === "scope-leak") {
+    if (opts.scopeLeakMode === "hard") return "scope-leak";
+    // Soft mode: log the leak paths, record the iteration, continue.
+    // The iteration record already has scopeLeakPaths for post-hoc review.
+  }
   if (outcome.verdict === "spawn-failed") return "spawn-failed";
+  // After a validated iteration, mark the task so the next pickTask
+  // call rotates past it. Without this, a worker that validates but
+  // does NOT open a PR (e.g. devin in --print mode pre-fix-2026-05-18,
+  // or a brief that doesn't instruct `gh pr create`) keeps getting
+  // the same task picked forever, blocking the walker from reaching
+  // other hosts. `walker-drains-one-host-forever` fix (b).
+  if (outcome.verdict === "validated") {
+    validatedTaskIds.add(task.id);
+  }
   return undefined;
 }
 
@@ -290,10 +382,24 @@ async function runOneIteration(args: {
  * the retry loop (if the audit ran but added no eligible tasks, we
  * exit `empty-queue` next).
  *
+ * `validatedTaskIds` is the loop's live skip-set. We snapshot it into a
+ * fresh `ReadonlySet` before each call so the picker sees an immutable
+ * point-in-time view; without the snapshot, a picker that stores the
+ * argument (e.g. a test fake recording call history, or a future
+ * stateful picker) would observe mutations from later iterations and
+ * misattribute them to earlier calls. Source: rule #6 (pure data flow
+ * at the boundary — pickers should not be coupled to internal loop
+ * timing) and the test
+ * `host-loop.test.ts › threads validated task IDs into the next pickTask
+ * call as skipTaskIds`, which fails without the snapshot.
+ *
  * (Internal helper — no JSDoc tag required.)
  */
-async function pickTaskOrSeed(opts: RunHostLoopOpts): Promise<ParsedTask | null> {
-  const first = opts.pickTask();
+async function pickTaskOrSeed(
+  opts: RunHostLoopOpts,
+  validatedTaskIds: ReadonlySet<string>,
+): Promise<ParsedTask | null> {
+  const first = opts.pickTask({ skipTaskIds: new Set(validatedTaskIds) });
   if (first !== null) return first;
   if (!opts.seedOnEmpty || opts.ctoAudit === undefined || opts.buildCtoSignals === undefined) {
     return null;
@@ -307,8 +413,10 @@ async function pickTaskOrSeed(opts: RunHostLoopOpts): Promise<ParsedTask | null>
   await opts.ctoAudit({ signals, completedVerdict: null });
   // Re-attempt pick once. If still null, the audit didn't help (no PR
   // merged yet, or audit produced no rule-#9-compliant blocks); the loop
-  // exits empty-queue normally.
-  return opts.pickTask();
+  // exits empty-queue normally. Snapshot again — the audit may have run
+  // long enough that the operator added another task in the meantime,
+  // but the skip-set semantics shouldn't change between the two calls.
+  return opts.pickTask({ skipTaskIds: new Set(validatedTaskIds) });
 }
 
 /**

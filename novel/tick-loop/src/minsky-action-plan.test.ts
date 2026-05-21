@@ -64,6 +64,40 @@ describe("planMinskyAction — claude-exhausted-no-stack", () => {
   });
 });
 
+// ---- Scenario: claude binary-missing (routes like exhausted) ----------------
+
+describe("planMinskyAction — claude binary-missing", () => {
+  it("routes binary-missing + no local stack to claude-exhausted-no-stack", () => {
+    const plan = planMinskyAction(
+      ctx({ claudeState: "binary-missing", localLlmState: "not-running" }),
+    );
+    expect(plan.scenario).toBe<Scenario>("claude-exhausted-no-stack");
+    expect(plan.recommendedAction.id).toBe("bootstrap-local-llm");
+  });
+
+  it("routes binary-missing + local stack to claude-exhausted-with-local-stack", () => {
+    const plan = planMinskyAction(ctx({ claudeState: "binary-missing", localLlmState: "running" }));
+    expect(plan.scenario).toBe<Scenario>("claude-exhausted-with-local-stack");
+    expect(plan.recommendedAction.id).toBe("start-worker-local-llm");
+  });
+
+  it("summary says 'not installed' for binary-missing, not 'quota exhausted'", () => {
+    const missing = planMinskyAction(ctx({ claudeState: "binary-missing" }));
+    expect(missing.contextSummary).toContain("not installed");
+    expect(missing.contextSummary).not.toContain("quota exhausted");
+    const exhausted = planMinskyAction(ctx({ claudeState: "exhausted" }));
+    expect(exhausted.contextSummary).toContain("quota exhausted");
+  });
+
+  it("does NOT fall through to clean-fresh-checkout when claude is absent", () => {
+    // The bug this fixes: a fresh checkout with no `claude` binary used to
+    // recommend "Start worker 0", which crashes immediately on spawn.
+    const plan = planMinskyAction(ctx({ claudeState: "binary-missing" }));
+    expect(plan.scenario).not.toBe<Scenario>("clean-fresh-checkout");
+    expect(plan.recommendedAction.id).not.toBe("start-worker");
+  });
+});
+
 // ---- Scenario: git-dirty-cant-iterate ----------------------------------------
 
 describe("planMinskyAction — git-dirty-cant-iterate", () => {

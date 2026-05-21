@@ -110,37 +110,6 @@ export function detectAnyCwd(inputs: CwdDetectInputs): CwdDetectResult {
 }
 
 /**
- * Map a {@link CwdDetectResult} to the single filesystem root the
- * conductor should scope to (its `MINSKY_HOME`). single-host → the host
- * itself; multi-host → the parent dir that contains the repos (the
- * conductor sweeps the whole tree under it). The `error` arm is
- * unreachable when fed from {@link detectAnyCwd} (which never errors),
- * but kept total so the function is pure over the full union — the
- * caller passes `fallbackCwd` for that degenerate case.
- *
- * @otel-exempt pure mapping over a typed union.
- */
-export function resolveConductorRoot(result: CwdDetectResult, fallbackCwd: string): string {
-  if (result.kind === "single-host") return result.host;
-  if (result.kind === "multi-host") return result.hostsDir;
-  return fallbackCwd;
-}
-
-/**
- * One call the conductor uses to scope itself from cwd: run the full
- * zero-arg precedence chain ({@link detectAnyCwd}) then collapse it to
- * the single root via {@link resolveConductorRoot}. This is the single
- * source of truth for "what root does `minsky` (zero-arg) scope to" —
- * `bin/minsky` no longer duplicates git-root detection in bash; the
- * conductor self-detects through this one pure path.
- *
- * @otel cross-repo-runner.detect-conductor-root
- */
-export function detectConductorRoot(inputs: CwdDetectInputs): string {
-  return resolveConductorRoot(detectAnyCwd(inputs), inputs.cwd);
-}
-
-/**
  * List direct subdirs of cwd that contain a `.git` entry (regular git
  * repos, submodules, and worktrees all have one). Analogous to
  * `findBootstrappedSubdirs` but uses `.git` presence instead of

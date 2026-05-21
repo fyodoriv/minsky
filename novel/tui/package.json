@@ -1,0 +1,31 @@
+{
+  "name": "@minsky/tui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zero-dependency retro-1995 CLI/TUI substrate for the machine-wide minsky dashboard. Slice 1: pure process-scan parser + machine-info formatter + ANSI dashboard renderer (no I/O, no model calls). Supersedes @minsky/dashboard-web per rule #10 ratchet (wired in a later slice).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minsky/cross-repo-runner": "workspace:^"
+  }
+}

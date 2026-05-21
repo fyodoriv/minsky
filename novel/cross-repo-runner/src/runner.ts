@@ -39,6 +39,15 @@ export interface SpawnLike {
     readonly durationMs: number;
     readonly stdoutTail: string;
     readonly stderrTail: string;
+    /**
+     * The POSIX signal that terminated the child, if any. Surfaced-by
+     * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19) —
+     * lets the runner distinguish `exit=-1 from clean null code` vs
+     * `exit=-1 from SIGTERM/SIGKILL/SIGHUP` when the cloud agent is
+     * silently killed by the OS / parent process / EPM hook. Optional
+     * to keep test fakes back-compatible.
+     */
+    readonly signal?: NodeJS.Signals;
   }>;
 }
 
@@ -55,6 +64,57 @@ export interface GitLike {
     readonly hostRoot: string;
     readonly sinceRef: string;
   }): Promise<readonly string[]>;
+}
+
+/**
+ * Structural subset of the gh-CLI surface the runner needs to implement
+ * the post-spawn PR-creation backstop (`devin-spawn-no-pr-opened` pivot,
+ * 2026-05-18). The hypothesis-fix is in `spawn-plan.ts` (the brief now
+ * includes `gh pr create` instructions); this seam is the pivot
+ * threshold's safety net for when the spawned agent honours the commit
+ * + push steps but skips `gh pr create` (the field-reported failure
+ * mode on devin --print runs).
+ *
+ * Production wires a `child_process.execFile("gh", …)` wrapper in
+ * `minsky-run.mjs`; tests inject an in-memory fake. The interface is
+ * intentionally optional on {@link RunLiveInputs} — when omitted, the
+ * runner falls back to the pre-pivot behaviour (extract from stdout only).
+ *
+ * Pattern: dependency-injection-via-structural-typing (Martin 2003 — depend
+ * on interfaces, not implementations) + rule #2 (vision.md § 2 — every
+ * external dep behind an interface; `gh` is the dep, this is the seam).
+ */
+export interface GhLike {
+  /**
+   * Returns the URL of an open PR on the host repo whose `headRefName`
+   * matches `branch`, or `null` when no such PR exists. Used to short-
+   * circuit the create-step when devin opened a PR but the URL was
+   * truncated from stdout (typical for long-running iterations whose
+   * stdout cap is hit before the PR-create line lands).
+   */
+  findOpenPr(args: {
+    readonly hostRepo: string;
+    readonly branch: string;
+  }): Promise<string | null>;
+  /**
+   * Opens a PR on the host repo from `branch` against `base`. Returns the
+   * PR URL on success, `null` on any failure (network, gh auth, branch
+   * not pushed, branch lacks commits, etc.). Failures are silent — the
+   * runner treats this as best-effort, never let-it-crash.
+   *
+   * The runner-side backstop is the LAST line of defence: it runs only
+   * after the spawn exited 0 with no scope leak AND no PR URL was found
+   * in stdout. Logging the failure is the caller's responsibility (the
+   * CLI surfaces it via `notes` in the iteration record).
+   */
+  createPr(args: {
+    readonly hostRepo: string;
+    readonly branch: string;
+    readonly base: string;
+    readonly title: string;
+    readonly body: string;
+    readonly workingDir: string;
+  }): Promise<string | null>;
 }
 
 /**
@@ -84,6 +144,27 @@ export interface RunLiveInputs {
    * the parser, no new glob dialect).
    */
   readonly globMatchesPath: (glob: string, path: string) => boolean;
+  /**
+   * Optional gh-CLI seam for the post-spawn PR-creation backstop
+   * (`devin-spawn-no-pr-opened` pivot, 2026-05-18). When provided, the
+   * runner attempts to find or open a PR for `plan.branchName` if the
+   * spawn exited 0 with no scope leak AND no PR URL was extracted from
+   * stdout. When omitted, the runner falls back to extract-from-stdout-
+   * only behaviour. The seam is optional so existing tests continue to
+   * pass without an injected fake.
+   */
+  readonly gh?: GhLike;
+  /**
+   * The fully-qualified host repo identifier (`owner/repo`) the backstop
+   * uses when calling `gh.findOpenPr` / `gh.createPr`. Required when `gh`
+   * is provided; ignored otherwise.
+   */
+  readonly hostRepo?: string;
+  /**
+   * The default branch to target when the backstop opens a PR. Required
+   * when `gh` is provided; ignored otherwise.
+   */
+  readonly defaultBranch?: string;
 }
 
 /**
@@ -115,6 +196,14 @@ export interface LiveSpawnOutcome {
   readonly prUrl: string | null;
   /** Baseline ref captured before the spawn — useful for operator audit. */
   readonly baselineRef: string;
+  /**
+   * POSIX signal that killed the child, if any. Threaded from the
+   * underlying `SpawnLike` so the iteration record can log
+   * `signal=SIGKILL`/`SIGTERM`/`SIGHUP` instead of the meaningless
+   * `exit=-1` collapse. Surfaced-by
+   * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+   */
+  readonly signal?: NodeJS.Signals;
 }
 
 /**
@@ -134,10 +223,15 @@ export interface LiveSpawnOutcome {
  * short-circuits and the run is `validated` regardless of the diff (the
  * operator opted out of scope enforcement by not declaring it).
  *
- * Step 4 (PR URL) — extract the LAST `https://github.com/.+/pull/\d+` URL
- * from stdout if present. The spawn typically prints the PR URL as its
- * last line; we take the last match so any earlier matches inside example
- * output (e.g. the brief's "see PR #N" prose) don't shadow the real one.
+ * Step 4 (PR URL resolution — three-stage cascade) — first extract the LAST
+ * `https://github.com/.+/pull/\d+` URL from stdout if present (the spawn
+ * typically prints the PR URL as its last line; we take the last match so
+ * any earlier matches inside example output don't shadow the real one).
+ * If that returns null AND `gh` is injected, ask whether an open PR
+ * already exists for the plan's branch (handles bounded-stdout-tail
+ * truncation). If still null, ask `gh` to open the PR — the
+ * `devin-spawn-no-pr-opened` pivot, 2026-05-18, when the agent commits
+ * + pushes but skips `gh pr create`.
  *
  * @otel cross-repo-runner.run-live
  */
@@ -158,31 +252,117 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
       scopeLeakPaths: [],
       prUrl: null,
       baselineRef,
+      // Thread the POSIX signal so the iteration log can show *why*
+      // the spawn died (SIGKILL from watchdog vs SIGTERM from parent
+      // vs SIGHUP from terminal vs null = exited with code).
+      // `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+      ...(result.signal !== undefined ? { signal: result.signal } : {}),
     };
   }
   const scopeLeakPaths = await detectScopeLeak(inputs, baselineRef);
-  if (scopeLeakPaths.length > 0) {
-    return {
-      verdict: "scope-leak",
-      stdoutTail: result.stdoutTail,
-      stderrTail: result.stderrTail,
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      scopeLeakPaths,
-      prUrl: null,
-      baselineRef,
-    };
-  }
+  // Smart scope-leak handling (2026-05-19 operator directive):
+  // Working on a task naturally touches more files than planned.
+  // Instead of discarding ALL work (old behavior), we:
+  //   - Still try to find/create the PR (preserve the work)
+  //   - Record the out-of-scope paths in the verdict (for follow-up)
+  //   - The host-loop decides whether to halt (hard) or continue (warn)
+  // The scope-leak paths become a follow-up signal ("these files
+  // changed — should they be in a separate PR?"), not a kill switch.
+  const prUrl = await ensurePrUrl(inputs, result.stdoutTail);
   return {
-    verdict: "validated",
+    verdict: scopeLeakPaths.length > 0 ? "scope-leak" : "validated",
     stdoutTail: result.stdoutTail,
     stderrTail: result.stderrTail,
     exitCode: result.exitCode,
     durationMs: result.durationMs,
-    scopeLeakPaths: [],
-    prUrl: extractPrUrl(result.stdoutTail),
+    scopeLeakPaths,
+    prUrl,
     baselineRef,
   };
+}
+
+/**
+ * Resolve the PR URL the iteration record will store. Three-stage cascade:
+ *
+ *   1. Extract from the spawn's stdout tail (the happy path — devin /
+ *      claude printed the URL after `gh pr create`).
+ *   2. If null and a `gh` seam is injected, ask whether an open PR
+ *      already exists for the plan's branch (handles the case where the
+ *      spawn opened a PR but its URL fell off the bounded stdout tail).
+ *   3. If still null, ask the seam to open a PR. This is the
+ *      `devin-spawn-no-pr-opened` pivot — when the agent commits + pushes
+ *      but skips `gh pr create`, the runner backstop opens it.
+ *
+ * Any failure inside the seam returns null and the verdict stays
+ * `validated` with `prUrl: null` (the legacy behaviour). The runner does
+ * NOT let-it-crash on the backstop because the gh probe is best-effort:
+ * gh-not-on-PATH / gh-auth-expired / branch-not-pushed are all
+ * recoverable in the next iteration. (Per rule #7 graceful-degrade.)
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function ensurePrUrl(inputs: RunLiveInputs, stdoutTail: string): Promise<string | null> {
+  const fromStdout = extractPrUrl(stdoutTail);
+  if (fromStdout !== null) return fromStdout;
+  if (inputs.gh === undefined) return null;
+  if (inputs.hostRepo === undefined) return null;
+  if (inputs.defaultBranch === undefined) return null;
+  const branch = inputs.plan.branchName;
+  const hostRepo = inputs.hostRepo;
+  const existing = await inputs.gh.findOpenPr({ hostRepo, branch });
+  if (existing !== null) return existing;
+  return inputs.gh.createPr({
+    hostRepo,
+    branch,
+    base: inputs.defaultBranch,
+    title: defaultBackstopTitle(inputs.plan.taskId),
+    body: defaultBackstopBody(inputs.plan.taskId),
+    workingDir: inputs.plan.workingDirectory,
+  });
+}
+
+/**
+ * Title for the runner-opened backstop PR. Conventional-commit prefix
+ * `chore:` so commit-style PR checks pass; the task id is suffixed for
+ * traceability in `gh pr list` output.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function defaultBackstopTitle(taskId: string): string {
+  return `chore: backstop PR for ${taskId} (agent did not run gh pr create)`;
+}
+
+/**
+ * Body for the runner-opened backstop PR. Includes the
+ * `Hypothesis self-grade` block required by `check-pr-self-grade.mjs`
+ * (rule #9 — pre-registered hypothesis + observation). The values are
+ * meta-statements about the runner's behaviour: the predicted outcome
+ * was "agent ships its own PR", the observed outcome was "agent did
+ * not call gh pr create", and the lesson is the runner's backstop is
+ * required for the success metric (`pr_url != null`) to move.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function defaultBackstopBody(taskId: string): string {
+  return [
+    `Auto-opened by minsky-run.mjs's post-spawn PR-creation backstop because the`,
+    "spawned agent finished with exit 0 but did not run `gh pr create` (or the",
+    "URL did not appear in the bounded stdout tail).",
+    "",
+    `Task: \`${taskId}\``,
+    "",
+    `Review the commits on this branch carefully — the agent's edits are present,`,
+    "but its PR description / self-grade is not. Edit this PR body to reflect",
+    "the actual hypothesis / observation before requesting review.",
+    "",
+    "## Hypothesis self-grade",
+    "",
+    "- Predicted: agent runs to completion and opens a PR via `gh pr create`",
+    "- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR",
+    "- Match: partial",
+    `- Lesson: the brief's \`gh pr create\` step is necessary but not always sufficient; the runner backstop is the durable safety net (devin-spawn-no-pr-opened pivot, 2026-05-18)`,
+    "",
+  ].join("\n");
 }
 
 /**
@@ -237,9 +417,42 @@ export function extractPrUrl(stdoutTail: string): string | null {
  * @otel-exempt pure parser helper.
  */
 export function extractAllowedPathsFromTaskBlock(taskBlock: string): readonly string[] {
+  const declared = parseDeclaredFields(taskBlock);
+  // Preserve today's "no scope = no leak" semantics: a task that declared
+  // no scope stays empty, even with the implicit-paths union enabled.
+  if (declared.length === 0) return declared;
+  const implicit = readImplicitAllowedPaths();
+  if (implicit.length === 0) return declared;
+  const declaredSet = new Set(declared);
+  const additions = implicit.filter((path) => !declaredSet.has(path));
+  return [...declared, ...additions];
+}
+
+function parseDeclaredFields(taskBlock: string): readonly string[] {
   const touches = parseTouchesField(taskBlock);
   if (touches.length > 0) return touches;
   return parseFilesField(taskBlock);
+}
+
+// Implicit allowed-paths union — closes the scope-leak loophole observed on
+// oncall-hub-api 2026-05-16: every devin worker is brief-instructed to remove
+// the shipped task block from TASKS.md, but no task author lists `TASKS.md`
+// in **Files**: (it's repo-meta, not code surface). Union those brief-mandated
+// cleanup paths with the declared scope so they don't trigger scope-leak.
+//
+// Env knob (MINSKY_IMPLICIT_ALLOWED_PATHS):
+//   - unset       → use DEFAULT_IMPLICIT_ALLOWED_PATHS
+//   - empty ("")  → disable the union (return [] — declared paths only)
+//   - "a, b, c"   → replace the default set with the comma list
+//
+// @otel-exempt pure env-reader.
+const DEFAULT_IMPLICIT_ALLOWED_PATHS: readonly string[] = ["TASKS.md", "AGENTS.md"];
+
+function readImplicitAllowedPaths(): readonly string[] {
+  const raw = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+  if (raw === undefined) return DEFAULT_IMPLICIT_ALLOWED_PATHS;
+  if (raw.length === 0) return [];
+  return splitCommaGlobs(raw);
 }
 
 function parseTouchesField(taskBlock: string): readonly string[] {
