@@ -109,6 +109,7 @@ Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 - **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
 - **[docs/cli-reference.md](docs/cli-reference.md)** — every command, every flag, every env var
 - **[docs/configuration.md](docs/configuration.md)** — `~/.minsky/config.json`, agent comparison
+- **[docs/dependabot.md](docs/dependabot.md)** — dependency-update policy, grouping, local merge gate
 - **[docs/edge-cases.md](docs/edge-cases.md)** — empty queues, runtime limits, comm channels, crashes
 - **[docs/PRACTICES.md](docs/PRACTICES.md)** — scientifically proven practices with citations
 - **[vision.md](vision.md)** — the constitution (18 rules), pattern conformance index
