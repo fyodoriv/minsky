@@ -2617,7 +2617,7 @@
 
 ## P3
 
-- [ ] `migrate-rule-9-lint-to-upstream` — once `@tasks-md/lint@0.8.0` (with `--require-prereg`) is published on npm, replace the local `scripts/check-rule-9-tasksmd-fields.mjs` with `npx -y @tasks-md/lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md`. The allowlist file is already in place (PR `chore/retire-local-rule-9-lint`); the script reads from it. Blocked on the v0.8.0 npm publish workflow succeeding (current failure: expired `NPM_TOKEN`).
+- [ ] `migrate-rule-9-lint-to-upstream` — once `@tasks-md/lint@0.8.0` (with `--require-prereg`) is published on npm, replace the local `scripts/check-rule-9-tasksmd-fields.mjs` with `npx -y @tasks-md/lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md`. The allowlist file is already in place (PR #690); the script reads from it. Blocked on the tasks.md v0.8.0 npm publish workflow succeeding (see `tasks-md-trusted-publishing-setup`).
   - **ID**: migrate-rule-9-lint-to-upstream
   - **Tags**: p3, cleanup, lint, upstream, tasks-md
   - **Milestone**: M1
@@ -2641,18 +2641,18 @@
   - **Measurement**: `node scripts/check-docs-frame-coherence.mjs && echo OK || echo VIOLATION` produces deterministic output for any TASKS.md / README.md content; CI gate `docs-frame-coherence` added to `.github/workflows/ci.yml` runs on every PR.
   - **Anchor**: `docs/PRACTICES.md § Unified reader-orientation doc frame`; PR #685 (the wholesale application).
 
-- [ ] `tasks-md-npm-token-rotate` — `@tasks-md/lint@0.8.0` publish failed with 404 "Not in this registry", which is npm's error code for "token cannot publish to this scope". Rotate the `NPM_TOKEN` repo secret on tasks.md to a fresh token with publish access to `@tasks-md/*` and re-run the publish workflow.
-  - **ID**: tasks-md-npm-token-rotate
-  - **Tags**: p3, blocked-on-operator, tasks-md, npm-publish
+- [ ] `tasks-md-trusted-publishing-setup` — `@tasks-md/lint@0.8.0` publish failed with 404 because the `NPM_TOKEN` secret expired. Rather than rotate the token, [tasks.md PR #84](https://github.com/tasksmd/tasks.md/pull/84) replaced the token-based publish path with [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). The workflow change is merged; the **one-time operator setup on npmjs.com is still pending** — without it, the publish workflow on tag `v0.8.0` will still fail.
+  - **ID**: tasks-md-trusted-publishing-setup
+  - **Tags**: p3, blocked-on-operator, tasks-md, npm-publish, supply-chain
   - **Milestone**: M1
-  - **Touches**: github.com/tasksmd/tasks.md repo secrets (NPM_TOKEN)
-  - **Surfaced-by**: 2026-05-21 v0.8.0 release attempt — publish workflow `publish.yml` on tag `v0.8.0` returned `npm error 404 Not Found - PUT https://registry.npmjs.org/@tasks-md%2fparser`.
-  - **Hypothesis**: the npm token issued before Apr 8 (v0.7.0 ship date) has expired or has been scoped down. A fresh token with `automation` access to `@tasks-md` scope restores the publish path.
-  - **Success**: `npm view @tasks-md/lint version` returns `0.8.0` (currently `0.7.0`); `npx -y @tasks-md/lint@latest --help` shows `--require-prereg`.
-  - **Pivot**: if the npm scope owner refuses to issue a publish token, switch tasks.md to GitHub Packages or a forked scope.
-  - **Measurement**: re-trigger the publish workflow on tag `v0.8.0` via `gh workflow run publish.yml` (or just push a v0.8.1 tag); check `gh run list --workflow=publish.yml --limit 1 --json conclusion` for `SUCCESS`.
-  - **Anchor**: this session's release attempt (run ID 26240628732).
-  - **Blocked**: needs-operator — `NPM_TOKEN` repo secret rotation is a maintainer-only action.
+  - **Touches**: npmjs.com Settings → Publishing access → Trusted Publishers (per-package, on `@tasks-md/parser`, `@tasks-md/lint`, `@tasks-md/cli`, `tasks-mcp`)
+  - **Surfaced-by**: 2026-05-21 v0.8.0 release attempt — publish workflow `publish.yml` on tag `v0.8.0` returned `npm error 404 Not Found - PUT https://registry.npmjs.org/@tasks-md%2fparser`. Operator directive same session: "all npm publishing should happen through trusted publishing, not through tokens". Fix shipped in tasks.md PR #84.
+  - **Hypothesis**: registering tasks.md PR #84's workflow as a Trusted Publisher for each of the four packages on npmjs.com lets the OIDC-based publish path succeed without any `NPM_TOKEN`. Provenance attestations (`npm publish --provenance`) raise the bar for supply-chain trust — consumers can verify a package came from this exact repo + workflow + commit via `npm audit signatures`.
+  - **Success**: `npm view @tasks-md/lint version` returns `0.8.0` (currently `0.7.0`); `npx -y @tasks-md/lint@latest --help` shows `--require-prereg`; the package page on npmjs.com shows a green "Provenance" badge.
+  - **Pivot**: if npm's Trusted Publishers UI rejects the configuration for any of the four packages (e.g., insufficient owner permissions on the scope), file a tasks.md issue documenting the blocker and fall back to a freshly-scoped automation token as a temporary measure (keep the OIDC workflow code; just re-add the `NODE_AUTH_TOKEN` env step in a follow-up PR).
+  - **Measurement**: per package, on npmjs.com: Settings → Publishing access → Trusted Publishers should show one rule with `tasksmd/tasks.md` + `publish.yml`. After all four are configured, re-trigger the publish via `gh workflow run publish.yml -R tasksmd/tasks.md --ref v0.8.0` (or tag a fresh v0.8.1); `gh run list --workflow=publish.yml --limit 1 --json conclusion` should return `SUCCESS`.
+  - **Anchor**: tasks.md PR #84 (the OIDC workflow change); npm Trusted Publishers documentation (<https://docs.npmjs.com/trusted-publishers>); npm provenance documentation (<https://docs.npmjs.com/generating-provenance-statements>); originating release-run ID 26240628732.
+  - **Blocked**: needs-operator — Trusted Publisher rule registration requires npm owner credentials on each `@tasks-md/*` package + `tasks-mcp`. Maintainer-only action per `tasks.md/CONTRIBUTING.md § Releasing`.
 
 - [ ] `scripts-complexity-refactor` — 6 `noExcessiveCognitiveComplexity` biome errors are silenced with `// biome-ignore` annotations in scripts/ and 2 in novel/cross-repo-runner/bin/minsky-run.mjs. Refactor each into smaller helpers so the rule passes natively.
   - **ID**: scripts-complexity-refactor
