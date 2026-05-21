@@ -103,6 +103,7 @@ describe("STACK_MANIFEST", () => {
       .sort();
     expect(fastNames).toEqual(
       [
+        "agents-md-coherence",
         "biome",
         "markdownlint",
         "no-hardcoded-user-paths",

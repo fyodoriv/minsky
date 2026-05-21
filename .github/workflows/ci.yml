@@ -1539,7 +1539,8 @@ jobs:
           # only; on push they are `skipped` — accept that, fail on
           # `failure`/`cancelled`. All other jobs must be `success`.
           fail=0
-          for r in "${{ needs.anchor-primary-source.result }}" \
+          for r in "${{ needs.agents-md-coherence.result }}" \
+                   "${{ needs.anchor-primary-source.result }}" \
                    "${{ needs.biome.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.cloud-audit-gate.result }}" \
