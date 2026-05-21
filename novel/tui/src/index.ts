@@ -21,6 +21,11 @@ export type { MinskyProc, MinskyRole } from "./scan.js";
 export { repoBasename } from "./render.js";
 export { renderDetail, formatLogRow } from "./detail.js";
 export type { DetailModel, DetailRenderOpts, LogFile } from "./detail.js";
-export { gatherMachineRaw, listLogFiles, defaultMachineProbe, defaultLogDirProbe } from "./gather.js";
+export {
+  gatherMachineRaw,
+  listLogFiles,
+  defaultMachineProbe,
+  defaultLogDirProbe,
+} from "./gather.js";
 export type { MachineProbe, LogDirProbe } from "./gather.js";
 export type { MachineRaw } from "./machine.js";
