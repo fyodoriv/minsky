@@ -1,6 +1,50 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
+
+// `maybeBootstrapLocalLlm` early-returns on ambient MINSKY_* env
+// (minsky.mjs: `MINSKY_NO_AUTO_BOOTSTRAP`, `MINSKY_LOCAL_LLM`,
+// `MINSKY_LLM_PROVIDER`) BEFORE the DI seam is consulted. The daemon
+// spawns its workers with `MINSKY_LLM_PROVIDER=local-preferred
+// MINSKY_LOCAL_LLM=1` — the exact env P0 `local-worker-worktree-never-
+// created` targets — so without sandboxing these keys the DI-seam
+// assertions below return `{}` from the env short-circuit and fail in
+// any local-preferred shell (incl. the pre-push full-stage vitest).
+// Snapshot + clear the gating keys so the seam is exercised hermetically.
+const GATING_ENV_KEYS = ["MINSKY_NO_AUTO_BOOTSTRAP", "MINSKY_LOCAL_LLM", "MINSKY_LLM_PROVIDER"];
+let savedEnv: Record<string, string | undefined> = {};
+beforeEach(() => {
+  savedEnv = {};
+  for (const key of GATING_ENV_KEYS) {
+    savedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+afterEach(() => {
+  for (const key of GATING_ENV_KEYS) {
+    const prev = savedEnv[key];
+    if (prev === undefined) delete process.env[key];
+    else process.env[key] = prev;
+  }
+});
+
 describe("maybeBootstrapLocalLlm — DI seam", () => {
+  // Sandbox the LLM-provider env so the DI-seam assertions test the seam,
+  // not the ambient process env. Daemon workers export
+  // MINSKY_LLM_PROVIDER=local-preferred / claude-only (see
+  // `local-preferred-daemon-env-vars`); without this stub these tests
+  // fail when the suite runs inside a daemon-spawned worker (the very
+  // process the pre-push hook runs in). vi.stubEnv(name, undefined) is
+  // the documented in-file pattern (biome `noDelete` forbids `delete`;
+  // `= undefined` coerces to the string "undefined" in Node).
+  beforeEach(() => {
+    vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
+    vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {
       server: { reachable: true, url: "http://127.0.0.1:1234" },

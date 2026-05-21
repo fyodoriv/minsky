@@ -1,0 +1,67 @@
+# Minsky daemon — Linux equivalent of the macOS `com.minsky.daemon`
+# launchd LaunchAgent (`bin/minsky install-daemon` / `uninstall-daemon`).
+#
+# On macOS launchd IS the supervisor: it runs `node minsky-run.mjs --loop`
+# directly (not via `--daemon` which backgrounds), so KeepAlive can see the
+# real PID. systemd takes the same shape — `Type=simple`, the node process
+# is `Type=simple` ExecStart, supervisor restarts on death.
+#
+# Acceptance criterion (d) of `daemon-survives-machine-restart` (rule #6,
+# stay-alive): the daemon auto-resumes after a sudden machine reboot,
+# power loss, kernel panic, or SIGKILL with zero operator intervention.
+# `Restart=always` (not `on-failure`) is the iron form — a clean exit-0
+# from the runner ALSO triggers restart, because in autonomous-loop mode
+# the daemon should never voluntarily stop. Compare `minsky-tick-loop.service`
+# which uses `Restart=on-failure` because the tick-loop CAN choose to stop
+# (e.g. `--max-iterations`); the daemon cannot.
+#
+# Pattern: Armstrong 2007 (let-it-crash + supervisor restart — systemd IS
+# the supervisor, mirroring launchd KeepAlive=true); Beyer SRE 2016 (the
+# daemon is cattle, not pets — restart is the normal path, not an
+# exception). Conformance: full (matches the macOS plist semantics 1:1).
+#
+# Stale PID cleanup, dirty-state reset on a crashed-iteration branch, and
+# iteration-resume are handled inside the runner / `bin/minsky --daemon`
+# startup path (see `bin/minsky` lines 547–581) — they apply uniformly on
+# both macOS and Linux.
+#
+# Placeholders (substituted by setup.sh via envsubst):
+#   ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+
+[Unit]
+Description=Minsky daemon — autonomous per-host tick-loop runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${MINSKY_HOME}
+Environment=MINSKY_HOME=${MINSKY_HOME}
+Environment=MINSKY_NON_INTERACTIVE=1
+# The launcher reads `default_host` from `~/.minsky/config.json` and execs
+# `node $MINSKY_HOME/novel/cross-repo-runner/bin/minsky-run.mjs
+#       --host <default_host> --loop` (mirroring the launchd plist).
+ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-daemon.sh
+
+# Restart=always (not on-failure): the daemon must auto-resume after a
+# clean exit too — see header comment.
+Restart=always
+RestartSec=5
+
+# Cap restart hammering on systematic failure (10 restarts in 5 minutes
+# is enough signal for an operator to look; we don't want unbounded
+# crash-loops eating the local LLM token budget).
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# StandardOutput/StandardError → journal (queryable via `journalctl --user
+# -u minsky-daemon -f`). The macOS counterpart writes to ~/.minsky/daemon.log.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minsky-daemon
+
+[Install]
+# default.target = the user session graphical/login target. The macOS
+# launchd plist uses RunAtLoad=true which auto-starts on login; this is
+# the equivalent systemd contract.
+WantedBy=default.target

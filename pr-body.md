@@ -90,7 +90,7 @@ Pre-existing findings (not introduced here, not fixed here —
 surgical-change rule):
 
 1. `orchestrate.mjs` hardcodes `REPO = MINSKY_HOME ??
-   /Users/cbrwizard/apps/tooling/minsky`. On a host without that path
+   <minsky-repo>`. On a host without that path
    and no `MINSKY_HOME`, the restart-state write rule-#7 no-ops silently
    (escalating backoff falls back to flat base on every boot). Worth a
    P2 for non-author-machine portability now the launchd unit lands.

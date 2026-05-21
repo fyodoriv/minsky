@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+// <!-- scope: human-approved slice 1 of `runany-self-restart-bounded-timelimit` (P0) — pure restart-supervisor decision core; the task block in TASKS.md anchors this. -->
 // `scripts/restart-supervisor.mjs` — pure restart-supervisor decision
 // core for `runany-self-restart-bounded-timelimit` (TASKS.md P0).
 //
