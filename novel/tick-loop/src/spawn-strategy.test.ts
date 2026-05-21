@@ -362,6 +362,72 @@ describe("tick-loop / spawn-strategy / ProcessSpawnStrategy with invocation opt"
     expect(receivedTaskId).toBe("expected-task-id");
   });
 
+  // Slice 3 of P0 `local-worker-worktree-never-created`: when the
+  // builder's `cwd` (the per-worker git worktree) does not exist, fail
+  // loud AT the workspace boundary with a one-line operator-actionable
+  // message — never spawn the model into a missing cwd.
+  it("rejects loud (naming the missing dir) when builder's cwd does not exist — does NOT spawn", async () => {
+    let spawnCalls = 0;
+    const strat = new ProcessSpawnStrategy({
+      command: "aider",
+      spawnFn: (() => {
+        spawnCalls += 1;
+        throw new Error("spawnFn must not be called when cwd is missing");
+      }) as unknown as typeof import("node:child_process").spawn,
+      existsFn: () => false,
+      invocation: () => ({
+        command: "aider",
+        argv: ["--message", "x"],
+        stdin: undefined,
+        cwd: "/Users/u/apps/minsky/.claude/worktrees/daemon-0-some-task",
+      }),
+    });
+    await expect(strat.spawn(emptyInput())).rejects.toThrow(
+      /worktree cwd "\/Users\/u\/apps\/minsky\/\.claude\/worktrees\/daemon-0-some-task" does not exist/,
+    );
+    await expect(strat.spawn(emptyInput())).rejects.toThrow(/local-worker-worktree-never-created/);
+    expect(spawnCalls).toBe(0);
+  });
+
+  it("proceeds to spawn when builder's cwd exists (existsFn → true)", async () => {
+    let checkedPath = "";
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      existsFn: (p) => {
+        checkedPath = p;
+        return true;
+      },
+      invocation: () => ({
+        command: process.execPath,
+        argv: ["-e", "process.exit(0);"],
+        stdin: undefined,
+        cwd: "/tmp",
+      }),
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(0);
+    expect(checkedPath).toBe("/tmp");
+  });
+
+  it("does not run the cwd guard when the invocation has no cwd (legacy path unaffected)", async () => {
+    let existsCalls = 0;
+    const strat = new ProcessSpawnStrategy({
+      command: process.execPath,
+      existsFn: () => {
+        existsCalls += 1;
+        return false;
+      },
+      invocation: () => ({
+        command: process.execPath,
+        argv: ["-e", "process.exit(0);"],
+        stdin: undefined,
+      }),
+    });
+    const result = await strat.spawn(emptyInput());
+    expect(result.exitCode).toBe(0);
+    expect(existsCalls).toBe(0);
+  });
+
   it("legacy path (no invocation opt) still writes brief to stdin", async () => {
     const script = `
       let s = '';
