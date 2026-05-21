@@ -200,6 +200,15 @@ Returns `{ ok: true, repoPath, source }` (where `source` records which seam matc
 
 `src/scan-processes.ts` exports pure `parseMinskyProcs(psText)` + the injected `scanMinskyProcesses(probe)` seam — the single machine-wide answer to "what minsky runs exist on this host right now?". It parses `ps` text into typed `MinskyProc` records (`kind: orchestrator | worker | gate`, repo root, per-run id), excluding `run-pre-pr-lint-stack` vet children and all non-minsky noise. Composes the OS `ps` rather than a bespoke registry (rule #1); the parse is pure with no I/O (rule #10); a broken/absent `ps` degrades to `[]` and never throws (rule #6) so it cannot take down the very TUI / launch path it serves. Foundational substrate for the runany P0 cluster (#588): the retro TUI dashboard, the multi-tenant no-conflict guard, and the zero-arg entrypoint all build on it instead of each re-deriving `ps` parsing. Tested by `scan-processes.test.ts` (7 paired cases: kind classification, multi-tenant repo derivation, worker run-id, vet-child exclusion, empty/garbage fail-safe, the injected seam, graceful-degrade).
 
+## `classifyRepo` / `assertWriteAllowed` (runany — least-authority repo policy)
+
+`src/repo-policy.ts` exports two pure, zero-I/O functions that form the run-anywhere conductor's least-authority gate (operator 2026-05-16 directive; rule #13; Saltzer & Schroeder 1975 — least privilege + fail-safe defaults):
+
+- `classifyRepo({ repoRoot, homeRoot, repoOrigin?, homeOrigin? })` → `"home" | "foreign"`. A repo is **home** when its normalised git root equals the invoked repo's root, OR (when both origins are known) its normalised `origin` equals the home origin — so a separate worktree / fresh clone of the same upstream stays home. Origin normalisation collapses `git@host:org/repo.git`, `https://host/org/repo`, and `ssh://git@host/org/repo/` to `host/org/repo`.
+- `assertWriteAllowed({ repoClass, action, changedPaths? })` → `WriteVerdict`. **Home** → any write allowed (branch, push, PR, gate-merge). **Foreign** → a code push is refused (`foreign-code-push`); a PR is allowed only when its diff is limited to `TASKS.md` (basename match, nested-aware) and refused otherwise (`foreign-nontaskmd-pr`). An omitted/empty diff on a foreign PR is refused (fail-safe — an undetermined diff is never assumed safe). Refusal codes are stable so the wiring layer (`scripts/orchestrate.mjs`, `scripts/local-gate-merge.mjs`) and `scripts/runany-policy-audit.mjs` can count them without re-parsing prose.
+
+`isTaskmdOnlyDiff(changedPaths)` is exported as the standalone defense-in-depth diff-shape predicate (the task's Pivot backstop). No model in the gate (rule #10); the caller resolves git facts and logs the verdict. Tested by `repo-policy.test.ts` (the full home/foreign × push/PR/taskmd matrix + the origin/path normalisation chain + every `isTaskmdOnlyDiff` edge). Wiring into the conductor + the run-window audit script land in follow-up iterations of `runany-permission-scoped-writes`.
+
 ## `detectAnyCwd` (runany — zero-arg entrypoint resolver)
 
 `src/cwd-detect.ts` exports `detectAnyCwd` (+ `findGitRootSubdirs`), the
@@ -228,7 +237,7 @@ plain-dir fallback, detached-worktree `.git`-file detection).
 
 ## Tests
 
-171+ paired vitest cases across 13 files (run `pnpm vitest run novel/cross-repo-runner`):
+171+ paired vitest cases across 14 files (run `pnpm vitest run novel/cross-repo-runner`):
 
 - `task-finder.test.ts` (14) — parses tasks.md sections / ID / tags / details / rule-#9 fields; ID match; title-substring matching; not-found reporting
 - `experiment-synth.test.ts` (10) — happy-path YAML rendering; rule-#9 iron-rule violations (missing fields)
