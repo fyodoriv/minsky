@@ -28,13 +28,24 @@ import type { LoopResult, LoopStopReason } from "./host-loop.js";
  *   - `scope-leak`        — first host iteration that produced a
  *                           scope-leak halts the entire walker for
  *                           operator inspection.
+ *   - `restart-requested` — `~/.minsky/restart-requested` sentinel was
+ *                           present in one of the inner loops. The
+ *                           whole walker exits cleanly (code 0) so
+ *                           launchd's `KeepAlive=true` respawns the
+ *                           daemon with the new code. Source: TASKS.md
+ *                           `minsky-auto-restart-daemon-on-pull`.
  *
  * Note: `spawn-failed` on a single host does NOT halt the walker —
  * the walker skips to the next host. The failure is recorded in the
  * visit audit trail and surfaced in the summary. This prevents one
  * bad host from blocking the entire fleet.
  */
-export type WalkerStopReason = "all-hosts-drained" | "max-iterations" | "aborted" | "scope-leak";
+export type WalkerStopReason =
+  | "all-hosts-drained"
+  | "max-iterations"
+  | "aborted"
+  | "scope-leak"
+  | "restart-requested";
 
 /**
  * Per-host audit trail. The walker collects one of these per host visit
@@ -147,6 +158,12 @@ export async function walkHostsDir(inputs: WalkHostsDirInputs): Promise<WalkerRe
 function mapInnerStopToWalker(inner: LoopStopReason): WalkerStopReason | undefined {
   if (inner === "scope-leak") return "scope-leak";
   if (inner === "aborted") return "aborted";
+  // restart-requested is a process-level signal: the running daemon
+  // should exit so launchd respawns it with the new code. A walker
+  // that "advanced to the next host" here would keep iterating on
+  // stale code — the operator would never see the requested restart.
+  // Source: TASKS.md `minsky-auto-restart-daemon-on-pull`.
+  if (inner === "restart-requested") return "restart-requested";
   // spawn-failed, empty-queue, and max-iterations are non-fatal advances —
   // the walker moves to the next host. spawn-failed is logged in the visit
   // record so the operator sees it in the summary.
