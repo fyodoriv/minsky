@@ -316,7 +316,7 @@ export const STACK_MANIFEST = Object.freeze([
     name: "biome",
     stages: ["fast", "full"],
     cmd: "pnpm",
-    args: ["biome", "ci", "--changed", "--since=origin/main", "."],
+    args: ["biome", "ci", "--changed", "--since=origin/main", "--no-errors-on-unmatched", "."],
   },
   {
     name: "typecheck",
