@@ -116,6 +116,19 @@ function footer(model: DashboardModel, on: boolean): string {
  *
  * @otel-exempt pure data transformation; no I/O, no state.
  */
+
+/**
+ * @otel-exempt pure path→segment helper. Trailing path segment of an
+ * absolute repo path. Slice-2 `detail.ts` and any other consumer of
+ * REPO-name shortening use this single source of truth.
+ */
+export function repoBasename(repo: string): string {
+  const trimmed = repo.replace(/\/+$/, "");
+  if (trimmed.length === 0) return "—";
+  const idx = trimmed.lastIndexOf("/");
+  return idx === -1 ? trimmed : trimmed.slice(idx + 1);
+}
+
 export function renderDashboard(
   model: DashboardModel,
   opts: { readonly color?: boolean } = {},
