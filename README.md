@@ -56,11 +56,11 @@ Safety is mechanical, not aspirational. Every rule below is enforced by a CI lin
 
 Full constitution: [`vision.md`](vision.md).
 
-## Inside the daemon
+## Architecture
 
-A 30-second teaser: a bash CLI shim → a task walker that picks the next priority item from your `TASKS.md` → a pluggable AI agent (Claude, Devin, or a local Ollama model) → a sidecar (`.minsky/`) recording each iteration → a draft PR for you to review. The whole thing is a MAPE-K control loop (Monitor / Analyze / Plan / Execute, Kephart & Chess 2003) with Erlang-style let-it-crash supervision (Armstrong 2007) and a Viable System Model layering (Beer 1972).
+A bash CLI shim → a task walker that picks the next priority item from your `TASKS.md` → a pluggable AI agent (Claude, Devin, or a local Ollama model) → a sidecar (`.minsky/`) recording each iteration → a draft PR for you to review. Built on MAPE-K (Kephart & Chess 2003), let-it-crash supervision (Armstrong 2007), and the Viable System Model (Beer 1972).
 
-Full architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md) — the layered model, the adapter pattern for every external dep, per-tick data flow, the process supervision tree, observability, and the bootstrap.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full breakdown.
 
 ## More
 
