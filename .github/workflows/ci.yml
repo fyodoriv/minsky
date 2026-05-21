@@ -1095,6 +1095,32 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-no-singleton-experiment.test.mjs
 
+  brief-pr-instructions:
+    # rule #10 deterministic enforcement of the `devin-spawn-no-pr-opened`
+    # fix (commit 085fdd7, 2026-05-18). The spawn brief in
+    # `novel/cross-repo-runner/src/spawn-plan.ts` must keep the three
+    # literal substrings (`FINAL STEP`, `git push`, `gh pr create`) that
+    # convert the agent's analysis-mode tail into action-mode and prevent
+    # the "validated but no PR opened" failure class from regressing.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # AGENTS.md § "Runtime invariants" (the runtime counterpart is
+    # `briefIncludesPrInstructions` in runtime-invariants.ts).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: brief-pr-instructions lint
+        run: node scripts/check-brief-pr-instructions.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-brief-pr-instructions.test.mjs
+
   skill-rule-cap:
     # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
     # `novel/spec-monitor/SKILL.md` declares a hard cap of ≤5 advisory
@@ -1481,6 +1507,7 @@ jobs:
       - agents-md-coherence
       - anchor-primary-source
       - biome
+      - brief-pr-instructions
       - cadence-pivot-threshold
       - cloud-audit-gate
       - dashboard-localhost-bind
@@ -1542,6 +1569,7 @@ jobs:
           for r in "${{ needs.agents-md-coherence.result }}" \
                    "${{ needs.anchor-primary-source.result }}" \
                    "${{ needs.biome.result }}" \
+                   "${{ needs.brief-pr-instructions.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.cloud-audit-gate.result }}" \
                    "${{ needs.dashboard-localhost-bind.result }}" \
