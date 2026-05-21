@@ -28,16 +28,13 @@ import type { LoopResult, LoopStopReason } from "./host-loop.js";
  *   - `scope-leak`        — first host iteration that produced a
  *                           scope-leak halts the entire walker for
  *                           operator inspection.
- *   - `spawn-failed`      — first host iteration with a non-zero spawn
- *                           halts the walker (likely systemic — auth,
- *                           binary missing, network).
+ *
+ * Note: `spawn-failed` on a single host does NOT halt the walker —
+ * the walker skips to the next host. The failure is recorded in the
+ * visit audit trail and surfaced in the summary. This prevents one
+ * bad host from blocking the entire fleet.
  */
-export type WalkerStopReason =
-  | "all-hosts-drained"
-  | "max-iterations"
-  | "aborted"
-  | "scope-leak"
-  | "spawn-failed";
+export type WalkerStopReason = "all-hosts-drained" | "max-iterations" | "aborted" | "scope-leak";
 
 /**
  * Per-host audit trail. The walker collects one of these per host visit
@@ -136,13 +133,22 @@ export async function walkHostsDir(inputs: WalkHostsDirInputs): Promise<WalkerRe
  * `undefined` when the walker should advance to the next host; returns
  * a `WalkerStopReason` when the walker should halt.
  *
+ * `spawn-failed` is intentionally NOT a walker halt — a bad host
+ * (missing binary, auth expired, network down) should not prevent the
+ * walker from trying the remaining hosts. The failure is recorded in
+ * the visit and surfaced in the summary. Only `scope-leak` (sandbox
+ * violation) and `aborted` (operator SIGTERM) halt the walk.
+ *
+ * Changed 2026-05-18: previously `spawn-failed` halted the walker,
+ * causing one bad host to block all other hosts indefinitely.
+ *
  * (Internal helper — no JSDoc tag required.)
  */
 function mapInnerStopToWalker(inner: LoopStopReason): WalkerStopReason | undefined {
   if (inner === "scope-leak") return "scope-leak";
-  if (inner === "spawn-failed") return "spawn-failed";
   if (inner === "aborted") return "aborted";
-  // empty-queue and max-iterations are healthy advances — the walker
-  // moves to the next host on either signal.
+  // spawn-failed, empty-queue, and max-iterations are non-fatal advances —
+  // the walker moves to the next host. spawn-failed is logged in the visit
+  // record so the operator sees it in the summary.
   return undefined;
 }

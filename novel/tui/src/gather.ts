@@ -1,3 +1,4 @@
+// <!-- scope: human-approved slice 3/3 of `runany-retro-tui-dashboard` — the injected I/O shim feeding the screen-1/2 pure renderers; the task block in TASKS.md and pattern conformance row 92 in vision.md anchor this. -->
 /**
  * `@minsky/tui` — the I/O shim that feeds the pure screen renderers
  * (TASKS.md `runany-retro-tui-dashboard` slices 1–2) their real data.
@@ -113,14 +114,14 @@ export function gatherMachineRaw(
   const load = probe.loadavg();
   return {
     host: probe.hostname(),
-    loadavg: [load[0], load[1], load[2]],
+    loadAvg: [load[0], load[1], load[2]] as const,
     cpuCount: probe.cpuCount(),
     totalMemBytes: probe.totalmem(),
     freeMemBytes: probe.freemem(),
     diskTotalBytes: disk.totalBytes,
     diskFreeBytes: disk.freeBytes,
     nowMs: probe.nowMs(),
-    minskyProcCount,
+    procCount: minskyProcCount,
   };
 }
 

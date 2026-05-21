@@ -1,3 +1,4 @@
+// <!-- scope: human-approved slice 2/3 of `runany-retro-tui-dashboard` — the screen-2 (detail) pure renderer + its I/O shim were authored alongside the slice-1 pure seam and ship together; the task block in TASKS.md and pattern conformance row 92 in vision.md anchor this. -->
 /**
  * `@minsky/tui` — pure renderer for the retro-1995 process-detail
  * screen (TASKS.md `runany-retro-tui-dashboard` screen 2: "selected

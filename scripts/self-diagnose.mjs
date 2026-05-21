@@ -560,7 +560,7 @@ export function daemonIterationRuntimeInvariant(opts) {
 /**
  * @typedef {object} DaemonPrCleanCiSummary
  * @property {number} number
- * @property {boolean} hasFailure — true iff statusCheckRollup currently shows ≥1 conclusion=FAILURE check
+ * @property {boolean} hasFailure — true iff statusCheckRollup currently shows ≥1 check whose conclusion/state is a red terminal outcome (`RED_CHECK_OUTCOMES` in `scripts/daemon-pr-lint-metrics.mjs` — FAILURE/ERROR/TIMED_OUT/STARTUP_FAILURE/ACTION_REQUIRED); shared via `parsePrListEntries`
  *
  * @typedef {object} PrLintPassRateInvariantOpts
  * @property {() => Promise<readonly DaemonPrCleanCiSummary[]>} recentDaemonPrs — rolling window the brief defines (default impl: `ROLLING_WINDOW_DAYS`-day, currently 30d)
@@ -571,7 +571,9 @@ export function daemonIterationRuntimeInvariant(opts) {
 /**
  * Pre-registered metric for `daemon-pre-pr-lint-gate` (TASKS.md): rolling
  * 30d fraction of daemon-authored PRs whose `statusCheckRollup` carries
- * zero `conclusion=FAILURE` checks must stay ≥ `minPassRate` (0.8).
+ * zero red checks (`RED_CHECK_OUTCOMES` — FAILURE/ERROR/TIMED_OUT/
+ * STARTUP_FAILURE/ACTION_REQUIRED, shared via `parsePrListEntries`) must
+ * stay ≥ `minPassRate` (0.8).
  * Below that the gate has drifted — either the canonical lint stack
  * (`scripts/run-pre-pr-lint-stack.mjs`) is missing a check CI runs, or
  * the daemon brief stopped honoring `pnpm pre-pr-lint` before
@@ -716,6 +718,60 @@ export function daemonPrStuckDirtyInvariant(opts) {
     };
   };
   /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-pr-stuck-dirty";
+  return fn;
+}
+
+/**
+ * @typedef {object} OpenDaemonPrSnapshotForThrash
+ * @property {number} number
+ * @property {number} commitCount - number of commits stacked on the PR head
+ * @property {number} ageHours - hours since the PR was created
+ * @property {string} mergeable - GitHub's mergeable field: MERGEABLE | CONFLICTING | UNKNOWN
+ *
+ * @typedef {object} DaemonPrThrashInvariantOpts
+ * @property {() => Promise<readonly OpenDaemonPrSnapshotForThrash[]>} openDaemonPrs
+ * @property {number} [maxCommits] - fire when a non-MERGEABLE PR exceeds this commit count (default 5)
+ * @property {number} [maxAgeHours] - …and this wall-clock age in hours (default 2)
+ */
+
+/**
+ * Throughput invariant: a daemon-authored PR keeps accumulating commits
+ * without ever merging because it stays non-MERGEABLE — the
+ * "optimize-thrash" pattern. Live observed 9h window 2026-05-07: worker-1
+ * stacked 11+ brief-compression commits onto PR #322 over ~5h while the PR
+ * stayed CONFLICTING, stranding ~−4,195 bytes/iter of token savings that
+ * never landed. Distinct from `daemon-pr-stuck-dirty` (age-of-dirtiness
+ * only) and `daemon-task-scope-explosion` (merged-PR count) — this catches
+ * the *single stuck PR being polished in place* failure mode before the
+ * wasted commits compound.
+ *
+ * @param {DaemonPrThrashInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonPrThrashInvariant(opts) {
+  const { openDaemonPrs, maxCommits = 5, maxAgeHours = 2 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const prs = await openDaemonPrs();
+    const thrashed = prs.filter(
+      (p) => p.commitCount > maxCommits && p.ageHours > maxAgeHours && p.mergeable !== "MERGEABLE",
+    );
+    if (thrashed.length === 0) return { id: "daemon-pr-thrash", ok: true };
+    const evidence = thrashed
+      .map(
+        (p) => `#${p.number}: ${p.commitCount} commits, ${p.ageHours.toFixed(1)}h, ${p.mergeable}`,
+      )
+      .join("; ");
+    const list = thrashed.map((p) => `#${p.number}`).join(", ");
+    return {
+      id: "daemon-pr-thrash",
+      ok: false,
+      evidence,
+      suggestedTaskTitle: `${thrashed.length} daemon PR(s) thrashing: >${maxCommits} commits + >${maxAgeHours}h age + not MERGEABLE`,
+      suggestedFix: `Optimize-thrash detected (PR #322 pattern, 9h window 2026-05-07): ${list} accumulated >${maxCommits} commits over >${maxAgeHours}h without merging because the PR is not MERGEABLE. The daemon's next pick of the matching task ID must rebase ${list} or close it; do NOT add more commits to a stuck PR. Auto-resolution: \`gh pr update-branch <n>\` then re-trigger CI; if conflicts persist, close as superseded and open a fresh PR. Pivot if legitimate long-lived substrate work false-positives ≥1/week: raise to 10 commits / 4h.`,
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-pr-thrash";
   return fn;
 }
 
@@ -1305,32 +1361,75 @@ export function defaultInvariants() {
     return parsePrListEntries(data);
   };
 
+  // Single shared fetch for open daemon PRs. `openDaemonPrsForDirty` and
+  // `openDaemonPrsForThrash` previously each issued their own
+  // `gh pr list --repo … --state open` subprocess — same query, different
+  // JSON projections. `runInvariants` runs invariants sequentially, so a
+  // memoised promise lets the second consumer reuse the first's result:
+  // net `gh pr list` round-trips for the open-PR snapshot stays 1, not 2.
+  //
+  // Declared-optional-property typedef (not an index signature) so dot
+  // access stays legal under `noPropertyAccessFromIndexSignature`.
+  /**
+   * @typedef {object} RawOpenDaemonPr
+   * @property {number} [number]
+   * @property {string} [mergeStateStatus]
+   * @property {string} [createdAt]
+   * @property {readonly unknown[]} [commits]
+   * @property {string} [mergeable]
+   */
+  /** @type {Promise<readonly RawOpenDaemonPr[]> | null} */
+  let openDaemonPrsRawCache = null;
+  /** @type {() => Promise<readonly RawOpenDaemonPr[]>} */
+  const fetchOpenDaemonPrsRaw = () => {
+    if (openDaemonPrsRawCache) return openDaemonPrsRawCache;
+    openDaemonPrsRawCache = (async () => {
+      const data = await ghJson([
+        "pr",
+        "list",
+        "--repo",
+        CANONICAL_REPO,
+        "--author",
+        "@me",
+        "--state",
+        "open",
+        "--json",
+        "number,mergeStateStatus,createdAt,commits,mergeable",
+        "--limit",
+        "20",
+      ]);
+      return Array.isArray(data) ? data : [];
+    })();
+    return openDaemonPrsRawCache;
+  };
+
   /** @type {() => Promise<readonly OpenDaemonPrSnapshotForDirty[]>} */
   const openDaemonPrsForDirty = async () => {
-    const data = await ghJson([
-      "pr",
-      "list",
-      "--repo",
-      CANONICAL_REPO,
-      "--author",
-      "@me",
-      "--state",
-      "open",
-      "--json",
-      "number,mergeStateStatus,createdAt",
-      "--limit",
-      "20",
-    ]);
-    if (!Array.isArray(data)) return [];
+    const data = await fetchOpenDaemonPrsRaw();
     const now = Date.now();
     return data.map((pr) => ({
-      number: pr.number,
+      number: pr.number ?? 0,
       mergeableState:
         typeof pr.mergeStateStatus === "string" ? pr.mergeStateStatus.toLowerCase() : "unknown",
       ageHours:
         typeof pr.createdAt === "string"
           ? Math.max(0, (now - Date.parse(pr.createdAt)) / 3_600_000)
           : 0,
+    }));
+  };
+
+  /** @type {() => Promise<readonly OpenDaemonPrSnapshotForThrash[]>} */
+  const openDaemonPrsForThrash = async () => {
+    const data = await fetchOpenDaemonPrsRaw();
+    const now = Date.now();
+    return data.map((pr) => ({
+      number: pr.number ?? 0,
+      commitCount: Array.isArray(pr.commits) ? pr.commits.length : 0,
+      ageHours:
+        typeof pr.createdAt === "string"
+          ? Math.max(0, (now - Date.parse(pr.createdAt)) / 3_600_000)
+          : 0,
+      mergeable: typeof pr.mergeable === "string" ? pr.mergeable : "UNKNOWN",
     }));
   };
 
@@ -1402,6 +1501,7 @@ export function defaultInvariants() {
     daemonPrLintPassRateInvariant({ recentDaemonPrs }),
     gitConfigParseableInvariant({ probeGitStatus, scanGitConfigForConflicts }),
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
+    daemonPrThrashInvariant({ openDaemonPrs: openDaemonPrsForThrash }),
     daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
     modelCatalogInvariantsHoldInvariant({
       validate: () => validateModelCatalog(MODEL_CATALOG),
@@ -1435,6 +1535,14 @@ export function defaultInvariants() {
  * itself; the pivot is "if the same finding fires for >7 consecutive
  * days, the invariant is wrong, not the system".
  *
+ * The `**Tags**:` line MUST lead with `p0`: `scripts/drain-concerns.mjs`
+ * routes a pending block to its `## PX` section by matching
+ * `/\b(p[0-3])\b/i` against the Tags line (`parsePriority`). Without a
+ * recognized priority tag the drainer moves the block to `invalid/` and
+ * the finding is never filed — so a self-diagnosed throughput issue
+ * would be detected but silently dropped instead of becoming a
+ * daemon-pickable P0 task. The paired test pins this contract.
+ *
  * @param {readonly InvariantViolation[]} findings
  * @param {string} nowIso
  * @returns {string}
@@ -1446,7 +1554,7 @@ export function findingsToTasksMd(findings, nowIso) {
     return [
       `- [ ] \`${id}\` — ${f.suggestedTaskTitle}`,
       `  - **ID**: ${id}`,
-      `  - **Tags**: self-detected, ${f.id}`,
+      `  - **Tags**: p0, self-detected, ${f.id}`,
       "  - **Estimate**: 1d",
       `  - **Hypothesis**: ${f.suggestedFix}`,
       `  - **Evidence**: ${f.evidence}`,
