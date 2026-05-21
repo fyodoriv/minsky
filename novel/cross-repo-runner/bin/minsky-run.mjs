@@ -23,9 +23,10 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -509,6 +510,75 @@ function writeIterationRecord(hostRoot, record) {
   const filePath = resolve(storeDir, `${record.experiment_id}.jsonl`);
   writeFileSync(filePath, renderIterationRecord(record), { flag: "a" });
   process.stdout.write(`✓ appended iteration record to ${filePath}\n`);
+}
+
+// ── Restart-sentinel reader (composes with the writer in
+//    `scripts/post-merge-auto-install.mjs`). The constant path lives in
+//    one place — `~/.minsky/restart-requested` — and BOTH the writer
+//    (post-merge hook) and the reader (this daemon) hardcode it
+//    identically. We don't import RESTART_SENTINEL_PATH from the
+//    writer module because the writer is a .mjs script outside the
+//    cross-repo-runner workspace package, and the runner can't depend
+//    on it without a circular layering inversion. Keep the two
+//    constants in sync; rule #1's "single source of truth" is enforced
+//    by the integration test in `test/integration/daemon-restart.test.ts`.
+const RESTART_SENTINEL_PATH = join(homedir(), ".minsky", "restart-requested");
+
+/**
+ * Read the restart-requested sentinel. Returns the parsed JSON when
+ * the sentinel exists AND parses cleanly, otherwise `null`. Best-effort
+ * per rule #6 — a malformed sentinel must NOT crash the loop (the
+ * worst-case is "we missed one restart cycle"; the operator can still
+ * run `minsky update` as the manual escape hatch).
+ *
+ * @returns {{ ts: string; reason: string; changedFiles: readonly string[] } | null}
+ */
+function readRestartSentinel() {
+  if (!existsSync(RESTART_SENTINEL_PATH)) return null;
+  try {
+    const raw = readFileSync(RESTART_SENTINEL_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    // Defensive: the writer guarantees the shape, but a hand-edited
+    // sentinel might be missing fields. Fail-soft into reasonable
+    // defaults so the daemon still restarts.
+    return {
+      ts: typeof parsed.ts === "string" ? parsed.ts : new Date().toISOString(),
+      reason: typeof parsed.reason === "string" ? parsed.reason : "unspecified",
+      changedFiles: Array.isArray(parsed.changedFiles) ? parsed.changedFiles : [],
+    };
+  } catch (err) {
+    // Sentinel exists but is malformed. Treat as "still requested" so
+    // the daemon DOES restart (the operator's intent is clear) and the
+    // post-restart daemon clears the broken file as a side effect.
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `⚠ restart sentinel at ${RESTART_SENTINEL_PATH} is malformed: ${message}\n`,
+    );
+    return {
+      ts: new Date().toISOString(),
+      reason: "sentinel-malformed (treating as restart)",
+      changedFiles: [],
+    };
+  }
+}
+
+/**
+ * Remove the restart-requested sentinel. Best-effort per rule #6 — if
+ * the file is already gone, that's fine (idempotent). If removal fails
+ * for some reason (locked file, perms), surface a warning but proceed
+ * to the exit; the post-restart daemon's `readRestartSentinel` will
+ * see the same request and trigger another restart cycle. Worst case
+ * is one extra restart — bounded by the pull cadence.
+ */
+function clearRestartSentinel() {
+  try {
+    rmSync(RESTART_SENTINEL_PATH, { force: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `⚠ failed to clear restart sentinel at ${RESTART_SENTINEL_PATH}: ${message}\n`,
+    );
+  }
 }
 
 /**
@@ -1026,6 +1096,17 @@ async function runLoopAsResult(parsed, controller) {
       });
     },
     seedOnEmpty: ctoAudit && seedOnEmpty,
+    // Restart-sentinel seam — composes with the writer in
+    // `scripts/post-merge-auto-install.mjs`. The post-merge hook drops
+    // a sentinel at `~/.minsky/restart-requested` after a `git pull`
+    // lands runtime code; the loop reads it BEFORE the next pickTask
+    // and exits cleanly (code 0). launchd's `KeepAlive=true` (or
+    // systemd `Restart=always`) respawns the daemon with the new
+    // code. Rule #16 (default by default) — `minsky update` becomes
+    // the rare escape hatch, not the daily flow. Source: TASKS.md
+    // `minsky-auto-restart-daemon-on-pull`.
+    checkRestartRequest: readRestartSentinel,
+    clearRestartRequest: clearRestartSentinel,
     ...(ctoAudit
       ? {
           ctoAudit: ({ signals, completedVerdict }) =>

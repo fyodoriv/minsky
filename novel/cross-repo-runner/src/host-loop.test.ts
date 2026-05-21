@@ -9,7 +9,7 @@ import type { LiveSpawnOutcome } from "./runner.js";
 import type { RunnerPlan } from "./spawn-plan.js";
 import type { ParsedTask } from "./task-finder.js";
 
-import type { LoopIterationResult } from "./host-loop.js";
+import type { LoopIterationResult, RestartRequest } from "./host-loop.js";
 
 import { runHostLoop } from "./host-loop.js";
 
@@ -663,5 +663,236 @@ describe("runHostLoop — CTO audit seam", () => {
     // No audit options passed; loop completes normally.
     expect(result.stopReason).toBe("max-iterations");
     expect(result.iterations).toHaveLength(1);
+  });
+});
+
+// Restart-sentinel seam — the reader side of the auto-restart-on-pull
+// mechanism. The writer lives in `scripts/post-merge-auto-install.mjs`
+// (action: `request-daemon-restart`); the loop reads the sentinel
+// between iterations and exits cleanly so launchd/systemd respawn the
+// daemon with the new code. Source: TASKS.md
+// `minsky-auto-restart-daemon-on-pull`.
+//
+// Hypothesis (rule #9): the loop exits with `restart-requested` within
+// one iteration of the sentinel being written, AND no in-flight
+// iteration is killed by the restart mechanism (verified by the loop
+// completing the current iteration's `recordIteration` callback before
+// the sentinel is read). Pivot: if the sentinel races KeepAlive and
+// produces respawn storms (>1 / 5 min in production), gate behind
+// `MINSKY_AUTO_RESTART_ON_PULL=1` (a separate env-var gate not modelled
+// in these tests — the loop-level seam is the unconditional building
+// block).
+describe("runHostLoop — restart-sentinel seam", () => {
+  function makeRequest(reason: string): RestartRequest {
+    return {
+      ts: "2026-05-20T10:00:00.000Z",
+      reason,
+      changedFiles: ["bin/minsky"],
+    };
+  }
+
+  test("checkRestartRequest returning null → loop runs normally", async () => {
+    // Baseline: the probe is wired but never surfaces a request; the
+    // loop must behave exactly as if the seam wasn't passed at all.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 3,
+      tickIntervalMs: 0,
+      checkRestartRequest: () => null,
+    });
+    expect(result.stopReason).toBe("max-iterations");
+    expect(result.iterations).toHaveLength(3);
+  });
+
+  test("sentinel present at start → exits restart-requested without running any iteration", async () => {
+    // Critical edge case: a sentinel left over from before the daemon
+    // started must NOT be ignored. The post-restart daemon must
+    // immediately exit (and the writer-side guard prevents writing
+    // when daemonRunning=false). Defence in depth — both sides agree.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let pickCalls = 0;
+    let liveCalls = 0;
+    const result = await runHostLoop({
+      pickTask: () => {
+        pickCalls++;
+        return baseTask;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => {
+        liveCalls++;
+        return Promise.resolve(makeOutcome());
+      },
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      checkRestartRequest: () => makeRequest("bin/minsky changed"),
+    });
+    expect(result.stopReason).toBe("restart-requested");
+    expect(result.iterations).toHaveLength(0);
+    expect(pickCalls).toBe(0);
+    expect(liveCalls).toBe(0);
+  });
+
+  test("sentinel written between iterations 0 and 1 → exits AFTER iteration 0 completes", async () => {
+    // The defining property: the in-flight iteration MUST complete its
+    // `recordIteration` callback before the loop exits. This is the
+    // "let-it-crash AT the right boundary" (Armstrong 2007) anchor —
+    // killing mid-spawn would corrupt the experiment-store with half-
+    // written iteration records.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    let sentinelWritten = false;
+    const records: LoopIterationResult[] = [];
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => {
+        // Simulate the post-merge hook writing the sentinel during
+        // iteration 0's spawn. The loop should NOT abort the in-flight
+        // iteration; it should record it, then see the sentinel on
+        // the iteration-1 boundary.
+        sentinelWritten = true;
+        return Promise.resolve(makeOutcome());
+      },
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      recordIteration: (r) => records.push(r),
+      checkRestartRequest: () => (sentinelWritten ? makeRequest("test") : null),
+    });
+    expect(result.stopReason).toBe("restart-requested");
+    // Iteration 0 completed (record emitted); iteration 1 never started.
+    expect(records).toHaveLength(1);
+    expect(records[0]?.taskId).toBe("task-0");
+    expect(records[0]?.verdict).toBe("validated");
+  });
+
+  test("clearRestartRequest is called exactly ONCE when sentinel surfaces", async () => {
+    // Without this, the post-restart daemon would see the same sentinel
+    // and exit immediately — respawn storm (the task's Pivot threshold).
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let clearCalls = 0;
+    await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      checkRestartRequest: () => makeRequest("bin/minsky changed"),
+      clearRestartRequest: () => {
+        clearCalls++;
+      },
+    });
+    expect(clearCalls).toBe(1);
+  });
+
+  test("clearRestartRequest is NOT called when sentinel never surfaces", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let clearCalls = 0;
+    await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 1,
+      tickIntervalMs: 0,
+      checkRestartRequest: () => null,
+      clearRestartRequest: () => {
+        clearCalls++;
+      },
+    });
+    expect(clearCalls).toBe(0);
+  });
+
+  test("onRestartRequested receives a one-line message with reason + ts", async () => {
+    // The daemon log line must surface the reason (operator-facing
+    // "why") and the ts (so operators can compare against pull
+    // timestamps for diagnostics).
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const messages: string[] = [];
+    await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      checkRestartRequest: () => makeRequest("pnpm-lock.yaml changed"),
+      onRestartRequested: (m) => messages.push(m),
+    });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatch(/restart-requested:/);
+    expect(messages[0]).toMatch(/pnpm-lock\.yaml changed/);
+    expect(messages[0]).toMatch(/2026-05-20T10:00:00\.000Z/);
+  });
+
+  test("abort signal takes precedence over restart-requested at the boundary", async () => {
+    // If the operator presses Ctrl-C at the exact moment a sentinel
+    // would otherwise fire, the abort wins. Rule #6 (rule of least
+    // surprise) — operator-initiated stops shouldn't be silently
+    // converted to clean exits with restart.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      signal: controller.signal,
+      checkRestartRequest: () => makeRequest("test"),
+    });
+    expect(result.stopReason).toBe("aborted");
+  });
+
+  test("loop without checkRestartRequest wired → same behaviour as before this feature", async () => {
+    // Backward-compatibility: existing callers (tests, walker fakes,
+    // legacy CLI paths) that don't wire the seam must observe identical
+    // behaviour to the pre-feature loop. This guards against any
+    // future drift where the seam becomes load-bearing.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome()),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 2,
+      tickIntervalMs: 0,
+    });
+    expect(result.stopReason).toBe("max-iterations");
+    expect(result.iterations).toHaveLength(2);
   });
 });
