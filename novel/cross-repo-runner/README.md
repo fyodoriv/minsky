@@ -265,3 +265,7 @@ Run `pnpm biome check --write novel/cross-repo-runner` before committing
 changes to this package.
 
 <!-- Merge of PR #599 (3 P0 orchestration fixes from example-service-api PROJ-720): the spawnPlan brief now requires removing the shipped task block from TASKS.md (rule #9 invariant), and the host-loop merge surfaces with main's evolved walker-drains-one-host-forever fix. Doc touched per rule-3 alongside the merge. -->
+
+## `policy-ledger` (runany — verdict ledger writer)
+
+`src/policy-ledger.ts` writes each `WriteVerdict` returned by `assertWriteAllowed` to the runany verdict ledger (`.minsky/runany-policy.jsonl`), the substrate `scripts/runany-policy-audit.mjs` reads to compute the run-window audit metrics. Pure-function-with-I/O-at-edge: the ledger record is computed pure; the `appendFileSync` is the I/O boundary. Composes with `assertWriteAllowed` (the gate) + `scripts/runany-policy-audit.mjs` (the reader) — closes the third side of the audit triangle.
