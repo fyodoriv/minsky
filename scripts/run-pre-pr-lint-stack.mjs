@@ -234,6 +234,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "agents-md-coherence",
       "anchor-primary-source",
       "biome",
+      "brief-pr-instructions",
       "cadence-pivot-threshold",
       "cloud-audit-gate",
       "dashboard-localhost-bind",
@@ -422,6 +423,16 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-no-singleton-experiment.mjs"],
+  },
+  {
+    // rule #10 deterministic enforcement of the devin-spawn-no-pr-opened
+    // fix — pre-merge guard that mirrors the runtime invariant
+    // `briefIncludesPrInstructions`. Fast (`fast` stage) because the
+    // bug class wastes an entire iteration's compute when it regresses.
+    name: "brief-pr-instructions",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-brief-pr-instructions.mjs"],
   },
   {
     name: "lockfile-integrity",
