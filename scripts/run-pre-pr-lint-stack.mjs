@@ -231,14 +231,17 @@ export const CI_TO_MANIFEST_ALIAS = Object.freeze({
 export const CI_BASH_GATE_BUCKETS = Object.freeze({
   mustSucceed: Object.freeze(
     new Set([
+      "agents-md-coherence",
       "anchor-primary-source",
       "biome",
+      "brief-pr-instructions",
       "cadence-pivot-threshold",
       "cloud-audit-gate",
       "dashboard-localhost-bind",
       "glossary-discipline",
       "hygiene",
       "lockfile-integrity",
+      "machine-budget",
       "maciek-smoke",
       "mape-k-budget-cap",
       "mape-k-constraints-md-size",
@@ -259,6 +262,10 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
       "rule-13-sibling-anchors",
+      "rule-17-proactive-heal",
+      "no-hardcoded-user-paths",
+      "no-personal-paths-in-docs",
+      "rule-9-tasksmd-fields",
       "sandbox-env-declared",
       "sbom-shape",
       "secret-scan",
@@ -374,6 +381,37 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-rule-12-scope-discipline.mjs"],
     env: { RULE_12_DIFF_BASE: "origin/main" },
   },
+  {
+    name: "rule-17-proactive-heal",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-17-proactive-heal.mjs"],
+    env: { RULE_17_DIFF_BASE: "origin/main" },
+  },
+  {
+    name: "no-hardcoded-user-paths",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-hardcoded-user-paths.mjs"],
+  },
+  {
+    name: "no-personal-paths-in-docs",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-personal-paths-in-docs.mjs"],
+  },
+  {
+    name: "agents-md-coherence",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-agents-md-coherence.mjs"],
+  },
+  {
+    name: "rule-9-tasksmd-fields",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-9-tasksmd-fields.mjs"],
+  },
   // ---- full stage ----------------------------------------------------------
   {
     name: "vitest",
@@ -410,6 +448,16 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-no-singleton-experiment.mjs"],
+  },
+  {
+    // rule #10 deterministic enforcement of the devin-spawn-no-pr-opened
+    // fix — pre-merge guard that mirrors the runtime invariant
+    // `briefIncludesPrInstructions`. Fast (`fast` stage) because the
+    // bug class wastes an entire iteration's compute when it regresses.
+    name: "brief-pr-instructions",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-brief-pr-instructions.mjs"],
   },
   {
     name: "lockfile-integrity",
@@ -505,6 +553,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-supervisor-sandbox-hardening.mjs"],
+  },
+  {
+    name: "machine-budget",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-machine-budget.mjs"],
   },
   {
     name: "cadence-pivot-threshold",

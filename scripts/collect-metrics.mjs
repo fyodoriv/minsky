@@ -10,7 +10,7 @@
 //   takes an exec seam; the CLI binding is the only I/O surface.
 
 import { execSync } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = process.cwd();
@@ -44,7 +44,10 @@ function collectLoopUptime() {
   );
   if (activeDays === null) return null;
   const ratio = Math.min(activeDays / 30, 1.0);
-  return { value: `${(ratio * 100).toFixed(1)}% active days (${activeDays}/30d)`, higherIsBetter: true };
+  return {
+    value: `${(ratio * 100).toFixed(1)}% active days (${activeDays}/30d)`,
+    higherIsBetter: true,
+  };
 }
 
 /** task-throughput: conventional commits per day over 30d */
@@ -69,15 +72,19 @@ function collectSpecAlignment() {
   const s = Number(raw);
   const t = Number(total);
   if (t === 0) return { value: "no CI runs", higherIsBetter: true };
-  const ratio = (s / t * 100).toFixed(1);
+  const ratio = ((s / t) * 100).toFixed(1);
   return { value: `${ratio}% (${s}/${t} runs green)`, higherIsBetter: true };
 }
 
 /** dep-interface-coverage: run the rule-2 check */
 function collectDepInterfaceCoverage() {
-  const result = run(`node scripts/check-rule-2-dep-coverage.mjs 2>&1`);
+  const result = run("node scripts/check-rule-2-dep-coverage.mjs 2>&1");
   if (result === null) return null;
-  const pass = result.includes("pass") || result.includes("✓") || result.includes("ok") || result.includes("clean");
+  const pass =
+    result.includes("pass") ||
+    result.includes("✓") ||
+    result.includes("ok") ||
+    result.includes("clean");
   return { value: pass ? "pass" : `fail — ${result.slice(0, 100)}`, higherIsBetter: true };
 }
 
@@ -90,31 +97,14 @@ function collectExtractionCount() {
   return { value: Number(raw), higherIsBetter: true };
 }
 
-/** test-count: from vitest */
-function collectTestCount() {
-  const raw = run(`pnpm vitest run --reporter=json 2>/dev/null | node -e "
-    let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>{
-      try { const j=JSON.parse(d); console.log(JSON.stringify({tests:j.numTotalTests,passed:j.numPassedTests,failed:j.numFailedTests,files:j.numTotalTestSuites})); }
-      catch { console.log('null'); }
-    })
-  "`);
-  if (raw === null || raw === "null") {
-    // Fallback: use cached knowledge from last run
-    return { value: "3,135 passed / 180 files (cached)", higherIsBetter: true };
-  }
-  try {
-    const j = JSON.parse(raw);
-    return { value: `${j.passed} passed / ${j.files} files`, higherIsBetter: true };
-  } catch {
-    return { value: "3,135 passed / 180 files (cached)", higherIsBetter: true };
-  }
-}
+// `collectTestCount()` removed 2026-05-19 — dead code, never wired
+// into the metrics output. Restore from git history when actually
+// needed; the spec for `test-count` already lives in METRICS.md and
+// `scripts/generate-metrics-md.mjs` does not depend on it.
 
 /** self-improvement-velocity: MAPE-K rollout commits */
 function collectSelfImprovementVelocity() {
-  const count = runNum(
-    `git log --all --since="30 days ago" --oneline --grep="mape-k" | wc -l`,
-  );
+  const count = runNum(`git log --all --since="30 days ago" --oneline --grep="mape-k" | wc -l`);
   if (count === null) return null;
   return { value: `${count} mape-k-related commits (30d)`, higherIsBetter: true };
 }
@@ -134,6 +124,35 @@ function collectMttr() {
   return { value: "no OTEL backend — MTTR not measurable yet (M1 gap)", higherIsBetter: false };
 }
 
+/** mttr-self-heal: p95 MTTR for catalogued automated heal events (.minsky/heal-events.jsonl) */
+function collectMttrSelfHeal() {
+  // Delegates to scripts/heal-mttr-report.mjs for the 30d window.
+  // Returns the OTEL-blocked stub when the ledger has no entries — same
+  // graceful-degrade pattern as collectLoopUptime.
+  const raw = run("node scripts/heal-mttr-report.mjs --window=30d --json");
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const row = Array.isArray(parsed) ? parsed[0] : null;
+    if (!row || row.source === "no-data") {
+      return {
+        value: "no heal-events yet — measurable once any helper fires",
+        higherIsBetter: false,
+      };
+    }
+    const p95 = row.mttr_p95_ms;
+    const p50 = row.mttr_p50_ms;
+    const successful = row.successful;
+    const attempted = row.attempted;
+    return {
+      value: `p95=${p95 ?? "n/a"}ms · p50=${p50 ?? "n/a"}ms · ${successful}/${attempted} healed (30d)`,
+      higherIsBetter: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** wrist-dwell: proxy — dashboard/watch surface not instrumented yet */
 function collectWristDwell() {
   return { value: "no watch-surface telemetry yet (M1 gap)", higherIsBetter: false };
@@ -141,8 +160,9 @@ function collectWristDwell() {
 
 // ---- Main ----
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates ≥10 metric collectors with fallback logic — refactor tracked in TASKS.md `scripts-complexity-refactor`
 async function main() {
-  console.log(`Collecting metrics for ${TODAY}...\n`);
+  console.info(`Collecting metrics for ${TODAY}...\n`);
 
   const collectors = {
     "loop-uptime": collectLoopUptime,
@@ -152,9 +172,13 @@ async function main() {
     "extraction-count": collectExtractionCount,
     "self-improvement-velocity": collectSelfImprovementVelocity,
     "token-budget-honoring": collectTokenBudgetHonoring,
-    "mttr": collectMttr,
+    mttr: collectMttr,
+    "mttr-self-heal": collectMttrSelfHeal,
     "wrist-dwell": collectWristDwell,
-    "tokens-per-story": () => ({ value: "no OTEL backend — not measurable yet (M1 gap)", higherIsBetter: false }),
+    "tokens-per-story": () => ({
+      value: "no OTEL backend — not measurable yet (M1 gap)",
+      higherIsBetter: false,
+    }),
   };
 
   /** @type {Record<string, {value: any, higherIsBetter?: boolean}>} */
@@ -167,14 +191,16 @@ async function main() {
       const result = fn();
       if (result !== null) {
         snapshot[id] = result;
-        console.log(`  ✅ ${id}: ${typeof result.value === "string" ? result.value : JSON.stringify(result.value)}`);
+        console.info(
+          `  ✅ ${id}: ${typeof result.value === "string" ? result.value : JSON.stringify(result.value)}`,
+        );
         collected++;
       } else {
-        console.log(`  ⚠️  ${id}: no data available`);
+        console.info(`  ⚠️  ${id}: no data available`);
         failed++;
       }
     } catch (err) {
-      console.log(`  ❌ ${id}: ${err instanceof Error ? err.message : String(err)}`);
+      console.info(`  ❌ ${id}: ${err instanceof Error ? err.message : String(err)}`);
       failed++;
     }
   }
@@ -182,13 +208,15 @@ async function main() {
   // Write snapshot
   mkdirSync(SNAPSHOT_DIR, { recursive: true });
   const snapshotPath = resolve(SNAPSHOT_DIR, `${TODAY}.json`);
-  writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2) + "\n");
+  writeFileSync(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
 
-  console.log(`\n${collected}/${collected + failed} metrics collected → ${snapshotPath}`);
+  console.info(`\n${collected}/${collected + failed} metrics collected → ${snapshotPath}`);
 
   // Also write a summary to stdout as JSON for piping
   if (process.argv.includes("--json")) {
-    console.log(JSON.stringify({ date: TODAY, path: snapshotPath, collected, failed, snapshot }, null, 2));
+    console.info(
+      JSON.stringify({ date: TODAY, path: snapshotPath, collected, failed, snapshot }, null, 2),
+    );
   }
 
   return failed > collected ? 1 : 0;

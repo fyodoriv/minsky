@@ -412,7 +412,9 @@ if [ "$MODE" = "dogfood" ]; then
     Linux)
       unit_dir="$HOME/.config/systemd/user"
       template_dir="$ROOT/distribution/systemd"
-      template_glob="*.service *.target"
+      # Includes *.timer so minsky-auto-merge.timer (and any future
+      # periodic-task units) ship alongside services and targets.
+      template_glob="*.service *.target *.timer"
       load_cmd_label="systemctl --user enable --now"
       ;;
     *)

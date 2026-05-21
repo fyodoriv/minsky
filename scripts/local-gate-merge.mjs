@@ -43,9 +43,16 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
+// Derive the repo root from this script's own location — the hardcoded
+// `/Users/cbrwizard/apps/tooling/minsky` fallback only worked for one
+// operator and broke the gate for everyone else (rule #17 fix,
+// 2026-05-19; see TASKS.md `local-gate-merge-minsky-home-hardcoded-
+// path`). The `MINSKY_HOME` env override remains as the operator
+// escape hatch.
+const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
 // Per-vet hard timeout — a cold `--stage=full` (tsc -b --force across all
 // workspace projects + full vitest) is ~20 min; this bounds a hung/

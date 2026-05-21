@@ -737,6 +737,17 @@ export {
   prTitleNamesTask,
 } from "./duplicate-pr-detector.js";
 
+// Slice 3/N of `daemon-duplicate-work-detection`: I/O wrapper that runs
+// `gh pr list --search "<task-id> in:title" --author <author> --state all`,
+// feeds the slice-2 parser, and returns the slice-1 verdict. The daemon
+// imports the factory (slice 4+ wires it after `pickAndClaim`, before
+// `gh pr create`); tests inject a `runGhPrList`/`now` stub (rule #2).
+export {
+  type CreateDuplicateCheckFetcherInput,
+  type DuplicateCheckFetcher,
+  createDuplicateCheckFetcher,
+} from "./duplicate-pr-detector-fetch.js";
+
 // Daemon fix-own-PR-on-CI-failure detector (P0 task `daemon-fix-own-pr-on-ci-failure`,
 // operator-flagged 2026-05-05): pure decision the daemon consults BEFORE building
 // the iteration brief — no-pr / pr-clean / pr-failing / pr-retries-exhausted.
@@ -752,6 +763,20 @@ export {
   parseGhPrListForDaemonPrState,
 } from "./daemon-pr-state.js";
 
+// Daemon fix-own-PR-on-CI-failure fix-iteration entry (slice 3/N of P0
+// `daemon-fix-own-pr-on-ci-failure`): the `gh pr list` I/O wrapper +
+// the pure planner (standard-task-brief / fix-brief / escalate) that
+// composes the slice-1/2 decision into the daemon's next move. Slice 4
+// wires `bin/tick-loop.mjs` to call these before building the brief.
+export {
+  DAEMON_STUCK_LABEL,
+  type DaemonFixPlan,
+  type PlanDaemonFixIterationOpts,
+  type ResolveDaemonPrStateOpts,
+  planDaemonFixIteration,
+  resolveDaemonPrStateFromGh,
+} from "./daemon-fix-own-pr.js";
+
 // Daemon task-completion detector (P0 watchdog from #346, operator 2026-05-07):
 // pure decision the daemon consults to auto-remove TASKS.md task blocks once
 // their substrate has shipped (≥1 merged PR + Acceptance field has no
@@ -763,6 +788,24 @@ export {
   decideTaskCompletion,
   titleNamesTask,
 } from "./task-completion-detector.js";
+
+// Daemon task-rotation I/O wrapper (slice b/c of
+// `daemon-task-rotation-on-completion`, P0). Reads TASKS.md, splices the
+// iteration's task block, lists merged PRs only when a block exists
+// (round-trip elimination), runs `decideTaskCompletion`, and on a `remove`
+// verdict writes + commits the block-stripped TASKS.md with a commit
+// message that names the criteria-checker decision. The daemon.ts wire-in
+// (after `runMetricsRender`) is the follow-up slice.
+export {
+  type ApplyRemoval,
+  type GetTasksMd,
+  type ListMergedPrs,
+  type RunTaskRotationArgs,
+  type RunTaskRotationOutcome,
+  rotationCommitMessage,
+  runTaskRotation,
+  spliceTaskBlock,
+} from "./daemon-task-rotation.js";
 
 // Local-LLM auto-bootstrap (P0 from operator 2026-05-08, "git pull && minsky"
 // UX target): pure detect + plan functions plus the executor that dispatches
@@ -957,3 +1000,19 @@ export {
   renderPlan,
   runInteractive,
 } from "./minsky-prompt.js";
+
+// `operator-machine-budget-autoscale` slice 3 — runtime OS-throttle
+// detector (the pure detect core). Exported here so slice 4's bin
+// wire-in (`bin/tick-loop.mjs`) can feed it the live machine facts and
+// log whether the operator's machine-utilisation budget (vision.md
+// rule #15) is physically reachable on this host.
+export {
+  type DetectedThrottle,
+  type MachineFacts,
+  type OsThrottleKind,
+  type OsThrottleReport,
+  OS_THROTTLE_POLICY,
+  TRIVIAL_BUDGET_PCT,
+  detectOsThrottles,
+  requiredFdFloor,
+} from "./os-throttle-detect.js";

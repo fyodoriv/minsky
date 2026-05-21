@@ -1,5 +1,7 @@
 # Competitor: MetaGPT
 
+> Foundation-Agents' multi-role coding-agent framework — closest conceptual match, but Python-stacked and not 24/7-aligned.
+
 - **URL**: <https://github.com/FoundationAgents/MetaGPT>
 - **Paper**: ICLR 2024 — "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework"
 - **Status**: Active, large adoption
