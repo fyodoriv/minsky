@@ -14,6 +14,9 @@ const sampleMetric = {
   formula: "systemctl --user is-active minsky-tick-loop",
   unit: "fraction",
   freshnessBudgetMs: 7 * DAY_MS,
+  goal: "99% / 97% / 95% (30 / 90 / 365 d)",
+  pivot: "<90% over 30 d → reconsider supervisor design",
+  anchor: "Beyer et al., _SRE_ 2016, Ch. 4 (SLI / SLO)",
 };
 
 const monotonicMetric = {
@@ -24,6 +27,9 @@ const monotonicMetric = {
   freshnessBudgetMs: 30 * DAY_MS,
   /** @type {"ok"} */
   monotonic: "ok",
+  goal: "≥4 OSS repos extracted by month 6",
+  pivot: "<2 by month 4 → re-evaluate extraction policy / scope",
+  anchor: "rule #1 (don't reinvent the wheel)",
 };
 
 const NOW = Date.UTC(2026, 4, 5, 12, 0, 0);
@@ -153,9 +159,82 @@ describe("buildMetricsMd — section structure", () => {
     expect(headings).toHaveLength(2);
   });
 
-  test("renders metric formula in a backtick-fenced one-liner", () => {
+  test("renders metric formula in a backtick-fenced one-liner under 'How to view'", () => {
     const out = buildMetricsMd({ metrics: [sampleMetric], nowMs: NOW });
-    expect(out).toContain("Formula: `systemctl --user is-active minsky-tick-loop`");
+    expect(out).toContain("**How to view:** `systemctl --user is-active minsky-tick-loop`");
+  });
+
+  test("renders Goal / Pivot / Anchor for every metric (operator directive 2026-05-21)", () => {
+    const out = buildMetricsMd({ metrics: [sampleMetric], nowMs: NOW });
+    expect(out).toContain("**Goal:** 99% / 97% / 95% (30 / 90 / 365 d)");
+    expect(out).toContain("**Pivot:** <90% over 30 d → reconsider supervisor design");
+    expect(out).toContain("**Anchor:** Beyer et al., _SRE_ 2016, Ch. 4 (SLI / SLO)");
+  });
+
+  test("renders milestone tag when present", () => {
+    const m = { ...sampleMetric, milestone: "M1.1" };
+    const out = buildMetricsMd({ metrics: [m], nowMs: NOW });
+    expect(out).toContain("Milestone: M1.1");
+  });
+
+  test("does not render milestone tag when absent (back-compat)", () => {
+    const out = buildMetricsMd({ metrics: [sampleMetric], nowMs: NOW });
+    expect(out).not.toContain("Milestone:");
+  });
+});
+
+describe("buildMetricsMd — 'Metrics to add' section", () => {
+  /** @type {import("./generate-metrics-md.mjs").ProposedMetricLike} */
+  const sampleProposed = {
+    id: "swe-bench-resolve-rate",
+    label: "SWE-bench Verified resolve rate",
+    rationale: "M2.7 acceptance: resolve rate vs. competitors.",
+    milestone: "M2.7",
+    blockedBy: "self-metrics-competitive-benchmark",
+    formula: "minsky benchmark --swe-bench-subset",
+  };
+
+  test("renders a 'Metrics to add' h2 when proposedMetrics is non-empty", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      proposedMetrics: [sampleProposed],
+      nowMs: NOW,
+    });
+    expect(out).toContain("## Metrics to add");
+    expect(out).toContain("### swe-bench-resolve-rate — SWE-bench Verified resolve rate");
+  });
+
+  test("renders the proposed metric's rationale + future-formula", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      proposedMetrics: [sampleProposed],
+      nowMs: NOW,
+    });
+    expect(out).toContain("**Why it belongs:** M2.7 acceptance: resolve rate vs. competitors.");
+    expect(out).toContain("**Future formula:** `minsky benchmark --swe-bench-subset`");
+  });
+
+  test("renders the blocker task when present", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      proposedMetrics: [sampleProposed],
+      nowMs: NOW,
+    });
+    expect(out).toContain("**Blocked by:** `self-metrics-competitive-benchmark` in `TASKS.md`.");
+  });
+
+  test("omits the 'Metrics to add' section when proposedMetrics is empty / absent", () => {
+    const out = buildMetricsMd({ metrics: [sampleMetric], nowMs: NOW });
+    expect(out).not.toContain("## Metrics to add");
+  });
+
+  test("renders the proposed metric's milestone tag", () => {
+    const out = buildMetricsMd({
+      metrics: [sampleMetric],
+      proposedMetrics: [sampleProposed],
+      nowMs: NOW,
+    });
+    expect(out).toContain("_Milestone: M2.7_");
   });
 
   test("preserves the order of the input metrics array", () => {
