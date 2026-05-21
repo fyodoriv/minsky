@@ -77,24 +77,6 @@ export function detectCwd(inputs: CwdDetectInputs): CwdDetectResult {
 }
 
 /**
- * List subdirs of cwd that carry `.minsky/repo.yaml`. Exposed because the
- * CLI also needs this when the operator passes `--hosts-dir` explicitly
- * (so the same enumeration runs in both auto-detect and explicit paths).
- *
- * @otel cross-repo-runner.find-bootstrapped-subdirs
- */
-export function findBootstrappedSubdirs(inputs: CwdDetectInputs): readonly string[] {
-  const children = inputs.fs.listDir(inputs.cwd);
-  const out: string[] = [];
-  for (const child of children) {
-    const childPath = joinPath(inputs.cwd, child);
-    const childRepoYaml = joinPath(childPath, ".minsky/repo.yaml");
-    if (inputs.fs.exists(childRepoYaml)) out.push(childPath);
-  }
-  return out;
-}
-
-/**
  * Zero-arg context resolver: extends `detectCwd` with git-root and
  * plain-dir fallbacks so `minsky` works from any folder without prior
  * bootstrap. Priority order:
@@ -104,10 +86,8 @@ export function findBootstrappedSubdirs(inputs: CwdDetectInputs): readonly strin
  *   4. cwd has git-root subdirs           → multi-host
  *   5. plain dir (fallback)               → single-host (cwd as root)
  *
- * Used by the zero-arg `minsky` path to scope the conductor; `minsky-run`
- * keeps using `detectCwd` so the bootstrap requirement is unchanged there
- * (rule #6 — auto-detect is advisory for the explicit-flag path; the
- * zero-arg path must never error, hence the plain-dir fallback).
+ * Used by bin/minsky zero-arg path to scope the conductor; minsky-run
+ * keeps using detectCwd so the bootstrap requirement is unchanged there.
  *
  * @otel cross-repo-runner.detect-any-cwd
  */
@@ -130,42 +110,10 @@ export function detectAnyCwd(inputs: CwdDetectInputs): CwdDetectResult {
 }
 
 /**
- * Map a {@link CwdDetectResult} to the single filesystem root the
- * conductor should scope to (its `MINSKY_HOME`). single-host → the host
- * itself; multi-host → the parent dir that contains the repos (the
- * conductor sweeps the whole tree under it). The `error` arm is
- * unreachable when fed from {@link detectAnyCwd} (which never errors),
- * but kept total so the function is pure over the full union — the
- * caller passes `fallbackCwd` for that degenerate case.
- *
- * @otel-exempt pure mapping over a typed union.
- */
-export function resolveConductorRoot(result: CwdDetectResult, fallbackCwd: string): string {
-  if (result.kind === "single-host") return result.host;
-  if (result.kind === "multi-host") return result.hostsDir;
-  return fallbackCwd;
-}
-
-/**
- * One call the conductor uses to scope itself from cwd: run the full
- * zero-arg precedence chain ({@link detectAnyCwd}) then collapse it to
- * the single root via {@link resolveConductorRoot}. This is the single
- * source of truth for "what root does `minsky` (zero-arg) scope to" —
- * `bin/minsky` and `scripts/orchestrate.mjs` consume this one pure path
- * rather than each re-deriving git-root detection.
- *
- * @otel cross-repo-runner.detect-conductor-root
- */
-export function detectConductorRoot(inputs: CwdDetectInputs): string {
-  return resolveConductorRoot(detectAnyCwd(inputs), inputs.cwd);
-}
-
-/**
  * List direct subdirs of cwd that contain a `.git` entry (regular git
- * repos, submodules, and worktrees all have one — a worktree's `.git`
- * is a file, a normal repo's is a dir; the `exists` probe accepts both).
- * Analogous to `findBootstrappedSubdirs` but uses `.git` presence
- * instead of `.minsky/repo.yaml`.
+ * repos, submodules, and worktrees all have one). Analogous to
+ * `findBootstrappedSubdirs` but uses `.git` presence instead of
+ * `.minsky/repo.yaml`.
  *
  * @otel cross-repo-runner.find-git-root-subdirs
  */
@@ -175,6 +123,24 @@ export function findGitRootSubdirs(inputs: CwdDetectInputs): readonly string[] {
   for (const child of children) {
     const childPath = joinPath(inputs.cwd, child);
     if (inputs.fs.exists(joinPath(childPath, ".git"))) out.push(childPath);
+  }
+  return out;
+}
+
+/**
+ * List subdirs of cwd that carry `.minsky/repo.yaml`. Exposed because the
+ * CLI also needs this when the operator passes `--hosts-dir` explicitly
+ * (so the same enumeration runs in both auto-detect and explicit paths).
+ *
+ * @otel cross-repo-runner.find-bootstrapped-subdirs
+ */
+export function findBootstrappedSubdirs(inputs: CwdDetectInputs): readonly string[] {
+  const children = inputs.fs.listDir(inputs.cwd);
+  const out: string[] = [];
+  for (const child of children) {
+    const childPath = joinPath(inputs.cwd, child);
+    const childRepoYaml = joinPath(childPath, ".minsky/repo.yaml");
+    if (inputs.fs.exists(childRepoYaml)) out.push(childPath);
   }
   return out;
 }

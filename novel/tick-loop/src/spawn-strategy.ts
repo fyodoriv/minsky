@@ -31,6 +31,7 @@
  */
 
 import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
 
 import type { LlmInvocation } from "./llm-invocation.js";
 
@@ -90,6 +91,23 @@ export interface SpawnResult {
    * Surfaced-by `daemon-claude-print-hang-watchdog` (operator 2026-05-07).
    */
   readonly timedOut?: boolean;
+  /**
+   * The signal that terminated the child, if any. `undefined` when the
+   * child exited via a clean exit code, a string like `"SIGTERM"` /
+   * `"SIGKILL"` / `"SIGHUP"` when the OS / another process / a self-
+   * suicide killed it.
+   *
+   * Surfaced-by `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19) —
+   * before this field, `exitCode: -1` collapsed two distinct failure modes
+   * ("child exited with no code" vs "child was signal-killed") into one
+   * indistinguishable bucket, so the daemon log couldn't tell us why every
+   * devin spawn was failing.
+   *
+   * When `timedOut: true`, this is `"SIGKILL"` (the watchdog kill) — the
+   * daemon should still prefer `timedOut` for that case since it carries
+   * the additional "we exceeded the watchdog" semantic.
+   */
+  readonly signal?: NodeJS.Signals;
   /**
    * Optional provider tag set by `LlmProviderSpawnStrategy` (slice 3 of
    * `local-llm-fallback-on-budget-pause`) — `"claude"` / `"local"` /
@@ -181,6 +199,20 @@ export interface ProcessSpawnStrategyOptions {
    */
   readonly spawnFn?: typeof nodeSpawn;
   /**
+   * Optional path-existence override — a seam tests can use to assert the
+   * cwd-missing guard without touching the OS. Production defaults to
+   * `node:fs.existsSync`.
+   *
+   * Why the guard exists: the local (aider / opencode) spawn path sets
+   * `cwd` to a per-worker git worktree (P0 `local-worker-worktree-never-created`).
+   * If that worktree was never created, Node's `child_process.spawn`
+   * emits a cryptic `spawn <cmd> ENOENT` that names the *command*, not the
+   * missing cwd — un-actionable for the operator. This guard fails loud
+   * AT the workspace boundary (rule #6 / Armstrong 2007) with a one-line
+   * message that names the missing directory, BEFORE the model is spawned.
+   */
+  readonly existsFn?: (path: string) => boolean;
+  /**
    * Per-iteration timeout in milliseconds. When set, the strategy SIGKILLs
    * any child still running after `timeoutMs` and resolves with
    * `exitCode: -1`, `stderrTail: '<timed out after Nms>'`, and
@@ -242,6 +274,7 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
   private readonly command: string;
   private readonly args: readonly string[];
   private readonly spawnFn: typeof nodeSpawn;
+  private readonly existsFn: (path: string) => boolean;
   private readonly timeoutMs: number | undefined;
   private readonly invocation: ((input: SpawnInput) => LlmInvocation) | undefined;
 
@@ -259,6 +292,7 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
     // `args: ["--print"]` explicitly.
     this.args = opts.args ?? ["--print", "--setting-sources", "project,local"];
     this.spawnFn = opts.spawnFn ?? nodeSpawn;
+    this.existsFn = opts.existsFn ?? existsSync;
     this.timeoutMs = opts.timeoutMs;
     this.invocation = opts.invocation;
   }
@@ -282,6 +316,21 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
     const resolved = this.resolveInvocation(input);
     const timeoutMs = this.timeoutMs;
     return new Promise<SpawnResult>((resolve, reject) => {
+      // Workspace-boundary guard (rule #6 / Armstrong 2007): the local
+      // (aider / opencode) path cd's into a per-worker git worktree
+      // (P0 `local-worker-worktree-never-created`). If that worktree was
+      // never created, `node:child_process.spawn` would emit a cryptic
+      // `spawn <cmd> ENOENT` naming the command, not the missing cwd —
+      // un-actionable. Fail loud HERE, before the model is spawned, with
+      // a one-line operator-actionable message that names the directory.
+      if (resolved.cwd !== undefined && !this.existsFn(resolved.cwd)) {
+        reject(
+          new Error(
+            `tick-loop: cannot spawn "${resolved.command}" — worktree cwd "${resolved.cwd}" does not exist; the local spawn path must create its worktree before spawn (P0 local-worker-worktree-never-created)`,
+          ),
+        );
+        return;
+      }
       const child = this.spawnFn(resolved.command, [...resolved.argv], {
         env: input.env,
         stdio: ["pipe", "pipe", "pipe"],
@@ -319,11 +368,12 @@ export class ProcessSpawnStrategy implements SpawnStrategy {
         reject(err);
       });
 
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         if (watchdog !== undefined) clearTimeout(watchdog);
         resolve(
           buildSpawnResult({
             code,
+            signal,
             timedOut,
             timeoutMs,
             startedAt,
@@ -391,6 +441,7 @@ function writeStdin(
  */
 function buildSpawnResult(input: {
   readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
   readonly timedOut: boolean;
   readonly timeoutMs: number | undefined;
   readonly startedAt: number;
@@ -407,6 +458,11 @@ function buildSpawnResult(input: {
     stdoutTail: tailOf(input.stdoutChunks, TAIL_CAP_BYTES),
     stderrTail,
     ...(input.timedOut ? { timedOut: true } : {}),
+    // Surface the signal that killed the child (if any). Lets the daemon
+    // log distinguish SIGTERM-from-parent vs SIGKILL-from-watchdog vs
+    // SIGHUP-from-terminal-close — the spawn-failed-exit-minus-one-
+    // silent-empty-stderr diagnostic gap.
+    ...(input.signal !== null ? { signal: input.signal } : {}),
   };
 }
 

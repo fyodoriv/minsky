@@ -20,7 +20,7 @@ prior bootstrap.
   `resolveRepoRoot(env, cwd, fsProbe)` — explicit `MINSKY_HOME` env wins
   (launchd / `minsky-bootstrap`); else the conductor self-detects from
   cwd via `detectConductorRoot`. **Removes the hardcoded personal-path
-  default** (`?? "/Users/cbrwizard/apps/tooling/minsky"`) that silently
+  default** (`?? "<minsky-repo>"`) that silently
   defeated "run in any folder".
 - `bin/minsky` (slice 2): a zero-arg branch that `exec`s the
   self-scoping conductor (no bash-side `git rev-parse` — detection is

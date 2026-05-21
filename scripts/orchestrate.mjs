@@ -22,45 +22,60 @@
 //   --once          : one tick then exit (for validation / dry checks)
 //   --interval-ms=N : loop period (default 1200000 = 20 min;
 //                      env MINSKY_ORCH_INTERVAL_MS also honored)
+//   land-local <branch> [--dry-run] [--no-review]
+//                   : take a fully-committed LOCAL branch (e.g. an
+//                     Opus-director keystone fix from a non-worktree
+//                     checkout) green through the scratch --stage=full
+//                     gate, then push + open PR + admin-merge it — the
+//                     orchestrator's worker-branch primitive generalised
+//                     to a local ref so swarm churn / missing worktree
+//                     node_modules can no longer strand a vetted branch
+//                     (TASKS.md orchestrator-must-land-local-vetted-branches).
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { detectConductorRoot } from "../novel/cross-repo-runner/dist/index.js";
-import { runGateSweep } from "./local-gate-merge.mjs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { landLocalBranch, runGateSweep } from "./local-gate-merge.mjs";
+import {
+  DEFAULT_HEALTHY_RESET_SEC,
+  DEFAULT_RUN_TIME_LIMIT_SEC,
+  decideStartupThrottle,
+  parseDurationSec,
+} from "./restart-supervisor.mjs";
 
-/**
- * Pure: resolve the root the conductor scopes to (its `MINSKY_HOME`).
- * `MINSKY_HOME` env wins (set by launchd units / `minsky-bootstrap`);
- * otherwise the conductor self-detects from `cwd` via the SAME pure
- * zero-arg precedence chain `bin/minsky` documents (single source of
- * truth — the shim no longer duplicates git-root detection in bash, so
- * a zero-arg launch forks zero extra detection subprocesses). Extracted
- * + exported so the decision is unit-testable with an injected fs probe
- * (rule #10 — no real I/O in the decision; the default probe is wired
- * only at the call site below).
- * @param {Record<string,string|undefined>} env
- * @param {string} cwd
- * @param {{exists:(p:string)=>boolean,listDir:(p:string)=>readonly string[]}} fsProbe
- * @returns {string}
- */
-export function resolveRepoRoot(env, cwd, fsProbe) {
-  const home = env["MINSKY_HOME"];
-  if (home !== undefined && home.length > 0) return home;
-  return detectConductorRoot({ cwd, fs: fsProbe });
-}
-
-const REPO = resolveRepoRoot(process.env, process.cwd(), {
-  exists: (p) => existsSync(p),
-  listDir: (p) => {
-    try {
-      return readdirSync(p);
-    } catch {
-      return [];
-    }
-  },
-});
+// Derive the repo root from this script's own location — the hardcoded
+// `/Users/cbrwizard/apps/tooling/minsky` fallback only worked for one
+// operator. Same rule-#17 fix as `scripts/local-gate-merge.mjs`
+// (PR #651, 2026-05-19). The `MINSKY_HOME` env override remains as the
+// operator escape hatch.
+const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LEDGER = join(REPO, ".minsky", "orchestrate.jsonl");
+// Persisted crash history for the startup self-throttle (the production
+// wire-in of decideStartupThrottle). One read at boot drives BOTH the
+// escalating backoff AND the supervised-run deadline origin — a single
+// state surface, no second file (round-trip elimination, rule #1).
+const RESTART_STATE = join(REPO, ".minsky", "runany-restart-state.json");
+// Hard wall-clock ceiling for this run (rule #6 — stay alive, but
+// bounded). After it, the conductor stops cleanly (exit 0) instead of
+// scheduling another tick; launchd's KeepAlive/runany supervision owns
+// crash-restart backoff (see scripts/restart-supervisor.mjs). Env
+// `MINSKY_RUN_TIME_LIMIT` accepts `<n>s|m|h` (default 10h).
+// `RUN_START_MS` is this *process* life's start; the deadline is
+// measured against the persisted *supervised-run* origin (carried
+// across launchd restarts so a crash-loop can't earn a fresh 10h every
+// respawn). `runOriginMs` is seeded from RUN_START_MS and overwritten
+// by the persisted origin at boot (rule #7 — falls back gracefully when
+// the state file is absent/corrupt).
+const RUN_START_MS = Date.now();
+let runOriginMs = RUN_START_MS;
+const RUN_TIME_LIMIT_MS =
+  parseDurationSec(process.env["MINSKY_RUN_TIME_LIMIT"], DEFAULT_RUN_TIME_LIMIT_SEC) * 1000;
+// Sustained-healthy window that resets the backoff ladder to base.
+// Operator-tunable like the deadline (same parseDurationSec contract —
+// a typo'd value falls back to the 20m default, rule #7); `<n>s|m|h`.
+const HEALTHY_RESET_MS =
+  parseDurationSec(process.env["MINSKY_HEALTHY_RESET"], DEFAULT_HEALTHY_RESET_SEC) * 1000;
 // PRs vetted per tick. Bounded (default 2) so a tick is at most
 // LIMIT × per-vet-timeout — the conductor cannot back up behind a long
 // sweep (keystone "run reliably for 10h"). Env-tunable.
@@ -158,7 +173,57 @@ function schedule(intervalMs, log) {
     const m = err instanceof Error ? err.message : String(err);
     log(`orchestrate: tick threw (continuing): ${m.slice(0, 200)}\n`);
   }
+  // Bounded stay-alive (rule #6): once the hard wall-clock ceiling is
+  // reached, do NOT reschedule — returning drains the setTimeout chain
+  // (the only thing keeping the loop alive) so Node exits 0 cleanly. No
+  // zombie, no infinite restart past the deadline. Measured against the
+  // *supervised-run* origin (persisted across launchd restarts), not
+  // this process life — otherwise a crash-loop earns a fresh budget
+  // every respawn and the ceiling never bites (Acceptance #3).
+  const elapsedMs = Date.now() - runOriginMs;
+  if (elapsedMs >= RUN_TIME_LIMIT_MS) {
+    log(
+      `orchestrate: MINSKY_RUN_TIME_LIMIT reached (${Math.round(
+        elapsedMs / 1000,
+      )}s ≥ ${RUN_TIME_LIMIT_MS / 1000}s) — clean stop, exit 0\n`,
+    );
+    process.exitCode = 0;
+    return;
+  }
   setTimeout(() => schedule(intervalMs, log), intervalMs);
+}
+
+/**
+ * Read persisted crash history (rule #7 — absent/corrupt/garbage all
+ * degrade to a clean first-run, never a throw that would defeat the
+ * supervisor). I/O edge; the decision is the pure decideStartupThrottle.
+ * @returns {{ prevStartMs: number | null, prevOriginMs: number | null, prevRestartIndex: number }}
+ */
+function readRestartState() {
+  try {
+    const raw = JSON.parse(readFileSync(RESTART_STATE, "utf8"));
+    return {
+      prevStartMs: Number.isFinite(raw.startMs) ? raw.startMs : null,
+      prevOriginMs: Number.isFinite(raw.originMs) ? raw.originMs : null,
+      prevRestartIndex: Number.isFinite(raw.restartIndex) ? raw.restartIndex : 0,
+    };
+  } catch {
+    return { prevStartMs: null, prevOriginMs: null, prevRestartIndex: 0 };
+  }
+}
+
+/**
+ * Persist crash history for the next launchd respawn. Best-effort: a
+ * failed write just means the next boot starts from base backoff and a
+ * fresh deadline origin — degraded, not broken (rule #7).
+ * @param {{ startMs: number, originMs: number, restartIndex: number }} st
+ */
+function writeRestartState(st) {
+  try {
+    writeFileSync(RESTART_STATE, `${JSON.stringify(st)}\n`);
+  } catch {
+    /* rule #7: state is an optimisation of the supervisor, not a gate */
+  }
 }
 
 // ---- CLI -----------------------------------------------------------------
@@ -167,6 +232,16 @@ const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}
 if (isMain) {
   const args = process.argv.slice(2);
   const log = (/** @type {string} */ s) => process.stdout.write(s);
+  if (args[0] === "land-local") {
+    const res = landLocalBranch({
+      branchName: args[1],
+      dryRun: args.includes("--dry-run"),
+      noReview: args.includes("--no-review"),
+      log,
+    });
+    log(`orchestrate: land-local ${args[1] ?? "(none)"} — ${res.outcome} (${res.reason})\n`);
+    process.exit(res.outcome === "landed" ? 0 : 1);
+  }
   const ivArg = args.find((a) => a.startsWith("--interval-ms="));
   const intervalMs = ivArg
     ? Number(ivArg.split("=")[1])
@@ -176,6 +251,37 @@ if (isMain) {
     tick(log);
     log("orchestrate: --once done\n");
   } else {
+    // Startup self-throttle: the production wire-in of the escalating,
+    // capped, reset-on-health backoff (decideStartupThrottle → the same
+    // pure decideRestart the chaos sim measures — rule #1, one core).
+    // launchd KeepAlive respawns us with a *flat* ThrottleInterval; the
+    // escalation lives here, off persisted crash history. The same read
+    // also pins the supervised-run deadline origin so the ceiling is
+    // bounded across restarts. State tracking always runs; only the
+    // sleep itself is skipped by MINSKY_NO_STARTUP_BACKOFF=1 (tests/CI
+    // and fast operator runs must not block on a 300s backoff).
+    const prev = readRestartState();
+    const t = decideStartupThrottle({
+      prevStartMs: prev.prevStartMs,
+      prevOriginMs: prev.prevOriginMs,
+      prevRestartIndex: prev.prevRestartIndex,
+      nowMs: Date.now(),
+      healthyResetMs: HEALTHY_RESET_MS,
+    });
+    writeRestartState({
+      startMs: t.startMs,
+      originMs: t.originMs,
+      restartIndex: t.nextRestartIndex,
+    });
+    runOriginMs = t.originMs;
+    if (t.sleepMs > 0 && process.env["MINSKY_NO_STARTUP_BACKOFF"] !== "1") {
+      log(
+        `orchestrate: startup self-throttle ${Math.round(
+          t.sleepMs / 1000,
+        )}s (${t.reason}, prior restart #${prev.prevRestartIndex})\n`,
+      );
+      await new Promise((r) => setTimeout(r, t.sleepMs));
+    }
     log(`orchestrate: start ${new Date().toISOString()} interval=${intervalMs}ms\n`);
     schedule(intervalMs, log);
   }

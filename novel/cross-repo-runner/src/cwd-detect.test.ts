@@ -8,11 +8,9 @@ import type { CwdFsProbe } from "./cwd-detect.js";
 
 import {
   detectAnyCwd,
-  detectConductorRoot,
   detectCwd,
   findBootstrappedSubdirs,
   findGitRootSubdirs,
-  resolveConductorRoot,
 } from "./cwd-detect.js";
 
 function fakeFs(
@@ -107,42 +105,7 @@ describe("detectCwd — error signal", () => {
   });
 });
 
-describe("findBootstrappedSubdirs", () => {
-  test("returns sorted list of subdir absolute paths", () => {
-    const subdirs = findBootstrappedSubdirs({
-      cwd: "/tmp/parent",
-      fs: fakeFs(
-        {
-          "/tmp/parent/host-a/.minsky/repo.yaml": "exists",
-          "/tmp/parent/host-b/.minsky/repo.yaml": "exists",
-        },
-        { "/tmp/parent": ["host-a", "host-b"] },
-      ),
-    });
-    expect(subdirs).toEqual(["/tmp/parent/host-a", "/tmp/parent/host-b"]);
-  });
-
-  test("returns empty list when no subdir is bootstrapped", () => {
-    const subdirs = findBootstrappedSubdirs({
-      cwd: "/tmp/parent",
-      fs: fakeFs({}, { "/tmp/parent": ["unbootstrapped-a", "unbootstrapped-b"] }),
-    });
-    expect(subdirs).toEqual([]);
-  });
-
-  test("handles trailing-slash cwd correctly", () => {
-    const subdirs = findBootstrappedSubdirs({
-      cwd: "/tmp/parent/",
-      fs: fakeFs(
-        { "/tmp/parent/child/.minsky/repo.yaml": "exists" },
-        { "/tmp/parent/": ["child"] },
-      ),
-    });
-    expect(subdirs).toEqual(["/tmp/parent/child"]);
-  });
-});
-
-describe("detectAnyCwd — zero-arg precedence chain", () => {
+describe("detectAnyCwd — git-root fallback", () => {
   test("returns single-host for a git root when not bootstrapped", () => {
     const result = detectAnyCwd({
       cwd: "/tmp/git-repo",
@@ -221,62 +184,37 @@ describe("findGitRootSubdirs", () => {
   });
 });
 
-describe("resolveConductorRoot — collapse detect result to one root", () => {
-  test("single-host → the host path", () => {
-    expect(resolveConductorRoot({ kind: "single-host", host: "/repo" }, "/fallback")).toBe("/repo");
+describe("findBootstrappedSubdirs", () => {
+  test("returns sorted list of subdir absolute paths", () => {
+    const subdirs = findBootstrappedSubdirs({
+      cwd: "/tmp/parent",
+      fs: fakeFs(
+        {
+          "/tmp/parent/host-a/.minsky/repo.yaml": "exists",
+          "/tmp/parent/host-b/.minsky/repo.yaml": "exists",
+        },
+        { "/tmp/parent": ["host-a", "host-b"] },
+      ),
+    });
+    expect(subdirs).toEqual(["/tmp/parent/host-a", "/tmp/parent/host-b"]);
   });
 
-  test("multi-host → the parent hostsDir (conductor sweeps the tree)", () => {
-    expect(
-      resolveConductorRoot({ kind: "multi-host", hostsDir: "/parent", hostCount: 3 }, "/fallback"),
-    ).toBe("/parent");
+  test("returns empty list when no subdir is bootstrapped", () => {
+    const subdirs = findBootstrappedSubdirs({
+      cwd: "/tmp/parent",
+      fs: fakeFs({}, { "/tmp/parent": ["unbootstrapped-a", "unbootstrapped-b"] }),
+    });
+    expect(subdirs).toEqual([]);
   });
 
-  test("error arm → the supplied fallback cwd (degenerate, unreachable via detectAnyCwd)", () => {
-    expect(resolveConductorRoot({ kind: "error", hint: "nope" }, "/fallback")).toBe("/fallback");
-  });
-});
-
-describe("detectConductorRoot — single source of truth for zero-arg root", () => {
-  test("bootstrapped cwd → cwd (bootstrapped wins over git-root)", () => {
-    expect(
-      detectConductorRoot({
-        cwd: "/repo",
-        fs: fakeFs({ "/repo/.minsky/repo.yaml": "exists", "/repo/.git": "exists" }),
-      }),
-    ).toBe("/repo");
-  });
-
-  test("git repo (no bootstrap) → cwd", () => {
-    expect(
-      detectConductorRoot({
-        cwd: "/gitrepo",
-        fs: fakeFs({ "/gitrepo/.git": "exists" }),
-      }),
-    ).toBe("/gitrepo");
-  });
-
-  test("nested-repos tree → the parent dir (multi-host root)", () => {
-    expect(
-      detectConductorRoot({
-        cwd: "/tree",
-        fs: fakeFs({ "/tree/a/.git": "exists", "/tree/b/.git": "exists" }, { "/tree": ["a", "b"] }),
-      }),
-    ).toBe("/tree");
-  });
-
-  test("plain dir (no git, no bootstrap) → cwd itself", () => {
-    expect(detectConductorRoot({ cwd: "/plain", fs: fakeFs({}, { "/plain": ["docs"] }) })).toBe(
-      "/plain",
-    );
-  });
-
-  test("detached worktree (.git is a file) → cwd", () => {
-    expect(
-      detectConductorRoot({
-        cwd: "/wt",
-        fs: fakeFs({ "/wt/.git": "exists" }),
-      }),
-    ).toBe("/wt");
+  test("handles trailing-slash cwd correctly", () => {
+    const subdirs = findBootstrappedSubdirs({
+      cwd: "/tmp/parent/",
+      fs: fakeFs(
+        { "/tmp/parent/child/.minsky/repo.yaml": "exists" },
+        { "/tmp/parent/": ["child"] },
+      ),
+    });
+    expect(subdirs).toEqual(["/tmp/parent/child"]);
   });
 });

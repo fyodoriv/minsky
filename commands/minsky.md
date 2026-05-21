@@ -20,7 +20,7 @@ pwd && test -f .minsky/repo.yaml && echo "BOOTSTRAPPED" || echo "NEEDS_BOOTSTRAP
 If `NEEDS_BOOTSTRAP`, run the bootstrap:
 
 ```bash
-node ~/apps/tooling/minsky/novel/sidecar-bootstrap/bin/minsky-bootstrap.mjs "$(pwd)"
+node <minsky-repo>/novel/sidecar-bootstrap/bin/minsky-bootstrap.mjs "$(pwd)"
 ```
 
 ### 2. Check if already running

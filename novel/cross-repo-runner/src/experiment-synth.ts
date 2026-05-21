@@ -23,9 +23,17 @@ export type SynthResult =
  * rule-#9 required fields (hypothesis / success / pivot / measurement /
  * anchor) is null on the task. Rule #9 is iron — no exemption.
  *
+ * Optional `hostRepo` is emitted as a YAML field when present (rule #4
+ * — everything measurable, everything visible: an operator reading
+ * `.minsky/experiments/<id>.yaml` should know which host the experiment
+ * targets without having to cross-reference `.minsky/repo.yaml`).
+ *
  * @otel cross-repo-runner.synthesise-experiment-yaml
  */
-export function synthesiseExperimentYaml(task: ParsedTask): SynthResult {
+export function synthesiseExperimentYaml(
+  task: ParsedTask,
+  opts?: { hostRepo?: string },
+): SynthResult {
   const missingFields: string[] = [];
   if (task.hypothesis === null) missingFields.push("Hypothesis");
   if (task.success === null) missingFields.push("Success");
@@ -37,6 +45,7 @@ export function synthesiseExperimentYaml(task: ParsedTask): SynthResult {
   const experimentId = task.id;
   const yaml = renderExperimentYaml({
     id: experimentId,
+    hostRepo: opts?.hostRepo,
     hypothesis: task.hypothesis as string,
     success: task.success as string,
     pivot: task.pivot as string,
@@ -53,14 +62,18 @@ export function synthesiseExperimentYaml(task: ParsedTask): SynthResult {
  */
 function renderExperimentYaml(record: {
   id: string;
+  hostRepo: string | undefined;
   hypothesis: string;
   success: string;
   pivot: string;
   measurement: string;
   anchor: string;
 }): string {
-  return [
-    `id: ${record.id}`,
+  const lines: string[] = [`id: ${record.id}`];
+  if (record.hostRepo !== undefined && record.hostRepo.length > 0) {
+    lines.push(`host_repo: ${quote(record.hostRepo)}`);
+  }
+  lines.push(
     "hypothesis: |",
     indent(record.hypothesis, "  "),
     `success: ${quote(record.success)}`,
@@ -69,7 +82,8 @@ function renderExperimentYaml(record: {
     "anchor: |",
     indent(record.anchor, "  "),
     "",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function indent(text: string, prefix: string): string {
