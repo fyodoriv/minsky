@@ -108,13 +108,15 @@ function renderSystemPromptOverlay(inputs: OverlayInputs): string {
     inputs.preCommitCommand.length > 0
       ? `3. Run \`${inputs.preCommitCommand}\` and confirm zero errors before committing.`
       : "3. Run the host's pre-commit hooks (if any) before committing.",
-    "4. Open a PR whose body carries a `Hypothesis self-grade` block:",
+    `4. Remove the shipped task block (\`${inputs.taskId}\`) from \`TASKS.md\` in the SAME commit that ships the code — the runner unions \`TASKS.md\` + \`AGENTS.md\` into the task's declared scope so this cleanup never triggers scope-leak. History lives in git log; never mark the block \`[x]\`, delete it entirely.`,
+    "5. Open a PR whose body carries a `Hypothesis self-grade` block:",
     "   - Predicted: <re-state the hypothesis>",
     "   - Observed: <the actual measurement output>",
     "   - Match: yes | no | partial",
     "   - Lesson: <one-sentence takeaway>",
     "",
     "Failure to include the self-grade block fails the minsky-side CI check.",
+    "Failure to remove the shipped task block from TASKS.md re-spawns the same task on the next tick (rule #9 — ship-off-the-queue is a sweep-completion invariant, not a soft preference).",
     "",
     // ─────────────────────────────────────────────────────────────────────
     // FINAL STEP — non-negotiable. Without this block claude --print has

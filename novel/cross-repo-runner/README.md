@@ -254,3 +254,5 @@ uses plain double-quoted strings unless `${…}` interpolation is present
 `task-finder.test.ts` / `bin/minsky-run.mjs` follow biome's formatter.
 Run `pnpm biome check --write novel/cross-repo-runner` before committing
 changes to this package.
+
+<!-- Merge of PR #599 (3 P0 orchestration fixes from oncall-hub-api AIFN-720): the spawnPlan brief now requires removing the shipped task block from TASKS.md (rule #9 invariant), and the host-loop merge surfaces with main's evolved walker-drains-one-host-forever fix. Doc touched per rule-3 alongside the merge. -->
