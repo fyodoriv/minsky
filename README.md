@@ -1,70 +1,124 @@
 # Minsky
 
-> A background daemon that runs AI coding agents on your repo's task queue — picks tasks, opens draft PRs, never merges without you.
+> A background daemon that runs AI coding agents against tasks in any git repo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-**For indie hackers**: ship the boring tickets while you sleep — failing tests, lint, dependency bumps, docs drift. Wake up to draft PRs to review.
+Minsky attaches to a git repo and improves it over time, applying scientifically proven software-engineering practices — TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, error budgets — each backed by a literature citation ([PRACTICES](docs/PRACTICES.md)). It identifies issues, works on each one until it's fixed, then researches what to do next — by default it runs until you stop it.
 
-**For companies**: a self-hosted, audit-traceable autonomous coding loop with mechanically-enforced safety rules. You bring your own model keys. No vendor lock-in, no managed service.
-
-Built on TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, and error budgets — each backed by a literature citation.
-
-- **Continuous, unattended improvement** — picks the next task, ships a draft PR, never merges without you.
-- **Issues surfaced as draft tasks** — a CTO-audit pass after each iteration proposes new tasks for your review.
-- **Right model for each task** — Claude for prose, Devin for refactors, local Ollama for mechanical lint fixes.
-- **Forced research at PR time** — every PR cites existing libraries it considered; the linter blocks reinvention.
-- **A tool that improves itself** — reads its own metrics, opens tasks against its own stability, ships the fixes.
-- **Keeps iterating when the cloud runs dry** — quota exceeded → local Ollama → loop continues until your tokens return.
-- **Async Q&A across timezones** — agents write questions to a local file; you reply by editing it.
+**[Seven reasons you'd want this →](#why-minsky)** &nbsp;·&nbsp; Or skip to [getting started](#getting-started).
 
 ## Getting started
 
-Through your AI agent — copy-paste:
+**Through your AI agent.** Copy-paste:
 
 > Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-Manual:
+**Manual:**
 
 ```bash
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-Minsky runs against your current repo by default. First run auto-installs persistence so it survives reboots.
+Full install runbook: [INSTALL.md](INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
 
-## Why it's safe to use Minsky
+## What it actually does
 
-Safety is mechanical, not aspirational. Every rule below is enforced by a CI lint that runs on every iteration; violations halt the iteration before any change reaches your repo.
+1. Reads `TASKS.md` from your **host** repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
+2. Picks the highest-priority task with complete rule-9 fields
+3. Spawns Devin, Claude, or a local model (configurable per machine)
+4. The agent implements the task on a feature branch
+5. Opens a PR with a hypothesis self-grade
+6. Records the iteration in `.minsky/experiment-store/` (inside the host repo)
+7. Picks the next task. Repeats.
 
-- **No agent ever pushes to `main` or merges a PR** — every PR is a draft for your review. ([`scripts/check-rule-12-scope-discipline.mjs`](scripts/check-rule-12-scope-discipline.mjs))
-- **Security-sensitive changes stay human-blocked** — auth, crypto, secrets, permissions never get auto-edited. ([`scripts/check-pr-security-review.mjs`](scripts/check-pr-security-review.mjs))
-- **No destructive operations** — force pushes, branch deletes, deploys are blocked at the iteration boundary. ([`scripts/check-rule-12-scope-discipline.mjs`](scripts/check-rule-12-scope-discipline.mjs))
-- **No personal data in published docs** — usernames, home directories, paths are caught at PR time. ([`scripts/check-no-personal-paths-in-docs.mjs`](scripts/check-no-personal-paths-in-docs.mjs), [`scripts/check-no-hardcoded-user-paths.mjs`](scripts/check-no-hardcoded-user-paths.mjs))
-- **Don't reinvent existing tools** — every new module cites the prior art it rejected. ([`scripts/check-rule-1-novel-justification.mjs`](scripts/check-rule-1-novel-justification.mjs))
-- **Every dependency behind an interface** — no tool name leaks into business logic; you can swap any dep without rewriting the loop. ([`scripts/check-rule-2-dep-coverage.mjs`](scripts/check-rule-2-dep-coverage.mjs))
-- **Test-first, metric-first, doc-first** — no code lands without a paired test, a metric, and a docs update. ([`scripts/check-rule-3-doc-first.mjs`](scripts/check-rule-3-doc-first.mjs))
-- **Everything observable** — every component emits OpenTelemetry; nothing happens silently. ([`scripts/check-rule-4-otel-coverage.mjs`](scripts/check-rule-4-otel-coverage.mjs))
-- **Every term has a CS citation** — no invented terminology when literature has a word for it. ([`scripts/check-rule-5-glossary-discipline.mjs`](scripts/check-rule-5-glossary-discipline.mjs))
-- **Let-it-crash supervision** — failures are caught at the supervisor boundary, not swallowed mid-iteration. ([`scripts/check-rule-6-let-it-crash.mjs`](scripts/check-rule-6-let-it-crash.mjs))
-- **Chaos engineering per module** — every package ships a deterministic chaos test that proves a failure mode is contained. ([`scripts/check-rule-7-chaos-coverage.mjs`](scripts/check-rule-7-chaos-coverage.mjs))
-- **Pre-registered hypothesis** — every change ships with a falsifiable success metric and a pivot threshold. No vanity metrics. ([`scripts/check-rule-9-tasksmd-fields.mjs`](scripts/check-rule-9-tasksmd-fields.mjs))
-- **Proactive healing** — every observed error must be fixed in the same session that observed it. ([`scripts/check-rule-17-proactive-heal.mjs`](scripts/check-rule-17-proactive-heal.mjs))
-- **No secrets in logs or commits** — pre-commit secret scan + OpenTelemetry PII filter. ([`scripts/scan-secrets.mjs`](scripts/scan-secrets.mjs), [`scripts/check-otel-no-pii.mjs`](scripts/check-otel-no-pii.mjs))
+> **What's a "host"?** A host is a single git repository that minsky operates on — picks tasks from its `TASKS.md`, spawns agents inside its worktree, opens PRs against its remote. Selected via `default_host` in `~/.minsky/config.json`, or `--host <path>` flag, or the current working directory by default. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
 
-Full constitution: [`vision.md`](vision.md).
+## Why Minsky?
 
-## Architecture
+Seven things you get with minsky running on a repo. Each links to a dedicated user-story page with acceptance criteria, metric, and chaos coverage.
 
-A bash CLI shim → a task walker that picks the next priority item → a pluggable AI agent (Claude, Devin, or a local Ollama model) → a sidecar (`.minsky/`) recording each iteration → a draft PR for you to review. Built on MAPE-K (Kephart & Chess 2003), let-it-crash supervision (Armstrong 2007), and the Viable System Model (Beer 1972).
+- **Continuous, unattended improvement** — daemon picks tasks, ships draft PRs, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
+- **Issues surfaced as draft tasks** *(opt-out via `MINSKY_CTO_AUDIT=off`)* — a CTO-audit pass after each iteration proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
+- **Right model for each task** *(per-task backend today; multi-persona M2)* — claude for prose, devin for refactors, local Ollama for mechanical lint fixes. ([details →](user-stories/008-per-task-backend-and-personas.md))
+- **Forced research at PR time** *(rule #1, enforced)* — every PR cites the existing libraries it considered; the linter blocks reinvention. ([details →](user-stories/009-forced-research-rule-1.md))
+- **A tool that improves itself** — reads own daemon metrics, files tasks against own stability, ships the fixes. ([details →](user-stories/003-mape-k-improves-prompts.md))
+- **Keeps iterating when the cloud runs dry** *(detection today; mid-run swap is P0)* — quota exceeded → local Ollama → loop continues until your tokens return. ([details →](user-stories/004-budget-auto-pause.md))
+- **Async Q&A across timezones** *(P0)* — agents write to `.minsky/qa-log.md`; you reply by editing the file. ([details →](user-stories/010-async-human-qa-via-file.md))
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full breakdown.
+Safety guards are mechanical — every PR is a draft for your review, every iteration passes 15 lint gates including secret-scan, scope-discipline, and security review. No agent can push to `main`. No PR merges without your approval.
 
-## What works today
+## What works today (honest)
 
-Stability target: 90% over 10h unattended runs. Today it's lower — improving via the roadmap in [`MILESTONES.md`](MILESTONES.md). The daemon picks tasks and opens draft PRs reliably; multi-repo walking, the live dashboard (`minsky watch`), the dynamic per-machine watchdog, and auto-survive-reboots all work. Switching between Claude / Devin / local Ollama works but Devin is experimental. Async file-based Q&A, `npx minsky` one-command install, multi-file refactors with a CI gate, and GitHub Actions integration are coming.
+| Capability | Status | Confidence |
+|---|---|---|
+| Pick tasks from TASKS.md and spawn agents | ✅ Works | High — 26+ iterations |
+| Open PRs autonomously | ✅ Works | PR #644 opened by devin |
+| Walk multiple repos (3 iterations per host) | ✅ Works | Per-host cap, fair scheduling |
+| Dynamic watchdog (adapts to machine speed) | ✅ Works | p95 × 1.5 from history |
+| Live dashboard (`minsky watch`) | ✅ Works | Stability %, iterations, human-help |
+| Survive reboots (launchd KeepAlive) | ✅ Works | Auto-installed on first run |
+| One-command update (`minsky update`) | ✅ Works | Stop → pull → rebuild → restart |
+| Zero ghost processes on stop | ✅ Works | Kills runners + agent children |
+| Per-machine agent config | ✅ Works | `~/.minsky/config.json` |
+| Switch between Devin, Claude, local models | 🟡 Partial | Claude primary, Devin experimental |
+| 8h unattended runs with >90% stability | 🟡 In progress | Currently ~24%, improving |
+| File-based human↔agent Q&A | 🔴 Not yet | P0 `minsky-human-comm-via-file` |
+| `npx minsky` one-command install+run | 🔴 Not yet | P1 `minsky-npx-install-and-run` |
+| Multi-file refactors | 🔴 Not yet | M2 milestone |
+| GitHub Actions CI | 🔴 Not yet | M3 milestone |
 
-About the name: Marvin Minsky (1927–2016), *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together.
+## What it won't do
+
+Hard rules. Not "tries not to" — mechanically blocked.
+
+- **Security-sensitive changes** — marked human-blocked, always
+- **Destructive operations** (force push, delete, deploy) — hard-blocked
+- **Architecture decisions** — files research tasks for humans
+- **Merge anything without your approval** — every PR is a draft; you review and merge
+
+## How Minsky works inside
+
+The 30-second sketch:
+
+```text
+minsky (bash CLI shim)
+  ↓
+cross-repo-runner (minsky-run.mjs) — walks hosts, picks tasks, spawns agents
+  ↓
+Devin / Claude / Aider — the actual AI agent (pluggable)
+  ↓
+.minsky/ sidecar — config, experiment store, iteration records
+```
+
+Six distinctive mechanisms, each backed by file paths so any claim is auditable:
+
+- **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) ships today; multi-persona pipelines per task are an M2 milestone tracked at `multi-persona-pipeline-handoff-spec`.
+- **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
+- **Constitution = 18 rules, each enforced as a CI lint** — rule #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing), #18 (fake-data markers) are the load-bearing ones.
+- **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
+- **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration; same code adapts to any machine.
+- **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
+
+## More
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — code in this repo is AI-authored; how to attest
+- **[INSTALL.md](INSTALL.md)** — agent-readable install runbook
+- **[docs/uninstall.md](docs/uninstall.md)** — full removal, daemon stop, sidecar cleanup
+- **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
+- **[docs/cli-reference.md](docs/cli-reference.md)** — every command, every flag, every env var
+- **[docs/configuration.md](docs/configuration.md)** — `~/.minsky/config.json`, agent comparison
+- **[docs/auto-merge.md](docs/auto-merge.md)** — periodic gate-and-merge for daemon PRs (ON for minsky itself, OFF for other repos)
+- **[docs/dependabot.md](docs/dependabot.md)** — dependency-update policy, grouping, local merge gate
+- **[docs/edge-cases.md](docs/edge-cases.md)** — empty queues, runtime limits, comm channels, crashes
+- **[docs/PRACTICES.md](docs/PRACTICES.md)** — scientifically proven practices with citations
+- **[vision.md](vision.md)** — the constitution (18 rules), pattern conformance index
+- **[TASKS.md](TASKS.md)** — open tasks with rule-9 fields
+- **[MILESTONES.md](MILESTONES.md)** — M1–M5 exit criteria
+- **[DEPRECATED.md](DEPRECATED.md)** — retired features (don't invest in these)
+
+About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
 
 ## License
 
