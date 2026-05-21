@@ -1,5 +1,7 @@
 # Competitor: Cursor Agent (Anysphere)
 
+> IDE-bound agent (inner loop) complementary to Minsky's outer loop (24/7 background daemon).
+
 - **URL**: <https://cursor.com>
 - **Status**: Active, massive adoption, VS Code fork with AI-native features
 - **Pricing**: Free tier, Pro $20/mo, Business $40/mo

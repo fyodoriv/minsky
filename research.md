@@ -1,8 +1,19 @@
 # Research
 
-Living scan of the tools Minsky depends on, the tools we've considered, and the tools we should keep watching. Updated whenever a dependency changes, a new candidate appears, or we re-evaluate a choice.
+> Living scan of the tools Minsky depends on, the tools we've considered, and the tools we should keep watching.
 
-This document operationalizes constitutional principle 1 — *don't reinvent the wheel*. **Quarterly: every entry is reviewed; choices are reconsidered; replacements are scanned.**
+## What this file is
+
+The operational substrate for constitutional rule #1 (*don't reinvent the wheel*). Every novel package in `novel/*` traces back to a row or subsection here that documents the existing tool that was considered, why it didn't fit, and what we built instead. The file is read by [`scripts/check-rule-1-novel-justification.mjs`](./scripts/check-rule-1-novel-justification.mjs) on every PR that adds a `novel/` directory — the script requires either a research.md justification or an opt-out comment in the package README.
+
+**Quarterly cadence**: every entry is reviewed; choices are reconsidered; replacements are scanned. The most recent review log is at the end of this file under `## Quarterly review log`.
+
+## What this file is not
+
+- **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules.
+- **Not the architecture doc** — see [ARCHITECTURE.md](./ARCHITECTURE.md) for the layered model + dependency table (the dependency table is the canonical surface; this file is the *exploration log* behind it).
+- **Not a practices index** — see [docs/PRACTICES.md](./docs/PRACTICES.md) for software-engineering practices Minsky applies.
+- **Not a competitor analysis** — see [competitors/](./competitors/) for the head-to-head profiles.
 
 ## Hypothesis-driven development tooling
 

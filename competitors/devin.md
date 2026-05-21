@@ -1,5 +1,7 @@
 # Competitor: Devin (Cognition)
 
+> Cognition's cloud coding agent — used by Minsky as a `cloud_agent` backend; also a primary direct competitor.
+
 - **URL**: <https://devin.ai>
 - **Status**: Active, Devin 2.0, 67% PR merge rate on defined tasks (morphllm.com 2026 benchmark)
 - **Pricing**: Pro $20/mo, Max $200/mo, Teams $80/mo/seat, Enterprise custom

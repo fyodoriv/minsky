@@ -1,5 +1,7 @@
 # Competitor: Codex CLI (OpenAI)
 
+> OpenAI's terminal coding agent — overlapping problem space, adjacent execution model.
+
 - **URL**: <https://github.com/openai/codex>
 - **Status**: Active, early stage (launched 2025), OpenAI's CLI agent offering
 - **Pricing**: Free (OSS). OpenAI API costs only.

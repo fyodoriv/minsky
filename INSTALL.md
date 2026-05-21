@@ -1,12 +1,23 @@
 # INSTALL.md — agent-mediated install runbook
 
-**Audience.** You are an AI coding agent (Claude Code, Devin, Cursor, Windsurf, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like "install minsky for this folder and start it". This file is the canonical install runbook. Follow it step by step. Ask the operator a question ONLY at the explicit consent-prompt step below — every other step is yours to execute autonomously.
+> Step-by-step runbook for an AI agent installing Minsky on behalf of a human operator.
+
+## What this is
+
+The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Devin, Cursor, Windsurf, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator a question ONLY at the explicit consent-prompt step (Step 5) — every other step is yours to execute autonomously.
 
 **Status.** Stub. Closing the loop is tracked as P0 task `agent-mediated-install` in `TASKS.md`. Until that task ships the `minsky consent` subcommand + the measurement harness, the consent step writes locally only (no server submission yet) and you the agent do steps 1–5 manually. The flow described below works end-to-end today; only the automated cross-provider measurement is pending.
 
+## What this is not
+
+- **Not the user-facing readme** — see [README.md](./README.md) for what Minsky does and why.
+- **Not the architecture doc** — see [ARCHITECTURE.md](./ARCHITECTURE.md) for the wiring.
+- **Not a troubleshooting guide for a running daemon** — see [docs/PRACTICES.md](./docs/PRACTICES.md) and `minsky doctor` once installed.
+- **Not a release-notes doc** — see [CHANGELOG.md](./CHANGELOG.md).
+
 ## What you're installing
 
-Minsky is a background daemon that runs AI coding agents against tasks in any git repo. It picks the highest-priority task with complete rule-9 fields from `TASKS.md`, spawns an AI agent to work on it, opens a PR, records the iteration, then picks the next task. By default it runs until the operator stops it. Full README at [README.md](./README.md); applied practices at [docs/PRACTICES.md](./docs/PRACTICES.md).
+Minsky is a background daemon that runs AI coding agents against tasks in any git repo. It picks the highest-priority task with complete rule-9 fields from `TASKS.md`, spawns an AI agent to work on it, opens a PR, records the iteration, then picks the next task. By default it runs until the operator stops it.
 
 ## Step 1 — verify prerequisites
 
