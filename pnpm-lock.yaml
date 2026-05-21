@@ -176,6 +176,8 @@ importers:
         specifier: workspace:*
         version: link:../adapters/prompt-optimizer
 
+  novel/observer/heals: {}
+
   novel/sidecar-bootstrap:
     devDependencies:
       '@types/node':

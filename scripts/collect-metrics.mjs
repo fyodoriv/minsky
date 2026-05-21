@@ -124,6 +124,35 @@ function collectMttr() {
   return { value: "no OTEL backend — MTTR not measurable yet (M1 gap)", higherIsBetter: false };
 }
 
+/** mttr-self-heal: p95 MTTR for catalogued automated heal events (.minsky/heal-events.jsonl) */
+function collectMttrSelfHeal() {
+  // Delegates to scripts/heal-mttr-report.mjs for the 30d window.
+  // Returns the OTEL-blocked stub when the ledger has no entries — same
+  // graceful-degrade pattern as collectLoopUptime.
+  const raw = run("node scripts/heal-mttr-report.mjs --window=30d --json");
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const row = Array.isArray(parsed) ? parsed[0] : null;
+    if (!row || row.source === "no-data") {
+      return {
+        value: "no heal-events yet — measurable once any helper fires",
+        higherIsBetter: false,
+      };
+    }
+    const p95 = row.mttr_p95_ms;
+    const p50 = row.mttr_p50_ms;
+    const successful = row.successful;
+    const attempted = row.attempted;
+    return {
+      value: `p95=${p95 ?? "n/a"}ms · p50=${p50 ?? "n/a"}ms · ${successful}/${attempted} healed (30d)`,
+      higherIsBetter: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** wrist-dwell: proxy — dashboard/watch surface not instrumented yet */
 function collectWristDwell() {
   return { value: "no watch-surface telemetry yet (M1 gap)", higherIsBetter: false };
@@ -144,6 +173,7 @@ async function main() {
     "self-improvement-velocity": collectSelfImprovementVelocity,
     "token-budget-honoring": collectTokenBudgetHonoring,
     mttr: collectMttr,
+    "mttr-self-heal": collectMttrSelfHeal,
     "wrist-dwell": collectWristDwell,
     "tokens-per-story": () => ({
       value: "no OTEL backend — not measurable yet (M1 gap)",
