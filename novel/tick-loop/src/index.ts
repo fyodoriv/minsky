@@ -986,3 +986,19 @@ export {
   renderPlan,
   runInteractive,
 } from "./minsky-prompt.js";
+
+// `operator-machine-budget-autoscale` slice 3 — runtime OS-throttle
+// detector (the pure detect core). Exported here so slice 4's bin
+// wire-in (`bin/tick-loop.mjs`) can feed it the live machine facts and
+// log whether the operator's machine-utilisation budget (vision.md
+// rule #15) is physically reachable on this host.
+export {
+  type DetectedThrottle,
+  type MachineFacts,
+  type OsThrottleKind,
+  type OsThrottleReport,
+  OS_THROTTLE_POLICY,
+  TRIVIAL_BUDGET_PCT,
+  detectOsThrottles,
+  requiredFdFloor,
+} from "./os-throttle-detect.js";
