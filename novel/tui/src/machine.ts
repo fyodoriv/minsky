@@ -1,90 +1,95 @@
 /**
- * `@minsky/tui` — pure formatter for the machine-info panel of the
- * retro dashboard (TASKS.md `runany-retro-tui-dashboard` screen 1:
- * "host, load, cpu, mem, disk, time, total minsky procs").
+ * `@minsky/tui` — pure machine-info formatter for the dashboard header.
  *
- * The raw numbers come from `node:os` / `df` at the I/O edge; this
- * module turns them into the glanceable, fixed-width strings the
- * renderer drops into the box (Card & Mackinlay 1999 — a dashboard is
- * a pre-formatted information display, not a number dump). Pure so the
- * panel layout is unit-testable with a frozen `MachineRaw` (rule #10).
+ * Screen (1) shows host vitals next to the process list. The raw OS
+ * readings (`os.loadavg()`, `os.totalmem()`, a `df` shell-out, …) are
+ * collected at the I/O edge in a later slice; THIS module is the pure
+ * seam that turns the numeric readings into the fixed-width display
+ * strings the renderer prints, so the formatting is unit-testable
+ * without touching the host (rule #10 — pure scan/format logic).
  *
- * Pattern conformance: vision.md § "Pattern conformance index" row 89.
+ * Time is formatted in UTC on purpose: a deterministic, timezone-free
+ * string keeps the unit tests stable on any CI host (rule #7 — explicit
+ * over implicit).
  *
- * @module tui/machine
+ * Anchor: rule #2 (readings are the adapter seam); Card & Mackinlay 1999
+ *   (glanceable fixed-width vitals).
  */
 
-/** Raw machine telemetry, gathered by a future shim at the I/O edge. */
-export interface MachineRaw {
-  /** `os.hostname()`. */
+import { humanBytes } from "./format.js";
+
+/** Raw host readings, exactly as the I/O edge will hand them over. */
+export interface RawMachineReadings {
   readonly host: string;
-  /** `os.loadavg()` → [1m, 5m, 15m]. */
-  readonly loadavg: readonly [number, number, number];
-  /** `os.cpus().length`. */
+  readonly loadAvg: readonly [number, number, number];
   readonly cpuCount: number;
-  /** `os.totalmem()` in bytes. */
   readonly totalMemBytes: number;
-  /** `os.freemem()` in bytes. */
   readonly freeMemBytes: number;
-  /** Filesystem size of the minsky volume, bytes. */
   readonly diskTotalBytes: number;
-  /** Free space on the minsky volume, bytes. */
   readonly diskFreeBytes: number;
-  /** Wall-clock epoch ms (passed in so the formatter stays pure). */
   readonly nowMs: number;
-  /** Count of running minsky processes (from the scan). */
-  readonly minskyProcCount: number;
+  /** total running minsky procs (== `parseMinskyProcs(...).length`). */
+  readonly procCount: number;
 }
 
-/** Pre-formatted, fixed-shape strings ready for the dashboard box. */
+/** @deprecated alias kept for slice-3 (`gather.ts`) compatibility — same shape as `RawMachineReadings`. */
+export type MachineRaw = RawMachineReadings;
+
+/** Formatted, fixed-width host vitals for the dashboard header. */
 export interface MachineInfo {
   readonly host: string;
-  /** `1m 5m 15m` to 2dp, e.g. `2.10 1.80 1.55`. */
   readonly load: string;
-  /** e.g. `8 cores`. */
   readonly cpu: string;
-  /** e.g. `9.4/16.0 GiB (59%)`. */
   readonly mem: string;
-  /** e.g. `412.0/930.0 GiB (44%)`. */
   readonly disk: string;
-  /** ISO-8601 UTC, e.g. `2026-05-17T12:00:00.000Z`. */
+  /** `"YYYY-MM-DD HH:MM:SS UTC"`. */
   readonly time: string;
-  /** e.g. `3 minsky procs`. */
   readonly procs: string;
 }
 
-const BYTES_PER_GIB = 1024 ** 3;
-
-/**
- * @otel-exempt pure number→string formatter; no I/O, no clock (the
- *   clock is the injected `nowMs`), no state. Same rule #4 carve-out as
- *   the scan parser — instrumenting a total pure function measures V8.
- *
- * Format raw machine telemetry into the dashboard's machine-info panel.
- *
- * Percentages round to the nearest whole number; sizes show one decimal
- * GiB. A zero total (e.g. `df` not yet read) degrades to `0%` rather
- * than `NaN%` (rule #7 — explicit graceful degrade, never a broken
- * glyph on the operator's screen).
- */
-export function formatMachineInfo(raw: MachineRaw): MachineInfo {
-  const usedMem = raw.totalMemBytes - raw.freeMemBytes;
-  const usedDisk = raw.diskTotalBytes - raw.diskFreeBytes;
-  return {
-    host: raw.host,
-    load: raw.loadavg.map((n) => n.toFixed(2)).join(" "),
-    cpu: `${raw.cpuCount} ${raw.cpuCount === 1 ? "core" : "cores"}`,
-    mem: ratio(usedMem, raw.totalMemBytes),
-    disk: ratio(usedDisk, raw.diskTotalBytes),
-    time: new Date(raw.nowMs).toISOString(),
-    procs: `${raw.minskyProcCount} minsky ${raw.minskyProcCount === 1 ? "proc" : "procs"}`,
-  };
+/** `used / total (NN%)` where used = total − free; clamps to [0,100]. */
+function usage(totalBytes: number, freeBytes: number): string {
+  const total = Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : 0;
+  const free = Number.isFinite(freeBytes) && freeBytes >= 0 ? Math.min(freeBytes, total) : 0;
+  const used = total - free;
+  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+  return `${humanBytes(used)} / ${humanBytes(total)} (${pct}%)`;
 }
 
-/** `used/total GiB (pct%)`; pct is 0 when total is 0 (no divide-by-zero). */
-function ratio(usedBytes: number, totalBytes: number): string {
-  const used = usedBytes / BYTES_PER_GIB;
-  const total = totalBytes / BYTES_PER_GIB;
-  const pct = totalBytes <= 0 ? 0 : Math.round((usedBytes / totalBytes) * 100);
-  return `${used.toFixed(1)}/${total.toFixed(1)} GiB (${pct}%)`;
+/** Two-digit zero-padded segment of a UTC timestamp. */
+function p2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** `nowMs` → `"YYYY-MM-DD HH:MM:SS UTC"`. Invalid → epoch string. */
+function utcStamp(nowMs: number): string {
+  const d = new Date(Number.isFinite(nowMs) ? nowMs : 0);
+  const date = `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`;
+  const clock = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`;
+  return `${date} ${clock} UTC`;
+}
+
+/** A finite, non-negative load number to 2dp, else `"?"`. */
+function load1(n: number): string {
+  return Number.isFinite(n) && n >= 0 ? n.toFixed(2) : "?";
+}
+
+/**
+ * Format raw host readings into the dashboard's fixed-width vitals.
+ *
+ * @otel-exempt pure data transformation; no I/O, no state.
+ */
+export function formatMachineInfo(raw: RawMachineReadings): MachineInfo {
+  const [l1, l5, l15] = raw.loadAvg;
+  const cores = Number.isFinite(raw.cpuCount) && raw.cpuCount > 0 ? raw.cpuCount : 0;
+  const procs = Number.isFinite(raw.procCount) && raw.procCount >= 0 ? raw.procCount : 0;
+  return {
+    host: raw.host.length > 0 ? raw.host : "unknown",
+    load: `${load1(l1)} ${load1(l5)} ${load1(l15)}`,
+    cpu: `${cores} core${cores === 1 ? "" : "s"}`,
+    mem: usage(raw.totalMemBytes, raw.freeMemBytes),
+    disk: usage(raw.diskTotalBytes, raw.diskFreeBytes),
+    time: utcStamp(raw.nowMs),
+    procs: `${procs} minsky proc${procs === 1 ? "" : "s"}`,
+  };
 }

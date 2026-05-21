@@ -2,7 +2,7 @@
   "name": "@minsky/tui",
   "version": "0.0.0",
   "private": true,
-  "description": "Zero-dependency retro (1995, amber/green-on-black, 80x24) CLI/TUI surface — pure machine-info + screen-render core. Composes @minsky/cross-repo-runner's process scan (rule #1); replaces @minsky/dashboard-web (rule #10 ratchet, landed in the bin/minsky wiring slice).",
+  "description": "Zero-dependency retro-1995 CLI/TUI substrate for the machine-wide minsky dashboard. Slice 1: pure process-scan parser + machine-info formatter + ANSI dashboard renderer (no I/O, no model calls). Supersedes @minsky/dashboard-web per rule #10 ratchet (wired in a later slice).",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,13 +13,19 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --root .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@minsky/cross-repo-runner": "workspace:*"
+    "@minsky/cross-repo-runner": "workspace:^"
   }
 }

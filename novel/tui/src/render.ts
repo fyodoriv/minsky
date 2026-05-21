@@ -1,144 +1,126 @@
 /**
- * `@minsky/tui` — pure renderer for the retro-1995 machine dashboard
- * (TASKS.md `runany-retro-tui-dashboard` screen 1).
+ * `@minsky/tui` — pure retro-1995 renderer for screen (1), the
+ * machine-wide dashboard. ANSI + box-drawing, green-on-black, fixed
+ * 80×24 aesthetic. Zero runtime dependency (rule #1 / the $10-mo cap —
+ * no heavy TUI lib, no runtime web service): raw escape codes only.
  *
- * Zero dependency: raw ANSI + Unicode box-drawing, amber/green-on-black,
- * a fixed 80x24 1995 aesthetic. No heavy TUI library — rule #1 / the
- * $10-mo cap forbid a runtime UI service or a fat dep, and a glanceable
- * read-only board needs none (Card & Mackinlay 1999). The process list
- * is **not** re-derived here: it composes the blessed `MinskyProc`
- * substrate from `@minsky/cross-repo-runner` (rule #1 — one
- * machine-wide enumerator for the whole runany cluster). The function
- * is pure (`model → string[]`); colour is opt-in so tests assert the
- * plain layout deterministically and the future TTY shim flips
- * `color: true` at the I/O edge (Martin 2017).
+ * The renderer is a total `model -> string` transform with NO I/O and NO
+ * model calls, so the layout is unit-testable without a TTY (rule #10 —
+ * the pure render logic is the seam; the raw-mode TTY driver and the
+ * file/process collectors are the I/O edge, wired in later slices).
  *
- * Pattern conformance: vision.md § "Pattern conformance index" row 89.
- *
- * @module tui/render
+ * Width discipline: every width/`cell` calculation runs on PLAIN text;
+ * color is applied only by wrapping an already-exact-width segment in a
+ * single escape pair, so ANSI codes never inflate the measured columns
+ * (the classic TUI alignment bug — Card & Mackinlay 1999, fixed grid).
  */
 
-import type { MinskyProc } from "@minsky/cross-repo-runner";
+import { cell } from "./format.js";
 import type { MachineInfo } from "./machine.js";
+import type { MinskyRole } from "./scan.js";
 
-/** The dashboard's render inputs. All pure data; no I/O handles. */
+/** Total terminal columns (the 1995 80×24 frame). */
+export const WIDTH = 80;
+/** Drawable inner columns: `║␠ … ␠║` → WIDTH − 4. */
+const INNER = WIDTH - 4;
+
+/** One process as the dashboard row wants it — all pre-formatted. */
+export interface ProcRow {
+  readonly runId: string;
+  readonly repo: string;
+  readonly role: MinskyRole;
+  readonly uptime: string;
+  readonly model: string;
+  /** e.g. `"running"`, `"paused"`, `"stuck"` — free-form, source-derived. */
+  readonly state: string;
+}
+
+/** Everything screen (1) needs to render, fully resolved upstream. */
 export interface DashboardModel {
   readonly machine: MachineInfo;
-  readonly procs: readonly MinskyProc[];
-  /** Highlighted row index, clamped into range; -1 / out-of-range → none. */
+  readonly procs: readonly ProcRow[];
+  /** highlighted row, clamped by the renderer; −1 / out-of-range → none. */
   readonly selectedIndex: number;
 }
 
-/** Render options. `color` defaults off (testability); `width` to 80. */
-export interface RenderOpts {
-  readonly color?: boolean;
-  readonly width?: number;
+const RESET = "\u001b[0m";
+const GREEN = "\u001b[32m";
+const AMBER = "\u001b[33m";
+const BOLD_INV = "\u001b[1;7m";
+
+/** Wrap `s` in an escape pair only when color is on; width is unchanged. */
+function tint(s: string, code: string, on: boolean): string {
+  return on ? `${code}${s}${RESET}` : s;
 }
 
-const DEFAULT_WIDTH = 80;
+/** A horizontal frame rule: `left` + `═`×(WIDTH−2) + `right`. */
+function rule(left: string, right: string, on: boolean): string {
+  return tint(left + "═".repeat(WIDTH - 2) + right, GREEN, on);
+}
 
-// SGR sequences. Amber chrome, green data, reverse-video selection —
-// the canonical phosphor-terminal palette the task calls for.
-const ANSI = {
-  reset: "\x1b[0m",
-  amber: "\x1b[38;5;214m",
-  green: "\x1b[38;5;46m",
-  dim: "\x1b[2m",
-  invert: "\x1b[7m",
-} as const;
+/** One framed content row: `║␠<inner padded to INNER>␠║`. */
+function line(inner: string, on: boolean, code: string): string {
+  const bar = tint("║", GREEN, on);
+  return `${bar} ${tint(cell(inner, INNER), code, on)} ${bar}`;
+}
 
-/**
- * @otel-exempt pure data→lines transform; no I/O, no clock, no state.
- *   The render is referentially transparent (rule #4 carve-out); the
- *   span belongs to the future TUI shim that writes these lines to the
- *   tty and reads keystrokes.
- *
- * Render the machine dashboard to an array of display lines.
- *
- * Every returned line is exactly `width` visible columns (ANSI escapes,
- * when `color` is on, do not count toward width — they are zero-width
- * to the terminal). An empty process list degrades to a centered
- * "(no running minsky processes)" notice rather than an empty box
- * (rule #7 — the operator always sees a coherent screen).
- */
-export function renderDashboard(model: DashboardModel, opts: RenderOpts = {}): string[] {
-  const width = opts.width ?? DEFAULT_WIDTH;
-  const color = opts.color ?? false;
-  const inner = width - 2;
-  const rule = (s: string): string => (color ? `${ANSI.amber}${s}${ANSI.reset}` : s);
+/** `label` left, `value` right-justified, joined to exactly INNER cols. */
+function kv(label: string, value: string): string {
+  const left = cell(label, INNER - value.length - 1);
+  return `${left} ${value}`;
+}
 
+/** Title + two vitals rows. */
+function header(m: MachineInfo, on: boolean): string[] {
   return [
-    rule(`┌${"─".repeat(inner)}┐`),
-    boxed(center("MINSKY // MACHINE DASHBOARD", inner), color, ANSI.amber),
-    rule(`├${"─".repeat(inner)}┤`),
-    ...machineRows(model.machine).map((r) => boxed(padEnd(` ${r}`, inner), color, ANSI.green)),
-    rule(`├${"─".repeat(inner)}┤`),
-    boxed(padEnd(` ${PROC_HEADER}`, inner), color, ANSI.amber),
-    ...procLines(model, color, inner),
-    rule(`├${"─".repeat(inner)}┤`),
-    boxed(center("↑/↓ select · ENTER detail · q quit", inner), color, ANSI.dim),
-    rule(`└${"─".repeat(inner)}┘`),
+    line(kv("MINSKY :: MACHINE DASHBOARD", m.time), on, AMBER),
+    rule("╠", "╣", on),
+    line(`host  ${cell(m.host, 22)} load  ${cell(m.load, 18)} cpu  ${m.cpu}`, on, GREEN),
+    line(`mem   ${cell(m.mem, 22)} disk  ${cell(m.disk, 18)} ${m.procs}`, on, GREEN),
+    rule("╠", "╣", on),
   ];
 }
 
-/** The six machine-info panel rows, in glance-priority order. */
-function machineRows(m: DashboardModel["machine"]): string[] {
-  return [
-    `HOST  ${m.host}`,
-    `TIME  ${m.time}`,
-    `LOAD  ${m.load}    CPU  ${m.cpu}`,
-    `MEM   ${m.mem}`,
-    `DISK  ${m.disk}`,
-    `PROCS ${m.procs}`,
-  ];
+/** The column header for the process table. */
+function tableHead(on: boolean): string {
+  const cols = `  ${cell("#", 3)}${cell("RUN-ID", 13)}${cell("REPO", 19)}${cell(
+    "ROLE",
+    12,
+  )}${cell("UPTIME", 9)}MODEL`;
+  return line(cols, on, AMBER);
+}
+
+/** One process row; the selected row is rendered inverse (retro cursor). */
+function procLine(row: ProcRow, num: number, selected: boolean, on: boolean): string {
+  const sel = selected ? "> " : "  ";
+  const body = `${sel}${cell(String(num), 3)}${cell(row.runId, 13)}${cell(
+    row.repo,
+    19,
+  )}${cell(row.role, 12)}${cell(row.uptime, 9)}${row.model}`;
+  return line(body, on, selected ? BOLD_INV : GREEN);
+}
+
+/** Footer: key hints left, selected proc's state right. */
+function footer(model: DashboardModel, on: boolean): string {
+  const sel = model.procs[model.selectedIndex];
+  const state = sel ? `state: ${sel.role} ${sel.state}` : "no process selected";
+  return line(kv("↑/↓ select   ⏎ open   q quit", state), on, GREEN);
 }
 
 /**
- * The process-table body: one boxed row per process (selected row in
- * reverse video), or a single centered notice when none are running
- * (rule #7 — never an empty box).
- */
-function procLines(model: DashboardModel, color: boolean, inner: number): string[] {
-  if (model.procs.length === 0) {
-    return [boxed(center("(no running minsky processes)", inner), color, ANSI.dim)];
-  }
-  const out: string[] = [];
-  for (let i = 0; i < model.procs.length; i += 1) {
-    const p = model.procs[i];
-    if (p === undefined) continue;
-    const cell = padEnd(` ${formatProcRow(p, i)}`, inner);
-    out.push(boxed(cell, color, i === model.selectedIndex ? ANSI.invert : ANSI.green));
-  }
-  return out;
-}
-
-/** Column header for the process table; kept in sync with formatProcRow. */
-const PROC_HEADER = "#  PID     KIND          REPO                        RUN";
-
-/**
- * @otel-exempt pure formatter for one table row; see renderDashboard.
+ * Render the full machine dashboard to a single string (`\n`-joined
+ * lines). `opts.color === false` disables ANSI so snapshot tests assert
+ * on stable plain text. An empty process list renders an explicit
+ * "(no running minsky processes)" row, never a blank table (rule #7 —
+ * the empty state is visible, not silent).
  *
- * Format a single `@minsky/cross-repo-runner` {@link MinskyProc} into
- * the dashboard's fixed-column row. Exported for the per-row unit tests
- * (rule #10) and for the future detail screen to reuse the columns.
+ * @otel-exempt pure data transformation; no I/O, no state.
  */
-export function formatProcRow(p: MinskyProc, index: number): string {
-  return [
-    String(index + 1).padEnd(2),
-    String(p.pid).padEnd(7),
-    p.kind.padEnd(13),
-    fit(repoBasename(p.repo), 27),
-    p.runId,
-  ].join(" ");
-}
 
 /**
- * @otel-exempt pure path→segment helper; see renderDashboard.
- *
- * Trailing path segment of an absolute repo path (the narrow REPO
- * column shows the repo folder name, not the full path). A path with
- * no `/` or an empty string renders `—` (rule #7 — explicit, never a
- * blank cell).
+ * @otel-exempt pure path→segment helper. Trailing path segment of an
+ * absolute repo path. Slice-2 `detail.ts` and any other consumer of
+ * REPO-name shortening use this single source of truth.
  */
 export function repoBasename(repo: string): string {
   const trimmed = repo.replace(/\/+$/, "");
@@ -147,27 +129,19 @@ export function repoBasename(repo: string): string {
   return idx === -1 ? trimmed : trimmed.slice(idx + 1);
 }
 
-/** Wrap content in the box's vertical rules, painting the content cell. */
-function boxed(content: string, color: boolean, code: string): string {
-  const bar = color ? `${ANSI.amber}│${ANSI.reset}` : "│";
-  const body = color ? `${code}${content}${ANSI.reset}` : content;
-  return `${bar}${body}${bar}`;
-}
-
-/** Pad to exactly `n` columns, truncating overflow. */
-function padEnd(s: string, n: number): string {
-  return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
-}
-
-/** Truncate to `n` columns with an ellipsis when it would overflow. */
-function fit(s: string, n: number): string {
-  if (s.length <= n) return s.padEnd(n);
-  return n <= 1 ? s.slice(0, n) : `${s.slice(0, n - 1)}…`;
-}
-
-/** Centre `s` within `n` columns (extra space biased to the right). */
-function center(s: string, n: number): string {
-  if (s.length >= n) return s.slice(0, n);
-  const left = Math.floor((n - s.length) / 2);
-  return " ".repeat(left) + s + " ".repeat(n - s.length - left);
+export function renderDashboard(
+  model: DashboardModel,
+  opts: { readonly color?: boolean } = {},
+): string {
+  const on = opts.color !== false;
+  const lines: string[] = [rule("╔", "╗", on), ...header(model.machine, on), tableHead(on)];
+  if (model.procs.length === 0) {
+    lines.push(line(cell("  (no running minsky processes)", INNER), on, GREEN));
+  } else {
+    model.procs.forEach((row, i) =>
+      lines.push(procLine(row, i + 1, i === model.selectedIndex, on)),
+    );
+  }
+  lines.push(rule("╠", "╣", on), footer(model, on), rule("╚", "╝", on));
+  return lines.join("\n");
 }

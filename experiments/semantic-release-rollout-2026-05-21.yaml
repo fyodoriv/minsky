@@ -1,0 +1,65 @@
+id: semantic-release-rollout-2026-05-21
+hypothesis: |
+  CHANGELOG.md was hand-maintained as a daily prose journal and drifted —
+  the last entry is 2026-05-18 despite 50+ merged PRs since then. The
+  operator directive 2026-05-21 superseded the daily-journal format with
+  versioned releases (semver), automated by semantic-release. Effect:
+  every push to main with a `feat:` / `fix:` / `perf:` / `BREAKING CHANGE:`
+  commit produces (a) a git tag `vX.Y.Z`, (b) a GitHub Release with
+  auto-generated notes, and (c) an updated `CHANGELOG.md` row — all
+  authored by the `semantic-release` workflow, zero operator intervention.
+  Pre-registered effect: changelog freshness (max-days-since-last-entry
+  measured against HEAD's commit date) drops from `≥3 days stale` to
+  `≤1 day stale` over the first 30 days after merge, and stays there
+  without any agent / operator manually editing CHANGELOG.md.
+success: |
+  Within 30 days after merge:
+    (1) `.github/workflows/release.yml` has fired ≥3 times on push to
+        main with a release-eligible commit type, AND each run created
+        a corresponding GitHub Release and tag visible at
+        `gh release list --limit 5`.
+    (2) The CHANGELOG.md `Last entry` date stays within ≤1 day of the
+        most recent main commit date (measured by
+        `bash scripts/check-changelog-freshness.sh` — to be added
+        post-merge once a release has actually fired).
+    (3) Zero operator commits touch CHANGELOG.md directly (all CHANGELOG
+        edits are authored by the `semantic-release-bot` committer or
+        the equivalent action identity).
+  The v0 measurement at PR-merge time is the structural smoke test:
+    `node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('.releaserc.json','utf-8'));process.exit(c.plugins?.length >= 4 ? 0 : 1)"`
+    AND `.github/workflows/release.yml` exists and declares `push: branches: [main]`
+    AND `package.json` carries `semantic-release` as a devDependency
+    AND `vision.md` § "Pattern conformance index" carries a row
+        referencing `.releaserc.json`.
+pivot: |
+  If semantic-release ships ≥2 incorrect-version releases in 30 days
+  (e.g., bumps minor when a fix-only PR landed; or fails to bump on a
+  feat: commit), pivot to **release-please** (Google's operator-in-the-
+  loop release-PR tool). Release-please creates a PR proposing the next
+  release that an operator approves before tag + publish — slower
+  cadence but harder to get wrong because a human reviews the version
+  bump. If semantic-release also fails to author the CHANGELOG.md row
+  on ≥1 release, pivot to the same.
+
+  Lower-cost pivot: if the issue is purely commit-type misclassification
+  (e.g., the team uses `refactor:` for things that should be `feat:` or
+  `fix:`), tighten the `releaseRules` config in `.releaserc.json` rather
+  than swap the tool.
+measurement: |
+  node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('.releaserc.json','utf-8'));process.exit((c.plugins||[]).length>=4?0:1)" && test -f .github/workflows/release.yml && grep -q "push:" .github/workflows/release.yml && grep -q "main" .github/workflows/release.yml && node -e "const p=require('./package.json');process.exit(p.devDependencies?.['semantic-release']?0:1)" && grep -q "\.releaserc\.json" vision.md
+anchor: |
+  rule #10 (vision.md § 10 — deterministic enforcement; the release
+  workflow is same-input-same-output, no LLM in the chain — the bump
+  decision is a pure function of the commit messages between the last
+  tag and HEAD); rule #11 (vision.md § 11 — default by default; release
+  automation IS the default for "keep the changelog current", not an
+  opt-in flag the agent might forget); rule #17 (vision.md § 17 —
+  proactive healing; CHANGELOG.md drift was observed 2026-05-21, the
+  fix lands in the same session); rule #1 (vision.md § 1 — don't
+  reinvent: semantic-release is the established OSS tool for the
+  conventional-commits → tag + release + changelog pattern,
+  battle-tested across ~10,000 npm packages); operator directive
+  2026-05-21 (verbatim: "Changelog is outdated, let's make it a rule
+  to keep it updated. Or even better let's set up github releases for
+  this"); MILESTONES.md (M1=v0.1.0, M2=v0.2.0, M3=v0.3.0, M4=v1.0.0,
+  M5=v2.0.0 — the versioning scheme this automation honors).

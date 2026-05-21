@@ -1,5 +1,7 @@
 # Competitor: ComposioHQ Agent Orchestrator (AO)
 
+> Closest "autonomy + dashboard" competitor to Minsky's substrate, but framed PR-by-PR rather than as a 24/7 daemon.
+
 - **URL**: <https://github.com/ComposioHQ/agent-orchestrator>
 - **Package**: `@aoagents/ao-cli`
 - **Status**: Active, MIT licensed

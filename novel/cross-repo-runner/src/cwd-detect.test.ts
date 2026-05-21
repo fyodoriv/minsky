@@ -6,7 +6,12 @@ import { describe, expect, test } from "vitest";
 
 import type { CwdFsProbe } from "./cwd-detect.js";
 
-import { detectCwd, findBootstrappedSubdirs } from "./cwd-detect.js";
+import {
+  detectAnyCwd,
+  detectCwd,
+  findBootstrappedSubdirs,
+  findGitRootSubdirs,
+} from "./cwd-detect.js";
 
 function fakeFs(
   entries: { [path: string]: "exists" | "missing" },
@@ -97,6 +102,85 @@ describe("detectCwd — error signal", () => {
     });
     expect(result.kind).toBe("error");
     if (result.kind === "error") expect(result.hint).toContain("/path/with/cwd-name");
+  });
+});
+
+describe("detectAnyCwd — git-root fallback", () => {
+  test("returns single-host for a git root when not bootstrapped", () => {
+    const result = detectAnyCwd({
+      cwd: "/tmp/git-repo",
+      fs: fakeFs({ "/tmp/git-repo/.git": "exists" }, { "/tmp/git-repo": [] }),
+    });
+    expect(result.kind).toBe("single-host");
+    if (result.kind === "single-host") expect(result.host).toBe("/tmp/git-repo");
+  });
+
+  test("bootstrapped wins over git-root when both present", () => {
+    const result = detectAnyCwd({
+      cwd: "/tmp/host",
+      fs: fakeFs({
+        "/tmp/host/.minsky/repo.yaml": "exists",
+        "/tmp/host/.git": "exists",
+      }),
+    });
+    expect(result.kind).toBe("single-host");
+    if (result.kind === "single-host") expect(result.host).toBe("/tmp/host");
+  });
+
+  test("returns multi-host when cwd has git-root subdirs but no bootstrap", () => {
+    const result = detectAnyCwd({
+      cwd: "/tmp/parent",
+      fs: fakeFs(
+        { "/tmp/parent/repo-a/.git": "exists", "/tmp/parent/repo-b/.git": "exists" },
+        { "/tmp/parent": ["repo-a", "repo-b", "not-a-repo"] },
+      ),
+    });
+    expect(result.kind).toBe("multi-host");
+    if (result.kind === "multi-host") {
+      expect(result.hostsDir).toBe("/tmp/parent");
+      expect(result.hostCount).toBe(2);
+    }
+  });
+
+  test("returns single-host for a plain dir (no git, no bootstrap) — run-anywhere fallback", () => {
+    const result = detectAnyCwd({
+      cwd: "/tmp/plain",
+      fs: fakeFs({}, { "/tmp/plain": ["some-file.txt"] }),
+    });
+    expect(result.kind).toBe("single-host");
+    if (result.kind === "single-host") expect(result.host).toBe("/tmp/plain");
+  });
+
+  test("worktree: .git file (not dir) is detected as git root", () => {
+    // In a detached worktree, .git is a file not a directory.
+    // The `exists` probe returns true for both files and dirs.
+    const result = detectAnyCwd({
+      cwd: "/tmp/worktree",
+      fs: fakeFs({ "/tmp/worktree/.git": "exists" }, { "/tmp/worktree": [".git"] }),
+    });
+    expect(result.kind).toBe("single-host");
+    if (result.kind === "single-host") expect(result.host).toBe("/tmp/worktree");
+  });
+});
+
+describe("findGitRootSubdirs", () => {
+  test("returns subdirs that have .git", () => {
+    const subdirs = findGitRootSubdirs({
+      cwd: "/tmp/parent",
+      fs: fakeFs(
+        { "/tmp/parent/repo-a/.git": "exists", "/tmp/parent/repo-b/.git": "exists" },
+        { "/tmp/parent": ["repo-a", "repo-b", "not-a-repo"] },
+      ),
+    });
+    expect(subdirs).toEqual(["/tmp/parent/repo-a", "/tmp/parent/repo-b"]);
+  });
+
+  test("returns empty list when no subdir has .git", () => {
+    const subdirs = findGitRootSubdirs({
+      cwd: "/tmp/parent",
+      fs: fakeFs({}, { "/tmp/parent": ["files", "docs"] }),
+    });
+    expect(subdirs).toEqual([]);
   });
 });
 

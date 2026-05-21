@@ -33,16 +33,22 @@ Each component has one job. The manifest is the seam (rule #2 — single source 
 
 The fast stage (default) runs the nine lints that close the five empirically-named daemon-PR failure modes (markdownlint MD001, rule-12 scope opt-out, rule-3 doc-first, rule-6 catch annotations, rule-7 chaos parsing — the brief's pre-fix observation set), plus the four cheap structural checks that keep the whole tree compiling:
 
-- `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`.
+- `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`. **Diff-scoped** via biome's native `--changed --since=<base>`: lints only the files the branch changed vs the resolved diff base, not the whole 400+-file tree, so inherited committed-main biome debt (e.g. `scripts/collect-metrics.mjs`) cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`, the Pivot's "extend it to the whole stack"). CI's `biome` job still runs whole-tree.
 - `typecheck` — `tsc --noEmit` across the workspace.
-- `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`.
+- `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`. **Diff-scoped** (`scripts/lint-md-diff.mjs`): lints only the `*.md` files the branch committed vs the resolved diff base, not the live `**/*.md` tree, so concurrent swarm churn on TASKS.md/vision.md and inherited committed-main debt cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`). CI's `markdownlint` job still runs whole-tree.
 - `tasks-lint` — `@tasks-md/lint` against `TASKS.md`.
 - `rule-2-dep-coverage` — every cross-package import has a Strategy seam.
 - `rule-3-doc-first` — every `novel/**/*.ts` change touches a doc (or carries a deferral marker).
 - `rule-6-let-it-crash` — every `try/catch` carries an `// rule-6:` annotation explaining the swallow.
 - `rule-7-chaos-coverage` — every `novel/**/README.md` lists a chaos test for each public artefact (promoted from full-only to fast on 2026-05-06 in slice 8/N — the 5th and final empirical failure mode now gated pre-PR rather than only at lefthook).
 - `rule-12-scope-discipline` — every newly-added public artefact resolves to a TASKS.md block, an `experiments/` pre-registration, or an in-PR opt-out.
+- `rule-17-proactive-heal` — every PR description that surfaces observed-error tokens (`spawn-failed`, `scope-leak`, `ETIMEDOUT`, `GraphQL 401`, stack traces) must also carry healing evidence — a `fix(...)` / `patch:` commit subject, a `**Blocked**: <code>` task block, or a non-empty diff. Promoted to fast 2026-05-19 — same shape as rule-12, catches the "watcher who narrates" anti-pattern at the PR boundary so the rule is never just aspirational.
+- `no-hardcoded-user-paths` — every executable line under `novel/**`, `scripts/**`, `bin/**`, `distribution/**` MUST NOT match `/Users/<other-user>/…` or `/home/<other-user>/…`. The rule-#17 fix for the recurring `MINSKY_HOME ?? "<user-home>/…"` class (PRs #651 + #654). Comments are exempt (audit trail); current-user, `ubuntu`, and `runner` are exempt (CI + local-machine self-references). Belt-and-suspenders for rule #1 — derive paths from `import.meta.url` / `$HOME` / env, never hardcode somebody else's `$HOME`.
+- `no-personal-paths-in-docs` — markdown sibling of `no-hardcoded-user-paths`. Every tracked `*.md` and `*.markdown` file MUST NOT leak personal paths (`/Users/<other-user>`, `~/apps/<repo-on-someone-else's-mac>`, `MINSKY_HOME=~/apps/tooling/minsky` defaults) into READMEs, docs, user-stories, changelogs, or TASKS.md. Same exemptions as the code-path version (comments allowed, current-user allowed). Added 2026-05-20 after the 2-day backlog audit found 13 doc files with operator-machine-specific paths that broke INSTALL.md for anyone running `git clone && pnpm install` on a fresh host. <!-- not-personal: this is the doc that explains what patterns the lint catches; the literal substrings above are examples-of-the-bug, not real personal paths -->
+- `agents-md-coherence` — every claim in `AGENTS.md` that points outward must resolve. Three drift classes: required-section invariant (`## Constitutional rules`, `## Orchestrator discipline`, `### 15. Milestone alignment gate` must all exist verbatim — they're cited by `check-pr-self-grade.mjs`, `check-rule-6-let-it-crash.mjs`, and CHANGELOG.md); relative-link resolution (every `[text](path)` whose path is relative must point to a real file); `vision.md § N` citation resolution (every `vision.md § N` reference must point to a real `### N.` heading in vision.md). Added 2026-05-21 per operator directive "Let's ensure agents.md is always updated too" — closes the same drift class for AGENTS.md that PR #686 closed for CHANGELOG.md via semantic-release.
+- `rule-9-tasksmd-fields` — every task block in `TASKS.md` carries the five rule-#9 fields: `Hypothesis`, `Success` (or `Acceptance`), `Pivot`, `Measurement`, `Anchor`. Without all five the iron rule degrades to wish-list. The 2026-05-19 audit found 32 of 152 task blocks violating; the lint's `RULE_9_GRANDFATHERED` allowlist captures them so the gate blocks NEW violations while the existing ones drain via the `rule-9-tasksmd-fields-backfill` task.
 - `threat-model-section` — every constitutional `novel/**/README.md` carries a STRIDE-shaped `## Threat model` section with ≥5 non-empty content lines (promoted from full-only to fast in #331's slice — the 6th rule-#13 substrate gate now also runs pre-PR rather than only at lefthook); rule #13.8 — security & privacy minimum-bar item #8 (threat-model documented per novel package).
+- `brief-pr-instructions` — `novel/cross-repo-runner/src/spawn-plan.ts` keeps the three literal substrings (`FINAL STEP`, `git push`, `gh pr create`) that convert the agent's analysis-mode tail into action-mode. Pre-merge counterpart to the `briefIncludesPrInstructions` runtime invariant; closes the `devin-spawn-no-pr-opened` regression class (2026-05-18 fix in commit 085fdd7); rule #10 (deterministic enforcement).
 
 The full stage adds the slow lints — vitest, the remaining diff-relative checks, and the dormant config caps. CI runs all of them; the operator's `pnpm pre-pr-lint --stage=full` (the gate `lefthook` `pre-push` invokes) mirrors the same set so a local push catches whatever a `gh pr create` would catch:
 
@@ -65,6 +71,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `mape-k-tick-iteration-backstop` — the tick-iteration backstop integer matches ARCHITECTURE.md.
 - `mape-k-watchdog-cadence` — the watchdog cadence (hours) matches ARCHITECTURE.md.
 - `tick-loop-backoff-schedule` — the restart-backoff schedule matches ARCHITECTURE.md (5s → 30s → 5min).
+- `machine-budget` — the operator machine-utilisation budget contract holds: the budget controller exports + policy constants stay pinned (`defaultBudgetPct=70`, `swarmMaxBudgetPct=80`), no minsky worker/tick-loop launchd template sets `ProcessType=Background` while the budget is non-trivial (the QoS class throttles the very CPU/IO the budget allocates), and the controller test file keeps the three rule-#9 pre-registered behaviour suites (ramp-up, knee, gridlock backoff). Dormant until the controller artefact lands; vision.md rule #15 / operator directive 2026-05-17.
 - `supervisor-sandbox-hardening` — every Minsky supervisor systemd unit (`minsky-tick-loop.service`, `minsky-budget-guard.service`, `minsky-watchdog.service`) carries the safe set of stage-0 hardening directives (`NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectKernel{Tunables,Modules,Logs}=yes`, `ProtectControlGroups=yes`, `RestrictSUIDSGID=yes`, `LockPersonality=yes`, `RestrictRealtime=yes`); rule #13.3 — security & privacy minimum-bar item #3 (supervisor sandbox), stage 0 of `supervisor-sandbox-syscall-restriction`. Filesystem/network restrictions ship in stage 1+ behind the dry-run + warn-only ramp.
 - `cadence-pivot-threshold` — the cadence-pivot threshold fraction matches research.md.
 - `pivot-success-margin` — every rule-#9 record's pivot threshold is below its success threshold by ≥ the documented margin.
@@ -121,6 +128,22 @@ node scripts/self-diagnose.mjs --json | jq '.[] | select(.id == "daemon-pr-lint-
 `pnpm pre-pr-lint` exits 0 iff every step passes. On failure, the script prints the failing step name + its stderr tail and exits non-zero — the daemon brief's three-attempt retry budget keys off this.
 
 If a `pr-body.md` file is sitting at the repo root, the script auto-appends the two body-only checks (`pr-self-grade`, `pr-security-review`) — same retry budget as the rest of the gate, no flag required. `--body=<other-path>` overrides the discovery.
+
+## Landing a local vetted branch (`land-local`)
+
+The swarm's workers land only because they push from the `.claude/worktrees/<branch>` checkouts the orchestrator provisions. A fully-committed branch produced by a non-worktree contributor (an Opus-director keystone fix) is otherwise un-landable while the swarm runs: the live-tree pre-push gate flaps on concurrent churn, and an isolated `git worktree` has no `node_modules`. `--no-verify` is forbidden.
+
+`land-local` generalises the orchestrator's proven PR scratch-vet (`local-gate-merge.mjs`) to a local ref — same isolated `git clone --shared` scratch with a real `pnpm install`, the same `--stage=full --json` deterministic gate, then push + open PR + admin-merge:
+
+```bash
+# Take a fully-committed local branch green through the scratch gate and land it:
+node scripts/orchestrate.mjs land-local fix/picktask-priority-agent-teams-slice1
+
+# Vet only (verdict printed; no push / PR / merge):
+node scripts/orchestrate.mjs land-local <branch> --dry-run
+```
+
+A cheap `git rev-list --count origin/main..<branch>` preflight elides the ~20-min scratch vet for a branch with nothing ahead of `origin/main`. The deterministic gate is always the authority; an Opus brain review is wired in a follow-up (deterministic-only by default — `--no-review` parity with the sweep). Because GitHub Actions is disabled on this repo and the merge is `--admin`, the scratch `--stage=full` verdict is the gate, not GitHub.
 
 ## When the invariant fires
 

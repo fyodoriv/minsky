@@ -1,38 +1,20 @@
 /**
- * `@minsky/tui` — package entry. Pure core of the retro-1995 CLI/TUI
- * operator surface that replaces `@minsky/dashboard-web`:
+ * `@minsky/tui` — public surface of the retro-1995 dashboard substrate.
  *
- * - The machine-wide process scan is **composed, not re-derived**:
- *   `parseMinskyProcs` / `scanMinskyProcesses` / `MinskyProc` are
- *   re-exported from `@minsky/cross-repo-runner` (rule #1 — one
- *   enumerator for the whole runany cluster) so the future TUI shim
- *   has a single import surface.
- * - `formatMachineInfo` — the machine-info panel formatter (new).
- * - `renderDashboard` / `formatProcRow` / `repoBasename` — the pure
- *   retro 80x24 dashboard renderer (new).
- *
- * The I/O shim (gather `os` telemetry, write to the tty, read
- * keystrokes) and screen 2 (process detail + log list) land in later
- * slices of TASKS.md `runany-retro-tui-dashboard`; that wiring slice
- * also fires the rule #10 ratchet (remove `@minsky/dashboard-web` +
- * the lighthouse gate in the same PR).
- *
- * Pattern conformance: vision.md § "Pattern conformance index" row 89.
- *
- * @module tui
+ * Slice 1 of `runany-retro-tui-dashboard`: the pure seam only — the
+ * process-scan parser, the machine-info formatter, and the screen-(1)
+ * ANSI renderer, all I/O-free and unit-tested (rule #10). The raw-mode
+ * TTY driver, the `pgrep`/`os`/`df` collectors, the per-process detail
+ * screen, the `bin/minsky` wiring, and the rule-#10 removal of
+ * `@minsky/dashboard-web` + the lighthouse gate land in later slices on
+ * top of this seam (the web UI is NOT reinstated — see the task block's
+ * Pivot clause).
  */
 
-export {
-  parseMinskyProcs,
-  scanMinskyProcesses,
-  type MinskyProc,
-  type ProcScanProbe,
-} from "@minsky/cross-repo-runner";
-export { formatMachineInfo, type MachineInfo, type MachineRaw } from "./machine.js";
-export {
-  formatProcRow,
-  renderDashboard,
-  repoBasename,
-  type DashboardModel,
-  type RenderOpts,
-} from "./render.js";
+export { cell, formatDuration, humanBytes } from "./format.js";
+export { formatMachineInfo } from "./machine.js";
+export type { MachineInfo, RawMachineReadings } from "./machine.js";
+export { renderDashboard, WIDTH } from "./render.js";
+export type { DashboardModel, ProcRow } from "./render.js";
+export { parseMinskyProcs } from "./scan.js";
+export type { MinskyProc, MinskyRole } from "./scan.js";

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Minsky auto-merge — launchd LaunchAgent for macOS.
+
+Pattern: "periodic task" supervisor pattern (Borg/Bashir/Burns/Hightower
+_Designing Distributed Systems_ 2017, ch. on the periodic-scheduling
+primitive). Every `StartInterval` seconds, launchd fires `run-auto-
+merge.sh` to drain the daemon-opened PR pipeline. NOT `KeepAlive=true`
+— this is bursty work scheduled outside the steady-state budget
+(rule #15 — operator machine-utilisation budget). Cheap when no PRs
+to merge (<1s exit); rate-limited when many (10 per cycle).
+
+Why this exists: operator directive 2026-05-20 — the 49-PR backlog
+audit found that the minsky daemon opens PRs but never auto-merges
+them (`mergeStateStatus=BLOCKED` because GHA is disabled, so the
+required `ci` check never reports). The `local-gate-merge.mjs` script
+already does the right thing (rebases onto current main in scratch,
+runs `pre-pr-lint --stage=full`, admin-squash-merges if green) — it
+just was never invoked automatically. This plist closes the loop.
+
+Default behaviour: ON for the minsky repo itself (dogfood case —
+rule #16, default by default). Opt-out: set `MINSKY_AUTO_MERGE=off`
+in the user's shell profile OR in `~/.minsky/config.json` (the env
+var path takes precedence; see `run-auto-merge.sh`).
+
+Placeholders substituted by setup.sh via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.auto-merge</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-auto-merge.sh</string>
+    </array>
+
+    <!--
+    StartInterval (NOT KeepAlive): fire every 300s (5 min). The previous
+    cycle's exit doesn't influence the next; if a cycle hangs at the
+    25-min VET_TIMEOUT_MS in local-gate-merge.mjs, launchd will wait
+    for it to complete before the next StartInterval fires (launchd
+    guarantees serial invocation under StartInterval). This is the right
+    behaviour — concurrent gate invocations would fight over the
+    `gh pr merge --admin` lock anyway.
+    -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!--
+    RunAtLoad: drain whatever is already in the queue on supervisor
+    startup. Without this, a freshly-rebooted host waits up to 5 min
+    before the first cycle.
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+    Cycle cap: 25 min == local-gate-merge.mjs's VET_TIMEOUT_MS. Anything
+    longer means launchd thinks the script wedged; SIGKILL it so the
+    NEXT cycle can start cleanly. Pattern: bounded-execution per
+    rule #6 (let-it-crash; the supervisor reaps).
+    -->
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>CPU</key>
+        <integer>3600</integer>
+    </dict>
+
+    <!--
+    Logs go to ~/.minsky/auto-merge.log (also tee'd by run-auto-merge.sh).
+    -->
+    <key>StandardOutPath</key>
+    <string>${HOME}/.minsky/auto-merge.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.minsky/auto-merge.log</string>
+</dict>
+</plist>
