@@ -965,6 +965,18 @@ export {
   pickStrategicModel,
 } from "./strategic-model-router.js";
 
+// Slice 1 of `runany-dynamic-model-or-local-fallback`: unified
+// pin>dynamic>local decision for the zero-arg run-anywhere entrypoint.
+// Exported here so the run-anywhere wiring layer and the pre-registered
+// measurement harness (`scripts/runany-model-audit.mjs`) consume the
+// same pure decider rather than re-deriving the decision table.
+export {
+  decideRunAnyProvider,
+  type RemoteBackendLiveness,
+  type RunAnyProviderDecision,
+  type RunAnyProviderInput,
+} from "./runany-provider-decision.js";
+
 // Slice 6 of `claude-usage-aware-strategic-model-router`: ring-buffer
 // trajectory + linear-regression exhaustion predictor.
 export {

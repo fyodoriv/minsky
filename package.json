@@ -32,6 +32,7 @@
     "llm-provider:throughput": "node scripts/llm-provider-throughput.mjs",
     "chaos:budget-exhaust": "node scripts/chaos-budget-exhaust.mjs",
     "cto-audit:metrics": "node scripts/cto-audit-metrics.mjs",
+    "runany:audit": "node scripts/runany-model-audit.mjs",
     "daemon-pr-lint:metrics": "node scripts/daemon-pr-lint-metrics.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.worktrees\" \"#.minsky\" \"#.obsidian\" \"#.claude\" \"#.claire\" \"#opencode.notes.md\" \"#.aider*\"",
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
