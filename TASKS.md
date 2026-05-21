@@ -2629,6 +2629,18 @@
   - **Measurement**: `pnpm pre-pr-lint --stage=fast` produces the same `rule-9-tasksmd-fields: scanned N block(s); clean=X, grandfathered=Y, blocking=Z` line after migration.
   - **Anchor**: tasks.md PR #83 (the upstream lint), this PR (`chore/retire-local-rule-9-lint`, the partial cleanup), vision.md § 9 (rule-#9 itself).
 
+- [ ] `docs-frame-coherence-lint` — encode `docs/PRACTICES.md § Unified reader-orientation doc frame` as a deterministic gate. Walks an allowlist of reader-orientation docs (`README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `DEPRECATED.md`, `INSTALL.md`, `MILESTONES.md`, `docs/PRACTICES.md`, `research.md`, `vision.md`, `competitors/*.md`) and asserts each opens with: (1) a one-line tagline ≤12 words, (2) a `## What this file is` / `## What this is` block, (3) a `## What this file is not` / `## What this is not` block.
+  - **ID**: docs-frame-coherence-lint
+  - **Tags**: p3, lint, docs, rule-9, observed-2026-05-21
+  - **Milestone**: M1
+  - **Touches**: scripts/check-docs-frame-coherence.mjs, scripts/check-docs-frame-coherence.test.mjs, scripts/run-pre-pr-lint-stack.mjs, .github/workflows/ci.yml, lefthook.yml
+  - **Surfaced-by**: 2026-05-21 set-in-stone-rules sweep — operator directive ("set in stone as rules") + PR #685 (`docs: unify reader-orientation docs under one structural pattern`) shipped the frame; this lint encodes it.
+  - **Hypothesis**: a deterministic lint over the 18 listed reader-orientation docs will catch the next time someone adds a doc without the frame (or removes the frame from an existing doc), preventing the slow doc-shape drift that PR #685 fixed wholesale.
+  - **Success**: `node scripts/check-docs-frame-coherence.mjs` exits 0 on a frame-conformant `README.md` and exits 1 with a per-file diff when any of the 18 listed docs lacks the three structural beats. New file added to the allowlist auto-enforces. Test suite covers (a) all 18 currently-conformant files pass, (b) deleting `## What this is not` from any of them surfaces an error, (c) a doc not on the allowlist is silently passed (correct behavior — only allowlisted docs are guarded).
+  - **Pivot**: if maintaining the file allowlist becomes a constant churn point (every new `docs/<name>.md` requires an allowlist edit), switch to a heuristic — auto-detect "which markdown files are cited by ≥2 other root-level markdown files" — and re-evaluate the gate.
+  - **Measurement**: `node scripts/check-docs-frame-coherence.mjs && echo OK || echo VIOLATION` produces deterministic output for any TASKS.md / README.md content; CI gate `docs-frame-coherence` added to `.github/workflows/ci.yml` runs on every PR.
+  - **Anchor**: `docs/PRACTICES.md § Unified reader-orientation doc frame`; PR #685 (the wholesale application).
+
 - [ ] `tasks-md-npm-token-rotate` — `@tasks-md/lint@0.8.0` publish failed with 404 "Not in this registry", which is npm's error code for "token cannot publish to this scope". Rotate the `NPM_TOKEN` repo secret on tasks.md to a fresh token with publish access to `@tasks-md/*` and re-run the publish workflow.
   - **ID**: tasks-md-npm-token-rotate
   - **Tags**: p3, blocked-on-operator, tasks-md, npm-publish
