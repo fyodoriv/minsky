@@ -33,9 +33,9 @@ Each component has one job. The manifest is the seam (rule #2 — single source 
 
 The fast stage (default) runs the nine lints that close the five empirically-named daemon-PR failure modes (markdownlint MD001, rule-12 scope opt-out, rule-3 doc-first, rule-6 catch annotations, rule-7 chaos parsing — the brief's pre-fix observation set), plus the four cheap structural checks that keep the whole tree compiling:
 
-- `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`.
+- `biome` — formatting + lint over `.{ts,js,json,jsonc,md}`. **Diff-scoped** via biome's native `--changed --since=<base>`: lints only the files the branch changed vs the resolved diff base, not the whole 400+-file tree, so inherited committed-main biome debt (e.g. `scripts/collect-metrics.mjs`) cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`, the Pivot's "extend it to the whole stack"). CI's `biome` job still runs whole-tree.
 - `typecheck` — `tsc --noEmit` across the workspace.
-- `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`.
+- `markdownlint` — MD001 (heading-increment), MD040 (fenced-language), MD034 (no bare URLs), and the rest of `.markdownlint.json`. **Diff-scoped** (`scripts/lint-md-diff.mjs`): lints only the `*.md` files the branch committed vs the resolved diff base, not the live `**/*.md` tree, so concurrent swarm churn on TASKS.md/vision.md and inherited committed-main debt cannot flap an unrelated vetted branch's `git push` (TASKS.md `orchestrator-must-land-local-vetted-branches`). CI's `markdownlint` job still runs whole-tree.
 - `tasks-lint` — `@tasks-md/lint` against `TASKS.md`.
 - `rule-2-dep-coverage` — every cross-package import has a Strategy seam.
 - `rule-3-doc-first` — every `novel/**/*.ts` change touches a doc (or carries a deferral marker).
@@ -71,6 +71,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `mape-k-tick-iteration-backstop` — the tick-iteration backstop integer matches ARCHITECTURE.md.
 - `mape-k-watchdog-cadence` — the watchdog cadence (hours) matches ARCHITECTURE.md.
 - `tick-loop-backoff-schedule` — the restart-backoff schedule matches ARCHITECTURE.md (5s → 30s → 5min).
+- `machine-budget` — the operator machine-utilisation budget contract holds: the budget controller exports + policy constants stay pinned (`defaultBudgetPct=70`, `swarmMaxBudgetPct=80`), no minsky worker/tick-loop launchd template sets `ProcessType=Background` while the budget is non-trivial (the QoS class throttles the very CPU/IO the budget allocates), and the controller test file keeps the three rule-#9 pre-registered behaviour suites (ramp-up, knee, gridlock backoff). Dormant until the controller artefact lands; vision.md rule #15 / operator directive 2026-05-17.
 - `supervisor-sandbox-hardening` — every Minsky supervisor systemd unit (`minsky-tick-loop.service`, `minsky-budget-guard.service`, `minsky-watchdog.service`) carries the safe set of stage-0 hardening directives (`NoNewPrivileges=yes`, `PrivateTmp=yes`, `ProtectKernel{Tunables,Modules,Logs}=yes`, `ProtectControlGroups=yes`, `RestrictSUIDSGID=yes`, `LockPersonality=yes`, `RestrictRealtime=yes`); rule #13.3 — security & privacy minimum-bar item #3 (supervisor sandbox), stage 0 of `supervisor-sandbox-syscall-restriction`. Filesystem/network restrictions ship in stage 1+ behind the dry-run + warn-only ramp.
 - `cadence-pivot-threshold` — the cadence-pivot threshold fraction matches research.md.
 - `pivot-success-margin` — every rule-#9 record's pivot threshold is below its success threshold by ≥ the documented margin.
@@ -127,6 +128,22 @@ node scripts/self-diagnose.mjs --json | jq '.[] | select(.id == "daemon-pr-lint-
 `pnpm pre-pr-lint` exits 0 iff every step passes. On failure, the script prints the failing step name + its stderr tail and exits non-zero — the daemon brief's three-attempt retry budget keys off this.
 
 If a `pr-body.md` file is sitting at the repo root, the script auto-appends the two body-only checks (`pr-self-grade`, `pr-security-review`) — same retry budget as the rest of the gate, no flag required. `--body=<other-path>` overrides the discovery.
+
+## Landing a local vetted branch (`land-local`)
+
+The swarm's workers land only because they push from the `.claude/worktrees/<branch>` checkouts the orchestrator provisions. A fully-committed branch produced by a non-worktree contributor (an Opus-director keystone fix) is otherwise un-landable while the swarm runs: the live-tree pre-push gate flaps on concurrent churn, and an isolated `git worktree` has no `node_modules`. `--no-verify` is forbidden.
+
+`land-local` generalises the orchestrator's proven PR scratch-vet (`local-gate-merge.mjs`) to a local ref — same isolated `git clone --shared` scratch with a real `pnpm install`, the same `--stage=full --json` deterministic gate, then push + open PR + admin-merge:
+
+```bash
+# Take a fully-committed local branch green through the scratch gate and land it:
+node scripts/orchestrate.mjs land-local fix/picktask-priority-agent-teams-slice1
+
+# Vet only (verdict printed; no push / PR / merge):
+node scripts/orchestrate.mjs land-local <branch> --dry-run
+```
+
+A cheap `git rev-list --count origin/main..<branch>` preflight elides the ~20-min scratch vet for a branch with nothing ahead of `origin/main`. The deterministic gate is always the authority; an Opus brain review is wired in a follow-up (deterministic-only by default — `--no-review` parity with the sweep). Because GitHub Actions is disabled on this repo and the merge is `--admin`, the scratch `--stage=full` verdict is the gate, not GitHub.
 
 ## When the invariant fires
 

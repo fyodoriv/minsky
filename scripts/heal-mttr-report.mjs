@@ -51,7 +51,7 @@ for (let i = 0; i < args.length; i++) {
   } else if (a === "--json") {
     // already handled
   } else if (a === "--help" || a === "-h") {
-    console.log(
+    console.info(
       "Usage: heal-mttr-report.mjs [--host-dir <path>] [--window=24h|7d|30d]... [--now=<iso>] [--json]",
     );
     process.exit(0);
@@ -179,15 +179,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const events = readLedger(ledgerPath);
   const rows = windows.map((w) => computeWindowStats({ events, window: w, nowMs }));
   if (jsonMode) {
-    console.log(JSON.stringify(rows));
+    console.info(JSON.stringify(rows));
   } else {
     for (const r of rows) {
       if (r.source === "no-data") {
-        console.log(`${r.window}: no data`);
+        console.info(`${r.window}: no data`);
       } else {
         const p50 = r.mttr_p50_ms === null ? "n/a" : `${r.mttr_p50_ms}ms`;
         const p95 = r.mttr_p95_ms === null ? "n/a" : `${r.mttr_p95_ms}ms`;
-        console.log(`${r.window}: ${r.successful}/${r.attempted} healed; p50=${p50} p95=${p95}`);
+        console.info(`${r.window}: ${r.successful}/${r.attempted} healed; p50=${p50} p95=${p95}`);
       }
     }
   }
