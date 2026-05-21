@@ -395,6 +395,29 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-no-hardcoded-user-paths.test.mjs
 
+  no-personal-paths-in-docs:
+    # Markdown sibling of `no-hardcoded-user-paths`. The pure-prose lint blocks
+    # personal-path leaks (`/Users/<other-user>`, `~/apps/<repo-on-fyodor's-mac>`,
+    # `MINSKY_HOME=~/apps/tooling/minsky` defaults) from sneaking into READMEs
+    # / docs / user-stories / changelogs / TASKS.md. Same enforcement shape as
+    # the code-path version: comments exempt, current-user exempt, runs across
+    # every tracked `*.md` and `*.markdown` file under the repo root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-personal-paths-in-docs lint
+        run: node scripts/check-no-personal-paths-in-docs.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-personal-paths-in-docs.test.mjs
+
   rule-9-tasksmd-fields:
     # Rule #9 (vision.md § "Pre-registered hypothesis-driven development
     # — iron rule"): every task block in TASKS.md must carry Hypothesis,
@@ -1464,6 +1487,7 @@ jobs:
       - rule-13-sibling-anchors
       - rule-17-proactive-heal
       - no-hardcoded-user-paths
+      - no-personal-paths-in-docs
       - rule-9-tasksmd-fields
       - sandbox-env-declared
       - sbom-shape
@@ -1517,6 +1541,7 @@ jobs:
                    "${{ needs.rule-13-sibling-anchors.result }}" \
                    "${{ needs.rule-17-proactive-heal.result }}" \
                    "${{ needs.no-hardcoded-user-paths.result }}" \
+                   "${{ needs.no-personal-paths-in-docs.result }}" \
                    "${{ needs.rule-9-tasksmd-fields.result }}" \
                    "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
