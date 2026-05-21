@@ -7,7 +7,7 @@
 // Conformance: full — every test injects in-memory fakes for the
 //   `SpawnLike` + `GitLike` seams; no shell-outs, no fs writes.
 
-import { describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 import type { RunnerPlan } from "./spawn-plan.js";
 
@@ -34,6 +34,7 @@ function fakeSpawn(result: {
   stdoutTail?: string;
   stderrTail?: string;
   durationMs?: number;
+  signal?: NodeJS.Signals;
 }): import("./runner.js").SpawnLike {
   return {
     spawn(): Promise<{
@@ -41,12 +42,18 @@ function fakeSpawn(result: {
       durationMs: number;
       stdoutTail: string;
       stderrTail: string;
+      signal?: NodeJS.Signals;
     }> {
       return Promise.resolve({
         exitCode: result.exitCode ?? 0,
         durationMs: result.durationMs ?? 100,
         stdoutTail: result.stdoutTail ?? "",
         stderrTail: result.stderrTail ?? "",
+        // Mirror the runtime convention from `@minsky/tick-loop`'s
+        // `ProcessSpawnStrategy`: only include `signal` when actually
+        // set (don't synthesise `signal: undefined`, which violates
+        // `exactOptionalPropertyTypes`).
+        ...(result.signal !== undefined ? { signal: result.signal } : {}),
       });
     },
   };
@@ -155,7 +162,7 @@ describe("runLive — scope-leak detection (chaos row 7)", () => {
     expect(result.scopeLeakPaths).toEqual(["package.json", "README.md", "test/a.ts"]);
   });
 
-  test("scope-leak does NOT extract PR URL (leak supersedes success)", async () => {
+  test("scope-leak PRESERVES PR URL (smart mode — work is valuable even with out-of-scope files)", async () => {
     const result = await runLive({
       plan: makePlan(),
       allowedPaths: ["src/**"],
@@ -167,7 +174,10 @@ describe("runLive — scope-leak detection (chaos row 7)", () => {
       globMatchesPath: fakeGlobMatch,
     });
     expect(result.verdict).toBe("scope-leak");
-    expect(result.prUrl).toBeNull();
+    // PR URL is now preserved even on scope-leak (2026-05-19 operator directive:
+    // "quite often when working on some task you touch more files than planned")
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/99");
+    expect(result.scopeLeakPaths).toContain("arbitrary.bin");
   });
 });
 
@@ -184,6 +194,39 @@ describe("runLive — spawn-failed (chaos row: non-zero spawn exit)", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderrTail).toBe("claude: ENOENT");
     expect(result.scopeLeakPaths).toEqual([]);
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is threaded from SpawnLike into LiveSpawnOutcome", async () => {
+    // The runner's diagnostic gap before this fix: a child killed by
+    // SIGKILL surfaced as `exit=-1 stderr=(empty)` with no signal.
+    // Verify the signal makes the round trip through `runLive` so the
+    // host-loop + daemon log can render it.
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: -1, stderrTail: "", signal: "SIGKILL" }),
+      git: fakeGit({}),
+      globMatchesPath: fakeGlobMatch,
+    });
+    expect(result.verdict).toBe("spawn-failed");
+    expect(result.exitCode).toBe(-1);
+    expect(result.signal).toBe("SIGKILL");
+    expect(result.stderrTail).toBe("");
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is omitted (not synthesised undefined) when SpawnLike does not provide one", async () => {
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 1, stderrTail: "boom" }),
+      git: fakeGit({}),
+      globMatchesPath: fakeGlobMatch,
+    });
+    expect(result.verdict).toBe("spawn-failed");
+    expect(result.exitCode).toBe(1);
+    // Property must be genuinely absent so downstream JSON.stringify
+    // doesn't emit "signal":null for the common exit-with-code path.
+    expect(result).not.toHaveProperty("signal");
   });
 
   test("spawn-failed skips the git diff step (rule #6 let-it-crash boundary)", async () => {
@@ -236,7 +279,29 @@ describe("extractPrUrl", () => {
   });
 });
 
-describe("extractAllowedPathsFromTaskBlock", () => {
+describe("extractAllowedPathsFromTaskBlock — parser", () => {
+  // The 5 tests below are about the PARSER's extraction shape, not the
+  // implicit-allowed-paths union policy. Disable the implicit set here so
+  // the existing contract assertions stay focused on what's parsed from
+  // the block's text. The union behaviour is tested separately below.
+  //
+  // Save-and-restore over delete (biome lint/performance/noDelete): mirrors
+  // novel/budget-guard/src/http-server.test.ts and avoids the "undefined as
+  // string" coercion trap on process.env[X] = undefined.
+  let savedImplicit: string | undefined;
+  beforeAll(() => {
+    savedImplicit = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+    process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = "";
+  });
+  afterAll(() => {
+    if (savedImplicit === undefined) {
+      // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
+      delete process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+    } else {
+      process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = savedImplicit;
+    }
+  });
+
   test("returns [] when neither field is present", () => {
     expect(extractAllowedPathsFromTaskBlock("- [ ] Task\n  - **ID**: x")).toEqual([]);
   });
@@ -280,6 +345,83 @@ describe("extractAllowedPathsFromTaskBlock", () => {
   });
 });
 
+describe("extractAllowedPathsFromTaskBlock — implicit allowed paths", () => {
+  // The implicit-paths union closes the scope-leak loophole observed on
+  // oncall-hub-api 2026-05-16: every devin worker is brief-instructed to
+  // remove the shipped task block from TASKS.md, but no task author lists
+  // TASKS.md in **Files**: (it's repo-meta, not code surface). The union
+  // appends `TASKS.md` + `AGENTS.md` to whatever the block declared so
+  // brief-mandated cleanup paths don't trigger scope-leak verdicts.
+
+  // Save-and-restore over delete (biome lint/performance/noDelete) — mirrors
+  // the parser block above so per-test env overrides don't leak.
+  let savedImplicit: string | undefined;
+  beforeEach(() => {
+    savedImplicit = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+  });
+  afterEach(() => {
+    if (savedImplicit === undefined) {
+      // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
+      delete process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+    } else {
+      process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = savedImplicit;
+    }
+  });
+
+  test("default: TASKS.md + AGENTS.md are appended to declared Touches", () => {
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Touches**: `src/foo.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "src/foo.ts",
+      "TASKS.md",
+      "AGENTS.md",
+    ]);
+  });
+
+  test("default: TASKS.md + AGENTS.md are appended to declared Files (fallback path)", () => {
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Files**: `server/db-ipsr.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "server/db-ipsr.ts",
+      "TASKS.md",
+      "AGENTS.md",
+    ]);
+  });
+
+  test("no-declaration blocks stay empty (implicit paths are additive, not load-bearing)", () => {
+    // detectScopeLeak short-circuits on empty allowed-paths — preserving
+    // today's "no scope = no leak" semantics for tasks that declared no scope.
+    expect(extractAllowedPathsFromTaskBlock("- [ ] Task\n  - **ID**: x")).toEqual([]);
+  });
+
+  test("dedup: when declared paths already include TASKS.md, no duplicate is added", () => {
+    const block = [
+      "- [ ] Task",
+      "  - **ID**: x",
+      "  - **Touches**: `TASKS.md`, `src/foo.ts`, `AGENTS.md`",
+    ].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "TASKS.md",
+      "src/foo.ts",
+      "AGENTS.md",
+    ]);
+  });
+
+  test("env override replaces the implicit set", () => {
+    process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = "docs/, CHANGELOG.md";
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Touches**: `src/foo.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual([
+      "src/foo.ts",
+      "docs/",
+      "CHANGELOG.md",
+    ]);
+  });
+
+  test("env empty string disables the implicit union", () => {
+    process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"] = "";
+    const block = ["- [ ] Task", "  - **ID**: x", "  - **Touches**: `src/foo.ts`"].join("\n");
+    expect(extractAllowedPathsFromTaskBlock(block)).toEqual(["src/foo.ts"]);
+  });
+});
+
 describe("runLive — baseline capture", () => {
   test("baselineRef is captured BEFORE spawn (returned in outcome)", async () => {
     const result = await runLive({
@@ -314,6 +456,219 @@ describe("runLive — baseline capture", () => {
     });
     expect(result.verdict).toBe("spawn-failed");
     expect(result.baselineRef).toBe("feedface");
+  });
+});
+
+describe("runLive — PR-creation backstop (devin-spawn-no-pr-opened pivot)", () => {
+  type GhCall =
+    | { kind: "findOpenPr"; hostRepo: string; branch: string }
+    | {
+        kind: "createPr";
+        hostRepo: string;
+        branch: string;
+        base: string;
+        title: string;
+        body: string;
+        workingDir: string;
+      };
+
+  function fakeGh(args: {
+    existingPr?: string | null;
+    createdPr?: string | null;
+  }): { gh: import("./runner.js").GhLike; calls: GhCall[] } {
+    const calls: GhCall[] = [];
+    const gh: import("./runner.js").GhLike = {
+      findOpenPr(input): Promise<string | null> {
+        calls.push({ kind: "findOpenPr", ...input });
+        return Promise.resolve(args.existingPr ?? null);
+      },
+      createPr(input): Promise<string | null> {
+        calls.push({ kind: "createPr", ...input });
+        return Promise.resolve(args.createdPr ?? null);
+      },
+    };
+    return { gh, calls };
+  }
+
+  test("falls back to stdout-only when no gh seam is injected", async () => {
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "no URL here" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+  });
+
+  test("stdout PR URL wins; gh seam is NEVER called when one is found", async () => {
+    const { gh, calls } = fakeGh({});
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({
+        exitCode: 0,
+        stdoutTail: "Opened https://github.com/test/repo/pull/77",
+      }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/77");
+    expect(calls.length).toBe(0);
+  });
+
+  test("findOpenPr URL wins when stdout is empty and PR already exists", async () => {
+    const { gh, calls } = fakeGh({
+      existingPr: "https://github.com/test/repo/pull/123",
+    });
+    const result = await runLive({
+      plan: makePlan({ branchName: "feat/fake-task-1" }),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/123");
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toEqual({
+      kind: "findOpenPr",
+      hostRepo: "test/repo",
+      branch: "feat/fake-task-1",
+    });
+  });
+
+  test("createPr is invoked when stdout empty AND no existing PR", async () => {
+    const { gh, calls } = fakeGh({
+      existingPr: null,
+      createdPr: "https://github.com/test/repo/pull/200",
+    });
+    const result = await runLive({
+      plan: makePlan({
+        branchName: "feat/fake-task-1",
+        taskId: "fake-task-1",
+        workingDirectory: "/tmp/fake-host",
+      }),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/200");
+    expect(calls.length).toBe(2);
+    const findCall = calls[0];
+    const createCall = calls[1];
+    expect(findCall?.kind).toBe("findOpenPr");
+    expect(createCall?.kind).toBe("createPr");
+    if (createCall === undefined || createCall.kind !== "createPr") {
+      throw new Error("test fixture invariant violated — createPr call missing");
+    }
+    expect(createCall.hostRepo).toBe("test/repo");
+    expect(createCall.branch).toBe("feat/fake-task-1");
+    expect(createCall.base).toBe("main");
+    expect(createCall.title).toContain("fake-task-1");
+    // Body must satisfy `check-pr-self-grade.mjs` — header + four fields.
+    expect(createCall.body).toMatch(/Hypothesis self-grade/i);
+    expect(createCall.body).toMatch(/Predicted:/i);
+    expect(createCall.body).toMatch(/Observed:/i);
+    expect(createCall.body).toMatch(/Match:\s*partial/i);
+    expect(createCall.body).toMatch(/Lesson:/i);
+    expect(createCall.workingDir).toBe("/tmp/fake-host");
+  });
+
+  test("createPr failure preserves legacy behaviour (validated + null prUrl)", async () => {
+    const { gh } = fakeGh({ existingPr: null, createdPr: null });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+  });
+
+  test("backstop RUNS on scope-leak (smart mode — preserve the PR even with out-of-scope files)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: ["src/**"],
+      spawn: fakeSpawn({ exitCode: 0 }),
+      git: fakeGit({ changed: ["src/foo.ts", "outside.txt"] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("scope-leak");
+    // Smart mode: PR URL is resolved even on scope-leak
+    expect(result.prUrl).toBe("https://github.com/test/repo/pull/99");
+    // The gh backstop was called to find the PR
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("backstop is SKIPPED on spawn-failed (verdict supersedes the cascade)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 1, stderrTail: "boom" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("spawn-failed");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  test("backstop is no-op when hostRepo is omitted (defensive)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      // hostRepo deliberately omitted
+      defaultBranch: "main",
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
+  });
+
+  test("backstop is no-op when defaultBranch is omitted (defensive)", async () => {
+    const { gh, calls } = fakeGh({ existingPr: "https://github.com/test/repo/pull/99" });
+    const result = await runLive({
+      plan: makePlan(),
+      allowedPaths: [],
+      spawn: fakeSpawn({ exitCode: 0, stdoutTail: "" }),
+      git: fakeGit({ changed: [] }),
+      globMatchesPath: fakeGlobMatch,
+      gh,
+      hostRepo: "test/repo",
+      // defaultBranch deliberately omitted
+    });
+    expect(result.verdict).toBe("validated");
+    expect(result.prUrl).toBeNull();
+    expect(calls.length).toBe(0);
   });
 });
 

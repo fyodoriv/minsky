@@ -1,10 +1,8 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   claudeBinaryReachableInvariant,
@@ -14,6 +12,7 @@ import {
   daemonPrLintPassRateInvariant,
   daemonPrStuckDirtyInvariant,
   daemonPrStuckOnCiInvariant,
+  daemonPrThrashInvariant,
   daemonShippedRatioInvariant,
   daemonTaskIdStalenessInvariant,
   daemonTaskScopeExplosionInvariant,
@@ -684,6 +683,66 @@ describe("daemonPrStuckDirtyInvariant", () => {
   });
 });
 
+describe("daemonPrThrashInvariant", () => {
+  // Paired cases per the task's Verification field:
+  // pr-fresh / pr-aged-fresh-commits / pr-aged-many-commits / pr-merged.
+
+  it("pr-fresh: passes for a young PR with few commits", async () => {
+    const openDaemonPrs = async () => [
+      { number: 1, commitCount: 2, ageHours: 0.5, mergeable: "CONFLICTING" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+    expect(result.id).toBe("daemon-pr-thrash");
+  });
+
+  it("pr-aged-fresh-commits: passes for an old PR that has NOT over-accumulated commits", async () => {
+    const openDaemonPrs = async () => [
+      { number: 2, commitCount: 3, ageHours: 9, mergeable: "CONFLICTING" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("pr-aged-many-commits: fires for an old, commit-stacked, non-MERGEABLE PR", async () => {
+    const openDaemonPrs = async () => [
+      { number: 322, commitCount: 11, ageHours: 5, mergeable: "CONFLICTING" },
+      { number: 99, commitCount: 2, ageHours: 0.1, mergeable: "MERGEABLE" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("daemon-pr-thrash");
+    expect(result.evidence).toContain("#322");
+    expect(result.evidence).toContain("11 commits");
+    expect(result.evidence).not.toContain("#99");
+    expect(result.suggestedFix).toContain("rebase #322 or close it");
+    expect(result.suggestedFix).toContain("do NOT add more commits");
+  });
+
+  it("pr-merged: passes when an old, commit-stacked PR is MERGEABLE (about to land, not thrashing)", async () => {
+    const openDaemonPrs = async () => [
+      { number: 400, commitCount: 12, ageHours: 6, mergeable: "MERGEABLE" },
+    ];
+    const result = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("respects custom maxCommits / maxAgeHours when injected (pivot lever)", async () => {
+    const openDaemonPrs = async () => [
+      { number: 7, commitCount: 8, ageHours: 3, mergeable: "CONFLICTING" },
+    ];
+    const fireResult = await daemonPrThrashInvariant({ openDaemonPrs })();
+    expect(fireResult.ok).toBe(false);
+    const pivotResult = await daemonPrThrashInvariant({
+      openDaemonPrs,
+      maxCommits: 10,
+      maxAgeHours: 4,
+    })();
+    expect(pivotResult.ok).toBe(true);
+  });
+});
+
 describe("daemonTaskScopeExplosionInvariant", () => {
   it("passes when no taskId crosses the threshold", async () => {
     const mergedPrCountByTaskId = async () =>
@@ -917,38 +976,6 @@ describe("parseIterationLogLine", () => {
 });
 
 describe("defaultInvariants", () => {
-  // Disclosed mandatory-gate unblock (composes with this PR's smoke-test +
-  // cross-repo-runner unblocks): `defaultInvariants()` builds probes that
-  // shell out to real `gh pr list` (no DI seam — it takes no args). In a
-  // sandboxed daemon worktree there is no route to the `gh` wrapper's
-  // enterprise host, so every `gh` call burns its full 10 s execFile timeout;
-  // with ~N network probes run sequentially that exceeds the 120 s test
-  // timeout and the test hangs-then-fails. Net effect: the full-stage
-  // pre-push gate red-blocks EVERY sandboxed daemon push fleet-wide — the
-  // exact "silently blocks the whole fleet's commit/push path" class the
-  // parent P0 (`commit-hook-chain-node-version-and-platform-resilience`)
-  // exists to eliminate. Fix is test-only and hermetic: shadow `gh` with a
-  // fail-fast stub on PATH so `ghJson` resolves to `null` in milliseconds
-  // (the offline outcome, just immediate). git/node/ps still resolve from
-  // the unmodified tail of PATH — only `gh` is shadowed. Zero production
-  // change; the real `defaultInvariants()`/`runInvariants` code paths still
-  // execute, just against a deterministic offline boundary.
-  /** @type {string} */
-  let ghStubDir;
-  /** @type {string} */
-  let originalPath;
-  beforeAll(() => {
-    ghStubDir = mkdtempSync(join(tmpdir(), "self-diagnose-gh-stub-"));
-    const ghStub = join(ghStubDir, "gh");
-    writeFileSync(ghStub, "#!/bin/sh\nexit 1\n");
-    chmodSync(ghStub, 0o755);
-    originalPath = process.env["PATH"] ?? "";
-    process.env["PATH"] = `${ghStubDir}:${originalPath}`;
-  });
-  afterAll(() => {
-    process.env["PATH"] = originalPath;
-    rmSync(ghStubDir, { recursive: true, force: true });
-  });
   it("returns at least 12 invariants (covering all the named gap-detectors)", () => {
     const invariants = defaultInvariants();
     expect(invariants.length).toBeGreaterThanOrEqual(12);
@@ -968,14 +995,18 @@ describe("defaultInvariants", () => {
       expect(typeof f.suggestedFix).toBe("string");
       expect(typeof f.suggestedTaskTitle).toBe("string");
     }
-    // The gh-stub above removes the dominant cost (the multi-minute
-    // enterprise-host dial timeout that tripped the old 120 s budget). The
-    // residual ~110 s is real local I/O the real suite legitimately does —
-    // 4× MaciekTokenMonitor.snapshot() over `~/.claude` usage JSONL, log
-    // parsing, git/ps. That's inherently slow, not broken, so the budget is
-    // raised to give margin under full-suite contention rather than masking a
-    // hang (a hang now fails fast at the stubbed boundary instead).
-  }, 240_000);
+    // 600s (not 120s/300s): this case runs all 99 invariants, each
+    // shelling out to real git/gh/fs probes. It completes in ~26s in
+    // isolation but is starved well past 120s when the whole-repo vitest
+    // suite runs it in the parallel pool (the `pnpm pre-pr-lint
+    // --stage=full` pre-push path). 300s was raised to 600s after it was
+    // observed timing out at exactly 300000ms in the pre-push gate under
+    // ~20-daemon worktree-swarm contention (every daemon's full-stage
+    // vitest pool sharing one machine). The work is deterministic — only
+    // wall-time under contention exceeds the cap — so a larger timeout is
+    // the correct remedy (vitest's own timeout-exceeded guidance) rather
+    // than masking a logic failure.
+  }, 600_000);
 });
 
 describe("CANONICAL_REPO is single-sourced from daemon-pr-lint-metrics", () => {
@@ -1090,7 +1121,39 @@ describe("findingsToTasksMd", () => {
     expect(block).toContain("**Hypothesis**:");
     expect(block).toContain("**Measurement**:");
     expect(block).toContain("**Pivot**:");
-    expect(block).toContain("**Tags**: self-detected, token-monitor-not-all-pegged");
+    expect(block).toContain("**Tags**: p0, self-detected, token-monitor-not-all-pegged");
+  });
+
+  // Regression pin for `daemon-self-detect-throughput-issues`: the rendered
+  // `**Tags**:` line MUST carry a `p0` priority tag matching the exact
+  // contract `scripts/drain-concerns.mjs` uses to route a pending block to
+  // its `## PX` section (`PRIORITY_TAG = /\b(p[0-3])\b/i` applied to the
+  // Tags line). Before this pin the line read `self-detected, <id>` with no
+  // priority tag, so the drainer matched nothing, moved every finding to
+  // `invalid/`, and the daemon could detect a throughput issue but never
+  // file it as a pickable P0 task. Encoding the contract as a test (not
+  // just a comment) is the "every bug becomes a rule" guardrail — if a
+  // future edit drops the tag, this fails loudly instead of silently
+  // re-breaking autonomous filing.
+  it("emits a p0 priority tag the drain-concerns pipeline routes to ## P0", () => {
+    const drainPriorityTag = /\b(p[0-3])\b/i;
+    const block = findingsToTasksMd(
+      [
+        {
+          id: "daemon-noop-iteration-rate-too-high",
+          ok: false,
+          evidence: "5 consecutive noop iterations on `foo`",
+          suggestedTaskTitle: "daemon stuck in noop loop",
+          suggestedFix: "investigate the spawn path",
+        },
+      ],
+      "2026-05-17T00:00:00.000Z",
+    );
+    const tagsLine = block.split("\n").find((l) => l.match(/^\s*-\s+\*\*Tags\*\*:/));
+    expect(tagsLine).toBeDefined();
+    const m = String(tagsLine).match(drainPriorityTag);
+    expect(m).not.toBeNull();
+    expect(String(m?.[1]).toLowerCase()).toBe("p0");
   });
 });
 

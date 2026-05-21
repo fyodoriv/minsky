@@ -1,0 +1,132 @@
+<!-- pattern: not-applicable — frozen historical narrative archive, superseded by semantic-release-managed CHANGELOG.md -->
+
+# Minsky changelog (humans) — narrative history archive
+
+> Daily prose journal of what shipped — frozen 2026-05-21. **Superseded by [CHANGELOG.md](../CHANGELOG.md)**, which is now managed by [semantic-release](https://semantic-release.gitbook.io/). All entries below this banner are preserved for historical context; new releases land in the top-level CHANGELOG.md per the `feat/fix/perf/BREAKING` conventional-commit contract.
+
+## What this file is
+
+A frozen snapshot of the daily prose changelog format Minsky used between 2026-05-05 and 2026-05-18. The format aimed at one operator-readable paragraph per day with explicit metric deltas (Card & Mackinlay 1999 glanceable-display constraint).
+
+It was retired on 2026-05-21 in favor of semver-tagged GitHub Releases (operator directive — see `experiments/semantic-release-rollout-2026-05-21.yaml`). The retirement was triggered by observed drift: the last daily entry was 2026-05-18 despite 50+ merged PRs in the following 3 days. Daily-prose authorship requires a daemon that fires once per day and authors the missing day in the right voice — that daemon (`daily-changelog-for-humans` in `TASKS.md`) was never shipped, so the format defaulted to never-current. Semantic-release shifts the cost model: the changelog row is generated structurally from each PR's commit type + scope, no daemon required.
+
+## What this file is not
+
+- **Not the current changelog** — see [`CHANGELOG.md`](../CHANGELOG.md) for releases since 2026-05-21.
+- **Not a release notes archive** — see the [GitHub Releases](https://github.com/fyodoriv/minsky/releases) page for the semver-tagged release notes.
+- **Not editable** — this file is frozen. New daily entries are not accepted. If you want to record narrative context for a release, put it in the PR body and let semantic-release surface it in the release notes.
+
+---
+
+## 2026-05-18
+
+### What shipped
+
+- **MILESTONES.md** — product roadmap with 5 milestones (M1–M5), 13 M1 exit criteria, per-milestone capability tables ("what you can trust minsky to do"), permanent design boundaries ("what minsky will never do"), competitive landscape with 6 real autonomous-coding competitors, and a milestone dependency graph.
+- **Rule #15 (AGENTS.md § 15)** — Milestone Alignment Gate. Before picking ANY implementation task, agents must verify 7 surfaces are aligned with the current milestone: README, quickstart, vision, user-stories, integration tests, logs/observability, METRICS.md. This is now the #1 priority in all minsky work (operator directive 2026-05-18).
+- **8 new P0 tasks** in TASKS.md — `milestone-alignment-gate-enforcement` (absolute first priority), `minsky-init-one-command-bootstrap`, `minsky-uninstall-clean-removal`, `minsky-default-8h-repo-transformation`, `readme-rewrite-5-min-install-guide`, `minsky-remote-task-submission`, `fleet-stability-centralized-reporting`, `competitive-landscape-real-competitors`.
+- **README.md** — added honest "What minsky can and cannot do today" capability table, updated Status section to reflect reality (broken items listed), added MILESTONES.md to Read-first table.
+- **METRICS.md** — added honest status banner acknowledging all 10 metrics are stubs.
+- **ARCHITECTURE.md** — added milestone context, updated reading-next section.
+- **AGENTS.md** — added MILESTONES.md to reading order, updated reading-next section.
+- **CHANGELOG.md** — this entry.
+- **TASKS.md policy** — added milestone alignment gate policy (supersedes all other policies) and milestone field policy.
+
+### Metrics
+
+- **open tasks**: 129 → 137 _(Δ +8 — all new M1-aligned P0 tasks; 0 tasks closed today — this was a planning day)_
+- **METRICS.md stubs**: 10/10 _(unchanged — wiring real observations is the `fleet-stability-centralized-reporting` task)_
+- **test count**: 3,135 passing / 180 files _(unchanged — no code shipped today)_
+
+### Day's narrative
+
+**The day minsky got a roadmap.** Until today, minsky had 129 tasks with no milestone alignment — work was vibes-driven. The operator directed a full strategic planning session: define 5 milestones with concrete exit criteria, add honest capability tables per milestone, analyze the real competitive landscape (Devin, OpenHands, SWE-agent, Aider, Cursor Agent, Codex CLI — not just the multi-agent frameworks), establish the 7-surface alignment gate as the #1 priority, and update every doc to reflect reality. The key insight: minsky's README made claims that weren't verified, METRICS.md was all stubs, and there was no way to measure whether minsky was getting better or worse. M1 fixes all of that. No code shipped today, but the organizational substrate for all future code is now in place.
+
+---
+
+## 2026-05-05
+
+### What shipped
+
+The dogfood loop's structural-unblock day. Ten+ PRs merged across two phases: the operator-led unblock (cap raise + anti-noop directive) and the daemon's compounding self-improvement chain (~600 LoC autonomously authored).
+
+- **#171** — `fix(token-monitor)`: raise PLAN_CAPS above Anthropic's 5h ceiling — advisory only _(+66/-68)_
+  > Caps raised from `pro=2M / max5=10M / max20=40M / custom=5M` to `100M / 500M / 2B / 250M`. Real rate-limit moves to Anthropic's 429; our BudgetGuard becomes belt-and-suspenders. Ended a 22-hour budget-paused stall.
+- **#170** — `chore(tasks)`: 3 P0 + 1 P1 daemon self-improvement tasks (pick-next) + post-task-cto-audit substrate _(+335/-3)_
+  > Filed `daemon-pre-pr-lint-gate`, `daemon-fix-own-pr-on-ci-failure`, `daemon-self-detect-throughput-issues` (P0, pick-next), `dashboard-web-rich-runs-view` (P1), `post-task-cto-audit` (P0). Shipped post-task-cto-audit pure substrate (`buildCtoBrief` + `shouldRunCtoAudit` gate) with 17 paired tests.
+- **#174** — `fix(tick-loop)`: real daemon brief + extractTaskBlock — anti-noop guard _(+156/-4)_
+  > Replaces the placeholder `"daemon brief for ${taskId}"` with `buildDaemonBrief({taskId, tasksMdContent})` — pure builder embedding the picked task's TASKS.md block + an explicit FORBIDDEN-noop directive. The structural unblock that ended ~88 iterations of brief-refresh churn.
+- **#175** — `feat(tick-loop)`: runCtoAudit() I/O wrapper — gate/no-recurse/lock seams _(+267/-1)_ — _daemon-authored_
+  > **First substantial daemon-implemented PR of the session.** 266 LoC + 24 paired tests. Composes the gate / no-recurse / lock seams.
+- **#176** — `feat(tick-loop)`: post-task CTO audit wire-in to runDaemon (sub-step c) _(+333/-0)_ — _daemon-authored_
+  > Wires `runCtoAudit` into the daemon's iteration-completion path. The daemon picked this sub-step itself (no operator pre-spec) and shipped the implementation in its first iteration after #174 merged.
+- **#172, #173** — closed as redundant brief-refresh churn (the noop pattern #174 was filed to prevent).
+
+### Metrics
+
+- **token-monitor remaining (max20)**: ~1.99B / 2B (~99.98% headroom) _(first observation post-cap-raise; pre-#171 was 100% consumed and circuit-broken)_
+- **supervisor uptime (longest single-process run today)**: 10h25m _(post-cap-raise restart cycle; 9h+ uninterrupted)_
+- **daemon iterations (shipped/total in session)**: 0/87 → 4/15 _(Δ +25 percentage points, **improved** — first session where daemon-shipped-vs-noop ratio crossed 25%)_
+- **self-diagnose findings**: 1 → 0 _(Δ -1, **improved** — `token-monitor-not-all-pegged` invariant cleared after cap raise)_
+- **PR-open-to-merge median for daemon PRs**: indefinite (deadlock) → ~30min _(**improved** — first day with no stuck-on-CI-failure PRs)_
+
+### Day's narrative
+
+**The day the dogfood loop started compounding.** Morning was infrastructure: secret-scanning task block, P0 daemon-self-improvement filings (#170), the cap raise (#171) that ended a 22-hour budget-paused stall by trusting Anthropic's 429 instead of our heuristic threshold. The afternoon's structural unblock was #174 — the daemon's brief was a placeholder string (`"daemon brief for ${taskId}"`) that had trained claude to default to TASKS.md prose updates. Replacing it with a real task-block-embedded brief plus a FORBIDDEN-noop directive flipped the loop: the very next iteration after the merge shipped #175 (266 LoC of substantive implementation), then #176 (333 LoC wire-in). Two daemon-authored PRs in 30 minutes, ~600 LoC total, no operator pre-spec. The first time this session the daemon picked its own next sub-step and implemented it autonomously.
+
+---
+
+## 2026-05-11
+
+### What shipped
+
+- **#454** — `feat(self-diagnose): local-server-concurrency-mismatch invariant + gate chaos rows` _(+160/-0)_
+  > Startup invariant fires when MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2 but the backend doesn't advertise concurrent-inference capability — detects the silent bypass-path footgun that would re-introduce the OOM PR #453 was built to prevent.
+- **#453** — `feat(local-llm): LocalLlmConcurrencyGate serializes spawns across workers` _(+523/-1)_
+  > O_EXCL file-lock SpawnStrategy decorator (cap=1 default) serializes concurrent aider spawns at the client side. Post-gate 3-worker live-fire: all 3 workers produced real diffs, mlx_lm.server stayed up — vs. Metal command-buffer OOM pre-PR.
+- **#452** — `fix(minsky-cli): MINSKY_ASSUME_TTY=1 escape hatch + non-interactive regression fix` _(+132/-5)_
+  > Splits TTY detection into two independent questions (hasTtyForSudo / isInteractive); MINSKY_ASSUME_TTY=1 lets non-TTY operator contexts proceed past the CLI refuse gate. Fixes regression where MINSKY_NON_INTERACTIVE=1 in a real TTY tripped the non-TTY refuse path.
+- **#451** — `fix(aider): default-off reflection paths + diff edit format` _(+74/-1)_
+  > Hard-wires --no-auto-lint/test/suggest-shell/detect-urls + --edit-format diff; kills multi-round reflection that drove round-2 tokens to 46k and the whole-file thrash that filled the 8192-token budget with no diff output.
+- **#446** — `fix(daemon): drop Files cell from buildLocalBrief` _(+27/-13)_
+  > Removes the Files cell from slim brief; aider's --yes auto-add was expanding 8-12 task-block paths into 50-66k per-worker contexts. Hypothesis/Details now contain only the 1-3 files the iteration needs.
+
+### Metrics
+
+- **local_3worker_spawn_workers_completed**: 0 → 3 _(Δ +3, **improved**)_
+- **local_llm_server_oom_crashes**: 1 → 0 _(Δ -1, **improved**)_
+
+### Day's narrative
+
+The local-LLM 3-worker path went from GPU OOM to deterministic stability via four compounding PRs. #446 drops the Files cell from the slim brief, cutting aider's auto-add explosion from 8–12 paths to the 1–3 files Hypothesis/Details organically mention. #451 hard-wires `--no-auto-lint/test/suggest-shell/detect-urls --edit-format diff`, killing multi-round reflection (which drove round-2 tokens to 46k) and the whole-file thrash loop that exhausted the output budget with no diff. #453 adds the key concurrency gate — an O_EXCL file-lock `SpawnStrategy` decorator capping in-flight local-LLM spawns to 1, matching mlx_lm.server's single-inference limit; post-gate live-fire ran all three workers through to real-diff completion (4.8k + 13k + 19k input tokens, server stable) vs. Metal command-buffer OOM pre-PR. #454 closes the observability gap with a startup invariant that fires when `MINSKY_LOCAL_SERVER_MAX_CONCURRENT≥2` but the backend doesn't advertise concurrent-inference capability, catching the silent bypass footgun before it can re-introduce the OOM. #452 ships alongside as independent CLI hardening: `MINSKY_ASSUME_TTY=1` decouples sudo-prompt availability from stdin interactivity, fixing a regression where `MINSKY_NON_INTERACTIVE=1` in a real TTY tripped the non-TTY refuse path.
+
+---
+
+## 2026-05-12
+
+### What shipped
+
+- **#495** — `chore(tasks): clean up shipped task blocks + file 5 P1 observer-filed observation tasks` _(+77/-32)_
+  > Retired completed task blocks; filed 5 new P1 observation tasks surfaced by the observer dogfood run.
+- **#494** — `observer: fix(cross-repo-runner): parseTasksMd accepts nested-bullet metadata format` _(+251/-1)_
+  > Fixes cross-repo task parsing: TASKS.md nested-bullet metadata (the format observer-filed tasks use) was silently dropped. Now parsed and forwarded.
+- **#493** — `feat(observer): observer plugin (skill + commands + PATH shim) for any-folder Minsky runs` _(+1147/-1)_
+  > Standalone observer plugin: skill, CLI commands, and PATH shim that lets any repo directory run against Minsky's tooling without being inside the Minsky repo.
+- **#492** — `feat(cross-repo-runner): autonomous defaults + --hosts-dir multi-host walk` _(+1250/-53)_
+  > Promotes the runner to fleet-scale: --hosts-dir walks all host directories in one pass; autonomous defaults eliminate per-host flag repetition.
+- **#491** — `feat(cross-repo-runner): --cto-audit auto-task-generation for host mode` _(+1064/-3)_
+  > CTO audit output is automatically converted to TASKS.md entries in host context — closes the loop between audit findings and actionable task filings.
+- **#490** — `feat(cross-repo-runner): --loop mode for continuous host iteration` _(+1201/-15)_
+  > Adds --loop flag for continuous iteration across hosts, turning the runner into a persistent fleet-monitoring process.
+- **#489** — `feat(cross-repo-runner): v1 live-spawn via ProcessSpawnStrategy (closes deferred chaos rows 5+7)` _(+1434/-39)_
+  > First live-spawn implementation via ProcessSpawnStrategy — closes chaos rows 5 and 7 that had been deferred; the runner now actually spawns and manages host processes.
+- **#488** — `feat(doctor): 13th substrate row — workers-dir writable (runtime-resilience slice 2 partial)` _(+93/-14)_
+  > Adds workers-dir writability as a startup health check; runtime-resilience slice 2 partial.
+
+### Metrics
+
+_No metrics recorded for this date._
+
+### Day's narrative
+
+The cross-repo-runner crossed from design to operational today in four stacked PRs: `ProcessSpawnStrategy` live-spawn (#489) closed the deferred chaos-row 5+7 execution gap; `--loop` mode (#490) added continuous host-iteration; `--cto-audit` (#491) closed the automation loop by generating tasks directly from audit output in host context; and `--hosts-dir` multi-host walk (#492) promoted the runner from single-target to fleet-scale with autonomous defaults. The observer plugin (#493) lands alongside — a PATH shim + skill granting any folder access to Minsky's tooling without being in the Minsky repo. `parseTasksMd` now accepting nested-bullet metadata (#494) unblocks the cross-repo task-parsing path the observer revealed in dogfood.

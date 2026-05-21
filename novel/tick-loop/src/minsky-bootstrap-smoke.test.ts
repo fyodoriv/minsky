@@ -1,17 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
-  // The DI-seam tests inject detectFn/claudeProbeFn/bootstrapFn but the SUT
-  // still consults process.env for the bootstrap-policy env vars. Daemon
-  // workers run with MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM exported (the
-  // pre-push hook runs the full vitest suite in that polluted env), so
-  // without this sandbox the first three cases take the SUT's ambient
-  // `MINSKY_LLM_PROVIDER=claude-only` early-return path and fail with
-  // `{ MINSKY_LLM_PROVIDER: 'claude-only' }`. vi.stubEnv(name, undefined)
-  // deletes the var (biome `noDelete` forbids `delete process.env.X`, and
-  // `= undefined` coerces to the string "undefined" in Node);
-  // unstubAllEnvs() restores the originals. Slice-C's own stubEnv overrides
-  // this baseline for that one case.
+  // Test-isolation guard (category fix): the daemon exports
+  // MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM into the worker env, so a
+  // suite that reads the ambient value is non-deterministic — under
+  // `MINSKY_LLM_PROVIDER=claude-only` the seam short-circuits and every
+  // detectFn-driven assertion fails. Neutralise all three knobs before
+  // each test (stubEnv(name, undefined) deletes the var; biome `noDelete`
+  // forbids the delete operator and `env.X = undefined` coerces to the
+  // string "undefined" in Node — see Slice C below). A test that needs a
+  // specific value (Slice C) re-stubs it; the later stub wins.
   beforeEach(() => {
     vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
     vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
