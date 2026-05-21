@@ -1,5 +1,7 @@
 # Competitor: Aider
 
+> Best-in-class CLI for AI pair programming with local models — used by Minsky as the `local_agent` for zero-cloud-token mode.
+
 - **URL**: <https://aider.chat> / <https://github.com/Aider-AI/aider>
 - **Status**: Active, "the tool to benchmark against" (HN), battle-tested CLI
 - **Pricing**: Free (OSS, Apache 2.0). Model costs only.

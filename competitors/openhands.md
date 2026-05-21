@@ -1,5 +1,7 @@
 # Competitor: OpenHands (All-Hands-AI)
 
+> The strongest OSS autonomous coding agent — Minsky's most direct head-to-head benchmark in the OSS column.
+
 - **URL**: <https://github.com/OpenHands/OpenHands>
 - **Site**: <https://www.openhands.dev>
 - **Status**: Active, MIT core + enterprise license, SWE-bench leader in OSS category

@@ -1,8 +1,19 @@
 # Deprecated Features
 
-Features marked deprecated should NOT receive new work. They will be
-removed in a future milestone. If you're implementing a task that
-references one of these, use the replacement instead.
+> The list of code paths that should not receive new work — and what to use instead.
+
+## What this file is
+
+The canonical do-not-invest list for the minsky repo. Every entry below names a deprecated surface, the replacement to use instead, and the rationale. If you're picking a task and one of these names appears in the task body, switch to the replacement before writing code — don't extend the deprecated path.
+
+The list is consulted by `AGENTS.md` (which tells every agent to read this file before implementing a feature) and is the ratchet that prevents two parallel implementations from co-existing past their migration window.
+
+## What this file is not
+
+- **Not a roadmap** — see `MILESTONES.md` for what's being built.
+- **Not a changelog** — see `CHANGELOG.md` for what shipped when.
+- **Not the constitution** — see `vision.md` for the rules every surface must follow.
+- **Not a list of bugs** — see `TASKS.md` for active work.
 
 ## Deprecated (do not invest)
 
