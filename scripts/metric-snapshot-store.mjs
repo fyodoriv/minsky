@@ -106,12 +106,29 @@ export function previousDateUtc(date) {
  */
 function validateMetricEntry(name, entry, sourcePath) {
   if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-    throw new Error(`${sourcePath}: metric "${name}" must be an object with a numeric value`);
+    throw new Error(`${sourcePath}: metric "${name}" must be an object with a value field`);
   }
   const e = /** @type {Record<string, unknown>} */ (entry);
   const value = e["value"];
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`${sourcePath}: metric "${name}" value must be a finite number`);
+  // The collector emits human-readable strings for proxy metrics
+  // (e.g. "53.3% active days (16/30d)") and finite numbers for clean
+  // scalars (e.g. `extraction-count: 1`). Both are accepted; the renderer
+  // formats the value as-is. Rejecting either shape was the
+  // `metrics-render-finite-number-validation-bug` (rule #17 — observed
+  // 2026-05-21 blocking every metrics:render, fixed in same session).
+  // NaN / Infinity is still rejected: they're not finite, and they
+  // indicate the collector hit a divide-by-zero or unparsed value —
+  // visible-not-silent.
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        `${sourcePath}: metric "${name}" numeric value must be finite (got ${value})`,
+      );
+    }
+  } else if (typeof value !== "string") {
+    throw new Error(
+      `${sourcePath}: metric "${name}" value must be a finite number or a string (got ${typeof value})`,
+    );
   }
   const hib = e["higherIsBetter"];
   if (hib !== undefined && typeof hib !== "boolean") {

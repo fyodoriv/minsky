@@ -13,8 +13,8 @@
  * | Priority | Scenario | Condition |
  * |---|---|---|
  * | 1 | worker-already-running | worker 0 PID is alive |
- * | 2 | claude-exhausted-with-local-stack | exhausted + local-LLM running |
- * | 3 | claude-exhausted-no-stack | exhausted + local-LLM not running |
+ * | 2 | claude-exhausted-with-local-stack | exhausted/binary-missing + local-LLM running |
+ * | 3 | claude-exhausted-no-stack | exhausted/binary-missing + local-LLM not running |
  * | 4 | git-dirty-cant-iterate | git state is dirty |
  * | 5 | wip-needs-cleanup | conflicting PRs > 0 |
  * | 6 | queue-empty | queue state is empty |
@@ -101,8 +101,8 @@ export function planMinskyAction(context: MinskyContext): MinskyActionPlan {
   if (context.workerState.alive) {
     return planWorkerAlreadyRunning(context.workerState.pid);
   }
-  if (isClaudeExhausted(context.claudeState)) {
-    return planClaudeExhausted(context.localLlmState);
+  if (isClaudeUnavailable(context.claudeState)) {
+    return planClaudeExhausted(context.localLlmState, context.claudeState);
   }
   if (context.gitState === "dirty") {
     return planGitDirty(context);
@@ -134,11 +134,18 @@ function planWorkerAlreadyRunning(pid: number): MinskyActionPlan {
   };
 }
 
-function planClaudeExhausted(localLlmState: LocalLlmContextState): MinskyActionPlan {
+function planClaudeExhausted(
+  localLlmState: LocalLlmContextState,
+  claudeState: ClaudeContextState,
+): MinskyActionPlan {
+  // Same action either way (claude can't run); only the *reason* differs so
+  // the operator knows whether to install claude or wait for quota reset.
+  const reason =
+    claudeState === "binary-missing" ? "Claude binary not installed" : "Claude quota exhausted";
   if (localLlmState === "running") {
     return {
       scenario: "claude-exhausted-with-local-stack",
-      contextSummary: "Claude quota exhausted; local-LLM server is running",
+      contextSummary: `${reason}; local-LLM server is running`,
       recommendedAction: {
         id: "start-worker-local-llm",
         label: "Start worker with local-LLM (MINSKY_LLM_PROVIDER=local-preferred)",
@@ -148,7 +155,7 @@ function planClaudeExhausted(localLlmState: LocalLlmContextState): MinskyActionP
   }
   return {
     scenario: "claude-exhausted-no-stack",
-    contextSummary: "Claude quota exhausted; local-LLM server not running",
+    contextSummary: `${reason}; local-LLM server not running`,
     recommendedAction: {
       id: "bootstrap-local-llm",
       label: "Bootstrap local-LLM stack (minsky bootstrap-local-llm)",
@@ -216,8 +223,15 @@ function planCleanFreshCheckout(): MinskyActionPlan {
 
 // ---- Internal helpers -------------------------------------------------------
 
-function isClaudeExhausted(state: ClaudeContextState): boolean {
-  return state === "exhausted";
+/**
+ * Claude cannot run iterations. Mirrors the canonical contract in
+ * `claude-health-probe.ts` (`needsLocalLlmBootstrap`: `verdict === "exhausted"
+ * || verdict === "binary-missing"`) — a fresh checkout with no `claude` on
+ * PATH must route to the bootstrap-local-LLM scenario, NOT fall through to
+ * `clean-fresh-checkout` and recommend a worker that crashes on spawn.
+ */
+function isClaudeUnavailable(state: ClaudeContextState): boolean {
+  return state === "exhausted" || state === "binary-missing";
 }
 
 /**

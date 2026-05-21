@@ -1,71 +1,77 @@
 #!/usr/bin/env node
-// Compute a single stability number (0–100%) for the rolling 7-day
-// window. Thin wrapper around `scripts/lib/stability.mjs`.
-//
+// Compute a single stability number (0-100%) from experiment-store jsonl.
 // Usage: node scripts/stability-number.mjs [host-dir] [--json]
-// Output: "73% (22/30 successful, 7d)" OR
-//         {stability_pct: 73, successful: 22, total: 30, window: "7d", source: "experiment-store"}
-//
-// The output shape is preserved from the pre-refactor implementation so
-// `bin/minsky status` and the test fixtures continue to work without
-// modification. The refactor delegates the read+compute logic to the
-// shared helper (rule #1 — don't duplicate the experiment-store reader
-// or the window-ratio math).
-//
-// Pattern: SLI/SLO measurement (single-window scalar form) — Beyer
-//   et al. 2016, *SRE*, Ch. 4.
-// Source: docs/plans/fleet-stability-centralized-reporting.md § Step 1c.
+// Output: "73% (22/30 successful, 7d)" or JSON.
 
-import { computeHostStability } from "./lib/stability.mjs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 
-const args = process.argv.slice(2);
-const jsonMode = args.includes("--json");
-const positional = args.filter((a) => !a.startsWith("--"));
-const hostDir = positional[0] || process.cwd();
+const hostDir = process.argv[2] || process.cwd();
+const jsonMode = process.argv.includes("--json");
+const storeDir = resolve(hostDir, ".minsky", "experiment-store", "cross-repo");
 
-const results = computeHostStability({ hostDir, windowLabels: ["7d"], now: Date.now() });
-const result = results[0];
-if (!result) {
-  // computeHostStability always returns one entry per requested window;
-  // this guard is defensive (helps TypeScript narrow the array element).
-  throw new Error(
-    "stability-number: computeHostStability returned empty array (should be unreachable)",
-  );
+if (!existsSync(storeDir)) {
+  if (jsonMode) {
+    console.info(
+      JSON.stringify({ stability_pct: null, source: "no-data", successful: 0, total: 0 }),
+    );
+  } else {
+    console.info("Stability: no data yet (run minsky for ≥1 hour to measure)");
+  }
+  process.exit(0);
 }
 
-if (result.ratio === null) {
+// Parse all jsonl records
+const records = [];
+const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+for (const file of readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"))) {
+  const content = readFileSync(join(storeDir, file), "utf8");
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const d = JSON.parse(line);
+      const ts = new Date(d.ts).getTime();
+      if (ts >= sevenDaysAgo) {
+        records.push(d);
+      }
+    } catch {
+      /* skip */
+    }
+  }
+}
+
+if (records.length === 0) {
   if (jsonMode) {
-    console.log(
+    console.info(
       JSON.stringify({
         stability_pct: null,
-        source: result.source,
+        source: "no-recent-data",
         successful: 0,
         total: 0,
         window: "7d",
       }),
     );
   } else {
-    if (result.source === "no-data") {
-      console.log("Stability: no data yet (run minsky for ≥1 hour to measure)");
-    } else {
-      console.log("Stability: no data in last 7d (run minsky to generate data)");
-    }
+    console.info("Stability: no data in last 7d (run minsky to generate data)");
   }
   process.exit(0);
 }
 
-const pct = Math.round(result.ratio * 100);
+const successful = records.filter((r) => r.verdict === "validated").length;
+const total = records.length;
+const pct = Math.round((successful / total) * 100);
 
 if (jsonMode) {
-  console.log(
+  console.info(
     JSON.stringify({
       stability_pct: pct,
-      successful: result.successful,
-      total: result.total,
+      successful,
+      total,
       window: "7d",
       source: "experiment-store",
     }),
   );
 } else {
-  console.log(`${pct}% (${result.successful}/${result.total} successful, 7d rolling)`);
+  console.info(`${pct}% (${successful}/${total} successful, 7d rolling)`);
 }

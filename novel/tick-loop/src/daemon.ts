@@ -70,6 +70,11 @@ import {
 } from "./snapshot-runner.js";
 import type { SpawnStrategy } from "./spawn-strategy.js";
 import {
+  type ExecSyncFn,
+  type FixTasksMdMarkdownResult,
+  fixTasksMdMarkdown,
+} from "./tasks-md-lint-fix.js";
+import {
   type TouchesPrSnapshot,
   decideTouchesCollision,
   parseTouchesOrFiles,
@@ -246,6 +251,37 @@ export interface RunDaemonOpts {
    * invokes (rule #10 — single source of truth: `scripts/run-pre-pr-lint-stack.mjs`).
    */
   readonly preLintRun?: PrePrLintRun;
+  /**
+   * Optional `markdownlint-cli2` runner seam (rule #2) for the TASKS.md
+   * auto-lint-fix step (`daemon-tasks-md-auto-lint-fix`). When injected, the
+   * daemon runs `markdownlint-cli2 --fix TASKS.md` after every `completed`
+   * iteration — BEFORE `preLintRun` verifies the branch — so the claim /
+   * progress-update / completion writes the inner Claude made to TASKS.md
+   * (all three converge into one `completed` result) can't leave an MD012
+   * double blank line that deadlocks the pre-PR lint gate (the
+   * `pre-pr-lint.failed_step:markdownlint` deadlock the task anchors).
+   *
+   * One fix pass per tick — not once per write — is the per-iteration
+   * optimization the task's Pivot section calls for (the daemon already
+   * batches all of the inner agent's TASKS.md writes into one commit).
+   *
+   * Emits a `tick-loop.tasks-md-lint-fix` span carrying
+   * `tasks-md-lint-fix.violations` + `.fixed`. When omitted, no fix runs —
+   * daemons predating this seam keep working unchanged.
+   *
+   * Seam contract (see `@minsky/tick-loop/tasks-md-lint-fix`): the runner
+   * executes one shell command and returns combined stdout+stderr, never
+   * throwing on a non-zero exit (the command carries `2>&1 || true`). The
+   * production binding wraps `execSync` (`bin/tick-loop.mjs`).
+   */
+  readonly tasksMdLintExec?: ExecSyncFn;
+  /**
+   * Path to TASKS.md for the `tasksMdLintExec` step. Default `"TASKS.md"`
+   * (cwd-relative — the daemon runs with cwd = repo root, same assumption
+   * as `createPnpmPrePrLintRun`'s default cwd). Only consulted when
+   * `tasksMdLintExec` is set.
+   */
+  readonly tasksMdPath?: string;
   /**
    * Optional per-worker config (slice 2 of `daemon-parallel-worktree-launch`).
    * When set:
@@ -453,6 +489,7 @@ export async function runDaemon(opts: RunDaemonOpts): Promise<DaemonRunResult> {
     await maybeRunChangelog(opts, outcome.result);
     await maybeRunSnapshot(opts, outcome.result);
     await maybeRunMetricsRender(opts, outcome.result);
+    maybeRunTasksMdLintFix(opts, outcome.result);
     await maybeRunPrePrLintGate(opts, outcome.result);
     if (outcome.stop !== undefined) {
       return { iterations, totalIterations: iterations.length, stoppedReason: outcome.stop };
@@ -780,6 +817,66 @@ function emitMetricsRenderSpan(
     base["metrics-render.duration_ms"] = outcome.durationMs;
   }
   opts.emit({ name: "tick-loop.metrics-render", attributes: base });
+}
+
+/**
+ * TASKS.md auto-lint-fix (`daemon-tasks-md-auto-lint-fix`): after a
+ * `completed` iteration the inner Claude has written TASKS.md on one (or
+ * more) of three paths — claim (`**Status**: in-progress`), progress
+ * overwrite, or completion removal — any of which can leave an MD012
+ * double blank line at a block boundary. Running `markdownlint-cli2 --fix
+ * TASKS.md` HERE — before `maybeRunPrePrLintGate` verifies the branch —
+ * repairs that at source so the gate never deadlocks on
+ * `pre-pr-lint.failed_step:markdownlint` (the deadlock the task anchors:
+ * PR `minsky-cli-auto-bootstrap-local-llm`).
+ *
+ * The three write paths converge into one `completed`
+ * `DaemonIterationResult`; running the fix once here (not once per write)
+ * is the per-iteration optimization the task's Pivot section calls for —
+ * the daemon already batches the inner agent's writes into one commit.
+ *
+ * Skip-fast when the seam isn't injected (daemons predating it) or the
+ * iteration didn't `complete` (no TASKS.md write happened — nothing to
+ * fix). Synchronous: `fixTasksMdMarkdown` is pure-over-injection. Unfixable
+ * structural violations (e.g. MD001 heading order) are warned-not-blocked
+ * via the `logFn` seam — the daemon's structural update is still correct;
+ * the operator resolves heading order in a separate pass.
+ *
+ * (Internal helper — no JSDoc tag required; `emitTasksMdLintFixSpan`
+ * carries the @otel signal.)
+ */
+function maybeRunTasksMdLintFix(opts: RunDaemonOpts, result: DaemonIterationResult): void {
+  if (opts.tasksMdLintExec === undefined) return;
+  if (result.status !== "completed") return;
+  const fixResult = fixTasksMdMarkdown({
+    tasksPath: opts.tasksMdPath ?? "TASKS.md",
+    execSyncFn: opts.tasksMdLintExec,
+    logFn: (line) => process.stderr.write(`${line}\n`),
+  });
+  emitTasksMdLintFixSpan(opts, result.taskId, fixResult);
+}
+
+/**
+ * Emit a `tick-loop.tasks-md-lint-fix` span with
+ * `tasks-md-lint-fix.violations` + `.fixed` so the operator can see the
+ * auto-fix in the log and the `grep -c "failed_step.*markdownlint"` metric
+ * can confirm it dropped to 0 (`daemon-tasks-md-auto-lint-fix` Acceptance
+ * #3/#4).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function emitTasksMdLintFixSpan(
+  opts: RunDaemonOpts,
+  taskId: string | undefined,
+  fixResult: FixTasksMdMarkdownResult,
+): void {
+  if (opts.emit === undefined) return;
+  const base: Record<string, string | number | boolean> = {
+    "tasks-md-lint-fix.violations": fixResult.violations,
+    "tasks-md-lint-fix.fixed": fixResult.fixed,
+  };
+  if (taskId !== undefined) base["task.id"] = taskId;
+  opts.emit({ name: "tick-loop.tasks-md-lint-fix", attributes: base });
 }
 
 /**
@@ -1486,6 +1583,14 @@ function collectRankedTasks(sliced: string): RankedTask[] {
   return ranked;
 }
 
+/**
+ * Rank every eligible P0+P1 task ID in priority-then-file order. The
+ * claim-aware candidate walk (`pickAndClaim`) and `pickTask` consume
+ * this list. Pure over the in-memory TASKS.md string.
+ *
+ * @otel-exempt pure ranking helper; the `tick-loop.*` spans live at the
+ *   call-sites (`pickAndClaim` / `runClaimedIteration`).
+ */
 export function listEligibleTasks(tasksMd: string): readonly string[] {
   const ranked = collectRankedTasks(sliceP0P1(tasksMd));
   ranked.sort((a, b) => a.pri - b.pri || a.idx - b.idx);

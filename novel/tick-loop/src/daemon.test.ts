@@ -1628,6 +1628,131 @@ describe("tick-loop / daemon / runDaemon", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  // ---- TASKS.md auto-lint-fix wire-in (`daemon-tasks-md-auto-lint-fix`) ---
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunTasksMdLintFix`.
+  // The pure fix/skip/dry-run semantics are tested in
+  // `tasks-md-lint-fix.test.ts`; here we only verify that the daemon
+  // dispatches into `fixTasksMdMarkdown` for the right iteration shapes,
+  // emits the `tick-loop.tasks-md-lint-fix` span carrying
+  // `tasks-md-lint-fix.violations` + `.fixed`, and honours the
+  // seam-omitted / non-completed skip-fast guards.
+
+  /**
+   * Build a `tasksMdLintExec` stub. `readOnlyOutputs` is the queue of
+   * combined-output strings returned for each *read-only* markdownlint
+   * invocation (the `--fix` invocation returns "" and is recorded
+   * separately) so a test can simulate "1 violation before, 0 after".
+   */
+  function makeLintExec(readOnlyOutputs: readonly string[]): {
+    readonly exec: (command: string) => string;
+    readonly commands: string[];
+  } {
+    const commands: string[] = [];
+    let readIdx = 0;
+    const exec = (command: string): string => {
+      commands.push(command);
+      if (command.includes(" --fix ")) return "";
+      const out = readOnlyOutputs[readIdx] ?? "";
+      readIdx += 1;
+      return out;
+    };
+    return { exec, commands };
+  }
+
+  const MD012_LINE =
+    "TASKS.md:42 MD012/no-multiple-blanks Multiple consecutive blank lines [Expected: 1; Actual: 2]";
+
+  it("tasksMdLintExec wire-in: completed iteration fixes an MD012 + emits a span with violations/fixed", async () => {
+    const recorder = new SpanRecorder();
+    // Before: one MD012. After `--fix`: clean.
+    const lint = makeLintExec([MD012_LINE, ""]);
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      tasksMdLintExec: lint.exec,
+      tasksMdPath: "TASKS.md",
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    // before-count → --fix → after-count = 3 invocations.
+    expect(lint.commands).toHaveLength(3);
+    expect(lint.commands[1]).toContain(" --fix ");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.violations"]).toBe(1);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.fixed"]).toBe(1);
+    expect(spans[0]?.attributes["task.id"]).toBe("alpha");
+  });
+
+  it("tasksMdLintExec wire-in: clean TASKS.md → span 0/0 and the skip-earlier gate runs only ONE exec", async () => {
+    const recorder = new SpanRecorder();
+    const lint = makeLintExec([""]); // no violations on the before-count
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      tasksMdLintExec: lint.exec,
+    });
+    // Skip-earlier gate: a clean file costs exactly one (read-only) call —
+    // no `--fix`, no re-read round-trips.
+    expect(lint.commands).toHaveLength(1);
+    expect(lint.commands[0]).not.toContain(" --fix ");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.violations"]).toBe(0);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.fixed"]).toBe(0);
+  });
+
+  it("tasksMdLintExec wire-in: failed iteration does NOT run the fix (no TASKS.md write happened)", async () => {
+    const recorder = new SpanRecorder();
+    const lint = makeLintExec([MD012_LINE, ""]);
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic({ failureMode: "http-5xx" }),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      tasksMdLintExec: lint.exec,
+    });
+    expect(result.iterations[0]?.status).toBe("failed");
+    expect(lint.commands).toHaveLength(0);
+    expect(recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix")).toHaveLength(0);
+  });
+
+  it("tasksMdLintExec wire-in: seam omitted → no fix span, daemon unaffected", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    expect(recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix")).toHaveLength(0);
+  });
+
   // ---- Slice 4: openPrFetcher / decideTouchesCollision wire-in ----------
 
   it("worker mode + openPrFetcher: skips a candidate whose Files overlap an open PR's changed files", async () => {

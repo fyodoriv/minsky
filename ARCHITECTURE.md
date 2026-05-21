@@ -1,8 +1,31 @@
 # Architecture
 
-This document describes how Minsky's pieces fit together. Every choice here is downstream of `vision.md`; if you find a conflict between this file and the constitution, the constitution wins and this file is wrong.
+> How Minsky's pieces fit together — entry points, the layered model, the adapter pattern, and the dependency table that closes rule #2.
+
+## What this file is
+
+The canonical wiring diagram for Minsky. It maps named code to named patterns (rule #8), names the entry points an agent or operator should read first, and lists every external dependency behind an interface (rule #2). Every choice here is downstream of `vision.md`; if you find a conflict between this file and the constitution, the constitution wins and this file is wrong.
 
 **Current milestone**: M1 (Stable, Measurable, One-Command) — see [`MILESTONES.md`](./MILESTONES.md) for the roadmap and per-milestone capability tables. Architecture decisions in this document serve M1 first; M2+ features are noted as future.
+
+The `## The dependency table` section below is **load-bearing** — it is parsed structurally by [`scripts/check-rule-2-dep-coverage.mjs`](./scripts/check-rule-2-dep-coverage.mjs) on every PR. Do not rename the section, change the column order, or remove the header row.
+
+## What this file is not
+
+- **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules.
+- **Not a tutorial or quickstart** — see [README.md](./README.md) and [INSTALL.md](./INSTALL.md).
+- **Not the agent runbook** — see [AGENTS.md](./AGENTS.md) for how to work in the repo.
+- **Not the research log** — see [research.md](./research.md) for open exploration and tool evaluations.
+
+## Entry points (read this first)
+
+The user-visible surface is a one-line bash shim that delegates to the cross-repo runner:
+
+- [`bin/minsky`](./bin/minsky) — the PATH-accessible CLI shim (`./bin/minsky`, `pnpm minsky`, or `minsky` once on PATH). Dispatches subcommands.
+- [`novel/cross-repo-runner/`](./novel/cross-repo-runner/) — the task-walker that picks the next task, spawns an agent, captures the iteration, opens a draft PR. Bin entry: [`novel/cross-repo-runner/bin/minsky-run.mjs`](./novel/cross-repo-runner/bin/minsky-run.mjs).
+- [`distribution/launchd/`](./distribution/launchd/) and [`distribution/systemd/`](./distribution/systemd/) — outer-supervisor units that restart the daemon on crash, re-claim work, and survive reboots (rule-#6 let-it-crash substrate).
+
+The agent layer is pluggable per the adapter pattern below. Today: `claude` (Claude Code), `devin` (Devin CLI), `aider` (local with Ollama). Selected via `~/.minsky/config.json` or `MINSKY_CLOUD_AGENT` env. Historical note: the original v0 architecture (below) referenced OMC as the orchestrator and an `omc-tasksmd-bridge`; the v0.1 line replaced both with direct agent spawning + the cross-repo runner's task picker. Sections that mention OMC are retained as historical context — the current substrate is the cross-repo runner.
 
 ## Layered model
 

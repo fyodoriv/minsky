@@ -78,6 +78,25 @@ export type AutoScaleState = {
    * collide on the same files).
    */
   readonly recentClaimCollisions: number;
+  /**
+   * `true` when the operator has forced local-LLM routing for *every*
+   * iteration — resolved by the caller from
+   * `MINSKY_LOCAL_LLM=1` AND `MINSKY_LLM_PROVIDER=local-preferred`.
+   * The pure function only sees the boolean; env reading stays in the
+   * caller (Strategy seam, rule #8). `undefined` → `false` (no forced
+   * local routing; the historical default).
+   */
+  readonly localRoutingForced?: boolean;
+  /**
+   * The local-LLM server's concurrent-inference capacity. Resolved by
+   * the caller from `MINSKY_LOCAL_SERVER_MAX_CONCURRENT`. Default 1 for
+   * `mlx_lm.server` / LM Studio (single-inference per process — they
+   * queue concurrent requests, collapsing throughput to ~1/N). Operators
+   * running vLLM / sglang / LM-Studio-Pro set this higher. `undefined`
+   * or any non-finite / `<1` value normalises to `1` (the fail-safe
+   * single-inference assumption, Saltzer & Schroeder 1975).
+   */
+  readonly localServerConcurrencyCap?: number;
 };
 
 /**
@@ -108,20 +127,37 @@ export const AUTO_SCALE_RULES = Object.freeze({
  * Decision rules in priority order — earlier rules short-circuit:
  *
  *   1. Invalid state (bad inputs) → hold ("invalid-state").
- *   2. `currentWorkers >= maxWorkers` → hold ("ceiling-reached").
- *   3. Budget paused / circuit-broken → hold ("budget-blocked").
- *   4. `eligibleTaskCount <= currentWorkers` → hold ("no-spare-tasks").
- *   5. `recentFailedIterations >= AUTO_SCALE_RULES.failedIterationCeiling`
+ *   2. Forced local routing onto a single-inference server
+ *      (`localRoutingForced` AND effective cap ≤ 1) → hold
+ *      ("local-server-single-inference"). Placed second (a skip-earlier
+ *      gate, before the five comparisons below) because no system
+ *      snapshot can flip this verdict to spawn — extra workers all
+ *      serialise on the one `mlx_lm.server` / LM-Studio process and
+ *      throughput collapses to ~1/N. Operators with a concurrent
+ *      backend (vLLM / sglang) raise `MINSKY_LOCAL_SERVER_MAX_CONCURRENT`.
+ *   3. `currentWorkers >= maxWorkers` → hold ("ceiling-reached").
+ *   4. Budget paused / circuit-broken → hold ("budget-blocked").
+ *   5. `eligibleTaskCount <= currentWorkers` → hold ("no-spare-tasks").
+ *   6. `recentFailedIterations >= AUTO_SCALE_RULES.failedIterationCeiling`
  *      → hold ("system-unstable").
- *   6. `recentClaimCollisions >= AUTO_SCALE_RULES.claimCollisionCeiling`
+ *   7. `recentClaimCollisions >= AUTO_SCALE_RULES.claimCollisionCeiling`
  *      → hold ("contention-high").
- *   7. Otherwise → spawn ("conditions-favourable").
+ *   8. Otherwise → spawn ("conditions-favourable").
  *
  * @otel-exempt pure decision; instrumentation lives in the caller.
  */
 export function decideAutoScale(state: AutoScaleState): AutoScaleDecision {
   if (!isValidState(state)) {
     return { verdict: "hold", reason: "invalid-state: input fields out of range or non-finite" };
+  }
+  if (state.localRoutingForced === true) {
+    const cap = normaliseLocalCap(state.localServerConcurrencyCap);
+    if (cap <= 1) {
+      return {
+        verdict: "hold",
+        reason: `local-server-single-inference: cap is ${cap} but currentWorkers=${state.currentWorkers} (forced local routing; set MINSKY_LOCAL_SERVER_MAX_CONCURRENT for vLLM/sglang)`,
+      };
+    }
   }
   if (state.currentWorkers >= state.maxWorkers) {
     return {
@@ -165,6 +201,17 @@ export function decideAutoScale(state: AutoScaleState): AutoScaleDecision {
  * the gate fires, `decideAutoScale` defaults to `hold` (fail-safe per
  * Saltzer & Schroeder 1975).
  */
+/**
+ * Normalise the operator-supplied local-server concurrency cap to a
+ * safe integer. `undefined`, non-finite, or `<1` all collapse to `1` —
+ * the single-inference fail-safe (assume the most constrained backend
+ * unless the operator explicitly proved otherwise via the env var).
+ */
+function normaliseLocalCap(cap: number | undefined): number {
+  if (cap === undefined || !Number.isFinite(cap) || cap < 1) return 1;
+  return Math.floor(cap);
+}
+
 function isValidState(state: AutoScaleState): boolean {
   return (
     Number.isFinite(state.currentWorkers) &&

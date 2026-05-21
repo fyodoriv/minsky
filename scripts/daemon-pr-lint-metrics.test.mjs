@@ -11,6 +11,7 @@ import { describe, expect, test } from "vitest";
 import {
   CANONICAL_REPO,
   GH_PR_LIST_LIMIT,
+  RED_CHECK_OUTCOMES,
   ROLLING_30D_MIN_N,
   ROLLING_30D_MIN_PASS_RATE,
   ROLLING_WINDOW_DAYS,
@@ -50,6 +51,25 @@ describe("pre-registered constants", () => {
     // self-diagnose invariant flip together (single-source).
     expect(CANONICAL_REPO).toBe("fyodoriv/minsky");
     expect(CANONICAL_REPO).toMatch(/^[\w.-]+\/[\w.-]+$/);
+  });
+
+  test("RED_CHECK_OUTCOMES enumerates every red terminal state and is frozen (slice 38/N)", () => {
+    // The pre-registered observable is "PRs that open with zero red CI
+    // checks". Before this slice the predicate only matched `FAILURE`, so a
+    // timed-out / errored / never-started run scored as clean and inflated
+    // the rolling pass-rate (rule #9 flattering-observable). Pin the exact
+    // set so a future relaxation that drops a red state can't pass silently.
+    expect([...RED_CHECK_OUTCOMES].sort()).toEqual(
+      ["ACTION_REQUIRED", "ERROR", "FAILURE", "STARTUP_FAILURE", "TIMED_OUT"].sort(),
+    );
+    // Frozen: data-not-code single source shared with the report formatter
+    // and scripts/self-diagnose.mjs via parsePrListEntries.
+    expect(Object.isFrozen(RED_CHECK_OUTCOMES)).toBe(true);
+    // Ambiguous / superseded outcomes stay OUT — including them would
+    // distort the ratio the other way (over-counting re-run-green PRs).
+    for (const nonRed of ["SUCCESS", "NEUTRAL", "SKIPPED", "STALE", "CANCELLED", "PENDING"]) {
+      expect(RED_CHECK_OUTCOMES.has(nonRed)).toBe(false);
+    }
   });
 });
 
@@ -92,6 +112,15 @@ describe("parsePrList", () => {
     expect(out).toEqual([{ number: 7, hasFailure: false }]);
   });
 
+  test('check entry with neither conclusion nor state → hasFailure false (the `?? ""` undefined path)', () => {
+    // Regression guard: slice 38's first cut passed `string | undefined`
+    // straight into `Set<string>.has`, which `tsc --noEmit -p tsconfig.json`
+    // missed but the gate's `tsc -b` (strict `scripts` project) caught. The
+    // `?? ""` coalesce makes a field-less entry simply "not red".
+    const out = parsePrList(JSON.stringify([{ number: 7, statusCheckRollup: [{}, {}] }]));
+    expect(out[0]?.hasFailure).toBe(false);
+  });
+
   test("PR with all SUCCESS checks → hasFailure false", () => {
     const out = parsePrList(
       JSON.stringify([
@@ -129,6 +158,45 @@ describe("parsePrList", () => {
       JSON.stringify([{ number: 7, statusCheckRollup: [{ state: "FAILURE" }] }]),
     );
     expect(out[0]?.hasFailure).toBe(true);
+  });
+
+  // Slice 38/N — the pre-registered observable is "zero RED CI checks", not
+  // "zero FAILURE checks". A timed-out / errored / never-started / action-
+  // required run is just as red as FAILURE; counting only FAILURE scored
+  // those PRs clean and inflated the rolling pass-rate (rule #9 flattering
+  // observable). One paired case per non-FAILURE red terminal state.
+  test.each([
+    ["TIMED_OUT", "conclusion"],
+    ["STARTUP_FAILURE", "conclusion"],
+    ["ACTION_REQUIRED", "conclusion"],
+    ["ERROR", "state"],
+  ])("PR with a %s check (%s field) → hasFailure true", (outcome, field) => {
+    const out = parsePrList(
+      JSON.stringify([
+        { number: 7, statusCheckRollup: [{ conclusion: "SUCCESS" }, { [field]: outcome }] },
+      ]),
+    );
+    expect(out[0]?.hasFailure).toBe(true);
+  });
+
+  test("PR whose only non-green check is CANCELLED/STALE → hasFailure false (no over-count)", () => {
+    // These are usually superseded re-runs; treating them as red would
+    // distort the ratio the opposite way. The paired negative for the
+    // red-state cases above.
+    const out = parsePrList(
+      JSON.stringify([
+        {
+          number: 7,
+          statusCheckRollup: [
+            { conclusion: "SUCCESS" },
+            { conclusion: "CANCELLED" },
+            { conclusion: "STALE" },
+            { conclusion: "NEUTRAL" },
+          ],
+        },
+      ]),
+    );
+    expect(out[0]?.hasFailure).toBe(false);
   });
 
   test("malformed JSON throws", () => {

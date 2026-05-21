@@ -1,8 +1,19 @@
 # Deprecated Features
 
-Features marked deprecated should NOT receive new work. They will be
-removed in a future milestone. If you're implementing a task that
-references one of these, use the replacement instead.
+> The list of code paths that should not receive new work — and what to use instead.
+
+## What this file is
+
+The canonical do-not-invest list for the minsky repo. Every entry below names a deprecated surface, the replacement to use instead, and the rationale. If you're picking a task and one of these names appears in the task body, switch to the replacement before writing code — don't extend the deprecated path.
+
+The list is consulted by `AGENTS.md` (which tells every agent to read this file before implementing a feature) and is the ratchet that prevents two parallel implementations from co-existing past their migration window.
+
+## What this file is not
+
+- **Not a roadmap** — see `MILESTONES.md` for what's being built.
+- **Not a changelog** — see `CHANGELOG.md` for what shipped when.
+- **Not the constitution** — see `vision.md` for the rules every surface must follow.
+- **Not a list of bugs** — see `TASKS.md` for active work.
 
 ## Deprecated (do not invest)
 
@@ -86,6 +97,28 @@ references one of these, use the replacement instead.
   current production daemon with walker, per-host cap, dynamic
   timeouts, and experiment store.
 - **Status**: Keep until all operators migrate to `minsky --daemon`.
+
+### 10. Daily-prose CHANGELOG.md format (`## 2026-05-21` per day, narrative paragraph + metric Δ lines)
+
+- **Replacement**: semver-tagged GitHub Releases managed by
+  [`semantic-release`](https://semantic-release.gitbook.io/). Each push
+  to `main` with a `feat:` / `fix:` / `perf:` / `BREAKING CHANGE:`
+  commit triggers `.github/workflows/release.yml`, which computes the
+  next version from conventional commits, publishes a GitHub Release,
+  and prepends a Keep-a-Changelog row to `CHANGELOG.md`.
+- **Rationale**: The daily-prose format required a daemon that fires
+  once per day to author the missing day's entry in the right voice
+  (`daily-changelog-for-humans` task in `TASKS.md`). That daemon was
+  shipped (#177, #179, #185-#193) but the format still drifted — the
+  last entry was 2026-05-18 despite 50+ merged PRs in the following
+  3 days, because the daily-fire path didn't survive the 2026-05-12
+  cross-repo-runner migration. Semantic-release shifts the cost model:
+  the changelog row is generated structurally from each PR's commit
+  type, no daemon required, no per-day narrative authorship.
+- **Archive**: the frozen daily-journal content is preserved at
+  [`docs/CHANGELOG-narrative-history.md`](./docs/CHANGELOG-narrative-history.md).
+- **Status**: superseded as of 2026-05-21. The archive file is
+  read-only — do not add new daily entries.
 
 ## Not deprecated (keep investing)
 
