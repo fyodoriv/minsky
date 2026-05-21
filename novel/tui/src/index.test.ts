@@ -7,11 +7,18 @@ describe("@minsky/tui public surface", () => {
     expect(Object.keys(tui).sort()).toEqual([
       "WIDTH",
       "cell",
+      "defaultLogDirProbe",
+      "defaultMachineProbe",
       "formatDuration",
+      "formatLogRow",
       "formatMachineInfo",
+      "gatherMachineRaw",
       "humanBytes",
+      "listLogFiles",
       "parseMinskyProcs",
       "renderDashboard",
+      "renderDetail",
+      "repoBasename",
     ]);
     expect(typeof tui.parseMinskyProcs).toBe("function");
     expect(typeof tui.formatMachineInfo).toBe("function");
