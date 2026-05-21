@@ -1,77 +1,86 @@
-# feat(tick-loop): machine-budget pure controller + rule-#10 deterministic gate (operator-machine-budget-autoscale slices 1–2/N)
+## What
+
+`runany-dynamic-model-or-local-fallback` — the unified **pin > dynamic >
+local** provider decision for the zero-arg run-anywhere entrypoint, plus
+its pre-registered measurement harness. This branch is two stacked
+slices:
+
+**Slice 1 — pure decision table** (`80c575f`):
+
+- `novel/tick-loop/src/runany-provider-decision.ts` — pure
+  `decideRunAnyProvider` (no I/O, no clock, no env). Pollack decision
+  table: (1) operator pin honored verbatim → (2) all remote backends
+  down → `local` → (3) delegate to the shipped `pickStrategicModel` by
+  remaining budget. Composes the two shipped deciders rather than
+  reinventing them (rule #1). New surface vs. what it composes: a
+  liveness signal across **all** configured remote backends (not just
+  claude); switches fully to `local` in ≤1 iteration and never returns a
+  wedged/`hold` state; recovery to remote is automatic (pure + recomputed
+  each tick).
+- `novel/tick-loop/src/runany-provider-decision.test.ts` — the 5-row
+  chaos table + the 3-clause steady-state hypothesis (17 tests).
+
+**Slice 2 — pre-registered measurement harness** (`17fdd5e`):
+
+- `novel/tick-loop/src/index.ts` — export `decideRunAnyProvider` + its
+  types from `@minsky/tick-loop` so the wiring layer and the harness
+  consume the **same** decider, not a re-derived table.
+- `scripts/runany-model-audit.mjs` — the exact `Measurement` command
+  from the task block: `--scenario=<pin|dynamic|all-down> --json`. Pure
+  scenario runner + injected decider seam + thin CLI (same shape as
+  `cto-audit-metrics.mjs`). Exit 0 only when every requested scenario
+  meets its pre-registered threshold.
+- `scripts/runany-model-audit.test.mjs` — paired test: the real decider
+  passes all 3 scenarios; **mutant deciders** (ignore-pin, never-local,
+  wedged-kind, inverted-tier) each flip the verdict to `ok:false`
+  (rule #10 — fails-closed).
+- `docs/run-anywhere.md` — operator-facing decision table, recovery
+  contract, measurement commands + threshold table.
+- `package.json` — `runany:audit` script (operator-surface uniformity,
+  mirrors `cto-audit:metrics`).
 
 ## Why needed
 
-Operator directive 2026-05-17 / vision.md **rule #15**: minsky must *match*
-a single operator-defined machine-utilisation budget (default 70 %, ≤80 %
-under the weekly-gated swarm switch) — neither idle the box nor gridlock
-it. The live evidence in the task block: on a 10-core box the worker plist
-shipped `ProcessType=Background` (macOS QoS throttles CPU/IO, making the
-budget *physically unreachable*) **and** a hand-tuned
-`--spawn-additional-workers` constant (4≈ok, 10 saturates, 20 gridlocks to
-zero). A constant cannot track the saturation knee, and the QoS flag made
-any budget moot.
+Today provider selection requires env wrangling and silently
+mis-degrades on a bad budget estimate or a dead backend. Slice 1 makes
+the pin > dynamic > local contract a single pure, testable decision.
+Slice 2 closes the falsifiability gap: the task's `Measurement` line
+names an exact command and Acceptance criterion 5 is "3-scenario
+measurement passes" — but that command did not exist and slice 1's
+decider was unexported, so the pre-registered hypothesis (rule #9 /
+Munafò et al. 2017) could not be evaluated. A future regression in the
+decider now breaks CI instead of silently mis-degrading the run-anywhere
+model choice (Beyer SRE 2016 — visible, not silent).
 
-This PR lands the first two slices of the cluster:
+## Measurement
 
-- **Slice 1 — pure controller** (`novel/tick-loop/src/machine-budget-autoscaler.ts`):
-  `resolveMachineBudgetPct` (env → clamped budget; swarm ceiling 80) and
-  `computeWorkerTarget` (effective-throughput controller with cold-start,
-  ramp-up, knee step-back, knee-hold, and gridlock-backoff rules). No I/O;
-  21 paired tests for every pre-registered behaviour (rule #9). Originated
-  on a sibling daemon worktree (`b61d972`); carried forward rebased onto
-  current `main` rather than re-derived, so slice 2 builds on it without
-  duplicating the controller (rule #1 — compose, don't reinvent;
-  duplicate-work-detection).
-- **Slice 2 — rule-#10 gate** (`scripts/check-machine-budget.mjs`, wired
-  into the `pre-pr-lint` `full` stage): asserts three otherwise prose-only
-  invariants on every PR — (1) the budget contract is present and
-  `defaultBudgetPct=70` / `swarmMaxBudgetPct=80` are pinned; (2) no minsky
-  worker/tick-loop launchd template sets `ProcessType=Background` while the
-  budget is non-trivial (the empirically-confirmed unreachable-budget
-  regression — hard fail); (3) the controller test file keeps the three
-  rule-#9 pre-registered behaviour suites. Dormant (exit 0 + advisory)
-  until the controller artefact lands — same precedent as
-  `check-mape-k-budget-cap`.
-
-This is the smallest meaningful increment toward the task's Acceptance
-line "`check-machine-budget.mjs` hard-fails on a `Background` QoS +
-non-trivial budget". Remaining slices (bin wire-in replacing the fixed
-spawn constant, OS-throttle auto-corrector, cross-repo dotfiles/agentbrew
-propagation) compose on this substrate.
-
-## Optimization (per-iteration discipline)
-
-`optimization: none-this-iteration: this slice adds a new deterministic
-gate + pure controller on no existing hot path; touching the pre-pr-lint
-runner's execution model or the daemon spawn loop would be rule-#12 scope
-sprawl. The gate's own dormant short-circuit (exit early when the
-controller file is absent) is inherent to the rule-#7 graceful-degrade
-pattern, not a new optimization.`
+```text
+node scripts/runany-model-audit.mjs --scenario=pin --json
+  → ok:true  pinnedRate:1  wedged:0  (8/8 iterations across budget×liveness)
+node scripts/runany-model-audit.mjs --scenario=dynamic --json
+  → ok:true  tiers:[1,1,2,3]  monotone:true  topIsTier1:true  bottomIsLocal:true
+node scripts/runany-model-audit.mjs --scenario=all-down --json
+  → ok:true  switchIters:0  localRate:1  wedged:0  (≤1 switch, ≥95% local)
+node scripts/runany-model-audit.mjs --scenario=all  → exit 0
+npx vitest run scripts/runany-model-audit.test.mjs \
+  novel/tick-loop/src/runany-provider-decision.test.ts  → 40 passed
+pnpm pre-pr-lint  → all 12 steps [ok], EXIT=0
+```
 
 ## Hypothesis self-grade
 
-- **Predicted**: a deterministic rule-#10 gate over the machine-budget contract hard-fails when a minsky worker/tick-loop launchd template carries `ProcessType=Background` with a non-trivial (≥default-70) budget, and passes green on the current repo (no such throttle present), with the controller exports intact and the three pre-registered behaviour suites present.
-- **Observed**: `node scripts/check-machine-budget.mjs` exits 0 on the repo ("budget contract pinned, no contradicting ProcessType=Background throttle, controller behaviour suites present"); the paired test "ProcessType=Background on a tick-loop plist → hard fail" asserts `ok:false` with a reason naming the file + `launchd.plist`/`unreachable`; 34/34 tests pass (21 controller + 13 gate); tsc + biome clean.
+- **Predicted**: with the harness wired to the shipped decider — pin scenario 100% pinned dispatch; dynamic scenario model tier monotone-correlates with remaining-budget bands; all-down scenario ≤1 iteration to switch to local then ≥95% local dispatch and 0 wedged iterations.
+- **Observed**: pin pinnedRate=1.0 wedged=0 (8/8); dynamic tiers=[1,1,2,3] monotone=true topIsTier1=true bottomIsLocal=true; all-down switchIters=0 localRate=1.0 wedged=0; `--scenario=all` exits 0; mutant deciders each flip to ok:false; 40/40 tests pass; pre-pr-lint 12/12 green.
 - **Match**: yes
-- **Lesson**: the throttle-regression invariant is now a CI tripwire, so the next slice (bin wire-in of `computeWorkerTarget`) can change the spawn path without silently re-introducing the QoS clamp that made the budget unreachable.
+- **Lesson**: the slice-1 decider already satisfies all three pre-registered thresholds; the next experiment moves to live-fire — wiring the decider + a real multi-backend liveness probe into the run-anywhere entrypoint, where the open question is probe cost per iteration (task Pivot: cache with TTL ≥60s).
 
-## Security & privacy
+## Optimization
 
-No new auth/secrets/sandbox/PII surface; vision.md § 13 reviewed. The new
-`check-machine-budget.mjs` is a read-only deterministic lint: it reads
-repo-tracked files only (`novel/tick-loop/src/machine-budget-autoscaler*`,
-`distribution/launchd/*.plist`), spawns no child process, makes no network
-call, and runs no LLM. Threat: a crafted plist string evading the
-`ProcessType` regex would let a throttled template pass — mitigation: the
-regex is whitespace-anchored and case-insensitive, the contract checks are
-fail-closed (a missing export *fails*, never silently passes), and the
-gate scopes hard-fails to repo-tracked templates so an attacker would have
-to land the evasive plist through normal review first.
+`optimization: none-this-iteration` — slice-2 is a pure measurement
+harness plus an index export; no hot path is touched (the audit script
+runs offline, and the decider already avoids a double `pickStrategicModel`
+call in the no-pin path). The eligible round-trip dedup — caching the
+multi-backend liveness probe (TTL ≥60s) — is the dedicated next slice per
+the task Pivot, not bundleable before the probe exists.
 
-## Test plan
-
-- `node scripts/check-machine-budget.mjs` → exit 0 on this branch.
-- `npx vitest run scripts/check-machine-budget.test.mjs novel/tick-loop/src/machine-budget-autoscaler.test.ts` → 34/34 green.
-- Injected-regression: the test "ProcessType=Background on a tick-loop plist → hard fail naming launchd" proves the Acceptance criterion deterministically.
-- `pnpm pre-pr-lint` (full stage) green, including the newly-wired `machine-budget` step.
+<!-- security: not-applicable — measurement script + type export only; no auth/secrets/sandbox/PII/network surface (the audit runs the pure decider offline; § 13 reviewed) -->
