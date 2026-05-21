@@ -145,6 +145,30 @@ Four mandatory parts: (1) **Same-session action** — the agent who observed the
 
 Enforced by: [`scripts/check-rule-17-proactive-heal.mjs`](scripts/check-rule-17-proactive-heal.mjs).
 
+### 18. Merge means MERGE — no close-with-preservation shortcuts (iron, no exemption)
+
+When the operator (or an upstream task) asks to **merge** a PR, the only acceptable outcomes are:
+
+(a) **the PR's commit lands in `main`** via squash-merge or rebase-merge with all gate checks passing, OR
+
+(b) **the PR is closed with mechanical proof that its work is already on `main`** — `git rebase --strategy-option=ours <pr-branch>` against `main` produces an empty diff, verified by [`scripts/verify-pr-closure-is-lossless.mjs`](scripts/verify-pr-closure-is-lossless.mjs). The script writes a one-line proof comment on the PR with the empty-diff SHA.
+
+**Forbidden anti-patterns** (each one closes a PR while pretending to preserve the work — none of them actually merge):
+
+1. **Close-with-preservation** — closing a PR with "the diff is preserved via GitHub closed-PR retention" or "the work is recoverable via `gh pr diff`" or any equivalent rationalisation. GitHub retention is a **recovery mechanism for accidents**, not a **merge substitute**. Closed PRs are not on anyone's radar, are not on `main`, and do not produce the commit the directive asked for.
+2. **"Umbrella close"** — filing one umbrella task with N PR numbers in its body and closing all N as "tracked by the umbrella". The umbrella is a task, not a merge. The commits stay off `main`.
+3. **"CONFLICTING ⇒ close" reflex** — declaring a PR CONFLICTING with main and closing it without first attempting `git rebase -X theirs origin/main` to land it. Most "CONFLICTING" PRs become MERGEABLE after a 30-second rebase.
+4. **"Superseded by parallel implementation"** without `-X ours` empty-diff proof — claiming PR A is superseded by PR B because they touch the same area, without mechanically proving B contains everything A did.
+5. **"Preserve-via-patch-file"** — writing the diff to `.minsky/preserved-diffs/<N>.patch` then closing. `.minsky/` is gitignored, so the patch evaporates on clone. Even if it weren't gitignored, a patch file in the repo is not a merge.
+
+**Pivot threshold:** if a drain session has been running >2 hours and the close-rate exceeds the merge-rate, STOP and escalate to the operator. The pattern is the session running out of budget and rationalising shortcuts — not a property of the PR queue.
+
+**Why this rule is iron:** the 2026-05-21 backlog drain produced a 32-PR close-with-preservation regression that the operator caught and corrected by reopening every one and re-merging via real squash. PR #695 then re-committed the same pattern on a second pass — closing 16 PRs as "preservation" with a `recovery via gh pr diff` rationale — proving that without this rule explicit in `vision.md` and primed in the agent skill catalogue, the shortcut pattern recurs whenever an agent runs out of session budget mid-drain. The rule names each anti-pattern precisely so it cannot be re-rationalised next time.
+
+Enforced by: [`scripts/verify-pr-closure-is-lossless.mjs`](scripts/verify-pr-closure-is-lossless.mjs) on the close-side (every PR closure must carry the empty-diff proof comment); [`scripts/local-gate-merge.mjs`](scripts/local-gate-merge.mjs) on the merge-side (only ever merges, never closes); and the [`pr-merge-no-shortcuts`](.claude/skills/pr-merge-no-shortcuts/SKILL.md) skill primer that auto-loads in any drain-session agent context.
+
+Anchor: rule #9 (pre-registered HDD — a "merge" directive's success criterion is the commit on `main`, not the closed PR); Cockburn 2001 *Writing Effective Use Cases* (the success scenario IS the criterion — close-with-preservation fails the "merge" use-case's success scenario regardless of the metadata).
+
 ## Pattern conformance index
 
 Operationalises rule #8. Each row maps a Minsky artifact (file path, package,
