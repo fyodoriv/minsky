@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
-  // Sandbox the LLM-provider env so the DI-seam assertions test the seam,
-  // not the ambient process env. Daemon workers export
-  // MINSKY_LLM_PROVIDER=local-preferred / claude-only (see
-  // `local-preferred-daemon-env-vars`); without this stub these tests
-  // fail when the suite runs inside a daemon-spawned worker (the very
-  // process the pre-push hook runs in). vi.stubEnv(name, undefined) is
-  // the documented in-file pattern (biome `noDelete` forbids `delete`;
-  // `= undefined` coerces to the string "undefined" in Node).
+  // Test-isolation guard (category fix): the daemon exports
+  // MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM into the worker env, so a
+  // suite that reads the ambient value is non-deterministic — under
+  // `MINSKY_LLM_PROVIDER=claude-only` the seam short-circuits and every
+  // detectFn-driven assertion fails. Neutralise all three knobs before
+  // each test (stubEnv(name, undefined) deletes the var; biome `noDelete`
+  // forbids the delete operator and `env.X = undefined` coerces to the
+  // string "undefined" in Node — see Slice C below). A test that needs a
+  // specific value (Slice C) re-stubs it; the later stub wins.
   beforeEach(() => {
     vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
     vi.stubEnv("MINSKY_LOCAL_LLM", undefined);

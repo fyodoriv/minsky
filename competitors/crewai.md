@@ -1,5 +1,7 @@
 # Competitor: CrewAI
 
+> Multi-agent orchestration framework — adjacent to Minsky's space, but generic rather than coding-specific.
+
 - **URL**: <https://crewai.com> / <https://github.com/crewAIInc/crewAI>
 - **Status**: Active, large adoption
 - **Relationship**: **Competitor** — adjacent space, generic rather than coding-specific

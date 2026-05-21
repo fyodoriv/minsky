@@ -117,11 +117,11 @@ runner from any folder and automatically watch the loop from outside.
 
 ```bash
 # One-time install (idempotent — re-run on every machine):
-~/apps/tooling/minsky/distribution/install-observer.sh
-agentbrew sync --agentfile ~/apps/tooling/minsky/Agentfile.yaml
+"$MINSKY_REPO/distribution/install-observer.sh"
+agentbrew sync --agentfile "$MINSKY_REPO/Agentfile.yaml"
 
 # Then, from any shell in any bootstrapped host:
-minsky --daemon --hosts-dir ~/apps   # background daemon across all repos
+minsky --daemon --hosts-dir <repos-parent>   # background daemon across all repos
 minsky --local --daemon              # same, but local models only (zero tokens)
 minsky status                        # PID + uptime + log tail
 minsky logs                          # follow the daemon log live

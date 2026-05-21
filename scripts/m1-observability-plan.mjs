@@ -107,15 +107,15 @@ const zeroGaps = tasks.filter((t) => t.gaps.length === 0).length;
 const totalGaps = tasks.reduce((s, t) => s + t.gaps.length, 0);
 
 if (jsonMode) {
-  console.log(
+  console.info(
     JSON.stringify({ total, avgScore: Number(avgScore), zeroGaps, totalGaps, tasks }, null, 2),
   );
 } else {
-  console.log("\n🔭 M1 Observability Plan\n");
-  console.log(`   Total M1 tasks: ${total}`);
-  console.log(`   Avg observability score: ${avgScore}/6`);
-  console.log(`   Fully observed (0 gaps): ${zeroGaps}/${total}`);
-  console.log(`   Total gaps to close: ${totalGaps}\n`);
+  console.info("\n🔭 M1 Observability Plan\n");
+  console.info(`   Total M1 tasks: ${total}`);
+  console.info(`   Avg observability score: ${avgScore}/6`);
+  console.info(`   Fully observed (0 gaps): ${zeroGaps}/${total}`);
+  console.info(`   Total gaps to close: ${totalGaps}\n`);
 
   // Per-signal gap count
   /** @type {Record<string, number>} */
@@ -125,28 +125,28 @@ if (jsonMode) {
       signalGaps[g] = (signalGaps[g] ?? 0) + 1;
     }
   }
-  console.log("   Gap by signal type:");
+  console.info("   Gap by signal type:");
   for (const [signal, count] of Object.entries(signalGaps).sort((a, b) => b[1] - a[1])) {
     const bar = "█".repeat(Math.min(count, 40));
-    console.log(`     ${signal.padEnd(20)} ${String(count).padStart(3)} tasks  ${bar}`);
+    console.info(`     ${signal.padEnd(20)} ${String(count).padStart(3)} tasks  ${bar}`);
   }
-  console.log();
+  console.info();
 
   // Task-level detail
   if (!gapsOnly) {
-    console.log("   Per-task gaps:");
+    console.info("   Per-task gaps:");
     for (const t of tasks
       .filter((t) => t.gaps.length > 0)
       .sort((a, b) => b.gaps.length - a.gaps.length)) {
-      console.log(`     ${t.taskId}`);
-      console.log(`       score: ${t.score}/6, gaps: ${t.gaps.join(", ")}`);
+      console.info(`     ${t.taskId}`);
+      console.info(`       score: ${t.score}/6, gaps: ${t.gaps.join(", ")}`);
     }
   } else {
     // Just the tasks with the most gaps
-    console.log("   Top 20 worst-observed tasks:");
+    console.info("   Top 20 worst-observed tasks:");
     for (const t of tasks.sort((a, b) => b.gaps.length - a.gaps.length).slice(0, 20)) {
-      console.log(`     ${t.gaps.length} gaps: ${t.taskId} → add: ${t.gaps.join(", ")}`);
+      console.info(`     ${t.gaps.length} gaps: ${t.taskId} → add: ${t.gaps.join(", ")}`);
     }
   }
-  console.log();
+  console.info();
 }

@@ -276,25 +276,27 @@ const report = {
 };
 
 if (jsonMode) {
-  console.log(JSON.stringify(report, null, 2));
+  console.info(JSON.stringify(report, null, 2));
 } else {
-  console.log("\n📊 Full Coverage Report (all layers)\n");
-  console.log(`   COMPOSITE: ${composite}%\n`);
-  console.log(`   L1 Unit tests (v8):       ${String(l1Pct).padStart(3)}%  (weight ${weights.l1})`);
-  console.log(
+  console.info("\n📊 Full Coverage Report (all layers)\n");
+  console.info(`   COMPOSITE: ${composite}%\n`);
+  console.info(
+    `   L1 Unit tests (v8):       ${String(l1Pct).padStart(3)}%  (weight ${weights.l1})`,
+  );
+  console.info(
     `   L2 Integration tests:     ${String(l2Pct).padStart(3)}%  (${featuresTestedCount}/${RUNTIME_FEATURES.length} features)`,
   );
-  console.log(
+  console.info(
     `   L3 CLI shim:              ${String(l3Pct).padStart(3)}%  (${Math.min(subcommandsTested, CLI_SUBCOMMANDS.length)}/${CLI_SUBCOMMANDS.length} subcommands)`,
   );
-  console.log(
+  console.info(
     `   L4 minsky-run.mjs:        ${String(l4Pct).padStart(3)}%  (${pathsExercised}/${MINSKY_RUN_PATHS.length} paths)`,
   );
-  console.log(
+  console.info(
     `   L5 Runtime invariants:     ${String(l5Pct).padStart(3)}%  (${invariantsCovered}/${KNOWN_FAILURE_CLASSES.length} failure classes)`,
   );
-  console.log(
+  console.info(
     `   L6 Scripts:               ${String(l6Pct).padStart(3)}%  (${scriptsWithTests}/${scriptFiles.length} with tests)`,
   );
-  console.log();
+  console.info();
 }

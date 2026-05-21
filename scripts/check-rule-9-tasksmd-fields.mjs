@@ -36,49 +36,36 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
-/** Tasks that pre-date the lint and are exempt until backfilled. Each
- *  entry should eventually be removed via the
- *  `rule-9-tasksmd-fields-backfill` task (filed in this PR). New tasks
- *  added after 2026-05-19 are NEVER exempt — the lint blocks them.
+/** Tasks that pre-date the lint and are exempt until backfilled. The
+ *  list lives in `.prereg-allowlist` at the repo root — same format as
+ *  the upstream `@tasks-md/lint --prereg-allowlist=<file>` flag (one ID
+ *  per line, `#` for comments). When @tasks-md/lint@0.8.0 ships on
+ *  npm, this script becomes a one-line wrapper:
  *
- *  @type {ReadonlySet<string>}
+ *    npx -y @tasks-md/lint --require-prereg \
+ *      --prereg-allowlist=.prereg-allowlist TASKS.md
+ *
+ *  Until then, this local script reads the same file so editing the
+ *  allowlist (when a grandfathered task is backfilled) is a one-line
+ *  diff in the data file, not a code change here.
+ *
+ *  @returns {ReadonlySet<string>}
  */
-export const RULE_9_GRANDFATHERED = Object.freeze(
-  new Set([
-    "minsky-cli-auto-bootstrap-local-llm",
-    "minsky-cli-fresh-clone-bootstrap",
-    "minsky-runtime-resilience",
-    "minsky-claude-exhaustion-persisted-state",
-    "minsky-cli-context-aware-ux",
-    "daemon-aider-brief-shrinker",
-    "daemon-claude-print-hang-watchdog",
-    "daemon-stuck-pr-rebase-watchdog",
-    "daemon-duplicate-work-detection",
-    "daemon-pr-age-watchdog",
-    "cto-audit-pr-auto-merge",
-    "daemon-pre-pr-lint-gate",
-    "daemon-fix-own-pr-on-ci-failure",
-    "daemon-self-detect-throughput-issues",
-    "devin-spawn-missing-permission-mode-bypass",
-    "dashboard-web-rich-runs-view",
-    "local-agent-config-validation-at-boot",
-    "daemon-iteration-phase-tagged-spans",
-    "daemon-config-analyzer-auto-apply",
-    "daemon-launchd-drift-warning-suppress-when-cli-launched",
-    "daemon-task-rotation-on-completion",
-    "daemon-tasks-md-auto-lint-fix",
-    "competitive-benchmark-real-automated-weekly",
-    "minsky-update-cli",
-    "minsky-config-bootstrap-prompt",
-    "self-metrics-competitive-benchmark",
-    "daemon-brief-test-pin-soft-tolerance",
-    "dependabot-bumps-dep-regression-triage",
-    "spawn-n-workers-with-watchdog-monitoring",
-    "brief-trim-coordinator",
-    "local-worktree-followups",
-    "gitignore-claire-runtime-dir",
-  ]),
-);
+function loadGrandfathered() {
+  const path = resolve(REPO_ROOT, ".prereg-allowlist");
+  const text = readFileSync(path, "utf8");
+  return Object.freeze(
+    new Set(
+      text
+        .split("\n")
+        .map((line) => line.replace(/#.*$/, "").trim())
+        .filter((line) => line.length > 0),
+    ),
+  );
+}
+
+/** @type {ReadonlySet<string>} */
+export const RULE_9_GRANDFATHERED = loadGrandfathered();
 
 /**
  * @typedef {object} TaskBlock

@@ -1,17 +1,69 @@
-## Summary
+## What & why needed
 
-- Add missing `set + EACCES` test case to `git-config-path-checks.test.ts`, completing the 3 keys × 4 outcomes coverage called out in the Verification criteria (unset / set+exists / set+missing / set+EACCES)
-- Remove completed task `minsky-cross-machine-dotfile-checks` from TASKS.md — implementation shipped in PR #399; task block was not removed at that time
+`runany-dynamic-model-or-local-fallback` Acceptance #3: when every
+configured remote is down/exhausted the run-anywhere entrypoint must
+switch **fully + automatically + visibly** to local within ≤1 iteration,
+with 0 wedged iterations.
+
+Slices 1–2 shipped the pure `resolveRunAnyModel` decider + the
+pre-registered `runany-model-audit.mjs` harness. Slice 3 wired the
+**pin** path into `pickAndLogStrategicModel()` (Acceptance #1). Until
+this slice the **all-remote-down** path was still unwired at the
+entrypoint: when the budget guard circuit-broke claude (the only
+configured remote → inaccessible), `pickAndLogStrategicModel()` fell
+through the full budget-snapshot → usage-history ring append →
+exhaustion-regression machinery and emitted the ~400-byte
+`tick-loop.strategic-pick` span before eventually yielding `undefined`
+(local). The decision was neither unified nor visibly attributed to
+"remote down".
+
+This slice (4) routes the `lastDecision.action === "circuit-break"` case
+through `resolveRunAnyModel` and returns **before** the snapshot math,
+the ring-buffer append, and the exhaustion regression — the switch to
+local happens in *that very iteration* (≤1) and emits a compact
+`[span] tick-loop.runany-resolve` line with `"source":"all-remote-down"`
+and a visible reason (Beyer SRE 2016 visible-not-silent). Recovery is
+implicit (Acceptance #4): the next non-circuit-broken iteration falls
+through to the unchanged dynamic path. The budget-band dynamic path (no
+pin, remote reachable) is byte-for-byte identical to before this slice.
+Actual local liveness/bootstrap stays owned by the wrapper's TTL-cached
+probe (`minsky-cli-auto-bootstrap-local-llm`); this layer routes + logs.
+
+## Changes
+
+- `novel/tick-loop/bin/tick-loop.mjs` — all-remote-down short-circuit in
+  `pickAndLogStrategicModel()` (mirrors slice 3's pin short-circuit
+  shape), plus two frozen module consts reused across degraded
+  iterations (no per-tick allocation).
+- `docs/run-anywhere.md` — Status section: slice 4 documented; follow-up
+  scope narrowed to the live multi-backend network probe.
+
+## Optimization (rule #9 skip-earlier gate)
+
+A circuit-broken iteration now skips: the remaining-fractions snapshot
+math, the `appendUsageHistory` ring-buffer growth, the
+`predictExhaustionMs` regression, and the ~400-byte
+`tick-loop.strategic-pick` span (replaced by a ~140-byte
+`tick-loop.runany-resolve` line). Net ≥260-byte per-degraded-iteration
+log reduction + dropped allocation/regression work. Same optimization
+class as slice 3's pin path.
+
+## Measurement
+
+```bash
+node scripts/runany-model-audit.mjs --json   # overall PASS
+```
+
+`all-down` scenario asserts the pre-registered thresholds the slice-4
+wire-in now drives at runtime: ≤1 iteration to switch to local, ≥0.95
+local-dispatch fraction during the down window, 0 wedged iterations,
+recovers to the dynamic remote pick when a backend returns.
 
 ## Hypothesis self-grade
 
-- **Predicted**: adding the EACCES test case satisfies the final gap in the Verification criterion "3 keys × 4 outcomes (unset / set+exists / set+missing / set+EACCES)"; existing tests already covered 3 of 4 outcomes
-- **Observed**: test file now has 11 tests for `checkGitConfigPaths` (was 10); new `set + EACCES` describe block explicitly documents that `existsSync` returns `false` on permission-denied paths, making EACCES indistinguishable from "missing" at the helper boundary
+- **Predicted**: with all remote backends blocked (simulated), the run switches to local within one iteration and continues with 0 wedged iterations; the pin and dynamic paths are unaffected
+- **Observed**: `runany-model-audit.mjs --json` → overall PASS (pin 15/15, dynamic 6/6, all-down: itersToSwitch≤1, localFraction 1.0, wedged 0, recoveredToRemote true)
 - **Match**: yes
-- **Lesson**: pure-over-injection helpers make EACCES and "missing" identical at the seam; the test value is documentation, not coverage novelty — pin the behavior explicitly so a future reader doesn't need to check Node.js docs
+- **Lesson**: the budget-circuit-break signal is a sufficient synchronous proxy for "the only configured remote is inaccessible"; the next slice adds a real per-backend network probe so a multi-remote network outage (not just budget) also trips the all-remote-down branch
 
-## Optimization
-
-optimization: none-this-iteration: the new test adds 12 lines; the TASKS.md removal saves ~540 bytes — no 10-byte-minimum measurable saving in the daemon-loop sense
-
-<!-- security: not-applicable — test-only addition + TASKS.md task removal; no new runtime surface, no secrets, no auth, no PII -->
+<!-- security: not-applicable — model-routing decision + log line only; no auth/secrets/sandbox/PII/network surface added (the wrapper owns probes) -->

@@ -1,7 +1,7 @@
 # Plan: `fleet-stability-centralized-reporting`
 
 - **Task**: `fleet-stability-centralized-reporting` (TASKS.md line 231 — P0, milestone M1)
-- **Repo**: `~/apps/tooling/minsky`
+- **Repo**: `<minsky-repo>`
 - **Author**: claude-opus-4-7-max session 2026-05-20
 - **Status**: validated (post-revision)
 - **Validated-by**: reviewer-subagent on 2026-05-20 — round 1 needs-revision with 3 shape/integration ambiguities; round 2 verdict appended below

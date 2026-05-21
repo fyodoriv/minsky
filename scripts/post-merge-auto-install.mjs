@@ -253,31 +253,36 @@ function bestEffortExec(command, args, opts) {
 /** @type {{ [K in Action["kind"]]: (action: Extract<Action, { kind: K }>) => void }} */
 const ACTION_HANDLERS = {
   "pnpm-install": () => {
-    console.log("  → pnpm install (lockfile or package.json changed)…");
+    // `console.info` (not `console.log`): biome's `noConsoleLog` warns
+    // that `console.log` reads as debug output; these lines are
+    // intentional operator-facing status notifications, so `.info`
+    // is the linter-approved channel. Healed 2026-05-20 to unblock
+    // pre-pr-lint --stage=fast on main (rule #17 proactive healing).
+    console.info("  → pnpm install (lockfile or package.json changed)…");
     bestEffortExec("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
       warnMsg: "  ⚠ pnpm install failed — run `pnpm install` manually to refresh dist/.",
     });
   },
   "regen-plist": (action) => {
-    console.log("  → minsky install-daemon (regenerate launchd plist)…");
+    console.info("  → minsky install-daemon (regenerate launchd plist)…");
     const ok = bestEffortExec(join(REPO_ROOT, "bin", "minsky"), ["install-daemon"], {
       env: { ...process.env, MINSKY_INSTALL_DAEMON_QUIET: "1" },
       warnMsg: "  ⚠ install-daemon failed — run `minsky install-daemon` manually if needed.",
     });
     if (ok && action.warnDaemonRunning) {
-      console.log(
+      console.info(
         "  ⓘ daemon is currently running — restart with `minsky update` to pick up the new plist.",
       );
     }
   },
   "systemctl-reload": () => {
-    console.log("  → systemctl --user daemon-reload (systemd unit changed)…");
+    console.info("  → systemctl --user daemon-reload (systemd unit changed)…");
     bestEffortExec("systemctl", ["--user", "daemon-reload"], {
       warnMsg: "  ⚠ systemctl daemon-reload failed — run it manually if needed.",
     });
   },
   "pre-pr-lint-fast": () => {
-    console.log("  → pnpm pre-pr-lint --stage=fast (sanity check)…");
+    console.info("  → pnpm pre-pr-lint --stage=fast (sanity check)…");
     bestEffortExec("pnpm", ["pre-pr-lint", "--stage=fast"], {
       warnMsg: "  ⚠ pre-pr-lint --stage=fast reported issues — see output above. Not blocking.",
     });
@@ -324,11 +329,11 @@ export function runAutoInstall() {
     return 0;
   }
 
-  console.log("minsky auto-install: applying post-pull updates…");
+  console.info("minsky auto-install: applying post-pull updates…");
   for (const action of result.actions) {
     executeAction(action);
   }
-  console.log("minsky auto-install: done.");
+  console.info("minsky auto-install: done.");
   return 0;
 }
 

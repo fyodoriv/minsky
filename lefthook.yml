@@ -1,17 +1,35 @@
 # Pre-commit + pre-push hooks. Run only on changed files for speed.
 # Install with: pnpm dlx lefthook install
 pre-commit:
-  parallel: true
+  # `piped: true` (not `parallel`) is the skip-earlier-gate phase split for
+  # `commit-hook-chain-node-version-and-platform-resilience` (slice: lefthook
+  # phase-split). Commands run sequentially and lefthook STOPS at the first
+  # non-zero exit. `toolchain` runs first as a barrier: when the runtime node
+  # or a platform optional dep diverges, every node-invoking step below
+  # (biome via pnpm, typecheck, test, scan-secrets) would each spew an opaque
+  # MODULE_NOT_FOUND. Under the old `parallel: true` the operator got 4
+  # simultaneous stack traces with the one actionable line buried; piped +
+  # toolchain-first short-circuits to exactly ONE operator-actionable line and
+  # never wastes a slow biome/tsc/vitest run on a known-broken toolchain
+  # (vision.md rule #6 "fail loudly at the actionable boundary"; operator
+  # 2026-05-05 skip-earlier-gate optimization category). Order is cheap+
+  # security-critical before the expensive trio so a bad toolchain or a leaked
+  # secret is caught before biome/typecheck/test ever start.
+  piped: true
   commands:
-    biome:
-      glob: "*.{ts,js,json,jsonc,md}"
-      run: pnpm biome check --error-on-warnings --no-errors-on-unmatched {staged_files}
-    typecheck:
-      glob: "*.ts"
-      run: pnpm typecheck
-    test:
-      glob: "*.ts"
-      run: pnpm vitest related --run {staged_files}
+    toolchain:
+      # TASKS.md `commit-hook-chain-node-version-and-platform-resilience`
+      # (slice 1). Asserts the running node matches `.node-version` and
+      # every hook-critical binary (biome's per-arch CLI, lefthook,
+      # scan-secrets) resolves for THIS platform/arch. On 2026-05-17 a
+      # node-version switch + a missing `@biomejs/cli-darwin-arm64`
+      # silently 100%-blocked every commit fleet-wide with an opaque
+      # MODULE_NOT_FOUND. This converts that class into one operator-
+      # actionable line (vision.md rule #6; rule #10 ratchet). Globless
+      # so it runs on every commit, not only when matching files stage.
+      # priority 1 — the toolchain barrier MUST run before any other step.
+      priority: 1
+      run: node scripts/check-toolchain.mjs
     scan-secrets:
       # vision.md § 13.1 / TASKS.md `secret-scanning-precommit-and-ci`: gate
       # credentials at commit time, before they land even locally — git's
@@ -19,19 +37,46 @@ pre-commit:
       # escalating to "rotate the credential and rewrite history". The CLI
       # accepts `{staged_files}` positionally and runs only on those paths;
       # the same script's no-arg full-scan mode runs in CI as the
-      # `secret-scan` gate.
+      # `secret-scan` gate. priority 2 — cheap and security-critical, runs
+      # before the expensive biome/typecheck/test trio.
+      priority: 2
       run: node scripts/scan-secrets.mjs {staged_files}
+    biome:
+      priority: 3
+      glob: "*.{ts,js,json,jsonc,md}"
+      run: pnpm biome check --error-on-warnings --no-errors-on-unmatched {staged_files}
+    typecheck:
+      priority: 4
+      glob: "*.ts"
+      run: pnpm typecheck
+    test:
+      priority: 5
+      glob: "*.ts"
+      run: pnpm vitest related --run {staged_files}
 
 pre-push:
   commands:
     pre-pr-lint:
-      # Canonical pre-PR lint stack — single source of truth shared with the
-      # daemon's brief gate (TASKS.md `daemon-pre-pr-lint-gate`). Humans run
-      # `--stage=full` (adds vitest + diff-relative + dormant-config lints);
-      # the daemon brief runs `--stage=fast` for spawn-budget reasons. Both
-      # share the manifest in `scripts/run-pre-pr-lint-stack.mjs`. Rule #10 —
-      # the daemon and the human pass through the same gate.
-      run: pnpm pre-pr-lint --stage=full
+      # `--stage=fast` (NOT `--stage=full`): pre-push must stay under ~10s
+      # wall-clock so developers don't dread `git push`. `--stage=fast` skips
+      # vitest (~35s for the 3,135-test suite) and the dormant-config lints
+      # that don't change per-PR; it keeps biome / typecheck / markdownlint /
+      # rule-9-tasksmd-fields / rule-3-doc-first / rule-6-let-it-crash /
+      # rule-7-chaos-coverage / rule-12-scope-discipline / rule-17-proactive-
+      # heal / no-hardcoded-user-paths / tasks-lint / threat-model-section /
+      # pr-self-grade / pr-security-review. Total: ~5-7s on a warm cache.
+      #
+      # Defense-in-depth: `scripts/local-gate-merge.mjs` runs the FULL stage
+      # (`--stage=full`) in a scratch `git clone --shared` BEFORE any PR
+      # merges to main. Nothing that fails `--stage=full` ever reaches main
+      # — the only reason to ALSO run `--stage=full` on pre-push was paranoia,
+      # and it cost ~35s × every-push-by-every-developer in friction.
+      #
+      # Policy enforced by P1 `pre-push-hook-stays-fast` (vision.md rule #10
+      # deterministic enforcement): any future PR that puts `--stage=full`
+      # back into pre-push must justify in the PR body why a 40s pre-push is
+      # acceptable, AND propose a corresponding speedup elsewhere.
+      run: pnpm pre-pr-lint --stage=fast
 
 # Auto-install on `git pull` — both the merge fast-path (post-merge) and
 # the rebase / amend path (post-rewrite). The script is rule-#6 best-effort:

@@ -26,8 +26,8 @@
 #
 # Resolution order (via `resolveMinskyRepo`):
 #   1. $MINSKY_REPO env var (if set + exists)
-#   2. ~/apps/tooling/minsky  (canonical Intuit layout)
-#   3. ~/apps/minsky, ~/code/minsky, ~/src/minsky (community layouts)
+#   2. ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky (common
+#      clone locations the shim searches automatically)
 #
 # Failure modes (rule #7):
 #   - No repo found: loud-crash-supervisor-restart; prints the exact
@@ -45,7 +45,7 @@ set -euo pipefail
 
 # ── 0. Node availability ─────────────────────────────────────
 if ! command -v node >/dev/null 2>&1; then
-  echo "minsky: node is not on PATH. Install Node 20+ and retry, or run ~/apps/tooling/minsky/setup.sh first." >&2
+  echo "minsky: node is not on PATH. Install Node 20+ and retry, or run setup.sh in the minsky repo." >&2
   exit 1
 fi
 
@@ -802,7 +802,13 @@ PLIST_EOF
       # Resolve host dir early (needed by stability + iterations + help)
       host_dir="${HOST_ARG:-}"
       if [ -z "$host_dir" ]; then
-        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1)
+        # The pipeline returns no matches when no daemon is running; `|| true`
+        # absorbs the empty-result exit-1 so `set -euo pipefail` doesn't abort
+        # the entire dashboard. Same fix shipped at line 122 for `status`.
+        # Discovered 2026-05-20 — fresh-install reader runs `minsky watch`
+        # with no daemon, dashboard exits after rendering only the DAEMON
+        # line, never gets to show RECENT ITERATIONS or NEEDS HUMAN ACTION.
+        host_dir=$(ps aux 2>/dev/null | grep minsky-run | grep -v grep | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | head -1 || true)
       fi
       host_dir="${host_dir:-}"
 
@@ -932,11 +938,13 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
   // Inline copy of the resolver's deterministic chain. Keeps the
   // shim zero-dependency: no need to resolve the minsky repo to
   // locate the resolver that tells us where the minsky repo is.
+  // Search order is "most-recommended layout first, niche layouts after".
   const FALLBACKS = [
-    'apps/tooling/minsky',
-    'apps/minsky',
+    'minsky',
     'code/minsky',
     'src/minsky',
+    'apps/minsky',
+    'apps/tooling/minsky',
   ];
   const home = homedir();
   const envRepo = process.env.MINSKY_REPO;
@@ -955,7 +963,7 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
       process.exit(0);
     }
   }
-  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), ~/apps/tooling/minsky, ~/apps/minsky, ~/code/minsky, ~/src/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/apps/tooling/minsky.\\n');
+  process.stderr.write('minsky: could not find the minsky repo. Looked at MINSKY_REPO (unset), ~/minsky, ~/code/minsky, ~/src/minsky, ~/apps/minsky. Set MINSKY_REPO=/path/to/minsky or clone to ~/minsky.\\n');
   process.exit(1);
 " 2>&1)"
 RESOLVE_EXIT=$?
@@ -975,7 +983,7 @@ fi
 # ── 3b. Parse --local flag ─────────────────────────────────
 # `minsky --local [args...]` sets the env vars for local-only mode
 # and strips --local from the args before forwarding. Combinable
-# with --daemon: `minsky --local --daemon --hosts-dir ~/apps/tooling`.
+# with --daemon: `minsky --local --daemon --hosts-dir <repos-parent>`.
 MINSKY_ARGS=()
 for arg in "$@"; do
   if [ "$arg" = "--local" ]; then
@@ -1066,7 +1074,7 @@ fi
 # from the trap above + fully detached from the controlling TTY).
 #
 # Lifecycle:
-#   minsky --daemon --hosts-dir ~/apps/tooling   → start
+#   minsky --daemon --hosts-dir <repos-parent>   → start
 #   minsky status                                → PID + uptime + log tail
 #   minsky logs                                  → tail -f daemon.log
 #   minsky stop                                  → SIGTERM → graceful drain

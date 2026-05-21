@@ -1,64 +1,55 @@
 # Minsky
 
-> Point minsky at any repo. It works on your tasks 24/7 using AI agents. You sleep, it ships PRs.
+> A background daemon that runs AI coding agents against tasks in any git repo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
+Minsky watches over your git repo and improves it over time. It picks the next thing to fix, makes the fix on a feature branch, runs your tests, and opens a draft pull request for you to review. Then it picks the next thing. By default it keeps going until you stop it.
+
+The methodology is rigorous — every change applies established software-engineering practices, each backed by a published literature citation ([see the full list](docs/PRACTICES.md)).
+
+**[Seven reasons you'd want this →](#why-minsky)** &nbsp;·&nbsp; Or skip to [getting started](#getting-started).
+
 ## Getting started
 
-```bash
-# Install
-git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install
+**Through your AI agent.** Copy-paste:
 
-# Run — starts the daemon (if needed), installs launchd persistence,
-# and drops you into the live dashboard. Same command works on first run
-# AND every run after: if a daemon is already running for this folder,
-# you attach to it. Ctrl-C detaches; the daemon keeps running.
-minsky
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-# Stop everything (zero ghost processes — kills runners + agent children)
-minsky stop
-```
-
-That's it. Minsky reads your `TASKS.md`, picks the highest-priority task, spawns an AI agent (Devin, Claude, or local), and opens a PR. Repeats 24/7. Survives reboots.
-
-### Picking up upstream fixes
-
-When new fixes land on `main`, pull them in:
+**Manual:**
 
 ```bash
-git pull
+git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-A post-merge git hook handles most of the redeploy work automatically:
-
-| Change in the pull | Auto-runs on `git pull` |
-|---|---|
-| `pnpm-lock.yaml` or `package.json` | `pnpm install` (refreshes `dist/`) |
-| `bin/minsky` (and your plist exists) | Regenerates the launchd plist (no daemon kill) |
-| `distribution/systemd/*.{service,target}` | `systemctl --user daemon-reload` (Linux) |
-| Any of the above | `pre-pr-lint --stage=fast` as advisory sanity check |
-
-**What it does NOT auto-do:** restart the running daemon. The current iteration may be mid-spawn and killing it would waste compute, so picking up new daemon-loop behavior still requires:
-
-```bash
-minsky update   # graceful stop → pull → rebuild → restart from next iteration
-```
-
-Tracked as P0 `minsky-auto-restart-daemon-on-pull` in `TASKS.md` — the goal is to make `minsky update` redundant by having the daemon notice the sentinel between iterations and gracefully restart itself. Opt out of any auto-install behavior with `MINSKY_NO_AUTO_INSTALL=1` (one-shot) or `touch ~/.minsky/no-auto-install` (per-machine).
-
----
+Full install runbook: [INSTALL.md](INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
 
 ## What it actually does
 
-1. Reads `TASKS.md` from your repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
-2. Picks the highest-priority task with complete rule-9 fields
-3. Spawns Devin, Claude, or a local model (configurable per machine)
+1. Reads `TASKS.md` from your **host** repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
+2. Picks the highest-priority task that's ready to work on (has the required fields filled in)
+3. Spawns Devin, Claude, or a local AI model (configurable per machine)
 4. The agent implements the task on a feature branch
-5. Opens a PR with a hypothesis self-grade
-6. Records the iteration in `.minsky/experiment-store/`
+5. Opens a draft pull request — including a self-graded report on whether the change moved the metric it predicted
+6. Records the iteration in `.minsky/experiment-store/` (inside your repo, for the next run to learn from)
 7. Picks the next task. Repeats.
+
+> **What's a "host"?** A host is a single git repository that minsky operates on — picks tasks from its `TASKS.md`, spawns agents inside its worktree, opens PRs against its remote. Selected via `default_host` in `~/.minsky/config.json`, or `--host <path>` flag, or the current working directory by default. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
+
+## Why Minsky?
+
+Seven things you get with minsky running on a repo. Each links to a dedicated page with the full story (what the feature delivers, how it's measured, and how it's tested under stress).
+
+- **Continuous, unattended improvement** — picks tasks, ships draft pull requests, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
+- **Finds new work for you to approve** *(can be turned off)* — after each fix, it audits the repo and proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
+- **Right model for each task** — Claude for prose, Devin for refactors, a local model for mechanical fixes (so cheap work stays cheap). ([details →](user-stories/008-per-task-backend-and-personas.md))
+- **Refuses to reinvent the wheel** — every pull request has to cite the libraries it considered; if it skips the search, the build fails. ([details →](user-stories/009-forced-research-rule-1.md))
+- **A tool that improves itself** — reads its own metrics, files tasks against its own weak spots, ships the fixes. ([details →](user-stories/003-mape-k-improves-prompts.md))
+- **Keeps going when the cloud runs dry** — if your cloud-AI quota runs out, it falls back to a local model so the loop doesn't stall. ([details →](user-stories/004-budget-auto-pause.md))
+- **Async Q&A across timezones** *(coming)* — agents leave questions in a file; you answer when you wake up. ([details →](user-stories/010-async-human-qa-via-file.md))
+
+Safety is mechanical, not optional. Every pull request is a draft until you mark it ready. Every iteration passes 15 automatic checks — including a secret scanner, a "stay-in-your-lane" check that catches drive-by edits, and a security review. No agent can push directly to `main`. No pull request merges without your approval.
 
 ## What works today (honest)
 
@@ -75,53 +66,23 @@ Tracked as P0 `minsky-auto-restart-daemon-on-pull` in `TASKS.md` — the goal is
 | Per-machine agent config | ✅ Works | `~/.minsky/config.json` |
 | Switch between Devin, Claude, local models | 🟡 Partial | Claude primary, Devin experimental |
 | 8h unattended runs with >90% stability | 🟡 In progress | Currently ~24%, improving |
+| File-based human↔agent Q&A | 🔴 Not yet | P0 `minsky-human-comm-via-file` |
+| `npx minsky` one-command install+run | 🔴 Not yet | P1 `minsky-npx-install-and-run` |
 | Multi-file refactors | 🔴 Not yet | M2 milestone |
 | GitHub Actions CI | 🔴 Not yet | M3 milestone |
 
-## What it will NEVER do
+## What it won't do
+
+Hard rules. Not "tries not to" — mechanically blocked.
 
 - **Security-sensitive changes** — marked human-blocked, always
 - **Destructive operations** (force push, delete, deploy) — hard-blocked
 - **Architecture decisions** — files research tasks for humans
-- **Run without your approval** — every PR is a draft, you review
+- **Merge anything without your approval** — every PR is a draft; you review and merge
 
-## CLI reference
+## How Minsky works inside
 
-```bash
-minsky                    # start-or-attach: daemon + auto-install persistence + dashboard
-minsky watch              # attach to live dashboard (Ctrl-C detaches, daemon keeps running)
-minsky status             # quick health: PID, uptime, stability %
-minsky logs               # tail daemon log
-minsky stop               # thorough shutdown (launchd + runners + agents)
-minsky update             # stop → git pull → rebuild → restart from same spot
-minsky doctor             # check host readiness (node, git, gh, config, agents)
-minsky report             # baseline / delta against .minsky/metric-snapshots/
-minsky benchmark          # run the cross-repo runner N times and report pass-rate
-minsky init               # one-command bootstrap on any git repo
-minsky uninstall          # full removal (dry-run by default; --force to delete)
-minsky install-daemon     # install launchd plist (auto-done on first run)
-minsky uninstall-daemon   # remove launchd plist only (preserves config + logs)
-```
-
-## Configuration
-
-Per-machine config at `~/.minsky/config.json`:
-
-```json
-{
-  "cloud_agent": "devin",
-  "cloud_agent_model": "claude-opus-4-7-max",
-  "default_host": "/path/to/your/repo"
-}
-```
-
-| Agent | Cloud | Local | How brief is sent |
-|---|---|---|---|
-| `devin` | ✅ | — | `--prompt-file` |
-| `claude` | ✅ | — | stdin |
-| `aider` | — | ✅ | `--message-file` |
-
-## Architecture (30 seconds)
+The 30-second sketch:
 
 ```text
 minsky (bash CLI shim)
@@ -133,46 +94,34 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 .minsky/ sidecar — config, experiment store, iteration records
 ```
 
-## Principles
+Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 
-- **Soft by default** — scope-leak warns (doesn't halt), spawn-failed skips (doesn't stop)
-- **Default by default** — every behavior ships as the default, not behind opt-in flags
-- **Gradual improvement** — `minsky update` after every fix, daemon resumes from same spot
-- **Honest metrics** — stability % computed from real data, not aspirational
-- **Test the runtime, not just functions** — runtime invariants catch what 95% unit coverage misses
+- **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) ships today; multi-persona pipelines per task are an M2 milestone tracked at `multi-persona-pipeline-handoff-spec`.
+- **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
+- **Constitution = 18 rules, each enforced as a CI lint** — rule #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing), #18 (fake-data markers) are the load-bearing ones.
+- **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
+- **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration; same code adapts to any machine.
+- **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
 
-## Key files
+## More
 
-| File | Purpose |
-|---|---|
-| `TASKS.md` | Work queue (tasks.md spec) |
-| `MILESTONES.md` | Roadmap with exit criteria |
-| `AGENTS.md` | Rules for AI agents |
-| `DEPRECATED.md` | Features not to invest in |
-| `vision.md` | The constitution (15 rules) |
-| `competitors/` | Honest analysis of 6 competitors |
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — code in this repo is AI-authored; how to attest
+- **[INSTALL.md](INSTALL.md)** — agent-readable install runbook
+- **[docs/uninstall.md](docs/uninstall.md)** — full removal, daemon stop, sidecar cleanup
+- **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
+- **[docs/cli-reference.md](docs/cli-reference.md)** — every command, every flag, every env var
+- **[docs/configuration.md](docs/configuration.md)** — `~/.minsky/config.json`, agent comparison
+- **[docs/auto-merge.md](docs/auto-merge.md)** — periodic gate-and-merge for daemon PRs (ON for minsky itself, OFF for other repos)
+- **[docs/dependabot.md](docs/dependabot.md)** — dependency-update policy, grouping, local merge gate
+- **[docs/edge-cases.md](docs/edge-cases.md)** — empty queues, runtime limits, comm channels, crashes
+- **[docs/PRACTICES.md](docs/PRACTICES.md)** — scientifically proven practices with citations
+- **[vision.md](vision.md)** — the constitution (18 rules), pattern conformance index
+- **[TASKS.md](TASKS.md)** — open tasks with rule-9 fields
+- **[MILESTONES.md](MILESTONES.md)** — M1–M5 exit criteria
+- **[DEPRECATED.md](DEPRECATED.md)** — retired features (don't invest in these)
 
-## Competitors (honest)
-
-| Tool | Their advantage | Minsky's advantage |
-|---|---|---|
-| **Devin** ($20/mo) | Polished cloud UX | Self-hosted, 24/7 daemon, multi-agent, $0 local |
-| **OpenHands** (OSS) | Higher SWE-bench | Daemon mode, budget mgmt, multi-repo |
-| **Aider** (OSS) | Best local models | Minsky uses aider as its local backend |
-| **Cursor Agent** | IDE integration | Headless, survives IDE close, multi-repo |
-
-## Uninstall
-
-```bash
-# Preview what would be removed (safe — no deletion)
-minsky uninstall
-
-# Full removal: stops daemon, removes launchd plist, deletes ~/.minsky/
-minsky uninstall --force
-```
-
-The host repo and its `.minsky/` experiment store (your iteration history) are not touched — those are your data. Only per-machine state under `~/.minsky/` and `~/Library/LaunchAgents/com.minsky.daemon.plist` are removed.
+About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](LICENSE).
