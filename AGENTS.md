@@ -66,7 +66,7 @@ minsky stop                                 # SIGTERM → graceful drain
 
 You're working on **Minsky** — an integration distribution that connects existing tools into a viable cybernetic system that produces software 24/7 and stays alive indefinitely. Minsky is not a framework. We do not build what already exists.
 
-Code in this repo is AI-authored — cloud agents and local models both count. Add `Authored-by-agent: <id>`, `Co-Authored-By:`, or a `🤖 Authored by <agent>` PR-body footer to every commit you ship. The convention is human-readable, not mechanically enforced; we trust attestation honesty. Full policy at [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Code in this repo is AI-authored — cloud agents and local models both count. Don't add an attestation trailer, footer, or co-author tag to commits; provenance is established by live observation of the session, not by self-declaration. The convention is descriptive, not mechanically enforced. Full policy at [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 See `vision.md` § "What Minsky is" for full identity.
 
