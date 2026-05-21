@@ -1,13 +1,24 @@
 # Scientifically proven practices
 
-One-page index of the software-engineering practices Minsky applies today, the academic source behind each, and the exact place in this repo where the practice ships.
+> One-page index of the software-engineering practices Minsky applies today, with citations and the exact place in the repo where each ships.
+
+## What this file is
+
+The canonical map from *named, published practice* → *exact enforcement point* in the Minsky repo. Every row gives the academic citation, the claim, and the file/lint/daemon path that operationalises it.
 
 Every row is one of two states:
 
-- **Applied** — the practice is enforced today, in CI, by a deterministic linter (per [vision.md rule #10](../vision.md)) or by the running daemon
-- **Cited** — the practice informs the design and lives in [vision.md "Theoretical foundations"](../vision.md), but no automated enforcement exists yet
+- **Applied** — the practice is enforced today, in CI, by a deterministic linter (per [vision.md rule #10](../vision.md)) or by the running daemon.
+- **Cited** — the practice informs the design and lives in [vision.md "Theoretical foundations"](../vision.md), but no automated enforcement exists yet.
 
 The README's tier-1 paragraph names the 5 most load-bearing ones (TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, error budgets). The full list is below.
+
+## What this file is not
+
+- **Not the constitution** — see [vision.md](../vision.md) for the 17 non-negotiable rules.
+- **Not the architecture doc** — see [ARCHITECTURE.md](../ARCHITECTURE.md) for the layered model and dependency table.
+- **Not the research log** — see [research.md](../research.md) for the open exploration questions and tool evaluations.
+- **Not a literature review** — every row here is a practice Minsky already uses, not a survey of the field.
 
 ## Applied today
 
