@@ -23,6 +23,7 @@ Description=Minsky supervisor target — autonomous Claude Code 24/7 loop
 Wants=minsky-tick-loop.service
 Wants=minsky-budget-guard.service
 Wants=minsky-watchdog.service
+Wants=minsky-auto-merge.timer
 After=network-online.target
 
 [Install]

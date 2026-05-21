@@ -49,6 +49,14 @@ export type LoopStopReason =
 /**
  * One iteration's contribution to the loop result. Mirrors the daemon's
  * `DaemonIterationResult` shape but scoped to the cross-repo verdicts.
+ *
+ * `stderrTail` and `exitCode` were added 2026-05-19 (rule #17 — proactive
+ * healing) so the loop's `recordIteration` callback can surface the WHY
+ * of a `spawn-failed` to the operator. Previously the runner captured
+ * the agent's stderr but the loop threw it away before the daemon log
+ * line was printed — leaving operators with `verdict=spawn-failed` and
+ * no way to diagnose. Now the iteration record carries enough data to
+ * print "stderr tail: ..." inline.
  */
 export interface LoopIterationResult {
   readonly iteration: number;
@@ -57,6 +65,17 @@ export interface LoopIterationResult {
   readonly durationMs: number;
   readonly scopeLeakPaths: readonly string[];
   readonly prUrl: string | null;
+  readonly stderrTail: string;
+  readonly exitCode: number;
+  /**
+   * POSIX signal that killed the spawned child, if any. Threaded
+   * from `LiveSpawnOutcome.signal` so the daemon log's
+   * `recordIteration` callback can render `signal=SIGKILL` next
+   * to `exit=-1` — without this field, every signal-killed devin
+   * iteration looked identical to "exited with no code". Surfaced-by
+   * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+   */
+  readonly signal?: NodeJS.Signals;
 }
 
 /**
@@ -189,6 +208,13 @@ export interface RunHostLoopOpts {
    */
   readonly seedOnEmpty?: boolean;
   /**
+   * Scope-leak handling mode. Default `"warn"` — log the leak paths
+   * and continue iterating (devin naturally touches related files
+   * outside the task's **Files** declaration). Set `"hard"` to halt
+   * the loop on scope-leak (legacy behavior).
+   */
+  readonly scopeLeakMode?: "warn" | "hard";
+  /**
    * Builder for the audit's `HostCtoSignals`. The loop has the trigger
    * context (post-iteration vs queue-empty) and the just-completed
    * iteration; the builder fills in `hostRepo` / `hostRoot` /
@@ -318,11 +344,25 @@ async function runOneIteration(args: {
     durationMs: outcome.durationMs,
     scopeLeakPaths: outcome.scopeLeakPaths,
     prUrl: outcome.prUrl,
+    stderrTail: outcome.stderrTail,
+    exitCode: outcome.exitCode,
+    // Pass the signal field through — exactOptionalPropertyTypes means
+    // we must omit the key entirely when undefined (don't synthesise
+    // `signal: undefined`, which the type doesn't allow).
+    ...(outcome.signal !== undefined ? { signal: outcome.signal } : {}),
   };
   iterations.push(iterationResult);
   opts.recordIteration?.(iterationResult);
   await maybeFirePostIterationAudit(opts, task, outcome);
-  if (outcome.verdict === "scope-leak") return "scope-leak";
+  // Scope-leak: configurable soft vs hard mode.
+  // Soft (default): log warning + continue — devin naturally touches
+  // related files outside **Files**: declaration.
+  // Hard: halt the loop (legacy behavior, opt-in via opts.scopeLeakMode).
+  if (outcome.verdict === "scope-leak") {
+    if (opts.scopeLeakMode === "hard") return "scope-leak";
+    // Soft mode: log the leak paths, record the iteration, continue.
+    // The iteration record already has scopeLeakPaths for post-hoc review.
+  }
   if (outcome.verdict === "spawn-failed") return "spawn-failed";
   // After a validated iteration, mark the task so the next pickTask
   // call rotates past it. Without this, a worker that validates but

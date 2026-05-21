@@ -77,11 +77,12 @@ a single repo. When in doubt, ask.
 | "dry run" | `minsky --no-live --once` (blocking OK for dry-run) |
 
 **Path resolution**: `minsky` (the PATH shim) auto-discovers the minsky
-repo via `$MINSKY_REPO` env → `~/apps/tooling/minsky` → `~/apps/minsky`
+repo via `$MINSKY_REPO` env → `<minsky-repo>` → `~/apps/minsky`
 → `~/code/minsky` → `~/src/minsky`. If your layout differs, set
 `export MINSKY_REPO=/your/path/to/minsky` in your shell profile.
 
 After starting, **immediately verify TWO things**:
+
 1. The daemon is running (`running (PID ...)`)
 2. It targets the **correct folder** (check the `--host` or `--hosts-dir` in the process args)
 
@@ -153,7 +154,7 @@ done
 | `verdict: validated, pr_url: https://...` | **PR opened!** 🎉 | report to operator immediately |
 | `verdict: spawn-failed, 900...ms` | watchdog killed a slow iteration | known issue — daemon continues automatically |
 | `verdict: spawn-failed, <5000ms` | spawn died immediately | check agent auth (`claude/devin --version`) |
-| `verdict: scope-leak` | agent wrote outside allowed paths | **halt** — do NOT restart. File PR (§5). |
+| `verdict: scope-leak` | agent touched files outside declared scope | **normal** — soft mode logs the out-of-scope files + preserves the PR. Only investigate if the same files leak 3+ times. |
 | daemon process gone, no stale PID | clean exit | check `stopReason` in log, restart if needed |
 | no new records for 20+ min | stuck iteration | check if agent process is alive; if CPU=0% for 5min, SIGTERM daemon + restart |
 
@@ -200,29 +201,41 @@ If budget exhausted → **STOP** and jump to §5 (Swift-PR).
 
 ## 4. Safe-heal (very bounded)
 
-The observer may ONLY attempt a code / config fix when ALL of these
-hold:
+The observer may attempt a code / config fix when ALL of these hold:
 
 1. The failure pattern is in the catalogue below (exact signal match).
-2. The fix is single-file, single-line, and obviously correct to a
-   third party reading the repro.
-3. The operator confirms (or is absent AND the risk is zero — e.g.
-   setting an env var in the current shell).
+2. The Status column says `automated` — call the helper at the listed
+   path. Status `operator-recipe` means run the recipe text manually.
+   Status `blocked-by-policy` means escalate; do NOT automate.
+3. For `automated` heals: the helper writes only to `.minsky/`,
+   `node_modules/`, or `.tsbuildinfo` artifacts (regeneratable by
+   definition). NEVER to source code, NEVER outside the worktree.
+
+After this PR (M1.13 phase 1): **11 catalogued failure modes**,
+classified as **4 automated**, **6 operator-recipe**, **1
+blocked-by-policy**. Phase 2 (`promote-remaining-heal-recipes`)
+promotes the remaining 6 where policy allows.
 
 ### Heal catalogue
 
-| Signal (in stderr / banner) | Safe-heal recipe |
-|---|---|
-| `MINSKY_REPO=<path> but path does not exist` | Unset `MINSKY_REPO` in the current shell + retry. |
-| `host is not bootstrapped` | Run `minsky-bootstrap <host>`. Wait for it to finish, then retry `minsky`. |
-| `Run minsky-bootstrap <host> first` | Same — run the bootstrap. |
-| `node: command not found` | Out of scope — tell the operator to `nvm install 20` and exit. |
-| `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
-| `stale PID file (PID XXXX not running)` | `rm -f ~/.minsky/daemon.pid` then retry. This is the #1 most common issue. |
-| `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, clean PID file; if alive, the daemon is fine. |
-| `unexpected argument` from devin | Minsky build is stale — `cd $MINSKY_REPO && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
-| `MODULE_NOT_FOUND` from biome/lefthook | Node version mismatch or missing platform deps. Run `pnpm install` in the minsky repo. |
-| `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
+| Status | Signal (in stderr / banner) | Safe-heal recipe |
+|---|---|---|
+| `operator-recipe` | `MINSKY_REPO=<path> but path does not exist` | Unset `MINSKY_REPO` in the current shell + retry. (Shell env in user's interactive session — promotion blocked by policy.) |
+| `operator-recipe` | `host is not bootstrapped` | Run `minsky-bootstrap <host>`. Wait for it to finish, then retry `minsky`. |
+| `operator-recipe` | `Run minsky-bootstrap <host> first` | Same — run the bootstrap. |
+| `blocked-by-policy` | `node: command not found` | Out of scope — tell the operator to `nvm install 20` and exit. Promotion permanently blocked (modifying user shell env is out-of-policy). |
+| `operator-recipe` | `Rule #9 is iron` (task missing required fields) | Do NOT edit the task. File the task-fix PR upstream (§5) — this is a host-repo content bug, not a runner bug. |
+| **`automated`** | `stale PID file (PID XXXX not running)` | `novel/observer/heals/heal-stale-pid.mjs` — detects via `kill(0, pid) → ESRCH`, applies via `unlinkSync(pidPath)`. The #1 most common issue. |
+| `operator-recipe` | `daemon already running (PID XXXX)` | Check `kill -0 XXXX 2>/dev/null`; if dead, the stale-pid heal above runs; if alive, the daemon is fine. |
+| `operator-recipe` | `unexpected argument` from devin | Minsky build is stale — `cd $MINSKY_REPO && pnpm install && pnpm typecheck`. The `--prompt-file` fix must be compiled. |
+| **`automated`** | `MODULE_NOT_FOUND` from biome/lefthook (worktree) | `novel/observer/heals/heal-worktree-missing-node-modules.mjs` — detects worktree + missing `node_modules/` + present `package.json`; applies `pnpm install --prefer-offline`. |
+| **`automated`** | `.tsbuildinfo` references prior node version | `novel/observer/heals/heal-stale-tsbuildinfo.mjs` — detects via version mismatch in `.tsbuildinfo` JSON; applies via `unlinkSync` per stale file (recursive). |
+| `operator-recipe` | `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
+| **`automated`** | Shell polled ≥3 times with no new output | `novel/observer/heals/heal-stuck-command.mjs` — invoked by the agent runtime's shell-polling loop (not the daemon). Detects via `pollsWithoutOutput >= 3`; applies via `kill_shell + retry narrowly`. See `templates/AGENTS.md` § "Stuck-command detection & recovery". |
+
+**MTTR for automated heals** is published as `mttr-self-heal` in
+METRICS.md. Source: `.minsky/heal-events.jsonl` per host, aggregated
+by `node scripts/heal-mttr-report.mjs --window=30d --json`.
 
 **NEVER**:
 
@@ -390,6 +403,7 @@ Every command should complete in <30s or be run non-blocking:
 ### Per-agent quirks
 
 **Devin** (`cloud_agent: "devin"`):
+
 - Brief delivery: `--prompt-file` (NOT stdin — devin panics on stdin pipe).
 - Typical iteration time: 5-15 min (longer than Claude due to API routing).
 - Watchdog: 900s (15 min) default — will kill slow-but-productive iterations. Known P0.
@@ -397,12 +411,14 @@ Every command should complete in <30s or be run non-blocking:
 - Permission mode: `--permission-mode dangerous` (unattended daemon).
 
 **Claude Code** (`cloud_agent: "claude"`):
+
 - Brief delivery: stdin (`child.stdin.end(brief)`).
 - Typical iteration time: 3-10 min.
 - Watchdog: 900s default, overridable via `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`.
 - May hang with 0% CPU — the 2026-05-07 hang ran 1h56m. The watchdog exists for this.
 
 **Aider / local** (`--local` mode):
+
 - Brief delivery: `--message-file` (written to temp file).
 - Typical iteration time: 10-30 min (local models are slower).
 - Watchdog: 1800s (30 min) default.
@@ -437,6 +453,7 @@ done
 ### Always test with daemon stopped
 
 After any change to `bin/minsky`, test BOTH states:
+
 ```bash
 minsky stop; rm -f ~/.minsky/daemon.pid   # daemon off
 minsky watch                               # must not crash
@@ -444,6 +461,7 @@ minsky status                              # must not crash
 minsky --daemon --host $(pwd)              # start
 minsky watch                               # must render with data
 ```
+
 The empty-state path (no daemon, no PID, no log) is where most
 `unbound variable` bugs hide. `set -u` catches them but only at
 runtime.
@@ -487,6 +505,100 @@ pnpm m1:observability        # which M1 tasks have observability gaps
 pnpm m1:coverage             # 6-layer composite coverage number
 ```
 
+### Proactive healing — observe-and-fix is ONE action (rule #17 — iron, no exemption)
+
+**You don't observe errors. You fix them.** Every error surfaced by the
+daemon, by `pnpm test`, by `pnpm typecheck`, by `gh pr checks`, by
+`minsky status`, by ANY tool while watching minsky is treated as work
+to be done in the SAME session, not noted for later.
+
+The discipline:
+
+1. **Observation = work item.** When you see `GraphQL 401`, `spawn-failed`,
+   `ETIMEDOUT`, `scope-leak`, stack traces, hung processes, stale state —
+   you do not "make a mental note", you do not "we'll address this next
+   sprint". You do not even ask whether to fix it. You FIX IT NOW or you
+   file a structured task block with `**Blocked**:` if completing it
+   needs an external action — but never both: never silently move on.
+
+2. **Fix the class, not the instance.** A 401 today means the auth path
+   is fragile. Don't restart and pray — find the swallowing-catch, the
+   missing timeout, the unbounded retry, the un-deduped error spam. Each
+   fix lands as: (a) a failing test that reproduces the class, (b) the
+   smallest minimal patch, (c) the lint rule or invariant that prevents
+   the entire category from recurring. Rule #10 enforcement is the goal:
+   "the same bug cannot reach CI twice." Anchor: Forsgren, Humble, Kim,
+   *Accelerate*, 2018 (DORA — change-fail rate is reduced by preventing
+   classes, not patching instances).
+
+3. **Heal before reporting.** Every status message to the operator must
+   already contain the verb "fixed", "patched", "rolled out", or
+   "filed-blocked-because". A status that's only "I observed X" is a
+   constitutional violation of rule #17 — it shifts work onto the
+   operator the agent could have done.
+
+4. **The same loop applies to minsky itself.** When the daemon spits a
+   recurring failure mode (`spawn-failed` × 5, `scope-leak` × 3), the
+   observer's next action is to: (a) read the root cause from
+   `~/.minsky/daemon.log`, (b) land a fix in `novel/cross-repo-runner/`
+   or `novel/tick-loop/` with a failing-test-first per rule #3, (c)
+   `minsky update` to roll it forward, (d) re-verify stability rises.
+   File a TASKS.md block ONLY if the fix requires external action
+   (a credential, a sysctl, an upstream PR) — in which case the block
+   carries `**Blocked**: <code>` and the unblock path is the first line.
+
+5. **Anti-pattern: the watcher who narrates.** A monitoring session that
+   produces a 10-bullet summary of failures and zero merged fixes is the
+   exact thing rule #17 forbids. It looks like attentive work; it's
+   actually load shed to the operator. The deterministic gate is:
+   *if observed-errors > 0 and PRs-opened + tasks-filed = 0, the
+   session is a violation.* Lint: `scripts/check-rule-17-proactive-heal.mjs`
+   (P0, TASKS.md `rule-17-proactive-heal-lint`).
+
+This is the same shape as rule #6 ("stay alive"; let-it-crash +
+supervisor restart) but elevated to the observer's own conduct: if the
+observer is silently degrading by watching-without-fixing, the
+supervisor (the operator) loses information about the real failure
+rate.
+
+**Trigger phrases that activate rule #17 IMMEDIATELY (don't ask, just
+fix):**
+
+- "fix bugs before they happen" / "be proactive"
+- "make sure minsky gracefully picks them up"
+- "heal minsky on the way"
+- "make it persist" / "make it iron rule"
+
+Sources: Forsgren/Humble/Kim, *Accelerate*, 2018 (change-fail rate);
+Beyer et al., *SRE*, 2016, Ch. 3 (error budgets — observation that
+doesn't move the budget is dead weight); Armstrong, *Programming Erlang*,
+2007 (let-it-crash applies to the observer itself); operator directive
+2026-05-19 ("why aren't they being fixed by you right away? I expect
+that"); rule #6 (stay alive); rule #10 (deterministic enforcement);
+rule #16 (default by default — proactive healing is the default
+observer behaviour, not an opt-in mode).
+
+### Default by default (rule #16 — always follow)
+
+Every new behavior ships as the default. Never hide behind an opt-in flag.
+
+- If it's reasonable for all users → make it the default NOW
+- Ship with: experiment + measurement + opt-out (for debugging only)
+- The question is "why ISN'T this the default?" — not "should we enable it?"
+- Opt-out flags go to DEPRECATED.md the moment they're never used
+
+Examples already shipped:
+
+- Scope-leak soft mode → default (daemon never halts on scope-leak)
+- Launchd persistence → auto-installed on first `minsky` run
+- Dynamic timeouts → computed from iteration history, not hardcoded
+- Smart auto-attach → type `minsky` → it just works
+- Stale PID cleanup → automatic on daemon startup
+
+**When implementing a task**: if you catch yourself writing `MINSKY_ENABLE_X=1`,
+stop — make X the default and write `MINSKY_DISABLE_X=1` as the escape hatch
+instead. Then immediately file that escape hatch in DEPRECATED.md.
+
 ### When to commit before starting minsky
 
 If you've made changes to the minsky repo (or any host repo) that are
@@ -497,6 +609,7 @@ cause of `scope-leak` in dogfood mode.
 ### Session handoff
 
 If you're ending your agent session but minsky should keep running:
+
 1. Verify `minsky status` shows running.
 2. The daemon is SIGHUP-immune — it survives terminal close.
 3. Log the current state: `minsky status 2>&1 > /tmp/minsky-handoff.txt`

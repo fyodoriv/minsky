@@ -32,6 +32,7 @@ import { promisify } from "node:util";
 
 import { ProcessSpawnStrategy, globMatchesPath } from "@minsky/tick-loop";
 
+import { computeDynamicSettings, parseTimingsFromJsonl } from "../dist/dynamic-timeouts.js";
 import {
   buildSpawnPlan,
   detectCwd,
@@ -42,22 +43,57 @@ import {
   loadRepoConfig,
   pickHostTask,
   renderIterationRecord,
+  resolveGhHost,
   runHostCtoAudit,
   runHostLoop,
   runLive,
   synthesiseExperimentYaml,
   walkHostsDir,
 } from "../dist/index.js";
-import {
-  computeDynamicSettings,
-  parseTimingsFromJsonl,
-} from "../dist/dynamic-timeouts.js";
 
 const execFile = promisify(execFileCb);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MINSKY_REPO_ROOT = resolve(HERE, "..", "..", "..");
 const VISION_MD_PATH = resolve(MINSKY_REPO_ROOT, "vision.md");
+
+// Cache one gh-env per hostRoot per process — git remote get-url is cheap
+// but called multiple times per iteration (open-PR scan, PR backstop,
+// task-completion checks). Per rule #17, the resolver IS the proactive
+// fix for the github.intuit.com / github.com 401 cascade.
+/** @type {Map<string, NodeJS.ProcessEnv>} */
+const GH_ENV_CACHE = new Map();
+
+/**
+ * Resolve the `GH_HOST` for `hostRoot` and return a cloned `process.env`
+ * with it set. Always returns an env — falls back to `process.env` as-is
+ * when no host can be resolved (graceful-degrade per rule #7).
+ *
+ * @param {string} hostRoot  absolute path to the host repo
+ * @returns {NodeJS.ProcessEnv}
+ */
+function ghEnvForHost(hostRoot) {
+  const cached = GH_ENV_CACHE.get(hostRoot);
+  if (cached !== undefined) return cached;
+  let remoteUrl;
+  try {
+    remoteUrl = execFileSync("git", ["-C", hostRoot, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    remoteUrl = undefined;
+  }
+  const resolved = resolveGhHost({
+    envGhHost: process.env.GH_HOST,
+    gitRemoteUrl: remoteUrl,
+  });
+  const env = { ...process.env };
+  if (resolved.host !== null) env.GH_HOST = resolved.host;
+  else env.GH_HOST = undefined;
+  GH_ENV_CACHE.set(hostRoot, env);
+  return env;
+}
 
 function usage() {
   process.stderr.write(
@@ -328,11 +364,22 @@ function buildHostDispatch(state, resolvedHost) {
     };
   }
   const defaults = applyAutonomousDefaults(state);
+  // `--once` semantically means "run exactly one iteration then exit".
+  // Without this bridge, `--once` only flips the `loop` flag (currently
+  // unused inside the loop runner) and the dispatch falls into the
+  // default `tickIntervalMs` sleep (300_000ms) after iteration #0,
+  // making the test see a 60s timeout. Rule #17 fix: an operator-
+  // facing flag whose meaning the runner ignores is a class of bug
+  // we should never ship again. Force `maxIterations=1` when `--once`
+  // is set so the loop exits via `max-iterations` stop reason. The
+  // explicit `--max-iterations=N` flag still wins.
+  const maxIterations =
+    !defaults.loop && state.maxIterations === Number.POSITIVE_INFINITY ? 1 : state.maxIterations;
   return {
     kind: "loop",
     host: resolve(resolvedHost),
     ...defaults,
-    maxIterations: state.maxIterations,
+    maxIterations,
     tickIntervalMs: state.tickIntervalMs,
   };
 }
@@ -425,7 +472,11 @@ function writeExperimentYaml(planPath, yaml) {
 // set if `gh` is unavailable or the host_repo is unreachable (graceful-
 // degrade per rule #7 — the worst case is the prior behaviour: re-pick
 // the same task, not a hard failure).
-function listOpenPrBranches(hostRepo) {
+//
+// `hostRoot` is required: it lets `ghEnvForHost` resolve `GH_HOST` from
+// the host's `git remote get-url origin` (rule #17 — fixes the
+// github.intuit.com / github.com 401 cascade).
+function listOpenPrBranches(hostRepo, hostRoot) {
   try {
     const out = execFileSync(
       "gh",
@@ -441,7 +492,7 @@ function listOpenPrBranches(hostRepo) {
         "--limit",
         "100",
       ],
-      { encoding: "utf8", env: { ...process.env, GH_HOST: "github.intuit.com" } },
+      { encoding: "utf8", env: ghEnvForHost(hostRoot) },
     );
     const prs = JSON.parse(out);
     return new Set(prs.map((pr) => pr.headRefName).filter((name) => typeof name === "string"));
@@ -473,10 +524,11 @@ function writeIterationRecord(hostRoot, record) {
  * @otel-exempt thin gh-CLI wrapper.
  */
 function makeGhProbe(hostRoot) {
-  // GH_HOST mirrors `listOpenPrBranches` — the operator's GHE hostname.
-  // Operators on github.com don't need to unset this because `gh` falls
-  // back to the authenticated default host.
-  const ghEnv = { ...process.env, GH_HOST: process.env.GH_HOST ?? "github.intuit.com" };
+  // Per rule #17: `ghEnvForHost` reads the hostRoot's `git remote get-url
+  // origin` and sets `GH_HOST` to the matching hostname. This is the
+  // proactive fix for the github.intuit.com / github.com 401 cascade —
+  // never assume one corporate host. Operator-set `GH_HOST` wins.
+  const ghEnv = ghEnvForHost(hostRoot);
   return {
     async findOpenPr({ hostRepo, branch }) {
       try {
@@ -743,7 +795,7 @@ async function runPlanned(taskId, hostRoot, live) {
     reportTaskNotFound(taskResult);
     process.exit(1);
   }
-  const synth = synthesiseExperimentYaml(taskResult.task);
+  const synth = synthesiseExperimentYaml(taskResult.task, { hostRepo: config.host_repo });
   if (!synth.ok) {
     reportRule9Violation(taskResult.task.id, synth.missingFields);
     process.exit(1);
@@ -812,6 +864,14 @@ async function runLoopAsResult(parsed, controller) {
       `seed-on-empty=${seedOnEmpty ? "on" : "off"}) ===\n`,
   );
 
+  // Per rule #4 (everything measurable, visible): always emit the
+  // dynamic-timeouts probe when this host has iteration history, even
+  // in dry-run mode. Operators (and integration tests) rely on seeing
+  // this line to know the timeout values the loop computed. Previously
+  // gated by `if (live)`, which made the probe invisible exactly when
+  // dry-run operators most needed to verify the computation.
+  computeDynamicSettingsForHost(hostRoot);
+
   let strategy = null;
   if (live) {
     const loopAgentCfg = buildAgentConfig(hostRoot);
@@ -846,7 +906,13 @@ async function runLoopAsResult(parsed, controller) {
       // re-picked 3 times after PR #296 opened, wasting 30+ minutes
       // until manual TASKS.md cleanup in PR #297. Source: plugin task
       // `minsky-claim-by-open-pr`.
-      const openPrBranches = listOpenPrBranches(config.host_repo);
+      //
+      // Dry-run mode skips the gh probe: no live spawn means no new PR
+      // to collide with, and the network call adds 10–30s latency + a
+      // ~2.5% flake rate per CI run (rule #11 — no flaky load-bearing
+      // gates). Rule #17 fix: tests and bootstrap probes that exercise
+      // `--no-live` should not hit the GitHub API at all.
+      const openPrBranches = live ? listOpenPrBranches(config.host_repo, hostRoot) : new Set();
       // Thread the loop's validated-task set into pickHostTask so a
       // worker that validates but does NOT open a PR (devin pre-fix,
       // a brief that doesn't instruct `gh pr create`, or a CI failure
@@ -860,7 +926,7 @@ async function runLoopAsResult(parsed, controller) {
         skipTaskIds: pickOpts?.skipTaskIds,
       });
       if (task === null) return null;
-      const synth = synthesiseExperimentYaml(task);
+      const synth = synthesiseExperimentYaml(task, { hostRepo: config.host_repo });
       if (!synth.ok) {
         reportRule9Violation(task.id, synth.missingFields);
         return null;
@@ -874,7 +940,7 @@ async function runLoopAsResult(parsed, controller) {
         task,
         visionMdPath: VISION_MD_PATH,
       });
-      const synth = synthesiseExperimentYaml(task);
+      const synth = synthesiseExperimentYaml(task, { hostRepo: config.host_repo });
       if (synth.ok) writeExperimentYaml(plan.experimentYamlPath, synth.yaml);
       return plan;
     },
@@ -888,7 +954,12 @@ async function runLoopAsResult(parsed, controller) {
     globMatchesPath,
     maxIterations,
     tickIntervalMs,
+    // Scope-leak soft mode (default): devin naturally touches related
+    // files outside **Files**: — warn + continue instead of halting.
+    // Override: MINSKY_SCOPE_LEAK_MODE=hard for strict enforcement.
+    scopeLeakMode: process.env.MINSKY_SCOPE_LEAK_MODE === "hard" ? "hard" : "warn",
     signal: controller.signal,
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: core iteration recorder; multiple verdict branches + observability emit. Refactor tracked in TASKS.md `minsky-run-record-iteration-extract-verdict-mapper`.
     recordIteration: (record) => {
       const verdict =
         record.verdict === "validated"
@@ -904,6 +975,46 @@ async function runLoopAsResult(parsed, controller) {
       process.stdout.write(
         `⏱ iteration #${record.iteration}: task=${record.taskId} agent=${agent} verdict=${verdict} duration=${durSec}s pr=${pr}\n`,
       );
+      // Smart scope-leak: log the out-of-scope files as a follow-up
+      // suggestion, not a failure. "Should these be in a separate PR?"
+      if (record.scopeLeakPaths && record.scopeLeakPaths.length > 0) {
+        process.stdout.write(
+          `  📋 out-of-scope files (consider separate PR): ${record.scopeLeakPaths.join(", ")}\n`,
+        );
+      }
+      // Rule #17 (proactive healing) — surface the WHY of a spawn-failed
+      // so the operator can act. Previously the runner captured the
+      // agent's stderr but the loop threw it away before this log line
+      // was written, leaving operators with `verdict=spawn-failed` and
+      // zero diagnostic. Now: print exit code + signal + stderr tail
+      // (last 1 KB) inline. `signal=` was added 2026-05-19 for the
+      // `spawn-failed-exit-minus-one-silent-empty-stderr` P0 — the
+      // entire diagnostic class where exit=-1 collapsed "exited with
+      // no code" and "killed by signal" into one bucket.
+      if (record.verdict === "spawn-failed") {
+        const signalSuffix = record.signal ? ` signal=${record.signal}` : "";
+        process.stdout.write(`  exit=${record.exitCode}${signalSuffix}\n`);
+        if (record.stderrTail.length > 0) {
+          const tail = record.stderrTail.slice(-1024);
+          process.stdout.write(`  stderr tail (last ${tail.length} bytes):\n`);
+          for (const line of tail.split("\n")) {
+            process.stdout.write(`    ${line}\n`);
+          }
+        } else {
+          process.stdout.write("  stderr tail: (empty — agent exited silently)\n");
+        }
+      }
+      // Compose the iteration-record `notes` field. For spawn-failed
+      // iterations we append `exit=N signal=SIG` so operators reading
+      // `experiment-store/cross-repo/<id>.jsonl` later (or aggregating
+      // across machines) can see the signal without re-scrolling the
+      // daemon log. Validated iterations keep the original minimal
+      // shape to avoid breaking downstream JSONL grep patterns.
+      const baseNotes = `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`;
+      const diagSuffix =
+        record.verdict === "spawn-failed"
+          ? `; exit=${record.exitCode}${record.signal ? ` signal=${record.signal}` : ""}`
+          : "";
       writeIterationRecord(hostRoot, {
         ts: new Date().toISOString(),
         experiment_id: record.taskId,
@@ -911,7 +1022,7 @@ async function runLoopAsResult(parsed, controller) {
         branch: `${config.branch_prefix}${record.taskId}`,
         verdict,
         pr_url: record.prUrl,
-        notes: `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`,
+        notes: `${baseNotes}${diagSuffix}`,
       });
     },
     seedOnEmpty: ctoAudit && seedOnEmpty,
@@ -974,15 +1085,17 @@ function computeDynamicSettingsForHost(hostRoot) {
       try {
         const content = readFileSync(join(storeDir, f), "utf8");
         allTimings = allTimings.concat(parseTimingsFromJsonl(content));
-      } catch { /* skip unreadable files */ }
+      } catch {
+        /* skip unreadable files */
+      }
     }
     const settings = computeDynamicSettings(allTimings);
     if (settings.source === "history") {
       process.stdout.write(
         `[dynamic-timeouts] computed from ${settings.sampleSize} iterations: ` +
-        `watchdog=${Math.round(settings.spawnTimeoutMs / 1000)}s, ` +
-        `tick=${Math.round(settings.tickIntervalMs / 1000)}s, ` +
-        `p95=${settings.p95Ms ? Math.round(settings.p95Ms / 1000) + "s" : "n/a"}\n`,
+          `watchdog=${Math.round(settings.spawnTimeoutMs / 1000)}s, ` +
+          `tick=${Math.round(settings.tickIntervalMs / 1000)}s, ` +
+          `p95=${settings.p95Ms ? `${Math.round(settings.p95Ms / 1000)}s` : "n/a"}\n`,
       );
     }
     return settings;
@@ -1044,6 +1157,7 @@ function readSpawnCommand() {
  * Returns { args, buildInvocation(hostRoot) } so both the one-shot and
  * loop paths can use the same factory.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: agent-factory branching across local/devin/claude/aider — refactor tracked in TASKS.md `minsky-run-record-iteration-extract-verdict-mapper`.
 function buildAgentConfig(hostRoot) {
   // When MINSKY_LLM_PROVIDER=local-only (set by `minsky --local`),
   // use the local agent (aider + ollama) instead of the cloud agent.

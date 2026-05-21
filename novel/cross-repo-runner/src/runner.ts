@@ -39,6 +39,15 @@ export interface SpawnLike {
     readonly durationMs: number;
     readonly stdoutTail: string;
     readonly stderrTail: string;
+    /**
+     * The POSIX signal that terminated the child, if any. Surfaced-by
+     * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19) —
+     * lets the runner distinguish `exit=-1 from clean null code` vs
+     * `exit=-1 from SIGTERM/SIGKILL/SIGHUP` when the cloud agent is
+     * silently killed by the OS / parent process / EPM hook. Optional
+     * to keep test fakes back-compatible.
+     */
+    readonly signal?: NodeJS.Signals;
   }>;
 }
 
@@ -187,6 +196,14 @@ export interface LiveSpawnOutcome {
   readonly prUrl: string | null;
   /** Baseline ref captured before the spawn — useful for operator audit. */
   readonly baselineRef: string;
+  /**
+   * POSIX signal that killed the child, if any. Threaded from the
+   * underlying `SpawnLike` so the iteration record can log
+   * `signal=SIGKILL`/`SIGTERM`/`SIGHUP` instead of the meaningless
+   * `exit=-1` collapse. Surfaced-by
+   * `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+   */
+  readonly signal?: NodeJS.Signals;
 }
 
 /**
@@ -235,29 +252,31 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
       scopeLeakPaths: [],
       prUrl: null,
       baselineRef,
+      // Thread the POSIX signal so the iteration log can show *why*
+      // the spawn died (SIGKILL from watchdog vs SIGTERM from parent
+      // vs SIGHUP from terminal vs null = exited with code).
+      // `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19).
+      ...(result.signal !== undefined ? { signal: result.signal } : {}),
     };
   }
   const scopeLeakPaths = await detectScopeLeak(inputs, baselineRef);
-  if (scopeLeakPaths.length > 0) {
-    return {
-      verdict: "scope-leak",
-      stdoutTail: result.stdoutTail,
-      stderrTail: result.stderrTail,
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      scopeLeakPaths,
-      prUrl: null,
-      baselineRef,
-    };
-  }
+  // Smart scope-leak handling (2026-05-19 operator directive):
+  // Working on a task naturally touches more files than planned.
+  // Instead of discarding ALL work (old behavior), we:
+  //   - Still try to find/create the PR (preserve the work)
+  //   - Record the out-of-scope paths in the verdict (for follow-up)
+  //   - The host-loop decides whether to halt (hard) or continue (warn)
+  // The scope-leak paths become a follow-up signal ("these files
+  // changed — should they be in a separate PR?"), not a kill switch.
+  const prUrl = await ensurePrUrl(inputs, result.stdoutTail);
   return {
-    verdict: "validated",
+    verdict: scopeLeakPaths.length > 0 ? "scope-leak" : "validated",
     stdoutTail: result.stdoutTail,
     stderrTail: result.stderrTail,
     exitCode: result.exitCode,
     durationMs: result.durationMs,
-    scopeLeakPaths: [],
-    prUrl: await ensurePrUrl(inputs, result.stdoutTail),
+    scopeLeakPaths,
+    prUrl,
     baselineRef,
   };
 }
@@ -282,10 +301,7 @@ export async function runLive(inputs: RunLiveInputs): Promise<LiveSpawnOutcome> 
  *
  * (Internal helper — no JSDoc tag required.)
  */
-async function ensurePrUrl(
-  inputs: RunLiveInputs,
-  stdoutTail: string,
-): Promise<string | null> {
+async function ensurePrUrl(inputs: RunLiveInputs, stdoutTail: string): Promise<string | null> {
   const fromStdout = extractPrUrl(stdoutTail);
   if (fromStdout !== null) return fromStdout;
   if (inputs.gh === undefined) return null;
@@ -330,20 +346,20 @@ function defaultBackstopTitle(taskId: string): string {
 function defaultBackstopBody(taskId: string): string {
   return [
     `Auto-opened by minsky-run.mjs's post-spawn PR-creation backstop because the`,
-    `spawned agent finished with exit 0 but did not run \`gh pr create\` (or the`,
-    `URL did not appear in the bounded stdout tail).`,
+    "spawned agent finished with exit 0 but did not run `gh pr create` (or the",
+    "URL did not appear in the bounded stdout tail).",
     "",
     `Task: \`${taskId}\``,
     "",
     `Review the commits on this branch carefully — the agent's edits are present,`,
-    `but its PR description / self-grade is not. Edit this PR body to reflect`,
-    `the actual hypothesis / observation before requesting review.`,
+    "but its PR description / self-grade is not. Edit this PR body to reflect",
+    "the actual hypothesis / observation before requesting review.",
     "",
-    `## Hypothesis self-grade`,
+    "## Hypothesis self-grade",
     "",
-    `- Predicted: agent runs to completion and opens a PR via \`gh pr create\``,
-    `- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR`,
-    `- Match: partial`,
+    "- Predicted: agent runs to completion and opens a PR via `gh pr create`",
+    "- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR",
+    "- Match: partial",
     `- Lesson: the brief's \`gh pr create\` step is necessary but not always sufficient; the runner backstop is the durable safety net (devin-spawn-no-pr-opened pivot, 2026-05-18)`,
     "",
   ].join("\n");
@@ -401,9 +417,42 @@ export function extractPrUrl(stdoutTail: string): string | null {
  * @otel-exempt pure parser helper.
  */
 export function extractAllowedPathsFromTaskBlock(taskBlock: string): readonly string[] {
+  const declared = parseDeclaredFields(taskBlock);
+  // Preserve today's "no scope = no leak" semantics: a task that declared
+  // no scope stays empty, even with the implicit-paths union enabled.
+  if (declared.length === 0) return declared;
+  const implicit = readImplicitAllowedPaths();
+  if (implicit.length === 0) return declared;
+  const declaredSet = new Set(declared);
+  const additions = implicit.filter((path) => !declaredSet.has(path));
+  return [...declared, ...additions];
+}
+
+function parseDeclaredFields(taskBlock: string): readonly string[] {
   const touches = parseTouchesField(taskBlock);
   if (touches.length > 0) return touches;
   return parseFilesField(taskBlock);
+}
+
+// Implicit allowed-paths union — closes the scope-leak loophole observed on
+// oncall-hub-api 2026-05-16: every devin worker is brief-instructed to remove
+// the shipped task block from TASKS.md, but no task author lists `TASKS.md`
+// in **Files**: (it's repo-meta, not code surface). Union those brief-mandated
+// cleanup paths with the declared scope so they don't trigger scope-leak.
+//
+// Env knob (MINSKY_IMPLICIT_ALLOWED_PATHS):
+//   - unset       → use DEFAULT_IMPLICIT_ALLOWED_PATHS
+//   - empty ("")  → disable the union (return [] — declared paths only)
+//   - "a, b, c"   → replace the default set with the comma list
+//
+// @otel-exempt pure env-reader.
+const DEFAULT_IMPLICIT_ALLOWED_PATHS: readonly string[] = ["TASKS.md", "AGENTS.md"];
+
+function readImplicitAllowedPaths(): readonly string[] {
+  const raw = process.env["MINSKY_IMPLICIT_ALLOWED_PATHS"];
+  if (raw === undefined) return DEFAULT_IMPLICIT_ALLOWED_PATHS;
+  if (raw.length === 0) return [];
+  return splitCommaGlobs(raw);
 }
 
 function parseTouchesField(taskBlock: string): readonly string[] {

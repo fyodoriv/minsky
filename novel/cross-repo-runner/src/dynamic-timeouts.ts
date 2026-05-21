@@ -58,7 +58,7 @@ const MIN_TICK_MS = 30 * 1000;
 function percentile(sorted: readonly number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.ceil(p * sorted.length) - 1;
-  return sorted[Math.max(0, idx)] ?? sorted[sorted.length - 1]!;
+  return sorted[Math.max(0, idx)] ?? sorted[sorted.length - 1] ?? 0;
 }
 
 /**
@@ -69,17 +69,13 @@ function percentile(sorted: readonly number[], p: number): number {
  *
  * With <5 data points, returns conservative defaults.
  */
-export function computeDynamicSettings(
-  history: readonly IterationTiming[],
-): DynamicSettings {
+export function computeDynamicSettings(history: readonly IterationTiming[]): DynamicSettings {
   // Filter to successful iterations only (validated + scope-leak are
   // "completed work" for timing purposes; spawn-failed at <10s are
   // config errors, at ≥10s are watchdog kills — exclude both).
   const successful = history
     .filter(
-      (h) =>
-        (h.verdict === "validated" || h.verdict === "scope-leak") &&
-        h.durationMs > 10_000, // exclude sub-10s no-ops
+      (h) => (h.verdict === "validated" || h.verdict === "scope-leak") && h.durationMs > 10_000, // exclude sub-10s no-ops
     )
     .map((h) => h.durationMs)
     .sort((a, b) => a - b);
@@ -97,17 +93,11 @@ export function computeDynamicSettings(
   const p95 = percentile(successful, 0.95);
   const p50 = percentile(successful, 0.5);
 
-  const watchdog = Math.min(
-    MAX_WATCHDOG_MS,
-    Math.max(MIN_WATCHDOG_MS, Math.round(p95 * HEADROOM)),
-  );
+  const watchdog = Math.min(MAX_WATCHDOG_MS, Math.max(MIN_WATCHDOG_MS, Math.round(p95 * HEADROOM)));
 
   // Tick interval: ~10% of median iteration time, clamped.
   // Fast machines get faster ticks; slow machines don't hammer.
-  const tick = Math.min(
-    DEFAULT_TICK_MS,
-    Math.max(MIN_TICK_MS, Math.round(p50 * 0.1)),
-  );
+  const tick = Math.min(DEFAULT_TICK_MS, Math.max(MIN_TICK_MS, Math.round(p50 * 0.1)));
 
   return {
     spawnTimeoutMs: watchdog,
@@ -126,28 +116,28 @@ export function computeDynamicSettings(
 export function parseTimingsFromJsonl(jsonl: string): IterationTiming[] {
   const timings: IterationTiming[] = [];
   for (const line of jsonl.split("\n")) {
-    if (line.trim().length === 0) continue;
-    try {
-      const d = JSON.parse(line) as {
-        verdict?: string;
-        notes?: string;
-      };
-      const verdict = d.verdict;
-      if (
-        verdict !== "validated" &&
-        verdict !== "scope-leak" &&
-        verdict !== "spawn-failed"
-      )
-        continue;
-      const msMatch = d.notes?.match(/(\d+)ms/);
-      if (!msMatch) continue;
-      timings.push({
-        durationMs: Number.parseInt(msMatch[1]!, 10),
-        verdict,
-      });
-    } catch {
-      // skip malformed lines
-    }
+    const t = parseOneTimingLine(line);
+    if (t !== null) timings.push(t);
   }
   return timings;
+}
+
+/** Pure helper for one JSONL line. Returns null when the line should be skipped. */
+function parseOneTimingLine(line: string): IterationTiming | null {
+  if (line.trim().length === 0) return null;
+  let d: { verdict?: string; notes?: string };
+  try {
+    d = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const verdict = d.verdict;
+  if (verdict !== "validated" && verdict !== "scope-leak" && verdict !== "spawn-failed") {
+    return null;
+  }
+  const msMatch = d.notes?.match(/(\d+)ms/);
+  if (!msMatch) return null;
+  const msStr = msMatch[1];
+  if (msStr === undefined) return null;
+  return { durationMs: Number.parseInt(msStr, 10), verdict };
 }

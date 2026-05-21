@@ -9,6 +9,8 @@ import type { LiveSpawnOutcome } from "./runner.js";
 import type { RunnerPlan } from "./spawn-plan.js";
 import type { ParsedTask } from "./task-finder.js";
 
+import type { LoopIterationResult } from "./host-loop.js";
+
 import { runHostLoop } from "./host-loop.js";
 
 const baseTask: ParsedTask = {
@@ -100,7 +102,7 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.iterations.map((i) => i.taskId)).toEqual(["task-0", "task-1", "task-2"]);
   });
 
-  test("scope-leak halts on the first leaked iteration", async () => {
+  test("scope-leak halts on the first leaked iteration (hard mode)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     let n = 0;
     const result = await runHostLoop({
@@ -120,6 +122,7 @@ describe("runHostLoop — stop conditions", () => {
       globMatchesPath,
       maxIterations: 10,
       tickIntervalMs: 0,
+      scopeLeakMode: "hard",
     });
     expect(result.stopReason).toBe("scope-leak");
     expect(result.iterations).toHaveLength(3);
@@ -143,6 +146,65 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.stopReason).toBe("spawn-failed");
     expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]?.verdict).toBe("spawn-failed");
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is threaded from outcome into LoopIterationResult", async () => {
+    // Without the threading, every signal-killed iteration would surface
+    // as `exit=-1 signal=undefined`, which is exactly the diagnostic
+    // collapse this task fixes. The host-loop must preserve `signal`
+    // when present so the daemon log + iteration record can render it.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const records: LoopIterationResult[] = [];
+    const result = await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () =>
+        Promise.resolve(
+          makeOutcome({
+            verdict: "spawn-failed",
+            exitCode: -1,
+            stderrTail: "",
+            signal: "SIGKILL",
+          }),
+        ),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 10,
+      tickIntervalMs: 0,
+      recordIteration: (rec) => records.push(rec),
+    });
+    expect(result.stopReason).toBe("spawn-failed");
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]?.signal).toBe("SIGKILL");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.signal).toBe("SIGKILL");
+  });
+
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: omits signal when outcome has none (no key synthesised)", async () => {
+    // exactOptionalPropertyTypes: a `null` outcome.signal becomes
+    // `iterationResult.signal === undefined` via the property-omission
+    // spread. Verify the key is genuinely absent so downstream JSON
+    // serialisation doesn't emit `"signal":null` for the common
+    // exit-with-code path.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const records: LoopIterationResult[] = [];
+    await runHostLoop({
+      pickTask: () => baseTask,
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "spawn-failed", exitCode: 1, stderrTail: "boom" })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 1,
+      tickIntervalMs: 0,
+      recordIteration: (rec) => records.push(rec),
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).not.toHaveProperty("signal");
   });
 
   test("aborted when AbortSignal fires BEFORE the first iteration", async () => {
@@ -322,10 +384,7 @@ describe("runHostLoop — validated-task rotation (walker-drains-one-host-foreve
     expect(result.iterations.map((i) => i.taskId)).toEqual(["task-a", "task-b", "task-c"]);
   });
 
-  test("does NOT add scope-leak verdicts to the skip set (loop halts anyway)", async () => {
-    // Defensive: scope-leak halts the loop, so we never call pickTask
-    // again. But assert the invariant explicitly — only `validated`
-    // verdicts get rotated past.
+  test("does NOT add scope-leak verdicts to the skip set in hard mode (loop halts)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     const skipsObserved: ReadonlySet<string>[] = [];
     const result = await runHostLoop({
@@ -342,12 +401,33 @@ describe("runHostLoop — validated-task rotation (walker-drains-one-host-foreve
       globMatchesPath,
       maxIterations: 5,
       tickIntervalMs: 0,
+      scopeLeakMode: "hard",
     });
     expect(result.stopReason).toBe("scope-leak");
-    // Only one pick happened (the loop halted on scope-leak), and the
-    // skip set was empty going in.
     expect(skipsObserved).toHaveLength(1);
     expect(Array.from(skipsObserved[0] ?? [])).toEqual([]);
+  });
+
+  test("scope-leak in warn mode (default) continues iterating", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => ["src/**"],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "scope-leak", scopeLeakPaths: ["x.ts"] })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 3,
+      tickIntervalMs: 0,
+      // scopeLeakMode defaults to undefined → treated as "warn"
+    });
+    // Soft mode: loop continues through all 3 iterations despite scope-leak
+    expect(result.stopReason).toBe("max-iterations");
+    expect(result.iterations).toHaveLength(3);
+    expect(result.iterations.every((i) => i.verdict === "scope-leak")).toBe(true);
   });
 
   test("a fresh runHostLoop invocation starts with an empty skip set", async () => {

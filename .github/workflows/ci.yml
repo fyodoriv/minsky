@@ -24,7 +24,7 @@ jobs:
       # Pinned to 0.15.0 (matches the package.json devDependency). Rule #7
       # (chaos engineering — trust no unverified dependency); ARCHITECTURE.md
       # § "Versioning & dependency evolution".
-      - run: npx -y markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.minsky" "#.obsidian" "#.claude"
+      - run: npx -y markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.worktrees" "#.minsky" "#.obsidian" "#.claude"
 
   tasks-lint:
     runs-on: ubuntu-latest
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -104,7 +104,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -168,7 +168,7 @@ jobs:
           # Full history so the linter can resolve `closes <task-id>` task
           # references from past commits.
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -241,7 +241,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -303,7 +303,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -328,6 +328,149 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-rule-12-scope-discipline.test.mjs
 
+  rule-17-proactive-heal:
+    # rule #17 (vision.md § "Proactive healing — observation IS the fix"
+    # — iron rule): a PR description that surfaces observed-error tokens
+    # (`spawn-failed`, `scope-leak`, `ETIMEDOUT`, `GraphQL 401`, stack
+    # traces, etc.) MUST also carry healing evidence — a `fix(...)` /
+    # `patch:` commit subject, a `**Blocked**: <code>` task block, or a
+    # non-empty diff that lands the fix. Pure "I observed X" PR bodies
+    # are rejected as the "watcher who narrates" anti-pattern.
+    # Anchor: rule #10 (deterministic enforcement); rule #17 itself;
+    # Forsgren/Humble/Kim, *Accelerate*, 2018 (DORA — change-fail rate
+    # falls when fixes prevent classes, not instances); operator
+    # directive 2026-05-19 ("why aren't they being fixed by you right
+    # away?").
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: fetch base ref
+        run: git fetch origin main:refs/remotes/origin/main
+      - name: fetch PR body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR_NUMBER" --json body --jq .body > /tmp/rule-17-pr-body.md
+      - name: rule-17 lint
+        env:
+          RULE_17_DIFF_BASE: origin/main
+          RULE_17_PR_BODY_PATH: /tmp/rule-17-pr-body.md
+        run: node scripts/check-rule-17-proactive-heal.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-17-proactive-heal.test.mjs
+
+  no-hardcoded-user-paths:
+    # rule-#1 + rule-#17 deterministic gate against hardcoded user paths.
+    # `MINSKY_HOME ?? "/Users/cbrwizard/…"` fallbacks broke the script for
+    # every operator who isn't `cbrwizard` and were healed twice in PRs
+    # #651 and #654. Without this lint, the same class returns the next
+    # time someone hardcodes their own `$HOME` in a script. Comments are
+    # exempt (audit trail); current-user, `ubuntu`, and `runner` are
+    # exempt (CI / local-machine self-references).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-hardcoded-user-paths lint
+        run: node scripts/check-no-hardcoded-user-paths.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-hardcoded-user-paths.test.mjs
+
+  no-personal-paths-in-docs:
+    # Markdown sibling of `no-hardcoded-user-paths`. The pure-prose lint blocks
+    # personal-path leaks (`/Users/<other-user>`, `~/apps/<repo-on-fyodor's-mac>`,
+    # `MINSKY_HOME=~/apps/tooling/minsky` defaults) from sneaking into READMEs
+    # / docs / user-stories / changelogs / TASKS.md. Same enforcement shape as
+    # the code-path version: comments exempt, current-user exempt, runs across
+    # every tracked `*.md` and `*.markdown` file under the repo root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-personal-paths-in-docs lint
+        run: node scripts/check-no-personal-paths-in-docs.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-no-personal-paths-in-docs.test.mjs
+
+  agents-md-coherence:
+    # AGENTS.md is the agent runbook every agent reads first. When it drifts
+    # from the actual repo state (broken relative links to renamed docs,
+    # `vision.md § N` citations pointing to non-existent rules, missing
+    # load-bearing section anchors that other scripts cite), agents follow
+    # stale instructions. This gate pins three drift classes: required
+    # sections, relative-link resolution, and `vision.md § N` citation
+    # resolution. Same shape as `no-personal-paths-in-docs` — pure decision
+    # function with the I/O at the edge.
+    #
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #17 (vision.md § 17 — proactive healing); operator directive
+    # 2026-05-21 "Let's ensure agents.md is always updated too".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: agents-md-coherence lint
+        run: node scripts/check-agents-md-coherence.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-agents-md-coherence.test.mjs
+
+  rule-9-tasksmd-fields:
+    # Rule #9 (vision.md § "Pre-registered hypothesis-driven development
+    # — iron rule"): every task block in TASKS.md must carry Hypothesis,
+    # Success (or Acceptance), Pivot, Measurement, and Anchor. Without
+    # all five the rule degrades to a wish-list. The 2026-05-19 audit
+    # found 32 of 152 task blocks violating; those are grandfathered in
+    # the lint's allowlist with a backfill task to drain the list. NEW
+    # tasks added after 2026-05-19 are never grandfathered.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-9-tasksmd-fields lint
+        run: node scripts/check-rule-9-tasksmd-fields.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-9-tasksmd-fields.test.mjs
+
   rule-6-let-it-crash:
     # rule #10: deterministic enforcement of rule #6 (let-it-crash). Walks
     # every novel/**/*.ts file added/modified in the PR; flags try/catch
@@ -342,7 +485,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -374,7 +517,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -428,7 +571,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -459,7 +602,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -487,7 +630,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # diff against origin/main needs the merge base.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -512,7 +655,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -540,7 +683,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -565,7 +708,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -590,7 +733,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -619,7 +762,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -647,7 +790,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -674,7 +817,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -700,7 +843,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -725,7 +868,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -752,7 +895,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -778,7 +921,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -908,7 +1051,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -939,7 +1082,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -951,6 +1094,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-no-singleton-experiment.test.mjs
+
+  brief-pr-instructions:
+    # rule #10 deterministic enforcement of the `devin-spawn-no-pr-opened`
+    # fix (commit 085fdd7, 2026-05-18). The spawn brief in
+    # `novel/cross-repo-runner/src/spawn-plan.ts` must keep the three
+    # literal substrings (`FINAL STEP`, `git push`, `gh pr create`) that
+    # convert the agent's analysis-mode tail into action-mode and prevent
+    # the "validated but no PR opened" failure class from regressing.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # AGENTS.md § "Runtime invariants" (the runtime counterpart is
+    # `briefIncludesPrInstructions` in runtime-invariants.ts).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: brief-pr-instructions lint
+        run: node scripts/check-brief-pr-instructions.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-brief-pr-instructions.test.mjs
 
   skill-rule-cap:
     # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
@@ -967,7 +1136,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -997,7 +1166,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1032,7 +1201,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1062,7 +1231,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1089,7 +1258,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1101,6 +1270,38 @@ jobs:
         run: node scripts/check-tick-loop-backoff-schedule.mjs
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs
+
+  machine-budget:
+    # rule #10 ratchet applied to vision.md rule #15 / operator directive
+    # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
+    # the budget controller exports + policy constants stay pinned
+    # (defaultBudgetPct=70, swarmMaxBudgetPct=80), that no minsky
+    # worker/tick-loop launchd template sets `ProcessType=Background` while
+    # the budget is non-trivial (the QoS class throttles the very CPU/IO the
+    # budget allocates — the empirically-confirmed unreachable-budget
+    # regression), and that the controller test file keeps the three rule-#9
+    # pre-registered behaviour suites. Dormant until the controller artefact
+    # lands (same precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # vision.md rule #15; operator directive 2026-05-17; Apple
+    # `launchd.plist(5)` (`ProcessType` QoS); Beyer et al., *Site
+    # Reliability Engineering*, O'Reilly 2016, Ch. 3 (error-budget
+    # enforcement — a contradicting throttle trips a mechanical response).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: machine-budget lint
+        run: node scripts/check-machine-budget.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-machine-budget.test.mjs
 
   supervisor-sandbox-hardening:
     # rule #10 ratchet applied to vision.md rule #13 item 3 (supervisor
@@ -1117,7 +1318,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1143,7 +1344,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1168,7 +1369,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1195,7 +1396,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1226,7 +1427,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1274,7 +1475,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1318,7 +1519,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
       - uses: actions/setup-node@v6
@@ -1335,8 +1536,10 @@ jobs:
 
   ci:
     needs:
+      - agents-md-coherence
       - anchor-primary-source
       - biome
+      - brief-pr-instructions
       - cadence-pivot-threshold
       - cloud-audit-gate
       - dashboard-localhost-bind
@@ -1344,6 +1547,7 @@ jobs:
       - hygiene
       - linux-supervisor-integration
       - lockfile-integrity
+      - machine-budget
       - macos-supervisor-integration
       - maciek-smoke
       - mape-k-budget-cap
@@ -1371,6 +1575,10 @@ jobs:
       - rule-7-chaos-coverage
       - rule-12-scope-discipline
       - rule-13-sibling-anchors
+      - rule-17-proactive-heal
+      - no-hardcoded-user-paths
+      - no-personal-paths-in-docs
+      - rule-9-tasksmd-fields
       - sandbox-env-declared
       - sbom-shape
       - supervisor-sandbox-hardening
@@ -1391,14 +1599,17 @@ jobs:
           # only; on push they are `skipped` — accept that, fail on
           # `failure`/`cancelled`. All other jobs must be `success`.
           fail=0
-          for r in "${{ needs.anchor-primary-source.result }}" \
+          for r in "${{ needs.agents-md-coherence.result }}" \
+                   "${{ needs.anchor-primary-source.result }}" \
                    "${{ needs.biome.result }}" \
+                   "${{ needs.brief-pr-instructions.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.cloud-audit-gate.result }}" \
                    "${{ needs.dashboard-localhost-bind.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.lockfile-integrity.result }}" \
+                   "${{ needs.machine-budget.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.mape-k-budget-cap.result }}" \
                    "${{ needs.mape-k-constraints-md-size.result }}" \
@@ -1421,6 +1632,10 @@ jobs:
                    "${{ needs.rule-7-chaos-coverage.result }}" \
                    "${{ needs.rule-12-scope-discipline.result }}" \
                    "${{ needs.rule-13-sibling-anchors.result }}" \
+                   "${{ needs.rule-17-proactive-heal.result }}" \
+                   "${{ needs.no-hardcoded-user-paths.result }}" \
+                   "${{ needs.no-personal-paths-in-docs.result }}" \
+                   "${{ needs.rule-9-tasksmd-fields.result }}" \
                    "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.supervisor-sandbox-hardening.result }}" \
