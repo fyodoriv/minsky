@@ -71,5 +71,14 @@ export type {
 } from "./host-walker.js";
 export { resolveMinskyRepo } from "./shim-resolve.js";
 export type { ResolveResult, ResolveSource, ShimResolveInputs } from "./shim-resolve.js";
+export { assertWriteAllowed, classifyRepo, isTaskmdOnlyDiff } from "./repo-policy.js";
+export type {
+  ClassifyRepoInputs,
+  RepoClass,
+  WriteAction,
+  WriteRefusalCode,
+  WriteRequest,
+  WriteVerdict,
+} from "./repo-policy.js";
 export { resolveGhHost } from "./gh-host-resolve.js";
 export type { GhHostSource, ResolveGhHostInput, ResolveGhHostResult } from "./gh-host-resolve.js";
