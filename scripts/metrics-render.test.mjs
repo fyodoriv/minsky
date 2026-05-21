@@ -23,6 +23,9 @@ const FIXTURE_METRICS = [
     formula: "echo 0",
     unit: "fraction",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "99% / 97% / 95% (30 / 90 / 365 d)",
+    pivot: "<90% over 30 d → reconsider supervisor design",
+    anchor: "Beyer et al., _SRE_ 2016, Ch. 4",
   },
   {
     id: "task-throughput",
@@ -30,6 +33,9 @@ const FIXTURE_METRICS = [
     formula: "echo 0",
     unit: "tasks/day",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "≥1 task / day at green budget",
+    pivot: "<1 / day for 14 d at green budget",
+    anchor: "Goldratt TOC",
   },
   {
     id: "extraction-count",
@@ -38,6 +44,9 @@ const FIXTURE_METRICS = [
     unit: "count",
     freshnessBudgetMs: 30 * DAY_MS,
     monotonic: "ok",
+    goal: "≥4 OSS repos by month 6",
+    pivot: "<2 by month 4",
+    anchor: "rule #1 (don't reinvent)",
   },
 ];
 
