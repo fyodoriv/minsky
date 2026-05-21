@@ -37,6 +37,26 @@ Three escape hatches, in order of granularity:
 | `MINSKY_AUTO_MERGE=off` in `~/.minsky/config.json` | Same effect, persisted across reboots. | Persistent per-machine disable without removing the supervisor unit. |
 | `launchctl bootout gui/$UID com.minsky.auto-merge` (macOS) / `systemctl --user disable --now minsky-auto-merge.timer` (Linux) | Removes the unit from the supervisor entirely. | Permanent disable + reclaim the disk space the plist/timer occupies. Rerun `setup.sh --dogfood` to reinstall. |
 
+## Lossless-close verification (operator directive 2026-05-21)
+
+**Never close a PR without verifying its work is preserved.** The auto-merge loop only ever MERGES; it never closes. But humans (and other agents) sometimes close PRs to deduplicate against a "survivor" — and a file-list overlap is NOT sufficient evidence that the survivor contains the closed PR's work. Two PRs can touch the same files with DIFFERENT implementations of the same logic; closing one would lose its unique implementation.
+
+Before closing any PR with the intent "superseded by #M", run:
+
+```bash
+node scripts/verify-pr-closure-is-lossless.mjs --close=<N> --survivor=<M>
+```
+
+Exit codes:
+
+| Exit | Meaning | What to do |
+|---|---|---|
+| 0 | Verified lossless — applying #N's patch onto #M's tree is a no-op | Safe to close #N. The closure comment should cite the verifier output. |
+| 1 | Loss detected — #N has unique work the survivor's tree doesn't absorb | Do NOT close. Either (a) cherry-pick #N's unique commits into a survivor-cleanup branch, or (b) leave #N open until it can merge directly. |
+| 2 | Invocation error (missing flags, gh failure) | Fix the invocation and retry. |
+
+History note: the 2026-05-20 Phase-1 PR closures (#609, #617, #619, #632) were based on file-list overlap alone. When this verifier was written 2026-05-21, three of the four (#609, #617, #619) failed verification — the survivor's tree had DIFFERENT implementations of the same files, and the close would have lost unique work. All four were reopened. This script is the durable rule-#10 substrate against the same class returning.
+
 ## What it does NOT do
 
 - **Doesn't merge drafts.** Drafts are explicitly excluded by `pickGateCandidates`.
