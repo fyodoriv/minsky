@@ -1,69 +1,100 @@
-## What & why needed
+## Summary
 
-`runany-dynamic-model-or-local-fallback` Acceptance #3: when every
-configured remote is down/exhausted the run-anywhere entrypoint must
-switch **fully + automatically + visibly** to local within ≤1 iteration,
-with 0 wedged iterations.
+P0 `runany-zero-arg-entrypoint`, slice 2 (composes slice 1's `#609`
+substrate, cherry-picked so this PR is a self-contained mergeable unit).
 
-Slices 1–2 shipped the pure `resolveRunAnyModel` decider + the
-pre-registered `runany-model-audit.mjs` harness. Slice 3 wired the
-**pin** path into `pickAndLogStrategicModel()` (Acceptance #1). Until
-this slice the **all-remote-down** path was still unwired at the
-entrypoint: when the budget guard circuit-broke claude (the only
-configured remote → inaccessible), `pickAndLogStrategicModel()` fell
-through the full budget-snapshot → usage-history ring append →
-exhaustion-regression machinery and emitted the ~400-byte
-`tick-loop.strategic-pick` span before eventually yielding `undefined`
-(local). The decision was neither unified nor visibly attributed to
-"remote down".
+Slice 1 (`#609`) made `minsky` zero-arg launch the conductor, but its own
+self-grade flagged the next step: *the shim did git-root detection in
+bash while `detectAnyCwd` did it in TS — two code paths that can
+diverge.* This slice closes that: detection now lives in **one tested
+place** and the conductor self-scopes through it.
 
-This slice (4) routes the `lastDecision.action === "circuit-break"` case
-through `resolveRunAnyModel` and returns **before** the snapshot math,
-the ring-buffer append, and the exhaustion regression — the switch to
-local happens in *that very iteration* (≤1) and emits a compact
-`[span] tick-loop.runany-resolve` line with `"source":"all-remote-down"`
-and a visible reason (Beyer SRE 2016 visible-not-silent). Recovery is
-implicit (Acceptance #4): the next non-circuit-broken iteration falls
-through to the unchanged dynamic path. The budget-band dynamic path (no
-pin, remote reachable) is byte-for-byte identical to before this slice.
-Actual local liveness/bootstrap stays owned by the wrapper's TTL-cached
-probe (`minsky-cli-auto-bootstrap-local-llm`); this layer routes + logs.
+- `novel/cross-repo-runner/src/cwd-detect.ts`: pure `resolveConductorRoot`
+  (collapse a `CwdDetectResult` to one `MINSKY_HOME` root: single-host→host,
+  multi-host→parent) + `detectConductorRoot` (`detectAnyCwd` → resolve, one
+  call).
+- `scripts/orchestrate.mjs`: pure exported `resolveRepoRoot(env, cwd, fs)`
+  — explicit `MINSKY_HOME` env wins (launchd / `minsky-bootstrap`); else
+  the conductor self-detects from cwd via `detectConductorRoot`. Removes
+  the hardcoded personal-path default that silently defeated "run in any
+  folder".
+- `bin/minsky`: zero-arg path drops the `git rev-parse --show-toplevel`
+  subprocess **and** the `MINSKY_HOME=…` assignment; it just `exec`s the
+  self-scoping conductor.
+- `index.ts`: exports the two new pure functions.
+- Tests: +12 `cwd-detect`, +4 `orchestrate` (31 pass).
+- `docs/run-anywhere.md`: detection table + implementation note rewritten
+  for the single-source-of-truth flow.
 
-## Changes
+Composes the existing shim + cross-repo-runner + conductor (rule #1 — no
+new orchestrator); the only new code is the pure root resolver and its
+wiring.
 
-- `novel/tick-loop/bin/tick-loop.mjs` — all-remote-down short-circuit in
-  `pickAndLogStrategicModel()` (mirrors slice 3's pin short-circuit
-  shape), plus two frozen module consts reused across degraded
-  iterations (no per-tick allocation).
-- `docs/run-anywhere.md` — Status section: slice 4 documented; follow-up
-  scope narrowed to the live multi-backend network probe.
+## Why needed
 
-## Optimization (rule #9 skip-earlier gate)
-
-A circuit-broken iteration now skips: the remaining-fractions snapshot
-math, the `appendUsageHistory` ring-buffer growth, the
-`predictExhaustionMs` regression, and the ~400-byte
-`tick-loop.strategic-pick` span (replaced by a ~140-byte
-`tick-loop.runany-resolve` line). Net ≥260-byte per-degraded-iteration
-log reduction + dropped allocation/regression work. Same optimization
-class as slice 3's pin path.
-
-## Measurement
-
-```bash
-node scripts/runany-model-audit.mjs --json   # overall PASS
-```
-
-`all-down` scenario asserts the pre-registered thresholds the slice-4
-wire-in now drives at runtime: ≤1 iteration to switch to local, ≥0.95
-local-dispatch fraction during the down window, 0 wedged iterations,
-recovers to the dynamic remote pick when a backend returns.
+Slice 1 left the precedence chain duplicated: bash's
+`git rev-parse || $PWD` does **not** implement the full 5-level chain
+(it never detects nested-repos as a multi-host parent, and ignores
+`.minsky/repo.yaml`). A nested-repos tree would therefore be scoped
+wrong. Centralising detection in `detectConductorRoot` makes the
+documented acceptance ("handles git-repo / nested-repos / plain-dir")
+correct by construction, and removes a class of future bash/TS drift
+bugs (Saltzer & Schroeder 1975 — least-surprise default; one resolver,
+one behaviour).
 
 ## Hypothesis self-grade
 
-- **Predicted**: with all remote backends blocked (simulated), the run switches to local within one iteration and continues with 0 wedged iterations; the pin and dynamic paths are unaffected
-- **Observed**: `runany-model-audit.mjs --json` → overall PASS (pin 15/15, dynamic 6/6, all-down: itersToSwitch≤1, localFraction 1.0, wedged 0, recoveredToRemote true)
+- **Predicted**: the conductor self-detects the correct scope root in
+  5/5 distinct folder types (git repo, nested-repos tree, plain dir,
+  monorepo, detached worktree) via one pure tested path, with no bash
+  detection duplication and one fewer subprocess per zero-arg launch
+- **Observed**: deterministic 5-fixture run of `detectConductorRoot`
+  over real fs probes → `5/5 conductor-root resolved correctly`
+  (git-repo→cwd, nested-repos→cwd parent, plain-dir→cwd, monorepo→cwd,
+  detached-wt→cwd); `cwd-detect.test.ts` + `orchestrate.test.mjs` 31/31
+  pass; `bin/minsky` zero-arg subprocess count 3→2 (the `git rev-parse`
+  fork is gone)
 - **Match**: yes
-- **Lesson**: the budget-circuit-break signal is a sufficient synchronous proxy for "the only configured remote is inaccessible"; the next slice adds a real per-backend network probe so a multi-remote network outage (not just budget) also trips the all-remote-down branch
+- **Lesson**: the pure resolver is now the single seam; a follow-up
+  slice can make the conductor's *sweep* (not just its root) honour the
+  multi-host tree so nested-repos run all sub-repos, not just scope to
+  the parent
 
-<!-- security: not-applicable — model-routing decision + log line only; no auth/secrets/sandbox/PII/network surface added (the wrapper owns probes) -->
+## Security & privacy
+
+`bin/minsky` zero-arg now `exec`s the conductor with no computed
+`MINSKY_HOME`; `orchestrate.mjs` self-detects via `detectConductorRoot`
+over real `existsSync`/`readdirSync` probes of cwd only. Threat: a
+hostile cwd cannot redirect the conductor binary — `node` and the
+conductor path still resolve from the already-validated `MINSKY_REPO`
+(existing resolver, unchanged), not from cwd; the detected root is only
+used as the ledger/sweep scope path, never `eval`'d or executed. No new
+auth, secret, sandbox, or PII surface; vision.md § 13 reviewed.
+
+## Optimization
+
+optimization: round-trip elimination — the zero-arg path previously
+forked a standalone `git -C "$PWD" rev-parse --show-toplevel` subprocess
+on every launch for root detection; that line (and the `MINSKY_HOME=…`
+prefix) is deleted and detection folds into the conductor's own startup,
+dropping zero-arg subprocess count 3→2 (~60 bytes of bash removed, well
+over the 10-byte floor; one fewer process spawn per `minsky` invocation).
+
+## Manual test (reviewer-relevant)
+
+Deterministic substitute for the live 5-fixture conductor smoke (the
+real conductor runs a PR-merge sweep, not run here):
+
+```bash
+node --input-type=module -e '
+import { detectConductorRoot } from "./novel/cross-repo-runner/dist/index.js";
+import { existsSync, readdirSync } from "node:fs";
+const probe = { exists:p=>existsSync(p), listDir:p=>{try{return readdirSync(p)}catch{return[]}} };
+for (const [n,d] of Object.entries({gitrepo:"…",tree:"…",plain:"…",mono:"…",wt:"…"}))
+  console.log(n, detectConductorRoot({cwd:d, fs:probe}));'
+# → 5/5 root === cwd
+npx vitest run novel/cross-repo-runner/src/cwd-detect.test.ts scripts/orchestrate.test.mjs
+# → 31/31
+```
+
+The operator-run live gate is documented in `docs/run-anywhere.md`.
