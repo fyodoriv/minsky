@@ -64,9 +64,6 @@
     "typescript": "5.7.2",
     "vitest": "2.1.9"
   },
-  "optionalDependencies": {
-    "@biomejs/cli-darwin-arm64": "1.9.4"
-  },
   "pnpm": {
     "overrides": {
       "protobufjs@<8.0.2": ">=8.0.2"
