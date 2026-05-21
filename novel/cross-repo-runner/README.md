@@ -12,6 +12,8 @@ Step 5 of 7 in the cross-repo-runner roadmap. Built on top of `@minsky/sidecar-b
 
 Allowed paths default to the task block's `**Touches**:` field (fallback to `**Files**:`); when neither is declared, the scope-leak check is disabled (`graceful-degrade` per rule #7 — operator opted out of scope enforcement). Watchdog defaults to 15 min, overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
 
+`spawn-failed` carries `signal?: NodeJS.Signals` (e.g. `"SIGKILL"` / `"SIGTERM"` / `"SIGHUP"`) when the child died from a signal rather than a clean exit code — threaded from `@minsky/tick-loop`'s `SpawnResult.signal` through `LiveSpawnOutcome` and out to the iteration record's `notes` field as `exit=N signal=SIG`. Without this, `exit=-1` collapsed "exited with no code" and "killed by signal" into one indistinguishable bucket; the daemon log now distinguishes SIGKILL-from-watchdog vs SIGTERM-from-parent vs SIGHUP-from-terminal-close. Surfaced-by `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19, vision.md § Glossary).
+
 ## `--loop` (continuous host-mode iteration)
 
 `minsky-run --host <dir> --loop [--live]` keeps invoking `runLive` against the host's TASKS.md until one of five stop conditions fires (in priority order):
@@ -64,6 +66,7 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 ## Usage
 
 The CLI has three modes, all driven from the same `minsky-run` entry point.
+The `bin/minsky` shim adds `--daemon` mode for background operation (see below).
 
 ### One-shot mode (explicit `<task-id>`)
 
@@ -188,40 +191,53 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 `src/shim-resolve.ts` exports `resolveMinskyRepo({ env, exists, homeDir })` — a pure, zero-dependency function consumed by the `bin/minsky` PATH shim (lives at the repo root) so any-folder operator invocations work without hand-resolving the minsky repo. Resolution chain (first match wins):
 
 1. `env.MINSKY_REPO` if set AND the path exists on disk.
-2. `~/apps/tooling/minsky` (Intuit canonical layout).
+2. `<minsky-repo>` (Intuit canonical layout).
 3. `~/apps/minsky`, `~/code/minsky`, `~/src/minsky` (common community layouts).
 
 Returns `{ ok: true, repoPath, source }` (where `source` records which seam matched, surfaced in logs + the installer's audit print-out) OR `{ ok: false, hint }` with a message that tells the operator how to fix it. Tested by `shim-resolve.test.ts` (10 paired cases covering env-var hit/miss, the 4-step fallback chain, ordering, and home-trailing-slash handling). See the root `README.md` § "Observer layer" for the operator-side install + slash-command surface, and `skill-plugins/observer/minsky/SKILL.md` for the observer protocol the shim is part of.
 
 ## `scanMinskyProcesses` (runany substrate — host-wide run enumeration)
 
-`src/scan-processes.ts` exports pure `parseMinskyProcs(psText)` + the injected `scanMinskyProcesses(probe)` seam — the single machine-wide answer to "what minsky runs exist on this host right now?". It parses `ps` text into typed `MinskyProc` records (`kind: orchestrator | worker | gate`, repo root, per-run id), excluding `run-pre-pr-lint-stack` vet children and all non-minsky noise. Composes the OS `ps` rather than a bespoke registry (rule #1); the parse is pure with no I/O (rule #10); a broken/absent `ps` degrades to `[]` and never throws (rule #6) so it cannot take down the very TUI / launch path it serves. Foundational substrate for the runany P0 cluster (#588): the retro TUI dashboard, the multi-tenant no-conflict guard, and the zero-arg entrypoint all build on it instead of each re-deriving `ps` parsing. Tested by `scan-processes.test.ts` (7 paired cases: kind classification, multi-tenant repo derivation, worker run-id, vet-child exclusion, empty/garbage fail-safe, the injected seam, graceful-degrade).
+`src/scan-processes.ts` exports pure `parseMinskyProcs(psText)` + the injected `scanMinskyProcesses(probe)` seam — the single machine-wide answer to "what minsky runs exist on this host right now?". It parses `ps` text into typed `MinskyProc` records (`kind: orchestrator | worker | gate`, repo root, per-run id), excluding `run-pre-pr-lint-stack` vet children and all non-minsky noise. Composes the OS `ps` rather than a bespoke registry (rule #1); the parse is pure with no I/O (rule #10); a broken/absent `ps` degrades to `[]` and never throws (rule #6) so it cannot take down the very TUI / launch path it serves. Foundational substrate for the runany P0 cluster (#588): the retro TUI dashboard, the multi-tenant no-conflict guard, and the zero-arg entrypoint all build on it instead of each re-deriving `ps` parsing. As of `runany-retro-tui-dashboard` slice 1, `@minsky/tui` is the first concrete consumer — it re-exports `parseMinskyProcs` / `scanMinskyProcesses` / `MinskyProc` rather than parsing `ps` a second time. Tested by `scan-processes.test.ts` (7 paired cases: kind classification, multi-tenant repo derivation, worker run-id, vet-child exclusion, empty/garbage fail-safe, the injected seam, graceful-degrade).
 
-## `repo-policy` + `policy-ledger` (runany permission gate)
+## `classifyRepo` / `assertWriteAllowed` (runany — least-authority repo policy)
 
-`src/repo-policy.ts` is the deterministic least-authority seam for the
-run-anywhere conductor: `classifyRepo` returns `home | foreign` from
-normalized git origins (fail-safe to `foreign` when identity is
-unprovable), and `assertWriteAllowed` default-denies every write except
-the four explicitly-allowed cells — `home + push/pr` (full flow) and
-`foreign + pr` **iff** the diff is `TASKS.md`-only; a `foreign + push`
-or any non-`TASKS.md` foreign PR is refused with a typed reason. Pure,
-rule #10 (no model, no I/O); the caller does the git/gh work and asks
-this module yes/no. `src/policy-ledger.ts` turns one decision into the
-exact `.minsky/runany-policy.jsonl` record `scripts/runany-policy-audit.mjs`
-reads (`run-start` / `write-verdict`) — the wire contract between the
-gate and its pre-registered measurement. The conductor's only code
-write (`scripts/local-gate-merge.mjs`'s `gh pr merge`) is gated here: a
-target that is not provably home is refused, logged, and skipped — no
-gate ⇒ no code write (Saltzer & Schroeder 1975; rule #13). See
-`docs/run-anywhere.md` for the matrix and measurement command.
+`src/repo-policy.ts` exports two pure, zero-I/O functions that form the run-anywhere conductor's least-authority gate (operator 2026-05-16 directive; rule #13; Saltzer & Schroeder 1975 — least privilege + fail-safe defaults):
+
+- `classifyRepo({ repoRoot, homeRoot, repoOrigin?, homeOrigin? })` → `"home" | "foreign"`. A repo is **home** when its normalised git root equals the invoked repo's root, OR (when both origins are known) its normalised `origin` equals the home origin — so a separate worktree / fresh clone of the same upstream stays home. Origin normalisation collapses `git@host:org/repo.git`, `https://host/org/repo`, and `ssh://git@host/org/repo/` to `host/org/repo`.
+- `assertWriteAllowed({ repoClass, action, changedPaths? })` → `WriteVerdict`. **Home** → any write allowed (branch, push, PR, gate-merge). **Foreign** → a code push is refused (`foreign-code-push`); a PR is allowed only when its diff is limited to `TASKS.md` (basename match, nested-aware) and refused otherwise (`foreign-nontaskmd-pr`). An omitted/empty diff on a foreign PR is refused (fail-safe — an undetermined diff is never assumed safe). Refusal codes are stable so the wiring layer (`scripts/orchestrate.mjs`, `scripts/local-gate-merge.mjs`) and `scripts/runany-policy-audit.mjs` can count them without re-parsing prose.
+
+`isTaskmdOnlyDiff(changedPaths)` is exported as the standalone defense-in-depth diff-shape predicate (the task's Pivot backstop). No model in the gate (rule #10); the caller resolves git facts and logs the verdict. Tested by `repo-policy.test.ts` (the full home/foreign × push/PR/taskmd matrix + the origin/path normalisation chain + every `isTaskmdOnlyDiff` edge). Wiring into the conductor + the run-window audit script land in follow-up iterations of `runany-permission-scoped-writes`.
+
+## `detectAnyCwd` (runany — zero-arg entrypoint resolver)
+
+`src/cwd-detect.ts` exports `detectAnyCwd` (+ `findGitRootSubdirs`), the
+pure resolver behind `minsky` with **no arguments** run in **any folder**
+(P0 `runany-zero-arg-entrypoint`). It extends `detectCwd` with git-root
+and plain-dir fallbacks so the operator never needs a prior
+`minsky-bootstrap`, env var, or flag (Saltzer & Schroeder 1975 —
+least-surprise default). Priority chain (first match wins):
+
+1. **bootstrapped** (`.minsky/repo.yaml`) → `single-host` (unchanged path)
+2. **bootstrapped subdirs** → `multi-host` (unchanged path)
+3. **git root** (`.git` present in cwd) → `single-host`
+4. **git-root subdirs** → `multi-host`
+5. **plain dir** (no git, no bootstrap) → `single-host`, cwd as root
+
+`minsky-run` keeps using `detectCwd` (bootstrap still required there);
+only the `bin/minsky` zero-arg path uses the run-anywhere chain — it
+detects the git root via `git rev-parse --show-toplevel` (fallback
+`$PWD`) and launches the launchd conductor (`scripts/orchestrate.mjs`)
+with `MINSKY_HOME` scoped to that root. Composes the existing shim +
+runner + conductor (rule #1 — no new orchestrator). See
+[`docs/run-anywhere.md`](../../docs/run-anywhere.md) for the operator
+flow and the 5-fixture acceptance smoke. Tested by `cwd-detect.test.ts`
+(git-root fallback, bootstrap-precedence, multi-host git subdirs,
+plain-dir fallback, detached-worktree `.git`-file detection).
 
 ## Tests
 
-171+ paired vitest cases across 15 files (run `pnpm vitest run novel/cross-repo-runner`):
-
-- `repo-policy.test.ts` (16) — full home/foreign × push/pr/taskmd matrix; origin normalization; fail-safe-to-foreign defaults
-- `policy-ledger.test.ts` (9) — record builders cross-checked against the audit's escape predicate; run-start marker; regression-is-scored-not-hidden
+171+ paired vitest cases across 14 files (run `pnpm vitest run novel/cross-repo-runner`):
 
 - `task-finder.test.ts` (14) — parses tasks.md sections / ID / tags / details / rule-#9 fields; ID match; title-substring matching; not-found reporting
 - `experiment-synth.test.ts` (10) — happy-path YAML rendering; rule-#9 iron-rule violations (missing fields)
@@ -231,7 +247,7 @@ gate ⇒ no code write (Saltzer & Schroeder 1975; rule #13). See
 - `runner.test.ts` (slice A) — `runLive` happy-path / scope-leak / spawn-failed verdicts; allowed-paths fallback
 - `host-loop.test.ts` (slice B + C seams) — stop conditions; abort; cto-audit + seed-on-empty interactions
 - `host-cto-audit.test.ts` (slice C) — gate predicate; brief builder; recursion-guard
-- `cwd-detect.test.ts` (slice D, 9) — single-host vs multi-host detection from `process.cwd()`
+- `cwd-detect.test.ts` (slice D + runany, 16) — single-host vs multi-host detection from `process.cwd()`; `detectAnyCwd` git-root / plain-dir / worktree fallbacks
 - `host-walker.test.ts` (slice D, 13) — drain-then-advance orchestrator; max-iterations sharing; empty-parent + all-hosts-drained stop reasons
 - `aifn-840-shape.test.ts` (20 integration cases) — end-to-end bootstrap → minsky-run smoke; autonomous-default aggregate; `--hosts-dir` walk; `--host` + `--hosts-dir` mutual exclusion
 - `shim-resolve.test.ts` (slice E, 10) — `resolveMinskyRepo` env-var + 4-step fallback chain; ordering; home-trailing-slash edge case
@@ -247,3 +263,9 @@ uses plain double-quoted strings unless `${…}` interpolation is present
 `task-finder.test.ts` / `bin/minsky-run.mjs` follow biome's formatter.
 Run `pnpm biome check --write novel/cross-repo-runner` before committing
 changes to this package.
+
+<!-- Merge of PR #599 (3 P0 orchestration fixes from oncall-hub-api AIFN-720): the spawnPlan brief now requires removing the shipped task block from TASKS.md (rule #9 invariant), and the host-loop merge surfaces with main's evolved walker-drains-one-host-forever fix. Doc touched per rule-3 alongside the merge. -->
+
+## `policy-ledger` (runany — verdict ledger writer)
+
+`src/policy-ledger.ts` writes each `WriteVerdict` returned by `assertWriteAllowed` to the runany verdict ledger (`.minsky/runany-policy.jsonl`), the substrate `scripts/runany-policy-audit.mjs` reads to compute the run-window audit metrics. Pure-function-with-I/O-at-edge: the ledger record is computed pure; the `appendFileSync` is the I/O boundary. Composes with `assertWriteAllowed` (the gate) + `scripts/runany-policy-audit.mjs` (the reader) — closes the third side of the audit triangle.

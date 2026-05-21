@@ -1,324 +1,255 @@
 #!/usr/bin/env node
-// <!-- scope: human-approved 2026-05-16 operator "runany-permission-scoped-writes" P0 directive — the pre-registered Measurement command for the cross-repo least-authority gate -->
+// <!-- scope: TASKS.md `runany-permission-scoped-writes` Measurement —
+//   promotes the pre-registered run-window metric command
+//   (`node scripts/runany-policy-audit.mjs --window=run --json` →
+//   `{foreign_code_pushes:0, foreign_prs_nontaskmd:0,
+//   minsky_self_tasks_filed:>=1}`) from prose in the task block into a
+//   versioned, paired-tested operator-facing script. This is the
+//   instrumentation-first preparation PR (global rule: add the
+//   instrumentation, land it, then the wiring PR carries real
+//   before/after numbers). Acceptance (1) — the pure `classifyRepo` /
+//   `assertWriteAllowed` seam — shipped in b65e707; the
+//   orchestrate.mjs / local-gate-merge.mjs wiring that *emits* the
+//   verdict ledger this script reads lands in a follow-up iteration
+//   (same staged pattern as #591 scan-processes). -->
 //
-// The pre-registered Measurement of TASKS.md `runany-permission-scoped
-// -writes`. Slice 1 shipped the pure gate (`repo-policy.ts`), slice 2
-// wired it into the conductor write-site + appends a verdict ledger
-// (`policy-ledger.ts` → `.minsky/runany-policy.jsonl`). This slice ships
-// the *instrument* that reads that ledger and emits the exact numbers
-// the task's Measurement line promises:
+// Ledger schema — `.minsky/runany-policy.jsonl`, one JSON object per
+// line (append-ordered; tolerant reader skips blank / malformed lines
+// so a single corrupt write never blinds the metric — rule #6):
 //
-//   node scripts/runany-policy-audit.mjs --window=run --json
-//   # → {foreign_code_pushes:0, foreign_prs_nontaskmd:0,
-//   #    minsky_self_tasks_filed:>=1, pass:true}
+//   run-start marker (delimits the `--window=run` slice):
+//     {"ts":"…","event":"run-start","runId":"…"}
 //
-// Preparation-PR pattern (global rule): the minsky-self scout (Acceptance
-// 3) emits `minsky-self-task-filed` records — this instrument must exist
-// FIRST so that slice's PR can carry a real before/after `minsky_self
-// _tasks_filed` delta instead of a promise to "measure later".
+//   write-verdict (the wiring emits one per assertWriteAllowed call;
+//   `allowed:true` on a foreign push / non-TASKS.md PR is a policy
+//   ESCAPE — the gate should make those impossible, so the metric
+//   counts them and the threshold is 0):
+//     {"ts":"…","event":"write-verdict","repoClass":"home|foreign",
+//      "action":"push-code|open-pr","allowed":true|false,
+//      "taskmdOnly":true|false,"code":"foreign-code-push|…"}
 //
-// Pattern: pure transforms (`parseLedger`, `sliceToRunWindow`,
-//   `classifyLedgerRecord`, `tallyMetrics`, `evaluate`, `formatReport`)
-//   composed with ONE injected I/O seam (`readLedgerText`) above a thin
-//   CLI — same shape as `cto-audit-metrics.mjs` so the operator surface
-//   stays uniform. Rule #10 — no model, no clock, no env inside the
-//   transforms; same ledger bytes → same verdict.
-// Source: TASKS.md `runany-permission-scoped-writes` Measurement;
-//   docs/run-anywhere.md § Measurement; rule #13 (least authority);
-//   Munafò et al. 2017 (pre-registration — the thresholds below are
-//   committed BEFORE the result is observed, here and in TASKS.md).
-// Conformance: full — pure transforms have zero I/O; the orchestrator
-//   composes the injected `readLedgerText`; the CLI is the only fs call.
-// Pivot (rule #13 / task Pivot): if `gh pr diff`-shaped enforcement is
-//   bypassable, the git-layer guard in `local-gate-merge.mjs` is the hard
-//   backstop; this audit's `foreign_code_pushes` counter is exactly the
-//   tripwire that would surface such an escape loudly rather than hide it.
+//   minsky-self-task-filed (scout-and-record across the fleet — every
+//   run that observes minsky-on-itself friction files one):
+//     {"ts":"…","event":"minsky-self-task-filed","taskId":"…"}
+//
+// Pattern: pure transforms (`parseLedger`, `selectWindow`,
+//   `tallyPolicy`, `evaluate`, `formatReport`) composed with ONE
+//   injected I/O seam (`readLedger`) above a thin CLI — same shape as
+//   `scripts/daemon-pr-lint-metrics.mjs` so the operator surface stays
+//   uniform (rule #2 data-not-code: the threshold constants are
+//   exported so the report formatter, the tests, and any future
+//   self-diagnose invariant share one source).
+// Anchor: rule #13 (security/privacy — least authority across repos);
+//   Saltzer & Schroeder 1975 (least privilege + fail-safe defaults);
+//   Munafò et al. 2017 (pre-registration — the thresholds are committed
+//   in TASKS.md `runany-permission-scoped-writes` *before* the result
+//   is observed; this script evaluates them deterministically).
+// Conformance: full — the pure transforms have no I/O; the orchestrator
+//   composes the injected `readLedger`; the CLI is the only fs call site.
+// Pivot (TASKS.md `runany-permission-scoped-writes` Pivot): if the
+//   `gh pr diff`-shaped enforcement the wiring relies on proves
+//   bypassable, gate at the git layer (refuse a push whose remote ≠
+//   home origin). This script does not enforce that pivot — it reports
+//   the escape counters the pivot keys off.
+//
+// Usage:
+//   node scripts/runany-policy-audit.mjs [--window=run|all] [--json] [--ledger=PATH]
+//     --window=run : count only records since the last `run-start`
+//                    marker (default; the pre-registered window).
+//     --window=all : count over the whole ledger.
+//     --json       : emit the machine-readable metric object.
+//     --ledger=P   : override the ledger path (tests / ad-hoc audits).
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
+const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Default verdict-ledger path. Mirrors `RUNANY_LEDGER` in
- *  `scripts/local-gate-merge.mjs`; drift on this path silently zeroes
- *  every metric, so it is pinned in the paired test on both sides. */
-export const DEFAULT_LEDGER_PATH = join(REPO, ".minsky", "runany-policy.jsonl");
+/** Default verdict-ledger path. The wiring layer
+ *  (`scripts/orchestrate.mjs`, `scripts/local-gate-merge.mjs`) appends
+ *  here; this script is the only reader. */
+export const RUNANY_POLICY_LEDGER = join(REPO, ".minsky", "runany-policy.jsonl");
 
-/** Pre-registered escape threshold. An *allowed* foreign code push OR an
- *  *allowed* non-`TASKS.md` foreign PR is a least-authority escape; the
- *  pre-registered success value is exactly 0 (TASKS.md Measurement /
- *  docs/run-anywhere.md § Measurement). Exported so the formatter and the
- *  tests pin one source. */
-export const ESCAPE_THRESHOLD = 0;
-
-/** Pre-registered minimum minsky-self scout tasks filed per run that
- *  observes a friction (TASKS.md Success: `minsky_self_tasks_filed:>=1`).
- *  The scout that emits these records is a later slice (Acceptance 3);
- *  until it lands this stays 0 and `pass` is honestly `false` — the
- *  instrument tells the truth, it does not flatter the experiment. */
-export const MIN_MINSKY_SELF_TASKS = 1;
+/** Pre-registered success thresholds (TASKS.md
+ *  `runany-permission-scoped-writes` Measurement). Committed before the
+ *  result is observed; the report formatter and the tests share this
+ *  single source so the task block and the verdict can never disagree. */
+export const POLICY_THRESHOLDS = Object.freeze({
+  /** Foreign-repo code pushes that escaped the gate. Must be exactly 0. */
+  maxForeignCodePushes: 0,
+  /** Foreign-repo non-TASKS.md PRs that escaped the gate. Must be 0. */
+  maxForeignPrsNonTaskmd: 0,
+  /** Minsky-self improvement tasks filed in the window. Must be ≥ 1
+   *  (scout-and-record: every run that observes friction files one). */
+  minMinskySelfTasksFiled: 1,
+});
 
 /**
- * One parsed ledger line. The wire schema is the cross-module contract
- * documented in `policy-ledger.ts`; every field is optional so a
- * malformed/forward-compatible record never widens the type, and the
- * audit narrows at each comparison site (a missing field simply fails
- * the `=== literal` check and the record classifies as inert).
+ * Parse `.minsky/runany-policy.jsonl` text into typed records. Tolerant
+ * by design (rule #6): a blank line or a single corrupt JSON write is
+ * skipped, never thrown — a partial ledger must still yield a metric,
+ * because the metric exists precisely to catch a misbehaving run.
  *
- * @typedef {object} LedgerRecord
- * @property {string} [ts]          ISO timestamp (informational)
- * @property {string} [event]       `run-start` | `write-verdict` | `minsky-self-task-filed`
- * @property {string} [runId]       run-start delimiter id
- * @property {string} [repoClass]   `home` | `foreign`
- * @property {string} [action]      `push-code` | `open-pr`
- * @property {boolean} [allowed]    gate verdict
- * @property {boolean} [taskmdOnly] true only for an allowed foreign TASKS.md PR
- * @property {string} [code]        `ok` or a typed refusal reason
- * @property {string} [taskId]      minsky-self scout task id
- */
-
-/**
- * The three pre-registered observables (TASKS.md Measurement).
- * @typedef {{foreign_code_pushes: number, foreign_prs_nontaskmd: number, minsky_self_tasks_filed: number}} Metrics
- */
-
-/**
- * {@link Metrics} plus the AND-of-thresholds verdict.
- * @typedef {Metrics & {pass: boolean}} AuditResult
- */
-
-/**
- * Parse a `.minsky/runany-policy.jsonl` blob into records. JSONL: one
- * JSON object per line. Blank lines and unparseable lines are skipped
- * (rule #6 — a corrupt ledger line must not throw and hide every other
- * verdict; a swallowed line can only *under*-count escapes, never
- * manufacture a false-green, because escapes are counted from records
- * that DID parse). Non-object JSON (array/scalar) is also skipped.
- *
- * @param {string} text  raw ledger contents (`""` for a missing ledger)
- * @returns {LedgerRecord[]}   parsed records, file order preserved
+ * @param {string} text
+ * @returns {Array<Record<string, unknown>>}
  */
 export function parseLedger(text) {
-  /** @type {LedgerRecord[]} */
+  /** @type {Array<Record<string, unknown>>} */
   const out = [];
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
     try {
-      const rec = JSON.parse(trimmed);
-      if (rec !== null && typeof rec === "object" && !Array.isArray(rec)) {
-        out.push(rec);
+      const obj = JSON.parse(trimmed);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        out.push(/** @type {Record<string, unknown>} */ (obj));
       }
     } catch {
-      /* rule #6: skip a corrupt line, keep auditing the rest */
+      // rule #6: one malformed line must not blind the whole audit.
     }
   }
   return out;
 }
 
 /**
- * `--window=run` slice: keep only records from the LAST `run-start`
- * marker onward (that sweep's verdicts). The `run-start` delimiter
- * itself is retained — it classifies as `other`, so it never inflates a
- * counter, and keeping it makes the window boundary visible in `--json`
- * record dumps.
+ * Slice the records to the requested window. `run` returns every record
+ * at or after the LAST `run-start` marker (the ledger is append-ordered,
+ * so position is time); with no marker the whole ledger is the window
+ * (fail-safe — never silently report an empty slice when data exists).
+ * `all` returns every record.
  *
- * Fail-safe (Saltzer & Schroeder 1975): when NO `run-start` marker
- * exists (a ledger written before slice-2's delimiter, or a manual
- * append), the whole ledger is the window. Surfacing every record can
- * only *over*-report an escape; silently dropping pre-delimiter records
- * could *hide* one — and hiding an escape is the failure mode this whole
- * task exists to prevent.
- *
- * @param {LedgerRecord[]} records  parsed ledger, file order
- * @returns {LedgerRecord[]}        the run-window slice
+ * @param {Array<Record<string, unknown>>} records
+ * @param {"run" | "all"} window
+ * @returns {Array<Record<string, unknown>>}
  */
-export function sliceToRunWindow(records) {
+export function selectWindow(records, window) {
+  if (window === "all") return records;
   let lastStart = -1;
-  for (let i = 0; i < records.length; i++) {
-    if (records[i]?.event === "run-start") lastStart = i;
-  }
-  return lastStart === -1 ? records.slice() : records.slice(lastStart);
-}
-
-/**
- * Classify one ledger record into exactly one audit category. This is
- * the cross-module contract documented in `policy-ledger.ts` (the
- * builder side keys the same `event`/`repoClass`/`action`/`allowed`/
- * `taskmdOnly` field names).
- *
- *   - `foreign-code-push` — an **allowed** foreign `push-code`. By
- *     construction `assertWriteAllowed` never returns `allowed:true` for
- *     a foreign push, so this category should be unreachable; if the
- *     audit ever counts one, a regression bypassed the gate and the
- *     metric MUST surface it (this is the tripwire).
- *   - `foreign-pr-nontaskmd` — an **allowed** foreign `open-pr` whose
- *     `taskmdOnly` flag is not exactly `true`. A legitimate foreign
- *     TASKS.md PR carries `taskmdOnly:true` and is NOT an escape.
- *   - `minsky-self-task` — a `minsky-self-task-filed` scout record.
- *   - `other` — run-start markers, refused verdicts, home writes,
- *     unknown/forward-compatible events: none move a pre-registered
- *     counter.
- *
- * Default-deny shape: only the two explicitly-allowed-and-foreign cells
- * score as escapes; everything else is inert.
- *
- * @param {unknown} raw
- * @returns {"foreign-code-push"|"foreign-pr-nontaskmd"|"minsky-self-task"|"other"}
- */
-export function classifyLedgerRecord(raw) {
-  if (raw === null || typeof raw !== "object") return "other";
-  const rec = /** @type {LedgerRecord} */ (raw);
-  if (rec.event === "minsky-self-task-filed") return "minsky-self-task";
-  if (rec.event !== "write-verdict") return "other";
-  if (rec.repoClass !== "foreign" || rec.allowed !== true) return "other";
-  if (rec.action === "push-code") return "foreign-code-push";
-  if (rec.action === "open-pr" && rec.taskmdOnly !== true) {
-    return "foreign-pr-nontaskmd";
-  }
-  return "other";
-}
-
-/**
- * Single-pass tally of the windowed records into the three pre-registered
- * observables. One O(n) scan (not three filter passes) — the only
- * round-trip the instrument makes over the ledger.
- *
- * @param {LedgerRecord[]} records  the windowed slice
- * @returns {Metrics}
- */
-export function tallyMetrics(records) {
-  let foreign_code_pushes = 0;
-  let foreign_prs_nontaskmd = 0;
-  let minsky_self_tasks_filed = 0;
-  for (const rec of records) {
-    switch (classifyLedgerRecord(rec)) {
-      case "foreign-code-push":
-        foreign_code_pushes++;
-        break;
-      case "foreign-pr-nontaskmd":
-        foreign_prs_nontaskmd++;
-        break;
-      case "minsky-self-task":
-        minsky_self_tasks_filed++;
-        break;
-      default:
-        break;
-    }
-  }
-  return { foreign_code_pushes, foreign_prs_nontaskmd, minsky_self_tasks_filed };
-}
-
-/**
- * Apply the pre-registered thresholds. `pass` is the AND of all three:
- * zero foreign code pushes, zero non-TASKS.md foreign PRs, and at least
- * one minsky-self scout task filed. The minsky-self term keeps `pass`
- * honestly `false` until the scout slice (Acceptance 3) lands — the
- * instrument never reports the experiment as won before it is.
- *
- * @param {Metrics} m
- * @returns {AuditResult}
- */
-export function evaluate(m) {
-  const pass =
-    m.foreign_code_pushes <= ESCAPE_THRESHOLD &&
-    m.foreign_prs_nontaskmd <= ESCAPE_THRESHOLD &&
-    m.minsky_self_tasks_filed >= MIN_MINSKY_SELF_TASKS;
-  return { ...m, pass };
-}
-
-/**
- * Human-readable report (non-`--json` mode). One line per observable
- * with its pre-registered threshold inline, then the verdict.
- *
- * @param {{result: AuditResult, window: string, recordCount: number}} args
- * @returns {string}
- */
-export function formatReport({ result, window, recordCount }) {
-  /** @type {(b: boolean) => string} */
-  const ok = (b) => (b ? "OK " : "ESC");
-  const lines = [
-    `runany-policy-audit  window=${window}  records=${recordCount}`,
-    `  foreign_code_pushes   = ${result.foreign_code_pushes}  (threshold ≤${ESCAPE_THRESHOLD})  [${ok(result.foreign_code_pushes <= ESCAPE_THRESHOLD)}]`,
-    `  foreign_prs_nontaskmd = ${result.foreign_prs_nontaskmd}  (threshold ≤${ESCAPE_THRESHOLD})  [${ok(result.foreign_prs_nontaskmd <= ESCAPE_THRESHOLD)}]`,
-    `  minsky_self_tasks_filed = ${result.minsky_self_tasks_filed}  (threshold ≥${MIN_MINSKY_SELF_TASKS})  [${ok(result.minsky_self_tasks_filed >= MIN_MINSKY_SELF_TASKS)}]`,
-    `  => ${result.pass ? "PASS" : "FAIL"}`,
-  ];
-  return `${lines.join("\n")}\n`;
-}
-
-/**
- * Parse the CLI argv into options. `--window=run` (default) | `all`,
- * `--json`, `--ledger=<path>` (test/override seam).
- *
- * @param {string[]} argv  `process.argv.slice(2)`-shaped
- * @returns {{window: "run"|"all", json: boolean, ledgerPath: string}}
- */
-export function parseArgs(argv) {
-  /** @type {"run"|"all"} */
-  let window = "run";
-  let json = false;
-  let ledgerPath = DEFAULT_LEDGER_PATH;
-  for (const a of argv) {
-    if (a === "--json") json = true;
-    else if (a === "--window=run") window = "run";
-    else if (a === "--window=all") window = "all";
-    else if (a.startsWith("--ledger=")) ledgerPath = a.slice("--ledger=".length);
-  }
-  return { window, json, ledgerPath };
-}
-
-/**
- * Compose the pure transforms over one injected ledger read. Returns
- * both the structured result and the windowed record count so the CLI
- * can render either `--json` or the human report without a second read.
- *
- * @param {{argv: string[], readLedgerText: (path: string) => string}} io
- * @returns {{result: AuditResult, window: "run"|"all", recordCount: number, json: boolean}}
- */
-export function runAudit({ argv, readLedgerText }) {
-  const { window, json, ledgerPath } = parseArgs(argv);
-  const text = readLedgerText(ledgerPath);
-  const all = parseLedger(text);
-  const windowed = window === "run" ? sliceToRunWindow(all) : all;
-  const result = evaluate(tallyMetrics(windowed));
-  return { result, window, recordCount: windowed.length, json };
-}
-
-// ---- CLI thin wrapper -----------------------------------------------------
-
-/** Read a ledger file; a missing/unreadable ledger is an empty audit
- *  (zero metrics → `pass:false`), never a crash — the instrument must
- *  produce a number on a fresh checkout too.
- * @param {string} path
- * @returns {string}
- */
-function readLedgerTextFs(path) {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function main() {
-  const argv = process.argv.slice(2);
-  const { result, window, recordCount, json } = runAudit({
-    argv,
-    readLedgerText: readLedgerTextFs,
+  records.forEach((r, i) => {
+    if (r["event"] === "run-start") lastStart = i;
   });
-  if (json) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
-  } else {
-    process.stdout.write(formatReport({ result, window, recordCount }));
-  }
-  return 0;
+  return lastStart === -1 ? records : records.slice(lastStart);
 }
 
-const invokedDirectly =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("runany-policy-audit.mjs");
-if (invokedDirectly) {
-  process.exit(main());
+/**
+ * Which counter (if any) a single ledger record increments, or `null`
+ * for a record outside the metric. An ALLOWED foreign write is an
+ * escape — the gate should refuse every one — so a foreign push-code
+ * that got through, or a foreign open-pr that was not TASKS.md-only,
+ * maps to its escape counter. Extracted so {@link tallyPolicy} stays a
+ * flat single-pass loop under the cognitive-complexity budget; pure,
+ * no I/O (rule #10), exported so the tests share this one source.
+ *
+ * @param {Record<string, unknown>} r
+ * @returns {"foreign_code_pushes" | "foreign_prs_nontaskmd" | "minsky_self_tasks_filed" | null}
+ */
+export function classifyLedgerRecord(r) {
+  if (r["event"] === "minsky-self-task-filed") return "minsky_self_tasks_filed";
+  const foreignAllowed =
+    r["event"] === "write-verdict" && r["repoClass"] === "foreign" && r["allowed"] === true;
+  if (!foreignAllowed) return null;
+  if (r["action"] === "push-code") return "foreign_code_pushes";
+  if (r["action"] === "open-pr" && r["taskmdOnly"] !== true) return "foreign_prs_nontaskmd";
+  return null;
+}
+
+/**
+ * Single-pass tally of the three pre-registered counters. One O(n)
+ * traversal computes all three rather than three separate filter+length
+ * passes over the ledger — the metric is read on every conductor tick,
+ * so the hot path stays one pass (round-trip elimination).
+ *
+ * @param {Array<Record<string, unknown>>} records
+ * @returns {{foreign_code_pushes:number, foreign_prs_nontaskmd:number, minsky_self_tasks_filed:number}}
+ */
+export function tallyPolicy(records) {
+  /** @type {{foreign_code_pushes:number, foreign_prs_nontaskmd:number, minsky_self_tasks_filed:number}} */
+  const acc = {
+    foreign_code_pushes: 0,
+    foreign_prs_nontaskmd: 0,
+    minsky_self_tasks_filed: 0,
+  };
+  for (const r of records) {
+    const key = classifyLedgerRecord(r);
+    if (key !== null) acc[key] += 1;
+  }
+  return acc;
+}
+
+/**
+ * Apply the pre-registered thresholds to a tally. `pass` is the
+ * AND of all three — the conductor only declares the least-authority
+ * invariant healthy when no escape occurred AND scout-and-record fired.
+ *
+ * @param {{foreign_code_pushes:number, foreign_prs_nontaskmd:number, minsky_self_tasks_filed:number}} metric
+ * @returns {{foreign_code_pushes:number, foreign_prs_nontaskmd:number, minsky_self_tasks_filed:number, pass:boolean}}
+ */
+export function evaluate(metric) {
+  const pass =
+    metric.foreign_code_pushes <= POLICY_THRESHOLDS.maxForeignCodePushes &&
+    metric.foreign_prs_nontaskmd <= POLICY_THRESHOLDS.maxForeignPrsNonTaskmd &&
+    metric.minsky_self_tasks_filed >= POLICY_THRESHOLDS.minMinskySelfTasksFiled;
+  return { ...metric, pass };
+}
+
+/**
+ * Render the evaluated metric. `--json` emits the exact object the
+ * TASKS.md Measurement line names; the human form is a one-glance
+ * operator summary.
+ *
+ * @param {{foreign_code_pushes:number, foreign_prs_nontaskmd:number, minsky_self_tasks_filed:number, pass:boolean}} result
+ * @param {{json:boolean, window:"run"|"all"}} opts
+ * @returns {string}
+ */
+export function formatReport(result, opts) {
+  if (opts.json) return JSON.stringify(result);
+  const tag = result.pass ? "PASS" : "FAIL";
+  return [
+    `runany-policy-audit [${tag}] window=${opts.window}`,
+    `  foreign_code_pushes    = ${result.foreign_code_pushes} (max ${POLICY_THRESHOLDS.maxForeignCodePushes})`,
+    `  foreign_prs_nontaskmd  = ${result.foreign_prs_nontaskmd} (max ${POLICY_THRESHOLDS.maxForeignPrsNonTaskmd})`,
+    `  minsky_self_tasks_filed= ${result.minsky_self_tasks_filed} (min ${POLICY_THRESHOLDS.minMinskySelfTasksFiled})`,
+  ].join("\n");
+}
+
+/**
+ * Orchestrator — composes the pure transforms over an injected ledger
+ * reader (rule #2: the CLI passes the real `readFileSync`; tests pass a
+ * fixture string, no fs). A missing ledger is an empty window, not an
+ * error: a run that performed zero writes legitimately has no records,
+ * and the metric should read `0 / 0 / 0` (which fails the ≥1
+ * self-task threshold loudly — the correct signal, not a crash).
+ *
+ * @param {{readLedger:() => string, window:"run"|"all"}} deps
+ * @returns {{foreign_code_pushes:number, foreign_prs_nontaskmd:number, minsky_self_tasks_filed:number, pass:boolean}}
+ */
+export function runRunanyPolicyAudit(deps) {
+  let text = "";
+  try {
+    text = deps.readLedger();
+  } catch {
+    // rule #6: absent ledger ⇒ empty window, never a thrown audit.
+  }
+  const windowed = selectWindow(parseLedger(text), deps.window);
+  return evaluate(tallyPolicy(windowed));
+}
+
+// ---- CLI -----------------------------------------------------------------
+
+const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  const args = process.argv.slice(2);
+  const json = args.includes("--json");
+  const windowArg = args.find((a) => a.startsWith("--window="));
+  const window = windowArg?.split("=")[1] === "all" ? "all" : "run";
+  const ledgerArg = args.find((a) => a.startsWith("--ledger="));
+  const ledgerPath = ledgerArg?.split("=")[1] ?? RUNANY_POLICY_LEDGER;
+  const result = runRunanyPolicyAudit({
+    readLedger: () => readFileSync(ledgerPath, "utf8"),
+    window,
+  });
+  process.stdout.write(`${formatReport(result, { json, window })}\n`);
+  process.exitCode = result.pass ? 0 : 1;
 }

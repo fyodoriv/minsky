@@ -86,26 +86,36 @@ describe("STACK_MANIFEST", () => {
     expect(uniq.size).toBe(names.length);
   });
 
-  test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-7 / rule-12", () => {
+  test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-7 / rule-12 / rule-17", () => {
     // Pre-registered scope of the daemon's pre-PR gate (TASKS.md
     // `daemon-pre-pr-lint-gate` Pivot — fast lints close ~80% of the failure
     // modes the operator cleans up). Drift here is what the manifest is
     // supposed to detect; pin the set explicitly. rule-7 was promoted to
     // fast 2026-05-06 (slice 8/N) — it is the 5th of 5 empirically-named
     // failure modes in the brief and walks `novel/**/README.md` only
-    // (~0.3s wall-clock, well under the 5-min pivot budget).
+    // (~0.3s wall-clock, well under the 5-min pivot budget). rule-17 was
+    // added 2026-05-19 (proactive-healing): a deterministic gate against
+    // PR bodies that surface observed-error tokens without any healing
+    // evidence (a fix commit, a `**Blocked**:` task block, or a non-
+    // empty diff). Same shape as rule-12.
     const fastNames = selectSteps("fast")
       .map((s) => s.name)
       .sort();
     expect(fastNames).toEqual(
       [
+        "agents-md-coherence",
         "biome",
+        "brief-pr-instructions",
         "markdownlint",
+        "no-hardcoded-user-paths",
+        "no-personal-paths-in-docs",
         "rule-12-scope-discipline",
+        "rule-17-proactive-heal",
         "rule-2-dep-coverage",
         "rule-3-doc-first",
         "rule-6-let-it-crash",
         "rule-7-chaos-coverage",
+        "rule-9-tasksmd-fields",
         "tasks-lint",
         "threat-model-section",
         "typecheck",
@@ -1101,9 +1111,19 @@ describe("withResolvedDiffBase (slice 31/N — manifest rewrite)", () => {
 
   test("steps without origin/main references pass through unchanged (referential equality)", () => {
     const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
-    const biome = STACK_MANIFEST.find((s) => s.name === "biome");
-    const swappedBiome = swapped.find((s) => s.name === "biome");
-    expect(swappedBiome).toBe(biome);
+    // `typecheck` has no diff-base/`--since` reference, so the pure transform
+    // must return the very same object. (`biome` is now diff-scoped via
+    // `--since=origin/main` and IS rewritten — see the next test.)
+    const typecheck = STACK_MANIFEST.find((s) => s.name === "typecheck");
+    const swappedTypecheck = swapped.find((s) => s.name === "typecheck");
+    expect(swappedTypecheck).toBe(typecheck);
+  });
+
+  test("rewrites the biome step's `--since=origin/main` to the resolved base", () => {
+    const swapped = withResolvedDiffBase(STACK_MANIFEST, "main");
+    const biome = swapped.find((s) => s.name === "biome");
+    expect(biome?.args).toContain("--since=main");
+    expect(biome?.args).not.toContain("--since=origin/main");
   });
 
   test("regression-floor: pre-slice-31 manifest references origin/main in ≥7 sites", () => {

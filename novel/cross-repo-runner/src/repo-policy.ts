@@ -1,232 +1,237 @@
-// `classifyRepo` + `assertWriteAllowed`: the deterministic permission
-// seam for the run-anywhere conductor. A single run may touch many git
-// repos under the operator's tree; only the **home** repo (the invoked
-// folder's repo / its origin) may receive code pushes and full-flow
-// PRs. Every other repo is **foreign** and the ONLY permitted write is
-// a `gh pr create` whose diff is limited to that repo's `TASKS.md`
-// (scout-and-record across the fleet — never push code elsewhere).
+// Least-authority repo policy seam — the deterministic gate that decides,
+// for every repo a run-anywhere conductor touches, whether a proposed
+// write is permitted. Two pure functions, zero I/O, no model in the
+// chain (rule #10): `classifyRepo` (home vs foreign) and
+// `assertWriteAllowed` (the verdict over a classified write request).
 //
-// Pattern: pure decision function with fail-safe defaults (Saltzer &
-//   Schroeder 1975 — least privilege + fail-safe defaults: deny unless
-//   the write is explicitly proven safe). Rule #10 — no model in the
-//   gate; same input → same output, zero I/O. The caller (orchestrate
-//   .mjs / local-gate-merge.mjs) does the git/gh I/O and asks this
-//   module yes/no.
+// Policy (operator 2026-05-16 directive):
+//   - HOME repo (the invoked folder's git repo / its origin) → the
+//     existing full flow: branch, push code, open any PR, gate-merge.
+//   - FOREIGN repo (any other git repo under the tree) → the ONLY
+//     permitted write is `gh pr create` whose diff is limited to that
+//     repo's `TASKS.md` (append findings as tasks.md-spec task blocks).
+//     Any code push or non-TASKS.md PR is refused with a stable code so
+//     the caller can log it (Acceptance (2)).
+//
+// Pattern: pure-function gate (rule #10 — deterministic, no I/O, no LLM;
+//   the caller injects the classified facts and logs the verdict) +
+//   fail-safe defaults (Saltzer & Schroeder 1975 — an unknown / empty
+//   diff on a foreign PR is refused, not allowed).
 // Source: TASKS.md `runany-permission-scoped-writes`; rule #13
-//   (security/privacy — least-authority across repos); operator
-//   2026-05-16 directive.
-// Conformance: full — no fs, no env reads, no process spawn inside the
-//   functions; both seams (origins, diff paths) are caller-supplied.
+//   (security/privacy — least authority across repos); Saltzer &
+//   Schroeder 1975 ("The Protection of Information in Computer Systems"
+//   — least privilege + fail-safe defaults).
+// Conformance: full — same input → same output, no fs / process / git
+//   calls inside either function; the caller owns I/O and logging.
 
-/** A repo the run touches is either the invoked home repo or foreign. */
+/**
+ * How a repo the run touches is classified relative to the invoked
+ * (home) repo. The two cells map 1:1 to the two write policies.
+ */
 export type RepoClass = "home" | "foreign";
 
-/** Write operations the conductor can attempt against a repo. */
-export type WriteKind = "push" | "pr";
+/**
+ * The write a conductor is about to perform against a repo.
+ *
+ *   - `push-code`  — `git push` of a branch carrying code (any non-PR
+ *                    publication to a remote).
+ *   - `open-pr`    — `gh pr create`. Whether it is permitted on a
+ *                    foreign repo depends on the diff shape (see
+ *                    {@link WriteRequest.changedPaths}).
+ *
+ * A "TASKS.md-only PR" is not a third action — it is an `open-pr`
+ * whose `changedPaths` are all `TASKS.md`. Collapsing it keeps the
+ * external surface minimal (one decision function, two actions).
+ */
+export type WriteAction = "push-code" | "open-pr";
 
 /**
- * Why a write was refused. Surfaced verbatim in the audit log so
- * `scripts/runany-policy-audit.mjs` can count refusals by class.
- *
- *   - `foreign-push-refused`   — a code push to a non-home repo. Never
- *                                allowed; foreign contribution is
- *                                TASKS.md-PR-only.
- *   - `foreign-pr-non-taskmd`  — a foreign PR whose diff touches a path
- *                                that is not `TASKS.md`.
- *   - `foreign-pr-no-diff`     — a foreign PR with no diff paths
- *                                supplied. Cannot prove the diff shape,
- *                                so fail safe (deny) rather than assume.
+ * Stable, machine-readable refusal codes. The wiring layer logs these
+ * verbatim so `scripts/runany-policy-audit.mjs` can count refusals
+ * without re-parsing prose (Acceptance (2) + the run-window metric).
  */
-export type WriteRefusalReason =
-  | "foreign-push-refused"
-  | "foreign-pr-non-taskmd"
-  | "foreign-pr-no-diff";
+export type WriteRefusalCode = "foreign-code-push" | "foreign-nontaskmd-pr";
 
 /**
- * Inputs to {@link classifyRepo}. Both the origin and the root-path
- * seams are caller-supplied (DI'd at the I/O boundary):
- *
- *   - `candidateOrigin` / `homeOrigin` — `git remote get-url origin`
- *     output, or `null` when the repo has no `origin` remote (a fresh
- *     local clone). Compared after normalization.
- *   - `candidateRoot` / `homeRoot` — optional `git rev-parse
- *     --show-toplevel` absolute paths. Used as a fallback identity when
- *     a repo has no origin (origin-less local repos still get a stable
- *     home/foreign verdict by path).
+ * Discriminated verdict. On allow, the classification + action are
+ * echoed back so the caller's log line is self-describing. On refuse,
+ * a stable `code` plus a human reason.
  */
-export interface ClassifyRepoInputs {
-  readonly candidateOrigin: string | null;
-  readonly homeOrigin: string | null;
-  readonly candidateRoot?: string;
-  readonly homeRoot?: string;
-}
-
-/** Inputs to {@link assertWriteAllowed}. `diffPaths` is required for PRs. */
-export interface AssertWriteAllowedInputs {
-  readonly repoClass: RepoClass;
-  readonly writeKind: WriteKind;
-  /**
-   * Repo-relative paths the PR diff touches (`gh pr diff --name-only`
-   * shaped). Ignored for `push`. For a foreign `pr`, every entry must
-   * be a `TASKS.md` file or the write is refused.
-   */
-  readonly diffPaths?: readonly string[];
-}
-
-/** Discriminated decision — `logLine` is always present for the audit trail. */
-export type WriteDecision =
-  | { readonly allowed: true; readonly logLine: string }
+export type WriteVerdict =
+  | {
+      readonly allowed: true;
+      readonly classification: RepoClass;
+      readonly action: WriteAction;
+    }
   | {
       readonly allowed: false;
-      readonly reason: WriteRefusalReason;
-      readonly logLine: string;
+      readonly code: WriteRefusalCode;
+      readonly reason: string;
     };
 
 /**
- * Normalize a git remote URL / path so the three common forms compare
- * equal:
+ * Inputs to {@link classifyRepo}. The caller resolves these at the I/O
+ * boundary (git rev-parse + `git remote get-url origin`); this function
+ * only compares the resolved facts.
  *
- *   git@github.com:fyodoriv/minsky.git
- *   https://github.com/fyodoriv/minsky.git
- *   https://github.com/fyodoriv/minsky
+ *   - `repoRoot`   — absolute git toplevel of the repo being written to.
+ *   - `homeRoot`   — absolute git toplevel of the invoked (home) repo.
+ *   - `repoOrigin` — optional `origin` remote URL of the candidate repo.
+ *   - `homeOrigin` — optional `origin` remote URL of the home repo.
  *
- * Strategy: lowercase, strip scheme, rewrite `host:path` SCP form to
- * `host/path`, drop a trailing `.git`, drop a trailing slash. Returns
- * `null` for `null`/empty so two origin-less repos never compare equal
- * by accident (that path falls through to root-path identity).
- *
- * Internal helper — no `@otel` tag.
+ * Either a path match OR (when both origins are known and non-empty) an
+ * origin match means HOME — so a separate worktree / fresh clone of the
+ * same upstream is still treated as home, not foreign.
  */
-function normalizeOrigin(raw: string | null): string | null {
-  if (raw === null) return null;
-  let s = raw.trim().toLowerCase();
-  if (s.length === 0) return null;
-  // scp-like: git@github.com:fyodoriv/minsky.git → github.com/fyodoriv/minsky.git
-  const scp = /^[^/@]+@([^:]+):(.+)$/.exec(s);
-  if (scp !== null) {
-    s = `${scp[1]}/${scp[2]}`;
-  } else {
-    // strip scheme://[user[:pass]@] prefix
-    s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^[^/@]+@/, "");
-  }
-  if (s.endsWith("/")) s = s.slice(0, -1);
-  if (s.endsWith(".git")) s = s.slice(0, -4);
-  if (s.endsWith("/")) s = s.slice(0, -1);
-  return s.length === 0 ? null : s;
-}
-
-/** Normalize an absolute path: trim, drop a single trailing slash. */
-function normalizeRoot(raw: string | undefined): string | undefined {
-  if (raw === undefined) return undefined;
-  const t = raw.trim();
-  if (t.length === 0) return undefined;
-  return t.endsWith("/") && t.length > 1 ? t.slice(0, -1) : t;
+export interface ClassifyRepoInputs {
+  readonly repoRoot: string;
+  readonly homeRoot: string;
+  readonly repoOrigin?: string;
+  readonly homeOrigin?: string;
 }
 
 /**
- * Classify a repo as `home` or `foreign` relative to the invoked home
- * repo. Identity is established by (in order):
+ * A foreign-repo PR request to vet against the TASKS.md-only shape.
+ * `changedPaths` are the repo-relative paths the PR diff touches; an
+ * omitted or empty list on a foreign `open-pr` is treated as UNKNOWN
+ * and refused (fail-safe — never assume an undetermined diff is safe).
+ * Ignored for `push-code` and for any home-repo request.
+ */
+export interface WriteRequest {
+  readonly repoClass: RepoClass;
+  readonly action: WriteAction;
+  readonly changedPaths?: readonly string[];
+}
+
+/**
+ * Classify a repo as `home` or `foreign` relative to the invoked repo.
  *
- *   1. Normalized `origin` URL equality — the canonical signal. Two
- *      repos with the same normalized origin are the same repo even if
- *      checked out at different paths (e.g. a worktree).
- *   2. Normalized root-path equality — fallback for origin-less local
- *      repos (a fresh `git init` with no remote).
+ * Match rule (first hit wins → `home`):
+ *   1. Normalised `repoRoot` === normalised `homeRoot`.
+ *   2. Both origins known & non-empty AND normalised `repoOrigin` ===
+ *      normalised `homeOrigin` (handles worktrees / fresh clones).
+ * Otherwise → `foreign`.
  *
- * Fail-safe default (Saltzer & Schroeder 1975): when neither signal
- * proves identity, the repo is `foreign` — the least-authority class.
- * "Don't know" must never grant the home (code-push) privilege.
+ * Path normalisation strips trailing slashes only (the caller passes
+ * absolute real paths). Origin normalisation strips the scheme, an
+ * `git@`/`user@` prefix, the `:`→`/` SCP-form separator, a trailing
+ * `.git`, trailing slashes, and lowercases — so
+ * `git@github.com:org/repo.git`, `https://github.com/org/repo`, and
+ * `ssh://git@github.com/org/repo/` all collapse to `github.com/org/repo`.
  *
- * @otel cross-repo-runner.classify-repo
+ * @otel-exempt pure policy decision — no I/O; caller resolves git facts and logs (rule #10).
  */
 export function classifyRepo(inputs: ClassifyRepoInputs): RepoClass {
-  const candidateOrigin = normalizeOrigin(inputs.candidateOrigin);
-  const homeOrigin = normalizeOrigin(inputs.homeOrigin);
-  if (candidateOrigin !== null && homeOrigin !== null) {
-    return candidateOrigin === homeOrigin ? "home" : "foreign";
+  if (normalizeRoot(inputs.repoRoot) === normalizeRoot(inputs.homeRoot)) {
+    return "home";
   }
-  const candidateRoot = normalizeRoot(inputs.candidateRoot);
-  const homeRoot = normalizeRoot(inputs.homeRoot);
-  if (candidateRoot !== undefined && homeRoot !== undefined) {
-    return candidateRoot === homeRoot ? "home" : "foreign";
+  const repoOrigin = normalizeOrigin(inputs.repoOrigin);
+  const homeOrigin = normalizeOrigin(inputs.homeOrigin);
+  if (repoOrigin.length > 0 && repoOrigin === homeOrigin) {
+    return "home";
   }
   return "foreign";
 }
 
 /**
- * True when a repo-relative path is a `TASKS.md` file. The tasks.md
- * spec permits multiple TASKS.md files (one per subtree), so any path
- * whose final segment is exactly `TASKS.md` qualifies. Case-sensitive
- * — the spec mandates the literal filename `TASKS.md`.
+ * The single permission gate. Decides whether `req.action` is allowed
+ * against a `req.repoClass`-classified repo.
  *
- * Internal helper — no `@otel` tag.
+ * Decision table (this IS the home vs foreign × push/PR/taskmd matrix):
+ *
+ *   | class   | action     | diff shape        | verdict                |
+ *   |---------|------------|-------------------|------------------------|
+ *   | home    | push-code  | (any)             | allow                  |
+ *   | home    | open-pr    | (any)             | allow                  |
+ *   | foreign | push-code  | (any)             | refuse foreign-code-push |
+ *   | foreign | open-pr    | TASKS.md-only     | allow                  |
+ *   | foreign | open-pr    | other / unknown   | refuse foreign-nontaskmd-pr |
+ *
+ * Fail-safe: a foreign `open-pr` with omitted/empty `changedPaths`
+ * (diff undetermined) is refused, never allowed.
+ *
+ * @otel-exempt pure policy decision — no I/O; caller logs the verdict (rule #10).
+ */
+export function assertWriteAllowed(req: WriteRequest): WriteVerdict {
+  if (req.repoClass === "home") {
+    return { allowed: true, classification: "home", action: req.action };
+  }
+  if (req.action === "push-code") {
+    return {
+      allowed: false,
+      code: "foreign-code-push",
+      reason:
+        "refused: foreign repo — code pushes are never permitted; the only foreign write is a TASKS.md-only PR",
+    };
+  }
+  if (isTaskmdOnlyDiff(req.changedPaths ?? [])) {
+    return { allowed: true, classification: "foreign", action: "open-pr" };
+  }
+  return {
+    allowed: false,
+    code: "foreign-nontaskmd-pr",
+    reason:
+      "refused: foreign repo — a PR is permitted only when its diff is limited to TASKS.md (got a non-TASKS.md or empty/undetermined diff)",
+  };
+}
+
+/**
+ * Defense-in-depth diff-shape predicate (the Pivot's backstop). True
+ * iff `changedPaths` is non-empty AND every path is a `TASKS.md` file
+ * (root or nested — basename match, since a repo may carry several
+ * TASKS.md per the tasks.md spec). An empty list is `false`
+ * (fail-safe — an undetermined diff is not "TASKS.md only").
+ *
+ * @otel-exempt pure path predicate — no I/O (rule #10).
+ */
+export function isTaskmdOnlyDiff(changedPaths: readonly string[]): boolean {
+  if (changedPaths.length === 0) return false;
+  return changedPaths.every((p) => isTasksMdPath(p));
+}
+
+/**
+ * A path is a TASKS.md file iff its last `/`-segment is exactly
+ * `TASKS.md`. Rejects look-alikes (`TASKS.md.bak`, `MY-TASKS.md`,
+ * `TASKS.markdown`).
+ *
+ * Not exported — internal helper.
  */
 function isTasksMdPath(path: string): boolean {
-  const cleaned = path.trim().replace(/\\/g, "/");
-  if (cleaned.length === 0) return false;
-  const segments = cleaned.split("/");
+  const trimmed = path.trim();
+  if (trimmed.length === 0) return false;
+  const segments = trimmed.split(/[\\/]/);
   return segments[segments.length - 1] === "TASKS.md";
 }
 
 /**
- * The hard write gate. Cells:
+ * Strip trailing slashes from an absolute path so `/a/b` and `/a/b/`
+ * compare equal. The caller is responsible for passing a real
+ * (symlink-resolved) absolute path — this stays pure.
  *
- *   home    + push → allowed (full flow: branch, push, PR, gate-merge)
- *   home    + pr   → allowed
- *   foreign + push → REFUSED (`foreign-push-refused`) — code never
- *                    leaves the home repo.
- *   foreign + pr   → allowed ONLY when `diffPaths` is non-empty AND
- *                    every entry is a `TASKS.md` file; otherwise
- *                    REFUSED (`foreign-pr-no-diff` /
- *                    `foreign-pr-non-taskmd`).
- *
- * Default-deny: the function enumerates the allowed cells explicitly
- * and refuses everything else. Every decision carries a `logLine` so
- * the caller can emit one audit line per write attempt regardless of
- * verdict (rule #7 — visible, not silent).
- *
- * @otel cross-repo-runner.assert-write-allowed
+ * Not exported — internal helper.
  */
-export function assertWriteAllowed(inputs: AssertWriteAllowedInputs): WriteDecision {
-  const { repoClass, writeKind } = inputs;
+function normalizeRoot(root: string): string {
+  return root.replace(/\/+$/, "");
+}
 
-  if (repoClass === "home") {
-    return {
-      allowed: true,
-      logLine: `runany-policy: ALLOW home ${writeKind} (full flow)`,
-    };
-  }
-
-  // repoClass === "foreign" from here.
-  if (writeKind === "push") {
-    return {
-      allowed: false,
-      reason: "foreign-push-refused",
-      logLine:
-        "runany-policy: REFUSE foreign push — code pushes to non-home repos are never permitted (rule #13)",
-    };
-  }
-
-  // foreign + pr — permitted iff the diff is TASKS.md-only.
-  const diffPaths = inputs.diffPaths ?? [];
-  if (diffPaths.length === 0) {
-    return {
-      allowed: false,
-      reason: "foreign-pr-no-diff",
-      logLine:
-        "runany-policy: REFUSE foreign pr — no diff paths supplied; cannot prove TASKS.md-only shape (fail-safe deny)",
-    };
-  }
-  const offending = diffPaths.filter((p) => !isTasksMdPath(p));
-  if (offending.length > 0) {
-    return {
-      allowed: false,
-      reason: "foreign-pr-non-taskmd",
-      logLine: `runany-policy: REFUSE foreign pr — diff touches non-TASKS.md paths: ${offending.join(", ")}`,
-    };
-  }
-  return {
-    allowed: true,
-    logLine: `runany-policy: ALLOW foreign pr — TASKS.md-only diff (${diffPaths.length} file${diffPaths.length === 1 ? "" : "s"})`,
-  };
+/**
+ * Collapse the common git remote URL forms to `host/org/repo`:
+ *   - `git@github.com:org/repo.git`
+ *   - `https://github.com/org/repo.git`
+ *   - `ssh://git@github.com/org/repo/`
+ * all → `github.com/org/repo`. Returns `""` for undefined/empty so the
+ * caller's "both origins known" guard is a simple length check.
+ *
+ * Not exported — internal helper.
+ */
+function normalizeOrigin(origin: string | undefined): string {
+  if (origin === undefined) return "";
+  let s = origin.trim();
+  if (s.length === 0) return "";
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, ""); // strip scheme://
+  s = s.replace(/^[^@/]+@/, ""); // strip user@ (git@, etc.)
+  s = s.replace(/:(?!\d)/, "/"); // SCP-form host:org → host/org
+  s = s.replace(/\.git$/i, ""); // trailing .git
+  s = s.replace(/\/+$/, ""); // trailing slashes
+  return s.toLowerCase();
 }
