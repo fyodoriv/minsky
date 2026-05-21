@@ -1,27 +1,69 @@
 {
   "$schema": "https://json.schemastore.org/semantic-release.json",
-  "branches": ["main"],
+  "branches": [
+    "main"
+  ],
   "plugins": [
     [
       "@semantic-release/commit-analyzer",
       {
         "preset": "conventionalcommits",
         "releaseRules": [
-          { "type": "feat", "release": "minor" },
-          { "type": "fix", "release": "patch" },
-          { "type": "perf", "release": "patch" },
-          { "type": "revert", "release": "patch" },
-          { "type": "docs", "release": false },
-          { "type": "style", "release": false },
-          { "type": "chore", "release": false },
-          { "type": "refactor", "release": false },
-          { "type": "test", "release": false },
-          { "type": "build", "release": false },
-          { "type": "ci", "release": false },
-          { "breaking": true, "release": "major" }
+          {
+            "type": "feat",
+            "release": "minor"
+          },
+          {
+            "type": "fix",
+            "release": "patch"
+          },
+          {
+            "type": "perf",
+            "release": "patch"
+          },
+          {
+            "type": "revert",
+            "release": "patch"
+          },
+          {
+            "type": "docs",
+            "release": false
+          },
+          {
+            "type": "style",
+            "release": false
+          },
+          {
+            "type": "chore",
+            "release": false
+          },
+          {
+            "type": "refactor",
+            "release": false
+          },
+          {
+            "type": "test",
+            "release": false
+          },
+          {
+            "type": "build",
+            "release": false
+          },
+          {
+            "type": "ci",
+            "release": false
+          },
+          {
+            "breaking": true,
+            "release": "major"
+          }
         ],
         "parserOpts": {
-          "noteKeywords": ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"]
+          "noteKeywords": [
+            "BREAKING CHANGE",
+            "BREAKING CHANGES",
+            "BREAKING"
+          ]
         }
       }
     ],
@@ -31,26 +73,59 @@
         "preset": "conventionalcommits",
         "presetConfig": {
           "types": [
-            { "type": "feat", "section": "Features" },
-            { "type": "fix", "section": "Bug Fixes" },
-            { "type": "perf", "section": "Performance" },
-            { "type": "revert", "section": "Reverts" },
-            { "type": "docs", "section": "Documentation", "hidden": true },
-            { "type": "style", "section": "Styles", "hidden": true },
-            { "type": "chore", "section": "Chores", "hidden": true },
-            { "type": "refactor", "section": "Refactors", "hidden": true },
-            { "type": "test", "section": "Tests", "hidden": true },
-            { "type": "build", "section": "Build", "hidden": true },
-            { "type": "ci", "section": "CI", "hidden": true }
+            {
+              "type": "feat",
+              "section": "Features"
+            },
+            {
+              "type": "fix",
+              "section": "Bug Fixes"
+            },
+            {
+              "type": "perf",
+              "section": "Performance"
+            },
+            {
+              "type": "revert",
+              "section": "Reverts"
+            },
+            {
+              "type": "docs",
+              "section": "Documentation",
+              "hidden": true
+            },
+            {
+              "type": "style",
+              "section": "Styles",
+              "hidden": true
+            },
+            {
+              "type": "chore",
+              "section": "Chores",
+              "hidden": true
+            },
+            {
+              "type": "refactor",
+              "section": "Refactors",
+              "hidden": true
+            },
+            {
+              "type": "test",
+              "section": "Tests",
+              "hidden": true
+            },
+            {
+              "type": "build",
+              "section": "Build",
+              "hidden": true
+            },
+            {
+              "type": "ci",
+              "section": "CI",
+              "hidden": true
+            }
           ]
         }
-      }
-    ],
-    [
-      "@semantic-release/changelog",
-      {
-        "changelogFile": "CHANGELOG.md",
-        "changelogTitle": "<!-- pattern: not-applicable — auto-generated release notes managed by semantic-release per .releaserc.json (Keep a Changelog v1.1.0 format) -->\n\n# Changelog\n\n> Versioned release notes for Minsky. Managed by [semantic-release](https://semantic-release.gitbook.io/) — every push to `main` with a `feat:` / `fix:` / `perf:` / `BREAKING CHANGE:` commit triggers a release.\n\nSee the [hand-written preamble](https://github.com/fyodoriv/minsky/blob/main/CHANGELOG.md) for the full release contract; new versioned entries are inserted below."
       }
     ],
     [
@@ -60,13 +135,6 @@
         "failComment": false,
         "labels": false,
         "releasedLabels": false
-      }
-    ],
-    [
-      "@semantic-release/git",
-      {
-        "assets": ["CHANGELOG.md", "package.json"],
-        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ]
   ]
