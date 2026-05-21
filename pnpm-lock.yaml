@@ -10,6 +10,10 @@ overrides:
 importers:
 
   .:
+    optionalDependencies:
+      '@biomejs/cli-darwin-arm64':
+        specifier: 1.9.4
+        version: 1.9.4
     devDependencies:
       '@biomejs/biome':
         specifier: 1.9.4
