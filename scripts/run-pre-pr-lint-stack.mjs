@@ -231,6 +231,7 @@ export const CI_TO_MANIFEST_ALIAS = Object.freeze({
 export const CI_BASH_GATE_BUCKETS = Object.freeze({
   mustSucceed: Object.freeze(
     new Set([
+      "agents-md-coherence",
       "anchor-primary-source",
       "biome",
       "cadence-pivot-threshold",
@@ -372,6 +373,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-personal-paths-in-docs.mjs"],
+  },
+  {
+    name: "agents-md-coherence",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-agents-md-coherence.mjs"],
   },
   {
     name: "rule-9-tasksmd-fields",
