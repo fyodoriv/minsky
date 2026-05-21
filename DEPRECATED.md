@@ -98,6 +98,28 @@ The list is consulted by `AGENTS.md` (which tells every agent to read this file 
   timeouts, and experiment store.
 - **Status**: Keep until all operators migrate to `minsky --daemon`.
 
+### 10. Daily-prose CHANGELOG.md format (`## 2026-05-21` per day, narrative paragraph + metric Δ lines)
+
+- **Replacement**: semver-tagged GitHub Releases managed by
+  [`semantic-release`](https://semantic-release.gitbook.io/). Each push
+  to `main` with a `feat:` / `fix:` / `perf:` / `BREAKING CHANGE:`
+  commit triggers `.github/workflows/release.yml`, which computes the
+  next version from conventional commits, publishes a GitHub Release,
+  and prepends a Keep-a-Changelog row to `CHANGELOG.md`.
+- **Rationale**: The daily-prose format required a daemon that fires
+  once per day to author the missing day's entry in the right voice
+  (`daily-changelog-for-humans` task in `TASKS.md`). That daemon was
+  shipped (#177, #179, #185-#193) but the format still drifted — the
+  last entry was 2026-05-18 despite 50+ merged PRs in the following
+  3 days, because the daily-fire path didn't survive the 2026-05-12
+  cross-repo-runner migration. Semantic-release shifts the cost model:
+  the changelog row is generated structurally from each PR's commit
+  type, no daemon required, no per-day narrative authorship.
+- **Archive**: the frozen daily-journal content is preserved at
+  [`docs/CHANGELOG-narrative-history.md`](./docs/CHANGELOG-narrative-history.md).
+- **Status**: superseded as of 2026-05-21. The archive file is
+  read-only — do not add new daily entries.
+
 ## Not deprecated (keep investing)
 
 - `minsky watch` — the primary operator dashboard
