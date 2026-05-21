@@ -15,6 +15,7 @@ export default defineConfig({
       "@minsky/prompt-optimizer": r("./novel/adapters/prompt-optimizer/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),
       "@minsky/budget-guard": r("./novel/budget-guard/src/index.ts"),
+      "@minsky/competitive-benchmark": r("./novel/competitive-benchmark/src/index.ts"),
       "@minsky/cross-repo-runner": r("./novel/cross-repo-runner/src/index.ts"),
       "@minsky/dashboard-web": r("./novel/dashboard-web/src/index.ts"),
       "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),

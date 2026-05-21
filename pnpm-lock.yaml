@@ -126,6 +126,8 @@ importers:
         specifier: ^4.12.18
         version: 4.12.21
 
+  novel/competitive-benchmark: {}
+
   novel/cross-repo-runner:
     dependencies:
       '@minsky/sidecar-bootstrap':
