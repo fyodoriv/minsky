@@ -62,7 +62,7 @@ Formula: `gh repo list fyodoriv --json name,description --jq '[.[] | select(.des
 
 ## dep-interface-coverage — Dependency interface coverage
 
-_Updated: 2026-05-20T14:00:00Z · Budget: 1d · Source: `scripts/collect-metrics.mjs`_
+_Updated: 2026-05-21T14:16:17Z · Budget: 1d · Source: `scripts/collect-metrics.mjs`_
 
 **Value:** pass (233 files scanned, 38 vendors checked) — all deps behind interfaces, enforced by rule-2 deterministic lint
 
@@ -70,7 +70,7 @@ Formula: `node scripts/check-rule-2-dep-coverage.mjs`
 
 ## token-budget-honoring — Token-budget honoring
 
-_Updated: 2026-05-20T14:00:00Z · Budget: 1d · Source: `scripts/collect-metrics.mjs`_
+_Updated: 2026-05-21T14:16:17Z · Budget: 1d · Source: `scripts/collect-metrics.mjs`_
 
 **Value:** 0 budget-pause events — proxy from daemon.log; robust signal needs `orchestrate.jsonl` budget transitions (tracked in `fleet-stability-centralized-reporting`)
 
