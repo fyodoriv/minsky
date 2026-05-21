@@ -1271,6 +1271,38 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs
 
+  machine-budget:
+    # rule #10 ratchet applied to vision.md rule #15 / operator directive
+    # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
+    # the budget controller exports + policy constants stay pinned
+    # (defaultBudgetPct=70, swarmMaxBudgetPct=80), that no minsky
+    # worker/tick-loop launchd template sets `ProcessType=Background` while
+    # the budget is non-trivial (the QoS class throttles the very CPU/IO the
+    # budget allocates — the empirically-confirmed unreachable-budget
+    # regression), and that the controller test file keeps the three rule-#9
+    # pre-registered behaviour suites. Dormant until the controller artefact
+    # lands (same precedent as `mape-k-budget-cap`).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # vision.md rule #15; operator directive 2026-05-17; Apple
+    # `launchd.plist(5)` (`ProcessType` QoS); Beyer et al., *Site
+    # Reliability Engineering*, O'Reilly 2016, Ch. 3 (error-budget
+    # enforcement — a contradicting throttle trips a mechanical response).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: machine-budget lint
+        run: node scripts/check-machine-budget.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-machine-budget.test.mjs
+
   supervisor-sandbox-hardening:
     # rule #10 ratchet applied to vision.md rule #13 item 3 (supervisor
     # sandbox) — pins the safe set of systemd hardening directives across
@@ -1515,6 +1547,7 @@ jobs:
       - hygiene
       - linux-supervisor-integration
       - lockfile-integrity
+      - machine-budget
       - macos-supervisor-integration
       - maciek-smoke
       - mape-k-budget-cap
@@ -1576,6 +1609,7 @@ jobs:
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
                    "${{ needs.lockfile-integrity.result }}" \
+                   "${{ needs.machine-budget.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
                    "${{ needs.mape-k-budget-cap.result }}" \
                    "${{ needs.mape-k-constraints-md-size.result }}" \

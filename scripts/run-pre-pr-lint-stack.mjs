@@ -241,6 +241,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "glossary-discipline",
       "hygiene",
       "lockfile-integrity",
+      "machine-budget",
       "maciek-smoke",
       "mape-k-budget-cap",
       "mape-k-constraints-md-size",
@@ -528,6 +529,12 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-supervisor-sandbox-hardening.mjs"],
+  },
+  {
+    name: "machine-budget",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-machine-budget.mjs"],
   },
   {
     name: "cadence-pivot-threshold",
