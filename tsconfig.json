@@ -19,6 +19,7 @@
     { "path": "./novel/observer/heals" },
     { "path": "./novel/sidecar-bootstrap" },
     { "path": "./novel/tick-loop" },
+    { "path": "./novel/tui" },
     { "path": "./scripts" },
     { "path": "./user-stories" }
   ]
