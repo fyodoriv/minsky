@@ -418,6 +418,35 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-no-personal-paths-in-docs.test.mjs
 
+  agents-md-coherence:
+    # AGENTS.md is the agent runbook every agent reads first. When it drifts
+    # from the actual repo state (broken relative links to renamed docs,
+    # `vision.md § N` citations pointing to non-existent rules, missing
+    # load-bearing section anchors that other scripts cite), agents follow
+    # stale instructions. This gate pins three drift classes: required
+    # sections, relative-link resolution, and `vision.md § N` citation
+    # resolution. Same shape as `no-personal-paths-in-docs` — pure decision
+    # function with the I/O at the edge.
+    #
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #17 (vision.md § 17 — proactive healing); operator directive
+    # 2026-05-21 "Let's ensure agents.md is always updated too".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: agents-md-coherence lint
+        run: node scripts/check-agents-md-coherence.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-agents-md-coherence.test.mjs
+
   rule-9-tasksmd-fields:
     # Rule #9 (vision.md § "Pre-registered hypothesis-driven development
     # — iron rule"): every task block in TASKS.md must carry Hypothesis,
@@ -1449,6 +1478,7 @@ jobs:
 
   ci:
     needs:
+      - agents-md-coherence
       - anchor-primary-source
       - biome
       - cadence-pivot-threshold
