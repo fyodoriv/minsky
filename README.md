@@ -103,6 +103,7 @@ Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 
 ## More
 
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — code in this repo is AI-authored; how to attest
 - **[INSTALL.md](INSTALL.md)** — agent-readable install runbook
 - **[docs/uninstall.md](docs/uninstall.md)** — full removal, daemon stop, sidecar cleanup
 - **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
