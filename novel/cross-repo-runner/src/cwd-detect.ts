@@ -77,6 +77,57 @@ export function detectCwd(inputs: CwdDetectInputs): CwdDetectResult {
 }
 
 /**
+ * Zero-arg context resolver: extends `detectCwd` with git-root and
+ * plain-dir fallbacks so `minsky` works from any folder without prior
+ * bootstrap. Priority order:
+ *   1. bootstrapped (.minsky/repo.yaml)   → single-host
+ *   2. bootstrapped subdirs               → multi-host
+ *   3. cwd is a git root (.git present)   → single-host
+ *   4. cwd has git-root subdirs           → multi-host
+ *   5. plain dir (fallback)               → single-host (cwd as root)
+ *
+ * Used by bin/minsky zero-arg path to scope the conductor; minsky-run
+ * keeps using detectCwd so the bootstrap requirement is unchanged there.
+ *
+ * @otel cross-repo-runner.detect-any-cwd
+ */
+export function detectAnyCwd(inputs: CwdDetectInputs): CwdDetectResult {
+  const bootstrapped = detectCwd(inputs);
+  if (bootstrapped.kind !== "error") return bootstrapped;
+
+  const cwdGit = joinPath(inputs.cwd, ".git");
+  if (inputs.fs.exists(cwdGit)) {
+    return { kind: "single-host", host: inputs.cwd };
+  }
+
+  const gitChildren = findGitRootSubdirs(inputs);
+  if (gitChildren.length > 0) {
+    return { kind: "multi-host", hostsDir: inputs.cwd, hostCount: gitChildren.length };
+  }
+
+  // Plain dir — treat cwd itself as the conductor root.
+  return { kind: "single-host", host: inputs.cwd };
+}
+
+/**
+ * List direct subdirs of cwd that contain a `.git` entry (regular git
+ * repos, submodules, and worktrees all have one). Analogous to
+ * `findBootstrappedSubdirs` but uses `.git` presence instead of
+ * `.minsky/repo.yaml`.
+ *
+ * @otel cross-repo-runner.find-git-root-subdirs
+ */
+export function findGitRootSubdirs(inputs: CwdDetectInputs): readonly string[] {
+  const children = inputs.fs.listDir(inputs.cwd);
+  const out: string[] = [];
+  for (const child of children) {
+    const childPath = joinPath(inputs.cwd, child);
+    if (inputs.fs.exists(joinPath(childPath, ".git"))) out.push(childPath);
+  }
+  return out;
+}
+
+/**
  * List subdirs of cwd that carry `.minsky/repo.yaml`. Exposed because the
  * CLI also needs this when the operator passes `--hosts-dir` explicitly
  * (so the same enumeration runs in both auto-detect and explicit paths).

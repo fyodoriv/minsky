@@ -1,14 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
+  // Test-isolation guard (category fix): the daemon exports
+  // MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM into the worker env, so a
+  // suite that reads the ambient value is non-deterministic — under
+  // `MINSKY_LLM_PROVIDER=claude-only` the seam short-circuits and every
+  // detectFn-driven assertion fails. Neutralise all three knobs before
+  // each test (stubEnv(name, undefined) deletes the var; biome `noDelete`
+  // forbids the delete operator and `env.X = undefined` coerces to the
+  // string "undefined" in Node — see Slice C below). A test that needs a
+  // specific value (Slice C) re-stubs it; the later stub wins.
   beforeEach(() => {
-    // DI-seam tests exercise internal paths that prod guards (MINSKY_NO_AUTO_BOOTSTRAP,
-    // MINSKY_LOCAL_LLM) short-circuit before they can be reached. Stub them away so
-    // each test verifies the intended branch, not the ambient env.
-    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", "");
-    vi.stubEnv("MINSKY_LOCAL_LLM", "");
-    vi.stubEnv("MINSKY_LLM_PROVIDER", "");
+    vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
+    vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", undefined);
   });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns local-LLM env when detectFn reports server reachable", async () => {
     const fakeState = {
       server: { reachable: true, url: "http://127.0.0.1:1234" },
@@ -67,5 +77,41 @@ describe("maybeBootstrapLocalLlm — DI seam", () => {
     });
     expect(bootstrapCalled).toBe(true);
     expect(result).toBe(sentinel);
+  });
+
+  it("Slice C: MINSKY_LLM_PROVIDER=claude-only is honored — skips local pre-flight even when server reachable", async () => {
+    // vi.stubEnv (not `delete process.env`): biome `noDelete` forbids the
+    // delete operator, and `process.env.X = undefined` is wrong in Node
+    // (coerces to the string "undefined"). stubEnv(name, undefined)
+    // deletes the var and unstubAllEnvs() restores the originals.
+    vi.stubEnv("MINSKY_LLM_PROVIDER", "claude-only");
+    vi.stubEnv("MINSKY_NO_AUTO_BOOTSTRAP", undefined);
+    vi.stubEnv("MINSKY_LOCAL_LLM", undefined);
+    try {
+      let detectCalled = false;
+      let bootstrapCalled = false;
+      let probeCalled = false;
+      const result = await maybeBootstrapLocalLlm({
+        detectFn: async () => {
+          detectCalled = true;
+          // biome-ignore lint/suspicious/noExplicitAny: DI seam — bugged path (reachable server) must NOT be reached
+          return { server: { reachable: true, url: "http://127.0.0.1:1234" } } as any;
+        },
+        bootstrapFn: async () => {
+          bootstrapCalled = true;
+          return { sentinel: "should-not-run" };
+        },
+        claudeProbeFn: async () => {
+          probeCalled = true;
+          return { verdict: "healthy", reason: "should-not-run" };
+        },
+      });
+      expect(result).toEqual({ MINSKY_LLM_PROVIDER: "claude-only" });
+      expect(detectCalled).toBe(false);
+      expect(bootstrapCalled).toBe(false);
+      expect(probeCalled).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

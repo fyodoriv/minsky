@@ -30,7 +30,7 @@
  * `runDaemon` is the pure orchestrator above.
  */
 
-import { execFile as execFileCb, execFileSync } from "node:child_process";
+import { execFile as execFileCb, execFileSync, execSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
@@ -39,7 +39,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { cpus, getPriority, homedir } from "node:os";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -84,6 +84,7 @@ import {
   buildAiderInvocation,
   buildChildWorkerArgs,
   buildClaudePrintInvocation,
+  buildDevinPrintInvocation,
   buildOpencodeInvocation,
   createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
@@ -95,6 +96,7 @@ import {
   createPnpmMetricsRender,
   createPnpmSnapshotCapture,
   detectCtoAuditEnvDrift,
+  detectOsThrottles,
   ensureCtoAuditLabel,
   ensureWorktree,
   formatRecommendations,
@@ -105,6 +107,11 @@ import {
   parseWorkerArgs,
   pickStrategicModel,
   predictExhaustionMs,
+  resolvePrePrStage,
+  // Slice 3 of `runany-dynamic-model-or-local-fallback` — the unified
+  // pin>dynamic>local decider, wired into the run-anywhere entrypoint
+  // (slices 1+2 shipped the pure decider + audit harness).
+  resolveRunAnyModel,
   runDaemon,
   runParallelSweeper,
   sandboxModeStartupHint,
@@ -271,6 +278,94 @@ if (recs.length > 0) {
   console.error("[config-analyzer] OK — no recommendations.");
 }
 
+// `operator-machine-budget-autoscale` slice 4/N — runtime OS-throttle
+// wire-in. Slice 3 shipped the pure `detectOsThrottles` core; this is
+// its caller (task part (c), the detect+report half — *applying* the
+// corrections is a later slice). The budget % is resolved from
+// `MINSKY_MACHINE_BUDGET_PCT` (default 70 — vision.md rule #15) at this
+// I/O boundary; the live machine facts are gathered best-effort and
+// the verdict logged so `tail .minsky/tick-loop.out.log` shows at boot
+// whether the box can physically hit the budget the autoscaler targets.
+//
+// Optimization (operator 2026-05-05, one measurable/iter): a budget at
+// or below the detector's trivial threshold is *always* reachable —
+// `detectOsThrottles` short-circuits before touching any fact — so the
+// live-fact gather is skipped entirely, eliminating one
+// `sh -c 'ulimit -n'` subprocess fork plus the os.getPriority/os.cpus
+// round-trips per daemon boot. Round-trip elimination, well over the
+// ≥10-byte anti-vanity floor (a whole fork avoided).
+const MACHINE_BUDGET_TRIVIAL_PCT = 10; // parity with TRIVIAL_BUDGET_PCT (slice 3)
+const machineBudgetPct = (() => {
+  const raw = process.env["MINSKY_MACHINE_BUDGET_PCT"];
+  if (raw === undefined || raw === "") return 70;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 100 ? parsed : 70;
+})();
+if (machineBudgetPct <= MACHINE_BUDGET_TRIVIAL_PCT) {
+  console.error(
+    `[machine-budget] budget=${machineBudgetPct}% is trivial (≤${MACHINE_BUDGET_TRIVIAL_PCT}%) — OS throttles intended; live-fact probe skipped`,
+  );
+} else {
+  // Each fact is best-effort: an unreadable one stays `undefined`, which
+  // `detectOsThrottles` treats as *absent* (fail-safe, Saltzer &
+  // Schroeder 1975) — never a false throttle, never a false "reachable".
+  const cores = (() => {
+    try {
+      return cpus().length;
+    } catch {
+      return undefined;
+    }
+  })();
+  const niceValue = (() => {
+    try {
+      return getPriority();
+    } catch {
+      return undefined;
+    }
+  })();
+  const ulimitNofile = (() => {
+    try {
+      const out = execFileSync("/bin/sh", ["-c", "ulimit -n"], {
+        encoding: "utf-8",
+        timeout: 2000,
+      }).trim();
+      const n = Number.parseInt(out, 10);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  // Effective launchd ProcessType is not exposed in the process env;
+  // leaving it undefined keeps this honest — the slice-2 static gate
+  // already covers the repo-tracked plist template, and the detector is
+  // fail-safe on an absent fact.
+  const throttleReport = detectOsThrottles({
+    budgetPct: machineBudgetPct,
+    cores: cores ?? 1,
+    niceValue,
+    ulimitNofile,
+    env: process.env,
+  });
+  if (throttleReport.budgetReachable) {
+    console.error(
+      `[machine-budget] budget=${machineBudgetPct}% reachable — no live OS throttle contradicts it`,
+    );
+  } else {
+    console.error(
+      `[machine-budget] budget=${machineBudgetPct}% UNREACHABLE — ${throttleReport.throttles.length} live OS throttle(s):`,
+    );
+    for (const t of throttleReport.throttles) {
+      console.error(`[machine-budget]   • ${t.kind}: ${t.observed} — ${t.reason}`);
+    }
+    console.error(
+      "[machine-budget] corrections (the cross-repo slice mirrors these to ~/apps/dotfiles & ~/apps/agentbrew):",
+    );
+    for (const correction of throttleReport.corrections) {
+      console.error(`[machine-budget]   $ ${correction}`);
+    }
+  }
+}
+
 // Sub-task 2/3: wire the real `BudgetGuard` from `@minsky/budget-guard`.
 // Dry-run uses a `StubTokenMonitor` (a fresh, full 5h window — no I/O against
 // `~/.claude/projects`) so the local smoke stays hermetic; production
@@ -395,6 +490,12 @@ const localLlmEnabled = (() => {
 const llmProviderOverride = (process.env.MINSKY_LLM_PROVIDER ?? "").trim().toLowerCase();
 const forceClaude = llmProviderOverride === "claude-only";
 const preferLocal = llmProviderOverride === "local-preferred";
+// `local-only` — hard local mode: skip the cloud strategy entirely.
+// The spawn strategy is the local strategy directly (no
+// LlmProviderSpawnStrategy wrapper, no budget guard, no claude probing).
+// Use when cloud tokens are exhausted or the operator wants zero cloud
+// spend. CLI shorthand: `minsky --local`.
+const forceLocalOnly = llmProviderOverride === "local-only";
 // `support-opencode-lmstudio-mlx-qwen3-14b-stack` slice 2 — `MINSKY_LOCAL_AGENT`
 // selects which CLI the local-dispatch path invokes. Default `aider` for
 // back-compat. When set to `opencode`, the local strategy spawns
@@ -408,6 +509,20 @@ const localAgent = (() => {
   return raw === "opencode" ? "opencode" : "aider";
 })();
 const opencodeBin = process.env.MINSKY_LOCAL_LLM_OPENCODE_BIN ?? "opencode";
+// `devin-cloud-agent-spawn-strategy` slice (c) — `MINSKY_CLOUD_AGENT`
+// selects which CLI the cloud-dispatch path invokes. Default `claude` for
+// back-compat. When set to `devin`, the cloud strategy spawns
+// `devin --print --model <model> --permission-mode dangerous` (brief on
+// stdin, same I/O contract as claude --print) instead of `claude --print`.
+// Per-machine config via dotfiles: `export MINSKY_CLOUD_AGENT=devin` in
+// zshrc.ai-tools. Invalid values normalise to `claude` (rule #7
+// graceful-degrade — don't crash over a typo).
+const cloudAgent = (() => {
+  const raw = (process.env.MINSKY_CLOUD_AGENT ?? "").trim().toLowerCase();
+  return raw === "devin" ? "devin" : "claude";
+})();
+const cloudAgentModel = (process.env.MINSKY_CLOUD_AGENT_MODEL ?? "").trim() || undefined;
+const devinBin = process.env.MINSKY_DEVIN_BIN ?? "devin";
 // Slice 3 — per-agent probe URL default. LM Studio's documented default
 // port is 1234 (`http://127.0.0.1:1234/v1/models`); mlx-lm.server's is
 // 8080. When the operator pins `MINSKY_LOCAL_LLM_PROBE_URL` explicitly,
@@ -519,27 +634,79 @@ async function probeLocalLlm() {
 }
 
 function buildClaudeStrategy() {
-  return dryRun
-    ? new DryRunSpawnStrategy()
-    : new ProcessSpawnStrategy({
-        command: "claude",
-        ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
-        invocation: (input) => {
-          // Slice 5: strategic picker computes the model per-iteration
-          // when `MINSKY_STRATEGIC_ROUTER=1`. The picker is pure; the
-          // remaining-fractions snapshot is fresh per spawn (cheap —
-          // Maciek parses cached JSONL).
-          const strategicModel = strategicRouterEnabled ? pickAndLogStrategicModel() : undefined;
-          return buildClaudePrintInvocation({
-            brief: input.brief,
-            ...(strategicModel === undefined ? {} : { model: strategicModel }),
-            ...(input.extraArgs && input.extraArgs.length > 0
-              ? { extraArgs: input.extraArgs }
-              : {}),
-          });
-        },
+  if (dryRun) return new DryRunSpawnStrategy();
+  // `devin-cloud-agent-spawn-strategy` slice (c): dispatch between
+  // claude --print and devin --print based on MINSKY_CLOUD_AGENT env.
+  if (cloudAgent === "devin") {
+    process.stdout.write(
+      `[tick-loop] cloud-agent=devin (bin=${devinBin}${cloudAgentModel ? `, model=${cloudAgentModel}` : ""})\n`,
+    );
+    return new ProcessSpawnStrategy({
+      command: devinBin,
+      ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+      invocation: (input) => {
+        return buildDevinPrintInvocation({
+          brief: input.brief,
+          ...(cloudAgentModel === undefined ? {} : { model: cloudAgentModel }),
+          command: devinBin,
+          ...(input.extraArgs && input.extraArgs.length > 0 ? { extraArgs: input.extraArgs } : {}),
+        });
+      },
+    });
+  }
+  return new ProcessSpawnStrategy({
+    command: "claude",
+    ...(claudePrintTimeoutMs !== undefined ? { timeoutMs: claudePrintTimeoutMs } : {}),
+    invocation: (input) => {
+      // Slice 5: strategic picker computes the model per-iteration
+      // when `MINSKY_STRATEGIC_ROUTER=1`. The picker is pure; the
+      // remaining-fractions snapshot is fresh per spawn (cheap —
+      // Maciek parses cached JSONL).
+      const strategicModel = strategicRouterEnabled ? pickAndLogStrategicModel() : undefined;
+      return buildClaudePrintInvocation({
+        brief: input.brief,
+        ...(strategicModel === undefined ? {} : { model: strategicModel }),
+        ...(input.extraArgs && input.extraArgs.length > 0 ? { extraArgs: input.extraArgs } : {}),
       });
+    },
+  });
 }
+
+// `resolveRunAnyModel`'s pin path (step 1) short-circuits *before* it
+// reads `remaining` / `remoteBackends` / `localProbeResult`, so the pin
+// wire-in above passes these frozen placeholders purely to satisfy the
+// input type — no per-iteration allocation, no real probe (round-trip
+// elimination on the hot pinned-iteration path).
+const PIN_PATH_UNUSED_REMAINING = Object.freeze({
+  fivehour: 1,
+  weekly: 1,
+  monthly: 1,
+  observedAt: "1970-01-01T00:00:00Z",
+});
+const PIN_PATH_UNUSED_BACKENDS = Object.freeze([]);
+const PIN_PATH_UNUSED_LOCAL_PROBE = Object.freeze({ reachable: true, observedAtMs: 0 });
+
+// Slice 4 of `runany-dynamic-model-or-local-fallback` (Acceptance #3):
+// when the budget guard has circuit-broken the only configured remote
+// (claude), the run-anywhere contract is "switch fully to local". This
+// model-router layer does not run a live local probe (the wrapper's
+// `LlmProviderSpawnStrategy` owns the TTL-cached probe + bootstrap, per
+// `minsky-cli-auto-bootstrap-local-llm`), so the probe state passed to
+// `resolveRunAnyModel` here is honestly `false` with a reason that says
+// the actual liveness/bootstrap is deferred to the wrapper. The
+// all-remote-down branch returns local regardless of this flag — it
+// only annotates the visible-not-silent reason string (Beyer SRE 2016).
+const RUNANY_LOCAL_PROBE_DEFERRED = Object.freeze({
+  reachable: false,
+  observedAtMs: 0,
+  reason: "deferred-to-wrapper-probe",
+});
+// One frozen claude-down backend list reused across every circuit-break
+// iteration (no per-tick allocation on the degraded path — round-trip /
+// GC elimination, same pattern as the audit harness's down fixture).
+const RUNANY_CLAUDE_DOWN_BACKENDS = Object.freeze([
+  Object.freeze({ id: "claude", reachable: false, reason: "budget-circuit-break" }),
+]);
 
 /**
  * Slice 5 of `claude-usage-aware-strategic-model-router` — invoke the
@@ -557,7 +724,86 @@ function buildClaudeStrategy() {
  *
  * @returns {string | undefined}
  */
+/**
+ * Emit the unified `tick-loop.runany-resolve` span for a
+ * {@link resolveRunAnyModel} decision and map it to the model id the
+ * `invocation` callback wants (`undefined` ⇒ local; the wrapper takes
+ * over). Shared by the pin (slice 3) and all-remote-down (slice 4)
+ * short-circuits so the span format + agent→model mapping live in one
+ * place (log-line dedup; one definition can't drift from the other).
+ *
+ * @param {{model:string,agent:string,source:string,reason:string}} d
+ * @param {boolean} withReason include the (longer) reason field — on for
+ *   the degraded all-remote-down path (operator needs the cause), off
+ *   for the pin path (the source alone is self-explanatory + shorter).
+ * @returns {string | undefined}
+ */
+function dispatchRunAnyDecision(d, withReason) {
+  const reasonField = withReason
+    ? `,"reason":"${d.reason.replace(/"/g, '\\"').slice(0, 160)}"`
+    : "";
+  process.stdout.write(
+    `[span] tick-loop.runany-resolve {"model":"${d.model}","agent":"${d.agent}","source":"${d.source}"${reasonField}}\n`,
+  );
+  return d.agent === "claude" ? d.model : undefined;
+}
+
+/**
+ * Slice 3 of `runany-dynamic-model-or-local-fallback` (Acceptance #1 +
+ * rule #9 skip-earlier gate): when the operator pinned a *catalog*
+ * model, the decision is honored verbatim regardless of budget/liveness.
+ * Extracted from {@link pickAndLogStrategicModel} so its
+ * cognitive-complexity stays under biome's cap. The catalog-membership
+ * guard keeps a *bogus* pin on the unchanged dynamic path (chaos row 3).
+ *
+ * @returns {{handled:boolean, model?:string}} `handled:false` ⇒ no
+ *   catalog pin; caller falls through to the budget-aware path.
+ */
+function tryPinnedRunAnyModel() {
+  if (strategicPin.length === 0 || !MODEL_CATALOG.some((e) => e.id === strategicPin)) {
+    return { handled: false };
+  }
+  const pinned = resolveRunAnyModel({
+    remaining: PIN_PATH_UNUSED_REMAINING,
+    remoteBackends: PIN_PATH_UNUSED_BACKENDS,
+    localProbeResult: PIN_PATH_UNUSED_LOCAL_PROBE,
+    operatorPin: strategicPin,
+  });
+  return { handled: true, model: dispatchRunAnyDecision(pinned, false) };
+}
+
+/**
+ * Slice 4 of `runany-dynamic-model-or-local-fallback` (Acceptance #3 +
+ * rule #9 skip-earlier gate): the budget guard circuit-broke claude —
+ * the only configured remote is inaccessible (budget exhausted). The
+ * run-anywhere contract is "switch fully + visibly to local". Route
+ * through the unified `resolveRunAnyModel` so the decision is one path
+ * with a visible `all-remote-down` source + reason (Beyer SRE 2016
+ * visible-not-silent). The wrapper's TTL-cached probe + bootstrap is
+ * the real local-liveness gate; this layer only routes + logs.
+ * Extracted to keep {@link pickAndLogStrategicModel} under the cap.
+ *
+ * @param {{action?:string}} lastDecision the budget guard's last decision.
+ * @returns {{handled:boolean, model?:string}} `handled:false` ⇒ remote
+ *   is not circuit-broken; caller falls through to the dynamic path.
+ */
+function tryCircuitBrokenRunAnyModel(lastDecision) {
+  if (lastDecision.action !== "circuit-break") return { handled: false };
+  const downDecision = resolveRunAnyModel({
+    remaining: PIN_PATH_UNUSED_REMAINING,
+    remoteBackends: RUNANY_CLAUDE_DOWN_BACKENDS,
+    localProbeResult: RUNANY_LOCAL_PROBE_DEFERRED,
+  });
+  return { handled: true, model: dispatchRunAnyDecision(downDecision, true) };
+}
+
 function pickAndLogStrategicModel() {
+  // Slice 3: pin short-circuits *before* the budget-snapshot read, the
+  // usage-history ring-buffer append, and the exhaustion prediction —
+  // a pinned run is honored verbatim, so all that dynamic machinery
+  // (plus its ~400-byte span) is pure waste every iteration.
+  const pin = tryPinnedRunAnyModel();
+  if (pin.handled) return pin.model;
   // v0: synchronous picker driven by `realGuard.lastDecision()` which
   // is populated by the BudgetGuard's tick loop. The remaining %
   // snapshot is the most recent decision's snapshot.
@@ -566,6 +812,29 @@ function pickAndLogStrategicModel() {
     // Cold start — no snapshot yet; let claude pick its session default.
     return undefined;
   }
+  // Slice 4: all-remote-down short-circuits before the snapshot math,
+  // the ring-buffer append, and the exhaustion regression (same
+  // optimization class as slice 3's pin path).
+  const down = tryCircuitBrokenRunAnyModel(lastDecision);
+  if (down.handled) return down.model;
+  return pickDynamicStrategicModel(lastDecision);
+}
+
+/**
+ * The unchanged budget-aware dynamic path (slices 5+6 of
+ * `claude-usage-aware-strategic-model-router`): derive remaining
+ * fractions from the budget snapshot, run the pure picker, append to
+ * the usage-history ring buffer, emit the rich `tick-loop.strategic-pick`
+ * span, and return the model id (or `undefined` ⇒ local). Extracted
+ * verbatim from {@link pickAndLogStrategicModel} so the slice-3/4
+ * short-circuit guards added there keep the caller under biome's
+ * cognitive-complexity cap (rule: clean up the complexity your own
+ * change introduced). Behaviour is byte-for-byte identical.
+ *
+ * @param {{snapshot: any}} lastDecision the budget guard's last decision.
+ * @returns {string | undefined}
+ */
+function pickDynamicStrategicModel(lastDecision) {
   const snap = lastDecision.snapshot;
   const remaining = {
     fivehour: snap.windowSizeTokens > 0 ? snap.tokensRemainingInWindow / snap.windowSizeTokens : 0,
@@ -708,7 +977,17 @@ function maybeWrapLocalStrategyInGate(localStratRaw) {
   });
 }
 
+// Extracted to stay under biome's cognitive-complexity cap (rule #6, ≤10).
+function buildLocalOnlyStrategy() {
+  const localStrat = maybeWrapLocalStrategyInGate(buildLocalStrategy());
+  process.stdout.write(
+    `[tick-loop] local-only mode (agent=${localAgent}, probe=${localProbeUrl}, watchdog=${localWatchdogMs ?? "disabled"}ms${localLlmModelId === undefined ? "" : `, model=${localLlmModelId}`}${dryRun ? ", dry-run" : ""})\n`,
+  );
+  return localStrat;
+}
+
 const spawnStrategy = (() => {
+  if (forceLocalOnly) return buildLocalOnlyStrategy();
   const claudeStrat = buildClaudeStrategy();
   if (!localLlmEnabled) return claudeStrat;
   const localStrat = maybeWrapLocalStrategyInGate(buildLocalStrategy());
@@ -1029,9 +1308,36 @@ if (metricsRenderSeam !== undefined) {
 // `pr-security-review`) ride the same retry budget as the branch-code
 // lints — closing the loop the brief already documents (inner Claude
 // writes the file, outer gate validates it).
-const preLintRun = createBodyAwarePrePrLintRun({ cwd: minskyHome });
+// Stage is env-gated (MINSKY_PRE_PR_STAGE). Default "fast" (back-compat /
+// local-sprint budget); set "full" so the worker gate matches the
+// autonomous merge authority's --stage=full — required for Sonnet workers
+// so they only open PRs that will actually pass the merge-gate and land
+// (a fast-gated PR that fails the full merge-gate wastes the iteration).
+const prePrStage = resolvePrePrStage(process.env["MINSKY_PRE_PR_STAGE"]);
+const preLintRun = createBodyAwarePrePrLintRun({ cwd: minskyHome, stage: prePrStage });
 process.stdout.write(
-  "[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=fast — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n",
+  `[tick-loop] pre-PR lint gate wired (pnpm pre-pr-lint --stage=${prePrStage} — rule #10 deterministic enforcement; body-aware: pr-body.md auto-discovered)\n`,
+);
+
+// TASKS.md auto-lint-fix seam (`daemon-tasks-md-auto-lint-fix`): production
+// binding for `runDaemon`'s `tasksMdLintExec`. The seam contract is "run one
+// shell command, return combined stdout+stderr, never throw on non-zero" —
+// the command itself carries `2>&1 || true` (see `buildMarkdownlintCommand`
+// in `@minsky/tick-loop/tasks-md-lint-fix`), so `execSync` won't throw on
+// markdownlint's violations-present non-zero exit. The catch is rule #7
+// graceful-degrade: if `npx markdownlint-cli2` can't spawn at all, return
+// "" — the pure helper parses that as zero violations and the daemon
+// proceeds with its (structurally-correct) commit rather than deadlocking.
+const tasksMdLintExec = (command) => {
+  try {
+    return execSync(command, { cwd: minskyHome, encoding: "utf8" });
+  } catch {
+    return "";
+  }
+};
+const tasksMdPath = resolve(minskyHome, "TASKS.md");
+process.stdout.write(
+  `[tick-loop] TASKS.md auto-lint-fix wired (markdownlint-cli2 --fix ${tasksMdPath} after every completed iteration — daemon-tasks-md-auto-lint-fix)\n`,
 );
 
 // Slice 4 of `daemon-parallel-worktree-launch`: file-collision pre-spawn
@@ -1284,6 +1590,11 @@ const result = await runDaemon({
   ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
   // Outer lint-gate verification — always active; no env opt-in.
   preLintRun,
+  // TASKS.md auto-lint-fix — always active; runs once per completed
+  // iteration before the pre-PR gate so a progress/claim/completion write
+  // that left an MD012 double blank can't deadlock the gate.
+  tasksMdLintExec,
+  tasksMdPath,
   emit: (event) => {
     observeIterationForTimeoutTracking(event);
     // Plain-text line on stdout for terminal/journalctl visibility.

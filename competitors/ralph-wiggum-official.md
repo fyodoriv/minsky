@@ -1,5 +1,7 @@
 # Competitor / Dependency: Anthropic's official ralph-wiggum plugin
 
+> Anthropic's official ralph-wiggum plugin — adopted as Minsky's `InnerLoop` primitive (the per-iteration step).
+
 - **URL**: <https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum>
 - **Origin**: Geoffrey Huntley's "Ralph technique" (named after Ralph Wiggum), formalized by Boris Cherny (Head of Claude Code) into an official plugin
 - **Status**: Active, official Anthropic plugin

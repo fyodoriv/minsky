@@ -137,6 +137,18 @@ Operator escape hatches:
 
 Switchback: when `provider === "local"` and `budgetState` returns to `normal`, the next 3 iterations run a "claude probe" (clean exit + non-empty stdout) before fully committing back. This avoids flap when the budget reset is partial. Implemented in slice 4 (`switchback-claude-probe`).
 
+### Cross-restart exhaustion detection (slice 4 of `minsky-claude-exhaustion-persisted-state`)
+
+The `claude --print "ping"` startup probe is a 1-token query; Anthropic's quota metering hits at the multi-K-token level. When the operator's quota is exhausted the probe can still return exit 0 — false-positive `healthy`. The daemon then spawns claude on iteration 1, which fails with a hard-limit; the existing per-iteration `decideProvider` correctly switches to local on iteration 2, but the wasted spawn already occurred and the local-LLM stack might not be installed yet.
+
+Slice 4 closes this gap:
+
+1. **Daemon writes hard-limit hits** to `.minsky/state.json::last_claude_hard_limit = { ts, reason }` via the `persistHardLimit` seam in `LlmProviderSpawnStrategy::captureClaudeFailure` (fires when `isClaudeHardLimit(failure) === true`).
+2. **CLI consults persisted state on startup** (`bin/minsky.mjs::maybeBootstrapLocalLlm`) BEFORE the live probe. Within `MINSKY_HARD_LIMIT_TTL_MIN` minutes (default 60), skip the probe and go straight to local-LLM bootstrap. Beyond TTL, run the live probe as before.
+3. **Doctor row** — `minsky doctor` shows `✓ claude exhaustion (persisted)` when unset or stale, and `⚠ claude exhaustion (persisted) <ts> (<N>m ago)` when within TTL.
+
+Implementation: `novel/tick-loop/src/claude-exhaustion-state.ts` (pure read/write helpers; paired-tested over 8 chaos rows). Persistence failures are graceful-degrade per rule #6 — the in-process `lastClaudeFailure` carry-over still works even if the disk write fails.
+
 ## Throughput baseline (post-slice-3 measurement)
 
 Once slice 3 ships, `node scripts/llm-provider-throughput.mjs --since=$(date -v-7d -u +%Y-%m-%d) --json` returns:
@@ -172,6 +184,16 @@ The daemon's stock brief (`buildDaemonBrief` in `daemon.ts`) is ~7-10KB of conte
 
 The substrate works; the brief shape doesn't. **Pivot threshold (rule #9):** if rolling-7d p95 of `local-spawn-timeout` count > 5/day across all workers, ship `daemon-aider-brief-shrinker` (filed as P0 in TASKS.md) that produces a slim brief (~≤2 KB, no gates, no templates) specifically for the aider path. The threshold has already been tripped by the 2026-05-07 live run; the task is queued.
 
+## Worktree lifecycle — the local path owns it
+
+The **claude** spawn path gets a per-worker git worktree for free: `claude --worktree <name>` makes Claude Code create it. The **local** path (`MINSKY_LLM_PROVIDER=local-preferred`, aider / opencode) takes the `--worktree` arg out of the equation, so **the local path owns its own worktree lifecycle** — nothing else creates it.
+
+- `novel/tick-loop/src/ensure-worktree.ts` (`ensureWorktree`) idempotently runs `git -C <minskyHome> worktree add --force -B <branch> <worktreeDir> origin/main`, so the worktree's `.git` file resolves to `<minskyHome>/.git/worktrees/<name>`. `buildLocalStrategy` (`bin/tick-loop.mjs`, aider + opencode branches) calls it via `ensureLocalWorktree(taskId)` *before* the spawn and threads the resolved dir through as the invocation `cwd`.
+- Defense-in-depth at the workspace boundary (rule #6 / Armstrong 2007): even if the worktree is missing for any reason, `ProcessSpawnStrategy.spawn` checks the resolved `cwd` exists *before* calling `child_process.spawn`. A missing cwd fails loud with a one-line operator-actionable error that names the directory and the P0 task — never a cryptic `spawn aider ENOENT`, never a model spawned into a bad cwd.
+- Single-process mode (no `workerConfig`) keeps inheriting the parent cwd (`minskyHome`) — `ensureLocalWorktree` returns `undefined`, no worktree, no guard. The per-task worktree is a multi-worker concern only.
+
+Surfaced-by P0 `local-worker-worktree-never-created` (operator 2026-05-16 dogfood): before this, 100% of `local-preferred` iterations died at git/cwd setup before the Qwen3 call because the local path set `cwd` to a worktree nothing created.
+
 ## Failure modes & chaos verification
 
 Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-paused windows. Blast radius: a single worker iteration. Operator escape hatch: `MINSKY_LLM_PROVIDER=claude-only` env override forces the Claude path regardless of budget signal, so the operator can opt out of local fallback for a specific run.
@@ -179,6 +201,7 @@ Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-pause
 | Failure mode | Trigger | Expected behavior | Chaos test |
 | --- | --- | --- | --- |
 | local server unreachable during fallback | `mlx_lm.server` crashed | iteration logs the probe failure, returns `status: "local-unreachable"`, no PR opened — not a destructive failure | `pkill -f mlx_lm.server` mid-iteration, assert no PR opened, no force-push, no destructive commit |
+| worktree cwd missing on local spawn | per-worker worktree never created / pruned | `ensureWorktree` recreates it; if still missing, `ProcessSpawnStrategy.spawn` rejects loud naming the dir + P0 task — model never spawned into a bad cwd | inject `existsFn → false` with a builder `cwd`, assert reject names the dir and `spawnFn` is not called (`spawn-strategy.test.ts`) |
 | local model produces a destructive PR | aider auto-commits `rm -rf node_modules` or similar | `daemon-fix-own-pr-on-ci-failure` catches via CI red; after 3 retries, labels `daemon-stuck` and stops | run synthetic brief that asks for a destructive change; assert it lands as a PR with `daemon-stuck` label, not as a force-push |
 | switchback flap | budget oscillates near 85 % | 3-iteration claude-probe gates the return; flap suppressed | synthetic budget-state oscillation, assert provider transitions ≤2 in 24 h |
 | memory pressure | local model resident + 3 claude workers running | invariant: only one provider resident at a time per machine; daemon holds before spawning local while any claude child still alive | assert `pgrep claude` returns empty before `mlx_lm.server` is spawned |
@@ -187,6 +210,7 @@ Steady-state hypothesis: the daemon's PR-merge rate stays >0 across budget-pause
 
 - `novel/budget-guard/src/index.ts` — the existing `circuit-break-and-notify` signal this fallback hooks into.
 - `novel/tick-loop/src/spawn-strategy.ts:175` — the single spawn point that slice 2 extends.
+- `novel/tick-loop/src/claude-exhaustion-state.ts` — persisted hard-limit read/write helpers; slice 4 of `minsky-claude-exhaustion-persisted-state`. Wired into `LlmProviderSpawnStrategy` (write) and `bin/minsky.mjs::maybeBootstrapLocalLlm` (read). See section above.
 - `novel/tick-loop/src/log-path-fallback.ts` — graceful-degrade: falls back to `/tmp/minsky-worker-<id>-<pid>.log` on EACCES/EROFS/ENOSPC so the local-LLM daemon still starts while the operator fixes `.minsky/workers/` (slice 2 of `minsky-runtime-resilience`; see `novel/tick-loop/README.md` § Slice 2).
 - `novel/tick-loop/src/workers-dir-mkdir.ts` — classifies `mkdirSync` errno into a recovery hint (chmod vs MINSKY_HOME); exits 1 with operator-actionable message instead of a raw Node.js stack trace if workers dir cannot be created (slice 2 of `minsky-runtime-resilience`).
 - `vision.md` rule #6 (stay alive — silence is failure).

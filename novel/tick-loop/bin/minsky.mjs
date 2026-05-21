@@ -59,6 +59,7 @@ import {
   openSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
@@ -127,16 +128,19 @@ const {
   executeBootstrapPlan,
   formatTickLoopBinMissingMessage,
   formatWorkersDirRecoveryMessage,
+  gatherMinskyContext,
   needsLocalLlmBootstrap,
   parseBootstrapLocalLlmArgs,
   pickLogPath,
   planLocalLlmBootstrap,
+  planMinskyAction,
   planRequiresTty,
   preferredPipxPath,
   probePythonWithDefaults,
   readLastHardLimit,
   renderConfirmSummary,
   renderDoctorSubstrateRows,
+  runInteractive,
 } = await import("../dist/index.js");
 const { formatLogLine } = await import("../dist/pretty-log.js");
 
@@ -177,6 +181,14 @@ if (isMain) {
     // Back-compat: keep `start` as an alias of the no-subcommand form. Any
     // further args are forwarded to bin/tick-loop.mjs at spawn time.
     await runStartOrAttach(argv.slice(1));
+  } else if (argv.length === 0) {
+    // Context-aware no-args path: gather 7 signals in parallel, plan the
+    // next action, and prompt the operator (or auto-confirm on non-TTY).
+    // Operator-directive 2026-05-08: "I want the main UX for it to be just
+    // `minsky` and the cli will understand the context and figure out what
+    // to do next, with full support of suggestions and asking user to confirm
+    // the plan (and possibly multi-select choice)".
+    await runContextAware();
   } else {
     await runStartOrAttach(argv);
   }
@@ -308,6 +320,195 @@ async function runStartOrAttach(args) {
   await tailWithPretty(activeLogPath, true);
 }
 
+// ---- Context-aware no-args UX --------------------------------------------
+
+/**
+ * Build the production `ContextProbes` object for `gatherMinskyContext`.
+ * Each probe is bounded by the caller-controlled timeout (default 500 ms).
+ *
+ * @returns {import("../dist/minsky-context.js").ContextProbes}
+ */
+function buildContextProbes() {
+  const workerId = 0;
+  const pidPath = resolve(WORKERS_DIR, `${workerId}.pid`);
+  const logPath = resolve(WORKERS_DIR, `${workerId}.log`);
+  const tasksPath = resolve(MINSKY_HOME, "TASKS.md");
+  const serverUrl = process.env["MINSKY_LOCAL_LLM_SERVER_URL"] ?? "http://127.0.0.1:8080";
+
+  return {
+    probeWorker: () => {
+      const pid = readLivePid(pidPath);
+      return pid !== undefined ? { alive: true, pid } : { alive: false };
+    },
+
+    probeLastIteration: () => {
+      if (!existsSync(logPath)) return undefined;
+      try {
+        const stat = statSync(logPath);
+        return Date.now() - stat.mtimeMs;
+        // rule-6: handled-locally — stat failure means no log info; degrade to undefined
+      } catch {
+        return undefined;
+      }
+    },
+
+    probeClaudeState: async () => {
+      // Fresh-checkout fast path: if `claude` is not on PATH the planner
+      // must route to bootstrap-local-LLM (mirrors `claude-health-probe`'s
+      // `needsLocalLlmBootstrap` contract), and the persisted hard-limit
+      // state is moot — short-circuit BEFORE the `.minsky/state.json` read
+      // (round-trip elimination: skips one existsSync + readFileSync on
+      // every no-claude invocation).
+      if (!claudeBinaryOnPath()) return "binary-missing";
+      // Use persisted hard-limit state only (file read ≤1 ms, no live probe).
+      // The live probe can take 5–20 s; skipping it keeps context gather under 500 ms.
+      const persisted = readPersistedHardLimit();
+      if (persisted.exhausted) return "exhausted";
+      return "unknown";
+    },
+
+    probeLocalLlmState: async () => {
+      try {
+        const ac = new AbortController();
+        const tid = setTimeout(() => ac.abort(), 400);
+        const resp = await globalThis.fetch(`${serverUrl}/v1/models`, { signal: ac.signal });
+        clearTimeout(tid);
+        return resp.ok ? "running" : "not-running";
+        // rule-6: handled-locally — fetch rejection (ECONNREFUSED / abort) means not running
+      } catch {
+        return "not-running";
+      }
+    },
+
+    probeGitState: async () => {
+      try {
+        const { stdout } = await execAsync("git status --porcelain", { timeout: 400 });
+        return stdout.trim().length > 0 ? "dirty" : "clean";
+        // rule-6: handled-locally — git not found / non-repo: degrade to unknown
+      } catch {
+        return "unknown";
+      }
+    },
+
+    probePrStats: async () => {
+      try {
+        const { stdout } = await execAsync(
+          "gh pr list --state open --json number,mergeable --limit 50",
+          { timeout: 400 },
+        );
+        const prs = JSON.parse(stdout);
+        if (!Array.isArray(prs)) return { open: 0, conflicting: 0 };
+        const open = prs.length;
+        const conflicting = prs.filter(
+          /** @param {{ mergeable?: string }} p */ (p) => p.mergeable === "CONFLICTING",
+        ).length;
+        return { open, conflicting };
+        // rule-6: handled-locally — gh not installed / not authed / timeout: degrade to zeros
+      } catch {
+        return { open: 0, conflicting: 0 };
+      }
+    },
+
+    probeQueueState: async () => {
+      if (!existsSync(tasksPath)) return "unknown";
+      try {
+        const content = readFileSync(tasksPath, "utf8");
+        const lines = content.split("\n");
+        const hasUnclaimed = lines.some((l) => /^\s*- \[ \] /.test(l) && !/@\w/.test(l));
+        return hasUnclaimed ? "has-tasks" : "empty";
+        // rule-6: handled-locally — TASKS.md read failure: degrade to unknown
+      } catch {
+        return "unknown";
+      }
+    },
+  };
+}
+
+/**
+ * Context-aware no-args entry point. Gathers 7 parallel context signals,
+ * plans the next action, and prompts the operator (or auto-confirms on
+ * non-TTY / `MINSKY_NON_INTERACTIVE=1`).
+ */
+async function runContextAware() {
+  const probes = buildContextProbes();
+  const context = await gatherMinskyContext(probes);
+  const plan = planMinskyAction(context);
+  const isTty =
+    process.stdout.isTTY === true &&
+    process.stdin.isTTY === true &&
+    process.env["MINSKY_NON_INTERACTIVE"] !== "1";
+
+  const actionId = await runInteractive(plan, {
+    stdin: process.stdin,
+    stdout: process.stderr,
+    isTty,
+  });
+
+  await executeChosenAction(actionId);
+}
+
+/**
+ * Pure: the `process.env` overlay an action needs before its `run*`
+ * delegate spawns the daemon. Extracted as a testable seam (rule #2 —
+ * pure-over-injection) so the round-trip-elimination invariant below is
+ * regression-tested instead of buried in a switch arm.
+ *
+ * `start-worker-local-llm` is only ever chosen from the
+ * `claude-exhausted-with-local-stack` scenario, which `planMinskyAction`
+ * reaches ONLY when the context probe already found the local-LLM server
+ * reachable (`probeLocalLlmState() === "running"`). Threading
+ * `MINSKY_LOCAL_LLM=1` alongside `local-preferred` makes the spawn's
+ * `maybeBootstrapLocalLlm` early-return at its `MINSKY_LOCAL_LLM === "1"`
+ * guard instead of falling through to `bootstrapFn()` →
+ * `detectLocalLlmStack`, which would re-`fetch` the same
+ * `127.0.0.1/v1/models` endpoint the context layer just probed. One
+ * eliminated round-trip per local-stack worker start.
+ *
+ * @param {import("../dist/minsky-action-plan.js").ActionId} actionId
+ * @returns {Record<string, string>} env overlay (empty when none needed)
+ */
+export function envOverlayForAction(actionId) {
+  if (actionId === "start-worker-local-llm") {
+    return { MINSKY_LLM_PROVIDER: "local-preferred", MINSKY_LOCAL_LLM: "1" };
+  }
+  return {};
+}
+
+/**
+ * Dispatch the chosen action ID to the appropriate `run*` function.
+ *
+ * @param {import("../dist/minsky-action-plan.js").ActionId} actionId
+ */
+async function executeChosenAction(actionId) {
+  switch (actionId) {
+    case "attach-worker":
+    case "start-worker":
+      await runStartOrAttach([]);
+      break;
+    case "start-worker-local-llm":
+      // Context probe already confirmed the local-LLM server reachable
+      // (scenario claude-exhausted-with-local-stack). MINSKY_LOCAL_LLM=1
+      // short-circuits the spawn's maybeBootstrapLocalLlm re-probe.
+      Object.assign(process.env, envOverlayForAction("start-worker-local-llm"));
+      await runStartOrAttach([]);
+      break;
+    case "bootstrap-local-llm":
+      await runBootstrapLocalLlm({ force: true });
+      break;
+    case "run-doctor":
+      await runDoctor();
+      break;
+    case "run-logs":
+      await runLogs([]);
+      break;
+    case "stop-worker":
+      runStop([]);
+      break;
+    default:
+      await runStartOrAttach([]);
+  }
+}
+
 // ---- Local-LLM auto-bootstrap pre-flight ---------------------------------
 
 /**
@@ -331,6 +532,21 @@ export async function maybeBootstrapLocalLlm(_opts = {}) {
   // Already opted in via env? Don't re-run the bootstrap.
   if (process.env["MINSKY_LOCAL_LLM"] === "1") {
     return {};
+  }
+
+  // Operator explicitly forces claude. Documented in --help
+  // ("MINSKY_LLM_PROVIDER=claude-only force claude (skip local-LLM
+  // probe)") but previously unimplemented HERE: every path below
+  // (reachable-server / persisted-hard-limit / live-probe) could still
+  // thread MINSKY_LLM_PROVIDER=local-preferred into the spawned daemon,
+  // silently overriding the operator on Minsky's (unreliable) budget
+  // estimate (budget-guard-correctness Slice C). Honor it: skip the
+  // entire local pre-flight and thread claude-only through unchanged.
+  if (process.env["MINSKY_LLM_PROVIDER"] === "claude-only") {
+    process.stderr.write(
+      "minsky: MINSKY_LLM_PROVIDER=claude-only — honoring operator; skipping local-LLM pre-flight\n",
+    );
+    return { MINSKY_LLM_PROVIDER: "claude-only" };
   }
 
   // Slice 60 — DI seam so tests can verify the install-trigger paths
@@ -916,6 +1132,30 @@ function buildArchProbes() {
     probeIntelBrewPath: () =>
       existsSync("/usr/local/bin/brew") ? "/usr/local/bin/brew" : undefined,
   };
+}
+
+/**
+ * Synchronous PATH scan for the `claude` binary — no subprocess spawn (unlike
+ * {@link whichFn}), so it stays inside the 500 ms context-probe budget and
+ * adds zero round-trips. Scans each PATH entry for an executable `claude`.
+ *
+ * @returns {boolean} true when `claude` is found and executable on PATH.
+ */
+function claudeBinaryOnPath() {
+  const raw = process.env["PATH"];
+  if (!raw) return false;
+  // POSIX-only daemon surface (the rest of this file assumes `sh` / `:` PATH).
+  for (const dir of raw.split(":")) {
+    if (dir.length === 0) continue;
+    try {
+      accessSync(resolve(dir, "claude"), fsConstants.X_OK);
+      return true;
+      // rule-6: handled-locally — not in this dir / not executable: keep scanning.
+    } catch {
+      // next dir
+    }
+  }
+  return false;
 }
 
 /** `which <bin>` adapter — uses `command -v` (POSIX) for portability. */

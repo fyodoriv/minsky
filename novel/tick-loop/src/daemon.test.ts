@@ -34,6 +34,7 @@ import {
   buildLocalBrief,
   extractOpenP0TaskIds,
   extractTaskBlock,
+  listEligibleTasks,
   pickTask,
   runDaemon,
 } from "./daemon.js";
@@ -1627,6 +1628,131 @@ describe("tick-loop / daemon / runDaemon", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  // ---- TASKS.md auto-lint-fix wire-in (`daemon-tasks-md-auto-lint-fix`) ---
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunTasksMdLintFix`.
+  // The pure fix/skip/dry-run semantics are tested in
+  // `tasks-md-lint-fix.test.ts`; here we only verify that the daemon
+  // dispatches into `fixTasksMdMarkdown` for the right iteration shapes,
+  // emits the `tick-loop.tasks-md-lint-fix` span carrying
+  // `tasks-md-lint-fix.violations` + `.fixed`, and honours the
+  // seam-omitted / non-completed skip-fast guards.
+
+  /**
+   * Build a `tasksMdLintExec` stub. `readOnlyOutputs` is the queue of
+   * combined-output strings returned for each *read-only* markdownlint
+   * invocation (the `--fix` invocation returns "" and is recorded
+   * separately) so a test can simulate "1 violation before, 0 after".
+   */
+  function makeLintExec(readOnlyOutputs: readonly string[]): {
+    readonly exec: (command: string) => string;
+    readonly commands: string[];
+  } {
+    const commands: string[] = [];
+    let readIdx = 0;
+    const exec = (command: string): string => {
+      commands.push(command);
+      if (command.includes(" --fix ")) return "";
+      const out = readOnlyOutputs[readIdx] ?? "";
+      readIdx += 1;
+      return out;
+    };
+    return { exec, commands };
+  }
+
+  const MD012_LINE =
+    "TASKS.md:42 MD012/no-multiple-blanks Multiple consecutive blank lines [Expected: 1; Actual: 2]";
+
+  it("tasksMdLintExec wire-in: completed iteration fixes an MD012 + emits a span with violations/fixed", async () => {
+    const recorder = new SpanRecorder();
+    // Before: one MD012. After `--fix`: clean.
+    const lint = makeLintExec([MD012_LINE, ""]);
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      tasksMdLintExec: lint.exec,
+      tasksMdPath: "TASKS.md",
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    // before-count → --fix → after-count = 3 invocations.
+    expect(lint.commands).toHaveLength(3);
+    expect(lint.commands[1]).toContain(" --fix ");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.violations"]).toBe(1);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.fixed"]).toBe(1);
+    expect(spans[0]?.attributes["task.id"]).toBe("alpha");
+  });
+
+  it("tasksMdLintExec wire-in: clean TASKS.md → span 0/0 and the skip-earlier gate runs only ONE exec", async () => {
+    const recorder = new SpanRecorder();
+    const lint = makeLintExec([""]); // no violations on the before-count
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      tasksMdLintExec: lint.exec,
+    });
+    // Skip-earlier gate: a clean file costs exactly one (read-only) call —
+    // no `--fix`, no re-read round-trips.
+    expect(lint.commands).toHaveLength(1);
+    expect(lint.commands[0]).not.toContain(" --fix ");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.violations"]).toBe(0);
+    expect(spans[0]?.attributes["tasks-md-lint-fix.fixed"]).toBe(0);
+  });
+
+  it("tasksMdLintExec wire-in: failed iteration does NOT run the fix (no TASKS.md write happened)", async () => {
+    const recorder = new SpanRecorder();
+    const lint = makeLintExec([MD012_LINE, ""]);
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic({ failureMode: "http-5xx" }),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      tasksMdLintExec: lint.exec,
+    });
+    expect(result.iterations[0]?.status).toBe("failed");
+    expect(lint.commands).toHaveLength(0);
+    expect(recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix")).toHaveLength(0);
+  });
+
+  it("tasksMdLintExec wire-in: seam omitted → no fix span, daemon unaffected", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations[0]?.status).toBe("completed");
+    expect(recorder.spans.filter((s) => s.name === "tick-loop.tasks-md-lint-fix")).toHaveLength(0);
+  });
+
   // ---- Slice 4: openPrFetcher / decideTouchesCollision wire-in ----------
 
   it("worker mode + openPrFetcher: skips a candidate whose Files overlap an open PR's changed files", async () => {
@@ -1855,6 +1981,48 @@ describe("tick-loop / daemon / pickTask", () => {
 
   it("returns undefined when nothing is pickable", () => {
     expect(pickTask("# Tasks\n\n## P0\n\n")).toBeUndefined();
+  });
+
+  // Regression for `daemon-priority-discipline-picktask-bug`: a block
+  // tagged `p1` that is physically placed inside the `## P0` section must
+  // NOT shadow genuine p0 work that appears later in the file. Effective
+  // priority is the `**Tags**:` p-token, not file position.
+  const FIXTURE_P1_TAGGED_IN_P0 = `# Tasks
+
+## P0
+
+- [ ] \`misplaced\` — p1-tagged block sitting first in the P0 section
+  - **ID**: misplaced
+  - **Tags**: p1, refactor
+  - **Hypothesis**: must not shadow genuine p0.
+
+- [ ] \`genuine-p0\` — correctly p0-tagged, later in the file
+  - **ID**: genuine-p0
+  - **Tags**: p0, reliability
+  - **Hypothesis**: must be picked first.
+
+## P1
+
+- [ ] \`real-p1\` — genuinely p1
+  - **ID**: real-p1
+  - **Tags**: p1
+  - **Hypothesis**: after all p0.
+`;
+
+  it("does not let a p1-tagged block in the P0 section shadow genuine p0 work", () => {
+    expect(pickTask(FIXTURE_P1_TAGGED_IN_P0)).toBe("genuine-p0");
+  });
+
+  it("orders eligible tasks by declared **Tags** priority, file order only as tiebreaker", () => {
+    expect(listEligibleTasks(FIXTURE_P1_TAGGED_IN_P0)).toEqual([
+      "genuine-p0",
+      "misplaced",
+      "real-p1",
+    ]);
+  });
+
+  it("keeps file order for untagged P0 tasks (no behavioural regression)", () => {
+    expect(listEligibleTasks(FIXTURE_TASKS_MD)).toEqual(["alpha", "beta", "gamma", "delta"]);
   });
 });
 

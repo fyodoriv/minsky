@@ -1,0 +1,22 @@
+{
+  "name": "@minsky/competitive-benchmark",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, cited metric set + direction-aware comparison helpers for ranking minsky against competitor autonomous-coding systems (task self-metrics-competitive-benchmark, slice a).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
