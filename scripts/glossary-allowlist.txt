@@ -93,3 +93,7 @@ RestrictAddressFamilies
 ProcessType
 agent-capability-delegation-scan
 pr-agent-delegation-scan-current
+
+# Skill primer names cited inline in vision.md to point readers at the corresponding
+# .claude/skills/<name>/ SKILL.md file. The anchor is the SKILL.md file itself.
+pr-merge-no-shortcuts
