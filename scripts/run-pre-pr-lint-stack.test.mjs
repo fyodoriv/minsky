@@ -106,6 +106,7 @@ describe("STACK_MANIFEST", () => {
         "biome",
         "markdownlint",
         "no-hardcoded-user-paths",
+        "no-personal-paths-in-docs",
         "rule-12-scope-discipline",
         "rule-17-proactive-heal",
         "rule-2-dep-coverage",
