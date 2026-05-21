@@ -2617,6 +2617,31 @@
 
 ## P3
 
+- [ ] `migrate-rule-9-lint-to-upstream` — once `@tasks-md/lint@0.8.0` (with `--require-prereg`) is published on npm, replace the local `scripts/check-rule-9-tasksmd-fields.mjs` with `npx -y @tasks-md/lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md`. The allowlist file is already in place (PR `chore/retire-local-rule-9-lint`); the script reads from it. Blocked on the v0.8.0 npm publish workflow succeeding (current failure: expired `NPM_TOKEN`).
+  - **ID**: migrate-rule-9-lint-to-upstream
+  - **Tags**: p3, cleanup, lint, upstream, tasks-md
+  - **Milestone**: M1
+  - **Touches**: scripts/check-rule-9-tasksmd-fields.mjs, scripts/check-rule-9-tasksmd-fields.test.mjs, scripts/run-pre-pr-lint-stack.mjs, .github/workflows/ci.yml, lefthook.yml, setup.sh
+  - **Surfaced-by**: 2026-05-21 upstream-extraction sweep (tasks.md PR #83 merged the upstream lint; v0.8.0 publish failed on npm-token-expired so the local script stays for now)
+  - **Hypothesis**: removing the duplicate parsing logic in `scripts/check-rule-9-tasksmd-fields.mjs` and depending on upstream tightens the source-of-truth and keeps minsky in lockstep with future spec evolution.
+  - **Success**: `node scripts/check-rule-9-tasksmd-fields.mjs` is replaced by `npx tasks-lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md` in `run-pre-pr-lint-stack.mjs` and `ci.yml`, the local script + test are deleted, and the output is byte-identical for the same TASKS.md input.
+  - **Pivot**: if upstream tasks-lint output diverges from minsky's expected format in a way that breaks CI parsing, file a tasks.md PR to align — don't fork.
+  - **Measurement**: `pnpm pre-pr-lint --stage=fast` produces the same `rule-9-tasksmd-fields: scanned N block(s); clean=X, grandfathered=Y, blocking=Z` line after migration.
+  - **Anchor**: tasks.md PR #83 (the upstream lint), this PR (`chore/retire-local-rule-9-lint`, the partial cleanup), vision.md § 9 (rule-#9 itself).
+
+- [ ] `tasks-md-npm-token-rotate` — `@tasks-md/lint@0.8.0` publish failed with 404 "Not in this registry", which is npm's error code for "token cannot publish to this scope". Rotate the `NPM_TOKEN` repo secret on tasks.md to a fresh token with publish access to `@tasks-md/*` and re-run the publish workflow.
+  - **ID**: tasks-md-npm-token-rotate
+  - **Tags**: p3, blocked-on-operator, tasks-md, npm-publish
+  - **Milestone**: M1
+  - **Touches**: github.com/tasksmd/tasks.md repo secrets (NPM_TOKEN)
+  - **Surfaced-by**: 2026-05-21 v0.8.0 release attempt — publish workflow `publish.yml` on tag `v0.8.0` returned `npm error 404 Not Found - PUT https://registry.npmjs.org/@tasks-md%2fparser`.
+  - **Hypothesis**: the npm token issued before Apr 8 (v0.7.0 ship date) has expired or has been scoped down. A fresh token with `automation` access to `@tasks-md` scope restores the publish path.
+  - **Success**: `npm view @tasks-md/lint version` returns `0.8.0` (currently `0.7.0`); `npx -y @tasks-md/lint@latest --help` shows `--require-prereg`.
+  - **Pivot**: if the npm scope owner refuses to issue a publish token, switch tasks.md to GitHub Packages or a forked scope.
+  - **Measurement**: re-trigger the publish workflow on tag `v0.8.0` via `gh workflow run publish.yml` (or just push a v0.8.1 tag); check `gh run list --workflow=publish.yml --limit 1 --json conclusion` for `SUCCESS`.
+  - **Anchor**: this session's release attempt (run ID 26240628732).
+  - **Blocked**: needs-operator — `NPM_TOKEN` repo secret rotation is a maintainer-only action.
+
 - [ ] `scripts-complexity-refactor` — 6 `noExcessiveCognitiveComplexity` biome errors are silenced with `// biome-ignore` annotations in scripts/ and 2 in novel/cross-repo-runner/bin/minsky-run.mjs. Refactor each into smaller helpers so the rule passes natively.
   - **ID**: scripts-complexity-refactor
   - **Tags**: p3, cleanup, biome, refactor, observed-2026-05-19

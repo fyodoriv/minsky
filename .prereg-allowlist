@@ -1,0 +1,50 @@
+# Rule-#9 pre-registration allowlist.
+#
+# Tasks listed here predate Minsky's adoption of the rule-#9 lint
+# (`tasks-lint --require-prereg`) and are exempt until backfilled.
+# New or modified tasks are NEVER exempt — the lint blocks them.
+#
+# Format: one task ID per line. Lines starting with `#` are comments;
+# inline `#` comments are also allowed.
+#
+# Backfill task: `rule-9-tasksmd-fields-backfill` in TASKS.md.
+#
+# Lint invocation:
+#   npx -y @tasks-md/lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md
+#
+# As the audit-gap-loop closes, IDs leave this list; eventually the
+# allowlist is empty and the rule is iron in practice, not just in
+# vision.md.
+
+minsky-cli-auto-bootstrap-local-llm
+minsky-cli-fresh-clone-bootstrap
+minsky-runtime-resilience
+minsky-claude-exhaustion-persisted-state
+minsky-cli-context-aware-ux
+daemon-aider-brief-shrinker
+daemon-claude-print-hang-watchdog
+daemon-stuck-pr-rebase-watchdog
+daemon-duplicate-work-detection
+daemon-pr-age-watchdog
+cto-audit-pr-auto-merge
+daemon-pre-pr-lint-gate
+daemon-fix-own-pr-on-ci-failure
+daemon-self-detect-throughput-issues
+devin-spawn-missing-permission-mode-bypass
+dashboard-web-rich-runs-view
+local-agent-config-validation-at-boot
+daemon-iteration-phase-tagged-spans
+daemon-config-analyzer-auto-apply
+daemon-launchd-drift-warning-suppress-when-cli-launched
+daemon-task-rotation-on-completion
+daemon-tasks-md-auto-lint-fix
+competitive-benchmark-real-automated-weekly
+minsky-update-cli
+minsky-config-bootstrap-prompt
+self-metrics-competitive-benchmark
+daemon-brief-test-pin-soft-tolerance
+dependabot-bumps-dep-regression-triage
+spawn-n-workers-with-watchdog-monitoring
+brief-trim-coordinator
+local-worktree-followups
+gitignore-claire-runtime-dir
