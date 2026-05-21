@@ -114,6 +114,22 @@ Enforced by `scripts/check-rule-9-tasksmd-fields.mjs` as a CI gate; the task pic
 
 **Where in Minsky.** README structure and the `reader-priority-docs` skill (local to this repo). Six tiers — tier 1 ("what IS this") is the lede; tier 6 (license, retired terms) is the bottom. Every README section is placed by tier and verified by the skill's checklist before any docs PR.
 
+### Unified reader-orientation doc frame
+
+**Citation.** Operator directive 2026-05-21 ("ease up README language for non-technical readers"; "doc surface should be skimmable as a coherent set"); applied wholesale in PR #685 (`docs: unify reader-orientation docs under one structural pattern`).
+
+**Claim.** Every top-level reader-orientation doc (`README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `DEPRECATED.md`, `INSTALL.md`, `MILESTONES.md`, `docs/PRACTICES.md`, `research.md`, `vision.md`, `competitors/*.md`) opens with three structural beats in the same order:
+
+1. **One-line tagline** — the doc's job in ≤12 words.
+2. **`## What this file is` / `## What this is`** — 2-4 bullets naming what the doc covers and the canonical source it draws from.
+3. **`## What this file is not` / `## What this is not`** — 3-5 bullets pointing the reader at the OTHER doc that would answer their question instead.
+
+The third beat is the load-bearing one. A reader who landed on the wrong doc finds the right one in 15 seconds. Without it, the same reader skims half the file before realising it answers a different question. The frame compounds: every doc that adopts it makes every other doc easier to navigate, because every "see [vision.md](...) instead" or "see [ARCHITECTURE.md](...) instead" pointer becomes load-bearing rather than decorative.
+
+**Where in Minsky.** Applied to all 18 reader-orientation docs as of PR #685. Tagline + `What X is / not` frame is the SHAPE; the contents differ per doc. New reader-orientation docs added after 2026-05-19 (e.g. a future `docs/SECURITY.md`) MUST open with this frame. Skim any of the 18 named docs above for the canonical shape.
+
+**Not yet enforced by a linter.** The pattern is currently a `docs/PRACTICES.md` rule + reviewer-discipline. Mechanically detecting "which markdown files are reader-orientation docs" requires either an allowlist (brittle) or a heuristic (which-files-are-cited-by-other-files; non-trivial). A future P3 task in `TASKS.md` (`docs-frame-coherence-lint`) will encode the rule when the per-file classification becomes machine-tractable.
+
 ### Calm Technology / Glanceable Information Display
 
 **Citation.** Weiser, Mark & Brown, John Seely. "The Coming Age of Calm Technology." *Beyond Calculation: The Next Fifty Years of Computing*, Springer, 1997. Also Mark Weiser, "The Computer for the 21st Century," *Scientific American*, 265(3):94–104, 1991.

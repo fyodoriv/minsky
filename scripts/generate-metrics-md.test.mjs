@@ -171,6 +171,32 @@ describe("buildMetricsMd — section structure", () => {
     expect(out).toContain("**Anchor:** Beyer et al., _SRE_ 2016, Ch. 4 (SLI / SLO)");
   });
 
+  test("throws when goal is empty string (TypeScript-allows-empty bypass guard, operator directive 2026-05-21)", () => {
+    const broken = { ...sampleMetric, goal: "" };
+    expect(() => buildMetricsMd({ metrics: [broken], nowMs: NOW })).toThrow(
+      /empty or non-string goal/,
+    );
+  });
+
+  test("throws when pivot is whitespace-only string", () => {
+    const broken = { ...sampleMetric, pivot: "   " };
+    expect(() => buildMetricsMd({ metrics: [broken], nowMs: NOW })).toThrow(
+      /empty or non-string pivot/,
+    );
+  });
+
+  test("throws when anchor is empty string", () => {
+    const broken = { ...sampleMetric, anchor: "" };
+    expect(() => buildMetricsMd({ metrics: [broken], nowMs: NOW })).toThrow(
+      /empty or non-string anchor/,
+    );
+  });
+
+  test("error message names the metric ID so the operator knows which one to fix", () => {
+    const broken = { ...sampleMetric, id: "supervisor-uptime", goal: "" };
+    expect(() => buildMetricsMd({ metrics: [broken], nowMs: NOW })).toThrow(/'supervisor-uptime'/);
+  });
+
   test("renders milestone tag when present", () => {
     const m = { ...sampleMetric, milestone: "M1.1" };
     const out = buildMetricsMd({ metrics: [m], nowMs: NOW });
