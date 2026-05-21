@@ -24,22 +24,22 @@ describe("gatherMachineRaw", () => {
     const raw = gatherMachineRaw(3, machineProbe, "/srv/minsky");
     expect(raw).toEqual({
       host: "op-mbp",
-      loadavg: [2.1, 1.8, 1.55],
+      loadAvg: [2.1, 1.8, 1.55],
       cpuCount: 8,
       totalMemBytes: 16 * GIB,
       freeMemBytes: 6.5 * GIB,
       diskTotalBytes: 930 * GIB,
       diskFreeBytes: 518 * GIB,
       nowMs: Date.UTC(2026, 4, 17, 12, 0, 0),
-      minskyProcCount: 3,
+      procCount: 3,
     });
     // The shim's output must satisfy the slice-1 formatter unchanged.
     expect(formatMachineInfo(raw).procs).toBe("3 minsky procs");
   });
 
   it("threads the caller's scan count, not a re-scan (rule #1)", () => {
-    expect(gatherMachineRaw(0, machineProbe).minskyProcCount).toBe(0);
-    expect(gatherMachineRaw(7, machineProbe).minskyProcCount).toBe(7);
+    expect(gatherMachineRaw(0, machineProbe).procCount).toBe(0);
+    expect(gatherMachineRaw(7, machineProbe).procCount).toBe(7);
   });
 
   it("queries the disk volume the runs live on", () => {
