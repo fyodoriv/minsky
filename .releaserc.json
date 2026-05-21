@@ -1,8 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/semantic-release.json",
-  "branches": [
-    "main"
-  ],
+  "branches": ["main"],
   "plugins": [
     [
       "@semantic-release/commit-analyzer",
@@ -59,11 +57,7 @@
           }
         ],
         "parserOpts": {
-          "noteKeywords": [
-            "BREAKING CHANGE",
-            "BREAKING CHANGES",
-            "BREAKING"
-          ]
+          "noteKeywords": ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"]
         }
       }
     ],
