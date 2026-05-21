@@ -22,12 +22,21 @@
 //   --once          : one tick then exit (for validation / dry checks)
 //   --interval-ms=N : loop period (default 1200000 = 20 min;
 //                      env MINSKY_ORCH_INTERVAL_MS also honored)
+//   land-local <branch> [--dry-run] [--no-review]
+//                   : take a fully-committed LOCAL branch (e.g. an
+//                     Opus-director keystone fix from a non-worktree
+//                     checkout) green through the scratch --stage=full
+//                     gate, then push + open PR + admin-merge it — the
+//                     orchestrator's worker-branch primitive generalised
+//                     to a local ref so swarm churn / missing worktree
+//                     node_modules can no longer strand a vetted branch
+//                     (TASKS.md orchestrator-must-land-local-vetted-branches).
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runGateSweep } from "./local-gate-merge.mjs";
+import { landLocalBranch, runGateSweep } from "./local-gate-merge.mjs";
 
 // Derive the repo root from this script's own location — the hardcoded
 // `/Users/cbrwizard/apps/tooling/minsky` fallback only worked for one
@@ -142,6 +151,16 @@ const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}
 if (isMain) {
   const args = process.argv.slice(2);
   const log = (/** @type {string} */ s) => process.stdout.write(s);
+  if (args[0] === "land-local") {
+    const res = landLocalBranch({
+      branchName: args[1],
+      dryRun: args.includes("--dry-run"),
+      noReview: args.includes("--no-review"),
+      log,
+    });
+    log(`orchestrate: land-local ${args[1] ?? "(none)"} — ${res.outcome} (${res.reason})\n`);
+    process.exit(res.outcome === "landed" ? 0 : 1);
+  }
   const ivArg = args.find((a) => a.startsWith("--interval-ms="));
   const intervalMs = ivArg
     ? Number(ivArg.split("=")[1])
