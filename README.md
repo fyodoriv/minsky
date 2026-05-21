@@ -7,33 +7,31 @@
 
 **For indie hackers**: ship the boring tickets while you sleep — failing tests, lint, dependency bumps, docs drift. Wake up to draft PRs to review.
 
-**For companies**: a self-hosted, audit-traceable autonomous coding loop with a measurable stability target (90% over 10h unattended at M1) and a constitution of mechanically-enforced safety rules. You bring your own model keys. No vendor lock-in, no managed service.
+**For companies**: a self-hosted, audit-traceable autonomous coding loop with mechanically-enforced safety rules. You bring your own model keys. No vendor lock-in, no managed service.
 
-Built on scientifically proven software-engineering practices — TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, error budgets — each backed by a literature citation in [PRACTICES](docs/PRACTICES.md).
-
-## Why Minsky
+Built on TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, and error budgets — each backed by a literature citation.
 
 - **Continuous, unattended improvement** — picks the next task, ships a draft PR, never merges without you.
-- **Issues surfaced as draft tasks** — a CTO-audit pass after each iteration proposes new tasks for your review (opt-out via env var).
+- **Issues surfaced as draft tasks** — a CTO-audit pass after each iteration proposes new tasks for your review.
 - **Right model for each task** — Claude for prose, Devin for refactors, local Ollama for mechanical lint fixes.
-- **Forced research at PR time** — every PR cites the existing libraries it considered; the linter blocks reinvention.
-- **A tool that improves itself** — reads its own daemon metrics, opens tasks against its own stability, ships the fixes.
+- **Forced research at PR time** — every PR cites existing libraries it considered; the linter blocks reinvention.
+- **A tool that improves itself** — reads its own metrics, opens tasks against its own stability, ships the fixes.
 - **Keeps iterating when the cloud runs dry** — quota exceeded → local Ollama → loop continues until your tokens return.
-- **Async Q&A across timezones** — agents write questions to a local file; you reply by editing it. No sync meetings, no chase DMs.
+- **Async Q&A across timezones** — agents write questions to a local file; you reply by editing it.
 
 ## Getting started
 
-**Through your AI agent.** Copy-paste:
+Through your AI agent — copy-paste:
 
 > Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-**Manual:**
+Manual:
 
 ```bash
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-Minsky runs against your current repo by default. First run auto-installs persistence (launchd / systemd) so it survives reboots.
+Minsky runs against your current repo by default. First run auto-installs persistence so it survives reboots.
 
 ## Why it's safe to use Minsky
 
@@ -51,42 +49,20 @@ Safety is mechanical, not aspirational. Every rule below is enforced by a CI lin
 - **Let-it-crash supervision** — failures are caught at the supervisor boundary, not swallowed mid-iteration. ([`scripts/check-rule-6-let-it-crash.mjs`](scripts/check-rule-6-let-it-crash.mjs))
 - **Chaos engineering per module** — every package ships a deterministic chaos test that proves a failure mode is contained. ([`scripts/check-rule-7-chaos-coverage.mjs`](scripts/check-rule-7-chaos-coverage.mjs))
 - **Pre-registered hypothesis** — every change ships with a falsifiable success metric and a pivot threshold. No vanity metrics. ([`scripts/check-rule-9-tasksmd-fields.mjs`](scripts/check-rule-9-tasksmd-fields.mjs))
-- **Proactive healing** — every observed error must be fixed in the same session that observed it. No "I'll get to it later". ([`scripts/check-rule-17-proactive-heal.mjs`](scripts/check-rule-17-proactive-heal.mjs))
+- **Proactive healing** — every observed error must be fixed in the same session that observed it. ([`scripts/check-rule-17-proactive-heal.mjs`](scripts/check-rule-17-proactive-heal.mjs))
 - **No secrets in logs or commits** — pre-commit secret scan + OpenTelemetry PII filter. ([`scripts/scan-secrets.mjs`](scripts/scan-secrets.mjs), [`scripts/check-otel-no-pii.mjs`](scripts/check-otel-no-pii.mjs))
 
 Full constitution: [`vision.md`](vision.md).
 
 ## Architecture
 
-A bash CLI shim → a task walker that picks the next priority item from your `TASKS.md` → a pluggable AI agent (Claude, Devin, or a local Ollama model) → a sidecar (`.minsky/`) recording each iteration → a draft PR for you to review. Built on MAPE-K (Kephart & Chess 2003), let-it-crash supervision (Armstrong 2007), and the Viable System Model (Beer 1972).
+A bash CLI shim → a task walker that picks the next priority item → a pluggable AI agent (Claude, Devin, or a local Ollama model) → a sidecar (`.minsky/`) recording each iteration → a draft PR for you to review. Built on MAPE-K (Kephart & Chess 2003), let-it-crash supervision (Armstrong 2007), and the Viable System Model (Beer 1972).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full breakdown.
 
-## More
-
-- [INSTALL.md](INSTALL.md) · [docs/uninstall.md](docs/uninstall.md) · [docs/updating.md](docs/updating.md)
-- [CONTRIBUTING.md](CONTRIBUTING.md) — code in this repo is AI-authored
-- [vision.md](vision.md) — the constitution
-- [MILESTONES.md](MILESTONES.md) — M1–M5 roadmap
-- [docs/PRACTICES.md](docs/PRACTICES.md) — the citations behind each practice
-
 ## What works today
 
-| Capability | Status |
-|---|---|
-| Daemon picks tasks and opens draft PRs | ✅ |
-| Live dashboard (`minsky watch`) | ✅ |
-| Multi-repo round-robin walking | ✅ |
-| Dynamic watchdog (adapts to machine speed) | ✅ |
-| Auto-survives reboots | ✅ |
-| Switch Devin / Claude / local Ollama | 🟡 Claude primary; Devin experimental |
-| 8h unattended at ≥90% stability | 🟡 In progress (target M1) |
-| `npx minsky` one-command install | 🔴 M1 |
-| Async file-based Q&A | 🔴 M1 |
-| Multi-file refactors with CI gate | 🔴 M2 |
-| GitHub Actions integration | 🔴 M3 |
-
-Roadmap: [`MILESTONES.md`](MILESTONES.md).
+Stability target: 90% over 10h unattended runs. Today it's lower — improving via the roadmap in [`MILESTONES.md`](MILESTONES.md). The daemon picks tasks and opens draft PRs reliably; multi-repo walking, the live dashboard (`minsky watch`), the dynamic per-machine watchdog, and auto-survive-reboots all work. Switching between Claude / Devin / local Ollama works but Devin is experimental. Async file-based Q&A, `npx minsky` one-command install, multi-file refactors with a CI gate, and GitHub Actions integration are coming.
 
 About the name: Marvin Minsky (1927–2016), *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together.
 
