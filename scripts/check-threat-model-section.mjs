@@ -46,7 +46,7 @@ const REPO_ROOT = resolve(HERE, "..");
  * surface as a separate, visible PR ratchet (add the package + add it here +
  * add the section), not slip in silently.
  *
- * Composition: 10 top-level `novel/<pkg>/` packages + 6 `novel/adapters/<pkg>/`
+ * Composition: 11 top-level `novel/<pkg>/` packages + 6 `novel/adapters/<pkg>/`
  * subpackages + 1 `novel/bridges/<pkg>/` subpackage (the bridges parent
  * README explicitly delegates per-bridge threat models — see its `## Threat
  * model` section). Future bridges land their own row here in the same PR
@@ -56,6 +56,7 @@ export const THREAT_MODEL_README_PATHS = Object.freeze([
   "novel/bridges/README.md",
   "novel/bridges/omc-tasksmd/README.md",
   "novel/budget-guard/README.md",
+  "novel/competitive-benchmark/README.md",
   "novel/cross-repo-runner/README.md",
   "novel/dashboard-web/README.md",
   "novel/experiment-record/README.md",

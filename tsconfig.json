@@ -10,13 +10,16 @@
     { "path": "./novel/adapters/types" },
     { "path": "./novel/bridges/omc-tasksmd" },
     { "path": "./novel/budget-guard" },
+    { "path": "./novel/competitive-benchmark" },
     { "path": "./novel/cross-repo-runner" },
     { "path": "./novel/dashboard-web" },
     { "path": "./novel/experiment-record" },
     { "path": "./novel/handoff-spec" },
     { "path": "./novel/mape-k-loop" },
+    { "path": "./novel/observer/heals" },
     { "path": "./novel/sidecar-bootstrap" },
     { "path": "./novel/tick-loop" },
+    { "path": "./novel/tui" },
     { "path": "./scripts" },
     { "path": "./user-stories" }
   ]

@@ -1,5 +1,7 @@
 # Competitor: Oh My Claude Code (OMC)
 
+> Oh My Claude Code — adopted as Minsky's `Orchestrator` layer (the persona/CLI substrate); not a competitor, a dependency.
+
 - **URL**: <https://github.com/Yeachan-Heo/oh-my-claudecode>
 - **Site**: <https://ohmyclaudecode.com>
 - **Status**: Active, v4.13.x as of 2026-05, 31.3k GitHub stars, MIT licensed

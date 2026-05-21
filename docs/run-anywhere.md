@@ -1,116 +1,136 @@
-# Run-Anywhere Model Decision
+# Run anywhere — zero-arg `minsky`
 
-<!-- scope: human-approved slice 1 of `runany-dynamic-model-or-local-fallback` (P0 task in TASKS.md). This file is the operator-facing contract for the unified "pin > dynamic > local" decision the run-anywhere entrypoint applies every iteration. -->
+`minsky` with no arguments starts the orchestrator conductor scoped to the
+current working directory. No env vars, no flags, no prior setup required.
 
-Operator-facing reference for how the zero-arg run picks its model and
-when it falls fully to the local stack.
+## Usage
+
+```bash
+cd /path/to/any/project
+minsky            # detect context → launch conductor
+minsky status     # show running conductor + worker processes
+minsky stop       # SIGTERM conductor + workers
+```
+
+## How detection works
+
+| CWD type | Detected as | `MINSKY_HOME` |
+|----------|-------------|---------------|
+| Git repo (has `.git`) | single-host | `git rev-parse --show-toplevel` |
+| Detached worktree (`.git` file) | single-host | worktree root |
+| Monorepo (single `.git` at root) | single-host | git root |
+| Parent of git repos | multi-host parent | `$PWD` |
+| Plain directory (no git) | single-host | `$PWD` |
+
+The conductor (`scripts/orchestrate.mjs`) reads `MINSKY_HOME` and scopes
+its ledger and sweep to that root.
+
+## Implementation
+
+Detection priority (from `novel/cross-repo-runner/src/cwd-detect.ts`):
+
+1. **Bootstrapped** (`.minsky/repo.yaml` present) → existing single-host path
+2. **Bootstrapped subdirs** → existing multi-host walk path
+3. **Git root** (`.git` present in cwd) → single-host via `detectAnyCwd`
+4. **Git-root subdirs** → multi-host via `detectAnyCwd`
+5. **Plain dir** → single-host, cwd as root
+
+The `bin/minsky` shim uses `git rev-parse --show-toplevel` for git-root
+detection and falls back to `$PWD` when not in a git repository.
+
+## Lifecycle
+
+```text
+minsky &        → conductor starts, MINSKY_HOME=<detected-root>
+minsky status   → shows conductor PID + worker PIDs
+minsky stop     → SIGTERM both conductor and workers
+```
+
+The conductor uses a self-scheduling `setTimeout` loop (never `while(true)`)
+so `minsky stop` always finds a clean shutdown point.
+
+## Per-iteration provider decision
+
+<!-- scope: human-approved `runany-dynamic-model-or-local-fallback` slices 1+2 (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
+
+Operator-facing reference for the zero-arg run-anywhere entrypoint's
+per-iteration **pin > dynamic > local** provider decision.
 
 ## TL;DR
 
+With no operator pin, Minsky tracks remaining budget and picks the
+highest-quality model that fits. When **every** configured remote backend
+is down — or the budget is exhausted — Minsky switches **fully and
+automatically** to the local stack within one iteration and keeps running.
+Recovery to remote is automatic the first iteration a backend probes
+reachable again. An operator pin overrides all of this, verbatim.
+
 ```text
-operator pinned a model?            → that model, verbatim, every iteration
-else every remote backend down?     → local, this iteration (≤1 to switch)
-else                                → strategic router picks by budget
-                                      (opus → sonnet → local; see below)
-remote backend reachable again?     → back to the budget-driven pick
+operator pin set            → pinned model (verbatim, ignores budget + liveness)
+all remote backends down    → local (≤1 iteration, never a wedged/hold state)
+otherwise                   → strategic picker by remaining budget band
 ```
 
-The decision is a single pure function,
-`resolveRunAnyModel` (`novel/tick-loop/src/runany-model-resolver.ts`).
-It composes the shipped strategic picker
-([Strategic Model Router](./strategic-model-router.md)) under a
-multi-backend liveness gate.
+## Decision table (first match wins)
 
-## The three rules, in order
+The decision is a single pure function — `decideRunAnyProvider`
+(`novel/tick-loop/src/runany-provider-decision.ts`, exported from
+`@minsky/tick-loop`). Pollack decision table (CACM 1962); first matching
+row fires:
 
-1. **Pin wins, absolutely.** Set `MINSKY_STRATEGIC_PIN_MODEL` (or pass
-   the explicit flag) to a catalog model id and that model is used in
-   100% of iterations — budget and backend liveness are never consulted.
-   A pin that names no catalog row is ignored (typo guard), not honored.
+1. **`operator-pin`** — `MINSKY_STRATEGIC_PIN_MODEL` (or explicit flag) is
+   set and maps to a catalog row → that model, every iteration, regardless
+   of budget or backend liveness. The operator's explicit choice is final
+   (rule #7 operator escape hatch). An unknown pin is ignored and the walk
+   falls through to row 3 (graceful-degrade).
+2. **`local-fallback`** — at least one remote backend is configured **and
+   every one of them is unreachable** → the highest-tier `local` catalog
+   row (synthesised `local` if the catalog has none). Never a `hold`/wedge
+   state; `local` is the always-available last resort.
+3. **`dynamic`** — delegate to `pickStrategicModel` (see
+   [strategic-model-router.md](./strategic-model-router.md)): the
+   highest-quality model whose per-window floors fit the current remaining
+   budget. A budget-exhausted dynamic pick is still the local catalog row,
+   so the daemon keeps running either way.
 
-2. **All remotes down → local, now.** Every configured remote backend
-   (claude *and any others*) is probed each iteration. When **every**
-   one is unreachable, the run switches fully to the local stack in the
-   *same* iteration — regardless of how much budget remains. This is the
-   gap the older `decideProvider` left open: a transient `ENETUNREACH`
-   is deliberately *not* a quota signal there, so a fully-offline remote
-   would otherwise wedge the daemon on claude forever. If the local
-   probe is also down, the daemon still routes local and bootstraps the
-   local stack (see `minsky-cli-auto-bootstrap-local-llm`) rather than
-   halting. An **empty** backend list (local-only operator) is *not*
-   "all down" — it falls through to rule 3.
+An **empty** backend list means "no remote configured" — not "all remote
+down" — so the dynamic picker still governs (budget alone gates `local`).
 
-3. **Otherwise, dynamic by budget.** Delegates to the strategic router:
-   the highest-quality model whose per-window remaining-budget floors
-   fit. The router returns the local tier itself when the budget is
-   exhausted, so "budget exhausted → local" needs no separate branch.
+## Recovery
 
-**Recovery** is automatic and needs no sticky state: the function is
-pure, so the next iteration with any remote backend reachable skips
-rule 2 and returns the budget-driven pick again.
+The function is pure and recomputed every iteration over the live backend
+liveness probe, so when a previously-down backend probes reachable again
+the next iteration returns a remote model automatically — no flap state is
+held here (hysteresis is the picker's job).
 
-## Verifying the contract
+## Measurement (pre-registered, rule #9)
 
-The three acceptance scenarios are pre-registered (rule #9) and checked
-deterministically:
+The task's Success threshold is evaluated deterministically by the audit
+harness — committed before the result is observed (Munafò et al. 2017):
 
 ```bash
-node scripts/runany-model-audit.mjs --scenario=pin      --json
-node scripts/runany-model-audit.mjs --scenario=dynamic  --json
-node scripts/runany-model-audit.mjs --scenario=all-down  --json
-node scripts/runany-model-audit.mjs                       # all three
+node scripts/runany-model-audit.mjs --scenario=pin --json
+node scripts/runany-model-audit.mjs --scenario=dynamic --json
+node scripts/runany-model-audit.mjs --scenario=all-down --json
+node scripts/runany-model-audit.mjs --scenario=all          # human summary, all three
 ```
 
-Exit code is `0` when every scenario meets its threshold, `1` otherwise.
-Thresholds (transcribed verbatim from the task's Success line):
+Exit code is `0` only when every requested scenario meets its
+pre-registered threshold:
 
-| Scenario  | Threshold |
-|-----------|-----------|
-| `pin`      | 100% pinned-model dispatch across the budget × liveness grid |
-| `dynamic`  | 100% of budget-banded iterations land on the band's tier (opus@high / sonnet@mid / local@low) |
-| `all-down` | ≤1 iteration to switch to local, then ≥95% local dispatch, 0 wedged iterations, recovers to the remote pick when a backend returns |
+| Scenario   | Threshold                                                              |
+|------------|------------------------------------------------------------------------|
+| `pin`      | 100% pinned-model dispatch across all budget/liveness bands; 0 wedged   |
+| `dynamic`  | selected tier monotone non-decreasing as budget drops; tier-1 at top band; `local` at bottom band |
+| `all-down` | ≤1 iteration to switch to local; ≥95% local dispatch thereafter; 0 wedged |
+
+A regression in the decider becomes an exit-1 gate break, not a silent
+mis-degrade.
 
 ## Status
 
-Slices 1+2: the pure `resolveRunAnyModel` decider, its tests, and the
-`runany-model-audit.mjs` measurement harness.
-
-Slice 3: the **pin-path wire-in** into the run-anywhere
-entrypoint. `pickAndLogStrategicModel()` in
-`novel/tick-loop/bin/tick-loop.mjs` now consults `resolveRunAnyModel`
-*first*: when `MINSKY_STRATEGIC_PIN_MODEL` names a catalog model, the
-decision short-circuits **before** the budget-snapshot read, the
-usage-history ring-buffer append, and the exhaustion prediction —
-honoring the pin verbatim every iteration (Acceptance #1) and emitting a
-compact `[span] tick-loop.runany-resolve` line instead of the ~400-byte
-`tick-loop.strategic-pick` span (rule #9 skip-earlier gate: a pinned run
-pays zero dynamic-machinery cost). A pin that names no catalog row stays
-on the unchanged budget-aware dynamic path (typo guard) — that path is
-byte-for-byte identical to before this slice, so the dynamic and
-all-down behaviour is unaffected.
-
-Slice 4 (this slice): the **all-remote-down wire-in** into the
-run-anywhere entrypoint (Acceptance #3). When the budget guard has
-circuit-broken claude — the only configured remote is inaccessible
-(budget exhausted) — `pickAndLogStrategicModel()` now routes the
-decision through `resolveRunAnyModel` and returns **before** the
-remaining-fractions snapshot math, the usage-history ring-buffer
-append, and the exhaustion regression (rule #9 skip-earlier gate: a
-down-remote iteration pays zero dynamic-machinery cost, same
-optimization class as slice 3's pin path). The switch to local happens
-in *that very iteration* (≤1-iteration switch) and emits a compact
-`[span] tick-loop.runany-resolve` line with `"source":"all-remote-down"`
-and a visible reason (Beyer SRE 2016 visible-not-silent) instead of the
-~400-byte `tick-loop.strategic-pick` span. Recovery is implicit: the
-next iteration where the guard is no longer circuit-broken falls through
-to the unchanged dynamic path (Acceptance #4). The actual local
-liveness/bootstrap is owned by the wrapper's TTL-cached probe
-(`minsky-cli-auto-bootstrap-local-llm`); this layer routes + logs only.
-The budget-band dynamic path (no pin, remote reachable) is still
-byte-for-byte identical to before this slice.
-
-Follow-up slices (tracked under the same task): routing the *dynamic*
-path through the resolver too, and the live multi-backend probe builder
-that populates `remoteBackends` from a real per-backend network probe
-(not just the budget-circuit-break proxy) so the all-remote-down branch
-also fires on a network-level outage of a multi-remote fleet.
+- **Slice 1** (shipped) — pure `decideRunAnyProvider` decision table + chaos tests.
+- **Slice 2** (this) — `@minsky/tick-loop` export + pre-registered measurement harness.
+- **Next** — wire the decider + a multi-backend liveness probe into the
+  run-anywhere entrypoint (`bin/minsky.mjs` / `scripts/orchestrate.mjs`);
+  probe-result cache (TTL ≥60s) per the task Pivot.

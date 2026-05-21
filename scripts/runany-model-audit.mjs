@@ -1,358 +1,369 @@
 #!/usr/bin/env node
-// <!-- scope: human-approved — task `runany-dynamic-model-or-local-fallback`
-//   Measurement line. Promotes the task's three pre-registered acceptance
-//   scenarios (pin / dynamic / all-down) from prose into a versioned,
-//   paired-tested deterministic harness. Without it the operator can't
-//   answer "does the run-anywhere model decision honor the pin / track
-//   budget / fall to local when all remotes die" except by reading code. -->
-// Pattern: pure scenario runners (`runPinScenario`, `runDynamicScenario`,
-//   `runAllDownScenario`) parameterised by an injected `resolve` (the
-//   `resolveRunAnyModel` pure decider) above a thin CLI — same shape as
-//   `cto-audit-metrics.mjs` so the operator surface stays uniform.
-// Anchor: rule #9 (pre-registered) + Munafò et al. 2017 — the success
-//   thresholds below are committed BEFORE the result is observed (they
-//   transcribe the task block's Success line verbatim). The harness
-//   evaluates that pre-registration deterministically.
-// Conformance: full — the scenario runners are pure (no I/O, no clock);
-//   the CLI is the only place the dist `resolveRunAnyModel` is imported.
-// Pivot (rule #9): if multi-backend probing proves too costly per
-//   iteration in production, the resolver caches probe results (TTL ≥60s)
-//   — this harness still passes because it drives the pure decider with
-//   fixed fixtures, not live probes.
+// <!-- scope: human-approved runany-dynamic-model-or-local-fallback slice 2 (operator 2026-05-16 directive — pre-registered measurement harness for the unified pin>dynamic>local decider) -->
+// Pattern: pure transforms (`runScenario`, `tierOf`, `summarize`) composed
+//   with one injected decider seam (`decideRunAnyProvider`, defaulted to the
+//   shipped slice-1 pure function) above a thin `--scenario/--json` CLI —
+//   same shape as `cto-audit-metrics.mjs` so the operator surface stays
+//   uniform. Rule #8 pure-decision-delegate + Strategy-seam conformance:
+//   full (the decider is injected; the CLI is the only I/O boundary).
+// Source: TASKS.md `runany-dynamic-model-or-local-fallback` Measurement line
+//   — `node scripts/runany-model-audit.mjs --scenario=<pin|dynamic|all-down>
+//   --json` is the exact pre-registered command that evaluates the task's
+//   3-clause Success threshold. Munafò et al. 2017 (pre-registration): the
+//   thresholds below are committed BEFORE the result is observed; this
+//   script evaluates that pre-registration deterministically (rule #10) so a
+//   regression in the decider becomes an exit-1 gate break, not a silent
+//   mis-degrade. Composes the shipped slice-1 `decideRunAnyProvider`
+//   (rule #1 — compose, don't reinvent the decision table here).
+// Conformance: full — `runScenario`/`tierOf`/`summarize` are referentially
+//   transparent over their inputs; `main` is the only place that reads argv
+//   and writes stdout / sets the exit code.
+// Pivot (rule #9): if the 3 fixed scenarios prove too coarse to localise a
+//   regression, add `--iterations=N` and a per-band breakdown — do NOT
+//   retire the script or weaken a threshold. The thresholds are
+//   pre-registered and not tunable from the CLI.
 
 import process from "node:process";
 
-// ---- Pre-registered thresholds (transcribe the task's Success line) -------
+import { MODEL_CATALOG, decideRunAnyProvider } from "@minsky/tick-loop";
 
-/** Scenario `pin`: fraction of iterations dispatching the pinned model. */
-export const PIN_MIN_PINNED_FRACTION = 1.0;
-/** Scenario `dynamic`: fraction of budget-banded iterations whose model
- *  tier matches the band (opus@high / sonnet@mid / local@low). */
-export const DYNAMIC_MIN_BANDED_CORRECT = 1.0;
-/** Scenario `all-down`: max iterations before the switch to local. */
-export const ALL_DOWN_MAX_ITERS_TO_SWITCH = 1;
-/** Scenario `all-down`: min local-dispatch fraction during the down window. */
-export const ALL_DOWN_MIN_LOCAL_FRACTION = 0.95;
-/** Scenario `all-down`: max wedged (non-dispatchable) iterations. */
-export const ALL_DOWN_MAX_WEDGED = 0;
+/**
+ * One provider decision. Deliberately loose on `kind`/`agent` (typed as
+ * `string`) so a mutant decider in the negative fixtures can return an
+ * out-of-contract value and `isWedged` can catch it at runtime.
+ *
+ * @typedef {{model: string, agent: string, kind: string, reason: string}} Decision
+ */
 
-const REACHABLE_LOCAL = Object.freeze({ reachable: true, observedAtMs: 0 });
-const UNREACHABLE_LOCAL = Object.freeze({
-  reachable: false,
-  observedAtMs: 0,
-  reason: "ECONNREFUSED",
-});
+/**
+ * The injected decider seam — the real shipped `decideRunAnyProvider`, or
+ * a mutant in the negative fixtures. The input is the structural
+ * `RunAnyProviderInput`; typed `any` here so the harness stays decoupled
+ * from the tick-loop input type (and a no-arg mutant decider is still
+ * assignable).
+ *
+ * @typedef {(input: any) => Decision} Decider
+ */
 
-/** Two remote backends, both unreachable — the `all-down` fixture.
- *  Hoisted to a frozen module const so the down-window loop reuses one
- *  array instead of re-allocating it per iteration (round-trip / GC
- *  elimination on the hot scenario loop). */
-const ALL_DOWN_REMOTE_BACKENDS = Object.freeze([
-  Object.freeze({ id: "claude", reachable: false, reason: "ENETUNREACH" }),
-  Object.freeze({ id: "openrouter", reachable: false, reason: "http 503" }),
+/**
+ * Catalog row subset this harness reads (id → qualityTier). The real
+ * `MODEL_CATALOG` rows carry more fields; only these two are consumed.
+ *
+ * @typedef {{ readonly id: string, readonly qualityTier: number }} CatalogRow
+ */
+
+/**
+ * Union of every metric any scenario emits. All optional so one
+ * `ScenarioResult` type covers all three scenarios (the relevant subset
+ * is populated per scenario).
+ *
+ * @typedef {Object} ScenarioMetrics
+ * @property {number} [pinnedRate]
+ * @property {number} [wedged]
+ * @property {number} [total]
+ * @property {number[]} [tiers]
+ * @property {boolean} [monotone]
+ * @property {boolean} [topIsTier1]
+ * @property {boolean} [bottomIsLocal]
+ * @property {number} [switchIters]
+ * @property {number} [localRate]
+ * @property {number} [faultIterations]
+ */
+
+/**
+ * Verdict for one scenario.
+ *
+ * @typedef {Object} ScenarioResult
+ * @property {string} scenario
+ * @property {boolean} ok
+ * @property {ScenarioMetrics} metrics
+ * @property {Object} thresholds
+ * @property {object[]} iterations
+ */
+
+/** The three pre-registered scenarios (TASKS.md Measurement `--scenario=`). */
+export const SCENARIOS = Object.freeze(["pin", "dynamic", "all-down"]);
+
+/** Pin scenario success: pinned-model dispatch fraction must equal 1.0
+ *  (TASKS.md Success — "(pin) 100% pinned-model dispatch"). */
+export const PIN_DISPATCH_MIN = 1.0;
+
+/** all-down scenario: ≥95% local dispatch after the switch
+ *  (TASKS.md Success — "then ≥95% local dispatch"). */
+export const ALLDOWN_LOCAL_MIN = 0.95;
+
+/** all-down scenario: ≤1 iteration to switch fully to local
+ *  (TASKS.md Success / Acceptance 3 — "≤1 iteration to switch to local"). */
+export const ALLDOWN_MAX_SWITCH_ITERS = 1;
+
+/** Any scenario: 0 wedged/halted iterations — `local` is the always-
+ *  available last resort, the decider must never return a hold state
+ *  (TASKS.md Success — "0 wedged/halted iterations"). */
+export const WEDGED_MAX = 0;
+
+/** The only decision kinds the slice-1 decider may emit. Anything else
+ *  (or a missing model/agent) counts as a wedged iteration. */
+const VALID_KINDS = Object.freeze(["operator-pin", "dynamic", "local-fallback"]);
+
+/** A pinned model from the catalog used for the `pin` scenario. */
+const PIN_MODEL = "claude-sonnet-4-6";
+
+/**
+ * Descending remaining-budget sweep for the `dynamic` scenario. Each band
+ * is strictly lower than the previous across all three windows, so the
+ * selected `qualityTier` must be monotone NON-DECREASING (quality may only
+ * degrade as budget drops — never improve). The exact tier per band is
+ * intentionally NOT asserted here so the audit stays robust to catalog
+ * floor refreshes (model-catalog.ts carries a quarterly `recordedAt`); the
+ * contract under test is the correlation, plus tier-1 at the top band and
+ * an `agent:"local"` row at the bottom band.
+ */
+const DYNAMIC_SWEEP = Object.freeze([
+  { fivehour: 1.0, weekly: 1.0, monthly: 1.0 },
+  { fivehour: 0.6, weekly: 0.4, monthly: 0.3 },
+  { fivehour: 0.35, weekly: 0.25, monthly: 0.16 },
+  { fivehour: 0.05, weekly: 0.05, monthly: 0.05 },
 ]);
 
 /**
- * One scenario's measurement outcome.
+ * Resolve a model id to its catalog `qualityTier`. Unknown ids (e.g. a
+ * synthetic `local` fallback when a custom catalog has no local row) map
+ * to `Infinity` so they sort as the lowest possible quality.
  *
- * @typedef {object} AuditResult
- * @property {string} scenario
- * @property {boolean} pass
- * @property {Record<string, number|boolean|string>} metrics
- * @property {Record<string, number>} thresholds
+ * @param {string} model
+ * @param {readonly CatalogRow[]} [catalog]
+ * @returns {number}
  */
+export function tierOf(model, catalog = MODEL_CATALOG) {
+  const row = catalog.find((e) => e.id === model);
+  return row === undefined ? Number.POSITIVE_INFINITY : row.qualityTier;
+}
 
 /**
- * Build a `RemainingFractions` with all three windows at `frac`.
+ * Build a `RemainingFractions` from a window triple.
  *
- * @param {number} frac
+ * @param {{fivehour:number, weekly:number, monthly:number}} w
  * @returns {{fivehour:number, weekly:number, monthly:number, observedAt:string}}
  */
-function remainingAt(frac) {
-  return { fivehour: frac, weekly: frac, monthly: frac, observedAt: "2026-05-17T00:00:00Z" };
+function mkRemaining(w) {
+  return { ...w, observedAt: "2026-05-16T00:00:00Z" };
 }
 
 /**
- * Scenario `pin`: a valid pin must win across every budget × liveness
- * combination. Drives the grid and reports the pinned-dispatch fraction.
+ * `true` when a decision is wedged: an unknown `kind`, or a missing
+ * model/agent. The decider's contract is that `local` is always reachable,
+ * so a wedged iteration is a hard failure of Acceptance 3.
  *
- * @param {(input:any)=>{model:string,agent:string,source:string}} resolve
- * @returns {AuditResult}
- */
-export function runPinScenario(resolve) {
-  const pin = "claude-sonnet-4-6";
-  const budgetBands = [1, 0.6, 0.4, 0.2, 0];
-  const livenessStates = [
-    [{ id: "claude", reachable: true }],
-    [{ id: "claude", reachable: false, reason: "ENETUNREACH" }],
-    [
-      { id: "claude", reachable: false, reason: "ENETUNREACH" },
-      { id: "openrouter", reachable: false, reason: "http 503" },
-    ],
-  ];
-  let total = 0;
-  let pinned = 0;
-  for (const frac of budgetBands) {
-    for (const remoteBackends of livenessStates) {
-      const out = resolve({
-        remaining: remainingAt(frac),
-        remoteBackends,
-        localProbeResult: REACHABLE_LOCAL,
-        operatorPin: pin,
-      });
-      total += 1;
-      if (out.model === pin && out.source === "operator-pin") pinned += 1;
-    }
-  }
-  const pinnedFraction = total === 0 ? 0 : pinned / total;
-  return {
-    scenario: "pin",
-    pass: pinnedFraction >= PIN_MIN_PINNED_FRACTION,
-    metrics: { total, pinned, pinnedFraction },
-    thresholds: { minPinnedFraction: PIN_MIN_PINNED_FRACTION },
-  };
-}
-
-/**
- * Scenario `dynamic`: with no pin and a reachable remote, the model tier
- * must track the remaining-budget band. high≥0.5→opus(claude),
- * mid[0.3,0.5)→sonnet(claude), low<0.3→local.
- *
- * @param {(input:any)=>{model:string,agent:string,source:string}} resolve
- * @returns {AuditResult}
- */
-export function runDynamicScenario(resolve) {
-  const cases = [
-    { frac: 0.9, wantAgent: "claude", wantModel: "claude-opus-4-7" },
-    { frac: 0.5, wantAgent: "claude", wantModel: "claude-opus-4-7" },
-    { frac: 0.45, wantAgent: "claude", wantModel: "claude-sonnet-4-6" },
-    { frac: 0.3, wantAgent: "claude", wantModel: "claude-sonnet-4-6" },
-    { frac: 0.2, wantAgent: "local", wantModel: undefined },
-    { frac: 0.0, wantAgent: "local", wantModel: undefined },
-  ];
-  let total = 0;
-  let correct = 0;
-  for (const c of cases) {
-    const out = resolve({
-      remaining: remainingAt(c.frac),
-      remoteBackends: [{ id: "claude", reachable: true }],
-      localProbeResult: REACHABLE_LOCAL,
-    });
-    total += 1;
-    const agentOk = out.agent === c.wantAgent;
-    const modelOk = c.wantModel === undefined ? true : out.model === c.wantModel;
-    if (agentOk && modelOk) correct += 1;
-  }
-  const bandedCorrect = total === 0 ? 0 : correct / total;
-  return {
-    scenario: "dynamic",
-    pass: bandedCorrect >= DYNAMIC_MIN_BANDED_CORRECT,
-    metrics: { total, correct, bandedCorrect },
-    thresholds: { minBandedCorrect: DYNAMIC_MIN_BANDED_CORRECT },
-  };
-}
-
-/**
- * Drive `downIters` iterations with every remote backend unreachable
- * (local probe is down on iteration 0 to prove the no-wedge path) and
- * tally: first iteration that switched to local, total local dispatches,
- * and wedged (non-dispatchable) iterations. Extracted from
- * {@link runAllDownScenario} to keep each function under biome's
- * cognitive-complexity cap (≤10).
- *
- * @param {(input:any)=>{model:string,agent:string,source:string}} resolve
- * @param {number} downIters
- * @returns {{itersToSwitch:number, localDispatches:number, wedged:number}}
- */
-function tallyDownWindow(resolve, downIters) {
-  /** @type {string[]} */
-  const agents = [];
-  for (let i = 0; i < downIters; i++) {
-    const out = resolve({
-      remaining: remainingAt(0.9),
-      remoteBackends: ALL_DOWN_REMOTE_BACKENDS,
-      localProbeResult: i === 0 ? UNREACHABLE_LOCAL : REACHABLE_LOCAL,
-    });
-    agents.push(out.agent);
-  }
-  // Array-derived (no nested branching) so the function stays under
-  // biome's cognitive-complexity cap. `findIndex` returns -1 when local
-  // was never dispatched — the same sentinel the pass predicate expects.
-  return {
-    itersToSwitch: agents.findIndex((a) => a === "local"),
-    localDispatches: agents.filter((a) => a === "local").length,
-    wedged: agents.filter((a) => a !== "local" && a !== "claude").length,
-  };
-}
-
-/**
- * The `all-down` pass predicate (rule #9 thresholds). Extracted so the
- * scenario runner stays under the cognitive-complexity cap.
- *
- * @param {{itersToSwitch:number, localFraction:number, wedged:number, recoveredToRemote:boolean}} m
+ * @param {Decision | null | undefined} d
  * @returns {boolean}
  */
-function allDownPass(m) {
+function isWedged(d) {
   return (
-    m.itersToSwitch >= 0 &&
-    m.itersToSwitch <= ALL_DOWN_MAX_ITERS_TO_SWITCH &&
-    m.localFraction >= ALL_DOWN_MIN_LOCAL_FRACTION &&
-    m.wedged <= ALL_DOWN_MAX_WEDGED &&
-    m.recoveredToRemote
+    d === null ||
+    d === undefined ||
+    !VALID_KINDS.includes(d.kind) ||
+    typeof d.model !== "string" ||
+    d.model.length === 0 ||
+    (d.agent !== "claude" && d.agent !== "local")
   );
 }
 
 /**
- * Scenario `all-down`: every remote backend unreachable for K iterations,
- * then a backend recovers. Measures (a) iterations until the switch to
- * local, (b) local-dispatch fraction during the down window, (c) wedged
- * (non-dispatchable) iterations, (d) recovery to the dynamic remote pick.
+ * Run one pre-registered scenario through the injected decider and return
+ * its metrics + pass/fail verdict against the pre-registered thresholds.
+ * Pure: no I/O, deterministic over `(scenario, decide, catalog)`.
  *
- * @param {(input:any)=>{model:string,agent:string,source:string}} resolve
- * @returns {AuditResult}
+ * @param {string} scenario one of {@link SCENARIOS}
+ * @param {{decide?: Decider, catalog?: readonly CatalogRow[]}} [deps]
+ *   `catalog` is consumed only by the `dynamic` scenario (tier
+ *   resolution); the `pin`/`all-down` scenarios assert agent/kind.
+ * @returns {ScenarioResult}
  */
-export function runAllDownScenario(resolve) {
-  /** @type {number} */
-  const downIters = 20;
-  const tally = tallyDownWindow(resolve, downIters);
-  const recovered = resolve({
-    remaining: remainingAt(0.9),
-    remoteBackends: [{ id: "claude", reachable: true }],
-    localProbeResult: REACHABLE_LOCAL,
-  });
-  const { itersToSwitch, localDispatches, wedged } = tally;
-  const localFraction = downIters === 0 ? 0 : localDispatches / downIters;
-  const recoveredToRemote = recovered.agent === "claude" && recovered.source === "dynamic";
-  const pass = allDownPass({ itersToSwitch, localFraction, wedged, recoveredToRemote });
+export function runScenario(scenario, deps = {}) {
+  const decide = deps.decide ?? decideRunAnyProvider;
+  const catalog = deps.catalog ?? MODEL_CATALOG;
+  if (scenario === "pin") return runPinScenario(decide);
+  if (scenario === "dynamic") return runDynamicScenario(decide, catalog);
+  if (scenario === "all-down") return runAllDownScenario(decide);
+  throw new Error(`unknown scenario "${scenario}" — expected one of ${SCENARIOS.join("|")}`);
+}
+
+/**
+ * `pin` — operator pin honored verbatim in 100% of iterations regardless
+ * of budget band or backend liveness (TASKS.md Success clause 1).
+ *
+ * @param {Decider} decide
+ * @returns {ScenarioResult}
+ */
+function runPinScenario(decide) {
+  /** @type {{input: object, decision: Decision}[]} */
+  const iterations = [];
+  for (const w of DYNAMIC_SWEEP) {
+    for (const reachable of [true, false]) {
+      const d = decide({
+        remaining: mkRemaining(w),
+        remoteBackends: [{ id: "claude", reachable }],
+        operatorPin: PIN_MODEL,
+      });
+      iterations.push({ input: { remaining: w, reachable }, decision: d });
+    }
+  }
+  const pinned = iterations.filter(
+    (it) => it.decision.kind === "operator-pin" && it.decision.model === PIN_MODEL,
+  ).length;
+  const pinnedRate = iterations.length === 0 ? 0 : pinned / iterations.length;
+  const wedged = iterations.filter((it) => isWedged(it.decision)).length;
+  const ok = pinnedRate >= PIN_DISPATCH_MIN && wedged <= WEDGED_MAX;
   return {
-    scenario: "all-down",
-    pass,
-    metrics: { downIters, itersToSwitch, localFraction, wedged, recoveredToRemote },
-    thresholds: {
-      maxItersToSwitch: ALL_DOWN_MAX_ITERS_TO_SWITCH,
-      minLocalFraction: ALL_DOWN_MIN_LOCAL_FRACTION,
-      maxWedged: ALL_DOWN_MAX_WEDGED,
-    },
+    scenario: "pin",
+    ok,
+    metrics: { pinnedRate, wedged, total: iterations.length },
+    thresholds: { pinnedRate: PIN_DISPATCH_MIN, wedged: WEDGED_MAX },
+    iterations,
   };
 }
 
-/** Canonical scenario names, in the order `--scenario=all` runs them. */
-export const SCENARIO_NAMES = Object.freeze(["pin", "dynamic", "all-down"]);
-
 /**
- * Dispatch one named scenario. Returns `undefined` for an unknown name
- * (the caller renders that as a non-pass error result). A switch — not
- * an object index — so `tsc -b`'s checkJs can prove the lookup total.
+ * `dynamic` — no pin, ≥1 remote reachable: the selected `qualityTier`
+ * tracks the remaining-budget bands (monotone non-decreasing as budget
+ * descends; tier-1 at the top band; an `agent:"local"` row at the bottom
+ * band). TASKS.md Success clause 2.
  *
- * @param {string} name
- * @param {(input:any)=>{model:string,agent:string,source:string}} resolve
- * @returns {AuditResult | undefined}
+ * @param {Decider} decide
+ * @param {readonly CatalogRow[]} catalog
+ * @returns {ScenarioResult}
  */
-function runScenario(name, resolve) {
-  switch (name) {
-    case "pin":
-      return runPinScenario(resolve);
-    case "dynamic":
-      return runDynamicScenario(resolve);
-    case "all-down":
-      return runAllDownScenario(resolve);
-    default:
-      return undefined;
+function runDynamicScenario(decide, catalog) {
+  const iterations = DYNAMIC_SWEEP.map((w) => {
+    const d = decide({
+      remaining: mkRemaining(w),
+      remoteBackends: [{ id: "claude", reachable: true }],
+    });
+    return { input: { remaining: w }, decision: d, tier: tierOf(d.model, catalog) };
+  });
+  const tiers = iterations.map((it) => it.tier);
+  let monotone = true;
+  for (let i = 1; i < tiers.length; i++) {
+    const cur = tiers[i];
+    const prev = tiers[i - 1];
+    if (cur !== undefined && prev !== undefined && cur < prev) monotone = false;
   }
+  const topIsTier1 = tiers[0] === 1;
+  const bottomIsLocal = iterations[iterations.length - 1]?.decision.agent === "local";
+  const wedged = iterations.filter((it) => isWedged(it.decision)).length;
+  const ok = monotone && topIsTier1 && bottomIsLocal && wedged <= WEDGED_MAX;
+  return {
+    scenario: "dynamic",
+    ok,
+    metrics: { tiers, monotone, topIsTier1, bottomIsLocal, wedged },
+    thresholds: { monotone: true, topIsTier1: true, bottomIsLocal: true, wedged: WEDGED_MAX },
+    iterations,
+  };
 }
 
 /**
- * Parse `--scenario=<name>` / `--json` from argv. Defaults: scenario
- * `all`, human output.
+ * `all-down` — no pin, every remote backend down: switch fully to local
+ * within ≤1 iteration, then ≥95% local dispatch, 0 wedged iterations.
+ * Iteration 0 is the last-good remote-up tick; iterations 1..N are the
+ * all-down regime. The "switch iteration" is the first all-down tick that
+ * returns `agent:"local"`. TASKS.md Success clause 3 / Acceptance 3.
  *
- * @param {readonly string[]} argv
- * @returns {{scenario:string, json:boolean}}
+ * @param {Decider} decide
+ * @returns {ScenarioResult}
  */
-export function parseArgs(argv) {
-  let scenario = "all";
-  let json = false;
-  for (const arg of argv) {
-    if (arg === "--json") json = true;
-    else if (arg.startsWith("--scenario=")) scenario = arg.slice("--scenario=".length);
+function runAllDownScenario(decide) {
+  const ALL_DOWN = [
+    { id: "claude", reachable: false, reason: "econnrefused" },
+    { id: "bedrock", reachable: false, reason: "timeout" },
+  ];
+  const N = 20;
+  /** @type {{iter: number, remoteUp: boolean, decision: Decision}[]} */
+  const iterations = [];
+  for (let i = 0; i < N; i++) {
+    const remoteUp = i === 0;
+    const d = decide({
+      remaining: mkRemaining({ fivehour: 1, weekly: 1, monthly: 1 }),
+      remoteBackends: remoteUp ? [{ id: "claude", reachable: true }] : ALL_DOWN,
+    });
+    iterations.push({ iter: i, remoteUp, decision: d });
   }
-  return { scenario, json };
+  const afterFault = iterations.filter((it) => !it.remoteUp);
+  const firstLocalIdx = afterFault.findIndex((it) => it.decision.agent === "local");
+  // iterations to switch = index within the all-down regime of the first
+  // local dispatch (0 = switched on the very first all-down tick).
+  const switchIters = firstLocalIdx < 0 ? Number.POSITIVE_INFINITY : firstLocalIdx;
+  const localCount = afterFault.filter((it) => it.decision.agent === "local").length;
+  const localRate = afterFault.length === 0 ? 0 : localCount / afterFault.length;
+  const wedged = iterations.filter((it) => isWedged(it.decision)).length;
+  const ok =
+    switchIters <= ALLDOWN_MAX_SWITCH_ITERS &&
+    localRate >= ALLDOWN_LOCAL_MIN &&
+    wedged <= WEDGED_MAX;
+  return {
+    scenario: "all-down",
+    ok,
+    metrics: { switchIters, localRate, wedged, faultIterations: afterFault.length },
+    thresholds: {
+      switchIters: ALLDOWN_MAX_SWITCH_ITERS,
+      localRate: ALLDOWN_LOCAL_MIN,
+      wedged: WEDGED_MAX,
+    },
+    iterations,
+  };
 }
 
 /**
- * Run one or all scenarios and aggregate. `scenario === "all"` runs the
- * three; otherwise the named one. Unknown name → an error result.
+ * Human-readable one-block summary of a scenario result.
  *
- * @param {(input:any)=>{model:string,agent:string,source:string}} resolve
- * @param {string} scenario
- * @returns {{ok:boolean, results:AuditResult[]}}
- */
-export function runAudit(resolve, scenario) {
-  const names = scenario === "all" ? [...SCENARIO_NAMES] : [scenario];
-  /** @type {AuditResult[]} */
-  const results = [];
-  for (const name of names) {
-    const result = runScenario(name, resolve);
-    if (result === undefined) {
-      results.push({
-        scenario: name,
-        pass: false,
-        metrics: { error: `unknown scenario: ${name}` },
-        thresholds: {},
-      });
-      continue;
-    }
-    results.push(result);
-  }
-  return { ok: results.every((r) => r.pass), results };
-}
-
-/**
- * CLI entry. Imports the dist `resolveRunAnyModel` (the typecheck step of
- * `pnpm pre-pr-lint` builds it), runs the requested scenario(s), prints
- * JSON or a human summary, exits 0 on pass / 1 on fail.
- *
- * @param {readonly string[]} argv
- * @returns {Promise<number>}
- */
-export async function main(argv) {
-  const { scenario, json } = parseArgs(argv);
-  const mod = await import("@minsky/tick-loop");
-  const resolve = mod.resolveRunAnyModel;
-  if (typeof resolve !== "function") {
-    process.stderr.write(
-      "runany-model-audit: @minsky/tick-loop did not export resolveRunAnyModel\n",
-    );
-    return 1;
-  }
-  const { ok, results } = runAudit(resolve, scenario);
-  process.stdout.write(renderAudit(ok, results, json));
-  return ok ? 0 : 1;
-}
-
-/**
- * Render the audit outcome as the JSON blob (`--json`) or a one-line-
- * per-scenario human summary. Pure — returns the string the CLI writes.
- * Extracted from {@link main} to keep it under biome's complexity cap.
- *
- * @param {boolean} ok
- * @param {AuditResult[]} results
- * @param {boolean} json
+ * @param {ScenarioResult} r
  * @returns {string}
  */
-function renderAudit(ok, results, json) {
-  if (json) return `${JSON.stringify({ ok, results }, null, 2)}\n`;
-  const lines = results.map(
-    (r) => `[${r.pass ? "PASS" : "FAIL"}] ${r.scenario}: ${JSON.stringify(r.metrics)}`,
-  );
-  lines.push(`overall: ${ok ? "PASS" : "FAIL"}`);
-  return `${lines.join("\n")}\n`;
+export function summarize(r) {
+  const verdict = r.ok ? "PASS" : "FAIL";
+  const m = JSON.stringify(r.metrics);
+  const t = JSON.stringify(r.thresholds);
+  return `[runany-model-audit] scenario=${r.scenario} ${verdict}\n  metrics=${m}\n  thresholds=${t}\n`;
 }
 
-const isMain =
+/**
+ * Parse `--scenario=` and `--json` from argv. `--scenario=all` (or no
+ * scenario) runs all three. Pure over the arg array.
+ *
+ * @param {string[]} argv
+ * @returns {{scenarios: string[], json: boolean}}
+ */
+export function parseArgs(argv) {
+  const json = argv.includes("--json");
+  const sArg = argv.find((a) => a.startsWith("--scenario="));
+  const raw = sArg === undefined ? "all" : sArg.slice("--scenario=".length);
+  if (raw === "all") return { scenarios: [...SCENARIOS], json };
+  if (!SCENARIOS.includes(raw)) {
+    throw new Error(`unknown --scenario=${raw} — expected one of ${SCENARIOS.join("|")}|all`);
+  }
+  return { scenarios: [raw], json };
+}
+
+/**
+ * CLI entry — the only I/O boundary. Reads argv, runs the requested
+ * scenarios, writes JSON or a human summary, returns the exit code.
+ *
+ * @returns {Promise<number>}
+ */
+async function main() {
+  const { scenarios, json } = parseArgs(process.argv.slice(2));
+  const results = scenarios.map((s) => runScenario(s));
+  if (json) {
+    process.stdout.write(`${JSON.stringify(results.length === 1 ? results[0] : results)}\n`);
+  } else {
+    for (const r of results) process.stdout.write(summarize(r));
+  }
+  return results.every((r) => r.ok) ? 0 : 1;
+}
+
+const invokedDirectly =
   import.meta.url === `file://${process.argv[1]}` ||
   process.argv[1]?.endsWith("runany-model-audit.mjs");
-if (isMain) {
-  main(process.argv.slice(2)).then((code) => {
-    process.exit(code);
-  });
+if (invokedDirectly) {
+  const code = await main();
+  process.exit(code);
 }

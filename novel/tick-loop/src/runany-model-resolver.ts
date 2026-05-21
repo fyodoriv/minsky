@@ -1,3 +1,4 @@
+// <!-- scope: human-approved slices 1-4 of `runany-dynamic-model-or-local-fallback` — the pure unified pin>dynamic>local decision and its bin wiring; the task block in TASKS.md anchors this. -->
 /**
  * `@minsky/tick-loop/runany-model-resolver` — slice 1 of
  * `runany-dynamic-model-or-local-fallback`.

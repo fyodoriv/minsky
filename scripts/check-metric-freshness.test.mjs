@@ -226,20 +226,19 @@ describe("checkMetricFreshness — failure paths", () => {
   });
 });
 
-describe("checkMetricFreshness — current genesis METRICS.md", () => {
-  test("the actual genesis file (all stubs) verifies clean against itself", async () => {
+describe("checkMetricFreshness — current METRICS.md", () => {
+  test("the actual METRICS.md file (mix of real observations + gaps) verifies clean", async () => {
     const { readFile } = await import("node:fs/promises");
     const { dirname, resolve } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..");
     const md = await readFile(resolve(repoRoot, "METRICS.md"), "utf8");
-    const result = checkMetricFreshness({ markdown: md, nowMs: NOW });
+    const result = checkMetricFreshness({ markdown: md, nowMs: Date.now() });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Genesis renders all 10 vision.md success criteria.
+    // METRICS.md renders all 10 vision.md success criteria.
     expect(result.sections.length).toBe(10);
-    expect(result.sections.every((s) => s.isStub)).toBe(true);
   });
 
   test("expectedIds against the 10 SUCCESS_METRICS ids → ok", async () => {
@@ -251,7 +250,7 @@ describe("checkMetricFreshness — current genesis METRICS.md", () => {
     const md = await readFile(resolve(repoRoot, "METRICS.md"), "utf8");
     const result = checkMetricFreshness({
       markdown: md,
-      nowMs: NOW,
+      nowMs: Date.now(),
       expectedIds: [
         "loop-uptime",
         "tokens-per-story",

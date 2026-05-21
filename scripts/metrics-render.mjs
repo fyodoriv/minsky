@@ -88,6 +88,10 @@ export function mapSnapshotToObservations({ snapshot, metricIds, timestampMs, so
  *   snapshotSource?: string,
  *   nowMs: number,
  *   stubFollowUp?: string,
+ *   proposedMetrics?: ReadonlyArray<{
+ *     id: string, label: string, rationale: string,
+ *     milestone: string, blockedBy?: string, formula: string,
+ *   }>,
  * }} args
  * @returns {string}
  */
@@ -98,6 +102,7 @@ export function runMetricsRender({
   snapshotSource,
   nowMs,
   stubFollowUp,
+  proposedMetrics,
 }) {
   const metricIds = metrics.map((m) => m.id);
   const observations =
@@ -109,9 +114,11 @@ export function runMetricsRender({
           timestampMs: snapshotTimestampMs,
           source: snapshotSource,
         });
-  return stubFollowUp === undefined
-    ? buildMetricsMd({ metrics, observations, nowMs })
-    : buildMetricsMd({ metrics, observations, nowMs, stubFollowUp });
+  /** @type {Parameters<typeof buildMetricsMd>[0]} */
+  const input = { metrics, observations, nowMs };
+  if (stubFollowUp !== undefined) input.stubFollowUp = stubFollowUp;
+  if (proposedMetrics !== undefined) input.proposedMetrics = proposedMetrics;
+  return buildMetricsMd(input);
 }
 
 /**
@@ -177,7 +184,7 @@ async function main() {
   const metricsModuleUrl = new URL(
     `file://${resolvePath(scriptDir, "../novel/dashboard-web/dist/metrics.js")}`,
   );
-  const { SUCCESS_METRICS } = await import(metricsModuleUrl.href);
+  const { SUCCESS_METRICS, PROPOSED_METRICS } = await import(metricsModuleUrl.href);
 
   const snapshot = await loadSnapshot({
     rootDir,
@@ -191,6 +198,7 @@ async function main() {
     snapshotTimestampMs: dateToMidnightUtcMs(date),
     snapshotSource: `.minsky/metric-snapshots/${date}.json`,
     nowMs: Date.now(),
+    proposedMetrics: PROPOSED_METRICS,
   });
 
   await fsWriteFile(outputPath, markdown);
