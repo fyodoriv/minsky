@@ -560,7 +560,7 @@ export function daemonIterationRuntimeInvariant(opts) {
 /**
  * @typedef {object} DaemonPrCleanCiSummary
  * @property {number} number
- * @property {boolean} hasFailure — true iff statusCheckRollup currently shows ≥1 conclusion=FAILURE check
+ * @property {boolean} hasFailure — true iff statusCheckRollup currently shows ≥1 check whose conclusion/state is a red terminal outcome (`RED_CHECK_OUTCOMES` in `scripts/daemon-pr-lint-metrics.mjs` — FAILURE/ERROR/TIMED_OUT/STARTUP_FAILURE/ACTION_REQUIRED); shared via `parsePrListEntries`
  *
  * @typedef {object} PrLintPassRateInvariantOpts
  * @property {() => Promise<readonly DaemonPrCleanCiSummary[]>} recentDaemonPrs — rolling window the brief defines (default impl: `ROLLING_WINDOW_DAYS`-day, currently 30d)
@@ -571,7 +571,9 @@ export function daemonIterationRuntimeInvariant(opts) {
 /**
  * Pre-registered metric for `daemon-pre-pr-lint-gate` (TASKS.md): rolling
  * 30d fraction of daemon-authored PRs whose `statusCheckRollup` carries
- * zero `conclusion=FAILURE` checks must stay ≥ `minPassRate` (0.8).
+ * zero red checks (`RED_CHECK_OUTCOMES` — FAILURE/ERROR/TIMED_OUT/
+ * STARTUP_FAILURE/ACTION_REQUIRED, shared via `parsePrListEntries`) must
+ * stay ≥ `minPassRate` (0.8).
  * Below that the gate has drifted — either the canonical lint stack
  * (`scripts/run-pre-pr-lint-stack.mjs`) is missing a check CI runs, or
  * the daemon brief stopped honoring `pnpm pre-pr-lint` before
