@@ -175,6 +175,94 @@ describe("decideAutoScale", () => {
     expect(decision.reason).toContain("invalid-state");
   });
 
+  describe("local-server single-inference cap (rule #2)", () => {
+    it("holds when local routing is forced and the cap defaults to 1 (undefined cap)", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        currentWorkers: 3,
+        localRoutingForced: true,
+      });
+      expect(decision.verdict).toBe("hold");
+      expect(decision.reason).toContain("local-server-single-inference");
+      expect(decision.reason).toContain("cap is 1");
+      expect(decision.reason).toContain("currentWorkers=3");
+    });
+
+    it("holds when local routing is forced and the cap is explicitly 1", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        currentWorkers: 2,
+        localRoutingForced: true,
+        localServerConcurrencyCap: 1,
+      });
+      expect(decision.verdict).toBe("hold");
+      expect(decision.reason).toContain("local-server-single-inference");
+    });
+
+    it("normalises a sub-1 / non-finite cap to 1 (fail-safe single-inference)", () => {
+      for (const badCap of [0, -4, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const decision = decideAutoScale({
+          ...baseState,
+          localRoutingForced: true,
+          localServerConcurrencyCap: badCap,
+        });
+        expect(decision.verdict).toBe("hold");
+        expect(decision.reason).toContain("cap is 1");
+      }
+    });
+
+    it("does NOT apply the cap when local routing is not forced (default behaviour preserved)", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        localRoutingForced: false,
+        localServerConcurrencyCap: 1,
+      });
+      expect(decision.verdict).toBe("spawn");
+    });
+
+    it("spawns when local routing is forced but the operator's backend handles concurrency (cap >= 2)", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        currentWorkers: 2,
+        localRoutingForced: true,
+        localServerConcurrencyCap: 8,
+      });
+      expect(decision.verdict).toBe("spawn");
+    });
+
+    it("a fractional operator cap (e.g. 2.9) floors to 2 and still permits a spawn", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        currentWorkers: 1,
+        localRoutingForced: true,
+        localServerConcurrencyCap: 2.9,
+      });
+      expect(decision.verdict).toBe("spawn");
+    });
+
+    it("short-circuits before ceiling-reached (rule #2 wins over rule #3 for the operator-actionable reason)", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        currentWorkers: 5,
+        maxWorkers: 5,
+        localRoutingForced: true,
+      });
+      expect(decision.verdict).toBe("hold");
+      expect(decision.reason).toContain("local-server-single-inference");
+      expect(decision.reason).not.toContain("ceiling-reached");
+    });
+
+    it("still rejects invalid state before evaluating the local-server rule (rule #1 precedence)", () => {
+      const decision = decideAutoScale({
+        ...baseState,
+        currentWorkers: Number.NaN,
+        localRoutingForced: true,
+      });
+      expect(decision.verdict).toBe("hold");
+      expect(decision.reason).toContain("invalid-state");
+    });
+  });
+
   it("decision reason is human-readable and includes the input numbers", () => {
     const decision = decideAutoScale({
       ...baseState,

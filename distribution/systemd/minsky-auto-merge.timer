@@ -1,0 +1,28 @@
+# Minsky auto-merge timer — fires `minsky-auto-merge.service` every 5 min
+# while `minsky-supervisor.target` is active. Parallels the launchd
+# `com.minsky.auto-merge.plist`'s `StartInterval=300` on macOS.
+#
+# Pattern: periodic-task supervisor (Borg/Bashir/Burns/Hightower
+# _Designing Distributed Systems_ 2017). The timer is the cadence
+# kernel; the service is the unit of work.
+
+[Unit]
+Description=Minsky auto-merge timer — drain daemon PRs every 5 min
+PartOf=minsky-supervisor.target
+
+[Timer]
+Unit=minsky-auto-merge.service
+# Fire 1 min after boot (drain whatever queued during downtime) then
+# every 5 min from the previous start (NOT from the previous end —
+# so a long cycle doesn't push subsequent ticks farther apart).
+OnBootSec=1min
+OnUnitActiveSec=5min
+# Per-tick jitter prevents lockstep with other minsky-* timers if any
+# are added later.
+RandomizedDelaySec=30s
+# Persistent=true ensures missed ticks during system sleep / reboot
+# fire on resume.
+Persistent=true
+
+[Install]
+WantedBy=minsky-supervisor.target

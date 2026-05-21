@@ -2,6 +2,7 @@ packages:
   - "novel/*"
   - "novel/adapters/*"
   - "novel/bridges/*"
+  - "novel/observer/*"
 
 # Slice 6 of `daemon-parallel-worktree-launch` (operator 2026-05-07 — 5-worker
 # prerequisite). Each `claude --worktree` creates a fresh git worktree;

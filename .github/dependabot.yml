@@ -10,13 +10,26 @@
 # regardless of group/schedule (Dependabot's documented behaviour: vulnerable
 # package alerts open a PR independent of the schedule).
 #
-# Why pnpm: `package-ecosystem: npm` covers pnpm workspaces — Dependabot's npm
-# updater reads `pnpm-lock.yaml` natively as of GitHub's 2024 update.
+# Why pnpm via `npm` ecosystem: `package-ecosystem: npm` covers pnpm workspaces
+# — Dependabot's npm updater reads `pnpm-lock.yaml` natively as of GitHub's
+# 2024 update. The root `pnpm-workspace.yaml` declares `novel/**/package.json`
+# so a single ecosystem entry covers every workspace package.
+#
+# Why aggressive grouping: the 2026-05-20 backlog audit found 5 open dependabot
+# PRs for 5 different `@opentelemetry/*` sub-packages, each on its own branch.
+# Their internal version axes are coupled (the `@opentelemetry/exporter-*-otlp-
+# http@0.218` line REQUIRES `@opentelemetry/core@2.7+` and
+# `@opentelemetry/api-logs@0.218`); merging one at a time produces version-skew
+# failures in `novel/adapters/observability/package.json` where the 0.57.x ↔
+# 2.7.x ↔ 0.217.x mix coexists. A single grouped PR is the only safe shape for
+# clustered package families.
 #
 # Anchor: NIST SP 800-218 SSDF PW.4 (manage third-party software security);
-# OWASP Top 10 A06:2021 (vulnerable & outdated components).
+# OWASP Top 10 A06:2021 (vulnerable & outdated components); Dependabot
+# grouped-updates docs § "Configuring updates" (docs.github.com).
 
 version: 2
+
 updates:
   - package-ecosystem: npm
     directory: /
@@ -25,22 +38,56 @@ updates:
       day: monday
       time: "06:00"
       timezone: Etc/UTC
-    open-pull-requests-limit: 5
+
+    # 10 max so a single grouped OpenTelemetry/dev-deps PR doesn't crowd out
+    # security alerts (which open outside the limit).
+    open-pull-requests-limit: 10
+
     allow:
       - dependency-type: direct
+
+    # Group related packages so they bump together — prevents the
+    # version-skew failures that hit us 2026-05-20 (5 OpenTelemetry sub-package
+    # PRs each landing alone would each red-CI on every other one's incompatible
+    # internal version axes).
     groups:
+      # All OpenTelemetry packages move together. Their internal version
+      # axes are coupled (see header comment). A single bump-all PR per week.
+      opentelemetry:
+        patterns:
+          - "@opentelemetry/*"
+        update-types:
+          - minor
+          - patch
+
+      # Dev-deps: bundlers, linters, test runners, type packages. Minor+patch
+      # only. Major upgrades for dev tooling (e.g., biome 1.x → 2.x) go through
+      # human review because they tend to change CLI flags or break configs.
       dev-dependencies:
         dependency-type: development
         update-types:
           - minor
           - patch
-      runtime-dependencies-patch:
+
+      # Runtime deps not in another group. Patches AND minors land together.
+      # Major upgrades to runtime deps need human review (potential
+      # breaking-change surface in load-bearing code).
+      runtime-dependencies:
         dependency-type: production
         update-types:
           - patch
+          - minor
+        exclude-patterns:
+          - "@opentelemetry/*" # already in `opentelemetry` group above
+
+    # Only bump when the existing constraint can't accept the new version.
+    # Prevents "no-op" PRs that change package.json without changing pnpm-lock.
+    versioning-strategy: increase-if-necessary
+
     labels:
       - dependencies
       - supply-chain
+
     commit-message:
       prefix: chore
       include: scope
@@ -52,10 +99,22 @@ updates:
       day: monday
       time: "06:00"
       timezone: Etc/UTC
+
     open-pull-requests-limit: 3
+
+    # Group all action bumps into one weekly PR — actions rarely interact
+    # but the noise reduction is worth it.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+
     labels:
       - dependencies
       - github-actions
+
     commit-message:
       prefix: chore
-      include: scope

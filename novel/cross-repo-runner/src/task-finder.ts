@@ -50,12 +50,24 @@ export type FindTaskResult =
  * priority section, document order wins (top-down — same convention as
  * `@minsky/tick-loop`'s `pickTask`).
  *
- * Pass `openPrBranches` to skip tasks that already have an open PR on
- * their canonical branch (`<branch_prefix><task.id>`). This makes the
- * task-finder self-healing across the merge-vs-cleanup-task race:
- * after task T's PR opens, minsky's NEXT iteration picks task T+1
- * (the next eligible) instead of re-doing T while waiting for the
- * operator to delete T from TASKS.md.
+ * Skip layers (composable — a task is excluded if ANY layer matches):
+ *
+ *   - `openPrBranches` — skip tasks whose canonical branch
+ *     (`<branch_prefix><task.id>`) already has an open PR. Self-heals
+ *     across the merge-vs-cleanup-task race: after task T's PR opens,
+ *     minsky's NEXT iteration picks T+1 instead of re-doing T while
+ *     waiting for the operator to delete T from TASKS.md. (Discovered
+ *     2026-05-16 on oncall-hub-plugin run.)
+ *
+ *   - `skipTaskIds` — skip tasks by ID. The host-loop fills this with
+ *     the set of task IDs that have already completed `verdict: validated`
+ *     earlier in the SAME `runHostLoop` invocation. Without this layer,
+ *     a worker that validates but never opens a PR (or never edits
+ *     TASKS.md) keeps getting the same task re-picked, draining the
+ *     loop's per-host iteration cap on a single non-progressing task
+ *     and starving every other host the walker should reach next.
+ *     (Discovered 2026-05-18 on the live multi-host dogfood run —
+ *     `walker-drains-one-host-forever`.)
  *
  * Returns `null` when no eligible task exists — the {@link runHostLoop}
  * caller uses this as the `empty-queue` stop signal.
@@ -64,14 +76,20 @@ export type FindTaskResult =
  */
 export function pickHostTask(
   tasksMdContent: string,
-  options?: { openPrBranches?: ReadonlySet<string>; branchPrefix?: string },
+  options?: {
+    openPrBranches?: ReadonlySet<string>;
+    branchPrefix?: string;
+    skipTaskIds?: ReadonlySet<string>;
+  },
 ): ParsedTask | null {
   const tasks = parseTasksMd(tasksMdContent);
   const openPrBranches = options?.openPrBranches ?? new Set<string>();
   const branchPrefix = options?.branchPrefix ?? "feat/";
+  const skipTaskIds = options?.skipTaskIds ?? new Set<string>();
   const eligible = tasks
     .filter(isHostTaskEligible)
-    .filter((t) => !openPrBranches.has(`${branchPrefix}${t.id}`));
+    .filter((t) => !openPrBranches.has(`${branchPrefix}${t.id}`))
+    .filter((t) => !skipTaskIds.has(t.id));
   for (const priority of ["P0", "P1"] as const) {
     const match = eligible.find((t) => t.priority === priority);
     if (match !== undefined) return match;
