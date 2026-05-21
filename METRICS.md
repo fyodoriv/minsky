@@ -40,9 +40,11 @@ Formula: `git log --all --since="30 days ago" --oneline --grep="mape-k" | wc -l`
 
 _Budget: 1d_
 
-**Value:** (stub) — requires OTEL backend for supervisor restart-to-claim latency spans (M1 gap); `orchestrate.jsonl` proxy tracked in `fleet-stability-centralized-reporting`
+**Value:** (stub) — requires OTEL backend for supervisor restart-to-claim latency spans (M1 gap); `orchestrate.jsonl` proxy tracked in `fleet-stability-centralized-reporting`.
 
 Formula: `histogram_quantile(0.95, supervisor_restart_to_claim_latency_seconds[7d])`
+
+**Sub-metric (catalogued automated heals only)**: `mttr-self-heal` is emitted to the metrics snapshot by `collectMttrSelfHeal()` in `scripts/collect-metrics.mjs`, sourced from `.minsky/heal-events.jsonl` via `node scripts/heal-mttr-report.mjs --window=30d --json`. M1.13 acceptance: p95 < 300_000 ms (5 min). The sub-metric is NOT a top-level row in this file (not part of the 10-metric `SUCCESS_METRICS` dashboard); it lives in the daily snapshot for the catalogued-failures subset, surfaced via the `m1:metrics` dashboard once any heal helper fires. Substrate: `novel/observer/heals/` (4 automated helpers — stale-pid, missing-node-modules, stale-tsbuildinfo, stuck-command). User-story: `user-stories/007-agent-self-heals-catalogued-failures.md`.
 
 ## wrist-dwell — Wrist dwell (inverted)
 
