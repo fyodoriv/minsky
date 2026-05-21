@@ -737,6 +737,17 @@ export {
   prTitleNamesTask,
 } from "./duplicate-pr-detector.js";
 
+// Slice 3/N of `daemon-duplicate-work-detection`: I/O wrapper that runs
+// `gh pr list --search "<task-id> in:title" --author <author> --state all`,
+// feeds the slice-2 parser, and returns the slice-1 verdict. The daemon
+// imports the factory (slice 4+ wires it after `pickAndClaim`, before
+// `gh pr create`); tests inject a `runGhPrList`/`now` stub (rule #2).
+export {
+  type CreateDuplicateCheckFetcherInput,
+  type DuplicateCheckFetcher,
+  createDuplicateCheckFetcher,
+} from "./duplicate-pr-detector-fetch.js";
+
 // Daemon fix-own-PR-on-CI-failure detector (P0 task `daemon-fix-own-pr-on-ci-failure`,
 // operator-flagged 2026-05-05): pure decision the daemon consults BEFORE building
 // the iteration brief — no-pr / pr-clean / pr-failing / pr-retries-exhausted.
