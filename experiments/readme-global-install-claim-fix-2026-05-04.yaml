@@ -14,14 +14,15 @@ hypothesis: |
   the framing of "install": signifier (Norman 1988) → affordance
   (the actual repo-rooted stack).
 success: |
-  - `grep -E "(pnpm minsky|repo-rooted)" README.md` exits 0 with at least
-    one match: the README documents the actual CLI surface (`pnpm minsky`
-    + `pnpm minsky doctor` + `pnpm minsky bootstrap-local-llm`) so a
-    first-time-install user has an exact next-command to run after
-    `./setup.sh`. The 2026-05-08 update (PR #382, `minsky-cli-auto-bootstrap-local-llm`)
-    retired the original "Not a global CLI" disclaimer in favour of a
-    documented "## The `minsky` CLI (operator UX)" section that names
-    the actual entry points; `pnpm minsky` is the load-bearing token now.
+  - `grep -E "(bin/minsky|minsky watch|~/.minsky/config)" README.md` exits 0 with at least
+    one match: the README documents the actual CLI surface (`bin/minsky`,
+    `minsky watch`, `~/.minsky/config.json`) so a first-time-install
+    user has an exact next-command to run after the install runbook.
+    The 2026-05-20 README rewrite (commits af74024..fc37ac8) standardized on
+    `bin/minsky` and `minsky <subcmd>` patterns, retiring the `pnpm minsky`
+    form. The disambiguation property (Norman 1988 signifier → affordance)
+    is preserved by a different surface — the explicit `bin/minsky` reference
+    + the install runbook telling the agent exactly what to do.
   - `command -v tasks` AND `command -v tasks-lint` AND
     `command -v tasks-mcp` all exit 0 (the three globals `setup.sh`
     actually installs — the original bullet's claim is still true at
@@ -38,7 +39,7 @@ pivot: |
   rather than disclaimed-absent — that's the right resolution of the
   original Norman 1988 signifier-affordance gap.
 measurement: |
-  grep -qE "(pnpm minsky|repo-rooted)" README.md
+  grep -qE "(bin/minsky|minsky watch|~/.minsky/config)" README.md
 anchor: |
   Norman, D. A., *The Design of Everyday Things*, Basic Books, 1988
   (signifiers — the README is the affordance; "install" is a strong
