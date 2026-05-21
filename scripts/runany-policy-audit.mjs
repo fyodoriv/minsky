@@ -61,10 +61,11 @@
 //     --ledger=P   : override the ledger path (tests / ad-hoc audits).
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
+const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Default verdict-ledger path. The wiring layer
  *  (`scripts/orchestrate.mjs`, `scripts/local-gate-merge.mjs`) appends

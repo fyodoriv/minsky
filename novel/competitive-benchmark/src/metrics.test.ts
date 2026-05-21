@@ -1,0 +1,114 @@
+import { describe, expect, it } from "vitest";
+
+// Import through the package barrel so `index.ts` (a pure re-export) is
+// covered by the same suite — mirrors `novel/adapters/types/src/index.test.ts`.
+import {
+  METRICS,
+  type MetricDefinition,
+  compareValues,
+  computeDelta,
+  metricById,
+} from "./index.js";
+
+describe("METRICS catalogue", () => {
+  it("ships ≥5 metrics across all three families (slice-(c) success bar)", () => {
+    expect(METRICS.length).toBeGreaterThanOrEqual(5);
+    const categories = new Set(METRICS.map((m) => m.category));
+    expect([...categories].sort()).toEqual(["agentic", "dora", "public-benchmark"]);
+  });
+
+  it("includes the four DORA keys", () => {
+    const dora = METRICS.filter((m) => m.category === "dora").map((m) => m.id);
+    expect(dora.sort()).toEqual([
+      "change-fail-rate",
+      "deploy-frequency",
+      "lead-time-for-changes",
+      "mttr",
+    ]);
+  });
+
+  it("includes the SWE-bench public-benchmark hook", () => {
+    const pub = METRICS.filter((m) => m.category === "public-benchmark");
+    expect(pub).toHaveLength(1);
+    expect(pub[0]?.id).toBe("swe-bench-verified-resolve-rate");
+  });
+
+  it("has unique kebab-case ids", () => {
+    const ids = METRICS.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    }
+  });
+
+  it("every metric carries a non-empty primary-source anchor and description", () => {
+    for (const m of METRICS) {
+      expect(m.anchor.length).toBeGreaterThan(10);
+      expect(m.description.length).toBeGreaterThan(10);
+      expect(["higher-is-better", "lower-is-better"]).toContain(m.direction);
+      expect(["count-per-day", "seconds", "ratio", "usd"]).toContain(m.unit);
+    }
+  });
+});
+
+describe("metricById", () => {
+  it("resolves a known id", () => {
+    expect(metricById("autonomous-merge-rate")?.label).toBe("Autonomous merge rate");
+  });
+
+  it("returns undefined for an unknown id", () => {
+    expect(metricById("not-a-metric")).toBeUndefined();
+  });
+});
+
+const higher: MetricDefinition = {
+  id: "h",
+  label: "H",
+  category: "agentic",
+  unit: "ratio",
+  direction: "higher-is-better",
+  anchor: "test anchor citation",
+  description: "test description text",
+};
+const lower: MetricDefinition = { ...higher, id: "l", direction: "lower-is-better" };
+
+describe("compareValues", () => {
+  it("ranks higher-is-better correctly", () => {
+    expect(compareValues(higher, 0.9, 0.5)).toBe(1);
+    expect(compareValues(higher, 0.5, 0.9)).toBe(-1);
+  });
+
+  it("ranks lower-is-better correctly", () => {
+    expect(compareValues(lower, 10, 30)).toBe(1);
+    expect(compareValues(lower, 30, 10)).toBe(-1);
+  });
+
+  it("returns 0 on an exact tie regardless of direction", () => {
+    expect(compareValues(higher, 0.5, 0.5)).toBe(0);
+    expect(compareValues(lower, 0.5, 0.5)).toBe(0);
+  });
+});
+
+describe("computeDelta", () => {
+  it("is positive when minsky is ahead (higher-is-better)", () => {
+    expect(computeDelta(higher, 0.9, 0.6)).toBeCloseTo(0.3);
+  });
+
+  it("is negative when minsky is behind (higher-is-better)", () => {
+    expect(computeDelta(higher, 0.6, 0.9)).toBeCloseTo(-0.3);
+  });
+
+  it("is positive when minsky is ahead (lower-is-better)", () => {
+    // minsky cheaper/faster → ahead → positive
+    expect(computeDelta(lower, 10, 25)).toBeCloseTo(15);
+  });
+
+  it("is negative when minsky is behind (lower-is-better)", () => {
+    expect(computeDelta(lower, 25, 10)).toBeCloseTo(-15);
+  });
+
+  it("is zero on parity", () => {
+    expect(computeDelta(higher, 1, 1)).toBe(0);
+    expect(computeDelta(lower, 1, 1)).toBe(-0);
+  });
+});

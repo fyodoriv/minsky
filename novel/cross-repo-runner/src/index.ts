@@ -38,6 +38,7 @@ export type {
   LoopIterationResult,
   LoopResult,
   LoopStopReason,
+  PickTaskArgs,
   RunHostLoopOpts,
 } from "./host-loop.js";
 export {
@@ -53,7 +54,12 @@ export type {
   HostCtoTriggerReason,
   RunHostCtoAuditInputs,
 } from "./host-cto-audit.js";
-export { detectCwd, findBootstrappedSubdirs } from "./cwd-detect.js";
+export {
+  detectAnyCwd,
+  detectCwd,
+  findBootstrappedSubdirs,
+  findGitRootSubdirs,
+} from "./cwd-detect.js";
 export type { CwdDetectInputs, CwdDetectResult, CwdFsProbe } from "./cwd-detect.js";
 export { walkHostsDir } from "./host-walker.js";
 export type {
@@ -73,3 +79,5 @@ export type {
   WriteRequest,
   WriteVerdict,
 } from "./repo-policy.js";
+export { resolveGhHost } from "./gh-host-resolve.js";
+export type { GhHostSource, ResolveGhHostInput, ResolveGhHostResult } from "./gh-host-resolve.js";

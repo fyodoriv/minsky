@@ -231,14 +231,17 @@ export const CI_TO_MANIFEST_ALIAS = Object.freeze({
 export const CI_BASH_GATE_BUCKETS = Object.freeze({
   mustSucceed: Object.freeze(
     new Set([
+      "agents-md-coherence",
       "anchor-primary-source",
       "biome",
+      "brief-pr-instructions",
       "cadence-pivot-threshold",
       "cloud-audit-gate",
       "dashboard-localhost-bind",
       "glossary-discipline",
       "hygiene",
       "lockfile-integrity",
+      "machine-budget",
       "maciek-smoke",
       "mape-k-budget-cap",
       "mape-k-constraints-md-size",
@@ -259,6 +262,10 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-7-chaos-coverage",
       "rule-12-scope-discipline",
       "rule-13-sibling-anchors",
+      "rule-17-proactive-heal",
+      "no-hardcoded-user-paths",
+      "no-personal-paths-in-docs",
+      "rule-9-tasksmd-fields",
       "sandbox-env-declared",
       "sbom-shape",
       "secret-scan",
@@ -294,10 +301,22 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
 export const STACK_MANIFEST = Object.freeze([
   // ---- fast stage (≤2 min wall-clock target — the daemon's gate) ------------
   {
+    // Diff-scoped via biome's native `--changed --since=<base>`: lints only
+    // the files this branch changed vs the resolved diff base, NOT the whole
+    // 400+-file tree. Whole-tree `biome ci .` inherited committed-on-main
+    // biome debt (`scripts/collect-metrics.mjs` from the M1-M5 milestones
+    // commit, 9 errors) onto every *unrelated* vetted branch's `git push` —
+    // the exact inherited-debt failure mode TASKS.md
+    // `orchestrator-must-land-local-vetted-branches` exists to fix, and the
+    // Pivot's explicit "extend it [diff-scoping] to the whole stack". Same
+    // shape as the diff-scoped `markdownlint` step: `origin/main` here is
+    // rewritten to the resolved base by `withResolvedDiffBase`, and CI's
+    // `biome` job still runs whole-tree (`pnpm biome ci .`) so committed
+    // biome debt is still surfaced — just not flapped onto every push.
     name: "biome",
     stages: ["fast", "full"],
     cmd: "pnpm",
-    args: ["biome", "ci", "."],
+    args: ["biome", "ci", "--changed", "--since=origin/main", "."],
   },
   {
     name: "typecheck",
@@ -306,10 +325,22 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["typecheck"],
   },
   {
+    // Diff-scoped: `scripts/lint-md-diff.mjs` lints only the *.md files this
+    // branch committed vs the resolved diff base, NOT the live `**/*.md`
+    // working tree. The whole-tree `pnpm lint:md` flapped an unrelated
+    // vetted branch's `git push` whenever the concurrent swarm re-dirtied
+    // TASKS.md/vision.md inside the ~100 s pre-push window, and inherited
+    // committed-main markdownlint debt onto every push (TASKS.md
+    // `orchestrator-must-land-local-vetted-branches` Pivot b). `origin/main`
+    // here is rewritten to the resolved base by `withResolvedDiffBase`, same
+    // as the other diff-relative steps. CI's `markdownlint` job still runs
+    // whole-tree — paying down that committed debt is the task's separate
+    // step (c).
     name: "markdownlint",
     stages: ["fast", "full"],
-    cmd: "pnpm",
-    args: ["lint:md"],
+    cmd: "node",
+    args: ["scripts/lint-md-diff.mjs"],
+    env: { LINT_MD_DIFF_BASE: "origin/main" },
   },
   {
     name: "tasks-lint",
@@ -350,6 +381,37 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-rule-12-scope-discipline.mjs"],
     env: { RULE_12_DIFF_BASE: "origin/main" },
   },
+  {
+    name: "rule-17-proactive-heal",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-17-proactive-heal.mjs"],
+    env: { RULE_17_DIFF_BASE: "origin/main" },
+  },
+  {
+    name: "no-hardcoded-user-paths",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-hardcoded-user-paths.mjs"],
+  },
+  {
+    name: "no-personal-paths-in-docs",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-personal-paths-in-docs.mjs"],
+  },
+  {
+    name: "agents-md-coherence",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-agents-md-coherence.mjs"],
+  },
+  {
+    name: "rule-9-tasksmd-fields",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-rule-9-tasksmd-fields.mjs"],
+  },
   // ---- full stage ----------------------------------------------------------
   {
     name: "vitest",
@@ -386,6 +448,16 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-no-singleton-experiment.mjs"],
+  },
+  {
+    // rule #10 deterministic enforcement of the devin-spawn-no-pr-opened
+    // fix — pre-merge guard that mirrors the runtime invariant
+    // `briefIncludesPrInstructions`. Fast (`fast` stage) because the
+    // bug class wastes an entire iteration's compute when it regresses.
+    name: "brief-pr-instructions",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-brief-pr-instructions.mjs"],
   },
   {
     name: "lockfile-integrity",
@@ -483,6 +555,12 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-supervisor-sandbox-hardening.mjs"],
   },
   {
+    name: "machine-budget",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-machine-budget.mjs"],
+  },
+  {
     name: "cadence-pivot-threshold",
     stages: ["full"],
     cmd: "node",
@@ -573,6 +651,12 @@ function rewriteArgsDiffBase(args, diffBase) {
     if (a === "--diff-base=origin/main") {
       changed = true;
       return `--diff-base=${diffBase}`;
+    }
+    // biome's native diff-scoping uses `--since=<ref>` (the `biome` step);
+    // rewrite it to the resolved base the same way as `--diff-base=`.
+    if (a === "--since=origin/main") {
+      changed = true;
+      return `--since=${diffBase}`;
     }
     return a;
   });

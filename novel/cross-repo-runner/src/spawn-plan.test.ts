@@ -118,6 +118,30 @@ describe("buildSpawnPlan", () => {
     expect(plan.systemPromptOverlay).toContain("host's pre-commit hooks");
   });
 
+  // The brief MUST mandate task-block removal — observed 2026-05-16 on
+  // oncall-hub-api: a soft "remove on success" preference led to ~17% of
+  // shipped PRs leaving the task block intact, re-spawning the same task on
+  // the next tick (rule #9 ship-off-the-queue invariant). The runner-side
+  // counterpart (implicit-allowed-paths union over TASKS.md + AGENTS.md)
+  // closes the scope-leak loop so the cleanup never trips the detector.
+  test("system-prompt overlay mandates task-block removal from TASKS.md and cites the task id", () => {
+    const plan = buildSpawnPlan({
+      hostRoot: "/host",
+      config: baseConfig,
+      task: baseTask,
+      visionMdPath: "/minsky/vision.md",
+    });
+    // The mandate text must reference TASKS.md and the specific task id —
+    // not a generic "clean up your queue" suggestion, which is the soft
+    // phrasing that produced the 17% no-cleanup rate.
+    expect(plan.systemPromptOverlay).toContain("TASKS.md");
+    expect(plan.systemPromptOverlay).toContain(baseTask.id);
+    expect(plan.systemPromptOverlay).toContain("Remove the shipped task block");
+    // The mandate must also state the consequence (re-spawn on next tick)
+    // so the LLM treats it as a hard invariant, not a polish step.
+    expect(plan.systemPromptOverlay).toContain("re-spawns the same task on the next tick");
+  });
+
   test("brief contains the task's title, hypothesis, success, pivot, measurement, anchor", () => {
     const plan = buildSpawnPlan({
       hostRoot: "/host",
@@ -141,5 +165,80 @@ describe("buildSpawnPlan", () => {
       visionMdPath: "/minsky/vision.md",
     });
     expect(plan.preCommitCommand).toBe("pnpm run check");
+  });
+
+  test("brief includes system-prompt overlay with PR creation instructions", () => {
+    const plan = buildSpawnPlan({
+      hostRoot: "/host",
+      config: baseConfig,
+      task: baseTask,
+      visionMdPath: "/minsky/vision.md",
+    });
+    expect(plan.brief).toContain("FINAL STEP");
+    expect(plan.brief).toContain("gh pr create");
+    expect(plan.brief).toContain("git push");
+  });
+
+  test("brief uses fallback visionMdPath when not provided in overlay", () => {
+    const plan = buildSpawnPlan({
+      hostRoot: "/host",
+      config: baseConfig,
+      task: baseTask,
+      visionMdPath: "/custom/path/vision.md",
+    });
+    // The overlay in the brief falls back to .minsky/vision.md
+    // but systemPromptOverlay uses the provided path
+    expect(plan.systemPromptOverlay).toContain("/custom/path/vision.md");
+    expect(plan.brief).toContain(".minsky/vision.md");
+  });
+
+  test("task with null optional fields renders without crashing", () => {
+    const sparseTask: ParsedTask = {
+      id: "sparse-task",
+      title: "Minimal task",
+      priority: "P1",
+      tags: [],
+      details: null,
+      hypothesis: null,
+      success: null,
+      pivot: null,
+      measurement: null,
+      anchor: null,
+    };
+    const plan = buildSpawnPlan({
+      hostRoot: "/host",
+      config: baseConfig,
+      task: sparseTask,
+      visionMdPath: "/v.md",
+    });
+    expect(plan.brief).toContain("Minimal task");
+    expect(plan.taskId).toBe("sparse-task");
+    // Should not contain "null" as a string
+    expect(plan.brief).not.toContain("null");
+  });
+
+  test("task with empty tags renders without Tags line", () => {
+    const noTagsTask: ParsedTask = {
+      ...baseTask,
+      id: "no-tags",
+      tags: [],
+    };
+    const plan = buildSpawnPlan({
+      hostRoot: "/host",
+      config: baseConfig,
+      task: noTagsTask,
+      visionMdPath: "/v.md",
+    });
+    expect(plan.brief).not.toContain("Tags:");
+  });
+
+  test("task with tags renders Tags line", () => {
+    const plan = buildSpawnPlan({
+      hostRoot: "/host",
+      config: baseConfig,
+      task: { ...baseTask, tags: ["p0", "reliability"] },
+      visionMdPath: "/v.md",
+    });
+    expect(plan.brief).toContain("Tags: p0, reliability");
   });
 });
