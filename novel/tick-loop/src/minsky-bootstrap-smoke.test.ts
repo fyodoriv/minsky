@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { maybeBootstrapLocalLlm } from "../bin/minsky.mjs";
 describe("maybeBootstrapLocalLlm — DI seam", () => {
-  // Daemon workers export MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM /
-  // MINSKY_NO_AUTO_BOOTSTRAP into the shell that runs the test suite
-  // (see `local-preferred-daemon-env-vars`). Without sandboxing, the
-  // `MINSKY_LLM_PROVIDER=claude-only` short-circuit in maybeBootstrapLocalLlm
-  // fires before the DI seams are reached and these tests fail under the
-  // daemon env (green on a bare shell, red on a daemon host). Stub the
-  // ambient daemon env to undefined per-test; vi.unstubAllEnvs() restores
-  // it. The Slice C test re-stubs MINSKY_LLM_PROVIDER itself after this.
+  // Test-isolation guard (category fix): the daemon exports
+  // MINSKY_LLM_PROVIDER / MINSKY_LOCAL_LLM into the worker env, so a
+  // suite that reads the ambient value is non-deterministic — under
+  // `MINSKY_LLM_PROVIDER=claude-only` the seam short-circuits and every
+  // detectFn-driven assertion fails. Neutralise all three knobs before
+  // each test (stubEnv(name, undefined) deletes the var; biome `noDelete`
+  // forbids the delete operator and `env.X = undefined` coerces to the
+  // string "undefined" in Node — see Slice C below). A test that needs a
+  // specific value (Slice C) re-stubs it; the later stub wins.
   beforeEach(() => {
     vi.stubEnv("MINSKY_LLM_PROVIDER", undefined);
     vi.stubEnv("MINSKY_LOCAL_LLM", undefined);

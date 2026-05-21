@@ -90,3 +90,6 @@ scan-secrets
 ProtectSystem
 PrivateTmp
 RestrictAddressFamilies
+ProcessType
+agent-capability-delegation-scan
+pr-agent-delegation-scan-current

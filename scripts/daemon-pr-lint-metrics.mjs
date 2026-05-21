@@ -69,6 +69,38 @@ export const CANONICAL_REPO = "fyodoriv/minsky";
  *  outcome-resolution. Slice 14 of `daemon-pre-pr-lint-gate`. */
 export const GH_PR_LIST_LIMIT = 50;
 
+/** Terminal `statusCheckRollup` outcomes that count as a *red* CI check —
+ *  i.e. the PR did NOT "open with zero red CI checks" (the pre-registered
+ *  observable in TASKS.md `daemon-pre-pr-lint-gate` Hypothesis). A
+ *  `statusCheckRollup` entry is either a `CheckRun` (carries `conclusion`)
+ *  or a legacy `StatusContext` (carries `state`); GitHub's GraphQL schema
+ *  lists more red terminal values than the single `FAILURE` the original
+ *  predicate matched:
+ *
+ *    - `FAILURE`          — check/status failed (both fields).
+ *    - `ERROR`            — commit-status hard error (`StatusState`).
+ *    - `TIMED_OUT`        — check run exceeded its time budget.
+ *    - `STARTUP_FAILURE`  — check run never started (infra failure).
+ *    - `ACTION_REQUIRED`  — check needs manual action; merge-blocking,
+ *                           not green.
+ *
+ *  Counting only `FAILURE` silently scored a timed-out / errored / never-
+ *  started run as *clean*, inflating the rolling pass-rate above its true
+ *  value — exactly the "flattering observable" failure mode rule #9
+ *  forbids (the metric must inspect "zero red CI checks", not a laxer
+ *  proxy). `CANCELLED` / `STALE` / `NEUTRAL` / `SKIPPED` are intentionally
+ *  excluded: a cancelled or stale check is usually a superseded re-run,
+ *  and treating those as red would distort the ratio the *other* way
+ *  (over-counting PRs that were actually green after a re-run).
+ *
+ *  Frozen + exported (rule #2 data-not-code) so the report formatter,
+ *  the paired tests, and `scripts/self-diagnose.mjs` — which reuses
+ *  `parsePrListEntries` via `ghJson` — share one source for the per-PR
+ *  red rule. Slice 38/N of `daemon-pre-pr-lint-gate`. */
+export const RED_CHECK_OUTCOMES = Object.freeze(
+  new Set(["FAILURE", "ERROR", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"]),
+);
+
 /**
  * Format a `Date` as a UTC `YYYY-MM-DD` string for use in `gh ... --search
  * "created:>=YYYY-MM-DD"`. UTC chosen to match the supervisor's clock
@@ -99,7 +131,7 @@ export function daysAgoUtc(now, days) {
 /**
  * @typedef {Object} PrSummary
  * @property {number} number
- * @property {boolean} hasFailure  true iff any statusCheckRollup entry has conclusion === "FAILURE" or state === "FAILURE"
+ * @property {boolean} hasFailure  true iff any statusCheckRollup entry's `conclusion` or `state` is in `RED_CHECK_OUTCOMES`
  */
 
 /**
@@ -130,8 +162,13 @@ export function parsePrListEntries(parsed) {
   for (const pr of parsed) {
     /** @type {readonly { conclusion?: string, state?: string }[]} */
     const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+    // `?? ""` keeps the `Set<string>.has` argument a `string` under the
+    // strict `scripts` tsconfig (a missing `conclusion`/`state` is just
+    // "not red"; the empty string is never a GitHub outcome).
     const hasFailure = checks.some(
-      (c) => Boolean(c) && (c.conclusion === "FAILURE" || c.state === "FAILURE"),
+      (c) =>
+        Boolean(c) &&
+        (RED_CHECK_OUTCOMES.has(c.conclusion ?? "") || RED_CHECK_OUTCOMES.has(c.state ?? "")),
     );
     out.push({ number: Number(pr.number), hasFailure });
   }
@@ -239,7 +276,7 @@ export function formatReport(inputs) {
     "Daemon pre-PR lint-gate pre-registered metric (anchor: TASKS.md `daemon-pre-pr-lint-gate` Measurement)",
     `Run at ${dateNow}Z; selector = \`-R ${CANONICAL_REPO} --author @me\` (single-operator repo proxy for daemon-authored PRs — see scripts/self-diagnose.mjs § daemonPrLintPassRateInvariant)`,
     "",
-    `Rolling ${ROLLING_WINDOW_DAYS}d clean-CI fraction (PRs created with zero \`statusCheckRollup\` FAILUREs, window >= ${date30dAgo}):`,
+    `Rolling ${ROLLING_WINDOW_DAYS}d clean-CI fraction (PRs created with zero red \`statusCheckRollup\` checks — ${[...RED_CHECK_OUTCOMES].join("/")}; window >= ${date30dAgo}):`,
     `  Value:     ${valueCell}`,
     `  Threshold: >= ${ROLLING_30D_MIN_PASS_RATE.toFixed(2)} (with n >= ${ROLLING_30D_MIN_N})`,
     `  Verdict:   ${verdict}`,

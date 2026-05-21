@@ -89,17 +89,32 @@ describe("validateSnapshot", () => {
     expect(() => validateSnapshot([], "/snap.json")).toThrow(/JSON object/);
   });
 
-  test("rejects non-numeric value", () => {
-    expect(() => validateSnapshot({ x: { value: "10" } }, "/snap.json")).toThrow(/finite number/);
+  test("accepts string value (collector emits human-readable proxy strings)", () => {
+    // Was the `metrics-render-finite-number-validation-bug` (rule #17 —
+    // fixed 2026-05-21): the collector emits e.g. `"53.3% active days"`
+    // for proxy metrics; the validator must accept strings, not require
+    // a finite number.
+    expect(() =>
+      validateSnapshot({ x: { value: "53.3% active days (16/30d)" } }, "/snap.json"),
+    ).not.toThrow();
+  });
+
+  test("rejects non-number-non-string value (boolean, null, array)", () => {
+    expect(() => validateSnapshot({ x: { value: true } }, "/snap.json")).toThrow(
+      /value must be a finite number or a string/,
+    );
+    expect(() => validateSnapshot({ x: { value: null } }, "/snap.json")).toThrow(
+      /value must be a finite number or a string/,
+    );
   });
 
   test("rejects NaN / Infinity values", () => {
     expect(() => validateSnapshot({ x: { value: Number.NaN } }, "/snap.json")).toThrow(
-      /finite number/,
+      /numeric value must be finite/,
     );
     expect(() =>
       validateSnapshot({ x: { value: Number.POSITIVE_INFINITY } }, "/snap.json"),
-    ).toThrow(/finite number/);
+    ).toThrow(/numeric value must be finite/);
   });
 
   test("rejects non-boolean higherIsBetter", () => {
@@ -109,7 +124,7 @@ describe("validateSnapshot", () => {
   });
 
   test("rejects scalar entry (non-object)", () => {
-    expect(() => validateSnapshot({ x: 42 }, "/snap.json")).toThrow(/numeric value/);
+    expect(() => validateSnapshot({ x: 42 }, "/snap.json")).toThrow(/value field/);
   });
 });
 
@@ -152,10 +167,30 @@ describe("loadSnapshot", () => {
     );
   });
 
-  test("invalid snapshot shape surfaces with the source path", async () => {
-    const readFile = async () => JSON.stringify({ x: { value: "ten" } });
+  test("string value is accepted (collector emits human-readable strings)", async () => {
+    const readFile = async () =>
+      JSON.stringify({ "loop-uptime": { value: "53.3% active days (16/30d)" } });
+    const snap = await loadSnapshot({ rootDir: ROOT, date: "2026-05-05", readFile });
+    expect(snap).toEqual({ "loop-uptime": { value: "53.3% active days (16/30d)" } });
+  });
+
+  test("non-finite numeric value (Infinity) surfaces with the source path", async () => {
+    // JSON.parse rejects literal `NaN`, so the file-going-through-validator
+    // branch is reachable only via Infinity (which JSON allows via 1e9999).
+    // The pure validate-time NaN branch is covered above by the
+    // `rejects NaN / Infinity values` test that constructs the value
+    // in-memory. Reject reason: divide-by-zero in the collector,
+    // visible-not-silent per rule #11.
+    const readInfinity = async () => '{"x":{"value":1e9999}}';
+    await expect(
+      loadSnapshot({ rootDir: ROOT, date: "2026-05-05", readFile: readInfinity }),
+    ).rejects.toThrow(/2026-05-05\.json: metric "x" numeric value must be finite/);
+  });
+
+  test("non-number-non-string value (e.g. boolean) surfaces with the source path", async () => {
+    const readFile = async () => JSON.stringify({ x: { value: true } });
     await expect(loadSnapshot({ rootDir: ROOT, date: "2026-05-05", readFile })).rejects.toThrow(
-      /2026-05-05\.json: metric "x" value must be a finite number/,
+      /2026-05-05\.json: metric "x" value must be a finite number or a string/,
     );
   });
 });
@@ -212,11 +247,11 @@ describe("saveSnapshot", () => {
         rootDir: ROOT,
         date: "2026-05-05",
         // @ts-expect-error testing bad input
-        snapshot: { x: { value: "bad" } },
+        snapshot: { x: { value: true } },
         writeFile,
         mkdir,
       }),
-    ).rejects.toThrow(/finite number/);
+    ).rejects.toThrow(/finite number or a string/);
     expect(writes).toEqual([]);
     expect(mkdirs).toEqual([]);
   });

@@ -1,5 +1,7 @@
 # Competitor: Microsoft Agent Framework
 
+> Microsoft's enterprise agent framework — overlapping ambition, but C#/.NET stack and corporate framing.
+
 - **URL**: <https://github.com/microsoft/agent-framework>
 - **Status**: Active, v1.0 released April 2026, .NET + Python
 - **Relationship**: **Competitor** — enterprise framing, wrong stack and shape

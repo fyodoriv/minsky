@@ -410,6 +410,83 @@ describe("pickHostTask", () => {
       })?.id,
     ).toBe("first-task");
   });
+
+  test("skipTaskIds rotates past tasks already validated in this run", () => {
+    // Regression — `walker-drains-one-host-forever` (filed 2026-05-18).
+    // When a worker validates a task but does NOT open a PR (devin in
+    // --print mode pre-fix, or a brief that doesn't instruct PR
+    // creation), the task is still listed in TASKS.md AND has no open
+    // PR — so `openPrBranches` doesn't filter it out. Without
+    // `skipTaskIds`, the loop's next iteration picks the same task
+    // again, blocking the walker from advancing to other hosts.
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] First task
+  - **ID**: first-task
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+- [ ] Second task
+  - **ID**: second-task
+  - **Hypothesis**: h2
+  - **Success**: s2
+  - **Pivot**: p2
+  - **Measurement**: m2
+  - **Anchor**: a2
+`;
+    // Without skip: first-task wins.
+    expect(pickHostTask(tasksMd)?.id).toBe("first-task");
+    // With first-task in skipTaskIds: rotates to second-task.
+    expect(pickHostTask(tasksMd, { skipTaskIds: new Set(["first-task"]) })?.id).toBe("second-task");
+    // With both in skipTaskIds: no eligible task → null.
+    expect(
+      pickHostTask(tasksMd, { skipTaskIds: new Set(["first-task", "second-task"]) }),
+    ).toBeNull();
+  });
+
+  test("skipTaskIds composes with openPrBranches (both filters apply)", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] One
+  - **ID**: one
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+- [ ] Two
+  - **ID**: two
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+- [ ] Three
+  - **ID**: three
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    // `one` has an open PR; `two` was already validated in this run;
+    // `three` is the only remaining eligible task.
+    const task = pickHostTask(tasksMd, {
+      openPrBranches: new Set(["feat/one"]),
+      branchPrefix: "feat/",
+      skipTaskIds: new Set(["two"]),
+    });
+    expect(task?.id).toBe("three");
+  });
 });
 
 describe("isHostTaskEligible", () => {

@@ -125,6 +125,8 @@ export class AutoScaleRunner {
   private readonly getBudgetState: () => AutoScaleState["budgetState"];
   private readonly spawn: SpawnCallback;
   private readonly emit: AutoScaleEventEmitter | undefined;
+  private readonly localRoutingForced: boolean;
+  private readonly localServerConcurrencyCap: number;
 
   constructor(input: AutoScaleRunnerInput) {
     this.maxWorkers = input.maxWorkers;
@@ -139,6 +141,13 @@ export class AutoScaleRunner {
     this.getBudgetState = input.getBudgetState;
     this.spawn = input.spawn;
     this.emit = input.emit;
+    // Strategy seam (rule #8): env is read once here; the pure
+    // `decideAutoScale` only sees the resolved boolean + cap.
+    this.localRoutingForced =
+      process.env["MINSKY_LOCAL_LLM"] === "1" &&
+      process.env["MINSKY_LLM_PROVIDER"] === "local-preferred";
+    const rawCap = Number.parseInt(process.env["MINSKY_LOCAL_SERVER_MAX_CONCURRENT"] ?? "1", 10);
+    this.localServerConcurrencyCap = Number.isFinite(rawCap) && rawCap >= 1 ? rawCap : 1;
   }
 
   /**
@@ -191,6 +200,8 @@ export class AutoScaleRunner {
       recentFailedIterations: this.recentFailedIterations,
       budgetState: this.getBudgetState(),
       recentClaimCollisions: this.recentClaimCollisions,
+      localRoutingForced: this.localRoutingForced,
+      localServerConcurrencyCap: this.localServerConcurrencyCap,
       iterationsSinceLastEval: this.iterationsSinceLastEval,
     };
   }
@@ -234,6 +245,8 @@ export class AutoScaleRunner {
       recentFailedIterations: this.recentFailedIterations,
       budgetState: this.getBudgetState(),
       recentClaimCollisions: this.recentClaimCollisions,
+      localRoutingForced: this.localRoutingForced,
+      localServerConcurrencyCap: this.localServerConcurrencyCap,
     };
     const decision = decideAutoScale(state);
     this.emitDecision(state, decision);
@@ -258,6 +271,8 @@ export class AutoScaleRunner {
         "auto-scale.recentFailedIterations": state.recentFailedIterations,
         "auto-scale.recentClaimCollisions": state.recentClaimCollisions,
         "auto-scale.budgetState": state.budgetState,
+        "auto-scale.localRoutingForced": state.localRoutingForced ?? false,
+        "auto-scale.localServerConcurrencyCap": state.localServerConcurrencyCap ?? 1,
       },
     });
   }
