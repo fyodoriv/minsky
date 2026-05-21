@@ -1,75 +1,112 @@
+## What
+
+Slice 1 of `runany-retro-tui-dashboard`: the **pure render core** of
+the new zero-dependency retro-1995 (amber/green-on-black, 80x24)
+CLI/TUI operator surface. New package `@minsky/tui`:
+
+- `formatMachineInfo` — pure machine-info panel formatter (host / time
+  / load / cpu / mem / disk / proc-count), `nowMs` injected.
+- `renderDashboard` / `formatProcRow` / `repoBasename` — pure retro
+  80x24 dashboard renderer; colour is an opt-in flag so the layout is
+  deterministically unit-testable.
+- The machine-wide process scan is **composed, not reinvented**:
+  `parseMinskyProcs` / `scanMinskyProcesses` / `MinskyProc` are
+  re-exported from `@minsky/cross-repo-runner`'s blessed
+  `scan-processes.ts` substrate (rule #1).
+
+12 unit tests, all green. Wired into the workspace (`tsconfig.json`
+project reference, `pnpm-lock.yaml` workspace dep) and the `vision.md`
+Pattern conformance index (row 89, with the rule #10 ratchet note).
+
 ## Why needed
 
-`runany-permission-scoped-writes` (P0, #588 cluster) pre-registers its
-verdict as a runnable command:
+The current operator surface is `@minsky/dashboard-web` — a Hono SSR
+web app gated by a Lighthouse Mobile≥0.85 CI job that needs Chromium, a
+bound port, and a browser. That is the wrong shape for a $0,
+multi-tenant, run-from-any-folder CLI tool (operator directive
+2026-05-16). This slice lays the dependency-light, fully-tested render
+substrate for screen 1 (machine dashboard). It deliberately does **not**
+wire `bin/minsky` or remove the web UI yet: the rule #10 ratchet fires
+in the wiring slice that lands the operator-facing surface, so the web
+UI is never removed before its replacement is reachable.
 
-```text
-node scripts/runany-policy-audit.mjs --window=run --json
-→ {foreign_code_pushes:0, foreign_prs_nontaskmd:0, minsky_self_tasks_filed:>=1}
-```
+`novel/cross-repo-runner/README.md` already declared `scan-processes.ts`
+the shared substrate the retro TUI must build on; composing it (rather
+than my first draft's duplicate parser) is the rule #1-correct shape and
+is verified by the rule-1 lint.
 
-That command did not exist — the metric lived only as prose in the task
-block, which is exactly the "post-hoc / unmeasurable" failure mode the
-pre-registration discipline forbids. The pure policy seam
-(`classifyRepo` / `assertWriteAllowed`) shipped in `b65e707`
-(Acceptance 1); the orchestrate.mjs / local-gate-merge.mjs wiring that
-*emits* the verdict ledger lands next. This PR is the
-**instrumentation-first preparation step**: it ships the measurement
-substrate so the upcoming wiring PR can carry a real before/after
-number instead of a promise to "instrument later".
+## Scope boundary (this slice)
 
-## What changed
+In: machine-info formatter + dashboard renderer + tests + package +
+pattern-index row; scan composed from `@minsky/cross-repo-runner`. Out
+(later slices): the I/O shim, screen 2 (process detail + log list),
+`bin/minsky` no-arg/auto-open wiring, `scripts/runany-tui-audit.mjs`,
+and the rule #10 ratchet removing `@minsky/dashboard-web` +
+`distribution/run-dashboard-web.sh` + `.github/workflows/lighthouse.yml`
+in the same PR as that wiring.
 
-- `scripts/runany-policy-audit.mjs` — reads the append-ordered verdict
-  ledger `.minsky/runany-policy.jsonl`, slices it to the
-  pre-registered `--window=run` (records since the last `run-start`
-  marker; fail-safe to the whole ledger when no marker exists), and
-  emits the exact `{foreign_code_pushes, foreign_prs_nontaskmd,
-  minsky_self_tasks_filed, pass}` object the TASKS.md Measurement line
-  names. Escape semantics: an *allowed* foreign code push or
-  *allowed* non-TASKS.md foreign PR is counted (the gate should make
-  those impossible — threshold 0); `minsky_self_tasks_filed` must be
-  ≥1 (scout-and-record fired). Pure transforms + one injected fs seam
-  (rule #2), tolerant reader (rule #6 — one corrupt line never blinds
-  the audit), thresholds exported as one source (rule #2 data-not-code).
-- `scripts/runany-policy-audit.test.mjs` — 18 paired positive/negative
-  cases: tolerant parse, last-marker window selection + no-marker
-  fail-safe, single-pass escape tally (refused ≠ escape, home ≠
-  escape, allowed-foreign = escape), threshold verdict, injected-reader
-  orchestrator incl. missing-ledger degrade, and report formatting.
+## Incidental: shared pre-pr-lint gate unblock
 
-Verified end-to-end against a fixture ledger: the clean run yields
-`{…,pass:true}` exit 0; a seeded foreign-code-push escape yields exit
-1; a missing ledger degrades to `0/0/0 pass:false` without throwing.
+`main` was red on the repo-wide `biome ci .` step (6 pre-existing
+errors in `novel/cross-repo-runner`: `spawn-plan.ts` unused template
+literals + format drift in `task-finder.ts` / `task-finder.test.ts` /
+`minsky-run.mjs`). Fixed via biome's own deterministic autofix — no
+behaviour change — because the gate blocks every PR until green. The
+`spawn-plan.ts` edit collapses two identical template-literal ternary
+branches to string literals (same rendered string).
 
-## Optimization (per-iteration discipline)
+## Optimization-discipline
 
-Round-trip elimination: `tallyPolicy` computes all three pre-registered
-counters in a **single O(n) pass** rather than three separate
-filter+`.length` passes over the ledger. The audit is read on every
-conductor tick, so the hot path stays one traversal. Saving vs the
-naive three-pass shape: ~180 bytes of duplicated filter predicates
-removed and 2 extra full-array traversals eliminated per call (well
-over the ≥10-byte floor).
+optimization: none-this-iteration: foundational slice creates a new
+render package; there is no pre-existing brief, gate, log line, or
+round-trip on this surface to shrink yet. (The rule-1 refactor removes
+a duplicate `ps` parser — a correctness fix, not a measured
+optimization, so not claimed as one.)
 
 ## Security & privacy
 
-This change is squarely on the rule #13 surface (least authority
-across repos). Threat: a run-anywhere conductor that walks a tree of
-unrelated git repos could push code to a repo the operator never
-authorised. Mitigation in this PR: the measurement that makes the
-least-authority invariant *falsifiable* — `pass` is the AND of
-"0 foreign code-push escapes ∧ 0 foreign non-TASKS.md PR escapes ∧
-≥1 minsky-self task filed", so any breach flips the verdict and exit
-code. The script is read-only (one injected `readFileSync`, no writes,
-no `gh`, no network) and the ledger schema carries no secrets or PII —
-only repo class, action, allow/refuse, and a task id. The hard
-enforcement (refusing the write) is the already-shipped pure seam
-plus the upcoming wiring; this PR cannot itself weaken any control.
+The renderer is pure and read-only; the only untrusted input is the
+`MinskyProc[]` derived from `ps` command lines of other host
+processes, parsed once in the audited `@minsky/cross-repo-runner`
+substrate (vet-child exclusion + fail-safe live there, not duplicated).
+Threat: a hostile local process could name its argv like a minsky
+entrypoint and show as a phantom row (spoofing); the surface is
+read-only (no action on a row) so the blast radius is a cosmetic
+phantom row, not code execution. The dashboard renders only
+`pid/kind/repo-basename/runId`, never the full argv, so other
+processes' flag values are not disclosed on screen 1. No auth, secrets,
+sandbox, PII, network, or filesystem-write surface is introduced. Full
+STRIDE table in `novel/tui/README.md` § Threat model (rule #13 § 13.8
+reviewed).
+
+## Test / verification
+
+- `pnpm --filter @minsky/tui test` → 12 passed (machine 3, render 9).
+- `@minsky/cross-repo-runner` scan substrate unchanged; its
+  `scan-processes.test.ts` (7 cases) still green.
+- `pnpm pre-pr-lint` (fast, the canonical gate) → green; full stage
+  green in a clean env.
+- Not caused by this PR: `novel/tick-loop/src/minsky-bootstrap-smoke.test.ts`
+  fails iff `MINSKY_LLM_PROVIDER` is exported in the runner's shell
+  (it asserts on un-sandboxed `process.env`); 4/4 green with the var
+  unset (CI's state). Pre-existing env-sensitive flake already tracked
+  by PR #577; untouched by this slice (no `tick-loop` change here).
 
 ## Hypothesis self-grade
 
-- **Predicted**: shipping `scripts/runany-policy-audit.mjs` makes the pre-registered command `node scripts/runany-policy-audit.mjs --window=run --json` runnable and emit `{foreign_code_pushes:0, foreign_prs_nontaskmd:0, minsky_self_tasks_filed:>=1}` against a clean fixture
-- **Observed**: CLI on a fixture ledger printed `{"foreign_code_pushes":0,"foreign_prs_nontaskmd":0,"minsky_self_tasks_filed":1,"pass":true}` exit 0; seeded foreign-push escape → exit 1; missing ledger → `0/0/0 pass:false` no crash; 18/18 vitest cases green
+- **Predicted**: composing the existing `@minsky/cross-repo-runner`
+  scan substrate + a pure renderer (no TUI dependency, no second `ps`
+  parser) fully covers screen 1's behaviour, so the operator surface
+  costs $0 at runtime and every layout path is unit-testable; success =
+  every `renderDashboard` line equals the box width across the empty,
+  single and multi-process cases and zero duplicate `ps`-parsing logic
+  (rule-1 lint green).
+- **Observed**: 12/12 tests pass; width invariant holds at width 80 and
+  100 and for the empty-list notice; the duplicate parser was deleted
+  and `@minsky/tui` re-exports the substrate; rule-1 / rule-3 / rule-4 /
+  rule-6 / rule-12 / pattern-index lints all green.
 - **Match**: yes
-- **Lesson**: the measurement substrate is in place; the next iteration wires `assertWriteAllowed` into orchestrate.mjs / local-gate-merge.mjs to emit the verdict ledger this script now consumes
+- **Lesson**: read the consuming package's README before adding a
+  "foundational" module — the scan substrate already existed and was
+  documented as the thing the TUI must compose; the first draft's
+  duplicate would have shipped a rule #1 violation.
