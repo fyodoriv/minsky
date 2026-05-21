@@ -1,266 +1,127 @@
 # Minsky
 
-> A reproducible recipe for running a team of AI coding agents on your own machine — supervised, on-budget, and observable. Named after [Marvin Minsky](https://en.wikipedia.org/wiki/Marvin_Minsky) and his [*Society of Mind*](https://en.wikipedia.org/wiki/Society_of_Mind) (1986), which argues that intelligence emerges from many simple specialists cooperating.
+> A background daemon that runs AI coding agents against tasks in any git repo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-## Who this is for
+Minsky watches over your git repo and improves it over time. It picks the next thing to fix, makes the fix on a feature branch, runs your tests, and opens a draft pull request for you to review. Then it picks the next thing. By default it keeps going until you stop it.
 
-If you've used Claude Code, Cursor, GitHub Copilot, or any other AI coding assistant and thought *"I wish this could just keep working overnight without me babysitting it"* — Minsky is a serious attempt at the supervisor layer that makes that possible.
+The methodology is rigorous — every change applies established software-engineering practices, each backed by a published literature citation ([see the full list](docs/PRACTICES.md)).
 
-- **If you're a junior** trying to ship more with one good AI agent: skip ahead to [Quickstart](#quickstart) and run `./setup.sh`. The setup is one command. Every other claim in this README is a link to either code or a paper.
-- **If you're a tech lead or manager** worried about runaway token bills, hidden agent state, or "we shipped something nobody can explain": read [Why this exists](#why-this-exists) — this repo is structurally designed around three concerns that matter to you (cost predictability, observability, change traceability).
-- **If you're a researcher or platform engineer** interested in how the guarantees compose: every architectural choice cites a paper. The supervision tree is Erlang/OTP, the budget guard is Google SRE, the autonomic loop is IBM MAPE-K, the experiment discipline is open-science pre-registration. See [Theoretical foundations](./vision.md#theoretical-foundations).
+**[Seven reasons you'd want this →](#why-minsky)** &nbsp;·&nbsp; Or skip to [getting started](#getting-started).
 
-## What this actually is, in 30 seconds
+## Getting started
 
-A **curated stack + small custom layers** that wires together existing tools — [Claude Code](https://claude.com/claude-code), [oh-my-claudecode (OMC) personas](https://github.com/Yeachan-Heo/oh-my-claudecode), [OpenTelemetry](https://opentelemetry.io/), systemd / launchd, the [tasks.md queue spec](https://github.com/tasksmd/tasks.md), Apple Shortcuts — into one supervised pipeline. The custom layers, published as `@minsky/*` on npm, fill gaps no upstream tool covers:
+**Through your AI agent.** Copy-paste:
 
-- **`@minsky/budget-guard`** — token-budget watchdog. Reads your usage and decides `NORMAL` / `THROTTLE` / `PAUSE` / `WEEKLY_WARN`. Exposes the decision to shell scripts (a flag file) and HTTP (`localhost:9876/budget`).
-- **`@minsky/observability`** — three-signal OpenTelemetry adapter (traces / metrics / logs) with health-probe `selfTest()`.
-- **`@minsky/handoff-spec`** — parseable record format for handoffs between agents (subject / from / to / status / blockers / suggested next).
-- **`@minsky/token-monitor`** — interface + planned Strategy against [Maciek-roboblog/Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) (the Python tool that actually surfaces Anthropic's hidden usage numbers).
-- **`@minsky/mape-k-loop`** — the autonomic manager that runs a spec monitor, identifies the bottleneck, A/Bs prompt variants, and rolls out winners. v0 ships pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` decision functions plus the assembled `tick` cycle (sustained-gain + oscillation guards) — see [`novel/mape-k-loop/`](./novel/mape-k-loop/).
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-Everything is MIT, every dependency lives behind an interface (`novel/adapters/`), every rule traces to a published source, and every code change in this repo carries a [pre-registered hypothesis + measurement](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes).
-
-## What this is *not*
-
-- **Not a framework.** No multi-agent runtime, no proprietary task queue, no proprietary loop driver. We adapt existing tools rather than rebuild them.
-- **Not for one-off quick fixes.** Every change in this repo carries the iron-rule overhead (hypothesis + measurement + pivot). If your fix can't justify that, it belongs in another repo.
-- **Not an IDE plugin** · **not a productivity tool** · **not a chatbot.** Minsky targets the supervisor layer, not the editor.
-
-## The `minsky` CLI (operator UX)
-
-Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/bin/minsky.mjs`). Sane defaults + auto-bootstrap:
+**Manual:**
 
 ```bash
-pnpm minsky                  # start-or-attach worker 0 (default); auto-detects
-                             # Claude exhaustion + offers to install local-LLM
-                             # fallback (~17 GB Qwen3 weights via mlx-lm + aider)
-                             # with one [Y/n] confirm prompt
-pnpm minsky doctor           # read-only health probe — claude / pipx / mlx-lm /
-                             # aider / model weights / mlx-lm.server reachable
-pnpm minsky bootstrap-local-llm  # explicitly run the local-LLM install plan
-pnpm minsky logs             # tail worker 0's log live
-pnpm minsky stop             # SIGTERM the daemon; leave the log
+git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-The auto-bootstrap pre-flight is idempotent — re-running `pnpm minsky` on a set-up machine adds <500 ms wall-clock (one fetch against `127.0.0.1:8080/v1/models`) and threads `MINSKY_LOCAL_LLM=1 MINSKY_LLM_PROVIDER=local-preferred` into the spawned daemon.
+Full install runbook: [INSTALL.md](INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
 
-**Operator escape hatches** (env vars; see `pnpm minsky --help`):
+## What it actually does
 
-| Env var | Effect |
-|---|---|
-| `MINSKY_LLM_PROVIDER=local-preferred` | "I know I'm exhausted" — skip live claude probe, install + use local-LLM directly. Use this on a fresh machine where you already know claude tokens are out. |
-| `MINSKY_LLM_PROVIDER=claude-only` | Skip the local-LLM probe; force claude even on a hard-limit signal. |
-| `MINSKY_LOCAL_LLM=1` | Wire the local-LLM fallback wrapper, but assume the stack is already installed (no bootstrap). |
-| `MINSKY_HARD_LIMIT_TTL_MIN=<n>` | How long to trust persisted hard-limit hits (default 60). After a hit gets persisted to `.minsky/state.json`, every subsequent `minsky` within the TTL skips the live probe and goes straight to local. |
-| `MINSKY_NO_AUTO_BOOTSTRAP=1` | Skip the pre-flight entirely. Daemon spawns claude regardless of state. |
-| `MINSKY_NON_INTERACTIVE=1` | Auto-confirm the bootstrap install plan. Useful for CI / daemonized contexts. Combined with `install-arm-homebrew` (which needs sudo TTY), the bootstrap refuses non-interactive and prints a manual one-liner instead of hanging. |
+1. Reads `TASKS.md` from your **host** repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
+2. Picks the highest-priority task that's ready to work on (has the required fields filled in)
+3. Spawns Devin, Claude, or a local AI model (configurable per machine)
+4. The agent implements the task on a feature branch
+5. Opens a draft pull request — including a self-graded report on whether the change moved the metric it predicted
+6. Records the iteration in `.minsky/experiment-store/` (inside your repo, for the next run to learn from)
+7. Picks the next task. Repeats.
 
-The CLI is intentionally repo-rooted (not a global `npm install -g` package) so the daemon's worktree, `.minsky/state.json`, and the workspace's pnpm dependencies stay co-located with the code. To run from outside the repo, alias it: `alias minsky="pnpm --dir ~/apps/minsky minsky"`.
+> **What's a "host"?** A host is a single git repository that minsky operates on — picks tasks from its `TASKS.md`, spawns agents inside its worktree, opens PRs against its remote. Selected via `default_host` in `~/.minsky/config.json`, or `--host <path>` flag, or the current working directory by default. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
 
-**Multi-machine flow** (cloning to a second machine where claude tokens are exhausted):
+## Why Minsky?
 
-```bash
-git clone https://github.com/fyodoriv/minsky.git && cd minsky
-pnpm install                            # (a) prepare hook builds dist; (b) lefthook installs hooks
-MINSKY_LLM_PROVIDER=local-preferred pnpm minsky   # skip claude probe + bootstrap local-LLM (~19 min, ~17 GB; one [Y/n] confirm)
-```
+Seven things you get with minsky running on a repo. Each links to a dedicated page with the full story (what the feature delivers, how it's measured, and how it's tested under stress).
 
-If `pnpm minsky` ran without the env var, the live probe (1-token `claude --print "ping"`) might false-positive `healthy` even when iterations would hit the quota. The first iteration's hard-limit response gets persisted to `.minsky/state.json::last_claude_hard_limit`; every subsequent `minsky` within `MINSKY_HARD_LIMIT_TTL_MIN` minutes (default 60) skips the live probe automatically.
+- **Continuous, unattended improvement** — picks tasks, ships draft pull requests, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
+- **Finds new work for you to approve** *(can be turned off)* — after each fix, it audits the repo and proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
+- **Right model for each task** — Claude for prose, Devin for refactors, a local model for mechanical fixes (so cheap work stays cheap). ([details →](user-stories/008-per-task-backend-and-personas.md))
+- **Refuses to reinvent the wheel** — every pull request has to cite the libraries it considered; if it skips the search, the build fails. ([details →](user-stories/009-forced-research-rule-1.md))
+- **A tool that improves itself** — reads its own metrics, files tasks against its own weak spots, ships the fixes. ([details →](user-stories/003-mape-k-improves-prompts.md))
+- **Keeps going when the cloud runs dry** — if your cloud-AI quota runs out, it falls back to a local model so the loop doesn't stall. ([details →](user-stories/004-budget-auto-pause.md))
+- **Async Q&A across timezones** *(coming)* — agents leave questions in a file; you answer when you wake up. ([details →](user-stories/010-async-human-qa-via-file.md))
 
-`pnpm minsky doctor` shows the persisted state at any time; the `claude exhaustion (persisted)` row turns YELLOW with the timestamp + age + reason within TTL.
+Safety is mechanical, not optional. Every pull request is a draft until you mark it ready. Every iteration passes 15 automatic checks — including a secret scanner, a "stay-in-your-lane" check that catches drive-by edits, and a security review. No agent can push directly to `main`. No pull request merges without your approval.
 
-## Observer layer (`minsky` from any folder, watched by a calling agent)
+## What works today (honest)
 
-Minsky ships an **observer plugin** distributed via
-[agentbrew](https://github.com/cbrwizard/agentbrew) so any Claude Code /
-Cursor / Devin / agentbrew-synced agent session can invoke the cross-repo
-runner from any folder and automatically watch the loop from outside.
-
-```bash
-# One-time install (idempotent — re-run on every machine):
-~/apps/tooling/minsky/distribution/install-observer.sh
-agentbrew sync --agentfile ~/apps/tooling/minsky/Agentfile.yaml
-
-# Then, from any shell in any bootstrapped host:
-cd ~/apps/my-repo && minsky          # autonomous run, observer-watched
-minsky status                        # list running minsky-run processes
-minsky stop                          # SIGTERM running processes; iteration drains cleanly
-```
-
-The plugin has four pieces:
-
-| Piece | Path | Purpose |
+| Capability | Status | Confidence |
 |---|---|---|
-| PATH shim | `bin/minsky` | Resolves the minsky repo via `MINSKY_REPO` → `~/apps/tooling/minsky` → common fallbacks; forwards to `novel/cross-repo-runner/bin/minsky-run.mjs`. Zero dependencies. |
-| Skill | `skill-plugins/observer/minsky/SKILL.md` | The observer protocol — Watch / Restart / Safe-heal / Swift-PR / Log. Triggered by phrases like "run minsky here" in any agent session. |
-| Slash commands | `commands/minsky.md` + `commands/minsky-status.md` + `commands/minsky-stop.md` | `/minsky`, `/minsky-status`, `/minsky-stop` for Claude Code / Cursor / Devin. |
-| Agentfile | `Agentfile.yaml` | Declares `skillSources: [{ label: minsky-observer, path: ./skill-plugins/observer }]` so `agentbrew sync` deploys the skill to every detected agent's `skillsDir`. |
+| Pick tasks from TASKS.md and spawn agents | ✅ Works | High — 26+ iterations |
+| Open PRs autonomously | ✅ Works | PR #644 opened by devin |
+| Walk multiple repos (3 iterations per host) | ✅ Works | Per-host cap, fair scheduling |
+| Dynamic watchdog (adapts to machine speed) | ✅ Works | p95 × 1.5 from history |
+| Live dashboard (`minsky watch`) | ✅ Works | Stability %, iterations, human-help |
+| Survive reboots (launchd KeepAlive) | ✅ Works | Auto-installed on first run |
+| One-command update (`minsky update`) | ✅ Works | Stop → pull → rebuild → restart |
+| Zero ghost processes on stop | ✅ Works | Kills runners + agent children |
+| Per-machine agent config | ✅ Works | `~/.minsky/config.json` |
+| Switch between Devin, Claude, local models | 🟡 Partial | Claude primary, Devin experimental |
+| 8h unattended runs with >90% stability | 🟡 In progress | Currently ~24%, improving |
+| File-based human↔agent Q&A | 🔴 Not yet | P0 `minsky-human-comm-via-file` |
+| `npx minsky` one-command install+run | 🔴 Not yet | P1 `minsky-npx-install-and-run` |
+| Multi-file refactors | 🔴 Not yet | M2 milestone |
+| GitHub Actions CI | 🔴 Not yet | M3 milestone |
 
-The calling agent **watches the loop from outside** (Perrow 1984,
-*Normal Accidents* — independent-monitor pattern), restarts on bounded
-transient failures with error-budget discipline (Beyer et al. 2016,
-*SRE* — retry budget), attempts a heal ONLY when the fix is in the
-catalogued list + single-line + obvious, and — when the retry budget is
-exhausted — swiftly opens a **draft** P0 PR in the correct upstream
-repo (Minsky for runner bugs; the host for host-side bugs). Rate-limit
-≤ 2 observer-filed PRs per hour per repo, rule-#9 substrate required in
-every filed task block.
+## What it won't do
 
-Failure-mode escalation gate: scope-leak / rule-#9 violation / segfault
-are immediate escalate; stuck / crash / spawn-failed are bounded-retry
-then escalate. See `skill-plugins/observer/minsky/SKILL.md` § 5 for the
-full gate.
+Hard rules. Not "tries not to" — mechanically blocked.
 
-## Why this exists
+- **Security-sensitive changes** — marked human-blocked, always
+- **Destructive operations** (force push, delete, deploy) — hard-blocked
+- **Architecture decisions** — files research tasks for humans
+- **Merge anything without your approval** — every PR is a draft; you review and merge
 
-Most agent stacks ([OMC](https://github.com/Yeachan-Heo/oh-my-claudecode), [CrewAI](https://github.com/joaomdmoura/crewAI), [MetaGPT](https://github.com/geekan/MetaGPT), Microsoft Agent Framework, Composio AO) optimise the **inner** loop — make one task ship faster. Minsky optimises the **outer** loop. Three concrete promises, each with a track-record of being broken in real-world deployments and each addressed by a specific design choice here:
+## How Minsky works inside
 
-1. **Stay alive** under process death, rate limits, network partitions, OS sleep, upstream drift. Approach: Erlang/OTP supervision (Armstrong 2007), let-it-crash discipline, no try/catch chains.
-2. **Stay on budget.** Treat tokens as an SRE-style error budget (Beyer et al., *Site Reliability Engineering*, 2016, ch. 3) and pre-empt the rate limiter rather than getting throttled by it. The budget watchdog ships in [`@minsky/budget-guard`](./novel/budget-guard/).
-3. **Stay on mission.** Runtime specification monitoring (Havelund & Goldberg, *VSTTE* 2008) reads `vision.md` plus recent work and reports drift. *Every* change is a pre-registered experiment with a declared hypothesis, success threshold, pivot threshold, and measurement command (Munafò et al., *Nature Human Behaviour*, 2017 — pre-registration; Ries 2011 — build-measure-learn).
-4. **Get better.** A MAPE-K autonomic loop (Kephart & Chess, *IEEE Computer* 2003): observe persona-level metrics, identify the bottleneck (Goldratt, *The Goal*, 1984), A/B test prompt variants, roll out winners with a sustained-gain check.
-
-The named patterns aren't decoration — they're the debuggability promise. When something breaks at 3am, *"this is supervision-tree pattern, restart strategy is one-for-one"* is a debuggable answer; *"this is how I happened to wire it"* is not.
-
-## Status
-
-**Pre-alpha. Active development.** What works today:
-
-- ✅ Core decision logic + watchdog loop in `@minsky/budget-guard`
-- ✅ Flag-file envelope (`${MINSKY_HOME}/.minsky/budget.flag`) and HTTP envelope (`localhost:9876/budget`)
-- ✅ OpenTelemetry adapter with `selfTest()` (`@minsky/observability`); OpenObserve install + dashboard `OpenObserveStrategy` (live PromQL read path)
-- ✅ Handoff record format + parser + validator (`@minsky/handoff-spec`)
-- ✅ Supervisor unit-file templates for systemd + launchd (`distribution/`)
-- ✅ Maciek `TokenMonitor` Strategy (`@minsky/token-monitor` — reads `~/.claude/projects/<cwd>/<session>.jsonl` directly)
-- ✅ MAPE-K autonomic loop v0 (`@minsky/mape-k-loop` — pure `monitor` / `analyze` / `plan` / `execute` / `knowledge` + assembled `tick`; sustained-gain + oscillation guards) + `mape-k-orchestrator` (rule-#9 self-improvement loop wiring; experiment-tracker → orchestrator ingestion closes the quarterly-close path)
-- ✅ Tick-loop daemon v0 (`@minsky/tick-loop` — production default = `ProcessSpawnStrategy`; real `BudgetGuard` via facade; `MINSKY_TICK_DRY_RUN=1` opt-in dry-run for the rollout window)
-- ✅ Persona spawner v0 (`@minsky/persona-spawner` — Adapter over `omc /team <persona>`; dispatch table maps task tags to OMC personas)
-- ✅ Notifier v0 (`@minsky/notifier` — Adapter over push channels; `NtfyNotifier` Strategy + `StubNotifier` test fake)
-- ✅ Spec monitor — deterministic CI lints (load-bearing per rule #10, see `scripts/check-rule-{1..7}-*.mjs` + `scripts/check-pattern-index.mjs` + `scripts/check-pr-self-grade.mjs` + `scripts/check-anchor-primary-source.mjs` + `scripts/check-pivot-success-margin.mjs` + `scripts/check-measurement-inspects-output.mjs` + `scripts/check-skill-rule-cap.mjs`) plus the residual-judgement advisory Claude Skill at `novel/spec-monitor/SKILL.md`
-- ✅ Web dashboard with Lighthouse Mobile ≥0.85 CI gate (`@minsky/dashboard-web`, `.github/workflows/lighthouse.yml`); `GET /watch.json` data surface + `POST /control` pause/resume control endpoint
-- ✅ Apple Shortcuts watch surface (`distribution/shortcuts/` — JSON manifests + on-device build runbook; pause/resume pair; host parameterized via Ask-Each-Time + Variable)
-- ✅ Rule #9 automation layer — per-PR experiment runner (`scripts/run-experiment.mjs` + `.github/workflows/experiment.yml`), weekly–monthly tracker (`@minsky/experiment-record` + `.github/workflows/experiment-tracker.yml`), and the experiment-record format
-- ✅ Read-only OMC → tasks.md bridge (`@minsky/omc-tasksmd-bridge` v0)
-- ✅ Iron rule #9 (pre-registered hypothesis-driven development) + rule #10 (deterministic CI enforcement) wired across `vision.md` / `AGENTS.md` / `TASKS.md` policy
-
-The 24/7-autonomy P0 path is end-to-end shippable: real-spawn daemon + real budget-guard gating + persona spawner + observability backend + Watch data surface + Watch control surface + push notifier + first user-story integration test driving the real daemon. What's still in flight — see [`TASKS.md`](./TASKS.md): the bidirectional OMC ↔ tasks.md watcher (`omc-tasksmd-bridge-v1-watcher`) and the next quarterly MAPE-K calibration cycle (`review-q3-2026`).
-
-## Quickstart
-
-```bash
-git clone https://github.com/fyodoriv/minsky.git
-cd minsky
-pnpm install   # the `prepare` hook builds @minsky/tick-loop's dist
-pnpm minsky doctor   # verify health
-```
-
-`pnpm install` runs a `prepare` hook that does two things in sequence: (a) `tsc -b` builds every workspace package's `dist/` (the CLI's runtime artifacts) so `pnpm minsky` works on a fresh clone with no separate build step, and (b) `lefthook install` writes the pre-commit + pre-push gates into `.git/hooks/` so commits are linted locally before they reach CI. If `dist/` is somehow missing at runtime (e.g., `prepare` was skipped, or a stale `.tsbuildinfo` short-circuited the build), `pnpm minsky` exits 1 with a one-line message naming the recovery command — no node `ERR_MODULE_NOT_FOUND` stack traces.
-
-For the full supervisor + dashboard install + dogfood-on-self loop, run `./setup.sh`:
-
-```bash
-./setup.sh
-```
-
-`./setup.sh` is idempotent and ends with a GREEN / YELLOW / RED self-test. Re-run any time. `./setup.sh --doctor` runs self-tests only; `./setup.sh --reset` rebuilds from scratch.
-
-To start Minsky **on this repo** (Minsky-on-itself; rule #12 / `user-stories/001-loop-runs-overnight.md`):
-
-```bash
-pnpm dogfood          # one-command supervisor start (renders + loads launchd / systemd units)
-pnpm dogfood:doctor   # read-only health probe
-```
-
-Then in [Claude Code](https://docs.claude.com/en/docs/claude-code) from this directory:
+The 30-second sketch:
 
 ```text
-/plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode
-/plugin install oh-my-claudecode
-/plugin install ralph-wiggum
-/next-task
+minsky (bash CLI shim)
+  ↓
+cross-repo-runner (minsky-run.mjs) — walks hosts, picks tasks, spawns agents
+  ↓
+Devin / Claude / Aider — the actual AI agent (pluggable)
+  ↓
+.minsky/ sidecar — config, experiment store, iteration records
 ```
 
-`/next-task` is queue mode by default — it picks the highest-priority unblocked task from [`TASKS.md`](./TASKS.md), ships it as a PR, loops to the next, and stops only when the queue is empty across all `~/apps/*/TASKS.md` and the audit cascade is clean.
+Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 
-### Fresh-clone troubleshooting
+- **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) ships today; multi-persona pipelines per task are an M2 milestone tracked at `multi-persona-pipeline-handoff-spec`.
+- **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
+- **Constitution = 18 rules, each enforced as a CI lint** — rule #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing), #18 (fake-data markers) are the load-bearing ones.
+- **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
+- **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration; same code adapts to any machine.
+- **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
 
-`pnpm minsky` detects the four likeliest fresh-clone failures before importing any module, replacing cryptic `ERR_MODULE_NOT_FOUND` stack traces with one-line operator-actionable messages:
+## More
 
-| Failure | Symptom | Recovery |
-|---|---|---|
-| `node_modules/` missing | `minsky: node_modules/ missing — run \`pnpm install\` from the repo root` | `pnpm install` |
-| `dist/index.js` not built | `minsky: dist not built (…) — run \`pnpm install\` …` | `pnpm install` |
-| `pnpm` not on PATH | `./setup.sh --doctor` exits RED: `pnpm missing` | `corepack enable` OR `brew install pnpm` OR `npm i -g pnpm` |
-| Node major < 20 | `./setup.sh --doctor` exits RED: `node X.x.x is below the >=20 engine requirement` | `nvm install 20 && nvm use 20` or `brew install node@20` |
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — code in this repo is AI-authored; how to attest
+- **[INSTALL.md](INSTALL.md)** — agent-readable install runbook
+- **[docs/uninstall.md](docs/uninstall.md)** — full removal, daemon stop, sidecar cleanup
+- **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
+- **[docs/cli-reference.md](docs/cli-reference.md)** — every command, every flag, every env var
+- **[docs/configuration.md](docs/configuration.md)** — `~/.minsky/config.json`, agent comparison
+- **[docs/auto-merge.md](docs/auto-merge.md)** — periodic gate-and-merge for daemon PRs (ON for minsky itself, OFF for other repos)
+- **[docs/dependabot.md](docs/dependabot.md)** — dependency-update policy, grouping, local merge gate
+- **[docs/edge-cases.md](docs/edge-cases.md)** — empty queues, runtime limits, comm channels, crashes
+- **[docs/PRACTICES.md](docs/PRACTICES.md)** — scientifically proven practices with citations
+- **[vision.md](vision.md)** — the constitution (18 rules), pattern conformance index
+- **[TASKS.md](TASKS.md)** — open tasks with rule-9 fields
+- **[MILESTONES.md](MILESTONES.md)** — M1–M5 exit criteria
+- **[DEPRECATED.md](DEPRECATED.md)** — retired features (don't invest in these)
 
-`pnpm minsky doctor` shows all four as substrate rows (plus the local-LLM stack). Any row RED → banner is RED and exits 1; fix the substrate before debugging the LLM stack.
-
-## How it fits together
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│ IDENTITY     vision.md                                           │
-│ INTELLIGENCE research.md, competitors/, user-stories/            │
-│ CONTROL      mape-k-loop, spec-monitor, error budgets            │
-│ COORDINATION tasks.md (queue), handoffs/ (blackboard)            │
-│ OPERATIONS   OMC personas, MCP tools                             │
-│ NERVOUS SYS  OpenTelemetry → dashboards (CLI / web / Watch)      │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-Stafford Beer's [Viable System Model](https://en.wikipedia.org/wiki/Viable_system_model) (Beer, *Brain of the Firm*, 1972). Lower layers are existing tools (OMC, tasks.md, OTEL, systemd / launchd). Upper layers are the small custom packages, each extracted as `@minsky/*` on npm from day one.
-
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) has the full wiring, the adapter pattern, the dependency table, and the supervision tree.
-
-## Read first
-
-| File | Purpose |
-| --- | --- |
-| [`vision.md`](./vision.md) | Constitution: ten non-negotiable rules, glossary, pattern-conformance index, success criteria |
-| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | All dependencies wired through interfaces; data flow; supervision tree |
-| [`AGENTS.md`](./AGENTS.md) | How any agent (Claude Code, OMC, future tools) should behave when working in this repo |
-| [`TASKS.md`](./TASKS.md) | Current work queue ([tasks.md](https://github.com/tasksmd/tasks.md) spec); every task carries Hypothesis / Success / Pivot / Measurement / Anchor per rule #9 |
-| [`research.md`](./research.md) | Living dependency scan; replacement candidates |
-| [`competitors/`](./competitors/) | Gap analysis vs OMC, CrewAI, MetaGPT, Microsoft Agent Framework, Composio AO |
-| [`user-stories/`](./user-stories/) | One file per story; metric, integration test, proof, failure modes |
-
-Two governance disciplines are load-bearing: every Minsky-coined term resolves to a published source via the [Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) (rule #5), and every artifact maps to a published pattern via the [Pattern conformance index](./vision.md#pattern-conformance-index) (rule #8). Both are enforced by deterministic CI lints per [rule #10](./vision.md#10-deterministic-enforcement--every-rule-is-a-ci-lint-not-a-hope) (in flight).
-
-## The namesake
-
-Marvin Minsky (1927–2016) was a co-founder of MIT's AI Lab and one of the field's foundational figures. *The Society of Mind* (1986) argues that what we experience as a single intelligence is actually a collection of many simple "agents" with limited individual capability, organised into societies that produce coherent behaviour. Minsky's later book *The Emotion Machine* (2006) extends the argument to include affect and self-reflection.
-
-The connection to this project is intentional: a useful AI coding stack is many small specialists (the OMC personas, the MCP tools, the supervisor, the budget guard, the spec monitor) cooperating under a shared discipline — not one monolithic super-agent. The discipline is the constitution in [`vision.md`](./vision.md).
-
-Further reading on Marvin Minsky:
-
-- [Marvin Minsky on Wikipedia](https://en.wikipedia.org/wiki/Marvin_Minsky)
-- [*The Society of Mind* (1986)](https://en.wikipedia.org/wiki/Society_of_Mind) — the idea this project is named after
-- [*The Emotion Machine* (2006)](https://en.wikipedia.org/wiki/The_Emotion_Machine) — extends the argument
-- [MIT Memoir on Marvin Minsky](https://news.mit.edu/2016/marvin-minsky-obituary-0125)
-
-## Tech defaults
-
-- **Node.js + TypeScript** for everything in `novel/` (publishes to npm under `@minsky/*`)
-- **pnpm** workspaces · **Biome** lint + format · **Vitest** with 90 % line / 85 % branch coverage gate · **lefthook** for pre-commit
-- **Strictest TypeScript** (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`)
-- **OpenTelemetry** everywhere — every novel package emits at least one span per public method (rule #4)
-- **systemd / launchd** for process supervision; let-it-crash discipline (Armstrong 2007)
-- **MIT** throughout; every novel layer extracted as its own MIT repo from day one
-
-[vision.md § Theoretical foundations](./vision.md#theoretical-foundations) lists the literature each choice is grounded in.
-
-## Contributing
-
-This repo is open-source MIT, but the contribution model is *strict by design*. Every change goes through the [iron-rule discipline of rule #9](./vision.md#9-pre-registered-hypothesis-driven-development--iron-rule-no-exceptions-including-bugfixes): you declare a hypothesis, a measurement command, success and pivot thresholds, and a literature anchor *before* you write the code. If that sounds heavy, it is — by design. The repo is for long-tail, measurable improvement of a system that runs for years; not for one-off fixes.
-
-If you want to contribute and that fits, the entry path is `/next-task` against [`TASKS.md`](./TASKS.md). Open issues for discussion before substantive work.
+About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+MIT. See [LICENSE](LICENSE).

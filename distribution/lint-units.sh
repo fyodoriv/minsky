@@ -52,6 +52,14 @@ for unit in "$ROOT"/systemd/*.service "$ROOT"/systemd/*.target; do
       fail "$name — missing [Service] section"
     elif [[ "$name" == *.service ]] && ! grep -q '^ExecStart=' "$unit"; then
       fail "$name — missing ExecStart="
+    elif [[ "$name" == *.service ]] && grep -q '^Type=oneshot' "$unit"; then
+      # Type=oneshot services run-to-completion and exit by design; Restart=
+      # would defeat the contract. The systemd timer that fires them IS
+      # the cadence kernel (rule #6 stay-alive applied at the timer/unit
+      # boundary, not at the service boundary). See `minsky-auto-merge.timer`
+      # — every 5 min the timer re-fires the oneshot service, which is
+      # functionally identical to `Restart=always` but with bounded execution.
+      ok "$name"
     elif [[ "$name" == *.service ]] && ! grep -q '^Restart=' "$unit"; then
       fail "$name — missing Restart= directive (rule #6 stay-alive)"
     else
@@ -60,10 +68,15 @@ for unit in "$ROOT"/systemd/*.service "$ROOT"/systemd/*.target; do
   fi
 done
 
-# 3. Verify placeholder hygiene — only ${MINSKY_HOME} permitted; flag any
-# undocumented ${...} expansions.
+# 3. Verify placeholder hygiene — only ${MINSKY_HOME} and ${HOME} permitted;
+# flag any undocumented ${...} expansions.
+#
+# ${MINSKY_HOME} is the canonical minsky-repo-root placeholder (substituted
+# by setup.sh via envsubst). ${HOME} is the operator's home directory —
+# launchd substitutes ${HOME} natively, and setup.sh also envsubsts it; it
+# appears in plists for log paths like ${HOME}/.minsky/auto-merge.log.
 printf '\nplaceholder hygiene:\n'
-allowed='MINSKY_HOME'
+allowed='MINSKY_HOME|HOME'
 for tmpl in "$ROOT"/systemd/*.service "$ROOT"/systemd/*.target "$ROOT"/launchd/*.plist; do
   if [ -f "$tmpl" ]; then
     name=$(basename "$tmpl")
