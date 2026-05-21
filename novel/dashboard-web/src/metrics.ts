@@ -36,6 +36,72 @@ export interface SuccessMetric {
    * lifetime-inventory count (e.g., `extraction-count`).
    */
   readonly monotonic?: "ok";
+  /**
+   * Success threshold copied verbatim from vision.md § "Success criteria".
+   * The numeric goal the metric should hit; the value below which we say
+   * "ship more, this is working". Operator directive 2026-05-21 — every
+   * metric tells you its goal explicitly, no implicit "good = high".
+   */
+  readonly goal: string;
+  /**
+   * Pivot threshold copied verbatim from vision.md § "Success criteria".
+   * The value below which the *approach* is reconsidered (Ries 2011
+   * build-measure-learn). Operator directive 2026-05-21 — every metric
+   * tells you when to walk away, not just when to celebrate.
+   */
+  readonly pivot: string;
+  /**
+   * Literature anchor for the metric's choice (not the goal). Operator
+   * directive 2026-05-21 — readers see the rationale for why this metric
+   * is the right one to track, not just the formula.
+   */
+  readonly anchor: string;
+  /**
+   * Milestone that gates this metric to "must be observed" status (e.g.
+   * "M1.1", "M1.13"). Optional — some metrics gate multiple milestones
+   * (`spec-alignment` is cited by M1, M2, M3, M4). Operator directive
+   * 2026-05-21 — links every metric to the roadmap so a reader can
+   * decide which to look at first.
+   */
+  readonly milestone?: string;
+}
+
+/**
+ * A metric that *should* exist but doesn't yet. Surfaced in METRICS.md's
+ * "Metrics to add" section so readers see the gap explicitly instead of
+ * silently assuming the 10-metric set is exhaustive. Operator directive
+ * 2026-05-21 — "which metrics should be added" is a load-bearing question,
+ * not a footnote.
+ */
+export interface ProposedMetric {
+  /** Stable kebab-case id; matches the future SuccessMetric id once landed. */
+  readonly id: string;
+  /** Human-readable label. */
+  readonly label: string;
+  /**
+   * Why this metric belongs on the dashboard. One sentence — the operator
+   * who reads METRICS.md should immediately understand why it's worth the
+   * collection cost.
+   */
+  readonly rationale: string;
+  /**
+   * Milestone that introduces this metric (e.g. "M1.1", "M2.7", "M4.1").
+   * Lets the reader filter "what's missing for the current milestone".
+   */
+  readonly milestone: string;
+  /**
+   * Task id (in `TASKS.md` or a future spec) that lands the collector.
+   * Optional — some proposals depend on milestone-level work rather than
+   * a discrete task.
+   */
+  readonly blockedBy?: string;
+  /**
+   * Sketch of the collection formula (same shape as `SuccessMetric.formula`
+   * but tagged TBD-AFTER for the blocker). Operator directive — even
+   * proposed metrics should show how they'd be observed once the blocker
+   * lands.
+   */
+  readonly formula: string;
 }
 
 /**
@@ -51,6 +117,10 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       'systemctl --user is-active minsky-tick-loop && journalctl --user -u minsky-tick-loop --since="30 days ago" -o json | node scripts/uptime.mjs',
     unit: "fraction",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "99% / 97% / 95% (30 / 90 / 365 d)",
+    pivot: "<90% over 30 d → reconsider supervisor design",
+    anchor: "Beyer et al., _SRE_ 2016, Ch. 4 (SLI / SLO)",
+    milestone: "M1.1",
   },
   {
     id: "tokens-per-story",
@@ -59,6 +129,11 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       'sum(token_count{event="user_story.complete"}[30d]) / count(span{name="user_story.complete"}[30d])',
     unit: "tokens/story",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "Decreasing trend month-over-month (≥5% MoM)",
+    pivot:
+      "Flat or rising for 3 consecutive months → MAPE-K loop isn't helping; pivot the autonomic manager",
+    anchor: "Goldratt TOC (improving the constraint should move this metric)",
+    milestone: "M2 (efficiency)",
   },
   {
     id: "spec-alignment",
@@ -67,6 +142,11 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       'gh run list --workflow ci.yml --branch main --status completed --created ">=$(date -v-30d +%Y-%m-%d)" --limit 1000 --json conclusion --jq \'([.[] | select(.conclusion=="success")] | length) / (length | if . == 0 then 1 else . end)\'',
     unit: "fraction",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "≥95% of CI runs on `main` are green across the rule-#10 lint set",
+    pivot: "<85% over 7 d → spec is wrong OR system is misaligned; trigger spec audit",
+    anchor:
+      'Havelund & Goldberg, "Verify Your Runs", _VSTTE_ 2008 (runtime specification monitoring)',
+    milestone: "M1 (gates every milestone)",
   },
   {
     id: "self-improvement-velocity",
@@ -74,6 +154,10 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     formula: "git log --grep='mape-k rollout' constraints.md --since=\"30 days ago\" | wc -l",
     unit: "rollouts/month",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "≥4 prompt rollouts / month with sustained gain (≥10%, p < 0.05, 7 d post-rollout) after Q1",
+    pivot: "<2 / month sustained 3 months → MAPE-K design or DSPy choice is wrong; pivot",
+    anchor: "Khattab DSPy 2023; Kohavi _Trustworthy_ 2020 (statistical rigour)",
+    milestone: "M4 (autonomous rollouts)",
   },
   {
     id: "mttr",
@@ -81,6 +165,10 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     formula: "histogram_quantile(0.95, supervisor_restart_to_claim_latency_seconds[7d])",
     unit: "seconds",
     freshnessBudgetMs: DAY_MS,
+    goal: "<5 min p95 from process death to next claim",
+    pivot: "p95 >10 min sustained 7 d → supervisor backoff or claim-resume is wrong",
+    anchor: "Forsgren et al., _Accelerate_ 2018 (DORA MTTR)",
+    milestone: "M1.13",
   },
   {
     id: "wrist-dwell",
@@ -88,6 +176,11 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     formula: 'count(http_get_total{path="/watch.json"}[1d]) * estimated_dwell_seconds_per_request',
     unit: "seconds/day",
     freshnessBudgetMs: DAY_MS,
+    goal: "≤60 s / day",
+    pivot:
+      ">120 s / day for 14 d → surface is too informative or system is too unhealthy; redesign",
+    anchor: "Card & Mackinlay 1999; Weiser & Brown 1995 (calm tech: dwell as friction)",
+    milestone: "M2+ (Watch surface)",
   },
   {
     id: "extraction-count",
@@ -97,6 +190,10 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     unit: "count",
     freshnessBudgetMs: 30 * DAY_MS,
     monotonic: "ok",
+    goal: "≥4 OSS repos extracted by month 6",
+    pivot: "<2 by month 4 → re-evaluate extraction policy / scope",
+    anchor: "rule #1 (don't reinvent the wheel) — extraction is the operationalisation",
+    milestone: "M2+ (sustained extraction)",
   },
   {
     id: "dep-interface-coverage",
@@ -104,6 +201,10 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     formula: "node scripts/check-rule-2-dep-coverage.mjs",
     unit: "fraction",
     freshnessBudgetMs: DAY_MS,
+    goal: "100% of named deps behind adapter",
+    pivot: "≥1 unhidden dep persisting >1 sprint → fix with adapter wrap or task",
+    anchor: "rule #2 (every dep behind interface)",
+    milestone: "M1 (substrate cohesion)",
   },
   {
     id: "token-budget-honoring",
@@ -111,6 +212,10 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     formula: 'sum(rate(claude_code_api_errors_total{status="429"}[7d]))',
     unit: "errors/week",
     freshnessBudgetMs: DAY_MS,
+    goal: "0 hard 429 / week sustained 30 d",
+    pivot: "≥1 / week sustained 4 weeks → budget-guard logic is broken; pivot",
+    anchor: "Beyer SRE 2016 (error budget)",
+    milestone: "M1 (cost discipline)",
   },
   {
     id: "task-throughput",
@@ -119,5 +224,118 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       "git log --since=\"30 days ago\" --oneline --grep='^feat\\|^fix\\|^docs\\|^chore' | wc -l / 30",
     unit: "tasks/day",
     freshnessBudgetMs: 7 * DAY_MS,
+    goal: "Sustained tasks / day at observed budget (≥1 / day at green budget)",
+    pivot: "<1 / day for 14 d at green budget → bottleneck elsewhere; analyse via TOC",
+    anchor: "Goldratt TOC (throughput as the goal of any system)",
+    milestone: "M1 (cadence)",
+  },
+];
+
+/**
+ * Metrics that *should* exist on the dashboard but don't yet. Each row
+ * names the milestone that introduces it, the task that lands the
+ * collector, and a sketch of the future formula. Operator directive
+ * 2026-05-21 — surface the gap explicitly so a reader knows the 10-metric
+ * set above is the current state, not the steady state. Order matches
+ * MILESTONES.md M1 → M5 progression.
+ */
+export const PROPOSED_METRICS: readonly ProposedMetric[] = [
+  {
+    id: "stability-10h-unattended",
+    label: "Stability: successful iterations / total over 10h unattended runs",
+    rationale:
+      "M1.1 acceptance gates on a 90% stability ratio across ≥5 consecutive 10h runs on ≥2 machines. `loop-uptime` measures _active days_ (a proxy); the real ratio comes from `orchestrate.jsonl` outcomes. Without this metric, M1.1 is unobservable.",
+    milestone: "M1.1",
+    blockedBy: "fleet-stability-centralized-reporting",
+    formula:
+      "node scripts/stability-report.mjs --window=10h ⟨TBD-AFTER: fleet-stability-centralized-reporting⟩",
+  },
+  {
+    id: "fleet-stability-aggregated",
+    label: "Fleet-wide stability across all reporting machines",
+    rationale:
+      "M1.2 acceptance requires a shared ledger — stability is measured across the fleet, not per-machine. Multi-host roll-up of `stability-10h-unattended`.",
+    milestone: "M1.2",
+    blockedBy: "fleet-stability-centralized-reporting",
+    formula:
+      "node scripts/fleet-stability-report.mjs ⟨TBD-AFTER: fleet-stability-centralized-reporting⟩",
+  },
+  {
+    id: "human-blocked-task-rate",
+    label: "Fraction of tasks marked `Blocked: needs-human-action` per 8h session",
+    rationale:
+      "M1.6 acceptance: 0 destructive ops, 0 force pushes, 0 secret mutations. The leading indicator is how often the agent correctly recognised an unsafe op and blocked it — too high means the agent is over-cautious; zero means the safety filter is asleep.",
+    milestone: "M1.6",
+    blockedBy: "minsky-default-8h-repo-transformation",
+    formula:
+      "grep -c '^\\*\\*Blocked\\*\\*: needs-human-action' TASKS.md ⟨TBD-AFTER: minsky-default-8h-repo-transformation⟩",
+  },
+  {
+    id: "baseline-delta-per-cycle",
+    label: "Repo improvement delta per 8h cycle (test count, coverage, lint, doc coverage)",
+    rationale:
+      "M1.7 acceptance: `minsky report --delta` shows before/after improvement. Needs a baseline-snapshot + delta-snapshot to compute the 4-axis improvement vector per cycle.",
+    milestone: "M1.7",
+    blockedBy: "minsky-init-one-command-bootstrap",
+    formula:
+      "minsky report --delta --since-baseline ⟨TBD-AFTER: minsky-init-one-command-bootstrap⟩",
+  },
+  {
+    id: "mttr-self-heal",
+    label: "MTTR for catalogued self-heal failures (top-level)",
+    rationale:
+      "M1.13 phase 1 shipped 4 automated heals + the MTTR ledger; the sub-metric is currently buried under `mttr` rather than a top-level row. Promote to top-level once the 30-day observation window has ≥1 heal-fire to plot.",
+    milestone: "M1.13",
+    blockedBy: "promote-remaining-heal-recipes",
+    formula:
+      "node scripts/heal-mttr-report.mjs --window=30d --json ⟨TBD-AFTER: ≥1 heal fires in production⟩",
+  },
+  {
+    id: "swe-bench-resolve-rate",
+    label: "SWE-bench Verified resolve rate, Minsky vs. competitors",
+    rationale:
+      "M2.7 acceptance: Minsky's resolve rate is measured and compared to published numbers for Devin, OpenHands, SWE-agent. The competitive scorecard depends on this single benchmark axis.",
+    milestone: "M2.7",
+    blockedBy: "self-metrics-competitive-benchmark",
+    formula: "minsky benchmark --swe-bench-subset ⟨TBD-AFTER: self-metrics-competitive-benchmark⟩",
+  },
+  {
+    id: "time-to-pr-median",
+    label: "Median time from `minsky run <id>` to PR-opened",
+    rationale:
+      "M2.6 acceptance: <30 min for a well-specified small task. Needs a timestamp pair (run-start, PR-opened) in the iteration record.",
+    milestone: "M2.6",
+    blockedBy: "self-metrics-competitive-benchmark",
+    formula:
+      "node scripts/time-to-pr.mjs --window=30d ⟨TBD-AFTER: self-metrics-competitive-benchmark⟩",
+  },
+  {
+    id: "ci-green-on-first-push",
+    label: "Fraction of daemon PRs where CI is green on the first push (no re-run cycle)",
+    rationale:
+      "M2.3 acceptance: 0 PRs opened with failing CI over a 10-task batch. Counts the rate at which the daemon's local-CI prediction matched the remote CI outcome — the integration-test surrogate for M2.3.",
+    milestone: "M2.3",
+    blockedBy: "daemon-pre-pr-lint-gate",
+    formula:
+      'gh pr list --search "head:daemon/" --json statusCheckRollup --jq \'[.[] | select((.statusCheckRollup[] | select(.conclusion=="failure")) | not)] | length / length\' ⟨TBD-AFTER: daemon PRs are explicitly tagged in branch name⟩',
+  },
+  {
+    id: "audit-log-completeness",
+    label: "Fraction of daemon actions surfaced in the audit log",
+    rationale:
+      "M4.2 acceptance: every action Minsky takes (PR opened, file edited, shell command run) is logged with timestamp + actor + scope. Sample-and-verify against the experiment store; gap is the M4 blocker.",
+    milestone: "M4.2",
+    blockedBy: "audit-log-substrate-v0",
+    formula: "node scripts/audit-log-coverage.mjs --window=7d ⟨TBD-AFTER: audit-log-substrate-v0⟩",
+  },
+  {
+    id: "secret-scan-findings",
+    label: "Secret-scan findings on `main` (should always be 0)",
+    rationale:
+      'vision.md § 13 minimum-bar item #1 ("No secrets in the repo, ever"). Currently enforced by `scripts/scan-secrets.mjs` pre-commit + CI gate, but the _count over time_ is not surfaced — making it impossible to detect leak attempts that were caught vs. patterns the lint missed.',
+    milestone: "M1.13 (security & privacy bar)",
+    blockedBy: "secret-scanning-precommit-and-ci",
+    formula:
+      "node scripts/scan-secrets.mjs --json --since=30d | jq '.findings | length' ⟨TBD-AFTER: secret-scanning-precommit-and-ci ships history retention⟩",
   },
 ];

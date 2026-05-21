@@ -34,7 +34,14 @@
 
 import { spawnSync } from "node:child_process";
 
-const result = spawnSync("lefthook", ["install"], {
+// `--force`: lefthook bails (exit 1) when `core.hooksPath` is set GLOBALLY
+// (e.g. dotfiles users with `~/dotfiles/git-hooks/`), even though the
+// repo's LOCAL `core.hooksPath = .git/hooks` always wins per git's
+// hierarchy. Without `--force`, the post-merge / post-rewrite auto-install
+// hook never lands for those operators — silently breaking the rule-#16
+// "auto-install on pull" guarantee. `--force` writes the hooks into
+// `.git/hooks/` regardless; git then reads them via the local override.
+const result = spawnSync("lefthook", ["install", "--force"], {
   stdio: "inherit",
   shell: false,
 });
@@ -51,6 +58,6 @@ const reason =
     : `lefthook install exited ${result.status ?? "<signal>"}`;
 
 process.stderr.write(
-  `\n[install-lefthook] warning: ${reason}; local pre-commit / pre-push gates disabled. Common causes: (a) \`git config core.hooksPath\` points to a path the current user can't write (e.g., dotfiles synced from another machine with a hardcoded \`/Users/<other-username>/...\`); (b) \`.git/hooks/\` is owned by a different user. After fixing, run \`pnpm exec lefthook install\` manually.\n`,
+  `\n[install-lefthook] warning: ${reason}; local pre-commit / pre-push / post-merge gates disabled. Common causes: (a) \`.git/hooks/\` is owned by a different user (typical after a one-time sudo'd clone); (b) \`.git/\` is read-only. After fixing, run \`pnpm exec lefthook install --force\` manually.\n`,
 );
 process.exit(0);

@@ -43,9 +43,16 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO = process.env["MINSKY_HOME"] ?? "/Users/cbrwizard/apps/tooling/minsky";
+// Derive the repo root from this script's own location — the hardcoded
+// `/Users/cbrwizard/apps/tooling/minsky` fallback only worked for one
+// operator and broke the gate for everyone else (rule #17 fix,
+// 2026-05-19; see TASKS.md `local-gate-merge-minsky-home-hardcoded-
+// path`). The `MINSKY_HOME` env override remains as the operator
+// escape hatch.
+const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
 // Per-vet hard timeout — a cold `--stage=full` (tsc -b --force across all
 // workspace projects + full vitest) is ~20 min; this bounds a hung/
@@ -152,6 +159,61 @@ export function decideMerge(input) {
   return { action: "merge", reason: `gate green on PR-merged-onto-main${brain}` };
 }
 
+// ---- land-local: the gate-merge mechanism applied to a LOCAL branch ------
+//
+// The swarm's workers land only because they push from `.claude/worktrees/`
+// checkouts the orchestrator provisions; a fully-vetted local branch from a
+// non-worktree contributor (an Opus-director keystone fix) is un-landable
+// while the swarm runs — the live-tree pre-push gate flaps on concurrent
+// churn and isolated worktrees lack node_modules. `landLocalBranch`
+// generalises the proven PR scratch-vet (rule #1: the orchestrator already
+// has the primitive — apply it to a local ref instead of a `pull/N/head`).
+// TASKS.md `orchestrator-must-land-local-vetted-branches` Detail (a).
+
+/**
+ * Pure: skip-earlier gate. A branch with nothing ahead of `origin/main`
+ * (empty / already-merged) can never land — eliding the ~20-min scratch
+ * clone + `pnpm install` + `--stage=full` vet on a cheap `rev-list --count`
+ * is the iteration's measurable optimization (round-trip elimination).
+ * @param {number} commitsAhead
+ * @returns {{proceed: boolean, reason: string}}
+ */
+export function decidePreflight(commitsAhead) {
+  if (!Number.isFinite(commitsAhead) || commitsAhead <= 0) {
+    return { proceed: false, reason: "nothing-to-land: 0 commits ahead of origin/main" };
+  }
+  return { proceed: true, reason: `${commitsAhead} commit(s) ahead of origin/main` };
+}
+
+/**
+ * Pure: land decision for a vetted local branch. Mirrors `decideMerge`
+ * (same two-layer authority — deterministic `--stage=full` gate, optional
+ * Opus brain) minus the `PrSnapshot` (a local branch has no PR yet).
+ * @param {{
+ *   verdict: {green: boolean, failedSteps: string[], sawSummary: boolean},
+ *   vetError?: string,
+ *   review?: {approve: boolean, reason: string},
+ * }} input
+ * @returns {{action: "land" | "abort", reason: string}}
+ */
+export function decideLand(input) {
+  if (input.vetError) return { action: "abort", reason: `vet-error: ${input.vetError}` };
+  if (!input.verdict.sawSummary) {
+    return { action: "abort", reason: "no gate summary (vet did not complete)" };
+  }
+  if (!input.verdict.green) {
+    return {
+      action: "abort",
+      reason: `gate red: ${input.verdict.failedSteps.join(",") || "summary not ok"}`,
+    };
+  }
+  if (input.review && !input.review.approve) {
+    return { action: "abort", reason: `opus-review rejected: ${input.review.reason}` };
+  }
+  const brain = input.review ? ` + opus-approved (${input.review.reason})` : "";
+  return { action: "land", reason: `gate green on branch-merged-onto-main${brain}` };
+}
+
 // ---- I/O seam (production defaults; tests inject fakes) -------------------
 
 /**
@@ -248,16 +310,25 @@ function prepareScratchClone(scratch, pr) {
   } catch {
     return { vetError: "merge-onto-main-conflict" };
   }
-  // pnpm scatters a per-package node_modules symlink-farm across the whole
-  // workspace; `git clone` only carries the (gitignored-excluded) tracked
-  // tree, so a bare clone has NO node_modules anywhere. Symlinking just the
-  // root one (the prior approach) left every `novel/*` package unresolvable
-  // — tsc + vitest then failed `Cannot find module` for EVERY PR, so the
-  // conductor skipped them all (the zero-merge bottleneck). A real install
-  // is the only correct fix: with the global pnpm store already warm from
-  // the live repo, `--prefer-offline --frozen-lockfile` only re-creates the
-  // hardlink/symlink farm (seconds, no network) and is fully isolated to
-  // the scratch (multi-tenant safe — never writes the live node_modules).
+  return installScratchDeps(scratch);
+}
+
+/**
+ * Re-create the workspace `node_modules` symlink-farm inside a fresh scratch
+ * clone. pnpm scatters a per-package farm across the whole workspace; `git
+ * clone` only carries the tracked tree, so a bare clone has NO node_modules
+ * anywhere. Symlinking just the root one left every `novel/*` package
+ * unresolvable (tsc + vitest `Cannot find module` for EVERY candidate — the
+ * zero-merge bottleneck). A real install is the only correct fix: with the
+ * global pnpm store already warm from the live repo, `--prefer-offline
+ * --frozen-lockfile` only re-links (seconds, no network) and is fully
+ * isolated to the scratch (multi-tenant safe — never writes the live
+ * node_modules). Shared by the PR vet (`prepareScratchClone`) and the
+ * local-branch vet (`prepareScratchCloneForBranch`) — rule #1, one seam.
+ * @param {string} scratch
+ * @returns {{vetError: string} | null}  null ⇒ deps ready
+ */
+function installScratchDeps(scratch) {
   try {
     execFileSync(
       "pnpm",
@@ -266,8 +337,8 @@ function prepareScratchClone(scratch, pr) {
     );
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    // An install failure is gate INFRA broken, not the PR being red — make
-    // that explicit so it is never misattributed as a PR gate-failure
+    // An install failure is gate INFRA broken, not the candidate being red —
+    // make that explicit so it is never misattributed as a gate-failure
     // (rule #6: surface the boundary error, don't swallow it as a skip).
     return { vetError: `scratch-install-failed: ${m.slice(0, 160)}` };
   }
@@ -355,6 +426,123 @@ function bestEffortRmScratch(scratch) {
 /** @param {PrSnapshot} pr */
 function defaultMerge(pr) {
   execFileSync("gh", ["pr", "merge", String(pr.number), "--squash", "--admin", "--delete-branch"], {
+    cwd: REPO,
+    encoding: "utf8",
+  });
+}
+
+/**
+ * How many commits the local branch is ahead of `origin/main`. Fail-open:
+ * if the ref or `origin/main` can't be counted, return 1 so the gate still
+ * runs — a probe error must never be misread as "nothing to land" and
+ * silently skip a real vet (rule #6).
+ * @param {string} branchName
+ * @returns {number}
+ */
+function defaultCommitsAhead(branchName) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", REPO, "rev-list", "--count", `origin/main..${branchName}`],
+      { encoding: "utf8" },
+    );
+    return Number(out.trim());
+    // rule-6: handled-locally — a missing origin/main or unknown ref must not be mistaken for an empty branch; fail-open to 1 so the deterministic vet stays the authority.
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Clone the live repo (shared object store) and stage the LOCAL branch
+ * merged onto `origin/main` inside `scratch`. A `git clone --shared` of the
+ * local repo exposes every local ref as `origin/<branch>` BEFORE `origin`
+ * is repointed at GitHub — so a never-pushed branch is reachable; pin it to
+ * `land-src` first, then repoint + fetch authoritative main + merge.
+ * @param {string} scratch
+ * @param {string} branchName
+ * @returns {{vetError: string} | null}  null ⇒ scratch is ready to gate
+ */
+function prepareScratchCloneForBranch(scratch, branchName) {
+  execFileSync("git", ["clone", "--shared", "--quiet", REPO, scratch], { encoding: "utf8" });
+  try {
+    execFileSync("git", ["-C", scratch, "rev-parse", "--verify", `origin/${branchName}`], {
+      encoding: "utf8",
+    });
+    // rule-6: handled-locally — a non-existent local branch is a caller error, not gate infra; surface it as a typed vetError so it never looks like a red gate.
+  } catch {
+    return { vetError: `local-branch-not-found: ${branchName}` };
+  }
+  execFileSync("git", ["-C", scratch, "branch", "land-src", `origin/${branchName}`], {
+    encoding: "utf8",
+  });
+  const ghRemote = execFileSync("git", ["-C", REPO, "remote", "get-url", "origin"], {
+    encoding: "utf8",
+  }).trim();
+  execFileSync("git", ["-C", scratch, "remote", "set-url", "origin", ghRemote], {
+    encoding: "utf8",
+  });
+  execFileSync("git", ["-C", scratch, "fetch", "--quiet", "origin", "main"], { encoding: "utf8" });
+  execFileSync("git", ["-C", scratch, "checkout", "--quiet", "-B", "gate", "origin/main"], {
+    encoding: "utf8",
+  });
+  try {
+    execFileSync("git", ["-C", scratch, "merge", "--no-edit", "land-src"], { encoding: "utf8" });
+  } catch {
+    return { vetError: "merge-onto-main-conflict" };
+  }
+  return installScratchDeps(scratch);
+}
+
+/**
+ * Default local-branch vet: isolated `git clone --shared` scratch (NEVER an
+ * in-repo worktree — that flips core.bare on the live repo), the branch
+ * merged onto origin/main, full gate with --json. Mirrors `defaultVet`.
+ * @param {string} branchName
+ * @returns {{stdout: string} | {vetError: string}}
+ */
+function defaultVetLocalBranch(branchName) {
+  const scratch = mkdtempSync(join(tmpdir(), "minsky-land-"));
+  try {
+    const prep = prepareScratchCloneForBranch(scratch, branchName);
+    if (prep) return prep;
+    const stdout = execFileSync(
+      "node",
+      ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"],
+      {
+        cwd: scratch,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: VET_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+      },
+    );
+    return { stdout };
+  } catch (err) {
+    return vetErrorToResult(err);
+  } finally {
+    bestEffortRmScratch(scratch);
+  }
+}
+
+/**
+ * Default land: push the locally-vetted branch to origin, open its PR, and
+ * admin-merge it — the exact `gh` primitive the orchestrator already uses
+ * for worker branches (PRs #596–#602), now reachable for a non-worktree
+ * contributor. `--fill` derives the PR title/body from the branch commits;
+ * CI is disabled on this repo and the merge is `--admin`, so the scratch
+ * `--stage=full` verdict (already green here) is the gate, not GitHub.
+ * @param {string} branchName
+ */
+function defaultLandBranch(branchName) {
+  execFileSync("git", ["-C", REPO, "push", "origin", `${branchName}:${branchName}`], {
+    encoding: "utf8",
+  });
+  execFileSync("gh", ["pr", "create", "--head", branchName, "--base", "main", "--fill"], {
+    cwd: REPO,
+    encoding: "utf8",
+  });
+  execFileSync("gh", ["pr", "merge", branchName, "--squash", "--admin", "--delete-branch"], {
     cwd: REPO,
     encoding: "utf8",
   });
@@ -556,6 +744,115 @@ export function runGateSweep(opts = {}) {
   return { merged, skipped };
 }
 
+/**
+ * @typedef {object} LandLocalOpts
+ * @property {string | undefined} [branchName]
+ * @property {boolean} [dryRun]
+ * @property {boolean} [noReview]
+ * @property {(branchName: string) => number} [commitsAheadFn]
+ * @property {(branchName: string) => {stdout: string} | {vetError: string}} [vetFn]
+ * @property {(branchName: string) => {approve: boolean, reason: string}} [reviewFn]
+ * @property {(branchName: string) => void} [landFn]
+ * @property {(s: string) => void} [log]
+ */
+
+/**
+ * Pure: collapse a vet result (gate stdout or vetError) plus the optional
+ * Opus review into the land decision. Extracted from `landLocalBranch` so
+ * that function stays within the cognitive-complexity budget and this
+ * branch-resolution logic is independently exercisable (rule #2 — the
+ * seam stays pure and testable; same input ⇒ same verdict, rule #10).
+ * @param {{stdout: string} | {vetError: string}} vetRes
+ * @param {{
+ *   branchName: string,
+ *   noReview?: boolean | undefined,
+ *   reviewFn?: ((branchName: string) => {approve: boolean, reason: string}) | undefined,
+ * }} cfg
+ * @returns {{action: "land" | "abort", reason: string}}
+ */
+export function decideLandFromVet(vetRes, cfg) {
+  if ("vetError" in vetRes) {
+    return decideLand({
+      verdict: { green: false, failedSteps: [], sawSummary: false },
+      vetError: vetRes.vetError,
+    });
+  }
+  const verdict = parseGateVerdict(vetRes.stdout);
+  const reviewFn = cfg.noReview ? undefined : cfg.reviewFn;
+  if (verdict.green && reviewFn) {
+    return decideLand({ verdict, review: reviewFn(cfg.branchName) });
+  }
+  return decideLand({ verdict });
+}
+
+/**
+ * Side-effecting land step isolated from `landLocalBranch` so that
+ * function's cognitive complexity stays within the linter budget. Push +
+ * open PR + admin-merge via the injected (or default) land fn; a thrown
+ * land call is reported, never crashes the conductor (rule #6 — handled
+ * locally, the deterministic gate already authorised the land).
+ * @param {string} branchName
+ * @param {((branchName: string) => void) | undefined} landFn
+ * @param {(s: string) => void} log
+ * @param {string} reason
+ * @returns {{outcome: "landed" | "aborted", reason: string}}
+ */
+function executeLand(branchName, landFn, log, reason) {
+  try {
+    (landFn ?? defaultLandBranch)(branchName);
+    log(`land-local ${branchName}: LANDED — ${reason}\n`);
+    return { outcome: "landed", reason };
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    log(`land-local ${branchName}: land call failed: ${m.slice(0, 160)}\n`);
+    return { outcome: "aborted", reason: `land-failed: ${m.slice(0, 120)}` };
+  }
+}
+
+/**
+ * Take a fully-committed LOCAL branch green through the same scratch
+ * `--stage=full` gate the worker PR path runs, then push + open PR +
+ * admin-merge it. Pure decisions (`decidePreflight`, `parseGateVerdict`,
+ * `decideLand`) over an injectable I/O seam (rule #2 / rule #10 — same
+ * input ⇒ same verdict, no model in the land decision). The deterministic
+ * gate is always the authority; an Opus brain runs only when a `reviewFn`
+ * is supplied (deterministic-only by default — `local-gate-merge` already
+ * supports `--no-review`; the local-branch Opus review wires in a follow-up).
+ * @param {LandLocalOpts} opts
+ * @returns {{outcome: "landed" | "aborted", reason: string}}
+ */
+export function landLocalBranch(opts) {
+  const log = opts.log ?? ((s) => process.stdout.write(s));
+  const branchName = opts.branchName;
+  if (!branchName) {
+    log("land-local: no branch name given\n");
+    return { outcome: "aborted", reason: "no-branch-name" };
+  }
+  // skip-earlier gate: a branch with nothing ahead of origin/main can never
+  // land — elide the ~20-min scratch clone + pnpm install + --stage=full vet.
+  const pre = decidePreflight((opts.commitsAheadFn ?? defaultCommitsAhead)(branchName));
+  if (!pre.proceed) {
+    log(`land-local ${branchName}: ABORT — ${pre.reason}\n`);
+    return { outcome: "aborted", reason: pre.reason };
+  }
+  log(`land-local ${branchName}: ${pre.reason}; vetting via scratch --stage=full…\n`);
+  const vetRes = (opts.vetFn ?? defaultVetLocalBranch)(branchName);
+  const decision = decideLandFromVet(vetRes, {
+    branchName,
+    noReview: opts.noReview,
+    reviewFn: opts.reviewFn,
+  });
+  if (decision.action !== "land") {
+    log(`land-local ${branchName}: ABORT — ${decision.reason}\n`);
+    return { outcome: "aborted", reason: decision.reason };
+  }
+  if (opts.dryRun) {
+    log(`land-local ${branchName}: WOULD LAND — ${decision.reason}\n`);
+    return { outcome: "landed", reason: decision.reason };
+  }
+  return executeLand(branchName, opts.landFn, log, decision.reason);
+}
+
 // ---- CLI -----------------------------------------------------------------
 
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
@@ -563,14 +860,22 @@ if (isMain) {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const noReview = args.includes("--no-review");
-  const limArg = args.find((a) => a.startsWith("--limit="));
-  const prArg = args.find((a) => a.startsWith("--pr="));
-  /** @type {{dryRun: boolean, noReview: boolean, limit?: number, onlyPr?: number}} */
-  const opts = { dryRun, noReview };
-  if (limArg) opts.limit = Number(limArg.split("=")[1]);
-  if (prArg) opts.onlyPr = Number(prArg.split("=")[1]);
-  const res = runGateSweep(opts);
-  process.stdout.write(
-    `local-gate-merge: done — merged=${res.merged.length} skipped=${res.skipped.length}\n`,
-  );
+  if (args[0] === "land-local") {
+    const branchName = args[1];
+    const res = landLocalBranch({ branchName, dryRun, noReview });
+    process.stdout.write(
+      `local-gate-merge: land-local ${branchName ?? "(none)"} — ${res.outcome} (${res.reason})\n`,
+    );
+  } else {
+    const limArg = args.find((a) => a.startsWith("--limit="));
+    const prArg = args.find((a) => a.startsWith("--pr="));
+    /** @type {{dryRun: boolean, noReview: boolean, limit?: number, onlyPr?: number}} */
+    const opts = { dryRun, noReview };
+    if (limArg) opts.limit = Number(limArg.split("=")[1]);
+    if (prArg) opts.onlyPr = Number(prArg.split("=")[1]);
+    const res = runGateSweep(opts);
+    process.stdout.write(
+      `local-gate-merge: done — merged=${res.merged.length} skipped=${res.skipped.length}\n`,
+    );
+  }
 }
