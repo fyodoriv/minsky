@@ -1,5 +1,7 @@
 # Competitor: SWE-agent (Princeton NLP)
 
+> Princeton NLP's research-benchmark coding agent — Minsky measures against SWE-agent's published SWE-bench scores.
+
 - **URL**: <https://github.com/SWE-agent/SWE-agent>
 - **Status**: Active, research-oriented, MIT licensed
 - **Pricing**: Free (OSS). Model costs only.

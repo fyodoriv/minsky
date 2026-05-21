@@ -1,10 +1,23 @@
 # AGENTS.md
 
-This file tells any AI agent (Claude Code, OMC personas, future tools) how this repository expects to be worked on. It complements `vision.md` (the constitution) and `ARCHITECTURE.md` (the wiring).
+> The agent runbook for the Minsky repo — setup, running, claiming tasks, and the constitutional rules every commit must honour.
 
-If you're an agent reading this for the first time: read `MILESTONES.md` first (the roadmap + capability tables), then `vision.md` (the constitution), then `TASKS.md` (the work queue), then come back here.
+## What this file is
+
+The canonical runbook for any AI agent (Claude Code, OMC personas, future tools) working in the Minsky repo. It tells you how to set up the workspace, run the daemon, claim a task from `TASKS.md`, and the operational rules — which rules apply, where to find them, and which are locally enforced.
+
+If you're an agent reading this for the first time, read in this order: `MILESTONES.md` (the roadmap), then `vision.md` (the constitution), then `TASKS.md` (the work queue), then come back here.
 
 **Before implementing any feature**, check `DEPRECATED.md` — it lists features that should NOT receive new work (hard scope-leak mode, observer-watch.sh, dogfood scripts, dashboard-web, hardcoded timeout env vars, manual stop/start flows). Use the replacement instead.
+
+## What this file is not
+
+- **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules. This file references them but doesn't redefine them.
+- **Not the architecture doc** — see [ARCHITECTURE.md](./ARCHITECTURE.md) for the layered model, adapter pattern, and dependency table.
+- **Not the install guide** — see [INSTALL.md](./INSTALL.md) for first-time setup of a freshly-cloned host.
+- **Not a task list** — see [TASKS.md](./TASKS.md) for active work.
+
+The `## Orchestrator discipline` and `### 15. Milestone alignment gate` sections below are **load-bearing** — they are cited by deterministic CI gates (`scripts/check-pr-self-grade.mjs`, `scripts/check-rule-6-let-it-crash.mjs`) and by `CHANGELOG.md`. Do not rename or renumber them.
 
 ## Repository setup
 
@@ -127,42 +140,21 @@ Every artifact (file, package, interface, architectural decision, process step) 
 
 ### 9. Pre-registered hypothesis-driven development (iron rule)
 
-Every change — every PR, every novel package, **every bugfix**, every refactor — declares, **before code is written**: **hypothesis** (Goal-Question-Metric, Basili 1994), **success threshold** (numeric or rubric), **pivot threshold** (numeric — the value below which the *approach* is abandoned, per Ries 2011 build-measure-learn), **measurement method** (exact runnable shell / OTEL / CI command — no English instructions; tag `<TBD-AFTER: <task-id>>` if the system isn't built yet), and **literature anchor** for the metric.
+Every change declares — **before code is written** — its hypothesis, success threshold, pivot threshold (numeric), measurement method (runnable shell/OTEL/CI command), and literature anchor. **Iron**: no exemption for small fixes, obvious bugs, or refactors. Vanity metrics and post-hoc metrics are forbidden. If the metric source doesn't exist yet, ship a preparation PR first.
 
-This is **iron**: no exemption for "small fixes", "obvious bugs", or "just a refactor". A bugfix's hypothesis is "the recurrence rate (or a stability metric to which it contributes) drops from X to Y after this fix"; if that statement can't be made, the root cause hasn't been identified.
-
-If the metric source doesn't exist yet, ship a **preparation PR** that lands the instrumentation, then open the change PR against the now-measurable baseline. Preparation PRs are first-class work; never skip the metric on the grounds that "we'll instrument later".
-
-**Automation layer.** Rule #9 commits the repo to executing the contract, not just declaring it. Three timescales: per-PR (daily — `ci-experiment-runner-v0`), weekly–monthly (`experiment-tracker-v0`), quarterly (folded into `mape-k-loop-v0` and `review-q3-2026`). Pre-registration without execution is half a rule. See `vision.md` § 9 for the full architecture.
-
-Vanity metrics (counts that always go up — LOC, commits, hours, tasks-in-flight) are forbidden. Post-hoc metrics (chosen after seeing the result) are forbidden. See `vision.md` § 9 for the full rule + sources, including the pre-registration anchor (Munafò et al. 2017, *Nature Human Behaviour*).
-
-**NEEDS-CLARIFICATION inventory gate (spec-kit reinforcement).** Before a task is claimed and before code is written, every item in the task block or its spec that cannot be answered from existing files must be listed explicitly as `[NEEDS CLARIFICATION: <exact question>]` — not silently assumed away. Assumptions block falsifiability: an assumed input means the hypothesis was never fully stated. Use `/task-spec` to surface the inventory; resolve it via `/grill-task`; commit the resolved list to `.minsky/specs/<task-id>.md`. A task with unresolved NEEDS-CLARIFICATION items must stay in `needs-info` state (see `/triage`). Source: spec-kit `spec-template.md` "NEEDS CLARIFICATION" convention; conforming pattern: explicit-assumption logging (Cockburn, *Writing Effective Use Cases*, 2001, Ch. 5).
+Full text, automation layer, NEEDS-CLARIFICATION gate, and sources in [vision.md § 9](./vision.md).
 
 ### 10. Deterministic enforcement (iron rule)
 
-Every constitutional rule must be enforced by a deterministic CI check — not a Skill, not an LLM, not "the agent will remember". Same input, same output, no model call in the chain. LLM-driven checks (Claude Skills like `claude-spec-monitor`) are *advisory only* and useful for *discovering* rule gaps; they are never load-bearing for *enforcing* rules. When a rule resists mechanisation, split it into a deterministic substrate (the lint catches presence/shape) plus an explicit human-judgement layer — never quietly delegated to a Skill. When a deterministic linter ships for a rule, any prior Skill-based enforcement is *removed* in the same PR (the ratchet rule — never two enforcement mechanisms competing). See `vision.md` § 10 for the full rule + sources.
+Every constitutional rule must be enforced by a deterministic CI check — not a Skill, not an LLM, not "the agent will remember". LLM-driven checks are *advisory only*; never load-bearing. When a rule resists mechanisation, split it into a deterministic substrate plus an explicit human-judgement layer. When a deterministic linter ships, any prior Skill-based enforcement is *removed* in the same PR (the ratchet rule).
 
-**Constitutional-gate pattern (spec-kit reinforcement).** Deterministic CI gates should be structured as explicit phase gates: a check that must pass before the next phase of work begins. Concretely: GWT scenarios must exist before tests are written (spec gate); tests must fail before implementation begins (red gate); rule-#9 pre-registration must be committed before code is merged (pre-reg gate). These gates are additive — each new deterministic lint added under rule #10 should declare which phase it guards and which constitutional rule it enforces, both in the CI workflow comment and in `vision.md` § "Pattern conformance index". Source: spec-kit `plan-template.md` § "Phase -1: Pre-Implementation Gates"; conforming pattern: phase-gate process (Cooper, *Winning at New Products*, 2001, Ch. 3 — stage-gate model adapted to software).
+Full text, constitutional-gate pattern, and sources in [vision.md § 10](./vision.md).
 
 ### 11. Default by default (rule #16)
 
-When you implement a new behavior or fix, **make it the default immediately** — not an opt-in flag behind an env var. If a behavior is reasonable for all users, it should be on by default the moment it ships.
+When you implement a new behaviour or fix, make it the default immediately — not an opt-in flag behind an env var. Every new default ships with (1) an experiment in `.minsky/experiments/<id>.yaml`, (2) a runnable measurement, (3) a documented opt-out for debugging only. Burden of proof: "why ISN'T this the default?"
 
-Examples of "default by default":
-
-- Scope-leak soft mode → default (not `MINSKY_SCOPE_LEAK_MODE=warn`)
-- Launchd persistence → auto-installed on first `minsky` run (not a separate `install-daemon` step)
-- Dynamic timeouts → computed automatically (not `MINSKY_CLAUDE_PRINT_TIMEOUT_MS=...`)
-- Smart auto-attach → just works when you type `minsky` (not `minsky --attach-or-start`)
-
-**Every new default ships with:**
-
-1. **An experiment** in `.minsky/experiments/<id>.yaml` with hypothesis + success threshold
-2. **A measurement** — a runnable command that verifies the default works
-3. **An opt-out** — an env var or flag to disable (for debugging only, documented in DEPRECATED.md as soon as it's never used)
-
-The burden of proof is on the opt-in side: "why ISN'T this the default?" not "why SHOULD this be the default?"
+Full text and example list in [vision.md § 16](./vision.md).
 
 ### 12. Proactive healing (rule #17 — iron, no exemption)
 
