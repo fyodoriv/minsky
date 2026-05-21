@@ -39,6 +39,7 @@ export type {
   LoopResult,
   LoopStopReason,
   PickTaskArgs,
+  RestartRequest,
   RunHostLoopOpts,
 } from "./host-loop.js";
 export {

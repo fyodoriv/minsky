@@ -56,9 +56,9 @@
 // (deterministic — same input → same output, no LLM in the chain).
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir, platform as osPlatform } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * @typedef {Object} DecideInput
@@ -75,6 +75,7 @@ import { join } from "node:path";
  *   | { kind: "pnpm-install" }
  *   | { kind: "regen-plist", warnDaemonRunning: boolean }
  *   | { kind: "systemctl-reload" }
+ *   | { kind: "request-daemon-restart", reason: string, changedFiles: readonly string[] }
  *   | { kind: "pre-pr-lint-fast" }
  * )} Action
  */
@@ -164,7 +165,24 @@ export function decideActions(input) {
     actions.push({ kind: "systemctl-reload" });
   }
 
-  // 4. Sanity check — run the fast lint stack ONLY when something
+  // 4. Request daemon restart — when a pull lands code the running
+  //    daemon would benefit from, write a sentinel file at
+  //    `~/.minsky/restart-requested`. The daemon's tick-loop reads
+  //    the sentinel between iterations and exits cleanly; launchd
+  //    KeepAlive (or systemd Restart=always) then respawns the
+  //    daemon with the new code. This makes `minsky update` redundant
+  //    for the common case: an operator who `git pull`s and walks
+  //    away returns to a daemon running latest code within one
+  //    iteration-cycle. Rule #16 (default by default — the burden
+  //    of proof is on the opt-in side; `minsky update` becomes the
+  //    rare manual escape hatch, not the daily flow).
+  //
+  //    Extracted to {@link maybeRequestDaemonRestart} so `decideActions`
+  //    stays under the cognitive-complexity cap (biome ≤ 10).
+  const restartAction = maybeRequestDaemonRestart(input);
+  if (restartAction !== null) actions.push(restartAction);
+
+  // 5. Sanity check — run the fast lint stack ONLY when something
   //    material was already going to install. Doc-only or TASKS.md-only
   //    pulls don't need the lint (fast but still ~10s; rule #6 forbids
   //    busywork). The lint must run AFTER the install steps so it
@@ -174,6 +192,70 @@ export function decideActions(input) {
   }
 
   return { skip: false, actions };
+}
+
+/**
+ * Pure: surface a `request-daemon-restart` action when the snapshot
+ * justifies one — daemon running AND the pull touched runtime code
+ * (`bin/minsky`, `pnpm-lock.yaml`, or anything under `novel/**`).
+ * Returns `null` otherwise. Extracted from {@link decideActions} so
+ * the orchestrator stays under the cognitive-complexity cap.
+ *
+ * Trigger: daemon must be running (no daemon → no restart needed),
+ * AND the pull touched runtime code — `bin/minsky`, anything under
+ * `novel/**` (`.ts`/`.mjs`/`.js`), OR `pnpm-lock.yaml` (lockfile
+ * changes almost always mean dependency code shifted under the
+ * daemon). `bin/minsky` overlaps with the `regen-plist` trigger
+ * above — after the plist is rewritten, the daemon must restart to
+ * pick up the new launchd env. Without this restart, regen-plist
+ * alone leaves the running daemon with stale env vars.
+ *
+ * @param {DecideInput} input
+ * @returns {(Extract<Action, { kind: "request-daemon-restart" }>) | null}
+ */
+function maybeRequestDaemonRestart(input) {
+  if (!input.daemonRunning) return null;
+  const reason = detectRestartReason(input.changedFiles);
+  if (reason === null) return null;
+  return {
+    kind: "request-daemon-restart",
+    reason,
+    changedFiles: filterRestartRelevantFiles(input.changedFiles),
+  };
+}
+
+/**
+ * Pure: classify whether a changed-file list warrants a daemon restart,
+ * and if so, what one-line reason to surface in the sentinel + daemon
+ * log. Returns `null` when no restart is needed (doc-only / TASKS.md-
+ * only / unrelated changes). The reason string is operator-facing —
+ * keep it short and concrete (one line, no period).
+ * @param {readonly string[]} changedFiles
+ * @returns {string | null}
+ */
+function detectRestartReason(changedFiles) {
+  const changed = new Set(changedFiles);
+  if (changed.has("bin/minsky")) return "bin/minsky changed";
+  if (changed.has("pnpm-lock.yaml")) return "pnpm-lock.yaml changed";
+  const novelChange = changedFiles.find((/** @type {string} */ f) =>
+    /^novel\/.+\.(ts|mjs|js)$/.test(f),
+  );
+  if (novelChange !== undefined) return `novel/* changed (e.g. ${novelChange})`;
+  return null;
+}
+
+/**
+ * Pure: filter the changed-file list down to the subset that's actually
+ * relevant to the restart reason. Used as the `changedFiles` payload in
+ * the sentinel JSON so the daemon log can surface the operator-facing
+ * "why" without printing 40 doc-only paths.
+ * @param {readonly string[]} changedFiles
+ * @returns {string[]}
+ */
+function filterRestartRelevantFiles(changedFiles) {
+  return changedFiles.filter(
+    (f) => f === "bin/minsky" || f === "pnpm-lock.yaml" || /^novel\/.+\.(ts|mjs|js)$/.test(f),
+  );
 }
 
 // ---- I/O wrapper ------------------------------------------------------
@@ -224,6 +306,49 @@ function detectDaemonRunning() {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Path to the restart-requested sentinel the daemon's tick-loop polls
+ * between iterations. Lives under `~/.minsky/` (the same dir as
+ * `config.json`, `daemon.pid`, `daemon.log`) so the lifecycle is one
+ * directory: stop the daemon → remove `~/.minsky/` → restart fresh.
+ *
+ * Exported as a constant so the host-loop sentinel reader uses the
+ * exact same path (single source of truth — rule #1 / rule #10).
+ */
+export const RESTART_SENTINEL_PATH = join(homedir(), ".minsky", "restart-requested");
+
+/**
+ * Write the restart-requested sentinel file. Best-effort per rule #6 —
+ * if `~/.minsky/` is unwritable for any reason (sandbox, full disk,
+ * read-only FS), we WARN but never block the git operation. The
+ * sentinel's contents are operator-facing JSON: `ts` lets the daemon
+ * log show how long ago the request was filed, `reason` is the
+ * one-line "why", `changedFiles` is the relevant subset (filtered by
+ * `filterRestartRelevantFiles` — not the full git diff, which can be
+ * 40+ paths on a routine pull).
+ *
+ * @param {string} reason
+ * @param {readonly string[]} changedFiles
+ */
+function writeRestartSentinel(reason, changedFiles) {
+  try {
+    mkdirSync(dirname(RESTART_SENTINEL_PATH), { recursive: true });
+    const payload = JSON.stringify(
+      { ts: new Date().toISOString(), reason, changedFiles: [...changedFiles] },
+      null,
+      2,
+    );
+    writeFileSync(RESTART_SENTINEL_PATH, `${payload}\n`, "utf8");
+  } catch (err) {
+    // Best-effort: surface but never throw. The operator can still
+    // recover with `minsky update` (the manual escape hatch — rule #16
+    // documents that auto-restart's failure mode is "no worse than
+    // pre-fix behaviour").
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`  ⚠ failed to write restart sentinel at ${RESTART_SENTINEL_PATH}: ${message}`);
   }
 }
 
@@ -280,6 +405,10 @@ const ACTION_HANDLERS = {
     bestEffortExec("systemctl", ["--user", "daemon-reload"], {
       warnMsg: "  ⚠ systemctl daemon-reload failed — run it manually if needed.",
     });
+  },
+  "request-daemon-restart": (action) => {
+    console.info(`  → request daemon restart (${action.reason})…`);
+    writeRestartSentinel(action.reason, action.changedFiles);
   },
   "pre-pr-lint-fast": () => {
     console.info("  → pnpm pre-pr-lint --stage=fast (sanity check)…");

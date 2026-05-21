@@ -267,3 +267,165 @@ describe("decideActions — composite scenarios (the realistic case)", () => {
     expect(kinds).toEqual(["pnpm-install", "systemctl-reload", "pre-pr-lint-fast"]);
   });
 });
+
+// Tests for the `request-daemon-restart` action — the writer side of the
+// auto-restart-on-pull sentinel mechanism. The reader lives in
+// `novel/cross-repo-runner/src/host-loop.ts`; the integration test in
+// `test/integration/daemon-restart.test.ts` exercises both ends together.
+//
+// Source: TASKS.md `minsky-auto-restart-daemon-on-pull`. Hypothesis: a
+// pull that touches bin/minsky, pnpm-lock.yaml, or novel/**/*.{ts,mjs,js}
+// AND a running daemon causes a sentinel write; the daemon picks it up
+// between iterations and exits cleanly so launchd respawns. Pivot
+// threshold: if the sentinel races KeepAlive and produces respawn storms
+// (>1/5min), gate behind `MINSKY_AUTO_RESTART_ON_PULL=1`.
+describe("decideActions — request-daemon-restart trigger", () => {
+  test("bin/minsky changed + daemon running → emits request-daemon-restart with reason", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky"],
+      daemonRunning: true,
+      plistExists: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/bin\/minsky/);
+      expect(restart.changedFiles).toContain("bin/minsky");
+    }
+  });
+
+  test("pnpm-lock.yaml changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["pnpm-lock.yaml"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/pnpm-lock/);
+    }
+  });
+
+  test("novel/**/*.ts changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["novel/cross-repo-runner/src/runner.ts"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.reason).toMatch(/novel/);
+      expect(restart.changedFiles).toContain("novel/cross-repo-runner/src/runner.ts");
+    }
+  });
+
+  test("novel/**/*.mjs changed + daemon running → emits request-daemon-restart", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["novel/cross-repo-runner/bin/minsky-run.mjs"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeDefined();
+  });
+
+  test("daemon NOT running → no request-daemon-restart even when runtime code changed", () => {
+    // No daemon to restart — sentinel would just sit on disk until the
+    // next daemon start, at which point the post-restart daemon would
+    // immediately exit (respawn storm). Guard at the source.
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["bin/minsky", "pnpm-lock.yaml"],
+      daemonRunning: false,
+      platform: "darwin",
+    });
+    expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeUndefined();
+  });
+
+  test("doc-only changes (README.md) → no request-daemon-restart even with daemon running", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["README.md", "docs/intro.md"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeUndefined();
+  });
+
+  test("TASKS.md-only change → no request-daemon-restart (operator-driven, not runtime code)", () => {
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: ["TASKS.md"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    expect(result.actions.find((a) => a.kind === "request-daemon-restart")).toBeUndefined();
+  });
+
+  test("MINSKY_NO_AUTO_INSTALL=1 → no request-daemon-restart (override blocks ALL actions)", () => {
+    const result = decideActions({
+      ...baseInput,
+      env: { MINSKY_NO_AUTO_INSTALL: "1" },
+      changedFiles: ["bin/minsky"],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    expect(result.skip).toBe(true);
+    expect(result.actions).toEqual([]);
+  });
+
+  test("changedFiles in the action is filtered to restart-relevant subset", () => {
+    // The git pull touched 5 files but only 2 are restart-relevant; the
+    // sentinel JSON should carry only those 2 so the daemon log doesn't
+    // print 5 paths when only 2 caused the restart.
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: [
+        "README.md", // doc-only — filter out
+        "bin/minsky", // keep
+        "TASKS.md", // operator-driven — filter out
+        "novel/cross-repo-runner/src/runner.ts", // keep
+        "docs/architecture.md", // doc-only — filter out
+      ],
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
+    expect(restart).toBeDefined();
+    if (restart !== undefined && restart.kind === "request-daemon-restart") {
+      expect(restart.changedFiles).toEqual(["bin/minsky", "novel/cross-repo-runner/src/runner.ts"]);
+    }
+  });
+
+  test("composite pull on macOS with daemon running → pnpm-install + regen-plist + request-restart + lint-fast", () => {
+    // The realistic shape of a PR that lands the auto-restart mechanism
+    // itself: lockfile + bin/minsky + a few novel/*.ts files + a test.
+    // The action list MUST include the new request-daemon-restart between
+    // regen-plist (which rewrites the launchd env) and pre-pr-lint-fast.
+    const result = decideActions({
+      ...baseInput,
+      changedFiles: [
+        "bin/minsky",
+        "pnpm-lock.yaml",
+        "novel/cross-repo-runner/src/host-loop.ts",
+        "scripts/post-merge-auto-install.mjs",
+      ],
+      plistExists: true,
+      daemonRunning: true,
+      platform: "darwin",
+    });
+    const kinds = result.actions.map((a) => a.kind);
+    expect(kinds).toEqual([
+      "pnpm-install",
+      "regen-plist",
+      "request-daemon-restart",
+      "pre-pr-lint-fast",
+    ]);
+  });
+});

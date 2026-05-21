@@ -38,13 +38,27 @@ import type { ParsedTask } from "./task-finder.js";
  *                        on a probably-systemic-failure (e.g. `claude`
  *                        binary missing, auth expired). Operator can
  *                        re-run after fixing.
+ *   - `restart-requested` — `~/.minsky/restart-requested` sentinel was
+ *                        present between iterations. The
+ *                        `post-merge-auto-install` hook writes the
+ *                        sentinel after a `git pull` lands runtime
+ *                        code; the loop exits cleanly (code 0) so
+ *                        launchd's `KeepAlive=true` (or systemd
+ *                        `Restart=always`) respawns the daemon with
+ *                        the new code. No in-flight iteration is
+ *                        interrupted — Armstrong 2007 let-it-crash
+ *                        AT the iteration boundary, not mid-spawn.
+ *                        Source: TASKS.md `minsky-auto-restart-daemon-
+ *                        on-pull` (rule #16 — `minsky update` becomes
+ *                        the rare escape hatch, not the daily flow).
  */
 export type LoopStopReason =
   | "max-iterations"
   | "empty-queue"
   | "aborted"
   | "scope-leak"
-  | "spawn-failed";
+  | "spawn-failed"
+  | "restart-requested";
 
 /**
  * One iteration's contribution to the loop result. Mirrors the daemon's
@@ -227,6 +241,56 @@ export interface RunHostLoopOpts {
     readonly prUrl: string | null;
     readonly filesChanged: readonly string[];
   }) => HostCtoSignals;
+  /**
+   * Optional restart-sentinel probe. Called once between iterations
+   * (after the just-completed iteration's `recordIteration` callback
+   * and BEFORE the next `pickTask`). When it returns a non-null
+   * `RestartRequest`, the loop emits a daemon-log line, invokes
+   * {@link RunHostLoopOpts.clearRestartRequest} (if wired), and exits
+   * with stop reason `restart-requested`. The CLI maps this to
+   * `process.exit(0)`; launchd's `KeepAlive=true` (or systemd
+   * `Restart=always`) then respawns the daemon with the new code.
+   *
+   * Production wires this to a `~/.minsky/restart-requested` JSON
+   * sentinel reader; tests inject a counter fake. The seam is the
+   * function — its body must be pure-data over the filesystem.
+   *
+   * Source: TASKS.md `minsky-auto-restart-daemon-on-pull`. Composes
+   * with `scripts/post-merge-auto-install.mjs`'s `request-daemon-
+   * restart` action (the writer).
+   */
+  readonly checkRestartRequest?: () => RestartRequest | null;
+  /**
+   * Companion to {@link RunHostLoopOpts.checkRestartRequest}. Called
+   * ONCE after the probe surfaces a non-null `RestartRequest` and
+   * before the loop returns. Production removes the sentinel file so
+   * the post-restart daemon doesn't see a stale request and bounce-
+   * loop. Tests can observe the call to assert the clean-up step
+   * fired exactly once.
+   */
+  readonly clearRestartRequest?: () => void;
+  /**
+   * Optional reporter for the operator-facing "restart-requested"
+   * daemon-log line. Wired in production to `console.info`; tests
+   * inject a collector. Single-string argument keeps the seam testable
+   * without coupling to formatting choices made by the CLI.
+   */
+  readonly onRestartRequested?: (message: string) => void;
+}
+
+/**
+ * Operator-facing payload returned by
+ * {@link RunHostLoopOpts.checkRestartRequest} when a restart has been
+ * requested. The fields mirror the JSON the
+ * `post-merge-auto-install` hook writes into the sentinel file —
+ * `ts` lets the daemon log show how long ago the request was filed,
+ * `reason` is the one-line "why" (e.g. `bin/minsky changed`),
+ * `changedFiles` is the relevant subset of the pull's diff.
+ */
+export interface RestartRequest {
+  readonly ts: string;
+  readonly reason: string;
+  readonly changedFiles: readonly string[];
 }
 
 /**
@@ -263,20 +327,98 @@ export async function runHostLoop(opts: RunHostLoopOpts): Promise<LoopResult> {
   const validatedTaskIds = new Set<string>();
 
   for (let i = 0; i < maxIterations; i++) {
-    const earlyStop = checkAbort(opts.signal);
-    if (earlyStop !== undefined) return { iterations, stopReason: earlyStop };
-    const stop = await runOneIteration({ opts, iteration: i, iterations, validatedTaskIds });
-    if (stop !== undefined) return { iterations, stopReason: stop };
-    const sleepStop = await sleepBetween({
+    const stop = await stepIteration({
+      opts,
       iteration: i,
+      iterations,
+      validatedTaskIds,
       maxIterations,
       tickIntervalMs,
       sleep,
-      signal: opts.signal,
     });
-    if (sleepStop !== undefined) return { iterations, stopReason: sleepStop };
+    if (stop !== undefined) return { iterations, stopReason: stop };
   }
   return { iterations, stopReason: "max-iterations" };
+}
+
+/**
+ * One full iteration step: pre-iteration checks (abort signal,
+ * restart-sentinel) → iteration body → inter-iteration sleep. Returns
+ * the stop reason when any step halts the loop, otherwise `undefined`
+ * (the outer loop advances). Extracted from {@link runHostLoop} so the
+ * orchestrator stays under the cognitive-complexity cap (rule #6,
+ * biome ≤ 10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+async function stepIteration(args: {
+  readonly opts: RunHostLoopOpts;
+  readonly iteration: number;
+  readonly iterations: LoopIterationResult[];
+  readonly validatedTaskIds: Set<string>;
+  readonly maxIterations: number;
+  readonly tickIntervalMs: number;
+  readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+}): Promise<LoopStopReason | undefined> {
+  const { opts, iteration, iterations, validatedTaskIds, maxIterations, tickIntervalMs, sleep } =
+    args;
+  const earlyStop = checkAbort(opts.signal);
+  if (earlyStop !== undefined) return earlyStop;
+  // Restart-sentinel check fires BEFORE pickTask on every iteration
+  // (including iteration #0 — a sentinel left over from before the
+  // daemon started must NOT be ignored). When the probe surfaces a
+  // request, the loop exits cleanly with `restart-requested` and
+  // launchd's KeepAlive respawns the daemon. The post-iteration
+  // boundary is the "right" boundary for let-it-crash (Armstrong
+  // 2007) — never kill an in-flight spawn.
+  const restartStop = checkRestartSentinel(opts);
+  if (restartStop !== undefined) return restartStop;
+  const stop = await runOneIteration({ opts, iteration, iterations, validatedTaskIds });
+  if (stop !== undefined) return stop;
+  return sleepBetween({
+    iteration,
+    maxIterations,
+    tickIntervalMs,
+    sleep,
+    signal: opts.signal,
+  });
+}
+
+/**
+ * Probe the restart-sentinel seam. Returns `"restart-requested"` when
+ * the probe surfaces a non-null `RestartRequest`; otherwise `undefined`.
+ * On a hit: emits the operator-facing log line via
+ * {@link RunHostLoopOpts.onRestartRequested} (default console.info)
+ * and clears the sentinel via {@link RunHostLoopOpts.clearRestartRequest}
+ * so the post-restart daemon doesn't see the same request twice (which
+ * would cause a respawn storm — see the task's Pivot threshold).
+ *
+ * Extracted from {@link runHostLoop} so the orchestrator stays under
+ * the cognitive-complexity cap (rule #6, biome ≤ 10).
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function checkRestartSentinel(opts: RunHostLoopOpts): LoopStopReason | undefined {
+  if (opts.checkRestartRequest === undefined) return undefined;
+  const request = opts.checkRestartRequest();
+  if (request === null) return undefined;
+  const message = `restart-requested: ${request.reason} (filed ${request.ts})`;
+  (opts.onRestartRequested ?? defaultReportRestart)(message);
+  opts.clearRestartRequest?.();
+  return "restart-requested";
+}
+
+/**
+ * Default `onRestartRequested` reporter — writes a single line to
+ * stdout via `console.info`. The CLI inherits this default; tests
+ * override with a collector. Kept as a module-level constant so the
+ * runtime branch in {@link checkRestartSentinel} doesn't allocate a
+ * closure on every iteration.
+ *
+ * (Internal helper — no JSDoc tag required.)
+ */
+function defaultReportRestart(message: string): void {
+  console.info(message);
 }
 
 /**

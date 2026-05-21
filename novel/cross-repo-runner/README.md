@@ -16,13 +16,14 @@ Allowed paths default to the task block's `**Touches**:` field (fallback to `**F
 
 ## `--loop` (continuous host-mode iteration)
 
-`minsky-run --host <dir> --loop [--live]` keeps invoking `runLive` against the host's TASKS.md until one of five stop conditions fires (in priority order):
+`minsky-run --host <dir> --loop [--live]` keeps invoking `runLive` against the host's TASKS.md until one of six stop conditions fires (in priority order):
 
 1. **`aborted`** — SIGTERM / SIGINT (operator's `kill <pid>` or Ctrl-C). In-flight iteration finishes; loop exits.
 2. **`max-iterations`** — `--max-iterations=N` cap reached. Healthy stop.
 3. **`empty-queue`** — `pickHostTask` returns null (no rule-#9-compliant `P0`/`P1` task left). Healthy stop.
 4. **`scope-leak`** — first iteration whose verdict is `scope-leak` halts the loop so the operator can inspect before another spawn fires (rule #7 `circuit-break-and-notify`).
 5. **`spawn-failed`** — first non-zero spawn exit halts the loop so the operator can fix the systemic issue (auth, `claude` binary, network) before burning more budget.
+6. **`restart-requested`** — `~/.minsky/restart-requested` sentinel was found between iterations. The just-completed iteration's `recordIteration` callback fires first; then the loop reads the sentinel, logs the operator-facing reason, clears the sentinel, and exits cleanly with code 0. launchd's `KeepAlive=true` (or systemd `Restart=always`) respawns the daemon with the new code. The sentinel is written by `scripts/post-merge-auto-install.mjs`'s `request-daemon-restart` action when a `git pull` lands runtime code (`bin/minsky`, `pnpm-lock.yaml`, or anything under `novel/**/*.{ts,mjs,js}`) AND the daemon is running. This makes `minsky update` redundant for the common case — an operator who `git pull`s and walks away returns to a daemon running latest code within one iteration-cycle (rule #16 — default by default; the burden of proof is on the opt-in side, so `minsky update` is the rare manual escape hatch, not the daily flow). No in-flight iteration is killed; the sentinel-check fires AT the iteration boundary, not mid-spawn (Armstrong 2007 — let-it-crash AT the right boundary). Source: TASKS.md `minsky-auto-restart-daemon-on-pull`.
 
 Flags:
 
