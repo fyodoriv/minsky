@@ -1,7 +1,7 @@
 # Plan: `agents-can-self-heal-minsky-m1-13`
 
 - **Task**: `agents-can-self-heal-minsky-m1-13` (TASKS.md line 96 — P0, milestone M1.13)
-- **Repo**: `~/apps/tooling/minsky`
+- **Repo**: `<minsky-repo>`
 - **Author**: claude-opus-4-7-max session 2026-05-20
 - **Status**: validated (post-revision) — round 1 caught 4 blocking issues; round 2 pending
 - **Validated-by**: reviewer-subagent 2026-05-20 (round 1: needs-revision; round 2 verdict appended below)
