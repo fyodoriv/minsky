@@ -1435,6 +1435,14 @@ export function defaultInvariants() {
  * itself; the pivot is "if the same finding fires for >7 consecutive
  * days, the invariant is wrong, not the system".
  *
+ * The `**Tags**:` line MUST lead with `p0`: `scripts/drain-concerns.mjs`
+ * routes a pending block to its `## PX` section by matching
+ * `/\b(p[0-3])\b/i` against the Tags line (`parsePriority`). Without a
+ * recognized priority tag the drainer moves the block to `invalid/` and
+ * the finding is never filed — so a self-diagnosed throughput issue
+ * would be detected but silently dropped instead of becoming a
+ * daemon-pickable P0 task. The paired test pins this contract.
+ *
  * @param {readonly InvariantViolation[]} findings
  * @param {string} nowIso
  * @returns {string}
@@ -1446,7 +1454,7 @@ export function findingsToTasksMd(findings, nowIso) {
     return [
       `- [ ] \`${id}\` — ${f.suggestedTaskTitle}`,
       `  - **ID**: ${id}`,
-      `  - **Tags**: self-detected, ${f.id}`,
+      `  - **Tags**: p0, self-detected, ${f.id}`,
       "  - **Estimate**: 1d",
       `  - **Hypothesis**: ${f.suggestedFix}`,
       `  - **Evidence**: ${f.evidence}`,

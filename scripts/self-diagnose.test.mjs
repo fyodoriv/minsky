@@ -1057,7 +1057,39 @@ describe("findingsToTasksMd", () => {
     expect(block).toContain("**Hypothesis**:");
     expect(block).toContain("**Measurement**:");
     expect(block).toContain("**Pivot**:");
-    expect(block).toContain("**Tags**: self-detected, token-monitor-not-all-pegged");
+    expect(block).toContain("**Tags**: p0, self-detected, token-monitor-not-all-pegged");
+  });
+
+  // Regression pin for `daemon-self-detect-throughput-issues`: the rendered
+  // `**Tags**:` line MUST carry a `p0` priority tag matching the exact
+  // contract `scripts/drain-concerns.mjs` uses to route a pending block to
+  // its `## PX` section (`PRIORITY_TAG = /\b(p[0-3])\b/i` applied to the
+  // Tags line). Before this pin the line read `self-detected, <id>` with no
+  // priority tag, so the drainer matched nothing, moved every finding to
+  // `invalid/`, and the daemon could detect a throughput issue but never
+  // file it as a pickable P0 task. Encoding the contract as a test (not
+  // just a comment) is the "every bug becomes a rule" guardrail — if a
+  // future edit drops the tag, this fails loudly instead of silently
+  // re-breaking autonomous filing.
+  it("emits a p0 priority tag the drain-concerns pipeline routes to ## P0", () => {
+    const drainPriorityTag = /\b(p[0-3])\b/i;
+    const block = findingsToTasksMd(
+      [
+        {
+          id: "daemon-noop-iteration-rate-too-high",
+          ok: false,
+          evidence: "5 consecutive noop iterations on `foo`",
+          suggestedTaskTitle: "daemon stuck in noop loop",
+          suggestedFix: "investigate the spawn path",
+        },
+      ],
+      "2026-05-17T00:00:00.000Z",
+    );
+    const tagsLine = block.split("\n").find((l) => l.match(/^\s*-\s+\*\*Tags\*\*:/));
+    expect(tagsLine).toBeDefined();
+    const m = String(tagsLine).match(drainPriorityTag);
+    expect(m).not.toBeNull();
+    expect(String(m?.[1]).toLowerCase()).toBe("p0");
   });
 });
 
