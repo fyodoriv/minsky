@@ -16,14 +16,23 @@
 // (rule #6 — let dry-run be the safe default; failure surfaces in the
 // plan, not the side-effect).
 
-import { execFile as execFileCb } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execFile as execFileCb, execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { ProcessSpawnStrategy, globMatchesPath } from "@minsky/tick-loop";
 
+import { computeDynamicSettings, parseTimingsFromJsonl } from "../dist/dynamic-timeouts.js";
 import {
   buildSpawnPlan,
   detectCwd,
@@ -34,6 +43,7 @@ import {
   loadRepoConfig,
   pickHostTask,
   renderIterationRecord,
+  resolveGhHost,
   runHostCtoAudit,
   runHostLoop,
   runLive,
@@ -46,6 +56,44 @@ const execFile = promisify(execFileCb);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MINSKY_REPO_ROOT = resolve(HERE, "..", "..", "..");
 const VISION_MD_PATH = resolve(MINSKY_REPO_ROOT, "vision.md");
+
+// Cache one gh-env per hostRoot per process — git remote get-url is cheap
+// but called multiple times per iteration (open-PR scan, PR backstop,
+// task-completion checks). Per rule #17, the resolver IS the proactive
+// fix for the github.intuit.com / github.com 401 cascade.
+/** @type {Map<string, NodeJS.ProcessEnv>} */
+const GH_ENV_CACHE = new Map();
+
+/**
+ * Resolve the `GH_HOST` for `hostRoot` and return a cloned `process.env`
+ * with it set. Always returns an env — falls back to `process.env` as-is
+ * when no host can be resolved (graceful-degrade per rule #7).
+ *
+ * @param {string} hostRoot  absolute path to the host repo
+ * @returns {NodeJS.ProcessEnv}
+ */
+function ghEnvForHost(hostRoot) {
+  const cached = GH_ENV_CACHE.get(hostRoot);
+  if (cached !== undefined) return cached;
+  let remoteUrl;
+  try {
+    remoteUrl = execFileSync("git", ["-C", hostRoot, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    remoteUrl = undefined;
+  }
+  const resolved = resolveGhHost({
+    envGhHost: process.env.GH_HOST,
+    gitRemoteUrl: remoteUrl,
+  });
+  const env = { ...process.env };
+  if (resolved.host !== null) env.GH_HOST = resolved.host;
+  else env.GH_HOST = undefined;
+  GH_ENV_CACHE.set(hostRoot, env);
+  return env;
+}
 
 function usage() {
   process.stderr.write(
@@ -71,8 +119,9 @@ function usage() {
       "  --no-seed-on-empty                Stop on empty-queue instead of seeding via CTO audit.",
       "",
       "Other flags:",
-      "  --max-iterations=N        Cap loop iterations. Default Infinity.",
-      "  --tick-interval-ms=M      Sleep between iterations. Default 300000 (5 min).",
+      "  --max-iterations=N             Cap total loop iterations across all hosts. Default Infinity.",
+      "  --max-iterations-per-host=N    Cap iterations per host per walk pass (walk mode only). Default 3.",
+      "  --tick-interval-ms=M           Sleep between iterations. Default 300000 (5 min).",
       "",
       "The host(s) must have been bootstrapped first via `minsky-bootstrap <host-dir>`.",
       "",
@@ -143,9 +192,20 @@ function applyTickIntervalMs(state, raw) {
   return true;
 }
 
+function applyMaxIterationsPerHost(state, raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    state.error = `--max-iterations-per-host must be a positive integer, got: ${raw}`;
+    return false;
+  }
+  state.maxIterationsPerHost = parsed;
+  return true;
+}
+
 const KEY_VALUE_FLAGS = {
   "--max-iterations=": applyMaxIterations,
   "--tick-interval-ms=": applyTickIntervalMs,
+  "--max-iterations-per-host=": applyMaxIterationsPerHost,
 };
 
 function tryKeyValueFlag(state, arg) {
@@ -201,6 +261,13 @@ function parseArgs(argv) {
     seedOnEmptyExplicit: false,
     maxIterations: Number.POSITIVE_INFINITY,
     tickIntervalMs: 300_000,
+    // Per-host iteration cap for multi-host walk mode. Default 3 — after
+    // a host has run N iterations, the walker advances regardless of
+    // whether that host's queue is empty. This is the *bounded drain*
+    // half of the `walker-drains-one-host-forever` fix (the other half
+    // is the validated-task rotation inside `runHostLoop`). Single-host
+    // (--host) mode ignores this flag — `--max-iterations` caps it instead.
+    maxIterationsPerHost: 3,
     positional: [],
     error: null,
   };
@@ -263,6 +330,7 @@ function buildWalkDispatch(state, resolvedHostsDir) {
     ...defaults,
     maxIterations: state.maxIterations,
     tickIntervalMs: state.tickIntervalMs,
+    maxIterationsPerHost: state.maxIterationsPerHost,
   };
 }
 
@@ -296,11 +364,22 @@ function buildHostDispatch(state, resolvedHost) {
     };
   }
   const defaults = applyAutonomousDefaults(state);
+  // `--once` semantically means "run exactly one iteration then exit".
+  // Without this bridge, `--once` only flips the `loop` flag (currently
+  // unused inside the loop runner) and the dispatch falls into the
+  // default `tickIntervalMs` sleep (300_000ms) after iteration #0,
+  // making the test see a 60s timeout. Rule #17 fix: an operator-
+  // facing flag whose meaning the runner ignores is a class of bug
+  // we should never ship again. Force `maxIterations=1` when `--once`
+  // is set so the loop exits via `max-iterations` stop reason. The
+  // explicit `--max-iterations=N` flag still wins.
+  const maxIterations =
+    !defaults.loop && state.maxIterations === Number.POSITIVE_INFINITY ? 1 : state.maxIterations;
   return {
     kind: "loop",
     host: resolve(resolvedHost),
     ...defaults,
-    maxIterations: state.maxIterations,
+    maxIterations,
     tickIntervalMs: state.tickIntervalMs,
   };
 }
@@ -386,12 +465,137 @@ function writeExperimentYaml(planPath, yaml) {
   process.stdout.write(`✓ wrote ${planPath}\n`);
 }
 
+// Fetch the set of head-ref names with open PRs on a host repo. Used by
+// the host-daemon loop to skip tasks whose canonical branch already has
+// an open PR — avoids the re-pick loop after a salvage-merge while the
+// operator's TASKS.md cleanup is still in flight. Falls back to an empty
+// set if `gh` is unavailable or the host_repo is unreachable (graceful-
+// degrade per rule #7 — the worst case is the prior behaviour: re-pick
+// the same task, not a hard failure).
+//
+// `hostRoot` is required: it lets `ghEnvForHost` resolve `GH_HOST` from
+// the host's `git remote get-url origin` (rule #17 — fixes the
+// github.intuit.com / github.com 401 cascade).
+function listOpenPrBranches(hostRepo, hostRoot) {
+  try {
+    const out = execFileSync(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--repo",
+        hostRepo,
+        "--state",
+        "open",
+        "--json",
+        "headRefName",
+        "--limit",
+        "100",
+      ],
+      { encoding: "utf8", env: ghEnvForHost(hostRoot) },
+    );
+    const prs = JSON.parse(out);
+    return new Set(prs.map((pr) => pr.headRefName).filter((name) => typeof name === "string"));
+  } catch {
+    // `gh` not on PATH, repo unreachable, malformed JSON — degrade to
+    // an empty set so the loop continues with the legacy behaviour.
+    return new Set();
+  }
+}
+
 function writeIterationRecord(hostRoot, record) {
   const storeDir = resolve(hostRoot, ".minsky", "experiment-store", "cross-repo");
   mkdirSync(storeDir, { recursive: true });
   const filePath = resolve(storeDir, `${record.experiment_id}.jsonl`);
   writeFileSync(filePath, renderIterationRecord(record), { flag: "a" });
   process.stdout.write(`✓ appended iteration record to ${filePath}\n`);
+}
+
+/**
+ * Build the `GhLike` probe over `child_process.execFile("gh", …)`. Used by
+ * `runLive`'s post-spawn PR-creation backstop (devin-spawn-no-pr-opened
+ * pivot, 2026-05-18). Both methods are best-effort: every failure path
+ * (gh-not-on-PATH, auth-expired, branch-not-pushed, network, malformed
+ * JSON) returns `null` so the runner falls back to the legacy behaviour
+ * (`validated` + `pr_url: null`) without crashing the iteration. Per
+ * rule #7 graceful-degrade — the backstop is the safety net, not the
+ * primary path.
+ *
+ * @otel-exempt thin gh-CLI wrapper.
+ */
+function makeGhProbe(hostRoot) {
+  // Per rule #17: `ghEnvForHost` reads the hostRoot's `git remote get-url
+  // origin` and sets `GH_HOST` to the matching hostname. This is the
+  // proactive fix for the github.intuit.com / github.com 401 cascade —
+  // never assume one corporate host. Operator-set `GH_HOST` wins.
+  const ghEnv = ghEnvForHost(hostRoot);
+  return {
+    async findOpenPr({ hostRepo, branch }) {
+      try {
+        const { stdout } = await execFile(
+          "gh",
+          [
+            "pr",
+            "list",
+            "--repo",
+            hostRepo,
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "url",
+            "--limit",
+            "1",
+          ],
+          { env: ghEnv, cwd: hostRoot },
+        );
+        const prs = JSON.parse(stdout);
+        if (!Array.isArray(prs) || prs.length === 0) return null;
+        const url = prs[0]?.url;
+        return typeof url === "string" && url.length > 0 ? url : null;
+      } catch {
+        return null;
+      }
+    },
+    async createPr({ hostRepo, branch, base, title, body, workingDir }) {
+      try {
+        const { stdout } = await execFile(
+          "gh",
+          [
+            "pr",
+            "create",
+            "--repo",
+            hostRepo,
+            "--head",
+            branch,
+            "--base",
+            base,
+            "--title",
+            title,
+            "--body",
+            body,
+          ],
+          { env: ghEnv, cwd: workingDir },
+        );
+        const url = extractPrUrl(stdout);
+        return url;
+      } catch (err) {
+        // gh pr create can fail for many reasons — the most common is
+        // "branch not pushed" or "PR already exists for branch". When
+        // we see "already exists", parse the URL from stderr; otherwise
+        // surface a short diagnostic so the iteration's notes field
+        // captures the failure mode (operator-actionable).
+        const stderr = err?.stderr ?? "";
+        const fallback = extractPrUrl(stderr);
+        if (fallback !== null) return fallback;
+        process.stdout.write(
+          `[pr-backstop] gh pr create failed for ${hostRepo}#${branch}: ${String(stderr).slice(0, 200)}\n`,
+        );
+        return null;
+      }
+    },
+  };
 }
 
 function reportTaskNotFound(taskResult) {
@@ -440,13 +644,13 @@ function emitDryRunReport(plan, hostRoot, hostRepo) {
  * detector short-circuits to `validated` regardless of diff (graceful-
  * degrade per rule #7).
  *
- * Watchdog: 15 min default (mirrors the daemon's `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`),
+ * Watchdog: 30 min default (raised from 15 min 2026-05-18 — devin iterations with
  * operator-overridable via `MINSKY_LIVE_SPAWN_TIMEOUT_MS`.
  */
-async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
+async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock, defaultBranch) {
   process.stdout.write("\n=== runner plan (live spawn) ===\n");
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-  process.stdout.write(`\nSpawning \`claude --print\` in ${hostRoot}...\n`);
+  process.stdout.write(`\nSpawning \`${readSpawnCommand()} --print\` in ${hostRoot}...\n`);
   const allowedPaths = extractAllowedPathsFromTaskBlock(rawTaskBlock);
   if (allowedPaths.length === 0) {
     process.stdout.write(
@@ -455,31 +659,25 @@ async function emitLiveSpawn(plan, hostRoot, hostRepo, rawTaskBlock) {
   } else {
     process.stdout.write(`ℹ scope: ${allowedPaths.join(", ")}\n`);
   }
-  const timeoutMs = (() => {
-    const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
-    if (raw === undefined) return 15 * 60 * 1000;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
-  })();
-  const claudeArgs = readClaudeSpawnArgs();
+  const timeoutMs = readLiveSpawnTimeoutMs(hostRoot);
+  const agentCfg = buildAgentConfig(hostRoot);
   const strategy = new ProcessSpawnStrategy({
-    command: "claude",
-    args: claudeArgs,
+    command: agentCfg.command,
+    args: agentCfg.args,
     timeoutMs,
-    invocation: (input) => ({
-      command: "claude",
-      argv: claudeArgs,
-      stdin: input.brief,
-      cwd: hostRoot,
-    }),
+    invocation: agentCfg.invocation,
   });
   const git = makeGitProbe(hostRoot);
+  const gh = makeGhProbe(hostRoot);
   const outcome = await runLive({
     plan,
     allowedPaths,
     spawn: strategy,
     git,
     globMatchesPath,
+    gh,
+    hostRepo,
+    defaultBranch,
   });
   emitLiveOutcome(outcome);
   writeIterationRecord(hostRoot, {
@@ -597,7 +795,7 @@ async function runPlanned(taskId, hostRoot, live) {
     reportTaskNotFound(taskResult);
     process.exit(1);
   }
-  const synth = synthesiseExperimentYaml(taskResult.task);
+  const synth = synthesiseExperimentYaml(taskResult.task, { hostRepo: config.host_repo });
   if (!synth.ok) {
     reportRule9Violation(taskResult.task.id, synth.missingFields);
     process.exit(1);
@@ -666,19 +864,22 @@ async function runLoopAsResult(parsed, controller) {
       `seed-on-empty=${seedOnEmpty ? "on" : "off"}) ===\n`,
   );
 
+  // Per rule #4 (everything measurable, visible): always emit the
+  // dynamic-timeouts probe when this host has iteration history, even
+  // in dry-run mode. Operators (and integration tests) rely on seeing
+  // this line to know the timeout values the loop computed. Previously
+  // gated by `if (live)`, which made the probe invisible exactly when
+  // dry-run operators most needed to verify the computation.
+  computeDynamicSettingsForHost(hostRoot);
+
   let strategy = null;
   if (live) {
-    const claudeArgs = readClaudeSpawnArgs();
+    const loopAgentCfg = buildAgentConfig(hostRoot);
     strategy = new ProcessSpawnStrategy({
-      command: "claude",
-      args: claudeArgs,
-      timeoutMs: readLiveSpawnTimeoutMs(),
-      invocation: (input) => ({
-        command: "claude",
-        argv: claudeArgs,
-        stdin: input.brief,
-        cwd: hostRoot,
-      }),
+      command: loopAgentCfg.command,
+      args: loopAgentCfg.args,
+      timeoutMs: readLiveSpawnTimeoutMs(hostRoot),
+      invocation: loopAgentCfg.invocation,
     });
   }
   const dryRunStrategy = {
@@ -695,11 +896,37 @@ async function runLoopAsResult(parsed, controller) {
 
   let lastTasksMd = "";
   const result = await runHostLoop({
-    pickTask: () => {
+    pickTask: (pickOpts) => {
       lastTasksMd = loadHostTasks(hostRoot, config.tasks_md_path);
-      const task = pickHostTask(lastTasksMd);
+      // Self-healing: skip tasks that already have an open PR on the
+      // canonical branch (<branch_prefix><task.id>). Without this, after
+      // a task's PR lands the loop re-picks the same task on every
+      // iteration until the operator deletes it from TASKS.md. Discovered
+      // 2026-05-16 on oncall-hub-plugin — bulletproof-ux-dashboard was
+      // re-picked 3 times after PR #296 opened, wasting 30+ minutes
+      // until manual TASKS.md cleanup in PR #297. Source: plugin task
+      // `minsky-claim-by-open-pr`.
+      //
+      // Dry-run mode skips the gh probe: no live spawn means no new PR
+      // to collide with, and the network call adds 10–30s latency + a
+      // ~2.5% flake rate per CI run (rule #11 — no flaky load-bearing
+      // gates). Rule #17 fix: tests and bootstrap probes that exercise
+      // `--no-live` should not hit the GitHub API at all.
+      const openPrBranches = live ? listOpenPrBranches(config.host_repo, hostRoot) : new Set();
+      // Thread the loop's validated-task set into pickHostTask so a
+      // worker that validates but does NOT open a PR (devin pre-fix,
+      // a brief that doesn't instruct `gh pr create`, or a CI failure
+      // that prevented the PR step) does not get the same task picked
+      // again on the next iteration. `walker-drains-one-host-forever`
+      // fix (b) — the in-loop counterpart to the per-host iteration
+      // cap in `runWalk`.
+      const task = pickHostTask(lastTasksMd, {
+        openPrBranches,
+        branchPrefix: config.branch_prefix,
+        skipTaskIds: pickOpts?.skipTaskIds,
+      });
       if (task === null) return null;
-      const synth = synthesiseExperimentYaml(task);
+      const synth = synthesiseExperimentYaml(task, { hostRepo: config.host_repo });
       if (!synth.ok) {
         reportRule9Violation(task.id, synth.missingFields);
         return null;
@@ -713,7 +940,7 @@ async function runLoopAsResult(parsed, controller) {
         task,
         visionMdPath: VISION_MD_PATH,
       });
-      const synth = synthesiseExperimentYaml(task);
+      const synth = synthesiseExperimentYaml(task, { hostRepo: config.host_repo });
       if (synth.ok) writeExperimentYaml(plan.experimentYamlPath, synth.yaml);
       return plan;
     },
@@ -727,21 +954,75 @@ async function runLoopAsResult(parsed, controller) {
     globMatchesPath,
     maxIterations,
     tickIntervalMs,
+    // Scope-leak soft mode (default): devin naturally touches related
+    // files outside **Files**: — warn + continue instead of halting.
+    // Override: MINSKY_SCOPE_LEAK_MODE=hard for strict enforcement.
+    scopeLeakMode: process.env.MINSKY_SCOPE_LEAK_MODE === "hard" ? "hard" : "warn",
     signal: controller.signal,
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: core iteration recorder; multiple verdict branches + observability emit. Refactor tracked in TASKS.md `minsky-run-record-iteration-extract-verdict-mapper`.
     recordIteration: (record) => {
+      const verdict =
+        record.verdict === "validated"
+          ? "validated"
+          : record.verdict === "scope-leak"
+            ? "scope-leak"
+            : "spawn-failed";
+      const durSec = Math.round(record.durationMs / 1000);
+      const pr = record.prUrl || "—";
+      const agent = readSpawnCommand();
+      // Per-iteration summary line for daemon.log glanceability
+      // (daemon-log-lacks-iteration-detail P1, 2026-05-18)
+      process.stdout.write(
+        `⏱ iteration #${record.iteration}: task=${record.taskId} agent=${agent} verdict=${verdict} duration=${durSec}s pr=${pr}\n`,
+      );
+      // Smart scope-leak: log the out-of-scope files as a follow-up
+      // suggestion, not a failure. "Should these be in a separate PR?"
+      if (record.scopeLeakPaths && record.scopeLeakPaths.length > 0) {
+        process.stdout.write(
+          `  📋 out-of-scope files (consider separate PR): ${record.scopeLeakPaths.join(", ")}\n`,
+        );
+      }
+      // Rule #17 (proactive healing) — surface the WHY of a spawn-failed
+      // so the operator can act. Previously the runner captured the
+      // agent's stderr but the loop threw it away before this log line
+      // was written, leaving operators with `verdict=spawn-failed` and
+      // zero diagnostic. Now: print exit code + signal + stderr tail
+      // (last 1 KB) inline. `signal=` was added 2026-05-19 for the
+      // `spawn-failed-exit-minus-one-silent-empty-stderr` P0 — the
+      // entire diagnostic class where exit=-1 collapsed "exited with
+      // no code" and "killed by signal" into one bucket.
+      if (record.verdict === "spawn-failed") {
+        const signalSuffix = record.signal ? ` signal=${record.signal}` : "";
+        process.stdout.write(`  exit=${record.exitCode}${signalSuffix}\n`);
+        if (record.stderrTail.length > 0) {
+          const tail = record.stderrTail.slice(-1024);
+          process.stdout.write(`  stderr tail (last ${tail.length} bytes):\n`);
+          for (const line of tail.split("\n")) {
+            process.stdout.write(`    ${line}\n`);
+          }
+        } else {
+          process.stdout.write("  stderr tail: (empty — agent exited silently)\n");
+        }
+      }
+      // Compose the iteration-record `notes` field. For spawn-failed
+      // iterations we append `exit=N signal=SIG` so operators reading
+      // `experiment-store/cross-repo/<id>.jsonl` later (or aggregating
+      // across machines) can see the signal without re-scrolling the
+      // daemon log. Validated iterations keep the original minimal
+      // shape to avoid breaking downstream JSONL grep patterns.
+      const baseNotes = `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`;
+      const diagSuffix =
+        record.verdict === "spawn-failed"
+          ? `; exit=${record.exitCode}${record.signal ? ` signal=${record.signal}` : ""}`
+          : "";
       writeIterationRecord(hostRoot, {
         ts: new Date().toISOString(),
         experiment_id: record.taskId,
         host_repo: config.host_repo,
         branch: `${config.branch_prefix}${record.taskId}`,
-        verdict:
-          record.verdict === "validated"
-            ? "validated"
-            : record.verdict === "scope-leak"
-              ? "scope-leak"
-              : "spawn-failed",
+        verdict,
         pr_url: record.prUrl,
-        notes: `loop iteration=${record.iteration}; ${record.durationMs}ms; ${live ? "live" : "dry-run"}`,
+        notes: `${baseNotes}${diagSuffix}`,
       });
     },
     seedOnEmpty: ctoAudit && seedOnEmpty,
@@ -771,11 +1052,56 @@ async function runLoopAsResult(parsed, controller) {
   return result;
 }
 
-function readLiveSpawnTimeoutMs() {
+/**
+ * Dynamic timeout: computes from iteration history if available,
+ * falls back to conservative default. Env var overrides everything.
+ *
+ * Principle (2026-05-18 operator directive): all timeouts must be
+ * dynamically calculated from actual machine performance, not
+ * hardcoded. Different machines + agents have different latencies.
+ */
+function readLiveSpawnTimeoutMs(hostRoot) {
+  // Env override always wins (escape hatch).
   const raw = process.env.MINSKY_LIVE_SPAWN_TIMEOUT_MS;
-  if (raw === undefined) return 15 * 60 * 1000;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+  if (raw !== undefined) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  // Dynamic: compute from this host's iteration history.
+  return computeDynamicSettingsForHost(hostRoot).spawnTimeoutMs;
+}
+
+/**
+ * Load iteration history from all experiment-store jsonl files for a host
+ * and compute dynamic settings (watchdog, tick interval).
+ */
+function computeDynamicSettingsForHost(hostRoot) {
+  try {
+    const storeDir = join(hostRoot, ".minsky", "experiment-store", "cross-repo");
+    if (!existsSync(storeDir)) return computeDynamicSettings([]);
+    const files = readdirSync(storeDir).filter((f) => f.endsWith(".jsonl"));
+    let allTimings = [];
+    for (const f of files) {
+      try {
+        const content = readFileSync(join(storeDir, f), "utf8");
+        allTimings = allTimings.concat(parseTimingsFromJsonl(content));
+      } catch {
+        /* skip unreadable files */
+      }
+    }
+    const settings = computeDynamicSettings(allTimings);
+    if (settings.source === "history") {
+      process.stdout.write(
+        `[dynamic-timeouts] computed from ${settings.sampleSize} iterations: ` +
+          `watchdog=${Math.round(settings.spawnTimeoutMs / 1000)}s, ` +
+          `tick=${Math.round(settings.tickIntervalMs / 1000)}s, ` +
+          `p95=${settings.p95Ms ? `${Math.round(settings.p95Ms / 1000)}s` : "n/a"}\n`,
+      );
+    }
+    return settings;
+  } catch {
+    return computeDynamicSettings([]);
+  }
 }
 
 // Build the argv we pass to `claude` for live spawns. `--print` is the
@@ -793,23 +1119,140 @@ function readLiveSpawnTimeoutMs() {
 // Source: rule #6 (let-it-crash AT the boundary, not silently — without
 // this flag the spawn no-ops on a context-overflow and the loop exits
 // `empty-queue iterations:0` with no operator-visible diagnostic).
-function readClaudeSpawnArgs() {
+/**
+ * Per-machine minsky config at `~/.minsky/config.json`. Loaded once
+ * at startup; env vars override any key for one-session overrides.
+ *
+ * Keys: cloud_agent, cloud_agent_model, local_agent, local_agent_model.
+ * Edit directly or (future) via `minsky config set <key> <value>`.
+ */
+function loadMinskyConfig() {
+  const configPath = resolve(process.env.HOME ?? "/root", ".minsky", "config.json");
+  try {
+    return JSON.parse(readFileSync(configPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+const _minskyConfig = loadMinskyConfig();
+
+/**
+ * Resolve the CLI command to spawn. Priority:
+ *   1. MINSKY_CLOUD_AGENT env var (one-session override)
+ *   2. ~/.minsky/config.json `cloud_agent` (persistent per-machine)
+ *   3. "claude" (default)
+ */
+function readSpawnCommand() {
+  const agent = process.env.MINSKY_CLOUD_AGENT ?? _minskyConfig.cloud_agent ?? "claude";
+  return agent.toLowerCase() === "devin" ? "devin" : "claude";
+}
+
+/**
+ * Build the argv and invocation factory for the resolved spawn command.
+ *
+ * Claude Code: feeds the brief via stdin (child.stdin.end(brief)).
+ * Devin CLI:   writes the brief to a temp file and passes --prompt-file
+ *              (devin panics on stdin pipe as of 2026.5.6-8).
+ *
+ * Returns { args, buildInvocation(hostRoot) } so both the one-shot and
+ * loop paths can use the same factory.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: agent-factory branching across local/devin/claude/aider — refactor tracked in TASKS.md `minsky-run-record-iteration-extract-verdict-mapper`.
+function buildAgentConfig(hostRoot) {
+  // When MINSKY_LLM_PROVIDER=local-only (set by `minsky --local`),
+  // use the local agent (aider + ollama) instead of the cloud agent.
+  const isLocal = process.env.MINSKY_LLM_PROVIDER === "local-only";
+  if (isLocal) return buildLocalAgentConfig(hostRoot);
+
+  const cmd = readSpawnCommand();
+  // Model resolution priority:
+  //   1. MINSKY_CLOUD_AGENT_MODEL env (one-session override)
+  //   2. MINSKY_CLAUDE_MODEL env (legacy)
+  //   3. ~/.minsky/config.json cloud_agent_model (persistent)
+  //   4. "" (use CLI default)
+  const model =
+    process.env.MINSKY_CLOUD_AGENT_MODEL ??
+    process.env.MINSKY_CLAUDE_MODEL ??
+    _minskyConfig.cloud_agent_model ??
+    "";
+
+  if (cmd === "devin") {
+    // --permission-mode dangerous: auto-approve edit/write/exec tools.
+    // Without this, devin in --print mode rejects ALL write operations
+    // ("Running in non-interactive mode. Use --permission-mode dangerous").
+    // Fixed 2026-05-18 (devin-spawn-missing-permission-mode-bypass P0).
+    const permMode = process.env.MINSKY_DEVIN_PERMISSION_MODE ?? "dangerous";
+    const base = ["--print", "--permission-mode", permMode];
+    if (model !== "") base.push("--model", model);
+    // Devin: brief → temp file → --prompt-file. No stdin.
+    const promptDir = mkdtempSync(join(tmpdir(), "minsky-devin-"));
+    return {
+      command: cmd,
+      args: base,
+      invocation: (input) => {
+        const promptPath = join(promptDir, `${input.taskId}.md`);
+        writeFileSync(promptPath, input.brief, "utf8");
+        return {
+          command: cmd,
+          argv: [...base, "--prompt-file", promptPath],
+          stdin: undefined, // do NOT pipe stdin — devin panics
+          cwd: hostRoot,
+        };
+      },
+    };
+  }
+
+  // Claude Code: brief via stdin (the original path)
   const raw = process.env.MINSKY_CLAUDE_SETTING_SOURCES;
   const sources = raw === undefined ? "project,local" : raw;
-  // `--permission-mode acceptEdits` lets claude --print actually USE its tools
-  // (Edit/Write/Bash/etc) without an interactive permission prompt; without it,
-  // the default permission mode requires a human at the keyboard, so claude
-  // produces validated text output but never edits files, commits, or opens a
-  // PR. Discovered 2026-05-16 — bulletproof-ux-dashboard iter 9 produced
-  // `verdict: validated, pr_url: null` because claude wrote a 5-page analysis
-  // but never invoked any Edit tool. Operators can override:
-  //   MINSKY_CLAUDE_PERMISSION_MODE=""             → omit the flag entirely
-  //   MINSKY_CLAUDE_PERMISSION_MODE=bypassPermissions  → fully permissive
-  const permMode = process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "acceptEdits";
+  const permMode = process.env.MINSKY_CLAUDE_PERMISSION_MODE ?? "bypassPermissions";
   const base = ["--print"];
   if (sources !== "") base.push("--setting-sources", sources);
   if (permMode !== "") base.push("--permission-mode", permMode);
-  return base;
+  if (model !== "") base.push("--model", model);
+  return {
+    command: cmd,
+    args: base,
+    invocation: (input) => ({
+      command: cmd,
+      argv: base,
+      stdin: input.brief,
+      cwd: hostRoot,
+    }),
+  };
+}
+
+/**
+ * Build agent config for local-only mode (aider + ollama).
+ * Reads local_agent, local_agent_model, local_agent_args from
+ * ~/.minsky/config.json. The brief is passed via aider's --message
+ * flag (written to a temp file to avoid shell escaping issues).
+ */
+function buildLocalAgentConfig(hostRoot) {
+  const agent = _minskyConfig.local_agent ?? "aider";
+  const model = _minskyConfig.local_agent_model ?? "";
+  const extraArgs = _minskyConfig.local_agent_args ?? [];
+
+  // aider path: --message via temp file, no stdin
+  const promptDir = mkdtempSync(join(tmpdir(), "minsky-local-"));
+  const base = [...extraArgs];
+
+  process.stdout.write(`  [local-only] agent=${agent} model=${model}\n`);
+
+  return {
+    command: agent,
+    args: base,
+    invocation: (input) => {
+      const promptPath = join(promptDir, `${input.taskId}.md`);
+      writeFileSync(promptPath, input.brief, "utf8");
+      return {
+        command: agent,
+        argv: [...base, "--message-file", promptPath, "--yes"],
+        stdin: undefined,
+        cwd: hostRoot,
+      };
+    },
+  };
 }
 
 function emitLoopSummary(result) {
@@ -868,7 +1311,7 @@ async function maybePrintCountdownBanner(live, target) {
   if (process.env.MINSKY_NON_INTERACTIVE === "true") return;
   if (!process.stdout.isTTY) return;
   process.stdout.write(
-    `\n⚠  Starting AUTONOMOUS LIVE SPAWN against ${target}\n   Ctrl-C in the next 3s to abort. Set MINSKY_NON_INTERACTIVE=1 to skip this banner.\n`,
+    `\n⚠  Starting AUTONOMOUS LIVE SPAWN against ${target}\n   Agent: ${readSpawnCommand()}${_minskyConfig.cloud_agent_model || process.env.MINSKY_CLOUD_AGENT_MODEL ? ` (model: ${process.env.MINSKY_CLOUD_AGENT_MODEL ?? _minskyConfig.cloud_agent_model})` : ""}\n   Ctrl-C in the next 3s to abort. Set MINSKY_NON_INTERACTIVE=1 to skip this banner.\n`,
   );
   for (let i = 3; i > 0; i--) {
     process.stdout.write(`   ${i}…\n`);
@@ -884,7 +1327,16 @@ async function maybePrintCountdownBanner(live, target) {
  * `walkHostsDir` (pure orchestrator) decides advance vs halt.
  */
 async function runWalk(parsed) {
-  const { hostsDir, live, ctoAudit, seedOnEmpty, loop, maxIterations, tickIntervalMs } = parsed;
+  const {
+    hostsDir,
+    live,
+    ctoAudit,
+    seedOnEmpty,
+    loop,
+    maxIterations,
+    tickIntervalMs,
+    maxIterationsPerHost,
+  } = parsed;
   const hosts = findBootstrappedSubdirs({
     cwd: hostsDir,
     fs: {
@@ -922,6 +1374,14 @@ async function runWalk(parsed) {
     maxTotalIterations: maxIterations,
     signal: controller.signal,
     runOneHost: async (hostRoot) => {
+      // Per-host iteration cap: in multi-host walk mode, each host gets
+      // at most `maxIterationsPerHost` iterations per walk pass to ensure
+      // fair scheduling across all hosts. Without this, a host with a
+      // non-completing task starves all other hosts indefinitely
+      // (walker-drains-one-host-forever bug, 2026-05-18). The total
+      // walker cap is still `maxTotalIterations`. Operator-tunable via
+      // `--max-iterations-per-host=N` (default 3).
+      const perHostCap = Math.min(maxIterationsPerHost, maxIterations);
       // Construct a fresh per-host parsed shape and reuse runLoop's
       // construction logic via a thin closure. We need runLoop to RETURN
       // the LoopResult instead of an exit code — refactor below to expose
@@ -932,7 +1392,7 @@ async function runWalk(parsed) {
         ctoAudit,
         seedOnEmpty,
         loop: loop !== false,
-        maxIterations,
+        maxIterations: perHostCap,
         tickIntervalMs,
       };
       return runLoopAsResult(hostParsed, controller);
@@ -944,7 +1404,8 @@ async function runWalk(parsed) {
 
   emitWalkerSummary(walker);
   if (walker.stopReason === "scope-leak") return 2;
-  if (walker.stopReason === "spawn-failed") return 1;
+  // spawn-failed on individual hosts no longer halts the walker (2026-05-18);
+  // failures are recorded per-visit and surfaced in the summary.
   return 0;
 }
 

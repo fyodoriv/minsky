@@ -3,13 +3,15 @@
 //
 // Source: TASKS.md `cross-repo-host-daemon-loop`; rule #3 (test-first).
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import type { LiveSpawnOutcome } from "./runner.js";
 import type { RunnerPlan } from "./spawn-plan.js";
 import type { ParsedTask } from "./task-finder.js";
 
-import { readSpawnFailedBudgetFromEnv, runHostLoop } from "./host-loop.js";
+import type { LoopIterationResult } from "./host-loop.js";
+
+import { runHostLoop } from "./host-loop.js";
 
 const baseTask: ParsedTask = {
   id: "fake-task-1",
@@ -100,7 +102,7 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.iterations.map((i) => i.taskId)).toEqual(["task-0", "task-1", "task-2"]);
   });
 
-  test("scope-leak halts on the first leaked iteration", async () => {
+  test("scope-leak halts on the first leaked iteration (hard mode)", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     let n = 0;
     const result = await runHostLoop({
@@ -120,13 +122,14 @@ describe("runHostLoop — stop conditions", () => {
       globMatchesPath,
       maxIterations: 10,
       tickIntervalMs: 0,
+      scopeLeakMode: "hard",
     });
     expect(result.stopReason).toBe("scope-leak");
     expect(result.iterations).toHaveLength(3);
     expect(result.iterations[2]?.scopeLeakPaths).toEqual(["package.json"]);
   });
 
-  test("spawn-failed halts on the first non-zero spawn exit (default budget=1)", async () => {
+  test("spawn-failed halts on the first non-zero spawn exit", async () => {
     const { spawn, git, globMatchesPath } = fakeSeams();
     let n = 0;
     const result = await runHostLoop({
@@ -145,67 +148,63 @@ describe("runHostLoop — stop conditions", () => {
     expect(result.iterations[0]?.verdict).toBe("spawn-failed");
   });
 
-  // Spawn-failed budget — observed 2026-05-16 on oncall-hub-api: 20+
-  // watchdog respawns burned because the loop halted on the first failure
-  // (rule #6 let-it-crash) and the supervisor restarted the daemon to find
-  // the same systemic problem on the next iteration. A small budget lets
-  // the loop skip a likely-transient failure and continue to the next task.
-  test("spawn-failed budget=3: 3 consecutive failures halt; 4th attempt never fires", async () => {
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: signal is threaded from outcome into LoopIterationResult", async () => {
+    // Without the threading, every signal-killed iteration would surface
+    // as `exit=-1 signal=undefined`, which is exactly the diagnostic
+    // collapse this task fixes. The host-loop must preserve `signal`
+    // when present so the daemon log + iteration record can render it.
     const { spawn, git, globMatchesPath } = fakeSeams();
-    let n = 0;
+    const records: LoopIterationResult[] = [];
     const result = await runHostLoop({
-      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      pickTask: () => baseTask,
       buildPlan: (t) => makePlan(t.id),
       resolveAllowedPaths: () => [],
-      runLive: () => Promise.resolve(makeOutcome({ verdict: "spawn-failed", exitCode: 137 })),
+      runLive: () =>
+        Promise.resolve(
+          makeOutcome({
+            verdict: "spawn-failed",
+            exitCode: -1,
+            stderrTail: "",
+            signal: "SIGKILL",
+          }),
+        ),
       spawn,
       git,
       globMatchesPath,
       maxIterations: 10,
       tickIntervalMs: 0,
-      spawnFailedBudget: 3,
+      recordIteration: (rec) => records.push(rec),
     });
     expect(result.stopReason).toBe("spawn-failed");
-    expect(result.iterations).toHaveLength(3);
-    expect(result.iterations.every((it) => it.verdict === "spawn-failed")).toBe(true);
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]?.signal).toBe("SIGKILL");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.signal).toBe("SIGKILL");
   });
 
-  test("spawn-failed budget=3: streak resets on a successful iteration", async () => {
+  test("spawn-failed-exit-minus-one-silent-empty-stderr: omits signal when outcome has none (no key synthesised)", async () => {
+    // exactOptionalPropertyTypes: a `null` outcome.signal becomes
+    // `iterationResult.signal === undefined` via the property-omission
+    // spread. Verify the key is genuinely absent so downstream JSON
+    // serialisation doesn't emit `"signal":null` for the common
+    // exit-with-code path.
     const { spawn, git, globMatchesPath } = fakeSeams();
-    // Sequence: fail, fail, OK (reset), fail, fail, fail (3rd consecutive → halt).
-    // With reset, the loop reaches iteration 6 before halting. Without reset
-    // it'd halt at iteration 4 (3 cumulative failures), proving reset works.
-    const verdicts: Array<"spawn-failed" | "validated"> = [
-      "spawn-failed",
-      "spawn-failed",
-      "validated",
-      "spawn-failed",
-      "spawn-failed",
-      "spawn-failed",
-      "validated", // never reached
-    ];
-    let n = 0;
-    const result = await runHostLoop({
-      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+    const records: LoopIterationResult[] = [];
+    await runHostLoop({
+      pickTask: () => baseTask,
       buildPlan: (t) => makePlan(t.id),
       resolveAllowedPaths: () => [],
-      runLive: () => {
-        const v = verdicts[n - 1] ?? "validated";
-        return Promise.resolve(
-          makeOutcome(v === "spawn-failed" ? { verdict: v, exitCode: 137 } : {}),
-        );
-      },
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "spawn-failed", exitCode: 1, stderrTail: "boom" })),
       spawn,
       git,
       globMatchesPath,
-      maxIterations: 10,
+      maxIterations: 1,
       tickIntervalMs: 0,
-      spawnFailedBudget: 3,
+      recordIteration: (rec) => records.push(rec),
     });
-    expect(result.stopReason).toBe("spawn-failed");
-    expect(result.iterations).toHaveLength(6);
-    expect(result.iterations[2]?.verdict).toBe("validated");
-    expect(result.iterations[5]?.verdict).toBe("spawn-failed");
+    expect(records).toHaveLength(1);
+    expect(records[0]).not.toHaveProperty("signal");
   });
 
   test("aborted when AbortSignal fires BEFORE the first iteration", async () => {
@@ -316,6 +315,150 @@ describe("runHostLoop — happy path", () => {
     });
     // 3 iterations → 2 inter-iteration sleeps.
     expect(sleepCalls).toEqual([1234, 1234]);
+  });
+});
+
+describe("runHostLoop — validated-task rotation (walker-drains-one-host-forever fix b)", () => {
+  test("threads validated task IDs into the next pickTask call as skipTaskIds", async () => {
+    // Reproduces the walker-drains-one-host-forever bug shape: a single
+    // task always returned from pickTask, with the worker validating
+    // (no PR opened). Without skipTaskIds, the loop would re-pick the
+    // same task on every iteration. With it, the loop sees an empty
+    // queue on iteration 1 and exits cleanly — the operator can then
+    // advance to other hosts.
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const skipsObserved: ReadonlySet<string>[] = [];
+    const result = await runHostLoop({
+      pickTask: (pickOpts) => {
+        // Record what the loop passed to us so we can assert it.
+        skipsObserved.push(pickOpts?.skipTaskIds ?? new Set());
+        // Simulate "task block never gets removed": always return the
+        // same task. The loop's rotation logic should mark it as
+        // already-validated after iteration 0 and rotate past it.
+        if (pickOpts?.skipTaskIds?.has(baseTask.id) === true) return null;
+        return baseTask;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome({ verdict: "validated", prUrl: null })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+    });
+    expect(result.stopReason).toBe("empty-queue");
+    expect(result.iterations).toHaveLength(1);
+    expect(result.iterations[0]?.taskId).toBe(baseTask.id);
+    // First pick: empty skip set. Second pick (after validated iter 0):
+    // skip set contains the validated task ID.
+    expect(skipsObserved).toHaveLength(2);
+    expect(Array.from(skipsObserved[0] ?? [])).toEqual([]);
+    expect(skipsObserved[1]?.has(baseTask.id)).toBe(true);
+  });
+
+  test("rotates through multiple validated tasks before exiting empty-queue", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const queue: readonly ParsedTask[] = [
+      { ...baseTask, id: "task-a" },
+      { ...baseTask, id: "task-b" },
+      { ...baseTask, id: "task-c" },
+    ];
+    const result = await runHostLoop({
+      pickTask: (pickOpts) => {
+        const skip = pickOpts?.skipTaskIds ?? new Set<string>();
+        return queue.find((t) => !skip.has(t.id)) ?? null;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => [],
+      runLive: () => Promise.resolve(makeOutcome({ verdict: "validated", prUrl: null })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 10,
+      tickIntervalMs: 0,
+    });
+    // Without rotation: 10 iterations on task-a (capped by maxIterations).
+    // With rotation: 3 iterations on a, b, c, then empty-queue.
+    expect(result.stopReason).toBe("empty-queue");
+    expect(result.iterations.map((i) => i.taskId)).toEqual(["task-a", "task-b", "task-c"]);
+  });
+
+  test("does NOT add scope-leak verdicts to the skip set in hard mode (loop halts)", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    const skipsObserved: ReadonlySet<string>[] = [];
+    const result = await runHostLoop({
+      pickTask: (pickOpts) => {
+        skipsObserved.push(pickOpts?.skipTaskIds ?? new Set());
+        return baseTask;
+      },
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => ["src/**"],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "scope-leak", scopeLeakPaths: ["x.ts"] })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 5,
+      tickIntervalMs: 0,
+      scopeLeakMode: "hard",
+    });
+    expect(result.stopReason).toBe("scope-leak");
+    expect(skipsObserved).toHaveLength(1);
+    expect(Array.from(skipsObserved[0] ?? [])).toEqual([]);
+  });
+
+  test("scope-leak in warn mode (default) continues iterating", async () => {
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let n = 0;
+    const result = await runHostLoop({
+      pickTask: () => ({ ...baseTask, id: `task-${n++}` }),
+      buildPlan: (t) => makePlan(t.id),
+      resolveAllowedPaths: () => ["src/**"],
+      runLive: () =>
+        Promise.resolve(makeOutcome({ verdict: "scope-leak", scopeLeakPaths: ["x.ts"] })),
+      spawn,
+      git,
+      globMatchesPath,
+      maxIterations: 3,
+      tickIntervalMs: 0,
+      // scopeLeakMode defaults to undefined → treated as "warn"
+    });
+    // Soft mode: loop continues through all 3 iterations despite scope-leak
+    expect(result.stopReason).toBe("max-iterations");
+    expect(result.iterations).toHaveLength(3);
+    expect(result.iterations.every((i) => i.verdict === "scope-leak")).toBe(true);
+  });
+
+  test("a fresh runHostLoop invocation starts with an empty skip set", async () => {
+    // Multi-host walker semantics: each walk pass calls runHostLoop
+    // fresh, so a task that was validated-but-skipped on pass 1 gets
+    // a fresh attempt on pass 2 (so a transient validate-without-PR
+    // doesn't permanently block the task across walks).
+    const { spawn, git, globMatchesPath } = fakeSeams();
+    let firstPickInRun: ReadonlySet<string> | undefined;
+    const runOnce = () =>
+      runHostLoop({
+        pickTask: (pickOpts) => {
+          if (firstPickInRun === undefined) firstPickInRun = pickOpts?.skipTaskIds ?? new Set();
+          return null;
+        },
+        buildPlan: (t) => makePlan(t.id),
+        resolveAllowedPaths: () => [],
+        runLive: () => Promise.resolve(makeOutcome()),
+        spawn,
+        git,
+        globMatchesPath,
+        maxIterations: 1,
+        tickIntervalMs: 0,
+      });
+
+    await runOnce();
+    expect(Array.from(firstPickInRun ?? [])).toEqual([]);
+
+    firstPickInRun = undefined;
+    await runOnce();
+    expect(Array.from(firstPickInRun ?? [])).toEqual([]);
   });
 });
 
@@ -520,52 +663,5 @@ describe("runHostLoop — CTO audit seam", () => {
     // No audit options passed; loop completes normally.
     expect(result.stopReason).toBe("max-iterations");
     expect(result.iterations).toHaveLength(1);
-  });
-});
-
-describe("readSpawnFailedBudgetFromEnv", () => {
-  // Save-and-restore over delete (biome lint/performance/noDelete) — mirrors
-  // novel/budget-guard/src/http-server.test.ts; assigning undefined coerces
-  // to the string "undefined" in process.env so save-and-restore is the
-  // only safe way to clean up.
-  let savedBudget: string | undefined;
-  beforeEach(() => {
-    savedBudget = process.env["MINSKY_SPAWN_FAILED_BUDGET"];
-  });
-  afterEach(() => {
-    if (savedBudget === undefined) {
-      // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
-      delete process.env["MINSKY_SPAWN_FAILED_BUDGET"];
-    } else {
-      process.env["MINSKY_SPAWN_FAILED_BUDGET"] = savedBudget;
-    }
-  });
-
-  test("returns undefined when env is unset (loop falls back to default budget=1)", () => {
-    // biome-ignore lint/performance/noDelete: assigning undefined coerces to "undefined" string in node env
-    delete process.env["MINSKY_SPAWN_FAILED_BUDGET"];
-    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
-  });
-
-  test("returns undefined when env is empty string", () => {
-    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "";
-    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
-  });
-
-  test("returns parsed integer when env is a valid positive integer", () => {
-    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "5";
-    expect(readSpawnFailedBudgetFromEnv()).toBe(5);
-  });
-
-  test("returns undefined on non-numeric env (no silent fallback to 0 — operator typo halts on first failure)", () => {
-    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "abc";
-    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
-  });
-
-  test("returns undefined on 0 or negative env (budget < 1 is meaningless — falls back to default)", () => {
-    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "0";
-    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
-    process.env["MINSKY_SPAWN_FAILED_BUDGET"] = "-1";
-    expect(readSpawnFailedBudgetFromEnv()).toBeUndefined();
   });
 });

@@ -73,7 +73,18 @@ export function buildSpawnPlan(inputs: SpawnPlanInputs): RunnerPlan {
       hostRepo: config.host_repo,
       preCommitCommand: config.pre_commit_command,
     }),
-    brief: renderBrief({ task, hostRepo: config.host_repo, branchName }),
+    brief: [
+      renderBrief({ task, hostRepo: config.host_repo, branchName }),
+      "",
+      "---",
+      "",
+      renderSystemPromptOverlay({
+        visionMdPath: visionMdPath ?? ".minsky/vision.md",
+        taskId: task.id,
+        hostRepo: config.host_repo,
+        preCommitCommand: config.pre_commit_command,
+      }),
+    ].join("\n"),
     preCommitCommand: config.pre_commit_command,
   };
 }
@@ -106,6 +117,35 @@ function renderSystemPromptOverlay(inputs: OverlayInputs): string {
     "",
     "Failure to include the self-grade block fails the minsky-side CI check.",
     "Failure to remove the shipped task block from TASKS.md re-spawns the same task on the next tick (rule #9 — ship-off-the-queue is a sweep-completion invariant, not a soft preference).",
+    "",
+    // ─────────────────────────────────────────────────────────────────────
+    // FINAL STEP — non-negotiable. Without this block claude --print has
+    // been observed to make every edit but never call commit / push / PR
+    // (see plugin task `claude-print-must-ship-pr` for the field report:
+    // bulletproof-ux-dashboard iter 10 produced 348 lines and exited
+    // verdict=validated, pr_url=null). The explicit ordered checklist
+    // below converts the natural "analysis-mode" tail of the response
+    // into an "action-mode" tail, by listing the exact tool calls the
+    // session must perform before exit.
+    // ─────────────────────────────────────────────────────────────────────
+    "FINAL STEP — once your edits land, you MUST invoke the following",
+    "shell commands in order (the Bash tool is permitted for these exact",
+    "commands; do NOT exit before opening a PR):",
+    "",
+    `  git checkout -b ${inputs.preCommitCommand.length > 0 ? "`feat/<task-id>`" : "`feat/<task-id>`"}`,
+    "  git add <files-you-edited>",
+    `  git commit -m \"<conventional-commit-subject> <task-id>\"`,
+    "  git push -u origin HEAD",
+    "  gh pr create --base <default-branch> --head HEAD \\",
+    `    --title \"<commit subject>\" --body \"<task body + self-grade>\"`,
+    "",
+    "After `gh pr create` succeeds, print the PR URL on its own line then",
+    "exit. Do NOT leave uncommitted work in the working tree — minsky's",
+    "scope-leak detector will attribute it to you and verdict=scope-leak.",
+    "",
+    "If a step fails (lint error, hook rejection, push conflict), report",
+    "the error verbatim and STOP — do not silently retry or leave the",
+    "tree dirty. The operator will read your stdout tail and decide.",
   ].join("\n");
 }
 

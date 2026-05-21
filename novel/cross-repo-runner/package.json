@@ -34,7 +34,7 @@
     "@minsky/tick-loop": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "25.7.0",
+    "@types/node": "25.9.1",
     "typescript": "5.7.2",
     "vitest": "2.1.9"
   }
