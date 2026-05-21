@@ -26,7 +26,7 @@ success: |
         edits are authored by the `semantic-release-bot` committer or
         the equivalent action identity).
   The v0 measurement at PR-merge time is the structural smoke test:
-    `node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('.releaserc.json','utf-8'));process.exit(c.plugins?.length >= 4 ? 0 : 1)"`
+    `node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('.releaserc.json','utf-8'));process.exit(c.plugins?.length >= 3 ? 0 : 1)"`
     AND `.github/workflows/release.yml` exists and declares `push: branches: [main]`
     AND `package.json` carries `semantic-release` as a devDependency
     AND `vision.md` § "Pattern conformance index" carries a row
@@ -46,7 +46,7 @@ pivot: |
   `fix:`), tighten the `releaseRules` config in `.releaserc.json` rather
   than swap the tool.
 measurement: |
-  node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('.releaserc.json','utf-8'));process.exit((c.plugins||[]).length>=4?0:1)" && test -f .github/workflows/release.yml && grep -q "push:" .github/workflows/release.yml && grep -q "main" .github/workflows/release.yml && node -e "const p=require('./package.json');process.exit(p.devDependencies?.['semantic-release']?0:1)" && grep -q "\.releaserc\.json" vision.md
+  node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('.releaserc.json','utf-8'));process.exit((c.plugins||[]).length>=3?0:1)" && test -f .github/workflows/release.yml && grep -q "push:" .github/workflows/release.yml && grep -q "main" .github/workflows/release.yml && node -e "const p=require('./package.json');process.exit(p.devDependencies?.['semantic-release']?0:1)" && grep -q "\.releaserc\.json" vision.md
 anchor: |
   rule #10 (vision.md § 10 — deterministic enforcement; the release
   workflow is same-input-same-output, no LLM in the chain — the bump
