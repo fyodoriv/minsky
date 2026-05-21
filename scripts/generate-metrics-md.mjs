@@ -126,10 +126,31 @@ function milestoneTag(metric) {
  * 2026-05-21 — each metric tells the reader how to view it now, what the
  * goal is, when to walk away, and why this metric was chosen.
  *
+ * TypeScript already requires `goal`, `pivot`, `anchor` as non-optional
+ * `string`s on the metrics.ts interface, but `string` allows `""`. This
+ * runtime check rejects empty values so the operator directive
+ * ("every metric tells you when to walk away") survives a future hand-
+ * edit that bypasses the type. Throwing here makes the error visible at
+ * render time (and in `scripts/metrics-render.test.mjs` smoke runs),
+ * not at the moment a reader notices an empty section in METRICS.md.
+ *
  * @param {SuccessMetricLike} metric
  * @returns {string}
  */
 function renderExplicitFields(metric) {
+  /** @type {ReadonlyArray<{ name: "goal" | "pivot" | "anchor", value: string }>} */
+  const fields = [
+    { name: "goal", value: metric.goal },
+    { name: "pivot", value: metric.pivot },
+    { name: "anchor", value: metric.anchor },
+  ];
+  for (const { name, value } of fields) {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new Error(
+        `metric '${metric.id}': empty or non-string ${name} (got ${JSON.stringify(value)}); every metric ships explicit goal + pivot + anchor (operator directive 2026-05-21; see novel/dashboard-web/src/metrics.ts type comments).`,
+      );
+    }
+  }
   return [
     `**How to view:** \`${metric.formula}\``,
     "",
