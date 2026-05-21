@@ -32,6 +32,9 @@ export interface RawMachineReadings {
   readonly procCount: number;
 }
 
+/** @deprecated alias kept for slice-3 (`gather.ts`) compatibility — same shape as `RawMachineReadings`. */
+export type MachineRaw = RawMachineReadings;
+
 /** Formatted, fixed-width host vitals for the dashboard header. */
 export interface MachineInfo {
   readonly host: string;

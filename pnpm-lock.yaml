@@ -230,6 +230,12 @@ importers:
         specifier: workspace:*
         version: link:../adapters/token-monitor
 
+  novel/tui:
+    dependencies:
+      '@minsky/cross-repo-runner':
+        specifier: workspace:*
+        version: link:../cross-repo-runner
+
 packages:
 
   '@actions/core@3.0.1':
