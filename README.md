@@ -5,7 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
-Minsky attaches to a git repo and improves it over time, applying scientifically proven software-engineering practices — TDD, MAPE-K, hypothesis-driven development, let-it-crash supervision, error budgets — each backed by a literature citation ([PRACTICES](docs/PRACTICES.md)). It identifies issues, works on each one until it's fixed, then researches what to do next — by default it runs until you stop it.
+Minsky watches over your git repo and improves it over time. It picks the next thing to fix, makes the fix on a feature branch, runs your tests, and opens a draft pull request for you to review. Then it picks the next thing. By default it keeps going until you stop it.
+
+The methodology is rigorous — every change applies established software-engineering practices, each backed by a published literature citation ([see the full list](docs/PRACTICES.md)).
 
 **[Seven reasons you'd want this →](#why-minsky)** &nbsp;·&nbsp; Or skip to [getting started](#getting-started).
 
@@ -26,28 +28,28 @@ Full install runbook: [INSTALL.md](INSTALL.md). Uninstall: [docs/uninstall.md](d
 ## What it actually does
 
 1. Reads `TASKS.md` from your **host** repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
-2. Picks the highest-priority task with complete rule-9 fields
-3. Spawns Devin, Claude, or a local model (configurable per machine)
+2. Picks the highest-priority task that's ready to work on (has the required fields filled in)
+3. Spawns Devin, Claude, or a local AI model (configurable per machine)
 4. The agent implements the task on a feature branch
-5. Opens a PR with a hypothesis self-grade
-6. Records the iteration in `.minsky/experiment-store/` (inside the host repo)
+5. Opens a draft pull request — including a self-graded report on whether the change moved the metric it predicted
+6. Records the iteration in `.minsky/experiment-store/` (inside your repo, for the next run to learn from)
 7. Picks the next task. Repeats.
 
 > **What's a "host"?** A host is a single git repository that minsky operates on — picks tasks from its `TASKS.md`, spawns agents inside its worktree, opens PRs against its remote. Selected via `default_host` in `~/.minsky/config.json`, or `--host <path>` flag, or the current working directory by default. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
 
 ## Why Minsky?
 
-Seven things you get with minsky running on a repo. Each links to a dedicated user-story page with acceptance criteria, metric, and chaos coverage.
+Seven things you get with minsky running on a repo. Each links to a dedicated page with the full story (what the feature delivers, how it's measured, and how it's tested under stress).
 
-- **Continuous, unattended improvement** — daemon picks tasks, ships draft PRs, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
-- **Issues surfaced as draft tasks** *(opt-out via `MINSKY_CTO_AUDIT=off`)* — a CTO-audit pass after each iteration proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
-- **Right model for each task** *(per-task backend today; multi-persona M2)* — claude for prose, devin for refactors, local Ollama for mechanical lint fixes. ([details →](user-stories/008-per-task-backend-and-personas.md))
-- **Forced research at PR time** *(rule #1, enforced)* — every PR cites the existing libraries it considered; the linter blocks reinvention. ([details →](user-stories/009-forced-research-rule-1.md))
-- **A tool that improves itself** — reads own daemon metrics, files tasks against own stability, ships the fixes. ([details →](user-stories/003-mape-k-improves-prompts.md))
-- **Keeps iterating when the cloud runs dry** *(detection today; mid-run swap is P0)* — quota exceeded → local Ollama → loop continues until your tokens return. ([details →](user-stories/004-budget-auto-pause.md))
-- **Async Q&A across timezones** *(P0)* — agents write to `.minsky/qa-log.md`; you reply by editing the file. ([details →](user-stories/010-async-human-qa-via-file.md))
+- **Continuous, unattended improvement** — picks tasks, ships draft pull requests, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
+- **Finds new work for you to approve** *(can be turned off)* — after each fix, it audits the repo and proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
+- **Right model for each task** — Claude for prose, Devin for refactors, a local model for mechanical fixes (so cheap work stays cheap). ([details →](user-stories/008-per-task-backend-and-personas.md))
+- **Refuses to reinvent the wheel** — every pull request has to cite the libraries it considered; if it skips the search, the build fails. ([details →](user-stories/009-forced-research-rule-1.md))
+- **A tool that improves itself** — reads its own metrics, files tasks against its own weak spots, ships the fixes. ([details →](user-stories/003-mape-k-improves-prompts.md))
+- **Keeps going when the cloud runs dry** — if your cloud-AI quota runs out, it falls back to a local model so the loop doesn't stall. ([details →](user-stories/004-budget-auto-pause.md))
+- **Async Q&A across timezones** *(coming)* — agents leave questions in a file; you answer when you wake up. ([details →](user-stories/010-async-human-qa-via-file.md))
 
-Safety guards are mechanical — every PR is a draft for your review, every iteration passes 15 lint gates including secret-scan, scope-discipline, and security review. No agent can push to `main`. No PR merges without your approval.
+Safety is mechanical, not optional. Every pull request is a draft until you mark it ready. Every iteration passes 15 automatic checks — including a secret scanner, a "stay-in-your-lane" check that catches drive-by edits, and a security review. No agent can push directly to `main`. No pull request merges without your approval.
 
 ## What works today (honest)
 
