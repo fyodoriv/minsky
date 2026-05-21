@@ -38,7 +38,7 @@ Templates use shell-style `${VAR}` placeholders that `setup.sh` (P0 `setup-sh-re
 
 | Variable | Meaning | Example |
 | --- | --- | --- |
-| `${MINSKY_HOME}` | absolute path to the cloned minsky repo | `/Users/alex/apps/minsky` |
+| `${MINSKY_HOME}` | absolute path to the cloned minsky repo | `$HOME/apps/minsky` |
 
 Any new placeholder added to a template must be (a) added to the table above and (b) accepted by `lint-units.sh`'s placeholder-hygiene check (which allows only the documented set).
 

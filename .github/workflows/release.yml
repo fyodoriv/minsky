@@ -1,0 +1,77 @@
+# Semantic-release workflow — fires on every push to `main` and decides
+# whether to cut a new release based on the conventional-commit types of
+# the commits since the last tag.
+#
+# Pattern: continuous delivery via conventional commits (Humble & Farley,
+# *Continuous Delivery*, 2010, Ch. 4 + Beck, *Extreme Programming
+# Explained*, 1999 — CI as the constraint enforcer applied to release
+# cadence). Conformance: full.
+#
+# Rule anchors:
+#   - rule #10 (vision.md § 10 — deterministic enforcement; same input,
+#     same output; no LLM in the chain — the bump decision is a pure
+#     function of the commit messages between the last tag and HEAD)
+#   - rule #11 (vision.md § 11 — default by default; release automation
+#     IS the default for "keep the changelog current", not an opt-in flag)
+#   - rule #17 (vision.md § 17 — proactive healing; the CHANGELOG drift
+#     observed 2026-05-21 was the trigger for landing this workflow)
+#
+# Pivot threshold (rule #9 — per `experiments/semantic-release-rollout-2026-05-21.yaml`):
+#   - ≥2 incorrect-version releases in 30 days → switch to release-please
+#   - ≥1 release where the CHANGELOG.md row is missing → switch to release-please
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# Cancel in-flight release runs on same branch — only the latest commit
+# on main should produce a release for the next bump window.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # for git tag + release commit
+  issues: write # for semantic-release to comment on closed issues
+  pull-requests: write # for semantic-release to comment on merged PRs
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Skip if the commit message says so — operator escape hatch for the
+    # rare case where a `feat:` / `fix:` commit must merge to main without
+    # cutting a release. Standard convention used by semantic-release docs.
+    if: "!contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # semantic-release needs the full history + tags to compute
+          # the next version from commits between the last tag and HEAD.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run semantic-release
+        env:
+          # GITHUB_TOKEN: built-in token with contents:write + pull-requests:write
+          # per the permissions block above. semantic-release uses this to
+          # create the tag, the release, and to commit the bumped CHANGELOG.md
+          # back to main.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release

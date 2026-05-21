@@ -1,0 +1,22 @@
+{
+  "name": "@minsky/observer-heals",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Automated heal helpers for catalogued failure modes (M1.13 phase 1). Each helper: detect() / apply() / verify() against a fixture-seam'd host. Pattern: SRE on-call automation (Beyer 2016 Ch. 6 + Ch. 11). User-story: user-stories/007-agent-self-heals-catalogued-failures.md.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
