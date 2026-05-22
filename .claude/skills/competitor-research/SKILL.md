@@ -256,6 +256,65 @@ Shape for an architectural-pattern finding (use this as the template for "X has 
 
 If you spent ≥30 minutes reading a competitor and produced ≥1 substantive finding (architectural pattern, roadmap threat, capability gap, honesty issue), and the PR does NOT file ≥1 follow-up task, you've leaked the work into the chat and the next session has to re-derive it. This is the rule-#17 (proactive healing) failure mode in research shape — *observation IS the fix*; the fix here is "file the task". The deterministic gate at `scripts/check-research-findings-filed.mjs` (forthcoming) catches this; until it ships, the discipline is reviewer-enforced.
 
+### Phase 7 — the "should we wrap them instead?" question (iron rule)
+
+**Every direct-competitor research run MUST end with a written wrap-feasibility analysis.** Operator's standing rule (2026-05-22):
+
+> *"for every direct competitor (eg crewai) you must deeply research should we replace part of minsky with that competitor's work. Eg if crewai is amazing at everything we do, why not wrap around it and let run for 24h or is it not possible? And honestly, if yes, create a P0 human blocked task where you propose the change. This must happen each time we update competitors"*
+
+This is rule #1 (don't reinvent) at maximum scale. If a competitor is genuinely better at what Minsky does, the right move is to wrap it — keep the daemon shell + operator-machine-identity + constitution-as-CI, delegate the agent/orchestrator layer to them. The skill enforces the question explicitly because the default failure mode is "we just shipped competitor research without ever asking it".
+
+**Which competitors get the analysis** — "direct competitors" means:
+
+- **Orchestrator-tier**: CrewAI, MetaGPT, AutoGen, LangGraph, OpenAI Agents SDK — peers that could plausibly replace Minsky's orchestrator layer.
+- **Agent-tier**: Claude Code, Devin, Aider, OpenHands, SWE-Agent, Cursor Agent, OpenAI Codex, Augment Code — already-wrapped or wrappable as Minsky backends; analyse whether we should add as a pluggable agent OR lock in to one.
+- **Skip for**: pure infrastructure tools (sandboxes, vector DBs, eval harnesses) — they're not "competitors", they're potential dependencies.
+
+**Format** — every `competitors/<id>.md` gets a `## Should we wrap <competitor> instead?` section answering five questions:
+
+| Question | Output |
+|---|---|
+| 1. **Architectural fit** | Could the competitor act as a drop-in agent/orchestrator that Minsky's daemon wraps? Frame in one paragraph. |
+| 2. **What we delegate** | Which Minsky layer (agent / orchestrator / fleet / queue) would the competitor own after the wrap? |
+| 3. **What we keep** | Of Minsky's 6 moats (daemon-not-framework, operator-machine identity, constitution+CI, MAPE-K substrate, cross-repo fleet, TASKS.md surface), how many survive? List them. |
+| 4. **Net moat after wrap** | Count of moats that survive. If ≤3 of 6, the wrap collapses Minsky's distinctiveness — verdict NO. If ≥4 of 6, the wrap is worth proposing. |
+| 5. **Verdict** | YES (file P0 task) / PARTIAL YES (file P0 for the partial wrap; reject the full wrap) / NO (document why, no task). |
+
+Plus a **trigger for re-evaluation**: under what observable conditions does this analysis flip? Examples: "if competitor publishes a self-host variant" / "if Minsky publishes a benchmark beating theirs" / "if competitor open-sources their orchestration layer". This is the pre-registered pivot per rule #9 applied at the strategic level.
+
+**When the verdict is YES or PARTIAL YES**: file a P0 human-blocked task. Format:
+
+```md
+- [ ] `should-we-add-<competitor>-as-pluggable-backend` OR `should-we-replace-<minsky-layer>-with-<competitor>-wrap` — <one-line description of the proposed change>
+  - **ID**: should-we-...
+  - **Tags**: p0, human-blocked, wrap-feasibility, <competitor>, observed-<YYYY-MM-DD>, PROJ-needed
+  - **Blocked**: needs-operator-strategic-decision
+  - **Milestone**: <M2|M3|M4>
+  - **Competitive-goal**: <what gap this closes; reference the wrap analysis section in competitors/<id>.md>
+  - **Touches**: <files that need to change>
+  - **Details**: <one-paragraph summary of the wrap shape; pointer to competitors/<id>.md § "Should we wrap?" for the full analysis; unblock path (operator reviews → operator decides → AIFN ticket → PR)>
+  - **Hypothesis**: <falsifiable: what does success look like?>
+  - **Success**: <measurable outcome>
+  - **Pivot**: <when do we revert?>
+  - **Measurement**: <runnable command>
+  - **Anchor**: rule #1 (don't reinvent — competitor X is amazing at Y, inherit the capability); operator directive 2026-05-22; competitors/<id>.md § "Should we wrap?"; primary citations.
+  - **Surfaced-by**: <YYYY-MM-DD> wrap-feasibility analysis pass.
+```
+
+**When the verdict is NO**: document the analysis in `competitors/<id>.md` § "Should we wrap?" with the 5 questions answered + the trigger-for-re-evaluation. NO task is filed, but the analysis must exist as a written artifact so the next research pass can re-evaluate against the same questions.
+
+**The five common verdicts and their canonical reasoning**:
+
+1. **PARTIAL YES** (one layer wraps cleanly, another doesn't) — e.g., OpenHands: agent-layer wrap = YES (file P0); orchestrator-layer wrap = NO (collapses 3 moats). File ONE P0 for the partial wrap that works.
+2. **ALREADY WRAPPED** (current architecture already delegates to this competitor at the right layer) — e.g., Devin via `cloud_agent: "devin"`. Don't file a new P0; analysis explains why the further-wrap question is NO.
+3. **STRUCTURAL MISMATCH** (competitor is the wrong shape for Minsky's task distribution) — e.g., CrewAI (general-purpose, not coding-specific) / MetaGPT (greenfield, not brownfield). Document why; file P2/P3 research tasks for portable PATTERNS to steal instead of wrapping the framework.
+4. **MOAT COLLAPSE** (the wrap would drop net moats below 3 of 6) — e.g., full Devin wrap kills operator-machine-identity + daemon-not-framework + cross-repo-fleet. Document why; the wrap fails the distinctiveness test from `competitors/README.md` § "What Minsky uniquely does".
+5. **CLEAN YES** (rare; competitor is genuinely a drop-in replacement for a Minsky layer with no moat cost). File P0 immediately. As of 2026-05-22 this has never been the verdict — included for completeness.
+
+### Anti-pattern: research-without-wrap-analysis
+
+A competitor research run that updates `competitors/<id>.md` but does NOT include a `## Should we wrap <competitor> instead?` section is incomplete. The `scripts/check-competitor-has-wrap-analysis.mjs` deterministic gate (forthcoming — file as a follow-up task if you're hitting this) catches the pattern; until it ships, the discipline is reviewer-enforced. Same shape as the rule-#17 "research-without-tasks" anti-pattern above.
+
 ## Outputs
 
 After running this skill successfully you have:
