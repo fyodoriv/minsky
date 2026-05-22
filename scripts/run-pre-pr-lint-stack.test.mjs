@@ -109,6 +109,7 @@ describe("STACK_MANIFEST", () => {
         "markdownlint",
         "no-hardcoded-user-paths",
         "no-personal-paths-in-docs",
+        "orphan-tests",
         "rule-12-scope-discipline",
         "rule-17-proactive-heal",
         "rule-2-dep-coverage",

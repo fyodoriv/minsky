@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+// <!-- scope: human-approved 2026-05-21 drain — rule-#10 ratchet for the test/-vs-src/ API drift class (PR #639 → #705). Task `tui-src-vs-test-api-drift-pivot-tracker` tracks the regex-vs-tsc pivot. -->
 // Pattern: lexical lint over the parallel `test/` / `src/` topology of
 //   `novel/**` packages. Cross-checks that every named symbol a
 //   `<pkg>/test/*.test.{ts,mjs,js}` file imports from `../src/...`
@@ -81,24 +82,32 @@ export function extractNamedImports(body) {
   // capturing the optional `type ` prefix and skipping when present.
   const re = /import\s+(type\s+)?\{([^}]+)\}\s+from\s+["']([^"']+)["']/g;
   for (const m of body.matchAll(re)) {
-    const isTypeOnly = !!m[1];
-    if (isTypeOnly) continue;
-    const block = m[2];
-    const fromSpec = m[3];
-    if (!block || !fromSpec) continue;
-    for (const tok of block.split(",")) {
-      const trimmed = tok.trim();
-      if (!trimmed) continue;
-      // Per-token type modifier: `import { type Foo, bar }` — Foo is
-      // erased, bar is runtime. Skip the typed ones.
-      if (/^type\s+/.test(trimmed)) continue;
-      // `foo as fooAlias` — what matters for API drift is the SOURCE
-      // name (`foo`), not the local alias (`fooAlias`). The local
-      // name is what `collectExports` reports on the source side.
-      const asMatch = trimmed.match(/^(\S+)\s+as\s+\S+$/);
-      const sourceName = asMatch && asMatch[1] ? asMatch[1] : trimmed;
-      if (sourceName) out.push({ symbol: sourceName, fromSpec });
+    if (m[1] || !m[2] || !m[3]) continue;
+    for (const symbol of parseImportTokens(m[2])) {
+      out.push({ symbol, fromSpec: m[3] });
     }
+  }
+  return out;
+}
+
+/**
+ * Pure tokenizer over the comma-separated content of one `import { ... }`
+ * block. Returns the SOURCE names (resolving `foo as fooAlias` to `foo`)
+ * of every runtime import, skipping the per-token `type ` modifier.
+ *
+ * @param {string} block content inside `{}`, e.g. `"foo, bar as b, type Baz"`
+ * @returns {string[]}
+ */
+function parseImportTokens(block) {
+  /** @type {string[]} */
+  const out = [];
+  for (const tok of block.split(",")) {
+    const trimmed = tok.trim();
+    if (!trimmed || /^type\s+/.test(trimmed)) continue;
+    // `foo as fooAlias` — what matters for API drift is the SOURCE name.
+    const asMatch = trimmed.match(/^(\S+)\s+as\s+\S+$/);
+    const sourceName = asMatch?.[1] ?? trimmed;
+    if (sourceName) out.push(sourceName);
   }
   return out;
 }
@@ -123,22 +132,13 @@ export function extractNamedExports(body, resolveAndRead, maxDepth = 8, visited 
   /** @type {Set<string>} */
   const names = new Set();
   // (a) Block exports: `export { foo, bar }` or `export { foo } from "./x.js"`.
-  for (const m of body.matchAll(/export\s+(?:type\s+)?\{([^}]+)\}(?:\s+from\s+["']([^"']+)["'])?/g)) {
-    const block = m[1];
-    if (!block) continue;
-    for (const tok of block.split(",")) {
-      const trimmed = tok.trim();
-      if (!trimmed) continue;
-      // `foo as fooAlias` -> exported name is `fooAlias`.
-      const asMatch = trimmed.match(/^(\S+)\s+as\s+(\S+)$/);
-      const exportedName = asMatch && asMatch[2] ? asMatch[2] : trimmed;
-      // Strip leading `type ` modifier from per-token type imports.
-      const stripped = exportedName.replace(/^type\s+/, "");
-      if (stripped) names.add(stripped);
-    }
-    // `export { foo } from "x"` already harvested `foo` above; the
-    // inner walk would be redundant for this case. We only recurse on
-    // (c) below — the star re-export shape.
+  //     Re-export-from already harvests the named tokens above; we only
+  //     recurse on the (c) star-re-export shape below.
+  for (const m of body.matchAll(
+    /export\s+(?:type\s+)?\{([^}]+)\}(?:\s+from\s+["']([^"']+)["'])?/g,
+  )) {
+    if (!m[1]) continue;
+    for (const name of parseExportTokens(m[1])) names.add(name);
   }
   // (b) Inline declarations: `export const foo`, `export function bar`,
   //     `export type Foo`, `export interface Foo`, `export enum Foo`,
@@ -149,18 +149,57 @@ export function extractNamedExports(body, resolveAndRead, maxDepth = 8, visited 
     if (m[1]) names.add(m[1]);
   }
   // (c) Star re-exports: `export * from "./x.js"`.
+  collectStarReexports(body, resolveAndRead, maxDepth, visited, names);
+  return names;
+}
+
+/**
+ * Pure tokenizer over the comma-separated content of one `export { ... }`
+ * block. Returns the EXPORTED names (resolving `foo as fooAlias` to
+ * `fooAlias`) of every export, stripping the leading `type ` modifier
+ * from per-token type re-exports.
+ *
+ * @param {string} block content inside `{}`
+ * @returns {string[]}
+ */
+function parseExportTokens(block) {
+  /** @type {string[]} */
+  const out = [];
+  for (const tok of block.split(",")) {
+    const trimmed = tok.trim();
+    if (!trimmed) continue;
+    // `foo as fooAlias` -> exported name is `fooAlias`.
+    const asMatch = trimmed.match(/^(\S+)\s+as\s+(\S+)$/);
+    const exportedName = asMatch?.[2] ?? trimmed;
+    // Strip leading `type ` modifier from per-token type re-exports.
+    const stripped = exportedName.replace(/^type\s+/, "");
+    if (stripped) out.push(stripped);
+  }
+  return out;
+}
+
+/**
+ * Walk every `export * from "./..."` in the body, recursing into the
+ * upstream module's exports up to `maxDepth`. Mutates `names` and
+ * `visited` for compactness — they're the only sinks anyway.
+ *
+ * @param {string} body
+ * @param {(spec: string) => string | undefined} resolveAndRead
+ * @param {number} maxDepth
+ * @param {Set<string>} visited
+ * @param {Set<string>} names sink
+ */
+function collectStarReexports(body, resolveAndRead, maxDepth, visited, names) {
+  if (maxDepth <= 0) return;
   for (const m of body.matchAll(/export\s+\*\s+from\s+["']([^"']+)["']/g)) {
-    if (maxDepth <= 0) break;
     const spec = m[1];
-    if (!spec) continue;
-    if (visited.has(spec)) continue;
+    if (!spec || visited.has(spec)) continue;
     visited.add(spec);
     const upstreamBody = resolveAndRead(spec);
     if (upstreamBody === undefined) continue;
     const inner = extractNamedExports(upstreamBody, resolveAndRead, maxDepth - 1, visited);
     for (const name of inner) names.add(name);
   }
-  return names;
 }
 
 /**
@@ -198,9 +237,8 @@ export function checkOrphans({ testBody, resolveSource, resolveReexport, crossDi
       violations.push({ symbol, fromSpec, resolved: null });
       continue;
     }
-    const exports = extractNamedExports(
-      resolved.body,
-      (reexportSpec) => reexportResolver(resolved.resolved, reexportSpec),
+    const exports = extractNamedExports(resolved.body, (reexportSpec) =>
+      reexportResolver(resolved.resolved, reexportSpec),
     );
     if (!exports.has(symbol)) {
       violations.push({ symbol, fromSpec, resolved: resolved.resolved });
@@ -229,26 +267,36 @@ function walkFiles(dir, matchFile) {
   const stack = [dir];
   while (stack.length > 0) {
     const cur = stack.pop();
-    if (!cur) continue;
-    /** @type {import("node:fs").Dirent[]} */
-    let entries;
-    try {
-      entries = readdirSync(cur, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const ent of entries) {
-      if (IGNORE_PATH_TOKENS.has(ent.name)) continue;
-      const abs = join(cur, ent.name);
-      if (ent.isDirectory()) {
-        stack.push(abs);
-      } else if (ent.isFile() && matchFile(abs)) {
-        out.push(abs);
-      }
-    }
+    if (cur) walkOneDir(cur, matchFile, stack, out);
   }
   out.sort();
   return out;
+}
+
+/**
+ * Read one directory's entries and dispatch each entry: push subdirs
+ * onto `stack`, push matching files into `out`. Extracted helper to keep
+ * `walkFiles`'s cognitive complexity below biome's threshold.
+ *
+ * @param {string} dir
+ * @param {(absPath: string) => boolean} matchFile
+ * @param {string[]} stack
+ * @param {string[]} out
+ */
+function walkOneDir(dir, matchFile, stack, out) {
+  /** @type {import("node:fs").Dirent[]} */
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const ent of entries) {
+    if (IGNORE_PATH_TOKENS.has(ent.name)) continue;
+    const abs = join(dir, ent.name);
+    if (ent.isDirectory()) stack.push(abs);
+    else if (ent.isFile() && matchFile(abs)) out.push(abs);
+  }
 }
 
 /**
@@ -265,11 +313,11 @@ function resolveOnDisk(importer, spec) {
   const baseDir = dirname(importer);
   const resolvedAbs = resolve(baseDir, spec);
   const tsCandidates = [];
-  if (spec.endsWith(".js")) tsCandidates.push(resolvedAbs.slice(0, -3) + ".ts");
-  if (spec.endsWith(".mjs")) tsCandidates.push(resolvedAbs.slice(0, -4) + ".mts");
+  if (spec.endsWith(".js")) tsCandidates.push(`${resolvedAbs.slice(0, -3)}.ts`);
+  if (spec.endsWith(".mjs")) tsCandidates.push(`${resolvedAbs.slice(0, -4)}.mts`);
   for (const ext of TS_EXTS) {
     tsCandidates.push(resolvedAbs + ext);
-    tsCandidates.push(join(resolvedAbs, "index" + ext));
+    tsCandidates.push(join(resolvedAbs, `index${ext}`));
   }
   tsCandidates.push(resolvedAbs);
   for (const cand of tsCandidates) {
@@ -287,7 +335,10 @@ function resolveOnDisk(importer, spec) {
 export function runCheck() {
   /** @type {{ test: string, importedSymbol: string, fromSpec: string, sourceAbs: string | null }[]} */
   const violations = [];
-  for (const testAbs of walkFiles(NOVEL_DIR, (abs) => TEST_FILE_RE.test(abs) && /\/test\//.test(abs))) {
+  for (const testAbs of walkFiles(
+    NOVEL_DIR,
+    (abs) => TEST_FILE_RE.test(abs) && /\/test\//.test(abs),
+  )) {
     const testBody = readFileSync(testAbs, "utf8");
     const { violations: vs } = checkOrphans({
       testBody,
@@ -329,16 +380,15 @@ function main() {
     /** @type {typeof violations} */ (byTest.get(v.test)).push(v);
   }
   process.stderr.write(
-    `check-orphan-tests: ${violations.length} orphan symbol(s) across ${byTest.size} test file(s).\n` +
-      "  Test imports a symbol that doesn't exist as a named export in the resolved sibling source.\n" +
-      "  Class: API drift between the test and the source after a merge that took one side's source\n" +
-      "         and the other side's tests. See `vision.md` § 18 and the 2026-05-21 drain.\n\n",
+    `check-orphan-tests: ${violations.length} orphan symbol(s) across ${byTest.size} test file(s).\n  Test imports a symbol that doesn't exist as a named export in the resolved sibling source.\n  Class: API drift between the test and the source after a merge that took one side's source\n         and the other side's tests. See \`vision.md\` § 18 and the 2026-05-21 drain.\n\n`,
   );
   for (const [test, vs] of byTest) {
     process.stderr.write(`${test}:\n`);
     for (const v of vs) {
       const target = v.sourceAbs ?? `(unresolved spec '${v.fromSpec}')`;
-      process.stderr.write(`  - import { ${v.importedSymbol} } from "${v.fromSpec}" -> ${target}\n`);
+      process.stderr.write(
+        `  - import { ${v.importedSymbol} } from "${v.fromSpec}" -> ${target}\n`,
+      );
     }
     process.stderr.write("\n");
   }

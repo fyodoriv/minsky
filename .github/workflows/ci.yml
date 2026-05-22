@@ -1589,6 +1589,7 @@ jobs:
       - measurement-inspects-output
       - metric-freshness
       - no-singleton-experiment
+      - orphan-tests
       - otel-no-pii
       - secret-scan
       - security-docs-cohesion
@@ -1650,6 +1651,7 @@ jobs:
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
+                   "${{ needs.orphan-tests.result }}" \
                    "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.secret-scan.result }}" \
                    "${{ needs.security-docs-cohesion.result }}" \

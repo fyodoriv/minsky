@@ -5,11 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import {
-  checkOrphans,
-  extractNamedExports,
-  extractNamedImports,
-} from "./check-orphan-tests.mjs";
+import { checkOrphans, extractNamedExports, extractNamedImports } from "./check-orphan-tests.mjs";
 
 describe("extractNamedImports", () => {
   test("(a) two named imports from one specifier", () => {
@@ -22,9 +18,7 @@ describe("extractNamedImports", () => {
 
   test("(b) named import with `as` alias — captures the SOURCE name", () => {
     const body = `import { foo as fooAlias } from "../src/x.js";\n`;
-    expect(extractNamedImports(body)).toEqual([
-      { symbol: "foo", fromSpec: "../src/x.js" },
-    ]);
+    expect(extractNamedImports(body)).toEqual([{ symbol: "foo", fromSpec: "../src/x.js" }]);
   });
 
   test("(c) `import type { ... }` is fully skipped (pure type import)", () => {
@@ -34,9 +28,7 @@ describe("extractNamedImports", () => {
 
   test("(d) per-token `type ` modifier is skipped in mixed imports", () => {
     const body = `import { type Foo, bar } from "../src/x.js";\n`;
-    expect(extractNamedImports(body)).toEqual([
-      { symbol: "bar", fromSpec: "../src/x.js" },
-    ]);
+    expect(extractNamedImports(body)).toEqual([{ symbol: "bar", fromSpec: "../src/x.js" }]);
   });
 
   test("(e) default imports are NOT captured (out of scope)", () => {
@@ -60,8 +52,7 @@ describe("extractNamedImports", () => {
   });
 
   test("(h) two import statements in the same file are both captured", () => {
-    const body =
-      `import { foo } from "../src/a.js";\n` + `import { bar } from "../src/b.js";\n`;
+    const body = `import { foo } from "../src/a.js";\n` + `import { bar } from "../src/b.js";\n`;
     expect(extractNamedImports(body)).toEqual([
       { symbol: "foo", fromSpec: "../src/a.js" },
       { symbol: "bar", fromSpec: "../src/b.js" },
@@ -71,7 +62,7 @@ describe("extractNamedImports", () => {
 
 describe("extractNamedExports", () => {
   test("(a) block export captures every name", () => {
-    const body = `export { foo, bar, baz };\n`;
+    const body = "export { foo, bar, baz };\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names].sort()).toEqual(["bar", "baz", "foo"]);
   });
@@ -83,45 +74,45 @@ describe("extractNamedExports", () => {
   });
 
   test("(c) inline `export const foo = ...`", () => {
-    const body = `export const foo = 42;\n`;
+    const body = "export const foo = 42;\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual(["foo"]);
   });
 
   test("(d) inline `export function foo(...)`", () => {
-    const body = `export function foo() {}\n`;
+    const body = "export function foo() {}\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual(["foo"]);
   });
 
   test("(e) inline `export async function foo(...)`", () => {
-    const body = `export async function foo() {}\n`;
+    const body = "export async function foo() {}\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual(["foo"]);
   });
 
   test("(f) inline `export class Foo {...}`", () => {
-    const body = `export class Foo {}\n`;
+    const body = "export class Foo {}\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual(["Foo"]);
   });
 
   test("(g) inline `export type Foo = ...`", () => {
-    const body = `export type Foo = string;\n`;
+    const body = "export type Foo = string;\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual(["Foo"]);
   });
 
   test("(h) inline `export interface Foo ...`", () => {
-    const body = `export interface Foo { x: string }\n`;
+    const body = "export interface Foo { x: string }\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual(["Foo"]);
   });
 
-  test("(i) `export * from \"./x.js\"` recurses through resolveAndRead", () => {
+  test('(i) `export * from "./x.js"` recurses through resolveAndRead', () => {
     const body = `export * from "./up.js";\n`;
     const names = extractNamedExports(body, (spec) =>
-      spec === "./up.js" ? `export const fromUpstream = 1;\n` : undefined,
+      spec === "./up.js" ? "export const fromUpstream = 1;\n" : undefined,
     );
     expect([...names]).toEqual(["fromUpstream"]);
   });
@@ -139,7 +130,7 @@ describe("extractNamedExports", () => {
   });
 
   test("(k) `export default ...` is NOT captured (not a named export)", () => {
-    const body = `export default function() {}\n`;
+    const body = "export default function() {}\n";
     const names = extractNamedExports(body, () => undefined);
     expect([...names]).toEqual([]);
   });
@@ -155,7 +146,7 @@ describe("checkOrphans", () => {
     const result = checkOrphans({
       testBody: `import { foo, bar } from "../src/x.js";\n`,
       resolveSource: makeResolver({
-        "../src/x.js": `export function foo() {}\nexport const bar = 1;\n`,
+        "../src/x.js": "export function foo() {}\nexport const bar = 1;\n",
       }),
     });
     expect(result.violations).toEqual([]);
@@ -165,7 +156,7 @@ describe("checkOrphans", () => {
     const result = checkOrphans({
       testBody: `import { foo, missing } from "../src/x.js";\n`,
       resolveSource: makeResolver({
-        "../src/x.js": `export function foo() {}\n`,
+        "../src/x.js": "export function foo() {}\n",
       }),
     });
     expect(result.violations).toEqual([
@@ -181,8 +172,8 @@ describe("checkOrphans", () => {
     const result = checkOrphans({
       testBody,
       resolveSource: makeResolver({
-        "../src/index.js": `export function listProcs() {}\n`, // slice-1 only
-        "../src/render.js": `export function renderTui() {}\n`, // slice-1 only
+        "../src/index.js": "export function listProcs() {}\n", // slice-1 only
+        "../src/render.js": "export function renderTui() {}\n", // slice-1 only
       }),
     });
     expect(result.violations).toHaveLength(2);
@@ -206,7 +197,7 @@ describe("checkOrphans", () => {
         `import { localHelper } from "./helpers.js";\n` + // local — skipped
         `import { foo } from "../src/x.js";\n`, // cross-dir — checked
       resolveSource: makeResolver({
-        "../src/x.js": `export function foo() {}\n`,
+        "../src/x.js": "export function foo() {}\n",
       }),
     });
     expect(result.violations).toEqual([]); // both fine
@@ -229,8 +220,8 @@ describe("checkOrphans", () => {
       resolveSource: makeResolver({
         "../src/index.js": `export * from "./helpers.js";\n`,
       }),
-      resolveReexport: (sourceSpec, reexportSpec) =>
-        reexportSpec === "./helpers.js" ? `export const fromHelper = 1;\n` : undefined,
+      resolveReexport: (_sourceSpec, reexportSpec) =>
+        reexportSpec === "./helpers.js" ? "export const fromHelper = 1;\n" : undefined,
     });
     expect(result.violations).toEqual([]);
   });
@@ -239,7 +230,7 @@ describe("checkOrphans", () => {
     const result = checkOrphans({
       testBody: `import type { Foo, Bar } from "../src/types.js";\n`,
       resolveSource: makeResolver({
-        "../src/types.js": ``, // exports nothing
+        "../src/types.js": "", // exports nothing
       }),
     });
     expect(result.violations).toEqual([]);
@@ -249,7 +240,7 @@ describe("checkOrphans", () => {
     const result = checkOrphans({
       testBody: `import { type Foo, bar } from "../src/x.js";\n`,
       resolveSource: makeResolver({
-        "../src/x.js": `export const bar = 1;\n`, // Foo not exported, but type-only is skipped
+        "../src/x.js": "export const bar = 1;\n", // Foo not exported, but type-only is skipped
       }),
     });
     expect(result.violations).toEqual([]);
@@ -259,7 +250,7 @@ describe("checkOrphans", () => {
     const result = checkOrphans({
       testBody: `import { foo } from "../../src/x.js";\n`,
       resolveSource: makeResolver({
-        "../../src/x.js": `export function nope() {}\n`,
+        "../../src/x.js": "export function nope() {}\n",
       }),
     });
     expect(result.violations).toHaveLength(1);
@@ -273,7 +264,10 @@ describe("regression — fictional but plausible orphan-test cases", () => {
       testBody: `import { a, b, c, d, e } from "../src/m.js";\n`,
       resolveSource: (spec) =>
         spec === "../src/m.js"
-          ? { body: `export const a = 1;\nexport const c = 3;\nexport const e = 5;\n`, resolved: spec }
+          ? {
+              body: "export const a = 1;\nexport const c = 3;\nexport const e = 5;\n",
+              resolved: spec,
+            }
           : null,
     });
     expect(result.violations.map((v) => v.symbol).sort()).toEqual(["b", "d"]);
@@ -285,9 +279,7 @@ describe("regression — fictional but plausible orphan-test cases", () => {
     const result = checkOrphans({
       testBody: `import { wrongName as right } from "../src/x.js";\n`,
       resolveSource: (spec) =>
-        spec === "../src/x.js"
-          ? { body: `export const right = 1;\n`, resolved: spec }
-          : null,
+        spec === "../src/x.js" ? { body: "export const right = 1;\n", resolved: spec } : null,
     });
     expect(result.violations).toEqual([
       { symbol: "wrongName", fromSpec: "../src/x.js", resolved: "../src/x.js" },
