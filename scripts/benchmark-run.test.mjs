@@ -144,4 +144,48 @@ describe("benchmark-run.mjs CLI", () => {
     expect(parsed.acceptance.meetsM110).toBe(true);
     expect(parsed.cellCount).toBeGreaterThan(0);
   });
+
+  test("(g) human summary surfaces the corpus-freshness line (rule #4 visibility)", () => {
+    const host = mkdtempSync(join(tmpdir(), "minsky-bench-"));
+    execFileSync("git", ["init", host], { stdio: "ignore" });
+    const r = runBenchmark(host);
+    // The freshness line is part of the M1.10 corpus self-refresh
+    // substrate (vision.md row 95). It MUST surface in the human
+    // summary so the operator sees corpus staleness without having
+    // to read the JSON.
+    expect(r.stdout).toContain("Freshness:");
+    expect(r.stdout).toMatch(/Freshness: mean \d+d/);
+  });
+
+  test("(h) --json attaches corpusFreshness with the expected shape", () => {
+    const host = mkdtempSync(join(tmpdir(), "minsky-bench-"));
+    execFileSync("git", ["init", host], { stdio: "ignore" });
+    const r = runBenchmark(host, ["--json"]);
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.corpusFreshness).toBeDefined();
+    expect(parsed.corpusFreshness.entries).toBeInstanceOf(Array);
+    expect(parsed.corpusFreshness.entries.length).toBeGreaterThan(0);
+    expect(typeof parsed.corpusFreshness.meanAgeDays).toBe("number");
+    expect(typeof parsed.corpusFreshness.staleCount).toBe("number");
+    expect(typeof parsed.corpusFreshness.verySaleCount).toBe("number");
+    expect(Array.isArray(parsed.corpusFreshness.verySaleIds)).toBe(true);
+    // Each entry has the documented shape from check-corpus-freshness.mjs.
+    const e = parsed.corpusFreshness.entries[0];
+    expect(typeof e.id).toBe("string");
+    expect(typeof e.asOf).toBe("string");
+    expect(typeof e.ageDays).toBe("number");
+    expect(["fresh", "stale", "very-stale"]).toContain(e.status);
+  });
+
+  test("(i) on-disk scorecard also carries corpusFreshness (consumers can read it without re-extracting from competitors.ts)", () => {
+    const host = mkdtempSync(join(tmpdir(), "minsky-bench-"));
+    execFileSync("git", ["init", host], { stdio: "ignore" });
+    runBenchmark(host);
+    const onDiskPath = join(host, ".minsky", "competitive-scorecard.json");
+    expect(existsSync(onDiskPath)).toBe(true);
+    const parsed = JSON.parse(readFileSync(onDiskPath, "utf8"));
+    expect(parsed.corpusFreshness).toBeDefined();
+    expect(parsed.corpusFreshness.entries.length).toBeGreaterThan(0);
+  });
 });
