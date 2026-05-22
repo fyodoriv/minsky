@@ -47,11 +47,13 @@ The agent tier (Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, O
 ## Architectural patterns we adopt or reject
 
 ### Adopt
+
 - **State persistence with checkpointing** (LangGraph thread_id + CrewAI @persist) — Minsky's `.minsky/orchestrate.jsonl` is the iteration-level analog. Could extend to per-iteration sub-states (mid-iteration crash recovery) — filed as `minsky-iteration-checkpoint-substrate`.
 - **Multi-role assembly line** (MetaGPT SoP) — Minsky's persona spawner (`novel/adapters/persona-spawner/`) is the equivalent, but Minsky's personas (researcher, planner, implementer) are bound to ONE agent per spawn. The MetaGPT pattern of role-handoff within ONE task is documented as a candidate experiment.
 - **Handoffs + guardrails** (OpenAI Agents SDK) — Minsky's runtime invariants serve a similar role (gate before iteration); the handoff substrate is the candidate for multi-persona-per-task.
 
 ### Reject (by design)
+
 - **Graph DSL** (LangGraph) — operators don't want to write a graph definition. TASKS.md is simpler and stays simpler as the queue grows.
 - **Cloud sandbox** (Devin Devbox) — Minsky's identity is the operator's identity. Cloud sandbox introduces a separate identity boundary that complicates credentials, git config, and trust.
 - **Python framework binding** (CrewAI/AutoGen/MetaGPT) — orchestrator-tier work in 2026 is full-stack: orchestrator interface (TypeScript), agent adapter (TypeScript), prompt evolution (TypeScript). Python adds zero value here.
