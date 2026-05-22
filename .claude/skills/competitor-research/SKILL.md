@@ -18,6 +18,12 @@ One required argument: the competitor's URL — usually a vendor homepage, blog 
 /competitor-research https://arxiv.org/abs/2406.01304
 ```
 
+Optional flag: `--refresh` — pass this when updating an existing competitor's readings (id already in `COMPETITORS`). This is the canonical flag used by the auto-refresh pipeline's filed `corpus-refresh-<id>` tasks (see "How the auto-refresh loop calls this skill" below).
+
+```
+/competitor-research https://www.cognition.ai --refresh
+```
+
 ## When to use
 
 **Use competitor-research when:**
@@ -25,12 +31,52 @@ One required argument: the competitor's URL — usually a vendor homepage, blog 
 - Adding a new competitor to the corpus (Cursor, OpenAI Codex, GitHub Copilot Coding Agent, etc.)
 - Refreshing an existing competitor's readings (vendor published a new SWE-bench number, a new study came out)
 - The operator hands you a URL and says "research this" / "add this to the scorecard"
+- The auto-refresh loop filed a `corpus-refresh-<id>` task and the tick-loop picked it up
 
 **Don't use when:**
 
 - The scorecard CLI is broken — edit `scripts/benchmark-run.mjs` and its tests directly.
 - The lint catches a missing `**Competitive-goal**:` field — fix the task block directly.
 - Doing generic competitive analysis for strategy work — that's not in scope (M1.10 corpus is narrow).
+
+## How the auto-refresh loop calls this skill
+
+The corpus is **self-refreshing** via two scheduled fires (see vision.md row 95):
+
+1. **Per-vendor reading freshness** — `distribution/launchd/com.minsky.corpus-refresh-check.plist` (macOS) and `distribution/systemd/minsky-corpus-refresh-check.{service,timer}` (Linux) run weekly. The shell pipeline is:
+
+   ```bash
+   node scripts/check-corpus-freshness.mjs --json \
+     | node scripts/auto-file-corpus-refresh-tasks.mjs --tasks-path TASKS.md
+   ```
+
+   The freshness checker classifies each competitor's `asOf` date as `fresh` (≤90 days), `stale` (91–180 days), or `very-stale` (>180 days) using the thresholds in `scripts/check-corpus-freshness.mjs`. The autofile runner inserts a P2 `corpus-refresh-<id>` task block for every `very-stale` competitor (idempotent — never re-files an id already in TASKS.md). The tick-loop's `/next-task` then picks up that task and the worker invokes `/competitor-research <homepage-url> --refresh`.
+
+2. **Corpus-list discovery** — quarterly recurring task `corpus-discover-quarterly` (TASKS.md P2) drives the operator (or the tick-loop) to scan the autonomous-coding landscape for NEW vendors and invoke `/competitor-research <url>` (no `--refresh`) for each surviving candidate. This closes the loop on the LIST half — without it, the corpus refreshes existing readings forever but never adds Codex, GitHub Copilot Coding Agent, MetaGPT v2, etc. as those launch.
+
+**The flow** the skill participates in:
+
+```
+weekly launchd / systemd  →  check-corpus-freshness.mjs (very-stale set)
+                              ↓
+                          auto-file-corpus-refresh-tasks.mjs
+                              ↓
+                          TASKS.md P2 + `corpus-refresh-<id>`
+                              ↓
+                          tick-loop /next-task
+                              ↓
+                          /competitor-research <url> --refresh   ← THIS SKILL
+                              ↓
+                          updated competitors.ts + competitors/<id>.md
+                              ↓
+                          asOf refreshed → next weekly fire is a no-op
+```
+
+When invoked with `--refresh`:
+
+- The skill SHOULD prefer the same primary source the existing entry cites (continuity); if the vendor has published something newer, use that instead.
+- The skill MUST update the `asOf` date even if the `values` map is unchanged — operator intent on a refresh is to record "this reading is still current as of <today>". A no-numeric-change refresh is a valid outcome.
+- The skill MUST delete the corresponding `corpus-refresh-<competitor-id>` task entry from TASKS.md after the corpus update lands (the task is "done"; failing to delete it makes the autofile runner re-file it on the next fire because `Anchor: …` doesn't include the `[x]` marker — TASKS.md spec is "remove completed tasks", not check them off).
 
 ## Workflow
 
@@ -195,5 +241,8 @@ After running this skill successfully you have:
 - M1.10 milestone (`MILESTONES.md` line 24) — the scorecard's "scorecard updates weekly" criterion is what this skill maintains.
 - `novel/competitive-benchmark/README.md` § "M1.10 acceptance — shape gate" — defines the gate this skill upholds.
 - `vision.md` § "Pattern conformance index" row 93 — pins the substrate, lint, and schedule as `full` conformance.
+- `vision.md` § "Pattern conformance index" row 95 — pins the auto-refresh loop (`check-corpus-freshness` + `auto-file-corpus-refresh-tasks` + scheduled fires) that calls this skill on a weekly cadence.
 - Operator directive 2026-05-16 (TASKS.md `self-metrics-competitive-benchmark` block) — established the corpus + citation discipline this skill operationalizes.
+- Operator directive 2026-05-22 ("add a mechanism so that minsky keeps competitors list updated and competitors there too") — established the self-refresh loop this skill participates in.
 - 2026-05-22 corpus-expansion (PR #717) — first end-to-end run of this workflow; the skill is the codified pattern.
+- Beyer, B., et al., *Site Reliability Engineering*, O'Reilly, 2016, ch. 17 — idempotent reconciliation as the design pattern for the autofile loop that calls this skill.
