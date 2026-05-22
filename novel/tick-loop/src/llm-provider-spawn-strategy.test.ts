@@ -297,9 +297,9 @@ describe("probeWithErrorGuard", () => {
   });
 
   it("handles non-Error throws (e.g., a string)", async () => {
-    // eslint-disable-next-line @typescript-eslint/no-throw-literal
     const r = await probeWithErrorGuard(
       async () => {
+        // biome-ignore lint/style/useThrowOnlyError: deliberate stringly-typed throw exercises the error-guard's rejection branch
         throw "stringly-typed";
       },
       () => 1000,

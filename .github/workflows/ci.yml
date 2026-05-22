@@ -69,6 +69,46 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm biome ci .
 
+  knip:
+    # Dead-code + unused-exports + unused-dependencies detector. Config at
+    # `knip.json` declares the workspace shape (entry points = bin scripts
+    # + scripts/*.mjs + workspace package src/index.ts + paired *.test.*
+    # vitest entries). All rules currently at WARN — knip surfaces findings
+    # but doesn't block CI. Once each rule family's violation count
+    # converges to ≤5 with documented exemptions, it graduates to ERROR
+    # per the rule-#10 ratchet.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec knip --no-progress --reporter compact
+
+  depcruise:
+    # Circular-dep + orphan-file detector via dependency-cruiser. Config at
+    # `.dependency-cruiser.cjs`. Like knip, the rules are currently at WARN
+    # so the step exits 0 when the only violations are cycles or orphans;
+    # ERROR-level rules (`no-dep-on-test`, `no-non-package-json`) trip the
+    # exit code immediately.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec depcruise novel scripts --output-type err
+
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -1599,8 +1639,10 @@ jobs:
       - cloud-audit-gate
       - competitive-goal
       - dashboard-localhost-bind
+      - depcruise
       - glossary-discipline
       - hygiene
+      - knip
       - linux-supervisor-integration
       - lockfile-integrity
       - machine-budget
@@ -1663,8 +1705,10 @@ jobs:
                    "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.cloud-audit-gate.result }}" \
                    "${{ needs.dashboard-localhost-bind.result }}" \
+                   "${{ needs.depcruise.result }}" \
                    "${{ needs.glossary-discipline.result }}" \
                    "${{ needs.hygiene.result }}" \
+                   "${{ needs.knip.result }}" \
                    "${{ needs.lockfile-integrity.result }}" \
                    "${{ needs.machine-budget.result }}" \
                    "${{ needs.maciek-smoke.result }}" \
