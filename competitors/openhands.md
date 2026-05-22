@@ -87,7 +87,7 @@ Open-source autonomous software engineering platform (formerly OpenDevin). **Req
 - **Daemon-not-framework** — 24/7 background process surviving terminal close, fleet-aware, no SaaS dependency in the hot path.
 - **Operator-machine identity** — Minsky uses operator's `~/.ssh` + `~/.gitconfig` + `~/.config/gh` directly; no credential provisioning, no token handoff to a system.
 - **17-rule constitution + 53 pre-pr-lint stages + 65 CI jobs** — every iteration is deterministically gated. OpenHands relies on LLM advisory + optional critic.
-- **MAPE-K self-improvement** — the daemon refines its own prompts/policies from observed iteration outcomes. OpenHands is static.
+- **MAPE-K substrate** — Minsky's experiment-store + observer + spec monitor capture iteration outcomes and surface them as filed tasks the daemon works on next iteration. The closed-loop A/B prompt tuning (full MAPE-K) is in specification phase per [`user-story-003`](../user-stories/003-mape-k-improves-prompts.md) — substrate ships today, full loop forthcoming. OpenHands has neither.
 - **Cross-repo fleet built-in** — single Minsky daemon walks N repos. OpenHands needs the Enterprise tier for cross-repo.
 - **TASKS.md as operator surface** — work queued in version-controlled markdown, git-native, no UI lock-in.
 - **No Docker required for local** — Minsky runs as the operator. (OpenHands' Dockerless option ships June 2026; Minsky already has this.)

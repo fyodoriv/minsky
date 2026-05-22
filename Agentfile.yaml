@@ -1,13 +1,35 @@
 # Agentfile.yaml — Minsky (agentbrew manifest)
 #
-# Declares the skill source for the observer plugin + the MCP servers
-# this repo expects the operating agent to have wired up. Consumed by
+# Declares the skill sources + MCP servers this repo expects every agent
+# on this machine to have wired up. Consumed by
 # `agentbrew sync --agentfile <path>`.
 #
-# See https://github.com/cbrwizard/agentbrew for the schema.
+# Reapply with:
+#   agentbrew sync --agentfile ./Agentfile.yaml
+#
+# Skills under `.claude/skills/` are the canonical source — they are
+# tracked in git, edited in PRs, and propagated to every agent's
+# skillsDir (Claude, Cursor, Windsurf, Devin, Augment, Codex, Gemini CLI,
+# Copilot, OpenCode, Kiro, Amp, etc.) via the symlink set agentbrew
+# generates. See https://github.com/cbrwizard/agentbrew for the schema.
+#
+# Don't edit symlinked copies under `~/.claude/skills/<name>` etc. —
+# the symlinks point back here; edit the source.
 
 skillSources:
   # The observer plugin (SKILL.md at skill-plugins/observer/minsky/) —
-  # distributed to every detected agent's skillsDir via `agentbrew sync`.
+  # the cross-host Minsky observer that watches every agent session.
   - label: minsky-observer
     path: ./skill-plugins/observer
+
+  # The Minsky-local .claude/skills directory — all skills tracked in git
+  # (competitor-research, pr-merge-no-shortcuts, poll-merge, reader-priority-docs,
+  # spec-driven-development, task-slice, task-spec, grill-task, triage,
+  # doubt-driven-development, karpathy-disciplines, brief-engineering,
+  # improve-codebase-architecture, incremental-implementation, diagnose,
+  # caveman, ci-gate-check, dogfood, experiment-validate, live-fire-smoke,
+  # worktree-handoff). When you `git pull` or merge a PR that touches one
+  # of these SKILL.md files, run `agentbrew sync --agentfile ./Agentfile.yaml`
+  # to refresh the symlinks in every agent's skillsDir.
+  - label: minsky-skills
+    path: ./.claude/skills
