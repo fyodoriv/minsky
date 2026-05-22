@@ -32,10 +32,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  computeFreshness,
-  extractCorpusEntries,
-} from "./check-corpus-freshness.mjs";
+import { computeFreshness, extractCorpusEntries } from "./check-corpus-freshness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
@@ -257,10 +254,7 @@ function formatFreshnessLine(f) {
  * @returns {ReturnType<typeof computeFreshness> | null}
  */
 function tryComputeFreshness() {
-  const competitorsPath = join(
-    REPO_ROOT,
-    "novel/competitive-benchmark/src/competitors.ts",
-  );
+  const competitorsPath = join(REPO_ROOT, "novel/competitive-benchmark/src/competitors.ts");
   if (!existsSync(competitorsPath)) return null;
   try {
     const body = readFileSync(competitorsPath, "utf8");
