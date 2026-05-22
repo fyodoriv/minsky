@@ -249,7 +249,7 @@ function reportFailure(errors) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const added = getAddedPaths(args.diffBase, args.repo);
-  const researchMd = (await readFileSafe(path.join(args.repo, "research.md"))) ?? "";
+  const researchMd = (await readFileSafe(path.join(args.repo, "docs/research-log.md"))) ?? "";
 
   const { errors } = checkAdditions({
     added,

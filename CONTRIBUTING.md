@@ -12,7 +12,7 @@ Code in this repo is **AI-authored**. Pick a task, claim it, ship a PR. The subs
 | Pick a task to work on | [MILESTONES.md](MILESTONES.md) → [TASKS.md](TASKS.md) |
 | Understand the workflow | [AGENTS.md](AGENTS.md) — setup, claim, lint, PR |
 | Understand the rules | [vision.md](vision.md) — 17 non-negotiable rules, each CI-enforced |
-| See what NOT to work on | [DEPRECATED.md](DEPRECATED.md) |
+| See what NOT to work on | [DEPRECATED.md](./docs/DEPRECATED.md) |
 
 The full documentation map is at [docs/README.md](docs/README.md).
 

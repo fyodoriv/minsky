@@ -11,7 +11,7 @@ Minsky attaches to a git repo and improves it over time, using established softw
 
 **Through your AI agent.** Copy-paste:
 
-> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/docs/INSTALL.md>, then start it. Ask me only the consent question.
 
 **Manual:**
 
@@ -19,11 +19,9 @@ Minsky attaches to a git repo and improves it over time, using established softw
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-Full install runbook: [INSTALL.md](INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
+Full install runbook: [INSTALL.md](./docs/INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
 
 ## Why Minsky
-
-Seven things you get with Minsky running on a repo. Each links to the dedicated page with the full story (what the feature delivers, how it's measured, and how it's tested under stress).
 
 - **Continuous, unattended improvement** — picks tasks, ships draft pull requests, never merges without you. ([details →](user-stories/001-loop-runs-overnight.md))
 - **Finds new work for you to approve** *(can be turned off)* — after each fix, it audits the repo and proposes new tasks for your review. ([details →](user-stories/007-cto-audit-files-new-tasks.md))
@@ -43,7 +41,7 @@ Seven things you get with Minsky running on a repo. Each links to the dedicated 
 6. Records the iteration in `.minsky/experiment-store/` (so the next run can learn from it)
 7. Picks the next task. Repeats.
 
-> **What's a "host"?** A host is a single git repo that Minsky operates on. Selected via `default_host` in `~/.minsky/config.json`, the `--host <path>` flag, or the current working directory. Multi-host mode (`--hosts-dir <parent>`) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).
+> **Host** = the git repo Minsky operates on. See [docs/configuration.md](docs/configuration.md) for how to select it and how multi-host mode walks N repos in round-robin.
 
 ### Architecture (30 seconds)
 
@@ -57,7 +55,7 @@ Devin / Claude / Aider — the actual AI agent (pluggable)
 .minsky/ sidecar — config, experiment store, iteration records
 ```
 
-Six distinctive mechanisms, each backed by file paths so any claim is auditable:
+Six distinctive mechanisms:
 
 - **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`); multi-persona pipelines per task are an M2 milestone.
 - **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
@@ -66,7 +64,7 @@ Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 - **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration.
 - **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's [TASKS.md](TASKS.md) were surfaced by daemon iterations.
 
-Deeper dive: [ARCHITECTURE.md](ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
+Deeper dive: [ARCHITECTURE.md](./docs/ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
 
 ## Safety
 
@@ -119,8 +117,6 @@ Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in pro
 
 ### Where Minsky has real tradeoffs
 
-Three tradeoffs an operator should weigh before picking Minsky:
-
 - **No headline benchmark yet** — OpenHands publishes 65.8% SWE-bench Verified; MetaGPT publishes 85.9% HumanEval; Augment Code publishes 65.4%. Minsky has no published score. Gap tracked at [`benchmark-minsky-via-claude-on-humaneval`](TASKS.md). If your buyer asks "show me the number," that's a known gap.
 - **Single-operator deployment shape today** — CrewAI ships AMP at Fortune 500 scale. OpenHands ships Enterprise Agent Control Plane. Devin ships Cognition Cloud + Devbox + customer VPC. Minsky has one production deployment (the operator's own machine). Gap tracked at [`enterprise-deployment-readiness-audit`](TASKS.md). If you need SOC 2 audit logs + RBAC + IdP integration today, Minsky doesn't ship those.
 - **Coding-specific by design** — CrewAI works for marketing, research, customer support, analytics. Minsky works for "merge code into a git repo." Tighter focus is the design choice — coding is what makes the constitution enforceable as CI, makes TASKS.md naturally version-controlled, makes the PR-shaped output measurable. But if your use case isn't shipping code, Minsky is the wrong tool.
@@ -144,13 +140,13 @@ A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchest
 
 ## Where to read next
 
-The full documentation map is at **[docs/README.md](docs/README.md)**. Pick the path that matches who you are:
+Full map: **[docs/README.md](docs/README.md)**. Pick by audience:
 
 - **Newcomer** — [vision.md § "What Minsky is"](vision.md#what-minsky-is) → [MILESTONES.md](MILESTONES.md).
-- **Installing on your repo** — [INSTALL.md](INSTALL.md).
-- **AI agent working on this codebase** — [AGENTS.md](AGENTS.md) → [DEPRECATED.md](DEPRECATED.md) → [TASKS.md](TASKS.md).
+- **Installing on your repo** — [INSTALL.md](./docs/INSTALL.md).
+- **AI agent working on this codebase** — [AGENTS.md](AGENTS.md) → [DEPRECATED.md](./docs/DEPRECATED.md) → [TASKS.md](TASKS.md).
 - **Operator running Minsky in production** — [docs/edge-cases.md](docs/edge-cases.md), [docs/auto-merge.md](docs/auto-merge.md), [docs/local-llm-fallback.md](docs/local-llm-fallback.md).
-- **Architecture deep-dive** — [ARCHITECTURE.md](ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
+- **Architecture deep-dive** — [ARCHITECTURE.md](./docs/ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
 - **Contributing** — [CONTRIBUTING.md](CONTRIBUTING.md). Code in this repo is AI-authored.
 
 About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
