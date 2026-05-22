@@ -1,3 +1,6 @@
+# <!-- scope: human-approved 2026-05-22 M1.10 slice (c+) — weekly scorecard auto-refresh; M1.10 milestone "scorecard updates weekly" deliverable; Linux/systemd parallel of com.minsky.weekly-competitive.plist. -->
+# <!-- pattern: not-applicable — systemd .service unit mirroring com.minsky.weekly-competitive.plist; the periodic-task supervisor pattern (Borg/Bashir/Burns/Hightower 2017) is already declared at vision.md § "Pattern conformance index" row 93 for `@minsky/competitive-benchmark`. This file is the Linux Unit-file half of that pattern, same shape as minsky-auto-merge.service. -->
+#
 # Minsky weekly competitive scorecard refresh — Linux/systemd parallel
 # of the launchd `com.minsky.weekly-competitive.plist`. Triggered by
 # `minsky-weekly-competitive.timer` every Monday at 04:00 local.

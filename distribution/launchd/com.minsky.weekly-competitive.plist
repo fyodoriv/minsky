@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- scope: human-approved 2026-05-22 M1.10 slice (c+) — weekly scorecard auto-refresh; M1.10 milestone "scorecard updates weekly" deliverable; mirrors com.minsky.auto-merge.plist's StartInterval shape and com.minsky.tick-loop.plist's launchd-supervised cadence. -->
 <!--
 Minsky weekly competitive scorecard refresh — launchd LaunchAgent for macOS.
 

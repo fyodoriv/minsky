@@ -1,5 +1,12 @@
 #!/bin/bash
-# <!-- pattern: Periodic-task pattern (Borg/Bashir/Burns/Hightower _Designing Distributed Systems_ 2017, ch. on "Distributed System Patterns" — periodic-scheduling primitive). The supervisor is the kernel (launchd/systemd) firing this script weekly; the script itself does ONE pass of work and exits. -->
+# <!-- scope: human-approved 2026-05-22 M1.10 slice (c+) — weekly scorecard auto-refresh runner; M1.10 milestone "scorecard updates weekly" deliverable; shared by launchd plist + systemd .service unit. -->
+# <!-- pattern: not-applicable — thin process-launcher runner the supervisor exec's, mirroring run-auto-merge.sh; the periodic-task supervisor pattern (Borg/Bashir/Burns/Hightower 2017) is already declared at vision.md § "Pattern conformance index" row 93 for `@minsky/competitive-benchmark` and covers this runner. -->
+#
+# Pattern: Periodic-task pattern (Borg/Bashir/Burns/Hightower _Designing
+# Distributed Systems_ 2017, ch. on "Distributed System Patterns" —
+# periodic-scheduling primitive). The supervisor is the kernel
+# (launchd/systemd) firing this script weekly; the script itself does
+# ONE pass of work and exits.
 #
 # Bash runner for `minsky-weekly-competitive.service` (systemd) and the
 # `com.minsky.weekly-competitive` launchd LaunchAgent (macOS).
