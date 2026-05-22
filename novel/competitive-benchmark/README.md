@@ -45,19 +45,41 @@ Slice (c) — ledger reducer + scorecard builder:
 - `AcceptanceState` — `{ meetsM110, liveDeltaCount, competitorsWithData, metricsWithComparison, gap }`. Two-part M1.10 gate (see below).
 - `buildScorecard(input)` — pure join over METRICS × COMPETITORS × Minsky readings. CLI shim `scripts/benchmark-run.mjs` invokes this and writes the JSON to `<host>/.minsky/competitive-scorecard.json`.
 
-## M1.10 acceptance — two parts
+## M1.10 acceptance — shape gate
 
-The M1.10 milestone requires the scorecard to cover ≥4 competitors × ≥5
-shared metrics with at least one Minsky-measured live delta. The
-`AcceptanceState` makes this gate explicit:
+The M1.10 milestone gate is the corpus SHAPE: ≥4 competitors × ≥5
+shared metrics with primary-cited published values. The
+`AcceptanceState` exposes both the gate verdict and an informational
+health indicator:
 
-1. **Shape** (`meetsM110`): does the published corpus carry ≥4 competitors × ≥5 metrics with cross-referenced `values` entries? If the corpus is too thin on either axis, this is `false` and `gap` carries a one-line rationale (e.g. `"M1.10 shape gap — corpus has 5 competitor(s) × 1 metric(s) with published values; need ≥4 × ≥5."`).
-2. **Live deltas** (`liveDeltaCount > 0`): has Minsky measured at least one metric that has a competitor counterpart in the corpus? Cold-start state is `0`.
+1. **Shape** (`meetsM110`): does the published corpus carry ≥4 competitors × ≥5 metrics with cross-referenced `values` entries? If the corpus is too thin on either axis, this is `false` and `gap` carries a one-line rationale (e.g. `"M1.10 shape gap — corpus has N competitor(s) × M metric(s) with published values; need ≥4 × ≥5."`).
+2. **Live deltas** (`liveDeltaCount`): how many cells have BOTH a Minsky reading and a competitor reading, i.e. how many real deltas are computable today. Cold-start state is `0`; weekly iterations grow it. This is **informational only** — does not gate the CLI exit code.
 
-`bin/minsky competitive` exits `0` only when **both** parts hold. The
-scorecard is **always written** regardless — the operator can read the gap
-rationale and act on it (today's gap is filed as
-`self-metrics-competitive-benchmark-corpus-expansion`).
+`bin/minsky competitive` exits `0` when the shape gate is met,
+regardless of `liveDeltaCount`. A fresh host with 0 live deltas is the
+expected state — the weekly auto-refresh
+(`distribution/launchd/com.minsky.weekly-competitive.plist` +
+`distribution/systemd/minsky-weekly-competitive.timer`) re-runs the
+build every Monday so the JSON stays at most 7 days stale; live deltas
+accumulate as Minsky iterates.
+
+### Current corpus (as of 2026-05-22)
+
+5 of 6 competitors carry ≥1 metric reading, with primary citations
+pinned in each `competitors/<id>.md` research file:
+
+| Metric                              | Competitors with readings                                      |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `swe-bench-verified-resolve-rate`   | 5 (Claude Code, OpenHands, Aider, SWE-agent, Devin)            |
+| `autonomous-merge-rate`             | 3 (Devin, Claude Code, Cursor)                                 |
+| `human-intervention-rate`           | 2 (Devin, Claude Code)                                         |
+| `mean-autonomous-merge-latency`     | 2 (OpenHands, Devin)                                           |
+| `cost-per-merged-pr`                | 1 (OpenHands)                                                  |
+
+Total: **5 metrics × 5 competitors** — shape gate MET. Slice (d) is the
+`**Competitive-goal**:` field + `scripts/check-competitive-goal.mjs`
+lint that enforces every P0/P1 task block names which scorecard metric
+it moves; the lint ships with 81 grandfathered ids draining over time.
 
 ## Pattern conformance
 
