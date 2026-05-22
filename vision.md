@@ -2,6 +2,26 @@
 
 > A society of minds. Building yours.
 
+## 30-second TL;DR
+
+Minsky is a **plug-and-play repo transformer** — a daemon you attach to any git repo, and it transforms that repo into one that follows Minsky's discipline: strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance. It is **not** a framework. It composes existing tools through versioned adapters and adds only what nobody else is building.
+
+Minsky operates at the **orchestrator tier** (managing daemon lifecycle, MAPE-K loop, prompt evolution, cross-repo task queue, supervisor restart). It sits ABOVE the agents (Claude / Devin / Aider) it composes. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it consumes.
+
+The constitution is **17 non-negotiable rules**, each enforced by a deterministic CI lint. The rules are below. The pattern conformance index (~700 lines later in this file) maps every artifact in the repo to a named, published pattern.
+
+## How to read this constitution
+
+The 17 rules are written for AI agents to follow. They're enforced mechanically — every PR runs through 53 deterministic lints (`pnpm pre-pr-lint --stage=full`) and 65 CI jobs. Rule numbers are stable; section headings are load-bearing (CI gates cite them by name).
+
+Read order:
+
+1. **The rules** — § 1 through § 17 below.
+2. **Pattern conformance index** — every artifact + the named pattern it implements (~700 lines, scan for the one you care about).
+3. **Theoretical foundations** at the very end — the literature anchors.
+
+A one-line cheat-sheet of all 17 rules with links is at [docs/README.md § "I want to understand the rules"](docs/README.md#i-want-to-understand-the-rules).
+
 ## What Minsky is
 
 Minsky is a **plug-and-play repo transformer**. Attach it to any git repository and it runs continuously to transform the repo into one that follows Minsky's discipline — strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance discipline. The repo can be a host (`minsky bootstrap <host-dir>` materialises a per-host gitignored `.minsky/` sidecar; `minsky run <task-id>` ships work against it) or Minsky's own repo (the supervisor runs the same loop against `~/apps/minsky` so the toolchain self-improves).
