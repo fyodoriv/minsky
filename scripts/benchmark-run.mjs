@@ -32,6 +32,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  computeFreshness,
+  extractCorpusEntries,
+} from "./check-corpus-freshness.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
@@ -222,12 +227,62 @@ function formatCellRow(row) {
 }
 
 /**
+ * Build the one-line freshness summary, e.g.
+ *   "Freshness: mean 330d (2 stale, 3 very-stale) — file refresh tasks via scripts/auto-file-corpus-refresh-tasks.mjs"
+ * or
+ *   "Freshness: mean 45d (all fresh)"
+ *
+ * @param {ReturnType<typeof computeFreshness>} f
+ * @returns {string}
+ */
+function formatFreshnessLine(f) {
+  const allFresh = f.staleCount === 0;
+  if (allFresh) return `Freshness: mean ${f.meanAgeDays}d (all fresh, ≤90d)`;
+  const buckets = [];
+  const staleOnly = f.staleCount - f.verySaleCount;
+  if (staleOnly > 0) buckets.push(`${staleOnly} stale`);
+  if (f.verySaleCount > 0) buckets.push(`${f.verySaleCount} very-stale`);
+  const tail =
+    f.verySaleCount > 0
+      ? " — `node scripts/auto-file-corpus-refresh-tasks.mjs` to file refresh tasks"
+      : "";
+  return `Freshness: mean ${f.meanAgeDays}d (${buckets.join(", ")})${tail}`;
+}
+
+/**
+ * Read competitors.ts and compute the freshness summary. Returns
+ * `null` if the file isn't readable (so the surrounding scorecard
+ * still renders — freshness is a visibility add-on, not a gate).
+ *
+ * @returns {ReturnType<typeof computeFreshness> | null}
+ */
+function tryComputeFreshness() {
+  const competitorsPath = join(
+    REPO_ROOT,
+    "novel/competitive-benchmark/src/competitors.ts",
+  );
+  if (!existsSync(competitorsPath)) return null;
+  try {
+    const body = readFileSync(competitorsPath, "utf8");
+    const entries = extractCorpusEntries(body);
+    if (entries.length === 0) return null;
+    return computeFreshness({
+      competitors: entries,
+      now: new Date().toISOString().slice(0, 10),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Render a human-readable summary table.
  *
  * @param {import("../novel/competitive-benchmark/dist/scorecard.js").Scorecard} sc
+ * @param {ReturnType<typeof computeFreshness> | null} freshness
  * @returns {string}
  */
-function renderSummary(sc) {
+function renderSummary(sc, freshness) {
   const lines = [];
   lines.push("");
   lines.push("══ Minsky Competitive Scorecard ══");
@@ -237,6 +292,7 @@ function renderSummary(sc) {
   );
   lines.push(`Live comparisons: ${sc.comparisonCount} cell(s) with a delta`);
   lines.push(formatAcceptanceLine(sc.acceptance));
+  if (freshness !== null) lines.push(formatFreshnessLine(freshness));
   lines.push("");
 
   for (const [metricId, rows] of groupCellsByMetric(sc.cells)) {
@@ -276,10 +332,22 @@ async function main() {
     now: new Date().toISOString(),
   });
 
+  // Compute corpus freshness as a visibility add-on (rule #4). The
+  // returned FreshnessSummary is attached to the scorecard JSON under
+  // `corpusFreshness` so downstream consumers (the dashboard, the
+  // weekly autofile runner) can read it without re-extracting from
+  // competitors.ts. `null` here means competitors.ts wasn't readable;
+  // the scorecard still renders — freshness is informational, not a gate.
+  const freshness = tryComputeFreshness();
+  const scorecardWithFreshness = {
+    ...scorecard,
+    ...(freshness ? { corpusFreshness: freshness } : {}),
+  };
+
   const outPath = opts.writeTo ?? join(host, ".minsky", "competitive-scorecard.json");
   try {
     mkdirSync(dirname(outPath), { recursive: true });
-    writeFileSync(outPath, `${JSON.stringify(scorecard, null, 2)}\n`);
+    writeFileSync(outPath, `${JSON.stringify(scorecardWithFreshness, null, 2)}\n`);
   } catch (err) {
     process.stderr.write(
       `benchmark-run: failed to write ${outPath}: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -288,9 +356,9 @@ async function main() {
   }
 
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(scorecard, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(scorecardWithFreshness, null, 2)}\n`);
   } else {
-    process.stdout.write(renderSummary(scorecard));
+    process.stdout.write(renderSummary(scorecard, freshness));
     process.stdout.write(`\nWrote ${outPath}\n`);
   }
 
