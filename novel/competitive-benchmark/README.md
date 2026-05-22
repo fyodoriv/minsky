@@ -2,19 +2,19 @@
 
 <!-- rule-1: an off-the-shelf benchmark library (e.g. `benchmark`, `tinybench`, `swebench` harness) rejected because: those measure micro-throughput or run the SWE-bench harness; none define the DORA+agentic *outcome* metric set Minsky ranks itself and competitor autonomous-coding systems on. This is a cited domain catalogue, not a runner. -->
 
-Slices (a)+(b) of task `self-metrics-competitive-benchmark`: the **pure,
-cited metric set** + direction-aware comparison helpers (a) and the
+Slices (a)+(b)+(c) of task `self-metrics-competitive-benchmark`: the
+**pure, cited metric set** + direction-aware comparison helpers (a), the
 **competitor corpus** with its pluggable result-source adapter seam (b),
-which the automated comparison runner (slice c), the dashboard panel
-(slice c), and the `check-competitive-goal.mjs` meta-rule lint (slice d) all
-consume. Keeping both a zero-dependency leaf means every consumer shares one
-definition of "what Minsky measures itself and its competitors on" and "who
-it compares against".
+and the **ledger reducer + scorecard builder** that join them into the
+load-bearing `competitive-scorecard.json` artefact (c). The CLI shim
+`scripts/benchmark-run.mjs` (wired as `bin/minsky competitive`) reads
+`.minsky/orchestrate.jsonl`, runs the reducer, calls `buildScorecard()`,
+and writes the JSON.
 
-The scheduled `$0` scorecard job (slice c), the `**Competitive-goal**:`
-TASKS.md meta-rule (slice d), and the new-repo bootstrap-baseline priority
-(slice e) are separate, later-shipped surfaces. This package ships none of
-them — it ships the substrate they stand on.
+The scheduled launchd/systemd-timer job that fires the CLI weekly, the
+`**Competitive-goal**:` TASKS.md meta-rule (slice d), and the new-repo
+bootstrap-baseline priority (slice e) are separate, later-shipped
+surfaces. This package ships the substrate they stand on.
 
 Public surface:
 
@@ -33,6 +33,31 @@ Public surface:
 - `competitorById(id)` — corpus lookup.
 - `publishedValue(competitor, metricId)` — reported value, or `undefined` (visible-not-silent, never a coerced zero).
 - `EXCLUDED_VENDOR_SUBSTRINGS` / `isExcludedVendor(name)` — operator vendor-exclusion guard (no Groq/xAI/Elon-affiliated entrants), test-enforced over the corpus.
+
+Slice (c) — ledger reducer + scorecard builder:
+
+- `IterationRecord` — `{ verdict, pr, prState, humanEdits, ciFirstPushGreen, durationSec, costUsd }`. The shape of one row in `.minsky/orchestrate.jsonl`.
+- `MinskyReadings` — `{ autonomousMergeRate, meanAutonomousMergeLatencySeconds, costPerMergedPrUsd, gatePassRate, humanInterventionRate, samples }`; `NaN` for cold-start denominators (visible-not-silent, Helland 2007).
+- `computeMinskyReadings(records)` — pure reducer over the ledger.
+- `readingsToMetricValues(readings)` — bridge from typed readings to the loose `Record<string, number>` shape `buildScorecard` consumes; keys match `MetricDefinition.id`.
+- `Scorecard` — the load-bearing artefact: `{ generatedAt, cellCount, comparisonCount, cells, metrics, competitors, acceptance }`.
+- `ScorecardCell` — `{ metricId, competitorId, minskyValue, competitorValue, delta }`. One cell per `(metric × competitor)`; `delta` is `undefined` when either side has no value.
+- `AcceptanceState` — `{ meetsM110, liveDeltaCount, competitorsWithData, metricsWithComparison, gap }`. Two-part M1.10 gate (see below).
+- `buildScorecard(input)` — pure join over METRICS × COMPETITORS × Minsky readings. CLI shim `scripts/benchmark-run.mjs` invokes this and writes the JSON to `<host>/.minsky/competitive-scorecard.json`.
+
+## M1.10 acceptance — two parts
+
+The M1.10 milestone requires the scorecard to cover ≥4 competitors × ≥5
+shared metrics with at least one Minsky-measured live delta. The
+`AcceptanceState` makes this gate explicit:
+
+1. **Shape** (`meetsM110`): does the published corpus carry ≥4 competitors × ≥5 metrics with cross-referenced `values` entries? If the corpus is too thin on either axis, this is `false` and `gap` carries a one-line rationale (e.g. `"M1.10 shape gap — corpus has 5 competitor(s) × 1 metric(s) with published values; need ≥4 × ≥5."`).
+2. **Live deltas** (`liveDeltaCount > 0`): has Minsky measured at least one metric that has a competitor counterpart in the corpus? Cold-start state is `0`.
+
+`bin/minsky competitive` exits `0` only when **both** parts hold. The
+scorecard is **always written** regardless — the operator can read the gap
+rationale and act on it (today's gap is filed as
+`self-metrics-competitive-benchmark-corpus-expansion`).
 
 ## Pattern conformance
 
@@ -145,7 +170,31 @@ if (merge) {
 const oh = competitorById("openhands");
 const ohResolve = oh && publishedValue(oh, "swe-bench-verified-resolve-rate"); // 0.53
 const haveLiveHarness = COMPETITORS.filter((c) => c.resultSource.kind === "local-harness");
+
+// Slice (c): build the load-bearing scorecard from a ledger record array.
+import {
+  buildScorecard,
+  computeMinskyReadings,
+  readingsToMetricValues,
+} from "@minsky/competitive-benchmark";
+
+const ledger = [
+  { verdict: "pr-open", pr: "x", prState: "merged", durationSec: 3600, costUsd: 0.5 },
+  { verdict: "pr-open", pr: "y", prState: "merged", durationSec: 1800, costUsd: 0.3 },
+];
+const readings = computeMinskyReadings(ledger); // autonomousMergeRate=1, etc.
+const scorecard = buildScorecard({
+  minskyValues: readingsToMetricValues(readings),
+  now: new Date().toISOString(),
+});
+scorecard.acceptance.meetsM110;       // false today (corpus thin)
+scorecard.acceptance.liveDeltaCount;  // 0 (autonomous-merge-rate has no competitor counterparts)
+scorecard.acceptance.gap;             // "M1.10 shape gap — corpus has 5 competitor(s) × 1 metric(s)…"
 ```
+
+The same flow runs from the command line via `bin/minsky competitive`,
+which writes `.minsky/competitive-scorecard.json` and exits non-zero
+when either gate part is open.
 
 ## Threat model
 
