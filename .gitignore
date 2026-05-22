@@ -58,8 +58,12 @@ opencode.notes.md
 # Tailscale local state
 .tailscale/
 
-# rule-11 flake-detection auto-emitted patches. The .gitkeep is tracked;
-# the auto-emitted *-task-block.md + *-workflow.patch files are not.
-tmp/rule-11/*-task-block.md
-tmp/rule-11/*-workflow.patch
+# Ephemeral working directories — not committed. The /tmp scratch dir
+# is recreated on demand by scripts; never check it in.
+tmp/
 .aider*
+
+# Ephemeral PR-body working file written by gh pr create — not committed.
+# Use `gh pr create --body "$(cat <<'EOF' ...` directly instead of leaving
+# pr-body.md sitting at root.
+pr-body.md

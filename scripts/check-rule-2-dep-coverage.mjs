@@ -343,7 +343,7 @@ export async function walkTs(root) {
 
 async function main() {
   const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-  const archPath = join(repoRoot, "ARCHITECTURE.md");
+  const archPath = join(repoRoot, "docs/ARCHITECTURE.md");
   const archMd = await readFile(archPath, "utf-8");
   const novelRoot = join(repoRoot, "novel");
   const absFiles = await walkTs(novelRoot);

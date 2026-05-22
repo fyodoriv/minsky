@@ -233,7 +233,7 @@ describe("checkMetricFreshness — current METRICS.md", () => {
     const { fileURLToPath } = await import("node:url");
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..");
-    const md = await readFile(resolve(repoRoot, "METRICS.md"), "utf8");
+    const md = await readFile(resolve(repoRoot, "docs/METRICS.md"), "utf8");
     const result = checkMetricFreshness({ markdown: md, nowMs: Date.now() });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -247,7 +247,7 @@ describe("checkMetricFreshness — current METRICS.md", () => {
     const { fileURLToPath } = await import("node:url");
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..");
-    const md = await readFile(resolve(repoRoot, "METRICS.md"), "utf8");
+    const md = await readFile(resolve(repoRoot, "docs/METRICS.md"), "utf8");
     const result = checkMetricFreshness({
       markdown: md,
       nowMs: Date.now(),

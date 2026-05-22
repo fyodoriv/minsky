@@ -71,7 +71,7 @@ The optional consent record at `~/.minsky/telemetry-consent.json` carries:
 }
 ```
 
-Recorded by the `minsky consent` CLI (P0 in flight). See [INSTALL.md](../INSTALL.md) step 5 for the consent prompt and what's submitted.
+Recorded by the `minsky consent` CLI (P0 in flight). See [INSTALL.md](./INSTALL.md) step 5 for the consent prompt and what's submitted.
 
 ## Multiple hosts
 

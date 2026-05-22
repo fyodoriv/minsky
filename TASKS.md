@@ -33,7 +33,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 1. Read [MILESTONES.md § "Critical path to M1 completion"](MILESTONES.md#critical-path-to-m1-completion). The top item is what's blocking M1.
 2. Verify the seven surfaces are aligned (see [AGENTS.md § "15. Milestone alignment gate"](AGENTS.md)). If any is stale, that's your task.
 3. Walk P0 → P1 → P2 → P3 in order. Pick the top unclaimed task with all rule-9 fields filled in.
-4. Check [DEPRECATED.md](DEPRECATED.md) before implementing — if the task touches a deprecated feature, use the replacement instead.
+4. Check [DEPRECATED.md](./docs/DEPRECATED.md) before implementing — if the task touches a deprecated feature, use the replacement instead.
 
 <!-- policy: Every task starts with a failing test (red), then minimal code to pass (green), then refactor. Define metrics and docs BEFORE writing code. See AGENTS.md. -->
 <!-- policy: Every external dependency is accessed through an interface in novel/adapters/. No vendor names in business logic. -->
