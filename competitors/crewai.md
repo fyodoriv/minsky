@@ -103,7 +103,7 @@ Based on releases (v1.13.0, v1.14.5) + recent blog posts:
 - **Daemon, not framework** — 24/7 background process, surviving terminal close, fleet-aware. CrewAI is stateless per `kickoff()`.
 - **Operator-machine identity** — Minsky uses operator's `~/.ssh` + `~/.gitconfig` + `~/.config/gh` directly. CrewAI OSS uses env vars; CrewAI AMP uses a SaaS credential vault.
 - **17-rule constitution + 53 pre-pr-lint stages + 65 CI jobs** — every iteration is deterministically gated. CrewAI's guardrails are optional + advisory.
-- **MAPE-K self-improvement** — Minsky refines prompts/policies from observed outcomes. CrewAI is static once shipped.
+- **MAPE-K substrate** — Minsky's experiment-store + observer + spec monitor capture iteration outcomes and surface them as filed tasks the daemon works on next iteration. The closed-loop A/B prompt tuning (full MAPE-K) is in specification phase per [`user-story-003`](../user-stories/003-mape-k-improves-prompts.md) — substrate ships today, full loop forthcoming. CrewAI has neither.
 - **Cross-repo fleet built-in** — Minsky walks N repos per pass. CrewAI Crews are single-execution-context.
 
 ## Why choose CrewAI over Minsky

@@ -94,7 +94,7 @@ Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in pro
 | **24/7 unattended** | ✅ Survives terminal close + reboots | ❌ Request-response (Enterprise: scheduled) | ❌ Stateless per `crew.kickoff()` | ✅ Cognition Cloud sessions | ❌ Interactive |
 | **Cross-repo fleet** | ✅ Built-in (`--hosts-dir`) | 🟡 Enterprise tier only | 🟡 Partial (Flows chain Crews) | ❌ One repo per session | ❌ One repo at a time |
 | **Constitutional rules / CI** | ✅ 17 iron rules + 53 lint stages + 65 CI jobs | ❌ LLM-advisory only | 🟡 Optional guardrails | 🟡 Cognition-internal policies | ❌ None |
-| **Self-improvement (MAPE-K)** | ✅ Daemon refines its own prompts/policies | ❌ Static once shipped | ❌ One-shot reasoning per task | 🟡 Cognition-internal | ❌ None |
+| **Self-improvement (MAPE-K)** | 🟡 Substrate ships today (experiment-store + spec monitor + observer); closed-loop prompt tuning is spec-only ([user-story-003](user-stories/003-mape-k-improves-prompts.md) status: Specification) | ❌ Static once shipped | ❌ One-shot reasoning per task | 🟡 Cognition-internal | ❌ None |
 | **Operator queue** | ✅ `TASKS.md` (markdown in repo) | Web UI / CLI / integrations | Python code + AMP UI | Cognition app / Slack | Operator types into terminal |
 | **Live dashboard** | ✅ `minsky watch` (stability, iterations, human-help) | ✅ Web UI | 🟡 AMP UI (paid) | ✅ Cognition app | ❌ |
 | **Backend choice (Claude / Devin / local)** | 🟡 Claude primary; Devin blocked on spawn-exit issue; local (aider) dry-run only | ✅ 15+ LLMs via OpenAI-compatible APIs | ✅ LiteLLM | ❌ Devin-only | ✅ N/A (is the backend) |
@@ -113,7 +113,7 @@ Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in pro
 
 - **Operator-machine identity** — Minsky's commits land as you, with your SSH key, your gitconfig, your GitHub token. No credential provisioning, no SaaS sandbox, no token handoff. Every other orchestrator runs in a separate identity boundary (Devbox, AMP vault, Docker sandbox, fresh clone).
 - **Constitution as deterministic CI** — 17 rules enforced as 53 pre-pr-lint stages and 65 CI jobs. Every PR an agent opens is gated by the same lint pipeline a human-authored PR would face. OpenHands / CrewAI / AutoGen / LangGraph rely on LLM-advisory prompts; none enforce policy at the gate level.
-- **Self-improving daemon** — Minsky reads its own iteration ledger (`.minsky/experiment-store/`) and tunes its own prompts / policies. The daemon refactors the daemon. Most P0s in this repo were surfaced by daemon iterations on itself.
+- **Self-improving substrate** — Minsky reads its own iteration ledger (`.minsky/experiment-store/`) and surfaces tasks against its own weak spots; the daemon refactors the daemon (most P0s in this repo were surfaced by daemon iterations on itself). Note: **closed-loop MAPE-K prompt tuning is in specification phase** ([user-story-003](user-stories/003-mape-k-improves-prompts.md)); what ships today is the substrate (experiment-store + observer + spec monitor + task-filing audit), not the auto-tuning A/B test.
 - **Cross-repo fleet at operator scale** — one Minsky daemon walks N hosts in round-robin (3 iterations per host per pass). OpenHands needs the Enterprise tier; CrewAI Crews are single-context.
 - **TASKS.md as operator surface** — work queue is plain markdown in git. No web UI to log into, no Python file to import, no DSL to learn. Operators edit it like any other file; the daemon picks tasks up on the next iteration.
 

@@ -2919,6 +2919,97 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P3
 
+- [ ] `research-finding-docker-sandbox-adapter` — research OpenHands' Docker sandbox shape; consider as optional M4 sandbox adapter for Minsky's untrusted-task path
+  - **ID**: research-finding-docker-sandbox-adapter
+  - **Tags**: p3, research-followup, observed-2026-05-22, openhands-deep-dive, m4
+  - **Milestone**: M4
+  - **Competitive-goal**: closes the "preventive vs detective sandbox" gap surfaced in competitors/openhands.md § "Why choose OpenHands over Minsky" bullet 2. OpenHands' Docker sandbox is preventive (agent cannot escape the container); Minsky's scope-leak detector is post-hoc (detects leaks after they happen, doesn't prevent them). For untrusted-task scenarios (e.g. running an agent on a fresh PR from an external contributor), preventive isolation is materially safer.
+  - **Touches**: `novel/adapters/sandbox/` (new dir — interface + Docker implementation), `ARCHITECTURE.md` § "Dependency table" (add row), `vision.md` § "Pattern conformance index" (add row citing OpenHands' `app_server/sandbox/` as the pattern source).
+  - **Details**: 2026-05-22 OpenHands deep-dive surfaced the pattern (`openhands/app_server/sandbox/`). Read OpenHands' `docker_sandbox_service.py` + `process_sandbox_service.py` + `remote_sandbox_service.py` to extract the abstraction. Design Minsky's `SandboxAdapter` interface around the same shape: { spawn(cwd, cmd), readFiles(), writeFiles(), kill() }. Implement Docker variant first. Off by default (opt-in via `~/.minsky/config.json`); operators on locked-down corporate machines can stay with the bash-runner default.
+  - **Hypothesis**: A Docker sandbox adapter reduces the per-iteration scope-leak rate by ≥80% for tasks marked `untrusted: true` in TASKS.md, at a per-iteration overhead of ≤20% wall-clock.
+  - **Success**: integration test in `test/integration/sandbox-docker.test.ts` shows zero filesystem writes outside the workspace dir for a deliberately-escaping agent prompt; `bin/minsky` honors `untrusted: true` in `.minsky/repo.yaml` by spawning under the Docker adapter.
+  - **Pivot**: if the overhead exceeds 50% wall-clock OR if no host-repo operator opts in within 60 days of shipping, the sandbox adapter is a research artifact, not a shipping default. Move to "What we steal from each" inspiration row, kill the package.
+  - **Measurement**: `pnpm exec vitest run test/integration/sandbox-docker.test.ts --reporter=basic` exit 0 + `node scripts/measure-sandbox-overhead.mjs --baseline-iterations=10` reports ≤20% delta vs bash-runner.
+  - **Anchor**: rule #1 (don't reinvent — OpenHands has shipped this pattern, adopt the shape); rule #7 (chaos engineering — preventive isolation is the higher-bar failure-mode containment); competitors/openhands.md § "Pluggable sandbox layer"; All-Hands AI, *OpenHands architecture*, `openhands/app_server/sandbox/`; OWASP LLM02 (untrusted-input handling).
+
+- [ ] `research-finding-multi-task-benchmark-suite` — adopt OpenHands Index's 5-task multi-benchmark suite shape; expand Minsky's corpus beyond `humaneval-pass-at-1`
+  - **ID**: research-finding-multi-task-benchmark-suite
+  - **Tags**: p3, research-followup, observed-2026-05-22, openhands-deep-dive, m1-10
+  - **Milestone**: M1
+  - **Competitive-goal**: closes the "single-number headline benchmark" framing weakness. OpenHands' Index reports per-task scores across 5 dimensions (issue resolution, greenfield, frontend, testing, info gathering); a single SWE-bench number masks where the agent fails. Minsky's corpus has 1 vendor-primary metric (`humaneval-pass-at-1`); adding 4 more makes the orchestrator-tier delta visible per-dimension.
+  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (add the 4 new metrics), `novel/competitive-benchmark/README.md` (document the multi-task suite shape), `competitors/<each>.md` (refresh scorecard sections with per-task scores where vendor-primary).
+  - **Details**: 2026-05-22 OpenHands deep-dive surfaced the suite at `index.openhands.dev`. The 5 dimensions: issue-resolution (SWE-bench-Verified), greenfield (Commit0), frontend (SWE-Bench-Multimodal), testing (SWT-Bench), info-gathering (GAIA). For each, find which competitors publish vendor-primary scores; add as a new metric to the corpus catalogue.
+  - **Hypothesis**: A 5-metric multi-task suite reveals at least one orchestrator-tier strength of Minsky that the single SWE-bench number masks (e.g., Minsky's constitution gates may help on testing tasks specifically by forcing the agent to write a failing test before fixing).
+  - **Success**: `bin/minsky competitive --json | jq '.metrics | length'` returns ≥6 (5 SWE-bench-shape metrics + the existing humaneval-pass-at-1).
+  - **Pivot**: if 60 days pass and no competitor publishes ≥3 of the 5 dimensions, the suite is too sparse — fall back to the single SWE-bench number plus one orchestrator-tier metric.
+  - **Measurement**: `node novel/competitive-benchmark/dist/cli.js --json | jq '[.metrics[] | select(.id | startswith("swe-bench-") or startswith("gaia-"))] | length'` ≥5.
+  - **Anchor**: rule #4 (visible — multi-dimensional metrics surface failures the single number masks); competitors/openhands.md § "What we learn / steal" bullet 2; All-Hands AI, *OpenHands Index Three Months Out*, openhands.dev/blog/openhands-index-3-months-out, 2026-05-11.
+
+- [ ] `research-finding-hierarchical-memory-architecture` — research CrewAI's unified_memory.py; consider for claude-handoff-spec
+  - **ID**: research-finding-hierarchical-memory-architecture
+  - **Tags**: p3, research-followup, observed-2026-05-22, crewai-deep-dive, m2
+  - **Milestone**: M2
+  - **Competitive-goal**: closes the "Minsky has no equivalent" gap acknowledged in competitors/crewai.md § "Why choose CrewAI over Minsky" bullet 2. CrewAI's hierarchical memory (`/project/alpha`, `/agent/researcher/findings` scopes, LLM-analyzed) is more sophisticated than Minsky's git + TASKS.md substrate for multi-turn conversations. The claude-handoff-spec M2 work needs a memory pattern; this is the candidate to evaluate.
+  - **Touches**: `novel/claude-handoff-spec/src/memory.ts` (new — interface design after research), `vision.md` § "Pattern conformance index" (add row citing CrewAI's unified_memory.py as the pattern source).
+  - **Details**: 2026-05-22 CrewAI deep-dive surfaced `lib/crewai/src/crewai/memory/unified_memory.py`. Read the file end-to-end. Document: (a) the scope syntax (`/project/<id>`, `/agent/<id>/<bucket>`), (b) the LLM-analyzed-scope-inference algorithm (how does it decide which scope a memory belongs to?), (c) the adaptive-depth recall scoring (semantic + recency + importance weights), (d) the persistence backend choice (which embedder, which vector store).
+  - **Hypothesis**: CrewAI's hierarchical memory shape maps cleanly to Minsky's per-task + per-host + per-fleet memory needs; the LLM-analyzed-scope-inference is a useful default that Minsky should adopt (rather than requiring operators to declare scopes manually).
+  - **Success**: a research file at `research/crewai-unified-memory-analysis.md` documents the 4 questions above + a "do we adopt this in claude-handoff-spec" recommendation.
+  - **Pivot**: if the unified_memory.py implementation depends heavily on CrewAI-specific Pydantic shapes that don't transfer, the recommendation is "don't adopt the implementation but adopt the SCOPE GRAMMAR" — the grammar is portable, the impl isn't. Or full reject if the grammar doesn't survive M2 use cases.
+  - **Measurement**: `[ -f research/crewai-unified-memory-analysis.md ] && grep -c "^## " research/crewai-unified-memory-analysis.md` ≥4 (one section per question).
+  - **Anchor**: rule #1 (don't reinvent — CrewAI shipped this, evaluate before building from scratch); competitors/crewai.md § "What we learn / steal" bullet 1; CrewAI maintainers, `lib/crewai/src/crewai/memory/unified_memory.py`, github.com/crewAIInc/crewAI.
+
+- [ ] `research-finding-event-driven-orchestration-flows` — research CrewAI Flows; evaluate as alternative to procedural cross-repo-runner
+  - **ID**: research-finding-event-driven-orchestration-flows
+  - **Tags**: p3, research-followup, observed-2026-05-22, crewai-deep-dive, m2, architecture
+  - **Milestone**: M2
+  - **Competitive-goal**: closes the "Flows-style state machines might map to MAPE-K phases more cleanly" hypothesis raised in competitors/crewai.md § "What we learn / steal" bullet 3. Minsky's cross-repo-runner is procedural — it walks hosts, picks tasks, spawns agents in a hardcoded sequence. CrewAI Flows use `@start` / `@listen` / `@router` decorators to express the same logic declaratively; the declarative shape might make MAPE-K phase boundaries (Monitor / Analyze / Plan / Execute) explicit in the type system rather than implicit in the procedural call graph.
+  - **Touches**: `novel/cross-repo-runner/src/flow-spike.ts` (new — a spike showing how cross-repo-runner could be expressed as a Flow), `vision.md` § "Pattern conformance index" (add row citing CrewAI Flows as the pattern source if adopted).
+  - **Details**: 2026-05-22 CrewAI deep-dive surfaced `lib/crewai/src/crewai/flow/flow.py`. Read the file + the docs section on Flows. Build a spike: re-express cross-repo-runner's loop body (pickHostTask → spawnAgent → recordIteration → fileTask) as a Flow with @start/@listen decorators. Measure: (a) how many lines does the procedural version save vs the declarative version? (b) do the MAPE-K phases become more visible in the type system? (c) does it become easier to add new MAPE-K phases without touching the spawn logic?
+  - **Hypothesis**: A Flow-shaped cross-repo-runner has comparable LOC to the procedural one but makes MAPE-K phase boundaries explicit, which materially helps when adding MAPE-K phases (Monitor, Analyze) that don't exist in the procedural form today.
+  - **Success**: spike at `novel/cross-repo-runner/src/flow-spike.ts` runs the existing test suite (`pnpm exec vitest run novel/cross-repo-runner/` with the spike substituted for the procedural runner) green for at least 80% of tests, with the remaining 20% documented as "would need adapter".
+  - **Pivot**: if the spike's LOC is >50% larger than procedural OR if <60% of tests pass, the declarative shape is wrong for Minsky's call graph — keep procedural and document the rejection in the research file.
+  - **Measurement**: `pnpm exec vitest run novel/cross-repo-runner --reporter=basic` exit 0 against the spike branch.
+  - **Anchor**: rule #1 (don't reinvent — CrewAI shipped Flows, evaluate before building MAPE-K phases procedurally); competitors/crewai.md § "What we learn / steal" bullet 3; CrewAI maintainers, `lib/crewai/src/crewai/flow/flow.py`, github.com/crewAIInc/crewAI.
+
+- [ ] `research-finding-manager-agent-delegation-pattern` — research CrewAI's manager agent / delegation pattern; informs multi-persona-pipeline-handoff-spec
+  - **ID**: research-finding-manager-agent-delegation-pattern
+  - **Tags**: p3, research-followup, observed-2026-05-22, crewai-deep-dive, openhands-deep-dive, m2
+  - **Milestone**: M2
+  - **Competitive-goal**: closes the "Minsky has no built-in delegation pattern" gap acknowledged in competitors/crewai.md § "Why choose CrewAI over Minsky" bullet 3. Both CrewAI (manager agent in hierarchical process) AND OpenHands (sub-agent delegation in May 2026 roadmap) ship delegation patterns. Minsky's M2 multi-persona-pipeline-handoff-spec needs a delegation contract; researching both gives Minsky 2 reference designs.
+  - **Touches**: `research/delegation-patterns-comparison.md` (new — compare CrewAI manager agent vs OpenHands sub-agent), `novel/claude-handoff-spec/src/delegation.ts` (new — interface after research).
+  - **Details**: Two sources to evaluate: (a) CrewAI's hierarchical process — `docs.crewai.com/en/learn/hierarchical-process` — auto-spawned or custom manager agent coordinates task delegation, validates output, and decides whether to re-delegate; (b) OpenHands' sub-agent delegation in the May 2026 roadmap — multi-agent workflows where parent agents delegate specialized sub-tasks to sub-agents, with inline critic/verification of sub-agent output. Compare: how does each handle (i) sub-agent failure recovery, (ii) context handoff to sub-agent, (iii) result aggregation, (iv) cycle detection (sub-agent re-delegating to parent).
+  - **Hypothesis**: CrewAI's manager-agent pattern (synchronous, hierarchical) is the right starting shape for Minsky's multi-persona pipeline; OpenHands' sub-agent (asynchronous, inline-critic) is the right second-iteration shape once the synchronous baseline ships.
+  - **Success**: `research/delegation-patterns-comparison.md` exists with the 4 questions above answered for both vendors + a "Minsky adopts pattern X first, pattern Y second" recommendation.
+  - **Pivot**: if both patterns require LLM-driven coordination that Minsky's deterministic-CI ethos rejects, the pattern is "deterministic handoff via TASKS.md sub-tasks" not "manager agent in the loop" — and the research file documents the rejection.
+  - **Measurement**: `[ -f research/delegation-patterns-comparison.md ] && grep -c "^## " research/delegation-patterns-comparison.md` ≥4.
+  - **Anchor**: rule #1 (don't reinvent — 2 vendors shipped this, evaluate before building); competitors/crewai.md § "What we learn / steal" bullet 2; competitors/openhands.md § "What we learn / steal" bullet 4; CrewAI hierarchical process docs; OpenHands Agent Canvas Initiative GitHub issue #14374.
+
+- [ ] `research-finding-pluggable-sandbox-layer` — extract sandbox/agent-loop separation pattern from OpenHands' app_server/sandbox/
+  - **ID**: research-finding-pluggable-sandbox-layer
+  - **Tags**: p3, research-followup, observed-2026-05-22, openhands-deep-dive, architecture, m4
+  - **Milestone**: M4
+  - **Competitive-goal**: closes the "Minsky's sandbox shape is monolithic" architectural debt. OpenHands separates sandbox-shape (Docker / Process / Remote-VM) from agent-loop (the same SDK runs in all three). Minsky's bin/minsky always runs the agent in the host repo directly (Process shape). Separating sandbox shape lets operators pick the security/cost tradeoff per task.
+  - **Touches**: `novel/adapters/sandbox/` (new — interface), `ARCHITECTURE.md` § "Dependency table" (add row). Related to `research-finding-docker-sandbox-adapter` but scoped differently: this task is the INTERFACE, that one is the DOCKER IMPLEMENTATION.
+  - **Details**: 2026-05-22 OpenHands deep-dive surfaced the pattern at `openhands/app_server/sandbox/` — three implementations (Docker, Process, Remote SSH) behind a common abstraction. Design Minsky's `SandboxAdapter` interface to match. The Process implementation = today's behavior (spawn in host dir). The Docker implementation = the work tracked in `research-finding-docker-sandbox-adapter`. The Remote-VM implementation = future M4 work.
+  - **Hypothesis**: Extracting the sandbox abstraction from Minsky's runner code reveals existing assumptions about the agent's execution context (e.g., that `$HOME` is the operator's HOME) that won't hold for non-Process sandboxes; surfacing those assumptions is itself valuable.
+  - **Success**: `novel/adapters/sandbox/index.ts` exports a `SandboxAdapter` interface; `process-sandbox-adapter.ts` exists as the default (today's behavior wrapped in the interface); `ARCHITECTURE.md` table has the new row.
+  - **Pivot**: if the abstraction adds >100 LOC of indirection for zero shipping benefit (no Docker, no Remote variant yet), revert and document the rejection — abstraction without an implementation is over-engineering.
+  - **Measurement**: `[ -f novel/adapters/sandbox/index.ts ] && grep -c "interface SandboxAdapter" novel/adapters/sandbox/index.ts` ≥1.
+  - **Anchor**: rule #2 (every dependency through an interface — sandbox shape IS a dependency); competitors/openhands.md § "Pluggable sandbox layer"; OpenHands maintainers, `openhands/app_server/sandbox/`, github.com/OpenHands/OpenHands.
+
+- [ ] `research-finding-mape-k-shipping-status-banner` — when MAPE-K closed-loop ships, sweep README + competitors/* + vision.md to flip "substrate today, full loop forthcoming" claims to fully-shipping
+  - **ID**: research-finding-mape-k-shipping-status-banner
+  - **Tags**: p3, research-followup, observed-2026-05-22, forward-tracking, mape-k
+  - **Milestone**: M2
+  - **Competitive-goal**: closes the "documentation drift after the moat materializes" failure mode. Today (2026-05-22), 4 files claim MAPE-K is a moat with substrate-shipping framing. When `user-stories/003-mape-k-improves-prompts.md` lands as ✅ Done, those 4 files must be swept atomically so the substrate-only framing doesn't outlive the closed-loop's arrival.
+  - **Touches**: `README.md` § "How Minsky compares to other tools" row "Self-improvement (MAPE-K)", `competitors/README.md` § moats table row 4, `competitors/openhands.md` § "Why choose Minsky over OpenHands" bullet 4, `competitors/crewai.md` § "Why choose Minsky over CrewAI" bullet 5.
+  - **Details**: 2026-05-22 honesty audit surfaced that 4 files claimed MAPE-K = ✅ shipping when the user story is in Specification phase. PR fixed all 4 to "🟡 substrate today, full loop forthcoming". When the closed loop ships (user-story-003 → ✅ Done), this task is the inverse: re-sweep all 4 surfaces and flip the framing to "✅ Full MAPE-K loop ships (substrate + closed-loop A/B prompt tuning)".
+  - **Hypothesis**: Forward-tracking the documentation invariant (4 files synced on the same claim) prevents the stale-claim drift that triggered the 2026-05-22 honesty audit.
+  - **Success**: when `user-stories/003-mape-k-improves-prompts.md` Status section says "✅ Done", all 4 files referenced above also flip to ✅ — verified by `node scripts/check-mape-k-claim-coherence.mjs` (a new lint that asserts the moat claim in all 4 files matches the user-story status).
+  - **Pivot**: if `user-story-003` is reframed (e.g., "we're not building closed-loop MAPE-K, we're shipping a different self-improvement pattern"), this task changes shape to "sweep all 4 files to match the new self-improvement framing" — same discipline, different content.
+  - **Measurement**: `node scripts/check-mape-k-claim-coherence.mjs` exit 0 once the user story flips.
+  - **Anchor**: rule #4 (visible — claims that are shipping should be visible, claims that aren't should be visibly aspirational); rule #15 (milestone alignment gate — 7 surfaces invariant, this is a multi-surface coherence check); 2026-05-22 operator honesty audit; user-stories/003-mape-k-improves-prompts.md § Status.
+
 - [ ] `migrate-rule-9-lint-to-upstream` — once `@tasks-md/lint@0.8.0` (with `--require-prereg`) is published on npm, replace the local `scripts/check-rule-9-tasksmd-fields.mjs` with `npx -y @tasks-md/lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md`. The allowlist file is already in place (PR #690); the script reads from it. Blocked on the tasks.md v0.8.0 npm publish workflow succeeding (see `tasks-md-trusted-publishing-setup`).
   - **ID**: migrate-rule-9-lint-to-upstream
   - **Tags**: p3, cleanup, lint, upstream, tasks-md

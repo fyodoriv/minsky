@@ -15,7 +15,7 @@ This directory holds one markdown research file per competitor in the M1.10 scor
 | 1 | **Daemon, not framework** | Operator attaches and walks away. Not a Python library / SDK / Flow you wrap your code in. | None — every orchestrator competitor is a framework |
 | 2 | **Operator-machine identity** | Runs as the operator's user with the operator's `~/.ssh`, `~/.gitconfig`, `~/.config/gh/`. Commits land as the operator. No cloud sandbox, no fresh clone. | None — Devin (Cognition Cloud + Devbox), CrewAI (Enterprise platform), AutoGen (whatever Python container), all run with separate identity |
 | 3 | **Constitution + deterministic enforcement** | 17 non-negotiable rules, each enforced by a CI lint. Not "best practices in docs" — `pnpm pre-pr-lint --stage=full` runs 53 checks. | None |
-| 4 | **MAPE-K self-improvement** | The daemon mines its own iteration ledger and improves itself. CrewAI/AutoGen/MetaGPT are static once shipped. | None |
+| 4 | **MAPE-K self-improvement (substrate today, full loop forthcoming)** | The substrate ships: experiment-store + observer + spec monitor + task-filing audit (the daemon files tasks against its own weak spots). Closed-loop prompt A/B tuning is spec-only — `user-stories/003-mape-k-improves-prompts.md` status: Specification. CrewAI/AutoGen/MetaGPT have neither substrate nor closed loop; the substrate alone is already differentiated. | None (substrate); none plan a closed loop |
 | 5 | **Cross-repo fleet at operator scale** | Walks N hosts in round-robin on one machine. | None — CrewAI Flow = one workflow, LangGraph thread = one conversation, Devin session = one task |
 | 6 | **TASKS.md as operator surface** | Plain markdown file. No dashboard, no API, no DSL. | None |
 
