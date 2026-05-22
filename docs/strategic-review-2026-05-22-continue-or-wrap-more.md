@@ -176,6 +176,7 @@ The operator's framing: *"maybe if we take in more already built products, maybe
 **The reshape**: post-wrap Minsky becomes a thin operator-identity + constitution-as-CI layer on top of OpenHands (agent) + agentbrew (skill distribution) + a few other narrowly-chosen wraps. Target codebase size: ~10K LOC by end of 2026 (down from ~70K).
 
 **What's wrapped (delegated to competitors)**:
+
 - Agent loop → OpenHands (PR #733 approved)
 - Multi-LLM routing → OpenHands' 15+ backend support
 - Docker sandbox → OpenHands' pluggable sandbox layer
@@ -186,6 +187,7 @@ The operator's framing: *"maybe if we take in more already built products, maybe
 - Sub-agent delegation (M2 work) → OpenHands' sub-agent shape from their May 2026 roadmap
 
 **What stays distinctively Minsky** (~10K LOC total target):
+
 - Daemon shell (~1K LOC) — bash entry + launchd/systemd + dynamic watchdog
 - TASKS.md reader (~500 LOC) — parser + picker
 - Constitution lint stack (~5K LOC) — TARGET DOWN from 53K LOC; aggressive deletion of lints that OpenHands' output already satisfies
