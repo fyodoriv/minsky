@@ -1,3 +1,6 @@
+# <!-- scope: human-approved 2026-05-22 M1.10 slice (c+) — weekly scorecard auto-refresh timer; M1.10 milestone "scorecard updates weekly" deliverable. -->
+# <!-- pattern: not-applicable — systemd .timer unit mirroring the launchd StartCalendarInterval in com.minsky.weekly-competitive.plist; the periodic-task supervisor pattern (Borg/Bashir/Burns/Hightower 2017) is already declared at vision.md § "Pattern conformance index" row 93 for `@minsky/competitive-benchmark`. Same shape as minsky-auto-merge.timer. -->
+#
 # Minsky weekly competitive scorecard timer — fires
 # `minsky-weekly-competitive.service` every Monday at 04:00 local while
 # `minsky-supervisor.target` is active. Parallels the launchd

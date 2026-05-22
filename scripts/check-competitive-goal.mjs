@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
+// <!-- scope: human-approved 2026-05-22 M1.10 slice (d) — deterministic lint that every P0/P1 task block in TASKS.md carries `**Competitive-goal**:`; M1.10 milestone deliverable; operator directive 2026-05-16 slice (d) of self-metrics-competitive-benchmark. -->
+//
 // Slice (d) of `self-metrics-competitive-benchmark`: deterministic
 // lint that every non-trivial task block in TASKS.md carries a
 // `**Competitive-goal**:` field naming which scorecard metric the
