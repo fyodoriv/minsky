@@ -61,7 +61,8 @@ describe("parseTasks", () => {
   });
 
   test("(b) skips lines outside any priority section (e.g. preamble)", () => {
-    const body = `# Tasks\n\nIntro paragraph.\n\n- [ ] Orphan task before any heading\n  - **ID**: orphan\n\n## P0\n\n- [ ] Real task\n  - **ID**: real\n  - **Competitive-goal**: x\n`;
+    const body =
+      "# Tasks\n\nIntro paragraph.\n\n- [ ] Orphan task before any heading\n  - **ID**: orphan\n\n## P0\n\n- [ ] Real task\n  - **ID**: real\n  - **Competitive-goal**: x\n";
     const tasks = parseTasks(body);
     // The orphan task has no priority section assignment so it does NOT
     // appear in the classified output (priority="" is filtered).
@@ -69,21 +70,24 @@ describe("parseTasks", () => {
   });
 
   test("(c) tolerates `- [x]` (checked) and `- [ ]` (unchecked) markers", () => {
-    const body = `# Tasks\n\n## P0\n\n- [x] Completed task\n  - **ID**: done\n  - **Competitive-goal**: x\n`;
+    const body =
+      "# Tasks\n\n## P0\n\n- [x] Completed task\n  - **ID**: done\n  - **Competitive-goal**: x\n";
     const tasks = parseTasks(body);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]?.hasCompetitiveGoal).toBe(true);
   });
 
   test("(d) flags empty `**Competitive-goal**:` as missing (no whitespace-only allowed)", () => {
-    const body = `# Tasks\n\n## P0\n\n- [ ] Task with empty field\n  - **ID**: empty\n  - **Competitive-goal**:   \n  - **Details**: ...\n`;
+    const body =
+      "# Tasks\n\n## P0\n\n- [ ] Task with empty field\n  - **ID**: empty\n  - **Competitive-goal**:   \n  - **Details**: ...\n";
     const tasks = parseTasks(body);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]?.hasCompetitiveGoal).toBe(false);
   });
 
   test("(e) requires the exact label `**Competitive-goal**:` (case-sensitive)", () => {
-    const body = `# Tasks\n\n## P0\n\n- [ ] Task with wrong-case field\n  - **ID**: wrong-case\n  - **competitive-goal**: lowercase variant\n`;
+    const body =
+      "# Tasks\n\n## P0\n\n- [ ] Task with wrong-case field\n  - **ID**: wrong-case\n  - **competitive-goal**: lowercase variant\n";
     const tasks = parseTasks(body);
     expect(tasks).toHaveLength(1);
     // Lowercase variant should NOT match (we require the canonical capitalization).
