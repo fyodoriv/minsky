@@ -63,10 +63,17 @@ Then [AGENTS.md](../AGENTS.md) covers the rest: claiming tasks, branch hygiene, 
 
 ## I want to understand how Minsky compares to other tools
 
-Two reads:
+Three reads, in order:
 
-- [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) — the M1.10 scorecard. Orchestrator tier (MetaGPT) + agent tier (Claude Code, Devin, OpenHands, …). Why both: Minsky is at the orchestrator tier; it composes agents.
-- [competitors/](../competitors/) — per-vendor research files. One markdown per competitor with positioning + scorecard readings.
+1. [competitors/README.md](../competitors/README.md) — **the strategic landscape synthesis**. 6 moats + 5 honest gaps + adopt/reject pattern table. Read this FIRST.
+2. [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) — the M1.10 scorecard. Orchestrator tier (MetaGPT) + agent tier (Claude Code, Devin, OpenHands, …). Why both: Minsky is at the orchestrator tier; it composes agents.
+3. [competitors/](../competitors/) — per-vendor research files. One markdown per competitor with positioning + scorecard readings.
+
+For the **moats as user stories** with chaos coverage + pre-registered umbrella experiments:
+
+- [user-stories/012-operator-machine-identity-moat.md](../user-stories/012-operator-machine-identity-moat.md) — moat #2 (`~/.gitconfig`, `~/.config/gh/`, `~/.ssh`)
+- [user-stories/013-daemon-not-framework-moat.md](../user-stories/013-daemon-not-framework-moat.md) — moat #1 (zero `@minsky/*` imports in host repo)
+- [ARCHITECTURE.md § "Competitive layer-by-layer"](../ARCHITECTURE.md#competitive-layer-by-layer) — 14-row table mapping Minsky vs 5 orchestrator competitors
 
 ## I'm operating Minsky in production
 
