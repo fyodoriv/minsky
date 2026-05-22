@@ -27,7 +27,6 @@ The "How to verify" column gives the exact shell command, file path, or PR that 
 | **M4** | Multi-repo coordination at fleet scale | 🔵 Not started |
 | **M5** | Self-distribution (`npx minsky` on any machine) | 🔵 Not started |
 
-
 ## M1 — Stable, Measurable, One-Command — v0.1.0
 
 Minsky works reliably on any repo, installs trivially, is honestly measured against competitors, and runs a useful 8-hour default session without human intervention.
