@@ -114,7 +114,7 @@ Open-source autonomous software engineering platform (formerly OpenDevin). **Req
 
 > Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
 
-**Verdict: PARTIAL YES — operator-approved 2026-05-22.** Agent layer wraps as a pluggable backend; orchestrator layer does NOT wrap. Implementation tracked at [`add-openhands-as-pluggable-backend`](../TASKS.md) (P0, external-dep-blocked on OpenHands' June 1, 2026 Agent Canvas Initiative CLI release).
+**Verdict: PARTIAL YES — operator-approved 2026-05-22.** Agent layer wraps as a pluggable backend; orchestrator layer does NOT wrap. Implementation tracked at [`add-openhands-as-pluggable-backend`](../TASKS.md) (P0, external-dep-blocked on OpenHands' June 1, 2026 Agent Canvas Initiative CLI release). **Detailed vision of the post-wrap world**: [docs/minsky-wraps-openhands-vision.md](../docs/minsky-wraps-openhands-vision.md) — operator's day in the life, architectural before/after, new failure modes, second-order effects on other competitor analyses.
 
 This is the most strategically interesting case in Minsky's competitor set, because OpenHands ships things Minsky doesn't (and probably can't catch up to in M1):
 
