@@ -1069,6 +1069,37 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-measurement-inspects-output.test.mjs
 
+  orphan-tests:
+    # rule #10 ratchet applied to the test/ vs src/ API drift class
+    # observed 2026-05-21 (PR #639 -> #705 chain): when a parallel
+    # `<pkg>/test/*.test.{ts,mjs,js}` file imports a named symbol from
+    # `../src/...` that doesn't actually exist as a named export of the
+    # resolved source, the test file is "orphan" and crashes at runtime
+    # only — never at typecheck (per-package tsconfigs `include` only
+    # `src`). The lint runs ~200ms and catches the class deterministically.
+    # Class boundary: cross-directory imports from `../src/` or
+    # `../../src/` only — local imports and between-package boundaries
+    # are tsc's job.
+    # Anchor: rule #10 (deterministic enforcement); Aho-Sethi-Ullman
+    #   1986 *Compilers: Principles, Techniques, and Tools*, Ch. 3
+    #   (lexer shape — regex over ESM tokens is sufficient); Beck 2002
+    #   *Test-Driven Development*, Ch. 26 (one bug, one test).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: orphan-tests lint
+        run: node scripts/check-orphan-tests.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-orphan-tests.test.mjs
+
   no-singleton-experiment:
     # rule #10 ratchet applied to experiments-directory-migration: the
     # singleton EXPERIMENT.yaml at the repo root was retired in favour
@@ -1558,6 +1589,7 @@ jobs:
       - measurement-inspects-output
       - metric-freshness
       - no-singleton-experiment
+      - orphan-tests
       - otel-no-pii
       - secret-scan
       - security-docs-cohesion
@@ -1619,6 +1651,7 @@ jobs:
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
+                   "${{ needs.orphan-tests.result }}" \
                    "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.secret-scan.result }}" \
                    "${{ needs.security-docs-cohesion.result }}" \
