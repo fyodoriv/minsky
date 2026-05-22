@@ -35,9 +35,80 @@ Hard signals:
 
 > **Order content by what the reader needs to know RIGHT NOW, not by what was easy or chronological for the author to write.**
 
-The reader is a stranger who arrived because someone said "look at this". They have 30 seconds to decide whether to keep reading. The first 30 seconds must answer "do I care?"; the next 2 minutes must answer "can I try it?"; the next 5 minutes must answer "should I commit to it?". Anything that doesn't serve one of those three questions belongs lower in the doc — or in a separate doc entirely.
+The reader is a stranger who arrived because someone said "look at this". **They have 12 seconds, not 12 minutes.** The first 12 seconds must answer "do I care?"; the next 2 minutes must answer "can I try it?"; the next 5 minutes must answer "should I commit to it?". Anything that doesn't serve one of those three questions belongs lower in the doc — or in a separate doc entirely.
 
 Author-chronology order (the bug this skill prevents): the author shipped feature A first, so A goes first; then B, so B goes second; etc. This produces a doc that's easy to write and useless to read.
+
+## Five iron rules for the top of the doc
+
+These are the load-bearing rules. Violating any one of them is sufficient to fail the cold-reader test even if everything else is perfect. They are independent of the tier hierarchy below — think of them as filters that apply BEFORE you start tier-tagging.
+
+### Rule 1 — No time-to-read banners measured in minutes at the top
+
+> Wrong: `Three reads, ~12 minutes total: this README → vision.md → MILESTONES.md`
+> Wrong: `~15 minutes to read end-to-end`
+> Wrong: `Estimated reading time: 8 min`
+>
+> Right: no banner at all. The doc's structure IS the contract.
+
+Cold readers don't have 12 minutes. They have ~12 seconds before they decide whether to keep reading; if your README opens with "12 minutes to read", you've already lost — they bounce immediately or feel manipulated when they realise the banner is aspirational not measured. Even when the banner is honest, it telegraphs "this doc is long" to a reader who is shopping for short. Delete it.
+
+Time-to-read banners are acceptable ONLY in tier-5 reference docs (e.g., an architecture overview labeled "~10 min read") because the reader has already decided to commit. They are never acceptable in a tier-1 / tier-2 surface.
+
+### Rule 2 — No navigation choices ("read X OR skip to Y") above the first `## section`
+
+> Wrong: `[Seven reasons you'd want this →](#why) · Or skip to [getting started](#getting-started).`
+> Wrong: `If you're an operator, read X; if you're a contributor, read Y; if you're curious, read Z.`
+> Wrong: `TL;DR · Quick start · Architecture · Comparison · License` (jump links at the top of a tool README)
+>
+> Right: the author sets the flow. Reader reads top-to-bottom; if they bounce, they were not the audience.
+
+A choice menu at the top is the author admitting they don't know what the reader should read first. That's the author's job to decide. Choice paralysis at byte zero is worse than serving the wrong content to one reader segment.
+
+**The only acceptable exception**: a table of contents at the top of a genuinely large doc (≥2000 lines, e.g., a full specification or RFC). For a tool README under 500 lines, the answer is always "no choice menu at the top".
+
+Choices ARE welcome at the BOTTOM of the doc ("Where to read next — pick by audience"). That's tier 6, after the reader has committed.
+
+### Rule 3 — Internal taxonomy goes deep, not at the top
+
+> Wrong (at the top): `## Minsky's position — Minsky is an orchestrator, not an agent. It sits ABOVE Claude / Devin...`
+> Wrong (at the top): `Foo is a library, not a framework — it does X not Y.`
+> Wrong (at the top): `Bar is a P2P system in the Y class of Z-style protocols.`
+
+Internal taxonomy is the project team's mental model — which competitive bucket the tool sits in, which architectural pattern it follows, which framing the maintainers use internally. The reader doesn't have the same context; the taxonomy reads as inside baseball.
+
+A cold reader's first 12 seconds need to answer "what does this do for me?" — not "which conceptual category does this belong to?". Move all self-classification (`X is an orchestrator`, `X is a daemon-not-framework`, `X is a peer of Y but not Z`) to **tier 5 (reference) or tier 6 (design principles)**. The reader gets there only after they've decided to commit; at that point taxonomy is useful context.
+
+If the taxonomy is genuinely market-critical (the project is a well-known alternative to a well-known incumbent and the comparison sells), that's a tier-4 positioning section — not a tier-1 framing claim. See "When does positioning belong in the README at all?" below.
+
+### Rule 4 — Why X before What X does
+
+> Wrong (this order): What it actually does (mechanism) → Why you'd want it (benefit)
+> Right (this order): Why you'd want it (benefit) → How it works (mechanism)
+
+A cold reader who arrives because someone said "look at this" needs the BENEFIT first — what they GET from the tool — before they care about the MECHANISM. "Why X" sells the tool; "How X works" explains it. The reader can't judge the mechanism until they know why the mechanism matters to them.
+
+This rule applies at the section level (Why-section before How-section) AND at the paragraph level inside the tier-1 lede (outcome sentence before mechanism sentence). Combined with the existing Tier-1 paragraph criteria, this means:
+
+- Sentence 1 of the lede: outcome ("the repo improves over time, with rigour")
+- Sentence 2-3 of the lede: lightest mechanism sketch ("identifies issues, fixes them, opens a PR")
+- Section 2 of the README: more benefits (the "Why" section listing the 5-7 reader-visible advantages)
+- Section 3 of the README: the "How it works" walkthrough
+- NOT: section 2 mechanism, section 3 benefits
+
+### Rule 5 — One section per topic; no duplicate How-it-works / What-it-does sections
+
+> Wrong: `## What it actually does` (tier 3 walkthrough) AND `## How Minsky works inside` (tier 5 architecture) — two sections, same topic, different depth.
+> Right: ONE `## How it works` section that nests the depth levels — high-level walkthrough first, then key files / architecture sketch in a subsection.
+
+Duplicate "How it works" sections are the most common structural bug in technical READMEs. The author writes a friendly walkthrough first (tier 3), then later wants to add file paths + architecture (tier 5), and ends up with two sections on the same topic. The reader sees the duplication, gets confused about which is canonical, and reads neither carefully.
+
+The fix: ONE `## How it works` section with two parts —
+
+1. **The 30-second walkthrough** (tier 3) — numbered steps, plain English, zero file paths.
+2. **The 30-second architecture sketch** (tier 5, embedded as a sub-section) — pipeline diagram, key file paths, named patterns.
+
+If the architecture sketch is too long for a sub-section, move it to a dedicated `ARCHITECTURE.md` and link from the bottom of the "How it works" section. Don't create a parallel section in the README.
 
 ## The 6-tier hierarchy
 
@@ -184,8 +255,11 @@ A clean tool README in reader-priority order:
 <badges>
 
 <2-3 sentence concrete explanation of what the tool actually DOES.    <!-- tier 1: what IS this -->
-Specific behaviour the reader will see, not vague positioning. The
-elevator pitch was the hook; this paragraph is the concrete reality.>
+Outcome first, mechanism second. Zero internal artifacts. No
+"X is an orchestrator" / "X is a daemon-not-framework" framing.>
+
+<!-- NO time-to-read banner here (Rule 1). NO "skip to X" navigation menu (Rule 2). -->
+<!-- NO "X's position in the landscape" section here (Rule 3 — taxonomy goes deep). -->
 
 ## Getting started                   <!-- tier 2: install + run -->
 
@@ -195,47 +269,69 @@ elevator pitch was the hook; this paragraph is the concrete reality.>
 <stop>
 ```
 
-## What it actually does             <!-- tier 3: walkthrough -->
+## Why <tool>                        <!-- tier 3: benefit (Why BEFORE How — Rule 4) -->
 
-1. ...
+- **Concrete benefit 1** — one-line consequence the reader will see.
+- **Concrete benefit 2** — ...
+- **...** — 5-7 bullets max.
+
+(Optional: one-paragraph honest-tradeoffs note — what the tool DOESN'T optimise for.)
+
+## How it works                      <!-- tier 3 + 5: mechanism (ONE section — Rule 5) -->
+
+1. <numbered walkthrough — plain English, zero file paths>
 2. ...
+3. ...
+
+### Architecture (30 seconds)        <!-- tier 5 as sub-section, NOT a separate top-level -->
+
+```text
+<pipeline diagram with key file paths>
+```
 
 > **What's a "X"?** <one-paragraph definition of any key term used above>
 
-## What works today (honest)         <!-- tier 4: honest limits -->
+## Safety                            <!-- tier 4: protections (renamed from "What it won't do" — Rule 4 anti-pattern) -->
 
-| Capability | Status | Confidence |
-|---|---|---|
-| ... | ... | ... |
+Hard rules — mechanically blocked, not "tries not to":
 
-## What it will NEVER do             <!-- tier 4: anti-features -->
+- **<constraint 1>** — what's prevented + how (lint / hook / draft-only / human-gate)
+- **<constraint 2>** — ...
 
-## Edge cases                        <!-- tier 4: empty input / max runtime / errors -->
+## How <tool> compares               <!-- tier 4: honest comparison + status, folded together -->
 
-### How long does it run?
-### What if <main input> is empty?
-### How does it talk to humans?
+| Capability | <tool> | <competitor A> | <competitor B> |
+|---|---|---|---|
+| ... | ✅ / 🟡 / ❌ | ... | ... |
 
-<!-- OPTIONAL — tier 4 positioning, ONLY when the 3 conditions hold (see -->
-<!-- "When does positioning belong in the README at all?" above). For most -->
-<!-- early-stage tools this section is omitted; the competitor analysis    -->
-<!-- lives in `competitors/` and is linked from "Key files" instead.       -->
-<!--                                                                        -->
-<!-- ## What it competes with             <!-- tier 4: positioning -->       -->
-<!--                                                                        -->
-<!-- | Tool | Their advantage | This tool's advantage |                     -->
-<!-- |---|---|---|                                                          -->
-<!-- | ... | ... | ... |                                                    -->
+(Per the "Status table folded into compare" anti-pattern — don't keep BOTH a standalone status table AND a compare table.)
 
-## CLI reference                     <!-- tier 5: reference -->
+### Where <tool> is strong / Where <tool> has tradeoffs
 
-## Configuration                     <!-- tier 5: reference -->
+<3-5 bullets each — bracketing what the operator gets vs what they give up>
 
-## Architecture (30 seconds)         <!-- tier 5: reference -->
+## Reference                         <!-- tier 5 -->
 
-## Key files                         <!-- tier 5: reference -->
+- [CLI reference](docs/cli-reference.md)
+- [Configuration](docs/configuration.md)
+- [Architecture deep-dive](ARCHITECTURE.md)
+- [Key files](#key-files-below)
+
+## <Tool>'s position in the landscape   <!-- tier 5 / 6: internal taxonomy (Rule 3) -->
+
+<2-3 paragraphs of self-classification — orchestrator vs agent, daemon vs framework,
+which competitive bucket. Lives here because the reader has already committed by
+this point; taxonomy is useful context, not a blocking first impression.>
 
 ## Principles                        <!-- tier 6: design philosophy -->
+
+## Where to read next                <!-- tier 6: navigation choices welcome HERE — Rule 2 -->
+
+Pick by audience:
+
+- **Newcomer** — <link>
+- **Operator** — <link>
+- **Contributor** — <link>
 
 ## Picking up upstream fixes         <!-- tier 6: maintenance -->
 
@@ -250,6 +346,9 @@ Note what's NOT in the skeleton:
 - A "FAQ" — if a question's worth answering, fold it into the relevant tier
 - A "Why we built this" — fold into the elevator pitch at tier 1, or delete
 - Section dividers (`---`) used as content — they're decoration, not organization
+- A separate "What works today" status table (folded into the compare table — anti-pattern above)
+- A separate "Architecture" top-level section (lives as a sub-section under "How it works" — Rule 5)
+- An "X's position" framing section above the walkthrough (lives deep, tier 5/6 — Rule 3)
 
 ## Anti-patterns to scan for
 
@@ -257,6 +356,13 @@ When auditing an existing doc, grep for these red flags:
 
 | Red flag | Why it's wrong | Fix |
 |---|---|---|
+| **Time-to-read banner measured in minutes at the top** ("~12 minutes to read", "8 min read", "Three reads, ~15 min total") | Cold readers have 12 SECONDS, not minutes — banner either bounces them immediately or signals "this doc is long" to a reader shopping for short | Delete the banner. The doc's structure IS the contract. See Rule 1 in "Five iron rules". |
+| **Navigation choice menu above the first `## section`** ("Skip to X · Or read Y", "If operator → X; if contributor → Y", "TL;DR · Quick start · Architecture · Comparison · License" jump links) | Choice paralysis at byte zero. Author abdicating the flow-setting job to the reader | Delete the menu. The reader reads top-to-bottom; author sets the order. Choices welcome ONLY at the BOTTOM ("Where to read next — pick by audience"). See Rule 2. |
+| **Internal taxonomy / self-classification at the top** ("X is an orchestrator, not an agent", "X is a daemon-not-framework", "X is a peer of Y but not Z", "X sits ABOVE Z") | Internal team mental model leaked into the reader's first 12 seconds; reads as inside baseball | Move ALL self-classification to tier 5 reference or tier 6 design-principles. See Rule 3. |
+| **Mechanism section ("What it does") above benefit section ("Why X")** | Reader can't judge mechanism before they know why it matters to them | Reorder so benefit / "Why X" comes BEFORE mechanism / "How it works". See Rule 4. |
+| **Two sections on the same topic** (e.g., `## What it actually does` AND `## How X works inside` — both describe the loop, at different depths) | Reader sees duplication, gets confused, reads neither carefully | Collapse to ONE `## How it works` section with a walkthrough sub-section + an architecture sub-section. See Rule 5. |
+| **Standalone "Status / What works today" table dwarfing the rest of the README** (>15 rows of feature × {✅ done / 🟡 partial / ❌ not-yet}) | Reader spends more time scanning the status table than reading the doc; reads as "we'd rather audit ourselves than tell you what it does" | Compress to ≤5 rows OR fold into the competitor comparison table (one column "Minsky" + ✅/🟡/❌ markers per capability). Don't keep both. |
+| **"What it won't do" / "What we refuse to do" labeled section** | The reader doesn't yet know what it WILL do; "won't do" framing reads negative + defensive | Rename to "Safety" — frame the same constraints as protections (draft PRs, no main pushes, scope-leak detection, security-sensitive changes need human approval). Same content, positive framing, lives at tier 4 after "How it works". |
 | "Picking up upstream fixes" / "Updating" / "Upgrade guide" in the first 5 sections | Tier 6 maintenance blocking tier 2 try-it-out | Move to tier 6 |
 | Competitor / "vs X" / positioning table appears before the reader knows what the tool DOES | Tier 4 positioning at tier 1 position; reader can't judge the table | Either remove (apply the 3-condition test) or move to tier 4 AFTER the walkthrough |
 | Tagline followed immediately by a competitor section, no explanation paragraph between | Reader leaves the tier-1 section without knowing what the tool actually does | Add a tier-1 explanation paragraph (2-3 sentences of concrete behaviour) between tagline and the next `##` |
@@ -276,15 +382,30 @@ When auditing an existing doc, grep for these red flags:
 
 Before claiming a doc is reader-priority-ordered, verify:
 
+**Five iron rules for the top of the doc:**
+
+- [ ] **Rule 1**: No "time-to-read" banner measured in minutes anywhere above the first `## section` (no "~12 minutes total", "8 min read", "Three reads X min"). The structure IS the contract.
+- [ ] **Rule 2**: No navigation choice menu above the first `## section` (no "Skip to X · Or read Y", no "If operator → X; if contributor → Y" branching, no top-of-doc TOC unless the doc is ≥2000 lines). Author sets the flow.
+- [ ] **Rule 3**: No internal taxonomy / self-classification above tier 5 (no "X is an orchestrator, not an agent", no "X is a daemon-not-framework", no "X sits ABOVE Y"). Move to tier 5 reference or tier 6 principles.
+- [ ] **Rule 4**: "Why X" benefits section appears BEFORE "How it works" mechanism section. Section ordering at the top must be: tagline → tier-1 lede → quickstart → Why → How → Safety → Compare.
+- [ ] **Rule 5**: Exactly ONE section per topic. No duplicate "What it does" / "How it works" sections at different depths — collapse into one section with sub-sections.
+
+**Tier-1 paragraph quality:**
+
 - [ ] First content after the title is a tier-1 explanation paragraph — concrete sentences saying what the tool DOES (not what it competes with)
 - [ ] Tier-1 paragraph answers "why should the reader care?" — names the OUTCOME the reader gets (the repo improves, the bug gets fixed, you get a PR), not internal artifacts (file names, config keys, queue names) or implementation details (event loops, watchdogs, supervisor strategies)
 - [ ] Tier-1 paragraph's FIRST sentence is a standalone explanation — reading only that one sentence answers "what is this tool?" (single subject + single predicate; not a 3-clause compound)
-- [ ] Tier-1 paragraph is ≤3 sentences and ≤60 words (the "I get it in 30 seconds" contract)
+- [ ] Tier-1 paragraph is ≤3 sentences and ≤60 words (the "I get it in 12 seconds" contract)
 - [ ] Tier-1 paragraph uses active descriptive verbs (`reads`, `picks`, `runs`, `opens`) — no marketing voice (`You sleep, it ships PRs`, `Empowers developers`, etc.)
 - [ ] Tagline is descriptive, not a selling-line — "Background daemon that runs X" beats "You sleep, it ships PRs"
-- [ ] No competitor / positioning section appears above the walkthrough — either the 3 conditions hold and the table is at tier 4, or the table is out entirely
+
+**Section ordering & content:**
+
 - [ ] Within 2 minutes of reading, the reader has seen the install + run commands (tier 2 reached)
-- [ ] No tier-5 or tier-6 content appears above the "What it actually does" / behaviour walkthrough
+- [ ] No tier-5 or tier-6 content appears above the "How it works" walkthrough
+- [ ] No competitor / positioning section appears above the walkthrough — either the 3 conditions hold and the table is at tier 4 (after How-it-works), or the table is out entirely
+- [ ] "Safety" labeled (not "What it won't do" / "What we refuse to do") and lives at tier 4 after "How it works"
+- [ ] Status / "what works today" table is ≤5 rows OR folded into the competitor comparison table (not both)
 - [ ] Operator-only content (update, uninstall, maintenance) lives at the bottom (tier 6)
 - [ ] No forward-references to tracker IDs appear in the install / quick-start section
 - [ ] Total reading time < 5 min for the README (count words / 250 wpm)
@@ -305,4 +426,4 @@ The skill doesn't write new content — it only restructures what's already ther
 
 Pattern conformance: information architecture by audience priority (Krug, _Don't Make Me Think_, 2014, Ch. 2 — "the average user spends 10 seconds on a page before deciding whether to leave"); progressive disclosure (Nielsen, _Usability Engineering_, 1993); reader-driven document order (Williams, _Style: Lessons in Clarity and Grace_, 2007, Ch. 4 — "old information before new").
 
-Anti-patterns sourced from observed bugs in this repo's README (PR #648 README rewrite + PR #668 clarity pass + 2026-05-20 operator review).
+Anti-patterns sourced from observed bugs in this repo's README (PR #648 README rewrite + PR #668 clarity pass + 2026-05-20 operator review + 2026-05-22 operator review surfacing the five iron rules — no-time-banner, no-top-navigation, taxonomy-goes-deep, why-before-what, one-section-per-topic).
