@@ -114,7 +114,7 @@ Open-source autonomous software engineering platform (formerly OpenDevin). **Req
 
 > Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
 
-**Verdict: PARTIAL YES** — the agent layer should be a pluggable backend; the orchestrator layer should not. **P0 human-blocked task filed: [`should-we-add-openhands-as-pluggable-backend`](../TASKS.md).**
+**Verdict: PARTIAL YES — operator-approved 2026-05-22.** Agent layer wraps as a pluggable backend; orchestrator layer does NOT wrap. Implementation tracked at [`add-openhands-as-pluggable-backend`](../TASKS.md) (P0, external-dep-blocked on OpenHands' June 1, 2026 Agent Canvas Initiative CLI release).
 
 This is the most strategically interesting case in Minsky's competitor set, because OpenHands ships things Minsky doesn't (and probably can't catch up to in M1):
 
@@ -142,9 +142,9 @@ Add `openhands` as a fourth pluggable backend in `~/.minsky/config.json`, alongs
 - **What we gain**: state-of-the-art single-task agent, Docker sandbox, 15+ LLM choice, OpenHands' benchmark surface (we cite their score for our agent-tier comparison).
 - **What we lose**: nothing fundamental. We're just adding an option; operators who prefer `claude` keep using it.
 - **Cost**: ~1-2 weeks. New entry in agent-support matrix + brief-delivery format + `openhands` argv contract + integration test. Same shape as the existing aider/devin/claude wiring.
-- **Risk**: OpenHands' CLI may not have a stable "single-shot run" mode yet; the Agent Canvas Initiative is what unblocks this. P0 task is human-blocked because the integration design depends on OpenHands' final June 1 CLI surface.
+- **Risk**: OpenHands' CLI may not have a stable "single-shot run" mode yet; the Agent Canvas Initiative is what unblocks this. Implementation waits on the June 1 launch.
 
-**This is the wrap to do**. The P0 task `should-we-add-openhands-as-pluggable-backend` is filed.
+**This is the wrap to do**, and the operator approved it on 2026-05-22. P0 task [`add-openhands-as-pluggable-backend`](../TASKS.md) is now external-dep-blocked on the June 1, 2026 OpenHands Agent Canvas Initiative CLI release. The strategic-decision gate is closed; the next agent to claim this task does so when the Dockerless `openhands` CLI ships with a stable single-shot `solve <task-brief>` interface.
 
 ### Shape B — Wrap the orchestrator layer (NO)
 
