@@ -187,9 +187,11 @@ describe("validateDraft — invariant failures", () => {
   });
 
   test("(r) missing resultSource is rejected", () => {
-    const draft = { ...basePublishedDraft() };
-    delete draft.resultSource;
-    const r = validateDraft(draft, OPTS);
+    // Build a partial draft without `resultSource` (avoid `delete` —
+    // biome's noDelete rule flags it for perf reasons even on test
+    // fixtures, and the validator treats `undefined` identically).
+    const { resultSource: _ignored, ...rest } = basePublishedDraft();
+    const r = validateDraft(rest, OPTS);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.join("\n")).toMatch(/resultSource/);
   });
