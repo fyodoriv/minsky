@@ -114,10 +114,12 @@ Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 
 - **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`) ships today; multi-persona pipelines per task are an M2 milestone tracked at `multi-persona-pipeline-handoff-spec`.
 - **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
-- **Constitution = 18 rules, each enforced as a CI lint** — rule #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing), #18 (fake-data markers) are the load-bearing ones.
+- **Constitution = 17 rules, each enforced as a CI lint** — rule #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing) are the load-bearing ones. `pnpm pre-pr-lint --stage=full` runs 53 deterministic checks; CI runs 65 jobs.
 - **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
 - **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration; same code adapts to any machine.
 - **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
+
+For the **competitive-position view** of the same substrate — the six moats that make Minsky distinctive vs CrewAI / AutoGen / LangGraph / MetaGPT / OpenAI Agents SDK — see [vision.md § "What Minsky uniquely does"](vision.md#what-minsky-uniquely-does-the-moat) and [`competitors/README.md`](competitors/README.md).
 
 ## Where to read next
 
