@@ -67,9 +67,80 @@ gh pr list --state=merged --search "merged:>=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ
 
 If `closed-not-merged > merged` for two consecutive hours, STOP. The session is doing the wrong thing. Escalate to the operator with the queue snapshot.
 
+## Operational discipline — observed 2026-05-21 PM session (15 PRs merged in 2h)
+
+These are tactical patterns the session learned through 18 merges. Each one prevents a class of self-inflicted failure.
+
+### 1. Work in an isolated worktree, not the main repo dir
+
+Parallel agent sessions (Devin in another tab, the auto-merge launchd, etc.) can `git reset --hard` or `git checkout` the main repo dir mid-edit, wiping uncommitted work. Use:
+
+```bash
+git worktree add /tmp/minsky-<task> -b <branch> origin/main
+cd /tmp/minsky-<task>
+```
+
+The `/tmp/<dir>` path is unique-per-PR and untouchable by other agents. The branch lives on the same git object store but the working tree is yours alone.
+
+### 2. After every squash-merge, verify the file list actually landed
+
+Observed 2026-05-21: PR #704's source commit had `.releaserc.json` in its `--stat`, but the squash-merge commit on main did NOT include it (the file appeared identical to base after some intermediate state). Result: the lint failure I thought I fixed was still failing on main.
+
+Verify with:
+
+```bash
+gh pr view <N> --json files --jq '.files[].path'
+# Compare against the expected file list from your local commit's `git show <sha> --stat`
+```
+
+If a file you committed is missing from the PR's file list, you have to ship it in a separate PR — the squash already happened.
+
+### 3. Don't trust `pnpm install --frozen-lockfile` to resolve per-arch optional deps
+
+Observed 2026-05-21 (pnpm 9.12.0): linux/x64 CI runners did NOT install `@biomejs/cli-linux-x64@1.9.4` even though it was in the lockfile, because:
+
+- (a) The user-level `optionalDependencies` block pinned only one arch (`darwin-arm64`) — pnpm interpreted this as "skip the others", and
+- (b) Even after removing the over-restrictive pin, `--frozen-lockfile` still skipped per-arch optionals that were locked at a different host than the one running install.
+
+**Fixes** in order of preference:
+1. Don't pin individual arch packages at the user `package.json` level — let the upstream tool (biome, esbuild, swc) handle its own optionalDependencies block. Pinning ONE arch silently drops the others.
+2. If a workflow has a bot commit that runs lefthook + check-toolchain, prefer `git config core.hooksPath /dev/null` over trying to install the right per-arch package. The bot's commit is from a verified actor on a paths-restricted change; the local-dev biome lint isn't the right gate.
+
+### 4. The pre-pr-lint `biome` step needs `--no-errors-on-unmatched`
+
+Otherwise it exits 1 on every docs-only / yaml-only / TASKS-only PR (because `--changed --since=origin/main` sees no biome-lintable files). That exit-1 cascades into:
+
+- `lefthook pre-push hook → push aborted`
+- `semantic-release's git push --tags → release workflow fails`
+
+Verify your fork has this fix landed (PR #702 added the flag). If not, add it to `scripts/run-pre-pr-lint-stack.mjs`.
+
+### 5. CI workflows must use `node-version-file: '.node-version'`, never a bare version literal
+
+Observed 2026-05-21: half the workflows had `node-version: "20"` while `.node-version` pinned `24.14.0`. Lefthook's check-toolchain (which runs in the experiment workflow's bot commit) fails loudly on the version mismatch. The fix-class is: every `actions/setup-node@v6` step reads from `.node-version`, never a literal.
+
+### 6. Adding a kebab-case skill primer requires updating `scripts/glossary-allowlist.txt` in the same PR
+
+Rule #5's `glossary-discipline` lint flags any backticked kebab-case identifier in `vision.md` that doesn't resolve to a Glossary row, a Pattern conformance index row, or the allowlist. When you add a new skill primer to `.claude/skills/<name>/` and reference it in `vision.md` (or any rule's enforcement section), add the same `<name>` to `scripts/glossary-allowlist.txt` in the same commit. The allowlist is the right anchor for skill names because the SKILL.md file itself is the anchor.
+
+### 7. The release workflow can't push back to main behind branch protection
+
+`@semantic-release/git` plugin tries to commit CHANGELOG + version bump to main. The built-in `GITHUB_TOKEN` doesn't bypass branch protection. The fix-class:
+
+- Remove `@semantic-release/git` from `.releaserc.json` plugins (PR #703 took this path — GH Releases still produced, CHANGELOG.md becomes a frozen artifact)
+- OR provision a PAT with `admin:write_repo` scope as a repo secret and switch the workflow's token (more credential surface)
+
+The first is the cheaper path and aligns with operator preference (`"set up github releases for this"`).
+
+### 8. The `<package>/test/*.test.ts` vs `<package>/src/*.test.ts` orphan-test trap
+
+Observed 2026-05-21 in `novel/tui/`: PR #639's `test/*.test.ts` files referenced functions from PR's `src/*.ts` files that I REJECTED during conflict resolution (kept main's source). The result: test files referenced `formatProcRow`, `renderDetail`, `gatherMachineRaw` that didn't exist in main's source → 13 broken tests, only caught by the full-tree CI test:coverage job (not the diff-scoped pre-push gate).
+
+Fix-class during conflict resolution: when you take main's source over PR's source, you must ALSO take main's tests (or delete PR's tests that reference the rejected API). The orphan-test detector is filed as a TASKS.md follow-up.
+
 ## Anchor
 
 - `vision.md` § 18 — the iron rule itself
 - `scripts/verify-pr-closure-is-lossless.mjs` — the mechanical proof
 - `scripts/local-gate-merge.mjs` — the real merge path (never closes)
-- 2026-05-21 morning + evening drain regressions — the empirical justification
+- 2026-05-21 morning drain (32 PRs reopened) + evening drain (16 PRs merged for real) + CI-stabilization sweep (8 cascading fixes) — the empirical justification
