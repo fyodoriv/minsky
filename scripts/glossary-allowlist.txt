@@ -101,3 +101,17 @@ pr-merge-no-shortcuts
 # Skill primer names cited inline in vision.md to point readers at the corresponding
 # .claude/skills/<name>/ SKILL.md file. The anchor is the SKILL.md file itself.
 pr-merge-no-shortcuts
+
+# TASKS.md task IDs cited inline in vision.md § "Honest gaps". Each task ID is
+# kebab-case, anchored in TASKS.md itself (the canonical anchor per the
+# allowlist discipline above). 2026-05-23 strategic competitive deep-dive.
+benchmark-minsky-via-claude-on-humaneval
+enterprise-deployment-readiness-audit
+explore-multi-agent-ensembling-experiment
+gaia-benchmark-evaluation-substrate
+
+# pickHostTask is the exported function from novel/cross-repo-runner/src/ that
+# parses TASKS.md and returns the next pickable task. Cited inline in vision.md
+# § "What Minsky uniquely does" row 6 (TASKS.md as operator surface) — the
+# anchor is the source file itself (novel/cross-repo-runner/src/index.ts).
+pickHostTask
