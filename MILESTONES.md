@@ -4,6 +4,29 @@ Minsky's roadmap. Each milestone is a ship-gate: done when every exit criterion 
 
 **North star**: a developer attaches Minsky to any git repo with one command, runs it with one command, and it measurably outperforms doing the same work manually or with any competing autonomous coding tool — with proof.
 
+## How to read this file
+
+Each milestone has multiple criteria. Each criterion has a status:
+
+| Symbol | Meaning |
+|---|---|
+| ✅ done | Criterion fully met and verified |
+| 🟡 partial | Substrate shipped, last validation step pending |
+| ❌ blocked | A specific upstream task must land first; see "Blocked by" |
+| 🔵 not started | Task exists in `TASKS.md`, not yet picked up |
+
+The "How to verify" column gives the exact shell command, file path, or PR that proves the status. Don't trust a `✅`-claim without it.
+
+## At-a-glance roadmap
+
+| Milestone | One-line | Status |
+|---|---|---|
+| **M1** | Stable, measurable, one-command — v0.1.0 | 🟡 In progress (3/13 ✅, 8/13 🟡, 2/13 ❌). Live dashboard: `node scripts/m1-metrics-dashboard.mjs` reads 39/81 measurable tasks passing (~48%). |
+| **M2** | Multi-file refactors at orchestrator quality | 🔵 Not started — gated on M1 completion |
+| **M3** | GitHub Actions CI for Minsky-managed repos | 🔵 Not started |
+| **M4** | Multi-repo coordination at fleet scale | 🔵 Not started |
+| **M5** | Self-distribution (`npx minsky` on any machine) | 🔵 Not started |
+
 ## M1 — Stable, Measurable, One-Command — v0.1.0
 
 Minsky works reliably on any repo, installs trivially, is honestly measured against competitors, and runs a useful 8-hour default session without human intervention.

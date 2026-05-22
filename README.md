@@ -9,7 +9,15 @@ Minsky watches over your git repo and improves it over time. It picks the next t
 
 The methodology is rigorous — every change applies established software-engineering practices, each backed by a published literature citation ([see the full list](docs/PRACTICES.md)).
 
+**New here?** Three reads, ~12 minutes total: this README → [vision.md § "What Minsky is"](vision.md#what-minsky-is) → [MILESTONES.md](MILESTONES.md). The full documentation map is at [docs/README.md](docs/README.md) — pick the reading path that matches your audience (newcomer, AI agent, operator, contributor).
+
 **[Seven reasons you'd want this →](#why-minsky)** &nbsp;·&nbsp; Or skip to [getting started](#getting-started).
+
+## Minsky's position
+
+Minsky is an **orchestrator**, not an agent. It sits ABOVE Claude / Devin / Aider — managing the daemon lifecycle, MAPE-K loop, prompt evolution, multi-repo task queue, supervisor restart discipline. The agents are its inputs. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it composes.
+
+A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchestrator layer. The scorecard at [novel/competitive-benchmark/README.md](novel/competitive-benchmark/README.md) compares both axes: Minsky should beat other orchestrators on orchestrator metrics AND not regress vs the bare agent.
 
 ## Getting started
 
@@ -111,22 +119,19 @@ Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 - **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration; same code adapts to any machine.
 - **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's `TASKS.md` were surfaced by daemon iterations.
 
-## More
+## Where to read next
 
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — code in this repo is AI-authored; how to attest
-- **[INSTALL.md](INSTALL.md)** — agent-readable install runbook
-- **[docs/uninstall.md](docs/uninstall.md)** — full removal, daemon stop, sidecar cleanup
-- **[docs/updating.md](docs/updating.md)** — `git pull` workflow, restart, sentinel
-- **[docs/cli-reference.md](docs/cli-reference.md)** — every command, every flag, every env var
-- **[docs/configuration.md](docs/configuration.md)** — `~/.minsky/config.json`, agent comparison
-- **[docs/auto-merge.md](docs/auto-merge.md)** — periodic gate-and-merge for daemon PRs (ON for minsky itself, OFF for other repos)
-- **[docs/dependabot.md](docs/dependabot.md)** — dependency-update policy, grouping, local merge gate
-- **[docs/edge-cases.md](docs/edge-cases.md)** — empty queues, runtime limits, comm channels, crashes
-- **[docs/PRACTICES.md](docs/PRACTICES.md)** — scientifically proven practices with citations
-- **[vision.md](vision.md)** — the constitution (18 rules), pattern conformance index
-- **[TASKS.md](TASKS.md)** — open tasks with rule-9 fields
-- **[MILESTONES.md](MILESTONES.md)** — M1–M5 exit criteria
-- **[DEPRECATED.md](DEPRECATED.md)** — retired features (don't invest in these)
+The full documentation map is at **[docs/README.md](docs/README.md)**. It's organised by audience — pick the path that matches who you are.
+
+Quick links by audience:
+
+- **Newcomer** — this README → [vision.md § "What Minsky is"](vision.md#what-minsky-is) → [MILESTONES.md](MILESTONES.md). ~12 minutes total.
+- **Installing on your repo** — [INSTALL.md](INSTALL.md). ~8 minutes.
+- **AI agent working on this codebase** — [AGENTS.md](AGENTS.md) → [DEPRECATED.md](DEPRECATED.md) → [TASKS.md](TASKS.md).
+- **Operator running Minsky in production** — [docs/edge-cases.md](docs/edge-cases.md), [docs/auto-merge.md](docs/auto-merge.md), [docs/local-llm-fallback.md](docs/local-llm-fallback.md).
+- **Architecture deep-dive** — [ARCHITECTURE.md](ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
+- **Comparing Minsky to other tools** — [novel/competitive-benchmark/README.md](novel/competitive-benchmark/README.md), [competitors/](competitors/).
+- **Contributing** — [CONTRIBUTING.md](CONTRIBUTING.md). Code in this repo is AI-authored.
 
 About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
 

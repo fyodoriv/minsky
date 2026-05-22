@@ -2,9 +2,20 @@
 
 > Step-by-step runbook for an AI agent installing Minsky on behalf of a human operator.
 
+**Time**: ~5 minutes if prerequisites are already installed; ~15 minutes if not.
+
+**For a human reading this directly**: this runbook is written for an AI agent to follow, but every command works manually too. Run them in order, stop at Step 5 to give consent, then continue.
+
 ## What this is
 
 The canonical install runbook for Minsky. **Audience**: an AI coding agent (Claude Code, Devin, Cursor, Windsurf, Codex CLI, or any agent that can read files and run shell commands) acting on behalf of a human operator who said something like *"install minsky for this folder and start it"*. Follow it step by step. Ask the operator a question ONLY at the explicit consent-prompt step (Step 5) — every other step is yours to execute autonomously.
+
+**Where to read next after installing**:
+
+- [docs/configuration.md](docs/configuration.md) — `~/.minsky/config.json`, agent comparison
+- [docs/cli-reference.md](docs/cli-reference.md) — every `minsky` subcommand
+- [docs/uninstall.md](docs/uninstall.md) — clean removal when you're done
+- [README.md](README.md) for context on what you just installed
 
 **Status.** Stub. Closing the loop is tracked as P0 task `agent-mediated-install` in `TASKS.md`. Until that task ships the `minsky consent` subcommand + the measurement harness, the consent step writes locally only (no server submission yet) and you the agent do steps 1–5 manually. The flow described below works end-to-end today; only the automated cross-provider measurement is pending.
 

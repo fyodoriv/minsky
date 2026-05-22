@@ -1,5 +1,40 @@
 # Tasks
 
+> The Minsky work queue. Sorted by priority (P0 most urgent → P3 least). The daemon picks the highest-priority unclaimed task with complete rule-9 fields, ships it, opens a draft PR.
+
+## How to read this file
+
+Format: [tasks.md spec](https://github.com/tasksmd/tasks.md). Each priority section is `## P0` / `## P1` / `## P2` / `## P3`.
+
+Each task is a checkbox line + indented metadata fields. Metadata fields agents read:
+
+| Field | What it does |
+|---|---|
+| **ID** | Stable kebab-case id; same as the task's branch and PR title |
+| **Tags** | Comma-separated, includes priority + topic tags |
+| **Milestone** | M1 / M2 / M3 / M4 / M5 (see [MILESTONES.md](MILESTONES.md)); defaults to M1 |
+| **Hypothesis** | One-line claim — "doing X causes Y, measured by Z" |
+| **Success** | One-line numeric / rubric threshold for shipping |
+| **Pivot** | One-line numeric threshold at which the *approach* is abandoned |
+| **Measurement** | Exact runnable shell / OTEL / CI command — no English, no `<TBD>` |
+| **Anchor** | Real literature citation (Author, Title, Year — Section) |
+| **Details** | What to do |
+| **Files** | What you'll touch |
+| **Acceptance** | Per-criterion checklist for the PR reviewer |
+| **Status** | Optional: `shipped` / `in-progress` / `blocked` |
+| **Competitive-goal** | Which scorecard metric the task moves (M1.10 lint enforces this on P0/P1) |
+
+**Rule #9 fields are iron** (Hypothesis / Success / Pivot / Measurement / Anchor). The task picker rejects any task missing them. `pnpm exec node novel/cross-repo-runner/dist/index.js` (or `node --input-type=module -e '...pickHostTask...'`) returns `null` for malformed tasks; the daemon silently skips them.
+
+**Claim a task** by appending `(@your-agent-id)` to the task line. **Close a task** by removing its entire block in the same commit that ships it — history lives in `git log`, never mark `[x]`.
+
+## How to pick the next task
+
+1. Read [MILESTONES.md § "Critical path to M1 completion"](MILESTONES.md#critical-path-to-m1-completion). The top item is what's blocking M1.
+2. Verify the seven surfaces are aligned (see [AGENTS.md § "15. Milestone alignment gate"](AGENTS.md)). If any is stale, that's your task.
+3. Walk P0 → P1 → P2 → P3 in order. Pick the top unclaimed task with all rule-9 fields filled in.
+4. Check [DEPRECATED.md](DEPRECATED.md) before implementing — if the task touches a deprecated feature, use the replacement instead.
+
 <!-- policy: Every task starts with a failing test (red), then minimal code to pass (green), then refactor. Define metrics and docs BEFORE writing code. See AGENTS.md. -->
 <!-- policy: Every external dependency is accessed through an interface in novel/adapters/. No vendor names in business logic. -->
 <!-- policy: When closing a task, remove its entire block. History lives in git log per the tasks.md spec. -->
