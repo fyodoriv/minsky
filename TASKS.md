@@ -1845,6 +1845,19 @@
 
 ## P2
 
+- [ ] `corpus-discover-quarterly` — quarterly: scan the autonomous-coding-agent landscape for NEW competitors that should be added to the M1.10 scorecard corpus, and surface them as `/competitor-research <url>` candidates
+  - **ID**: corpus-discover-quarterly
+  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-discovery, recurring
+  - **Milestone**: M1
+  - **Competitive-goal**: keeps the M1.10 corpus COMPETITOR LIST current (the freshness loop handles the per-vendor readings; this task handles whether the right set of vendors is in the corpus at all). A list frozen at 6 vendors loses signal as new autonomous-coding agents launch (e.g., GitHub Copilot coding agent, OpenAI Codex, MetaGPT v2, etc.).
+  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (additions only), `competitors/<new-id>.md` (one per added vendor), and the `/competitor-research` skill (no edits — just invoked).
+  - **Details**: every quarter the operator (or the tick-loop's `/next-task` picks this up after the 90-day mark) runs a discovery sweep: (a) `gh search repos "autonomous coding agent" --sort=updated --limit=20` and the equivalent for `WebSearch` against news + Hacker News; (b) filter out anything already in `COMPETITORS` (via `bin/minsky competitive --json | jq '.competitors[].id'`); (c) filter against `EXCLUDED_VENDOR_SUBSTRINGS` (no Groq/xAI/Elon-affiliated); (d) for each surviving candidate, invoke `/competitor-research <vendor-url>` to add it. Acceptance: ≥1 new competitor evaluated per quarter (added OR explicitly rejected with a note in the research file).
+  - **Hypothesis**: today the corpus is 6 vendors. After 4 quarters of running this task, the corpus is ≥9 vendors (≥1 addition per quarter on average; rejections don't grow the corpus but DO produce a research file documenting the why).
+  - **Success**: `bin/minsky competitive --json | jq '.competitors | length'` increases by ≥1 each quarter, OR a new `competitors/<id>.md` research file documents an explicit rejection (with vendor name + why-not).
+  - **Pivot**: if the autonomous-coding landscape consolidates such that 2 consecutive quarters yield 0 net-new credible vendors, switch this task from quarterly to semi-annual cadence. Don't pad the corpus with marginal players just to hit the quarterly addition target — vanity adds dilute the comparison signal (rule #9 — vanity metrics forbidden).
+  - **Measurement**: `bin/minsky competitive --json | jq '.competitors | length'` ≥ `7` after Q3 2026, ≥ `8` after Q4 2026, ≥ `9` after Q1 2027 (assumes ≥1 addition per quarter starting Q3 2026 when this task ships).
+  - **Anchor**: rule #4 (visible — the corpus's coverage IS a measurable scoreboard metric); rule #6 (stay alive — without periodic discovery, the corpus snapshots the autonomous-coding market at a single point and stops being useful as the market evolves); operator directive 2026-05-22 ("add a mechanism so that minsky keeps competitors list updated and competitors there too" — this task is the LIST half; the `corpus-refresh-*` auto-filed tasks are the READINGS half); Doerr 2018 *Measure What Matters* (OKR — set the cadence target explicitly so progress is measurable, not aspirational).
+
 - [ ] `tui-src-vs-test-api-drift-pivot-tracker` — track the orphan-tests detector's false-positive rate over the next 5 PRs; if >2 false positives accumulate, switch from regex-based detection to a tsc-based detector (per-package `tsconfig.test.json` + `tsc --noEmit` over `test/`).
   - **ID**: tui-src-vs-test-api-drift-pivot-tracker
   - **Tags**: p2, lint, rule-10, pivot-tracker, observed-2026-05-21

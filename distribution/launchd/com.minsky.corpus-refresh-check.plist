@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- scope: human-approved 2026-05-22 M1.10 self-refresh — weekly freshness check + auto-file refresh tasks; operator directive "add a mechanism so that minsky keeps competitors list updated and competitors there too"; closes the corpus-staleness loop with rule-#17 healing (observed staleness IS the fix). -->
+<!--
+Minsky weekly corpus-freshness check + auto-file — launchd LaunchAgent
+for macOS.
+
+Pattern: "periodic task" supervisor pattern (Borg/Bashir/Burns/Hightower
+_Designing Distributed Systems_ 2017). Every Monday at 04:15 local
+(15 min after the weekly-competitive scoreboard refresh) launchd fires
+`run-corpus-refresh-check.sh` which:
+  1. Runs `node scripts/check-corpus-freshness.mjs` to score the corpus.
+  2. If any entry is "very-stale" (>180 days), invokes
+     `node scripts/auto-file-corpus-refresh-tasks.mjs` to append
+     `corpus-refresh-<id>` task blocks to TASKS.md.
+  3. Commits the TASKS.md edit (if any), so the tick-loop picks it up
+     and invokes /competitor-research <url> to refresh the reading.
+
+Why this exists
+---------------
+M1.10 acceptance: "scorecard updates weekly". The scorecard itself is
+already weekly-refreshed by com.minsky.weekly-competitive.plist. THIS
+plist closes the corpus-staleness loop: it ensures the SOURCE numbers
+the scorecard joins against also stay fresh, by surfacing very-stale
+readings as filed tasks.
+
+Schedule: Monday 04:15 (15 min after the weekly-competitive scoreboard
+refresh at 04:00, so the freshness JSON is read against the just-
+refreshed corpus state).
+
+Placeholders substituted by `bin/minsky install-daemon` via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+  ${HOME}          — operator's home directory
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.corpus-refresh-check</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-corpus-refresh-check.sh</string>
+    </array>
+
+    <!--
+    StartCalendarInterval: Monday at 04:15 local time. 15 min after
+    com.minsky.weekly-competitive.plist (which refreshes the scorecard
+    at 04:00) so the freshness check reads against the post-scoreboard-
+    rebuild state.
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <!--
+    RunAtLoad: surface staleness on host bootstrap so a fresh install
+    immediately sees what needs refreshing without waiting until Monday.
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+    Cycle cap: 120s. The freshness check + the auto-file walk are both
+    pure local-file operations, so anything longer is a bug.
+    -->
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>CPU</key>
+        <integer>120</integer>
+    </dict>
+
+    <!--
+    Logs go to ~/.local/state/minsky/corpus-refresh.log per the
+    AGENTS.md convention for scheduled-task logs.
+    -->
+    <key>StandardOutPath</key>
+    <string>${HOME}/.local/state/minsky/corpus-refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.local/state/minsky/corpus-refresh.log</string>
+</dict>
+</plist>
