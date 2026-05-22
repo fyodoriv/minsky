@@ -40,11 +40,64 @@ The script:
 
 | Situation                                            | Allowed action                                                                |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
-| PR is MERGEABLE and gate-green                       | `gh pr merge <N> --squash --admin --delete-branch`                            |
+| PR is MERGEABLE and gate-green (`MERGEABLE/CLEAN`)   | `gh pr merge <N> --squash --admin --delete-branch`                            |
+| PR is **MERGEABLE BLOCKED, blocker = review-required only**, all substantive checks green | `gh pr merge <N> --squash --admin --delete-branch` IS pre-approved by the AGENTS.md rule on admin-merging your own PR. Confirm the blocker IS review-only — run the `verify-blocker-is-review-only` check below before pulling the trigger. **Always preferred fallback**: poll-merge with `--auto` first; admin-merge only if review never comes. |
 | PR is CONFLICTING                                    | Rebase first (`git rebase -X theirs origin/main`); if still conflicting, fix the conflict; merge. Closing without rebase is forbidden. |
+| PR has a substantive check failing (Build, security scan, BundleScan, vitest, biome, pre-pr-lint stage) | **DO NOT admin-merge**. Fix the failure first. Admin-merging over a substantive failure is the path to broken main. |
 | PR is "superseded" by another PR or main commit      | Run the lossless verifier. ONLY close if it writes the empty-diff proof.       |
 | PR is stale / WIP / experimental and operator says "close" | OK to close, but only after the operator explicitly says so per-PR (not via blanket directive).  |
 | Out of session budget, queue still has open PRs       | **STOP**. File a TASKS.md entry naming each remaining PR by number. Do not close them as "preserved".  |
+
+## The review-only-blocker exception (when admin-merge IS approved)
+
+The operator's standing instruction (most recently confirmed 2026-05-22): *"Remember that there might be a review requirement. IF everything else passes, you can admin merge."*
+
+This is the **same rule** as the AGENTS.md "admin-merge YOUR OWN current-repo PR" carve-out, with the trigger explicitly extended to cover "blocked only on review" (not just "unblock an autonomous loop"). The three conjunctive conditions remain:
+
+1. **The PR is yours** in the current repo (author = the agent or operator who started this session).
+2. **Every failing check has a non-substantive cause** — review-required gate, codeowner approval, branch-protection-review-count. NOT: Build / security scans / BundleScan / vitest / biome / pre-pr-lint / typecheck / any rule-N lint.
+3. **Substantive checks pass** — at minimum: `ci` (the top-level required check), all `pnpm pre-pr-lint --stage=full` stages green via the per-stage CI jobs, secret-scan, dependency-cruiser, knip.
+
+Before pulling the trigger, run the verifier:
+
+```bash
+# 1. Confirm mergeable state
+gh pr view <N> --json mergeable,mergeStateStatus -q '.mergeable + " " + .mergeStateStatus'
+# expected: MERGEABLE BLOCKED   (BLOCKED only — not UNSTABLE which would mean failing checks)
+
+# 2. Confirm every failed/pending check is review-shaped, not substantive
+gh pr checks <N> 2>&1 | grep -vE "^(pass|skipping)" | head
+# expected: only review-required / codeowner / approval shapes; NEVER a CI/lint/test name
+
+# 3. Confirm all CI jobs are green
+gh pr checks <N> | awk '{print $2}' | sort -u
+# expected: only "pass" (no "fail" lines)
+```
+
+If steps 1-3 all confirm — admin-merge IS approved by the operator's standing instruction. The merge command:
+
+```bash
+gh pr merge <N> --squash --admin --delete-branch
+```
+
+**Always document the admin-merge in the PR body before merging** — add a one-line note "Admin-merged per AGENTS.md review-only-blocker carve-out; substantive checks all green at <SHA>" so the audit trail is clear.
+
+**If a substantive check is failing**, the carve-out does NOT apply. Fix the check first. Filing a "the lint is broken in main, my PR didn't introduce it" scout task is acceptable to document the unrelated cause — but DO NOT admin-merge over a substantive failure unless the operator gives fresh per-PR approval.
+
+## Trigger phrases that authorize admin-merge in the current session
+
+The operator has standing approval for admin-merge on the operator's own PRs in the current repo. The phrases below activate it without further per-PR approval (subject to the 3 conditions above):
+
+- "merge this", "land this", "get this merged" (after the PR is green except for review)
+- "get everything merged" (sweep mode — applies to every open PR you authored in this session)
+- "admin merge if needed", "admin-merge it"
+- "IF everything else passes, you can admin merge" (the exact phrase that confirmed the standing rule on 2026-05-22)
+
+The phrases below do NOT activate it — fresh approval required:
+
+- "merge this" on a PR with substantive failures (Build / lint / test) → first fix the failures
+- "merge this" on someone else's PR → cross-author admin-merge always needs explicit per-PR approval
+- "force merge" / "merge over the failures" → always needs explicit per-PR approval naming the failing check
 
 ## Forbidden phrasings (each is a rule-#18 violation)
 
