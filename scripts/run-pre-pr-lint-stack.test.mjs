@@ -106,6 +106,7 @@ describe("STACK_MANIFEST", () => {
         "agents-md-coherence",
         "biome",
         "brief-pr-instructions",
+        "competitive-goal",
         "markdownlint",
         "no-hardcoded-user-paths",
         "no-personal-paths-in-docs",

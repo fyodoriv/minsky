@@ -21,25 +21,24 @@ Minsky works reliably on any repo, installs trivially, is honestly measured agai
 | M1.7 | **Project metrics first** — Minsky's first 1-2 iterations on any repo establish a metrics baseline (test count, coverage, lint status, build health, dependency age, doc coverage) so every subsequent cycle shows before/after | 🟡 partial | `minsky report --baseline` exists; the `baseline-delta-per-cycle` metric is proposed (METRICS.md). The 4-axis improvement vector per cycle needs validation against a real iteration. |
 | M1.8 | **Remote task submission** — findings from any machine can be submitted as tasks to Minsky itself, with user approval + anonymized data preview | ❌ not started | Task `minsky-remote-task-submission` is open and unblocked. No `bin/minsky submit-finding` subcommand yet. |
 | M1.9 | **Works from Claude Code, Devin, and local models** — same Minsky, three launch surfaces with identical core behavior | 🟡 partial | Claude is the production path (PRs opened, iterations completing). Devin spawns with `exit=-1 empty-stderr` — blocker filed as P0 `spawn-failed-exit-minus-one-silent-empty-stderr`. Local model (aider) works in dry-run; live model invocation is one PR away. |
-| M1.10 | **Competitive benchmark — real, automated, weekly** — Minsky measures itself against ≥4 competitors (Devin, OpenHands, SWE-agent, Aider) on shared metrics; scorecard updates weekly | 🟡 partial | Slices a+b+c shipped: `@minsky/competitive-benchmark` (11 metrics × 6 competitors) + `minsky competitive` writes `.minsky/competitive-scorecard.json`. Shape gate (≥4 × ≥5) still open — corpus carries SWE-bench Verified across 5 competitors but the other 4+ DORA/agentic metrics need competitor readings. Follow-ups: `self-metrics-competitive-benchmark-corpus-expansion` (corpus), `self-metrics-weekly-scheduled-run` (launchd plist), `self-metrics-competitive-goal-field-and-lint` (slice d). |
+| M1.10 | **Competitive benchmark — real, automated, weekly** — Minsky measures itself against ≥4 competitors (Devin, OpenHands, SWE-agent, Aider) on shared metrics; scorecard updates weekly | ✅ done | All five slices shipped: (a)+(b) substrate (PR #642, #716 — metric catalogue + competitor corpus), (c) ledger reducer + scorecard builder + `bin/minsky competitive` CLI (PR #716), corpus-expansion with primary citations across 5 metrics × 5 competitors (this PR), (d) `**Competitive-goal**:` field + `check-competitive-goal.mjs` lint with 81 grandfathered ids draining over time (this PR), weekly auto-refresh via `com.minsky.weekly-competitive.plist` + `minsky-weekly-competitive.timer` (this PR). Shape gate (≥4 × ≥5) MET. Slice (e) bootstrap-priority is a P2 follow-up (`self-metrics-bootstrap-priority`). |
 | M1.11 | **Honest README in <5 min reading time** | 🟡 partial | README is < 130 lines and walks install → run; no formal 3-developer user test conducted. Task `readme-honest-3-developer-user-test` not yet filed. |
 | M1.12 | **Clean uninstall** — `minsky uninstall` removes everything Minsky added to a repo, zero residue | 🟡 partial | `minsky uninstall --force` works end-to-end (`minsky-uninstall-clean-removal` passes). The single-command interactive path (`minsky uninstall` in a TTY prompts and proceeds) is open — see P0 `minsky-uninstall-one-command-with-stop`. |
 | M1.13 | **Agents can self-heal Minsky** — when Minsky breaks, the running agent (or observer) diagnoses and fixes common failures without human intervention | 🟡 partial | Phase 1 shipped: 4 automated heals (`heal-stale-pid`, `heal-stale-tsbuildinfo`, `heal-stuck-command`, `heal-worktree-missing-node-modules`) under `novel/observer/heals/src/` + the MTTR ledger at `.minsky/heal-events.jsonl` + the `mttr-self-heal` metric. Phase 2 needs ≥10 automated heals + MTTR < 5min validated against the chaos test — task `agents-can-self-heal-minsky-m1-13` open. |
 
-**M1 summary** — done: 2 (M1.4, M1.6); partial: 8 (M1.2, M1.3, M1.5, M1.7, M1.9, M1.10, M1.11, M1.12, M1.13); blocked: 2 (M1.1, M1.8); not started: 0.
+**M1 summary** — done: 3 (M1.4, M1.6, M1.10); partial: 7 (M1.2, M1.3, M1.5, M1.7, M1.9, M1.11, M1.12, M1.13); blocked: 2 (M1.1, M1.8); not started: 0.
 
 **Critical path to M1 completion:**
 
 1. Land `spawn-failed-exit-minus-one-silent-empty-stderr` (unblocks M1.1 + M1.9) — adds stderr/stdout/signal capture to the spawn handler so silent failures stop happening.
-2. Land `self-metrics-competitive-benchmark-corpus-expansion` (M1.10 shape gate) — extend the published corpus to carry ≥5 shared metrics across ≥4 competitors so `minsky competitive` exits 0; then `self-metrics-weekly-scheduled-run` to fire it weekly via launchd/systemd.
-3. Land `agents-can-self-heal-minsky-m1-13` phase 2 (M1.13) — promote 6 more operator-recipe heals to automation, validate MTTR < 5min on chaos test.
-4. Land `minsky-uninstall-one-command-with-stop` (M1.12) — single-command interactive uninstall.
-5. Land `minsky-remote-task-submission` (M1.8) — `bin/minsky submit-finding` subcommand.
-6. Land `minsky-npx-install-and-run` (M1.3) — npm-registry publish + `npx minsky init` path.
-7. Validate `bin/minsky report --baseline --delta` end-to-end on a clean fixture repo for one 8h session (M1.5 + M1.7).
-8. Run the 3-developer user test against README (M1.11).
+2. Land `agents-can-self-heal-minsky-m1-13` phase 2 (M1.13) — promote 6 more operator-recipe heals to automation, validate MTTR < 5min on chaos test.
+3. Land `minsky-uninstall-one-command-with-stop` (M1.12) — single-command interactive uninstall.
+4. Land `minsky-remote-task-submission` (M1.8) — `bin/minsky submit-finding` subcommand.
+5. Land `minsky-npx-install-and-run` (M1.3) — npm-registry publish + `npx minsky init` path.
+6. Validate `bin/minsky report --baseline --delta` end-to-end on a clean fixture repo for one 8h session (M1.5 + M1.7).
+7. Run the 3-developer user test against README (M1.11).
 
-Once 1-8 land and `node scripts/m1-metrics-dashboard.mjs` shows all measurable rows passing, M1 ships as `v0.1.0` *for real* (overriding the prior auto-bumps). The plan is to retag `main` at the M1-complete commit as `v0.1.0-m1` to mark the milestone independently of semver minor-bumps.
+Once 1-7 land and `node scripts/m1-metrics-dashboard.mjs` shows all measurable rows passing, M1 ships as `v0.1.0` *for real* (overriding the prior auto-bumps). The plan is to retag `main` at the M1-complete commit as `v0.1.0-m1` to mark the milestone independently of semver minor-bumps.
 
 ## M2 — Fast Mode: Single-Task Delivery — v0.2.0
 

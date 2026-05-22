@@ -52,6 +52,18 @@ AI-native code editor (VS Code fork) with deep agent integration. Agent mode can
 - More polished UX for daily coding
 - Lower barrier — already in your editor
 
+## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
+
+| Metric                  | Value | Date       | Primary source                                                                                                                                                                                                                                       |
+| ----------------------- | ----- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `autonomous-merge-rate` | 0.804 | 2026-02-09 | Pinna, Gong, Williams, Sarro, *Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance*, arXiv 2602.08915, 2026-02-09 — AIDev dataset, Cursor leads fix-task acceptance at 80.4%.                                            |
+
+Note: The 80.4% is Cursor's fix-task acceptance rate per the AIDev
+study, not an aggregate across all task types. The AIDev study reports
+that no single agent leads every task category (Cursor excels at fixes,
+Claude Code at docs and features, Codex broadly). Used here as the
+autonomous-merge-rate proxy with the caveat documented in the citation.
+
 ## Last reviewed
 
-2026-05-18
+2026-05-22

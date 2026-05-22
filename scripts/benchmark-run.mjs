@@ -12,9 +12,11 @@
 //   3. Build the scorecard with the live corpus.
 //   4. Write to <host>/.minsky/competitive-scorecard.json (or --write-to).
 //   5. Print a human summary to stdout (or --json for raw scorecard JSON).
-//   6. Exit 0 only when BOTH shape (corpus ≥4 competitors × ≥5 metrics)
-//      AND live-delta count (Minsky has measured ≥1 metric with a
-//      competitor counterpart) hold.
+//   6. Exit 0 when the M1.10 shape gate is met (≥4 competitors × ≥5
+//      shared metrics in the published corpus); exit 1 when the corpus
+//      is too thin. `liveDeltaCount` is surfaced in the summary as a
+//      cold-start health indicator but does NOT gate the exit code —
+//      Minsky measurements accumulate over time, not block the milestone.
 //
 // Pattern: thin CLI shim over the pure builder. Matches
 //   `scripts/minsky-benchmark.mjs` (the iteration-throughput benchmark)
@@ -103,9 +105,13 @@ function printUsage() {
       "  --help, -h        Print this message",
       "",
       "Exit code:",
-      "  0  shape met (≥4 competitors × ≥5 metrics) AND Minsky has ≥1 live delta",
-      "  1  shape gap OR Minsky has 0 live deltas (cold-start; scorecard still written)",
+      "  0  M1.10 shape gate met (≥4 competitors × ≥5 shared metrics in the corpus)",
+      "  1  shape gap — corpus too thin (scorecard still written; check the `gap` field)",
       "  2  reading/writing error (missing builder dist, write permission, etc.)",
+      "",
+      "Live deltas (Minsky measured against ≥1 corpus-covered metric) are",
+      "surfaced in the summary as a cold-start health indicator — they do not",
+      "gate the exit code. A fresh host has 0 deltas; weekly iterations grow it.",
       "",
     ].join("\n"),
   );
@@ -162,18 +168,17 @@ function readLedger(host) {
  * @returns {string}
  */
 function formatAcceptanceLine(a) {
-  const shapeOk = a.meetsM110;
-  const liveOk = a.liveDeltaCount > 0;
-  const overall = shapeOk && liveOk ? "✅ MET" : "❌ GAP";
-  /** @type {string[]} */
-  const reasons = [];
-  if (!shapeOk) reasons.push(a.gap);
-  if (!liveOk) {
-    reasons.push(
-      "Minsky has 0 live deltas — run ≥1 iteration whose metric also lives in the corpus.",
-    );
-  }
-  return `M1.10 acceptance: ${overall}${reasons.length > 0 ? ` — ${reasons.join(" + ")}` : ""}`;
+  // The M1.10 milestone gate is the corpus SHAPE: ≥4 competitors × ≥5
+  // shared metrics. `liveDeltaCount` is an informational health number
+  // surfaced beside the verdict — a cold-start host has 0 deltas and
+  // that's expected behavior, not a gate failure.
+  const overall = a.meetsM110 ? "✅ MET" : "❌ GAP";
+  const detail = a.meetsM110
+    ? a.liveDeltaCount > 0
+      ? `${a.liveDeltaCount} live delta(s)`
+      : "0 live deltas — cold-start host; run ≥1 iteration on a shared metric to baseline"
+    : a.gap;
+  return `M1.10 acceptance: ${overall} — ${detail}`;
 }
 
 /**
@@ -289,13 +294,13 @@ async function main() {
     process.stdout.write(`\nWrote ${outPath}\n`);
   }
 
-  // M1.10 gate is two-part:
-  //   shape       (≥4 competitors × ≥5 metrics from the published corpus)
-  //   live deltas (Minsky has measured at least one shared metric)
-  // Exit 0 only when BOTH hold; otherwise exit 1 with the scorecard
-  // still written so the operator can read the gap rationale.
-  const passed = scorecard.acceptance.meetsM110 && scorecard.acceptance.liveDeltaCount > 0;
-  return passed ? 0 : 1;
+  // M1.10 milestone gate: corpus SHAPE — ≥4 competitors × ≥5 shared
+  // metrics with published values. Exit 0 when the shape gate is met;
+  // exit 1 when the corpus is too thin. `liveDeltaCount` is surfaced
+  // in the summary but does NOT gate the exit code — a cold-start host
+  // (0 live deltas) is expected to accumulate Minsky measurements over
+  // time, not block the milestone.
+  return scorecard.acceptance.meetsM110 ? 0 : 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

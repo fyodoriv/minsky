@@ -55,6 +55,17 @@ AI pair programming in your terminal. Best-in-class local model support. Works w
 - Better local model UX (model picker, context management)
 - More battle-tested for daily coding
 
+## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
+
+| Metric                              | Value | Date       | Primary source                                                                                                                                                            |
+| ----------------------------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swe-bench-verified-resolve-rate`   | 0.263 | 2024-05-22 | Aider, *How aider scored SOTA 26.3% on SWE Bench Lite*, aider.chat/2024/05/22/swe-bench-lite.html — pass@1 with GPT-4o + Opus on the 300-instance SWE-bench Lite subset. |
+
+Note: Aider has not published a SWE-bench Verified-split-specific
+number. The Lite subset overlaps Verified for the easier-issue tail, so
+the Lite number is used here as the Verified-split proxy. If Aider
+publishes a Verified-split run, replace this reading.
+
 ## Last reviewed
 
-2026-05-18
+2026-05-22
