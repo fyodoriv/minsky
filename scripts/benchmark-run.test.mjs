@@ -29,12 +29,15 @@ function runBenchmark(host, args = []) {
     });
     return { code: 0, stdout: out, stderr: "" };
   } catch (e) {
-    const err = /** @type {{ status?: number | null, stdout?: string | Buffer, stderr?: string | Buffer }} */ (e);
+    const err =
+      /** @type {{ status?: number | null, stdout?: string | Buffer, stderr?: string | Buffer }} */ (
+        e
+      );
     const code = err.status ?? 1;
     return {
       code,
-      stdout: typeof err.stdout === "string" ? err.stdout : err.stdout?.toString() ?? "",
-      stderr: typeof err.stderr === "string" ? err.stderr : err.stderr?.toString() ?? "",
+      stdout: typeof err.stdout === "string" ? err.stdout : (err.stdout?.toString() ?? ""),
+      stderr: typeof err.stderr === "string" ? err.stderr : (err.stderr?.toString() ?? ""),
     };
   }
 }
@@ -113,7 +116,9 @@ describe("benchmark-run.mjs CLI", () => {
     // for any competitor today. The scorecard's notes column makes the
     // gap visible. This is a NEW slice-(c) follow-up: expand corpus.
     expect(r.code).toBe(1);
-    const sc = JSON.parse(readFileSync(join(host, ".minsky", "competitive-scorecard.json"), "utf8"));
+    const sc = JSON.parse(
+      readFileSync(join(host, ".minsky", "competitive-scorecard.json"), "utf8"),
+    );
     expect(sc.acceptance.liveDeltaCount).toBe(0);
   });
 

@@ -18,16 +18,8 @@
 //   M1.10 shape ratio, the live-delta count, and the gap-rationale
 //   field.
 
-import {
-  type Competitor,
-  COMPETITORS,
-  publishedValue,
-} from "./competitors.js";
-import {
-  type MetricDefinition,
-  METRICS,
-  computeDelta,
-} from "./metrics.js";
+import { COMPETITORS, type Competitor, publishedValue } from "./competitors.js";
+import { METRICS, type MetricDefinition, computeDelta } from "./metrics.js";
 
 /**
  * One cell in the scorecard grid: one Minsky vs one competitor on one
@@ -138,10 +130,7 @@ export interface BuildScorecardInput {
 const SHAPE_GATE_MIN_COMPETITORS = 4;
 const SHAPE_GATE_MIN_METRICS = 5;
 
-function competitorReportsMetric(
-  competitor: Competitor,
-  metric: MetricDefinition,
-): boolean {
+function competitorReportsMetric(competitor: Competitor, metric: MetricDefinition): boolean {
   const src = competitor.resultSource;
   if (src.kind === "published") {
     return Object.hasOwn(src.values, metric.id);
@@ -151,6 +140,75 @@ function competitorReportsMetric(
   // "carries" the metric only when the harness is wired up (M1.10 will
   // gate on it when the wiring lands — for now treat as no data).
   return false;
+}
+
+/**
+ * Whether both Minsky and the competitor have a real number for the
+ * given metric, i.e. a delta is computable.
+ */
+function canComputeDelta(competitorValue: number | undefined, minskyValue: number): boolean {
+  return (
+    typeof competitorValue === "number" &&
+    Number.isFinite(competitorValue) &&
+    Number.isFinite(minskyValue)
+  );
+}
+
+/**
+ * Build a single (metric × competitor) cell. Pure — derives the cell
+ * shape from the inputs only, no side effects.
+ */
+function buildCell(
+  metric: MetricDefinition,
+  competitor: Competitor,
+  minskyValue: number,
+): ScorecardCell {
+  const competitorValue = publishedValue(competitor, metric.id);
+  const delta = canComputeDelta(competitorValue, minskyValue)
+    ? computeDelta(metric, minskyValue, competitorValue as number)
+    : undefined;
+  return {
+    metricId: metric.id,
+    competitorId: competitor.id,
+    minskyValue,
+    competitorValue,
+    delta,
+  };
+}
+
+/**
+ * Running aggregate threaded through the (metric × competitor) loop.
+ * Lifts the loop body's bookkeeping into a typed shape so
+ * `buildScorecard` stays under the cognitive-complexity gate.
+ */
+interface ScorecardAggregate {
+  readonly cells: ScorecardCell[];
+  comparisonCount: number;
+  liveDeltaCount: number;
+  readonly competitorsWithData: Set<string>;
+  readonly metricsWithComparison: Set<string>;
+}
+
+/**
+ * Process one (metric × competitor) intersection: build the cell, push
+ * it, and update the aggregate counters.
+ */
+function processCell(
+  metric: MetricDefinition,
+  competitor: Competitor,
+  minskyValue: number,
+  agg: ScorecardAggregate,
+): void {
+  const cell = buildCell(metric, competitor, minskyValue);
+  agg.cells.push(cell);
+  if (cell.delta !== undefined) {
+    agg.comparisonCount += 1;
+    agg.liveDeltaCount += 1;
+  }
+  if (competitorReportsMetric(competitor, metric)) {
+    agg.competitorsWithData.add(competitor.id);
+    agg.metricsWithComparison.add(metric.id);
+  }
 }
 
 /**
@@ -170,48 +228,30 @@ function competitorReportsMetric(
  *   });
  *   sc.acceptance.meetsM110 // false — corpus only has SWE-bench today
  *   sc.acceptance.gap       // explains the shape gap
+ *
+ * @otel-exempt pure join — single double-nested fold over METRICS ×
+ *   COMPETITORS; no I/O, no side effects. The CLI shim's
+ *   `benchmark-run` span owns the observability for the surrounding
+ *   read-then-build-then-write pipeline.
  */
 export function buildScorecard(input: BuildScorecardInput): Scorecard {
-  const cells: ScorecardCell[] = [];
-  let comparisonCount = 0;
-  const competitorsWithDataSet = new Set<string>();
-  const metricsWithComparisonSet = new Set<string>();
-  let liveDeltaCount = 0;
+  const agg: ScorecardAggregate = {
+    cells: [],
+    comparisonCount: 0,
+    liveDeltaCount: 0,
+    competitorsWithData: new Set(),
+    metricsWithComparison: new Set(),
+  };
 
   for (const metric of METRICS) {
     for (const competitor of COMPETITORS) {
       const minskyValue = input.minskyValues[metric.id] ?? Number.NaN;
-      const competitorValue = publishedValue(competitor, metric.id);
-      const corpusHas = competitorReportsMetric(competitor, metric);
-
-      let delta: number | undefined;
-      if (
-        typeof competitorValue === "number" &&
-        Number.isFinite(competitorValue) &&
-        Number.isFinite(minskyValue)
-      ) {
-        delta = computeDelta(metric, minskyValue, competitorValue);
-        comparisonCount += 1;
-        liveDeltaCount += 1;
-      }
-
-      if (corpusHas) {
-        competitorsWithDataSet.add(competitor.id);
-        metricsWithComparisonSet.add(metric.id);
-      }
-
-      cells.push({
-        metricId: metric.id,
-        competitorId: competitor.id,
-        minskyValue,
-        competitorValue,
-        delta,
-      });
+      processCell(metric, competitor, minskyValue, agg);
     }
   }
 
-  const competitorsWithData = competitorsWithDataSet.size;
-  const metricsWithComparison = metricsWithComparisonSet.size;
+  const competitorsWithData = agg.competitorsWithData.size;
+  const metricsWithComparison = agg.metricsWithComparison.size;
   const meetsM110 =
     competitorsWithData >= SHAPE_GATE_MIN_COMPETITORS &&
     metricsWithComparison >= SHAPE_GATE_MIN_METRICS;
@@ -221,9 +261,9 @@ export function buildScorecard(input: BuildScorecardInput): Scorecard {
 
   return {
     generatedAt: input.now,
-    cellCount: cells.length,
-    comparisonCount,
-    cells,
+    cellCount: agg.cells.length,
+    comparisonCount: agg.comparisonCount,
+    cells: agg.cells,
     metrics: METRICS.map((m) => ({ id: m.id, label: m.label })),
     competitors: COMPETITORS.map((c) => ({
       id: c.id,
@@ -232,7 +272,7 @@ export function buildScorecard(input: BuildScorecardInput): Scorecard {
     })),
     acceptance: {
       meetsM110,
-      liveDeltaCount,
+      liveDeltaCount: agg.liveDeltaCount,
       competitorsWithData,
       metricsWithComparison,
       gap,

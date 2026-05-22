@@ -38,6 +38,38 @@ const REPO_ROOT = resolve(HERE, "..");
  */
 
 /**
+ * Apply one argv token to the running CliOpts. Returns the new index
+ * (the caller advances by 1 by default, this returns +1 when the flag
+ * consumed a value too).
+ *
+ * @param {string} flag
+ * @param {string[]} args
+ * @param {number} i
+ * @param {CliOpts} out
+ * @returns {number} new index in args
+ */
+function applyArg(flag, args, i, out) {
+  if (flag === "--json") {
+    out.json = true;
+    return i;
+  }
+  if (flag === "--host") {
+    out.host = args[i + 1] ?? null;
+    return i + 1;
+  }
+  if (flag === "--write-to") {
+    out.writeTo = args[i + 1] ?? null;
+    return i + 1;
+  }
+  if (flag === "--help" || flag === "-h") {
+    out.help = true;
+    return i;
+  }
+  process.stderr.write(`benchmark-run: unknown argument: ${flag}\n`);
+  process.exit(64);
+}
+
+/**
  * Parse argv. Same shape as scripts/minsky-benchmark.mjs.
  *
  * @param {string[]} argv
@@ -49,18 +81,8 @@ function parseArgs(argv) {
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--json") {
-      out.json = true;
-    } else if (a === "--host") {
-      out.host = args[++i] ?? null;
-    } else if (a === "--write-to") {
-      out.writeTo = args[++i] ?? null;
-    } else if (a === "--help" || a === "-h") {
-      out.help = true;
-    } else if (a) {
-      process.stderr.write(`benchmark-run: unknown argument: ${a}\n`);
-      process.exit(64);
-    }
+    if (!a) continue;
+    i = applyArg(a, args, i, out);
   }
   return out;
 }
@@ -130,6 +152,70 @@ function readLedger(host) {
   return records;
 }
 
+/** @typedef {{ competitorId: string, delta: number | undefined, competitorValue: number | undefined, minskyValue: number }} CellRow */
+
+/**
+ * Build the one-line M1.10 acceptance summary from a scorecard's
+ * `acceptance` object.
+ *
+ * @param {import("../novel/competitive-benchmark/dist/scorecard.js").Scorecard["acceptance"]} a
+ * @returns {string}
+ */
+function formatAcceptanceLine(a) {
+  const shapeOk = a.meetsM110;
+  const liveOk = a.liveDeltaCount > 0;
+  const overall = shapeOk && liveOk ? "✅ MET" : "❌ GAP";
+  /** @type {string[]} */
+  const reasons = [];
+  if (!shapeOk) reasons.push(a.gap);
+  if (!liveOk) {
+    reasons.push(
+      "Minsky has 0 live deltas — run ≥1 iteration whose metric also lives in the corpus.",
+    );
+  }
+  return `M1.10 acceptance: ${overall}${reasons.length > 0 ? ` — ${reasons.join(" + ")}` : ""}`;
+}
+
+/**
+ * Group cells by metric, dropping rows where both Minsky and the
+ * competitor have no value (pure no-data rows). The summary stays
+ * scan-able by only showing rows that carry information.
+ *
+ * @param {readonly import("../novel/competitive-benchmark/dist/scorecard.js").ScorecardCell[]} cells
+ * @returns {Map<string, CellRow[]>}
+ */
+function groupCellsByMetric(cells) {
+  /** @type {Map<string, CellRow[]>} */
+  const byMetric = new Map();
+  for (const cell of cells) {
+    if (cell.competitorValue === undefined && !Number.isFinite(cell.minskyValue)) {
+      continue;
+    }
+    if (!byMetric.has(cell.metricId)) byMetric.set(cell.metricId, []);
+    byMetric.get(cell.metricId)?.push({
+      competitorId: cell.competitorId,
+      delta: cell.delta,
+      competitorValue: cell.competitorValue,
+      minskyValue: cell.minskyValue,
+    });
+  }
+  return byMetric;
+}
+
+/**
+ * Format one row in the per-metric block of the summary.
+ *
+ * @param {CellRow} row
+ * @returns {string}
+ */
+function formatCellRow(row) {
+  const indicator = row.delta === undefined ? "·" : row.delta > 0 ? "✓" : row.delta < 0 ? "✗" : "=";
+  const minSki = Number.isFinite(row.minskyValue) ? row.minskyValue.toFixed(4) : "no data";
+  const comp = row.competitorValue === undefined ? "no data" : row.competitorValue.toFixed(4);
+  const delta = row.delta === undefined ? "" : ` (Δ ${row.delta.toFixed(4)})`;
+  return `    ${indicator} vs ${row.competitorId}: minsky=${minSki} competitor=${comp}${delta}`;
+}
+
 /**
  * Render a human-readable summary table.
  *
@@ -145,60 +231,13 @@ function renderSummary(sc) {
     `Grid: ${sc.cellCount} cells (${sc.metrics.length} metrics × ${sc.competitors.length} competitors)`,
   );
   lines.push(`Live comparisons: ${sc.comparisonCount} cell(s) with a delta`);
-
-  // Two-part M1.10 acceptance: shape (corpus) + live deltas (Minsky measured)
-  const shapeOk = sc.acceptance.meetsM110;
-  const liveOk = sc.acceptance.liveDeltaCount > 0;
-  const overall = shapeOk && liveOk ? "✅ MET" : "❌ GAP";
-  /** @type {string[]} */
-  const reasons = [];
-  if (!shapeOk) reasons.push(sc.acceptance.gap);
-  if (!liveOk) {
-    reasons.push(
-      "Minsky has 0 live deltas — run ≥1 iteration whose metric also lives in the corpus.",
-    );
-  }
-  lines.push(
-    `M1.10 acceptance: ${overall}${reasons.length > 0 ? ` — ${reasons.join(" + ")}` : ""}`,
-  );
+  lines.push(formatAcceptanceLine(sc.acceptance));
   lines.push("");
 
-  // Group cells by metric and show only competitors with a delta or
-  // competitor value (skip pure no-data rows to keep the summary scan-able).
-  /** @type {Map<string, Array<{ competitorId: string, delta: number | undefined, competitorValue: number | undefined, minskyValue: number }>>} */
-  const byMetric = new Map();
-  for (const cell of sc.cells) {
-    if (cell.competitorValue === undefined && !Number.isFinite(cell.minskyValue)) {
-      continue;
-    }
-    if (!byMetric.has(cell.metricId)) byMetric.set(cell.metricId, []);
-    byMetric.get(cell.metricId)?.push({
-      competitorId: cell.competitorId,
-      delta: cell.delta,
-      competitorValue: cell.competitorValue,
-      minskyValue: cell.minskyValue,
-    });
-  }
-  for (const [metricId, rows] of byMetric) {
+  for (const [metricId, rows] of groupCellsByMetric(sc.cells)) {
     lines.push(`  ${metricId}`);
     for (const row of rows) {
-      const indicator =
-        row.delta === undefined
-          ? "·"
-          : row.delta > 0
-            ? "✓"
-            : row.delta < 0
-              ? "✗"
-              : "=";
-      const minSki = Number.isFinite(row.minskyValue)
-        ? row.minskyValue.toFixed(4)
-        : "no data";
-      const comp =
-        row.competitorValue === undefined ? "no data" : row.competitorValue.toFixed(4);
-      const delta = row.delta === undefined ? "" : ` (Δ ${row.delta.toFixed(4)})`;
-      lines.push(
-        `    ${indicator} vs ${row.competitorId}: minsky=${minSki} competitor=${comp}${delta}`,
-      );
+      lines.push(formatCellRow(row));
     }
     lines.push("");
   }
@@ -232,8 +271,7 @@ async function main() {
     now: new Date().toISOString(),
   });
 
-  const outPath =
-    opts.writeTo ?? join(host, ".minsky", "competitive-scorecard.json");
+  const outPath = opts.writeTo ?? join(host, ".minsky", "competitive-scorecard.json");
   try {
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, `${JSON.stringify(scorecard, null, 2)}\n`);
@@ -256,8 +294,7 @@ async function main() {
   //   live deltas (Minsky has measured at least one shared metric)
   // Exit 0 only when BOTH hold; otherwise exit 1 with the scorecard
   // still written so the operator can read the gap rationale.
-  const passed =
-    scorecard.acceptance.meetsM110 && scorecard.acceptance.liveDeltaCount > 0;
+  const passed = scorecard.acceptance.meetsM110 && scorecard.acceptance.liveDeltaCount > 0;
   return passed ? 0 : 1;
 }
 

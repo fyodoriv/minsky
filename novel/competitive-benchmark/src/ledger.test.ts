@@ -1,10 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import {
-  type IterationRecord,
-  computeMinskyReadings,
-  readingsToMetricValues,
-} from "./ledger.js";
+import { type IterationRecord, computeMinskyReadings, readingsToMetricValues } from "./ledger.js";
 
 describe("computeMinskyReadings", () => {
   test("(a) empty ledger → every rate is NaN; sample counts are zero", () => {
@@ -130,9 +126,7 @@ describe("computeMinskyReadings", () => {
   });
 
   test("(f) returns the same shape on re-invocation (referential transparency check)", () => {
-    const records: IterationRecord[] = [
-      { verdict: "pr-open", pr: "x", prState: "merged" },
-    ];
+    const records: IterationRecord[] = [{ verdict: "pr-open", pr: "x", prState: "merged" }];
     const r1 = computeMinskyReadings(records);
     const r2 = computeMinskyReadings(records);
     expect(r1).toStrictEqual(r2);
@@ -141,9 +135,7 @@ describe("computeMinskyReadings", () => {
 
 describe("readingsToMetricValues", () => {
   test("(g) keys match canonical MetricDefinition ids in metrics.ts", () => {
-    const r = computeMinskyReadings([
-      { verdict: "pr-open", pr: "x", prState: "merged" },
-    ]);
+    const r = computeMinskyReadings([{ verdict: "pr-open", pr: "x", prState: "merged" }]);
     const v = readingsToMetricValues(r);
     expect(Object.keys(v).sort()).toEqual([
       "autonomous-merge-rate",
