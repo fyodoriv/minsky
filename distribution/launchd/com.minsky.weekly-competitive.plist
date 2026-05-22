@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- scope: human-approved 2026-05-22 M1.10 slice (c+) — weekly scorecard auto-refresh; M1.10 milestone "scorecard updates weekly" deliverable; mirrors com.minsky.auto-merge.plist's StartInterval shape and com.minsky.tick-loop.plist's launchd-supervised cadence. -->
+<!--
+Minsky weekly competitive scorecard refresh — launchd LaunchAgent for macOS.
+
+Pattern: "periodic task" supervisor pattern (Borg/Bashir/Burns/Hightower
+_Designing Distributed Systems_ 2017). Every Monday at 04:00 local
+launchd fires `run-weekly-competitive.sh` which runs
+`bin/minsky competitive --host ${MINSKY_HOME}`, refreshing
+`~/.minsky/competitive-scorecard.json` against the published competitor
+corpus + the current `.minsky/orchestrate.jsonl` ledger.
+
+Why this exists: M1.10 acceptance requires "scorecard updates weekly".
+Without scheduled automation, the JSON drifts and the operator's
+dashboard claims stale freshness. The plist closes that gap.
+
+Default behaviour: installed via `minsky install-daemon` alongside the
+supervisor. The cycle is cheap (≤2s build+render+write) so we run it
+weekly rather than daily — the corpus changes are publication-driven
+(once per quarter at most), so a daily refresh would be vanity.
+
+Placeholders substituted by `bin/minsky install-daemon` via envsubst:
+  ${MINSKY_HOME}   — absolute path to the minsky repo checkout
+  ${HOME}          — operator's home directory
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.minsky.weekly-competitive</string>
+
+    <key>WorkingDirectory</key>
+    <string>${MINSKY_HOME}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MINSKY_HOME</key>
+        <string>${MINSKY_HOME}</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${MINSKY_HOME}/distribution/systemd/run-weekly-competitive.sh</string>
+    </array>
+
+    <!--
+    StartCalendarInterval: every Monday at 04:00 local time. Why Monday
+    morning: the operator starts the week looking at the fresh scorecard;
+    the run happens before they open the dashboard. 04:00 avoids
+    contention with the auto-merge cycle (300s tick), the budget-guard
+    cycle (60s), and the tick-loop daemon work.
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!--
+    RunAtLoad: refresh the scorecard on host bootstrap so a fresh
+    install has a usable JSON immediately, not after the next Monday
+    04:00. The script is idempotent — re-running is cheap.
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+    Cycle cap: 60s. The scorecard build is pure (no network), so any
+    cycle running longer is a bug — SIGKILL.
+    -->
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>CPU</key>
+        <integer>60</integer>
+    </dict>
+
+    <!--
+    Logs go to ~/.local/state/minsky/competitive.log per the
+    AGENTS.md convention for scheduled-task logs.
+    -->
+    <key>StandardOutPath</key>
+    <string>${HOME}/.local/state/minsky/competitive.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/.local/state/minsky/competitive.log</string>
+</dict>
+</plist>

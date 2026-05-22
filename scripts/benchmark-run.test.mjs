@@ -62,27 +62,24 @@ describe("benchmark-run.mjs CLI", () => {
     expect(r.stderr).toContain("unknown argument: --bogus");
   });
 
-  test("(c) empty-ledger host: writes scorecard, exits 1 (shape gap on metrics axis + no live deltas)", () => {
+  test("(c) empty-ledger host: writes scorecard, exits 0 (M1.10 shape gate MET on corpus alone)", () => {
     const host = mkdtempSync(join(tmpdir(), "minsky-bench-"));
     execFileSync("git", ["init", host], { stdio: "ignore" });
     const r = runBenchmark(host);
-    // The corpus has 1 metric (SWE-bench) across 5 competitors —
-    // metrics axis fails (1 < 5) AND Minsky has nothing measured.
-    expect(r.code).toBe(1);
+    // After the 2026-05-22 corpus expansion the published corpus
+    // carries ≥4 competitors × ≥5 shared metrics, so the M1.10 shape
+    // gate is met regardless of Minsky-side measurement.
+    expect(r.code).toBe(0);
     const writePath = join(host, ".minsky", "competitive-scorecard.json");
     expect(existsSync(writePath)).toBe(true);
     const sc = JSON.parse(readFileSync(writePath, "utf8"));
-    expect(sc.acceptance.meetsM110).toBe(false);
+    expect(sc.acceptance.meetsM110).toBe(true);
+    expect(sc.acceptance.gap).toBe("");
+    // Cold-start: no Minsky readings yet (informational).
     expect(sc.acceptance.liveDeltaCount).toBe(0);
-    expect(sc.acceptance.gap).toMatch(/M1.10 shape gap/);
   });
 
-  test("(d) fixture ledger with SWE-bench reading would produce a live delta — but ledger doesn't carry SWE-bench so deltas stay 0", () => {
-    // This test pins the documented constraint: the iteration ledger
-    // can't measure swe-bench-verified-resolve-rate; that's a
-    // benchmark-run number, not a live-iteration number. So even
-    // with a full ledger, liveDeltaCount stays 0 until a separate
-    // SWE-bench-run hook lands.
+  test("(d) fixture ledger producing autonomous-merge-rate yields live deltas against Devin/Claude Code/Cursor", () => {
     const host = mkdtempSync(join(tmpdir(), "minsky-bench-"));
     execFileSync("git", ["init", host], { stdio: "ignore" });
     const minskyDir = join(host, ".minsky");
@@ -112,14 +109,17 @@ describe("benchmark-run.mjs CLI", () => {
     writeFileSync(join(minskyDir, "orchestrate.jsonl"), `${ledger}\n`);
 
     const r = runBenchmark(host);
-    // Still exit 1 because the corpus doesn't carry autonomous-merge-rate
-    // for any competitor today. The scorecard's notes column makes the
-    // gap visible. This is a NEW slice-(c) follow-up: expand corpus.
-    expect(r.code).toBe(1);
+    // Shape gate met (corpus is fine) → exit 0.
+    expect(r.code).toBe(0);
     const sc = JSON.parse(
       readFileSync(join(host, ".minsky", "competitive-scorecard.json"), "utf8"),
     );
-    expect(sc.acceptance.liveDeltaCount).toBe(0);
+    expect(sc.acceptance.meetsM110).toBe(true);
+    // The Minsky ledger now produces autonomous-merge-rate = 1.0
+    // (2 merged / 2 opened) — joins against Devin (0.67), Claude Code
+    // (0.726), Cursor (0.804). Also mean-autonomous-merge-latency = 2700s
+    // and cost-per-merged-pr = 0.4 USD — join against OpenHands/Devin.
+    expect(sc.acceptance.liveDeltaCount).toBeGreaterThanOrEqual(3);
   });
 
   test("(e) --write-to redirects the output file", () => {
@@ -133,14 +133,15 @@ describe("benchmark-run.mjs CLI", () => {
     expect(sc.cells).toBeInstanceOf(Array);
   });
 
-  test("(f) --json prints raw JSON to stdout", () => {
+  test("(f) --json prints raw JSON to stdout, exits 0 on M1.10 shape gate met", () => {
     const host = mkdtempSync(join(tmpdir(), "minsky-bench-"));
     execFileSync("git", ["init", host], { stdio: "ignore" });
     const r = runBenchmark(host, ["--json"]);
-    expect(r.code).toBe(1); // still gap, exit 1
+    expect(r.code).toBe(0);
     // JSON should be parseable
     const parsed = JSON.parse(r.stdout);
     expect(parsed.acceptance).toBeDefined();
+    expect(parsed.acceptance.meetsM110).toBe(true);
     expect(parsed.cellCount).toBeGreaterThan(0);
   });
 });

@@ -21,23 +21,29 @@ describe("buildScorecard", () => {
     expect(sc.metrics[0]).toMatchObject({ id: expect.any(String), label: expect.any(String) });
   });
 
-  test("(c) empty-Minsky scorecard has 0 live deltas and shape gap on metrics axis", () => {
+  test("(c) empty-Minsky scorecard hits 0 live deltas; the shape gate is MET (post-corpus-expansion)", () => {
     const sc = buildScorecard({ minskyValues: {}, now: NOW });
-    // Today the corpus carries SWE-bench Verified across ≥4 competitors,
-    // but only ONE shared metric — the metrics axis fails the shape gate.
+    // After the 2026-05-22 corpus expansion, the corpus carries 5
+    // distinct metrics across ≥4 published competitors — the M1.10
+    // shape gate MEETS the ≥4 × ≥5 target regardless of Minsky-side
+    // measurement. `liveDeltaCount` stays 0 until Minsky has measured
+    // at least one shared metric (cold-start expected behavior).
+    expect(sc.acceptance.meetsM110).toBe(true);
+    expect(sc.acceptance.gap).toBe("");
+    expect(sc.acceptance.competitorsWithData).toBeGreaterThanOrEqual(4);
+    expect(sc.acceptance.metricsWithComparison).toBeGreaterThanOrEqual(5);
     expect(sc.acceptance.liveDeltaCount).toBe(0);
-    expect(sc.acceptance.meetsM110).toBe(false);
-    expect(sc.acceptance.gap).toMatch(/M1.10 shape gap/);
-    expect(sc.acceptance.gap).toMatch(/metric\(s\) with published values/);
   });
 
-  test("(d) Minsky reading without a competitor counterpart in the corpus → no live delta", () => {
-    // autonomous-merge-rate has 0 competitor values in the published corpus today
+  test("(d) Minsky reading on autonomous-merge-rate now produces ≥1 live delta", () => {
+    // Post-corpus-expansion the corpus carries autonomous-merge-rate for
+    // Devin (0.67), Claude Code (0.726), Cursor (0.804) — so a Minsky
+    // measurement on that metric joins to ≥3 competitor cells.
     const sc = buildScorecard({
       minskyValues: { "autonomous-merge-rate": 0.85 },
       now: NOW,
     });
-    expect(sc.acceptance.liveDeltaCount).toBe(0);
+    expect(sc.acceptance.liveDeltaCount).toBeGreaterThanOrEqual(3);
   });
 
   test("(e) Minsky reading WITH a competitor counterpart produces a live delta", () => {

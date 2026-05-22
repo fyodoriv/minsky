@@ -54,6 +54,19 @@ Cloud-hosted autonomous software engineer. Runs in Cognition's cloud — full ID
 - Fine-tuning support
 - Better for teams who want managed infrastructure
 
+## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
+
+The Minsky scorecard uses these dated, cited numbers for Devin. Update
+this section whenever the corpus reading is updated; the `asOf` field
+in the corpus must match the date here.
+
+| Metric                              | Value | Date       | Primary source                                                                                                                                                                                                  |
+| ----------------------------------- | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `autonomous-merge-rate`             | 0.67  | 2026-04-07 | Cognition Labs, *2025 Annual Performance Review*, cognition.ai (real-world PR merge rate across thousands of customer codebases); cross-referenced AgentMarketCap, *Devin's 67% PR Merge Rate*, 2026-04-07.    |
+| `human-intervention-rate`           | 0.33  | 2026-04-07 | Inverse of autonomous-merge-rate per the same source (the 33% of PRs that don't merge without significant rework).                                                                                              |
+| `swe-bench-verified-resolve-rate`   | 0.139 | 2024-03-12 | Cognition Labs, *Introducing Devin*, cognition.ai, 2024-03-12 (original SWE-bench end-to-end resolve rate at launch). Note: Devin has not published a Verified-split-specific number since the original launch. |
+| `mean-autonomous-merge-latency`     | 900 s | 2026-04-07 | AgentMarketCap, *Devin Doubled Its PR Merge Rate to 67%*, 2026-04-07 — 1 ACU ≈ 15 min Devin work, ~1 ACU per typical PR. 900 sec is the order-of-magnitude estimate, not a per-PR measurement.                  |
+
 ## Last reviewed
 
-2026-05-18
+2026-05-22
