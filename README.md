@@ -121,6 +121,65 @@ Six distinctive mechanisms, each backed by file paths so any claim is auditable:
 
 For the **competitive-position view** of the same substrate — the six moats that make Minsky distinctive vs CrewAI / AutoGen / LangGraph / MetaGPT / OpenAI Agents SDK — see [vision.md § "What Minsky uniquely does"](vision.md#what-minsky-uniquely-does-the-moat) and [`competitors/README.md`](competitors/README.md).
 
+## How Minsky compares to other tools
+
+> The honest version. Each column is a real product the operator might pick instead.
+
+Minsky's peers are **orchestrators** (CrewAI, AutoGen, LangGraph, MetaGPT) — not agents (Claude Code, Cursor, Aider) — but operators often compare across tiers, so the table includes both. Per-competitor research files live in [`competitors/`](competitors/).
+
+| Capability | Minsky | [OpenHands][oh] | [CrewAI][crewai] | [Devin][devin] | [Claude Code][cc] / [Aider][aider] |
+|---|---|---|---|---|---|
+| **Shape** | Daemon (background process) | Framework + runtime (FastAPI + sandbox) | Python framework (`pip install crewai`) | SaaS (Cognition Cloud + Devbox) | CLI tool |
+| **Where it runs** | Operator's machine, operator's identity | Local Docker / Cloud SaaS / Enterprise K8s | Developer's Python env / CrewAI AMP K8s | Cognition Cloud (Devbox per task) | Operator's terminal |
+| **Credentials** | Reuses `~/.ssh`, `~/.gitconfig`, `~/.config/gh` directly — **zero provisioning** | Operator gives OpenHands a GitHub token (system handles it) | OSS: env vars. AMP: SaaS credential vault | Cognition-provisioned Devbox identity | Operator's terminal session |
+| **Coding-specific?** | Yes — TASKS.md → PR is the whole loop | Yes — CodeAct paradigm, autonomous coding | No — general-purpose orchestration; code execution deprecated | Yes — autonomous engineer | Yes — pair programming |
+| **24/7 unattended** | Yes — survives terminal close, launchd / systemd KeepAlive | No — request-response (Enterprise Automations are scheduled) | No — stateless per `crew.kickoff()` | Yes — Cognition Cloud sessions | No — interactive |
+| **Cross-repo fleet** | Built-in (`--hosts-dir` walks N repos) | Enterprise tier only (Automations) | Partial (Flows can chain Crews, no fleet walker) | One repo per session | One repo at a time |
+| **Constitutional rules / deterministic CI** | 17 iron rules + 53 pre-pr-lint stages + 65 CI jobs | LLM-advisory only | Optional guardrails | Cognition-internal policies | None |
+| **Self-improvement (MAPE-K)** | Yes — daemon refines its own prompts/policies | No (Index benchmarks models but doesn't auto-tune agents) | No (reasoning agents reflect per-task, not closed-loop) | Unclear (Cognition-internal) | No |
+| **Operator queue** | `TASKS.md` (markdown in repo, version-controlled) | Web UI / CLI / Slack-GitHub integrations | Python code (`agents.yaml` + `crew.py`) + AMP UI | Cognition app / Slack | Operator types into terminal |
+| **Headline benchmark** | None published yet ([gap filed][gap]) | **65.8% SWE-bench Verified** (Apr 2025) | Not coding-specific — no HumanEval/MBPP/SWE-bench | Disclosed scores in Cognition blog | Aider has its own polyglot leaderboard |
+| **Enterprise distribution** | None — single operator today ([gap filed][gap-ent]) | OpenHands Enterprise (Agent Control Plane, May 2026) | CrewAI AMP — **60% of Fortune 500, 2B+ executions** | Devin Enterprise (Cognition Cloud / VPC) | Anthropic / OSS, no dedicated enterprise |
+| **Funding signal** | None | $18.8M Series A (Madrona, Nov 2025) | $18M total (Insight Partners, Oct 2024) | $4B valuation (Cognition Labs) | Anthropic-backed / OSS |
+| **License** | MIT | MIT (core) + Polyform Free Trial (enterprise dir) | MIT | Proprietary SaaS | Anthropic ToS / Apache-2.0 |
+
+[oh]: competitors/openhands.md
+[crewai]: competitors/crewai.md
+[devin]: competitors/devin.md
+[cc]: competitors/claude-code.md
+[aider]: competitors/aider.md
+[gap]: TASKS.md
+[gap-ent]: TASKS.md
+
+### Where Minsky is uniquely strong
+
+- **Operator-machine identity** — Minsky's commits land as you, with your SSH key, your gitconfig, your GitHub token. No credential provisioning, no SaaS sandbox, no token handoff. Every other orchestrator runs in a separate identity boundary (Devbox, AMP vault, Docker sandbox, fresh clone).
+- **Constitution as deterministic CI** — 17 rules enforced as 53 pre-pr-lint stages and 65 CI jobs. Every PR an agent opens is gated by the same lint pipeline a human-authored PR would face. OpenHands / CrewAI / AutoGen / LangGraph rely on LLM-advisory prompts; none enforce policy at the gate level.
+- **Self-improving daemon** — Minsky reads its own iteration ledger (`.minsky/experiment-store/`) and tunes its own prompts / policies. The daemon refactors the daemon. Most P0s in this repo were surfaced by daemon iterations on itself.
+- **Cross-repo fleet at operator scale** — one Minsky daemon walks N hosts in round-robin (3 iterations per host per pass). OpenHands needs the Enterprise tier; CrewAI Crews are single-context.
+- **TASKS.md as operator surface** — work queue is plain markdown in git. No web UI to log into, no Python file to import, no DSL to learn. Operators edit it like any other file; the daemon picks tasks up on the next iteration.
+
+### Where Minsky has real tradeoffs
+
+Honesty matters more than marketing here. Three tradeoffs an operator should weigh:
+
+- **No headline benchmark yet** — OpenHands publishes 65.8% SWE-bench Verified (Apr 2025); MetaGPT publishes 85.9% HumanEval; Augment Code publishes 65.4%. Minsky has no published score. The gap is tracked at [`benchmark-minsky-via-claude-on-humaneval`](TASKS.md) and successor tasks. Until that lands, an operator comparing Minsky-via-Claude to a bare Claude Code baseline can't show a number, only a qualitative narrative. If your buyer asks "show me the number," that's a known gap.
+- **Single-operator deployment shape today** — CrewAI ships AMP at Fortune 500 scale (60% Fortune 500). OpenHands ships Enterprise Agent Control Plane (RBAC, audit, OAuth2). Devin ships Cognition Cloud + Devbox + customer VPC. Minsky has one production deployment (the operator's own machine). The gap is tracked at [`enterprise-deployment-readiness-audit`](TASKS.md). If your buyer requires SOC 2 audit logs + RBAC + IdP integration today, Minsky doesn't ship those.
+- **Coding-specific by design** — CrewAI works for marketing, research, customer support, analytics. Minsky works for "merge code into a git repo." Tighter focus is the design choice — coding is what makes the constitution enforceable as CI, makes TASKS.md naturally version-controlled, makes the PR-shaped output measurable. But if your use case isn't shipping code, Minsky is the wrong tool. Use CrewAI Flows or AutoGen for generic orchestration; use Minsky for coding.
+
+### What we steal from each
+
+Each competitor's research file ([`competitors/<id>.md`](competitors/)) ends with a *What we learn / steal* section listing concrete ideas. Selected highlights:
+
+- **OpenHands** — pluggable sandbox layer (Docker / Process / Remote); multi-task benchmark suite shape (Index = 5 tasks, not just SWE-bench); bring-your-own-agent framing (operator picks Claude Code / Codex / OpenHands inside one shell — structurally identical to Minsky's per-machine agent config).
+- **CrewAI** — hierarchical memory architecture (short-term / long-term / entity / contextual with LLM-analyzed scopes); manager agent / delegation pattern; event-driven Flows as an alternative to procedural cross-repo-runner.
+- **Devin** — Cognition's investment in agent observability + replay tooling (Minsky's `.minsky/experiment-store/` is the embryonic version of this).
+- **Aider** — git-aware repo editing UX, polyglot leaderboard discipline (publishing a real benchmark on a public leaderboard before claiming the moat).
+
+### One-paragraph summary
+
+If you want a 24/7 daemon that walks your fleet of repos, uses your credentials, enforces 17 deterministic rules, and improves itself from its own iteration ledger — pick Minsky. If you want SWE-bench leadership today + a Docker-isolated sandbox + a web UI to watch the agent think — pick OpenHands. If you want general-purpose multi-agent orchestration for marketing / research / customer support + Fortune 500 deployment substrate — pick CrewAI. If you want a fully managed agent in Cognition's cloud + the highest single-task autonomy bar — pick Devin. If you want a focused CLI pair programmer — pick Claude Code or Aider.
+
 ## Where to read next
 
 The full documentation map is at **[docs/README.md](docs/README.md)**. It's organised by audience — pick the path that matches who you are.
