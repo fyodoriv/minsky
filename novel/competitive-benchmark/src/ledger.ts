@@ -71,6 +71,52 @@ export interface MinskyReadings {
 }
 
 /**
+ * Verdicts that count as "successful iteration" (not a failure-class
+ * intervention). The reducer keeps this set narrow so a new verdict
+ * type doesn't silently get classified as success.
+ */
+const NON_FAILURE_VERDICTS: ReadonlySet<string> = new Set([
+  "pr-open",
+  "no-change",
+  "empty-queue",
+  "dry-run-only",
+]);
+
+/** Mutable running totals threaded through the reducer's fold. */
+interface RunningTotals {
+  openedPrs: number;
+  mergedPrs: number;
+  mergedLatencySumSec: number;
+  mergedCostSumUsd: number;
+  ciFirstPushGreenCount: number;
+  humanEditsCount: number;
+  failureVerdictCount: number;
+}
+
+/** Fold one `pr-open` record into the running totals. */
+function foldPrOpen(r: IterationRecord, t: RunningTotals): void {
+  t.openedPrs += 1;
+  if (r.prState === "merged") {
+    t.mergedPrs += 1;
+    if (typeof r.durationSec === "number") t.mergedLatencySumSec += r.durationSec;
+    if (typeof r.costUsd === "number") t.mergedCostSumUsd += r.costUsd;
+  }
+  if (r.ciFirstPushGreen === true) t.ciFirstPushGreenCount += 1;
+  if (r.humanEdits === true) t.humanEditsCount += 1;
+}
+
+/** Whether a verdict counts as a failure that requires human intervention. */
+function isFailureVerdict(verdict: string | undefined): boolean {
+  if (typeof verdict !== "string") return false;
+  return !NON_FAILURE_VERDICTS.has(verdict);
+}
+
+/** NaN when the denominator is zero (visible-not-silent — Helland 2007). */
+function safeDiv(num: number, den: number): number {
+  return den === 0 ? Number.NaN : num / den;
+}
+
+/**
  * Compute Minsky's metric values from an array of iteration records.
  *
  * Pure function over an immutable array; returns NaN for any metric
@@ -83,68 +129,41 @@ export interface MinskyReadings {
  *   cost-per-merged-pr              = sum(costUsd | merged) / mergedPrs
  *   gate-pass-rate                  = ciFirstPushGreen / openedPrs
  *   human-intervention-rate         = (humanEdits + non-pr-open verdicts) / iterations
+ *
+ * @otel-exempt pure reducer — single-pass fold over an immutable array;
+ *   no I/O, no side effects. The CLI shim's `benchmark-run` span owns
+ *   the observability for the read-then-reduce-then-write pipeline.
  */
-export function computeMinskyReadings(
-  records: readonly IterationRecord[],
-): MinskyReadings {
-  const totalIterations = records.length;
-  let openedPrs = 0;
-  let mergedPrs = 0;
-  let mergedLatencySumSec = 0;
-  let mergedCostSumUsd = 0;
-  let ciFirstPushGreenCount = 0;
-  let humanEditsCount = 0;
-  let failureVerdictCount = 0;
+export function computeMinskyReadings(records: readonly IterationRecord[]): MinskyReadings {
+  const t: RunningTotals = {
+    openedPrs: 0,
+    mergedPrs: 0,
+    mergedLatencySumSec: 0,
+    mergedCostSumUsd: 0,
+    ciFirstPushGreenCount: 0,
+    humanEditsCount: 0,
+    failureVerdictCount: 0,
+  };
 
   for (const r of records) {
     if (r.verdict === "pr-open" && typeof r.pr === "string") {
-      openedPrs += 1;
-      if (r.prState === "merged") {
-        mergedPrs += 1;
-        if (typeof r.durationSec === "number") {
-          mergedLatencySumSec += r.durationSec;
-        }
-        if (typeof r.costUsd === "number") {
-          mergedCostSumUsd += r.costUsd;
-        }
-      }
-      if (r.ciFirstPushGreen === true) {
-        ciFirstPushGreenCount += 1;
-      }
-      if (r.humanEdits === true) {
-        humanEditsCount += 1;
-      }
-    } else if (
-      r.verdict === "spawn-failed" ||
-      r.verdict === "scope-leak" ||
-      (typeof r.verdict === "string" &&
-        r.verdict !== "pr-open" &&
-        r.verdict !== "no-change" &&
-        r.verdict !== "empty-queue" &&
-        r.verdict !== "dry-run-only")
-    ) {
-      failureVerdictCount += 1;
+      foldPrOpen(r, t);
+    } else if (isFailureVerdict(r.verdict)) {
+      t.failureVerdictCount += 1;
     }
   }
 
-  // Direction-aware safe division: NaN when denominator is zero, so the
-  // scorecard renders "no data" instead of masking as zero.
-  const safeDiv = (num: number, den: number): number =>
-    den === 0 ? Number.NaN : num / den;
-
+  const totalIterations = records.length;
   return {
-    autonomousMergeRate: safeDiv(mergedPrs, openedPrs),
-    meanAutonomousMergeLatencySeconds: safeDiv(mergedLatencySumSec, mergedPrs),
-    costPerMergedPrUsd: safeDiv(mergedCostSumUsd, mergedPrs),
-    gatePassRate: safeDiv(ciFirstPushGreenCount, openedPrs),
-    humanInterventionRate: safeDiv(
-      humanEditsCount + failureVerdictCount,
-      totalIterations,
-    ),
+    autonomousMergeRate: safeDiv(t.mergedPrs, t.openedPrs),
+    meanAutonomousMergeLatencySeconds: safeDiv(t.mergedLatencySumSec, t.mergedPrs),
+    costPerMergedPrUsd: safeDiv(t.mergedCostSumUsd, t.mergedPrs),
+    gatePassRate: safeDiv(t.ciFirstPushGreenCount, t.openedPrs),
+    humanInterventionRate: safeDiv(t.humanEditsCount + t.failureVerdictCount, totalIterations),
     samples: {
       totalIterations,
-      mergedPrs,
-      openedPrs,
+      mergedPrs: t.mergedPrs,
+      openedPrs: t.openedPrs,
     },
   };
 }
@@ -156,10 +175,11 @@ export function computeMinskyReadings(
  *
  * Values stay `Number.NaN` for missing metrics — the scorecard's join
  * step skips NaN values and renders them as `"no data"`.
+ *
+ * @otel-exempt pure object-shape conversion — no I/O, no side effects.
+ *   Wrapping a span around an object literal would be pure noise.
  */
-export function readingsToMetricValues(
-  readings: MinskyReadings,
-): Record<string, number> {
+export function readingsToMetricValues(readings: MinskyReadings): Record<string, number> {
   return {
     "autonomous-merge-rate": readings.autonomousMergeRate,
     "mean-autonomous-merge-latency": readings.meanAutonomousMergeLatencySeconds,
