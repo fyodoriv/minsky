@@ -76,13 +76,14 @@ describe("findAlreadyFiledIds", () => {
   });
 
   test("(f) returns the subset that appears as **ID**: corpus-refresh-<id>", () => {
-    const tasksMd = `# Tasks\n\n## P2\n\n- [ ] foo\n  - **ID**: corpus-refresh-openhands\n\n- [ ] bar\n  - **ID**: unrelated-task\n`;
+    const tasksMd =
+      "# Tasks\n\n## P2\n\n- [ ] foo\n  - **ID**: corpus-refresh-openhands\n\n- [ ] bar\n  - **ID**: unrelated-task\n";
     const present = findAlreadyFiledIds(tasksMd, ["openhands", "aider", "swe-agent"]);
     expect([...present].sort()).toEqual(["openhands"]);
   });
 
   test("(g) matches the `corpus-refresh-` prefix exactly (no false-positive on substring)", () => {
-    const tasksMd = `# Tasks\n\n  - **ID**: refresh-corpus-openhands\n`;
+    const tasksMd = "# Tasks\n\n  - **ID**: refresh-corpus-openhands\n";
     const present = findAlreadyFiledIds(tasksMd, ["openhands"]);
     expect(present.size).toBe(0);
   });

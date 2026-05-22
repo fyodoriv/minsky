@@ -64,8 +64,8 @@ export function buildRefreshTaskBlock(input) {
   return [
     `- [ ] \`corpus-refresh-${competitorId}\` — refresh the published readings for \`${competitorId}\` in \`novel/competitive-benchmark/src/competitors.ts\` (asOf ${asOf}, ${ageDays} days stale; auto-filed by \`scripts/auto-file-corpus-refresh-tasks.mjs\`)`,
     `  - **ID**: corpus-refresh-${competitorId}`,
-    `  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed`,
-    `  - **Milestone**: M1`,
+    "  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed",
+    "  - **Milestone**: M1",
     `  - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at \`fresh\` (≤90 days). A reading at ${ageDays} days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs ${competitorId}" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.`,
     `  - **Touches**: \`novel/competitive-benchmark/src/competitors.ts\` (the \`${competitorId}\` entry), \`competitors/${competitorId}.md\` (Scorecard readings table), optional \`competitors.test.ts\` if a value moves significantly.`,
     `  - **Details**: invoke \`/competitor-research <url>\` with the vendor's primary publication URL for \`${competitorId}\`. The skill walks the 6 phases (identify → research → draft → validate → verify → file follow-ups). The draft validator (\`scripts/competitor-research-validate.mjs --refresh --draft <path>\`) accepts the existing id with \`--refresh\`. After the skill lands the PR, this auto-filed task can be removed from TASKS.md (per tasks.md spec — history lives in git log).`,
@@ -162,41 +162,34 @@ function parseArgs(argv) {
   return out;
 }
 
-async function main() {
-  const opts = parseArgs(process.argv);
-  if (opts.help) {
-    printUsage();
-    return 0;
-  }
-  // Lazy-import the sibling so the script works in CI even if the
-  // node-resolver path differs.
-  const { computeFreshness, extractCorpusEntries } = await import("./check-corpus-freshness.mjs");
+/**
+ * Resolve the two input file paths and ensure they both exist on disk.
+ *
+ * @returns {{ ok: true, competitorsPath: string, tasksMdPath: string } | { ok: false, code: number }}
+ */
+function resolveInputPaths() {
   const competitorsPath = resolve(REPO_ROOT, "novel/competitive-benchmark/src/competitors.ts");
   if (!existsSync(competitorsPath)) {
     process.stderr.write(`auto-file-corpus-refresh-tasks: ${competitorsPath} not found\n`);
-    return 2;
+    return { ok: false, code: 2 };
   }
   const tasksMdPath = resolve(REPO_ROOT, "TASKS.md");
   if (!existsSync(tasksMdPath)) {
     process.stderr.write(`auto-file-corpus-refresh-tasks: ${tasksMdPath} not found\n`);
-    return 2;
+    return { ok: false, code: 2 };
   }
+  return { ok: true, competitorsPath, tasksMdPath };
+}
 
-  const competitors = extractCorpusEntries(readFileSync(competitorsPath, "utf8"));
-  const summary = computeFreshness({
-    competitors,
-    now: new Date().toISOString().slice(0, 10),
-  });
-  if (summary.verySaleCount === 0) {
-    process.stdout.write(
-      "auto-file-corpus-refresh-tasks: 0 very-stale entries — nothing to file.\n",
-    );
-    return 1;
-  }
-
-  const tasksMd = readFileSync(tasksMdPath, "utf8");
-  const alreadyFiled = findAlreadyFiledIds(tasksMd, summary.verySaleIds);
-
+/**
+ * Build the task blocks for every very-stale id that isn't already
+ * filed in TASKS.md, and report the two counts.
+ *
+ * @param {import("./check-corpus-freshness.mjs").FreshnessSummary} summary
+ * @param {ReadonlySet<string>} alreadyFiled
+ * @returns {{ newBlocks: string[], skippedExisting: string[] }}
+ */
+function buildBlocksForVerySale(summary, alreadyFiled) {
   /** @type {string[]} */
   const newBlocks = [];
   /** @type {string[]} */
@@ -208,12 +201,44 @@ async function main() {
     }
     const row = summary.entries.find((e) => e.id === id);
     if (row === undefined) continue;
-    newBlocks.push(buildRefreshTaskBlock({
-      competitorId: id,
-      asOf: row.asOf,
-      ageDays: row.ageDays,
-    }));
+    newBlocks.push(
+      buildRefreshTaskBlock({
+        competitorId: id,
+        asOf: row.asOf,
+        ageDays: row.ageDays,
+      }),
+    );
   }
+  return { newBlocks, skippedExisting };
+}
+
+async function main() {
+  const opts = parseArgs(process.argv);
+  if (opts.help) {
+    printUsage();
+    return 0;
+  }
+  // Lazy-import the sibling so the script works in CI even if the
+  // node-resolver path differs.
+  const { computeFreshness, extractCorpusEntries } = await import("./check-corpus-freshness.mjs");
+  const paths = resolveInputPaths();
+  if (!paths.ok) return paths.code;
+
+  const competitors = extractCorpusEntries(readFileSync(paths.competitorsPath, "utf8"));
+  const summary = computeFreshness({
+    competitors,
+    now: new Date().toISOString().slice(0, 10),
+  });
+  if (summary.verySaleCount === 0) {
+    process.stdout.write(
+      "auto-file-corpus-refresh-tasks: 0 very-stale entries — nothing to file.\n",
+    );
+    return 1;
+  }
+
+  const tasksMd = readFileSync(paths.tasksMdPath, "utf8");
+  const alreadyFiled = findAlreadyFiledIds(tasksMd, summary.verySaleIds);
+  const { newBlocks, skippedExisting } = buildBlocksForVerySale(summary, alreadyFiled);
 
   if (opts.dryRun) {
     process.stdout.write(
@@ -232,7 +257,7 @@ async function main() {
 
   const insertIdx = locateP2InsertionPoint(tasksMd);
   const updated = `${tasksMd.slice(0, insertIdx)}${newBlocks.join("\n")}\n${tasksMd.slice(insertIdx)}`;
-  writeFileSync(tasksMdPath, updated);
+  writeFileSync(paths.tasksMdPath, updated);
   process.stdout.write(
     `auto-file-corpus-refresh-tasks: filed ${newBlocks.length} block(s) under ## P2; skipped ${skippedExisting.length} already-present id(s).\n`,
   );

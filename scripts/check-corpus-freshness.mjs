@@ -115,25 +115,45 @@ export function extractCorpusEntries(body) {
   // Each iteration tries id → kind → asOf in order against the SAME
   // line; multiple matches on one line (compact-shape test fixtures
   // and the production shape) both work.
-  const lines = body.split("\n");
-  for (const line of lines) {
-    const idMatch = /id:\s*"([a-z0-9-]+)"/.exec(line);
-    if (idMatch !== null && idMatch[1] !== undefined) {
-      current = { id: idMatch[1], kindSeen: null };
-    }
-    if (current === null) continue;
-    const kindMatch = /kind:\s*"(published|local-harness)"/.exec(line);
-    if (kindMatch !== null && kindMatch[1] !== undefined) {
-      current.kindSeen = /** @type {"published" | "local-harness"} */ (kindMatch[1]);
-    }
-    if (current.kindSeen !== "published") continue;
-    const asOfMatch = /asOf:\s*"(\d{4}-\d{2}-\d{2})"/.exec(line);
-    if (asOfMatch !== null && asOfMatch[1] !== undefined) {
-      out.push({ id: current.id, asOf: asOfMatch[1] });
-      current = null; // consumed; move on
-    }
+  for (const line of body.split("\n")) {
+    current = applyLineToCorpusExtraction(line, current, out);
   }
   return out;
+}
+
+/**
+ * One step of the corpus-extraction state machine. Each line can
+ * advance `current` (start a new id), record a `kind` for the
+ * in-flight id, or — once the kind is `published` — record the
+ * `asOf` and emit the entry. Pulled out of `extractCorpusEntries`
+ * to keep that function's cognitive complexity at ≤10 (biome
+ * lint/complexity/noExcessiveCognitiveComplexity gate).
+ *
+ * @param {string} line
+ * @param {{ id: string, kindSeen: "published" | "local-harness" | null } | null} current
+ * @param {CorpusEntry[]} out  mutated when an entry is emitted
+ * @returns {{ id: string, kindSeen: "published" | "local-harness" | null } | null}  new `current` for the next line
+ */
+function applyLineToCorpusExtraction(line, current, out) {
+  const idMatch = /id:\s*"([a-z0-9-]+)"/.exec(line);
+  const next =
+    idMatch !== null && idMatch[1] !== undefined
+      ? { id: idMatch[1], kindSeen: /** @type {null} */ (null) }
+      : current;
+  if (next === null) return null;
+
+  const kindMatch = /kind:\s*"(published|local-harness)"/.exec(line);
+  if (kindMatch !== null && kindMatch[1] !== undefined) {
+    next.kindSeen = /** @type {"published" | "local-harness"} */ (kindMatch[1]);
+  }
+  if (next.kindSeen !== "published") return next;
+
+  const asOfMatch = /asOf:\s*"(\d{4}-\d{2}-\d{2})"/.exec(line);
+  if (asOfMatch !== null && asOfMatch[1] !== undefined) {
+    out.push({ id: next.id, asOf: asOfMatch[1] });
+    return null; // consumed; move on
+  }
+  return next;
 }
 
 /**
@@ -163,39 +183,38 @@ export function computeFreshness(input) {
   if (Number.isNaN(nowMs)) {
     throw new Error(`computeFreshness: invalid now date: ${JSON.stringify(input.now)}`);
   }
-  /** @type {FreshnessRow[]} */
-  const entries = [];
-  /** @type {string[]} */
-  const verySaleIds = [];
-  let totalAge = 0;
-  let staleCount = 0;
-  let verySaleCount = 0;
-
-  for (const c of input.competitors) {
-    const asOfMs = Date.parse(c.asOf);
-    if (Number.isNaN(asOfMs)) {
-      throw new Error(`computeFreshness: invalid asOf for ${c.id}: ${JSON.stringify(c.asOf)}`);
-    }
-    const ageDays = Math.max(0, Math.floor((nowMs - asOfMs) / 86_400_000));
-    const status = bucketize(ageDays, thresholds);
-    entries.push({ id: c.id, asOf: c.asOf, ageDays, status });
-    totalAge += ageDays;
-    if (status === "stale" || status === "very-stale") staleCount += 1;
-    if (status === "very-stale") {
-      verySaleCount += 1;
-      verySaleIds.push(c.id);
-    }
-  }
-
-  const meanAgeDays = entries.length === 0 ? 0 : Math.round(totalAge / entries.length);
+  const rows = input.competitors.map((c) => buildFreshnessRow(c, nowMs, thresholds));
+  const totalAge = rows.reduce((sum, r) => sum + r.ageDays, 0);
+  const staleCount = rows.filter((r) => r.status !== "fresh").length;
+  const verySaleIds = rows.filter((r) => r.status === "very-stale").map((r) => r.id);
+  const meanAgeDays = rows.length === 0 ? 0 : Math.round(totalAge / rows.length);
   return {
     generatedAt: input.now,
-    entries,
+    entries: rows,
     meanAgeDays,
     staleCount,
-    verySaleCount,
+    verySaleCount: verySaleIds.length,
     verySaleIds,
   };
+}
+
+/**
+ * Build one FreshnessRow from a corpus entry. Pulled out of
+ * `computeFreshness` to keep that function's cognitive complexity
+ * at ≤10 (biome lint/complexity/noExcessiveCognitiveComplexity gate).
+ *
+ * @param {CorpusEntry} c
+ * @param {number} nowMs        epoch-ms of the "now" reference
+ * @param {FreshnessThresholds} thresholds
+ * @returns {FreshnessRow}
+ */
+function buildFreshnessRow(c, nowMs, thresholds) {
+  const asOfMs = Date.parse(c.asOf);
+  if (Number.isNaN(asOfMs)) {
+    throw new Error(`computeFreshness: invalid asOf for ${c.id}: ${JSON.stringify(c.asOf)}`);
+  }
+  const ageDays = Math.max(0, Math.floor((nowMs - asOfMs) / 86_400_000));
+  return { id: c.id, asOf: c.asOf, ageDays, status: bucketize(ageDays, thresholds) };
 }
 
 function printUsage() {
@@ -255,7 +274,9 @@ function renderSummary(s) {
   lines.push("");
   for (const row of s.entries) {
     const icon = row.status === "fresh" ? "✓" : row.status === "stale" ? "·" : "✗";
-    lines.push(`  ${icon} ${row.id.padEnd(20)} ${row.asOf}  ${row.ageDays.toString().padStart(4)}d  ${row.status}`);
+    lines.push(
+      `  ${icon} ${row.id.padEnd(20)} ${row.asOf}  ${row.ageDays.toString().padStart(4)}d  ${row.status}`,
+    );
   }
   lines.push("");
   if (s.verySaleCount > 0) {
@@ -289,7 +310,9 @@ function main() {
   }
   const competitors = extractCorpusEntries(body);
   if (competitors.length === 0) {
-    process.stderr.write("check-corpus-freshness: 0 published competitors extracted — competitors.ts shape may have changed\n");
+    process.stderr.write(
+      "check-corpus-freshness: 0 published competitors extracted — competitors.ts shape may have changed\n",
+    );
     return 2;
   }
   const summary = computeFreshness({ competitors, now: new Date().toISOString().slice(0, 10) });
