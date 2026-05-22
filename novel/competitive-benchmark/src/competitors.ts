@@ -238,6 +238,32 @@ export const COMPETITORS: readonly Competitor[] = [
       values: { "autonomous-merge-rate": 0.804 },
     },
   },
+  {
+    id: "openai-codex",
+    label: "OpenAI Codex (codex-1)",
+    kind: "closed-commercial",
+    homepage: "https://openai.com/index/introducing-codex/",
+    resultSource: {
+      kind: "published",
+      citation:
+        "OpenAI, 'Introducing Codex', openai.com/index/introducing-codex/, 2025-05-16 (SWE-Bench Verified pass@1 = 0.721 for codex-1; 23 instances excluded as not-runnable on internal infrastructure; 192k context, medium reasoning effort; pass@8 = 0.838 reported in the same post). Codex CLI open-source repository at github.com/openai/codex.",
+      asOf: "2025-05-16",
+      values: { "swe-bench-verified-resolve-rate": 0.721 },
+    },
+  },
+  {
+    id: "augment-code",
+    label: "Augment Code (Augment SWE-bench agent)",
+    kind: "open-source",
+    homepage: "https://github.com/augmentcode/augment-swebench-agent",
+    resultSource: {
+      kind: "published",
+      citation:
+        "Chen & Flaherty, '#1 open-source agent on SWE-Bench Verified by combining Claude 3.7 and O1', augmentcode.com/blog, 2025-03-31 (open-source SWE-bench Verified resolve rate 0.654 with Claude Sonnet 3.7 driver + OpenAI o1 ensembler; methodology: forked from Anthropic SWE-bench post + sequential-thinking MCP tool); reproducible open-source repo at github.com/augmentcode/augment-swebench-agent.",
+      asOf: "2025-03-31",
+      values: { "swe-bench-verified-resolve-rate": 0.654 },
+    },
+  },
 ];
 
 /**

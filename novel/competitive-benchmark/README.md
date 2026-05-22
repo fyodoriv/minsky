@@ -65,21 +65,28 @@ accumulate as Minsky iterates.
 
 ### Current corpus (as of 2026-05-22)
 
-5 of 6 competitors carry ≥1 metric reading, with primary citations
+All 8 competitors carry ≥1 metric reading, with primary citations
 pinned in each `competitors/<id>.md` research file:
 
-| Metric                              | Competitors with readings                                      |
-| ----------------------------------- | -------------------------------------------------------------- |
-| `swe-bench-verified-resolve-rate`   | 5 (Claude Code, OpenHands, Aider, SWE-agent, Devin)            |
-| `autonomous-merge-rate`             | 3 (Devin, Claude Code, Cursor)                                 |
-| `human-intervention-rate`           | 2 (Devin, Claude Code)                                         |
-| `mean-autonomous-merge-latency`     | 2 (OpenHands, Devin)                                           |
-| `cost-per-merged-pr`                | 1 (OpenHands)                                                  |
+| Metric                              | Competitors with readings                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| `swe-bench-verified-resolve-rate`   | 7 (Claude Code, OpenHands, Aider, SWE-agent, Devin, OpenAI Codex, Augment Code)            |
+| `autonomous-merge-rate`             | 3 (Devin, Claude Code, Cursor)                                                             |
+| `human-intervention-rate`           | 2 (Devin, Claude Code)                                                                     |
+| `mean-autonomous-merge-latency`     | 2 (OpenHands, Devin)                                                                       |
+| `cost-per-merged-pr`                | 1 (OpenHands)                                                                              |
 
-Total: **5 metrics × 5 competitors** — shape gate MET. Slice (d) is the
-`**Competitive-goal**:` field + `scripts/check-competitive-goal.mjs`
-lint that enforces every P0/P1 task block names which scorecard metric
-it moves; the lint ships with 81 grandfathered ids draining over time.
+Total: **5 metrics × 8 competitors** — shape gate MET (M1.10 requires
+≥4 × ≥5; current 7×5 = 35-cell density on the SWE-bench axis alone).
+Slice (d) is the `**Competitive-goal**:` field +
+`scripts/check-competitive-goal.mjs` lint that enforces every P0/P1
+task block names which scorecard metric it moves; the lint ships with
+81 grandfathered ids draining over time.
+
+Discovery and refresh of the corpus are automated:
+
+- **Per-vendor freshness loop** (PR #719) — `scripts/check-corpus-freshness.mjs` + `scripts/auto-file-corpus-refresh-tasks.mjs` + weekly launchd / systemd fires. When any `asOf` reading goes >180 days stale, the runner files a `corpus-refresh-<id>` task that the tick-loop's `/next-task` picks up and the `/competitor-research <url> --refresh` skill clears.
+- **Quarterly LIST discovery** — `corpus-discover-quarterly` recurring task in `TASKS.md` drives the operator to scan for NEW vendors and invoke `/competitor-research` for each candidate. PR #720 is the first run: lifted in OpenAI Codex + Augment Code, filed 3 P2 follow-ups (`corpus-add-github-copilot-coding-agent`, `corpus-add-goose-block`, `corpus-add-factory-droid`) for vendors blocked on primary citation.
 
 ## Pattern conformance
 
