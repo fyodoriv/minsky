@@ -53,6 +53,8 @@ Safety is mechanical, not optional. Every pull request is a draft until you mark
 
 ## What works today (honest)
 
+> **M1 progress** (as of 2026-05-22): `node scripts/m1-metrics-dashboard.mjs` reports **39 / 81 measurable M1 tasks passing** (~48%). The headline `v0.2.0` tag was an automatic minor-bump from a `feat:` commit — see [MILESTONES.md § M1](MILESTONES.md#m1--stable-measurable-one-command--v010) for the per-criterion status (✅ done / 🟡 partial / ❌ blocked).
+
 | Capability | Status | Confidence |
 |---|---|---|
 | Pick tasks from TASKS.md and spawn agents | ✅ Works | High — 26+ iterations |
@@ -64,10 +66,16 @@ Safety is mechanical, not optional. Every pull request is a draft until you mark
 | One-command update (`minsky update`) | ✅ Works | Stop → pull → rebuild → restart |
 | Zero ghost processes on stop | ✅ Works | Kills runners + agent children |
 | Per-machine agent config | ✅ Works | `~/.minsky/config.json` |
-| Switch between Devin, Claude, local models | 🟡 Partial | Claude primary, Devin experimental |
-| 8h unattended runs with >90% stability | 🟡 In progress | Currently ~24%, improving |
+| Self-heal common failures | 🟡 Partial (4 / 10) | Phase 1: stale-pid, stale-tsbuildinfo, stuck-command, worktree-missing-node-modules. Phase 2 (≥10 + MTTR <5min): `agents-can-self-heal-minsky-m1-13` |
+| Fleet-wide stability reporting | 🟡 Partial | `scripts/fleet-stability-report.mjs` ships rollups; one 7d observation window pending |
+| Clean uninstall | 🟡 Partial | `minsky uninstall --force` works end-to-end; bare-command interactive path open in P0 `minsky-uninstall-one-command-with-stop` |
+| Switch between Devin, Claude, local models | 🟡 Partial | Claude primary; Devin blocked by `spawn-failed-exit-minus-one-silent-empty-stderr` (P0); local model (aider) dry-run only |
+| 8h unattended runs with >90% stability | 🟡 In progress | Currently ~53% loop-uptime proxy; real ratio gated on the Devin spawn fix |
+| `minsky report --baseline --delta` for repo improvement | 🟡 Partial | Commands wired; not yet validated end-to-end on a clean 8h fixture run |
 | File-based human↔agent Q&A | 🔴 Not yet | P0 `minsky-human-comm-via-file` |
-| `npx minsky` one-command install+run | 🔴 Not yet | P1 `minsky-npx-install-and-run` |
+| `npx minsky` one-command install+run | 🔴 Not yet | P1 `minsky-npx-install-and-run` (gated on npm-registry publish) |
+| `minsky submit-finding` → Minsky-self submission | 🔴 Not yet | `minsky-remote-task-submission` (M1.8) |
+| Competitive benchmark scorecard (M1.10) | 🔴 Not yet | `self-metrics-competitive-benchmark` (P0) — no `competitive-scorecard.json` yet |
 | Multi-file refactors | 🔴 Not yet | M2 milestone |
 | GitHub Actions CI | 🔴 Not yet | M3 milestone |
 
