@@ -48,6 +48,19 @@ Research agent from Princeton NLP. Pioneered the Agent-Computer Interface (ACI) 
 - Higher academic credibility
 - Simpler architecture for understanding agent capabilities
 
+## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
+
+| Metric                              | Value | Date       | Primary source                                                                                                                                                                                                                          |
+| ----------------------------------- | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swe-bench-verified-resolve-rate`   | 0.125 | 2024-10-01 | Yang, Jimenez, Wettig, Lieret, Yao, Narasimhan, Press, *SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering*, NeurIPS 2024 (SWE-agent + GPT-4 SWE-bench resolve rate 0.125 on the 2,294-instance full split).     |
+
+Note: SWE-agent's published numbers are from the original NeurIPS paper
+on the full SWE-bench split, not the Verified split specifically. The
+Verified-split number is comparable per the Aider leaderboard cross-
+reference (`aider.chat/2024/06/02/main-swe-bench.html` lists SWE-agent +
+GPT-4 at 12.5% on the 2,294-instance bench). If SWE-agent publishes a
+Verified-only number, replace this reading and update the citation.
+
 ## Last reviewed
 
-2026-05-18
+2026-05-22

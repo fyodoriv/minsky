@@ -471,6 +471,30 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-rule-9-tasksmd-fields.test.mjs
 
+  competitive-goal:
+    # Slice (d) of `self-metrics-competitive-benchmark`: every P0/P1
+    # task block must carry a `**Competitive-goal**:` field naming
+    # which scorecard metric the task moves. Same rule-#10 ratchet
+    # pattern as rule-9-tasksmd-fields above — 81 grandfathered task
+    # ids at lint-introduction, NEW tasks must carry the field.
+    # Source: operator directive 2026-05-16 (TASKS.md `self-metrics-
+    # competitive-benchmark` block slice d).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: competitive-goal lint
+        run: node scripts/check-competitive-goal.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-competitive-goal.test.mjs
+
   rule-6-let-it-crash:
     # rule #10: deterministic enforcement of rule #6 (let-it-crash). Walks
     # every novel/**/*.ts file added/modified in the PR; flags try/catch
@@ -1573,6 +1597,7 @@ jobs:
       - brief-pr-instructions
       - cadence-pivot-threshold
       - cloud-audit-gate
+      - competitive-goal
       - dashboard-localhost-bind
       - glossary-discipline
       - hygiene
@@ -1669,6 +1694,7 @@ jobs:
                    "${{ needs.no-hardcoded-user-paths.result }}" \
                    "${{ needs.no-personal-paths-in-docs.result }}" \
                    "${{ needs.rule-9-tasksmd-fields.result }}" \
+                   "${{ needs.competitive-goal.result }}" \
                    "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.supervisor-sandbox-hardening.result }}" \
