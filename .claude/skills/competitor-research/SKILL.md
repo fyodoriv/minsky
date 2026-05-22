@@ -201,9 +201,25 @@ pnpm pre-pr-lint --stage=full
 
 If `bin/minsky competitive` exits 1, read the `acceptance.gap` field in the JSON — the corpus is too thin. Add another reading or another competitor.
 
-### Phase 6 — file follow-up tasks
+### Phase 6 — file follow-up tasks for every actionable finding (iron rule)
 
-If the new competitor covers fewer than 3 metrics, file a P2 follow-up in TASKS.md:
+**Research findings → tasks. Every time.** Discoveries from a deep dive are not notes for later — they are work to file in TASKS.md in the same PR as the research itself. The operator's standing rule (2026-05-22): *"all discoveries made by Minsky during any research must immediately be taken into consideration and lead to actual changes. They should be converted to tasks."*
+
+Concrete trigger inventory — file ONE task per item found, in the same PR:
+
+| Finding shape | Default priority | Task ID prefix |
+|---|---|---|
+| Competitor covers fewer than 3 metrics in the corpus (the existing thin-coverage case) | P2 | `corpus-refresh-<id>` |
+| **Architectural pattern worth borrowing** (Docker sandbox, hierarchical memory, manager-agent delegation, event-driven Flows, pluggable sandbox layer, etc.) | P3 | `research-finding-<descriptor>` |
+| **Roadmap threat** (competitor launching a feature that overlaps a Minsky moat) | P2 | `monitor-<competitor>-<feature>-launch` |
+| **Gap that operators ask about** (competitor publishes X, Minsky doesn't — e.g., headline benchmark, enterprise distribution, multi-agent ensembling) | P2 | `<gap-descriptor>` |
+| **Visibility / framing fix** (the gap is buried in a research file but should surface at README-table level) | P2 | `<surface>-<gap>-comparison-row` |
+| **Forward-tracking invariant** (when X ships, sweep N files to flip the framing — e.g., when MAPE-K closed loop ships, the moats table needs a coherence sweep) | P3 | `research-finding-<x>-shipping-status-banner` |
+| **Honesty fix** (a current Minsky claim doesn't match the underlying user-story status) | P1 | `<claim>-honesty-fix` |
+
+**The skill is to FILE THE TASK, not write the implementation.** A good research-followup task names the finding, the source competitor file/line, the hypothesis (will adopting this help?), the success criterion (what does "done" look like?), and the pivot (what makes us reject this?).
+
+Common shapes for the canonical thin-coverage case:
 
 ```md
 - [ ] `corpus-refresh-<competitor-id>` — extend `<competitor>` to cover ≥3 shared scorecard metrics (currently <N>)
@@ -218,6 +234,27 @@ If the new competitor covers fewer than 3 metrics, file a P2 follow-up in TASKS.
   - **Measurement**: same shell snippet as Success.
   - **Anchor**: rule #4 (visible — every published metric narrows the comparison); rule #1 (don't reinvent — wait for the vendor to publish rather than running our own harness).
 ```
+
+Shape for an architectural-pattern finding (use this as the template for "X has Y, we should evaluate"):
+
+```md
+- [ ] `research-finding-<descriptor>` — research <competitor>'s <pattern>; <one-sentence on why Minsky cares>
+  - **ID**: research-finding-<descriptor>
+  - **Tags**: p3, research-followup, observed-<YYYY-MM-DD>, <competitor>-deep-dive, <milestone-tag>
+  - **Milestone**: <M1|M2|M3|M4>
+  - **Competitive-goal**: closes the "<gap acknowledged in competitors/<id>.md>" gap.
+  - **Touches**: <file paths the research output produces / informs>.
+  - **Details**: <which file/line surfaced the finding; what to read; what 3-5 questions to answer>.
+  - **Hypothesis**: <will the pattern help / hurt Minsky's specific call graph>.
+  - **Success**: <a research file at research/<descriptor>.md or a spike implementation that runs the existing tests>.
+  - **Pivot**: <what makes us reject this pattern>.
+  - **Measurement**: <runnable shell command that produces exit 0 when Success is met>.
+  - **Anchor**: rule #1 (don't reinvent — vendor X shipped this, evaluate before building); competitors/<competitor>.md § <section>; <vendor maintainer + file path + URL>.
+```
+
+### Anti-pattern: research-without-tasks
+
+If you spent ≥30 minutes reading a competitor and produced ≥1 substantive finding (architectural pattern, roadmap threat, capability gap, honesty issue), and the PR does NOT file ≥1 follow-up task, you've leaked the work into the chat and the next session has to re-derive it. This is the rule-#17 (proactive healing) failure mode in research shape — *observation IS the fix*; the fix here is "file the task". The deterministic gate at `scripts/check-research-findings-filed.mjs` (forthcoming) catches this; until it ships, the discipline is reviewer-enforced.
 
 ## Outputs
 
