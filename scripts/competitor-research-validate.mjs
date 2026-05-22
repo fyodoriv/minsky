@@ -94,92 +94,194 @@ function loadExistingCompetitorIds() {
 }
 
 /**
+ * Validate the id field — kebab-case + uniqueness (modulo refresh mode).
+ *
+ * @param {unknown} id
+ * @param {{ existingCompetitorIds: Set<string>, allowExisting: boolean }} opts
+ * @returns {string[]} errors
+ */
+function validateId(id, opts) {
+  if (typeof id !== "string" || !ID_RE.test(id)) {
+    return [`id must be kebab-case (got: ${JSON.stringify(id)})`];
+  }
+  if (!opts.allowExisting && opts.existingCompetitorIds.has(id)) {
+    return [
+      `id "${id}" already exists in the corpus — pass --refresh to update it instead of adding a duplicate`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * Vendor-exclusion guard — matches against EXCLUDED_SUBSTRINGS
+ * case-insensitively on both id and label.
+ *
+ * @param {unknown} id
+ * @param {unknown} label
+ * @returns {string[]} errors
+ */
+function validateVendorExclusion(id, label) {
+  /** @type {string[]} */
+  const errors = [];
+  const idLower = typeof id === "string" ? id.toLowerCase() : "";
+  const labelLower = typeof label === "string" ? label.toLowerCase() : "";
+  for (const bad of EXCLUDED_SUBSTRINGS) {
+    if (idLower.includes(bad) || labelLower.includes(bad)) {
+      errors.push(
+        `vendor "${label ?? id}" matches the operator-set deny list (${bad}); rejected by EXCLUDED_VENDOR_SUBSTRINGS`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
+ * Validate one `values` map entry — key is a known metric id and value is finite.
+ *
+ * @param {string} key
+ * @param {unknown} value
+ * @param {Set<string>} knownMetricIds
+ * @returns {string[]} errors
+ */
+function validateValueEntry(key, value, knownMetricIds) {
+  /** @type {string[]} */
+  const errors = [];
+  if (!knownMetricIds.has(key)) {
+    errors.push(
+      `resultSource.values key "${key}" is not in novel/competitive-benchmark/src/metrics.ts METRICS — fix the typo or add the metric definition first`,
+    );
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    errors.push(
+      `resultSource.values["${key}"] must be a finite number (got: ${JSON.stringify(value)})`,
+    );
+  }
+  return errors;
+}
+
+/**
+ * Validate a `published` result source.
+ *
+ * @param {{ kind: "published", citation?: unknown, asOf?: unknown, values?: unknown }} src
+ * @param {Set<string>} knownMetricIds
+ * @returns {string[]} errors
+ */
+function validatePublishedSource(src, knownMetricIds) {
+  /** @type {string[]} */
+  const errors = [];
+  if (typeof src.citation !== "string" || src.citation.length < 10) {
+    errors.push("resultSource.citation must be a string ≥10 chars");
+  }
+  if (typeof src.asOf !== "string" || !ISO_DATE_RE.test(src.asOf)) {
+    errors.push(`resultSource.asOf must match YYYY-MM-DD (got: ${JSON.stringify(src.asOf)})`);
+  }
+  if (typeof src.values !== "object" || src.values === null) {
+    errors.push("resultSource.values must be a non-null object");
+    return errors;
+  }
+  /** @type {Record<string, unknown>} */
+  const values = /** @type {Record<string, unknown>} */ (src.values);
+  const keys = Object.keys(values);
+  if (keys.length < 1) {
+    errors.push("resultSource.values must carry ≥1 metric reading");
+  }
+  for (const key of keys) {
+    errors.push(...validateValueEntry(key, values[key], knownMetricIds));
+  }
+  return errors;
+}
+
+/**
+ * Validate a `local-harness` result source.
+ *
+ * @param {{ kind: "local-harness", citation?: unknown, harnessId?: unknown }} src
+ * @returns {string[]} errors
+ */
+function validateLocalHarnessSource(src) {
+  /** @type {string[]} */
+  const errors = [];
+  if (typeof src.citation !== "string" || src.citation.length < 10) {
+    errors.push("resultSource.citation must be a string ≥10 chars (local-harness)");
+  }
+  if (typeof src.harnessId !== "string" || src.harnessId.length < 1) {
+    errors.push("resultSource.harnessId must be a non-empty string");
+  }
+  return errors;
+}
+
+/**
+ * Validate the resultSource discriminated union.
+ *
+ * @param {unknown} src
+ * @param {Set<string>} knownMetricIds
+ * @returns {string[]} errors
+ */
+function validateResultSource(src, knownMetricIds) {
+  if (typeof src !== "object" || src === null) {
+    return ["resultSource must be a non-null object"];
+  }
+  /** @type {{ kind?: unknown, citation?: unknown, asOf?: unknown, values?: unknown, harnessId?: unknown }} */
+  const s = /** @type {{ kind?: unknown }} */ (src);
+  if (s.kind === "published") {
+    return validatePublishedSource(
+      /** @type {{ kind: "published", citation?: unknown, asOf?: unknown, values?: unknown }} */ (
+        s
+      ),
+      knownMetricIds,
+    );
+  }
+  if (s.kind === "local-harness") {
+    return validateLocalHarnessSource(
+      /** @type {{ kind: "local-harness", citation?: unknown, harnessId?: unknown }} */ (s),
+    );
+  }
+  return [
+    `resultSource.kind must be "published" or "local-harness" (got: ${JSON.stringify(s.kind)})`,
+  ];
+}
+
+/**
+ * Validate the shape fields (label / homepage / kind) that aren't id /
+ * vendor-exclusion / resultSource.
+ *
+ * @param {Partial<CompetitorDraft>} d
+ * @returns {string[]} errors
+ */
+function validateShapeFields(d) {
+  /** @type {string[]} */
+  const errors = [];
+  if (typeof d.label !== "string" || d.label.length < 2) {
+    errors.push("label must be a non-empty string");
+  }
+  if (typeof d.homepage !== "string" || !URL_RE.test(d.homepage)) {
+    errors.push(`homepage must be https:// (got: ${JSON.stringify(d.homepage)})`);
+  }
+  if (d.kind !== "closed-commercial" && d.kind !== "open-source") {
+    errors.push(
+      `kind must be "closed-commercial" or "open-source" (got: ${JSON.stringify(d.kind)})`,
+    );
+  }
+  return errors;
+}
+
+/**
  * @param {unknown} draft
  * @param {{ knownMetricIds: Set<string>, existingCompetitorIds: Set<string>, allowExisting: boolean }} opts
  * @returns {ValidationResult}
  */
 export function validateDraft(draft, opts) {
-  /** @type {string[]} */
-  const errors = [];
   if (typeof draft !== "object" || draft === null) {
     return { ok: false, errors: ["draft must be a non-null object"] };
   }
   /** @type {Partial<CompetitorDraft>} */
   const d = /** @type {Partial<CompetitorDraft>} */ (draft);
-
-  if (typeof d.id !== "string" || !ID_RE.test(d.id)) {
-    errors.push(`id must be kebab-case (got: ${JSON.stringify(d.id)})`);
-  } else if (!opts.allowExisting && opts.existingCompetitorIds.has(d.id)) {
-    errors.push(
-      `id "${d.id}" already exists in the corpus — pass --refresh to update it instead of adding a duplicate`,
-    );
-  }
-
-  if (typeof d.label !== "string" || d.label.length < 2) {
-    errors.push("label must be a non-empty string");
-  }
-
-  if (typeof d.homepage !== "string" || !URL_RE.test(d.homepage)) {
-    errors.push(`homepage must be https:// (got: ${JSON.stringify(d.homepage)})`);
-  }
-
-  if (d.kind !== "closed-commercial" && d.kind !== "open-source") {
-    errors.push(`kind must be "closed-commercial" or "open-source" (got: ${JSON.stringify(d.kind)})`);
-  }
-
-  // Vendor-exclusion guard
-  const idLower = typeof d.id === "string" ? d.id.toLowerCase() : "";
-  const labelLower = typeof d.label === "string" ? d.label.toLowerCase() : "";
-  for (const bad of EXCLUDED_SUBSTRINGS) {
-    if (idLower.includes(bad) || labelLower.includes(bad)) {
-      errors.push(
-        `vendor "${d.label ?? d.id}" matches the operator-set deny list (${bad}); rejected by EXCLUDED_VENDOR_SUBSTRINGS`,
-      );
-    }
-  }
-
-  const src = d.resultSource;
-  if (typeof src !== "object" || src === null) {
-    errors.push("resultSource must be a non-null object");
-  } else if (src.kind === "published") {
-    if (typeof src.citation !== "string" || src.citation.length < 10) {
-      errors.push("resultSource.citation must be a string ≥10 chars");
-    }
-    if (typeof src.asOf !== "string" || !ISO_DATE_RE.test(src.asOf)) {
-      errors.push(`resultSource.asOf must match YYYY-MM-DD (got: ${JSON.stringify(src.asOf)})`);
-    }
-    if (typeof src.values !== "object" || src.values === null) {
-      errors.push("resultSource.values must be a non-null object");
-    } else {
-      const keys = Object.keys(src.values);
-      if (keys.length < 1) {
-        errors.push("resultSource.values must carry ≥1 metric reading");
-      }
-      for (const key of keys) {
-        if (!opts.knownMetricIds.has(key)) {
-          errors.push(
-            `resultSource.values key "${key}" is not in novel/competitive-benchmark/src/metrics.ts METRICS — fix the typo or add the metric definition first`,
-          );
-        }
-        const v = src.values[key];
-        if (typeof v !== "number" || !Number.isFinite(v)) {
-          errors.push(`resultSource.values["${key}"] must be a finite number (got: ${JSON.stringify(v)})`);
-        }
-      }
-    }
-  } else if (src.kind === "local-harness") {
-    if (typeof src.citation !== "string" || src.citation.length < 10) {
-      errors.push("resultSource.citation must be a string ≥10 chars (local-harness)");
-    }
-    if (typeof src.harnessId !== "string" || src.harnessId.length < 1) {
-      errors.push("resultSource.harnessId must be a non-empty string");
-    }
-  } else {
-    errors.push(
-      `resultSource.kind must be "published" or "local-harness" (got: ${JSON.stringify(src && /** @type {{ kind?: unknown }} */ (src).kind)})`,
-    );
-  }
-
+  /** @type {string[]} */
+  const errors = [
+    ...validateId(d.id, opts),
+    ...validateShapeFields(d),
+    ...validateVendorExclusion(d.id, d.label),
+    ...validateResultSource(d.resultSource, opts.knownMetricIds),
+  ];
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
 
@@ -209,6 +311,35 @@ function printUsage() {
 /** @typedef {{ draft: string | null, refresh: boolean, help: boolean }} CliOpts */
 
 /**
+ * Apply one argv token to the running CliOpts. Returns the new index
+ * (caller advances by 1 by default; returns i+1 when the flag consumed
+ * a value too). Extracted to keep `parseArgs` under the cognitive-
+ * complexity gate.
+ *
+ * @param {string} flag
+ * @param {string[]} args
+ * @param {number} i
+ * @param {CliOpts} out
+ * @returns {number} new index in args
+ */
+function applyArg(flag, args, i, out) {
+  if (flag === "--draft") {
+    out.draft = args[i + 1] ?? null;
+    return i + 1;
+  }
+  if (flag === "--refresh") {
+    out.refresh = true;
+    return i;
+  }
+  if (flag === "--help" || flag === "-h") {
+    out.help = true;
+    return i;
+  }
+  process.stderr.write(`competitor-research-validate: unknown argument: ${flag}\n`);
+  process.exit(64);
+}
+
+/**
  * @param {string[]} argv
  * @returns {CliOpts}
  */
@@ -218,15 +349,68 @@ function parseArgs(argv) {
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--draft") out.draft = args[++i] ?? null;
-    else if (a === "--refresh") out.refresh = true;
-    else if (a === "--help" || a === "-h") out.help = true;
-    else if (a) {
-      process.stderr.write(`competitor-research-validate: unknown argument: ${a}\n`);
-      process.exit(64);
-    }
+    if (!a) continue;
+    i = applyArg(a, args, i, out);
   }
   return out;
+}
+
+/**
+ * Read + parse the draft JSON. Returns `{ ok: true, draft }` on
+ * success or `{ ok: false, code }` with the exit code to surface.
+ *
+ * @param {string | null} draftArg
+ * @returns {{ ok: true, draft: unknown } | { ok: false, code: number }}
+ */
+function loadDraft(draftArg) {
+  if (draftArg === null) {
+    process.stderr.write("competitor-research-validate: --draft <path> is required\n");
+    return { ok: false, code: 2 };
+  }
+  const draftPath = resolve(draftArg);
+  if (!existsSync(draftPath)) {
+    process.stderr.write(`competitor-research-validate: draft file not found: ${draftPath}\n`);
+    return { ok: false, code: 2 };
+  }
+  try {
+    return { ok: true, draft: JSON.parse(readFileSync(draftPath, "utf8")) };
+  } catch (err) {
+    process.stderr.write(
+      `competitor-research-validate: failed to parse JSON: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return { ok: false, code: 2 };
+  }
+}
+
+/**
+ * Print the success line for a passing draft.
+ *
+ * @param {Partial<CompetitorDraft>} d
+ * @param {number} catalogueSize
+ */
+function printSuccess(d, catalogueSize) {
+  const valueCount =
+    d.resultSource && d.resultSource.kind === "published"
+      ? Object.keys(d.resultSource.values).length
+      : 0;
+  process.stdout.write(
+    `competitor-research-validate ok: draft "${d.id}" passes ${catalogueSize}-metric catalogue check; ${valueCount} reading(s)\n`,
+  );
+}
+
+/**
+ * Print the failure summary for a failed draft.
+ *
+ * @param {string[]} errors
+ */
+function printFailure(errors) {
+  process.stderr.write(`competitor-research-validate: ${errors.length} invariant(s) failed:\n`);
+  for (const e of errors) {
+    process.stderr.write(`  - ${e}\n`);
+  }
+  process.stderr.write(
+    "\nFix each error in the draft JSON and re-run. See `.claude/skills/competitor-research/SKILL.md` phase 3 for the schema.\n",
+  );
 }
 
 function main() {
@@ -235,57 +419,22 @@ function main() {
     printUsage();
     return 0;
   }
-  if (opts.draft === null) {
-    process.stderr.write("competitor-research-validate: --draft <path> is required\n");
-    return 2;
-  }
-  const draftPath = resolve(opts.draft);
-  if (!existsSync(draftPath)) {
-    process.stderr.write(`competitor-research-validate: draft file not found: ${draftPath}\n`);
-    return 2;
-  }
-  /** @type {unknown} */
-  let draft;
-  try {
-    draft = JSON.parse(readFileSync(draftPath, "utf8"));
-  } catch (err) {
-    process.stderr.write(
-      `competitor-research-validate: failed to parse JSON: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
-    return 2;
-  }
+  const loaded = loadDraft(opts.draft);
+  if (!loaded.ok) return loaded.code;
 
   const knownMetricIds = loadKnownMetricIds();
   const existingCompetitorIds = loadExistingCompetitorIds();
-
-  const result = validateDraft(draft, {
+  const result = validateDraft(loaded.draft, {
     knownMetricIds,
     existingCompetitorIds,
     allowExisting: opts.refresh,
   });
 
   if (result.ok) {
-    /** @type {Partial<CompetitorDraft>} */
-    const d = /** @type {Partial<CompetitorDraft>} */ (draft);
-    const valueCount =
-      d.resultSource && d.resultSource.kind === "published"
-        ? Object.keys(d.resultSource.values).length
-        : 0;
-    process.stdout.write(
-      `competitor-research-validate ok: draft "${d.id}" passes ${knownMetricIds.size}-metric catalogue check; ${valueCount} reading(s)\n`,
-    );
+    printSuccess(/** @type {Partial<CompetitorDraft>} */ (loaded.draft), knownMetricIds.size);
     return 0;
   }
-
-  process.stderr.write(
-    `competitor-research-validate: ${result.errors.length} invariant(s) failed:\n`,
-  );
-  for (const e of result.errors) {
-    process.stderr.write(`  - ${e}\n`);
-  }
-  process.stderr.write(
-    "\nFix each error in the draft JSON and re-run. See `.claude/skills/competitor-research/SKILL.md` phase 3 for the schema.\n",
-  );
+  printFailure(result.errors);
   return 1;
 }
 
