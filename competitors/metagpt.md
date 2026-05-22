@@ -66,6 +66,31 @@ Not a dependency. No adapter.
 
 MetaGPT also published `mbpp-pass-at-1 = 0.877` in the same paper, which is tracked in the citation string but not yet promoted to a separate metric in the M1.10 catalogue. Promotion path: add `mbpp-pass-at-1` if a second orchestrator-tier competitor publishes the same metric (avoid single-source metrics per rule #9 — vanity-metrics forbidden).
 
+## Should we wrap MetaGPT instead?
+
+> Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
+
+**Verdict: NO** — task-shape mismatch. Don't file a P0 wrap proposal.
+
+MetaGPT's HumanEval Pass@1 = 0.859 (ICLR 2024 Oral) is the best published orchestrator-tier coding result in Minsky's corpus. That makes the wrap question worth asking. But the architectures don't compose for Minsky's specific job shape:
+
+**Architectural fit**: MetaGPT is a Python framework (`pip install metagpt`) targeting **greenfield software generation** — turn a one-line product idea ("build me a snake game") into a full repo via a fixed pipeline (PM → Architect → Engineer → QA → Tester, all 5 roles assembled in sequence per the SOP-shaped *Standardized Operating Procedure* methodology). The success metric is HumanEval (function-implementation correctness from scratch).
+
+Minsky's job shape is **brownfield maintenance** — pick a task from an existing repo's `TASKS.md`, make a targeted change on a feature branch, run the existing tests, open a PR for review. The success shape is `prs-opened` × `iteration-stability-pct`, not HumanEval.
+
+**What MetaGPT replaces**: nothing in Minsky's current loop. MetaGPT's 5-role pipeline runs per-task; spawning it for every TASKS.md item would (a) take 5x the LLM budget per task because every task gets the full PM/Arch/Eng/QA/Test pipeline regardless of size, (b) over-spec smaller tasks (a typo fix doesn't need a PM phase), (c) lose the agent's git-awareness because MetaGPT's pipeline generates code into a fresh `workspace/` directory rather than editing the existing repo.
+
+**What we keep if we don't wrap**: everything.
+
+**Why we shouldn't wrap**:
+
+1. **Wrong task shape**. Minsky tasks are "fix X in this existing repo"; MetaGPT optimises for "build X from scratch". The HumanEval result doesn't transfer to Minsky's task distribution.
+2. **Per-task overhead is wrong**. 5-role pipelines optimise for greenfield where the PM phase + Architect phase add real value. Minsky's typical task ("rename function getCwd to getCurrentWorkingDirectory across 15 files") doesn't benefit from a Project Manager phase.
+3. **Git-blindness**. MetaGPT writes to `workspace/<task-id>/`, not to the operator's existing repo. We'd have to bolt git-awareness on, undoing MetaGPT's clean pipeline.
+4. **The valuable pattern is portable**. The thing worth borrowing is the SOP-shaped multi-agent pipeline pattern (Hong et al. 2024, "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework"). That's what `multi-persona-pipeline-handoff-spec` (M2) tracks — pattern reuse, not framework wrap.
+
+**Trigger for re-evaluation**: if MetaGPT publishes a brownfield-targeted variant (`metagpt-maintain` or similar) that operates on existing repos with a smaller per-task footprint, OR if MetaGPT's pipeline-per-task overhead drops to <2x baseline LLM cost — then re-open this analysis. Until then, MetaGPT is citation material for `multi-persona-pipeline-handoff-spec`, not wrap material for the daemon.
+
 ## Last reviewed
 
-2026-05-23 (added to scorecard corpus via `/competitor-research` as the first orchestrator-tier competitor)
+2026-05-23 (added to scorecard corpus via `/competitor-research` as the first orchestrator-tier competitor); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive — verdict: wrong task shape, don't wrap.
