@@ -239,8 +239,10 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "cloud-audit-gate",
       "competitive-goal",
       "dashboard-localhost-bind",
+      "depcruise",
       "glossary-discipline",
       "hygiene",
+      "knip",
       "lockfile-integrity",
       "machine-budget",
       "maciek-smoke",
@@ -440,6 +442,34 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "pnpm",
     args: ["test"],
+  },
+  {
+    // Dead-code + unused-exports + unused-dependencies detector. Config at
+    // `knip.json` declares the workspace shape (entry points = bin scripts
+    // + scripts/*.mjs + workspace package src/index.ts + paired *.test.*
+    // vitest entries). All rules currently at WARN — knip surfaces findings
+    // but doesn't block CI. Once each rule family's violation count
+    // converges to ≤5 with documented exemptions, it graduates to ERROR
+    // per the rule-#10 ratchet. This step exits 0 even when findings exist
+    // (the warn-level rules don't escalate); operators see the report in
+    // the daemon log and CI artifacts. Lockfile-equivalent reasoning
+    // applies to the `--no-progress` flag — same shape as `biome ci`.
+    name: "knip",
+    stages: ["full"],
+    cmd: "pnpm",
+    args: ["exec", "knip", "--no-progress", "--reporter", "compact"],
+  },
+  {
+    // Circular-dep + orphan-file detector via dependency-cruiser. Config at
+    // `.dependency-cruiser.cjs`. Like knip, the rules are currently at WARN
+    // so the step exits 0 when the only violations are cycles or orphans;
+    // ERROR-level rules (`no-dep-on-test`, `no-non-package-json`) trip the
+    // exit code immediately. The `--output-type err-long` reporter emits
+    // one line per violation suitable for CI log parsing.
+    name: "depcruise",
+    stages: ["full"],
+    cmd: "pnpm",
+    args: ["exec", "depcruise", "novel", "scripts", "--output-type", "err"],
   },
   {
     name: "rule-1-novel-justification",

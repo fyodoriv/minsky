@@ -30,11 +30,14 @@
           "options": { "maxAllowedComplexity": 10 }
         },
         "noUselessTypeConstraint": "error",
-        "useLiteralKeys": "off"
+        "useLiteralKeys": "off",
+        "noForEach": "off"
       },
       "suspicious": {
         "noExplicitAny": "error",
-        "noConsoleLog": "warn"
+        "noConsoleLog": "warn",
+        "noEmptyBlockStatements": "warn",
+        "useAwait": "warn"
       },
       "style": {
         "noNonNullAssertion": "error",
@@ -42,12 +45,24 @@
         "useConsistentArrayType": {
           "level": "error",
           "options": { "syntax": "shorthand" }
-        }
+        },
+        "noNamespace": "error",
+        "noParameterAssign": "error",
+        "noUselessElse": "error",
+        "useNumberNamespace": "error",
+        "useNodejsImportProtocol": "error",
+        "useThrowOnlyError": "error",
+        "useThrowNewError": "error"
       },
       "correctness": {
         "noUnusedVariables": "error",
         "noUnusedImports": "error",
-        "noUnusedFunctionParameters": "error"
+        "noUnusedFunctionParameters": "error",
+        "noUndeclaredVariables": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error",
+        "noDelete": "error"
       }
     }
   },

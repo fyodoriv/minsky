@@ -55,6 +55,8 @@ The fast stage (default) runs the nine lints that close the five empirically-nam
 The full stage adds the slow lints — vitest, the remaining diff-relative checks, and the dormant config caps. CI runs all of them; the operator's `pnpm pre-pr-lint --stage=full` (the gate `lefthook` `pre-push` invokes) mirrors the same set so a local push catches whatever a `gh pr create` would catch:
 
 - `vitest` — `pnpm test:coverage` across all packages.
+- `knip` — dead-code + unused-exports + unused-dependencies detector ([knip](https://knip.dev)). Configured in `knip.json`; declares the workspace shape (entry points = `bin/*` CLI scripts + `scripts/*.mjs` + workspace package `src/index.ts` + paired `*.test.*` vitest entries). All rules currently at WARN so the lint surfaces findings without blocking CI; rules graduate to ERROR per the rule-#10 ratchet once their violation count converges to ≤5 with documented exemptions.
+- `depcruise` — circular-dep + orphan-file detector via [dependency-cruiser](https://github.com/sverweij/dependency-cruiser). Configured in `.dependency-cruiser.cjs`. WARN-level rules (`no-circular`, `no-orphans`, `not-to-deprecated`) surface findings; ERROR-level rules (`no-dep-on-test`, `no-non-package-json`) trip the exit code immediately. Targets `novel/` and `scripts/` only — the rest of the tree is excluded via the config's `options.exclude` list.
 - `rule-1-novel-justification` — every novel artefact carries a justification block.
 - `rule-4-otel-coverage` — every public function in `novel/**` emits an OTEL span (rule #4 — everything measurable, everything visible).
 - `rule-5-glossary-discipline` — every glossary term in vision.md has exactly one definition.

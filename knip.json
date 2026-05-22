@@ -1,0 +1,96 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "bin/minsky",
+        "scripts/*.mjs",
+        "scripts/*.test.mjs",
+        "scripts/check-*.mjs",
+        "scripts/lib/**/*.{mjs,js}",
+        "user-stories/**/*.{ts,mjs}",
+        "test/integration/**/*.{ts,mts}"
+      ],
+      "project": [
+        "scripts/**/*.{mjs,js,ts}",
+        "user-stories/**/*.{ts,mjs}",
+        "test/**/*.{ts,mts,mjs}",
+        "!scripts/fixtures/**",
+        "!**/dist/**"
+      ],
+      "ignoreDependencies": [
+        "@minsky/experiment-record",
+        "@minsky/tick-loop",
+        "@minsky/token-monitor"
+      ]
+    },
+    "novel/*": {
+      "entry": ["src/index.ts", "src/*.test.ts", "bin/*.mjs", "bin/*.ts", "test/**/*.test.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts", "bin/**/*.{ts,mjs}", "!**/dist/**"]
+    },
+    "novel/adapters/*": {
+      "entry": ["src/index.ts", "src/*.test.ts"],
+      "project": ["src/**/*.ts", "!**/dist/**"]
+    },
+    "novel/bridges/*": {
+      "entry": ["src/index.ts", "src/*.test.ts", "bin/*.mjs", "bin/*.ts"],
+      "project": ["src/**/*.ts", "bin/**/*.{ts,mjs}", "!**/dist/**"]
+    },
+    "novel/observer/*": {
+      "entry": ["src/index.ts", "src/*.test.ts"],
+      "project": ["src/**/*.ts", "!**/dist/**"]
+    }
+  },
+  "ignore": [
+    ".minsky/**",
+    ".worktrees/**",
+    ".obsidian/**",
+    ".claude/**",
+    "**/dist/**",
+    "**/*.d.ts",
+    "**/fixtures/**"
+  ],
+  "ignoreBinaries": [
+    "fnm",
+    "claude",
+    "devin",
+    "aider",
+    "ollama",
+    "ts-prune",
+    "remark-validate-links",
+    "tail",
+    "head",
+    "wc",
+    "launchctl",
+    "systemctl",
+    "fswatch",
+    "tput",
+    "stty",
+    "tic",
+    "infocmp"
+  ],
+  "ignoreDependencies": [
+    "@semantic-release/changelog",
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/git",
+    "@semantic-release/github",
+    "@semantic-release/release-notes-generator",
+    "conventional-changelog-conventionalcommits",
+    "lefthook",
+    "js-yaml"
+  ],
+  "rules": {
+    "files": "warn",
+    "dependencies": "warn",
+    "devDependencies": "warn",
+    "unlisted": "warn",
+    "binaries": "warn",
+    "unresolved": "warn",
+    "exports": "warn",
+    "types": "warn",
+    "nsExports": "warn",
+    "nsTypes": "warn",
+    "duplicates": "warn",
+    "enumMembers": "warn"
+  }
+}
