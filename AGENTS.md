@@ -351,6 +351,31 @@ Declare `**Touches**:` on tasks the daemon is likely to pick. Broad meta-tasks (
 
 If a task description is wrong, or a constitutional rule is being misapplied, push back. Add a `**Pushback**:` block to the task explaining the issue. The human or the MAPE-K loop will resolve it. Silent compliance with a bad spec is itself a constitutional violation.
 
+## Pipeline-managed repos — dedicated worktree pattern
+
+When you (the agent) are doing a multi-PR batch on this repo (e.g. a backlog drain, a CI stabilization sweep, a rule rollout), do NOT work in the main checkout. Other agents (the dogfood launchd, parallel Devin sessions, the daemon itself) `git checkout` the main repo dir at unpredictable times and wipe your uncommitted edits.
+
+The discipline is:
+
+```bash
+git worktree add /tmp/minsky-<short-task-name> -b <branch> origin/main
+cd /tmp/minsky-<short-task-name>
+pnpm install --frozen-lockfile
+# do all your work here
+# when done: git worktree remove /tmp/minsky-<short-task-name> --force
+```
+
+The `/tmp/` path is unique per task and parallel agents have no business touching it. The branch lives on the same git object store as the main checkout but the working tree is yours alone. Operator's `bin/minsky` cleanup commands (e.g. `pnpm dogfood:gc`) leave `/tmp/` worktrees alone — they only clean `.worktrees/<id>` under the repo.
+
+When the merge lands, remove the worktree:
+
+```bash
+git worktree remove /tmp/minsky-<short-task-name> --force
+git branch -D <branch>  # if not already deleted by gh pr merge --delete-branch
+```
+
+See [`.claude/skills/pr-merge-no-shortcuts/SKILL.md` § Operational discipline](.claude/skills/pr-merge-no-shortcuts/SKILL.md) for the 8 tactical patterns observed during the 2026-05-21 PR drain — including the orphan-test trap, the diff-scoped vs whole-tree biome divergence, and the lefthook-bypass for bot commits.
+
 ## What never to commit
 
 - `.env` files or any secret material
