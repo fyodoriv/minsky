@@ -16,8 +16,8 @@ The README's tier-1 paragraph names the 5 most load-bearing ones (TDD, MAPE-K, h
 ## What this file is not
 
 - **Not the constitution** — see [vision.md](../vision.md) for the 17 non-negotiable rules.
-- **Not the architecture doc** — see [ARCHITECTURE.md](../ARCHITECTURE.md) for the layered model and dependency table.
-- **Not the research log** — see [research.md](../research.md) for the open exploration questions and tool evaluations.
+- **Not the architecture doc** — see [ARCHITECTURE.md](./ARCHITECTURE.md) for the layered model and dependency table.
+- **Not the research log** — see [research.md](./research-log.md) for the open exploration questions and tool evaluations.
 - **Not a literature review** — every row here is a practice Minsky already uses, not a survey of the field.
 
 ## Applied today

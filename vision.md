@@ -81,7 +81,7 @@ Enforced by: [`scripts/check-rule-1-novel-justification.mjs`](scripts/check-rule
 
 ### 2. Every dependency behind an interface
 
-No tool we depend on is hardcoded. Each is accessed through an adapter — a module defining an interface, then implementing it against the currently chosen tool. Swapping any dep is a one-file change. This makes rule #1 tractable over a decade. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the adapter pattern.
+No tool we depend on is hardcoded. Each is accessed through an adapter — a module defining an interface, then implementing it against the currently chosen tool. Swapping any dep is a one-file change. This makes rule #1 tractable over a decade. See [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the adapter pattern.
 
 Enforced by: [`scripts/check-rule-2-dep-coverage.mjs`](scripts/check-rule-2-dep-coverage.mjs).
 

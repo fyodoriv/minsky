@@ -22,9 +22,9 @@ Two paths.
 
 **Through your AI agent** (fastest):
 
-> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/docs/INSTALL.md>, then start it. Ask me only the consent question.
 
-**Manual**: read [INSTALL.md](../INSTALL.md) (~8 min). Prerequisites: Node ≥22, pnpm ≥9, git ≥2.40.
+**Manual**: read [INSTALL.md](./INSTALL.md) (~8 min). Prerequisites: Node ≥22, pnpm ≥9, git ≥2.40.
 
 After install:
 
@@ -41,7 +41,7 @@ Read in this order. Total: ~20 minutes.
 |---|---|---|
 | 1 | [AGENTS.md](../AGENTS.md) | The agent runbook. Setup, running, claiming tasks, the 17 constitutional rules. **Load-bearing — CI gates cite section headings here.** |
 | 2 | [MILESTONES.md](../MILESTONES.md) | What milestone we're in, what's blocking it. Read before picking a task. |
-| 3 | [DEPRECATED.md](../DEPRECATED.md) | What NOT to invest in. Check this before implementing anything. |
+| 3 | [DEPRECATED.md](./DEPRECATED.md) | What NOT to invest in. Check this before implementing anything. |
 | 4 | [TASKS.md](../TASKS.md) | The work queue. Sorted P0 → P3. Pick the top unclaimed task with all rule-9 fields filled in. |
 
 Then read [vision.md](../vision.md) at your own pace — the 17 constitutional rules each get enforced by a deterministic CI lint, so you can also discover the rules by reading the lint output.
@@ -50,7 +50,7 @@ Then read [vision.md](../vision.md) at your own pace — the 17 constitutional r
 
 | Doc | What it covers |
 |---|---|
-| [ARCHITECTURE.md](../ARCHITECTURE.md) | Layered model, adapter pattern, the dependency table. Where each tool plugs in. |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Layered model, adapter pattern, the dependency table. Where each tool plugs in. |
 | [vision.md § "Pattern conformance index"](../vision.md#pattern-conformance-index) | Every artifact in the repo + the named published pattern it implements. |
 | [vision.md § "What Minsky is"](../vision.md#what-minsky-is) | The plug-and-play repo transformer thesis. |
 | [docs/PRACTICES.md](PRACTICES.md) | Every published software-engineering practice Minsky applies + its enforcement point. |
@@ -73,7 +73,7 @@ For the **moats as user stories** with chaos coverage + pre-registered umbrella 
 
 - [user-stories/012-operator-machine-identity-moat.md](../user-stories/012-operator-machine-identity-moat.md) — moat #2 (`~/.gitconfig`, `~/.config/gh/`, `~/.ssh`)
 - [user-stories/013-daemon-not-framework-moat.md](../user-stories/013-daemon-not-framework-moat.md) — moat #1 (zero `@minsky/*` imports in host repo)
-- [ARCHITECTURE.md § "Competitive layer-by-layer"](../ARCHITECTURE.md#competitive-layer-by-layer) — 14-row table mapping Minsky vs 5 orchestrator competitors
+- [ARCHITECTURE.md § "Competitive layer-by-layer"](./ARCHITECTURE.md#competitive-layer-by-layer) — 14-row table mapping Minsky vs 5 orchestrator competitors
 
 ## I'm operating Minsky in production
 
