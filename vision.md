@@ -40,6 +40,35 @@ Minsky is **not** a framework. It does not contain a multi-agent runtime, a task
 - **Not a productivity tool** — productivity tools die when you stop maintaining them; viable systems maintain themselves.
 - **Not a vehicle for quick one-off fixes** — every change ships with a pre-registered hypothesis, success threshold, pivot threshold, measurement command, and literature anchor (rule #9). If a change is too small for that discipline, it's too small for Minsky.
 
+## What Minsky uniquely does (the moat)
+
+Six properties that, in combination, no orchestrator-tier competitor (CrewAI, AutoGen, LangGraph, MetaGPT, OpenAI Agents SDK) has. Each is pinned by a user story + lint + chaos test.
+
+| # | Moat | Why it matters | Where it lives |
+|---|---|---|---|
+| 1 | **Daemon, not framework** | Operator attaches Minsky to a repo with one command and walks away. Zero `@minsky/*` imports in the host repo. Competitors are Python (or TypeScript) libraries the developer must wrap their code in. | [`user-stories/013-daemon-not-framework-moat.md`](user-stories/013-daemon-not-framework-moat.md); `bin/minsky` |
+| 2 | **Operator-machine identity** | Minsky runs as the operator's user with `~/.gitconfig`, `~/.config/gh/`, `~/.ssh`. Commits land as the operator. No cloud sandbox, no Devbox, no separate bot account, no tenancy boundary. | [`user-stories/012-operator-machine-identity-moat.md`](user-stories/012-operator-machine-identity-moat.md); `novel/cross-repo-runner/bin/minsky-run.mjs` (spawns with `cwd: hostDir`) |
+| 3 | **Constitution + deterministic enforcement** | 17 rules, each a CI lint. `pnpm pre-pr-lint --stage=full` runs 53 deterministic checks; CI runs 65 jobs. No LLM advisories. No "best practices in docs". | This file (the 17 rules) + `scripts/check-rule-*.mjs` + `.github/workflows/ci.yml` |
+| 4 | **MAPE-K self-improvement** | The daemon mines `.minsky/orchestrate.jsonl` and improves itself. Competitors are static once shipped — CrewAI Flow definitions, AutoGen agent configs, MetaGPT roles don't evolve from production data. | [`user-stories/003-mape-k-improves-prompts.md`](user-stories/003-mape-k-improves-prompts.md); `novel/mape-k-loop/` |
+| 5 | **Cross-repo fleet at operator scale** | Walks N hosts in round-robin on ONE machine, 3 iterations per host per pass. Competitors are per-task (CrewAI Flow = one workflow; LangGraph thread = one conversation; Devin session = one task). | [`user-stories/006-runner-on-any-repo.md`](user-stories/006-runner-on-any-repo.md); `novel/cross-repo-runner/` |
+| 6 | **TASKS.md as operator surface** | Plain markdown. No dashboard, no API, no DSL. The operator edits a file; Minsky reads it. | `TASKS.md` + `pickHostTask` in `novel/cross-repo-runner/src/` |
+
+The full landscape analysis is at [`competitors/README.md`](competitors/README.md) — per-vendor research files + the corpus scorecard at [`novel/competitive-benchmark/`](novel/competitive-benchmark/).
+
+## Honest gaps (what Minsky does NOT do, that competitors do)
+
+The moat above is real, but the corpus also surfaces things Minsky doesn't have. Each is filed as a TASKS.md follow-up so they're explicit, not hidden:
+
+| Gap | Who has it | Status |
+|---|---|---|
+| Headline benchmark number (HumanEval / SWE-bench / GAIA) | MetaGPT (HumanEval 85.9%), AutoGen (GAIA SOTA), Devin (PR merge rate 67%) | Filed: `benchmark-minsky-via-claude-on-humaneval`, `gaia-benchmark-evaluation-substrate` |
+| Enterprise distribution | CrewAI (60% Fortune 500), Devin (enterprise tier) | Filed: `enterprise-deployment-readiness-audit` (M2-gated; not M1 work) |
+| Multi-agent ensembling | Augment Code (Claude 3.7 + o1 ensembler) | Filed: `explore-multi-agent-ensembling-experiment` (M2-gated) |
+| Graph-based execution with time-travel | LangGraph (checkpointer + thread_id + super-step replay) | Rejected — daemon iteration is linear by design (the iteration ledger replaces the graph) |
+| Python framework binding | CrewAI, AutoGen, MetaGPT, smolagents | Rejected — TypeScript is the orchestrator-tier surface |
+
+Pivot threshold (rule #9 shape): if 12 months pass and Minsky still has zero deployed instances outside the operator's own infrastructure, AT LEAST ONE of the "filed" gaps above is the wrong gap to file. Re-evaluate which gap actually blocks adoption.
+
 ## The constitution
 
 17 rules, non-negotiable. Each rule is enforced by a deterministic CI lint that runs on every iteration; violations halt the iteration. The constitution is the project specification; the linters monitor execution against it at runtime (Havelund & Goldberg 2008).

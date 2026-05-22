@@ -361,13 +361,47 @@ These don't block writing `vision.md` and `ARCHITECTURE.md`, but they do block w
 5. **OMC version pinning strategy** — strict patch pin (v4.13.4 exactly) vs minor-floating (v4.13.x)? Recommend minor-floating with integration test gate, but verify their semver discipline first.
 6. **OTEL backend choice** — *Resolved 2026-05-03* (see `research.md` § "Lighter OTEL backend"): OpenObserve for v0 (single binary, smallest disk footprint, satisfies all three query-shape constraints); VictoriaMetrics triad as runner-up. The previously-considered Loki/Tempo/Prometheus/Grafana stack is heavier than necessary for a single-dev setup.
 
+## Competitive layer-by-layer
+
+What Minsky has at each layer vs the orchestrator-tier competitors (CrewAI, AutoGen, LangGraph, MetaGPT, OpenAI Agents SDK). Use this table to see the moat shape architecturally — where Minsky is the only system with the property AND where competitors have something Minsky doesn't.
+
+Symbol legend: ✅ has it, today; 🟡 partial / framework-level; ❌ doesn't have it; ⚪ rejected by design.
+
+| Layer | Minsky | CrewAI | AutoGen | LangGraph | MetaGPT | OpenAI Agents SDK |
+|---|---|---|---|---|---|---|
+| **Daemon (operator attaches and walks away)** | ✅ launchd / systemd supervisor | ❌ framework (Python lib) | ❌ framework (Python lib) | ❌ framework (Python lib) | ❌ framework (Python lib) | ❌ framework (Python lib) |
+| **Operator-machine identity (~/.gitconfig, ~/.config/gh/, ~/.ssh)** | ✅ `spawn(agent, args, { cwd: hostDir })` | ❌ platform identity (CrewAI Enterprise) | ❌ Python container identity | ❌ Python container identity | ❌ Python container identity | ❌ OpenAI account identity |
+| **State persistence with checkpointing** | 🟡 `.minsky/orchestrate.jsonl` (iteration-level, not graph-level) | ✅ `@persist` + JsonProvider / SqliteProvider | 🟡 GroupChat memory; no first-class persistence | ✅ Postgres / Sqlite / InMemory savers + thread_id | ❌ stateless per task | ✅ sessions + tracing |
+| **Multi-role / persona pipeline** | 🟡 persona-spawner adapter; one persona per spawn today | ✅ Crew = roles | ✅ AssistantAgent / UserProxyAgent / GroupChat | ✅ graph nodes | ✅ Standardised Operating Procedure (PM / Architect / Engineer / QA) | ✅ handoffs |
+| **MAPE-K self-improvement loop** | ✅ `novel/mape-k-loop/` mines iteration ledger | ❌ static once shipped | ❌ static once shipped | ❌ static once shipped | ❌ static once shipped | ❌ static once shipped |
+| **Constitution + deterministic CI enforcement** | ✅ 17 rules + 53 pre-pr-lint stages + 65 CI jobs | ❌ no per-rule CI gate | ❌ no per-rule CI gate | ❌ no per-rule CI gate | ❌ no per-rule CI gate | 🟡 guardrails primitive (per-agent) |
+| **Cross-repo fleet (walk N hosts)** | ✅ `--hosts-dir <parent>` + round-robin | ❌ one Flow at a time | ❌ one team at a time | ❌ one graph at a time | ❌ one task at a time | ❌ one agent at a time |
+| **TASKS.md as operator surface** | ✅ plain markdown queue | ❌ Python code defines tasks | ❌ Python code defines agents | ❌ Python code defines graph | ❌ Python code defines roles | ❌ Python / TS code defines agents |
+| **Pre-registered hypothesis-driven development (rule #9)** | ✅ Hypothesis/Success/Pivot/Measurement/Anchor on every task | ❌ no equivalent | ❌ no equivalent | ❌ no equivalent | ❌ no equivalent | ❌ no equivalent |
+| **Headline benchmark (HumanEval / SWE-bench / GAIA)** | ❌ no number yet | ❌ no benchmark (adoption metrics only) | 🟡 GAIA SOTA March 2024 (no headline %) | ❌ third-party benchmarks only | ✅ HumanEval 0.859, MBPP 0.877 | ❌ no benchmark yet |
+| **Enterprise distribution (Fortune 500-scale)** | ❌ ~1 deployment | ✅ 60% Fortune 500 | 🟡 Microsoft-internal | 🟡 LangChain community | ❌ research-grade | 🟡 OpenAI ecosystem |
+| **Multi-agent ensembling within ONE task** | ❌ one agent per task | 🟡 Crew = multi-agent | ✅ GroupChat | ✅ graph nodes | ✅ assembly line | ✅ handoffs |
+| **Graph-based time-travel debugging** | ⚪ rejected (linear iteration ledger is the moat) | 🟡 checkpoint replay | ❌ no equivalent | ✅ get_state_history + replay | ❌ no equivalent | 🟡 trace replay |
+| **Python framework** | ⚪ rejected (TypeScript surface) | ✅ Python | ✅ Python | ✅ Python | ✅ Python | ✅ Python + TS |
+
+The full moat analysis lives at [`competitors/README.md`](competitors/README.md). The four ❌ rows in the Minsky column above are filed as TASKS.md follow-ups:
+
+- `benchmark-minsky-via-claude-on-humaneval` — close the headline-benchmark gap by running HumanEval on Minsky-via-Claude and publishing the score.
+- `enterprise-deployment-readiness-audit` — close the distribution gap; M2-gated (M1's job is to make Minsky stable + measurable, not to chase enterprise sales).
+- `explore-multi-agent-ensembling-experiment` — investigate whether the Augment Code pattern (Sonnet driver + o1 ensembler) lifts Minsky-via-Claude's HumanEval score; M2-gated.
+- `gaia-benchmark-evaluation-substrate` — add `bin/minsky benchmark gaia` to compare to AutoGen's claimed GAIA SOTA.
+
+The two ⚪ rows (graph-based time-travel + Python framework) are rejected by design — vision.md § "Honest gaps" explains the trade-offs.
+
 ## Reading next
 
 - `MILESTONES.md` — product roadmap, per-milestone capability tables, what minsky will never do
-- `vision.md` — the constitution this document serves
+- `vision.md` — the constitution this document serves; § "What Minsky uniquely does" enumerates the six moats
 - `AGENTS.md` — how any agent should behave when working in this repo (includes rule #15: milestone alignment gate)
 - `TASKS.md` — current work queue (137 open tasks; milestone-alignment-gate task is always first)
 - `METRICS.md` — 10 canonical metrics (currently stubs — M1 wires real observations)
 - `research.md` — living dependency scan
-- `competitors/` — gap analysis vs autonomous coding competitors
+- `competitors/README.md` — strategic landscape + moat synthesis (read AFTER vision.md § "What Minsky uniquely does")
+- `competitors/<id>.md` — per-vendor research files
+- `user-stories/012-operator-machine-identity-moat.md` + `user-stories/013-daemon-not-framework-moat.md` — moats 1 and 2 as user stories
 - `user-stories/` — one file per story with metric, integration test, proof
