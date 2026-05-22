@@ -2,7 +2,7 @@
 
 > "Minsky" is a popular name. This doc tells you which Minsky you found, and where this Minsky's ideas come from.
 
-## Not to be confused with...
+## Not to be confused with
 
 There are several pieces of software called "Minsky". This one — the [`fyodoriv/minsky`](https://github.com/fyodoriv/minsky) autonomous coding daemon — has zero overlap with any of them. If you arrived here looking for one of the projects below, you're in the wrong place; the links go to the right place.
 
