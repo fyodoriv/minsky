@@ -1807,8 +1807,93 @@
   - **Anchor**: cwd-detect.ts already provides the multi-host primitive (rule #1 — don't reinvent); host-walker.ts maps drain-then-advance over the host list (Liu & Layland 1973 — round-robin scheduling); 2026-05-20 audit log + the `walker-task-rotation` already-filed P0 (composing dependency — both fixes together unblock multi-host).
   - **Why P1 not P0**: not a correctness bug in the engine — the walker works correctly when invoked with `--hosts-dir`. The plist is just emitting the wrong flag. But every operator following the README's "Running minsky" section gets a single-host daemon, so the bug is permanently latent for the median user.
 
+<!-- 2026-05-21 drain session — 7 follow-up tasks codifying observed regression classes and gap classes. -->
+
+- [ ] `daemon-daily-metrics-render-not-firing` — `pnpm metrics:render` is supposed to auto-fire once per day from the daemon, but didn't on 2026-05-22; 4 `Budget: 1d` sections of METRICS.md went stale and broke `scripts/check-metric-freshness.test.mjs` until manually re-rendered in PR #712.
+  - **ID**: daemon-daily-metrics-render-not-firing
+  - **Tags**: p1, daemon, observability, metrics, rule-17, observed-2026-05-22
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PM PR-drain — `pnpm pre-pr-lint --stage=full` failed on PR #712's docs-only change because METRICS.md still pointed to 2026-05-21 snapshots. The daemon's intended daily fire-and-commit wire-in didn't execute on 2026-05-22 (or executed but failed silently). Operator workaround was to run `pnpm metrics:render` manually inside the docs PR — the failure was caught because the docs PR also touched the same lint stack, but a code-only PR would have hit the same stale-METRICS.md error with no clear path to fix.
+  - **Hypothesis**: the daemon's `metrics-render-runner.ts` either (a) doesn't fire on every iteration that crosses a UTC-midnight boundary, (b) fires but fails silently when the working-tree-clean check rejects the auto-commit (since other agents have edits in flight), or (c) the daily snapshot is created (`.minsky/metric-snapshots/2026-05-22.json` exists) but the render step that writes METRICS.md isn't wired to fire when the snapshot is written by a different process.
+  - **Success**: METRICS.md `_Updated:` stamps are within their freshness budget for 7 consecutive days WITHOUT manual `pnpm metrics:render` runs. Measurement command emits 0 stale sections every day. Pre-pr-lint never fails on `check-metric-freshness` for a PR that doesn't touch METRICS.md.
+  - **Pivot**: if the daemon-side fire is too brittle, move the refresh to a GH Actions cron workflow that opens a PR with the METRICS.md bump every UTC midnight (operator can squash-merge). Threshold: 3 consecutive days of stale metrics after a fix attempt.
+  - **Measurement**: `node -e 'import("./scripts/check-metric-freshness.mjs").then(async ({checkMetricFreshness}) => { const md = await (await import("node:fs/promises")).readFile("METRICS.md","utf8"); const r = checkMetricFreshness({markdown:md, nowMs:Date.now()}); console.log(r.ok ? "ok" : `stale:${r.errors.length}`); })'` — emits `ok` daily for 7d.
+  - **Anchor**: rule #17 (proactive healing — observation IS the fix; this PR observed and filed); rule #4 (everything measurable, everything visible — stale-metrics is the canonical "data going dark" failure); novel/tick-loop/src/metrics-render-runner.ts (existing daily-fire substrate that needs the wire-in fix).
+  - **Files**: `novel/tick-loop/src/metrics-render-runner.ts`, `novel/tick-loop/src/metrics-render-cli-wiring.ts`, `novel/tick-loop/bin/tick-loop.mjs` (the daemon's tick-loop where the daily-fire is dispatched), `scripts/check-metric-freshness.test.mjs` (asserts the failure mode).
 
 ## P2
+
+- [ ] `tui-src-vs-test-api-drift-pivot-tracker` — track the orphan-tests detector's false-positive rate over the next 5 PRs; if >2 false positives accumulate, switch from regex-based detection to a tsc-based detector (per-package `tsconfig.test.json` + `tsc --noEmit` over `test/`).
+  - **ID**: tui-src-vs-test-api-drift-pivot-tracker
+  - **Tags**: p2, lint, rule-10, pivot-tracker, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PM PR-drain — PR #713 shipped `scripts/check-orphan-tests.mjs`, a regex-based lint that catches the test/ vs src/ API drift class (the PR #639 → #705 regression). The lint declares a pivot threshold in its top-of-file comment: ">2 false positives over a 5-PR window → switch to tsc-based". This task is the tracker so the threshold is actually monitored.
+  - **Hypothesis**: regex-based ESM import/export parsing is sufficient for the orphan-test class; the source-of-drift surface is small (named runtime imports from a parallel directory) and TypeScript's edge cases (default imports, namespace imports, dynamic imports) are out of scope for this lint.
+  - **Success**: 5 consecutive PRs land with the `orphan-tests` CI job either green or red-for-a-real-orphan, no false positives.
+  - **Pivot**: if any single PR triggers a false positive, file an immediate diagnostic task. If 3 false positives across <5 PRs, abandon the regex approach and ship the tsc-based detector (separate `tsconfig.test.json` per `novel/*` package that has a `test/` dir, run `tsc --noEmit` over the test files in `check-orphan-tests.mjs`).
+  - **Measurement**: `gh run list --workflow=ci --json conclusion,databaseId --jq '[.[] | select(.conclusion == "FAILURE")] | length'` over the next 5 PRs touching `novel/**/test/`. Cross-reference any failure against the actual orphan-symbol report to classify true-vs-false positive.
+  - **Anchor**: rule #9 (pre-registered pivot threshold — the lint declared its own pivot in its top-of-file Pivot comment); rule #10 (deterministic enforcement — every rule is mechanically checked); novel/tui scaffolding from PR #639 is the source of the original regression.
+  - **Files**: `scripts/check-orphan-tests.mjs` (the lint to pivot from), `scripts/check-orphan-tests.test.mjs` (new test cases for the tsc-based detector), `novel/*/tsconfig.test.json` (new per-package configs if pivot fires), `.github/workflows/ci.yml` (rewire the orphan-tests job).
+
+- [ ] `pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence` — `pnpm pre-pr-lint` runs `biome ci --changed --since=origin/main` (diff-scoped), but the CI `biome` workflow job runs `biome ci .` (whole-tree). Formatting drift in unchanged files survives the local gate and explodes in CI 5 minutes later.
+  - **ID**: pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence
+  - **Tags**: p2, lint, biome, pre-pr-lint, ci-divergence, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PM CI-stabilization sweep — PR #704 had to ship three pre-existing biome violations (in `scripts/heal-mttr-report.mjs`, `.releaserc.json`, `novel/tui/src/index.ts`) that the local diff-scoped gate didn't see because the files weren't in the PR's diff. Each CI failure required a separate fix PR (#705, #706, #707).
+  - **Hypothesis**: the diff-scoped local gate is fundamentally a different gate from the whole-tree CI gate; a single PR's locally-green lint stack can't guarantee CI green. Two paths to reconcile: (a) make the local gate whole-tree too (slower but consistent) or (b) keep diff-scoped local but add an explicit `biome ci .` step to the lint stack's `full` stage so the whole-tree pass runs locally before push.
+  - **Success**: after the fix, a PR that's clean against `pnpm pre-pr-lint --stage=full` never fails the CI `biome` job for unrelated whole-tree violations. Measurement: 5 consecutive PRs with this invariant.
+  - **Pivot**: if making the local gate whole-tree exceeds 60s wall-clock on M2-class hardware (rule-#11 perf budget), keep diff-scoped local + add a separate `pnpm biome:full` script that runs in lefthook pre-push (not pre-commit).
+  - **Measurement**: `time pnpm pre-pr-lint --stage=full` p50/p95 over 10 runs after the fix; assert wall-clock budget ≤ 60s.
+  - **Anchor**: rule #10 (deterministic enforcement — gates that disagree are non-deterministic); rule #11 (no flaky gates — a gate that says "ok" while the next gate says "fail" is flaky-by-construction); 2026-05-21 PR #704/#706/#707 chain.
+  - **Files**: `scripts/run-pre-pr-lint-stack.mjs` (the biome step args), `lefthook.yml` (pre-push hook reuse), `.github/workflows/ci.yml` (the biome job that exposes the whole-tree gap).
+
+- [ ] `lefthook-bot-commit-bypass-discipline` — the experiment workflow's bot-commit step ran the local `check-toolchain` hook inside a linux/x64 CI runner; the hook expected darwin-arm64 optional deps. PR #710 worked around by setting `git config core.hooksPath /dev/null` in the bot's commit step; the right answer is a documented bypass discipline so future bot commits don't recurringly trip this class.
+  - **ID**: lefthook-bot-commit-bypass-discipline
+  - **Tags**: p2, ci, lefthook, bot-commit, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PM CI-stabilization — the experiment workflow's `experiment-store` bot commit ran on a fresh linux/x64 runner and tripped lefthook's pre-commit `check-toolchain` hook (which expected the macOS darwin-arm64 optionalDependency). PR #710 fixed by adding `git config core.hooksPath /dev/null` to the bot's commit step, but the fix is local to one workflow.
+  - **Hypothesis**: every workflow that bots-commit-back-to-repo (currently: experiment-tracker, fresh-clone, lighthouse) needs the same hook-bypass; a documented pattern + a CI lint that catches workflows missing the bypass would prevent recurrence.
+  - **Success**: a deterministic check (new `scripts/check-bot-commit-hook-bypass.mjs`) scans every `.github/workflows/*.yml` for steps that `git commit` AND don't have either `core.hooksPath=/dev/null` set OR `--no-verify` on the commit; the lint fails the CI if any workflow is missing the bypass.
+  - **Pivot**: if the bypass discipline is itself error-prone (operator forgets it), move the bot-commit class to a single shared composite action in `.github/actions/bot-commit/action.yml` that always sets `core.hooksPath=/dev/null` + always runs from a darwin-arm64-clean env.
+  - **Measurement**: `grep -rE "git commit" .github/workflows/ | grep -v "core.hooksPath=/dev/null\|--no-verify"` should produce 0 lines.
+  - **Anchor**: rule #10 (deterministic enforcement); rule #11 (no flaky gates); 2026-05-21 PR #710.
+  - **Files**: `scripts/check-bot-commit-hook-bypass.mjs` (new lint), `scripts/check-bot-commit-hook-bypass.test.mjs` (new), `.github/workflows/*.yml` (audit + add the bypass where missing).
+
+- [ ] `glossary-allowlist-update-discipline` — adding a new skill primer in `.claude/skills/<name>/SKILL.md` requires a matching entry in `scripts/glossary-allowlist.txt` in the same PR (rule #5). The rule isn't enforced — a forgotten allowlist entry isn't caught until a later PR cites the skill in `vision.md`.
+  - **ID**: glossary-allowlist-update-discipline
+  - **Tags**: p2, lint, rule-5, glossary, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 — PR #696 added `.claude/skills/pr-merge-no-shortcuts/SKILL.md` and cited it in `vision.md` § 18. The `pr-merge-no-shortcuts` token wasn't added to the allowlist. A subsequent merge dropped the entry; #704 had to re-add it. The cycle of "skill primer ships → allowlist entry forgotten → later PR's rule-5 check fails → re-add" happens every time.
+  - **Hypothesis**: a deterministic check that asserts every `.claude/skills/<name>/SKILL.md` (or `.devin/skills/<name>/SKILL.md`) directory name appears in `scripts/glossary-allowlist.txt` would prevent the recurrence. The check runs in fast-stage in 50ms.
+  - **Success**: a lint `scripts/check-skill-allowlist-coverage.mjs` exists; it's red until every skill directory under `.claude/skills/` (or `.devin/skills/`) has its name on the allowlist. After the fix, 0 skill primers can be added without the allowlist entry.
+  - **Pivot**: if maintaining the allowlist by hand becomes its own toil, move skill names to a derived list — `node scripts/derive-skill-list.mjs` generates the allowlist subset, committed via lefthook post-commit.
+  - **Measurement**: `find .claude/skills .devin/skills -maxdepth 2 -name SKILL.md -exec dirname {} \; | xargs -n1 basename | sort -u > /tmp/actual; grep -oP '^[a-z][a-z0-9-]+$' scripts/glossary-allowlist.txt | sort -u > /tmp/allowed; diff /tmp/actual /tmp/allowed` — should produce 0 lines (every skill directory has its name on the allowlist).
+  - **Anchor**: rule #5 (theoretical grounding — every term has a CS anchor; skill names are terms); rule #10 (deterministic enforcement); 2026-05-21 PR #696/#704 cycle.
+  - **Files**: `scripts/check-skill-allowlist-coverage.mjs` (new), `scripts/check-skill-allowlist-coverage.test.mjs` (new), `scripts/glossary-allowlist.txt` (the allowlist that the lint checks), `scripts/run-pre-pr-lint-stack.mjs` (wire-in).
+
+- [ ] `release-pat-vs-github-releases-decision` — `@semantic-release/git` was removed from `.releaserc.json` plugins (PR #703) because branch protection blocks the bot's auto-commit to main. The current path uses GitHub Releases only (CHANGELOG.md becomes a frozen artifact). Operator needs to confirm this is the durable choice OR provision a PAT with `admin:write_repo` so the git-commit-back plugin can be re-enabled.
+  - **ID**: release-pat-vs-github-releases-decision
+  - **Tags**: p2, release, operator-decision, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PM CI-stabilization — PR #703 removed `@semantic-release/git` from the release plugins because the built-in `GITHUB_TOKEN` couldn't bypass branch protection. The release workflow now ships GitHub Releases only; CHANGELOG.md hasn't been updated since.
+  - **Hypothesis**: the operator's actual preference (`"set up github releases for this"`) is the durable path — CHANGELOG.md is a developer-facing artifact and GitHub Releases is the user-facing one. Confirming this lets us delete the unused changelog plugin too. The alternative (PAT) adds credential surface for marginal benefit.
+  - **Success**: operator confirms the path; if "stay GitHub-Releases", delete the unused `@semantic-release/changelog` plugin from `.releaserc.json` and update the docs that mention CHANGELOG.md. If "use PAT", provision the secret + re-add the git plugin + update the workflow.
+  - **Pivot**: not applicable — this is an operator decision, not a hypothesis.
+  - **Measurement**: `cat .releaserc.json | jq '.plugins | length'` matches the decided plugin count; `gh release list --limit 5` shows recent releases; `grep -rl CHANGELOG.md docs/ README.md` returns 0 lines after the docs cleanup.
+  - **Anchor**: rule #2 (deps through interfaces — semantic-release plugin choice is a versioning-policy adapter); 2026-05-21 PR #703; operator directive "set up github releases for this".
+  - **Files**: `.releaserc.json` (the plugin list), `README.md` (any CHANGELOG.md references), `docs/release.md` (if it exists), `.github/workflows/release.yml` (the workflow if PAT path chosen).
+
+- [ ] `squash-merge-file-list-verifier` — observed 2026-05-21: PR #704's source commit had `.releaserc.json` in its `--stat`, but the squash-merge commit on main did NOT include it. The file appeared identical to base after some intermediate state. Need a lint that catches when a squash-merge drops files from the PR's diff.
+  - **ID**: squash-merge-file-list-verifier
+  - **Tags**: p2, gh, merge-verification, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PM PR-drain — PR #704 was supposed to land a fix to `.releaserc.json`'s biome-formatted shape. The PR's commit DID include the change, but the squash-merge commit on main didn't. Result: PR #706 had to re-ship the same `.releaserc.json` fix. The squash-merge dropped the file silently because GitHub's squash-merge re-merges parallel main churn into the squashed body.
+  - **Hypothesis**: after every squash-merge, a verifier can compare the PR's source-commit file list (from `gh pr view <N> --json files`) against the resulting squash-merge commit's `git show <sha> --name-only`. Any file in the PR's diff that's NOT in the squash-commit is a drop. The verifier can post a comment on the PR (or open a follow-up PR) flagging the drop.
+  - **Success**: the verifier runs on every push to main, checks the last 5 squash-merges, and posts a PR comment if any file was dropped. After landing, 0 silent file drops across 20 consecutive squash-merges.
+  - **Pivot**: if GitHub's squash-merge behavior is the root cause and not fixable client-side, move to merge-commits-only with `--ff-only` rebase requirement, accepting the linear-history loss.
+  - **Measurement**: `gh pr view <N> --json files --jq '.files[].path' | sort > /tmp/pr-files; git show <merge-sha> --name-only --format= | sort > /tmp/squash-files; diff /tmp/pr-files /tmp/squash-files` — files in PR but not in squash = drop.
+  - **Anchor**: rule #17 (proactive healing — observation IS the fix); rule #10 (deterministic enforcement — every dropped file is mechanically detectable); 2026-05-21 PR #704 → #706 ghost-fix-class.
+  - **Files**: `scripts/verify-squash-merge-completeness.mjs` (new), `scripts/verify-squash-merge-completeness.test.mjs` (new), `.github/workflows/squash-merge-verifier.yml` (new workflow that runs on every push to main), `vision.md` § 18 (cross-link: this is the deterministic gate that prevents the "merge dropped my file" subclass of rule-18).
 
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
 
