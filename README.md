@@ -155,6 +155,8 @@ The full documentation map is at **[docs/README.md](docs/README.md)**. Pick the 
 
 About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
 
+Not the only Minsky on the internet — there's also a popular economic-modelling tool ([`highperformancecoder/minsky`](https://github.com/highperformancecoder/minsky), named after the *economist* Hyman Minsky) plus several other unrelated projects. Full disambiguation table + the prior-art lineage that informs this Minsky's architecture: [docs/prior-art-and-name-collisions.md](docs/prior-art-and-name-collisions.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
