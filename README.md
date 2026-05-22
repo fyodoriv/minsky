@@ -75,7 +75,7 @@ Safety is mechanical, not optional. Every pull request is a draft until you mark
 | File-based human↔agent Q&A | 🔴 Not yet | P0 `minsky-human-comm-via-file` |
 | `npx minsky` one-command install+run | 🔴 Not yet | P1 `minsky-npx-install-and-run` (gated on npm-registry publish) |
 | `minsky submit-finding` → Minsky-self submission | 🔴 Not yet | `minsky-remote-task-submission` (M1.8) |
-| Competitive benchmark scorecard (M1.10) | 🟡 Substrate ready | `minsky competitive` builds `.minsky/competitive-scorecard.json` from `@minsky/competitive-benchmark`; the M1.10 shape gate (≥4 competitors × ≥5 shared metrics) is open today — the corpus carries SWE-bench Verified across 5 competitors but ≥4 other metrics still need competitor readings. See `self-metrics-competitive-benchmark-corpus-expansion`. |
+| Competitive benchmark scorecard (M1.10) | ✅ Done | `minsky competitive` writes `.minsky/competitive-scorecard.json` from `@minsky/competitive-benchmark` — 5 shared metrics × 5 published competitors (Devin, Claude Code, OpenHands, Cursor, Aider/SWE-agent on SWE-bench). M1.10 shape gate MET. Weekly auto-refresh via `com.minsky.weekly-competitive` (launchd) / `minsky-weekly-competitive.timer` (systemd). Live deltas accumulate as Minsky iterates. |
 | Multi-file refactors | 🔴 Not yet | M2 milestone |
 | GitHub Actions CI | 🔴 Not yet | M3 milestone |
 

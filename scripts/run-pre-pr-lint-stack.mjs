@@ -237,6 +237,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "brief-pr-instructions",
       "cadence-pivot-threshold",
       "cloud-audit-gate",
+      "competitive-goal",
       "dashboard-localhost-bind",
       "glossary-discipline",
       "hygiene",
@@ -422,6 +423,16 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-rule-9-tasksmd-fields.mjs"],
+  },
+  {
+    // Slice (d) of `self-metrics-competitive-benchmark` — every P0/P1
+    // task block must carry a `**Competitive-goal**:` field naming
+    // which scorecard metric it moves. Ratchet pattern: 81 grandfathered
+    // task ids at lint-introduction; new tasks MUST carry the field.
+    name: "competitive-goal",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-competitive-goal.mjs"],
   },
   // ---- full stage ----------------------------------------------------------
   {

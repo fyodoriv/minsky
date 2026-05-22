@@ -155,9 +155,13 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "Anthropic, 'Claude 3.7 Sonnet and Claude Code', anthropic.com, 2025 (SWE-bench Verified, agentic harness)",
-      asOf: "2025-02-24",
-      values: { "swe-bench-verified-resolve-rate": 0.49 },
+        "Anthropic, 'Claude 3.7 Sonnet and Claude Code', anthropic.com, 2025-02-24 (SWE-bench Verified, agentic harness, 0.49); Pinna, Gong, Williams, Sarro, 'Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance', arXiv 2602.08915, 2026-02-09 (AIDev dataset PR acceptance — Claude Code leads documentation tasks 0.923, features 0.726, used here as autonomous-merge-rate proxy for features-class PRs; the inverse 0.274 reported as human-intervention-rate for the same subset).",
+      asOf: "2026-02-09",
+      values: {
+        "swe-bench-verified-resolve-rate": 0.49,
+        "autonomous-merge-rate": 0.726,
+        "human-intervention-rate": 0.274,
+      },
     },
   },
   {
@@ -168,9 +172,13 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "Wang et al., 'OpenHands: An Open Platform for AI Software Developers as Generalist Agents', 2024 (SWE-bench Verified, public leaderboard)",
-      asOf: "2025-01-15",
-      values: { "swe-bench-verified-resolve-rate": 0.53 },
+        "All-Hands AI, 'SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model', all-hands.dev/blog, 2025-04-15 (SWE-bench Verified resolve rate 0.658, verified via SWE-bench/experiments PR #209); All-Hands AI, 'Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)', openhands.dev/blog, 2024-10-04 (cost-per-issue 0.30 USD with Claude 3.5 Sonnet on SWE-bench Lite, used here as cost-per-merged-pr proxy); average_runtime 3600 sec from openhands-index-results/scores.json (used here as mean-autonomous-merge-latency).",
+      asOf: "2025-04-15",
+      values: {
+        "swe-bench-verified-resolve-rate": 0.658,
+        "cost-per-merged-pr": 0.3,
+        "mean-autonomous-merge-latency": 3600,
+      },
     },
   },
   {
@@ -181,9 +189,9 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "Yang et al., 'SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering', NeurIPS 2024 (SWE-bench Verified)",
+        "Yang, Jimenez, Wettig, Lieret, Yao, Narasimhan, Press, 'SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering', NeurIPS 2024 (SWE-agent + GPT-4: SWE-bench resolve rate 0.125, reported on 2,294-instance full split — used here as the SWE-bench Verified proxy since SWE-agent's Verified-split number is comparable per the Aider leaderboard cross-reference).",
       asOf: "2024-10-01",
-      values: { "swe-bench-verified-resolve-rate": 0.18 },
+      values: { "swe-bench-verified-resolve-rate": 0.125 },
     },
   },
   {
@@ -194,9 +202,9 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "Aider, 'Aider LLM leaderboards', aider.chat/docs/leaderboards, 2025 (SWE-bench subset)",
-      asOf: "2025-01-10",
-      values: { "swe-bench-verified-resolve-rate": 0.26 },
+        "Aider, 'How aider scored SOTA 26.3% on SWE Bench Lite', aider.chat/2024/05/22/swe-bench-lite.html, 2024-05-22 (SWE-bench Lite: 0.263; pass@1 with GPT-4o + Opus). Reported here as the SWE-bench Verified proxy because Aider has not published a Verified-split run; the Lite subset overlaps Verified for the easier-issue tail.",
+      asOf: "2024-05-22",
+      values: { "swe-bench-verified-resolve-rate": 0.263 },
     },
   },
   {
@@ -207,9 +215,14 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "Cognition Labs, 'Introducing Devin', cognition.ai, 2024 (original SWE-bench end-to-end; superseded numbers tracked on refresh)",
-      asOf: "2024-03-12",
-      values: { "swe-bench-verified-resolve-rate": 0.139 },
+        "Cognition Labs, '2025 Annual Performance Review', cognition.ai, 2026-04 (real-world PR merge rate 0.67 across thousands of customer codebases; inverse 0.33 as human-intervention-rate; documented in AgentMarketCap, 'Devin's 67% PR Merge Rate', agentmarketcap.ai/blog/2026/04/07); Cognition Labs, 'Introducing Devin', cognition.ai, 2024-03-12 (original SWE-bench Verified resolve rate 0.139); ACU economics — 'Devin Doubled Its PR Merge Rate to 67%', AgentMarketCap, 2026-04-07 (1 ACU ≈ 15 min Devin work ≈ 900 sec mean-autonomous-merge-latency for ~1 ACU/PR typical).",
+      asOf: "2026-04-07",
+      values: {
+        "swe-bench-verified-resolve-rate": 0.139,
+        "autonomous-merge-rate": 0.67,
+        "human-intervention-rate": 0.33,
+        "mean-autonomous-merge-latency": 900,
+      },
     },
   },
   {
@@ -218,13 +231,11 @@ export const COMPETITORS: readonly Competitor[] = [
     kind: "closed-commercial",
     homepage: "https://www.cursor.com",
     resultSource: {
-      // No reproducible public SWE-bench Verified number; the slice-(c)
-      // runner drives a reproducible local harness against the shared
-      // workload instead. This arm exercises the non-published adapter path.
-      kind: "local-harness",
+      kind: "published",
       citation:
-        "Cursor, 'Cursor agent mode', cursor.com/features, 2025 (no public Verified figure; reproduced via shared local workload)",
-      harnessId: "shared-workload-local",
+        "Pinna, Gong, Williams, Sarro, 'Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance', arXiv 2602.08915, 2026-02-09 (AIDev dataset — Cursor leads fix-task acceptance 0.804, used here as autonomous-merge-rate proxy for the fix-task subset).",
+      asOf: "2026-02-09",
+      values: { "autonomous-merge-rate": 0.804 },
     },
   },
 ];

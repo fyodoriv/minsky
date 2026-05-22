@@ -56,6 +56,14 @@ Open-source autonomous software engineering platform (formerly OpenDevin). Docke
 - Web UI for interactive work
 - Larger community
 
+## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
+
+| Metric                              | Value     | Date       | Primary source                                                                                                                                                                                                                                       |
+| ----------------------------------- | --------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swe-bench-verified-resolve-rate`   | 0.658     | 2025-04-15 | All-Hands AI, *SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model*, all-hands.dev/blog, 2025-04-15. Verified via `SWE-bench/experiments` PR #209 — slight re-evaluation discrepancy noted by the SWE-bench maintainer (~65.8%). |
+| `cost-per-merged-pr`                | $0.30     | 2024-10-04 | All-Hands AI, *Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)*, openhands.dev/blog — Claude 3.5 Sonnet, prompt-caching enabled, SWE-bench Lite subset (`$0.3 per issue`). Used here as the cost-per-merged-pr proxy.                |
+| `mean-autonomous-merge-latency`     | 3600 s    | 2024-11-12 | `OpenHands/openhands-index-results/scores.json` — `average_runtime: 3600` for SWE-bench v1.8.3 with Claude Sonnet 4.5. Used here as the mean-autonomous-merge-latency proxy (per-instance wall-clock).                                                |
+
 ## Last reviewed
 
-2026-05-18
+2026-05-22

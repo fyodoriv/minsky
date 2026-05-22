@@ -1,0 +1,30 @@
+# Minsky weekly competitive scorecard timer — fires
+# `minsky-weekly-competitive.service` every Monday at 04:00 local while
+# `minsky-supervisor.target` is active. Parallels the launchd
+# `com.minsky.weekly-competitive.plist`'s StartCalendarInterval on macOS.
+#
+# Pattern: periodic-task supervisor (Borg/Bashir/Burns/Hightower
+# _Designing Distributed Systems_ 2017). The timer is the cadence
+# kernel; the service is the unit of work.
+# Source: M1.10 milestone — "scorecard updates weekly".
+
+[Unit]
+Description=Minsky weekly competitive scorecard timer — refresh JSON every Monday 04:00
+PartOf=minsky-supervisor.target
+
+[Timer]
+Unit=minsky-weekly-competitive.service
+# Mondays at 04:00 local time. Matches the launchd
+# StartCalendarInterval — avoids contention with the auto-merge cycle
+# and the tick-loop daemon work.
+OnCalendar=Mon *-*-* 04:00:00
+# Refresh on boot too, so a fresh host has a usable JSON without
+# waiting until the next Monday.
+OnBootSec=1min
+# Per-tick jitter is small here (the cycle is cheap and infrequent).
+RandomizedDelaySec=30s
+# Persistent=true ensures the Monday tick fires after sleep / reboot.
+Persistent=true
+
+[Install]
+WantedBy=minsky-supervisor.target
