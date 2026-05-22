@@ -20,7 +20,7 @@ The full documentation map is at [docs/README.md](docs/README.md).
 
 Code in this repo is AI-authored. Cloud agents (Claude, Devin, Codex, Cursor, Windsurf, Copilot, Aider, Cody, …) and local models (Ollama, llama.cpp, MLX, LM Studio, vLLM, …) both count — the bar is that the lines weren't typed by you stroke-by-stroke in a plain editor.
 
-**Why.** Minsky is itself a daemon that runs AI agents against tasks. Its credibility rests on the codebase being produced the same way the product produces code. There's also a velocity argument: agent-authored PRs onboard against this repo's 16 lint gates and 18 constitutional rules with one read of `AGENTS.md`, which keeps the review loop fast — a human cold-starting on the rules takes hours per PR.
+**Why.** Minsky is itself a daemon that runs AI agents against tasks. Its credibility rests on the codebase being produced the same way the product produces code. There's also a velocity argument: agent-authored PRs onboard against this repo's 53 pre-PR lint stages, 65 CI jobs, and 17 constitutional rules with one read of `AGENTS.md`, which keeps the review loop fast — a human cold-starting on the rules takes hours per PR.
 
 **No attestation needed.** Don't add a trailer, footer, or co-author tag to declare what tool you used. Provenance is established by live observation (how the work was produced in the active session), not by self-declaration in the commit. The convention is descriptive, not mechanically enforced.
 
