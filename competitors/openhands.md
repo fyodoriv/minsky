@@ -1,60 +1,106 @@
-# Competitor: OpenHands (All-Hands-AI)
+# Competitor: OpenHands (All-Hands AI)
 
-> The strongest OSS autonomous coding agent — Minsky's most direct head-to-head benchmark in the OSS column.
+> The strongest OSS autonomous coding agent — Minsky's most direct head-to-head benchmark in the agent-tier column, and an emerging orchestrator-tier overlap (Agent Control Plane, Automations).
 
 - **URL**: <https://github.com/OpenHands/OpenHands>
 - **Site**: <https://www.openhands.dev>
-- **Status**: Active, MIT core + enterprise license, SWE-bench leader in OSS category
-- **Pricing**: Free (self-hosted), cloud hosted plans available
-- **Relationship**: **Competitor** — the strongest OSS autonomous coding agent
+- **Status**: Active, MIT core + Polyform Free Trial for `enterprise/`; SWE-bench leader in OSS category (65.8% verified, April 2025). Series A $18.8M (November 2025).
+- **Pricing**: Free (self-hosted local GUI / CLI / SDK), Cloud (free tier with Minimax model, paid tiers), Enterprise (custom, Kubernetes self-hosted Agent Control Plane).
+- **Relationship**: **Competitor** — strongest OSS autonomous coding agent; emerging orchestrator overlap via Agent Control Plane + Automations + the May 2026 Agent Canvas Initiative.
 
 ## What it is
 
-Open-source autonomous software engineering platform (formerly OpenDevin). Docker-sandboxed execution. CodeAct paradigm — the agent writes and executes code to solve tasks. Supports multiple LLM backends (Claude, GPT-4, local). CLI + web interface. Can be self-hosted or used via cloud.
+Open-source autonomous software engineering platform (formerly OpenDevin). **Request-response agent framework, not a daemon** — FastAPI backend (`openhands/app_server/app.py`) instantiates a sandbox per conversation, runs a stateless agent loop via the OpenHands Software Agent SDK (separate repo: `github.com/OpenHands/software-agent-sdk`), returns results. Each invocation is fresh with full context passed in; conversation history persists to `~/.openhands/<conversation_id>/` as JSON.
+
+**CodeAct paradigm** — the agent writes code, executes it, observes output, iterates. **15+ LLM backends** (Claude 4.5 Opus, GPT-5.x, Gemini 3.x, DeepSeek-3.2-Thinker, Qwen, Llama) via OpenAI-compatible APIs. **Three deployment shapes**: Local GUI (Docker sandbox), Cloud SaaS (`app.all-hands.dev`), Enterprise (Kubernetes self-hosted with Agent Control Plane). CLI + SDK also available.
 
 ## Strengths
 
-- **SWE-bench leader** in the OSS category — highest published resolve rate among open-source agents
-- **Docker sandbox** — full isolation, can't damage the host
-- **Multi-LLM support** — Claude, GPT-4, local models via OpenAI-compatible API
-- **Self-hosted** — run on your own infra, no data leaves your network
-- **Active community** — large contributor base, rapid iteration
-- **CLI + web UI** — flexible interface for different workflows
-- **Enterprise offering** — managed cloud version for teams
+- **SWE-bench leader** in OSS — 65.8% verified resolve rate (April 2025) via inference-time scaling + critic model (best@4).
+- **Docker sandbox** — per-conversation container isolation, agent can't damage host filesystem or escape to host git config. Configurable non-root user.
+- **Pluggable sandbox layer** (`openhands/app_server/sandbox/`) — Docker, Process, Remote (SSH to VM). Customers pick the security/cost tradeoff.
+- **Multi-LLM support** — 15+ models tracked in the OpenHands Index, no vendor lock-in.
+- **Active community + funding** — 70K+ GitHub stars, 495 contributors, 102 releases, Series A $18.8M led by Madrona (Nov 2025), strategic partnerships with AMD + NVIDIA + Fujitsu.
+- **CLI + web UI + SDK** — flexible interface; React frontend with real-time WebSocket updates for live agent observation.
+- **OpenHands Enterprise Agent Control Plane** (May 2026) — RBAC, cost tracking, audit logs, scheduled/event-driven Automations, cross-repo workflows.
+- **OpenHands Index** (5-task suite, updated quarterly) — issue resolution, greenfield, frontend, testing, info gathering. More comprehensive than SWE-bench alone.
 
-## Weaknesses vs minsky's vision
+## Weaknesses vs Minsky's vision
 
-1. **Single-task focused** — no 24/7 daemon, no task queue processing, no overnight unattended runs.
-2. **No supervision layer** — no budget management, no automatic restart on failure, no error-budget discipline.
-3. **No self-improvement loop** — no MAPE-K, no prompt evolution, no competitive benchmarking against itself.
-4. **No multi-agent orchestration** — one agent per task. No brain+workers, no model routing.
-5. **No cross-repo support** — works on one repo at a time. No multi-repo walker.
-6. **Heavy Docker dependency** — requires Docker for sandboxing. Not all machines have Docker (especially locked-down corporate laptops).
-7. **No integrated observability** — no OTEL, no daemon logs, no fleet-wide metrics.
+1. **Request-response, not a daemon** — agent is stateless between turns; no 24/7 background process surviving terminal close on the operator's machine. Each invocation re-passes context.
+2. **No constitutional rules** — agent behavior is LLM-driven, not policy-driven. No way to enforce "never commit to main", "must add tests", or any deterministic invariant. Pure LLM advisory.
+3. **No MAPE-K self-improvement loop** — OpenHands Index benchmarks models but doesn't auto-tune agent prompts/policies based on observed performance. Static once shipped; operator manually adjusts.
+4. **Cross-repo support is enterprise-only** — Local GUI / CLI / SDK work one repo at a time. Enterprise Automations support cross-repo workflows but require the Agent Control Plane license.
+5. **Docker dependency in local GUI** — corporate laptops without Docker can't run the local GUI today. Dockerless option ships June 2026 (Agent Canvas Initiative); CLI mode already has no Docker requirement.
+6. **Credential flow differs from Minsky** — operator provides GitHub token to OpenHands (the system), not directly to the agent. Local GUI approximates Minsky's operator-machine identity model, but Docker adds an isolation layer that breaks `~/.gitconfig` / `~/.ssh` reuse. Cloud and Enterprise are pure SaaS credential vaults.
+7. **No TASKS.md / git-native operator surface** — work is queued via Web UI, CLI, or Slack/GitHub integrations (Enterprise Automations). No version-controlled markdown queue.
+
+## Recent benchmarks (2025–2026)
+
+| Benchmark                     | Score                         | Date       | Source                                                                                                                                          |
+| ----------------------------- | ----------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| SWE-bench Verified            | 65.8%                         | 2025-04-15 | All-Hands AI, *SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model*, all-hands.dev/blog; verified `SWE-bench/experiments` PR #209 |
+| SWE-bench Verified (OpenHands LM 32B) | 37.2%                | 2025-03-31 | openhands.dev/blog/introducing-openhands-lm-32b-a-strong-open-coding-agent-model — open-weight 32B model, comparable to Deepseek V3 (38.8%, 671B) |
+| OpenHands Index (5-task suite)| Multi-model leaderboard       | 2026-01-29 | index.openhands.dev — issue resolution + greenfield + frontend + testing + info gathering; Claude 4.5 Opus leads overall                          |
+| OpenHands Index (3-month update) | Expanded to 15+ models     | 2026-05-11 | openhands.dev/blog/openhands-index-3-months-out — Opus 4.7 top, GPT-5.5 competitive, Gemini 3.1 Pro cost-effective, DeepSeek-3.2-Thinker 1/10 price of Claude |
+| SWE-bench Lite (10 models)    | 27% (Claude 3.5 Sonnet)       | 2024-10-04 | openhands.dev/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed — closed models outperform open; o1-mini underperforms GPT-4o   |
+
+**Model migration**: Moved beyond Claude 3.5 Sonnet (2024). Now benchmarks Claude 4.5 Opus (Nov 2025), GPT-5.x, Gemini 3.x, open models. Framework is LLM-agnostic; bring-your-own-model via OpenAI-compatible APIs.
+
+## Production architecture
+
+- **Local GUI** — FastAPI + React on operator's machine, Docker sandbox per conversation. `~/.openhands/` for state. GitHub token via `~/.openhands/.env` or `GITHUB_TOKEN` env var. SSH keys in `~/.ssh/`.
+- **OpenHands Cloud** — SaaS at `app.all-hands.dev`. Multi-tenant. GitHub/GitLab SSO. Free tier with Minimax model.
+- **OpenHands Enterprise** — Kubernetes via Helm. Agent Control Plane (orchestration, RBAC, cost tracking, audit logs), Automations backend, integrations (Slack, GitHub, Jira, Linear). Requires PostgreSQL + Redis + Keycloak. Polyform Free Trial license (30-day) for `enterprise/` directory.
+- **CLI** — Separate repo, lightweight binary, no Docker required. Runs agent-server directly.
+
+## Roadmap (next 6-12 months)
+
+**Agent Canvas Initiative** (announced May 11, 2026, GitHub issue #14374; launches June 1, 2026):
+
+- Agent Canvas as flagship interface — visual local agent development, **bring-your-own-agent (Claude Code, Codex, OpenHands)**, alpha at github.com/OpenHands/agent-canvas.
+- Dockerless installation — single agent-server backend running on laptop, Docker, or remote VM.
+- Move `enterprise/` directory out of OSS repo (simpler licensing).
+- Self-hosting on VMs as first-class use case.
+- **Open-source the Automations backend** — scheduled/event-driven workflows currently enterprise-only.
+- Optional Cloud Connections — local OpenHands can attach to OpenHands Cloud.
+- OpenHands Index expansion (quarterly updates).
+- Agent Skills marketplace.
+- Sub-agent delegation — multi-agent workflows with inline critic/verification.
+
+## Adoption signals
+
+- GitHub stars: **70,651** (May 2026); forks ~8,900; contributors **495**; releases **102** (latest 1.7.0, May 2026).
+- Funding: **$18.8M Series A** (November 2025, Madrona-led; co-investors Menlo Ventures, Pillar VC, Obvious Ventures, Fujitsu Ventures, Alumni Ventures). Prior $5M seed (Sept 2024).
+- Customer logos (per README.md): TikTok, VMware, Roche, Amazon, C3 AI, Netflix, Mastercard, Red Hat, MongoDB, Apple, NVIDIA, Google.
+- Press / case studies: US Mobile (Sept 2025), C3 AI ("eight billion tokens in two weeks", Dec 2025), OpenHands Enterprise launch (May 2026), monthly product updates.
 
 ## What we learn / steal
 
-- **Docker sandboxing** — cleaner isolation than minsky's scope-leak detector. Consider as M4 option.
-- **CodeAct paradigm** — the agent writing and executing code is powerful; minsky delegates to Claude/Devin which do this natively.
-- **SWE-bench benchmarking** — OpenHands publishes scores; minsky's scorecard should include the same benchmark.
-- **CLI UX** — OpenHands CLI is clean and focused; minsky's CLI should be equally simple.
+- **Docker sandbox shape** — cleaner isolation than Minsky's scope-leak detector. Consider as an optional M4 sandbox adapter (off by default; operator opts in for untrusted tasks).
+- **OpenHands Index** — 5-task multi-benchmark suite is the right shape for orchestrator-tier evaluation. Minsky's `humaneval-pass-at-1` corpus metric is one number; adding a multi-task suite would be a stronger proof point.
+- **CLI + bring-your-own-agent** — the Agent Canvas Initiative's "operator picks Claude Code, Codex, or OpenHands" framing is structurally identical to Minsky's per-machine agent config. Watch how they communicate this trade-off.
+- **Pluggable sandbox layer** (`openhands/app_server/sandbox/`) — separating sandbox shape from agent loop is a clean architectural choice we should mirror if/when Minsky grows a sandbox abstraction.
 
-## Why choose minsky over OpenHands
+## Why choose Minsky over OpenHands
 
-- 24/7 daemon with budget management and supervision
-- Multi-repo walker, cross-repo task queue
-- Self-improving (MAPE-K loop)
-- No Docker required
-- Multi-agent (brain + workers with model routing)
-- Competitive self-benchmarking
+- **Daemon-not-framework** — 24/7 background process surviving terminal close, fleet-aware, no SaaS dependency in the hot path.
+- **Operator-machine identity** — Minsky uses operator's `~/.ssh` + `~/.gitconfig` + `~/.config/gh` directly; no credential provisioning, no token handoff to a system.
+- **17-rule constitution + 53 pre-pr-lint stages + 65 CI jobs** — every iteration is deterministically gated. OpenHands relies on LLM advisory + optional critic.
+- **MAPE-K self-improvement** — the daemon refines its own prompts/policies from observed iteration outcomes. OpenHands is static.
+- **Cross-repo fleet built-in** — single Minsky daemon walks N repos. OpenHands needs the Enterprise tier for cross-repo.
+- **TASKS.md as operator surface** — work queued in version-controlled markdown, git-native, no UI lock-in.
+- **No Docker required for local** — Minsky runs as the operator. (OpenHands' Dockerless option ships June 2026; Minsky already has this.)
 
-## Why choose OpenHands over minsky
+## Why choose OpenHands over Minsky
 
-- Higher SWE-bench scores on single-task benchmarks
-- Docker sandbox is safer than scope-leak detection
-- More mature single-task execution
-- Web UI for interactive work
-- Larger community
+- **SWE-bench leaderboard position** — 65.8% verified resolve rate (Minsky has no published SWE-bench score yet; gap filed as `benchmark-minsky-via-claude-on-humaneval` and follow-ups).
+- **Docker sandbox is preventive, not detective** — Minsky's scope-leak detector is post-hoc; Docker prevents the leak.
+- **Web UI for live observation** — operators can watch the agent think, edit, run. Minsky is CLI/dashboard-only.
+- **Multi-LLM support breadth** — OpenHands Index benchmarks 15+ models. Minsky's per-machine config currently supports `claude`, `devin`, `aider`.
+- **Larger community** — 70K stars vs Minsky's ~1 deployment.
+- **Enterprise Agent Control Plane** — RBAC + audit + Automations for regulated industries. Minsky's enterprise gap is filed as `enterprise-deployment-readiness-audit`.
+- **Strong VC backing + customer momentum** — $18.8M Series A + Fortune 500 customers + named partnerships (AMD, NVIDIA, Fujitsu).
 
 ## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
 
@@ -66,4 +112,4 @@ Open-source autonomous software engineering platform (formerly OpenDevin). Docke
 
 ## Last reviewed
 
-2026-05-22
+2026-05-22 (deep-dive refresh — Agent Canvas Initiative, Series A, Enterprise Agent Control Plane, OpenHands Index expansion)
