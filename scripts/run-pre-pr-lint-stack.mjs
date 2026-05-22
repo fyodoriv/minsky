@@ -251,6 +251,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "measurement-inspects-output",
       "metric-freshness",
       "no-singleton-experiment",
+      "orphan-tests",
       "otel-no-pii",
       "pivot-success-margin",
       "privacy-data-egress",
@@ -380,6 +381,16 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-rule-12-scope-discipline.mjs"],
     env: { RULE_12_DIFF_BASE: "origin/main" },
+  },
+  {
+    // Catches the API drift class where a test/*.test.ts file imports
+    // a symbol that doesn't exist in its sibling src/. Born from the
+    // 2026-05-21 drain's PR #639 → #705 chain — the
+    // `tui-src-vs-test-api-drift` task.
+    name: "orphan-tests",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-orphan-tests.mjs"],
   },
   {
     name: "rule-17-proactive-heal",
