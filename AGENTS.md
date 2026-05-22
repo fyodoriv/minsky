@@ -74,6 +74,9 @@ minsky stop                                 # SIGTERM → graceful drain
 | `claude` | ✅ | — | stdin | `--model` |
 | `devin` | ✅ | — | `--prompt-file` (stdin panics) | `--model` |
 | `aider` | — | ✅ | `--message-file` | `--model` via config args |
+| `openhands` | 🟡 planned (approved 2026-05-22; blocked on OpenHands Agent Canvas CLI release 2026-06-01) | 🟡 planned | TBD pending June 1 CLI shape (likely `solve <task-brief>` via positional arg or `--task-file`) | `--model` (LLM-agnostic via OpenAI-compatible API) |
+
+The `openhands` row reflects an operator-approved wrap-feasibility decision per `competitors/openhands.md` § "Should we wrap OpenHands instead?" (Shape A: agent-layer wrap as pluggable backend). Implementation tracked at [`add-openhands-as-pluggable-backend`](TASKS.md) (P0); blocked only on the external OpenHands Agent Canvas Initiative CLI release. Until that ships, the existing 3-agent matrix is what operators actually use.
 
 ## Identity
 
