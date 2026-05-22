@@ -1845,6 +1845,58 @@
 
 ## P2
 
+- [ ] `corpus-add-autogen-microsoft` — add Microsoft AutoGen to the orchestrator-tier corpus once a primary-cited HumanEval, MBPP, or GAIA number is available
+  - **ID**: corpus-add-autogen-microsoft
+  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, observed-2026-05-23
+  - **Milestone**: M1
+  - **Competitive-goal**: covers Microsoft's enterprise multi-agent orchestration framework (AutoGen, github.com/microsoft/autogen, very large adoption per Microsoft Research). The Wu et al. 2023 paper (arXiv 2308.08155) reports MATH 69.48% and ALFWorld 77% as primary numbers, but the M1.10 catalogue's orchestrator-tier metric is `humaneval-pass-at-1`. Microsoft's TRANSPARENCY_FAQS.md claims "SOTA results on GAIA as of March 1, 2024" without an exact percentage; the Magentic-One follow-up paper has specific GAIA numbers but is a SEPARATE system built on top of AutoGen.
+  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (add the entry), `competitors/autogen.md` (new research file). Optionally: add `gaia-benchmark-score` metric to `novel/competitive-benchmark/src/metrics.ts` if AutoGen's GAIA number is the primary path.
+  - **Details**: 2026-05-23 orchestrator-tier sweep found AutoGen has substantial primary documentation (Microsoft Research paper, TRANSPARENCY_FAQS, AutoGenBench tool) but no headline `humaneval-pass-at-1` number — HumanEval results are model-dependent (run via AutoGenBench tool against the model of choice). Two acceptable resolution paths: (a) cite the Microsoft 2023 paper's MATH/ALFWorld primary numbers and add new `math-whole-test` or `alfworld-success` metrics to the catalogue; (b) wait for a Magentic-One-style follow-up that publishes a headline HumanEval number for "AutoGen on stock models". Pivot-resistant: don't fabricate an AutoGen HumanEval number by running AutoGenBench locally — that's a `local-harness` result kind which requires a `harnessId` per the corpus contract.
+  - **Hypothesis**: Microsoft publishes a Magentic-One-class follow-up paper with headline HumanEval / GAIA numbers within 6 months. If they don't, add AutoGen with the MATH 69.48% number via a new metric.
+  - **Success**: `bin/minsky competitive --json | jq '.competitors[] | select(.id == "autogen-microsoft")'` returns a competitor record with `resultSource.kind == "published"` and a Microsoft-primary citation.
+  - **Pivot**: if 6 months pass without a Microsoft-primary HumanEval / GAIA number, add AutoGen with the MATH 69.48% reading via a new `math-whole-test-accuracy` metric (Hendrycks et al. MATH dataset; Wu et al. arXiv 2308.08155 as primary). Adopting MATH as a sibling to HumanEval also unlocks future per-orchestrator math-reasoning comparisons.
+  - **Measurement**: `bin/minsky competitive --json | jq '.competitors | map(select(.id == "autogen-microsoft")) | length'` ≥ `1`.
+  - **Anchor**: rule #4 (visible — primary citations only); rule #6 (stay alive — without periodic vendor-publication checks, this task ages out); Wu, Bansal, Zhang, Wu, Li, Zhu, Wang, Saied, Awadallah, Yang, "AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework", microsoft.com/en-us/research/wp-content/uploads/2023/08/LLM_agent.pdf, 2023 (current primary); operator directive 2026-05-23.
+
+- [ ] `corpus-add-crewai` — add CrewAI to the orchestrator-tier corpus once CrewAI publishes a vendor-primary HumanEval / MBPP / SWE-bench number
+  - **ID**: corpus-add-crewai
+  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, blocked-on-vendor, observed-2026-05-23
+  - **Milestone**: M1
+  - **Competitive-goal**: covers the largest open-source multi-agent orchestration framework by adoption (40k+ GitHub stars; CrewAI claims 1.4B+ agentic executions, 60% of Fortune 500 per crewai.com/blog OSS v1.0 launch). Currently the corpus's orchestrator tier has only MetaGPT — adding CrewAI broadens the orchestrator axis.
+  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (add the entry), `competitors/crewai.md` (existing research file — update with Scorecard readings section).
+  - **Details**: 2026-05-23 sweep found CrewAI has rich adoption metrics on the OSS v1.0 launch post (crewai.com/blog/crewai-oss-1-0---we-are-going-ga) but **no vendor-primary HumanEval, MBPP, SWE-bench, or GAIA number**. Third-party benchmarks (Pooya.blog 2026, JetThoughts 2025, AImultiple 2026) report CrewAI at 54% complex-task success vs LangGraph's 62%, and 5.76x QA speed advantage, but these are NOT vendor-primary. The competitor-research validator (rule #4 — no fabricated readings) rejects readings without a primary citation. Two acceptable resolution paths: (a) CrewAI publishes an official benchmark on crewai.com — invoke `/competitor-research <url>`; (b) add CrewAI with the adoption metrics (1.4B+ executions, 60% Fortune 500) via a new `enterprise-adoption-percentile` metric — requires catalogue extension.
+  - **Hypothesis**: CrewAI publishes a benchmark number on crewai.com within 6 months (their OSS v1.0 launch in Q1 2026 increases benchmark publication pressure). If they don't, add CrewAI via the adoption metric path.
+  - **Success**: `bin/minsky competitive --json | jq '.competitors[] | select(.id == "crewai")'` returns a competitor record with `resultSource.kind == "published"` and a CrewAI-primary citation.
+  - **Pivot**: if 6 months pass with no CrewAI-primary benchmark number, add CrewAI with the adoption metrics via a new `enterprise-adoption` metric. Do NOT add CrewAI with third-party benchmark numbers — the validator's published-primary rule (rule #4 visible) takes precedence.
+  - **Measurement**: same as Success.
+  - **Anchor**: rule #4 (visible — published primary citations only); rule #6 (stay alive — track until CrewAI publishes); operator directive 2026-05-23; Moura, "CrewAI OSS 1.0 — We are going GA", crewai.com/blog, 2026 (current primary; adoption metrics not yet promoted to scorecard); Pooya.blog 2026 + JetThoughts 2025 + AImultiple 2026 (the third-party benchmark sources that exist but don't qualify as primary).
+
+- [ ] `corpus-add-langgraph` — add LangGraph (LangChain) to the orchestrator-tier corpus once LangChain publishes a vendor-primary orchestrator-tier metric
+  - **ID**: corpus-add-langgraph
+  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, blocked-on-vendor, observed-2026-05-23
+  - **Milestone**: M1
+  - **Competitive-goal**: covers LangChain's graph-based orchestration framework — the most cited closed-loop alternative to CrewAI per third-party comparisons (62% complex-task success vs CrewAI's 54%, AImultiple 2026; 100% tool-execution success rate per AImultiple's agentic-analytics study). Substantial adoption in production agent stacks.
+  - **Touches**: `novel/competitive-benchmark/src/competitors.ts`, `competitors/langgraph.md` (new research file).
+  - **Details**: 2026-05-23 sweep found LangGraph has rich third-party benchmark data (AImultiple, JetThoughts, Pooya.blog) but **no LangChain-primary HumanEval / MBPP / SWE-bench / GAIA number** on langchain.com / langchain.dev / blog.langchain.dev. The closest LangChain-primary signal is product positioning + tutorial benchmarks. Acceptable resolution: wait for LangChain to publish a vendor benchmark.
+  - **Hypothesis**: LangChain publishes a vendor-primary benchmark for LangGraph within 6 months. If they don't, this task is closed without adding LangGraph (the corpus is honest about what's not measurable).
+  - **Success**: `bin/minsky competitive --json | jq '.competitors[] | select(.id == "langgraph")'` returns a record with a LangChain-primary citation.
+  - **Pivot**: if 6 months pass without a LangChain-primary benchmark, close this task. The corpus's `humaneval-pass-at-1` cell for LangGraph stays empty (visible-not-silent per Helland 2007).
+  - **Measurement**: same as Success.
+  - **Anchor**: rule #4 (visible — published primary citations only); rule #6 (stay alive); operator directive 2026-05-23; AImultiple, "Benchmarking Agentic AI Frameworks in Analytics Workflows", aimultiple.com/agentic-analytics, 2026 (third-party — not adopted; documents the gap until LangChain publishes).
+
+- [ ] `corpus-add-openai-agents-sdk` — add OpenAI Agents SDK (Swarm's production successor) to the orchestrator-tier corpus once OpenAI publishes a vendor-primary orchestrator-tier metric
+  - **ID**: corpus-add-openai-agents-sdk
+  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, blocked-on-vendor, observed-2026-05-23
+  - **Milestone**: M1
+  - **Competitive-goal**: covers OpenAI's production multi-agent orchestration framework (openai-agents-python, openai-agents-typescript). Released March 2026 as the successor to Swarm; v0.17.1 in May 2026; 26k+ GitHub stars, 4k forks. Strong distribution signal even without a published benchmark.
+  - **Touches**: `novel/competitive-benchmark/src/competitors.ts`, `competitors/openai-agents-sdk.md` (new research file). Note: Codex CLI is already in the corpus as `openai-codex` (agent tier). The Agents SDK is the ORCHESTRATOR layer OpenAI ships separately.
+  - **Details**: 2026-05-23 sweep found OpenAI Agents SDK is a clear orchestrator-tier framework (handoffs, guardrails, tracing, sessions per Respan migration guide). OpenAI's launch posts focus on developer ergonomics rather than benchmark numbers. Acceptable resolution: wait for OpenAI to publish a vendor-primary benchmark on openai.com / blog.openai.com.
+  - **Hypothesis**: OpenAI publishes a benchmark for the Agents SDK within 6 months (they did for codex-1; the Agents SDK is on a similar launch trajectory). If they don't, the SDK stays out of the corpus.
+  - **Success**: `bin/minsky competitive --json | jq '.competitors[] | select(.id == "openai-agents-sdk")'` returns a record with an OpenAI-primary citation.
+  - **Pivot**: if 6 months pass with no OpenAI-primary benchmark, close this task. The Agents SDK's `humaneval-pass-at-1` cell stays empty.
+  - **Measurement**: same as Success.
+  - **Anchor**: rule #4 (visible — published primary citations only); rule #6 (stay alive); operator directive 2026-05-23; Respan, "OpenAI Agents SDK vs Swarm: Migration Guide (2026)", respan.ai/articles/openai-agents-sdk-vs-swarm, 2026 (third-party migration documentation); OpenAI Swarm GitHub README (the deprecation notice that points at the Agents SDK).
+
 - [ ] `biome-1-to-2-upgrade` — upgrade biome 1.9.4 → 2.x to unlock type-aware nursery rules (`noFloatingPromises`, `noMisusedPromises`, `useAwaitThenable`, `noUnnecessaryConditions`, `useExhaustiveSwitchCases`) and per-domain rule packs
   - **ID**: biome-1-to-2-upgrade
   - **Tags**: p2, lint, lint-hardening, biome, observed-2026-05-23

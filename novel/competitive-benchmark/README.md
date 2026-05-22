@@ -63,30 +63,40 @@ expected state — the weekly auto-refresh
 build every Monday so the JSON stays at most 7 days stale; live deltas
 accumulate as Minsky iterates.
 
-### Current corpus (as of 2026-05-22)
+### Orchestrator vs agent tier
 
-All 8 competitors carry ≥1 metric reading, with primary citations
+The corpus deliberately tracks two tiers of competitors:
+
+- **Orchestrator tier** (Minsky's peer tier) — systems that compose agents into a long-horizon autonomous-coding pipeline. They manage daemon lifecycle, task queues, agent fleet, observability, supervisor restart discipline. Published metrics tend to be `humaneval-pass-at-1` (the multi-agent code-generation benchmark) or `mbpp-pass-at-1`. Current entries: **MetaGPT** (the canonical reference). Follow-up adds: AutoGen, CrewAI, LangGraph, OpenAI Agents SDK — each blocked on a vendor-primary HumanEval / MBPP / GAIA citation.
+- **Agent tier** (Minsky composes these) — single-task systems that take an issue and return a patch. Published metrics tend to be `swe-bench-verified-resolve-rate`. Current entries: **Claude Code, OpenHands, SWE-agent, Aider, Devin, Cursor agent, OpenAI Codex, Augment Code**. Minsky-via-Claude inherits Claude Code's SWE-bench score plus the orchestrator-tier delta (long-horizon retention, MAPE-K-driven prompt evolution, cross-repo multiplexing).
+
+Why both tiers in one corpus: a Minsky operator picks an agent (Claude vs Devin vs Aider) AND benefits from the orchestrator layer. The scorecard compares both axes — Minsky should outperform other orchestrators on orchestrator-tier metrics AND not regress vs the bare agent on the agent-tier baseline.
+
+### Current corpus (as of 2026-05-23)
+
+All 9 competitors carry ≥1 metric reading, with primary citations
 pinned in each `competitors/<id>.md` research file:
 
-| Metric                              | Competitors with readings                                                                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| `swe-bench-verified-resolve-rate`   | 7 (Claude Code, OpenHands, Aider, SWE-agent, Devin, OpenAI Codex, Augment Code)            |
-| `autonomous-merge-rate`             | 3 (Devin, Claude Code, Cursor)                                                             |
-| `human-intervention-rate`           | 2 (Devin, Claude Code)                                                                     |
-| `mean-autonomous-merge-latency`     | 2 (OpenHands, Devin)                                                                       |
-| `cost-per-merged-pr`                | 1 (OpenHands)                                                                              |
+| Metric                              | Tier         | Competitors with readings                                                                  |
+| ----------------------------------- | ------------ | ------------------------------------------------------------------------------------------ |
+| `swe-bench-verified-resolve-rate`   | agent        | 7 (Claude Code, OpenHands, Aider, SWE-agent, Devin, OpenAI Codex, Augment Code)            |
+| `autonomous-merge-rate`             | agent        | 3 (Devin, Claude Code, Cursor)                                                             |
+| `human-intervention-rate`           | agent        | 2 (Devin, Claude Code)                                                                     |
+| `mean-autonomous-merge-latency`     | agent        | 2 (OpenHands, Devin)                                                                       |
+| `cost-per-merged-pr`                | agent        | 1 (OpenHands)                                                                              |
+| `humaneval-pass-at-1`               | orchestrator | 1 (MetaGPT — primary citation: arXiv 2308.00352, ICLR 2024 Oral)                           |
 
-Total: **5 metrics × 8 competitors** — shape gate MET (M1.10 requires
-≥4 × ≥5; current 7×5 = 35-cell density on the SWE-bench axis alone).
-Slice (d) is the `**Competitive-goal**:` field +
-`scripts/check-competitive-goal.mjs` lint that enforces every P0/P1
-task block names which scorecard metric it moves; the lint ships with
-81 grandfathered ids draining over time.
+Total: **6 metrics × 9 competitors** — shape gate MET (M1.10 requires
+≥4 × ≥5; current density: 7×5 on the agent SWE-bench axis + 1×1 on the
+orchestrator HumanEval axis). Slice (d) is the `**Competitive-goal**:`
+field + `scripts/check-competitive-goal.mjs` lint that enforces every
+P0/P1 task block names which scorecard metric it moves; the lint ships
+with 81 grandfathered ids draining over time.
 
 Discovery and refresh of the corpus are automated:
 
 - **Per-vendor freshness loop** (PR #719) — `scripts/check-corpus-freshness.mjs` + `scripts/auto-file-corpus-refresh-tasks.mjs` + weekly launchd / systemd fires. When any `asOf` reading goes >180 days stale, the runner files a `corpus-refresh-<id>` task that the tick-loop's `/next-task` picks up and the `/competitor-research <url> --refresh` skill clears.
-- **Quarterly LIST discovery** — `corpus-discover-quarterly` recurring task in `TASKS.md` drives the operator to scan for NEW vendors and invoke `/competitor-research` for each candidate. PR #720 is the first run: lifted in OpenAI Codex + Augment Code, filed 3 P2 follow-ups (`corpus-add-github-copilot-coding-agent`, `corpus-add-goose-block`, `corpus-add-factory-droid`) for vendors blocked on primary citation.
+- **Quarterly LIST discovery** — `corpus-discover-quarterly` recurring task in `TASKS.md` drives the operator to scan for NEW vendors and invoke `/competitor-research` for each candidate. PR #720 (the first run): lifted in OpenAI Codex + Augment Code at the agent tier. PR #722 (this PR) — lifted in MetaGPT at the orchestrator tier + filed P2 follow-ups for AutoGen, CrewAI, LangGraph, OpenAI Agents SDK.
 
 ## Pattern conformance
 

@@ -58,6 +58,14 @@ Not a dependency. No adapter.
 - **How Minsky relates**: don't adopt — Minsky shares the persona-driven paradigm but binds it to Claude Code via OMC (row 50) rather than to a Python+GPT runtime. The conceptual lineage is acknowledged; the substrate is incompatible.
 - **Index row**: vision.md § "Pattern conformance index" row 48
 
+## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
+
+| Metric                              | Value | Date       | Primary source |
+| ----------------------------------- | ----- | ---------- | -------------- |
+| `humaneval-pass-at-1`               | 0.859 | 2024-05-07 | Hong, Zhuge, Chen, Zheng et al., "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework", arXiv 2308.00352, ICLR 2024 Oral (HumanEval Pass@1 = 85.9%, SoTA at publication; 28.2% relative improvement over GPT-4; methodology: Standardized Operating Procedure-shaped multi-agent assembly line) |
+
+MetaGPT also published `mbpp-pass-at-1 = 0.877` in the same paper, which is tracked in the citation string but not yet promoted to a separate metric in the M1.10 catalogue. Promotion path: add `mbpp-pass-at-1` if a second orchestrator-tier competitor publishes the same metric (avoid single-source metrics per rule #9 — vanity-metrics forbidden).
+
 ## Last reviewed
 
-2026-05-03
+2026-05-23 (added to scorecard corpus via `/competitor-research` as the first orchestrator-tier competitor)
