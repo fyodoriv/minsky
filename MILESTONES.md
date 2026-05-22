@@ -29,6 +29,7 @@ Minsky works reliably on any repo, installs trivially, is honestly measured agai
 **M1 summary** — done: 2 (M1.4, M1.6); partial: 7 (M1.2, M1.3, M1.5, M1.7, M1.9, M1.11, M1.12, M1.13); blocked: 2 (M1.1, M1.8); not started: 1 (M1.10).
 
 **Critical path to M1 completion:**
+
 1. Land `spawn-failed-exit-minus-one-silent-empty-stderr` (unblocks M1.1 + M1.9) — adds stderr/stdout/signal capture to the spawn handler so silent failures stop happening.
 2. Land `self-metrics-competitive-benchmark` + `weekly-lmarena-style-benchmark` (M1.10) — write `competitive-scorecard.json` against Devin, OpenHands, SWE-agent, Aider.
 3. Land `agents-can-self-heal-minsky-m1-13` phase 2 (M1.13) — promote 6 more operator-recipe heals to automation, validate MTTR < 5min on chaos test.
