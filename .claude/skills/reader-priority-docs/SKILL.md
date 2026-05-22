@@ -39,7 +39,7 @@ The reader is a stranger who arrived because someone said "look at this". **They
 
 Author-chronology order (the bug this skill prevents): the author shipped feature A first, so A goes first; then B, so B goes second; etc. This produces a doc that's easy to write and useless to read.
 
-## Five iron rules for the top of the doc
+## Six iron rules for the top of the doc
 
 These are the load-bearing rules. Violating any one of them is sufficient to fail the cold-reader test even if everything else is perfect. They are independent of the tier hierarchy below — think of them as filters that apply BEFORE you start tier-tagging.
 
@@ -109,6 +109,25 @@ The fix: ONE `## How it works` section with two parts —
 2. **The 30-second architecture sketch** (tier 5, embedded as a sub-section) — pipeline diagram, key file paths, named patterns.
 
 If the architecture sketch is too long for a sub-section, move it to a dedicated `ARCHITECTURE.md` and link from the bottom of the "How it works" section. Don't create a parallel section in the README.
+
+### Rule 6 — Don't pre-explain what a nearby link or label already says
+
+> Wrong: `Seven things you get. Each links to the dedicated page with the full story (what the feature delivers, how it's measured, and how it's tested under stress).` followed by bullets with `([details →](...))` links.
+> Wrong: `Six distinctive mechanisms, each backed by file paths so any claim is auditable:` followed by bullets that show the file paths.
+> Wrong: `Three tradeoffs an operator should weigh before picking Minsky:` followed by the three tradeoffs (we're already in the Minsky README; the "Minsky" is implicit).
+> Wrong: `> **What's a "host"?** A host is a single git repo that Minsky operates on. Selected via X in Y, the Z flag, or the working directory. Multi-host mode (W flag) walks every git repo under one parent directory in round-robin (3 iterations per host per pass).` — paragraph-length jargon callout inside a 7-step walkthrough.
+>
+> Right (link pre-explanation): bullets + `[details →](...)` link with no preface. The link text and the bullet are the story.
+> Right (label pre-explanation): `Six distinctive mechanisms:` (the bullets' file-paths speak for themselves).
+> Right (jargon callout): `> **Host** = the git repo Minsky operates on. See [docs/configuration.md] for selection + multi-host mode.` (one line; details live in the linked doc).
+
+If a sentence above a link, list, or label restates what the reader is about to see, delete it. The link's text + the item's content + the section heading already encode the same information; the preface is friction. Apply at three scales:
+
+- **Link-pre-explanation**: a sentence like "Each links to the dedicated page with the full story (what the feature delivers, how it's measured, ...)" before a list of `([details →])` links — delete entirely. The link label is the spec.
+- **Label-pre-explanation**: a sentence like "Six distinctive mechanisms, each backed by file paths" when the bullets THEMSELVES show file paths — cut the qualifier, keep the count ("Six distinctive mechanisms:").
+- **Glossary-callout-bloat**: jargon callouts ("> **What's an X?**") that run >2 sentences inside a walkthrough. The callout interrupts the reader; move all but the one-line definition + a `See docs/X.md for ...` link into the linked doc.
+
+The rule is asymmetric — *more* explanation is sometimes needed (a tier-1 lede should over-explain the outcome, not under-explain it). The trigger is REDUNDANCY: when the preface and the thing-being-prefaced say the same thing in different words, the preface is the one to cut.
 
 ## The 6-tier hierarchy
 
@@ -314,7 +333,7 @@ Hard rules — mechanically blocked, not "tries not to":
 
 - [CLI reference](docs/cli-reference.md)
 - [Configuration](docs/configuration.md)
-- [Architecture deep-dive](ARCHITECTURE.md)
+- [Architecture deep-dive](./docs/ARCHITECTURE.md)
 - [Key files](#key-files-below)
 
 ## <Tool>'s position in the landscape   <!-- tier 5 / 6: internal taxonomy (Rule 3) -->
@@ -356,11 +375,13 @@ When auditing an existing doc, grep for these red flags:
 
 | Red flag | Why it's wrong | Fix |
 |---|---|---|
-| **Time-to-read banner measured in minutes at the top** ("~12 minutes to read", "8 min read", "Three reads, ~15 min total") | Cold readers have 12 SECONDS, not minutes — banner either bounces them immediately or signals "this doc is long" to a reader shopping for short | Delete the banner. The doc's structure IS the contract. See Rule 1 in "Five iron rules". |
+| **Time-to-read banner measured in minutes at the top** ("~12 minutes to read", "8 min read", "Three reads, ~15 min total") | Cold readers have 12 SECONDS, not minutes — banner either bounces them immediately or signals "this doc is long" to a reader shopping for short | Delete the banner. The doc's structure IS the contract. See Rule 1 in "Six iron rules". |
 | **Navigation choice menu above the first `## section`** ("Skip to X · Or read Y", "If operator → X; if contributor → Y", "TL;DR · Quick start · Architecture · Comparison · License" jump links) | Choice paralysis at byte zero. Author abdicating the flow-setting job to the reader | Delete the menu. The reader reads top-to-bottom; author sets the order. Choices welcome ONLY at the BOTTOM ("Where to read next — pick by audience"). See Rule 2. |
 | **Internal taxonomy / self-classification at the top** ("X is an orchestrator, not an agent", "X is a daemon-not-framework", "X is a peer of Y but not Z", "X sits ABOVE Z") | Internal team mental model leaked into the reader's first 12 seconds; reads as inside baseball | Move ALL self-classification to tier 5 reference or tier 6 design-principles. See Rule 3. |
 | **Mechanism section ("What it does") above benefit section ("Why X")** | Reader can't judge mechanism before they know why it matters to them | Reorder so benefit / "Why X" comes BEFORE mechanism / "How it works". See Rule 4. |
 | **Two sections on the same topic** (e.g., `## What it actually does` AND `## How X works inside` — both describe the loop, at different depths) | Reader sees duplication, gets confused, reads neither carefully | Collapse to ONE `## How it works` section with a walkthrough sub-section + an architecture sub-section. See Rule 5. |
+| **Sentence pre-explains what the next link or list item already says** ("Each links to a dedicated page with the full story (what the feature delivers, how it's measured, ...)" before bullets with `[details →]` links; "Six mechanisms, each backed by file paths" before bullets that show file paths; "Three tradeoffs an operator should weigh before picking Minsky" before three tradeoffs in Minsky's README) | The preface and the thing-being-prefaced say the same thing twice; the reader pays for both. Friction without information gain | Delete the preface. The link label + bullet content + section heading already encode the same information. See Rule 6. |
+| **Glossary callout that runs more than 1 sentence inside a walkthrough** ("> **What's an X?**" followed by 4 sentences of definition + flag-list + sub-mode explanation) | Paragraph-length callouts interrupt the numbered-step flow they're embedded in; the reader bounces out of the walkthrough to read terminology, then has to find their way back | One-line glossary: `> **X** = <one-line definition>. See <link> for details.` Push the rest into the linked doc. See Rule 6. |
 | **Standalone "Status / What works today" table dwarfing the rest of the README** (>15 rows of feature × {✅ done / 🟡 partial / ❌ not-yet}) | Reader spends more time scanning the status table than reading the doc; reads as "we'd rather audit ourselves than tell you what it does" | Compress to ≤5 rows OR fold into the competitor comparison table (one column "Minsky" + ✅/🟡/❌ markers per capability). Don't keep both. |
 | **"What it won't do" / "What we refuse to do" labeled section** | The reader doesn't yet know what it WILL do; "won't do" framing reads negative + defensive | Rename to "Safety" — frame the same constraints as protections (draft PRs, no main pushes, scope-leak detection, security-sensitive changes need human approval). Same content, positive framing, lives at tier 4 after "How it works". |
 | "Picking up upstream fixes" / "Updating" / "Upgrade guide" in the first 5 sections | Tier 6 maintenance blocking tier 2 try-it-out | Move to tier 6 |
@@ -382,13 +403,14 @@ When auditing an existing doc, grep for these red flags:
 
 Before claiming a doc is reader-priority-ordered, verify:
 
-**Five iron rules for the top of the doc:**
+**Six iron rules for the top of the doc:**
 
 - [ ] **Rule 1**: No "time-to-read" banner measured in minutes anywhere above the first `## section` (no "~12 minutes total", "8 min read", "Three reads X min"). The structure IS the contract.
 - [ ] **Rule 2**: No navigation choice menu above the first `## section` (no "Skip to X · Or read Y", no "If operator → X; if contributor → Y" branching, no top-of-doc TOC unless the doc is ≥2000 lines). Author sets the flow.
 - [ ] **Rule 3**: No internal taxonomy / self-classification above tier 5 (no "X is an orchestrator, not an agent", no "X is a daemon-not-framework", no "X sits ABOVE Y"). Move to tier 5 reference or tier 6 principles.
 - [ ] **Rule 4**: "Why X" benefits section appears BEFORE "How it works" mechanism section. Section ordering at the top must be: tagline → tier-1 lede → quickstart → Why → How → Safety → Compare.
 - [ ] **Rule 5**: Exactly ONE section per topic. No duplicate "What it does" / "How it works" sections at different depths — collapse into one section with sub-sections.
+- [ ] **Rule 6**: No sentence pre-explains what a nearby link, label, or list item already says. Examples to delete on sight: "Each links to a dedicated page with the full story" before bullets with `(details →)` links; "Each backed by file paths" before bullets that show file paths; "Three tradeoffs an operator should weigh before picking Minsky" before three tradeoffs in the Minsky README. Glossary callouts (`> What's an X?`) max 1 line + a link.
 
 **Tier-1 paragraph quality:**
 

@@ -288,7 +288,7 @@ function truncate(s, n) {
  */
 function parseArgs(argv) {
   /** @type {{ input: string, expected: string[] | null, now: number | null }} */
-  const args = { input: "METRICS.md", expected: null, now: null };
+  const args = { input: "docs/METRICS.md", expected: null, now: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--input") args.input = argv[++i] ?? args.input;
