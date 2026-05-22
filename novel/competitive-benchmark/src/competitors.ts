@@ -264,6 +264,30 @@ export const COMPETITORS: readonly Competitor[] = [
       values: { "swe-bench-verified-resolve-rate": 0.654 },
     },
   },
+  // ---- ORCHESTRATOR TIER (peers to Minsky — they compose agents) -----------
+  // Per operator directive 2026-05-23 ("add actual competitors to the list,
+  // not agents"). Minsky is an orchestrator: it manages the daemon lifecycle,
+  // MAPE-K loop, prompt evolution, multi-repo task queue, supervisor restart
+  // discipline — sitting ON TOP of agents (Claude / Devin / Aider) which it
+  // COMPOSES. The peers at Minsky's tier are other orchestrators
+  // (MetaGPT, AutoGen, CrewAI, LangGraph). Agents above are kept in the
+  // corpus as benchmark context — Minsky-via-Claude inherits Claude's
+  // SWE-bench score plus the orchestrator-tier delta (MAPE-K-driven
+  // long-horizon retention). See `novel/competitive-benchmark/README.md`
+  // § "Orchestrator vs agent tier" for the layering.
+  {
+    id: "metagpt",
+    label: "MetaGPT (Foundation Agents — ICLR 2024)",
+    kind: "open-source",
+    homepage: "https://github.com/FoundationAgents/MetaGPT",
+    resultSource: {
+      kind: "published",
+      citation:
+        "Hong, Zhuge, Chen, Zheng, Cheng, Wang, Zhuge, Wang, Yau, Lin, Zhou, Ran, Xiao, Wu, Schmidhuber, 'MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework', arXiv 2308.00352, ICLR 2024 Oral (HumanEval Pass@1 = 0.859 — SoTA at publication; MBPP Pass@1 = 0.877; 28.2% relative improvement over GPT-4 on HumanEval via Standardized Operating Procedure-shaped multi-agent assembly line); reproducible at github.com/FoundationAgents/MetaGPT.",
+      asOf: "2024-05-07",
+      values: { "humaneval-pass-at-1": 0.859 },
+    },
+  },
 ];
 
 /**

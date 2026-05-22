@@ -194,6 +194,26 @@ export const METRICS: readonly MetricDefinition[] = [
     description:
       "Fraction of SWE-bench Verified instances resolved — the public head-to-head axis.",
   },
+  // --- Orchestrator-tier benchmark hook (Chen et al. 2021 / MetaGPT ICLR 2024) ---
+  // Added 2026-05-23 to widen the corpus to actual orchestrator competitors
+  // (CrewAI, AutoGen, LangGraph, MetaGPT) per operator directive "add actual
+  // competitors to the list, not agents". Orchestrators publish code-
+  // generation benchmark numbers in HumanEval Pass@1 form (a tighter
+  // per-task slice than SWE-bench Verified); agents are AT THE LAYER BELOW
+  // Minsky's tier (Minsky composes agents — Minsky is a peer to
+  // orchestrators, not to agents). See `competitors/README.md` for the
+  // tier distinction.
+  {
+    id: "humaneval-pass-at-1",
+    label: "HumanEval Pass@1",
+    category: "public-benchmark",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Chen et al., 'Evaluating Large Language Models Trained on Code', arXiv 2107.03374, 2021 (HumanEval — 164 hand-written Python tasks; pass@k is the unbiased estimator); MetaGPT ICLR 2024 (Hong, Zhuge et al., arXiv 2308.00352 — the canonical orchestrator-tier reporting convention)",
+    description:
+      "Fraction of HumanEval tasks the orchestrator's pipeline resolves on first attempt. The orchestrator-tier counterpart to swe-bench-verified-resolve-rate — multi-agent frameworks (MetaGPT, AutoGen, CrewAI) publish this, single-agent systems (Claude Code, Devin, Aider) publish SWE-bench Verified.",
+  },
 ];
 
 /**
