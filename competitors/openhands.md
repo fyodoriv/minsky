@@ -110,6 +110,61 @@ Open-source autonomous software engineering platform (formerly OpenDevin). **Req
 | `cost-per-merged-pr`                | $0.30     | 2024-10-04 | All-Hands AI, *Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)*, openhands.dev/blog — Claude 3.5 Sonnet, prompt-caching enabled, SWE-bench Lite subset (`$0.3 per issue`). Used here as the cost-per-merged-pr proxy.                |
 | `mean-autonomous-merge-latency`     | 3600 s    | 2024-11-12 | `OpenHands/openhands-index-results/scores.json` — `average_runtime: 3600` for SWE-bench v1.8.3 with Claude Sonnet 4.5. Used here as the mean-autonomous-merge-latency proxy (per-instance wall-clock).                                                |
 
+## Should we wrap OpenHands instead?
+
+> Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
+
+**Verdict: PARTIAL YES** — the agent layer should be a pluggable backend; the orchestrator layer should not. **P0 human-blocked task filed: [`should-we-add-openhands-as-pluggable-backend`](../TASKS.md).**
+
+This is the most strategically interesting case in Minsky's competitor set, because OpenHands ships things Minsky doesn't (and probably can't catch up to in M1):
+
+- **65.8% SWE-bench Verified** (April 2025) — published, public, verified. Minsky has zero published benchmarks.
+- **OpenHands Index 5-task suite** updated quarterly. Minsky has the per-vendor scorecard but no own multi-task harness.
+- **Docker sandbox + pluggable sandbox layer** — preventive isolation. Minsky has scope-leak detection (post-hoc).
+- **15+ LLM backends** via OpenAI-compatible API. Minsky has `claude` + `devin` + `aider` (3, one blocked).
+- **$18.8M Series A, 70K stars, Fortune 500 customers, named partnerships** — community + capital Minsky doesn't have.
+
+The **Agent Canvas Initiative** (announced May 11, launches June 1, 2026; GitHub issue #14374) is the inflection point. It explicitly adds:
+
+- Dockerless local installation (matches Minsky's "no Docker required").
+- **Bring-your-own-agent** (Claude Code, Codex, OpenHands SDK) — structurally identical to Minsky's per-machine `~/.minsky/config.json` agent selection.
+- Self-hosting on VMs as first-class.
+
+After June 1, OpenHands will look architecturally a lot like Minsky's per-task backend layer. So the wrap question becomes sharp.
+
+**Two wrap shapes to evaluate**:
+
+### Shape A — Wrap the agent layer (PARTIAL YES, file P0)
+
+Add `openhands` as a fourth pluggable backend in `~/.minsky/config.json`, alongside `claude` / `devin` / `aider`. Per-task, Minsky's daemon spawns `openhands solve <task-brief>` and OpenHands runs the agent loop with its 65.8%-verified policy + Docker sandbox + multi-LLM choice. Minsky keeps the daemon + TASKS.md + cross-repo fleet + constitution-as-CI on top.
+
+- **What we keep**: 6/6 moats survive (daemon, operator-machine identity, constitution+CI, MAPE-K substrate, cross-repo fleet, TASKS.md surface).
+- **What we gain**: state-of-the-art single-task agent, Docker sandbox, 15+ LLM choice, OpenHands' benchmark surface (we cite their score for our agent-tier comparison).
+- **What we lose**: nothing fundamental. We're just adding an option; operators who prefer `claude` keep using it.
+- **Cost**: ~1-2 weeks. New entry in agent-support matrix + brief-delivery format + `openhands` argv contract + integration test. Same shape as the existing aider/devin/claude wiring.
+- **Risk**: OpenHands' CLI may not have a stable "single-shot run" mode yet; the Agent Canvas Initiative is what unblocks this. P0 task is human-blocked because the integration design depends on OpenHands' final June 1 CLI surface.
+
+**This is the wrap to do**. The P0 task `should-we-add-openhands-as-pluggable-backend` is filed.
+
+### Shape B — Wrap the orchestrator layer (NO)
+
+Replace Minsky's cross-repo-runner with OpenHands Enterprise's Automations backend (open-source June 2026 per Agent Canvas Initiative point 6). Minsky becomes a thin operator-identity layer on top of OpenHands' scheduled / event-driven workflow engine.
+
+- **What we keep**: operator-machine identity, constitution-as-CI (if we still gate the agent's PRs).
+- **What we lose**: TASKS.md surface (OpenHands Automations are configured in UI/SDK, not markdown), MAPE-K substrate (no equivalent in Automations), and probably the daemon-not-framework moat (Automations are event-driven workflows, not 24/7 daemons).
+- **Net moat**: ≤3 of 6 survive — below the 3-moat threshold required to claim "distinctive" (per `competitors/README.md` § "What Minsky uniquely does").
+- **Architectural mismatch**: Automations are *scheduled/event-driven* (run at 9am Monday; run on new PR); Minsky's TASKS.md is *queue-driven* (continuously drain the priority queue). Different shape; one doesn't replace the other.
+
+**Don't wrap at this layer.** The moat collapse alone makes this a no-go.
+
+### Trigger for re-evaluation
+
+Both shapes get re-evaluated whenever:
+
+1. OpenHands' Agent Canvas Initiative launches (June 1, 2026; tracked by `monitor-openhands-agent-canvas-launch`).
+2. Minsky publishes its own SWE-bench Verified or HumanEval Pass@1 score (`benchmark-minsky-via-claude-on-humaneval`) — if Minsky-via-Claude beats OpenHands' 65.8%, the agent-wrap rationale weakens.
+3. OpenHands publishes a "Minsky-like" SDK explicitly designed for "run me forever on a task queue" — that'd reduce the orchestrator-tier moat further and the wrap-the-orchestrator question gets sharper.
+
 ## Last reviewed
 
-2026-05-22 (deep-dive refresh — Agent Canvas Initiative, Series A, Enterprise Agent Control Plane, OpenHands Index expansion)
+2026-05-22 (deep-dive refresh — Agent Canvas Initiative, Series A, Enterprise Agent Control Plane, OpenHands Index expansion); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive — verdict: agent layer wrap (P0 filed), orchestrator layer reject.

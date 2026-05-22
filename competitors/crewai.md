@@ -131,6 +131,28 @@ Based on releases (v1.13.0, v1.14.5) + recent blog posts:
 - **How Minsky relates**: don't adopt — Minsky is coding-specific and uses OMC for orchestration within the Anthropic stack. CrewAI's role-play orchestration occupies the same surface as OMC (vision.md row 50); adopting CrewAI would violate rule #1 across OMC + MCP + Claude Code Max.
 - **Index row**: vision.md § "Pattern conformance index" row 47.
 
+## Should we wrap CrewAI instead?
+
+> Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
+
+**Verdict**: NO — structural mismatch. Don't file a P0 wrap proposal.
+
+**Architectural fit**: CrewAI is a Python framework (`pip install crewai`), not a daemon. To use CrewAI from Minsky's daemon shell, we'd have to spawn `python -m crewai.run ...` per task. CrewAI itself has no "watch a TASKS.md queue forever" mode — we'd be building the task-picker + queue layer on top of CrewAI, not the other way around.
+
+**What we'd delegate to CrewAI**: multi-agent orchestration within one task (role / goal / backstory / crew composition).
+
+**What we'd keep**: daemon shell, TASKS.md surface, operator-machine identity, constitution + 53 lint stages + 65 CI jobs, MAPE-K substrate, cross-repo fleet — i.e., everything Minsky-distinctive.
+
+**Why the wrap doesn't pay off**:
+
+1. **CrewAI is general-purpose, not coding-specific.** Code execution is deprecated (`CodeInterpreterTool` removed; operators are pointed at E2B / Modal). Wrapping CrewAI means we still need to write the git workflow, the test runner, the PR-shaped output ourselves. CrewAI doesn't replace the LLM-as-coding-agent piece.
+2. **CrewAI's role / goal / backstory + memory architecture would have to be re-mapped to Minsky's task shape.** Minsky tasks are markdown blocks with Hypothesis / Success / Pivot / Measurement / Anchor fields (per rule #9). CrewAI's per-agent role/goal isn't a 1:1 translation; we'd be writing an adapter layer.
+3. **Net moat after wrap = same 6 moats as today**, plus CrewAI's `unified_memory.py` (which is genuinely better than our git + experiment-store). But the memory architecture is portable as a pattern (already filed as `research-finding-hierarchical-memory-architecture` for evaluation in `claude-handoff-spec` M2 work). We can STEAL the pattern without wrapping the framework.
+
+**Honest conclusion**: CrewAI is the wrong shape to wrap. We extract maximum value by stealing patterns (memory architecture, manager-agent delegation, Flows-style state machines — all filed as P3 research tasks in TASKS.md), not by replacing Minsky's orchestrator layer with CrewAI's framework.
+
+The pivot scenario that would change this answer: if CrewAI publishes a coding-specific variant (`crewai-code` or similar) with first-class git workflow + test runner + PR-shaped output, OR if their A2A protocol becomes the industry-standard agent-handoff format and Minsky benefits from speaking A2A natively. Either would re-open this analysis.
+
 ## Last reviewed
 
-2026-05-22 (deep-dive refresh — CrewAI AMP production architecture, 2B execution milestone, $18M funding, Flows / Crews distinction, coding-fit assessment, vendor-benchmark gating for `corpus-add-crewai`)
+2026-05-22 (deep-dive refresh — CrewAI AMP production architecture, 2B execution milestone, $18M funding, Flows / Crews distinction, coding-fit assessment, vendor-benchmark gating for `corpus-add-crewai`); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive.
