@@ -67,6 +67,28 @@ in the corpus must match the date here.
 | `swe-bench-verified-resolve-rate`   | 0.139 | 2024-03-12 | Cognition Labs, *Introducing Devin*, cognition.ai, 2024-03-12 (original SWE-bench end-to-end resolve rate at launch). Note: Devin has not published a Verified-split-specific number since the original launch. |
 | `mean-autonomous-merge-latency`     | 900 s | 2026-04-07 | AgentMarketCap, *Devin Doubled Its PR Merge Rate to 67%*, 2026-04-07 — 1 ACU ≈ 15 min Devin work, ~1 ACU per typical PR. 900 sec is the order-of-magnitude estimate, not a per-PR measurement.                  |
 
+## Should we wrap Devin instead?
+
+> Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
+
+**Verdict: ALREADY PARTIALLY WRAPPED at the right layer.** Further wrap kills moat #2 (operator-machine identity). Don't file a P0.
+
+**Current state**: Devin IS already a Minsky backend option — `cloud_agent: "devin"` in `~/.minsky/config.json` (see `AGENTS.md` § "Per-machine agent config"). Per-task, Minsky's daemon spawns `devin` CLI which talks to Cognition Cloud + the Devbox sandbox; PRs come back to the operator's machine via the operator's `gh` credentials. This is the per-task wrap — the right shape — and ships today.
+
+**The further-wrap question**: should Minsky delegate the FLEET LAYER too? I.e., submit all N repos' tasks to Cognition's API, let Devin's session-management run the cross-repo fleet, and have Minsky shrink to a thin operator-identity layer?
+
+**Answer: NO** — net moat after this wrap is ≤4 of 6 because Cognition's session-management runs in Cognition Cloud, which:
+
+1. **Kills moat #2 (operator-machine identity)** — Devin's whole architecture is Brain (on Cognition's servers) + Devbox (Cognition-provisioned sandbox). Commits originate from a Cognition identity (`devin-ai-integration[bot]`), NOT the operator. This is the loudest Minsky moat per `competitors/README.md` § "What Minsky uniquely does"; losing it collapses the differentiation story.
+2. **Kills moat #1 (daemon-not-framework)** — if Cognition Cloud is the daemon, Minsky is just a wrapper around their API. The "operator attaches and walks away" framing only works if the daemon runs on the operator's machine.
+3. **Kills moat #5 (cross-repo fleet at operator scale)** — Cognition manages the session lifecycle, not Minsky. We lose the launchd/systemd outer supervisor, the dynamic watchdog, the per-host round-robin.
+
+The current PARTIAL wrap (per-task Devin, fleet-layer Minsky) preserves all 6 moats. The further wrap (fleet-layer Devin too) collapses 3 of them. The math is clear.
+
+**What does change the answer**: if Cognition releases a self-hostable "Devin in your VPC" variant where the Brain runs on the operator's infrastructure (Cognition has hinted at enterprise-VPC deployment but it's not generally available), the operator-machine-identity argument weakens. At that point re-evaluate. Tracked indirectly by `enterprise-deployment-readiness-audit` in TASKS.md (which surfaces both Minsky's enterprise gap AND Devin's enterprise architecture for comparison).
+
+**What gets re-evaluated periodically**: Minsky's `cloud_agent: "devin"` integration today is blocked by `spawn-failed-exit-minus-one-silent-empty-stderr` (P0 in TASKS.md). When that ships, Devin's per-task wrap will be fully functional + the comparison sharpens.
+
 ## Last reviewed
 
-2026-05-22
+2026-05-22; 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive — verdict: per-task wrap already shipping (correct shape), fleet-layer wrap rejected (collapses 3/6 moats).
