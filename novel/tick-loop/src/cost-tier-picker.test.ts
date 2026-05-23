@@ -9,13 +9,14 @@ import {
   COST_TIERS,
   DEFAULT_TIER_ID,
   getDefaultTier,
+  isPendingTier,
   pickTierById,
   tierToConfigPatch,
 } from "./cost-tier-picker.js";
 
 describe("COST_TIERS shape", () => {
-  test("ships exactly 6 tiers, in declared order", () => {
-    expect(COST_TIERS).toHaveLength(6);
+  test("ships exactly 7 tiers, in declared order", () => {
+    expect(COST_TIERS).toHaveLength(7);
     expect(COST_TIERS.map((t) => t.id)).toEqual([
       "opus-opus",
       "opus-sonnet",
@@ -23,6 +24,7 @@ describe("COST_TIERS shape", () => {
       "sonnet-local",
       "local-local",
       "windsurf-devin",
+      "openhands-claude",
     ]);
   });
 
@@ -143,5 +145,79 @@ describe("getDefaultTier + DEFAULT_TIER_ID invariant", () => {
     // Cross-references the task body's stated default. Locked in here so
     // the prose intent doesn't silently drift from the data.
     expect(DEFAULT_TIER_ID).toBe("opus-sonnet");
+  });
+});
+
+describe("openhands-claude 7th tier (pending external dep)", () => {
+  test("7-tier table includes openhands-claude in position 7", () => {
+    const ids = COST_TIERS.map((t) => t.id);
+    expect(ids.indexOf("openhands-claude")).toBe(6);
+  });
+
+  test("openhands-claude tier carries pendingExternalDep = 2026-06-01", () => {
+    const tier = pickTierById("openhands-claude");
+    expect(tier?.pendingExternalDep).toBe("2026-06-01");
+  });
+
+  test("openhands-claude has cloud_agent=openhands + claude-opus model in its patch", () => {
+    const tier = pickTierById("openhands-claude");
+    expect(tier?.configPatch.cloud_agent).toBe("openhands");
+    expect(tier?.configPatch.cloud_agent_model).toBe("claude-opus-4-7-max");
+  });
+
+  test("shipped tiers (the first 6) have no pendingExternalDep", () => {
+    const shippedIds = [
+      "opus-opus",
+      "opus-sonnet",
+      "sonnet-sonnet",
+      "sonnet-local",
+      "local-local",
+      "windsurf-devin",
+    ];
+    for (const id of shippedIds) {
+      const tier = pickTierById(id);
+      // Either undefined (the field wasn't set) or explicitly null —
+      // both mean the tier is selectable today.
+      expect(tier?.pendingExternalDep ?? null).toBeNull();
+    }
+  });
+});
+
+describe("isPendingTier — self-flipping date predicate", () => {
+  test("returns false for a tier with no pendingExternalDep field", () => {
+    const shipped = pickTierById("opus-sonnet");
+    if (!shipped) throw new Error("opus-sonnet not found");
+    expect(isPendingTier(shipped)).toBe(false);
+  });
+
+  test("returns true for openhands-claude when today < 2026-06-01", () => {
+    const tier = pickTierById("openhands-claude");
+    if (!tier) throw new Error("openhands-claude not found");
+    expect(isPendingTier(tier, new Date("2026-05-23"))).toBe(true);
+  });
+
+  test("returns false for openhands-claude on 2026-06-01 (release day, dep is satisfied)", () => {
+    const tier = pickTierById("openhands-claude");
+    if (!tier) throw new Error("openhands-claude not found");
+    expect(isPendingTier(tier, new Date("2026-06-01T00:00:00Z"))).toBe(false);
+  });
+
+  test("returns false for openhands-claude on 2026-06-02 (day after release)", () => {
+    const tier = pickTierById("openhands-claude");
+    if (!tier) throw new Error("openhands-claude not found");
+    expect(isPendingTier(tier, new Date("2026-06-02"))).toBe(false);
+  });
+});
+
+describe("tierToConfigPatch — pending-tier safeguard", () => {
+  test("returns null for openhands-claude before the dep date (safeguard)", () => {
+    // The picker MUST NOT accidentally persist an unrunnable tier
+    // to config.json. With a freshly-default Date(), today is before
+    // 2026-06-01 so the patch is null.
+    expect(tierToConfigPatch("openhands-claude")).toBeNull();
+  });
+
+  test("shipped tier still returns a non-null patch", () => {
+    expect(tierToConfigPatch("opus-sonnet")).not.toBeNull();
   });
 });

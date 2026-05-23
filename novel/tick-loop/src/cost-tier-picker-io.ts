@@ -38,7 +38,7 @@
 
 import type { ConfigPatch, CostTier, CostTierId } from "./cost-tier-picker.js";
 
-import { COST_TIERS, DEFAULT_TIER_ID, pickTierById } from "./cost-tier-picker.js";
+import { COST_TIERS, DEFAULT_TIER_ID, isPendingTier, pickTierById } from "./cost-tier-picker.js";
 
 /**
  * Format the 6-tier menu for stdout. Each line is `(N) <label> — ~$X/hr · <recommendedFor>`.
@@ -50,7 +50,16 @@ export function renderTierMenu(): string {
   const lines = COST_TIERS.map((t, i) => {
     const num = i + 1;
     const price = t.estimatedUsdPerHour === 0 ? "$0/hr" : `~$${t.estimatedUsdPerHour}/hr`;
-    return `  (${num}) ${t.label} — ${price} · ${t.recommendedFor}`;
+    // Tiers with a non-null `pendingExternalDep` are visible in the
+    // menu but unselectable — the suffix makes the gating explicit.
+    // `parseUserSelection` rejects selection of these tiers below;
+    // both surfaces share the same `pendingExternalDep` field as the
+    // source of truth.
+    const pending =
+      t.pendingExternalDep !== undefined && t.pendingExternalDep !== null
+        ? ` [pending ${t.pendingExternalDep}]`
+        : "";
+    return `  (${num}) ${t.label} — ${price} · ${t.recommendedFor}${pending}`;
   });
   return [
     "Pick a cost tier for this machine:",
@@ -83,16 +92,23 @@ export function parseUserSelection(input: string): CostTier | null {
     // Blank reply → DEFAULT (the prompt advertises this).
     return pickTierById(DEFAULT_TIER_ID);
   }
+  let candidate: CostTier | null = null;
   // Numeric pick: "1" through `COST_TIERS.length`.
   if (/^\d+$/.test(trimmed)) {
     const idx = Number.parseInt(trimmed, 10) - 1;
     if (idx >= 0 && idx < COST_TIERS.length) {
-      return COST_TIERS[idx] ?? null;
+      candidate = COST_TIERS[idx] ?? null;
     }
-    return null;
+  } else {
+    // Tier id lookup.
+    candidate = pickTierById(trimmed);
   }
-  // Tier id lookup.
-  return pickTierById(trimmed);
+  if (candidate === null) return null;
+  // Pending tiers (e.g. openhands-claude before 2026-06-01) are visible
+  // in the menu but unselectable. Returning null routes the CLI shell
+  // back into the prompt loop with an actionable diagnostic.
+  if (isPendingTier(candidate)) return null;
+  return candidate;
 }
 
 /**
