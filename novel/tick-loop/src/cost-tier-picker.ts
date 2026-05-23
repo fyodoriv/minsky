@@ -58,6 +58,23 @@ export type CostTier = {
   readonly recommendedFor: string;
   /** Mapping the picker writes to config.json for this tier. */
   readonly configPatch: ConfigPatch;
+  /**
+   * `null` when the tier is selectable today. A `YYYY-MM-DD` ISO date
+   * when the tier is visible in the menu but BLOCKED on an external
+   * runtime dep that has not yet shipped (e.g. the `openhands-claude`
+   * tier awaiting the OpenHands Agent Canvas CLI release on
+   * 2026-06-01). The picker renders pending tiers with a
+   * `[pending YYYY-MM-DD]` suffix and `parseUserSelection` rejects
+   * them with an actionable error; `tierToConfigPatch` returns null
+   * for pending tiers so the config-writer never accidentally
+   * persists an unrunnable tier.
+   *
+   * The companion sibling task `add-openhands-as-pluggable-backend`
+   * (P0) is the parent contract this field anchors to;
+   * `cloud-agent-config-audit-matrix-test` is the deterministic gate
+   * that flips this field to `null` on/after the dep date.
+   */
+  readonly pendingExternalDep?: string | null;
 };
 
 export type CostTierId =
@@ -66,7 +83,8 @@ export type CostTierId =
   | "sonnet-sonnet"
   | "sonnet-local"
   | "local-local"
-  | "windsurf-devin";
+  | "windsurf-devin"
+  | "openhands-claude";
 
 /**
  * The subset of `~/.minsky/config.json` the picker writes. Other fields
@@ -181,6 +199,31 @@ export const COST_TIERS: readonly CostTier[] = [
       local_agent_model: null,
     },
   },
+  {
+    // The 7th tier — visible-but-pending until 2026-06-01. Reflects
+    // parent P0 `add-openhands-as-pluggable-backend`; the picker UX
+    // anticipates the agent-tier swe-bench upgrade (OpenHands 65.8%
+    // SWE-bench Verified vs bare Claude Code's lower inherited score)
+    // that becomes selectable on/after the OpenHands Agent Canvas CLI
+    // release. `cloud-agent-config-audit-matrix-test` (sibling lint)
+    // self-flips on the same date so the operator sees this row
+    // become live without a manual TODO chase.
+    id: "openhands-claude",
+    label: "OpenHands + Claude workers",
+    brainAgent: "openhands",
+    workersAgent: "claude",
+    estimatedUsdPerHour: 10,
+    recommendedFor:
+      "agent-tier SWE-bench upgrade (OpenHands 65.8% Verified) — requires the OpenHands Agent Canvas CLI",
+    configPatch: {
+      cost_tier: "openhands-claude",
+      cloud_agent: "openhands",
+      cloud_agent_model: "claude-opus-4-7-max",
+      local_agent: null,
+      local_agent_model: null,
+    },
+    pendingExternalDep: "2026-06-01",
+  },
 ] as const;
 
 /**
@@ -207,13 +250,49 @@ export function pickTierById(id: string): CostTier | null {
  * (writes nothing, returns error). The patch is read-only — callers
  * spread it over the existing config rather than mutating.
  *
+ * Pending tiers (those with a non-null `pendingExternalDep`) ALSO
+ * return null today — the picker must NOT accidentally persist an
+ * unrunnable tier to config.json. The companion `isPendingTier`
+ * predicate lets the picker render the row in the menu while
+ * preventing it from being selected.
+ *
  * @otel-exempt pure data transformation, no I/O — slice 2's atomic config.json write is the right span surface for this concern (will carry `cost-tier-picker.write` with the chosen tier as a span attribute)
  * @param id the chosen tier id
- * @returns the partial config patch, or null on unknown id
+ * @returns the partial config patch, or null on unknown id OR pending tier
  */
 export function tierToConfigPatch(id: string): ConfigPatch | null {
   const tier = pickTierById(id);
-  return tier ? tier.configPatch : null;
+  if (tier === null) return null;
+  if (isPendingTier(tier)) return null;
+  return tier.configPatch;
+}
+
+/**
+ * Predicate: is this tier pending an external runtime dep? Returns
+ * true when `pendingExternalDep` is set AND today's date is before
+ * the dep date. Used by:
+ *
+ *   - `tierToConfigPatch` to refuse to convert a pending tier into a
+ *     persisted config patch
+ *   - the picker UI to render the `[pending YYYY-MM-DD]` suffix and
+ *     reject selection
+ *   - the (eventual) post-dep transition: the same predicate returns
+ *     false once today >= pendingExternalDep, and the tier becomes
+ *     fully selectable without code changes (the date comparison IS
+ *     the flip mechanism)
+ *
+ * @otel-exempt pure predicate, no I/O.
+ * @param tier the tier to test
+ * @param now optional injected "today" for testability; defaults to
+ *   `new Date()` which makes the predicate self-flip on the dep date
+ * @returns true iff the tier is still pending an external dep today
+ */
+export function isPendingTier(tier: CostTier, now: Date = new Date()): boolean {
+  if (tier.pendingExternalDep === null || tier.pendingExternalDep === undefined) {
+    return false;
+  }
+  const today = now.toISOString().slice(0, 10);
+  return today < tier.pendingExternalDep;
 }
 
 /**

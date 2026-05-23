@@ -14,7 +14,7 @@ import {
 import { COST_TIERS, type ConfigPatch, DEFAULT_TIER_ID } from "./cost-tier-picker.js";
 
 describe("renderTierMenu", () => {
-  test("renders all 6 tiers, numbered 1-6 in order", () => {
+  test("renders all 7 tiers, numbered 1-7 in order", () => {
     const menu = renderTierMenu();
     for (let i = 0; i < COST_TIERS.length; i++) {
       const tier = COST_TIERS[i];
@@ -38,7 +38,23 @@ describe("renderTierMenu", () => {
   test("ends with a prompt that names the default tier id", () => {
     const menu = renderTierMenu();
     expect(menu).toContain(`[default: ${DEFAULT_TIER_ID}]`);
-    expect(menu).toMatch(/Enter a number \(1-6\) or tier id/);
+    expect(menu).toMatch(/Enter a number \(1-7\) or tier id/);
+  });
+
+  test("pending tiers carry a `[pending YYYY-MM-DD]` suffix in the menu", () => {
+    const menu = renderTierMenu();
+    expect(menu).toContain("OpenHands + Claude workers");
+    expect(menu).toContain("[pending 2026-06-01]");
+  });
+
+  test("shipped tiers do NOT carry the pending suffix", () => {
+    const menu = renderTierMenu();
+    // The opus-sonnet line should not include the "[pending ...]" text.
+    const opusSonnetLine = menu
+      .split("\n")
+      .find((l) => l.includes("opus-sonnet") || l.includes("Opus brain + Sonnet workers"));
+    expect(opusSonnetLine).toBeDefined();
+    expect(opusSonnetLine ?? "").not.toContain("[pending");
   });
 });
 
@@ -88,6 +104,18 @@ describe("parseUserSelection — tier-id input", () => {
 
   test("tier id lookup is case-sensitive (matches slice 1 invariant)", () => {
     expect(parseUserSelection("OPUS-OPUS")).toBeNull();
+  });
+
+  test("pending tier (openhands-claude) by id returns null today (pre-2026-06-01)", () => {
+    // The picker MUST refuse to persist an unrunnable tier. Returning
+    // null routes the CLI shell back into the prompt loop where it
+    // can emit the actionable "tier not yet available" message.
+    expect(parseUserSelection("openhands-claude")).toBeNull();
+  });
+
+  test("pending tier (openhands-claude) by numeric pick (7) returns null today", () => {
+    // The openhands-claude row is position 7 in the 7-tier table.
+    expect(parseUserSelection("7")).toBeNull();
   });
 });
 
