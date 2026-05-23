@@ -1951,18 +1951,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 ## P2
 
 
-- [ ] `wrap-feasibility-openai-agents-sdk` — run Phase 7 wrap-feasibility analysis on OpenAI Agents SDK
-  - **ID**: wrap-feasibility-openai-agents-sdk
-  - **Tags**: p2, competitive, strategic, wrap-analysis, orchestrator-tier, observed-2026-05-22
-  - **Milestone**: M1
-  - **Competitive-goal**: completes the orchestrator-tier wrap analysis. OpenAI Agents SDK is the 3rd-priority orchestrator-tier wrap candidate because (a) OpenAI is the dominant LLM vendor → SDK has the largest reach for users who pick the agent SDK that matches their model provider; (b) the SDK's `handoffs` + tracing dashboard structurally overlap Minsky's adapter layer + observer; (c) decisive market signal: if Anthropic + Google ship SDKs that copy this pattern, agent orchestration consolidates around vendor-SDKs, and Minsky's bring-your-own-agent positioning (via adapters) matters less. Need a written wrap-feasibility doc before deciding whether to fold adapters into a vendor-SDK pattern.
-  - **Touches**: `competitors/openai-agents-sdk.md` (new file — follow the deep-dive template), `competitors/README.md` § "Comparison matrix" (new row), `README.md` § "How Minsky compares" (new row), TASKS.md (file follow-up P0/P1 task if verdict warrants).
-  - **Details**: follow Phase 7 procedure encoded in `.claude/skills/competitor-research/SKILL.md`. Anchor questions: (1) architectural fit — OpenAI Agents SDK is Python OR TypeScript; it runs in-process; Minsky's daemon could call the SDK directly per-task; (2) what we delegate — single-agent task execution + tool calling + tracing; the SDK's `handoffs` pattern could replace Minsky's adapter switching; (3) what we keep — constitution, lint stack, TASKS.md surface, cross-repo runner, operator-machine identity — none of which the SDK provides; (4) net moat after wrap — wraps moat #2 (bring-your-own-agent) and partially moat #6 (TASKS.md surface still ours); 5 surviving moats → meets P0 threshold; (5) verdict — likely `PARTIAL YES` for the per-task execution layer, but Minsky needs to verify the SDK works against operator-supplied API keys (not just OpenAI ones).
-  - **Hypothesis**: OpenAI Agents SDK is `PARTIAL YES` — Minsky could fold the adapter layer into the SDK's agent abstraction and gain tracing dashboard for free. But the SDK is tightly coupled to OpenAI models; using Claude/Devin/Aider through it requires a compatibility layer. Trade-off: free tracing dashboard vs. losing direct adapter control.
-  - **Success**: `competitors/openai-agents-sdk.md` exists with all required sections, comparison tables refreshed, follow-up tasks filed if verdict warrants. The wrap-question answer is materially specific (e.g., "fold MapE-K's adapter layer into Agents SDK Agent + handoffs primitives, keep adapters for non-OpenAI models").
-  - **Pivot**: if the SDK only supports OpenAI models (not Claude/Devin/Aider via adapter), the wrap is `STRUCTURAL MISMATCH` — most Minsky users are bring-your-own-agent including non-OpenAI providers.
-  - **Measurement**: `test -f competitors/openai-agents-sdk.md && grep -c '## Should we wrap' competitors/openai-agents-sdk.md` returns ≥1 AND `grep -c -i 'agents.sdk\|openai-agents' competitors/README.md` returns ≥3 AND `grep -c -i 'agents.sdk\|openai-agents' README.md` returns ≥1.
-  - **Anchor**: `competitors/README.md`; `.claude/skills/competitor-research/SKILL.md` § Phase 7; docs/strategic-review-2026-05-22-continue-or-wrap-more.md § "Question 1".
 
 - [ ] `monitor-openhands-agent-canvas-launch` — track OpenHands' Agent Canvas Initiative launch (June 1, 2026) and reassess Minsky's bring-your-own-agent positioning
   - **ID**: monitor-openhands-agent-canvas-launch
