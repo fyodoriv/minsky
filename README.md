@@ -11,7 +11,7 @@ Minsky attaches to a git repo and improves it over time, using established softw
 
 **Through your AI agent.** Copy-paste:
 
-> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/docs/INSTALL.md>, then start it. Ask me only the consent question.
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
 **Manual:**
 
@@ -19,7 +19,7 @@ Minsky attaches to a git repo and improves it over time, using established softw
 git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
 ```
 
-Full install runbook: [INSTALL.md](./docs/INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
+Full install runbook: [INSTALL.md](./INSTALL.md). Uninstall: [docs/uninstall.md](docs/uninstall.md).
 
 ## Why Minsky
 
@@ -143,7 +143,7 @@ A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchest
 Full map: **[docs/README.md](docs/README.md)**. Pick by audience:
 
 - **Newcomer** — [vision.md § "What Minsky is"](vision.md#what-minsky-is) → [MILESTONES.md](MILESTONES.md).
-- **Installing on your repo** — [INSTALL.md](./docs/INSTALL.md).
+- **Installing on your repo** — [INSTALL.md](./INSTALL.md).
 - **AI agent working on this codebase** — [AGENTS.md](AGENTS.md) → [DEPRECATED.md](./docs/DEPRECATED.md) → [TASKS.md](TASKS.md).
 - **Operator running Minsky in production** — [docs/edge-cases.md](docs/edge-cases.md), [docs/auto-merge.md](docs/auto-merge.md), [docs/local-llm-fallback.md](docs/local-llm-fallback.md).
 - **Architecture deep-dive** — [ARCHITECTURE.md](./docs/ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).

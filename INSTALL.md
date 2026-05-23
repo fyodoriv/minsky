@@ -17,7 +17,7 @@ The canonical install runbook for Minsky. **Audience**: an AI coding agent (Clau
 - [docs/uninstall.md](docs/uninstall.md) — clean removal when you're done
 - [README.md](README.md) for context on what you just installed
 
-**Status.** Stub. Closing the loop is tracked as P0 task `agent-mediated-install` in `TASKS.md`. Until that task ships the `minsky consent` subcommand + the measurement harness, the consent step writes locally only (no server submission yet) and you the agent do steps 1–5 manually. The flow described below works end-to-end today; only the automated cross-provider measurement is pending.
+**Status.** The end-to-end flow below works today. Two sub-deliverables of the parent `agent-mediated-install` P0 are still pending: (a) a `minsky consent` subcommand (P1 task `minsky-consent-subcommand` — until it ships, follow the shell snippet in Step 5 manually); (b) an automated cross-provider measurement harness (P1 task `measure-agent-install-harness` — until it ships, the 9-run success criterion is operator-verified, not CI-verified). Both gaps are tracked in `TASKS.md`.
 
 ## What this is not
 
