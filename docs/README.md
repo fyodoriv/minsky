@@ -22,9 +22,9 @@ Two paths.
 
 **Through your AI agent** (fastest):
 
-> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/docs/INSTALL.md>, then start it. Ask me only the consent question.
+> Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-**Manual**: read [INSTALL.md](./INSTALL.md) (~8 min). Prerequisites: Node ≥22, pnpm ≥9, git ≥2.40.
+**Manual**: read [INSTALL.md](../INSTALL.md) (~8 min). Prerequisites: Node ≥22, pnpm ≥9, git ≥2.40.
 
 After install:
 
