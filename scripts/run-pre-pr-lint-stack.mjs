@@ -279,6 +279,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "tasks-lint",
       "test",
       "threat-model-section",
+      "cloud-agent-config-audit-matrix",
       "tick-loop-backoff-schedule",
       "typecheck",
       "user-story-security-section",
@@ -554,6 +555,20 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-threat-model-section.mjs"],
+  },
+  {
+    // The 4-agent cloud-agent contract lint referenced by
+    // `add-openhands-as-pluggable-backend` § Measurement. Standalone
+    // node script (not vitest) so the lint can run pre-build against
+    // the published AGENT_MATRIX in `novel/cross-repo-runner/dist/
+    // agent-config.js`. Self-flips on 2026-06-01: pre-release the lint
+    // asserts openhands.pendingExternalDep === "2026-06-01"; post-
+    // release it asserts === null, refusing to be green during the
+    // operator's required flip-the-flag transition.
+    name: "cloud-agent-config-audit-matrix",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.mjs"],
   },
   {
     name: "security-docs-cohesion",

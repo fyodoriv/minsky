@@ -106,6 +106,7 @@ describe("STACK_MANIFEST", () => {
         "agents-md-coherence",
         "biome",
         "brief-pr-instructions",
+        "cloud-agent-config-audit-matrix",
         "competitive-goal",
         "markdownlint",
         "no-hardcoded-user-paths",
