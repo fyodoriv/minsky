@@ -25,7 +25,7 @@ As a solo developer running minsky overnight, when the daemon fails with a catal
 
 ## Integration test
 
-- **File**: `novel/observer/test/chaos/heal-catalogue-mttr.test.mjs` (chaos test, ≥4 cases)
+- **File**: `novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts` (chaos test, ≥4 cases)
 - **Setup**: hermetic fixture host via `mkdtempSync`; one failure signal injected per `test.each` iteration (injection table: see `docs/plans/agents-can-self-heal-minsky-m1-13.md` Step 6)
 - **Action**: invoke `helper.detect()` → assert `{ present: true }`; invoke `helper.apply()`; invoke `helper.verify()` → assert `{ healed: true }`
 - **Assert**:
