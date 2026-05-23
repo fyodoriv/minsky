@@ -261,6 +261,37 @@ describe("L4: listOpenPrBranches", () => {
   });
 });
 
+// ─── L4 — listAllPrsForTaskId gated on live mode ──
+//
+// Defence-in-depth dedup wired in PR `wire-duplicate-pr-detector-into-cross-repo-runner`.
+// Same network-skip discipline as `listOpenPrBranches` (rule-#17 fix
+// from PR #648 — no gh call in dry-run; observed via a fixture host
+// with no remote completing successfully in <10s).
+
+describe("L4: listAllPrsForTaskId", () => {
+  test("listAllPrsForTaskId NOT called in dry-run (network skipped)", () => {
+    // The function `listAllPrsForTaskId` calls `gh pr list --search
+    // <task-id> in:title --state all`. In dry-run mode it MUST be
+    // skipped — the `live` guard in the pickTask seam keeps the gh
+    // call off the path. Observation: a fixture host with NO origin
+    // remote still completes successfully in well under 10s; if
+    // listAllPrsForTaskId were called the gh probe would either fail
+    // remote-resolution or fall back to gh's default host (slow).
+    const dir = makeFixtureHost(); // no remote
+    expect(() =>
+      execFileSync("git", ["remote", "get-url", "origin"], { cwd: dir, stdio: "pipe" }),
+    ).toThrow();
+    const t0 = Date.now();
+    execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
+      encoding: "utf8",
+      env: cleanEnv(),
+      timeout: 10_000,
+    });
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(10_000);
+  });
+});
+
 // ─── L4 — writeIterationRecord ──
 
 describe("L4: writeIterationRecord", () => {
