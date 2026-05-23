@@ -236,19 +236,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `node scripts/stability-report.mjs --window=10h --json` on a machine with ≥1 completed 10h run.
   - **Anchor**: Forsgren/Humble/Kim 2018 (DORA — measure what matters); Beyer SRE 2016 (SLI/SLO — stability ratio IS the SLI).
 
-- [ ] `competitive-landscape-real-competitors` — update `competitors/` to cover the actual autonomous coding competitors: Devin, OpenHands, SWE-agent, Aider, Cursor Agent, Codex CLI
-  - **ID**: competitive-landscape-real-competitors
-  - **Tags**: p0, milestone-m1, research, competitive, business
-  - **Milestone**: M1
-  - **Competitive-goal**: the existing competitor analysis covers multi-agent frameworks (OMC, CrewAI, MetaGPT) but misses the actual tools a developer would compare minsky against: Devin ($500/mo managed), OpenHands (OSS, SWE-bench leader), SWE-agent (research), Aider (CLI), Cursor Agent (IDE), Codex CLI (OpenAI). Without analyzing the real competition, the competitive benchmark is meaningless.
-  - **Details**: for each competitor, write a `competitors/<name>.md` with: what it is, strengths, weaknesses vs minsky's vision, what we learn/steal, pricing, SWE-bench scores (if published), and why a user would choose minsky over it (or not). Be honest — if a competitor is better at X, say so.
-  - **Files**: `competitors/devin.md` (new), `competitors/openhands.md` (new), `competitors/swe-agent.md` (new), `competitors/aider.md` (new), `competitors/cursor-agent.md` (new), `competitors/codex-cli.md` (new)
-  - **Hypothesis**: today the competitor analysis is incomplete (misses the 6 most relevant competitors). After this, every competitor a user would compare minsky against has a documented analysis.
-  - **Success**: 6 new competitor files, each ≥500 words, with honest strengths/weaknesses and pricing.
-  - **Pivot**: if deep analysis of all 6 is too time-consuming, prioritize Devin + OpenHands + Aider (the three most likely alternatives a developer would actually try).
-  - **Measurement**: `ls competitors/*.md | wc -l` ≥ 12 (6 existing + 6 new); each file has the required sections.
-  - **Anchor**: Porter *Competitive Strategy* 1980 (five forces — know your substitutes); Sun Tzu (know your enemy).
-
 - [ ] `interactive-model-cost-picker` — on first run (or when no `~/.minsky/config.json` exists), minsky asks the user to choose a brain+workers cost tier with clear $/hr expectations; the choice is saved to config and never asked again
   - **ID**: interactive-model-cost-picker
   - **Tags**: p0, milestone-m1, ux, onboarding, cost, models
