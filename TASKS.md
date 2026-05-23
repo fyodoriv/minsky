@@ -176,20 +176,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `node scripts/heal-mttr-report.mjs --window=30d --json | jq '.successful, .mttr_p95_ms'` — successful ≥ 10, p95 < 300_000ms.
   - **Anchor**: MILESTONES.md M1.13 (the milestone this task ships); Beyer et al. 2016 *Site Reliability Engineering* Ch. 6 "Effective Troubleshooting" + Ch. 11 "Being On-Call" (MTTR as the SRE SLI for self-healing systems); Armstrong 2007 (let-it-crash + supervisor-restart as the substrate self-heal is built on); rule #17 (proactive healing — the agent observed, the agent fixes, in the same session); rule #12 (scope discipline — every heal helper is a pure function with paired tests).
 
-- [ ] `watchdog-timeout-kills-productive-devin` — the 900s (15min) watchdog SIGKILLs devin mid-work; devin iterations take 5-6min when productive but the watchdog fires on slow iterations, wasting the entire iteration
-  - **ID**: watchdog-timeout-kills-productive-devin
-  - **Tags**: p0, milestone-m1, devin, watchdog, reliability
-  - **Milestone**: M1
-  - **Competitive-goal**: a killed productive iteration wastes 15min of devin time with zero output — directly regresses cost-per-PR and stability.
-  - **Surfaced-by**: 2026-05-18 live daemon: one `spawn-failed` at exactly 900014ms (the 900s watchdog) while the other iterations completed in 335-382s. The watchdog killed what was likely a productive-but-slow iteration.
-  - **Details**: the default `claudePrintTimeoutMs` is 900_000 (15 min), set in `tick-loop.mjs:340`. But minsky-run.mjs (the cross-repo runner) doesn't use the tick-loop's spawn strategy — it has its own spawn path. Check which timeout the cross-repo runner uses and whether it's too aggressive for devin. Devin may legitimately take >15min on complex tasks. The existing P2 task `worker-watchdog-scale-by-pinned-model-latency` addresses this for the tick-loop but not for the cross-repo runner.
-  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (spawn timeout configuration), `novel/tick-loop/bin/tick-loop.mjs` (reference — already has `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` env override)
-  - **Hypothesis**: raising the cross-repo runner's spawn timeout to 1800s (30min) eliminates watchdog-killed productive iterations while still catching truly stuck spawns.
-  - **Success**: 0 `spawn-failed` at exactly 900s over 10 consecutive iterations; productive iterations that take 10-20min complete normally.
-  - **Pivot**: if 30min is too long for stuck detection, implement a "progress watchdog" that checks whether the spawn has produced any stdout in the last 5min instead of a fixed wall-clock timeout.
-  - **Measurement**: `jq 'select(.verdict=="spawn-failed") | .notes' .minsky/experiment-store/cross-repo/*.jsonl | grep -c '900'` → 0 (was: 1).
-  - **Anchor**: 2026-05-18 live daemon (900014ms spawn-failed). Existing P2 `worker-watchdog-scale-by-pinned-model-latency`.
-
 - [ ] `milestone-alignment-gate-enforcement` — build the alignment check + fill all gaps between MILESTONES.md and the 7 surfaces (README, quickstart, vision, user-stories, integration tests, logs/observability, METRICS.md) for M1
   - **ID**: milestone-alignment-gate-enforcement
   - **Tags**: p0, operator-directive, milestone-m1, meta, docs, metrics, tests, observability, rule-10, rule-15
@@ -2977,6 +2963,19 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 
 ## P3
+
+- [ ] `verify-watchdog-substrate-eliminates-900s-spawn-failures` — confirm the dynamic-timeouts substrate (commit `2d2c15b`, 2026-05-18) eliminates the 900s watchdog kill class from cross-repo-runner spawns
+  - **ID**: verify-watchdog-substrate-eliminates-900s-spawn-failures
+  - **Tags**: p3, longitudinal-verification, watchdog, dynamic-timeouts, observed-2026-05-23, follow-up
+  - **Milestone**: M1
+  - **Competitive-goal**: closes the runtime-verification half of `watchdog-timeout-kills-productive-devin` (P0, resolved by infrastructure that landed the same day as the original observation). The code-level fix exists (dynamic-timeouts default 20min > observed 15min kill, max 45min, p95×1.5 scaling); operator-side runtime data confirms zero 900s spawn-failures over 10 consecutive iterations.
+  - **Touches**: read-only — no source changes. Inspects `.minsky/experiment-store/cross-repo/*.jsonl` for spawn-failed records at 900s ±10ms.
+  - **Details**: 2026-05-23 — `watchdog-timeout-kills-productive-devin` (P0) closed without a code change because the 900s kill class was already resolved by `novel/cross-repo-runner/src/dynamic-timeouts.ts` (PR commit `2d2c15b`, 2026-05-18). The substrate uses `DEFAULT_WATCHDOG_MS = 20 * 60 * 1000` (20min) when iteration history is insufficient + p95×1.5 scaling clamped to [2min, 45min] with sufficient history. The 900s observation predates the substrate landing on the same day. To confirm the fix is fully effective: run the operator's daemon for ≥10 iterations producing `spawn-failed` verdicts; assert NONE of them have `durationMs === 900_000 ± 10ms` (the original kill signature). The substrate's env-override (`MINSKY_LIVE_SPAWN_TIMEOUT_MS`) should also be inspected for accidental 900000 values in launchd plists, bootstrap scripts, or operator shell rc (already grepped clean as of 2026-05-23 — no production references, only test fixtures).
+  - **Hypothesis**: post-substrate (PR commit `2d2c15b`), `spawn-failed` verdicts in `.minsky/experiment-store/cross-repo/*.jsonl` show ZERO records with `durationMs` in the range [899_990ms, 900_010ms]. Falsifiable: if any spawn-failed record across 10 consecutive iterations has durationMs ≈ 900_000ms, the substrate has a wiring gap that bypasses the dynamic settings (e.g., a different spawn path missed during the 2026-05-18 refactor).
+  - **Success**: `jq 'select(.verdict=="spawn-failed") | select(.durationMs >= 899990 and .durationMs <= 900010)' .minsky/experiment-store/cross-repo/*.jsonl | wc -l` returns 0 across ≥10 iterations on ≥3 hosts. Companion: `pnpm minsky watch` shows the dynamic watchdog value (computed from history) is logged per iteration banner.
+  - **Pivot**: if the measurement returns ≥1 hit (i.e., the 900s kill still occurs post-substrate), inspect the iteration's environment for `MINSKY_LIVE_SPAWN_TIMEOUT_MS=900000` accidentally set in a bootstrap script or launchd plist. If env is clean, the dynamic-timeouts wiring has a bypass — re-open the parent task as a code-level bug, identify the bypass path, and ship a fix.
+  - **Measurement**: `jq -r 'select(.verdict=="spawn-failed") | select(.durationMs >= 899990 and .durationMs <= 900010) | .ts' .minsky/experiment-store/cross-repo/*.jsonl | wc -l` returns 0; `grep -rE "MINSKY_LIVE_SPAWN_TIMEOUT_MS\s*=\s*['\"]?900_?000" ~/.minsky/ /Library/LaunchAgents/com.minsky*.plist 2>/dev/null | wc -l` returns 0 (no accidental hardcoded 900s overrides).
+  - **Anchor**: rule #11 (no flaky metric is load-bearing — watchdog timeout is load-bearing; this follow-up confirms the dynamic-substrate fix is non-flaky); rule #17 (proactive healing — runtime verification IS the close-out of the substrate fix); `novel/cross-repo-runner/src/dynamic-timeouts.ts` commit `2d2c15b` 2026-05-18 (the substrate this task verifies); the now-closed `watchdog-timeout-kills-productive-devin` parent task block in git history.
 
 - [ ] `wire-duplicate-detector-longitudinal-verification` — verify the wired-in `decideDuplicate` detector eliminates duplicate close-out PRs over 100 live daemon iterations
   - **ID**: wire-duplicate-detector-longitudinal-verification
