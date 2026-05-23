@@ -301,3 +301,63 @@ If you want to contribute and that fits, the entry path is `/next-task` against 
 ## License
 
 MIT. See [LICENSE](./LICENSE).
+
+---
+
+## Moved from README.md 2026-05-23
+
+The sections below were relocated from the top-level `README.md` to shrink its top-of-funnel surface (per P0 `readme-rewrite-5-min-install-guide`, sub-task `readme-move-deep-content-to-detailed-md`). Content is unchanged; only the location moved. The README now links here for readers who need the depth.
+
+### How it works
+
+1. Reads `TASKS.md` from your host repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
+2. Picks the highest-priority task that's ready to work on
+3. Spawns Devin, Claude, or a local AI model (configurable per machine)
+4. The agent implements the task on a feature branch and runs your tests
+5. Opens a draft pull request — with a self-graded report on whether the change moved the metric it predicted
+6. Records the iteration in `.minsky/experiment-store/` (so the next run can learn from it)
+7. Picks the next task. Repeats.
+
+> **Host** = the git repo Minsky operates on. See [docs/configuration.md](configuration.md) for how to select it and how multi-host mode walks N repos in round-robin.
+
+#### Architecture (30 seconds)
+
+```text
+minsky (bash CLI shim)
+  ↓
+cross-repo-runner (minsky-run.mjs) — walks hosts, picks tasks, spawns agents
+  ↓
+Devin / Claude / Aider — the actual AI agent (pluggable)
+  ↓
+.minsky/ sidecar — config, experiment store, iteration records
+```
+
+Six distinctive mechanisms:
+
+- **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`); multi-persona pipelines per task are an M2 milestone.
+- **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
+- **Constitution = 18 rules, each enforced as a CI lint** — rules #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing) are the load-bearing ones. `pnpm pre-pr-lint --stage=full` runs 53 deterministic checks; CI runs 65 jobs.
+- **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
+- **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration.
+- **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's [TASKS.md](../TASKS.md) were surfaced by daemon iterations.
+
+Deeper dive: [ARCHITECTURE.md](ARCHITECTURE.md), [vision.md § "Pattern conformance index"](../vision.md#pattern-conformance-index), [docs/PRACTICES.md](PRACTICES.md).
+
+### Minsky's position in the landscape
+
+Minsky is an **orchestrator**, not an agent. It sits ABOVE Claude / Devin / Aider — managing the daemon lifecycle, the MAPE-K loop, prompt evolution, the multi-repo task queue, supervisor restart discipline. The agents are its inputs. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it composes.
+
+A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchestrator layer. The scorecard at [novel/competitive-benchmark/README.md](../novel/competitive-benchmark/README.md) compares both axes: Minsky should beat other orchestrators on orchestrator metrics AND not regress vs the bare agent. For the moat view of the same substrate, see [vision.md § "What Minsky uniquely does"](../vision.md#what-minsky-uniquely-does-the-moat) and [`competitors/README.md`](../competitors/README.md).
+
+Not the only Minsky on the internet — there's also a popular economic-modelling tool ([`highperformancecoder/minsky`](https://github.com/highperformancecoder/minsky), named after the *economist* Hyman Minsky) plus several other unrelated projects. Full disambiguation table + the prior-art lineage that informs this Minsky's architecture: [docs/prior-art-and-name-collisions.md](prior-art-and-name-collisions.md).
+
+### Where to read next (full audience-segmented map)
+
+Full map: **[docs/README.md](README.md)**. Pick by audience:
+
+- **Newcomer** — [vision.md § "What Minsky is"](../vision.md#what-minsky-is) → [MILESTONES.md](../MILESTONES.md).
+- **Installing on your repo** — [INSTALL.md](../INSTALL.md).
+- **AI agent working on this codebase** — [AGENTS.md](../AGENTS.md) → [DEPRECATED.md](DEPRECATED.md) → [TASKS.md](../TASKS.md).
+- **Operator running Minsky in production** — [docs/edge-cases.md](edge-cases.md), [docs/auto-merge.md](auto-merge.md), [docs/local-llm-fallback.md](local-llm-fallback.md).
+- **Architecture deep-dive** — [ARCHITECTURE.md](ARCHITECTURE.md), [vision.md § "Pattern conformance index"](../vision.md#pattern-conformance-index), [docs/PRACTICES.md](PRACTICES.md).
+- **Contributing** — [CONTRIBUTING.md](../CONTRIBUTING.md). Code in this repo is AI-authored.
