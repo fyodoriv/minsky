@@ -1874,6 +1874,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
+- [ ] `vision-md-line-width-chunking` — chunk `vision.md` so no line exceeds 1000 chars; current state has 89 lines >1000 chars (max 14107) which crushes any context window that loads the file whole
+  - **ID**: vision-md-line-width-chunking
+  - **Tags**: p2, scout, docs, vision-md, line-width, context-window, rule-15
+  - **Hypothesis**: replacing the 89 ultra-wide single-paragraph constitutional clauses with paragraph-broken equivalents reduces total file size and lets agents load `vision.md` into a smaller context-window budget while preserving 100% of the content. Falsifiable: a diff that adds only paragraph breaks (no semantic edits) should round-trip through a markdown parser with identical AST nodes except for paragraph splits.
+  - **Success**: `awk '{ if(length > 1000) c++ } END { print c+0 }' vision.md` returns `0`; total byte size drops to ≤ 500 KB (currently 1.2 MB); a markdown parse comparison confirms semantic equivalence.
+  - **Pivot**: if breaking constitutional clauses into paragraphs accidentally changes their meaning (a clause cites a multi-sentence binding rule that must read as one unit), revert that specific clause and document why in `vision.md` near it. Never drop below ≥10 lines unchunked if all of them have semantic-unit reasons.
+  - **Measurement**: `awk '{ if(length > 1000) c++ } END { print c+0 }' vision.md` → 0; `wc -c vision.md` ≤ 524288.
+  - **Anchor**: scouted while landing `docs/acknowledge-canonical-doc-structure` PR (2026-05-23 canonicalize-docs sweep); rule #15 (milestone alignment gate — vision.md is one of the seven surfaces that must stay readable to enforce the gate).
+  - **Details**: `vision.md` is the project constitution and is intentionally long (~717 lines). Per the load-project-context rule shipped via agentbrew, agents should treat it as system-prompt-level context. However, 89 of those lines are single ultra-wide paragraphs (max 14107 chars on one line). Most modern markdown editors and agents wrap on prose; the absence of paragraph breaks is likely an artifact of editor settings rather than a deliberate constitutional choice. Action: walk the file from top to bottom; for each line >1000 chars, identify natural sentence/clause boundaries (after `.`, `;`, or section markers like `—`) and insert paragraph breaks. Do not change wording, citations, rule numbers, or pattern conformance assertions. Run a diff afterward to confirm only whitespace and paragraph-break additions.
+  - **Files**: `vision.md` (the only file modified); any test in `tests/specifications/` that asserts on `vision.md` line counts (none today, but check before committing).
+  - **Acceptance**: (a) `awk` returns 0 for lines >1000 chars; (b) `wc -c` ≤ 524288 bytes (≤512KB); (c) markdown structural diff (e.g. `pandoc -t json` round-trip) shows no semantic differences beyond paragraph splits; (d) all CI gates (`pnpm verify`, `pnpm check`) still pass; (e) no rule numbers / citations / pattern names change.
+
 - [ ] `milestone-alignment-wire-into-verify` — once aligned-count reaches ≥10/13, wire `pnpm milestone:check --strict --min-aligned=10` into `pnpm verify` so every PR re-checks the gate
   - **ID**: milestone-alignment-wire-into-verify
   - **Tags**: p2, operator-directive, milestone-m1, verify-pipeline, ci, rule-10, rule-15
