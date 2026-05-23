@@ -279,6 +279,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "tasks-lint",
       "test",
       "threat-model-section",
+      "cloud-agent-config-audit-matrix",
       "tick-loop-backoff-schedule",
       "typecheck",
       "user-story-security-section",
