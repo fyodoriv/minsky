@@ -213,26 +213,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: Krug *Don't Make Me Think* 2014; Nielsen *Homepage Usability* 2001.
   - **Decomposition 2026-05-23**: parent broken into 3 ship-independent sub-tasks. Parent stays open until all 3 ship + README is verified <3KB.
     - ✅ Sub-task 1 `readme-move-deep-content-to-detailed-md` shipped 2026-05-23 PR #751 (3 sections moved to `docs/README-v1-detailed.md`; H2 count 7→5; byte count 15585→11777).
-    - ✅ Sub-task 2 `readme-compress-comparison-table` shipped 2026-05-23 PR #752 (table 15→5 rows; full table + post-table content moved to `docs/competitive-comparison.md`; byte count 11777→5343).
-    - `readme-final-rewrite-hero-and-getting-started` (sub-task 3) — final pass: hero pitch + getting-started + safety in <30 lines total, brings the whole file under 3KB. ~60 LOC change.
-
-- [ ] `readme-final-rewrite-hero-and-getting-started` — final-pass rewrite of `README.md` hero, getting-started, and safety sections so the whole file is <3KB and a new visitor can install in <5 minutes
-  - **ID**: readme-final-rewrite-hero-and-getting-started
-  - **Tags**: p0, milestone-m1, docs, ux, sub-task-of-readme-rewrite-5-min-install-guide, observed-2026-05-23
-  - **Milestone**: M1
-  - **Parent**: readme-rewrite-5-min-install-guide
-  - **Competitive-goal**: closes the parent P0's 3KB target. Without this slice the README sits at ~5KB (post sub-tasks 1+2). The parent task's hypothesis ("collapses install from 10+ min to ≤60s") needs the hero pitch + one-command install + brief safety claims to fit on the first screen — which they don't at 5KB.
-  - **Surfaced-by**: 2026-05-23 parent task decomposition (PR #750). Per task-slice 3 of 3 for `readme-rewrite-5-min-install-guide`.
-  - **Hypothesis**: a 60-line README (hero + getting-started + 5-row comparison + safety + links) is <3KB and matches the Aider / OpenHands quickstart shape. The 30-second pitch + 2 install paths (agent-mediated + manual) fit on the first screen of a 1080p display.
-  - **Success**: (1) `wc -c README.md` ≤ 3000. (2) `wc -l README.md` ≤ 60. (3) README contains: 30-second pitch (≤3 lines), Getting started with agent-mediated prompt + manual one-liner (≤8 lines), 5-row comparison table (≤10 lines), Safety claims (≤6 lines), Where-to-read-next (≤4 lines), License (≤1 line). (4) The parent P0 `readme-rewrite-5-min-install-guide` closes after this sub-task ships AND a manual user-test confirms install-from-README-only works in <5 minutes for at least one new operator (operator-side gate).
-  - **Pivot**: if <3KB is too aggressive after this slice ships, accept the parent task's documented pivot — target <5KB with collapsible `<details>` sections for the comparison table and safety bullets. Threshold: if 60-line / <3KB version omits something the operator considers load-bearing, expand to 80 lines / <4KB with collapsibles.
-  - **Measurement**: `wc -c README.md` ≤ 3000 AND `wc -l README.md` ≤ 60.
-  - **Anchor**: Krug 2014 (parent's anchor — "obviousness" on the homepage). Spool, J. *Web Site Usability* (Morgan Kaufmann 1999) — 5-minute completion target for first-task usability is the industry-standard onboarding metric.
-  - **Details**: Rewrite the remaining sections after sub-tasks 1+2 ship: (a) **Hero**: 1 H1 + 1-line tagline + 2 badges. (b) **30-second pitch**: 3-line paragraph naming what Minsky does + for whom (rule #1 anchor — don't reinvent the badge convention or pitch shape). (c) **Getting started**: agent-mediated prompt block (copy-paste) + manual git-clone+pnpm-install one-liner. (d) **Comparison**: the 5-row table from sub-task 2. (e) **Safety**: ≤6 bullets, mechanically-enforced claims only (no "tries to" framing). (f) **Where to read next**: 4-line audience-segmented link list pointing at docs/README.md as the full map. (g) **License**: 1 line. Aim for visible-on-one-screen at 1080p.
-  - **Files**: `README.md` (rewritten).
-  - **Touches**: `README.md`.
-  - **Acceptance**: (1)-(4) of Success above. (5) `pnpm pre-pr-lint --stage=fast` passes. (6) The agent-mediated install prompt (copy-paste block) in the new README is byte-identical to the one in `INSTALL.md` (no drift between the two surfaces).
-  - **Risk**: medium. (a) Information density — fitting all of (a)-(g) in <3KB requires careful word choice. Mitigation: time-bound the slice; if the rewrite drafts exceed 3KB after 1 hour of cuts, accept the pivot to <5KB with collapsibles. (b) Operator preference drift — some operators may prefer the longer "this is exactly what we are" framing. Mitigation: the longer version stays available at `docs/README-v1-detailed.md`.
+    - ✅ Sub-task 2 `readme-compress-comparison-table` shipped 2026-05-23 PR #752 (table 15→5 rows; byte count 11777→5343).
+    - ✅ Sub-task 3 `readme-final-rewrite-hero-and-getting-started` shipped 2026-05-23 PR #753 (hero + Why Minsky tightened to 3 bullets + Safety to 1 line + picker prose compressed; byte count 5343→2910).
+  - **Status 2026-05-23**: parent's <3KB target met (2910 bytes / 44 lines / 5 H2). Remaining gate per Success criterion: operator-side user-test ("3 developers who've never seen minsky can install and run it following only the README in <5 min"). Task stays open until that gate closes; demoted to P1 since no further code-side work is needed.
 
 - [ ] `minsky-remote-task-submission` — findings from any machine running minsky can be submitted as tasks to the minsky repo itself (with user approval + anonymized data preview)
   - **ID**: minsky-remote-task-submission
