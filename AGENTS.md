@@ -14,7 +14,7 @@ If you're an agent reading this for the first time, read in this order: `MILESTO
 
 - **Not the constitution** — see [vision.md](./vision.md) for the 17 non-negotiable rules. This file references them but doesn't redefine them.
 - **Not the architecture doc** — see [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the layered model, adapter pattern, and dependency table.
-- **Not the install guide** — see [INSTALL.md](./docs/INSTALL.md) for first-time setup of a freshly-cloned host.
+- **Not the install guide** — see [INSTALL.md](./INSTALL.md) for first-time setup of a freshly-cloned host.
 - **Not a task list** — see [TASKS.md](./TASKS.md) for active work.
 
 The `## Orchestrator discipline` and `### 15. Milestone alignment gate` sections below are **load-bearing** — they are cited by deterministic CI gates (`scripts/check-pr-self-grade.mjs`, `scripts/check-rule-6-let-it-crash.mjs`) and by `CHANGELOG.md`. Do not rename or renumber them.
