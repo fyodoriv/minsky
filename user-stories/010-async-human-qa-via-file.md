@@ -1,5 +1,7 @@
 # Story 010 — Async human↔agent Q&A via `.minsky/qa-log.md`
 
+**Milestone(s)**: M1.6
+
 > **Why this story exists.** Motivation bullet #7 in [README.md § "Why Minsky?"](../README.md#why-minsky): *"'let me know if you have questions' is a useless contract with an agent in another timezone"*. The operator-facing promise: agents drop questions into `.minsky/qa-log.md`, humans answer by editing the file, the agent picks up the answer via `fs.watch` and continues. No sync meeting, no 4-hour-blocked iteration, no daily DMs.
 
 ## Story

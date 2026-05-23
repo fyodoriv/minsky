@@ -1,5 +1,7 @@
 # Story 011 — Every stub, mock, and deprecation is marked at the point of definition
 
+**Milestone(s)**: M1.6
+
 > **Why this story exists.** Agents iterating on the codebase write stubs all the time — "couldn't connect to the real adapter yet, return a hardcoded user, ship the surrounding work". Without a discipline, the stub becomes load-bearing: a later agent reads it as production, builds on top, ships broken behaviour to operators. This story makes the marker convention mechanical: every stub carries a `// FAKE: …` comment with the closing task id, every `@deprecated` export carries a `// DEPRECATED: …` comment with the replacement, and a CI linter rejects any new stub-shaped pattern in `novel/*` without the marker.
 
 ## Story

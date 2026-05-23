@@ -1,5 +1,7 @@
 # Story 003 — MAPE-K loop improves persona prompts measurably
 
+**Milestone(s)**: M1.7
+
 ## Story
 
 Over the first month, I notice the QA persona's pass rate is around 62% — too low. I do nothing. Two weeks later, the MAPE-K loop (the *autonomic manager*; see [vision.md § Glossary](../vision.md#glossary--every-term-has-a-cs-anchor)) has identified the bottleneck, generated three prompt variants, run an A/B test with measurable metric (tasks closed without rollback), kept the winner, and now the QA persona's pass rate is 81%. I see the change in `constraints.md`, the audit trail in git log, and a notification on my Watch when the rollout completed.
