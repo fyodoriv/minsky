@@ -201,16 +201,76 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `readme-rewrite-5-min-install-guide` — rewrite README.md to be readable in <5 min with clear install, run, benefits, and honest competitive comparison
   - **ID**: readme-rewrite-5-min-install-guide
-  - **Tags**: p0, milestone-m1, docs, ux, growth
+  - **Tags**: p0, milestone-m1, docs, ux, growth, decomposed-2026-05-23
   - **Milestone**: M1
-  - **Competitive-goal**: README is the top-of-funnel conversion surface. Current README is 23KB (~15 min read). Competitors: Devin has a polished marketing page; OpenHands has a clean 2-min quickstart; Aider has a focused CLI-first README. Minsky's README must be shorter, clearer, and more honest.
+  - **Competitive-goal**: README is the top-of-funnel conversion surface. Current README is 15KB (down from 23KB at task-filing time — partial progress via 2026-05-22 deep-dive PRs). Competitors: Devin has a polished marketing page; OpenHands has a clean 2-min quickstart; Aider has a focused CLI-first README. Minsky's README must be shorter, clearer, and more honest.
   - **Details**: rewrite to: (a) 30-second pitch (what + for whom); (b) one-command install; (c) one-command run with expected output; (d) what happens during a default 8h session; (e) honest competitive comparison table (minsky vs Devin vs OpenHands vs SWE-agent vs Aider — strengths AND weaknesses of each); (f) link to MILESTONES.md for the roadmap; (g) link to detailed docs for power users. Target: <3KB, <5 min reading time. Move the current README content to `docs/detailed-architecture.md` or similar.
-  - **Files**: `README.md` (rewrite), `docs/detailed-readme.md` (new — current README content preserved)
+  - **Files**: `README.md` (rewrite), `docs/README-v1-detailed.md` (exists; receives moved content)
   - **Hypothesis**: current README causes >50% of new visitors to bounce before reaching quickstart. A <5 min README with honest competitive comparison will increase clone-to-first-run conversion.
   - **Success**: 3 developers who've never seen minsky can install and run it following only the README in <5 min; README is <3KB.
   - **Pivot**: if <3KB is too aggressive, target <5KB with collapsible sections for details.
   - **Measurement**: word count + reading time estimate; user test timing.
   - **Anchor**: Krug *Don't Make Me Think* 2014; Nielsen *Homepage Usability* 2001.
+  - **Decomposition 2026-05-23**: parent broken into 3 ship-independent sub-tasks. Parent stays open until all 3 ship + README is verified <3KB.
+    - `readme-move-deep-content-to-detailed-md` (sub-task 1) — relocate "How it works" + "Minsky's position in the landscape" + "Where to read next" sections to `docs/README-v1-detailed.md`. Lowest-risk move first. ~150 LOC moved.
+    - `readme-compress-comparison-table` (sub-task 2) — shrink the 5-column competitor table from 13 rows to ≤5 of the highest-differentiation rows; move the long-form table to `docs/competitive-comparison.md`. ~80 LOC change.
+    - `readme-final-rewrite-hero-and-getting-started` (sub-task 3) — final pass: hero pitch + getting-started + safety in <30 lines total, brings the whole file under 3KB. ~60 LOC change.
+
+- [ ] `readme-move-deep-content-to-detailed-md` — relocate the "How it works" + "Minsky's position in the landscape" + "Where to read next" sections out of `README.md` into `docs/README-v1-detailed.md` so they don't compete with the agent-mediated install path for top-of-funnel real estate
+  - **ID**: readme-move-deep-content-to-detailed-md
+  - **Tags**: p0, milestone-m1, docs, ux, sub-task-of-readme-rewrite-5-min-install-guide, observed-2026-05-23
+  - **Milestone**: M1
+  - **Parent**: readme-rewrite-5-min-install-guide
+  - **Competitive-goal**: each line removed from README's top-of-funnel surface is a line that doesn't compete with the agent-mediated-install prompt for a new visitor's attention. OpenHands' README has a 2-minute quickstart; Aider's README is hero + 1 command + comparison. Minsky's current 158-line README has 95+ lines of architecture / how-it-works / position-in-landscape material that belongs in detailed docs, not at the top of the funnel.
+  - **Surfaced-by**: 2026-05-23 parent task decomposition (PR #750). The current README has 7 H2 sections totalling 15KB. The 3 sections targeted here (`## How it works`, `## Minsky's position in the landscape`, `## Where to read next`) are reference material a first-time visitor doesn't need before deciding whether to install.
+  - **Hypothesis**: moving these 3 sections to `docs/README-v1-detailed.md` (which already exists, 24KB) reduces README to ~3.5KB and ~80 lines while preserving every link the moved content carried. The README stays a complete onboarding doc because the post-install "where to read next" path is already covered by `docs/README.md` (the docs map) which the slim README links to.
+  - **Success**: (1) `wc -c README.md` returns ≤5500 (≤5.5KB — interim threshold; the <3KB final target is closed by sub-tasks 2+3). (2) `grep -c '^## ' README.md` returns ≤5 (down from 8). (3) Every link in the moved sections still resolves (no broken `./vision.md#xxx` style anchors). (4) `docs/README-v1-detailed.md` receives the moved sections at the end with a "Moved from README 2026-05-23" provenance heading. (5) Internal cross-refs from other docs pointing at the moved sections (e.g., `[How it works](./README.md#how-it-works)`) get updated.
+  - **Pivot**: if the comparison table + safety section together are already >3.5KB (and thus this sub-task can't get under 5.5KB without touching them), pivot to ALSO moving the safety section to `docs/security/safety-rules.md` in the same PR. Threshold: if `wc -c` after the planned moves still exceeds 6KB, expand scope to include safety.
+  - **Measurement**: `wc -c README.md` ≤ 5500 AND `grep -c '^## ' README.md` ≤ 5 AND `node scripts/lint-md-diff.mjs` is clean.
+  - **Anchor**: Krug, S. *Don't Make Me Think Revisited* (New Riders 2014) — "obviousness" depends on what's NOT on the page as much as what is; reference material on the homepage hurts conversion. Nielsen 2001 *Homepage Usability* (same anchor as parent).
+  - **Details**: Move 3 sections from `README.md` to `docs/README-v1-detailed.md`: (a) `## How it works` (8 numbered steps + 30-second architecture diagram). (b) `## Minsky's position in the landscape` (paragraph + claim list). (c) `## Where to read next` (audience-segmented link list). Replace each in README with a 1-line cross-ref pointer (`See [docs/README-v1-detailed.md § How it works](docs/README-v1-detailed.md#how-it-works)`). At the receiving end, append the 3 sections under a new `## Moved from README.md 2026-05-23` heading. Grep for the 3 section IDs across `docs/`, `vision.md`, `AGENTS.md` and update any anchors that reference them.
+  - **Files**: `README.md` (3 sections removed + 3 pointer lines added), `docs/README-v1-detailed.md` (3 sections appended).
+  - **Touches**: `README.md`, `docs/README-v1-detailed.md`, possibly any `*.md` with anchor links to the moved sections.
+  - **Acceptance**: (1)-(5) of Success above. (6) `pnpm pre-pr-lint --stage=fast` passes (no markdownlint regressions). (7) The cross-ref pointers in README use the canonical `docs/README-v1-detailed.md` path, not absolute URLs.
+  - **Risk**: low. Pure content relocation. No new code, no API changes. Risk class is broken-link drift — mitigated by grep-then-fix in the same PR.
+
+- [ ] `readme-compress-comparison-table` — shrink the 5-column / 13-row competitor table in `README.md` § "How Minsky compares to other tools" to ≤5 high-differentiation rows + move the long-form table to `docs/competitive-comparison.md`
+  - **ID**: readme-compress-comparison-table
+  - **Tags**: p0, milestone-m1, docs, ux, sub-task-of-readme-rewrite-5-min-install-guide, observed-2026-05-23
+  - **Milestone**: M1
+  - **Parent**: readme-rewrite-5-min-install-guide
+  - **Blocked by**: readme-move-deep-content-to-detailed-md
+  - **Competitive-goal**: the comparison table is currently 13 rows × 5 competitors = 65 cells, ~3KB of README weight. A new visitor needs the 5 differentiation-load-bearing rows (Shape, 24/7 unattended, Cross-repo fleet, Constitutional rules / CI, Headline benchmark). The other 8 rows (Where it runs, Credentials, Coding-specific, Self-improvement, Operator queue, Live dashboard, Backend choice, Enterprise distribution) move to `docs/competitive-comparison.md` for readers who care about depth.
+  - **Surfaced-by**: 2026-05-23 parent task decomposition (PR #750). Per task-slice 2 of 3 for `readme-rewrite-5-min-install-guide`.
+  - **Hypothesis**: a 5-row comparison table (vs 13 rows) reduces README cognitive load by ~62% on this section while preserving the 5 differentiations operators actually weigh on (per `competitors/README.md` § Honest gaps + the per-competitor "why Minsky over X" framings). The full table stays available one click away at `docs/competitive-comparison.md`.
+  - **Success**: (1) `README.md` § "How Minsky compares to other tools" table has ≤5 rows. (2) `docs/competitive-comparison.md` exists and contains the full 13-row table. (3) The 5 rows that stay in README are: Shape, 24/7 unattended, Cross-repo fleet, Constitutional rules / CI, Headline benchmark (the 5 highest-differentiation rows per `competitors/README.md`). (4) `wc -c README.md` decreases by ≥1500 bytes from sub-task 1's interim state.
+  - **Pivot**: if 5 rows is too few to communicate Minsky's positioning (operator feedback "table doesn't show enough differentiation"), expand to 7 rows but DON'T regress past 10 — anything beyond 10 belongs in the docs version.
+  - **Measurement**: `awk '/^## How Minsky compares/,/^## /' README.md | grep -c "^| " - 2` returns ≤5 (≤5 data rows after header + separator); AND `[ -f docs/competitive-comparison.md ]`.
+  - **Anchor**: Few, S. *Information Dashboard Design* (O'Reilly 2006) — table size correlates inversely with pattern-recognition speed. Krug 2014 (parent's anchor) — "obviousness".
+  - **Details**: (a) Identify the 5 highest-differentiation rows by cross-referencing `competitors/README.md` § Honest gaps and the per-competitor "why Minsky over X" sections. (b) Move the full 13-row table to a new `docs/competitive-comparison.md` with a "Last updated" date header. (c) Replace the README table with the 5-row version + a "See full comparison at [docs/competitive-comparison.md](docs/competitive-comparison.md)" pointer. (d) Update the README's prose framing (the paragraph below the table) to match the slimmer view.
+  - **Files**: `README.md` (table slimmed), `docs/competitive-comparison.md` (new).
+  - **Touches**: `README.md`, `docs/competitive-comparison.md`, possibly `docs/README.md` (docs map gets a new entry).
+  - **Acceptance**: (1)-(4) of Success above. (5) The full 13-row table at `docs/competitive-comparison.md` carries a "Last updated 2026-05-23" date header so future audits can detect staleness. (6) The 5 rows in README cite the same status emojis (✅ / 🟡 / 🔴) as the docs/ version so they don't drift.
+  - **Risk**: low-medium. Content selection risk (picking the wrong 5 rows). Mitigated by sourcing the 5 from existing `competitors/README.md` § Honest gaps — the file the operator already maintains as the canonical "what's differentiated" list.
+
+- [ ] `readme-final-rewrite-hero-and-getting-started` — final-pass rewrite of `README.md` hero, getting-started, and safety sections so the whole file is <3KB and a new visitor can install in <5 minutes
+  - **ID**: readme-final-rewrite-hero-and-getting-started
+  - **Tags**: p0, milestone-m1, docs, ux, sub-task-of-readme-rewrite-5-min-install-guide, observed-2026-05-23
+  - **Milestone**: M1
+  - **Parent**: readme-rewrite-5-min-install-guide
+  - **Blocked by**: readme-compress-comparison-table
+  - **Competitive-goal**: closes the parent P0's 3KB target. Without this slice the README sits at ~5KB (post sub-tasks 1+2). The parent task's hypothesis ("collapses install from 10+ min to ≤60s") needs the hero pitch + one-command install + brief safety claims to fit on the first screen — which they don't at 5KB.
+  - **Surfaced-by**: 2026-05-23 parent task decomposition (PR #750). Per task-slice 3 of 3 for `readme-rewrite-5-min-install-guide`.
+  - **Hypothesis**: a 60-line README (hero + getting-started + 5-row comparison + safety + links) is <3KB and matches the Aider / OpenHands quickstart shape. The 30-second pitch + 2 install paths (agent-mediated + manual) fit on the first screen of a 1080p display.
+  - **Success**: (1) `wc -c README.md` ≤ 3000. (2) `wc -l README.md` ≤ 60. (3) README contains: 30-second pitch (≤3 lines), Getting started with agent-mediated prompt + manual one-liner (≤8 lines), 5-row comparison table (≤10 lines), Safety claims (≤6 lines), Where-to-read-next (≤4 lines), License (≤1 line). (4) The parent P0 `readme-rewrite-5-min-install-guide` closes after this sub-task ships AND a manual user-test confirms install-from-README-only works in <5 minutes for at least one new operator (operator-side gate).
+  - **Pivot**: if <3KB is too aggressive after this slice ships, accept the parent task's documented pivot — target <5KB with collapsible `<details>` sections for the comparison table and safety bullets. Threshold: if 60-line / <3KB version omits something the operator considers load-bearing, expand to 80 lines / <4KB with collapsibles.
+  - **Measurement**: `wc -c README.md` ≤ 3000 AND `wc -l README.md` ≤ 60.
+  - **Anchor**: Krug 2014 (parent's anchor — "obviousness" on the homepage). Spool, J. *Web Site Usability* (Morgan Kaufmann 1999) — 5-minute completion target for first-task usability is the industry-standard onboarding metric.
+  - **Details**: Rewrite the remaining sections after sub-tasks 1+2 ship: (a) **Hero**: 1 H1 + 1-line tagline + 2 badges. (b) **30-second pitch**: 3-line paragraph naming what Minsky does + for whom (rule #1 anchor — don't reinvent the badge convention or pitch shape). (c) **Getting started**: agent-mediated prompt block (copy-paste) + manual git-clone+pnpm-install one-liner. (d) **Comparison**: the 5-row table from sub-task 2. (e) **Safety**: ≤6 bullets, mechanically-enforced claims only (no "tries to" framing). (f) **Where to read next**: 4-line audience-segmented link list pointing at docs/README.md as the full map. (g) **License**: 1 line. Aim for visible-on-one-screen at 1080p.
+  - **Files**: `README.md` (rewritten).
+  - **Touches**: `README.md`.
+  - **Acceptance**: (1)-(4) of Success above. (5) `pnpm pre-pr-lint --stage=fast` passes. (6) The agent-mediated install prompt (copy-paste block) in the new README is byte-identical to the one in `INSTALL.md` (no drift between the two surfaces).
+  - **Risk**: medium. (a) Information density — fitting all of (a)-(g) in <3KB requires careful word choice. Mitigation: time-bound the slice; if the rewrite drafts exceed 3KB after 1 hour of cuts, accept the pivot to <5KB with collapsibles. (b) Operator preference drift — some operators may prefer the longer "this is exactly what we are" framing. Mitigation: the longer version stays available at `docs/README-v1-detailed.md`.
 
 - [ ] `minsky-remote-task-submission` — findings from any machine running minsky can be submitted as tasks to the minsky repo itself (with user approval + anonymized data preview)
   - **ID**: minsky-remote-task-submission
