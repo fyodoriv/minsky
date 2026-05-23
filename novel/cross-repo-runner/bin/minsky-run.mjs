@@ -31,7 +31,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { ProcessSpawnStrategy, globMatchesPath } from "@minsky/tick-loop";
+import {
+  ProcessSpawnStrategy,
+  decideDuplicate,
+  globMatchesPath,
+  parseGhPrListForDuplicateDetection,
+} from "@minsky/tick-loop";
 
 import { computeDynamicSettings, parseTimingsFromJsonl } from "../dist/dynamic-timeouts.js";
 import {
@@ -502,6 +507,77 @@ function listOpenPrBranches(hostRepo, hostRoot) {
     // an empty set so the loop continues with the legacy behaviour.
     return new Set();
   }
+}
+
+/**
+ * I/O wrapper that feeds `parseGhPrListForDuplicateDetection` +
+ * `decideDuplicate` (the pure functions from `@minsky/tick-loop`,
+ * shipped via PR #309's `daemon-duplicate-work-detection` substrate).
+ *
+ * Catches the daemon-authored-close-out-PR class that `listOpenPrBranches`
+ * misses: when the daemon opens 4 unique-branch-name close-out PRs for
+ * the same `<task-id>` (observed 2026-05-19 for `daemon-survives-machine-restart`:
+ * PRs #647, #649, #655, #656), the existing branch-prefix dedup never
+ * matches because each branch name has a different timestamp suffix.
+ * The pure detector matches by task-id-in-title instead, which the
+ * daemon's commit convention reliably emits.
+ *
+ * Source: `wire-duplicate-pr-detector-into-cross-repo-runner` (P0).
+ *
+ * Returns `undefined` on any failure (gh missing, repo unreachable,
+ * malformed JSON) so the caller degrades to the legacy behaviour
+ * instead of halting the loop. Same shape as `listOpenPrBranches`'s
+ * empty-set fallback.
+ */
+function listAllPrsForTaskId(hostRepo, hostRoot, taskId) {
+  try {
+    const out = execFileSync(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--repo",
+        hostRepo,
+        "--search",
+        `${taskId} in:title`,
+        "--state",
+        "all",
+        "--json",
+        "number,title,state,closedAt",
+        "--limit",
+        "50",
+      ],
+      { encoding: "utf8", env: ghEnvForHost(hostRoot) },
+    );
+    return parseGhPrListForDuplicateDetection(out);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Helper around `decideDuplicate` for the pickTask callback. Emits the
+ * skip log message + returns true if the task should be skipped this
+ * iteration, false to proceed. Extracted out of the pickTask seam so
+ * the seam stays inside the biome cognitive-complexity budget (≤10).
+ */
+function isDuplicatePrForTask(hostRepo, hostRoot, taskId) {
+  const prs = listAllPrsForTaskId(hostRepo, hostRoot, taskId);
+  if (prs === undefined) return false;
+  const verdict = decideDuplicate({ taskId, prs });
+  if (verdict.kind === "open") {
+    process.stdout.write(
+      `↩ skipping ${taskId}: PR #${verdict.prNumber} already open (decideDuplicate)\n`,
+    );
+    return true;
+  }
+  if (verdict.kind === "merged-recent") {
+    process.stdout.write(
+      `↩ skipping ${taskId}: PR #${verdict.prNumber} merged ${verdict.daysAgo.toFixed(1)}d ago (decideDuplicate)\n`,
+    );
+    return true;
+  }
+  return false;
 }
 
 function writeIterationRecord(hostRoot, record) {
@@ -996,6 +1072,18 @@ async function runLoopAsResult(parsed, controller) {
         skipTaskIds: pickOpts?.skipTaskIds,
       });
       if (task === null) return null;
+      // Defence-in-depth duplicate-PR detection via `isDuplicatePrForTask`
+      // — wraps `decideDuplicate` from `@minsky/tick-loop` (PR #309's
+      // pure substrate). Catches the daemon-authored close-out class
+      // that `listOpenPrBranches` misses (timestamp-suffixed unique
+      // branch names; observed 2026-05-19 on `daemon-survives-machine-
+      // restart` — PRs #647/#649/#655/#656). Gated on `live` mode the
+      // same way `listOpenPrBranches` is, so dry-run tests don't hit
+      // the network (rule-#17 fix from PR #648). Source:
+      // `wire-duplicate-pr-detector-into-cross-repo-runner` (P0).
+      if (live && isDuplicatePrForTask(config.host_repo, hostRoot, task.id)) {
+        return null;
+      }
       const synth = synthesiseExperimentYaml(task, { hostRepo: config.host_repo });
       if (!synth.ok) {
         reportRule9Violation(task.id, synth.missingFields);
