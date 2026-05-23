@@ -99,7 +99,9 @@ import {
   // probes the running environment at startup; log-line formatter renders
   // the chosen capability tier into a single greppable line for daemon.log
   // / tick-loop.out.log. Slice 2 does NOT branch on the tier — selection
-  // policy and real backends land in later slices.
+  // policy and real backends land in later slices. Slice 2.5 promotes the
+  // tier from `native-subagents` to `native-agent-teams` when the version
+  // + env-flag allow it, via the bounded async `probeClaudeVersion` probe.
   detectAgentTeamsSupport,
   detectCtoAuditEnvDrift,
   detectOsThrottles,
@@ -114,6 +116,7 @@ import {
   parseWorkerArgs,
   pickStrategicModel,
   predictExhaustionMs,
+  probeClaudeVersion,
   resolvePrePrStage,
   // Slice 3 of `runany-dynamic-model-or-local-fallback` — the unified
   // pin>dynamic>local decider, wired into the run-anywhere entrypoint
@@ -257,20 +260,31 @@ if (spawnDecision.count > 0) {
 
 console.error(workerStartupLine(workerConfig));
 
-// Slice 2 of `native-agent-teams-with-tiered-adapter`: log the
+// Slice 2 + 2.5 of `native-agent-teams-with-tiered-adapter`: log the
 // detected agent-team capability tier so it shows up in `daemon.log` /
 // `tick-loop.out.log`. The bin reads `MINSKY_CLOUD_AGENT` (the running
 // agent identity — set per-machine in `~/.zshrc.ai-tools`) and the live
-// env; we deliberately do NOT probe `claude --version` here (sync I/O
-// at boot is a let-it-crash hazard — the version probe lands in a
-// later slice). With `claudeVersion: null`, the detector falls back to
-// `native-subagents` for Claude Code and `process-fan-out` for non-
-// native agents, both of which are the safe defaults today. Selection
-// policy and real backends land in later slices; this slice only
-// connects slice 1's detector to operator-visible output.
+// env. Slice 2.5 adds the bounded async `claude --version` probe so the
+// tier can promote from `native-subagents` to `native-agent-teams`; the
+// probe is fail-soft (every failure path returns null per rule #6), so
+// a missing / slow / broken `claude` binary degrades cleanly to today's
+// slice-2 baseline without crashing the supervisor. Selection policy
+// and real backends land in later slices; this slice only connects
+// slice 1's detector to operator-visible output.
+const tierProbeExec = (() => {
+  const execFile = promisify(execFileCb);
+  return async (file, args, opts) => {
+    const { stdout } = await execFile(file, [...args], {
+      encoding: "utf-8",
+      ...opts,
+    });
+    return { stdout };
+  };
+})();
+const claudeVersion = await probeClaudeVersion({ exec: tierProbeExec });
 const tierDecision = detectAgentTeamsSupport({
   agent: (process.env.MINSKY_CLOUD_AGENT ?? "").trim().toLowerCase() || null,
-  claudeVersion: null,
+  claudeVersion,
   env: process.env,
 });
 console.error(formatTierLogLine(tierDecision));

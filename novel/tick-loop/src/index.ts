@@ -399,6 +399,19 @@ export {
 // land in later slices.
 export { TIER_LOG_PREFIX, formatTierLogLine } from "./log-detected-tier.js";
 
+// Slice 2.5 of `native-agent-teams-with-tiered-adapter` — bounded async
+// probe of `claude --version` so the tier resolver can promote from
+// `native-subagents` to `native-agent-teams` when the version + env flag
+// allow it. Every failure path returns `null` (rule #6) so a missing or
+// slow `claude` binary degrades gracefully to the slice-2 default.
+export {
+  DEFAULT_CLAUDE_BIN,
+  DEFAULT_PROBE_TIMEOUT_MS,
+  type ProbeClaudeVersionInput,
+  type VersionProbeExec,
+  probeClaudeVersion,
+} from "./probe-claude-version.js";
+
 // Sub-task of `daily-changelog-for-humans` — expose the changelog-runner
 // primitives so the CLI (`bin/tick-loop.mjs`) can wire the seam without
 // reaching past `dist/`. Mirrors the post-task-cto-audit re-export block.
