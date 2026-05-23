@@ -30,6 +30,7 @@ const baseTask: ParsedTask = {
   pivot: "< 5 percent",
   measurement: "yarn vitest run plugins/iep-ai-native",
   anchor: "rule #9; vision.md § 9",
+  blocked: null,
 };
 
 describe("buildSpawnPlan", () => {
@@ -204,6 +205,7 @@ describe("buildSpawnPlan", () => {
       pivot: null,
       measurement: null,
       anchor: null,
+      blocked: null,
     };
     const plan = buildSpawnPlan({
       hostRoot: "/host",
