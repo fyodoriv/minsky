@@ -16,6 +16,7 @@ const completeTask: ParsedTask = {
   pivot: "< 5 percent",
   measurement: "test -f /tmp/foo && grep -q bar",
   anchor: "rule #9 (vision.md § 9 — pre-registration)",
+  blocked: null,
 };
 
 describe("synthesiseExperimentYaml — happy path", () => {
