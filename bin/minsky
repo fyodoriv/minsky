@@ -50,7 +50,12 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # ── Daemon paths ──────────────────────────────────────────────
-MINSKY_STATE_DIR="${HOME}/.minsky"
+# `MINSKY_STATE_DIR` is env-override-friendly so integration tests can
+# isolate the fixture against a tmpdir without clobbering the operator's
+# real `~/.minsky/`. The default still resolves to `${HOME}/.minsky`
+# for operator-facing invocations. Same pattern as `MINSKY_INSTALL_
+# DAEMON_QUIET:-0` and other opt-out env vars in this script.
+MINSKY_STATE_DIR="${MINSKY_STATE_DIR:-${HOME}/.minsky}"
 MINSKY_DAEMON_LOG="${MINSKY_STATE_DIR}/daemon.log"
 MINSKY_DAEMON_PID="${MINSKY_STATE_DIR}/daemon.pid"
 
@@ -367,40 +372,79 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
     exit 0
     ;;
   uninstall)
-    # `minsky uninstall [--force]` — remove all per-machine state.
+    # `minsky uninstall [--force]` — remove all per-machine state in
+    # ONE command (rule #16 default by default — the single-command
+    # path is the obvious default, not the previous two-step
+    # dry-run + --force flow that surprised operators into walking
+    # away thinking they'd uninstalled when they hadn't).
     #
-    # Behavior:
-    #   - default (no flags): DRY-RUN. Prints what would be removed
-    #     and exits 0. Operator must add --force to actually delete.
-    #     This is rule #6 (stay alive — never destroy state without
-    #     explicit confirmation).
-    #   - --force: stops the daemon, uninstalls launchd plist, removes
-    #     ~/.minsky/ entirely (config, logs, PID file, daemon state).
-    #     Does NOT touch the host repo or any experiment-store data
-    #     inside it — those are the operator's data.
+    # Behavior (post-2026-05-23):
+    #   - TTY, no --force: prints preview, prompts `Type YES to proceed`.
+    #     On exactly-`YES` (not `y` / `yes` / Enter) → executes ALL
+    #     steps in one invocation. On anything else → aborts cleanly.
+    #   - non-TTY, no --force (e.g., piped, CI, MINSKY_NON_INTERACTIVE=1):
+    #     exits 2 with `error: non-interactive — use --force`. Preserves
+    #     the safety net for scripts that pipe stdin to the command.
+    #   - --force: skips the prompt, executes ALL steps. Back-compat for
+    #     existing scripts that rely on the force path.
+    #
+    # Execute = stop daemon (if running) → uninstall-daemon → rm -rf
+    # ~/.minsky/. Does NOT touch host repo's `.minsky/` experiment-store
+    # (operator data, preserved by design).
     #
     # Distinct from `uninstall-daemon` which only removes the launchd
     # plist (preserves config + logs). `uninstall` is the full reset.
     #
-    # Source: M1 milestone exit criterion §12 (clean uninstall).
+    # Source: M1 milestone exit criterion §12 (clean uninstall); rule
+    # #16 (default by default — operator directive 2026-05-20 "to
+    # uninstall you need to just run minsky uninstall and it will do
+    # every single needed step including stopping (after confirmation)");
+    # `minsky-uninstall-one-command-with-stop` (P0, this PR).
     _force=0
     for _a in "$@"; do
       [ "$_a" = "--force" ] && _force=1
     done
-    if [ "$_force" = "0" ]; then
-      echo "minsky uninstall (dry-run) — would remove:"
-      [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ] && \
-        echo "  - launchd plist: $HOME/Library/LaunchAgents/com.minsky.daemon.plist"
-      [ -d "$MINSKY_STATE_DIR" ] && echo "  - state dir:     $MINSKY_STATE_DIR"
-      if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
-        echo "  - running daemon (PID $(pgrep -f cross-repo-runner/bin/minsky-run | head -1))"
-      fi
-      echo ""
-      echo "Re-run with --force to actually uninstall:"
-      echo "  minsky uninstall --force"
-      exit 0
+    # Compose the preview text once — used by both the interactive
+    # prompt and the non-TTY rejection's body so operators see the
+    # same shape in both paths.
+    _preview=""
+    if [ -f "$HOME/Library/LaunchAgents/com.minsky.daemon.plist" ]; then
+      _preview="${_preview}  - launchd plist: $HOME/Library/LaunchAgents/com.minsky.daemon.plist
+"
     fi
-    # Force path — full removal.
+    if [ -d "$MINSKY_STATE_DIR" ]; then
+      _preview="${_preview}  - state dir:     $MINSKY_STATE_DIR
+"
+    fi
+    if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
+      _preview="${_preview}  - running daemon (PID $(pgrep -f cross-repo-runner/bin/minsky-run | head -1))
+"
+    fi
+    if [ "$_force" = "0" ]; then
+      # Non-TTY path: refuse without --force. `MINSKY_NON_INTERACTIVE=1`
+      # is the explicit opt-out (matches the existing convention used by
+      # `MINSKY_INSTALL_DAEMON_QUIET=1` and the daemon-side
+      # `MINSKY_NON_INTERACTIVE`).
+      if [ ! -t 0 ] || [ "${MINSKY_NON_INTERACTIVE:-0}" = "1" ]; then
+        echo "minsky uninstall — would remove:" >&2
+        printf '%s' "$_preview" >&2
+        echo "" >&2
+        echo "error: non-interactive — use --force to confirm without prompt" >&2
+        exit 2
+      fi
+      # Interactive TTY path: show preview, prompt for `YES` (exact match,
+      # no fuzzy yes/y/Enter — accidental confirmation is hard).
+      echo "minsky uninstall — will remove:"
+      printf '%s' "$_preview"
+      echo ""
+      printf "Type YES to proceed (anything else aborts): "
+      IFS= read -r _confirm
+      if [ "$_confirm" != "YES" ]; then
+        echo "aborted (got '$_confirm', expected exactly 'YES')"
+        exit 1
+      fi
+    fi
+    # Execute path — full removal. Reached by --force OR interactive YES.
     if pgrep -f "cross-repo-runner/bin/minsky-run" >/dev/null 2>&1; then
       "$0" stop >/dev/null 2>&1 || true
     fi

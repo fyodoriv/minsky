@@ -2,21 +2,34 @@
 
 Full removal of minsky from a machine. The host repo and its `.minsky/` experiment store are NOT touched — those are your data.
 
-## Quick path
-
-```bash
-minsky uninstall --force
-```
-
-Stops the daemon, removes the launchd plist (macOS) / systemd-user unit (Linux), deletes `~/.minsky/`. Idempotent — safe to re-run.
-
-## Dry-run preview (default)
+## Quick path (interactive)
 
 ```bash
 minsky uninstall
 ```
 
-Prints what would be removed. Exits 0 without changing anything. Add `--force` to actually delete.
+Shows what will be removed, prompts `Type YES to proceed`. On exactly-`YES`, executes ALL steps in one invocation: stops the daemon, removes the launchd plist (macOS) / systemd-user unit (Linux), deletes `~/.minsky/`. Idempotent — safe to re-run.
+
+`YES` is exact-match — `y`, `yes`, Enter, anything else aborts cleanly. The strict-match makes accidental confirmation hard.
+
+## Script-friendly path
+
+```bash
+minsky uninstall --force
+```
+
+Skips the prompt, executes ALL steps. Use this in CI, post-merge hooks, or any non-interactive context. Equivalent to typing `YES` at the prompt.
+
+Equivalently, `MINSKY_NON_INTERACTIVE=1 minsky uninstall --force` makes the non-interactive intent explicit (useful when the same script needs to switch between interactive and non-interactive paths based on context).
+
+## Non-interactive without --force
+
+```bash
+echo YES | minsky uninstall                 # exits 2
+MINSKY_NON_INTERACTIVE=1 minsky uninstall   # exits 2
+```
+
+Piped stdin (or `MINSKY_NON_INTERACTIVE=1`) without `--force` exits 2 with `error: non-interactive — use --force`. This is the safety net: scripts that pipe input must opt in explicitly via `--force` (the previous dry-run-by-default behavior masked this distinction and let operators walk away thinking they'd uninstalled when they hadn't).
 
 ## What gets removed
 
