@@ -212,34 +212,15 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: word count + reading time estimate; user test timing.
   - **Anchor**: Krug *Don't Make Me Think* 2014; Nielsen *Homepage Usability* 2001.
   - **Decomposition 2026-05-23**: parent broken into 3 ship-independent sub-tasks. Parent stays open until all 3 ship + README is verified <3KB.
-    - ✅ Sub-task 1 `readme-move-deep-content-to-detailed-md` shipped 2026-05-23 PR #751 (3 sections moved to `docs/README-v1-detailed.md`; H2 count 7→5; byte count 15585→11777 — partial, the table is the remaining weight).
-    - `readme-compress-comparison-table` (sub-task 2) — shrink the 5-column competitor table from 13 rows to ≤5 of the highest-differentiation rows; move the long-form table to `docs/competitive-comparison.md`. ~80 LOC change. Pivot fire from sub-task 1: the <5.5KB interim threshold turned out to need this sub-task's table-shrink work, so the parent's ≤3KB target is still tracked but interim measurements show comparison-table is the dominant remaining weight.
+    - ✅ Sub-task 1 `readme-move-deep-content-to-detailed-md` shipped 2026-05-23 PR #751 (3 sections moved to `docs/README-v1-detailed.md`; H2 count 7→5; byte count 15585→11777).
+    - ✅ Sub-task 2 `readme-compress-comparison-table` shipped 2026-05-23 PR #752 (table 15→5 rows; full table + post-table content moved to `docs/competitive-comparison.md`; byte count 11777→5343).
     - `readme-final-rewrite-hero-and-getting-started` (sub-task 3) — final pass: hero pitch + getting-started + safety in <30 lines total, brings the whole file under 3KB. ~60 LOC change.
-
-- [ ] `readme-compress-comparison-table` — shrink the 5-column / 13-row competitor table in `README.md` § "How Minsky compares to other tools" to ≤5 high-differentiation rows + move the long-form table to `docs/competitive-comparison.md`
-  - **ID**: readme-compress-comparison-table
-  - **Tags**: p0, milestone-m1, docs, ux, sub-task-of-readme-rewrite-5-min-install-guide, observed-2026-05-23
-  - **Milestone**: M1
-  - **Parent**: readme-rewrite-5-min-install-guide
-  - **Competitive-goal**: the comparison table is currently 13 rows × 5 competitors = 65 cells, ~3KB of README weight. A new visitor needs the 5 differentiation-load-bearing rows (Shape, 24/7 unattended, Cross-repo fleet, Constitutional rules / CI, Headline benchmark). The other 8 rows (Where it runs, Credentials, Coding-specific, Self-improvement, Operator queue, Live dashboard, Backend choice, Enterprise distribution) move to `docs/competitive-comparison.md` for readers who care about depth.
-  - **Surfaced-by**: 2026-05-23 parent task decomposition (PR #750). Per task-slice 2 of 3 for `readme-rewrite-5-min-install-guide`.
-  - **Hypothesis**: a 5-row comparison table (vs 13 rows) reduces README cognitive load by ~62% on this section while preserving the 5 differentiations operators actually weigh on (per `competitors/README.md` § Honest gaps + the per-competitor "why Minsky over X" framings). The full table stays available one click away at `docs/competitive-comparison.md`.
-  - **Success**: (1) `README.md` § "How Minsky compares to other tools" table has ≤5 rows. (2) `docs/competitive-comparison.md` exists and contains the full 13-row table. (3) The 5 rows that stay in README are: Shape, 24/7 unattended, Cross-repo fleet, Constitutional rules / CI, Headline benchmark (the 5 highest-differentiation rows per `competitors/README.md`). (4) `wc -c README.md` decreases by ≥1500 bytes from sub-task 1's interim state.
-  - **Pivot**: if 5 rows is too few to communicate Minsky's positioning (operator feedback "table doesn't show enough differentiation"), expand to 7 rows but DON'T regress past 10 — anything beyond 10 belongs in the docs version.
-  - **Measurement**: `awk '/^## How Minsky compares/,/^## /' README.md | grep -c "^| " - 2` returns ≤5 (≤5 data rows after header + separator); AND `[ -f docs/competitive-comparison.md ]`.
-  - **Anchor**: Few, S. *Information Dashboard Design* (O'Reilly 2006) — table size correlates inversely with pattern-recognition speed. Krug 2014 (parent's anchor) — "obviousness".
-  - **Details**: (a) Identify the 5 highest-differentiation rows by cross-referencing `competitors/README.md` § Honest gaps and the per-competitor "why Minsky over X" sections. (b) Move the full 13-row table to a new `docs/competitive-comparison.md` with a "Last updated" date header. (c) Replace the README table with the 5-row version + a "See full comparison at [docs/competitive-comparison.md](docs/competitive-comparison.md)" pointer. (d) Update the README's prose framing (the paragraph below the table) to match the slimmer view.
-  - **Files**: `README.md` (table slimmed), `docs/competitive-comparison.md` (new).
-  - **Touches**: `README.md`, `docs/competitive-comparison.md`, possibly `docs/README.md` (docs map gets a new entry).
-  - **Acceptance**: (1)-(4) of Success above. (5) The full 13-row table at `docs/competitive-comparison.md` carries a "Last updated 2026-05-23" date header so future audits can detect staleness. (6) The 5 rows in README cite the same status emojis (✅ / 🟡 / 🔴) as the docs/ version so they don't drift.
-  - **Risk**: low-medium. Content selection risk (picking the wrong 5 rows). Mitigated by sourcing the 5 from existing `competitors/README.md` § Honest gaps — the file the operator already maintains as the canonical "what's differentiated" list.
 
 - [ ] `readme-final-rewrite-hero-and-getting-started` — final-pass rewrite of `README.md` hero, getting-started, and safety sections so the whole file is <3KB and a new visitor can install in <5 minutes
   - **ID**: readme-final-rewrite-hero-and-getting-started
   - **Tags**: p0, milestone-m1, docs, ux, sub-task-of-readme-rewrite-5-min-install-guide, observed-2026-05-23
   - **Milestone**: M1
   - **Parent**: readme-rewrite-5-min-install-guide
-  - **Blocked by**: readme-compress-comparison-table
   - **Competitive-goal**: closes the parent P0's 3KB target. Without this slice the README sits at ~5KB (post sub-tasks 1+2). The parent task's hypothesis ("collapses install from 10+ min to ≤60s") needs the hero pitch + one-command install + brief safety claims to fit on the first screen — which they don't at 5KB.
   - **Surfaced-by**: 2026-05-23 parent task decomposition (PR #750). Per task-slice 3 of 3 for `readme-rewrite-5-min-install-guide`.
   - **Hypothesis**: a 60-line README (hero + getting-started + 5-row comparison + safety + links) is <3KB and matches the Aider / OpenHands quickstart shape. The 30-second pitch + 2 install paths (agent-mediated + manual) fit on the first screen of a 1080p display.
