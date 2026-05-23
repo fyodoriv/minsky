@@ -268,6 +268,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if interactive TTY detection is unreliable (launchd, SSH, CI), default to tier 2 (Opus+Sonnet) in non-interactive mode and log the choice; the user can always `minsky config` to change.
   - **Measurement**: `cat ~/.minsky/config.json | node -e "process.stdin.on('data',d=>{const c=JSON.parse(d);console.log(c.cost_tier?'set':'missing')})"` → "set" after first run.
   - **Anchor**: Krug *Don't Make Me Think* 2014 (progressive disclosure); Ries 2011 (validated learning — the tier choice IS a user preference signal we can learn from).
+  - **Progress 2026-05-23**: Slice 1 shipped via PR #770 — pure tier-definitions module (`novel/tick-loop/src/cost-tier-picker.ts`, 220 LOC) with 6 tiers (Opus+Opus $40/hr, Opus+Sonnet DEFAULT $10/hr, Sonnet+Sonnet $4/hr, Sonnet+local $2/hr, all-local $0/hr, Windsurf+Devin $8/hr), `pickTierById`, `tierToConfigPatch`, `getDefaultTier`. 19 paired tests cover ordering, uniqueness, cost monotonicity, roundtrip invariants, and DEFAULT marker. Slice 2 (next): TTY detection + atomic config.json write + interactive prompt rendering. Slice 3: wire into `novel/tick-loop/bin/minsky.mjs` no-args path. Slice 4: `docs/cost-tiers.md`.
 
 - [ ] `single-stability-number` — minsky exposes ONE stability number (0-100%) that answers "how reliable is minsky right now?" — computed from real iteration data, updated every run, displayed in `minsky status` and METRICS.md
   - **ID**: single-stability-number
