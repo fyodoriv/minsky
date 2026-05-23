@@ -20,6 +20,8 @@ Manual: `git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm i
 - **Self-improving** — reads its own iteration ledger, files tasks against its own weak spots ([MAPE-K](user-stories/003-mape-k-improves-prompts.md)).
 - **Talks to you in a file** — agents append `## Q:` to `.minsky/qa-log.md` and wait; you answer with `## A:`; `minsky qa` opens it in `$EDITOR` ([human-loop](novel/human-loop/README.md)).
 
+[M1](MILESTONES.md) in flight: one-command run, fleet-wide stability reporting, 8h default sessions that drive a repo toward minsky standards, human-blocked unsafe ops, remote task submission.
+
 How it works: reads `TASKS.md` → picks task → spawns agent on a feature branch → draft PR with self-graded metrics → records iteration → loops. Full architecture: [docs/README-v1-detailed.md](docs/README-v1-detailed.md#how-it-works).
 
 ## Safety (mechanically enforced)
