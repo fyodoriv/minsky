@@ -6,7 +6,7 @@
 
 Human↔agent QA channel via an append-only Markdown file at `.minsky/qa-log.md` in the host repo. Agents write `## Q:` blocks and wait for the human to append `## A:` blocks; the human edits the file in any text editor.
 
-Slice 1 of P0 `minsky-human-comm-via-file` (operator directive 2026-05-20: "as simple as creating a log or xml or whatever file where you leave questions and I leave answers"). This package currently ships **only the pure parser/serializer** — the async `askHuman()` + `fs.watch` + `proper-lockfile` layers ship in subsequent slices.
+Slices 1+2 of P0 `minsky-human-comm-via-file` (operator directive 2026-05-20: "as simple as creating a log or xml or whatever file where you leave questions and I leave answers"). This package now ships the **pure parser/serializer** + the **async `askHuman()` API with fs.watch dedupe** — the `bin/minsky qa` CLI + brief template + docs sweep ship in subsequent slices (3+4).
 
 ## Why this exists
 
@@ -18,7 +18,9 @@ Today minsky communicates with humans through three weak channels:
 
 None support fast back-and-forth Q&A. The QA channel is the operator's "ask, wait, branch on answer" surface — the agent writes a question and gets a synchronous answer within minutes, not days.
 
-## What ships in slice 1
+## What ships (slices 1+2)
+
+Slice 1 — pure parser/serializer (`./qa-log-format.ts`):
 
 ```text
 import { formatQuestion, formatAnswer, parseQaLog } from "@minsky/human-loop";
@@ -35,16 +37,34 @@ const entries = parseQaLog(fileContents);
 // → QaEntry[] (flat ordered list of Q and A blocks, tolerant of human edits)
 ```
 
-Pure functions only — no fs, no async, no fs.watch. The sub-task-2 `askHuman()` API will consume these exports as its protocol contract.
+Slice 2 — async `askHuman()` API (`./ask-human.ts`):
+
+```text
+import { askHuman, TimeoutError } from "@minsky/human-loop";
+
+try {
+  const answer = await askHuman("Should I proceed?", {
+    taskId: "task-1",
+    agent: "claude",
+    qaLogPath: "/path/to/host/.minsky/qa-log.md",
+    timeoutMs: 4 * 3600 * 1000, // 4 hours (default)
+  });
+  // → "Yes, ship it." (when human appends a matching ## A: block)
+} catch (err) {
+  if (err instanceof TimeoutError) {
+    // No answer within 4h — fall back to **Blocked**: needs-user-approval
+  }
+}
+```
+
+`askHuman()` appends a Q block atomically (fs.appendFile is atomic for payloads under PIPE_BUF — 4KB Linux, 512B POSIX — which a Q block fits well within), watches the qa-log with fs.watch debounced to 100ms (collapsing macOS's 2-events-per-save into one re-read), and resolves with the answer body when the human appends a matching A block whose timestamp succeeds the Q's.
 
 ## What does NOT ship yet
 
-- `askHuman(question, opts): Promise<string>` — sub-task 2 (`human-loop-ask-human-and-watcher`).
-- `fs.watch` dedupe layer with cross-OS (macOS FSEvents vs Linux inotify) handling — sub-task 2.
-- `proper-lockfile` integration for multi-agent safety — sub-task 2.
 - `bin/minsky qa` subcommand — sub-task 3.
 - `minsky watch` pending-Q count — sub-task 3.
 - Brief template addition + README + vision.md row — sub-task 4.
+- `proper-lockfile` integration — deferred. The `fs.appendFile` atomicity guarantee covers the parent's Success #5 contract under the spec's "or equivalent" clause; if multi-agent contention shows up under live load, file `human-loop-proper-lockfile-upgrade` as P1.
 
 ## Failure modes & chaos verification
 
@@ -52,8 +72,12 @@ Pure functions only — no fs, no async, no fs.watch. The sub-task-2 `askHuman()
 |---|---|---|---|---|
 | 1 | Malformed `## Q:` header (no separator) | upstream-malformed | `graceful-degrade` — parser skips the block, later blocks parse normally; no throw | covered by `qa-log-format.test.ts` "malformed Q header (no separator) is skipped" |
 | 2 | Human edits previous Q's body (inserts text between Q and A) | upstream-malformed | `graceful-degrade` — inserted lines fall after the `**asks**:` line, get absorbed into the question body; later A block still parses | covered by `qa-log-format.test.ts` "human-inserted noise between blocks is silently dropped" |
-| 3 | Orphan A block (no matching Q) | edge case | `graceful-degrade` — A block parses with empty consumer-side context; the consuming `askHuman` (sub-task 2) ignores orphans | covered by `qa-log-format.test.ts` "A block before any Q (orphan answer) parses cleanly" |
-| 4 | Missing `**asks**:` line on a Q block | upstream-malformed | `graceful-degrade` — question body is `""`; round-trip still works; consumer-side `askHuman` may decide to retry the ask | covered by `qa-log-format.test.ts` "Q with missing **asks** line still parses with empty question body" |
+| 3 | Orphan A block (no matching Q) | edge case | `graceful-degrade` — `askHuman` ignores A blocks whose taskId doesn't match its own | covered by `ask-human.test.ts` "ignores A blocks for other taskIds" |
+| 4 | Missing `**asks**:` line on a Q block | upstream-malformed | `graceful-degrade` — question body is `""`; round-trip still works | covered by `qa-log-format.test.ts` "Q with missing **asks** line still parses with empty question body" |
+| 5 | Human never answers | timeout | `loud-crash-supervisor-restart` — `askHuman` rejects with `TimeoutError` after `timeoutMs` (default 4h); caller falls back to TASKS.md `Blocked: needs-user-approval` | covered by `ask-human.test.ts` "rejects with TimeoutError when no answer arrives within timeoutMs" |
+| 6 | Stale answer pre-dates the Q (clock skew, human re-ran an old test) | edge case | `graceful-degrade` — `askHuman` ignores A blocks whose timestamp precedes its own askTimestamp | covered by `ask-human.test.ts` "ignores A blocks with timestamps preceding the Q (stale answers)" |
+| 7 | macOS fs.watch fires 2 events per save (FSEvents + atomic temp+rename) | upstream-noise | `graceful-degrade` — 100ms debounce collapses rapid events into one re-read | covered by `ask-human.test.ts` "multiple rapid fs.watch events collapse into one re-read" |
+| 8 | Human writes the answer BEFORE the watcher arms (race) | timing | `graceful-degrade` — immediate post-Q check resolves the promise before the watcher would fire | covered by `ask-human.test.ts` "resolves even if the human appends the answer BEFORE the watcher is armed" |
 
 ## Hypothesis-driven development (rule #9)
 
