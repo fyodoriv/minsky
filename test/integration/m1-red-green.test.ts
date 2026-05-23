@@ -9,7 +9,7 @@
 // Pattern: Acceptance-TDD (Freeman & Pryce, GOOS, 2009).
 // Rule #3: test-first, metric-first, doc-first.
 
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -270,7 +270,18 @@ describe("M1 TDD: config-setup", () => {
     expect(existsSync(join(env.HOME ?? "", ".minsky", "config.json"))).toBe(false);
   });
 
-  test("minsky uninstall WITHOUT --force prints dry-run and keeps config", () => {
+  test("minsky uninstall WITHOUT --force in non-interactive context exits 2 and keeps config", () => {
+    // Behavior change 2026-05-23 (PR `minsky-uninstall-one-command-with-stop`):
+    // previously bare `minsky uninstall` printed a dry-run preview and
+    // exited 0 without changes — a footgun that let operators walk away
+    // thinking they'd uninstalled when they hadn't. Now:
+    //   - non-TTY (incl. test envs) without --force: exits 2 with
+    //     `error: non-interactive — use --force`. State preserved.
+    //   - TTY without --force: prompts `Type YES to proceed`, executes
+    //     on exact YES match (covered by uninstall.test.ts which
+    //     runs the full prompt path with a stdin pipe).
+    // This test asserts only the non-interactive rejection — the
+    // interactive path is exercised by `test/integration/uninstall.test.ts`.
     const env = cleanEnv();
     mkdirSync(join(env.HOME ?? "", ".minsky"), { recursive: true });
     writeFileSync(
@@ -278,12 +289,14 @@ describe("M1 TDD: config-setup", () => {
       JSON.stringify({ default_host: "/tmp/x" }),
     );
     const binPath = join(REPO_ROOT, "bin", "minsky");
-    const out = execFileSync(binPath, ["uninstall"], {
+    const result = spawnSync(binPath, ["uninstall"], {
       env,
       encoding: "utf8",
       timeout: 30_000,
     });
-    expect(out).toContain("dry-run");
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("non-interactive");
+    expect(result.stderr).toContain("--force");
     expect(existsSync(join(env.HOME ?? "", ".minsky", "config.json"))).toBe(true);
   });
 });
