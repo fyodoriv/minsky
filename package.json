@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@9.12.0",
   "scripts": {
-    "prepare": "tsc -b --force && node scripts/install-lefthook-best-effort.mjs",
+    "prepare": "tsc -b --force && node scripts/install-lefthook-best-effort.mjs && node scripts/check-toolchain.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -65,6 +65,16 @@
     "semantic-release": "25.0.3",
     "typescript": "5.7.2",
     "vitest": "2.1.9"
+  },
+  "optionalDependencies": {
+    "@biomejs/cli-darwin-arm64": "1.9.4",
+    "@biomejs/cli-darwin-x64": "1.9.4",
+    "@biomejs/cli-linux-arm64": "1.9.4",
+    "@biomejs/cli-linux-arm64-musl": "1.9.4",
+    "@biomejs/cli-linux-x64": "1.9.4",
+    "@biomejs/cli-linux-x64-musl": "1.9.4",
+    "@biomejs/cli-win32-arm64": "1.9.4",
+    "@biomejs/cli-win32-x64": "1.9.4"
   },
   "pnpm": {
     "overrides": {
