@@ -295,19 +295,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `node scripts/fleet-dashboard.mjs --json | jq '.machines | length'` ≥ 2 after both machines have run ≥1 iteration.
   - **Anchor**: Beyer SRE 2016 (observability — you can't manage what you can't see); Beer VSM 1972 (System 3 — the control layer needs a nerve channel from every System 1).
 
-- [ ] `weekly-lmarena-style-benchmark` — automated weekly benchmark comparing minsky vs competitors on shared tasks, published as a scorecard (inspired by LMArena / Chatbot Arena methodology)
-  - **ID**: weekly-lmarena-style-benchmark
-  - **Tags**: p0, milestone-m1, metrics, competitive, benchmark, business
-  - **Milestone**: M1
-  - **Competitive-goal**: this IS the competitive scorecard. Without it, "minsky is better than X" is an unverifiable claim. With it, every week the scorecard either shows improvement or flags regression.
-  - **Details**: inspired by LMSYS Chatbot Arena (lmarena.ai) — head-to-head comparison on shared tasks with Elo-style ranking. For minsky, the tasks are coding tasks (from SWE-bench Verified subset + minsky's own TASKS.md history). Methodology: (a) define 5 agentic-SWE metrics: autonomous-merge-rate (% of tasks that produce a merged PR without human help), time-to-PR (minutes from task claim to PR open), cost-per-PR ($), stability (iteration success rate), human-intervention-rate (% of runs needing human help); (b) measure minsky on these from real orchestrate.jsonl data; (c) measure competitors from their published numbers (SWE-bench scores, pricing pages, published case studies) + any local reproduction we can do; (d) produce `competitive-scorecard.json` with minsky + ≥4 competitors × 5 metrics + a composite rank; (e) a `scripts/benchmark-weekly.mjs` runs on a cron (launchd weekly timer) and updates the scorecard; (f) the scorecard is the #1 thing on the dashboard and in `minsky status --benchmark`. Composes with `self-metrics-competitive-benchmark` (the scorecard definition) and `competitive-landscape-real-competitors` (the competitor corpus).
-  - **Files**: `scripts/benchmark-weekly.mjs` (new — orchestrates the comparison), `scripts/scorecard-render.mjs` (new — JSON→markdown table), `distribution/com.minsky.weekly-benchmark.plist` (new — launchd timer), `.minsky/competitive-scorecard.json` (output), paired tests
-  - **Hypothesis**: today minsky has no measured comparison to competitors. After this, `minsky status --benchmark` shows a ranked scorecard updated weekly.
-  - **Success**: `cat .minsky/competitive-scorecard.json | jq '.competitors | length'` ≥ 4; scorecard has data for all 5 metrics for minsky + ≥4 competitors; scorecard is ≤7 days old.
-  - **Pivot**: if reproducing competitor results locally is infeasible (Devin is cloud-only, Cursor has no CLI), use published numbers only and clearly mark them as "reported" vs "measured".
-  - **Measurement**: `node scripts/benchmark-weekly.mjs --dry-run --json` produces the scorecard shape; `jq '.scorecard_age_days' .minsky/competitive-scorecard.json` ≤ 7.
-  - **Anchor**: Chiang et al. 2024 "Chatbot Arena: An Open Platform for Evaluating LLMs by Human Preference" (the Arena methodology — head-to-head with Elo); Jimenez et al. 2024 "SWE-bench" (the task corpus); Forsgren/Humble/Kim 2018 (DORA metrics as the enterprise-credible baseline).
-
 - [ ] `minsky-on-minsky-as-regular-host` — minsky's own repo is a regular host destination (not special-cased), including remote task submission from other machines; full dogfood parity
   - **ID**: minsky-on-minsky-as-regular-host
   - **Tags**: p0, milestone-m1, dogfood, cross-repo, self-hosting, experiment
