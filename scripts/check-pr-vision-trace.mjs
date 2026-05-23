@@ -40,11 +40,14 @@
 // newlines and accidentally grab the next field's value when the current
 // line's value is empty.
 const HEADER_RE = /^#+[ \t]*vision[- ]?trace\b/im;
-const OPTOUT_RE = /<!--[ \t]*vision[- ]?trace:[ \t]*not[- ]?applicable[ \t]*[—\-:][ \t]*(.+?)[ \t]*-->/i;
+const OPTOUT_RE =
+  /<!--[ \t]*vision[- ]?trace:[ \t]*not[- ]?applicable[ \t]*[—\-:][ \t]*(.+?)[ \t]*-->/i;
 const FIELD_RES = {
   "Vision goal": /^[ \t]*[-*•]?[ \t]*(?:\*\*)?vision[- ]?goal(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
-  "User story": /^[ \t]*[-*•]?[ \t]*(?:\*\*)?user[- ]?stor(?:y|ies)(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
-  "Competitor prior art": /^[ \t]*[-*•]?[ \t]*(?:\*\*)?competitor[- ]?(?:prior[- ]?art|check)(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+  "User story":
+    /^[ \t]*[-*•]?[ \t]*(?:\*\*)?user[- ]?stor(?:y|ies)(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+  "Competitor prior art":
+    /^[ \t]*[-*•]?[ \t]*(?:\*\*)?competitor[- ]?(?:prior[- ]?art|check)(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
 };
 
 const MIN_VALUE_LEN = 3;
@@ -63,8 +66,11 @@ const MIN_VALUE_LEN = 3;
  */
 function checkField(name, re, body) {
   const m = body.match(re);
-  if (!m) return `missing or malformed line: \`- ${name}: …\``;
-  const value = m[1].trim().replace(/[*_`]+$/g, "").trim();
+  if (!m || m[1] === undefined) return `missing or malformed line: \`- ${name}: …\``;
+  const value = m[1]
+    .trim()
+    .replace(/[*_`]+$/g, "")
+    .trim();
   if (value.length < MIN_VALUE_LEN) {
     return `\`${name}\` value is too short (need ≥${MIN_VALUE_LEN} chars, got "${value}")`;
   }
@@ -78,7 +84,7 @@ function checkField(name, re, body) {
 export function checkPrVisionTrace(body) {
   // Opt-out marker — bypasses the block requirement.
   const optout = body.match(OPTOUT_RE);
-  if (optout) {
+  if (optout && optout[1] !== undefined) {
     const reason = optout[1].trim();
     if (reason.length < MIN_VALUE_LEN) {
       return {
@@ -143,7 +149,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     );
     process.exit(1);
   }
-  if (result.reason) console.log(`pr-vision-trace: ${result.reason}`);
-  else console.log("pr-vision-trace: ok");
+  if (result.reason) console.info(`pr-vision-trace: ${result.reason}`);
+  else console.info("pr-vision-trace: ok");
   process.exit(0);
 }
