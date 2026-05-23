@@ -17,7 +17,7 @@ The canonical install runbook for Minsky. **Audience**: an AI coding agent (Clau
 - [docs/uninstall.md](docs/uninstall.md) — clean removal when you're done
 - [README.md](README.md) for context on what you just installed
 
-**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists, so Step 5 is a single CLI call. One sub-deliverable of the parent `agent-mediated-install` P0 is still pending: the automated cross-provider measurement harness (P1 task `measure-agent-install-harness`) — until it ships, the 9-run success criterion is operator-verified, not CI-verified. Tracked in `TASKS.md`.
+**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists (Step 5 is a single CLI call) and the measurement harness `scripts/measure-agent-install.mjs` is wired into `pre-pr-lint --stage=full` (so the harness machinery is CI-gated). The remaining gap to fully close the parent `agent-mediated-install` P0 is live-mode for real-agent invocation against claude-code / devin / cursor — tracked as P2 `measure-agent-install-live-mode`. Until it ships, the 9-run success criterion is operator-verified end-to-end; the CI gate enforces threshold semantics and harness shape via mock mode.
 
 ## What this is not
 

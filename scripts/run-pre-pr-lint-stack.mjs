@@ -251,6 +251,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "mape-k-tick-iteration-backstop",
       "mape-k-watchdog-cadence",
       "markdownlint",
+      "measure-agent-install",
       "measurement-inspects-output",
       "metric-freshness",
       "no-singleton-experiment",
@@ -678,6 +679,26 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-vision-rule-13-non-task-anchors.mjs"],
+  },
+  {
+    // Closes parent P0 `agent-mediated-install`'s Success #1 criterion
+    // in CI by running the measurement harness against the deterministic
+    // mock provider. The harness exits 0 iff every run passes both
+    // thresholds (≤90s, ≤1 prompt); mock-mode is the regression gate on
+    // the harness machinery without spending API budget. Live mode is
+    // gated behind the `--live` flag and explicitly NOT wired into CI
+    // per the parent task's Pivot.
+    name: "measure-agent-install",
+    stages: ["full"],
+    cmd: "node",
+    args: [
+      "scripts/measure-agent-install.mjs",
+      "--providers=mock",
+      "--runs-per-provider=3",
+      "--threshold-seconds=90",
+      "--threshold-prompts=1",
+      "--quiet",
+    ],
   },
 ]);
 
