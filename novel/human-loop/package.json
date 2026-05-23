@@ -1,0 +1,33 @@
+{
+  "name": "@minsky/human-loop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Human↔agent QA channel via an append-only Markdown file at `.minsky/qa-log.md`. Agents write `## Q:` blocks and wait for the human to append `## A:` blocks; the human edits the file in any editor. This package ships only the pure parser/serializer (slice 1 of P0 `minsky-human-comm-via-file`); the async askHuman() + fs.watch + lockfile layers ship in subsequent slices.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.1",
+    "typescript": "5.7.2",
+    "vitest": "2.1.9"
+  }
+}
