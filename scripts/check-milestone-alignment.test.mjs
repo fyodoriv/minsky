@@ -404,6 +404,7 @@ describe("reportAlignment", () => {
           status: "done",
           statusText: "✅ done",
           verify: "x",
+          exempt: null,
         },
         {
           id: "M1.2",
@@ -411,6 +412,7 @@ describe("reportAlignment", () => {
           status: "partial",
           statusText: "🟡 partial",
           verify: "y",
+          exempt: null,
         },
       ],
     };
@@ -436,5 +438,159 @@ describe("reportAlignment", () => {
     expect(r.gaps["M1.2"]).toBeDefined();
     expect(r.gaps["M1.2"]?.missing).toContain("user-story");
     expect(r.gaps["M1.1"]).toBeUndefined();
+  });
+});
+
+// ---------- exempt mechanism ----------
+
+describe("parseMilestonesMd — exempt comment", () => {
+  test("parses exempt reason from `<!-- exempt: ... -->` HTML comment", () => {
+    const md = [
+      "## M1 — Stable",
+      "| # | Criterion | Status | How to verify |",
+      "|---|---|---|---|",
+      "| M1.4 | **one-command run** | ✅ done | live evidence <!-- exempt: binary criterion, verified manually --> |",
+    ].join("\n");
+    const c = require_(require_(parseMilestonesMd(md), 0).criteria, 0);
+    expect(c.exempt).toBe("binary criterion, verified manually");
+  });
+
+  test("exempt=null when no HTML comment present", () => {
+    const md = [
+      "## M1 — Stable",
+      "| # | Criterion | Status | How to verify |",
+      "|---|---|---|---|",
+      "| M1.1 | foo | ✅ done | bar |",
+    ].join("\n");
+    const c = require_(require_(parseMilestonesMd(md), 0).criteria, 0);
+    expect(c.exempt).toBe(null);
+  });
+
+  test("ignores empty/short exempt reasons (<3 chars)", () => {
+    const md = [
+      "## M1 — Stable",
+      "| # | Criterion | Status | How to verify |",
+      "|---|---|---|---|",
+      "| M1.1 | foo | ✅ done | bar <!-- exempt: x --> |",
+    ].join("\n");
+    const c = require_(require_(parseMilestonesMd(md), 0).criteria, 0);
+    expect(c.exempt).toBe(null);
+  });
+});
+
+describe("checkCriterion — exempt criteria", () => {
+  test("exempt criterion is allAligned=true even with all surfaces failing", () => {
+    const criterion = {
+      id: "M1.4",
+      description: "**foo**",
+      exempt: "binary criterion",
+    };
+    const surfaces = {
+      userStoryFiles: [],
+      readUserStory: () => "",
+      fileExists: () => false,
+      readmeContent: "",
+    };
+    const r = checkCriterion(criterion, { metrics: [] }, surfaces);
+    expect(r.allAligned).toBe(true);
+    expect(r.exempt).toBe(true);
+    expect(r.exemptReason).toBe("binary criterion");
+    // Individual surface checks still report honestly.
+    expect(r.userStory.ok).toBe(false);
+    expect(r.metric.ok).toBe(false);
+  });
+
+  test("exempt criterion reports honest surface gaps in addition to exempt", () => {
+    const criterion = {
+      id: "M1.4",
+      description: "**foo**",
+      exempt: "binary criterion",
+    };
+    const surfaces = {
+      userStoryFiles: ["a.md"],
+      readUserStory: () =>
+        "Closes M1.4.\n## Metric\nx\n## Integration test\n- **File**: `x.test.ts`",
+      fileExists: () => true,
+      readmeContent: "foo",
+    };
+    const r = checkCriterion(criterion, { metrics: [] }, surfaces);
+    expect(r.allAligned).toBe(true);
+    expect(r.exempt).toBe(true);
+    // Surfaces that DO pass still report ok=true so the operator sees both.
+    expect(r.userStory.ok).toBe(true);
+    expect(r.metric.ok).toBe(false); // honest miss surfaced even when exempt
+  });
+
+  test("non-exempt criterion behaves unchanged", () => {
+    const criterion = { id: "M1.1", description: "**bar**" };
+    const surfaces = {
+      userStoryFiles: [],
+      readUserStory: () => "",
+      fileExists: () => false,
+      readmeContent: "",
+    };
+    const r = checkCriterion(criterion, { metrics: [] }, surfaces);
+    expect(r.allAligned).toBe(false);
+    expect(r.exempt).toBeUndefined();
+  });
+});
+
+describe("reportAlignment — exempt criteria count toward aligned", () => {
+  test("two exempt criteria + one aligned + one ❌ → aligned_count=3", () => {
+    const milestone = {
+      id: "M1",
+      title: "Stable",
+      criteria: [
+        {
+          id: "M1.1",
+          description: "**foo**",
+          status: "done",
+          statusText: "✅",
+          verify: "",
+          exempt: "binary",
+        },
+        {
+          id: "M1.2",
+          description: "**bar**",
+          status: "done",
+          statusText: "✅",
+          verify: "",
+          exempt: "no-metric-applies",
+        },
+        {
+          id: "M1.3",
+          description: "**baz**",
+          status: "done",
+          statusText: "✅",
+          verify: "",
+          exempt: null,
+        },
+        {
+          id: "M1.4",
+          description: "**qux**",
+          status: "partial",
+          statusText: "🟡",
+          verify: "",
+          exempt: null,
+        },
+      ],
+    };
+    const surfaces = {
+      userStoryFiles: ["a.md"],
+      readUserStory: () =>
+        "Closes M1.3.\n## Metric\nx\n## Integration test\n- **File**: `x.test.ts`",
+      fileExists: () => true,
+      readmeContent: "baz qux foo bar",
+    };
+    const parsedSurfaces = {
+      metrics: [{ id: "m1", milestone: "M1.3", valueIsStub: false, rawValue: "1" }],
+    };
+    const r = reportAlignment(milestone, parsedSurfaces, surfaces);
+    expect(r.total).toBe(4);
+    expect(r.aligned_count).toBe(3); // 2 exempt + 1 fully aligned
+    expect(r.gaps["M1.4"]).toBeDefined();
+    expect(r.gaps["M1.1"]).toBeUndefined();
+    expect(r.gaps["M1.2"]).toBeUndefined();
+    expect(r.gaps["M1.3"]).toBeUndefined();
   });
 });

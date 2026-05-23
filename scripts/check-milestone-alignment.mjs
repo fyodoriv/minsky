@@ -68,13 +68,13 @@ const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..");
 
 /**
- * @typedef {{id: string, description: string, status: string, statusText: string, verify: string}} Criterion
+ * @typedef {{id: string, description: string, status: string, statusText: string, verify: string, exempt: string|null}} Criterion
  * @typedef {{id: string, title: string, criteria: Criterion[]}} Milestone
  * @typedef {{id: string, milestone: string|null, valueIsStub: boolean, rawValue: string}} MetricEntry
  * @typedef {{milestones: Milestone[], current: Milestone|null, inTable: boolean, sawHeader: boolean}} ParseState
  * @typedef {{userStoryFiles: string[], readUserStory: (file: string) => string, fileExists?: (path: string) => boolean, readmeContent?: string}} Surfaces
  * @typedef {{metrics: MetricEntry[]}} ParsedSurfaces
- * @typedef {{userStory: {ok: boolean, files: string[]}, sections: {ok: boolean, missing: string[]}, testFile: {ok: boolean, path: string|null, exists: boolean}, metric: {ok: boolean, metricIds: string[], hasStub: boolean}, readme: {ok: boolean, matchedKeywords: string[]}, allAligned: boolean}} CriterionResult
+ * @typedef {{userStory: {ok: boolean, files: string[]}, sections: {ok: boolean, missing: string[]}, testFile: {ok: boolean, path: string|null, exists: boolean}, metric: {ok: boolean, metricIds: string[], hasStub: boolean}, readme: {ok: boolean, matchedKeywords: string[]}, allAligned: boolean, exempt?: boolean, exemptReason?: string}} CriterionResult
  */
 
 // ---------- parsers ----------
@@ -82,7 +82,7 @@ const ROOT = join(__dirname, "..");
 /**
  * Parse MILESTONES.md and return all milestone tables.
  * @param {string} content
- * @returns {Array<{id: string, title: string, criteria: Array<{id: string, description: string, status: string, statusText: string, verify: string}>}>}
+ * @returns {Milestone[]}
  */
 export function parseMilestonesMd(content) {
   /** @type {ParseState} */
@@ -163,6 +163,9 @@ function handleTableRow(line, state) {
 function parseCriterionRow(line) {
   // Row: | M1.1 | description | status | verify |
   // Some milestones (M2+) have only 3 columns (no Status). Tolerate either.
+  // An inline `<!-- exempt: <reason> -->` HTML comment in any cell marks the
+  // criterion as exempt from the alignment gate (counts toward aligned with
+  // the reason documented). Per the parent task's Pivot field.
   const cells = splitTableRow(line);
   const id = cells[0]?.trim();
   if (!id || !/^M\d+\.\d+$/.test(id)) return null;
@@ -176,7 +179,22 @@ function parseCriterionRow(line) {
     status: statusFromEmoji(statusRaw),
     statusText: statusRaw,
     verify,
+    exempt: extractExemptReason(line),
   };
+}
+
+/**
+ * Extract an `<!-- exempt: <reason> -->` HTML comment from a MILESTONES.md
+ * row. The comment can appear anywhere in the row. Returns the reason
+ * (≥3 chars of text, trimmed) or null if no exempt comment is present.
+ * @param {string} line
+ * @returns {string|null}
+ */
+function extractExemptReason(line) {
+  const m = line.match(/<!--\s*exempt:\s*([^\n]+?)\s*-->/i);
+  if (!m || !m[1]) return null;
+  const reason = m[1].trim();
+  return reason.length >= 3 ? reason : null;
 }
 
 /**
@@ -396,8 +414,13 @@ function checkMetricSurface(criterionId, metrics) {
 }
 
 /**
- * Run the five surface checks for a single criterion.
- * @param {{id: string, description: string}} criterion
+ * Run the five surface checks for a single criterion. Honors an `exempt`
+ * marker (set by `parseCriterionRow` from a `<!-- exempt: <reason> -->`
+ * HTML comment in the MILESTONES.md row) — exempt criteria count toward
+ * `allAligned` regardless of surface state, per the parent task's Pivot
+ * field. The per-surface checks still run so the operator sees what would
+ * be missing if the exempt were lifted.
+ * @param {{id: string, description: string, exempt?: string|null}} criterion
  * @param {ParsedSurfaces} parsedSurfaces
  * @param {Surfaces} surfaces
  * @returns {CriterionResult}
@@ -415,9 +438,17 @@ export function checkCriterion(criterion, parsedSurfaces, surfaces) {
   const matched = keywords.filter((kw) => readmeContent.toLowerCase().includes(kw.toLowerCase()));
   const readme = { ok: matched.length > 0, matchedKeywords: matched };
 
-  const allAligned = userStory.ok && sections.ok && testFile.ok && metric.ok && readme.ok;
+  const exempt = criterion.exempt ?? null;
+  const allSurfacesOk = userStory.ok && sections.ok && testFile.ok && metric.ok && readme.ok;
+  const allAligned = exempt !== null ? true : allSurfacesOk;
 
-  return { userStory, sections, testFile, metric, readme, allAligned };
+  /** @type {CriterionResult} */
+  const result = { userStory, sections, testFile, metric, readme, allAligned };
+  if (exempt !== null) {
+    result.exempt = true;
+    result.exemptReason = exempt;
+  }
+  return result;
 }
 
 /**
@@ -513,7 +544,7 @@ function renderText(report) {
  * @returns {string}
  */
 function renderCriterionLine(id, result) {
-  const mark = result.allAligned ? "✅" : "❌";
+  const mark = result.exempt ? "🟦" : result.allAligned ? "✅" : "❌";
   /** @type {Array<[string, boolean]>} */
   const fields = [
     ["user-story", result.userStory.ok],
@@ -523,7 +554,8 @@ function renderCriterionLine(id, result) {
     ["readme", result.readme.ok],
   ];
   const checks = fields.map(([name, ok]) => `${name} ${ok ? "✓" : "✗"}`).join(" · ");
-  return `${mark} ${id}: ${checks}`;
+  const suffix = result.exempt ? ` (exempt: ${result.exemptReason})` : "";
+  return `${mark} ${id}: ${checks}${suffix}`;
 }
 
 /**
