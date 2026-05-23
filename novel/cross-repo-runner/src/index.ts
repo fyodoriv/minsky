@@ -4,6 +4,8 @@
 //   the I/O boundary and is intentionally not re-exported here.
 // Source: user-stories/006-runner-on-any-repo.md.
 
+export { AGENT_MATRIX, resolveCloudAgent } from "./agent-config.js";
+export type { AgentMatrixRow, AgentResolution, BriefDeliveryShape } from "./agent-config.js";
 export { loadRepoConfig, parseFlatYaml } from "./repo-config-loader.js";
 export {
   findTask,

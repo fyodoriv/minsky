@@ -27,7 +27,7 @@ Per-machine config at `~/.minsky/config.json`. Edit once, read on every minsky s
 
 | Field | What it controls |
 | --- | --- |
-| `cloud_agent` | Which CLI runs in cloud mode: `devin` / `claude`. |
+| `cloud_agent` | Which CLI runs in cloud mode: `claude` / `devin` / `openhands` (pending OpenHands Agent Canvas CLI release on 2026-06-01 — daemon refuses to spawn under this value until then). |
 | `cloud_agent_model` | Passed as `--model` to the cloud agent. |
 | `local_agent` | Which CLI runs in local mode: `aider` / `opencode`. |
 | `local_agent_model` | Model name for the local agent (passed to the underlying provider). |
@@ -43,6 +43,7 @@ Per-machine config at `~/.minsky/config.json`. Edit once, read on every minsky s
 | `devin` | Cloud (Windsurf subscription) | `--prompt-file` (stdin panics) | Polished IDE-style PR output | Cloud workload when claude is rate-limited |
 | `aider` | Local (Ollama / MLX) | `--message-file` | $0 cost, runs on M-series Mac | Token-budget fallback; long sessions |
 | `opencode` | Local (LM Studio / Ollama) | stdin | Faster cold-start than aider | Mechanical lint fixes |
+| `openhands` | Cloud (OpenHands SDK + LLM of choice) | stdin | 65.8% SWE-bench Verified inherited via wrap; critic + best-of-N agent loop | _pending June 1, 2026 — Agent Canvas CLI release (GHE issue OpenHands/OpenHands#14374). Daemon exits 64 with actionable error if `cloud_agent: "openhands"` is set before that date._ |
 
 ## Switching agents
 

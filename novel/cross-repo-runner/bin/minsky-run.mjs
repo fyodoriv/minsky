@@ -49,6 +49,7 @@ import {
   loadRepoConfig,
   pickHostTask,
   renderIterationRecord,
+  resolveCloudAgent,
   resolveGhHost,
   runHostCtoAudit,
   runHostLoop,
@@ -1310,10 +1311,32 @@ const _minskyConfig = loadMinskyConfig();
  *   1. MINSKY_CLOUD_AGENT env var (one-session override)
  *   2. ~/.minsky/config.json `cloud_agent` (persistent per-machine)
  *   3. "claude" (default)
+ *
+ * Delegates the actual matrix lookup to `resolveCloudAgent` (pure
+ * function in `novel/cross-repo-runner/src/agent-config.ts`). For
+ * pending-external-dep agents (openhands pre-June-1) and unknown
+ * agents, this function exits the process with EX_USAGE (64) and an
+ * actionable error — NEVER silently falls back to a different agent.
+ *
+ * Today's wire shapes:
+ *   - claude    → invoked as `claude`  (brief via stdin)
+ *   - devin     → invoked as `devin`   (brief via --prompt-file)
+ *   - aider     → invoked as `aider`   (brief via --message-file)  [v0 not yet active in this binary]
+ *   - openhands → exits 64 with the actionable June 1 error
  */
 function readSpawnCommand() {
-  const agent = process.env.MINSKY_CLOUD_AGENT ?? _minskyConfig.cloud_agent ?? "claude";
-  return agent.toLowerCase() === "devin" ? "devin" : "claude";
+  const resolution = resolveCloudAgent({
+    envValue: process.env.MINSKY_CLOUD_AGENT,
+    configValue: _minskyConfig.cloud_agent,
+  });
+  if (resolution.status !== "ok") {
+    // biome-ignore lint/suspicious/noConsole: actionable error to operator at the I/O boundary
+    console.error(resolution.error);
+    process.exit(64);
+  }
+  // Today's binary only spawns claude/devin natively; aider routes
+  // through the local-agent path. openhands is gated above.
+  return resolution.agent === "devin" ? "devin" : "claude";
 }
 
 /**

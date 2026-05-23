@@ -14,6 +14,16 @@ Allowed paths default to the task block's `**Touches**:` field (fallback to `**F
 
 `spawn-failed` carries `signal?: NodeJS.Signals` (e.g. `"SIGKILL"` / `"SIGTERM"` / `"SIGHUP"`) when the child died from a signal rather than a clean exit code — threaded from `@minsky/tick-loop`'s `SpawnResult.signal` through `LiveSpawnOutcome` and out to the iteration record's `notes` field as `exit=N signal=SIG`. Without this, `exit=-1` collapsed "exited with no code" and "killed by signal" into one indistinguishable bucket; the daemon log now distinguishes SIGKILL-from-watchdog vs SIGTERM-from-parent vs SIGHUP-from-terminal-close. Surfaced-by `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19, vision.md § Glossary).
 
+## Cloud-agent matrix and resolver
+
+`src/agent-config.ts` exports the canonical 4-row `AGENT_MATRIX` (claude / devin / aider / openhands) and a pure `resolveCloudAgent({ envValue, configValue, defaultAgent? })` resolver. The resolver returns a discriminated union:
+
+- `status: "ok"` — agent is runnable today; caller proceeds to spawn.
+- `status: "pending-external-dep"` — agent is contractually accepted by the matrix but its runtime CLI has not yet shipped. The `error` field carries an operator-actionable message naming the dep date and the fallback agents. Caller MUST print the error and exit `EX_USAGE` (64); never silently fall back to a different agent.
+- `status: "unknown"` — operator typed an agent id the matrix does not know. Error names the valid ids.
+
+Today the `openhands` row carries `pendingExternalDep: "2026-06-01"` (the OpenHands Agent Canvas Initiative CLI release per GHE issue `OpenHands/OpenHands#14374`). On June 1 the field flips to `null` and the same resolver call returns `status: "ok"`. Source: TASKS.md `openhands-config-schema-pre-june-1`, parent `add-openhands-as-pluggable-backend`.
+
 ## `--loop` (continuous host-mode iteration)
 
 `minsky-run --host <dir> --loop [--live]` keeps invoking `runLive` against the host's TASKS.md until one of six stop conditions fires (in priority order):

@@ -74,9 +74,9 @@ minsky stop                                 # SIGTERM → graceful drain
 | `claude` | ✅ | — | stdin | `--model` |
 | `devin` | ✅ | — | `--prompt-file` (stdin panics) | `--model` |
 | `aider` | — | ✅ | `--message-file` | `--model` via config args |
-| `openhands` | 🟡 planned (approved 2026-05-22; blocked on OpenHands Agent Canvas CLI release 2026-06-01) | 🟡 planned | TBD pending June 1 CLI shape (likely `solve <task-brief>` via positional arg or `--task-file`) | `--model` (LLM-agnostic via OpenAI-compatible API) |
+| `openhands` | 🟡 schema accepted, runtime pending 2026-06-01 (OpenHands Agent Canvas CLI — GHE issue `OpenHands/OpenHands#14374`) | 🟡 planned | `stdin` (anticipated; confirms on June 1) | `--model` (LLM-agnostic via OpenAI-compatible API) |
 
-The `openhands` row reflects an operator-approved wrap-feasibility decision per `competitors/openhands.md` § "Should we wrap OpenHands instead?" (Shape A: agent-layer wrap as pluggable backend). Implementation tracked at [`add-openhands-as-pluggable-backend`](TASKS.md) (P0); blocked only on the external OpenHands Agent Canvas Initiative CLI release. Until that ships, the existing 3-agent matrix is what operators actually use.
+The `openhands` row reflects an operator-approved wrap-feasibility decision per `competitors/openhands.md` § "Should we wrap OpenHands instead?" (Shape A: agent-layer wrap as pluggable backend). Implementation tracked at [`add-openhands-as-pluggable-backend`](TASKS.md) (P0). The schema half ships now via `novel/cross-repo-runner/src/agent-config.ts` → `AGENT_MATRIX` (the 4th row carries `pendingExternalDep: "2026-06-01"`); the daemon REFUSES to spawn under `cloud_agent: "openhands"` until that date, exiting `EX_USAGE` (64) with an actionable error that names the GHE issue and the fallback agents. On June 1 the `pendingExternalDep` flag flips to `null` and the same code path becomes live.
 
 ## Identity
 
