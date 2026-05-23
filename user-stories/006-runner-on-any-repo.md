@@ -1,5 +1,7 @@
 # Story 006 — Run minsky's full constitution on any host repo
 
+**Milestone(s)**: M1.3, M1.4, M1.9, M1.12
+
 > **Dual-purpose framing.** This story is **Minsky on any host** — `minsky bootstrap <host-dir>` materialises a per-host gitignored `.minsky/` sidecar; `minsky run <task-id> --host <host-dir>` ships work against the host repo using the same supervisor that runs Minsky-on-itself. The Minsky-on-itself counterpart is [`user-stories/001-loop-runs-overnight.md`](001-loop-runs-overnight.md) — same loop, same constitution, parameterised by `MINSKY_HOST_ROOT`. vision.md § "What Minsky is" frames this dual-purpose surface as the original Minsky vision: a plug-and-play repo transformer you attach to any git repository (host or itself) and it runs 24/7 to make medium-to-long-term improvements aligned with Minsky principles. Both stories are gated by **rule #12** (vision.md § "Scope discipline") — when the queue empties, the next move is stability work, not new functionality, unless human-approved / market-research-only / pre-registered as a rule-#9 experiment. A host repo's `.minsky/repo.yaml` may *narrow* what experiments run (e.g., disable `--live` spawn for safety) but cannot widen the scope-discipline rule.
 
 ## Story

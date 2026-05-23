@@ -1,5 +1,7 @@
 # Story 005 — Watch shows three numbers, never four
 
+**Milestone(s)**: M1.7
+
 ## Story
 
 I raise my wrist. I see three things and only three things: tokens-remaining (color-coded), last-task-status, this-week's-constraint. In two seconds I know if the organism is alive and on track. I lower my wrist. If I needed more detail, I'd open the iPhone or laptop — but I almost never do, because the three numbers answer the question.

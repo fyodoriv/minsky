@@ -1,5 +1,7 @@
 # Story 008 — Per-task agent backend selection + multi-persona pipelines
 
+**Milestone(s)**: M1.9
+
 > **Why this story exists.** Motivation bullet #3 in [README.md § "Why Minsky?"](../README.md#why-minsky): *"no single model is good at architecture, implementation, and review at the same time"*. The operator-facing promise: a docs-only task spawns Claude Sonnet (cheap, prose-fluent); a complex cross-repo refactor spawns Devin (large context, multi-file); a mechanical lint-fix spawns local Ollama (free, fast, deterministic). Per-task backend selection is shipped; per-task multi-persona pipelines (researcher → planner → developer → QA → reviewer running on the same task) is an M2 milestone.
 
 ## Story
