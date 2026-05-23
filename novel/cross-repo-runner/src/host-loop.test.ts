@@ -24,6 +24,7 @@ const baseTask: ParsedTask = {
   pivot: "<0.5",
   measurement: "yarn vitest run",
   anchor: "rule #9",
+  blocked: null,
 };
 
 function makePlan(taskId: string): RunnerPlan {

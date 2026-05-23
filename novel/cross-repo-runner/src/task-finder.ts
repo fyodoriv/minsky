@@ -36,6 +36,16 @@ export interface ParsedTask {
   measurement: string | null;
   /** Free-form `**Anchor**:` literature citation (rule #9), or null. */
   anchor: string | null;
+  /**
+   * Free-form `**Blocked**:` reason (external-dep / needs-approval /
+   * policy-refused), or null when the task is not blocked. Tasks with a
+   * non-empty `blocked` field are filtered out by {@link pickHostTask} —
+   * picking a blocked task burns an iteration before the worker
+   * discovers the block. The `**Blocked by**:` *task-dependency* form
+   * is a separate field handled by the runner's dependency-graph layer,
+   * not this regex.
+   */
+  blocked: string | null;
 }
 
 export type FindTaskResult =
@@ -88,6 +98,7 @@ export function pickHostTask(
   const skipTaskIds = options?.skipTaskIds ?? new Set<string>();
   const eligible = tasks
     .filter(isHostTaskEligible)
+    .filter(isNotBlocked)
     .filter((t) => !openPrBranches.has(`${branchPrefix}${t.id}`))
     .filter((t) => !skipTaskIds.has(t.id));
   for (const priority of ["P0", "P1"] as const) {
@@ -111,6 +122,23 @@ export function isHostTaskEligible(task: ParsedTask): boolean {
     task.measurement !== null &&
     task.anchor !== null
   );
+}
+
+/**
+ * Predicate: is this task unblocked (no non-empty `**Blocked**:` reason)?
+ * Used by {@link pickHostTask} to skip tasks whose external-dep / approval
+ * gate has not yet been resolved. A task with `blocked` set is still
+ * surfaced by {@link findTask} (targeted lookups should report the block
+ * to the caller), but never returned from the autonomous-loop picker.
+ *
+ * The companion `**Blocked by**: <id>` task-dependency form is NOT covered
+ * here — that lives in the runner's dependency-graph layer because it
+ * needs the full task set to resolve transitive deps.
+ *
+ * @otel-exempt pure predicate.
+ */
+export function isNotBlocked(task: ParsedTask): boolean {
+  return task.blocked === null || task.blocked.trim().length === 0;
 }
 
 /**
@@ -162,6 +190,7 @@ function startTask(title: string, priority: string): PartialParsedTask {
     pivot: null,
     measurement: null,
     anchor: null,
+    blocked: null,
   };
 }
 
@@ -251,6 +280,7 @@ interface PartialParsedTask {
   pivot: string | null;
   measurement: string | null;
   anchor: string | null;
+  blocked: string | null;
 }
 
 function finaliseTask(p: PartialParsedTask): ParsedTask | null {
@@ -266,6 +296,7 @@ function finaliseTask(p: PartialParsedTask): ParsedTask | null {
     pivot: p.pivot,
     measurement: p.measurement,
     anchor: p.anchor,
+    blocked: p.blocked,
   };
 }
 
@@ -385,6 +416,22 @@ function assignMetadata(task: PartialParsedTask, line: string, state: ParserStat
             task.anchor = combined;
           },
           () => task.anchor,
+        );
+      },
+    ],
+    [
+      // `**Blocked**:` — external-dep / approval / policy-refused gate.
+      // The `**Blocked by**: <task-id>` task-dependency form is a
+      // DIFFERENT token (`Blocked by**` vs `Blocked**`) and is handled
+      // by the runner's dependency-graph layer, not this regex.
+      /^\*\*Blocked\*\*:\s*(.+)$/,
+      (val) => {
+        task.blocked = val.trim();
+        registerContinuation(
+          (combined) => {
+            task.blocked = combined;
+          },
+          () => task.blocked,
         );
       },
     ],

@@ -2,7 +2,13 @@
 
 import { describe, expect, test } from "vitest";
 
-import { findTask, isHostTaskEligible, parseTasksMd, pickHostTask } from "./task-finder.js";
+import {
+  findTask,
+  isHostTaskEligible,
+  isNotBlocked,
+  parseTasksMd,
+  pickHostTask,
+} from "./task-finder.js";
 
 const sampleTasksMd = `# Tasks
 
@@ -503,6 +509,7 @@ describe("isHostTaskEligible", () => {
         pivot: "p",
         measurement: "m",
         anchor: "a",
+        blocked: null,
       }),
     ).toBe(true);
   });
@@ -519,11 +526,191 @@ describe("isHostTaskEligible", () => {
       pivot: "p",
       measurement: "m",
       anchor: "a",
+      blocked: null,
     };
     expect(isHostTaskEligible({ ...base, hypothesis: null })).toBe(false);
     expect(isHostTaskEligible({ ...base, success: null })).toBe(false);
     expect(isHostTaskEligible({ ...base, pivot: null })).toBe(false);
     expect(isHostTaskEligible({ ...base, measurement: null })).toBe(false);
     expect(isHostTaskEligible({ ...base, anchor: null })).toBe(false);
+  });
+});
+
+describe("isNotBlocked", () => {
+  const base = {
+    id: "x",
+    title: "t",
+    priority: "P0",
+    tags: [],
+    details: null,
+    hypothesis: "h",
+    success: "s",
+    pivot: "p",
+    measurement: "m",
+    anchor: "a",
+    blocked: null,
+  };
+
+  test("true when blocked is null", () => {
+    expect(isNotBlocked({ ...base, blocked: null })).toBe(true);
+  });
+
+  test("true when blocked is empty string", () => {
+    expect(isNotBlocked({ ...base, blocked: "" })).toBe(true);
+  });
+
+  test("true when blocked is whitespace-only", () => {
+    expect(isNotBlocked({ ...base, blocked: "   " })).toBe(true);
+  });
+
+  test("false when blocked carries a real reason", () => {
+    expect(isNotBlocked({ ...base, blocked: "needs-user-approval" })).toBe(false);
+    expect(isNotBlocked({ ...base, blocked: "needs-external-action — wait on dep" })).toBe(false);
+  });
+});
+
+describe("parseTasksMd — Blocked field", () => {
+  test("captures **Blocked**: reason on the task block", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Task with external block
+  - **ID**: blocked-task
+  - **Blocked**: needs-external-action — waiting on June 1 CLI release
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    const tasks = parseTasksMd(tasksMd);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.blocked).toBe("needs-external-action — waiting on June 1 CLI release");
+  });
+
+  test("blocked is null when the field is absent", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Unblocked task
+  - **ID**: unblocked-task
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    const tasks = parseTasksMd(tasksMd);
+    expect(tasks[0]?.blocked).toBeNull();
+  });
+
+  test("**Blocked by**: <id> task-dependency form does NOT populate `blocked`", () => {
+    // `**Blocked by**: <id>` is a separate dependency-graph field
+    // resolved at a different layer; the `**Blocked**:` regex must NOT
+    // capture it (Blocked by** is a distinct token from Blocked**).
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Dep-blocked task
+  - **ID**: dep-blocked
+  - **Blocked by**: other-task
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    const tasks = parseTasksMd(tasksMd);
+    expect(tasks[0]?.blocked).toBeNull();
+  });
+});
+
+describe("pickHostTask — Blocked filter", () => {
+  test("skips a blocked P0 task and falls through to an unblocked P1", () => {
+    // Regression — 2026-05-23 honest-status-check verified pickHostTask
+    // returned `add-openhands-as-pluggable-backend` despite its
+    // `**Blocked**:` field. Wasted iteration budget. Fix: filter
+    // blocked tasks in the picker.
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Blocked P0
+  - **ID**: blocked-p0
+  - **Blocked**: needs-external-action — June 1 CLI not yet shipped
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+## P1
+
+- [ ] Unblocked P1
+  - **ID**: unblocked-p1
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    const task = pickHostTask(tasksMd);
+    expect(task?.id).toBe("unblocked-p1");
+    expect(task?.priority).toBe("P1");
+  });
+
+  test("returns null when EVERY P0/P1 task is blocked", () => {
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Blocked P0
+  - **ID**: blocked-p0
+  - **Blocked**: needs-user-approval
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+
+## P1
+
+- [ ] Blocked P1
+  - **ID**: blocked-p1
+  - **Blocked**: policy-refused — not allowed in current scope
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    expect(pickHostTask(tasksMd)).toBeNull();
+  });
+
+  test("empty-string blocked field does not exclude the task (graceful absence)", () => {
+    // A `**Blocked**:` line with no payload after the colon is treated
+    // as not-blocked (graceful absence pattern, same as `details: null`).
+    const tasksMd = `# Tasks
+
+## P0
+
+- [ ] Task with empty block
+  - **ID**: empty-block
+  - **Blocked**: 
+  - **Hypothesis**: h
+  - **Success**: s
+  - **Pivot**: p
+  - **Measurement**: m
+  - **Anchor**: a
+`;
+    // Regex requires at least one char after Blocked**:\s* so an empty
+    // payload won't even capture; blocked stays null. Worst-case if
+    // someone hand-edits a whitespace-only block, isNotBlocked trims
+    // it and still returns true.
+    const task = pickHostTask(tasksMd);
+    expect(task?.id).toBe("empty-block");
   });
 });
