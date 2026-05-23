@@ -867,6 +867,28 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-vision-rule-13-non-task-anchors.test.mjs
 
+  measure-agent-install:
+    # P1 sub-task `measure-agent-install-harness` (slice 3 of parent P0
+    # `agent-mediated-install`): the harness machinery for the 9-run
+    # cross-provider install-latency measurement. Runs in mock mode so
+    # CI has a deterministic regression gate without spending API budget.
+    # Live mode is the P2 follow-up `measure-agent-install-live-mode`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: measure-agent-install harness (mock mode)
+        run: node scripts/measure-agent-install.mjs --providers=mock --runs-per-provider=3 --threshold-seconds=90 --threshold-prompts=1 --quiet
+      - name: unit tests for the harness
+        run: pnpm exec vitest run scripts/measure-agent-install.test.mjs
+
   otel-no-pii:
     # vision.md § 13.2 / TASKS.md `otel-no-pii-in-spans-lint` § Measurement:
     # full-scan of `novel/**/*.ts` rejects PR-introduced span attributes
@@ -1653,6 +1675,7 @@ jobs:
       - mape-k-tick-iteration-backstop
       - mape-k-watchdog-cadence
       - markdownlint
+      - measure-agent-install
       - measurement-inspects-output
       - metric-freshness
       - no-singleton-experiment
@@ -1717,6 +1740,7 @@ jobs:
                    "${{ needs.mape-k-tick-iteration-backstop.result }}" \
                    "${{ needs.mape-k-watchdog-cadence.result }}" \
                    "${{ needs.markdownlint.result }}" \
+                   "${{ needs.measure-agent-install.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
