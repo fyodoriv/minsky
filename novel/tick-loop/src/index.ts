@@ -391,6 +391,14 @@ export {
   semverGte,
 } from "./detect-agent-teams-support.js";
 
+// Slice 2 of `native-agent-teams-with-tiered-adapter` — pure formatter
+// that turns the {@link detectAgentTeamsSupport} result into a single
+// startup-log line keyed by `TIER_LOG_PREFIX`. The bin (`tick-loop.mjs`)
+// calls this once at boot so the chosen tier is greppable in
+// `daemon.log` / `tick-loop.out.log`; selection-policy and real backends
+// land in later slices.
+export { TIER_LOG_PREFIX, formatTierLogLine } from "./log-detected-tier.js";
+
 // Sub-task of `daily-changelog-for-humans` — expose the changelog-runner
 // primitives so the CLI (`bin/tick-loop.mjs`) can wire the seam without
 // reaching past `dist/`. Mirrors the post-task-cto-audit re-export block.
