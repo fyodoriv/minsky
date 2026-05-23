@@ -17,7 +17,7 @@ The canonical install runbook for Minsky. **Audience**: an AI coding agent (Clau
 - [docs/uninstall.md](docs/uninstall.md) — clean removal when you're done
 - [README.md](README.md) for context on what you just installed
 
-**Status.** The end-to-end flow below works today. Two sub-deliverables of the parent `agent-mediated-install` P0 are still pending: (a) a `minsky consent` subcommand (P1 task `minsky-consent-subcommand` — until it ships, follow the shell snippet in Step 5 manually); (b) an automated cross-provider measurement harness (P1 task `measure-agent-install-harness` — until it ships, the 9-run success criterion is operator-verified, not CI-verified). Both gaps are tracked in `TASKS.md`.
+**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists, so Step 5 is a single CLI call. One sub-deliverable of the parent `agent-mediated-install` P0 is still pending: the automated cross-provider measurement harness (P1 task `measure-agent-install-harness`) — until it ships, the 9-run success criterion is operator-verified, not CI-verified. Tracked in `TASKS.md`.
 
 ## What this is not
 
@@ -112,31 +112,20 @@ This is the ONE place you must pause and ask the operator. Read this prompt to t
 
 > Minsky can submit anonymized runtime logs — iteration counts, error verdicts, and p95 timings — to help catch regressions and improve the daemon. No code content, no task content, and no personally identifying information is ever sent; the host path is SHA-256-hashed with a per-machine salt before submission. The data goes only to the Minsky project's consent ledger. Do you agree to submit these anonymized telemetry events? (yes / no — default: no if you don't answer)
 
-Wait for the answer. Then record it:
+Wait for the answer. Then record it with one command:
 
 ```bash
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-# Replace CONSENT below with the operator's literal answer: true or false
-CONSENT=true  # or false
-# Hash the host path with a per-machine salt for privacy
-SALT_FILE=~/.minsky/machine-salt
-[ -f "$SALT_FILE" ] || (head -c 32 /dev/urandom | base64 > "$SALT_FILE")
-SALT=$(cat "$SALT_FILE")
-HOST_HASH=$(printf '%s%s' "$SALT" "$HOST_PATH" | shasum -a 256 | cut -d' ' -f1)
-
-cat > ~/.minsky/telemetry-consent.json <<EOF
-{
-  "consent": $CONSENT,
-  "timestamp": "$TIMESTAMP",
-  "host_path_hash": "$HOST_HASH",
-  "agent": "$AGENT"
-}
-EOF
+# Replace --yes with --no if the operator declined.
+MINSKY_AGENT="$AGENT" "$INSTALL_DIR/bin/minsky" consent --yes
 ```
 
-When the `minsky consent` subcommand ships (tracked in P0 `agent-mediated-install`), replace the shell block above with `minsky consent --yes` or `minsky consent --no` — that one command does the same atomic write plus server submission when `MINSKY_TELEMETRY_ENDPOINT` is configured.
+That single call:
 
-Until then: server submission is a no-op. The file lives only on the operator's machine.
+- creates `~/.minsky/machine-salt` (32 random bytes, base64) on first run, reuses it after
+- writes `~/.minsky/telemetry-consent.json` atomically (tmp + rename) with the 4 documented fields (`consent` / `timestamp` / `host_path_hash` / `agent`)
+- POSTs the same payload to `MINSKY_TELEMETRY_ENDPOINT` when set (best-effort, never blocks the install)
+
+If `minsky` isn't yet on PATH for the current shell, use the explicit `$INSTALL_DIR/bin/minsky` form (as shown above) — Step 3 already set the absolute path in your shell variable.
 
 ## Step 6 — start the daemon
 

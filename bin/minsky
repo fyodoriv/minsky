@@ -462,6 +462,113 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
     echo "Note: host repo data (.minsky/ inside your repos) is untouched."
     exit 0
     ;;
+  consent)
+    # `minsky consent --yes | --no` — record telemetry consent atomically.
+    #
+    # Slice (2) of P0 `agent-mediated-install` per INSTALL.md Step 5.
+    # Collapses the 10-line shell snippet (salt gen, sha256, atomic
+    # write) into one CLI invocation that all agents (claude-code /
+    # devin / cursor) handle identically. The bin shim parses + dispatches
+    # to an inline node script so this stays zero-dep at the install
+    # layer.
+    #
+    # Behavior:
+    #   - `--yes`  → records consent: true
+    #   - `--no`   → records consent: false
+    #   - both / neither → exits 2 with "ambiguous"
+    #   - idempotent (re-run with same value is a no-op rewrite)
+    #   - writes ~/.minsky/telemetry-consent.json atomically (tmp + rename)
+    #   - hashes $PWD as `host_path_hash` using ~/.minsky/machine-salt
+    #     (created on first run, 32 random bytes base64) so the server
+    #     never sees the raw path
+    #   - POSTs to MINSKY_TELEMETRY_ENDPOINT when set (best-effort;
+    #     never blocks the install)
+    #
+    # Source: M1 milestone `minsky-consent-subcommand` (P1 sub-task of
+    # parent `agent-mediated-install`); RFC 8615 (canonical-path
+    # convention for agent-discoverable metadata).
+    _yes=0
+    _no=0
+    for _a in "$@"; do
+      case "$_a" in
+        --yes) _yes=1 ;;
+        --no)  _no=1 ;;
+      esac
+    done
+    if [ "$_yes" = "1" ] && [ "$_no" = "1" ]; then
+      echo "minsky consent: --yes and --no are mutually exclusive" >&2
+      exit 2
+    fi
+    if [ "$_yes" = "0" ] && [ "$_no" = "0" ]; then
+      echo "minsky consent: pass --yes or --no" >&2
+      exit 2
+    fi
+    _consent="false"
+    [ "$_yes" = "1" ] && _consent="true"
+    MINSKY_CONSENT_VALUE="$_consent" \
+    MINSKY_STATE_DIR="$MINSKY_STATE_DIR" \
+    MINSKY_TELEMETRY_ENDPOINT="${MINSKY_TELEMETRY_ENDPOINT:-}" \
+    MINSKY_AGENT="${MINSKY_AGENT:-${MINSKY_LLM_PROVIDER:-claude}}" \
+    MINSKY_HOST_PATH="$(pwd)" \
+    node --input-type=module -e "
+import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { join } from 'node:path';
+
+const stateDir = process.env.MINSKY_STATE_DIR;
+const consent = process.env.MINSKY_CONSENT_VALUE === 'true';
+const endpoint = process.env.MINSKY_TELEMETRY_ENDPOINT;
+const agent = process.env.MINSKY_AGENT;
+const hostPath = process.env.MINSKY_HOST_PATH;
+
+mkdirSync(stateDir, { recursive: true });
+
+const saltPath = join(stateDir, 'machine-salt');
+let salt;
+if (existsSync(saltPath)) {
+  salt = readFileSync(saltPath, 'utf8').trim();
+} else {
+  salt = randomBytes(32).toString('base64');
+  writeFileSync(saltPath, salt + '\n', { mode: 0o600 });
+}
+
+const hash = createHash('sha256').update(salt + hostPath).digest('hex');
+const timestamp = new Date().toISOString();
+const payload = {
+  consent,
+  timestamp,
+  host_path_hash: hash,
+  agent,
+};
+
+const target = join(stateDir, 'telemetry-consent.json');
+const tmp = target + '.tmp-' + process.pid;
+writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 });
+renameSync(tmp, target);
+
+if (endpoint) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!resp.ok) {
+      console.error('minsky consent: telemetry POST returned status ' + resp.status + ' (consent recorded locally)');
+    }
+  } catch (err) {
+    console.error('minsky consent: telemetry POST failed (consent recorded locally): ' + (err?.message ?? err));
+  }
+}
+
+console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + timestamp);
+"
+    exit $?
+    ;;
   doctor)
     # `minsky doctor [--quiet]` — health probe for this machine.
     #
