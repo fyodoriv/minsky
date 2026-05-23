@@ -34,7 +34,7 @@ That's not pessimism; that's the math. Now to the four questions.
 
 ## Q1: Post-wrap Minsky vs competitors
 
-Reference: [`docs/minsky-wraps-openhands-vision.md`](./minsky-wraps-openhands-vision.md) describes the post-wrap world.
+Reference: [`docs/plans/2026-05-22-path-c-openhands-reshape.md`](./plans/2026-05-22-path-c-openhands-reshape.md) — the canonical Path C reshape plan, which describes the post-wrap world (consolidated from the now-deleted `docs/minsky-wraps-openhands-vision.md`).
 
 Post-wrap, Minsky becomes "operator-machine-identity + cross-repo fleet + constitution-as-CI layer over a wrapped agent". The other layers shrink. Where does that leave Minsky vs each direct competitor?
 
@@ -122,7 +122,7 @@ Pre-wrap, the moats list was 6:
 5. Cross-repo fleet
 6. TASKS.md as operator surface
 
-Post-OpenHands-wrap, all 6 survive (per [`docs/minsky-wraps-openhands-vision.md`](./minsky-wraps-openhands-vision.md)).
+Post-OpenHands-wrap, all 6 survive (per [`docs/plans/2026-05-22-path-c-openhands-reshape.md`](./plans/2026-05-22-path-c-openhands-reshape.md) § "What OpenHands does NOT provide").
 
 But the question "what makes us unique" deserves a sharper answer. Not all 6 are equally defensible:
 
@@ -253,7 +253,7 @@ Three additional tasks recommended by this review but NOT yet filed (operator's 
 
 Re-read this doc when ANY of these fire:
 
-1. **OpenHands Agent Canvas Initiative ships** (June 1, 2026) — verify the wrap shape predicted in `docs/minsky-wraps-openhands-vision.md` matches reality. If their CLI is materially different, the reshape changes.
+1. **OpenHands Agent Canvas Initiative ships** (June 1, 2026) — verify the wrap shape predicted in `docs/plans/2026-05-22-path-c-openhands-reshape.md` § "Architecture changes" matches reality. If their CLI is materially different, the reshape changes.
 2. **Operator's available hours drop below 5/week** — Path C requires sustained 10 hours/week. Below that, Path A becomes the honest answer.
 3. **A competitor ships a "Minsky-shaped" product** (operator-machine-identity + 24/7 daemon + git-native + constitution-as-CI) — at that point, the distinctive niche is contested; re-evaluate.
 4. **The 70K-LOC codebase grows toward 100K LOC** — the reshape failed; Path B was implicitly chosen by inaction. Fire the pivot to Path A.
