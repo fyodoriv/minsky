@@ -388,8 +388,17 @@ See [`.claude/skills/pr-merge-no-shortcuts/SKILL.md` § Operational discipline](
 
 ## Reading next
 
+This repo conforms to the [`load-project-context`](https://github.example.com/example-org/agentbrew/blob/main/src/catalog.yaml) canonical-doc layout (cardinal docs at root + multi-file dirs at root or `docs/`). Any agentbrew-managed agent session entering this repo auto-loads the docs below into context via the catalog rule + Claude Code `SessionStart` hook. Read them in this order:
+
 - `MILESTONES.md` — the roadmap, per-milestone capability tables, what minsky will never do
+- `vision.md` — the 17-rule constitution; load-bearing for every constitutional decision
+- `ARCHITECTURE.md` — the layered model + adapter pattern + dependency table
 - `TASKS.md` — what to do (137 open tasks; the milestone-alignment-gate task is always first)
 - `METRICS.md` — the 10 canonical metrics (currently stubs — M1 wires real observations)
 - `research.md` — what's in the stack and why
 - `user-stories/` — what success looks like, with metrics
+- `competitors/` — per-competitor strategic analysis (M1.10 corpus + delegate/contribute/absorb verdicts)
+- `DEPRECATED.md` — features that should NOT receive new work; check before implementing
+- `INSTALL.md` — first-time setup of a freshly-cloned host
+
+**Size note**: `vision.md` is intentionally long (~717 lines, ~1.2 MB) — it's the constitution, not a quickstart. Agents loading it should treat it as system-prompt-level context, not a tutorial. The size anomaly (89 lines exceed 1000 chars each — single-paragraph constitutional clauses) is tracked as a P2 in `TASKS.md` for potential chunking; until then, agents read it whole and treat it as load-bearing.
