@@ -31,40 +31,7 @@ Full install runbook: [INSTALL.md](./INSTALL.md). Uninstall: [docs/uninstall.md]
 - **Keeps going when the cloud runs dry** — if your cloud-AI quota runs out, it falls back to a local model so the loop doesn't stall. ([details →](user-stories/004-budget-auto-pause.md))
 - **Async Q&A across timezones** *(coming)* — agents leave questions in a file; you answer when you wake up. ([details →](user-stories/010-async-human-qa-via-file.md))
 
-## How it works
-
-1. Reads `TASKS.md` from your host repo (the [tasks.md spec](https://github.com/tasksmd/tasks.md))
-2. Picks the highest-priority task that's ready to work on
-3. Spawns Devin, Claude, or a local AI model (configurable per machine)
-4. The agent implements the task on a feature branch and runs your tests
-5. Opens a draft pull request — with a self-graded report on whether the change moved the metric it predicted
-6. Records the iteration in `.minsky/experiment-store/` (so the next run can learn from it)
-7. Picks the next task. Repeats.
-
-> **Host** = the git repo Minsky operates on. See [docs/configuration.md](docs/configuration.md) for how to select it and how multi-host mode walks N repos in round-robin.
-
-### Architecture (30 seconds)
-
-```text
-minsky (bash CLI shim)
-  ↓
-cross-repo-runner (minsky-run.mjs) — walks hosts, picks tasks, spawns agents
-  ↓
-Devin / Claude / Aider — the actual AI agent (pluggable)
-  ↓
-.minsky/ sidecar — config, experiment store, iteration records
-```
-
-Six distinctive mechanisms:
-
-- **Multi-layer team of workers** — per-task backend selection (`novel/tick-loop/src/llm-provider-spawn-strategy.ts`); multi-persona pipelines per task are an M2 milestone.
-- **MAPE-K control loop** (Kephart & Chess 2003, IBM autonomic computing) — Monitor / Analyze / Plan / Execute over `.minsky/experiment-store/` knowledge.
-- **Constitution = 17 rules, each enforced as a CI lint** — rules #1 (don't reinvent), #9 (hypothesis-driven), #12 (scope discipline), #17 (proactive healing) are the load-bearing ones. `pnpm pre-pr-lint --stage=full` runs 53 deterministic checks; CI runs 65 jobs.
-- **Soft-by-default failure modes** — Erlang let-it-crash + launchd / systemd outer supervisor; an iteration that scope-leaks or spawn-fails doesn't halt the loop.
-- **Dynamic watchdog** (p95 from history) — `novel/cross-repo-runner/src/dynamic-timeouts.ts` re-derives the watchdog timeout every iteration.
-- **Self-improvement on itself** — the daemon refactors the daemon; most P0s in this repo's [TASKS.md](TASKS.md) were surfaced by daemon iterations.
-
-Deeper dive: [ARCHITECTURE.md](./docs/ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
+One-line how-it-works: Minsky reads your `TASKS.md`, picks the highest-priority task, spawns Devin/Claude/Aider on a feature branch, opens a draft PR with self-graded metrics, records the iteration, loops. Full architecture + 7-step flow at [docs/README-v1-detailed.md § How it works](docs/README-v1-detailed.md#how-it-works).
 
 ## Safety
 
@@ -132,27 +99,6 @@ Status of Minsky capabilities below: ✅ shipping today · 🟡 partial / in pro
 
 If you want a 24/7 daemon that walks your fleet of repos, uses your credentials, enforces 17 deterministic rules, and improves itself from its own iteration ledger — pick Minsky. If you want SWE-bench leadership today + a Docker-isolated sandbox + a web UI to watch the agent think — pick OpenHands. If you want general-purpose multi-agent orchestration + Fortune 500 deployment substrate — pick CrewAI. If you want a fully managed agent in Cognition's cloud + the highest single-task autonomy bar — pick Devin. If you want a focused CLI pair programmer — pick Claude Code or Aider.
 
-## Minsky's position in the landscape
-
-Minsky is an **orchestrator**, not an agent. It sits ABOVE Claude / Devin / Aider — managing the daemon lifecycle, the MAPE-K loop, prompt evolution, the multi-repo task queue, supervisor restart discipline. The agents are its inputs. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it composes.
-
-A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchestrator layer. The scorecard at [novel/competitive-benchmark/README.md](novel/competitive-benchmark/README.md) compares both axes: Minsky should beat other orchestrators on orchestrator metrics AND not regress vs the bare agent. For the moat view of the same substrate, see [vision.md § "What Minsky uniquely does"](vision.md#what-minsky-uniquely-does-the-moat) and [`competitors/README.md`](competitors/README.md).
-
-## Where to read next
-
-Full map: **[docs/README.md](docs/README.md)**. Pick by audience:
-
-- **Newcomer** — [vision.md § "What Minsky is"](vision.md#what-minsky-is) → [MILESTONES.md](MILESTONES.md).
-- **Installing on your repo** — [INSTALL.md](./INSTALL.md).
-- **AI agent working on this codebase** — [AGENTS.md](AGENTS.md) → [DEPRECATED.md](./docs/DEPRECATED.md) → [TASKS.md](TASKS.md).
-- **Operator running Minsky in production** — [docs/edge-cases.md](docs/edge-cases.md), [docs/auto-merge.md](docs/auto-merge.md), [docs/local-llm-fallback.md](docs/local-llm-fallback.md).
-- **Architecture deep-dive** — [ARCHITECTURE.md](./docs/ARCHITECTURE.md), [vision.md § "Pattern conformance index"](vision.md#pattern-conformance-index), [docs/PRACTICES.md](docs/PRACTICES.md).
-- **Contributing** — [CONTRIBUTING.md](CONTRIBUTING.md). Code in this repo is AI-authored.
-
-About the name: Marvin Minsky (1927–2016), cognitive scientist, *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together. The tool borrows the metaphor.
-
-Not the only Minsky on the internet — there's also a popular economic-modelling tool ([`highperformancecoder/minsky`](https://github.com/highperformancecoder/minsky), named after the *economist* Hyman Minsky) plus several other unrelated projects. Full disambiguation table + the prior-art lineage that informs this Minsky's architecture: [docs/prior-art-and-name-collisions.md](docs/prior-art-and-name-collisions.md).
-
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Where to read next: [docs/README.md](docs/README.md) (full audience-segmented map) · [INSTALL.md](./INSTALL.md) · [AGENTS.md](AGENTS.md) · [vision.md](vision.md) · [TASKS.md](TASKS.md). Positioning vs other orchestrators + name-disambiguation: [docs/README-v1-detailed.md § Minsky's position in the landscape](docs/README-v1-detailed.md#minskys-position-in-the-landscape). About the name: Marvin Minsky (1927–2016), *The Society of Mind* (1986) — intelligence emerges from many simple specialised agents working together.
