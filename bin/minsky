@@ -937,6 +937,82 @@ PLIST_EOF
     echo "   Run 'minsky watch' to monitor."
     exit 0
     ;;
+  qa)
+    # `minsky qa` — open .minsky/qa-log.md in $EDITOR, then tail it.
+    #
+    # Slice 3 of P0 `minsky-human-comm-via-file`. The operator surface
+    # for the agent↔human QA channel established by slices 1+2.
+    #
+    # Behavior:
+    #   - Resolves the log path: $MINSKY_QA_LOG_PATH overrides
+    #     "<pwd>/.minsky/qa-log.md" (the convention agents write to).
+    #   - Creates the file with a usage-header template when missing so
+    #     a fresh operator who runs `minsky qa` first sees the format.
+    #   - Opens the file in $EDITOR (fallback: vi). After the editor
+    #     exits, `tail -F`'s the file so the operator can watch live
+    #     agent additions until Ctrl-C.
+    #   - --print-path: emit the resolved path and exit 0 (no editor,
+    #     no tail). For scripts / tests / agents that need the path.
+    #   - --init-only: ensure the file exists with the header, then
+    #     exit 0 (no editor, no tail). For first-run bootstrap.
+    #
+    # Source: M1 milestone `minsky-human-comm-via-file` slice 3;
+    # composes the qa-log-format spec in
+    # novel/human-loop/src/qa-log-format.ts (slice 1) and the askHuman
+    # async API in novel/human-loop/src/ask-human.ts (slice 2).
+    _qa_path="${MINSKY_QA_LOG_PATH:-$(pwd)/.minsky/qa-log.md}"
+    _qa_dir="$(dirname "$_qa_path")"
+    _init_only=0
+    _print_path=0
+    for _a in "${@:2}"; do
+      case "$_a" in
+        --init-only) _init_only=1 ;;
+        --print-path) _print_path=1 ;;
+        --help|-h)
+          echo "Usage: minsky qa [--init-only|--print-path]"
+          echo ""
+          echo "  Open the agent↔human QA log (.minsky/qa-log.md) in"
+          echo "  \$EDITOR, then tail -F it. Override the path with"
+          echo "  MINSKY_QA_LOG_PATH."
+          exit 0
+          ;;
+        *)
+          echo "minsky qa: unknown flag $_a (try --help)" >&2
+          exit 2
+          ;;
+      esac
+    done
+    mkdir -p "$_qa_dir"
+    if [ ! -f "$_qa_path" ]; then
+      cat > "$_qa_path" <<'EOF'
+# Minsky QA log
+
+This file is the channel between minsky agents and you. Agents append
+question blocks (`## Q:`) and wait up to 4 hours for your answer block
+(`## A:`) with the same task-id. The format is documented at
+`novel/human-loop/README.md` in the minsky repo.
+
+When you save this file, any agent watching it via `askHuman()` picks
+up your answer within 500 ms and resumes work.
+
+You can delete this header at any time — only the `## Q:` / `## A:`
+blocks are parsed.
+
+EOF
+    fi
+    if [ "$_print_path" = "1" ]; then
+      echo "$_qa_path"
+      exit 0
+    fi
+    if [ "$_init_only" = "1" ]; then
+      echo "minsky qa: log at $_qa_path"
+      exit 0
+    fi
+    _editor="${EDITOR:-vi}"
+    "$_editor" "$_qa_path"
+    echo "minsky qa: tailing $_qa_path (Ctrl-C to exit)" >&2
+    exec tail -F "$_qa_path"
+    ;;
   watch)
     # Live dashboard: status + iterations + log in a single refreshing view.
     # Refreshes every 10s. Ctrl-C to exit (daemon keeps running).
