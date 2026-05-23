@@ -1937,18 +1937,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
-- [ ] `wrap-feasibility-langgraph` — run Phase 7 wrap-feasibility analysis on LangGraph
-  - **ID**: wrap-feasibility-langgraph
-  - **Tags**: p2, competitive, strategic, wrap-analysis, orchestrator-tier, observed-2026-05-22
-  - **Milestone**: M1
-  - **Competitive-goal**: completes the orchestrator-tier wrap analysis the 2026-05-22 strategic review identified as missing. LangGraph is the 2nd-priority orchestrator-tier wrap candidate because (a) it's the canonical LangChain-ecosystem stateful workflow runtime → high gravity / large community; (b) its graph-state model is structurally similar to Minsky's MAPE-K substrate (both encode state transitions between agents); (c) decisive market signal: if LangGraph absorbs the agent-orchestration ecosystem the way LangChain absorbed LLM chains, Minsky's orchestrator tier risks irrelevance unless it folds into LangGraph as a deployment surface.
-  - **Touches**: `competitors/langgraph.md` (new file — follow the deep-dive template), `competitors/README.md` § "Comparison matrix" (new row), `README.md` § "How Minsky compares" (new row), TASKS.md (file follow-up P0/P1 task if verdict is `PARTIAL YES` or `CLEAN YES`).
-  - **Details**: follow Phase 7 procedure encoded in `.claude/skills/competitor-research/SKILL.md`. The 5 questions specifically anchor on: (1) architectural fit — LangGraph runs in-process Python OR LangGraph Cloud; can it run on the operator's machine without LangSmith dependency? (2) what we delegate — state-machine orchestration could fold into LangGraph; cross-repo fleet probably can't (LangGraph doesn't model multi-repo concurrency); (3) what we keep — Minsky's TASKS.md surface + constitution; can LangGraph nodes be re-anchored to operate against TASKS.md as their state store? (4) net moat after wrap — LangGraph wrap probably eliminates moat #4 (MAPE-K substrate) but preserves #1, #2, #3, #5, #6 → ≥5 surviving moats → would meet the "worth proposing as P0" threshold per the wrap-feasibility skill; (5) verdict — likely `PARTIAL YES` (state-machine layer) given the strong architectural similarity with MAPE-K.
-  - **Hypothesis**: LangGraph is structurally CLOSER to Minsky than AutoGen — both encode state transitions explicitly, both want to be a "platform" not a "framework". Verdict likely `PARTIAL YES` for the MAPE-K substrate layer. File P0 follow-up: "fold MAPE-K state machine onto LangGraph runtime; keep tick-loop as the LangGraph scheduler harness."
-  - **Success**: `competitors/langgraph.md` exists with all required sections, comparison tables refreshed, follow-up tasks filed if verdict warrants. The wrap-question answer is materially specific (LangGraph nodes operate against TASKS.md, MAPE-K becomes a LangGraph deployment, tick-loop becomes the LangGraph executor).
-  - **Pivot**: if LangGraph's wrap verdict is `MOAT COLLAPSE` (because LangGraph forces LangSmith / cloud dependency that violates operator-machine-identity), back off and keep MAPE-K as Minsky's own substrate.
-  - **Measurement**: `test -f competitors/langgraph.md && grep -c '## Should we wrap' competitors/langgraph.md` returns ≥1 AND `grep -c 'LangGraph' competitors/README.md` returns ≥3 AND `grep -c 'LangGraph' README.md` returns ≥1.
-  - **Anchor**: `competitors/README.md`; `.claude/skills/competitor-research/SKILL.md` § Phase 7; docs/strategic-review-2026-05-22-continue-or-wrap-more.md § "Question 1".
 
 - [ ] `wrap-feasibility-openai-agents-sdk` — run Phase 7 wrap-feasibility analysis on OpenAI Agents SDK
   - **ID**: wrap-feasibility-openai-agents-sdk
