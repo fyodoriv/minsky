@@ -1,5 +1,7 @@
 # Story 012 — Minsky commits as me, in my repo, with my git identity
 
+**Milestone(s)**: M1.10
+
 > **Moat #2 of [competitors/README.md](../competitors/README.md).** Minsky is the only orchestrator-tier system that runs as the operator's user on the operator's machine — with the operator's `~/.ssh`, `~/.gitconfig`, `~/.config/gh/`, `~/.aws/credentials`. Every other competitor introduces an identity boundary: Devin spawns a Devbox (Cognition or VPC); CrewAI Enterprise runs on the platform; AutoGen / LangGraph / MetaGPT run in whatever Python container the developer deploys. The agent loop sees the operator's home directory, the operator's credentials, the operator's existing repos. There is no separate identity to manage, no cross-VPC IAM, no "Devbox just got a new VM" identity reset.
 
 ## Story

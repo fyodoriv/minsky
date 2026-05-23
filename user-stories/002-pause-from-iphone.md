@@ -1,5 +1,7 @@
 # Story 002 — Pause from iPhone
 
+**Milestone(s)**: M1.6
+
 ## Story
 
 I'm at dinner. My phone buzzes — the agent is about to commit something I want to review first. I tap a Shortcut on my iPhone (no laptop, no tunnel-fiddling). Within 30 seconds, the loop pauses cleanly: the in-flight task finishes its current persona step and the system enters a paused state with no new tasks claimed. When I get home, I tap "resume" from the same Shortcut.
