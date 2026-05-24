@@ -18,10 +18,16 @@ One required argument: the competitor's URL — usually a vendor homepage, blog 
 /competitor-research https://arxiv.org/abs/2406.01304
 ```
 
-Optional flag: `--refresh` — pass this when updating an existing competitor's readings (id already in `COMPETITORS`). This is the canonical flag used by the auto-refresh pipeline's filed `corpus-refresh-<id>` tasks (see "How the auto-refresh loop calls this skill" below).
+Optional flags:
+
+- `--refresh` — updating an existing competitor's readings (id already in `COMPETITORS`). This is the canonical flag used by the auto-refresh pipeline's filed `corpus-refresh-<id>` tasks (see "How the auto-refresh loop calls this skill" below).
+- `--deep` — run the **Five Pivot Questions framework** (Phase 7 below) in addition to the standard corpus + research-file workflow. Use for ≥500-star competitors and any time the operator says "deep research", "what can we learn", "should we pivot", or "could this replace part of Minsky?". `--deep` is implicit when the URL is on the deep-dive watchlist in `competitors/README.md` § "Deep-dive watchlist" (forthcoming).
+- `--post-mortem` — the competitor is dead (archived, no commits >180d, vendor pivoted away). Run the standard workflow PLUS a "Why it died" section sourced from GitHub issues, HN/Reddit threads, and the project's own changelog. Pair with `--deep` for full strategic value.
 
 ```
 /competitor-research https://www.cognition.ai --refresh
+/competitor-research https://github.com/cline/cline --deep
+/competitor-research https://github.com/sweepai/sweep --deep --post-mortem
 ```
 
 ## When to use
@@ -252,6 +258,57 @@ Shape for an architectural-pattern finding (use this as the template for "X has 
   - **Anchor**: rule #1 (don't reinvent — vendor X shipped this, evaluate before building); competitors/<competitor>.md § <section>; <vendor maintainer + file path + URL>.
 ```
 
+### Phase 7 — the Five Pivot Questions framework (`--deep` mode)
+
+Triggered by `--deep` flag, by `--post-mortem`, or by any operator phrase that implies strategic-level analysis ("what can we learn", "should we pivot", "is this a vision-threat"). The framework forces the research file past surface taxonomy into the five questions that actually inform Minsky's strategic choices.
+
+**Append to `competitors/<id>.md`** as a `## Five pivot questions` section (after the existing "Why choose Minsky over X / Why choose X over Minsky" sections):
+
+```md
+## Five pivot questions
+
+### 1. How is it different from Minsky?
+<2-4 sentence diff focused on architecture and intent, not features. Cite ≥1 primary source (their docs / paper / blog).>
+
+### 2. What lessons can it give to us?
+<Bullet list of ≥2 architectural patterns, design decisions, or operational practices Minsky should consider absorbing. Each lesson MUST cite the exact file/blog/paper section.>
+
+### 3. Are any of these lessons potentially vision-changing?
+<If yes: name them explicitly AND append a new entry to the repo's `ask_human.md` (per the agentbrew shared rule "Async human comms — ask_human.md"; this is the adopted [ask-human-mcp](https://github.com/masony817/ask-human-mcp) convention). If no: state "no vision-changing finding" with one-sentence reasoning so the negative finding is auditable. Vision-changing means the lesson would force a rewrite of `vision.md § What Minsky is` or invalidate one of the 17 rules — not "we should add a feature".>
+
+### 4. How can we improve our strategy based on this?
+<Concrete, actionable strategy-level improvements (NOT individual feature requests). Examples of valid answers: "Tighten the 'no framework' moat by publishing comparison X." / "Accept that Y is commodity and stop building it ourselves." Each improvement MUST trace to a specific lesson from §2.>
+
+### 5. Can and should we cut corners by replacing part of Minsky with this?
+<For each Minsky surface (tick-loop, MAPE-K, adapters, sandbox, corpus, dashboard, etc.) say one of: REPLACE (with concrete migration sketch + estimated surface % cut), AUGMENT (use alongside, name the seam), KEEP (Minsky's version is superior, name why), or N/A (out of scope). Total replace % across all surfaces is the headline number for the operator.>
+```
+
+**Operator escape hatch**: the repo's `ask_human.md` (the adopted [ask-human-mcp](https://github.com/masony817/ask-human-mcp) convention — see agentbrew shared-rules.md § "Async human comms — ask_human.md") is the human-↔-agent comm channel for question #3. Every finding flagged as vision-changing MUST be appended there using the canonical Q-block format. The operator reads the file (or the `ask-human-mcp` daemon notifies them), replaces `answer: PENDING` with their decision inline, and the agent re-reads to continue.
+
+```md
+### Q<8-char-hex-id>
+ts: YYYY-MM-DD HH:MM
+q: vision-threat: <one-line headline>. <The specific decision the operator must make.>
+ctx: competitor: <id>. vision section threatened: `vision.md § <section>` line N: "<exact quoted text>".
+     what they do instead: <2-3 sentences>. source: <citation>. recommendation: <pivot | absorb pattern | reject as off-strategy>.
+answer: PENDING
+```
+
+Generate the Q-id with `openssl rand -hex 4`. Never reuse an id. The Q block stays in the file even after the answer lands — it's the audit trail.
+
+**Anti-pattern in `--deep` mode**: "lessons" that are really feature requests in disguise. Question 2's answer is "patterns and practices", not "we should add X widget". If a lesson can be reframed as a single feature ticket, it's question 4 material (strategy), not question 2 material. If you can't trace a lesson to a specific named pattern in literature OR to a specific file in the competitor's repo, it's not a lesson — drop it.
+
+**Post-mortem mode (`--post-mortem`)**: when the competitor is dead, add this section between "What we learn / steal" and "Five pivot questions":
+
+```md
+## Post-mortem: why it died
+
+- **Last meaningful commit**: <date>; **archived flag**: <yes/no>; **vendor pivoted to**: <name + URL or N/A>
+- **Root cause** (one of: architectural-dead-end / business-model-failure / vendor-acquisition / community-collapse / model-obsoleted-the-niche): <choose + cite>
+- **Evidence**: ≥3 sources — GitHub issues showing the death spiral, an HN/Reddit thread declaring it dead, the project's own README/CHANGELOG announcing the pivot.
+- **Lesson for Minsky** (mandatory): name the specific Minsky rule, decision, or invariant that prevents Minsky from dying the same way. If you can't find one, file a P1 task to add the missing guardrail.
+```
+
 ### Anti-pattern: research-without-tasks
 
 If you spent ≥30 minutes reading a competitor and produced ≥1 substantive finding (architectural pattern, roadmap threat, capability gap, honesty issue), and the PR does NOT file ≥1 follow-up task, you've leaked the work into the chat and the next session has to re-derive it. This is the rule-#17 (proactive healing) failure mode in research shape — *observation IS the fix*; the fix here is "file the task". The deterministic gate at `scripts/check-research-findings-filed.mjs` (forthcoming) catches this; until it ships, the discipline is reviewer-enforced.
@@ -319,11 +376,14 @@ A competitor research run that updates `competitors/<id>.md` but does NOT includ
 
 After running this skill successfully you have:
 
-1. A new (or updated) entry in `novel/competitive-benchmark/src/competitors.ts`.
+1. A new (or updated) entry in `novel/competitive-benchmark/src/competitors.ts` (if the competitor publishes ≥1 quantitative metric; skip if no primary number exists — `--deep` mode does NOT require corpus entry).
 2. A new (or updated) `competitors/<id>.md` research file with the Scorecard readings table.
-3. (Optional) A P2 follow-up TASKS.md entry if coverage is thin.
-4. Green `bin/minsky competitive` showing the competitor in the scorecard grid.
-5. All pre-pr-lint gates green.
+3. **In `--deep` mode**: a `## Five pivot questions` section at the bottom of `competitors/<id>.md` answering all 5 questions with primary-source citations.
+4. **In `--deep` mode, if vision-threat found**: ≥1 Q-block appended to `ask_human.md` (repo root) per the adopted ask-human-mcp convention. The block stays in the file even after the operator answers; it's the audit trail.
+5. **In `--post-mortem` mode**: a `## Post-mortem: why it died` section with ≥3 evidence sources and ≥1 named Minsky guardrail.
+6. (Optional) P2/P3 follow-up TASKS.md entries per Phase 6 — for thin coverage, architectural-pattern findings, roadmap threats, capability gaps, etc.
+7. Green `bin/minsky competitive` showing the competitor in the scorecard grid (only if a corpus entry was added).
+8. All pre-pr-lint gates green.
 
 ## Anti-patterns
 
