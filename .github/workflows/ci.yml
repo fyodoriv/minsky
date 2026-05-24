@@ -227,6 +227,10 @@ jobs:
         # we only fail on warning-and-above. The Phase 7c --bash-runner
         # dispatch hunk must stay shellcheck-clean.
         run: shellcheck --severity=warning bin/minsky
+      - name: shellcheck distribution/systemd/run-daemon.sh (Phase 7b'-prep)
+        # Pinned warning-level so the MINSKY_BASH_RUNNER opt-in branch
+        # added in Phase 7b'-prep stays clean.
+        run: shellcheck distribution/systemd/run-daemon.sh
       - name: Run bats suite
         run: bats tests/minsky-run.bats
 
