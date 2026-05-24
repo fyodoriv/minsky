@@ -887,7 +887,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c "plug-and-play repo transformer" README.md vision.md` returns 0; `grep -c "discipline pack" README.md vision.md` returns ≥ 2.
   - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
   - **Details**: blocked on Phases 7-12 completing. Final cleanup PR.
-  - **Files**: `README.md`, `vision.md`, `AGENTS.md`, `INSTALL.md`, `~/apps/tooling/agentbrew/src/catalog.yaml` (add `minsky-discipline-pack` source entry).
+  - **Files**: `README.md`, `vision.md`, `AGENTS.md`, `INSTALL.md`, the agentbrew catalog source file (add `minsky-discipline-pack` source entry).
   - **Acceptance**: a stranger reading only README.md understands that Minsky = discipline pack on OpenHands, not a 70K-LOC TypeScript codebase.
   - **Risk**: low.
 

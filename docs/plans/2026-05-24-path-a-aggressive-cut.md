@@ -73,6 +73,7 @@ The Path C plan kept 14 packages → ~10 packages. Path A keeps 14 → **~5-6 pa
 **Net LOC delta**: ~62K → **~8K** (vs Path C's ~40K). Roughly 87% cut.
 
 **Surviving packages** (5 total):
+
 1. `novel/adapters/` (notifier + observability + types) — 1.2K LOC
 2. `novel/experiment-record/` — 2K LOC
 3. `novel/mape-k-loop/` — 4K LOC
@@ -80,6 +81,7 @@ The Path C plan kept 14 packages → ~10 packages. Path A keeps 14 → **~5-6 pa
 5. `competitive-benchmark/` — folded to static markdown (~500 lines of MD, ~0 lines of code)
 
 **Surviving non-package surface**:
+
 - `vision.md` — 800 lines (the constitution + rules + theoretical anchors)
 - `scripts/check-rule-*.mjs` — ~10K LOC of constitutional linters (UNIQUE, no replacement)
 - `.github/workflows/ci.yml` — the 65 CI jobs (UNIQUE)
