@@ -6,9 +6,12 @@
  *                     Munafò et al. 2017 (pre-registration);
  *                     Fowler 2002 (DTO).
  *   - Parser shape:   recursive-descent → schema check → semantic
- *                     check (vanity-metric / empty-windows). Same
- *                     three-stage shape as `@minsky/handoff-spec`'s
- *                     parse → validate → semantic-rules pipeline.
+ *                     check (vanity-metric / empty-windows).
+ *                     (Previously referenced `@minsky/handoff-spec`'s
+ *                     three-stage parse pipeline; that package was
+ *                     deleted in Phase 9 of the Path A aggressive cut
+ *                     when its M2 multi-persona scope absorbed into
+ *                     OpenHands' native persona stack.)
  *                     Conformance: full.
  */
 

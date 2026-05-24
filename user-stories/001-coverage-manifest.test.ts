@@ -82,9 +82,12 @@ const COVERAGE_MANIFEST: readonly CoverageEntry[] = [
   {
     row: 3,
     description: "persona returns malformed handoff JSON (upstream-malformed)",
-    status: "covered",
-    file: "novel/handoff-spec/src/index.test.ts",
-    testNamePattern: /malformed|missing[- ]required[- ]field/i,
+    status: "deferred",
+    deferredReason:
+      "M2 multi-persona path absorbed into OpenHands' native persona stack per " +
+      "the 2026-05-22 wrap-feasibility reassessment; `novel/handoff-spec/` was " +
+      "deleted in Phase 9 (path-a-phase-9-small-package-sweep-delete). The " +
+      "upstream-malformed handling now belongs to OpenHands' boundary, not Minsky's.",
   },
   {
     row: 4,
