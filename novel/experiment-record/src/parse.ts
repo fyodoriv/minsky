@@ -6,9 +6,12 @@
  *                     Munafò et al. 2017 (pre-registration);
  *                     Fowler 2002 (DTO).
  *   - Parser shape:   recursive-descent → schema check → semantic
- *                     check (vanity-metric / empty-windows). Same
- *                     three-stage shape as `@minsky/handoff-spec`'s
- *                     parse → validate → semantic-rules pipeline.
+ *                     check (vanity-metric / empty-windows).
+ *                     (Previously referenced `@minsky/handoff-spec`'s
+ *                     three-stage parse pipeline; that package was
+ *                     deleted in Phase 9 of the Path A aggressive cut
+ *                     when its M2 multi-persona scope absorbed into
+ *                     OpenHands' native persona stack.)
  *                     Conformance: full.
  */
 
@@ -281,6 +284,14 @@ function buildRecord(
   };
 }
 
+/**
+ * Pure: parse an EXPERIMENT.yaml string into a structured ParseResult.
+ *
+ * @otel-exempt pure-function — no I/O, no async, no side effects. The
+ *   recursive-descent → schema check → semantic check pipeline operates
+ *   over an in-memory string; instrumentation would only add overhead
+ *   to a call-path the caller already wraps in their own span.
+ */
 export function parse(input: string): ParseResult {
   const yaml = tryYamlParse(input);
   if (!yaml.ok) {

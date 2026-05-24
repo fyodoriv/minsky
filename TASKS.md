@@ -830,7 +830,8 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: see Phase 7 acceptance template; same shape applied to each of the three deletions.
   - **Risk**: medium. The cross-package handoffs (observer notifies tick-loop; spec-monitor advises observer) become inline; some subtle integration behavior may be lost. Mitigation: keep the test fixtures from each deleted package and rewrite as parity tests against the inlined version.
 
-- [ ] `path-a-phase-9-small-package-sweep-delete` — delete `novel/handoff-spec/`, `novel/budget-guard/`, `novel/tui/`, `novel/bridges/omc-tasksmd/`, `novel/adapters/prompt-optimizer/` (5 packages, ~3.7K LOC); replacements are: markdown template + 50-line shell + tail/openhands-stream + nothing + spec-only-in-mape-k-loop
+- [ ] `path-a-phase-9-small-package-sweep-delete` — delete `novel/budget-guard/` + `novel/adapters/prompt-optimizer/` (the 2 remaining packages of the original 5; the other 3 — handoff-spec, tui, bridges/omc-tasksmd — were deleted in earlier slices). Replacements: 50-line `bin/check-budget.sh` shell, spec-only-in-mape-k-loop for prompt-optimizer.
+  - **Status**: 3-of-5 done. `handoff-spec` + `bridges/omc-tasksmd` deleted in Phase 9 partial PR (this PR); `tui` source deleted in #794. Remaining: `budget-guard` (5 external importers, needs the shell replacement first) + `adapters/prompt-optimizer` (14 external importers, needs spec-only refactor).
   - **ID**: path-a-phase-9-small-package-sweep-delete
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-8
   - **Milestone**: M1
