@@ -26,6 +26,8 @@ A one-line cheat-sheet of all 18 rules with links is at [docs/README.md § "I wa
 
 **Minsky is attachable 24/7. It runs OpenHands in your repo, enforces 18 constitutional rules deterministically, and observes itself to queue improvements.**
 
+> **Operator vision (2026-05-22 directive, verbatim)**: *"A 24/7 self-improving code factory that relies on OpenHands as an orchestrator. It comes up with tasks and finds the best way to solve them based on science."* The four operator pillars map cleanly to the five shipping-status phrases below: **24/7** → row 2; **self-improving code factory** → rows 1 + 5; **relies on OpenHands** → row 3; **comes up with tasks** → row 5 (with `corpus-discover-quarterly` autonomously filing competitor-research tasks every 90d); **finds the best way based on science** → row 4 (rule #9 pre-registered HDD on every PR). README's [Where we are vs. the vision](README.md#where-we-are-vs-the-vision) section scores each pillar with the file paths that back the claim.
+
 Five phrases, each tagged with shipping status (status reflects state 2026-05-22; the staged status row collapses to a single ✅ identity after the Path C reshape completes — see [`docs/plans/2026-05-22-path-c-openhands-reshape.md`](docs/plans/2026-05-22-path-c-openhands-reshape.md) § "Migration phases"):
 
 | Phrase | What it means | Today |

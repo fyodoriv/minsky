@@ -48,8 +48,9 @@ Minsky works reliably on any repo, installs trivially, is honestly measured agai
 | M1.11 | **Honest README in <5 min reading time** | 🟡 partial | README is < 130 lines and walks install → run; no formal 3-developer user test conducted. Task `readme-honest-3-developer-user-test` not yet filed. |
 | M1.12 | **Clean uninstall** — `minsky uninstall` removes everything Minsky added to a repo, zero residue | 🟡 partial | `minsky uninstall --force` works end-to-end (`minsky-uninstall-clean-removal` passes). The single-command interactive path (`minsky uninstall` in a TTY prompts and proceeds) is open — see P0 `minsky-uninstall-one-command-with-stop`. |
 | M1.13 | **Agents can self-heal Minsky** — when Minsky breaks, the running agent (or observer) diagnoses and fixes common failures without human intervention | 🟡 partial | Phase 1 shipped: 4 automated heals (`heal-stale-pid`, `heal-stale-tsbuildinfo`, `heal-stuck-command`, `heal-worktree-missing-node-modules`) under `novel/observer/heals/src/` + the MTTR ledger at `.minsky/heal-events.jsonl` + the `mttr-self-heal` metric. Phase 2 needs ≥10 automated heals + MTTR < 5min validated against the chaos test — task `agents-can-self-heal-minsky-m1-13` open. |
+| M1.14 | **OpenHands as the canonical agent runtime** — `~/.minsky/config.json` accepts `cloud_agent: "openhands"`, `novel/adapters/agent-runtime.openhands.ts` ships, and `bin/minsky competitive --backend openhands` produces a comparable scorecard against `--backend claude` on the M1.10 corpus | 🔴 blocked (external) · substrate ready | Substrate landed pre-`2026-06-01`: AGENT_MATRIX schema with `pendingExternalDep: "2026-06-01"` row + discriminated-union `resolveCloudAgent()` (PR #777); `cloud-agent-config-audit-matrix` lint that self-flips on the dep date (PR #779); 7th cost tier `openhands-claude` with `[pending YYYY-MM-DD]` UX (PR #780). Integration blocked on OpenHands' Agent Canvas Initiative CLI release (`needs-openhands-agent-canvas-cli-june-1-2026`). On `2026-06-01`, three field flips (`pendingExternalDep` → `null` in AGENT_MATRIX + audit-matrix test + COST_TIERS) unlock the path. Full plan: [`docs/plans/2026-05-22-path-c-openhands-reshape.md`](docs/plans/2026-05-22-path-c-openhands-reshape.md). |
 
-**M1 summary** — done: 3 (M1.4, M1.6, M1.10); partial: 7 (M1.2, M1.3, M1.5, M1.7, M1.9, M1.11, M1.12, M1.13); blocked: 2 (M1.1, M1.8); not started: 0.
+**M1 summary** — done: 3 (M1.4, M1.6, M1.10); partial: 7 (M1.2, M1.3, M1.5, M1.7, M1.9, M1.11, M1.12, M1.13); blocked: 3 (M1.1, M1.8, M1.14); not started: 0.
 
 **Critical path to M1 completion:**
 
@@ -60,8 +61,9 @@ Minsky works reliably on any repo, installs trivially, is honestly measured agai
 5. Land `minsky-npx-install-and-run` (M1.3) — npm-registry publish + `npx minsky init` path.
 6. Validate `bin/minsky report --baseline --delta` end-to-end on a clean fixture repo for one 8h session (M1.5 + M1.7).
 7. Run the 3-developer user test against README (M1.11).
+8. **On `2026-06-01`**: flip three `pendingExternalDep` fields and ship `novel/adapters/agent-runtime.openhands.ts` (M1.14) — the substrate is in place; the unblock is a same-day patch once OpenHands' Agent Canvas Initiative CLI is public. Then run `bin/minsky competitive --backend openhands` against the M1.10 corpus to confirm parity or better.
 
-Once 1-7 land and `node scripts/m1-metrics-dashboard.mjs` shows all measurable rows passing, M1 ships as `v0.1.0` *for real* (overriding the prior auto-bumps). The plan is to retag `main` at the M1-complete commit as `v0.1.0-m1` to mark the milestone independently of semver minor-bumps.
+Once 1-8 land and `node scripts/m1-metrics-dashboard.mjs` shows all measurable rows passing, M1 ships as `v0.1.0` *for real* (overriding the prior auto-bumps). The plan is to retag `main` at the M1-complete commit as `v0.1.0-m1` to mark the milestone independently of semver minor-bumps.
 
 ## M2 — Fast Mode: Single-Task Delivery — v0.2.0
 
