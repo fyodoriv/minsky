@@ -270,19 +270,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: Krug *Don't Make Me Think* 2014 (progressive disclosure); Ries 2011 (validated learning — the tier choice IS a user preference signal we can learn from).
   - **Progress 2026-05-23**: Slices 1+2 shipped via PRs #770+#771 (pure tier data + menu/parser/atomic-writer surfaces, 39 paired tests). Slice 3a shipped via PR #773 — `novel/tick-loop/src/cost-tier-picker-flow.ts` ships pure `decidePickerFlow({ existingCostTier, isTty })` returning a 3-way discriminated union: `skip` (config has known tier — print summary), `use-default` (no tier OR unknown tier OR no TTY — apply DEFAULT + log reason), `prompt` (no tier + TTY — slice 3b renders menu). 12 paired tests cover every branch + edge cases. Slice 3b (next): bin/minsky.mjs wiring — read config.json, detect TTY, dispatch the verdict (readline prompt loop for `prompt`, atomic write + log for the others). Slice 4: `docs/cost-tiers.md`.
 
-- [ ] `single-stability-number` — minsky exposes ONE stability number (0-100%) that answers "how reliable is minsky right now?" — computed from real iteration data, updated every run, displayed in `minsky status` and METRICS.md
-  - **ID**: single-stability-number
-  - **Tags**: p0, milestone-m1, metrics, observability, ux
-  - **Milestone**: M1
-  - **Competitive-goal**: no competitor publishes a live self-measured reliability number. This is the headline metric for the competitive scorecard.
-  - **Details**: the single number = `(successful_iterations / total_iterations) * 100` over a rolling 7-day window across all machines reporting. "Successful" = iteration produced a PR or a meaningful TASKS.md update without crashing. "Failed" = spawn-failed, timeout, crash, or empty iteration. Compute from `.minsky/orchestrate.jsonl` (local) or the fleet ledger (when `fleet-stability-centralized-reporting` ships). Display in: (a) `minsky status` output (first line: "Stability: 73% (7d rolling)"); (b) METRICS.md `loop-uptime` entry (replace the proxy metric); (c) dashboard web; (d) competitive scorecard. The number must be honest — if stability is 40%, show 40%.
-  - **Files**: `scripts/stability-number.mjs` (new — pure computation from jsonl), `novel/tick-loop/bin/minsky.mjs` (wire into `minsky status`), `METRICS.md` (replace loop-uptime proxy), paired tests with fixture jsonl
-  - **Hypothesis**: today stability is unmeasured (proxy metric: "active days"). After this, `minsky status` shows a real stability percentage computed from iteration data.
-  - **Success**: `minsky status` prints "Stability: XX% (7d)" as the first line; `node scripts/stability-number.mjs` computes the same number from `.minsky/orchestrate.jsonl`; the number matches manual count of success/fail in the log.
-  - **Pivot**: if no orchestrate.jsonl exists (fresh install), show "Stability: no data yet (run minsky for ≥1 hour to measure)" — never show a fake number.
-  - **Measurement**: `node scripts/stability-number.mjs --json` → `{stability_pct: N, window: "7d", successful: X, total: Y}`.
-  - **Anchor**: Forsgren/Humble/Kim 2018 (DORA — change failure rate is the closest DORA analogue); Beyer SRE 2016 (SLI/SLO — this IS the SLI).
-
 - [ ] `fleet-log-aggregation` — every machine running minsky ships iteration logs to a shared surface so the operator sees all machines' health in one place
   - **ID**: fleet-log-aggregation
   - **Tags**: p0, milestone-m1, observability, fleet, logs
