@@ -65,6 +65,20 @@ describe("metricById", () => {
   it("returns undefined for an unknown id", () => {
     expect(metricById("not-a-metric")).toBeUndefined();
   });
+
+  it("includes daemon-stability-pct (M1.1 reliability SLI)", () => {
+    // 2026-05-24: added to close out `single-stability-number` P0 task — the
+    // operator's headline reliability number is now a first-class row in the
+    // competitive scorecard. M1.1 gates on this at ≥0.90.
+    const m = metricById("daemon-stability-pct");
+    expect(m).toBeDefined();
+    expect(m?.category).toBe("agentic");
+    expect(m?.unit).toBe("ratio");
+    expect(m?.direction).toBe("higher-is-better");
+    expect(m?.label).toContain("Daemon stability");
+    expect(m?.anchor).toContain("Beyer");
+    expect(m?.description).toContain("≥0.90");
+  });
 });
 
 const higher: MetricDefinition = {
