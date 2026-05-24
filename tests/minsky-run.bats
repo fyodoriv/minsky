@@ -140,6 +140,21 @@ EOF
   [[ "$(echo "$line" | jq -r .notes)" == *"no eligible task"* ]]
 }
 
+@test "empty host writes exactly 1 aborted record per pass even when iterations-per-host>1" {
+  # Skip-empty-hosts behaviour: when a host has no eligible task, the
+  # walker breaks the inner round-robin loop after recording ONE aborted
+  # record, instead of emitting iterations-per-host copies. Matches the
+  # TypeScript host-walker.ts implementation (rule #1 — port behavior).
+  host="$(make_host empty "$(printf '# Tasks\n\n## P0\n\n')")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 3
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/_no-task.jsonl"
+  [ -f "$jsonl" ]
+  # Exactly 1 line — not 3 — because the walker skipped ahead.
+  line_count="$(wc -l < "$jsonl" | tr -d ' ')"
+  [ "$line_count" = "1" ]
+}
+
 # --- 6. Iteration-count clamp ---------------------------------------------
 
 @test "--max-iterations clamps total iterations across hosts" {

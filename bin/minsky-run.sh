@@ -163,7 +163,10 @@ walk_hosts() {
     local n
     for ((n=1; n <= ITERATIONS_PER_HOST; n++)); do
       [[ "$MAX_ITERATIONS" -gt 0 && "$ITER_COUNT" -ge "$MAX_ITERATIONS" ]] && return 0
-      iterate_host "$host" "$n"
+      # Break the inner loop when the host has no eligible task — no
+      # point burning N round-robin slots emitting "aborted" records;
+      # move to the next host. Matches host-walker.ts behaviour.
+      iterate_host "$host" "$n" || { ITER_COUNT=$((ITER_COUNT + 1)); break; }
       ITER_COUNT=$((ITER_COUNT + 1))
     done
   done
@@ -192,7 +195,10 @@ iterate_host() {
   if [[ -z "$task_id" ]]; then
     record_iteration "$host" "$iter_n" "" "" "aborted" "" "no eligible task"
     echo "no eligible task in $host" >&2
-    return 0
+    # Return non-zero so walk_hosts() breaks the inner loop and moves
+    # to the next host instead of burning N round-robin slots emitting
+    # repeated "aborted" records (matches host-walker.ts).
+    return 1
   fi
 
   local branch="feat/${task_id}"
