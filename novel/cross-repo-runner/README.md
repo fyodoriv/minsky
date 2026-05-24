@@ -22,7 +22,7 @@ Allowed paths default to the task block's `**Touches**:` field (fallback to `**F
 - `status: "pending-external-dep"` — agent is contractually accepted by the matrix but its runtime CLI has not yet shipped. The `error` field carries an operator-actionable message naming the dep date and the fallback agents. Caller MUST print the error and exit `EX_USAGE` (64); never silently fall back to a different agent.
 - `status: "unknown"` — operator typed an agent id the matrix does not know. Error names the valid ids.
 
-Today the `openhands` row carries `pendingExternalDep: "2026-06-01"` (the OpenHands Agent Canvas Initiative CLI release per GHE issue `OpenHands/OpenHands#14374`). On June 1 the field flips to `null` and the same resolver call returns `status: "ok"`. Source: TASKS.md `openhands-config-schema-pre-june-1`, parent `add-openhands-as-pluggable-backend`.
+As of **2026-05-24**, the `openhands` row is the **canonical default** (`AGENT_MATRIX[0]`, `pendingExternalDep: null`). The June-1 dep was lifted ahead of schedule by the [`@minsky/agent-runtime-openhands`](../adapters/agent-runtime-openhands/README.md) package: a Python shim wraps OpenHands SDK v1.19.1 in-process and the TS adapter spawns it via `--brief-file`. When the canonical OpenHands CLI ships on `2026-06-01`, the shim is replaced one-for-one with a direct `openhands solve --task-file X` invocation and the TS adapter shape stays the same. Source: operator 2026-05-24 directive "Let's work on completely integrating with openhands today", parent `add-openhands-as-pluggable-backend`, `docs/plans/2026-05-22-path-c-openhands-reshape.md`.
 
 ## `--loop` (continuous host-mode iteration)
 

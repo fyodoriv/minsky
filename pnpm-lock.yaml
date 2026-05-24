@@ -97,6 +97,8 @@ importers:
         specifier: 2.1.9
         version: 2.1.9(@types/node@25.9.1)
 
+  novel/adapters/agent-runtime-openhands: {}
+
   novel/adapters/notifier:
     dependencies:
       '@minsky/adapter-types':
@@ -182,6 +184,9 @@ importers:
 
   novel/cross-repo-runner:
     dependencies:
+      '@minsky/agent-runtime-openhands':
+        specifier: workspace:*
+        version: link:../adapters/agent-runtime-openhands
       '@minsky/sidecar-bootstrap':
         specifier: workspace:*
         version: link:../sidecar-bootstrap
