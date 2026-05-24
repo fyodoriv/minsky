@@ -805,6 +805,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: path-a-phase-7-cross-repo-runner-shell-rewrite
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24
   - **Milestone**: M1
+  - **Competitive-goal**: shrinks Minsky LOC from ~62K → ~52K, moving the 1-FTE-sustainable-budget ratio from 6× over to 5× over. Indirectly improves `cost-per-merged-pr` (scorecard metric) because the bash + Python pair has lower per-iteration context overhead than the 10.8K LOC TypeScript scaffold.
   - **Hypothesis**: cross-repo-runner's 10.8K LOC TypeScript can be replaced by a 300-line bash + 200-line Python combo that runs `openhands solve` per host in round-robin and parses TASKS.md. The TypeScript complexity grew incrementally as adapters multiplied; with OpenHands as the single canonical agent (shipped 2026-05-24), most adapter logic is gone, and a small shell + Python script suffices.
   - **Success**: `bin/minsky-run --hosts-dir ~/apps` completes 1 round-robin pass across ≥3 hosts in <30 minutes, opening ≥1 draft PR per host that touched a task. The bash + python combined LOC is ≤ 600. The existing fixture set in `novel/cross-repo-runner/test/` is rewritten as `tests/minsky-run.bats` and passes. After parity confirmed, `novel/cross-repo-runner/` is deleted.
   - **Pivot**: if the bash rewrite hits >100 hours of integration debugging (suggesting the TypeScript complexity was load-bearing), revert to Path C's "keep cross-repo-runner" plan and stop the aggressive cut at Phase 9 (small-package sweep only).
@@ -819,6 +820,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: path-a-phase-8-tick-observer-spec-monitor-inline-fold
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-7
   - **Milestone**: M1
+  - **Competitive-goal**: shrinks Minsky LOC by another ~8K (tick-loop + observer + spec-monitor). Improves `mean-autonomous-merge-latency` (scorecard metric) — the inline bash invariant checks run in microseconds vs the TypeScript observer's per-iteration import+resolve cost.
   - **Hypothesis**: the tick-loop's outer iteration logic + the observer's 5 runtime invariants + the spec-monitor's specification-drift detection are 8K LOC total in TypeScript, but functionally they are: (a) one for-loop, (b) 5 small inline bash functions, (c) one `check-rule-coverage.mjs` lint. Total replacement: ≤ 200 lines.
   - **Success**: all three directories deleted. `bin/minsky-run --self-check` exits 0 with a 1-line summary of each invariant. `scripts/check-rule-coverage.mjs` is wired into `pre-pr-lint --stage=full` and exits 0.
   - **Pivot**: if the inline-fold makes `bin/minsky-run` exceed 600 lines, split into `bin/minsky-run` + `lib/invariants.sh` (still inside the budget).
@@ -833,6 +835,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: path-a-phase-9-small-package-sweep-delete
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-8
   - **Milestone**: M1
+  - **Competitive-goal**: shrinks Minsky LOC by ~3.7K (5 small packages). Indirectly improves `cost-per-merged-pr` (scorecard metric) — fewer files in the workspace means lower agent context cost per iteration.
   - **Hypothesis**: these 5 small packages exist for historical reasons; their current responsibilities can be discharged by (a) `templates/task-brief.md` markdown, (b) `bin/check-budget.sh` shell, (c) `tail -f ~/.minsky/daemon.log` + `openhands stream`, (d) removing OMC integration entirely (the 2026-05-22 reassessment already noted OpenHands' native persona stack covers most of OMC's surface), (e) folding the prompt-optimizer spec into `novel/mape-k-loop/spec/prompt-optimizer.md` (the substrate is unbuilt anyway).
   - **Success**: all 5 directories deleted. Replacements exist and pass `make check` equivalent.
   - **Pivot**: if any replacement's reduced LOC produces ≥1 lost capability (i.e. a previously-passing integration test fails), restore that one package and document the why.
@@ -847,6 +850,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: path-a-phase-10-competitive-benchmark-static
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-9
   - **Milestone**: M1
+  - **Competitive-goal**: shrinks Minsky LOC by ~3K (the competitive-benchmark package). The scorecard moves from executable to static markdown — same `swe-bench-verified-resolve-rate`, `autonomous-merge-rate`, etc. visible to readers, lower per-iteration overhead (no `bin/minsky competitive` CLI in the daemon's PATH).
   - **Hypothesis**: the M1.10 milestone is met (the corpus shape gate is satisfied). The corpus doesn't need to be executable anymore — static markdown at `competitors/scorecard.md` is the right surface for a once-per-quarter refresh cadence. The `competitor-research` skill already supports writing to markdown.
   - **Success**: `competitors/scorecard.md` exists with the same content shape as today's `bin/minsky competitive --json | jq`. `bin/minsky competitive` subcommand removed. The `competitor-research` skill (already updated 2026-05-24 to use ask_human.md) continues to update individual `competitors/<id>.md` files.
   - **Pivot**: if the scorecard needs to be live (vendor numbers update weekly, not quarterly), keep the corpus.ts + scorecard.html generator and only delete the CLI subcommand.
@@ -861,6 +865,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: path-a-phase-11-sidecar-template-only
   - **Tags**: p1, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-10
   - **Milestone**: M1
+  - **Competitive-goal**: shrinks Minsky LOC by ~800 (sidecar-bootstrap reduction). Indirectly preserves the `operator-machine-identity` moat (real-world PR merge rate is unaffected because the sidecar template still materializes `.minsky/repo.yaml` correctly).
   - **Hypothesis**: the sidecar bootstrap today materializes `.minsky/repo.yaml` into host repos via TypeScript; the logic is essentially "copy a template + substitute the repo name." 20 lines of shell.
   - **Success**: `novel/sidecar-bootstrap/` shrinks to ≤ 200 LOC (or deletes entirely).
   - **Pivot**: if the template-only version loses repo-detection logic that the daemon depended on, restore that one function but stop there.
@@ -875,6 +880,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: path-a-phase-13-identity-promotion
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phases-7-12
   - **Milestone**: M1
+  - **Competitive-goal**: doesn't shrink LOC directly, but lowers the operator's per-month maintenance ceiling (the headline value of the whole Path A cut). User-facing capability against scorecard metrics (`swe-bench-verified-resolve-rate`, `autonomous-merge-rate`, `mean-autonomous-merge-latency`) is unchanged because OpenHands is the runtime in both pre- and post-cut states.
   - **Hypothesis**: after the aggressive cut completes, Minsky's identity has shifted from "70K-LOC integration distribution" to "5-10K-LOC discipline pack running on OpenHands". The user-facing capability ("24/7 self-improving code factory") is unchanged, but the surface area is 85% smaller. The README + vision.md need to reflect the new identity so newcomers don't expect 70K LOC of TypeScript.
   - **Success**: README TL;DR reads as a discipline-pack story (constitutional rules + MAPE-K substrate on OpenHands), not as a runtime story. `vision.md § "What Minsky is"` matches. Pattern conformance index has no orphan rows (deleted packages → no row). `agentbrew install minsky-discipline-pack` works.
   - **Pivot**: trivial — this is docs.
