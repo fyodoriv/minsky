@@ -236,6 +236,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "biome",
       "brief-pr-instructions",
       "cadence-pivot-threshold",
+      "check-cross-repo-pr-rate",
       "cloud-audit-gate",
       "competitive-goal",
       "dashboard-localhost-bind",
@@ -460,6 +461,21 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "pnpm",
     args: ["exec", "knip", "--no-progress", "--reporter", "compact"],
+  },
+  {
+    // Cross-repo runner's iteration→PR ship-rate gate. Reads
+    // `.minsky/experiment-store/cross-repo/*.jsonl`, computes the
+    // rolling-30d rate, exits non-zero when verdict=BELOW (rate <
+    // SHIP_RATE_FLOOR=0.10). Threshold constants live in
+    // `novel/cross-repo-runner/src/iteration-ship-rate.ts` (one source of
+    // truth per rule #9 + Munafò 2017). FULL stage only — the daemon's
+    // fast gate doesn't need a metric over its own history (by design:
+    // daemon pushes can still file fix-the-rate PRs even when BELOW;
+    // only operator pushes are blocked).
+    name: "check-cross-repo-pr-rate",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-cross-repo-pr-rate.mjs", "--window=30d"],
   },
   {
     // Circular-dep + orphan-file detector via dependency-cruiser. Config at

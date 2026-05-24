@@ -123,6 +123,25 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     milestone: "M1.1",
   },
   {
+    // 2026-05-24: added to close out `cross-repo-iteration-ship-rate-ci-gate`
+    // (P0 M1). Rolling-30d iteration→PR ship-rate, surfaced as a dashboard
+    // tile so an operator scanning the dashboard sees the ratio without
+    // grepping jsonl. Pre-registered thresholds are pinned in
+    // `novel/cross-repo-runner/src/iteration-ship-rate.ts` (one source of
+    // truth shared by the CLI lint and this collector).
+    id: "cross-repo-pr-rate",
+    label: "Cross-repo iteration→PR ship-rate (30d)",
+    formula: "node scripts/check-cross-repo-pr-rate.mjs --window=30d --json",
+    unit: "ratio",
+    freshnessBudgetMs: 1 * DAY_MS,
+    goal: "≥0.15 (ABOVE) — at or above the target floor; the runner is shipping enough PRs to justify iteration cost",
+    pivot:
+      "<0.10 (BELOW) for ≥4 consecutive weeks AFTER both `devin-spawn-no-pr-opened` and `watchdog-timeout-kills-productive-devin` ship → retire the spawn-then-extract-PR-URL pattern and replace with pre-created draft PRs (see TASKS.md `cross-repo-iteration-ship-rate-ci-gate` Pivot)",
+    anchor:
+      "Beyer et al., _SRE_ 2016, Ch. 6 (the four golden signals require aggregate visibility); Forsgren/Humble/Kim, _Accelerate_ 2018 (DORA keys are ratios over a window); Munafò et al. 2017 (pre-registered thresholds — pinned in `iteration-ship-rate.ts`)",
+    milestone: "M1",
+  },
+  {
     id: "tokens-per-story",
     label: "Tokens per closed user-story",
     formula:

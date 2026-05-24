@@ -76,6 +76,38 @@ function collectLoopUptime() {
   };
 }
 
+/** cross-repo-pr-rate: rolling-30d iteration→PR ship-rate via the pure
+ * `computeShipRate` (one source of truth — same constants as the CI lint
+ * and the optional runtime invariant). Returns the live ratio formatted
+ * for METRICS.md; the verdict bucket is included so an at-a-glance reader
+ * sees both the number and the action (ABOVE / WARN / BELOW / INSUFFICIENT-DATA).
+ * Reads via `node scripts/check-cross-repo-pr-rate.mjs --json` so the CLI
+ * I/O path is exercised by every metric snapshot (rule #4 visibility).
+ */
+function collectCrossRepoPrRate() {
+  try {
+    const stdout = execFileSync(
+      "node",
+      ["scripts/check-cross-repo-pr-rate.mjs", "--window=30d", "--json"],
+      { cwd: ROOT, encoding: "utf8", timeout: 5_000 },
+    );
+    const parsed = JSON.parse(stdout);
+    if (parsed.verdict === "INSUFFICIENT-DATA") {
+      return {
+        value: `INSUFFICIENT-DATA (n=${parsed.n} < 5; need more iterations to verdict)`,
+        higherIsBetter: true,
+      };
+    }
+    const pct = (parsed.rate * 100).toFixed(1);
+    return {
+      value: `${pct}% (${parsed.withPr}/${parsed.n} iterations opened a PR over 30d) — verdict=${parsed.verdict}`,
+      higherIsBetter: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** task-throughput: conventional commits per day over 30d */
 function collectTaskThroughput() {
   const total = runNum(
@@ -192,6 +224,7 @@ async function main() {
 
   const collectors = {
     "loop-uptime": collectLoopUptime,
+    "cross-repo-pr-rate": collectCrossRepoPrRate,
     "task-throughput": collectTaskThroughput,
     "spec-alignment": collectSpecAlignment,
     "dep-interface-coverage": collectDepInterfaceCoverage,

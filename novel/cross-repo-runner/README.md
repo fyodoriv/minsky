@@ -14,6 +14,10 @@ Allowed paths default to the task block's `**Touches**:` field (fallback to `**F
 
 `spawn-failed` carries `signal?: NodeJS.Signals` (e.g. `"SIGKILL"` / `"SIGTERM"` / `"SIGHUP"`) when the child died from a signal rather than a clean exit code — threaded from `@minsky/tick-loop`'s `SpawnResult.signal` through `LiveSpawnOutcome` and out to the iteration record's `notes` field as `exit=N signal=SIG`. Without this, `exit=-1` collapsed "exited with no code" and "killed by signal" into one indistinguishable bucket; the daemon log now distinguishes SIGKILL-from-watchdog vs SIGTERM-from-parent vs SIGHUP-from-terminal-close. Surfaced-by `spawn-failed-exit-minus-one-silent-empty-stderr` (2026-05-19, vision.md § Glossary).
 
+## Ship-rate gate (M1 P0 — closed 2026-05-24)
+
+`src/iteration-ship-rate.ts` exports the pure `computeShipRate(records, { windowDays, nowMs })` plus four pre-registered constants pinned per rule #9 (Munafò 2017): `SHIP_RATE_TARGET=0.15`, `SHIP_RATE_FLOOR=0.10`, `MIN_SAMPLE_SIZE=5`, `DEFAULT_WINDOW_DAYS=30`. The verdict bucket is `ABOVE | WARN | BELOW | INSUFFICIENT-DATA`. One source of truth shared by three callers: the CLI lint `scripts/check-cross-repo-pr-rate.mjs` (operator-side gate via `pre-pr-lint --stage=full`; exits 1 on `BELOW`), the dashboard collector `collectCrossRepoPrRate` in `scripts/collect-metrics.mjs` (populates the METRICS.md `cross-repo-pr-rate` row), and the optional runtime invariant. A tune-the-threshold PR is a deliberate diff to the `.ts` constants, not a silent drift between callers. Closes the measurement loop opened by `walker-drains-one-host-forever` (PR #644): walker-drains made distribution fair; this gate makes the per-host iteration→PR outcome visible in every operator push.
+
 ## Cloud-agent matrix and resolver
 
 `src/agent-config.ts` exports the canonical 4-row `AGENT_MATRIX` (claude / devin / aider / openhands) and a pure `resolveCloudAgent({ envValue, configValue, defaultAgent? })` resolver. The resolver returns a discriminated union:

@@ -39,17 +39,17 @@ describe("createServer — Hono SSR scaffold", () => {
     const body = await res.text();
     // Exactly 10 data-metric-id attributes — the parent dashboard-web-v0's
     // verification cell.
-    expect(body.match(/data-metric-id=/g) ?? []).toHaveLength(10);
+    expect(body.match(/data-metric-id=/g) ?? []).toHaveLength(11);
   });
 
-  it("renders exactly 10 data-metric-id attributes for the default SUCCESS_METRICS", async () => {
+  it("renders exactly 11 data-metric-id attributes for the default SUCCESS_METRICS", async () => {
     const { fetch } = createServer({ metrics: SUCCESS_METRICS });
     const res = await fetch(new Request("http://test.local/"));
     const body = await res.text();
-    expect(body.match(/data-metric-id=/g) ?? []).toHaveLength(10);
+    expect(body.match(/data-metric-id=/g) ?? []).toHaveLength(11);
   });
 
-  it("renders all 10 SUCCESS_METRICS ids (set-equality assertion)", async () => {
+  it("renders all 11 SUCCESS_METRICS ids (set-equality assertion)", async () => {
     const { fetch } = createServer();
     const res = await fetch(new Request("http://test.local/"));
     const body = await res.text();
@@ -70,8 +70,8 @@ describe("createServer — Hono SSR scaffold", () => {
     const { fetch } = createServer();
     const res = await fetch(new Request("http://test.local/"));
     const body = await res.text();
-    // One (stub) per row; 10 rows.
-    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(10);
+    // One (stub) per row; 11 rows.
+    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(11);
   });
 
   it("live values replace `(stub)` when Strategy returns strings (otel-wiring seam)", async () => {
@@ -80,14 +80,14 @@ describe("createServer — Hono SSR scaffold", () => {
     const body = await res.text();
     expect(body.match(/\(stub\)/g) ?? []).toHaveLength(0);
     expect(body).toContain(">42<");
-    expect((body.match(/>42</g) ?? []).length).toBe(10);
+    expect((body.match(/>42</g) ?? []).length).toBe(11);
   });
 
   it("default Strategy preserves backward compat (no getValue arg → 10 stubs)", async () => {
     const { fetch } = createServer();
     const res = await fetch(new Request("http://test.local/"));
     const body = await res.text();
-    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(10);
+    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(11);
   });
 
   it("HTML-escapes Strategy output so a hostile backend cannot inject `<script>` (rule #7 XSS guard)", async () => {
@@ -103,8 +103,8 @@ describe("createServer — Hono SSR scaffold", () => {
     const { fetch } = createServer({ getValue });
     const res = await fetch(new Request("http://test.local/"));
     const body = await res.text();
-    // 10 metrics − 1 live = 9 stubs.
-    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(9);
+    // 11 metrics − 1 live = 10 stubs.
+    expect(body.match(/\(stub\)/g) ?? []).toHaveLength(10);
     expect(body).toContain(">0.99<");
   });
 });
