@@ -206,6 +206,25 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=high
 
+  bash-tests:
+    # Phase 7 bash-side parity tests for `bin/minsky-run.sh` +
+    # `scripts/spawn_with_watchdog.py`. Filed as
+    # `add-bats-ci-gate-for-tests-minsky-run-bats` (P2) after PR #797
+    # noted the bats suite was dev-only with no enforcement.
+    # Anchor: rule #11 (deterministic enforcement — every test is a
+    # gate); rule #1 (bats + jq + GNU timeout are existing tools).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats + jq + shellcheck (apt)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq shellcheck
+      - name: shellcheck bin/minsky-run.sh
+        run: shellcheck bin/minsky-run.sh
+      - name: Run bats suite
+        run: bats tests/minsky-run.bats
+
   rule-2-dep-coverage:
     # rule #2 enforcement: every external dep is reached only through
     # `novel/adapters/`. The script extracts vendor names from
