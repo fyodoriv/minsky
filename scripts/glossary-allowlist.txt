@@ -115,3 +115,7 @@ gaia-benchmark-evaluation-substrate
 # § "What Minsky uniquely does" row 6 (TASKS.md as operator surface) — the
 # anchor is the source file itself (novel/cross-repo-runner/src/index.ts).
 pickHostTask
+
+# Task IDs filed 2026-05-24 in PR #788 (anchored in TASKS.md).
+launcher-agnostic-feature-parity-chaos-test  # P1 task in TASKS.md — implements story-014's chaos test
+local-models-stability-gate-90-percent  # P1 task in TASKS.md — implements story-015's M1.1 stability gate
