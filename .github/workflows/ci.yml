@@ -222,6 +222,11 @@ jobs:
           sudo apt-get install -y bats jq shellcheck
       - name: shellcheck bin/minsky-run.sh
         run: shellcheck bin/minsky-run.sh
+      - name: shellcheck bin/minsky (Phase 7c dispatch)
+        # Pre-existing info-level warnings in bin/minsky are tolerated;
+        # we only fail on warning-and-above. The Phase 7c --bash-runner
+        # dispatch hunk must stay shellcheck-clean.
+        run: shellcheck --severity=warning bin/minsky
       - name: Run bats suite
         run: bats tests/minsky-run.bats
 

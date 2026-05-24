@@ -19,6 +19,10 @@
 #                           with --daemon: `minsky --local --daemon`.
 #   minsky --host <dir>  → explicit single-host.
 #   minsky --hosts-dir <parent> → explicit multi-host walk.
+#   minsky --bash-runner → dispatch to the Path A bash port at
+#                           `bin/minsky-run.sh` instead of the Node
+#                           runner (opt-in; multi-host walker only).
+#                           Equivalent: `MINSKY_BASH_RUNNER=1 minsky`.
 #   minsky --help        → forwarded to `minsky-run --help`.
 #   minsky status        → show running minsky processes + tail of daemon log.
 #   minsky stop          → SIGTERM any running minsky-run processes.
@@ -1242,11 +1246,22 @@ fi
 # `minsky --local [args...]` sets the env vars for local-only mode
 # and strips --local from the args before forwarding. Combinable
 # with --daemon: `minsky --local --daemon --hosts-dir <repos-parent>`.
+#
+# Also parses --bash-runner: when set (or MINSKY_BASH_RUNNER=1),
+# dispatch to bin/minsky-run.sh (the Path A bash port) instead of the
+# Node runner. Opt-in only — default stays the Node runner. Phase 7c
+# of `docs/plans/2026-05-24-path-a-aggressive-cut.md`. Operators use
+# this to live-fire-smoke the bash port; once parity is confirmed
+# end-to-end the default flips and the Node runner gets deleted in
+# Phase 7b.
 MINSKY_ARGS=()
+USE_BASH_RUNNER="${MINSKY_BASH_RUNNER:-0}"
 for arg in "$@"; do
   if [ "$arg" = "--local" ]; then
     export MINSKY_LLM_PROVIDER="local-only"
     export MINSKY_LOCAL_LLM=1
+  elif [ "$arg" = "--bash-runner" ]; then
+    USE_BASH_RUNNER=1
   else
     MINSKY_ARGS+=("$arg")
   fi
@@ -1403,4 +1418,17 @@ fi
 # Forward every arg verbatim. The runner bin itself handles `--help`,
 # cwd auto-detect, countdown banner, autonomous defaults, etc.
 # SIGHUP-immune from the trap above.
+if [ "$USE_BASH_RUNNER" = "1" ]; then
+  # Phase 7c: dispatch to the Path A bash port instead of the Node
+  # runner. Only the multi-host walker path is supported today; bash
+  # rejects unknown flags with exit 2. See `docs/plans/2026-05-24-
+  # path-a-aggressive-cut.md` § Phase 7c for the scope.
+  BASH_RUNNER_BIN="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+  if [ ! -x "$BASH_RUNNER_BIN" ]; then
+    echo "minsky: --bash-runner requested but $BASH_RUNNER_BIN is not executable. Run \`chmod +x $BASH_RUNNER_BIN\`." >&2
+    exit 1
+  fi
+  echo "minsky: using bash runner ($BASH_RUNNER_BIN) — Phase 7c opt-in" >&2
+  exec bash "$BASH_RUNNER_BIN" "$@"
+fi
 exec node "$RUNNER_BIN" "$@"
