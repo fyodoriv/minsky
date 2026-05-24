@@ -24,6 +24,20 @@ export type { RunnerPlan, SpawnPlanInputs } from "./spawn-plan.js";
 export { renderIterationRecord } from "./iteration-record.js";
 export type { IterationRecord, IterationVerdict } from "./iteration-record.js";
 export {
+  DEFAULT_WINDOW_DAYS,
+  MIN_SAMPLE_SIZE,
+  SHIP_RATE_FLOOR,
+  SHIP_RATE_TARGET,
+  bucketVerdict,
+  computeShipRate,
+} from "./iteration-ship-rate.js";
+export type {
+  ComputeShipRateOptions,
+  ShipRateRecord,
+  ShipRateResult,
+  ShipRateVerdict,
+} from "./iteration-ship-rate.js";
+export {
   DEFAULT_MINSKY_DISPATCH_REPO,
   DISPATCH_EVENT_TYPE,
   buildDispatchPayload,
