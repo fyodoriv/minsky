@@ -1380,13 +1380,44 @@ function buildAgentConfig(hostRoot) {
     // shim NEVER imports OpenHands into the Node.js process — the
     // entire SDK contact surface stays in Python (rule #2 adapter +
     // rule #14 delegate-to-runtime).
+    //
+    // Local-model auto-detection: if cloud_agent_model starts with
+    // `ollama_chat/` or `lm_studio/` we auto-set base_url + thinking-off
+    // so operators without an Anthropic key can use a local LLM via
+    // Ollama with zero extra config. Operator can still override via
+    // MINSKY_OPENHANDS_BASE_URL / MINSKY_OPENHANDS_REASONING_EFFORT.
     const shimPath = resolveOpenHandsShimPath();
     const pythonBin = process.env.MINSKY_OPENHANDS_PYTHON ?? "python3";
     const apiKeyEnv = process.env.MINSKY_OPENHANDS_API_KEY_ENV ?? "ANTHROPIC_API_KEY";
     const ohModel = model !== "" ? model : "claude-sonnet-4-20250514";
+    const isLocalModel =
+      ohModel.startsWith("ollama_chat/") ||
+      ohModel.startsWith("ollama/") ||
+      ohModel.startsWith("lm_studio/");
+    const explicitBaseUrl = process.env.MINSKY_OPENHANDS_BASE_URL;
+    const baseUrl =
+      explicitBaseUrl !== undefined && explicitBaseUrl !== ""
+        ? explicitBaseUrl
+        : isLocalModel
+          ? (_minskyConfig.ollama_base_url ?? "http://localhost:11434")
+          : undefined;
+    const explicitReasoningEffort = process.env.MINSKY_OPENHANDS_REASONING_EFFORT;
+    const reasoningEffort =
+      explicitReasoningEffort !== undefined && explicitReasoningEffort !== ""
+        ? explicitReasoningEffort
+        : isLocalModel
+          ? "none"
+          : undefined;
+    const disableExtendedThinking = isLocalModel;
+
+    const argsBase = [shimPath, "--model", ohModel, "--api-key-env", apiKeyEnv];
+    if (baseUrl !== undefined) argsBase.push("--base-url", baseUrl);
+    if (reasoningEffort !== undefined) argsBase.push("--reasoning-effort", reasoningEffort);
+    if (disableExtendedThinking) argsBase.push("--no-extended-thinking");
+
     return {
       command: pythonBin,
-      args: [shimPath, "--model", ohModel, "--api-key-env", apiKeyEnv],
+      args: argsBase,
       invocation: (input) => {
         const inv = buildOpenHandsInvocation({
           brief: input.brief,
@@ -1395,6 +1426,9 @@ function buildAgentConfig(hostRoot) {
           apiKeyEnv,
           shimPath,
           pythonBin,
+          baseUrl,
+          reasoningEffort,
+          disableExtendedThinking,
         });
         return {
           command: inv.command,

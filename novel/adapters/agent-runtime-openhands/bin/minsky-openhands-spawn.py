@@ -59,11 +59,15 @@ def _baseline_sha(repo_root: Path) -> str:
 
 
 def _capture_diff_stats(repo_root: Path, baseline_sha: str) -> dict[str, int]:
-    """Return file-change stats since baseline_sha, including uncommitted edits.
+    """Return file-change stats since baseline_sha, including uncommitted edits AND new untracked files.
 
     The agent may either commit (full git diff baseline..HEAD) or leave
-    edits uncommitted (git diff baseline plus working-tree diff). We
-    capture both so the TS caller sees the union.
+    edits uncommitted (git diff baseline plus working-tree diff), or
+    create brand-new untracked files (`git status --porcelain`). We
+    capture all three so the TS caller sees the full union — anything
+    less misses common agent behaviour like "create a new file" which
+    git diff alone reports as zero changes (because the new file is
+    untracked, not modified).
     """
     if baseline_sha == "":
         return {"files_changed": 0, "diff_bytes": 0}
@@ -81,10 +85,31 @@ def _capture_diff_stats(repo_root: Path, baseline_sha: str) -> dict[str, int]:
         timeout=30,
         check=False,
     )
+    # Untracked files don't show in `git diff` — get them from porcelain.
+    # Format: `?? path/to/file` per untracked entry. We count entries and
+    # add a rough byte-size from the working tree.
+    untracked = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "--others", "--exclude-standard"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    untracked_paths = [p for p in (untracked.stdout or "").splitlines() if p.strip()]
+    untracked_byte_count = 0
+    for rel_path in untracked_paths:
+        abs_path = repo_root / rel_path
+        try:
+            untracked_byte_count += abs_path.stat().st_size
+        except OSError:
+            # Path disappeared between ls-files and stat — skip
+            pass
+
     combined = (committed.stdout or "") + (uncommitted.stdout or "")
+    diff_files = combined.count("diff --git ")
     return {
-        "files_changed": combined.count("diff --git "),
-        "diff_bytes": len(combined),
+        "files_changed": diff_files + len(untracked_paths),
+        "diff_bytes": len(combined) + untracked_byte_count,
     }
 
 
@@ -93,20 +118,46 @@ def _resolve_api_key(env_name: str) -> str | None:
     return os.getenv(env_name)
 
 
-def _build_agent(model: str, api_key: str):
+def _build_agent(
+    model: str,
+    api_key: str,
+    base_url: str | None,
+    reasoning_effort: str | None,
+    disable_extended_thinking: bool,
+):
     """Construct an OpenHands Agent with the canonical 3-tool kit.
 
     Tools: terminal + file_editor + task_tracker. This matches the
     OpenHands SDK README hello-world (context7 /openhands/software-agent-sdk).
     Additional tools (web search, MCP integrations) are out of scope for
     the v0 adapter — file follow-up tasks if a workload needs them.
+
+    LLM-config knobs:
+
+    - `base_url` — non-None routes through a custom LiteLLM endpoint
+      (e.g. `http://localhost:11434` for Ollama). Required for any
+      `ollama_chat/<model>` or `lm_studio/<model>` id.
+    - `reasoning_effort` — `'none'` disables OpenHands' default
+      reasoning-token request (Anthropic/OpenAI feature). Ollama and
+      most non-thinking providers fail the request with
+      `does-not-support-thinking` if this isn't `'none'`.
+    - `disable_extended_thinking` — sets `extended_thinking_budget=None`,
+      otherwise OpenHands defaults to 200000 budget tokens which
+      Ollama rejects with the same `does-not-support-thinking` error.
     """
     from openhands.sdk import LLM, Agent, Tool  # local import keeps banner suppressible
     from openhands.tools.file_editor import FileEditorTool
     from openhands.tools.task_tracker import TaskTrackerTool
     from openhands.tools.terminal import TerminalTool
 
-    llm = LLM(model=model, api_key=api_key)
+    llm_kwargs: dict[str, object] = {"model": model, "api_key": api_key}
+    if base_url is not None:
+        llm_kwargs["base_url"] = base_url
+    if reasoning_effort is not None:
+        llm_kwargs["reasoning_effort"] = reasoning_effort
+    if disable_extended_thinking:
+        llm_kwargs["extended_thinking_budget"] = None
+    llm = LLM(**llm_kwargs)
     return Agent(
         llm=llm,
         tools=[
@@ -158,6 +209,35 @@ def main() -> int:
         help="Env var name that holds the LLM API key. Default: ANTHROPIC_API_KEY.",
     )
     parser.add_argument(
+        "--base-url",
+        default=None,
+        help=(
+            "Optional LiteLLM endpoint base URL. Required for Ollama / LM Studio "
+            "/ any non-default provider, e.g. 'http://localhost:11434' for "
+            "ollama_chat/* models. Omit for Anthropic/OpenAI/Gemini cloud endpoints."
+        ),
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        default=None,
+        choices=[None, "none", "low", "medium", "high", "xhigh"],
+        help=(
+            "OpenHands reasoning-effort knob. Set 'none' for non-thinking providers "
+            "(Ollama, LM Studio, most local models) which reject the default 'high' "
+            "with 'does-not-support-thinking'. Omit for Anthropic/OpenAI/Gemini."
+        ),
+    )
+    parser.add_argument(
+        "--no-extended-thinking",
+        action="store_true",
+        help=(
+            "Disable OpenHands' default extended_thinking_budget (200000 tokens). "
+            "Required for Ollama and other non-thinking providers. Has no effect "
+            "for providers that support thinking; set it whenever --base-url points "
+            "at a local endpoint."
+        ),
+    )
+    parser.add_argument(
         "--max-iterations",
         type=int,
         default=50,
@@ -186,7 +266,13 @@ def main() -> int:
     baseline = _baseline_sha(repo_root)
 
     try:
-        agent = _build_agent(model=args.model, api_key=api_key)
+        agent = _build_agent(
+            model=args.model,
+            api_key=api_key,
+            base_url=args.base_url,
+            reasoning_effort=args.reasoning_effort,
+            disable_extended_thinking=args.no_extended_thinking,
+        )
         _run_conversation(
             agent=agent,
             brief=brief,

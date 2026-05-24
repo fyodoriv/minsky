@@ -101,6 +101,72 @@ describe("buildOpenHandsInvocation", () => {
     const flagsOnly = inv.argv.filter((a) => a.startsWith("--"));
     expect(flagsOnly).toEqual(["--brief-file", "--model", "--repo", "--api-key-env"]);
   });
+
+  it("threads --base-url when baseUrl is provided (Ollama / LM Studio path)", () => {
+    const inv = buildOpenHandsInvocation({
+      ...fixture,
+      baseUrl: "http://localhost:11434",
+    });
+    const flagIdx = inv.argv.indexOf("--base-url");
+    expect(flagIdx).toBeGreaterThan(0);
+    expect(inv.argv[flagIdx + 1]).toBe("http://localhost:11434");
+  });
+
+  it("omits --base-url when not provided (cloud-provider default)", () => {
+    const inv = buildOpenHandsInvocation(fixture);
+    expect(inv.argv.includes("--base-url")).toBe(false);
+  });
+
+  it("threads --reasoning-effort when set to 'none' (non-thinking provider)", () => {
+    const inv = buildOpenHandsInvocation({
+      ...fixture,
+      reasoningEffort: "none",
+    });
+    const flagIdx = inv.argv.indexOf("--reasoning-effort");
+    expect(flagIdx).toBeGreaterThan(0);
+    expect(inv.argv[flagIdx + 1]).toBe("none");
+  });
+
+  it("threads --no-extended-thinking when disableExtendedThinking=true", () => {
+    const inv = buildOpenHandsInvocation({
+      ...fixture,
+      disableExtendedThinking: true,
+    });
+    expect(inv.argv.includes("--no-extended-thinking")).toBe(true);
+  });
+
+  it("omits --no-extended-thinking when disableExtendedThinking is undefined", () => {
+    const inv = buildOpenHandsInvocation(fixture);
+    expect(inv.argv.includes("--no-extended-thinking")).toBe(false);
+  });
+
+  it("omits --no-extended-thinking when disableExtendedThinking=false (explicit)", () => {
+    const inv = buildOpenHandsInvocation({
+      ...fixture,
+      disableExtendedThinking: false,
+    });
+    expect(inv.argv.includes("--no-extended-thinking")).toBe(false);
+  });
+
+  it("combines all local-model flags in the documented Ollama invocation shape", () => {
+    const inv = buildOpenHandsInvocation({
+      ...fixture,
+      model: "ollama_chat/qwen3-coder:30b",
+      baseUrl: "http://localhost:11434",
+      reasoningEffort: "none",
+      disableExtendedThinking: true,
+    });
+    const flagsOnly = inv.argv.filter((a) => a.startsWith("--"));
+    expect(flagsOnly).toEqual([
+      "--brief-file",
+      "--model",
+      "--repo",
+      "--api-key-env",
+      "--base-url",
+      "--reasoning-effort",
+      "--no-extended-thinking",
+    ]);
+  });
 });
 
 describe("resolveShimPath", () => {
