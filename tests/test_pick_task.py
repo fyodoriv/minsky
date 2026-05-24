@@ -276,3 +276,169 @@ def test_pick_host_task_returns_none_when_no_eligible_tasks() -> None:
     empty_md = "## P0\n\n- [x] All done with no IDs\n"
     chosen = pick_task.pick_host_task(empty_md)
     assert chosen is None
+
+
+# --- findTask parity tests -----------------------------------------------
+
+
+def test_find_task_returns_task_on_exact_id_match() -> None:
+    result = pick_task.find_task(SAMPLE_TASKS_MD, "aifn-840-slash-command-labels")
+    assert result.ok
+    assert result.task is not None
+    assert result.task.id == "aifn-840-slash-command-labels"
+
+
+def test_find_task_id_match_is_case_sensitive() -> None:
+    # Kebab IDs are lower-case by convention; uppercase query is NOT a
+    # substring of the title either, so the lookup fails.
+    result = pick_task.find_task(SAMPLE_TASKS_MD, "AIFN-840-SLASH-COMMAND-LABELS")
+    assert not result.ok
+
+
+def test_find_task_falls_through_to_title_substring() -> None:
+    # "AIFN-840" appears in the title but is not the ID.
+    result = pick_task.find_task(SAMPLE_TASKS_MD, "AIFN-840")
+    assert result.ok
+    assert result.task is not None
+    assert result.task.id == "aifn-840-slash-command-labels"
+
+
+def test_find_task_title_substring_is_case_insensitive() -> None:
+    result = pick_task.find_task(SAMPLE_TASKS_MD, "aifn-840")
+    assert result.ok
+    assert result.task is not None
+    assert result.task.id == "aifn-840-slash-command-labels"
+
+
+def test_find_task_substring_partial_match_works() -> None:
+    result = pick_task.find_task(SAMPLE_TASKS_MD, "slash command")
+    assert result.ok
+    assert result.task is not None
+    assert result.task.id == "aifn-840-slash-command-labels"
+
+
+def test_find_task_returns_available_ids_on_miss() -> None:
+    result = pick_task.find_task(SAMPLE_TASKS_MD, "no-such-task")
+    assert not result.ok
+    assert "aifn-840-slash-command-labels" in result.available_ids
+    assert "storybook-coverage-solid-2313" in result.available_ids
+    assert result.reason is not None
+    assert "no-such-task" in result.reason
+
+
+def test_find_task_returns_empty_ids_on_empty_tasks_md() -> None:
+    result = pick_task.find_task("# Tasks\n", "anything")
+    assert not result.ok
+    assert result.available_ids == []
+
+
+# --- Multi-line + asterisk-bullet parser regression tests ----------------
+
+
+MULTILINE_OBSERVER_DOGFOOD_MD = """# Tasks
+
+## P0
+
+- [ ] Sample task with multi-line details
+
+  - **ID**: sample-multiline
+  - **Tags**: regression
+  - **Hypothesis**: needs to survive multi-line
+  - **Success**: details captures all 4 lines
+  - **Pivot**: capture only first line
+  - **Measurement**: yarn vitest run task-finder
+  - **Anchor**: 2026-05-16 oncall-hub-plugin run
+  - **Details**: Walk the page state-by-state:
+    1. `default` — the happy path
+    2. `loading` — skeleton
+    3. `empty` — no team
+    4. `error` — PagerDuty 500
+
+    Reuse `src/shared/components/{Skeleton, EmptyState}`.
+"""
+
+CONTINUATION_NO_BLEED_MD = """# Tasks
+
+## P0
+
+- [ ] Sample task
+
+  - **ID**: sample-no-bleed
+  - **Tags**: regression
+  - **Details**: First line of details.
+
+    Continuation paragraph still part of Details.
+  - **Hypothesis**: separate field, not in details
+  - **Success**: ok
+  - **Pivot**: ok
+  - **Measurement**: ok
+  - **Anchor**: ok
+"""
+
+ASTERISK_BULLET_TASKS_MD = """# Tasks
+
+## P1
+
+- [ ] star-bullet
+  * **ID**: star-bullet
+  * **Hypothesis**: h
+  * **Success**: s
+  * **Pivot**: p
+  * **Measurement**: m
+  * **Anchor**: a
+"""
+
+
+def test_parser_captures_oncall_hub_multiline_details_regression() -> None:
+    # 2026-05-16 oncall-hub-plugin regression: parser dropped continuation
+    # lines under **Details** so the brief was empty and claude --print
+    # shipped nothing. This pins the fix.
+    tasks = pick_task.parse_tasks_md(MULTILINE_OBSERVER_DOGFOOD_MD)
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t.details is not None
+    assert "Walk the page state-by-state" in t.details
+    assert "1. `default`" in t.details
+    assert "4. `error`" in t.details
+    assert "Reuse" in t.details
+    assert t.anchor == "2026-05-16 oncall-hub-plugin run"
+    assert t.hypothesis == "needs to survive multi-line"
+
+
+def test_continuation_does_not_bleed_across_sibling_field_bullets() -> None:
+    tasks = pick_task.parse_tasks_md(CONTINUATION_NO_BLEED_MD)
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t.details is not None
+    assert "First line of details." in t.details
+    assert "Continuation paragraph still part of Details." in t.details
+    assert "separate field" not in t.details
+    assert t.hypothesis == "separate field, not in details"
+
+
+def test_parser_handles_asterisk_bullet_metadata() -> None:
+    # tasks.md spec allows either `- ` or `* ` as the bullet character.
+    tasks = pick_task.parse_tasks_md(ASTERISK_BULLET_TASKS_MD)
+    assert len(tasks) == 1
+    assert tasks[0].id == "star-bullet"
+    assert tasks[0].hypothesis == "h"
+
+
+# --- Real-TASKS.md parity smoke test -------------------------------------
+
+
+def test_pick_host_task_against_real_tasks_md() -> None:
+    """Smoke test: the picker must return a non-None ID against the live TASKS.md.
+
+    This catches the case where the picker's filter logic accidentally
+    rejects every task (e.g. all become blocked, all lose rule-9 fields)
+    — failing fast in CI rather than silently shipping a daemon that
+    can't pick anything.
+    """
+    tasks_md = Path(__file__).parent.parent / "TASKS.md"
+    if not tasks_md.is_file():
+        return  # Tolerated when the test runs in a sub-directory checkout.
+    chosen = pick_task.pick_host_task(tasks_md.read_text(encoding="utf-8"))
+    assert chosen is not None
+    assert chosen.id is not None
+    assert chosen.priority in {"P0", "P1"}
