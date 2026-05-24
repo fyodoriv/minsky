@@ -42,8 +42,32 @@ Per-machine config at `~/.minsky/config.json`. Edit once, read on every minsky s
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `MINSKY_OPENHANDS_PYTHON` | `python3` | Python binary the daemon spawns. Override if your `python3` isn't 3.10+ or you want to use a specific venv interpreter (e.g. `~/.minsky/openhands-venv/bin/python`). |
-| `MINSKY_OPENHANDS_API_KEY_ENV` | `ANTHROPIC_API_KEY` | Env var name the shim reads for the LLM API key. Set to `OPENAI_API_KEY` / `GEMINI_API_KEY` / etc. when using a non-Anthropic model. |
+| `MINSKY_OPENHANDS_API_KEY_ENV` | `ANTHROPIC_API_KEY` | Env var name the shim reads for the LLM API key. Set to `OPENAI_API_KEY` / `GEMINI_API_KEY` / `OLLAMA_API_KEY` / etc. when using a non-Anthropic model. |
+| `MINSKY_OPENHANDS_BASE_URL` | (auto-detected) | LiteLLM endpoint base URL. Auto-detected to `http://localhost:11434` (or `ollama_base_url` in config) when `cloud_agent_model` starts with `ollama_chat/` / `ollama/` / `lm_studio/`. Override for non-default local endpoints or custom proxies. |
+| `MINSKY_OPENHANDS_REASONING_EFFORT` | (auto-detected) | OpenHands reasoning-effort knob. Auto-detected to `none` for local models (Ollama / LM Studio) which reject the SDK default `high`. Override (`low` / `medium` / `high` / `xhigh` / `none`) for hybrid setups. |
 | `OPENHANDS_SUPPRESS_BANNER` | (unset) | Suppress OpenHands' startup banner in shim stdout. Recommended for `1` in CI/non-interactive contexts. |
+
+## OpenHands with local models (Ollama / LM Studio)
+
+For operators without an Anthropic / OpenAI / Gemini key, set `cloud_agent_model` to a `ollama_chat/<model>` id and Minsky auto-configures the shim for local-model operation:
+
+```json
+{
+  "cloud_agent": "openhands",
+  "cloud_agent_model": "ollama_chat/qwen3-coder:30b",
+  "ollama_base_url": "http://localhost:11434"
+}
+```
+
+Then export the API-key env var with any non-empty value (LiteLLM requires it set, ignores the value for Ollama):
+
+```bash
+export OLLAMA_API_KEY="ollama"
+export MINSKY_OPENHANDS_API_KEY_ENV=OLLAMA_API_KEY
+minsky
+```
+
+The daemon auto-detects the local model from the prefix and threads `--base-url` + `--reasoning-effort=none` + `--no-extended-thinking` to the shim. Verified end-to-end on 2026-05-24 against `qwen3-coder:30b` (the same model Minsky's legacy `aider` local agent uses). Tool-call reliability degrades below ~8B params — use `qwen3-coder:30b` or larger for production work.
 
 ## Agent comparison
 

@@ -41,6 +41,29 @@ export interface OpenHandsSpawnInput {
   shimPath?: string;
   /** Python binary to invoke. Default "python3"; operator may override via env. */
   pythonBin?: string;
+  /**
+   * Optional LiteLLM endpoint base URL. Required for Ollama / LM Studio
+   * / any non-default provider, e.g. `http://localhost:11434` for any
+   * `ollama_chat/<model>` id. Omit for Anthropic/OpenAI/Gemini cloud
+   * endpoints where LiteLLM resolves the URL from the provider prefix.
+   */
+  baseUrl?: string;
+  /**
+   * Optional OpenHands reasoning-effort knob. Set `"none"` for non-
+   * thinking providers (Ollama, LM Studio, most local models) which
+   * reject the default `"high"` with `does-not-support-thinking`. Omit
+   * for Anthropic/OpenAI/Gemini which support thinking natively.
+   */
+  reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
+  /**
+   * Optional disable-extended-thinking flag. Required `true` for Ollama
+   * / LM Studio / any non-thinking provider — OpenHands defaults to
+   * `extended_thinking_budget=200000` which Ollama rejects with the
+   * same `does-not-support-thinking` error. Has no effect when the
+   * provider supports thinking; safe to set whenever `baseUrl` points
+   * at a local endpoint.
+   */
+  disableExtendedThinking?: boolean;
 }
 
 /**
@@ -109,6 +132,15 @@ export function buildOpenHandsInvocation(input: OpenHandsSpawnInput): OpenHandsI
     "--api-key-env",
     apiKeyEnv,
   ];
+  if (input.baseUrl !== undefined) {
+    argv.push("--base-url", input.baseUrl);
+  }
+  if (input.reasoningEffort !== undefined) {
+    argv.push("--reasoning-effort", input.reasoningEffort);
+  }
+  if (input.disableExtendedThinking === true) {
+    argv.push("--no-extended-thinking");
+  }
 
   return {
     command: pythonBin,

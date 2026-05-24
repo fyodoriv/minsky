@@ -53,6 +53,29 @@ The Python shim consumes:
 | `--repo` | yes | — | Absolute path to the host repo (= OpenHands workspace) |
 | `--api-key-env` | no | `ANTHROPIC_API_KEY` | Env var name that holds the LLM API key |
 | `--max-iterations` | no | `50` | Reserved; OpenHands SDK does not currently expose this knob |
+| `--base-url` | no | (none) | LiteLLM endpoint base URL. Required for Ollama / LM Studio / any local provider (e.g. `http://localhost:11434`). Omit for Anthropic/OpenAI/Gemini cloud endpoints. |
+| `--reasoning-effort` | no | (none, lets SDK default) | OpenHands reasoning-effort knob. Set `none` for Ollama and most local models which reject the default `high` with `does-not-support-thinking`. |
+| `--no-extended-thinking` | no | off | Flag — set this whenever `--base-url` points at a local endpoint. Disables the SDK's default `extended_thinking_budget=200000` which Ollama rejects with the same `does-not-support-thinking` error. |
+
+### Local-model (Ollama / LM Studio) invocation
+
+For operators without an Anthropic / OpenAI / Gemini key, the shim works against any local OpenAI-compatible endpoint via LiteLLM. The canonical Ollama invocation:
+
+```bash
+export OLLAMA_API_KEY="ollama"  # litellm requires the env var to be SET; value is ignored
+python3 bin/minsky-openhands-spawn.py \
+  --brief-file /tmp/brief.md \
+  --model 'ollama_chat/qwen3-coder:30b' \
+  --repo /path/to/repo \
+  --api-key-env OLLAMA_API_KEY \
+  --base-url http://localhost:11434 \
+  --reasoning-effort none \
+  --no-extended-thinking
+```
+
+The cross-repo-runner auto-detects local models from the `ollama_chat/`, `ollama/`, or `lm_studio/` model prefix in `~/.minsky/config.json` `cloud_agent_model` and adds these flags automatically. Operators only need to set `cloud_agent: "openhands"` + `cloud_agent_model: "ollama_chat/qwen3-coder:30b"` for zero-config local-LLM operation.
+
+**Tool-call reliability with local models**: Smaller models (qwen3:0.6b, llama-3.2:1b) often emit malformed tool-call JSON, which OpenHands rejects with `Cannot infer 'command' for tool` and exits via the stuck-detector. Use qwen3-coder:30b or larger for reliable tool calls. The shim's contract test catches malformed argv but tool-call quality is an LLM-tier concern, not a shim concern.
 
 It emits:
 
