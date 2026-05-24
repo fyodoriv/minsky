@@ -22,7 +22,7 @@ Public surface:
 - `MetricCategory` — `"dora" | "agentic" | "public-benchmark"`.
 - `MetricDirection` — `"higher-is-better" | "lower-is-better"`.
 - `MetricUnit` — `"count-per-day" | "seconds" | "ratio" | "usd"`.
-- `METRICS` — the 11-metric catalogue (4 DORA keys + 6 agentic + 1 public).
+- `METRICS` — the 13-metric catalogue (4 DORA keys + 7 agentic + 2 public). The 7th agentic metric `daemon-stability-pct` (added 2026-05-24 to close the `single-stability-number` P0 task) is the M1.1 reliability SLI — rolling 7-day fraction of daemon iterations that completed cleanly, with the ≥0.90 gate threshold gating the local-models-default stance from `user-stories/015-local-models-until-stable.md`. No public competitor publishes this metric (it's structurally only meaningful for an autonomous orchestrator running a 24/7 self-iterating loop).
 - `metricById(id)` — catalogue lookup.
 - `compareValues(metric, a, b)` — direction-aware rank: `1` = `a` better, `-1` = `b` better, `0` = tie.
 - `computeDelta(metric, minskyValue, competitorValue)` — direction-normalised delta; positive = Minsky ahead.
