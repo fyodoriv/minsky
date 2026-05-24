@@ -1,3 +1,4 @@
+<!-- pattern: not-applicable — ask_human.md documents the adopted ask-human-mcp convention (github.com/masony817/ask-human-mcp); no novel implementation pattern to catalog -->
 # ask_human.md — async human-↔-agent comm channel
 
 > Adopted convention: [ask-human-mcp](https://github.com/masony817/ask-human-mcp) by masony817 (MIT, 150★).
@@ -53,8 +54,8 @@ The daemon watches this file, unblocks the asking agent the instant `PENDING` is
 
 ## Anchor
 
-- agentbrew shared rule "Async human comms — ask_human.md" (`~/.config/agentbrew/shared-rules.md`) — the global convention this file instantiates.
-- agentbrew catalog entry `ask-human` (`~/apps/tooling/agentbrew/src/catalog.yaml` line ~1166) — the installable MCP server.
+- agentbrew shared rule "Async human comms — ask_human.md" (in your agentbrew install's `shared-rules.md`) — the global convention this file instantiates.
+- agentbrew catalog entry `ask-human` (in your agentbrew install's `src/catalog.yaml`) — the installable MCP server.
 - `/competitor-research --deep` skill Phase 7 — the primary producer of vision-threat entries here.
 - minsky TASKS.md `minsky-human-comm-via-file` P0 — the operator's original ask for this channel; adopted via this file plus `ask-human-mcp` instead of being rebuilt from scratch (rule #1 — don't reinvent the wheel).
 
