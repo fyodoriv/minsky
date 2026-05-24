@@ -228,32 +228,42 @@ EOF
   # Dynamic watchdog — p95×1.5 of recent successful iterations, with a
   # conservative 1200s (20min) fallback when history is thin. Mirrors the
   # TS `dynamic-timeouts.ts` algorithm (rule #1 — port, don't reinvent).
-  # GNU `timeout` exits 124 when the watchdog fires; we map that to the
-  # `spawn-failed` verdict + a notes string that names the timeout.
+  # Exit code 124 means the watchdog fired (matches GNU `timeout(1)`).
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
   local watchdog_s
-  watchdog_s="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/dynamic_timeout.py" "$host")"
+  watchdog_s="$(python3 "$script_dir/../scripts/dynamic_timeout.py" "$host")"
   local start_ms
   start_ms="$(python3 -c 'import time; print(int(time.time() * 1000))')"
-  local timeout_bin
-  # macOS `timeout` is `gtimeout` under coreutils; fall back gracefully.
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin="gtimeout"
-  else
-    timeout_bin=""
-  fi
 
-  if [[ -n "$timeout_bin" ]]; then
-    "$timeout_bin" "${watchdog_s}s" openhands solve \
+  # Watchdog binary resolution order (rule #1 — prefer existing solutions):
+  #   1. Python wrapper at scripts/spawn_with_watchdog.py — POSIX-portable,
+  #      handles process-group SIGTERM/SIGKILL, no external deps.
+  #   2. GNU `timeout` (Linux default; Ubuntu CI runners).
+  #   3. `gtimeout` (macOS with `brew install coreutils`).
+  #   4. No wrapper — graceful degrade (rule #6); a hung openhands hangs
+  #      the daemon. Logged at warn-level so operators know.
+  local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
+  if [[ -x "$spawn_wrapper" ]]; then
+    python3 "$spawn_wrapper" "$watchdog_s" openhands solve \
+      --task-file "$brief_file" \
+      --workspace "$host" \
+      --model "$model" \
+      >"$stdout_log" 2>&1 || exit_code=$?
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "${watchdog_s}s" openhands solve \
+      --task-file "$brief_file" \
+      --workspace "$host" \
+      --model "$model" \
+      >"$stdout_log" 2>&1 || exit_code=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "${watchdog_s}s" openhands solve \
       --task-file "$brief_file" \
       --workspace "$host" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   else
-    # No timeout binary available — degrade gracefully (rule #6 let-it-
-    # crash AT the right boundary; the iteration record will still
-    # capture an exit code, just no watchdog).
+    echo "WARN: no watchdog available — running unbounded openhands" >&2
     openhands solve \
       --task-file "$brief_file" \
       --workspace "$host" \
