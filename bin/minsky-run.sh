@@ -180,6 +180,8 @@ walk_hosts() {
 iterate_host() {
   local host="$1"
   local iter_n="$2"
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
   invariant_host_experiment_store_writable "$host"
 
   # Tasks with open PRs are skipped (matches host-loop.ts behaviour added
@@ -209,15 +211,24 @@ iterate_host() {
     return 0
   fi
 
-  # Build a minimal brief — Phase 7 follow-up will ship a richer template.
+  # Build the brief via scripts/build_brief.py — full TS-parity brief
+  # with the task block + system-prompt overlay (constitution + FINAL
+  # STEP block). Replaces the 4-line stub. Falls back to a minimal
+  # stub if the builder errors out (rule #6 — let it crash AT the
+  # right boundary; an iteration with a bad brief is better than one
+  # with no brief).
   local brief_file
   brief_file="$(mktemp -t minsky-brief.XXXXXX)"
-  cat >"$brief_file" <<EOF
+  if ! python3 "$script_dir/../scripts/build_brief.py" \
+       "$task_id" "$host" > "$brief_file" 2>/dev/null; then
+    echo "WARN: build_brief.py failed for $task_id; falling back to stub" >&2
+    cat >"$brief_file" <<EOF
 # Brief for task ${task_id}
 
 Work on the unclaimed top-priority task in $host/TASKS.md.
 Follow the host repo's AGENTS.md + vision.md rules.
 EOF
+  fi
 
   local model
   model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
@@ -229,8 +240,6 @@ EOF
   # conservative 1200s (20min) fallback when history is thin. Mirrors the
   # TS `dynamic-timeouts.ts` algorithm (rule #1 — port, don't reinvent).
   # Exit code 124 means the watchdog fired (matches GNU `timeout(1)`).
-  local script_dir
-  script_dir="$(dirname "${BASH_SOURCE[0]}")"
   local watchdog_s
   watchdog_s="$(python3 "$script_dir/../scripts/dynamic_timeout.py" "$host")"
   local start_ms

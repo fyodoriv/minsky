@@ -257,6 +257,72 @@ EOF
   [ "$ms" -le 30000 ]
 }
 
+@test "brief file passed to openhands contains task block + FINAL STEP overlay" {
+  # Works on every platform: brief is built by scripts/build_brief.py
+  # BEFORE the watchdog wraps the openhands invocation. The Python
+  # spawn_with_watchdog.py (tier 1) handles the timeout portably.
+
+  # Shim openhands to (a) copy the brief contents to a known path
+  # before exiting, (b) hang forever so the watchdog fires.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  brief_dump="$TMPDIR_TEST/brief-dump.md"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+# Find the brief file from argv (--task-file <path>) and copy it.
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --task-file) cp "\$2" "$brief_dump" 2>/dev/null || true; shift 2 ;;
+    *) shift ;;
+  esac
+done
+sleep 99999
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(2)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host briefy "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-brief.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  [ -f "$brief_dump" ]
+  # Substantive content: task ID header + the FINAL STEP block.
+  grep -q "^# Task: pick-me-first$" "$brief_dump"
+  grep -q "## Hypothesis (rule #9)" "$brief_dump"
+  grep -q "FINAL STEP" "$brief_dump"
+  grep -q "gh pr create" "$brief_dump"
+  # The brief is not the 4-line stub anymore.
+  [ "$(wc -l < "$brief_dump" | tr -d ' ')" -gt 20 ]
+}
+
 @test "round-robin iterates each host the expected number of times" {
   host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
   host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"
