@@ -15,10 +15,16 @@ CLI:
         [--open-pr-branches=<comma-separated-branch-names>]
         [--branch-prefix=feat/]
         [--skip-task-ids=<comma-separated-task-ids>]
+        [--find=<task-id-or-title-substring>]
 
-Prints the top-priority pickable task ID on stdout, or empty if none.
-Exit codes: 0 on success (whether or not a task was picked); 1 on file
-not found or parse error; 2 on bad CLI args.
+Default mode (no --find): prints the top-priority pickable task ID on
+stdout, or empty if none. Exit codes: 0 on success (whether or not a
+task was picked); 1 on file not found or parse error; 2 on bad CLI args.
+
+`--find <query>` mode: prints the matched task's ID on stdout (exit 0),
+or a "task not found" message + the available IDs on stderr (exit 3).
+Matches the TypeScript `findTask` return shape — exact-ID match
+case-sensitive first, then case-insensitive substring on title.
 """
 
 from __future__ import annotations
@@ -219,18 +225,62 @@ def pick_host_task(
     return None
 
 
+# --- Finder ---------------------------------------------------------------
+
+
+@dataclass
+class FindTaskResult:
+    """Result of a `find_task` lookup. Mirrors the TS `FindTaskResult` union.
+
+    `ok=True` means we found a task; `task` is populated. `ok=False` means
+    we didn't; `reason` and `available_ids` describe why.
+    """
+
+    ok: bool
+    task: ParsedTask | None = None
+    reason: str | None = None
+    available_ids: list[str] = field(default_factory=list)
+
+
+def find_task(content: str, query: str) -> FindTaskResult:
+    """Find a task by ID (exact, case-sensitive) or title (substring, case-insensitive).
+
+    Parity contract: matches `findTask` in task-finder.ts. First pass
+    matches `task.id == query` exactly. Second pass falls through to
+    case-insensitive substring on title. Returns `ok=False` with the
+    available IDs when neither matches.
+    """
+    tasks = parse_tasks_md(content)
+    query_lower = query.lower()
+    # First pass — exact ID match (case-sensitive; kebab-IDs are lower-case by convention).
+    for task in tasks:
+        if task.id == query:
+            return FindTaskResult(ok=True, task=task)
+    # Second pass — case-insensitive substring on title.
+    for task in tasks:
+        if query_lower in task.title.lower():
+            return FindTaskResult(ok=True, task=task)
+    return FindTaskResult(
+        ok=False,
+        reason=f'task "{query}" not found in TASKS.md (matched neither **ID**: nor title)',
+        available_ids=[t.id for t in tasks if t.id is not None],
+    )
+
+
 # --- CLI -----------------------------------------------------------------
 
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("usage: pick_task.py <path-to-TASKS.md> [--branch-prefix=feat/]"
-              " [--open-pr-branches=<csv>] [--skip-task-ids=<csv>]", file=sys.stderr)
+              " [--open-pr-branches=<csv>] [--skip-task-ids=<csv>] [--find=<query>]",
+              file=sys.stderr)
         return 2
     path = Path(argv[1])
     branch_prefix = "feat/"
     open_pr_branches: list[str] = []
     skip_task_ids: list[str] = []
+    find_query: str | None = None
     for arg in argv[2:]:
         if arg.startswith("--branch-prefix="):
             branch_prefix = arg.split("=", 1)[1]
@@ -238,14 +288,26 @@ def main(argv: list[str]) -> int:
             open_pr_branches = [s for s in arg.split("=", 1)[1].split(",") if s]
         elif arg.startswith("--skip-task-ids="):
             skip_task_ids = [s for s in arg.split("=", 1)[1].split(",") if s]
+        elif arg.startswith("--find="):
+            find_query = arg.split("=", 1)[1]
         else:
             print(f"unknown flag: {arg}", file=sys.stderr)
             return 2
     if not path.is_file():
         print(f"file not found: {path}", file=sys.stderr)
         return 1
+    content = path.read_text(encoding="utf-8")
+    if find_query is not None:
+        result = find_task(content, find_query)
+        if result.ok and result.task is not None and result.task.id is not None:
+            print(result.task.id)
+            return 0
+        print(result.reason or "not found", file=sys.stderr)
+        if result.available_ids:
+            print("available IDs:", ", ".join(result.available_ids), file=sys.stderr)
+        return 3
     chosen = pick_host_task(
-        path.read_text(encoding="utf-8"),
+        content,
         open_pr_branches=open_pr_branches,
         branch_prefix=branch_prefix,
         skip_task_ids=skip_task_ids,
