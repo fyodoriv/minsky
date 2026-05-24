@@ -1,8 +1,11 @@
 packages:
   - "novel/*"
   - "novel/adapters/*"
-  - "novel/bridges/*"
   - "novel/observer/*"
+  # novel/bridges/* namespace removed in Phase 9 (Path A aggressive cut)
+  # alongside `novel/handoff-spec/` — its only sub-package `omc-tasksmd`
+  # was deleted (rule #1 — OpenHands' native persona stack covers the
+  # OMC integration surface per the 2026-05-22 wrap-feasibility reassessment).
 
 # Slice 6 of `daemon-parallel-worktree-launch` (operator 2026-05-07 — 5-worker
 # prerequisite). Each `claude --worktree` creates a fresh git worktree;

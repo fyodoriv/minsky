@@ -46,21 +46,20 @@ const REPO_ROOT = resolve(HERE, "..");
  * surface as a separate, visible PR ratchet (add the package + add it here +
  * add the section), not slip in silently.
  *
- * Composition: 11 top-level `novel/<pkg>/` packages + 6 `novel/adapters/<pkg>/`
- * subpackages + 1 `novel/bridges/<pkg>/` subpackage (the bridges parent
- * README explicitly delegates per-bridge threat models — see its `## Threat
- * model` section). Future bridges land their own row here in the same PR
- * that adds them.
+ * Composition: 9 top-level `novel/<pkg>/` packages + 6 `novel/adapters/<pkg>/`
+ * subpackages. The previous `novel/bridges/` namespace and its single
+ * `omc-tasksmd` sub-package were deleted in Phase 9 of the Path A
+ * aggressive cut (PR `feat/phase-9-partial-delete-3-zero-importer-packages`)
+ * alongside `novel/handoff-spec/` — those 3 paths were removed from this
+ * hardcoded list to keep the gate runnable. Future packages land their
+ * own row here in the same PR that adds them.
  */
 export const THREAT_MODEL_README_PATHS = Object.freeze([
-  "novel/bridges/README.md",
-  "novel/bridges/omc-tasksmd/README.md",
   "novel/budget-guard/README.md",
   "novel/competitive-benchmark/README.md",
   "novel/cross-repo-runner/README.md",
   "novel/dashboard-web/README.md",
   "novel/experiment-record/README.md",
-  "novel/handoff-spec/README.md",
   "novel/mape-k-loop/README.md",
   "novel/sidecar-bootstrap/README.md",
   "novel/spec-monitor/README.md",

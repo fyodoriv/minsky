@@ -1,2 +1,0 @@
-{ this is intentionally not valid JSON — used by the bridge's
-  rule-7 graceful-skip chaos test (chaos table row 2). }
