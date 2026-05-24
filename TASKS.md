@@ -799,6 +799,92 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: GIVEN the audit matrix file exists, WHEN `pnpm vitest run novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts` runs, THEN ≥20 parameterized tests pass across the 4 audit dimensions. GIVEN a developer adds a 4th cloud agent to `CLOUD_AGENT_MATRIX` without updating AGENTS.md § "Agent support matrix", WHEN the audit matrix re-runs, THEN ≥1 classification test fails with a message naming the missing AGENTS.md row. GIVEN a developer adds a 4th cloud agent row to AGENTS.md without updating `CLOUD_AGENT_MATRIX`, WHEN the audit matrix re-runs, THEN ≥1 classification test fails with a message naming the orphan AGENTS.md row. GIVEN two agents in `CLOUD_AGENT_MATRIX` are given the same `requiredArgv` set by mistake, WHEN the audit matrix re-runs, THEN ≥1 no-clash test fails with a message naming both agents.
   - **Risk**: low. (a) AGENTS.md table parser brittleness — mitigated by tight regex + a paired test that pins the table format. (b) The audit catches valid drift that operators haven't fixed yet (existing agents that don't have a matrix row) — mitigated by an explicit ALLOWLIST in the audit file for grandfathered cases, identical to the `SHARED_PATH_ALLOWLIST` pattern in agentbrew PR #1023. (c) Adding the 4th audit dimension (no-clash) on top of agentbrew's 3 — this is a Minsky-specific addition that catches the copy-paste failure mode unique to argv contracts (where 2 agents could plausibly share `["--print"]` if not careful).
 
+<!-- 2026-05-24 OPERATOR DIRECTIVE — Path A aggressive cut. Operator was offered Path A (~5-10K LOC final) vs continuing Path C (~30K LOC final) and answered "2" (more aggressive). The 4-stream landscape research + brutal-honest moat audit confirmed 2 of 6 claimed moats are genuinely unique; the other 4 are partial. Path A's 7 deletion phases extend Path C's existing plan. Plan doc: `docs/plans/2026-05-24-path-a-aggressive-cut.md`. -->
+
+- [ ] `path-a-phase-7-cross-repo-runner-shell-rewrite` — replace `novel/cross-repo-runner/` (10.8K LOC TypeScript) with `bin/minsky-run` (~300 lines bash) + `scripts/pick_task.py` (~200 lines Python); same end-user-visible behavior with `--hosts-dir <parent>` round-robin
+  - **ID**: path-a-phase-7-cross-repo-runner-shell-rewrite
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: cross-repo-runner's 10.8K LOC TypeScript can be replaced by a 300-line bash + 200-line Python combo that runs `openhands solve` per host in round-robin and parses TASKS.md. The TypeScript complexity grew incrementally as adapters multiplied; with OpenHands as the single canonical agent (shipped 2026-05-24), most adapter logic is gone, and a small shell + Python script suffices.
+  - **Success**: `bin/minsky-run --hosts-dir ~/apps` completes 1 round-robin pass across ≥3 hosts in <30 minutes, opening ≥1 draft PR per host that touched a task. The bash + python combined LOC is ≤ 600. The existing fixture set in `novel/cross-repo-runner/test/` is rewritten as `tests/minsky-run.bats` and passes. After parity confirmed, `novel/cross-repo-runner/` is deleted.
+  - **Pivot**: if the bash rewrite hits >100 hours of integration debugging (suggesting the TypeScript complexity was load-bearing), revert to Path C's "keep cross-repo-runner" plan and stop the aggressive cut at Phase 9 (small-package sweep only).
+  - **Measurement**: `test -d novel/cross-repo-runner && echo still-here || echo deleted` returns `deleted`; `wc -l bin/minsky-run scripts/pick_task.py | tail -1 | awk '{print $1}'` ≤ 600; `bats tests/minsky-run.bats` exits 0.
+  - **Anchor**: rule #1 (don't reinvent — OpenHands SDK does the agent work; the shell is just the round-robin scheduler); `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 7; operator directive 2026-05-24 "2".
+  - **Details**: write `bin/minsky-run` as a single bash file with 5 inline invariant checks (replacing observer's runtime-invariants); write `scripts/pick_task.py` as a single Python file that reads TASKS.md, validates rule-9 fields, returns the top unclaimed task ID. Both files have paired tests. Once green, delete `novel/cross-repo-runner/` and update `package.json` `bin` field.
+  - **Files**: `bin/minsky-run` (NEW shell, ~300 lines), `scripts/pick_task.py` (NEW Python, ~200 lines), `tests/minsky-run.bats` (NEW), `tests/pick_task.test.py` (NEW), `novel/cross-repo-runner/` (DELETE entirely after parity).
+  - **Acceptance**: GIVEN the bash + Python rewrite ships AND parity tests pass, WHEN `bin/minsky-run --hosts-dir ~/apps --dry-run` runs, THEN it emits the same per-host iteration order the TypeScript version did against the same fixture. GIVEN the new code ships, WHEN `ls novel/cross-repo-runner/ 2>/dev/null`, THEN no output.
+  - **Risk**: medium-high. Bash is harder to test than TypeScript; the iteration record format (JSONL) must remain byte-stable since MAPE-K reads it. Mitigation: pin the JSONL schema with a JSON-schema validator in pre-pr-lint.
+
+- [ ] `path-a-phase-8-tick-observer-spec-monitor-inline-fold` — fold `novel/tick-loop/` (3K LOC) + `novel/observer/` (3K LOC) + `novel/spec-monitor/` (2K LOC) into `bin/minsky-run` inline functions; delete all three directories
+  - **ID**: path-a-phase-8-tick-observer-spec-monitor-inline-fold
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-7
+  - **Milestone**: M1
+  - **Hypothesis**: the tick-loop's outer iteration logic + the observer's 5 runtime invariants + the spec-monitor's specification-drift detection are 8K LOC total in TypeScript, but functionally they are: (a) one for-loop, (b) 5 small inline bash functions, (c) one `check-rule-coverage.mjs` lint. Total replacement: ≤ 200 lines.
+  - **Success**: all three directories deleted. `bin/minsky-run --self-check` exits 0 with a 1-line summary of each invariant. `scripts/check-rule-coverage.mjs` is wired into `pre-pr-lint --stage=full` and exits 0.
+  - **Pivot**: if the inline-fold makes `bin/minsky-run` exceed 600 lines, split into `bin/minsky-run` + `lib/invariants.sh` (still inside the budget).
+  - **Measurement**: `ls novel/tick-loop novel/observer novel/spec-monitor 2>/dev/null | wc -l` returns 0; `wc -l bin/minsky-run` ≤ 500; `pnpm pre-pr-lint --stage=full | grep -c 'check-rule-coverage'` ≥ 1.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 8.
+  - **Details**: depends on Phase 7 (`bin/minsky-run` must exist first). Move the outer iteration logic into the bash loop; map each TypeScript observer invariant to a bash function; convert the spec-monitor to a single pre-pr-lint check.
+  - **Files**: `bin/minsky-run` (extend), `scripts/check-rule-coverage.mjs` (NEW), `novel/tick-loop/`, `novel/observer/`, `novel/spec-monitor/` (DELETE all three).
+  - **Acceptance**: see Phase 7 acceptance template; same shape applied to each of the three deletions.
+  - **Risk**: medium. The cross-package handoffs (observer notifies tick-loop; spec-monitor advises observer) become inline; some subtle integration behavior may be lost. Mitigation: keep the test fixtures from each deleted package and rewrite as parity tests against the inlined version.
+
+- [ ] `path-a-phase-9-small-package-sweep-delete` — delete `novel/handoff-spec/`, `novel/budget-guard/`, `novel/tui/`, `novel/bridges/omc-tasksmd/`, `novel/adapters/prompt-optimizer/` (5 packages, ~3.7K LOC); replacements are: markdown template + 50-line shell + tail/openhands-stream + nothing + spec-only-in-mape-k-loop
+  - **ID**: path-a-phase-9-small-package-sweep-delete
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-8
+  - **Milestone**: M1
+  - **Hypothesis**: these 5 small packages exist for historical reasons; their current responsibilities can be discharged by (a) `templates/task-brief.md` markdown, (b) `bin/check-budget.sh` shell, (c) `tail -f ~/.minsky/daemon.log` + `openhands stream`, (d) removing OMC integration entirely (the 2026-05-22 reassessment already noted OpenHands' native persona stack covers most of OMC's surface), (e) folding the prompt-optimizer spec into `novel/mape-k-loop/spec/prompt-optimizer.md` (the substrate is unbuilt anyway).
+  - **Success**: all 5 directories deleted. Replacements exist and pass `make check` equivalent.
+  - **Pivot**: if any replacement's reduced LOC produces ≥1 lost capability (i.e. a previously-passing integration test fails), restore that one package and document the why.
+  - **Measurement**: `ls novel/handoff-spec novel/budget-guard novel/tui novel/bridges/omc-tasksmd novel/adapters/prompt-optimizer 2>/dev/null | wc -l` returns 0; `ls novel/ | wc -l` returns ≤ 8 (down from 15).
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 9.
+  - **Details**: 5 separate sub-PRs (one per package) is safer than one big PR — each deletion's parity-test must pass before the next starts.
+  - **Files**: `templates/task-brief.md` (NEW), `bin/check-budget.sh` (NEW), `novel/handoff-spec/`, `novel/budget-guard/`, `novel/tui/`, `novel/bridges/omc-tasksmd/`, `novel/adapters/prompt-optimizer/` (DELETE all 5).
+  - **Acceptance**: each sub-PR's parity test passes; the operator confirms `minsky watch` still surfaces useful information after `novel/tui/` deletion.
+  - **Risk**: low-medium. Small packages are easier to delete than large ones; main risk is hidden cross-package coupling.
+
+- [ ] `path-a-phase-10-competitive-benchmark-static` — fold `novel/competitive-benchmark/` (3K LOC) to static markdown at `competitors/scorecard.md`; remove `bin/minsky competitive` subcommand; corpus refresh continues via the `competitor-research` skill writing to markdown directly
+  - **ID**: path-a-phase-10-competitive-benchmark-static
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-9
+  - **Milestone**: M1
+  - **Hypothesis**: the M1.10 milestone is met (the corpus shape gate is satisfied). The corpus doesn't need to be executable anymore — static markdown at `competitors/scorecard.md` is the right surface for a once-per-quarter refresh cadence. The `competitor-research` skill already supports writing to markdown.
+  - **Success**: `competitors/scorecard.md` exists with the same content shape as today's `bin/minsky competitive --json | jq`. `bin/minsky competitive` subcommand removed. The `competitor-research` skill (already updated 2026-05-24 to use ask_human.md) continues to update individual `competitors/<id>.md` files.
+  - **Pivot**: if the scorecard needs to be live (vendor numbers update weekly, not quarterly), keep the corpus.ts + scorecard.html generator and only delete the CLI subcommand.
+  - **Measurement**: `test -f competitors/scorecard.md` returns 0; `bin/minsky --help | grep -c competitive` returns 0.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 10.
+  - **Details**: render the existing `bin/minsky competitive --json` once, save as markdown, delete the package. The corpus.ts + competitors.ts data files stay (the `competitor-research` skill writes to them).
+  - **Files**: `competitors/scorecard.md` (NEW), `novel/competitive-benchmark/` (DELETE).
+  - **Acceptance**: `bin/minsky competitive` no longer in CLI help; `competitors/scorecard.md` matches the format Path C's M1.10 scorecard committed.
+  - **Risk**: low. Static markdown is a strict subset of the executable scorecard.
+
+- [ ] `path-a-phase-11-sidecar-template-only` — shrink `novel/sidecar-bootstrap/` (1K LOC) to a single template file + 20-line `bin/minsky-bootstrap` shell command
+  - **ID**: path-a-phase-11-sidecar-template-only
+  - **Tags**: p1, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-10
+  - **Milestone**: M1
+  - **Hypothesis**: the sidecar bootstrap today materializes `.minsky/repo.yaml` into host repos via TypeScript; the logic is essentially "copy a template + substitute the repo name." 20 lines of shell.
+  - **Success**: `novel/sidecar-bootstrap/` shrinks to ≤ 200 LOC (or deletes entirely).
+  - **Pivot**: if the template-only version loses repo-detection logic that the daemon depended on, restore that one function but stop there.
+  - **Measurement**: `wc -l novel/sidecar-bootstrap/**/*.ts 2>/dev/null | tail -1 | awk '{print $1}'` ≤ 200.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 11.
+  - **Details**: write the bash version first, parity-test, then delete the TypeScript version.
+  - **Files**: `bin/minsky-bootstrap` (NEW, ~20 lines), `templates/repo.yaml` (NEW template), `novel/sidecar-bootstrap/` (REDUCE or DELETE).
+  - **Acceptance**: `bin/minsky-bootstrap <host>` materializes `.minsky/repo.yaml` byte-identically to the TypeScript version.
+  - **Risk**: low.
+
+- [ ] `path-a-phase-13-identity-promotion` — rewrite README.md TL;DR + vision.md § "What Minsky is" for the post-aggressive-cut identity; update Pattern conformance index for deleted packages; add `minsky-discipline-pack` to agentbrew catalog
+  - **ID**: path-a-phase-13-identity-promotion
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phases-7-12
+  - **Milestone**: M1
+  - **Hypothesis**: after the aggressive cut completes, Minsky's identity has shifted from "70K-LOC integration distribution" to "5-10K-LOC discipline pack running on OpenHands". The user-facing capability ("24/7 self-improving code factory") is unchanged, but the surface area is 85% smaller. The README + vision.md need to reflect the new identity so newcomers don't expect 70K LOC of TypeScript.
+  - **Success**: README TL;DR reads as a discipline-pack story (constitutional rules + MAPE-K substrate on OpenHands), not as a runtime story. `vision.md § "What Minsky is"` matches. Pattern conformance index has no orphan rows (deleted packages → no row). `agentbrew install minsky-discipline-pack` works.
+  - **Pivot**: trivial — this is docs.
+  - **Measurement**: `grep -c "plug-and-play repo transformer" README.md vision.md` returns 0; `grep -c "discipline pack" README.md vision.md` returns ≥ 2.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
+  - **Details**: blocked on Phases 7-12 completing. Final cleanup PR.
+  - **Files**: `README.md`, `vision.md`, `AGENTS.md`, `INSTALL.md`, `~/apps/tooling/agentbrew/src/catalog.yaml` (add `minsky-discipline-pack` source entry).
+  - **Acceptance**: a stranger reading only README.md understands that Minsky = discipline pack on OpenHands, not a 70K-LOC TypeScript codebase.
+  - **Risk**: low.
+
 ## P1
 
 - [ ] `launcher-agnostic-feature-parity-chaos-test` — chaos test asserts that two Minsky installs on the same OS, same fixture repo, same model, driven through `INSTALL.md` by two different launcher agents (fake-claude, fake-cursor) produce byte-identical runtime behavior; the only permitted delta is the `agent` string in `~/.minsky/telemetry-consent.json`
