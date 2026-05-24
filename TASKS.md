@@ -753,7 +753,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- CTO audit 2026-05-19 after walker-drains-one-host-forever (#644): the walker now fairly distributes iterations across hosts, but the aggregate iteration→PR ship rate is the next unmeasured surface. Filed below. -->
 
-
 - [ ] `cloud-agent-spawn-argv-regression-matrix` — every cloud agent (claude, devin, aider, future-N) declares its required argv contract in a single fixture file; a parameterized test matrix asserts that spawning each agent without any required flag yields a recognizable failure mode, AND that spawning each agent WITH the contract argv succeeds — same `it.each(MATRIX)` shape that agentbrew PR #1021 used for its (agent × format × env-var) crash-class regression
   - **ID**: cloud-agent-spawn-argv-regression-matrix
   - **Tags**: p0, milestone-m1, rule-3a, rule-3b, rule-9, rule-17, test, spawn, regression-suite, agentbrew-parallel
@@ -893,19 +892,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-- [ ] `minsky-run-sh-watchdog-timeout-on-openhands-spawn` — `bin/minsky-run.sh` invokes `openhands solve` with no time limit; if the agent hangs forever, the daemon hangs forever. The TypeScript runner has a dynamic timeout (p95×1.5 of recent successful spawns) in `novel/cross-repo-runner/src/dynamic-timeouts.ts`. The bash port needs the equivalent before it goes into 24/7 production use.
-  - **ID**: minsky-run-sh-watchdog-timeout-on-openhands-spawn
-  - **Tags**: p1, path-a-phase-7, resilience, observed-2026-05-24
-  - **Competitive-goal**: drives `mean-autonomous-merge-latency` lower (scorecard metric) by killing hung spawns at p95×1.5 instead of letting them pin the host's round-robin slot indefinitely; protects `fleet-uptime-hours` from going to 0 when a single host stalls.
-  - **Surfaced-by**: 2026-05-24 Phase 7 bash port — built the JSONL parity + bats tests + open-PR filter, then realized the spawn line `openhands solve ... >"$stdout_log" 2>&1 || exit_code=$?` has no `timeout` wrapper. A hung openhands process blocks the entire host walker indefinitely; the operator notices only when the dashboard goes silent.
-  - **Files**: `bin/minsky-run.sh` (wrap the openhands invocation in `timeout <seconds>`), `scripts/dynamic-timeout.py` (NEW — port the p95×1.5 logic from `dynamic-timeouts.ts`; reads recent `*.jsonl` files from `$host/.minsky/experiment-store/cross-repo/` and prints a seconds value), `tests/minsky-run.bats` (add a test that injects a slow-fixture script and asserts the iteration record's verdict is `aborted` with notes containing `"timeout"`).
-  - **Hypothesis**: wrapping the spawn in `timeout $(python3 scripts/dynamic-timeout.py "$host")` (with a 600s fallback when no history exists) cuts the worst-case hang time from infinity to ≤900s p99 (p95×1.5 ceiling). Falsifiable: if any production daemon log shows a spawn running >900s after this lands, the watchdog math is wrong.
-  - **Success**: paired test passes; live daemon log over 7 days shows zero spawns >900s; the dashboard's "stale iteration" alarm (when added) never fires.
-  - **Pivot**: if the p95-based timeout causes >5% of valid spawns to be killed mid-work (verified by tail-of-stdout showing the agent was still making progress), revert to a fixed 1800s timeout and treat the dynamic-timeout port as a Phase 8 follow-up.
-  - **Measurement**: `bats tests/minsky-run.bats -f watchdog` exits 0; `jq -s 'map(select(.ts > "<7-days-ago>")) | map(select(.notes | test("timeout"))) | length' .minsky/experiment-store/cross-repo/*.jsonl` returns >0 only when a spawn genuinely hung (verifiable by cross-referencing with the openhands stdout tail in notes).
-  - **Anchor**: rule #6 (let-it-crash AT the right boundary — an unbounded spawn is the wrong boundary; bound it at the iteration); rule #7 (chaos coverage — watchdog kicks in is observable in the JSONL); Beyer et al., *SRE*, 2016, Ch. 6 ("degraded-but-running > failed-and-stopped" — applies in reverse here, where "stopped after timeout" > "hung forever").
-  - **Acceptance**: (1) `bin/minsky-run.sh` wraps the openhands invocation in `timeout`; (2) `scripts/dynamic-timeout.py` exists + has paired tests; (3) bats test asserts timeout behavior with a slow-fixture script; (4) shellcheck clean.
-
 - [ ] `launcher-agnostic-feature-parity-chaos-test` — chaos test asserts that two Minsky installs on the same OS, same fixture repo, same model, driven through `INSTALL.md` by two different launcher agents (fake-claude, fake-cursor) produce byte-identical runtime behavior; the only permitted delta is the `agent` string in `~/.minsky/telemetry-consent.json`
   - **ID**: launcher-agnostic-feature-parity-chaos-test
   - **Tags**: p1, milestone-m1, chaos-test, invariant, story-014, operator-directive, observed-2026-05-24
@@ -923,7 +909,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `pnpm vitest run test/chaos/launcher-agnostic-feature-parity.test.ts` exits 0 on a clean main. (2) Deliberate injection of `if (process.env.CLAUDE_CODE) { config.cloud_agent = "claude"; }` into `novel/cross-repo-runner/bin/minsky-run.mjs` causes the test to fail with an assertion naming `config.cloud_agent` as the divergent field. (3) The test runs in ≤30s wall-clock (fast enough for the full pre-pr-lint stage). (4) `pnpm pre-pr-lint --stage=full` includes the chaos test as a load-bearing gate.
   - **Risk**: low. (a) Fake-launcher stubs may not perfectly simulate real launcher behavior — mitigated by keeping the stubs minimal (just env-var setting + exec'ing install steps); the test's value is in catching env-var-driven branches, not in reproducing every real-agent quirk. (b) The snapshot allowlist (only `telemetry_consent.agent` is permitted to differ) may need extension if a future PR legitimately adds a launcher-recorded field; mitigation: extend the allowlist with a comment justifying the new field.
   - **Note**: This task closes story-014's chaos-test row in the failure-modes table. When it ships, update the row from "filed" to "shipped" and add the test path to the table's "Chaos test" column.
-
 
 - [ ] `gh-actions-checkout-v4-flaky-auth-failures` — `actions/checkout@v4` intermittently fails with "fatal: could not read Username for github.com: terminal prompts disabled" on random jobs in random PRs; the failure is non-deterministic per-PR and per-job; admin-merges have been required to unblock the autonomous loop
   - **ID**: gh-actions-checkout-v4-flaky-auth-failures
@@ -1121,7 +1106,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `pnpm pre-pr-lint --stage=fast` runs the new lint and reports `[ok] pre-push-hook-stays-fast`. (2) A synthetic PR that reverts `lefthook.yml` to `--stage=full` is blocked by the lint with the actionable message above. (3) `time git push` on a feature branch with one trivial commit completes in ≤10s wall-clock on the operator's box.
   - **Risk**: low. One pure script + paired tests + manifest wiring + one pattern-conformance row. No code path changes — the lint adds a gate, doesn't change runtime behaviour.
   - **Note**: composes with `commit-hook-chain-node-version-and-platform-resilience` (the existing P0 about commit hooks breaking quietly) — both are feedback-loop hygiene tasks.
-
 
 - [ ] `local-gate-merge-minsky-home-hardcoded-path` — `scripts/local-gate-merge.mjs` line 48 hardcodes `MINSKY_HOME` default to `$MINSKY_REPO`, breaking the gate for every operator who isn't `cbrwizard`
   - **ID**: local-gate-merge-minsky-home-hardcoded-path
@@ -1937,6 +1921,32 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: parent task `milestone-alignment-gate-enforcement` (this is its slice (b)); operator directive 2026-05-18 (`AGENTS.md` § 15); rule #10 (deterministic enforcement — gap-fill IS the enforcement). Composes with `Forsgren/Humble/Kim 2018` (measure what matters).
 
 ## P2
+
+- [ ] `minsky-run-sh-portable-watchdog-for-macos-without-coreutils` — `bin/minsky-run.sh` falls back to running `openhands solve` WITHOUT a watchdog when neither GNU `timeout` nor `gtimeout` is present (the common case on a fresh macOS install without `brew install coreutils`). The graceful-degrade is honest (rule #6) but it disables the watchdog on a real operator surface.
+  - **ID**: minsky-run-sh-portable-watchdog-for-macos-without-coreutils
+  - **Tags**: p2, path-a-phase-7, resilience, mac-without-coreutils, observed-2026-05-24
+  - **Surfaced-by**: 2026-05-24 watchdog-timeout PR — the bats `watchdog` test SKIPs on this machine because neither `timeout` nor `gtimeout` is on PATH. Production daemons running on a fresh Mac would have the same problem and hang silently.
+  - **Files**: `bin/minsky-run.sh` (replace the `command -v timeout` branch with a Python-based watchdog), `scripts/spawn_with_watchdog.py` (NEW — wraps `subprocess.run(timeout=N)` around the openhands invocation; emits stdout + exit code back to bash), `tests/test_spawn_with_watchdog.py` (NEW), `tests/minsky-run.bats` (drop the skip guard on the watchdog test).
+  - **Hypothesis**: a Python-based watchdog (using `subprocess.run(timeout=N)`) covers every platform Python runs on (Linux, macOS, Windows-via-WSL, BSD) without external dependencies. Falsifiable: if any platform Minsky targets has Python ≥3.8 but `subprocess.run(timeout=)` fails, the abstraction is wrong.
+  - **Success**: bats `watchdog` test runs (not skipped) on a fresh macOS without coreutils; the existing test still passes on Ubuntu CI.
+  - **Pivot**: if the Python wrapper adds >50ms overhead per spawn vs the GNU `timeout` baseline (visible in `duration_ms` deltas), keep coreutils as the preferred path and use the Python wrapper only as fallback.
+  - **Measurement**: `bats tests/minsky-run.bats -f watchdog` passes (not skipped) on a clean macOS; `python3 -m pytest tests/test_spawn_with_watchdog.py` exits 0.
+  - **Competitive-goal**: protects `fleet-uptime-hours` on macOS-without-coreutils operator machines (a meaningful fraction of the install base — most macOS developers don't have GNU coreutils unless they specifically `brew install`'d it).
+  - **Anchor**: rule #1 (Python stdlib's `subprocess.run(timeout=)` is the existing solution; don't reinvent); rule #6 (let-it-crash at the right boundary — the iteration, not the process).
+  - **Acceptance**: (1) `scripts/spawn_with_watchdog.py` ships with paired tests; (2) `bin/minsky-run.sh` uses it preferentially (or as fallback when `timeout` missing); (3) bats watchdog test no longer skips on macOS-without-coreutils.
+
+- [ ] `add-bats-ci-gate-for-tests-minsky-run-bats` — `tests/minsky-run.bats` (11 paired tests for `bin/minsky-run.sh`) currently has NO CI gate. Bats is a standard tool but is not in any GitHub Actions workflow under `.github/workflows/ci.yml`. Drift in `bin/minsky-run.sh` could silently break the script without anything failing in CI.
+  - **ID**: add-bats-ci-gate-for-tests-minsky-run-bats
+  - **Tags**: p2, ci, path-a-phase-7, observed-2026-05-24
+  - **Surfaced-by**: 2026-05-24 watchdog-timeout PR — `grep bats .github/workflows/` returns nothing. The bats test suite exists + passes locally but doesn't gate anything in PR CI.
+  - **Files**: `.github/workflows/ci.yml` (add a `bash-tests` job: `apt-get install -y bats jq`, run `bats tests/`).
+  - **Hypothesis**: adding a `bash-tests` CI job that runs `bats tests/` would catch any future bash regression in <1 minute of CI time. Falsifiable: if the new gate adds >2min to PR turnaround on Ubuntu runners, prune the test list.
+  - **Success**: a deliberately-broken `bin/minsky-run.sh` (e.g. flipping a verdict string) FAILS the new gate; an unrelated PR doesn't get blocked.
+  - **Pivot**: if `bats` on Ubuntu CI has reliability issues (flaky shim-bin tests under tmpfs etc), split into a slim "smoke" subset that runs in CI and keep the full suite as dev-only.
+  - **Measurement**: `gh pr checks <some-broken-PR> 2>&1 | grep bash-tests | grep fail` returns 1 line; `gh pr checks <clean-PR> 2>&1 | grep bash-tests | grep pass` returns 1 line.
+  - **Competitive-goal**: protects `agent-tier-pr-merge-rate` from silent bash regressions that would propagate to all hosts simultaneously.
+  - **Anchor**: rule #11 (deterministic enforcement — every test must be a gate); rule #10 (failure-mode discipline — un-gated tests are theatre).
+  - **Acceptance**: (1) `.github/workflows/ci.yml` has a `bash-tests` job; (2) the job runs `bats tests/minsky-run.bats` and exits 0 on green; (3) deliberately-breaking the bash fails the gate.
 
 - [ ] `minsky-run-sh-brief-template-enrichment` — the brief that `bin/minsky-run.sh` passes to `openhands solve` is a 4-line stub ("work on the unclaimed top-priority task"). The TypeScript runner's brief includes the task's metadata block, recent git log (last 5 commits touching `**Files**`), test commands from AGENTS.md, and vision/AGENTS pointers. The bash port needs the equivalent before agent-tier output quality matches the TS baseline.
   - **ID**: minsky-run-sh-brief-template-enrichment
@@ -3098,7 +3108,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: 2026-05-16 example-service-plugin run — operator (this session) had two minsky-runs concurrent (plugin + api on the other session), needed to restart only the plugin one without killing the api one. Today's `minsky stop` would have killed both. Workaround used: direct PID kill via `kill -TERM <pid>`. Rule #6 (let-it-crash AT the right boundary — `minsky stop --host` is the operator's per-host kill switch; today's global stop crosses the wrong boundary). Hyrum's Law: the host-filter capability is exactly what multi-operator machines need.
   - **Risk**: low. Bash-shim-only change, additive (no flag preserves today's behavior + adds the safety banner), gated by the first paired test for the shim.
   - **Surfaced-by**: 2026-05-16 example-service-plugin autonomous run — supervisor log at `/tmp/minsky-example-service-plugin/supervisor.log` documents that the operator had to be careful about `minsky stop` interaction with the other session's API minsky-run. Workaround was direct PID kill; this task documents the right CLI shape.
-
 
 ## P3
 

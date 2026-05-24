@@ -219,21 +219,59 @@ EOF
   local stdout_log
   stdout_log="$(mktemp -t minsky-stdout.XXXXXX)"
 
-  openhands solve \
-    --task-file "$brief_file" \
-    --workspace "$host" \
-    --model "$model" \
-    >"$stdout_log" 2>&1 || exit_code=$?
+  # Dynamic watchdog — p95×1.5 of recent successful iterations, with a
+  # conservative 1200s (20min) fallback when history is thin. Mirrors the
+  # TS `dynamic-timeouts.ts` algorithm (rule #1 — port, don't reinvent).
+  # GNU `timeout` exits 124 when the watchdog fires; we map that to the
+  # `spawn-failed` verdict + a notes string that names the timeout.
+  local watchdog_s
+  watchdog_s="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/dynamic_timeout.py" "$host")"
+  local start_ms
+  start_ms="$(python3 -c 'import time; print(int(time.time() * 1000))')"
+  local timeout_bin
+  # macOS `timeout` is `gtimeout` under coreutils; fall back gracefully.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin="gtimeout"
+  else
+    timeout_bin=""
+  fi
+
+  if [[ -n "$timeout_bin" ]]; then
+    "$timeout_bin" "${watchdog_s}s" openhands solve \
+      --task-file "$brief_file" \
+      --workspace "$host" \
+      --model "$model" \
+      >"$stdout_log" 2>&1 || exit_code=$?
+  else
+    # No timeout binary available — degrade gracefully (rule #6 let-it-
+    # crash AT the right boundary; the iteration record will still
+    # capture an exit code, just no watchdog).
+    openhands solve \
+      --task-file "$brief_file" \
+      --workspace "$host" \
+      --model "$model" \
+      >"$stdout_log" 2>&1 || exit_code=$?
+  fi
+  local end_ms
+  end_ms="$(python3 -c 'import time; print(int(time.time() * 1000))')"
+  local duration_ms=$((end_ms - start_ms))
 
   local verdict notes pr_url
   if [[ "$exit_code" -eq 0 ]]; then
     verdict="validated"
     pr_url="$(grep -oE 'https://github\.com/[^[:space:]]+/pull/[0-9]+' "$stdout_log" | head -1 || true)"
-    notes="openhands exited 0"
+    notes="openhands exited 0; ${duration_ms}ms"
+  elif [[ "$exit_code" -eq 124 ]]; then
+    # GNU timeout(1) exits 124 when the watchdog fires.
+    verdict="spawn-failed"
+    pr_url=""
+    notes="timeout (${watchdog_s}s); ${duration_ms}ms"
   else
     verdict="spawn-failed"
     pr_url=""
-    notes="openhands exited $exit_code; tail: $(tail -1 "$stdout_log" | tr -d '"' | cut -c1-120)"
+    notes="openhands exited $exit_code; ${duration_ms}ms; tail: $(tail -1 "$stdout_log" | tr -d '"' | cut -c1-100)"
   fi
 
   rm -f "$brief_file" "$stdout_log"
