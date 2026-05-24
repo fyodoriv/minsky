@@ -1922,19 +1922,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
-- [ ] `add-bats-ci-gate-for-tests-minsky-run-bats` — `tests/minsky-run.bats` (11 paired tests for `bin/minsky-run.sh`) currently has NO CI gate. Bats is a standard tool but is not in any GitHub Actions workflow under `.github/workflows/ci.yml`. Drift in `bin/minsky-run.sh` could silently break the script without anything failing in CI.
-  - **ID**: add-bats-ci-gate-for-tests-minsky-run-bats
-  - **Tags**: p2, ci, path-a-phase-7, observed-2026-05-24
-  - **Surfaced-by**: 2026-05-24 watchdog-timeout PR — `grep bats .github/workflows/` returns nothing. The bats test suite exists + passes locally but doesn't gate anything in PR CI.
-  - **Files**: `.github/workflows/ci.yml` (add a `bash-tests` job: `apt-get install -y bats jq`, run `bats tests/`).
-  - **Hypothesis**: adding a `bash-tests` CI job that runs `bats tests/` would catch any future bash regression in <1 minute of CI time. Falsifiable: if the new gate adds >2min to PR turnaround on Ubuntu runners, prune the test list.
-  - **Success**: a deliberately-broken `bin/minsky-run.sh` (e.g. flipping a verdict string) FAILS the new gate; an unrelated PR doesn't get blocked.
-  - **Pivot**: if `bats` on Ubuntu CI has reliability issues (flaky shim-bin tests under tmpfs etc), split into a slim "smoke" subset that runs in CI and keep the full suite as dev-only.
-  - **Measurement**: `gh pr checks <some-broken-PR> 2>&1 | grep bash-tests | grep fail` returns 1 line; `gh pr checks <clean-PR> 2>&1 | grep bash-tests | grep pass` returns 1 line.
-  - **Competitive-goal**: protects `agent-tier-pr-merge-rate` from silent bash regressions that would propagate to all hosts simultaneously.
-  - **Anchor**: rule #11 (deterministic enforcement — every test must be a gate); rule #10 (failure-mode discipline — un-gated tests are theatre).
-  - **Acceptance**: (1) `.github/workflows/ci.yml` has a `bash-tests` job; (2) the job runs `bats tests/minsky-run.bats` and exits 0 on green; (3) deliberately-breaking the bash fails the gate.
-
 - [ ] `minsky-run-sh-brief-template-enrichment` — the brief that `bin/minsky-run.sh` passes to `openhands solve` is a 4-line stub ("work on the unclaimed top-priority task"). The TypeScript runner's brief includes the task's metadata block, recent git log (last 5 commits touching `**Files**`), test commands from AGENTS.md, and vision/AGENTS pointers. The bash port needs the equivalent before agent-tier output quality matches the TS baseline.
   - **ID**: minsky-run-sh-brief-template-enrichment
   - **Tags**: p2, path-a-phase-7, agent-quality, observed-2026-05-24
