@@ -1960,18 +1960,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: Karpathy 2026, "context engineering is the primary surface" (cited in `competitors/README.md` § "Brief engineering"); rule #1 (the TypeScript brief builder is the canonical existing solution — port it, don't reinvent).
   - **Acceptance**: (1) `scripts/build_brief.py` ships with paired tests; (2) bats test asserts brief contains the expected sections; (3) M1.10 corpus run shows the merge-rate delta.
 
-- [ ] `minsky-run-sh-skip-empty-hosts` — when a host has 0 eligible tasks, the bash walker still consumes its 3 round-robin slots emitting `verdict: "aborted"` JSONL records. The TypeScript walker skips ahead to the next host. Net effect: a fleet with 5 hosts where 3 have empty TASKS.md still does 9 wasted iterations per pass.
-  - **ID**: minsky-run-sh-skip-empty-hosts
-  - **Tags**: p2, path-a-phase-7, efficiency, observed-2026-05-24
-  - **Surfaced-by**: 2026-05-24 Phase 7 bash port — the loop `for ((n=1; n <= ITERATIONS_PER_HOST; n++))` doesn't break when `iterate_host` returns "no eligible task". Easy fix: have `iterate_host` return a non-zero status when there's nothing to do, and `break` the inner loop.
-  - **Files**: `bin/minsky-run.sh` (`walk_hosts` + `iterate_host`), `tests/minsky-run.bats` (paired test).
-  - **Hypothesis**: skipping empty hosts cuts the "no-eligible-task" share of total iterations from ≈40% (today, on a fleet where some hosts are temporarily empty) to ≤5%. Worst case the daemon now scans empty hosts once per pass instead of 3 times, freeing budget for hosts that actually have work.
-  - **Success**: paired test asserts the JSONL contains exactly 1 aborted record per empty host (not 3); fleet-load metric (when added) shows ≥30pp drop in aborted-share over a 7-day window.
-  - **Pivot**: if breaking on empty-host iteration N causes the walker to oscillate (i.e. host alternates between 0 and 1 eligible tasks across passes), keep the loop but add a single-aborted-per-pass cap instead of breaking.
-  - **Measurement**: `bats tests/minsky-run.bats -f skip-empty` exits 0; `grep -c '"verdict":"aborted"' .minsky/experiment-store/cross-repo/_no-task.jsonl` returns 1 per pass per empty host (not 3).
-  - **Anchor**: rule #1 (the TS walker already does this — port behavior, don't reinvent); rule #16 (default by default — efficient default).
-  - **Acceptance**: (1) `iterate_host` returns non-zero status on "no eligible task"; (2) `walk_hosts` breaks the inner loop on non-zero; (3) paired bats test passes.
-
 - [ ] `agentbrew-sync-missing-intuit-code-secure-to-openhands` — agentbrew syncs ~200 skills to `~/.openhands/skills/` for OpenHands SDK to load at agent boot, but `intuit-code-secure` is missing — it lives in `~/.claude/plugins/marketplaces/devassist-plugins-registry/code-secure-plugin/skills/intuit-code-secure/` but never gets propagated. The `~/.agents/agents/security-reviewer.md` (and `~/.claude/agents/security-reviewer.md`) reference `skills: [intuit-code-secure]`; OpenHands SDK's `register_file_agents` crashes with `ValueError: Skill 'intuit-code-secure' not found` whenever Conversation.run() is called. Today this is worked around by a manual stub at `~/.openhands/skills/intuit-code-secure/SKILL.md`; agentbrew should sync the canonical file directly
   - **ID**: agentbrew-sync-missing-intuit-code-secure-to-openhands
   - **Tags**: p2, scout-finding, agentbrew, openhands-sync, observed-2026-05-24
