@@ -11,6 +11,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@minsky/adapter-types": r("./novel/adapters/types/src/index.ts"),
+      "@minsky/agent-runtime-openhands": r("./novel/adapters/agent-runtime-openhands/src/index.ts"),
       "@minsky/observability": r("./novel/adapters/observability/src/index.ts"),
       "@minsky/prompt-optimizer": r("./novel/adapters/prompt-optimizer/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),

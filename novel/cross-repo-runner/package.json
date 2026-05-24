@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@minsky/agent-runtime-openhands": "workspace:*",
     "@minsky/sidecar-bootstrap": "workspace:*",
     "@minsky/tick-loop": "workspace:*"
   },

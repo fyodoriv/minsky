@@ -1,9 +1,14 @@
 #!/usr/bin/env node
-// Audit-matrix lint for the cloud-agent contract — referenced from
-// `add-openhands-as-pluggable-backend` § Measurement as the green-on-
-// June-1 gate that proves the 4-agent contract is in place AND
-// the openhands row's `pendingExternalDep` flag has flipped to null
-// on/after the OpenHands Agent Canvas Initiative CLI release.
+// Audit-matrix lint for the cloud-agent contract — proves the 4-agent
+// matrix contract is in place AND openhands is now the canonical default.
+//
+// History: originally written as a self-flipping date-gate for the
+// 2026-06-01 OpenHands Agent Canvas CLI release. The dep was lifted
+// early on 2026-05-24 when the Python-SDK shim adapter shipped
+// (`@minsky/agent-runtime-openhands`), so the lint no longer date-flips
+// — it now asserts the post-integration steady state: openhands is
+// row 0, all four rows have pendingExternalDep === null, and the
+// brief-file delivery shape is in the validShapes set.
 //
 // Standalone node script (NOT a vitest spec) so the parent task's
 // Measurement command can run it without booting the test runner:
@@ -15,7 +20,7 @@
 // first failing assertion and exits 1 on any violation.
 //
 // Source: parent task `add-openhands-as-pluggable-backend` § Measurement;
-// sibling `openhands-config-schema-pre-june-1` (ships AGENT_MATRIX).
+// operator 2026-05-24 "complete OpenHands integration today" directive.
 
 import process from "node:process";
 
@@ -42,8 +47,10 @@ console.info("cloud-agent-config-audit-matrix");
 // Dimension 1 — row count.
 assert("matrix has exactly 4 rows", AGENT_MATRIX.length === 4, `got ${AGENT_MATRIX.length}`);
 
-// Dimension 2 — row order is the canonical claude / devin / aider / openhands.
-const expectedIds = ["claude", "devin", "aider", "openhands"];
+// Dimension 2 — row order is openhands (default) first, then legacy
+// backends in insertion order. Per operator 2026-05-24 "make openhands
+// default" directive.
+const expectedIds = ["openhands", "claude", "devin", "aider"];
 const actualIds = AGENT_MATRIX.map((r) => r.id);
 assert(
   `row order is ${expectedIds.join(" / ")}`,
@@ -52,7 +59,7 @@ assert(
 );
 
 // Dimension 3 — every row has the required fields with valid shapes.
-const validShapes = new Set(["stdin", "prompt-file", "message-file"]);
+const validShapes = new Set(["brief-file", "stdin", "prompt-file", "message-file"]);
 const flagPattern = /^--?[a-z][a-z0-9-]*$/;
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -74,11 +81,14 @@ for (const row of AGENT_MATRIX) {
   );
 }
 
-// Dimension 4 — shipped agents (claude, devin, aider) carry no
-// pendingExternalDep. The openhands row is permitted to carry it until
-// the OpenHands Agent Canvas CLI release.
-const shippedIds = ["claude", "devin", "aider"];
-for (const id of shippedIds) {
+// Dimension 4 — ALL agents (including openhands) carry no pending
+// external dep. The June-1-2026 gate was lifted on 2026-05-24 when
+// the Python-SDK shim adapter shipped — see the `@minsky/agent-
+// runtime-openhands` package README. If a future agent regresses
+// behind a dep, file a new task and re-introduce the date-aware self-
+// flipping logic for that specific row.
+const allIds = ["openhands", "claude", "devin", "aider"];
+for (const id of allIds) {
   const row = AGENT_MATRIX.find((r) => r.id === id);
   assert(
     `row ${id}: pendingExternalDep is null (agent is runnable today)`,
@@ -87,29 +97,15 @@ for (const id of shippedIds) {
   );
 }
 
-// Dimension 5 — openhands row carries the expected pending date until
-// 2026-06-01 passes; after that, the row must have flipped to null.
-// This is what makes the gate self-flipping: today the assertion
-// reads "openhands.pendingExternalDep === '2026-06-01'"; on June 2 it
-// reads "openhands.pendingExternalDep === null" automatically. The
-// transition itself is the operator's job — the lint refuses to be
-// green during the gap.
+// Dimension 5 — openhands is the canonical default agent (operator
+// 2026-05-24 directive). Asserted via the row-0 position above
+// (dimension 2) and the briefDeliveryShape contract here.
 const openhands = AGENT_MATRIX.find((r) => r.id === "openhands");
-const today = new Date().toISOString().slice(0, 10);
-const RELEASE_DATE = "2026-06-01";
-if (today < RELEASE_DATE) {
-  assert(
-    `row openhands: pendingExternalDep is "${RELEASE_DATE}" (pre-release; today is ${today})`,
-    openhands?.pendingExternalDep === RELEASE_DATE,
-    `got ${JSON.stringify(openhands?.pendingExternalDep)}`,
-  );
-} else {
-  assert(
-    `row openhands: pendingExternalDep is null (post-release; today is ${today} >= ${RELEASE_DATE})`,
-    openhands?.pendingExternalDep === null,
-    `got ${JSON.stringify(openhands?.pendingExternalDep)} — flip the matrix row's pendingExternalDep to null now that the OpenHands Agent Canvas CLI has shipped`,
-  );
-}
+assert(
+  "row openhands: briefDeliveryShape is brief-file (Python shim contract)",
+  openhands?.briefDeliveryShape === "brief-file",
+  `got ${JSON.stringify(openhands?.briefDeliveryShape)}`,
+);
 
 // Dimension 6 — no two rows share the same `briefDeliveryShape` +
 // `modelFlag` pair AND id (defensive against copy-paste mistakes
