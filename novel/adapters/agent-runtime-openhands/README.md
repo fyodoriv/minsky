@@ -96,7 +96,9 @@ ANTHROPIC_API_KEY=sk-... python3 path/to/minsky-openhands-spawn.py \
 
 ## Threat model
 
-Per rule #13 (security & privacy — every novel package documents this).
+Per constitutional rule #13 (vision.md § 13.8). Methodology: STRIDE (Howard & LeBlanc 2003 — Spoofing / Tampering / Repudiation / Information-disclosure / Denial-of-service / Elevation-of-privilege).
+
+**Performance-first carve-out** (vision.md § 13 relief-valve clause): **none declared.** The Python shim adapter does not exchange security for performance — there is no TLS-disabled, sandbox-relaxed, or PII-permissive code path in this package.
 
 **What's untrusted**
 
