@@ -10,12 +10,16 @@ describe("AGENT_MATRIX", () => {
     expect(AGENT_MATRIX).toHaveLength(4);
   });
 
-  test("row order is claude / devin / aider / openhands", () => {
-    expect(AGENT_MATRIX.map((r) => r.id)).toEqual(["claude", "devin", "aider", "openhands"]);
+  test("openhands is first row (canonical default since 2026-05-24)", () => {
+    expect(AGENT_MATRIX[0]?.id).toBe("openhands");
+  });
+
+  test("row order is openhands / claude / devin / aider", () => {
+    expect(AGENT_MATRIX.map((r) => r.id)).toEqual(["openhands", "claude", "devin", "aider"]);
   });
 
   test("every row has a valid briefDeliveryShape", () => {
-    const validShapes = new Set(["stdin", "prompt-file", "message-file"]);
+    const validShapes = new Set(["brief-file", "stdin", "prompt-file", "message-file"]);
     for (const row of AGENT_MATRIX) {
       expect(validShapes.has(row.briefDeliveryShape)).toBe(true);
     }
@@ -28,17 +32,17 @@ describe("AGENT_MATRIX", () => {
     }
   });
 
-  test("shipped agents have pendingExternalDep === null", () => {
-    const shippedIds = ["claude", "devin", "aider"] as const;
-    for (const id of shippedIds) {
-      const row = AGENT_MATRIX.find((r) => r.id === id);
-      expect(row?.pendingExternalDep).toBeNull();
+  test("all four agents have pendingExternalDep === null (integration complete)", () => {
+    // June-1-2026 dep lifted on 2026-05-24 when the Python-SDK shim
+    // adapter shipped. No row carries an external-dep gate today.
+    for (const row of AGENT_MATRIX) {
+      expect(row.pendingExternalDep).toBeNull();
     }
   });
 
-  test("openhands row carries pendingExternalDep: 2026-06-01", () => {
+  test("openhands row uses brief-file delivery shape (via Python shim)", () => {
     const row = AGENT_MATRIX.find((r) => r.id === "openhands");
-    expect(row?.pendingExternalDep).toBe("2026-06-01");
+    expect(row?.briefDeliveryShape).toBe("brief-file");
   });
 
   test("every row's pendingExternalDep is null or a YYYY-MM-DD ISO date", () => {
@@ -52,6 +56,15 @@ describe("AGENT_MATRIX", () => {
 });
 
 describe("resolveCloudAgent — shipped agents", () => {
+  test("ok status for openhands (canonical default, brief-file shape)", () => {
+    const r = resolveCloudAgent({ envValue: undefined, configValue: "openhands" });
+    expect(r.status).toBe("ok");
+    if (r.status === "ok") {
+      expect(r.agent).toBe("openhands");
+      expect(r.row.briefDeliveryShape).toBe("brief-file");
+    }
+  });
+
   test("ok status for claude", () => {
     const r = resolveCloudAgent({ envValue: undefined, configValue: "claude" });
     expect(r.status).toBe("ok");
@@ -77,42 +90,6 @@ describe("resolveCloudAgent — shipped agents", () => {
       expect(r.agent).toBe("aider");
       expect(r.row.briefDeliveryShape).toBe("message-file");
     }
-  });
-});
-
-describe("resolveCloudAgent — pending external dep (openhands)", () => {
-  test("returns pending-external-dep status for openhands", () => {
-    const r = resolveCloudAgent({ envValue: undefined, configValue: "openhands" });
-    expect(r.status).toBe("pending-external-dep");
-    if (r.status === "pending-external-dep") {
-      expect(r.agent).toBe("openhands");
-      expect(r.row.pendingExternalDep).toBe("2026-06-01");
-    }
-  });
-
-  test("error message names the openhands agent and the June 1 date", () => {
-    const r = resolveCloudAgent({ envValue: undefined, configValue: "openhands" });
-    if (r.status !== "pending-external-dep") {
-      throw new Error(`expected pending-external-dep, got ${r.status}`);
-    }
-    expect(r.error).toContain("openhands");
-    expect(r.error).toContain("2026-06-01");
-  });
-
-  test("error message includes the GHE issue reference for traceability", () => {
-    const r = resolveCloudAgent({ envValue: undefined, configValue: "openhands" });
-    if (r.status !== "pending-external-dep") {
-      throw new Error(`expected pending-external-dep, got ${r.status}`);
-    }
-    expect(r.error).toContain("OpenHands/OpenHands#14374");
-  });
-
-  test("error message names the fallback agents (claude / devin)", () => {
-    const r = resolveCloudAgent({ envValue: undefined, configValue: "openhands" });
-    if (r.status !== "pending-external-dep") {
-      throw new Error(`expected pending-external-dep, got ${r.status}`);
-    }
-    expect(r.error).toMatch(/claude.*devin|devin.*claude/);
   });
 });
 
@@ -149,10 +126,13 @@ describe("resolveCloudAgent — priority (env > config > default)", () => {
     expect(r.agent).toBe("devin");
   });
 
-  test("defaults to claude when both env and config are undefined", () => {
+  test("defaults to openhands when both env and config are undefined", () => {
+    // Default flipped 2026-05-24: openhands is now Minsky's canonical
+    // agent runtime. Legacy "claude" default removed per operator
+    // "make openhands default" directive.
     const r = resolveCloudAgent({ envValue: undefined, configValue: undefined });
     if (r.status !== "ok") throw new Error(`expected ok, got ${r.status}`);
-    expect(r.agent).toBe("claude");
+    expect(r.agent).toBe("openhands");
   });
 
   test("defaultAgent override is honored when env + config are undefined", () => {
@@ -167,9 +147,10 @@ describe("resolveCloudAgent — priority (env > config > default)", () => {
 });
 
 describe("resolveCloudAgent — case insensitivity", () => {
-  test("OPENHANDS uppercase resolves to openhands row", () => {
+  test("OPENHANDS uppercase resolves to openhands row (now ok status)", () => {
     const r = resolveCloudAgent({ envValue: undefined, configValue: "OPENHANDS" });
-    expect(r.status).toBe("pending-external-dep");
+    expect(r.status).toBe("ok");
+    if (r.status === "ok") expect(r.agent).toBe("openhands");
   });
 
   test("mixed case Claude resolves to claude row", () => {

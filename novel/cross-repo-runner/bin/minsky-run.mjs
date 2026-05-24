@@ -38,6 +38,11 @@ import {
   parseGhPrListForDuplicateDetection,
 } from "@minsky/tick-loop";
 
+import {
+  buildOpenHandsInvocation,
+  resolveShimPath as resolveOpenHandsShimPath,
+} from "@minsky/agent-runtime-openhands";
+
 import { computeDynamicSettings, parseTimingsFromJsonl } from "../dist/dynamic-timeouts.js";
 import {
   buildSpawnPlan,
@@ -1310,19 +1315,20 @@ const _minskyConfig = loadMinskyConfig();
  * Resolve the CLI command to spawn. Priority:
  *   1. MINSKY_CLOUD_AGENT env var (one-session override)
  *   2. ~/.minsky/config.json `cloud_agent` (persistent per-machine)
- *   3. "claude" (default)
+ *   3. "openhands" (default since 2026-05-24)
  *
  * Delegates the actual matrix lookup to `resolveCloudAgent` (pure
  * function in `novel/cross-repo-runner/src/agent-config.ts`). For
- * pending-external-dep agents (openhands pre-June-1) and unknown
- * agents, this function exits the process with EX_USAGE (64) and an
- * actionable error — NEVER silently falls back to a different agent.
+ * unknown agents, this function exits the process with EX_USAGE (64)
+ * and an actionable error — NEVER silently falls back to a different
+ * agent. (Pending-external-dep path retained in the resolver for
+ * future external deps; no agent currently uses it.)
  *
  * Today's wire shapes:
- *   - claude    → invoked as `claude`  (brief via stdin)
- *   - devin     → invoked as `devin`   (brief via --prompt-file)
- *   - aider     → invoked as `aider`   (brief via --message-file)  [v0 not yet active in this binary]
- *   - openhands → exits 64 with the actionable June 1 error
+ *   - openhands → invoked as `python3 <shim>` (brief via --brief-file)  [DEFAULT]
+ *   - claude    → invoked as `claude`        (brief via stdin)
+ *   - devin     → invoked as `devin`         (brief via --prompt-file)
+ *   - aider     → invoked as `aider`         (brief via --message-file)  [v0 not yet active in this binary]
  */
 function readSpawnCommand() {
   const resolution = resolveCloudAgent({
@@ -1330,13 +1336,12 @@ function readSpawnCommand() {
     configValue: _minskyConfig.cloud_agent,
   });
   if (resolution.status !== "ok") {
-    // biome-ignore lint/suspicious/noConsole: actionable error to operator at the I/O boundary
     console.error(resolution.error);
     process.exit(64);
   }
-  // Today's binary only spawns claude/devin natively; aider routes
-  // through the local-agent path. openhands is gated above.
-  return resolution.agent === "devin" ? "devin" : "claude";
+  // Caller uses the agent id to branch; the actual command (claude /
+  // devin / python3 + shim path) is selected inside buildAgentConfig.
+  return resolution.agent;
 }
 
 /**
@@ -1367,6 +1372,39 @@ function buildAgentConfig(hostRoot) {
     process.env.MINSKY_CLAUDE_MODEL ??
     _minskyConfig.cloud_agent_model ??
     "";
+
+  if (cmd === "openhands") {
+    // OpenHands: brief → temp file → --brief-file via the Python SDK
+    // shim. The shim itself lives in @minsky/agent-runtime-openhands;
+    // its absolute path is resolved from this binary's location. The
+    // shim NEVER imports OpenHands into the Node.js process — the
+    // entire SDK contact surface stays in Python (rule #2 adapter +
+    // rule #14 delegate-to-runtime).
+    const shimPath = resolveOpenHandsShimPath();
+    const pythonBin = process.env.MINSKY_OPENHANDS_PYTHON ?? "python3";
+    const apiKeyEnv = process.env.MINSKY_OPENHANDS_API_KEY_ENV ?? "ANTHROPIC_API_KEY";
+    const ohModel = model !== "" ? model : "claude-sonnet-4-20250514";
+    return {
+      command: pythonBin,
+      args: [shimPath, "--model", ohModel, "--api-key-env", apiKeyEnv],
+      invocation: (input) => {
+        const inv = buildOpenHandsInvocation({
+          brief: input.brief,
+          repoRoot: hostRoot,
+          model: ohModel,
+          apiKeyEnv,
+          shimPath,
+          pythonBin,
+        });
+        return {
+          command: inv.command,
+          argv: inv.argv,
+          stdin: inv.stdin,
+          cwd: inv.cwd,
+        };
+      },
+    };
+  }
 
   if (cmd === "devin") {
     // --permission-mode dangerous: auto-approve edit/write/exec tools.

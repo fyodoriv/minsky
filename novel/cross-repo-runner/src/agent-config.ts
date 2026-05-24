@@ -1,26 +1,28 @@
 // Per-machine cloud-agent matrix and resolver for the cross-repo runner.
 //
-// Source: TASKS.md `openhands-config-schema-pre-june-1` — schema-half
-// of the 4-agent contract per the parent P0
-// `add-openhands-as-pluggable-backend`. Pre-June-1 the openhands row
-// carries a `pendingExternalDep: "2026-06-01"` discriminator; the
-// daemon REFUSES to spawn under that config (exit 64) with an
-// actionable error, never silently falling back to a different agent.
-// Post-June-1 the field flips to null and the same row becomes live.
+// Source: operator 2026-05-22 directive (Path C reshape) and 2026-05-24
+// "complete OpenHands integration today" directive. OpenHands is now
+// the canonical agent runtime — first row, default agent. The legacy
+// claude / devin / aider rows remain as opt-in fallbacks but are no
+// longer the default. The 2026-06-01 `pendingExternalDep` was lifted
+// on 2026-05-24 once the Python-SDK shim adapter shipped
+// (`@minsky/agent-runtime-openhands`); the substrate-only gate is
+// gone, integration is real.
 //
 // Pattern: pure data table + pure resolver function — testable without
 // mocking the host process, exported for the `cloud-agent-config-audit-
-// matrix-test` lint (sibling task) to assert the 4-row contract.
+// matrix-test` lint to assert the 4-row contract.
 
 /**
  * Brief-delivery shape a cloud agent expects:
  *
- *   - `stdin` — Claude Code / OpenHands read from stdin (child.stdin.end)
+ *   - `brief-file` — OpenHands (via the shim) reads from `--brief-file`
+ *   - `stdin` — Claude Code reads from stdin (child.stdin.end)
  *   - `prompt-file` — Devin reads from a temp file via `--prompt-file`
  *     (devin panics on stdin pipe as of 2026.5.6-8)
  *   - `message-file` — aider reads from a `--message-file` argument
  */
-export type BriefDeliveryShape = "stdin" | "prompt-file" | "message-file";
+export type BriefDeliveryShape = "brief-file" | "stdin" | "prompt-file" | "message-file";
 
 /**
  * One row in the per-machine cloud-agent support matrix. Each row is
@@ -47,16 +49,22 @@ export interface AgentMatrixRow {
 }
 
 /**
- * The canonical 4-row cloud-agent matrix. Order is meaningful: shipped
- * agents first (claude / devin / aider), then pending agents
- * (openhands). The `cloud-agent-config-audit-matrix-test` lint asserts
- * exactly these four rows in this order.
+ * The canonical 4-row cloud-agent matrix. Order is meaningful: the
+ * default agent (openhands) is first, then legacy backends in the
+ * order they were originally added. The `cloud-agent-config-audit-
+ * matrix-test` lint asserts exactly these four rows in this order.
  *
- * Source: parent task `add-openhands-as-pluggable-backend` § Touches
- * (this is the schema-half of the agent matrix change);
+ * Source: operator 2026-05-22 Path C directive + 2026-05-24 "make
+ * openhands default, integrate completely today" directive.
  * `docs/plans/2026-05-22-path-c-openhands-reshape.md` § Phase 1.
  */
 export const AGENT_MATRIX: readonly AgentMatrixRow[] = [
+  {
+    id: "openhands",
+    briefDeliveryShape: "brief-file",
+    modelFlag: "--model",
+    pendingExternalDep: null,
+  },
   {
     id: "claude",
     briefDeliveryShape: "stdin",
@@ -74,12 +82,6 @@ export const AGENT_MATRIX: readonly AgentMatrixRow[] = [
     briefDeliveryShape: "message-file",
     modelFlag: "--model",
     pendingExternalDep: null,
-  },
-  {
-    id: "openhands",
-    briefDeliveryShape: "stdin",
-    modelFlag: "--model",
-    pendingExternalDep: "2026-06-01",
   },
 ];
 
@@ -114,7 +116,7 @@ export type AgentResolution =
  * Priority (matches `bin/minsky-run.mjs` readSpawnCommand):
  *   1. `envValue` — MINSKY_CLOUD_AGENT one-session override
  *   2. `configValue` — `~/.minsky/config.json` `cloud_agent`
- *   3. `defaultAgent` — fallback (default: `"claude"`)
+ *   3. `defaultAgent` — fallback (default: `"openhands"` as of 2026-05-24)
  *
  * @otel-exempt pure resolver — no I/O, no state.
  */
@@ -123,7 +125,12 @@ export function resolveCloudAgent(input: {
   configValue: string | undefined;
   defaultAgent?: AgentMatrixRow["id"];
 }): AgentResolution {
-  const fallback = input.defaultAgent ?? "claude";
+  // Default agent flipped on 2026-05-24 per the operator's
+  // "make openhands default" directive — OpenHands is now Minsky's
+  // canonical agent runtime; the prior default has been retired.
+  // Legacy backends remain valid via explicit `cloud_agent` config or
+  // `MINSKY_CLOUD_AGENT` env override.
+  const fallback = input.defaultAgent ?? "openhands";
   const raw = (input.envValue ?? input.configValue ?? fallback).toLowerCase();
   const row = AGENT_MATRIX.find((r) => r.id === raw);
   if (row === undefined) {

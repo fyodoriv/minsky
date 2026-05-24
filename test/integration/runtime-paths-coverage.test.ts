@@ -146,24 +146,25 @@ describe("L4: runWalk — multi-host walker with --hosts-dir", () => {
 // ─── L4 — buildAgentConfig + buildLocalAgentConfig path ──
 
 describe("L4: buildAgentConfig + buildLocalAgentConfig + readSpawnCommand", () => {
-  test("default cloud agent path picks devin (the build-agent-config decision)", () => {
+  test("default cloud agent path picks openhands (the build-agent-config decision)", () => {
     // `buildAgentConfig` reads ~/.minsky/config.json's `cloud_agent`
-    // (default `devin`) and returns the spawn argv. We observe the
-    // decision via `readSpawnCommand`'s output in the iteration line:
-    // `agent=devin` means buildAgentConfig→cloud→devin path was taken.
+    // (default `openhands` since 2026-05-24) and returns the spawn
+    // argv. We observe the decision via `readSpawnCommand`'s output
+    // in the iteration line: `agent=openhands` means buildAgentConfig
+    // → cloud → openhands path was taken.
     const dir = makeFixtureHost();
     const env = cleanEnv();
     // No config.json in $HOME → buildAgentConfig falls through to its
-    // built-in default `devin`.
+    // built-in default `openhands`.
     const out = execFileSync("node", [RUNNER_BIN, "--host", dir, "--once", "--no-live"], {
       encoding: "utf8",
       env,
       timeout: 10_000,
     });
-    // dry-run prints `agent=claude` because `--no-live` overrides via
-    // dryRunStrategy; the cloud-agent decision is observable in the
-    // banner (live mode would print agent=devin).
-    expect(out).toMatch(/agent=(devin|claude|aider)/);
+    // dry-run prints `agent=<id>` for any of the 4 valid agents; the
+    // cloud-agent decision is observable in the banner (live mode
+    // would print agent=openhands).
+    expect(out).toMatch(/agent=(openhands|devin|claude|aider)/);
   });
 
   test("buildLocalAgentConfig path selected when MINSKY_LLM_PROVIDER=local-only", () => {
