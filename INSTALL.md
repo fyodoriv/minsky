@@ -19,6 +19,14 @@ The canonical install runbook for Minsky. **Audience**: an AI coding agent (Clau
 
 **Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists (Step 5 is a single CLI call) and the measurement harness `scripts/measure-agent-install.mjs` is wired into `pre-pr-lint --stage=full` (so the harness machinery is CI-gated). The remaining gap to fully close the parent `agent-mediated-install` P0 is live-mode for real-agent invocation against claude-code / devin / cursor — tracked as P2 `measure-agent-install-live-mode`. Until it ships, the 9-run success criterion is operator-verified end-to-end; the CI gate enforces threshold semantics and harness shape via mock mode.
 
+## Step 0 — what "install" means (read first)
+
+Two invariants you, the installing agent, must honor:
+
+1. **You are a doorway, not a runtime.** After you finish this runbook, you are *out of the picture*. The daemon you started runs on the operator's machine and operates independently. Whatever chat window invoked you — Claude Code, Cursor, Devin, Windsurf, Codex, Aider, or a local model talking to one of them — must produce **byte-identical runtime behavior** afterwards. Do not write launcher-specific config. Do not branch on `process.env.CLAUDE_CODE` / `CURSOR` / `DEVIN_AGENT` / `CODEX` / etc. on the way through. Do not seed `~/.minsky/config.json` with anything that varies by launcher. The only field that may record which launcher you were is `agent` inside `~/.minsky/telemetry-consent.json` (telemetry-only — never re-read by runtime code). See [`user-stories/014-launcher-agnostic-feature-parity.md`](user-stories/014-launcher-agnostic-feature-parity.md) for the full invariant.
+
+2. **A cloud API key is NOT required.** Minsky's default runtime is local — Ollama / LM Studio / MLX. The default config you write in Step 4 sets `cloud_agent: "openhands"` + `cloud_agent_model: "ollama_chat/qwen3-coder:30b"` + `ollama_base_url: "http://localhost:11434"`. If the operator has no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` in their environment, that is **not a blocker** — proceed to Step 5 (consent) and Step 6 (daemon start) without prompting. The operator's directive (recorded in [`user-stories/015-local-models-until-stable.md`](user-stories/015-local-models-until-stable.md)) is: rely on local models until the M1.1 stability gate trips at 90% clean-exit fraction. Cloud-key opt-in is a documented post-install edit, not an install-time prompt.
+
 ## What this is not
 
 - **Not the user-facing readme** — see [README.md](./README.md) for what Minsky does and why.
