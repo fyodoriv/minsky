@@ -34,7 +34,7 @@ Five phrases, each tagged with shipping status (status reflects state 2026-05-22
 |---|---|---|
 | **attachable** | Operator drops `.minsky/repo.yaml` + `--hosts-dir <parent>` and walks away; zero `@minsky/*` imports in the host repo | ✅ ships |
 | **24/7** | launchd/systemd KeepAlive daemon survives terminal close + host reboots | ✅ ships |
-| **runs OpenHands in your repo** | Agent layer is OpenHands' CodeAct loop inside a Docker sandbox per task | 🟡 **June 1+** — today runs `claude` / `devin` / `aider`; `openhands` becomes the 4th pluggable backend after OpenHands' Agent Canvas Initiative CLI release |
+| **runs OpenHands in your repo** | Agent layer is OpenHands' CodeAct loop, spawned via the Python SDK shim today and via the canonical `openhands solve` CLI from 2026-06-01 | ✅ **shipped 2026-05-24** (PR #782) — `cloud_agent: "openhands"` is the default; legacy `claude` / `devin` / `aider` remain opt-in. Live A/B benchmark vs. legacy backends on the M1.10 corpus pending (M1.OH next slice) |
 | **enforces 18 constitutional rules deterministically** | 18 rules × 53 pre-pr-lint stages × 65 CI jobs run on every PR the daemon opens; LLM-driven checks are advisory only, never load-bearing | ✅ ships |
 | **observes itself to queue improvements** | MAPE-K substrate (experiment-store + spec-monitor + observer) records every iteration's outcome; the daemon files TASKS.md entries against its own weak spots | ✅ ships (L1) — 🟡 closed-loop A/B prompt tuning (L2) is spec-only per `user-stories/003-mape-k-improves-prompts.md`; constitutional self-revision (L3) is M3+ aspirational |
 

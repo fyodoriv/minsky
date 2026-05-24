@@ -1,6 +1,6 @@
 # Minsky
 
-> **A 24/7 self-improving code factory.** OpenHands runs the agent. Minsky chooses what to work on next, enforces 18 constitutional rules on every PR, and turns each change into a pre-registered scientific experiment.
+> **A 24/7 self-improving code factory.** OpenHands runs the agent (canonical default since 2026-05-24). Minsky chooses what to work on next, enforces 18 constitutional rules on every PR, and turns each change into a pre-registered scientific experiment.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
@@ -14,11 +14,11 @@ The operator's stated vision is *"a 24/7 self-improving code factory that relies
 | **24/7 daemon** | launchd / systemd KeepAlive supervisor; auto-restart; dynamic p95-watchdog | ✅ substrate ships · 🟡 [M1.1](MILESTONES.md) stability target (90% over 10h) blocked on `spawn-failed-exit-minus-one-silent-empty-stderr` |
 | **Self-improving** | dogfood loop runs against `~/apps/minsky` itself; MAPE-K L1 records every iteration; observer heals 4 failure modes today | ✅ L1 ships · 🟡 closed-loop A/B prompt tuning (L2) is spec-only · constitutional self-revision (L3) is M3+ aspirational |
 | **Code factory** | cross-repo runner walks N hosts (3 iterations / host); rule #12 forces stability work when queue empties | 🟡 throughput-at-scale unmeasured · M1.10 competitive scorecard ships but throughput row is empty |
-| **Relies on OpenHands as orchestrator** | AGENT_MATRIX schema, cost-tier-picker, audit-matrix lint all carry `openhands` rows that self-flip on the dep date; `competitors/openhands.md` flipped from *competitor* to *dependency* on 2026-05-22 | 🔴 0% runtime integration today · substrate ready; integration gated on OpenHands' Agent Canvas Initiative CLI release **2026-06-01** |
+| **Relies on OpenHands as orchestrator** | [`@minsky/agent-runtime-openhands`](novel/adapters/agent-runtime-openhands/README.md) wraps OpenHands SDK v1.19.1 via a Python shim; the TS adapter spawns it via `--brief-file`. `cloud_agent: "openhands"` is the default since 2026-05-24. The shim is replaced one-for-one with the canonical `openhands solve` CLI on `2026-06-01`. | ✅ default agent shipped 2026-05-24 (PR #782) · 🟡 live A/B vs. claude/devin on the M1.10 corpus filed as M1.OH next slice |
 | **Comes up with tasks** | agents file P1–P3 tasks while iterating (rule #17 forces same-PR scout filings); `corpus-discover-quarterly` files competitor-research tasks autonomously every 90d; sweep / project-audit / standing-audit-gap-loop skills | 🟡 agents author tasks *inside* iterations; the daemon doesn't autonomously author tasks *between* ticks · file `autonomous-task-authoring-between-ticks` is the M2 gap |
 | **Best way based on science** | rule #9 pre-registered HDD enforced as CI lint on every PR (Hypothesis / Success / Pivot / Measurement / Anchor); M1.10 corpus scorecard with primary-source citations; every PR carries a `## Hypothesis self-grade` block | ✅ strongest pillar — this is the moat |
 
-**The next ratchet**: `2026-06-01` opens the OpenHands integration. The substrate is in place — flipping `pendingExternalDep` from `"2026-06-01"` to `null` in three rows ([`AGENT_MATRIX`](novel/cross-repo-runner/src/agent-config.ts), the [audit-matrix test](novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.mjs), [`COST_TIERS`](novel/tick-loop/src/cost-tier-picker.ts)) unlocks the runtime swap. Full plan: [docs/plans/2026-05-22-path-c-openhands-reshape.md](docs/plans/2026-05-22-path-c-openhands-reshape.md).
+**What landed 2026-05-24**: OpenHands is now the canonical agent runtime — `cloud_agent: "openhands"` is the default in `~/.minsky/config.json`. The Python-SDK shim adapter ([`@minsky/agent-runtime-openhands`](novel/adapters/agent-runtime-openhands/README.md)) lifted the original 2026-06-01 dep gate ahead of schedule. On `2026-06-01` the shim is replaced one-for-one with the canonical `openhands solve` CLI; the TS adapter shape stays the same. Full plan: [docs/plans/2026-05-22-path-c-openhands-reshape.md](docs/plans/2026-05-22-path-c-openhands-reshape.md).
 
 ## Getting started
 
@@ -31,11 +31,11 @@ Manual: `git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm i
 ## Why Minsky
 
 - **Unattended improvement** — picks `TASKS.md` tasks, ships draft PRs, never merges without you ([loop](user-stories/001-loop-runs-overnight.md)).
-- **Right model per task** — Claude / Devin / Aider today; OpenHands becomes the 4th backend on `2026-06-01` ([backends](user-stories/008-per-task-backend-and-personas.md), [config](novel/cross-repo-runner/src/agent-config.ts)).
+- **Right model per task** — OpenHands by default, with Claude / Devin / Aider as opt-in fallbacks per `~/.minsky/config.json` ([backends](user-stories/008-per-task-backend-and-personas.md), [config](novel/cross-repo-runner/src/agent-config.ts)).
 - **Self-improving** — reads its own iteration ledger, files tasks against its own weak spots ([MAPE-K](user-stories/003-mape-k-improves-prompts.md)).
 - **Talks to you in a file** — agents append `## Q:` to `.minsky/qa-log.md` and wait; you answer with `## A:`; `minsky qa` opens it in `$EDITOR` ([human-loop](novel/human-loop/README.md)).
 
-[M1](MILESTONES.md) in flight: one-command run, fleet-wide stability reporting, 8h default sessions that drive a repo toward minsky standards, human-blocked unsafe ops, remote task submission, OpenHands integration (`2026-06-01`).
+[M1](MILESTONES.md) in flight: one-command run, fleet-wide stability reporting, 8h default sessions that drive a repo toward minsky standards, human-blocked unsafe ops, remote task submission. **OpenHands as the canonical agent runtime shipped 2026-05-24** (M1.14 substrate complete; live A/B benchmark vs. claude/devin still pending).
 
 How it works: reads `TASKS.md` → picks task → spawns agent on a feature branch → draft PR with self-graded metrics → records iteration → loops. Full architecture: [docs/README-v1-detailed.md](docs/README-v1-detailed.md#how-it-works).
 
