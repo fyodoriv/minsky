@@ -314,22 +314,22 @@ Sequenced phases with success/pivot thresholds per phase. Each phase has rule-#9
 
 **Pivot**: if skill translation requires non-trivial format mutation (>5% of skills need re-authoring), the AgentSkills compatibility claim is wrong — document the actual delta in `competitors/openhands.md` and treat as porting work rather than mechanical sync.
 
-### Phase 3 — Pilot one package replacement
+### Phase 3 — Pilot one package replacement — ✅ SHIPPED 2026-05-24
 
 **Goal**: replace one Minsky package with an OpenHands equivalent end-to-end. Smallest meaningful replacement: `novel/adapters/persona-spawner/` → OpenHands MicroAgents.
 
-**Trigger**: Phase 2 ships.
+**Outcome**: persona-spawner package deleted in one PR (this PR). Audit found ZERO external consumers — the package was already isolated. Net deletion: 8 files, ~1000 LOC, no migration work needed. Plus updates to: `scripts/check-threat-model-section.mjs` (remove persona-spawner from the threat-model-required list), `user-stories/013-daemon-not-framework-moat.md` (the "extend Minsky with personas" failure-mode row now points at `.openhands/microagents/`), `docs/ARCHITECTURE.md` (multi-role/persona pipeline row now shows ✅ delegated-to-OpenHands), `tsconfig.json` (workspace reference removed).
 
-**Work**: ~1 week.
+**Lesson**: when the Path C plan called persona-spawner "the smallest meaningful replacement" it was actually correct — but for a different reason than expected. The reason was structural isolation (no consumers), not the predicted ~1-week migration cost. Future pluggable-interface deletions should run a consumer-count audit FIRST and prioritize zero-consumer packages for the deletion phase before the more-coupled ones.
+
+**Original predicted work** (preserved for the validated-learning record):
 
 1. Audit current `persona-spawner` consumers — which novel/ packages depend on it.
 2. Re-author each persona consumer to invoke an OpenHands MicroAgent via the appropriate trigger (keyword for knowledge agents, command for task agents).
 3. Delete `novel/adapters/persona-spawner/` + the dependency rows from `ARCHITECTURE.md`.
 4. Update `pnpm-workspace.yaml`.
 
-**Success**: `novel/adapters/persona-spawner/` directory is gone; all tests pass; `rule-2-dep-coverage` lint exits 0.
-
-**Pivot**: if `persona-spawner` has more consumers than expected (>5 packages), the pilot is too large for one phase — split into per-consumer slices.
+**Success criterion (met)**: `novel/adapters/persona-spawner/` directory is gone; all tests pass; `rule-2-dep-coverage` lint exits 0.
 
 ### Phase 4 — Deletion sweep 1 (novel/ packages)
 
