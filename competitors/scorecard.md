@@ -47,47 +47,56 @@ The six caveats every reader should hold:
 (Pulled verbatim from `competitors.ts` so this file stays self-contained — primary-source URLs survive even if `competitors.ts` is later deleted.)
 
 ### claude-code — Claude Code (Anthropic, closed-commercial)
-- Homepage: https://www.anthropic.com/claude-code
+
+- Homepage: <https://www.anthropic.com/claude-code>
 - As-of: 2026-02-09
 - Citation: Anthropic, *Claude 3.7 Sonnet and Claude Code*, anthropic.com, 2025-02-24 (SWE-bench Verified, agentic harness, 0.49); Pinna, Gong, Williams, Sarro, *Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance*, arXiv:2602.08915, 2026-02-09 (features-class autonomous-merge 0.726; inverse 0.274 reported as human-intervention-rate).
 
 ### openhands — OpenHands (All-Hands AI, open-source)
-- Homepage: https://github.com/All-Hands-AI/OpenHands
+
+- Homepage: <https://github.com/All-Hands-AI/OpenHands>
 - As-of: 2025-04-15
 - Citation: All-Hands AI, *SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model*, all-hands.dev/blog, 2025-04-15 (SWE-bench Verified resolve rate 0.658, verified via SWE-bench/experiments PR #209); All-Hands AI, *Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)*, openhands.dev/blog, 2024-10-04 (cost-per-issue 0.30 USD with Claude 3.5 Sonnet on SWE-bench Lite); average_runtime 3600 sec from openhands-index-results/scores.json.
 
 ### swe-agent — SWE-agent (Princeton NLP, open-source)
-- Homepage: https://github.com/SWE-agent/SWE-agent
+
+- Homepage: <https://github.com/SWE-agent/SWE-agent>
 - As-of: 2024-10-01
 - Citation: Yang, Jimenez, Wettig, Lieret, Yao, Narasimhan, Press, *SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering*, NeurIPS 2024 (SWE-agent + GPT-4 resolve rate 0.125 on the 2,294-instance full split, used as the Verified proxy).
 
 ### aider — Aider (open-source)
-- Homepage: https://aider.chat
+
+- Homepage: <https://aider.chat>
 - As-of: 2024-05-22
 - Citation: Aider, *How aider scored SOTA 26.3% on SWE Bench Lite*, aider.chat/2024/05/22/swe-bench-lite.html, 2024-05-22 (SWE-bench Lite 0.263; pass@1 with GPT-4o + Opus).
 
 ### devin — Devin (Cognition Labs, closed-commercial)
-- Homepage: https://www.cognition.ai
+
+- Homepage: <https://www.cognition.ai>
 - As-of: 2026-04-07
 - Citation: Cognition Labs, *2025 Annual Performance Review*, cognition.ai, 2026-04 (real-world PR merge rate 0.67 across thousands of customer codebases); Cognition Labs, *Introducing Devin*, cognition.ai, 2024-03-12 (SWE-bench Verified 0.139); ACU economics — AgentMarketCap, *Devin's 67% PR Merge Rate*, agentmarketcap.ai/blog/2026/04/07.
 
 ### cursor-agent — Cursor agent (closed-commercial)
-- Homepage: https://www.cursor.com
+
+- Homepage: <https://www.cursor.com>
 - As-of: 2026-02-09
 - Citation: Pinna, Gong, Williams, Sarro, *Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance*, arXiv:2602.08915, 2026-02-09 (AIDev dataset; Cursor leads fix-task acceptance 0.804).
 
 ### openai-codex — OpenAI Codex (codex-1, closed-commercial)
-- Homepage: https://openai.com/index/introducing-codex/
+
+- Homepage: <https://openai.com/index/introducing-codex/>
 - As-of: 2025-05-16
 - Citation: OpenAI, *Introducing Codex*, openai.com/index/introducing-codex/, 2025-05-16 (SWE-Bench Verified pass@1 = 0.721 for codex-1; 23 instances excluded as not-runnable; 192k context, medium reasoning effort; pass@8 = 0.838).
 
 ### augment-code — Augment Code (Augment SWE-bench agent, open-source)
-- Homepage: https://github.com/augmentcode/augment-swebench-agent
+
+- Homepage: <https://github.com/augmentcode/augment-swebench-agent>
 - As-of: 2025-03-31
 - Citation: Chen & Flaherty, *#1 open-source agent on SWE-Bench Verified by combining Claude 3.7 and O1*, augmentcode.com/blog, 2025-03-31 (open-source SWE-bench Verified 0.654 with Claude Sonnet 3.7 driver + OpenAI o1 ensembler).
 
 ### metagpt — MetaGPT (Foundation Agents, open-source, orchestrator tier)
-- Homepage: https://github.com/FoundationAgents/MetaGPT
+
+- Homepage: <https://github.com/FoundationAgents/MetaGPT>
 - As-of: 2024-05-07
 - Citation: Hong et al., *MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework*, arXiv:2308.00352, ICLR 2024 Oral (HumanEval Pass@1 = 0.859; 28.2% relative improvement over GPT-4 via Standardized Operating Procedure-shaped multi-agent assembly line).
 
