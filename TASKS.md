@@ -1922,19 +1922,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
-- [ ] `minsky-run-sh-portable-watchdog-for-macos-without-coreutils` — `bin/minsky-run.sh` falls back to running `openhands solve` WITHOUT a watchdog when neither GNU `timeout` nor `gtimeout` is present (the common case on a fresh macOS install without `brew install coreutils`). The graceful-degrade is honest (rule #6) but it disables the watchdog on a real operator surface.
-  - **ID**: minsky-run-sh-portable-watchdog-for-macos-without-coreutils
-  - **Tags**: p2, path-a-phase-7, resilience, mac-without-coreutils, observed-2026-05-24
-  - **Surfaced-by**: 2026-05-24 watchdog-timeout PR — the bats `watchdog` test SKIPs on this machine because neither `timeout` nor `gtimeout` is on PATH. Production daemons running on a fresh Mac would have the same problem and hang silently.
-  - **Files**: `bin/minsky-run.sh` (replace the `command -v timeout` branch with a Python-based watchdog), `scripts/spawn_with_watchdog.py` (NEW — wraps `subprocess.run(timeout=N)` around the openhands invocation; emits stdout + exit code back to bash), `tests/test_spawn_with_watchdog.py` (NEW), `tests/minsky-run.bats` (drop the skip guard on the watchdog test).
-  - **Hypothesis**: a Python-based watchdog (using `subprocess.run(timeout=N)`) covers every platform Python runs on (Linux, macOS, Windows-via-WSL, BSD) without external dependencies. Falsifiable: if any platform Minsky targets has Python ≥3.8 but `subprocess.run(timeout=)` fails, the abstraction is wrong.
-  - **Success**: bats `watchdog` test runs (not skipped) on a fresh macOS without coreutils; the existing test still passes on Ubuntu CI.
-  - **Pivot**: if the Python wrapper adds >50ms overhead per spawn vs the GNU `timeout` baseline (visible in `duration_ms` deltas), keep coreutils as the preferred path and use the Python wrapper only as fallback.
-  - **Measurement**: `bats tests/minsky-run.bats -f watchdog` passes (not skipped) on a clean macOS; `python3 -m pytest tests/test_spawn_with_watchdog.py` exits 0.
-  - **Competitive-goal**: protects `fleet-uptime-hours` on macOS-without-coreutils operator machines (a meaningful fraction of the install base — most macOS developers don't have GNU coreutils unless they specifically `brew install`'d it).
-  - **Anchor**: rule #1 (Python stdlib's `subprocess.run(timeout=)` is the existing solution; don't reinvent); rule #6 (let-it-crash at the right boundary — the iteration, not the process).
-  - **Acceptance**: (1) `scripts/spawn_with_watchdog.py` ships with paired tests; (2) `bin/minsky-run.sh` uses it preferentially (or as fallback when `timeout` missing); (3) bats watchdog test no longer skips on macOS-without-coreutils.
-
 - [ ] `add-bats-ci-gate-for-tests-minsky-run-bats` — `tests/minsky-run.bats` (11 paired tests for `bin/minsky-run.sh`) currently has NO CI gate. Bats is a standard tool but is not in any GitHub Actions workflow under `.github/workflows/ci.yml`. Drift in `bin/minsky-run.sh` could silently break the script without anything failing in CI.
   - **ID**: add-bats-ci-gate-for-tests-minsky-run-bats
   - **Tags**: p2, ci, path-a-phase-7, observed-2026-05-24

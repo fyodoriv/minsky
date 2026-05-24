@@ -184,12 +184,10 @@ EOF
 # --- 8. Round-robin iterates each host fairly ------------------------------
 
 @test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {
-  # Skip on machines without GNU timeout — the bash script's
-  # graceful-degrade path (rule #6) runs the spawn without a wrapper.
-  # CI Ubuntu runners have `timeout` by default, so this gate runs
-  # there; on macOS-without-coreutils this skips (filed as a scout
-  # task `minsky-run-sh-portable-watchdog-for-macos-without-coreutils`).
-  command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || skip "no timeout/gtimeout binary; install GNU coreutils to run this test"
+  # Watchdog resolution order: Python wrapper (preferred, no deps) →
+  # GNU timeout → gtimeout → unbounded. The Python wrapper is in-repo
+  # at scripts/spawn_with_watchdog.py, so this test runs everywhere
+  # Python ≥3.3 + bash are available (which is every supported platform).
 
   # Inject a fake `openhands` that hangs forever. Wire the dynamic-
   # timeout config to a 2s ceiling for the test (override the floor via
@@ -226,10 +224,13 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export PATH="$shim_dir:\$PATH"
-# Shadow scripts/dynamic_timeout.py for this run only.
+# Shadow scripts/dynamic_timeout.py for this run only. Keep
+# spawn_with_watchdog.py from the real repo since it's deterministic.
 TMP_SCRIPT="\$(mktemp -d -t minsky-run-shim.XXXXXX)/scripts"
 mkdir -p "\$TMP_SCRIPT"
 cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
 cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
 chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
 # Create a parallel bin/ that points to the shimmed scripts.
