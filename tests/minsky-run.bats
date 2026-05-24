@@ -168,6 +168,79 @@ EOF
 
 # --- 8. Round-robin iterates each host fairly ------------------------------
 
+@test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {
+  # Skip on machines without GNU timeout — the bash script's
+  # graceful-degrade path (rule #6) runs the spawn without a wrapper.
+  # CI Ubuntu runners have `timeout` by default, so this gate runs
+  # there; on macOS-without-coreutils this skips (filed as a scout
+  # task `minsky-run-sh-portable-watchdog-for-macos-without-coreutils`).
+  command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || skip "no timeout/gtimeout binary; install GNU coreutils to run this test"
+
+  # Inject a fake `openhands` that hangs forever. Wire the dynamic-
+  # timeout config to a 2s ceiling for the test (override the floor via
+  # the BATS env so we don't have to wait 120s for the real MIN_WATCHDOG_S).
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+# Fake openhands — hangs forever. Used by tests/minsky-run.bats to assert
+# the watchdog fires.
+sleep 99999
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake dynamic_timeout.py — always returns 2s, so the watchdog fires
+  # in ≤3s wall-time even on slow machines. Save the original on a
+  # known path so the wrapper can stay tight.
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(2)  # 2-second watchdog for tests
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host hangy "$(complete_task_block)")"
+
+  # Run minsky-run.sh with the shimmed openhands AND shimmed picker dir.
+  # The script reads pick_task.py from `$(dirname "${BASH_SOURCE[0]}")/../scripts/`
+  # so we copy our test's dynamic_timeout.py over that path's neighbour
+  # via a wrapper. Simpler: use a small wrapper script.
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+# Shadow scripts/dynamic_timeout.py for this run only.
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-shim.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+# Create a parallel bin/ that points to the shimmed scripts.
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  # Wall-clock must be small (well under 99999s) — the watchdog fired.
+  [ "$status" -eq 0 ]
+  jsonl="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$jsonl" ]
+  line="$(head -1 "$jsonl")"
+  echo "JSONL: $line"
+  # Verdict must be spawn-failed; notes must mention the timeout.
+  [ "$(echo "$line" | jq -r .verdict)" = "spawn-failed" ]
+  [[ "$(echo "$line" | jq -r .notes)" == *"timeout"* ]]
+  # Recorded duration in ms must be ≥ 2000 (watchdog at 2s) and ≤ 30000 (sanity).
+  ms="$(echo "$line" | jq -r .notes | grep -oE '[0-9]+ms' | head -1 | tr -d ms)"
+  [ "$ms" -ge 1900 ]
+  [ "$ms" -le 30000 ]
+}
+
 @test "round-robin iterates each host the expected number of times" {
   host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
   host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"
