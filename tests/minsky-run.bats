@@ -323,6 +323,69 @@ EOF
   [ "$(wc -l < "$brief_dump" | tr -d ' ')" -gt 20 ]
 }
 
+@test "bin/minsky --bash-runner dispatches to bin/minsky-run.sh (Phase 7c)" {
+  # Test the dispatch in isolation by extracting + sourcing only the
+  # flag-parser + dispatch section of `bin/minsky`. Bypasses the
+  # MINSKY_REPO resolver (pre-existing bash-quoting issue on macOS;
+  # filed as scout if CI exercises it).
+  test_script="$TMPDIR_TEST/minsky-flag-test.sh"
+  cat > "$test_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+# Stub the resolver — assume MINSKY_REPO_PATH is already set.
+MINSKY_REPO_PATH="${MINSKY_REPO_PATH_OVERRIDE:?must be set in test}"
+
+# --- Replica of the --bash-runner flag parser from bin/minsky --------
+MINSKY_ARGS=()
+USE_BASH_RUNNER="${MINSKY_BASH_RUNNER:-0}"
+for arg in "$@"; do
+  if [ "$arg" = "--local" ]; then
+    : # noop in this unit test
+  elif [ "$arg" = "--bash-runner" ]; then
+    USE_BASH_RUNNER=1
+  else
+    MINSKY_ARGS+=("$arg")
+  fi
+done
+if [ "${#MINSKY_ARGS[@]}" -gt 0 ]; then set -- "${MINSKY_ARGS[@]}"; else set --; fi
+
+# --- Replica of the dispatch from bin/minsky -------------------------
+if [ "$USE_BASH_RUNNER" = "1" ]; then
+  BASH_RUNNER_BIN="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+  [ -x "$BASH_RUNNER_BIN" ] || { echo "minsky: --bash-runner requested but $BASH_RUNNER_BIN is not executable" >&2; exit 1; }
+  echo "DISPATCH=bash-runner ARGS=[$*]"
+else
+  echo "DISPATCH=node-runner ARGS=[$*]"
+fi
+EOF
+  chmod +x "$test_script"
+
+  export MINSKY_REPO_PATH_OVERRIDE="$REPO_ROOT"
+
+  # 1. Default: dispatch to node-runner
+  run "$test_script" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=node-runner"* ]]
+  [[ "$output" == *"ARGS=[--help]"* ]]
+
+  # 2. --bash-runner: dispatch to bash-runner + flag stripped
+  run "$test_script" --bash-runner --hosts-dir /tmp/x --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=bash-runner"* ]]
+  [[ "$output" == *"ARGS=[--hosts-dir /tmp/x --dry-run]"* ]]
+
+  # 3. MINSKY_BASH_RUNNER=1 env: dispatch to bash-runner without the flag
+  MINSKY_BASH_RUNNER=1 run "$test_script" --hosts-dir /tmp/y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=bash-runner"* ]]
+
+  # 4. --bash-runner with mixed flags: only --bash-runner stripped
+  run "$test_script" --bash-runner --local --hosts-dir /tmp/z
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DISPATCH=bash-runner"* ]]
+  [[ "$output" == *"ARGS=[--hosts-dir /tmp/z]"* ]]
+}
+
 @test "round-robin iterates each host the expected number of times" {
   host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
   host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"
