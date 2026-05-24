@@ -55,7 +55,13 @@ import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { computeShipRate } from "../novel/cross-repo-runner/dist/iteration-ship-rate.js";
+// Phase 7b: import from the local in-scripts port at
+// scripts/lib/iteration-ship-rate.mjs instead of
+// novel/cross-repo-runner/dist/. The Python equivalent at
+// scripts/iteration_ship_rate.py carries the same pre-registered
+// thresholds for bash-callable code paths; both share constants and a
+// threshold edit must land in both files in the same PR.
+import { computeShipRate } from "./lib/iteration-ship-rate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
