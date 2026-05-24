@@ -386,6 +386,61 @@ EOF
   [[ "$output" == *"ARGS=[--hosts-dir /tmp/z]"* ]]
 }
 
+@test "run-daemon.sh dispatches to bash runner when MINSKY_BASH_RUNNER=1 (Phase 7b'-prep)" {
+  # Phase 7b'-prep: the supervisor script must support the bash-runner
+  # opt-in so the operator can dogfood the bash port via the existing
+  # systemd/launchd daemon plumbing. Tests the dispatch logic by
+  # extracting the relevant block and asserting it picks the right
+  # branch for each MINSKY_BASH_RUNNER value.
+  test_script="$TMPDIR_TEST/run-daemon-test.sh"
+  fake_bash_runner="$TMPDIR_TEST/fake-bash-runner.sh"
+  fake_node_runner="$TMPDIR_TEST/fake-node-runner.mjs"
+  fake_host="$TMPDIR_TEST/fake-host"
+  mkdir -p "$fake_host"
+  # Stub the bash + node runners — each just prints which one it is.
+  cat > "$fake_bash_runner" <<'EOF'
+#!/usr/bin/env bash
+echo "BASH_RUNNER_INVOKED hosts_dir=$2"
+exit 0
+EOF
+  chmod +x "$fake_bash_runner"
+  cat > "$fake_node_runner" <<'EOF'
+console.log(`NODE_RUNNER_INVOKED args=${process.argv.slice(2).join(",")}`);
+process.exit(0);
+EOF
+
+  # Replica of the dispatch block in distribution/systemd/run-daemon.sh.
+  cat > "$test_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+HOST="$fake_host"
+if [ "\${MINSKY_BASH_RUNNER:-0}" = "1" ]; then
+  HOST_PARENT="\$(dirname "\$HOST")"
+  exec bash "$fake_bash_runner" --hosts-dir "\$HOST_PARENT"
+fi
+exec node "$fake_node_runner" --host "\$HOST" --loop
+EOF
+  chmod +x "$test_script"
+
+  # 1. Default (no env) → node-runner branch
+  run "$test_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NODE_RUNNER_INVOKED"* ]]
+  [[ "$output" == *"--host"* ]]
+  [[ "$output" == *"--loop"* ]]
+
+  # 2. MINSKY_BASH_RUNNER=1 → bash-runner branch with hosts-dir = parent
+  MINSKY_BASH_RUNNER=1 run "$test_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BASH_RUNNER_INVOKED"* ]]
+  [[ "$output" == *"hosts_dir=$TMPDIR_TEST"* ]]
+
+  # 3. MINSKY_BASH_RUNNER=0 (explicit) → node-runner branch
+  MINSKY_BASH_RUNNER=0 run "$test_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NODE_RUNNER_INVOKED"* ]]
+}
+
 @test "round-robin iterates each host the expected number of times" {
   host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
   host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"

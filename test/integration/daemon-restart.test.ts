@@ -410,18 +410,16 @@ describe("daemon-restart: launchd KeepAlive contract", () => {
     // The plist should reference minsky-run.mjs directly
     expect(src).toContain("_runner=");
     expect(src).toContain("minsky-run.mjs");
-    // And NOT use --daemon flag (which backgrounds and exits)
-    // The plist template is between 'cat >' and 'PLIST_EOF' in the source
-    const plistSection = src.match(/PLIST_EOF[\s\S]*?PLIST_EOF/);
-    if (!plistSection) {
-      // Fallback: just check the whole install-daemon block
-      const installBlock = src.match(/install-daemon\)[\s\S]*?exit 0/);
-      expect(installBlock).not.toBeNull();
-      expect(installBlock?.[0]).toContain("--loop");
-      expect(installBlock?.[0]).not.toContain('"--daemon"');
-    } else {
-      expect(plistSection[0]).toContain("--loop");
-    }
+    // And NOT use --daemon flag (which backgrounds and exits).
+    // Phase 7b'-prep (#805) split the ProgramArguments into a `$_program_args`
+    // variable so the install-daemon block can branch on MINSKY_INSTALL_DAEMON_BASH;
+    // the literal `--loop` now lives in the Node branch of that variable rather
+    // than inside the PLIST_EOF heredoc itself. Check the broader install-daemon
+    // block for both `--loop` (Node default) AND absence of `"--daemon"`.
+    const installBlock = src.match(/install-daemon\)[\s\S]*?exit 0/);
+    expect(installBlock).not.toBeNull();
+    expect(installBlock?.[0]).toContain("--loop");
+    expect(installBlock?.[0]).not.toContain('"--daemon"');
   });
 
   test("plist has ThrottleInterval to prevent restart storm", () => {

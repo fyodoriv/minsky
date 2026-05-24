@@ -772,6 +772,36 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
       _node_bin=$(which node)
     fi
     _runner="$_repo_dir/novel/cross-repo-runner/bin/minsky-run.mjs"
+    # Phase 7b'-prep: when MINSKY_INSTALL_DAEMON_BASH=1, generate a
+    # plist that invokes the Path A bash port (#797-#803) instead of
+    # the Node runner. Same supervisor semantics; one-line ProgramArguments
+    # switch. Operator opt-in:
+    #   MINSKY_INSTALL_DAEMON_BASH=1 minsky install-daemon
+    # The default (env unset / =0) keeps the Node runner so a casual
+    # `git pull` doesn't silently flip the runner under the operator.
+    if [ "${MINSKY_INSTALL_DAEMON_BASH:-0}" = "1" ]; then
+      _bash_runner="$_repo_dir/bin/minsky-run.sh"
+      if [ ! -x "$_bash_runner" ]; then
+        echo "minsky: MINSKY_INSTALL_DAEMON_BASH=1 but $_bash_runner not executable" >&2
+        exit 1
+      fi
+      # ProgramArguments for the bash variant: invoke bash directly so
+      # launchd sees the bash PID and KeepAlive=true reaches it. The
+      # bash runner takes --hosts-dir; we pass the host's parent so
+      # the walker finds exactly one host (matches run-daemon.sh's
+      # single-host adaptation).
+      _bash_hosts_parent=$(dirname "$_default_host")
+      _program_args="    <string>/bin/bash</string>
+    <string>$_bash_runner</string>
+    <string>--hosts-dir</string>
+    <string>$_bash_hosts_parent</string>"
+    else
+      _program_args="    <string>$_node_bin</string>
+    <string>$_runner</string>
+    <string>--host</string>
+    <string>$_default_host</string>
+    <string>--loop</string>"
+    fi
     # Propagate agent-auth env vars from the operator's current shell
     # so the daemon child inherits them via launchd's `EnvironmentVariables`.
     # Without this, devin/claude/openai/anthropic CLIs spawn under launchd
@@ -819,11 +849,7 @@ EOF
   <string>com.minsky.daemon</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$_node_bin</string>
-    <string>$_runner</string>
-    <string>--host</string>
-    <string>$_default_host</string>
-    <string>--loop</string>
+$_program_args
   </array>
   <key>RunAtLoad</key>
   <true/>
