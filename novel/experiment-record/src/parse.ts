@@ -284,6 +284,14 @@ function buildRecord(
   };
 }
 
+/**
+ * Pure: parse an EXPERIMENT.yaml string into a structured ParseResult.
+ *
+ * @otel-exempt pure-function — no I/O, no async, no side effects. The
+ *   recursive-descent → schema check → semantic check pipeline operates
+ *   over an in-memory string; instrumentation would only add overhead
+ *   to a call-path the caller already wraps in their own span.
+ */
 export function parse(input: string): ParseResult {
   const yaml = tryYamlParse(input);
   if (!yaml.ok) {
