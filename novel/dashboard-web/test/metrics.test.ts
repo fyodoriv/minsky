@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { SUCCESS_METRICS } from "../src/metrics.js";
 
-describe("SUCCESS_METRICS — 10 vision.md success criteria", () => {
-  it("contains exactly 10 entries (one per vision.md § 'Success criteria' row)", () => {
-    expect(SUCCESS_METRICS).toHaveLength(10);
+describe("SUCCESS_METRICS — 11 vision.md success criteria", () => {
+  it("contains exactly 11 entries (one per vision.md § 'Success criteria' row)", () => {
+    expect(SUCCESS_METRICS).toHaveLength(11);
   });
 
   it("every id is kebab-case (lowercase, digits, single hyphens, no leading/trailing dash)", () => {

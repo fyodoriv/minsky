@@ -90,6 +90,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec knip --no-progress --reporter compact
 
+  check-cross-repo-pr-rate:
+    # Cross-repo runner iteration→PR ship-rate gate (M1 P0
+    # `cross-repo-iteration-ship-rate-ci-gate`). Reads
+    # `.minsky/experiment-store/cross-repo/*.jsonl` and exits 1 when the
+    # rolling-30d ratio is below the pre-registered FLOOR (0.10). Pure
+    # threshold constants pinned in
+    # `novel/cross-repo-runner/src/iteration-ship-rate.ts` (rule #9 +
+    # Munafò 2017). One source of truth shared by the .mjs CLI + the
+    # `scripts/collect-metrics.mjs` collector + the runtime invariant.
+    # On the daemon's fresh worktree the experiment-store is empty so the
+    # verdict is INSUFFICIENT-DATA (exit 0); this gate only fires when
+    # actual iteration history accumulates and degrades.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @minsky/cross-repo-runner build
+      - run: node scripts/check-cross-repo-pr-rate.mjs --window=30d
+
   depcruise:
     # Circular-dep + orphan-file detector via dependency-cruiser. Config at
     # `.dependency-cruiser.cjs`. Like knip, the rules are currently at WARN
@@ -1685,6 +1711,7 @@ jobs:
       - biome
       - brief-pr-instructions
       - cadence-pivot-threshold
+      - check-cross-repo-pr-rate
       - cloud-audit-gate
       - competitive-goal
       - dashboard-localhost-bind
@@ -1754,6 +1781,7 @@ jobs:
                    "${{ needs.biome.result }}" \
                    "${{ needs.brief-pr-instructions.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
+                   "${{ needs.check-cross-repo-pr-rate.result }}" \
                    "${{ needs.cloud-audit-gate.result }}" \
                    "${{ needs.dashboard-localhost-bind.result }}" \
                    "${{ needs.depcruise.result }}" \
