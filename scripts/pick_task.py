@@ -1,144 +1,220 @@
 #!/usr/bin/env python3
-"""scripts/pick_task.py — Path A Phase 7 skeleton.
+"""scripts/pick_task.py — Path A Phase 7 picker (parity port of task-finder.ts).
 
-Status: SKELETON ONLY. Not yet wired into bin/minsky. Filed 2026-05-24
-alongside `path-a-phase-7-cross-repo-runner-shell-rewrite` (TASKS.md P0).
+Replaces the TypeScript `pickHostTask` / `parseTasksMd` / `findTask` in
+`novel/cross-repo-runner/src/task-finder.ts` (473 LOC) with a single Python
+file. Same semantics, same fixture-passing behavior.
 
-Goal: replace the TypeScript TASKS.md picker (`pickHostTask` in
-`novel/cross-repo-runner/src/task-finder.ts`, ~470 LOC) with a single
-Python file that:
-  1. Reads a TASKS.md file.
-  2. Parses the tasks.md spec format (first line `# Tasks`, `## P0/P1/P2/P3`
-     sections, `- [ ] task-id` rows with indented bold-metadata fields).
-  3. Validates rule-9 fields per task (Hypothesis / Success / Pivot /
-     Measurement / Anchor) — required for P0 and P1, optional below.
-  4. Filters out:
-     - Tasks claimed by another agent: `(@<agent-id>)` suffix.
-     - Tasks blocked: `**Status**: blocked` field.
-     - Tasks with malformed rule-9 fields (the parser must reject these
-       loudly, not silently — see `vision.md` § rule #9).
-  5. Returns the top-priority unclaimed task ID on stdout, exit 0.
-     Returns empty stdout + exit 0 if no task is pickable.
-     Exits non-zero on parse error.
-
-Parity test: must produce the same ID the TypeScript `pickHostTask` would
-for every fixture under `novel/cross-repo-runner/test/`. The parity
-fixture harness lives at `tests/pick_task.test.py` (forthcoming in Phase 7's
-implementation PR).
+The bash counterpart lives at `bin/minsky-run.sh` — see that file for the
+round-robin loop logic.
 
 Plan doc: docs/plans/2026-05-24-path-a-aggressive-cut.md § Phase 7
+
+CLI:
+    python3 scripts/pick_task.py <path-to-TASKS.md>
+        [--open-pr-branches=<comma-separated-branch-names>]
+        [--branch-prefix=feat/]
+        [--skip-task-ids=<comma-separated-task-ids>]
+
+Prints the top-priority pickable task ID on stdout, or empty if none.
+Exit codes: 0 on success (whether or not a task was picked); 1 on file
+not found or parse error; 2 on bad CLI args.
 """
 
 from __future__ import annotations
 
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 # --- Constants ------------------------------------------------------------
 
-PRIORITY_ORDER = ["P0", "P1", "P2", "P3"]
-REQUIRED_RULE_9_FIELDS_AT_P0_P1 = (
-    "Hypothesis",
-    "Success",
-    "Pivot",
-    "Measurement",
-    "Anchor",
-)
+PRIORITY_ORDER = ("P0", "P1")  # P2/P3 are NEVER auto-picked (matches TS)
+REQUIRED_RULE_9_FIELDS = ("hypothesis", "success", "pivot", "measurement", "anchor")
 
-# Per `vision.md` § rule #9: each field must fit on ONE line (the parser
-# uses `^\*\*<Field>\*\*:\s*(.+)$` per line; continuation lines orphan the
-# value and the task is silently dropped — this is intentional to surface
-# malformed entries loudly).
-FIELD_REGEX = re.compile(r"^\s+- \*\*(?P<field>[A-Za-z][A-Za-z0-9 _-]+)\*\*:\s*(?P<value>.+)$")
-TASK_HEADER_REGEX = re.compile(r"^- \[ \] `(?P<id>[a-z0-9][a-z0-9-]+)`(.*)$")
-PRIORITY_HEADER_REGEX = re.compile(r"^## (P[0-3])$")
-CLAIM_REGEX = re.compile(r"\(@[a-z0-9][a-z0-9-]+\)$")
+# Per task-finder.ts: priority sections `## P0/P1/P2/P3`, checkbox rows
+# `- [ ] title` or `- [x] title`, metadata bullets `  - **Field**:` or
+# `  **Field**:` (leading `-` or `*` is stripped before field-match).
+PRIORITY_RE = re.compile(r"^##\s+(P\d)\b")
+CHECKBOX_RE = re.compile(r"^-\s+\[\s*[ x]\s*\]\s+(.*)$")
+STRIP_BULLET_RE = re.compile(r"^[-*]\s+")
+LEADING_WS_RE = re.compile(r"^[ \t]*")
+
+# Field regexes — match against the line AFTER leading whitespace is
+# stripped AND after any leading bullet (`- ` or `* `) is removed.
+FIELD_REGEXES = {
+    "id": re.compile(r"^\*\*ID\*\*:\s*(.+)$"),
+    "tags": re.compile(r"^\*\*Tags\*\*:\s*(.+)$"),
+    "details": re.compile(r"^\*\*Details\*\*:\s*(.+)$"),
+    "hypothesis": re.compile(r"^\*\*Hypothesis\*\*:\s*(.+)$"),
+    "success": re.compile(r"^\*\*Success\*\*:\s*(.+)$"),
+    "pivot": re.compile(r"^\*\*Pivot\*\*:\s*(.+)$"),
+    "measurement": re.compile(r"^\*\*Measurement\*\*:\s*(.+)$"),
+    "anchor": re.compile(r"^\*\*Anchor\*\*:\s*(.+)$"),
+    "blocked": re.compile(r"^\*\*Blocked\*\*:\s*(.+)$"),
+}
 
 
 @dataclass
-class Task:
-    id: str
+class ParsedTask:
+    """One parsed task block — mirrors the TypeScript `ParsedTask` interface."""
+
+    title: str
     priority: str
-    header_line: str
-    fields: dict[str, str]
-    claimed: bool
+    id: str | None = None
+    tags: list[str] = field(default_factory=list)
+    details: str | None = None
+    hypothesis: str | None = None
+    success: str | None = None
+    pivot: str | None = None
+    measurement: str | None = None
+    anchor: str | None = None
+    blocked: str | None = None
 
 
 # --- Parser ---------------------------------------------------------------
 
 
-def parse(text: str) -> list[Task]:
-    """Parse TASKS.md text into a list of Task records.
+def _leading_indent_width(line: str) -> int:
+    """Number of leading whitespace chars (tabs + spaces). Mirrors TS."""
+    match = LEADING_WS_RE.match(line)
+    return len(match.group(0)) if match else 0
 
-    Tasks without rule-9 fields are dropped from the result silently when
-    they're P0 or P1 — that's the spec behavior. The drop IS the loudness
-    (the picker just returns the next pickable task, the operator notices
-    "why isn't this task being picked" and fixes the fields).
+
+def parse_tasks_md(content: str) -> list[ParsedTask]:
+    """Parse TASKS.md content into a list of ParsedTask records.
+
+    Parity contract: must produce the same output the TypeScript
+    `parseTasksMd` produces for any same input. The test suite at
+    `tests/test_pick_task.py` pins this via fixtures lifted from
+    `novel/cross-repo-runner/src/task-finder.test.ts`.
     """
-    tasks: list[Task] = []
-    current_priority: str | None = None
-    current_task: Task | None = None
+    tasks: list[ParsedTask] = []
+    current_priority = ""
+    current: ParsedTask | None = None
+    # Continuation tracking for multi-line metadata bullets. When a
+    # `**Field**:` matches we remember the field's indent + a setter that
+    # appends to the captured field. Subsequent lines whose indent is
+    # STRICTLY greater get appended; siblings/headings close it.
+    field_indent: int | None = None
+    field_setter: object | None = None  # callable(extra: str) -> None
 
-    for line in text.splitlines():
-        priority_match = PRIORITY_HEADER_REGEX.match(line)
-        if priority_match:
-            if current_task is not None:
-                tasks.append(current_task)
-                current_task = None
-            current_priority = priority_match.group(1)
+    def flush() -> None:
+        nonlocal current
+        if current is not None and current.id is not None:
+            tasks.append(current)
+        current = None
+
+    for line in content.splitlines():
+        # Priority section header.
+        m = PRIORITY_RE.match(line)
+        if m:
+            flush()
+            current_priority = m.group(1)
+            field_indent = None
+            field_setter = None
             continue
 
-        task_match = TASK_HEADER_REGEX.match(line)
-        if task_match and current_priority is not None:
-            if current_task is not None:
-                tasks.append(current_task)
-            current_task = Task(
-                id=task_match.group("id"),
-                priority=current_priority,
-                header_line=line,
-                fields={},
-                claimed=bool(CLAIM_REGEX.search(line)),
-            )
+        # Checkbox row → start a new task.
+        m = CHECKBOX_RE.match(line)
+        if m:
+            flush()
+            current = ParsedTask(title=m.group(1).strip(), priority=current_priority)
+            field_indent = None
+            field_setter = None
             continue
 
-        field_match = FIELD_REGEX.match(line)
-        if field_match and current_task is not None:
-            current_task.fields[field_match.group("field")] = field_match.group("value")
+        if current is None:
             continue
 
-    if current_task is not None:
-        tasks.append(current_task)
+        # Metadata field bullet — strip leading whitespace + optional
+        # leading bullet character before matching.
+        indent = _leading_indent_width(line)
+        stripped = line.strip()
+        stripped = STRIP_BULLET_RE.sub("", stripped, count=1)
 
+        matched_field = False
+        for field_name, pattern in FIELD_REGEXES.items():
+            m = pattern.match(stripped)
+            if not m:
+                continue
+            value = m.group(1).strip()
+            if field_name == "tags":
+                current.tags = [t.strip() for t in value.split(",") if t.strip()]
+                field_indent = indent
+                # Tags don't support continuation in TS — keep matching but no setter.
+                field_setter = None
+            else:
+                setattr(current, field_name, value)
+                field_indent = indent
+
+                def _append(extra: str, _name=field_name) -> None:  # noqa: ANN001
+                    cur = getattr(current, _name)
+                    if cur is not None:
+                        setattr(current, _name, cur + " " + extra)
+
+                field_setter = _append
+            matched_field = True
+            break
+
+        if matched_field:
+            continue
+
+        # Continuation: a non-empty line indented STRICTLY MORE than the
+        # active field's bullet → append to that field.
+        if field_setter is not None and field_indent is not None and stripped:
+            if indent > field_indent:
+                field_setter(stripped)
+                continue
+
+        # Sibling line at <= field_indent → close the continuation.
+        if field_indent is not None and indent <= field_indent and stripped:
+            field_indent = None
+            field_setter = None
+
+    flush()
     return tasks
-
-
-# --- Rule-9 validation ----------------------------------------------------
-
-
-def is_pickable(task: Task) -> bool:
-    """Whether a task is pickable per the rule-9 contract."""
-    if task.claimed:
-        return False
-    if task.fields.get("Status", "").strip().lower() == "blocked":
-        return False
-    if task.priority in ("P0", "P1"):
-        for field in REQUIRED_RULE_9_FIELDS_AT_P0_P1:
-            value = task.fields.get(field, "").strip()
-            if not value or "<TBD>" in value:
-                return False
-    return True
 
 
 # --- Picker ---------------------------------------------------------------
 
 
-def pick(tasks: list[Task]) -> Task | None:
-    """Top-priority unclaimed task across the priority order. None if none."""
+def is_rule_9_compliant(task: ParsedTask) -> bool:
+    """True when all 5 rule-#9 fields are present (any non-None value)."""
+    return all(getattr(task, fn) is not None for fn in REQUIRED_RULE_9_FIELDS)
+
+
+def is_not_blocked(task: ParsedTask) -> bool:
+    """True when the `Blocked` field is absent or empty."""
+    return task.blocked is None or task.blocked.strip() == ""
+
+
+def pick_host_task(
+    content: str,
+    open_pr_branches: Iterable[str] = (),
+    branch_prefix: str = "feat/",
+    skip_task_ids: Iterable[str] = (),
+) -> ParsedTask | None:
+    """Top-priority unclaimed rule-#9-compliant task across P0 then P1.
+
+    Parity contract: matches `pickHostTask` in task-finder.ts.
+    """
+    open_branches = set(open_pr_branches)
+    skip_ids = set(skip_task_ids)
+    tasks = parse_tasks_md(content)
+    eligible = [
+        t for t in tasks
+        if is_rule_9_compliant(t)
+        and is_not_blocked(t)
+        and t.id is not None
+        and f"{branch_prefix}{t.id}" not in open_branches
+        and t.id not in skip_ids
+    ]
     for priority in PRIORITY_ORDER:
-        for task in tasks:
-            if task.priority == priority and is_pickable(task):
+        for task in eligible:
+            if task.priority == priority:
                 return task
     return None
 
@@ -147,17 +223,34 @@ def pick(tasks: list[Task]) -> Task | None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: pick_task.py <path-to-TASKS.md>", file=sys.stderr)
+    if len(argv) < 2:
+        print("usage: pick_task.py <path-to-TASKS.md> [--branch-prefix=feat/]"
+              " [--open-pr-branches=<csv>] [--skip-task-ids=<csv>]", file=sys.stderr)
         return 2
     path = Path(argv[1])
+    branch_prefix = "feat/"
+    open_pr_branches: list[str] = []
+    skip_task_ids: list[str] = []
+    for arg in argv[2:]:
+        if arg.startswith("--branch-prefix="):
+            branch_prefix = arg.split("=", 1)[1]
+        elif arg.startswith("--open-pr-branches="):
+            open_pr_branches = [s for s in arg.split("=", 1)[1].split(",") if s]
+        elif arg.startswith("--skip-task-ids="):
+            skip_task_ids = [s for s in arg.split("=", 1)[1].split(",") if s]
+        else:
+            print(f"unknown flag: {arg}", file=sys.stderr)
+            return 2
     if not path.is_file():
         print(f"file not found: {path}", file=sys.stderr)
         return 1
-    text = path.read_text(encoding="utf-8")
-    tasks = parse(text)
-    chosen = pick(tasks)
-    if chosen is not None:
+    chosen = pick_host_task(
+        path.read_text(encoding="utf-8"),
+        open_pr_branches=open_pr_branches,
+        branch_prefix=branch_prefix,
+        skip_task_ids=skip_task_ids,
+    )
+    if chosen is not None and chosen.id is not None:
         print(chosen.id)
     return 0
 

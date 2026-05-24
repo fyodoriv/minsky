@@ -1,0 +1,278 @@
+"""Parity tests for scripts/pick_task.py against the TS task-finder fixtures.
+
+These tests pin the Python port to behavior-parity with the TypeScript
+parser at `novel/cross-repo-runner/src/task-finder.ts` whose own tests
+live at `novel/cross-repo-runner/src/task-finder.test.ts`.
+
+When the TS file is deleted in Phase 7b, these tests become the canonical
+contract for `parseTasksMd` / `pickHostTask` / rule-9 enforcement.
+
+Run: `python3 -m pytest tests/test_pick_task.py -v`
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Allow importing scripts/pick_task.py without installing the package.
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+import pick_task  # noqa: E402  pylint: disable=wrong-import-position
+
+# --- Fixture lifted verbatim from task-finder.test.ts ---------------------
+
+SAMPLE_TASKS_MD = """# Tasks
+
+## P0
+
+- [ ] Fix the slash command labels PROJ-840
+  **ID**: proj-840-slash-command-labels
+  **Tags**: bug, ai-native, one-shot
+  **Details**: titles "hold" and "lead" should read "Put on hold" / "Lead support"
+  **Hypothesis**: Replacing the title strings closes the labels gap.
+  **Success**: tests pass; titles render as expected
+  **Pivot**: <0.5
+  **Measurement**: yarn vitest run plugins/example-ai-native
+  **Anchor**: rule #9; vision.md § 9
+
+- [ ] Add storybook coverage SOLID-2313
+  **ID**: storybook-coverage-solid-2313
+  **Tags**: docs, storybook
+
+## P1
+
+- [x] Already-done task (should be ignored as no ID)
+"""
+
+DASH_BULLET_TASKS_MD = """## P0
+
+- [ ] Task with dash-prefixed metadata
+  - **ID**: dash-task-1
+  - **Tags**: foo, bar
+  - **Hypothesis**: leading dashes parse the same
+  - **Success**: yes
+  - **Pivot**: <0.3
+  - **Measurement**: pytest tests/
+  - **Anchor**: rule #9
+"""
+
+P0_BEFORE_P1_TASKS_MD = """## P0
+
+- [ ] Higher-priority task
+  **ID**: high-priority-task
+  **Hypothesis**: P0 should always come first
+  **Success**: P0 is picked
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+
+## P1
+
+- [ ] Lower-priority task
+  **ID**: low-priority-task
+  **Hypothesis**: P1 should be skipped when P0 is available
+  **Success**: P1 not picked
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+"""
+
+BLOCKED_TASKS_MD = """## P0
+
+- [ ] Task that is blocked
+  **ID**: blocked-task
+  **Hypothesis**: blocked tasks are skipped
+  **Success**: skipped
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+  **Blocked**: waiting on upstream
+
+- [ ] Task that is fine
+  **ID**: fine-task
+  **Hypothesis**: this one is picked
+  **Success**: picked
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+"""
+
+INCOMPLETE_RULE_9_TASKS_MD = """## P0
+
+- [ ] Missing-anchor task
+  **ID**: missing-anchor-task
+  **Hypothesis**: should be filtered
+  **Success**: should not be picked
+  **Pivot**: <0.5
+  **Measurement**: pytest
+
+- [ ] Complete task
+  **ID**: complete-task
+  **Hypothesis**: this one is picked
+  **Success**: picked
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+"""
+
+MULTILINE_DETAILS_TASKS_MD = """## P0
+
+- [ ] Multi-line details task
+  **ID**: multiline-task
+  **Tags**: complex
+  **Details**: first line of details
+    continuation line, indented more than the bullet
+    another continuation line
+  **Hypothesis**: multi-line fields parse correctly
+  **Success**: continuation is joined with spaces
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+"""
+
+# --- parseTasksMd parity tests -------------------------------------------
+
+
+def test_parses_two_tasks_under_p0() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    assert len(tasks) == 2
+    assert tasks[0].id == "proj-840-slash-command-labels"
+    assert tasks[1].id == "storybook-coverage-solid-2313"
+
+
+def test_captures_the_priority_for_each_task() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    assert tasks[0].priority == "P0"
+    assert tasks[1].priority == "P0"
+
+
+def test_captures_all_rule_9_fields_when_present() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    t = tasks[0]
+    assert t.hypothesis is not None and "Replacing the title strings" in t.hypothesis
+    assert t.success is not None and "tests pass" in t.success
+    assert t.pivot == "<0.5"
+    assert t.measurement is not None and "yarn vitest run" in t.measurement
+    assert t.anchor is not None and "rule #9" in t.anchor
+
+
+def test_returns_none_for_missing_rule_9_fields() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    t = tasks[1]  # storybook task — has no rule-9 fields
+    assert t.hypothesis is None
+    assert t.success is None
+    assert t.pivot is None
+    assert t.measurement is None
+    assert t.anchor is None
+
+
+def test_parses_dash_prefixed_metadata_bullets() -> None:
+    tasks = pick_task.parse_tasks_md(DASH_BULLET_TASKS_MD)
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t.id == "dash-task-1"
+    assert t.tags == ["foo", "bar"]
+    assert t.hypothesis == "leading dashes parse the same"
+
+
+def test_already_done_tasks_with_no_id_are_skipped() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    ids = {t.id for t in tasks}
+    assert "should be ignored as no ID" not in ids
+    # And the [x] line itself doesn't contribute a task.
+    assert all(t.id != None for t in tasks)  # noqa: E711
+
+
+def test_parses_multi_line_details_field() -> None:
+    tasks = pick_task.parse_tasks_md(MULTILINE_DETAILS_TASKS_MD)
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t.details is not None
+    assert "first line of details" in t.details
+    assert "continuation line, indented more than the bullet" in t.details
+    assert "another continuation line" in t.details
+
+
+# --- isRule9Compliant parity tests ---------------------------------------
+
+
+def test_is_rule_9_compliant_true_for_complete_task() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    assert pick_task.is_rule_9_compliant(tasks[0])
+
+
+def test_is_rule_9_compliant_false_for_partial_task() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    assert not pick_task.is_rule_9_compliant(tasks[1])  # storybook is missing fields
+
+
+def test_is_rule_9_compliant_false_when_anchor_missing() -> None:
+    tasks = pick_task.parse_tasks_md(INCOMPLETE_RULE_9_TASKS_MD)
+    missing = next(t for t in tasks if t.id == "missing-anchor-task")
+    assert not pick_task.is_rule_9_compliant(missing)
+
+
+# --- isNotBlocked parity tests -------------------------------------------
+
+
+def test_is_not_blocked_true_when_field_absent() -> None:
+    tasks = pick_task.parse_tasks_md(SAMPLE_TASKS_MD)
+    assert pick_task.is_not_blocked(tasks[0])
+
+
+def test_is_not_blocked_false_when_blocked_field_set() -> None:
+    tasks = pick_task.parse_tasks_md(BLOCKED_TASKS_MD)
+    blocked = next(t for t in tasks if t.id == "blocked-task")
+    assert not pick_task.is_not_blocked(blocked)
+
+
+# --- pickHostTask parity tests -------------------------------------------
+
+
+def test_pick_host_task_picks_first_p0_when_available() -> None:
+    chosen = pick_task.pick_host_task(SAMPLE_TASKS_MD)
+    assert chosen is not None
+    assert chosen.id == "proj-840-slash-command-labels"
+
+
+def test_pick_host_task_prefers_p0_over_p1() -> None:
+    chosen = pick_task.pick_host_task(P0_BEFORE_P1_TASKS_MD)
+    assert chosen is not None
+    assert chosen.id == "high-priority-task"
+
+
+def test_pick_host_task_skips_blocked_tasks() -> None:
+    chosen = pick_task.pick_host_task(BLOCKED_TASKS_MD)
+    assert chosen is not None
+    assert chosen.id == "fine-task"  # blocked task is skipped
+
+
+def test_pick_host_task_skips_tasks_missing_rule_9_fields() -> None:
+    chosen = pick_task.pick_host_task(INCOMPLETE_RULE_9_TASKS_MD)
+    assert chosen is not None
+    assert chosen.id == "complete-task"
+
+
+def test_pick_host_task_skips_tasks_with_open_prs() -> None:
+    chosen = pick_task.pick_host_task(
+        P0_BEFORE_P1_TASKS_MD,
+        open_pr_branches=["feat/high-priority-task"],
+    )
+    assert chosen is not None
+    assert chosen.id == "low-priority-task"
+
+
+def test_pick_host_task_skips_explicit_skip_ids() -> None:
+    chosen = pick_task.pick_host_task(
+        P0_BEFORE_P1_TASKS_MD,
+        skip_task_ids=["high-priority-task"],
+    )
+    assert chosen is not None
+    assert chosen.id == "low-priority-task"
+
+
+def test_pick_host_task_returns_none_when_no_eligible_tasks() -> None:
+    empty_md = "## P0\n\n- [x] All done with no IDs\n"
+    chosen = pick_task.pick_host_task(empty_md)
+    assert chosen is None
