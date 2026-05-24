@@ -50,7 +50,7 @@
 //   node scripts/check-cross-repo-pr-rate.mjs --json        # always exits 0, machine-readable for collectors
 //   node scripts/check-cross-repo-pr-rate.mjs --host-dir=<path>  # non-cwd host
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,22 @@ import { computeShipRate } from "../novel/cross-repo-runner/dist/iteration-ship-
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
+
+/**
+ * CLI-entry guard that survives macOS's `/tmp` → `/private/tmp` symlink.
+ * The raw `import.meta.url === "file://" + argv[1]` check breaks when the
+ * script is invoked from a CWD whose path differs from the canonical
+ * realpath (e.g. a bash test running `node /tmp/...`).
+ */
+function isCliEntry() {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return fileURLToPath(import.meta.url) === realpathSync(argv1);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * @typedef {Object} ParsedArgs
@@ -197,7 +213,7 @@ export function main(argv, deps = {}) {
 }
 
 // CLI entry point — only when invoked directly, not when imported by tests.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isCliEntry()) {
   try {
     const code = main(process.argv.slice(2));
     process.exit(code);

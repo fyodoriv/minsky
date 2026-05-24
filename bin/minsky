@@ -1063,6 +1063,17 @@ EOF
       if [ -n "$host_dir" ] && command -v node >/dev/null 2>&1; then
         _stab=$(node "$MINSKY_REPO_SCRIPTS/stability-number.mjs" "$host_dir" 2>/dev/null || echo "no data")
         echo "  📈 Stability: $_stab"
+        # Stability gate row — per `local-models-stability-gate-90-percent`
+        # (M1.1) and user-story 015. Renders one of:
+        #   gate: lifted               (≥0.90)
+        #   gate: active (78% 7d)      (0.60–0.90)
+        #   gate: pivot-eval-needed (52% 7d)  (<0.60)
+        #   gate: not-yet-measured     (insufficient data)
+        _gate_json=$(node "$MINSKY_REPO_SCRIPTS/measure-stability.mjs" --host-dir="$host_dir" --no-banner-marker 2>/dev/null || echo "")
+        if [ -n "$_gate_json" ]; then
+          _gate=$(echo "$_gate_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s);if(p.gate==="not-yet-measured"){process.stdout.write("not-yet-measured")}else{const pct=Math.round((p.rate||0)*100);process.stdout.write(`${p.gate} (${pct}% 7d)`)}}catch{process.stdout.write("")}})' 2>/dev/null || echo "")
+          [ -n "$_gate" ] && echo "  🎯 gate: $_gate"
+        fi
       fi
       dt_line=$(grep 'dynamic-timeouts' "$MINSKY_DAEMON_LOG" 2>/dev/null | tail -1)
       if [ -n "$dt_line" ]; then
