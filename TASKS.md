@@ -801,7 +801,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- 2026-05-24 OPERATOR DIRECTIVE — Path A aggressive cut. Operator was offered Path A (~5-10K LOC final) vs continuing Path C (~30K LOC final) and answered "2" (more aggressive). The 4-stream landscape research + brutal-honest moat audit confirmed 2 of 6 claimed moats are genuinely unique; the other 4 are partial. Path A's 7 deletion phases extend Path C's existing plan. Plan doc: `docs/plans/2026-05-24-path-a-aggressive-cut.md`. -->
 
-- [ ] `path-a-phase-7-cross-repo-runner-shell-rewrite` — replace `novel/cross-repo-runner/` (10.8K LOC TypeScript) with `bin/minsky-run` (~300 lines bash) + `scripts/pick_task.py` (~200 lines Python); same end-user-visible behavior with `--hosts-dir <parent>` round-robin
+- [ ] `path-a-phase-7-cross-repo-runner-shell-rewrite` (@devin-2026-05-24) — replace `novel/cross-repo-runner/` (10.8K LOC TypeScript) with `bin/minsky-run` (~300 lines bash) + `scripts/pick_task.py` (~200 lines Python); same end-user-visible behavior with `--hosts-dir <parent>` round-robin
   - **ID**: path-a-phase-7-cross-repo-runner-shell-rewrite
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24
   - **Milestone**: M1
@@ -892,6 +892,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: low.
 
 ## P1
+
+- [ ] `minsky-run-sh-watchdog-timeout-on-openhands-spawn` — `bin/minsky-run.sh` invokes `openhands solve` with no time limit; if the agent hangs forever, the daemon hangs forever. The TypeScript runner has a dynamic timeout (p95×1.5 of recent successful spawns) in `novel/cross-repo-runner/src/dynamic-timeouts.ts`. The bash port needs the equivalent before it goes into 24/7 production use.
+  - **ID**: minsky-run-sh-watchdog-timeout-on-openhands-spawn
+  - **Tags**: p1, path-a-phase-7, resilience, observed-2026-05-24
+  - **Surfaced-by**: 2026-05-24 Phase 7 bash port — built the JSONL parity + bats tests + open-PR filter, then realized the spawn line `openhands solve ... >"$stdout_log" 2>&1 || exit_code=$?` has no `timeout` wrapper. A hung openhands process blocks the entire host walker indefinitely; the operator notices only when the dashboard goes silent.
+  - **Files**: `bin/minsky-run.sh` (wrap the openhands invocation in `timeout <seconds>`), `scripts/dynamic-timeout.py` (NEW — port the p95×1.5 logic from `dynamic-timeouts.ts`; reads recent `*.jsonl` files from `$host/.minsky/experiment-store/cross-repo/` and prints a seconds value), `tests/minsky-run.bats` (add a test that injects a slow-fixture script and asserts the iteration record's verdict is `aborted` with notes containing `"timeout"`).
+  - **Hypothesis**: wrapping the spawn in `timeout $(python3 scripts/dynamic-timeout.py "$host")` (with a 600s fallback when no history exists) cuts the worst-case hang time from infinity to ≤900s p99 (p95×1.5 ceiling). Falsifiable: if any production daemon log shows a spawn running >900s after this lands, the watchdog math is wrong.
+  - **Success**: paired test passes; live daemon log over 7 days shows zero spawns >900s; the dashboard's "stale iteration" alarm (when added) never fires.
+  - **Pivot**: if the p95-based timeout causes >5% of valid spawns to be killed mid-work (verified by tail-of-stdout showing the agent was still making progress), revert to a fixed 1800s timeout and treat the dynamic-timeout port as a Phase 8 follow-up.
+  - **Measurement**: `bats tests/minsky-run.bats -f watchdog` exits 0; `jq -s 'map(select(.ts > "<7-days-ago>")) | map(select(.notes | test("timeout"))) | length' .minsky/experiment-store/cross-repo/*.jsonl` returns >0 only when a spawn genuinely hung (verifiable by cross-referencing with the openhands stdout tail in notes).
+  - **Anchor**: rule #6 (let-it-crash AT the right boundary — an unbounded spawn is the wrong boundary; bound it at the iteration); rule #7 (chaos coverage — watchdog kicks in is observable in the JSONL); Beyer et al., *SRE*, 2016, Ch. 6 ("degraded-but-running > failed-and-stopped" — applies in reverse here, where "stopped after timeout" > "hung forever").
+  - **Acceptance**: (1) `bin/minsky-run.sh` wraps the openhands invocation in `timeout`; (2) `scripts/dynamic-timeout.py` exists + has paired tests; (3) bats test asserts timeout behavior with a slow-fixture script; (4) shellcheck clean.
 
 - [ ] `launcher-agnostic-feature-parity-chaos-test` — chaos test asserts that two Minsky installs on the same OS, same fixture repo, same model, driven through `INSTALL.md` by two different launcher agents (fake-claude, fake-cursor) produce byte-identical runtime behavior; the only permitted delta is the `agent` string in `~/.minsky/telemetry-consent.json`
   - **ID**: launcher-agnostic-feature-parity-chaos-test
@@ -1924,6 +1936,30 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: parent task `milestone-alignment-gate-enforcement` (this is its slice (b)); operator directive 2026-05-18 (`AGENTS.md` § 15); rule #10 (deterministic enforcement — gap-fill IS the enforcement). Composes with `Forsgren/Humble/Kim 2018` (measure what matters).
 
 ## P2
+
+- [ ] `minsky-run-sh-brief-template-enrichment` — the brief that `bin/minsky-run.sh` passes to `openhands solve` is a 4-line stub ("work on the unclaimed top-priority task"). The TypeScript runner's brief includes the task's metadata block, recent git log (last 5 commits touching `**Files**`), test commands from AGENTS.md, and vision/AGENTS pointers. The bash port needs the equivalent before agent-tier output quality matches the TS baseline.
+  - **ID**: minsky-run-sh-brief-template-enrichment
+  - **Tags**: p2, path-a-phase-7, agent-quality, observed-2026-05-24
+  - **Surfaced-by**: 2026-05-24 Phase 7 bash port (PR Phase-7-bash-JSONL-parity) — the `cat >"$brief_file"` block in `iterate_host()` is a 4-line stub. Compare to the TypeScript brief builder at `novel/cross-repo-runner/bin/minsky-run.mjs` (multi-section: task block, files, git log, test commands, vision pointers).
+  - **Files**: `bin/minsky-run.sh` (extend `iterate_host` to call out to `scripts/build_brief.py`), `scripts/build_brief.py` (NEW — port the brief-builder logic; reads task ID + host path, writes a brief file path to stdout), `tests/test_build_brief.py` (NEW), `tests/minsky-run.bats` (add a test that asserts the brief file contains the task's `**Details**` + at least one recent commit SHA).
+  - **Hypothesis**: enriching the brief with task details + recent git log + test commands raises the agent-tier PR-merge-rate by ≥15pp on a fixed corpus (measured against the existing scorecard's `autonomous-merge-rate` metric). Falsifiable: if the rate doesn't move ≥15pp on the M1.10 corpus, the brief-enrichment hypothesis is wrong and the stub is good enough.
+  - **Success**: `autonomous-merge-rate` measured on the M1.10 fixed corpus rises by ≥15pp; paired test passes; brief size stays ≤8KB (tokens are budget).
+  - **Pivot**: if the enriched brief causes ≥10% of spawns to exceed the model's context window (visible as "context-length-exceeded" in openhands stdout), revert to the stub + ship the task-block-only enrichment as a separate slice.
+  - **Measurement**: `node scripts/benchmark-run.mjs --corpus=M1.10 --runner=bash-minsky-run --metric=autonomous-merge-rate` returns a value ≥15pp higher than the same command with `--runner=bash-minsky-run-stub-brief`; `pytest tests/test_build_brief.py` exits 0.
+  - **Anchor**: Karpathy 2026, "context engineering is the primary surface" (cited in `competitors/README.md` § "Brief engineering"); rule #1 (the TypeScript brief builder is the canonical existing solution — port it, don't reinvent).
+  - **Acceptance**: (1) `scripts/build_brief.py` ships with paired tests; (2) bats test asserts brief contains the expected sections; (3) M1.10 corpus run shows the merge-rate delta.
+
+- [ ] `minsky-run-sh-skip-empty-hosts` — when a host has 0 eligible tasks, the bash walker still consumes its 3 round-robin slots emitting `verdict: "aborted"` JSONL records. The TypeScript walker skips ahead to the next host. Net effect: a fleet with 5 hosts where 3 have empty TASKS.md still does 9 wasted iterations per pass.
+  - **ID**: minsky-run-sh-skip-empty-hosts
+  - **Tags**: p2, path-a-phase-7, efficiency, observed-2026-05-24
+  - **Surfaced-by**: 2026-05-24 Phase 7 bash port — the loop `for ((n=1; n <= ITERATIONS_PER_HOST; n++))` doesn't break when `iterate_host` returns "no eligible task". Easy fix: have `iterate_host` return a non-zero status when there's nothing to do, and `break` the inner loop.
+  - **Files**: `bin/minsky-run.sh` (`walk_hosts` + `iterate_host`), `tests/minsky-run.bats` (paired test).
+  - **Hypothesis**: skipping empty hosts cuts the "no-eligible-task" share of total iterations from ≈40% (today, on a fleet where some hosts are temporarily empty) to ≤5%. Worst case the daemon now scans empty hosts once per pass instead of 3 times, freeing budget for hosts that actually have work.
+  - **Success**: paired test asserts the JSONL contains exactly 1 aborted record per empty host (not 3); fleet-load metric (when added) shows ≥30pp drop in aborted-share over a 7-day window.
+  - **Pivot**: if breaking on empty-host iteration N causes the walker to oscillate (i.e. host alternates between 0 and 1 eligible tasks across passes), keep the loop but add a single-aborted-per-pass cap instead of breaking.
+  - **Measurement**: `bats tests/minsky-run.bats -f skip-empty` exits 0; `grep -c '"verdict":"aborted"' .minsky/experiment-store/cross-repo/_no-task.jsonl` returns 1 per pass per empty host (not 3).
+  - **Anchor**: rule #1 (the TS walker already does this — port behavior, don't reinvent); rule #16 (default by default — efficient default).
+  - **Acceptance**: (1) `iterate_host` returns non-zero status on "no eligible task"; (2) `walk_hosts` breaks the inner loop on non-zero; (3) paired bats test passes.
 
 - [ ] `agentbrew-sync-missing-intuit-code-secure-to-openhands` — agentbrew syncs ~200 skills to `~/.openhands/skills/` for OpenHands SDK to load at agent boot, but `intuit-code-secure` is missing — it lives in `~/.claude/plugins/marketplaces/devassist-plugins-registry/code-secure-plugin/skills/intuit-code-secure/` but never gets propagated. The `~/.agents/agents/security-reviewer.md` (and `~/.claude/agents/security-reviewer.md`) reference `skills: [intuit-code-secure]`; OpenHands SDK's `register_file_agents` crashes with `ValueError: Skill 'intuit-code-secure' not found` whenever Conversation.run() is called. Today this is worked around by a manual stub at `~/.openhands/skills/intuit-code-secure/SKILL.md`; agentbrew should sync the canonical file directly
   - **ID**: agentbrew-sync-missing-intuit-code-secure-to-openhands
