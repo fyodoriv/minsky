@@ -183,6 +183,30 @@ export const METRICS: readonly MetricDefinition[] = [
     anchor: "Doerr, Measure What Matters, 2018 (autonomy KR)",
     description: "Fraction of tasks that required a human edit, unblock, or manual merge.",
   },
+  {
+    // 2026-05-24: added to close out the `single-stability-number` P0 task
+    // (M1). Operator's headline reliability number — "how reliable is
+    // minsky right now?". Computed from `.minsky/experiment-store/cross-repo/*.jsonl`
+    // by `scripts/stability-number.mjs`; 7-day rolling clean-exit fraction
+    // (validated iteration / total iteration). Distinct from `change-fail-rate`
+    // (which is about merged-PR regressions) and `mttr` (restore time after
+    // regression): this metric is about the autonomous LOOP'S reliability —
+    // does the daemon survive iterations? The M1.1 stability target gates on
+    // this at ≥0.90 (story 015 / `local-models-stability-gate-90-percent`).
+    // No public competitor publishes this — competitors don't run a 24/7
+    // self-iterating loop, so the metric is structurally only meaningful for
+    // an autonomous orchestrator like Minsky. Listed here so the scorecard
+    // surface advertises it as the (currently unrivalled) reliability axis.
+    id: "daemon-stability-pct",
+    label: "Daemon stability (7d clean-exit fraction)",
+    category: "agentic",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Beyer et al., Site Reliability Engineering, O'Reilly 2016, Ch. 4 (SLI / SLO — service-level indicator); Forsgren, Humble, Kim, Accelerate, 2018 (change-fail-rate analogue at the iteration-loop layer)",
+    description:
+      "Rolling 7-day fraction of daemon iterations that completed cleanly (validated verdict, no spawn-fail / crash / timeout). The reliability SLI for the autonomous loop. Computed from `.minsky/experiment-store/cross-repo/*.jsonl` via `scripts/stability-number.mjs`. The M1.1 milestone target is ≥0.90.",
+  },
   // --- Public benchmark hook (Jimenez et al. 2024) ------------------------
   {
     id: "swe-bench-verified-resolve-rate",
