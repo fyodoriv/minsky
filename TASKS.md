@@ -1922,18 +1922,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
-- [ ] `minsky-run-sh-brief-template-enrichment` — the brief that `bin/minsky-run.sh` passes to `openhands solve` is a 4-line stub ("work on the unclaimed top-priority task"). The TypeScript runner's brief includes the task's metadata block, recent git log (last 5 commits touching `**Files**`), test commands from AGENTS.md, and vision/AGENTS pointers. The bash port needs the equivalent before agent-tier output quality matches the TS baseline.
-  - **ID**: minsky-run-sh-brief-template-enrichment
-  - **Tags**: p2, path-a-phase-7, agent-quality, observed-2026-05-24
-  - **Surfaced-by**: 2026-05-24 Phase 7 bash port (PR Phase-7-bash-JSONL-parity) — the `cat >"$brief_file"` block in `iterate_host()` is a 4-line stub. Compare to the TypeScript brief builder at `novel/cross-repo-runner/bin/minsky-run.mjs` (multi-section: task block, files, git log, test commands, vision pointers).
-  - **Files**: `bin/minsky-run.sh` (extend `iterate_host` to call out to `scripts/build_brief.py`), `scripts/build_brief.py` (NEW — port the brief-builder logic; reads task ID + host path, writes a brief file path to stdout), `tests/test_build_brief.py` (NEW), `tests/minsky-run.bats` (add a test that asserts the brief file contains the task's `**Details**` + at least one recent commit SHA).
-  - **Hypothesis**: enriching the brief with task details + recent git log + test commands raises the agent-tier PR-merge-rate by ≥15pp on a fixed corpus (measured against the existing scorecard's `autonomous-merge-rate` metric). Falsifiable: if the rate doesn't move ≥15pp on the M1.10 corpus, the brief-enrichment hypothesis is wrong and the stub is good enough.
-  - **Success**: `autonomous-merge-rate` measured on the M1.10 fixed corpus rises by ≥15pp; paired test passes; brief size stays ≤8KB (tokens are budget).
-  - **Pivot**: if the enriched brief causes ≥10% of spawns to exceed the model's context window (visible as "context-length-exceeded" in openhands stdout), revert to the stub + ship the task-block-only enrichment as a separate slice.
-  - **Measurement**: `node scripts/benchmark-run.mjs --corpus=M1.10 --runner=bash-minsky-run --metric=autonomous-merge-rate` returns a value ≥15pp higher than the same command with `--runner=bash-minsky-run-stub-brief`; `pytest tests/test_build_brief.py` exits 0.
-  - **Anchor**: Karpathy 2026, "context engineering is the primary surface" (cited in `competitors/README.md` § "Brief engineering"); rule #1 (the TypeScript brief builder is the canonical existing solution — port it, don't reinvent).
-  - **Acceptance**: (1) `scripts/build_brief.py` ships with paired tests; (2) bats test asserts brief contains the expected sections; (3) M1.10 corpus run shows the merge-rate delta.
-
 - [ ] `agentbrew-sync-missing-example-code-secure-to-openhands` — agentbrew syncs ~200 skills to `~/.openhands/skills/` for OpenHands SDK to load at agent boot, but `example-code-secure` is missing — it lives in `~/.claude/plugins/marketplaces/dev-tool-plugins-registry/code-secure-plugin/skills/example-code-secure/` but never gets propagated. The `~/.agents/agents/security-reviewer.md` (and `~/.claude/agents/security-reviewer.md`) reference `skills: [example-code-secure]`; OpenHands SDK's `register_file_agents` crashes with `ValueError: Skill 'example-code-secure' not found` whenever Conversation.run() is called. Today this is worked around by a manual stub at `~/.openhands/skills/example-code-secure/SKILL.md`; agentbrew should sync the canonical file directly
   - **ID**: agentbrew-sync-missing-example-code-secure-to-openhands
   - **Tags**: p2, scout-finding, agentbrew, openhands-sync, observed-2026-05-24
