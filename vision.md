@@ -58,18 +58,25 @@ After the Path C reshape ships (see plan above), the surviving Minsky surface co
 
 ## What Minsky uniquely does (the moat)
 
-Six properties that, in combination, no orchestrator-tier competitor (CrewAI, AutoGen, LangGraph, MetaGPT, OpenAI Agents SDK) has. Each is pinned by a user story + lint + chaos test.
+> **Honest-audit revision 2026-05-24**: the 4-stream autonomous-coding-landscape research (this session) + the brutal-honest moat audit confirmed that of the six historically-claimed moats, **two are genuinely unique** and four are partial / easily replicable. The Path A aggressive cut (see [`docs/plans/2026-05-24-path-a-aggressive-cut.md`](docs/plans/2026-05-24-path-a-aggressive-cut.md)) collapses the four partial moats into a single ~500-line "autonomic shell" (bash + Python) and keeps the two genuinely-unique moats as the surviving Minsky surface.
 
-| # | Moat | Why it matters | Where it lives |
+**The two genuinely-unique moats:**
+
+| # | Moat | Why it's unique | Where it lives |
 |---|---|---|---|
-| 1 | **Daemon, not framework** | Operator attaches Minsky to a repo with one command and walks away. Zero `@minsky/*` imports in the host repo. Competitors are Python (or TypeScript) libraries the developer must wrap their code in. | [`user-stories/013-daemon-not-framework-moat.md`](user-stories/013-daemon-not-framework-moat.md); `bin/minsky` |
-| 2 | **Operator-machine identity** | Minsky runs as the operator's user with `~/.gitconfig`, `~/.config/gh/`, `~/.ssh`. Commits land as the operator. No cloud sandbox, no Devbox, no separate bot account, no tenancy boundary. | [`user-stories/012-operator-machine-identity-moat.md`](user-stories/012-operator-machine-identity-moat.md); `novel/cross-repo-runner/bin/minsky-run.mjs` (spawns with `cwd: hostDir`) |
-| 3 | **Constitution + deterministic enforcement** | 18 rules, each a CI lint. `pnpm pre-pr-lint --stage=full` runs 53 deterministic checks; CI runs 65 jobs. No LLM advisories. No "best practices in docs". | This file (the 18 rules) + `scripts/check-rule-*.mjs` + `.github/workflows/ci.yml` |
-| 4 | **MAPE-K self-improvement** | The daemon mines `.minsky/orchestrate.jsonl` and improves itself. Competitors are static once shipped — CrewAI Flow definitions, AutoGen agent configs, MetaGPT roles don't evolve from production data. | [`user-stories/003-mape-k-improves-prompts.md`](user-stories/003-mape-k-improves-prompts.md); `novel/mape-k-loop/` |
-| 5 | **Cross-repo fleet at operator scale** | Walks N hosts in round-robin on ONE machine, 3 iterations per host per pass. Competitors are per-task (CrewAI Flow = one workflow; LangGraph thread = one conversation; Devin session = one task). | [`user-stories/006-runner-on-any-repo.md`](user-stories/006-runner-on-any-repo.md); `novel/cross-repo-runner/` |
-| 6 | **TASKS.md as operator surface** | Plain markdown. No dashboard, no API, no DSL. The operator edits a file; Minsky reads it. | `TASKS.md` + `pickHostTask` in `novel/cross-repo-runner/src/` |
+| 1 | **Constitution + deterministic enforcement** | Zero competitors have a constitutional doc with rule-by-rule deterministic CI lints. OpenHands V1 has "event-sourced state with deterministic replay" but that's runtime determinism, not rule enforcement. 18 rules × 53 pre-pr-lint stages × 65 CI jobs run on every PR. No LLM advisories. No "best practices in docs". | This file (the 18 rules) + `scripts/check-rule-*.mjs` + `.github/workflows/ci.yml` |
+| 2 | **MAPE-K substrate (across-session learning)** | OpenHands ships per-session observability; Minsky's MAPE-K is across-session. No shipping product implements MAPE-K formally. Closest research is Live-SWE-agent's runtime-self-evolution (different mechanism — modifies its own prompts/tools/skills via the agent itself; no MAPE-K formalism). | [`user-stories/003-mape-k-improves-prompts.md`](user-stories/003-mape-k-improves-prompts.md); `novel/mape-k-loop/` + `novel/experiment-record/` |
 
-The full landscape analysis is at [`competitors/README.md`](competitors/README.md) — per-vendor research files + the corpus scorecard at [`novel/competitive-benchmark/`](novel/competitive-benchmark/).
+**The four collapsed moats (partial — Path A folds these into the autonomic shell):**
+
+| # | Old moat | Why it's not unique enough to keep as standalone surface | Replaced by |
+|---|---|---|---|
+| 3 | Daemon, not framework | OpenHands runs locally (V1 SDK), Plandex runs locally with full-auto, ForgeGod / CLU / kai-linux/agent-os all implement the daemon-shell shape at hobby scale. The "one-command attach" UX is real but defendable with a launchd plist + ~300 lines of bash, not 3K LOC of `novel/tick-loop/`. | `bin/minsky-run` (bash, ~300 lines) + launchd/systemd plists |
+| 4 | Operator-machine identity | Real moat against cloud competitors (Devin, Cursor cloud, Factory cloud, Charlie cloud) — but identical to Claude Code's own default. The push-mirror author-rewrite is a ~50-line responsibility, not a package. | `bin/minsky-run` push-mirror step |
+| 5 | Cross-repo fleet | Composio Agent Orchestrator (Feb 2026) does 30 parallel agents with auto-CI-fix; Charlie Labs CAOS coordinates multi-repo daemons; Factory Missions multi-agent. Minsky's "N hosts round-robin on ONE machine" framing is genuinely Minsky-shaped, but it's ~500 lines of shell to replicate, not 10.8K LOC of TypeScript. | `bin/minsky-run --hosts-dir` (bash, replaces `novel/cross-repo-runner/`) |
+| 6 | TASKS.md as operator surface | The tasks.md convention is published at github.com/tasksmd/tasks.md. The picker is ~200 lines of Python (including rule-9 field validation). Deliberate-design-choice, not earth-shattering. | `scripts/pick_task.py` (Python, ~200 lines) |
+
+The full landscape analysis is at [`competitors/README.md`](competitors/README.md) — per-vendor research files + the corpus scorecard at [`novel/competitive-benchmark/`](novel/competitive-benchmark/) (the scorecard is being folded to static markdown at `competitors/scorecard.md` per Path A Phase 10).
 
 ## Honest gaps (what Minsky does NOT do, that competitors do)
 
