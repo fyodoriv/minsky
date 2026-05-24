@@ -6,17 +6,19 @@ Per-machine config at `~/.minsky/config.json`. Edit once, read on every minsky s
 
 ```json
 {
-  "cloud_agent": "claude",
+  "cloud_agent": "openhands",
   "default_host": "/path/to/your/repo"
 }
 ```
+
+`openhands` is the default since 2026-05-24 — no `cloud_agent` field is required if the operator wants OpenHands behind Claude/OpenAI/Gemini. The legacy `claude` / `devin` / `aider` backends remain valid via explicit setting.
 
 ## Full schema
 
 ```json
 {
-  "cloud_agent": "claude",
-  "cloud_agent_model": "claude-opus-4-7-max",
+  "cloud_agent": "openhands",
+  "cloud_agent_model": "claude-sonnet-4-20250514",
   "local_agent": "aider",
   "local_agent_model": "ollama_chat/qwen3-coder:30b",
   "local_agent_args": ["--model", "ollama_chat/qwen3-coder:30b", "--no-auto-commits"],
@@ -27,23 +29,31 @@ Per-machine config at `~/.minsky/config.json`. Edit once, read on every minsky s
 
 | Field | What it controls |
 | --- | --- |
-| `cloud_agent` | Which CLI runs in cloud mode: `claude` / `devin` / `openhands` (pending OpenHands Agent Canvas CLI release on 2026-06-01 — daemon refuses to spawn under this value until then). |
-| `cloud_agent_model` | Passed as `--model` to the cloud agent. |
+| `cloud_agent` | Which agent runs in cloud mode: `openhands` (default since 2026-05-24) / `claude` / `devin` / `aider`. |
+| `cloud_agent_model` | Passed as `--model` to the agent. For `openhands`, this is the LiteLLM model id consumed by the SDK (e.g. `claude-sonnet-4-20250514`, `gpt-4o`). |
 | `local_agent` | Which CLI runs in local mode: `aider` / `opencode`. |
 | `local_agent_model` | Model name for the local agent (passed to the underlying provider). |
 | `local_agent_args` | Extra CLI flags passed to the local agent on every invocation. |
 | `ollama_base_url` | URL for Ollama (when local agent uses Ollama as the backend). |
 | `default_host` | The git repo minsky operates on by default. Override per-invocation with `--host <path>`. |
 
+## OpenHands-specific environment overrides
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `MINSKY_OPENHANDS_PYTHON` | `python3` | Python binary the daemon spawns. Override if your `python3` isn't 3.10+ or you want to use a specific venv interpreter (e.g. `~/.minsky/openhands-venv/bin/python`). |
+| `MINSKY_OPENHANDS_API_KEY_ENV` | `ANTHROPIC_API_KEY` | Env var name the shim reads for the LLM API key. Set to `OPENAI_API_KEY` / `GEMINI_API_KEY` / etc. when using a non-Anthropic model. |
+| `OPENHANDS_SUPPRESS_BANNER` | (unset) | Suppress OpenHands' startup banner in shim stdout. Recommended for `1` in CI/non-interactive contexts. |
+
 ## Agent comparison
 
 | Agent | Mode | How brief is sent | Strengths | Recommended for |
 | --- | --- | --- | --- | --- |
-| `claude` | Cloud (Anthropic subscription) | stdin | Highest task-completion rate; OAuth / keychain auth | Default cloud workload |
-| `devin` | Cloud (Windsurf subscription) | `--prompt-file` (stdin panics) | Polished IDE-style PR output | Cloud workload when claude is rate-limited |
+| `openhands` | Cloud (OpenHands SDK + LLM of choice via litellm) | `--brief-file` (via Python shim) | 65.8% SWE-bench Verified inherited; critic + best-of-N agent loop; LLM-agnostic; AgentSkills-spec compat with Claude Code skills | **Default cloud workload since 2026-05-24** |
+| `claude` | Cloud (Anthropic subscription) | stdin | Highest single-shot completion rate; OAuth / keychain auth | Opt-in fallback when OpenHands SDK unavailable |
+| `devin` | Cloud (Windsurf subscription) | `--prompt-file` (stdin panics) | Polished IDE-style PR output | Opt-in fallback when openhands rate-limited |
 | `aider` | Local (Ollama / MLX) | `--message-file` | $0 cost, runs on M-series Mac | Token-budget fallback; long sessions |
 | `opencode` | Local (LM Studio / Ollama) | stdin | Faster cold-start than aider | Mechanical lint fixes |
-| `openhands` | Cloud (OpenHands SDK + LLM of choice) | stdin | 65.8% SWE-bench Verified inherited via wrap; critic + best-of-N agent loop | _pending June 1, 2026 — Agent Canvas CLI release (GHE issue OpenHands/OpenHands#14374). Daemon exits 64 with actionable error if `cloud_agent: "openhands"` is set before that date._ |
 
 ## Switching agents
 
