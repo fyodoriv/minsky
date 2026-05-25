@@ -3,11 +3,14 @@
 # report in one invocation.
 #
 # Vertical slice 3 of `minsky-default-8h-repo-transformation` (TASKS.md
-# P0). Composes the three pieces already shipped:
+# P0). Composes the four pieces already shipped:
 #   1. bin/minsky-bootstrap.sh   (PR #807) — sidecar materialization
 #   2. scripts/baseline_metrics.py (PR #812) — captures `.minsky/baseline.json`
 #   3. bin/minsky-run.sh         (PR #797…)  — the autonomous tick loop
 #   4. scripts/minsky_report.py  (PR #813) — before/after delta
+# Plus a MAPE-K Monitor surface (PR #824 — this file):
+#   5. .minsky/transform-runs.jsonl — append-only per-host session ledger
+#      so trends accrue over multiple sessions without recomputation.
 #
 # Path A aligned — no new logic, no new packages. Pure bash orchestration
 # of existing tools. Total LOC ≈ 100.
@@ -179,5 +182,19 @@ else
   echo "minsky-default-session: rendering report" >&2
 fi
 python3 "$REPO_ROOT/scripts/minsky_report.py" "${report_args[@]}"
+
+# Step 5 — Append report to .minsky/transform-runs.jsonl ledger.
+# MAPE-K Monitor surface: every session's delta accrues here so the
+# operator can see trends over time without recomputing each session
+# in isolation. The ledger is local-only (per-host); never pushed to
+# any remote. Best-effort per rule #6 — a failed append doesn't kill
+# the session.
+LEDGER_FILE="$HOST_DIR/.minsky/transform-runs.jsonl"
+if delta_json="$(python3 "$REPO_ROOT/scripts/minsky_report.py" --repo "$HOST_DIR" --baseline "$BASELINE_FILE" --json 2>/dev/null)"; then
+  # jq -c flattens to one line — JSONL invariant.
+  printf '%s\n' "$delta_json" | jq -c '.' >> "$LEDGER_FILE" 2>/dev/null || \
+    printf '%s\n' "$delta_json" >> "$LEDGER_FILE"
+  echo "minsky-default-session: report appended to $LEDGER_FILE" >&2
+fi
 
 exit 0

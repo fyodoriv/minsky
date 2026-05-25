@@ -667,6 +667,37 @@ EOF
   [ -f "$workdir/.minsky/baseline.json" ]
 }
 
+@test "bin/minsky-default-session.sh appends every session to .minsky/transform-runs.jsonl ledger" {
+  # MAPE-K Monitor surface: every session's delta accrues in the
+  # per-host ledger so the operator can see trends over time without
+  # recomputing each session in isolation. Append-only invariant:
+  # N sessions → N JSONL lines.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-ledger"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+
+  # Run 3 report-only sessions; ledger should accumulate 3 lines.
+  for i in 1 2 3; do
+    run "$session" "$fixture" --report-only
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"report appended to"* ]]
+  done
+
+  ledger="$fixture/.minsky/transform-runs.jsonl"
+  [ -f "$ledger" ]
+  line_count="$(wc -l < "$ledger" | tr -d ' ')"
+  [ "$line_count" = "3" ]
+
+  # Each line parses as JSON with schema_version=1
+  while IFS= read -r line; do
+    echo "$line" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); assert d['schema_version']==1"
+  done < "$ledger"
+}
+
 @test "bin/minsky-default-session.sh --json emits structured JSON report" {
   # Forward --json to scripts/minsky_report.py; confirms the report
   # is parseable JSON instead of the human-readable text.
