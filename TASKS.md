@@ -2892,6 +2892,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P3
 
+- [ ] `ci-yml-add-edited-trigger-type` — `.github/workflows/ci.yml` declares `on: pull_request:` without explicit `types:`, so the default set (`opened, synchronize, reopened`) misses `edited`; PR-body-only fixes (e.g., reformatting the `## Hypothesis self-grade` block to match `scripts/check-pr-self-grade.mjs`'s `Predicted / Observed / Match / Lesson` schema, or fixing `pr-vision-trace`'s `**Vision goal**:` label) don't re-trigger `pr-self-grade` / `ci` jobs, forcing the agent to push an empty commit to force `synchronize`. `pr-vision-trace.yml` already lists `types: [opened, edited, synchronize, ready_for_review, reopened]` — apply the same explicit type list to `ci.yml` so body lints close the feedback loop without an empty-commit hack.
+  - **ID**: ci-yml-add-edited-trigger-type
+  - **Tags**: p3, scout-finding, ci, feedback-loop, observed-2026-05-25
+  - **Milestone**: M1
+  - **Hypothesis**: adding `types: [opened, edited, synchronize, ready_for_review, reopened]` to `ci.yml`'s `on: pull_request:` block makes body-only PR fixes re-trigger `pr-self-grade` and other body-lint jobs automatically. Pre-registration: post-fix, the count of `chore(ci): retrigger` empty commits per rolling 30d window drops to 0; if it stays >0, the underlying check is reading something other than PR body.
+  - **Success**: ≤1 `chore(ci): retrigger` style empty commit per rolling 30d window on agent-authored PRs.
+  - **Pivot**: if `edited` re-triggers cause unwanted check churn (e.g., bot edits trigger N CI re-runs), narrow the type list to `[opened, synchronize, ready_for_review, reopened]` AND add a separate body-lint workflow with `types: [opened, edited, reopened]` that only runs the cheap body lints.
+  - **Measurement**: `gh pr list --search 'author:@me is:merged' --limit 100 --json commits | jq '[.[] | .commits[] | select(.messageHeadline | test("chore.+retrigger"))] | length'` — count of retrigger empty commits in recent merged PRs.
+  - **Anchor**: 2026-05-25 PR #863 — body edit to fix `pr-self-grade` template didn't re-trigger `ci.yml`'s `pr-self-grade` job because `edited` isn't in default `pull_request` event types; agent had to push an empty commit. `pr-vision-trace.yml` got this right; `ci.yml` didn't. Anchor: agentbrew rule #10 (deterministic enforcement); zernie.com/blog/feedback-loop-is-all-you-need (close the body-edit feedback loop in CI).
+  - **Files**: `.github/workflows/ci.yml` (add explicit `types:` to the `on: pull_request:` block).
+  - **Acceptance**: (1) `ci.yml`'s `on: pull_request:` carries `types: [opened, edited, synchronize, ready_for_review, reopened]` matching `pr-vision-trace.yml`'s pattern. (2) Body-only PR edit (e.g., fixing the self-grade block) re-triggers `pr-self-grade` job within ≤60s without an empty commit.
+
 - [ ] `daemon-test-biome-useawait-cleanup` — 17 pre-existing `lint/suspicious/useAwait` warnings in `novel/tick-loop/src/daemon.test.ts` block `pre-commit` biome check (`--error-on-warnings`) when the file is touched; convert each `async (n) => { ...; return X }` to `(n) => Promise.resolve(X)` so the file becomes biome-clean and any future test addition can ship without warning-debt friction
   - **ID**: daemon-test-biome-useawait-cleanup
   - **Tags**: p3, scout-finding, biome, test-hygiene, observed-2026-05-23
