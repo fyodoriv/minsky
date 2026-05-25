@@ -33,7 +33,7 @@
 #                           forwarded: `--max-hours N`,
 #                           `--baseline-only`, `--report-only`,
 #                           `--no-bootstrap`.
-#   minsky --help        → forwarded to `minsky-run --help`.
+#   minsky --help        → prints this usage block and exits.
 #   minsky status        → show running minsky processes + tail of daemon log.
 #   minsky stop          → SIGTERM any running minsky-run processes.
 #   minsky logs          → tail -f the daemon log.
@@ -130,6 +130,22 @@ _minsky_config_value() {
 # cost so a fresh machine without minsky checked out can still
 # report "no running process".
 case "${1:-}" in
+  --help|-h)
+    # Print the canonical usage block from the comment header at the
+    # top of this file. Extracted via sed — the source-of-truth lives
+    # in the file's own docstring, so editing the docstring updates
+    # the help output. Drives "minsky --help" through a real top-
+    # level handler instead of falling through to the smart-auto-
+    # attach block (which would otherwise start a daemon — wrong UX
+    # for a help request).
+    sed -n '/^# Usage:$/,/^# Resolution order/p' "$0" \
+      | sed -e 's/^# //' -e 's/^#$//' \
+      | sed '$d'
+    echo
+    echo "For more on the minsky-run loop: minsky --bash-runner --self-check"
+    echo "For the transform orchestrator:  minsky --transform --help"
+    exit 0
+    ;;
   status)
     echo "=== minsky daemon ==="
     # Stability number (from experiment store)
