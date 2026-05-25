@@ -640,6 +640,65 @@ EOF
   [[ "$output" == *"--transform"* ]]
 }
 
+@test "bin/minsky trend dispatches to scripts/transform_trend.py with PWD as --repo" {
+  # Subcommand wraps the MAPE-K Analyse script. The CLI flag defaults
+  # --repo to $PWD so operators don't have to type it.
+  fixture="$TMPDIR_TEST/trend-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":2},"test_file_count":{"delta":1},"loc_by_language":{"ts":{"delta":10}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' trend 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"transform-runs trend"* ]]
+  [[ "$output" == *"1 session recorded"* ]]
+}
+
+@test "bin/minsky recommend dispatches to scripts/transform_recommend.py with PWD as --repo" {
+  fixture="$TMPDIR_TEST/recommend-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":2},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":30}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+{"after_ts":"t2","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":20}}},"lint":{"after_exit_code":1},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' recommend 2>&1"
+  [ "$status" -eq 0 ]
+  # 50 LOC growth + 0 tests + lint regression → expect 2 patterns
+  [[ "$output" == *"test-coverage-gap"* ]]
+  [[ "$output" == *"lint-regression"* ]]
+}
+
+@test "bin/minsky knowledge dispatches to scripts/transform_knowledge.py with --hosts-dir" {
+  parent="$TMPDIR_TEST/knowledge-parent"
+  for h in alpha bravo; do
+    mkdir -p "$parent/$h/.minsky"
+    cat > "$parent/$h/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":1},"loc_by_language":{"ts":{"delta":5}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+  done
+
+  MINSKY_REPO="$REPO_ROOT" run "$REPO_ROOT/bin/minsky" knowledge --hosts-dir "$parent"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 hosts indexed"* ]]
+  [[ "$output" == *"alpha"* ]]
+  [[ "$output" == *"bravo"* ]]
+}
+
+@test "bin/minsky trend forwards --json flag" {
+  fixture="$TMPDIR_TEST/trend-json-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":5}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' trend --json 2>&1"
+  [ "$status" -eq 0 ]
+  # Output must be valid JSON with schema_version=1.
+  echo "$output" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['schema_version']==1; assert d['session_count']==1"
+}
+
 @test "bin/minsky --transform dispatches to bin/minsky-default-session.sh against \$PWD" {
   # Vertical slice 3 dispatch wiring: confirms `minsky --transform`
   # from any folder routes to the orchestrator with PWD as the host.
