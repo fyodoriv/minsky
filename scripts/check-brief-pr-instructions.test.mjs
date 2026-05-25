@@ -1,8 +1,13 @@
 // Paired tests for `check-brief-pr-instructions.mjs`. Pattern: rule #10
 // deterministic gate; xUnit paired fixtures (Meszaros 2007). The pure
 // function is the unit; the CLI's filesystem read is exercised by the
-// "the live spawn-plan.ts file passes the gate today" sentinel below
+// "the live build_brief.py file passes the gate today" sentinel below
 // (the only test that touches a real path — the rest inject fixtures).
+//
+// History: PR #881 (phase-7b step 5) migrated the live-file pointer
+// from `novel/cross-repo-runner/src/spawn-plan.ts` (TS, deletion
+// target) to `scripts/build_brief.py` (Python, canonical bash-runner
+// brief builder). Same 3 required substrings; same contract.
 //
 // Source: TASKS.md `devin-spawn-no-pr-opened`; rule #10 (vision.md § 10 —
 // deterministic enforcement; pure-function + CLI-wrapper split).
@@ -20,7 +25,7 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
-const SPAWN_PLAN_PATH = resolve(REPO_ROOT, "novel", "cross-repo-runner", "src", "spawn-plan.ts");
+const BUILD_BRIEF_PATH = resolve(REPO_ROOT, "scripts", "build_brief.py");
 
 describe("checkBriefPrInstructions — pure function", () => {
   test("ok when every required substring is present", () => {
@@ -83,17 +88,17 @@ describe("checkBriefPrInstructions — pure function", () => {
   });
 });
 
-// Sentinel: pin the production spawn-plan.ts to the gate. If someone
+// Sentinel: pin the production build_brief.py to the gate. If someone
 // edits the brief in a way that drops one of the required substrings,
 // this test goes red before CI does. Decouples the contract from the
 // CI wiring — failing locally is the cheapest feedback loop.
-describe("checkBriefPrInstructions — live spawn-plan.ts", () => {
-  test("the production novel/cross-repo-runner/src/spawn-plan.ts passes the gate today", () => {
-    const source = readFileSync(SPAWN_PLAN_PATH, "utf8");
+describe("checkBriefPrInstructions — live build_brief.py", () => {
+  test("the production scripts/build_brief.py passes the gate today", () => {
+    const source = readFileSync(BUILD_BRIEF_PATH, "utf8");
     const result = checkBriefPrInstructions(source);
     if (!result.ok) {
       throw new Error(
-        `live spawn-plan.ts is missing required brief substrings: ${result.missing.join(", ")}. This is the devin-spawn-no-pr-opened regression — restore the substrings inside renderSystemPromptOverlay.`,
+        `live build_brief.py is missing required brief substrings: ${result.missing.join(", ")}. This is the devin-spawn-no-pr-opened regression — restore the substrings inside render_system_prompt_overlay.`,
       );
     }
     expect(result.ok).toBe(true);
