@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import { SUCCESS_METRICS } from "../src/metrics.js";
 
-describe("SUCCESS_METRICS — 11 vision.md success criteria", () => {
-  it("contains exactly 11 entries (one per vision.md § 'Success criteria' row)", () => {
-    expect(SUCCESS_METRICS).toHaveLength(11);
+describe("SUCCESS_METRICS — vision.md success criteria + extension tiles", () => {
+  it("contains a positive number of entries (live count, not a frozen literal)", () => {
+    // The original 10 entries map to vision.md § "Success criteria" rows.
+    // Extension tiles ship alongside as PRs land (e.g. `cross-repo-pr-rate`
+    // in #790; `fleet-stability-aggregated` / `session-converts-repo` /
+    // `baseline-delta-per-cycle` in PR `feat/m1-2-m1-7-collectors-from-transform-ledger`).
+    // Counting from the live array prevents the assertion from rotting
+    // every time a tile is added — the equivalent stale-literal bug
+    // was just fixed in `scripts/check-metric-freshness.test.mjs`.
+    expect(SUCCESS_METRICS.length).toBeGreaterThanOrEqual(10);
   });
 
   it("every id is kebab-case (lowercase, digits, single hyphens, no leading/trailing dash)", () => {
