@@ -23,6 +23,16 @@
 #                           `bin/minsky-run.sh` instead of the Node
 #                           runner (opt-in; multi-host walker only).
 #                           Equivalent: `MINSKY_BASH_RUNNER=1 minsky`.
+#   minsky --transform   → dispatch to `bin/minsky-default-session.sh`
+#                           against $PWD. Composes bootstrap +
+#                           baseline-capture + run + before/after
+#                           report. The killer-feature command —
+#                           "point at any repo, demo improvement"
+#                           (TASKS.md `minsky-default-8h-repo-
+#                           transformation` P0). Remaining args are
+#                           forwarded: `--max-hours N`,
+#                           `--baseline-only`, `--report-only`,
+#                           `--no-bootstrap`.
 #   minsky --help        → forwarded to `minsky-run --help`.
 #   minsky status        → show running minsky processes + tail of daemon log.
 #   minsky stop          → SIGTERM any running minsky-run processes.
@@ -1226,7 +1236,7 @@ MINSKY_REPO_PATH="$(node --input-type=module -e "
   // Inline copy of the resolver's deterministic chain. Keeps the
   // shim zero-dependency: no need to resolve the minsky repo to
   // locate the resolver that tells us where the minsky repo is.
-  // Search order is "most-recommended layout first, niche layouts after".
+  // Search order is most-recommended layout first, niche layouts after.
   const FALLBACKS = [
     'minsky',
     'code/minsky',
@@ -1262,8 +1272,20 @@ fi
 export SHIM_HOME SHIM_ENV_REPO
 
 # ── 3. Locate the runner bin + forward ──────────────────────
+# Pre-scan args for dispatches that DON'T need the Node runner bin
+# (--transform → bin/minsky-default-session.sh; --bash-runner →
+# bin/minsky-run.sh). Otherwise the runner-bin existence check would
+# require `pnpm install` even when the operator is dogfooding a pure-
+# bash flow. The full arg parse later still owns flag stripping; this
+# is just a "do we need the Node runner at all?" probe.
+_NEEDS_NODE_RUNNER=1
+for arg in "$@"; do
+  case "$arg" in
+    --transform|--bash-runner) _NEEDS_NODE_RUNNER=0 ;;
+  esac
+done
 RUNNER_BIN="$MINSKY_REPO_PATH/novel/cross-repo-runner/bin/minsky-run.mjs"
-if [ ! -f "$RUNNER_BIN" ]; then
+if [ "$_NEEDS_NODE_RUNNER" = "1" ] && [ ! -f "$RUNNER_BIN" ]; then
   echo "minsky: resolved repo $MINSKY_REPO_PATH but runner bin not found at $RUNNER_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
   exit 1
 fi
@@ -1282,12 +1304,20 @@ fi
 # Phase 7b.
 MINSKY_ARGS=()
 USE_BASH_RUNNER="${MINSKY_BASH_RUNNER:-0}"
+USE_TRANSFORM="0"
 for arg in "$@"; do
   if [ "$arg" = "--local" ]; then
     export MINSKY_LLM_PROVIDER="local-only"
     export MINSKY_LOCAL_LLM=1
   elif [ "$arg" = "--bash-runner" ]; then
     USE_BASH_RUNNER=1
+  elif [ "$arg" = "--transform" ]; then
+    # Vertical-slice-3 flag: dispatch to bin/minsky-default-session.sh
+    # against $PWD. Composes bootstrap (#807) + baseline (#812) + run
+    # (#797 + #808) + report (#813). See bin/minsky-default-session.sh
+    # for the orchestration. The remaining args are forwarded so
+    # operators can pass `--max-hours`, `--baseline-only`, etc.
+    USE_TRANSFORM=1
   else
     MINSKY_ARGS+=("$arg")
   fi
@@ -1327,8 +1357,13 @@ _daemon_running_for_host() {
   ps -p "$pid" -o args= 2>/dev/null | grep -q "$1" 2>/dev/null
 }
 
-# If no subcommand and no --daemon flag, try smart auto-attach
-if [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop" ] && [ "${1:-}" != "logs" ] && [ "${1:-}" != "watch" ] && [ "${1:-}" != "doctor" ]; then
+# If no subcommand and no --daemon flag, try smart auto-attach.
+# Skip auto-attach when --transform or --bash-runner is in the
+# original arg list — those dispatch paths do not want the "attach
+# to running daemon" UX. (Note: the arg-strip block above already
+# consumed --transform / --bash-runner from $@, so we read the
+# USE_TRANSFORM / USE_BASH_RUNNER vars set there.)
+if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop" ] && [ "${1:-}" != "logs" ] && [ "${1:-}" != "watch" ] && [ "${1:-}" != "doctor" ]; then
   # Determine the target host from args or cwd
   _target_host=""
   for _a in "$@"; do
@@ -1444,6 +1479,18 @@ fi
 # Forward every arg verbatim. The runner bin itself handles `--help`,
 # cwd auto-detect, countdown banner, autonomous defaults, etc.
 # SIGHUP-immune from the trap above.
+if [ "$USE_TRANSFORM" = "1" ]; then
+  # Vertical slice 3 dispatch (TASKS.md `minsky-default-8h-repo-
+  # transformation` P0): orchestrate bootstrap + baseline + run +
+  # report against $PWD. See bin/minsky-default-session.sh.
+  TRANSFORM_BIN="$MINSKY_REPO_PATH/bin/minsky-default-session.sh"
+  if [ ! -x "$TRANSFORM_BIN" ]; then
+    echo "minsky: --transform requested but $TRANSFORM_BIN is not executable. Run \`chmod +x $TRANSFORM_BIN\`." >&2
+    exit 1
+  fi
+  echo "minsky: --transform → orchestrating bootstrap + baseline + run + report against $PWD" >&2
+  exec bash "$TRANSFORM_BIN" "$PWD" "$@"
+fi
 if [ "$USE_BASH_RUNNER" = "1" ]; then
   # Phase 7c: dispatch to the Path A bash port instead of the Node
   # runner. Only the multi-host walker path is supported today; bash
