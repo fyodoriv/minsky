@@ -104,7 +104,12 @@ done
 # Required args.
 for var in HOST TASK_ID VERDICT EXIT_CODE; do
   if [[ -z "${!var}" ]]; then
-    echo "capture-failure: --${var,,} required" >&2 | tr A-Z a-z
+    # ${var,,} is bash's built-in lowercase expansion (4.0+) — no need
+    # for an external `tr A-Z a-z` pipe, which was a leftover from the
+    # original draft and which shellcheck (SC2018/SC2019) flags as
+    # non-POSIX. The script requires bash 4.0+ anyway (set -euo
+    # pipefail + [[ ]] + ${!var}).
+    echo "capture-failure: --${var,,} required" >&2
     exit 1
   fi
 done

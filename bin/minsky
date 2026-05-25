@@ -763,6 +763,92 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
       fi
     fi
 
+    # Fold bash-skeleton probes into doctor (rule #16 CLI consolidation
+    # corollary, 2026-05-25): `minsky doctor` is the single health-
+    # check surface.
+    #
+    # Conditional: only run the bash-skeleton fold when there's
+    # evidence the operator cares about the Path A bash path. Signals:
+    #   (a) `.minsky/repo.yaml` in $PWD — operator is in a bootstrapped
+    #       host (about to run `minsky --transform`).
+    #   (b) `bin/minsky-run.sh` in the repo dir AND the operator is
+    #       INSIDE the minsky repo itself — they're developing the
+    #       bash path.
+    # Without one of these signals, the bash-skeleton probes are
+    # likely noise (e.g. running `minsky doctor` in a directory that
+    # has nothing to do with minsky). Also skipping it keeps doctor
+    # FAST when called as the no-args preamble — the bash-skeleton
+    # probes shell out to shellcheck, python3 compile, etc. which add
+    # ~5s per call. The integration test in m1-red-green.test.ts spawns
+    # `minsky doctor` with a 30s timeout from a clean tmpdir; without
+    # the conditional, the spawn ETIMEDOUTs on slow CI runners.
+    # Trigger conditional: only run the bash-skeleton fold when the
+    # operator is INSIDE a bootstrapped host (`.minsky/repo.yaml`
+    # present in $PWD). This is the only signal that the operator is
+    # about to run `minsky --transform` or otherwise needs the bash
+    # path validated.
+    #
+    # Why not also fold when in the minsky repo itself? Because the
+    # bash-skeleton fold calls `python3` via `bash-doctor-probes.sh`,
+    # and corporate Python wrappers (Example dotfiles, etc.) take 30+
+    # seconds to bootstrap uv with a fresh HOME — turning `doctor`
+    # into a 30-90s command when invoked from a fresh-HOME test env
+    # (e.g. the m1-red-green.test.ts integration suite). The existing
+    # comment at the top of this file explicitly warns about this
+    # ("bin/minsky uses portable shell helpers, not python3"). The
+    # conditional defers that cost until the operator is in a context
+    # where it actually matters (a bootstrapped host).
+    #
+    # Operator escape: pass `--all` (or `--smoke`) to force the fold
+    # regardless of $PWD signals.
+    _bd_should_run=0
+    if [ -f "$PWD/.minsky/repo.yaml" ]; then
+      _bd_should_run=1
+    fi
+    # Always run when --smoke or --all is passed (explicit operator
+    # request for the full check).
+    for _a in "$@"; do
+      case "$_a" in
+        --smoke|--all) _bd_should_run=1 ;;
+      esac
+    done
+
+    if [ "$_bd_should_run" = "1" ]; then
+      _bd_args=()
+      [ "$_quiet" = "1" ] && _bd_args+=("--quiet")
+      for _a in "$@"; do
+        [ "$_a" = "--smoke" ] && _bd_args+=("--smoke")
+      done
+      [ "$_quiet" = "0" ] && echo "" && echo "--- bash-skeleton probes (Path A) — informational ---"
+      set +e
+      # `${arr[@]:-}` rather than `${arr[@]}` so set -u doesn't trip when
+      # the array is empty (no --quiet / --smoke passed). Bash's set -u
+      # treats unset array access as a fatal error.
+      # MINSKY_DOCTOR_FOLD=1 suppresses bash-doctor's own deprecation
+      # banner (no point telling the operator "use minsky doctor" when
+      # that's exactly what they ran).
+      MINSKY_DOCTOR_FOLD=1 "$0" bash-doctor "${_bd_args[@]:-}" 2>&1
+      _bd_exit=$?
+      set -e
+      # Do NOT propagate bash-doctor's exit code into _crit_fail. Rationale:
+      # `doctor`'s invariant is "the machine can run AT LEAST ONE Minsky
+      # path" — if the TS substrate is healthy, doctor passes even when
+      # the Path A bash skeleton lacks `openhands` SDK or API key. The
+      # bash-skeleton output is shown for visibility (FAILs are actionable
+      # via `minsky --transform`); a strict check is available via
+      # `minsky bash-doctor` (direct invocation) for operators who
+      # specifically need the bash path. This matches the integration
+      # test pin in test/integration/m1-red-green.test.ts § "minsky doctor
+      # exits 0 when no critical checks fail" — TS-substrate critical
+      # checks gate exit code; bash-skeleton checks are informational.
+      if [ "$_bd_exit" != "0" ] && [ "$_quiet" = "0" ]; then
+        echo "(bash-skeleton exited $_bd_exit — see above; run \`minsky bash-doctor\` for strict mode)"
+      fi
+    elif [ "$_quiet" = "0" ]; then
+      echo ""
+      echo "(bash-skeleton probes skipped: no .minsky/repo.yaml in \$PWD; run \`minsky bash-doctor\` for the full Path A check or \`minsky doctor --all\` to force)"
+    fi
+
     [ "$_quiet" = "0" ] && echo ""
     if [ "$_crit_fail" = "0" ]; then
       [ "$_quiet" = "0" ] && echo "✅ doctor: ready"
@@ -773,21 +859,17 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     fi
     ;;
   bash-doctor)
-    # `minsky bash-doctor [--quiet]` — pre-flight check specifically for
-    # the Path A bash + Python skeleton (`bin/minsky-run.sh` +
-    # `scripts/spawn_agent.py` + the OpenHands SDK fallback path).
+    # `minsky bash-doctor [--quiet] [--smoke]` — DEPRECATED alias kept
+    # for backwards compatibility. Use `minsky doctor` (which now runs
+    # both the TS substrate checks and these bash-skeleton checks in
+    # one pass). Will be removed in the next major version per rule
+    # #16 CLI consolidation corollary (2026-05-25): one health-check
+    # surface, not two.
     #
-    # `minsky doctor` covers the TS substrate (node, daemon, agents).
-    # `minsky bash-doctor` covers what the bash skeleton actually
-    # depends on: jq, python ≥3.10, the OpenHands SDK shim, OPENHANDS_
-    # API_KEY (or a working canonical CLI), `.minsky/repo.yaml` in $PWD,
-    # executable bits on the bash entrypoints, and shellcheck cleanliness
-    # of `bin/minsky-run.sh` itself.
-    #
-    # Without this check, the 24h parity-port (PRs #794-857) has been
-    # validated only via bats tests against fixtures — never against a
-    # real host. The first thing the live smoke (`minsky-transform-
-    # live-smoke-on-real-repo`) does should be this probe.
+    # The probe set itself (jq, python ≥3.10, the OpenHands SDK shim,
+    # OPENHANDS_API_KEY, `.minsky/repo.yaml`, executable bits, shellcheck,
+    # disk space, git HEAD, lockfile, optional --smoke) is unchanged —
+    # only the front door consolidated.
     #
     # Exit codes:
     #   0 — all critical checks pass (bash skeleton can run)
@@ -796,11 +878,22 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     # Source: 2026-05-25 retro — observed gap between "parity tests
     # pass" and "first live run works"; rule #17 (proactive healing —
     # gap becomes a probe); composes with `minsky-transform-live-smoke-
-    # on-real-repo` P0 task as the pre-flight gate.
+    # on-real-repo` P0 task as the pre-flight gate. Folded into
+    # `doctor` per rule #16 (CLI consolidation corollary).
+    # <!-- @deprecated 2026-05-25 — folded into `minsky doctor` -->
+    # Suppress the deprecation banner when invoked internally by `doctor`
+    # (it's the fold's purpose; the user already ran the consolidated
+    # command). Show it when invoked directly so PR-#866-era habits
+    # migrate.
+    if [ "${MINSKY_DOCTOR_FOLD:-0}" != "1" ]; then
+      [ "${1:-}" != "--quiet" ] && [ "${2:-}" != "--quiet" ] && echo "minsky bash-doctor: DEPRECATED — use \`minsky doctor\` (now runs both surfaces). bash-doctor will be removed in the next major version." >&2
+    fi
     _crit_fail=0
     _quiet=0
+    _smoke=0
     for _a in "$@"; do
       [ "$_a" = "--quiet" ] && _quiet=1
+      [ "$_a" = "--smoke" ] && _smoke=1
     done
 
     _bash_doctor_print() {
@@ -947,6 +1040,120 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
       _crit_fail=1
     fi
 
+    # WARN — disk space in $HOME/.minsky and $PWD/.minsky (failure
+    # captures + ledger writes grow over time; iter loops on a full
+    # disk produce confusing "ENOSPC" mid-run). Threshold: 1GB free.
+    # Discovered: a live run that filled the disk mid-iteration left
+    # partial JSONL + partial capture dirs; recovery required `rm -rf`.
+    _df_threshold_mb=1024
+    if command -v df >/dev/null 2>&1; then
+      # df -k output column 4 is "available" in 1K blocks; convert to MB.
+      _avail_kb=$(df -k "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')
+      if [ -n "$_avail_kb" ] && [ "$_avail_kb" -gt 0 ] 2>/dev/null; then
+        _avail_mb=$((_avail_kb / 1024))
+        if [ "$_avail_mb" -ge "$_df_threshold_mb" ]; then
+          _bash_doctor_print PASS "disk free ($HOME)" "${_avail_mb}MB available"
+        else
+          _bash_doctor_print WARN "disk free ($HOME)" "${_avail_mb}MB available (below ${_df_threshold_mb}MB threshold — failure captures + JSONL ledger may hit ENOSPC mid-iteration)"
+        fi
+      else
+        _bash_doctor_print WARN "disk free ($HOME)" "(df unparseable)"
+      fi
+    else
+      _bash_doctor_print WARN "disk free" "df not on PATH (cannot probe)"
+    fi
+
+    # WARN — git HEAD state in $PWD. A detached HEAD or in-flight
+    # rebase/merge state breaks the per-iteration git branch+push
+    # path. Skipped when $PWD is not a git repo (e.g. operator runs
+    # bash-doctor from /tmp).
+    if [ -d "$PWD/.git" ] || git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
+      _git_branch=$(git -C "$PWD" symbolic-ref --short HEAD 2>/dev/null || echo "")
+      if [ -n "$_git_branch" ]; then
+        # Check for in-progress merge / rebase / cherry-pick.
+        _git_dir=$(git -C "$PWD" rev-parse --git-dir 2>/dev/null)
+        if [ -d "$_git_dir/rebase-merge" ] || [ -d "$_git_dir/rebase-apply" ]; then
+          _bash_doctor_print WARN "git HEAD ($PWD)" "rebase in progress (run \`git rebase --abort\` or finish it before --transform)"
+        elif [ -f "$_git_dir/MERGE_HEAD" ]; then
+          _bash_doctor_print WARN "git HEAD ($PWD)" "merge in progress (run \`git merge --abort\` or commit it before --transform)"
+        elif [ -f "$_git_dir/CHERRY_PICK_HEAD" ]; then
+          _bash_doctor_print WARN "git HEAD ($PWD)" "cherry-pick in progress (run \`git cherry-pick --abort\` before --transform)"
+        else
+          _bash_doctor_print PASS "git HEAD ($PWD)" "on branch $_git_branch"
+        fi
+      else
+        _bash_doctor_print WARN "git HEAD ($PWD)" "detached HEAD (agent cannot push to a non-branch ref — \`git checkout main\` or similar)"
+      fi
+    else
+      _bash_doctor_print PASS "git HEAD" "$PWD is not a git repo (skipped — only checked when called from inside one)"
+    fi
+
+    # WARN — lockfile presence when $PWD/package.json exists. Without
+    # the lockfile, the agent's `pnpm install` (or `npm install`) on
+    # the host runs unbounded, may pull breaking versions, and slows
+    # every iteration by 30s+. Skipped when no package.json.
+    if [ -f "$PWD/package.json" ]; then
+      if [ -f "$PWD/pnpm-lock.yaml" ] || [ -f "$PWD/package-lock.json" ] || [ -f "$PWD/yarn.lock" ]; then
+        _bash_doctor_print PASS "lockfile" "found (pnpm-lock.yaml / package-lock.json / yarn.lock)"
+      else
+        _bash_doctor_print WARN "lockfile" "$PWD/package.json exists but no lockfile (every iteration's install will resolve fresh — slow + non-deterministic)"
+      fi
+    fi
+
+    # --smoke — deeper checks. Dry-runs each Python pipeline script
+    # with `--help` to catch broken installs / import errors / missing
+    # deps that the static existence checks above miss. Adds ~5s of
+    # runtime so it's opt-in via the --smoke flag.
+    if [ "$_smoke" = "1" ]; then
+      [ "$_quiet" = "0" ] && echo "" && echo "--smoke: dry-running pipeline scripts to catch integration bugs"
+      _smoke_fail=0
+      for _script in "scripts/pick_task.py" "scripts/build_brief.py" "scripts/build_cto_brief.py" "scripts/spawn_agent.py" "scripts/extract_pr_url.py" "scripts/resolve_gh_host.py" "scripts/transform_trend.py" "scripts/transform_recommend.py" "scripts/transform_knowledge.py" "scripts/baseline_metrics.py" "scripts/minsky_report.py" "scripts/iteration_ship_rate.py" "scripts/dynamic_timeout.py" "scripts/synth_experiment_yaml.py" "scripts/spawn_with_watchdog.py"; do
+        _script_path="$_repo_dir/$_script"
+        if [ ! -f "$_script_path" ]; then
+          _bash_doctor_print FAIL "smoke: $_script" "missing"
+          _smoke_fail=1
+          continue
+        fi
+        # python3 -m py_compile is fast (no import side effects) — runs
+        # via the bash-doctor-probes helper to keep python3 -c out of
+        # bin/minsky.
+        if bash "$_bash_doctor_probes" syntax "$_script_path" >/dev/null 2>&1; then
+          _bash_doctor_print PASS "smoke: $_script" "syntax OK"
+        else
+          _bash_doctor_print FAIL "smoke: $_script" "syntax error or import-time crash (bash $_bash_doctor_probes syntax $_script_path)"
+          _smoke_fail=1
+        fi
+      done
+      # Also dry-run the two bash entry-points via shellcheck (already
+      # checked above for minsky-run.sh; here we check the rest).
+      for _bash_script in "bin/minsky-bootstrap.sh" "bin/minsky-default-session.sh" "scripts/capture-failure.sh" "scripts/bash-doctor-probes.sh"; do
+        _bash_path="$_repo_dir/$_bash_script"
+        if [ ! -f "$_bash_path" ]; then
+          _bash_doctor_print FAIL "smoke: $_bash_script" "missing"
+          _smoke_fail=1
+          continue
+        fi
+        if command -v shellcheck >/dev/null 2>&1; then
+          if shellcheck -x "$_bash_path" >/dev/null 2>&1; then
+            _bash_doctor_print PASS "smoke: $_bash_script" "shellcheck clean"
+          else
+            _bash_doctor_print WARN "smoke: $_bash_script" "shellcheck violations (run: shellcheck -x $_bash_path)"
+          fi
+        else
+          # Without shellcheck, bash -n is a weaker syntax check
+          if bash -n "$_bash_path" 2>/dev/null; then
+            _bash_doctor_print PASS "smoke: $_bash_script" "bash -n clean"
+          else
+            _bash_doctor_print FAIL "smoke: $_bash_script" "bash -n syntax error"
+            _smoke_fail=1
+          fi
+        fi
+      done
+      if [ "$_smoke_fail" = "1" ]; then
+        _crit_fail=1
+      fi
+    fi
+
     echo ""
     if [ "$_crit_fail" = "0" ]; then
       [ "$_quiet" = "0" ] && echo "✅ bash-doctor: bash + Python skeleton is ready for \`minsky --transform\`"
@@ -1082,24 +1289,45 @@ IUSAGE
         | head -1 || true)
     fi
     LATEST_VERDICT="(unknown)"
+    LATEST_NOTES=""
+    LATEST_PR_URL=""
     if [ -n "$LATEST_LEDGER" ] && [ -f "$LATEST_LEDGER" ]; then
       LATEST_VERDICT=$(tail -1 "$LATEST_LEDGER" | jq -r '.verdict // "(no-verdict-field)"' 2>/dev/null || echo "(parse-error)")
+      LATEST_NOTES=$(tail -1 "$LATEST_LEDGER" | jq -r '.notes // ""' 2>/dev/null || echo "")
+      LATEST_PR_URL=$(tail -1 "$LATEST_LEDGER" | jq -r '.pr_url // ""' 2>/dev/null || echo "")
     fi
     LATEST_FAILURE_DIR=""
+    LATEST_DURATION_MS=""
     if [ -d "$HOST_DIR/.minsky/failures" ]; then
       LATEST_FAILURE_DIR=$(/usr/bin/find "$HOST_DIR/.minsky/failures" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
         | xargs -0 ls -dt 2>/dev/null \
         | head -1 || true)
+      if [ -n "$LATEST_FAILURE_DIR" ] && [ -f "$LATEST_FAILURE_DIR/metadata.json" ]; then
+        LATEST_DURATION_MS=$(jq -r '.duration_ms // ""' "$LATEST_FAILURE_DIR/metadata.json" 2>/dev/null || echo "")
+      fi
     fi
 
     echo ""
     echo "=== iter-once summary ==="
     echo "  verdict:        $LATEST_VERDICT"
+    if [ -n "$LATEST_DURATION_MS" ] && [ "$LATEST_DURATION_MS" != "0" ] && [ "$LATEST_DURATION_MS" != "null" ]; then
+      echo "  spawn duration: ${LATEST_DURATION_MS}ms"
+    fi
+    if [ -n "$LATEST_NOTES" ] && [ "$LATEST_NOTES" != "null" ]; then
+      # Truncate notes to 120 chars so the summary stays scannable
+      _notes_short=$(printf '%s' "$LATEST_NOTES" | head -c 120)
+      [ "${#LATEST_NOTES}" -gt 120 ] && _notes_short="${_notes_short}..."
+      echo "  notes:          $_notes_short"
+    fi
+    if [ -n "$LATEST_PR_URL" ] && [ "$LATEST_PR_URL" != "null" ] && [ "$LATEST_PR_URL" != "" ]; then
+      echo "  pr url:         $LATEST_PR_URL"
+    fi
     echo "  ledger row:     ${LATEST_LEDGER:-(none)}"
     echo "  iter log:       $ITER_LOG"
     if [ -n "$LATEST_FAILURE_DIR" ] && [ "$LATEST_VERDICT" != "validated" ] && [ "$LATEST_VERDICT" != "planned" ]; then
       echo "  failure capture: $LATEST_FAILURE_DIR"
       echo "                   (cat $LATEST_FAILURE_DIR/metadata.json | jq .)"
+      echo "                   (minsky tail-failures $HOST_DIR --latest)"
     fi
     exit "$RUN_EXIT"
     ;;
@@ -1849,12 +2077,19 @@ fi
 trap '' HUP
 
 # ── 3b. Smart auto-attach ────────────────────────────────────
-# When invoked without subcommands and a daemon is already running,
-# attach to it with `watch` instead of failing or starting a duplicate.
+# When invoked without subcommands, do the smartest thing:
+#   1. Run health checks (doctor) FIRST — if any critical check fails,
+#      print + exit non-zero. The operator's machine isn't ready.
+#   2. If a daemon is already running for $PWD → attach with watch.
+#   3. Otherwise → start one in daemon mode + auto-install persistence
+#      + attach.
 # This makes `minsky` in a folder always do the right thing:
+#   - machine broken? → tell the operator exactly what to fix
 #   - daemon running for this host? → attach (watch)
 #   - no daemon? → start one in daemon mode + attach (watch)
 # Operator directive 2026-05-18: "run minsky in a folder → it just works"
+# Extended 2026-05-25 with the doctor preamble (rule #16 CLI consolidation
+# corollary — `minsky` with no args owns the smartest defaults).
 
 _daemon_running_for_host() {
   # Returns 0 if a daemon is running and targeting a path that contains $1
@@ -1873,6 +2108,24 @@ _daemon_running_for_host() {
 # consumed --transform / --bash-runner from $@, so we read the
 # USE_TRANSFORM / USE_BASH_RUNNER vars set there.)
 if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop" ] && [ "${1:-}" != "logs" ] && [ "${1:-}" != "watch" ] && [ "${1:-}" != "doctor" ]; then
+  # Step 1: doctor preamble. Run the existing `doctor` check; on
+  # critical fail, print + exit. Operator gets actionable hints.
+  # Skipped when MINSKY_SKIP_DOCTOR=1 (escape hatch for known-degraded
+  # environments where the operator wants to attach anyway).
+  if [ "${MINSKY_SKIP_DOCTOR:-0}" != "1" ]; then
+    # Run doctor in quiet mode — only FAIL/WARN lines print. If it
+    # exits non-zero, re-run loud so the operator sees what failed.
+    if ! "$0" doctor --quiet >/dev/null 2>&1; then
+      echo ""
+      echo "minsky: pre-flight failed. Health-check details:"
+      echo ""
+      "$0" doctor || true
+      echo ""
+      echo "minsky: fix the FAIL lines above, then re-run \`minsky\` (or set MINSKY_SKIP_DOCTOR=1 to bypass)."
+      exit 1
+    fi
+  fi
+
   # Determine the target host from args or cwd
   _target_host=""
   for _a in "$@"; do

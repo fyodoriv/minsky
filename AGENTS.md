@@ -157,7 +157,9 @@ Full text, constitutional-gate pattern, and sources in [vision.md § 10](./visio
 
 When you implement a new behaviour or fix, make it the default immediately — not an opt-in flag behind an env var. Every new default ships with (1) an experiment in `.minsky/experiments/<id>.yaml`, (2) a runnable measurement, (3) a documented opt-out for debugging only. Burden of proof: "why ISN'T this the default?"
 
-Full text and example list in [vision.md § 16](./vision.md).
+**CLI surface consolidation (corollary).** New CLI capabilities default to **flags on existing commands** or **default behavior of existing commands** — never new subcommands. Before writing a new `case` branch in any CLI entrypoint, answer three questions: (1) Is this a refinement of an existing command? → add a flag. (2) Should this happen automatically when the user runs the parent? → make it the parent's default. (3) Are the semantics fundamentally different from every existing command? Only when all three answers force "no, no, yes" does a new verb earn a slot. For `minsky` specifically: invoked with no subcommand it MUST run `doctor` first (pre-flight), exit non-zero on critical failure, attach to a running daemon for $PWD if present, else start one with sensible defaults. Subcommands that violate this rule are folded into their parent with a one-major-version-deprecated alias.
+
+Full text and example list in [vision.md § 16](./vision.md). See [`.claude/skills/cli-consolidation/SKILL.md`](.claude/skills/cli-consolidation/SKILL.md) for the operational checklist.
 
 ### 12. Proactive healing (rule #17 — iron, no exemption)
 
