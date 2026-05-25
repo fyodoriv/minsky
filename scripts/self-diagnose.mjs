@@ -26,7 +26,7 @@
 // would change.
 
 import { execFile } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -822,6 +822,53 @@ export function daemonTaskScopeExplosionInvariant(opts) {
 }
 
 /**
+ * @typedef {object} ClaudePrintTimeoutInvariantOpts
+ * @property {() => Promise<number>} countTimeoutsInRollingWindow - total `claude-print-timeout` log occurrences across worker logs in the rolling 7d window
+ * @property {number} [threshold] - fire when count exceeds this (default 14 = 2/day average across workers)
+ */
+
+/**
+ * Throughput invariant: the rolling 7d count of `claude-print-timeout`
+ * log entries across worker logs exceeds the operator's tolerance
+ * (default 14 = 2/day average across workers). Encodes the 2026-05-07
+ * monitoring window — a single 1h 56min hang silently lost ~24
+ * iterations of throughput because the daemon parent waited
+ * indefinitely on a stuck child. The `daemon-claude-print-hang-watchdog`
+ * task added a `timeoutMs` watchdog to `ProcessSpawnStrategy.spawn`
+ * (default 30 min, env-overridable via `MINSKY_CLAUDE_PRINT_TIMEOUT_MS`)
+ * that SIGKILLs hung children. The visible-not-silent failure mode is
+ * now `claude-print-timeout: <ms>ms` in the iteration log — but if
+ * those start firing too often, the timeout is too aggressive (Beyer
+ * SRE 2016 Ch. 6 — silence is failure, but a chatty false-positive is
+ * also a failure mode). This invariant closes the loop by surfacing the
+ * over-aggressive-timeout case as a daemon-pickable task.
+ *
+ * Closes Acceptance criterion (e) of `daemon-claude-print-hang-watchdog`.
+ *
+ * @param {ClaudePrintTimeoutInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function claudePrintTimeoutFrequencyInvariant(opts) {
+  const { countTimeoutsInRollingWindow, threshold = 14 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const count = await countTimeoutsInRollingWindow();
+    if (count <= threshold) return { id: "claude-print-timeout-frequency", ok: true };
+    return {
+      id: "claude-print-timeout-frequency",
+      ok: false,
+      evidence: `${count} \`claude-print-timeout\` events in rolling 7d window (threshold ${threshold} = 2/day across workers).`,
+      suggestedTaskTitle: `claude --print timeouts firing too often (${count} in 7d, threshold ${threshold})`,
+      suggestedFix:
+        "The spawn-strategy `timeoutMs` watchdog is killing children too aggressively. Options: (1) raise `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` from the default 30min if the workload genuinely needs longer iterations (likely if a few tasks are large-refactor sized); (2) inspect the per-iteration logs for the killed children — if they were genuinely hung (no progress for 5min+), the timeout is correct and the underlying child needs the fix (e.g., `claude --print` retry-with-backoff inside the spawn). Concretely: `grep -B 5 'claude-print-timeout' .minsky/workers/*.log | head -50` shows what each killed child was doing right before SIGKILL.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "claude-print-timeout-frequency";
+  return fn;
+}
+
+/**
  * Format seconds as `<H>h<M>m<S>s` short form. Used in evidence and
  * suggestedFix rendering for human readability.
  *
@@ -849,6 +896,67 @@ async function spawnVersionProbe(name) {
     return { ok: true };
   } catch {
     return { ok: false };
+  }
+}
+
+/**
+ * Production probe for `claudePrintTimeoutFrequencyInvariant`: counts
+ * `claude-print-timeout` substring occurrences across all worker log
+ * files (`.minsky/workers/*.log`) whose mtime is within the last 7d.
+ * Older files are skipped because their timeout entries are outside
+ * the rolling window. Returns 0 on any I/O failure (rule #7
+ * graceful-degrade — if logs can't be read, the invariant doesn't fire
+ * spuriously; a real timeout-storm becomes visible on the next
+ * iteration once logs are readable).
+ *
+ * The mtime filter is an approximation of "events within 7d": a log
+ * file that was last appended to within 7d may still contain older
+ * entries from the same session, but in practice worker logs are
+ * short-lived (per-iteration or per-worker-session) so the
+ * approximation is close enough. The pivot threshold (default 14) is
+ * tolerant of approximation drift.
+ *
+ * @param {string} repoRoot
+ * @returns {Promise<number>}
+ */
+async function countClaudePrintTimeoutsIn7d(repoRoot) {
+  const workersDir = join(repoRoot, ".minsky", "workers");
+  /** @type {readonly string[]} */
+  let entries;
+  try {
+    entries = await readdir(workersDir);
+  } catch {
+    return 0;
+  }
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 3_600_000;
+  let total = 0;
+  for (const entry of entries) {
+    if (!entry.endsWith(".log")) continue;
+    total += await countTimeoutsInLogFile(join(workersDir, entry), sevenDaysAgoMs);
+  }
+  return total;
+}
+
+/**
+ * Count `claude-print-timeout` occurrences in a single log file, gated
+ * by mtime against `sevenDaysAgoMs`. Returns 0 on any per-file failure
+ * (rule #7 graceful-degrade — one bad file doesn't poison the
+ * aggregate).
+ *
+ * @param {string} path
+ * @param {number} sevenDaysAgoMs
+ * @returns {Promise<number>}
+ */
+async function countTimeoutsInLogFile(path, sevenDaysAgoMs) {
+  try {
+    const stats = await stat(path);
+    if (stats.mtimeMs < sevenDaysAgoMs) return 0;
+    const content = await readFile(path, "utf8");
+    const matches = content.match(/claude-print-timeout/g);
+    return matches ? matches.length : 0;
+  } catch {
+    // rule-6: handled-locally — per-file errors collapse to 0; the aggregate degrades gracefully
+    return 0;
   }
 }
 
@@ -1503,6 +1611,9 @@ export function defaultInvariants() {
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
     daemonPrThrashInvariant({ openDaemonPrs: openDaemonPrsForThrash }),
     daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
+    claudePrintTimeoutFrequencyInvariant({
+      countTimeoutsInRollingWindow: () => countClaudePrintTimeoutsIn7d(repoRoot),
+    }),
     modelCatalogInvariantsHoldInvariant({
       validate: () => validateModelCatalog(MODEL_CATALOG),
     }),
