@@ -163,6 +163,14 @@ walk_hosts() {
     local n
     for ((n=1; n <= ITERATIONS_PER_HOST; n++)); do
       [[ "$MAX_ITERATIONS" -gt 0 && "$ITER_COUNT" -ge "$MAX_ITERATIONS" ]] && return 0
+      # Restart-sentinel check (Phase 7 closing gap, matches host-loop.ts
+      # `checkRestartRequest` between iterations). When the sentinel
+      # exists at `~/.minsky/restart-requested`, the runner clears it
+      # and exits 75 (EX_TEMPFAIL). The supervisor (launchd / systemd)
+      # restarts the daemon, which re-execs into the freshly updated
+      # binary. Written by `scripts/post-merge-auto-install.mjs` after
+      # a successful repo update.
+      check_restart_sentinel && return 75
       # Break the inner loop when the host has no eligible task — no
       # point burning N round-robin slots emitting "aborted" records;
       # move to the next host. Matches host-walker.ts behaviour.
@@ -170,6 +178,27 @@ walk_hosts() {
       ITER_COUNT=$((ITER_COUNT + 1))
     done
   done
+}
+
+# --- Restart sentinel ------------------------------------------------------
+# Mirrors `runHostLoop`'s checkRestartRequest/clearRestartRequest seams in
+# `novel/cross-repo-runner/src/host-loop.ts`. Returns 0 if the sentinel
+# existed (and was consumed); 1 otherwise. Best-effort per rule #6 — a
+# malformed sentinel JSON is reported and removed; the loop continues
+# rather than crashing.
+
+RESTART_SENTINEL_PATH="${MINSKY_RESTART_SENTINEL_PATH:-$HOME/.minsky/restart-requested}"
+
+check_restart_sentinel() {
+  [[ -f "$RESTART_SENTINEL_PATH" ]] || return 1
+  local payload reason ts
+  payload="$(cat "$RESTART_SENTINEL_PATH" 2>/dev/null || true)"
+  reason="$(printf '%s' "$payload" | jq -r '.reason // "unspecified"' 2>/dev/null || echo unspecified)"
+  ts="$(printf '%s' "$payload" | jq -r '.ts // "unknown"' 2>/dev/null || echo unknown)"
+  echo "minsky-run: restart-requested sentinel found (reason=$reason ts=$ts); exiting 75 (EX_TEMPFAIL)" >&2
+  # Clear the sentinel so the supervisor's next launch doesn't re-trigger.
+  rm -f "$RESTART_SENTINEL_PATH" || true
+  return 0
 }
 
 # --- 5. Per-host iteration --------------------------------------------------

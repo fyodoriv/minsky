@@ -542,6 +542,39 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+@test "restart-sentinel exits 75 and clears the sentinel file (Phase 7-closing parity)" {
+  # Mirrors host-loop.ts checkRestartRequest/clearRestartRequest semantics.
+  # The TS side returns stop reason "restart-requested"; the bash side
+  # exits 75 (EX_TEMPFAIL) which launchd's `KeepAlive` interprets as
+  # "restart the daemon, the binary may have changed".
+  host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/restart-1/)")"
+
+  sentinel="$TMPDIR_TEST/restart-requested"
+  printf '{"ts":"2026-05-24T20:00:00Z","reason":"post-merge auto-install","changedFiles":["bin/minsky-run.sh"]}' > "$sentinel"
+
+  MINSKY_RESTART_SENTINEL_PATH="$sentinel" \
+    run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 2
+
+  [ "$status" -eq 75 ]
+  [[ "$output" == *"restart-requested sentinel found"* ]]
+  [[ "$output" == *"reason=post-merge auto-install"* ]]
+
+  # Sentinel must be cleared after detection.
+  [ ! -f "$sentinel" ]
+}
+
+@test "restart-sentinel absent → loop proceeds normally" {
+  # Negative test: sentinel that does NOT exist must not affect normal
+  # operation. Run with a bogus path; the loop iterates normally.
+  host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/no-sentinel/)")"
+
+  MINSKY_RESTART_SENTINEL_PATH="$TMPDIR_TEST/does-not-exist" \
+    run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"restart-requested"* ]]
+}
+
 @test "round-robin iterates each host the expected number of times" {
   host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
   host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"
