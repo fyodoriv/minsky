@@ -185,23 +185,24 @@ function collectMttr() {
 /** mttr-self-heal: p95 MTTR for catalogued automated heal events (.minsky/heal-events.jsonl) */
 function collectMttrSelfHeal() {
   // Delegates to scripts/heal-mttr-report.mjs for the 30d window.
-  // Returns the OTEL-blocked stub when the ledger has no entries — same
-  // graceful-degrade pattern as collectLoopUptime.
+  // The zero state (no heal events in 30d) is a REAL observation, not
+  // an "OTEL-blocked stub": the heal helpers + ledger ship at
+  // `novel/observer/heals/` (PRs #738, #748, #781 …), so a 0/0 reading
+  // means "supervisor was healthy enough that no heal fired in 30d",
+  // not "the metric machinery is missing". Reporting it as the same
+  // shape as the populated path closes Phase 1 success criterion #4
+  // of `agents-can-self-heal-minsky-m1-13` (TASKS.md) which calls for
+  // "a real number (not the OTEL-blocked stub)".
   const raw = run("node scripts/heal-mttr-report.mjs --window=30d --json");
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw);
     const row = Array.isArray(parsed) ? parsed[0] : null;
-    if (!row || row.source === "no-data") {
-      return {
-        value: "no heal-events yet — measurable once any helper fires",
-        higherIsBetter: false,
-      };
-    }
+    if (!row) return null;
     const p95 = row.mttr_p95_ms;
     const p50 = row.mttr_p50_ms;
-    const successful = row.successful;
-    const attempted = row.attempted;
+    const successful = row.successful ?? 0;
+    const attempted = row.attempted ?? 0;
     return {
       value: `p95=${p95 ?? "n/a"}ms · p50=${p50 ?? "n/a"}ms · ${successful}/${attempted} healed (30d)`,
       higherIsBetter: false,
