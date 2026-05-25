@@ -537,6 +537,138 @@ EOF
   grep -q "^anchor: |" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
 }
 
+@test "extract_pr_url captures github.intuit.com URLs (was broken; bash regex only matched github.com)" {
+  # Pre-fix: bash one-liner `grep -oE 'https://github\.com/...'` would
+  # silently miss every github.intuit.com PR URL. Every successful
+  # Intuit-host iteration recorded pr_url=null. Parity port of
+  # `extractPrUrl` from novel/cross-repo-runner/src/runner.ts.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+
+  # Fake openhands: write a stdout that contains an Intuit-host PR URL
+  # the old regex couldn't match, then exit 0 (success path).
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Created PR: https://github.intuit.com/team/iep-app-plugin/pull/12345"
+echo "Done."
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Force a tiny watchdog and shim dynamic_timeout.py so the test is
+  # fast (matches the watchdog/brief-test pattern in this file).
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-intuit "$(complete_task_block)")"
+
+  # Wrapper: copy needed scripts into a parallel scripts/ dir so the
+  # shimmed `dynamic_timeout.py` works alongside the real ones (matches
+  # the watchdog test wrapper pattern).
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # The iteration record was written with the github.intuit.com PR URL
+  # (proves the parity port replaces the broken github.com-only regex).
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  grep -q '"pr_url":"https://github.intuit.com/team/iep-app-plugin/pull/12345"' "$record_file"
+  # And the verdict is "validated" (openhands exited 0 → success path).
+  grep -q '"verdict":"validated"' "$record_file"
+}
+
+@test "extract_pr_url picks the LAST PR URL when stdout cites multiple (parity vs head -1)" {
+  # Parity port behavior: the old bash regex used `head -1` (first
+  # match), but the TS substrate's `extractPrUrl` returns the LAST
+  # match. When the agent's stdout cites a related PR before printing
+  # the newly-created one at the end, the new behavior captures the
+  # right URL.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Related work: https://github.com/old/repo/pull/1"
+echo "Working..."
+echo "Opened https://github.com/new/repo/pull/999"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(60)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-multi "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prurl2.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # Captures the LAST URL (the newly-created PR), not the first
+  # (the cited related PR).
+  grep -q '"pr_url":"https://github.com/new/repo/pull/999"' "$record_file"
+  ! grep -q '"pr_url":"https://github.com/old/repo/pull/1"' "$record_file"
+}
+
 @test "bin/minsky --bash-runner dispatches to bin/minsky-run.sh (Phase 7c)" {
   # Test the dispatch in isolation by extracting + sourcing only the
   # flag-parser + dispatch section of `bin/minsky`. Bypasses the
