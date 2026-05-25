@@ -1,0 +1,56 @@
+# `.minsky/repo.yaml` — per-host overlay for the cross-repo-runner.
+#
+# Written by `bin/minsky-bootstrap.sh` (Path A Phase 11 — bash + template
+# replacement for the TS bootstrap inferer at `novel/sidecar-bootstrap/`).
+#
+# Inferred fields are substituted by the bootstrap script from the host's
+# actual state at run time. The bootstrap looks for:
+#   - host_repo:           owner/repo from .git/config remote URL
+#   - tasks_md_path:       first found of TASKS.md, docs/TASKS.md
+#   - branch_prefix:       feat/ (unless package.json declares otherwise)
+#   - default_branch:      from .git/HEAD, defaulting to main
+#   - pre_commit_command:  pnpm run check when package.json has the script,
+#                          otherwise empty
+#   - host_packages_path:  packages/ when present, otherwise the repo root
+#
+# The operator is expected to edit this file after bootstrap to tighten
+# the inferred defaults. The schema is documented at
+# `novel/sidecar-bootstrap/src/schema.ts` § `RepoConfig`.
+
+# Canonical owner/repo identifier used by the runner for experiment-store
+# labels and cross-repo CI action scoping.
+host_repo: "${HOST_REPO}"
+
+# Path (relative to the host repo root) to the host's TASKS.md.
+tasks_md_path: "${TASKS_MD_PATH}"
+
+# Conventional commit subject template. Placeholders <TYPE> <TICKET>
+# <DESCRIPTION> are substituted by the runner; the host's commitlint
+# hook (if any) is the actual enforcer.
+commit_format: "<TYPE>(<TICKET>): <DESCRIPTION>"
+
+# Shell command run before `git commit` on every cross-repo run.
+# Empty string = no pre-commit step (host's lefthook / pre-commit hook
+# is the substitute).
+pre_commit_command: "${PRE_COMMIT_COMMAND}"
+
+# Branch prefix the runner uses when cutting feature branches.
+branch_prefix: "${BRANCH_PREFIX}"
+
+# Default branch the runner cuts feature branches from.
+default_branch: "${DEFAULT_BRANCH}"
+
+# Ticket format regex (or null). Used when commit_format references
+# <TICKET>. Examples: `PROJ-\\d+`, `SOLID-\\d+`. Default null — the
+# runner skips ticket substitution.
+ticket_format: null
+
+# Per-substrate lint command overrides. Default empty — the runner uses
+# the host's own scripts/. Add keys like `pnpm-test`, `pnpm-typecheck`
+# only if the host repo deviates from the canonical commands.
+lint_substrate_overrides: {}
+
+# Path (relative to host root) where the host's package manifests live.
+# Default `.` — monorepos may set `packages/` and the runner walks each
+# subdir for substrate detection.
+host_packages_path: "${HOST_PACKAGES_PATH}"
