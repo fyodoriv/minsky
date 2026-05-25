@@ -9,7 +9,7 @@
 // `bin/minsky-openhands-spawn.py` in this package.
 //
 // Wire shape matches the existing claude / devin / aider builders in
-// `novel/cross-repo-runner/bin/minsky-run.mjs` § `buildAgentConfig`:
+// `bin/minsky-run.sh` § `iterate_host` (the bash skeleton that supersedes the TS runner per Phase 7b):
 // the caller receives `{ command, argv, stdin, cwd }` and spawns it
 // directly via `child_process.spawn`. No long-lived state, no shared
 // resources between calls — each task gets its own subprocess.
