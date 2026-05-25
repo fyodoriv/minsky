@@ -55,6 +55,9 @@ Options:
   --report-only         Skip the run; only emit the report
   --baseline-only       Only capture the baseline; no run, no report
   --no-bootstrap        Skip the bootstrap step (use existing .minsky/)
+  --json                Emit the report as structured JSON (forwards
+                        to scripts/minsky_report.py --json). Useful
+                        for piping the delta to other tools.
   -h, --help            Print this help and exit
 
 Exit codes:
@@ -70,6 +73,7 @@ MAX_HOURS=8
 REPORT_ONLY=0
 BASELINE_ONLY=0
 SKIP_BOOTSTRAP=0
+EMIT_JSON=0
 HOST_DIR=""
 
 # Parse args. Single positional + flagged options.
@@ -82,6 +86,7 @@ while [[ $# -gt 0 ]]; do
     --report-only)   REPORT_ONLY=1; shift ;;
     --baseline-only) BASELINE_ONLY=1; shift ;;
     --no-bootstrap)  SKIP_BOOTSTRAP=1; shift ;;
+    --json)          EMIT_JSON=1; shift ;;
     --*) echo "unknown flag: $1" >&2; exit 2 ;;
     *)
       if [[ -z "$HOST_DIR" ]]; then HOST_DIR="$1"; shift
@@ -163,10 +168,16 @@ if [[ "$REPORT_ONLY" != "1" ]]; then
 fi
 
 # Step 4 — Report. Always runs (even after --report-only — that's the
-# whole point of that flag).
-echo "minsky-default-session: rendering report" >&2
-python3 "$REPO_ROOT/scripts/minsky_report.py" \
-  --repo "$HOST_DIR" \
-  --baseline "$BASELINE_FILE"
+# whole point of that flag). The --json forward emits structured JSON
+# on stdout instead of the human-readable text — useful for piping the
+# delta to other tools or CI gates.
+report_args=(--repo "$HOST_DIR" --baseline "$BASELINE_FILE")
+if [[ "$EMIT_JSON" == "1" ]]; then
+  report_args+=(--json)
+  echo "minsky-default-session: rendering report (JSON)" >&2
+else
+  echo "minsky-default-session: rendering report" >&2
+fi
+python3 "$REPO_ROOT/scripts/minsky_report.py" "${report_args[@]}"
 
 exit 0
