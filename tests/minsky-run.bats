@@ -46,6 +46,17 @@ make_host() {
   # would work but it's noise the script doesn't need.)
   (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
   printf '%s' "$tasks_md" > "$dir/TASKS.md"
+  # Bootstrap the host so the runner's `invariant_host_bootstrapped`
+  # accepts it (Invariant 6; parity with TS `loadHostConfig`). Minimum
+  # fixture: just the `.minsky/repo.yaml` marker file. Tests that
+  # specifically exercise the unbootstrapped path use a different
+  # fixture (or set MINSKY_SKIP_BOOTSTRAP_CHECK=1).
+  mkdir -p "$dir/.minsky"
+  cat > "$dir/.minsky/repo.yaml" <<EOF
+host_repo: "test/$name"
+default_branch: "main"
+tasks_md_path: "TASKS.md"
+EOF
   echo "$dir"
 }
 
@@ -193,6 +204,44 @@ EOF
   # test pins the wire-up so the call site can't silently regress to
   # branch-only detection.
   grep -q -- "--all-prs-json=" "$MINSKY_RUN"
+}
+
+# --- 7.5. Bootstrap invariant (parity with TS loadHostConfig) -------------
+
+@test "iterate_host refuses an unbootstrapped host (no .minsky/repo.yaml)" {
+  # Build a host WITHOUT the bootstrap marker. The runner must refuse
+  # to iterate and emit the operator-actionable hint pointing at
+  # bin/minsky-bootstrap.sh. Parity with the TS runner's loadHostConfig.
+  local dir="$HOSTS_DIR/unbootstrapped"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  printf '%s' "$(complete_task_block)" > "$dir/TASKS.md"
+  # Intentionally NO `.minsky/repo.yaml`.
+
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  # The runner exits non-zero only on invariant failure for the WHOLE
+  # walk; per-host invariant failures are recorded as "aborted" and
+  # the walk continues. We assert the error message appears.
+  [[ "$output" == *"host is not bootstrapped"* ]]
+  [[ "$output" == *"minsky-bootstrap.sh"* ]]
+}
+
+@test "MINSKY_SKIP_BOOTSTRAP_CHECK=1 bypasses the bootstrapped-host invariant" {
+  # Operator escape hatch: post-bootstrap migration window where an
+  # existing host has experiment-store data but pre-dates the sidecar
+  # convention. The override lets the runner iterate without aborting.
+  local dir="$HOSTS_DIR/migrate"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  printf '%s' "$(complete_task_block)" > "$dir/TASKS.md"
+  # No .minsky/repo.yaml — same as the test above.
+
+  MINSKY_SKIP_BOOTSTRAP_CHECK=1 run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [[ "$output" != *"host is not bootstrapped"* ]]
+  # The iteration record should land — proves the runner actually
+  # iterated rather than just silently passing the invariant.
+  [ -f "$dir/.minsky/experiment-store/cross-repo/pick-me-first.jsonl" ]
 }
 
 # --- 8. Round-robin iterates each host fairly ------------------------------
