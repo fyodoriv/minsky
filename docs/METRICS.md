@@ -217,6 +217,7 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 **Pivot:** >25000 for ≥30 d AFTER phase-7b'+11b deletions ship → surviving substrate has irreducible complexity at higher floor than predicted; raise budget to 25K with operator signoff in the Path A plan. Don't fake the metric to make the budget.
 
 **Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)
+
 ## Metrics to add
 
 _8 metrics that should exist on the dashboard but don't yet. Each row names the milestone that introduces it, the task that lands the collector, and a sketch of the future formula. Operator directive 2026-05-21 — gap is surfaced explicitly so the 10-metric set above is understood as the current state, not the steady state._
