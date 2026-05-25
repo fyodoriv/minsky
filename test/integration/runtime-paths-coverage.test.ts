@@ -23,8 +23,8 @@
 // (proactive healing); operator directive 2026-05-19 "get
 // integration/runtime tests coverage to 95%".
 
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -40,54 +40,6 @@ function cleanEnv(): NodeJS.ProcessEnv {
   env.MINSKY_NON_INTERACTIVE = "1";
   env.HOME = mkdtempSync(join(tmpdir(), "rtpath-home-"));
   return env;
-}
-
-function makeFixtureHost(opts?: { tasksMd?: string; remoteUrl?: string }): string {
-  const dir = mkdtempSync(join(tmpdir(), "rtpath-host-"));
-  execFileSync("git", ["init", "-b", "main"], { cwd: dir, stdio: "pipe" });
-  execFileSync("git", ["config", "user.email", "t@t"], { cwd: dir, stdio: "pipe" });
-  execFileSync("git", ["config", "user.name", "t"], { cwd: dir, stdio: "pipe" });
-  execFileSync("git", ["commit", "--allow-empty", "-m", "chore: init", "--no-verify"], {
-    cwd: dir,
-    stdio: "pipe",
-  });
-  if (opts?.remoteUrl) {
-    execFileSync("git", ["remote", "add", "origin", opts.remoteUrl], { cwd: dir, stdio: "pipe" });
-  }
-  const md = join(dir, ".minsky");
-  mkdirSync(join(md, "experiment-store", "cross-repo"), { recursive: true });
-  mkdirSync(join(md, "experiments"), { recursive: true });
-  writeFileSync(
-    join(md, "repo.yaml"),
-    [
-      "host_repo: test/rtpath",
-      "tasks_md_path: TASKS.md",
-      "commit_format: 'feat: <DESCRIPTION>'",
-      "pre_commit_command: ''",
-      "branch_prefix: feat/",
-      "default_branch: main",
-      "host_packages_path: src/",
-      "ignore_mechanism: global-ignore",
-    ].join("\n"),
-  );
-  const tasks =
-    opts?.tasksMd ??
-    [
-      "# Tasks",
-      "",
-      "## P0",
-      "",
-      "- [ ] `rtpath-fixture` — fixture",
-      "  - **ID**: rtpath-fixture",
-      "  - **Tags**: p0",
-      "  - **Hypothesis**: x reduces y",
-      "  - **Success**: y < 5",
-      "  - **Pivot**: y > 10",
-      "  - **Measurement**: `pnpm test`",
-      "  - **Anchor**: rule #9",
-    ].join("\n");
-  writeFileSync(join(dir, "TASKS.md"), tasks);
-  return dir;
 }
 
 // ─── L3 — bin/minsky subcommands: status, stop, logs, watch ─────

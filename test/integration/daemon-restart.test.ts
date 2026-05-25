@@ -14,14 +14,13 @@
 // skeleton.
 
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MINSKY_BIN = join(REPO_ROOT, "bin", "minsky");
-
 
 function run(cmd: string, env?: Record<string, string>): string {
   return execSync(cmd, {
@@ -450,4 +449,3 @@ describe("daemon-restart: simulated crash recovery", () => {
     expect(stable ?? "").not.toContain("fnm_multishells");
   });
 });
-
