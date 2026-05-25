@@ -325,25 +325,6 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)",
     milestone: "M1",
   },
-  {
-    // Path A sub-tree scoreboard. Tracks the LOC in
-    // `novel/tick-loop/` — the daemon-deletion target. Phase 11b
-    // of the Path A plan deletes the TS daemon once the
-    // bash-skeleton supervisor (launchd / systemd-user) carries
-    // the loop. Hits 0 when phase-11b ships.
-    id: "path-a-loc-tick-loop",
-    label: "Path A sub-tree: LOC in novel/tick-loop/ (deletion target)",
-    formula:
-      "fd -e ts -e tsx --type f --exclude '*.test.*' . novel/tick-loop/ | xargs wc -l | tail -1 | awk '{print $1}'",
-    unit: "LOC",
-    freshnessBudgetMs: 1 * DAY_MS,
-    goal: "0 (post phase-11b deletion); today (~17K) is the supervisor-parity deletion target — the single largest tree in novel/",
-    pivot:
-      "Stays >0 for ≥30 d AFTER supervisor-parity validates → tick-loop's surface is broader than the bash skeleton covers (extension points the operator hasn't migrated); document the residual coupling in the Path A plan and re-scope.",
-    anchor:
-      "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 11b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)",
-    milestone: "M1",
-  },
 ];
 
 /**

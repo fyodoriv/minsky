@@ -1087,31 +1087,12 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-security-docs-cohesion.test.mjs
 
-  sandbox-env-declared:
-    # vision.md § 13.3 / TASKS.md `supervisor-sandbox-syscall-restriction`:
-    # `MINSKY_SANDBOX` must be declared in the resolver source
-    # (`SANDBOX_MODE_ENV` in `novel/tick-loop/src/sandbox-mode.ts`) AND
-    # surfaced in both supervisor unit-file templates (commented opt-in is
-    # sufficient — substrate-inert by default). Pure classifier + paired
-    # tests ship in `scripts/check-sandbox-env-declared.mjs`. This gate
-    # pins substrate-cohesion so a future rename of the env var or removal
-    # of the operator-visible declaration from one platform surfaces in CI
-    # rather than silently desynchronising the operator-facing surface.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9.12.0
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: ".node-version"
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: sandbox-env-declared lint
-        run: node scripts/check-sandbox-env-declared.mjs
-      - name: unit tests for the linter
-        run: pnpm exec vitest run scripts/check-sandbox-env-declared.test.mjs
+  # `sandbox-env-declared` CI job deleted in PR #888 (phase-11b step 8).
+  # The lint pinned `novel/tick-loop/src/sandbox-mode.ts`'s
+  # SANDBOX_MODE_ENV constant against the supervisor unit-files. The TS
+  # file is gone with the rest of `novel/tick-loop/`; the bash skeleton
+  # doesn't yet wire MINSKY_SANDBOX. Restore as P3 follow-up when bash
+  # wiring lands.
 
   pr-security-review:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate` §
@@ -1797,7 +1778,7 @@ jobs:
       - name: metric-freshness lint
         run: |
           node scripts/check-metric-freshness.mjs \
-            --expected loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput,cross-repo-pr-rate,fleet-stability-aggregated,session-converts-repo,baseline-delta-per-cycle,path-a-loc-novel-tree,path-a-loc-tick-loop
+            --expected loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput,cross-repo-pr-rate,fleet-stability-aggregated,session-converts-repo,baseline-delta-per-cycle,path-a-loc-novel-tree
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
 
@@ -1854,7 +1835,6 @@ jobs:
       - no-hardcoded-user-paths
       - no-personal-paths-in-docs
       - rule-9-tasksmd-fields
-      - sandbox-env-declared
       - sbom-shape
       - supervisor-sandbox-hardening
       - tasks-lint
@@ -1920,7 +1900,6 @@ jobs:
                    "${{ needs.no-personal-paths-in-docs.result }}" \
                    "${{ needs.rule-9-tasksmd-fields.result }}" \
                    "${{ needs.competitive-goal.result }}" \
-                   "${{ needs.sandbox-env-declared.result }}" \
                    "${{ needs.sbom-shape.result }}" \
                    "${{ needs.supervisor-sandbox-hardening.result }}" \
                    "${{ needs.tasks-lint.result }}" \

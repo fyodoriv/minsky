@@ -356,16 +356,17 @@ describe("real novel/**/README.md — the threat-model invariant on main", () =>
   test("the hardcoded path list covers top-level novel/* and novel/adapters/* READMEs", () => {
     // Phase 9 (Path A aggressive cut) deleted the `novel/bridges/`
     // namespace + `novel/handoff-spec/`, dropping 3 paths from the list
-    // (was 18, then 15). Phase 7b step 6 (PR #882) dropped
-    // `novel/cross-repo-runner/README.md` (the TS runner is being
-    // deleted in step 7), leaving 14 paths: 8 top-level + 6 adapters.
-    expect(THREAT_MODEL_README_PATHS.length).toBe(14);
+    // (was 18, then 15). Phase 7b step 6 (PR #883) dropped
+    // `novel/cross-repo-runner/README.md`, leaving 14. Phase 11b step
+    // 6/7/8 (PR #888) dropped `novel/tick-loop/README.md`, leaving 13:
+    // 7 top-level + 6 adapters.
+    expect(THREAT_MODEL_README_PATHS.length).toBe(13);
     const adapterCount = THREAT_MODEL_README_PATHS.filter((p) => p.includes("/adapters/")).length;
     expect(adapterCount).toBe(6);
     const bridgeSubpkgCount = THREAT_MODEL_README_PATHS.filter((p) =>
       p.startsWith("novel/bridges/"),
     ).length;
     expect(bridgeSubpkgCount).toBe(0);
-    expect(THREAT_MODEL_README_PATHS.length - adapterCount - bridgeSubpkgCount).toBe(8);
+    expect(THREAT_MODEL_README_PATHS.length - adapterCount - bridgeSubpkgCount).toBe(7);
   });
 });

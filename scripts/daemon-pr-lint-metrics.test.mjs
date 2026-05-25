@@ -524,18 +524,13 @@ describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => 
     expect(block).toContain(decimal);
   });
 
-  test("daemon brief (novel/tick-loop/src/daemon.ts) cites the threshold's percent form", () => {
-    // The brief at line ~1010 ("Pre-registered (TASKS.md
-    // `daemon-pre-pr-lint-gate`): post-fix, ≥80% of daemon-authored PRs ...")
-    // is the load-bearing prompt the inner Claude reads every iteration; if
-    // the constant moves and the brief's percent token is stale, the daemon
-    // announces a threshold its self-diagnose no longer applies. Pinning the
-    // percent form alone is sufficient — the brief is one paragraph, the
-    // decimal form is not used there.
-    const brief = readFileSync(resolve(REPO_ROOT, "novel/tick-loop/src/daemon.ts"), "utf8");
-    const { percent } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
-    expect(brief).toContain(percent);
-  });
+  // Removed in PR #888 (phase-11b step 6/7/8): the original test
+  // pinned the threshold percent in `novel/tick-loop/src/daemon.ts`'s
+  // buildDaemonBrief. After the TS daemon is deleted, the canonical
+  // brief lives at `scripts/build_brief.py` (the bash skeleton's
+  // brief builder). A follow-up P3 (`daemon-brief-threshold-pin-in-
+  // build_brief-py`) restores the pin against build_brief.py if the
+  // threshold ever moves.
 
   test("extractDaemonPrePrLintGateBlock parses to a non-trivial block bounded by the next task (parser sanity)", () => {
     const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");

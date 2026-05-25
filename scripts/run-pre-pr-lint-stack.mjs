@@ -275,7 +275,6 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "no-hardcoded-user-paths",
       "no-personal-paths-in-docs",
       "rule-9-tasksmd-fields",
-      "sandbox-env-declared",
       "sbom-shape",
       "secret-scan",
       "security-docs-cohesion",
@@ -727,12 +726,11 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-rule-13-sibling-anchors.mjs"],
   },
-  {
-    name: "sandbox-env-declared",
-    stages: ["full"],
-    cmd: "node",
-    args: ["scripts/check-sandbox-env-declared.mjs"],
-  },
+  // `sandbox-env-declared` lint deleted in PR #888 (phase-11b step 8) —
+  // the lint pinned `novel/tick-loop/src/sandbox-mode.ts`'s
+  // SANDBOX_MODE_ENV constant against the unit-files. The TS file is
+  // gone; bash skeleton doesn't yet wire MINSKY_SANDBOX. Restore as
+  // P3 follow-up when bash wiring lands.
   {
     name: "vision-rule-13-task-id-citations",
     stages: ["full"],
