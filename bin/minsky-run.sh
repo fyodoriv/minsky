@@ -544,6 +544,63 @@ EOF
                   --head "$branch" --state open \
                   --json url --jq '.[0].url // ""' 2>/dev/null || true)"
     fi
+    # Stage 3 backstop (parity port of TS `ensurePrUrl` stage 3 +
+    # `defaultBackstopTitle`/`defaultBackstopBody`): when neither
+    # stdout extraction nor the gh-pr-list query found a PR, but the
+    # agent committed + pushed (i.e. the branch exists on origin), the
+    # runner opens the PR itself. This is the
+    # `devin-spawn-no-pr-opened` pivot from 2026-05-18 — agents
+    # commonly finish editing + commit + push but skip `gh pr create`.
+    # Without this stage, those iterations record `pr_url=null` even
+    # though the work shipped, breaking the cross-repo-pr-rate metric.
+    #
+    # The backstop:
+    #   - Verifies the branch exists on origin via `git ls-remote
+    #     --heads` (skips when the agent didn't even push).
+    #   - Resolves default_branch from the host's repo.yaml (falls
+    #     back to "main").
+    #   - Calls `gh pr create` with rule-#9-aware title + body.
+    #   - Captures the resulting PR URL.
+    # Safe-defaults to empty on any failure (rule #7); the legacy
+    # `pr_url=null` is preserved as the no-backstop-possible signal.
+    if [[ -z "$pr_url" ]]; then
+      # Check the branch was actually pushed before bothering with
+      # `gh pr create` (which would just fail with a clearer error
+      # than ours otherwise). `git ls-remote --exit-code` returns 0
+      # when the ref exists, 2 when it doesn't.
+      if ( cd "$host" && git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1 ); then
+        local default_branch
+        default_branch="$(python3 -c "
+import sys
+sys.path.insert(0, '$script_dir/../scripts')
+from build_brief import load_host_config
+from pathlib import Path
+print(load_host_config(Path('$host')).default_branch)
+" 2>/dev/null || echo "main")"
+        local backstop_title backstop_body
+        backstop_title="chore: backstop PR for ${task_id} (agent did not run gh pr create)"
+        # Body matches the TS substrate's defaultBackstopBody — same
+        # markdown structure + the rule-#9 self-grade block (required
+        # by check-pr-self-grade.mjs).
+        backstop_body="$(printf '%s\n' \
+"Auto-opened by minsky-run's post-spawn PR-creation backstop because the spawned agent finished with exit 0 but did not run \`gh pr create\` (or the URL did not appear in the bounded stdout tail)." \
+"" \
+"Task: \`${task_id}\`" \
+"" \
+"Review the commits on this branch carefully — the agent's edits are present, but its PR description / self-grade is not. Edit this PR body to reflect the actual hypothesis / observation before requesting review." \
+"" \
+"## Hypothesis self-grade" \
+"" \
+"- Predicted: agent runs to completion and opens a PR via \`gh pr create\`" \
+"- Observed: agent finished cleanly but no PR URL appeared in stdout; runner-side backstop opened this PR" \
+"- Match: partial" \
+"- Lesson: the brief's \`gh pr create\` step is necessary but not always sufficient; the runner backstop is the durable safety net (devin-spawn-no-pr-opened pivot, 2026-05-18)")"
+        pr_url="$(_gh_in_host "$host" "$gh_host" pr create \
+                    --base "$default_branch" --head "$branch" \
+                    --title "$backstop_title" \
+                    --body "$backstop_body" 2>/dev/null || true)"
+      fi
+    fi
     notes="openhands exited 0; ${duration_ms}ms"
   elif [[ "$exit_code" -eq 124 ]]; then
     # GNU timeout(1) exits 124 when the watchdog fires.
