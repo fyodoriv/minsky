@@ -30,6 +30,7 @@ import {
   type CtoAuditSeam,
   type MetricsRenderSeam,
   type SnapshotSeam,
+  type TaskRotationSeam,
   buildDaemonBrief,
   buildLocalBrief,
   extractOpenP0TaskIds,
@@ -1626,6 +1627,185 @@ describe("tick-loop / daemon / runDaemon", () => {
     const lockExists = existsSync(join(tmp, "task-alpha.lock"));
     expect(lockExists).toBe(false);
     rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // ---- task-rotation wire-in (`daemon-task-rotation-on-completion`) ------
+  //
+  // These tests cover the wire-in in `runDaemon` → `maybeRunTaskRotation`.
+  // The pure decision + I/O wrapper semantics are tested in
+  // `daemon-task-rotation.test.ts` + `task-completion-detector.test.ts`;
+  // here we only verify that the daemon dispatches into `runTaskRotation`
+  // for the right iteration shapes, emits the `tick-loop.task-rotation`
+  // span, and honours the seam-omitted / operator-quiet skip-fast guards.
+
+  /**
+   * Build a `TaskRotationSeam` whose three sub-seams record their calls.
+   * `tasksMdHasBlock` controls whether the synthetic TASKS.md contains
+   * the task block (drives the `block-absent` short-circuit). `mergedPrs`
+   * defaults to an empty list (drives the `no-merged-pr` verdict — useful
+   * for the operator-quiet skip-fast tests).
+   */
+  function makeTaskRotationSeam(opts: {
+    tasksMdHasBlock?: boolean;
+    taskId?: string;
+    mergedPrs?: ReadonlyArray<{ readonly number: number; readonly title: string }>;
+  } = {}): {
+    readonly seam: TaskRotationSeam;
+    readonly getTasksMdCalls: { count: number };
+    readonly listMergedPrsCalls: { count: number };
+    readonly applyRemovalCalls: Array<{
+      taskId: string;
+      viaPrNumber: number;
+      commitMessage: string;
+    }>;
+  } {
+    const taskId = opts.taskId ?? "shipped-task";
+    const tasksMdHasBlock = opts.tasksMdHasBlock ?? false;
+    const mergedPrs = opts.mergedPrs ?? [];
+    // No `**Status**:` field — the criteria checker falls through to the
+    // merged-PR + acceptance path, which is what the wire-in needs to
+    // exercise the removal verdict. Operator-veto (`**Status**: in-progress`)
+    // is covered by the pure unit tests in `task-completion-detector.test.ts`.
+    const tasksMd = tasksMdHasBlock
+      ? `# Tasks\n\n## P0\n\n- [ ] \`${taskId}\` — does a thing\n  - **ID**: ${taskId}\n  - **Acceptance**: TBD\n`
+      : "# Tasks\n\n## P0\n\n- [ ] `other-task` — different\n  - **ID**: other-task\n";
+    const getTasksMdCalls = { count: 0 };
+    const listMergedPrsCalls = { count: 0 };
+    const applyRemovalCalls: Array<{
+      taskId: string;
+      viaPrNumber: number;
+      commitMessage: string;
+    }> = [];
+    const seam: TaskRotationSeam = {
+      getTasksMd: async () => {
+        getTasksMdCalls.count++;
+        return tasksMd;
+      },
+      listMergedPrs: async () => {
+        listMergedPrsCalls.count++;
+        return mergedPrs;
+      },
+      applyRemoval: async (input) => {
+        applyRemovalCalls.push({
+          taskId: input.taskId,
+          viaPrNumber: input.viaPrNumber,
+          commitMessage: input.commitMessage,
+        });
+      },
+    };
+    return { seam, getTasksMdCalls, listMergedPrsCalls, applyRemovalCalls };
+  }
+
+  it("task-rotation wire-in: block-absent (already rotated by a prior iteration) emits a skipped span without listing PRs", async () => {
+    const recorder = new SpanRecorder();
+    const tr = makeTaskRotationSeam({ tasksMdHasBlock: false });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      taskRotation: tr.seam,
+    });
+    expect(tr.getTasksMdCalls.count).toBe(1);
+    // cheap gate: never reached the `gh pr list` round-trip
+    expect(tr.listMergedPrsCalls.count).toBe(0);
+    expect(tr.applyRemovalCalls).toHaveLength(0);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["task-rotation.outcome"]).toBe("skipped");
+    expect(spans[0]?.attributes["task-rotation.reason"]).toBe("block-absent");
+  });
+
+  it("task-rotation wire-in: merged PR present + acceptance ok triggers removal + emits a removed span tagged with the via_pr_number", async () => {
+    const recorder = new SpanRecorder();
+    // FIXTURE_TASKS_MD picks `alpha` first; reuse that ID so the
+    // iteration's `taskId` matches the block we're rotating.
+    const tr = makeTaskRotationSeam({
+      tasksMdHasBlock: true,
+      taskId: "alpha",
+      mergedPrs: [{ number: 309, title: "feat(alpha): substrate" }],
+    });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+      taskRotation: tr.seam,
+    });
+    expect(tr.getTasksMdCalls.count).toBe(1);
+    expect(tr.listMergedPrsCalls.count).toBe(1);
+    expect(tr.applyRemovalCalls).toHaveLength(1);
+    expect(tr.applyRemovalCalls[0]?.taskId).toBe("alpha");
+    expect(tr.applyRemovalCalls[0]?.viaPrNumber).toBe(309);
+    expect(tr.applyRemovalCalls[0]?.commitMessage).toContain("auto-remove");
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.attributes["task-rotation.outcome"]).toBe("removed");
+    expect(spans[0]?.attributes["task-rotation.via_pr_number"]).toBe(309);
+  });
+
+  it("task-rotation wire-in: omitted seam (production daemons predating this seam) keeps working unchanged", async () => {
+    const recorder = new SpanRecorder();
+    const result = await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      emit: (e: TickSpan) => recorder.record(e),
+    });
+    expect(result.iterations.every((i) => i.status === "completed")).toBe(true);
+    const spans = recorder.spans.filter((s) => s.name === "tick-loop.task-rotation");
+    expect(spans).toHaveLength(0);
+  });
+
+  it("task-rotation wire-in: paused iteration does NOT fire (operator-quiet — never reads TASKS.md)", async () => {
+    const tr = makeTaskRotationSeam({ tasksMdHasBlock: true });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: pausedNow(),
+      budgetGuard: normalBudgetGuard(),
+      sleep: noSleep,
+      taskRotation: tr.seam,
+    });
+    expect(tr.getTasksMdCalls.count).toBe(0);
+    expect(tr.listMergedPrsCalls.count).toBe(0);
+    expect(tr.applyRemovalCalls).toHaveLength(0);
+  });
+
+  it("task-rotation wire-in: budget-paused iteration does NOT fire (cheap-gate before any I/O)", async () => {
+    const tr = makeTaskRotationSeam({ tasksMdHasBlock: true });
+    await runDaemon({
+      tickInterval: 0,
+      maxIterations: 1,
+      dryRun: true,
+      mockClient: new TestFakeMockAnthropic(),
+      tasksMdReader: staticReader(FIXTURE_TASKS_MD),
+      pausedSentinelReader: noPaused(),
+      budgetGuard: pausingBudgetGuard(),
+      sleep: noSleep,
+      taskRotation: tr.seam,
+    });
+    expect(tr.getTasksMdCalls.count).toBe(0);
+    expect(tr.listMergedPrsCalls.count).toBe(0);
+    expect(tr.applyRemovalCalls).toHaveLength(0);
   });
 
   // ---- TASKS.md auto-lint-fix wire-in (`daemon-tasks-md-auto-lint-fix`) ---

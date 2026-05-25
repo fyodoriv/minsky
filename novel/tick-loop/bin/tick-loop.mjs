@@ -89,8 +89,11 @@ import {
   createBodyAwarePrePrLintRun,
   createFileBackedChangelogReader,
   createFileBackedCtoAuditLock,
+  createFileBackedGetTasksMd,
   createFileBackedLastRenderedDate,
   createFileBackedSnapshotExists,
+  createGhMergedPrList,
+  createGitBackedApplyRemoval,
   createGitGhSignalsBuilder,
   createOpenPrFetcher,
   createPnpmMetricsRender,
@@ -1271,6 +1274,37 @@ const metricsRenderSeam = (() => {
   };
 })();
 
+// `daemon-task-rotation-on-completion` (P0) wire-in slice — CLI-side
+// construction of the `TaskRotationSeam`. Three sub-seams:
+//   - file-backed `TASKS.md` reader (re-reads on each iteration so a
+//     concurrent agent's writes are observed);
+//   - `gh pr list --state merged --json number,title --limit 50` to
+//     resolve the matching merged-PR set (cheap-gate AFTER the
+//     `block-absent` short-circuit — steady state cost is zero `gh`
+//     round-trips);
+//   - `git commit --only TASKS.md -m <auto-message>` to land the
+//     block-stripped TASKS.md on the daemon's branch.
+//
+// Opt-in via `MINSKY_TASK_ROTATION_ENABLE=1` (separate from the
+// `MINSKY_TASK_ROTATION=off` *runtime veto* in `runTaskRotation` — the
+// enable flag controls whether the seam is even constructed; the off
+// flag is the operator's escape after enable). Default disabled so
+// supervisor daemons predating this slice keep working unchanged.
+// Idempotent: rotation only fires when criteria-checker decides the
+// task is shipped AND the block exists; the runner's three cheap
+// gates make redundant invocations a noop.
+const taskRotationSeam = (() => {
+  if (process.env.MINSKY_TASK_ROTATION_ENABLE !== "1") return undefined;
+  return {
+    getTasksMd: createFileBackedGetTasksMd(resolve(minskyHome, "TASKS.md")),
+    listMergedPrs: createGhMergedPrList({ cwd: minskyHome }),
+    applyRemoval: createGitBackedApplyRemoval({
+      tasksMdPath: resolve(minskyHome, "TASKS.md"),
+      cwd: minskyHome,
+    }),
+  };
+})();
+
 const ntfyTopic = process.env.MINSKY_NTFY_TOPIC;
 const notifier =
   ntfyTopic === undefined || ntfyTopic.trim() === ""
@@ -1343,6 +1377,15 @@ if (metricsRenderSeam !== undefined) {
 } else {
   process.stdout.write(
     "[tick-loop] no daily metrics render wired (set MINSKY_CHANGELOG_ENABLE=1 to refresh METRICS.md daily)\n",
+  );
+}
+if (taskRotationSeam !== undefined) {
+  process.stdout.write(
+    "[tick-loop] task rotation wired (file-backed TASKS.md reader + gh pr list --state merged + git commit --only TASKS.md)\n",
+  );
+} else {
+  process.stdout.write(
+    "[tick-loop] no task rotation wired (set MINSKY_TASK_ROTATION_ENABLE=1 to auto-remove shipped task blocks from TASKS.md)\n",
   );
 }
 
@@ -1637,6 +1680,10 @@ const result = await runDaemon({
   // Optional daily-metrics-render seam; same umbrella as the snapshot seam
   // (it consumes the snapshot file and writes METRICS.md).
   ...(metricsRenderSeam !== undefined ? { metricsRender: metricsRenderSeam } : {}),
+  // Optional task-rotation seam (`daemon-task-rotation-on-completion`);
+  // opt-in via MINSKY_TASK_ROTATION_ENABLE=1. Closes the orphan-task drift
+  // class — auto-removes TASKS.md blocks whose substrate has merged.
+  ...(taskRotationSeam !== undefined ? { taskRotation: taskRotationSeam } : {}),
   // Outer lint-gate verification — always active; no env opt-in.
   preLintRun,
   // TASKS.md auto-lint-fix — always active; runs once per completed
