@@ -408,6 +408,286 @@ _run_bash_skeleton_probes() {
   return "$_bd_skeleton_crit_fail"
 }
 
+# ── iter-once probe body (shared by `minsky --once` and the deprecated
+#    `iter-once` alias) ────────────────────────────────────────────────
+#
+# Single source of truth for the operator's "run one iteration, show me
+# everything" tight-loop. Two callers:
+#   - `minsky --once <host>` (the new canonical form per rule #16 CLI
+#     consolidation — flag on no-args entry).
+#   - `minsky iter-once <host>` (deprecated alias, banner + delegation).
+#
+# Args:
+#   $1            host-dir (REQUIRED; absolute or relative)
+#   $2..$N        flags: --live, --no-capture
+#
+# Behavior unchanged from PR #867: defaults to --dry-run (no agent
+# spawn). `--live` flips to real spawn. Tees all I/O to
+# <host>/.minsky/iter-once.log. Prints summary block on exit.
+#
+# Returns: the bash runner's exit code (caller propagates).
+#
+# Source: 2026-05-25 PR #867 (introduced as iter-once subcommand);
+# rule #16 CLI consolidation corollary (2026-05-25 follow-up — fold
+# into `minsky --once`); rule #1 (don't reinvent — wraps the existing
+# bin/minsky-run.sh --max-iterations=1 path).
+_run_iter_once() {
+  local _io_host=""
+  local _io_live=0
+  local _io_no_capture=0
+  local _io_a
+  for _io_a in "$@"; do
+    case "$_io_a" in
+      --live) _io_live=1 ;;
+      --no-capture) _io_no_capture=1 ;;
+      -h|--help)
+        cat <<'IUSAGE'
+Usage:
+  minsky --once <host-dir> [--live] [--no-capture]
+
+Options:
+  --live          Spawn the agent for real (default: --dry-run, no spawn)
+  --no-capture    Disable failure-capture for this iteration (sets
+                  MINSKY_CAPTURE_FAILURES=0)
+  -h, --help      Print this help
+
+Output: <host-dir>/.minsky/iter-once.log — full stdout+stderr of the
+iteration; survives across runs (appended).
+
+After exit, the summary line names:
+  - the verdict from the JSONL ledger row
+  - the ledger path: <host-dir>/.minsky/experiment-store/cross-repo/<task-id>.jsonl
+  - the failure-capture path: <host-dir>/.minsky/failures/<latest>/
+    (only if the verdict was non-validated AND capture was on)
+IUSAGE
+        return 0
+        ;;
+      --*) echo "--once: unknown flag: $_io_a" >&2; return 2 ;;
+      *)
+        if [ -z "$_io_host" ]; then
+          _io_host="$_io_a"
+        else
+          echo "--once: unexpected arg: $_io_a" >&2; return 2
+        fi
+        ;;
+    esac
+  done
+  if [ -z "$_io_host" ]; then
+    echo "--once: host-dir required" >&2
+    echo "  usage: minsky --once <host-dir> [--live] [--no-capture]" >&2
+    return 2
+  fi
+  if [ ! -d "$_io_host" ]; then
+    echo "--once: host-dir not found: $_io_host" >&2
+    return 1
+  fi
+  _io_host="$(cd "$_io_host" && pwd)"
+  local _io_hosts_parent
+  _io_hosts_parent="$(dirname "$_io_host")"
+  local _io_real_bin
+  _io_real_bin=$(_minsky_realpath "$0")
+  local _io_repo_dir
+  _io_repo_dir=$(dirname "$(dirname "$_io_real_bin")")
+  local _io_runner="$_io_repo_dir/bin/minsky-run.sh"
+  if [ ! -x "$_io_runner" ]; then
+    echo "--once: $_io_runner not executable (run: chmod +x $_io_runner)" >&2
+    return 1
+  fi
+  mkdir -p "$_io_host/.minsky"
+  local _io_log="$_io_host/.minsky/iter-once.log"
+  {
+    echo ""
+    echo "=== minsky --once @ $(date -u +%Y-%m-%dT%H:%M:%S.000Z) ==="
+    echo "host:        $_io_host"
+    echo "mode:        $([ "$_io_live" = "1" ] && echo "LIVE (agent will spawn)" || echo "dry-run (no agent spawn)")"
+    echo "capture:     $([ "$_io_no_capture" = "1" ] && echo "OFF" || echo "on")"
+    echo "---"
+  } >> "$_io_log"
+
+  local _io_runner_args=(--hosts-dir "$_io_hosts_parent" --max-iterations 1 --iterations-per-host 1)
+  if [ "$_io_live" != "1" ]; then
+    _io_runner_args+=(--dry-run)
+  fi
+  if [ "$_io_no_capture" = "1" ]; then
+    export MINSKY_CAPTURE_FAILURES=0
+  fi
+
+  echo "--once: running $_io_runner ${_io_runner_args[*]}" >&2
+  set +e
+  bash "$_io_runner" "${_io_runner_args[@]}" 2>&1 | tee -a "$_io_log"
+  local _io_run_exit=${PIPESTATUS[0]}
+  set -e
+
+  # Summarize.
+  local _io_ledger_dir="$_io_host/.minsky/experiment-store/cross-repo"
+  local _io_latest_ledger=""
+  if [ -d "$_io_ledger_dir" ]; then
+    _io_latest_ledger=$(/usr/bin/find "$_io_ledger_dir" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null \
+      | xargs -0 ls -t 2>/dev/null \
+      | head -1 || true)
+  fi
+  local _io_latest_verdict="(unknown)"
+  local _io_latest_notes=""
+  local _io_latest_pr_url=""
+  if [ -n "$_io_latest_ledger" ] && [ -f "$_io_latest_ledger" ]; then
+    _io_latest_verdict=$(tail -1 "$_io_latest_ledger" | jq -r '.verdict // "(no-verdict-field)"' 2>/dev/null || echo "(parse-error)")
+    _io_latest_notes=$(tail -1 "$_io_latest_ledger" | jq -r '.notes // ""' 2>/dev/null || echo "")
+    _io_latest_pr_url=$(tail -1 "$_io_latest_ledger" | jq -r '.pr_url // ""' 2>/dev/null || echo "")
+  fi
+  local _io_latest_failure_dir=""
+  local _io_latest_duration_ms=""
+  if [ -d "$_io_host/.minsky/failures" ]; then
+    _io_latest_failure_dir=$(/usr/bin/find "$_io_host/.minsky/failures" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
+      | xargs -0 ls -dt 2>/dev/null \
+      | head -1 || true)
+    if [ -n "$_io_latest_failure_dir" ] && [ -f "$_io_latest_failure_dir/metadata.json" ]; then
+      _io_latest_duration_ms=$(jq -r '.duration_ms // ""' "$_io_latest_failure_dir/metadata.json" 2>/dev/null || echo "")
+    fi
+  fi
+
+  echo ""
+  echo "=== --once summary ==="
+  echo "  verdict:        $_io_latest_verdict"
+  if [ -n "$_io_latest_duration_ms" ] && [ "$_io_latest_duration_ms" != "0" ] && [ "$_io_latest_duration_ms" != "null" ]; then
+    echo "  spawn duration: ${_io_latest_duration_ms}ms"
+  fi
+  if [ -n "$_io_latest_notes" ] && [ "$_io_latest_notes" != "null" ]; then
+    local _io_notes_short
+    _io_notes_short=$(printf '%s' "$_io_latest_notes" | head -c 120)
+    [ "${#_io_latest_notes}" -gt 120 ] && _io_notes_short="${_io_notes_short}..."
+    echo "  notes:          $_io_notes_short"
+  fi
+  if [ -n "$_io_latest_pr_url" ] && [ "$_io_latest_pr_url" != "null" ] && [ "$_io_latest_pr_url" != "" ]; then
+    echo "  pr url:         $_io_latest_pr_url"
+  fi
+  echo "  ledger row:     ${_io_latest_ledger:-(none)}"
+  echo "  iter log:       $_io_log"
+  if [ -n "$_io_latest_failure_dir" ] && [ "$_io_latest_verdict" != "validated" ] && [ "$_io_latest_verdict" != "planned" ]; then
+    echo "  failure capture: $_io_latest_failure_dir"
+    echo "                   (minsky logs --failures $_io_host --latest)"
+  fi
+  return "$_io_run_exit"
+}
+
+# ── tail-failures probe body (shared by `minsky logs --failures` and
+#    the deprecated `tail-failures` alias) ────────────────────────────
+#
+# Single source of truth for the operator's "show me what just broke"
+# surface. Reads <host>/.minsky/failures/*/ written by the capture
+# pattern (PR #866).
+#
+# Args:
+#   $1..$N        host-dir + flags (--count N, --latest)
+#
+# Defaults: host = $PWD, --count = 5.
+#
+# Source: 2026-05-25 PR #867 (introduced as tail-failures subcommand);
+# rule #16 CLI consolidation corollary (2026-05-25 follow-up — fold
+# into `minsky logs --failures`).
+_run_tail_failures() {
+  local _tf_host=""
+  local _tf_count=5
+  local _tf_latest=0
+  local _tf_a
+  while [ $# -gt 0 ]; do
+    _tf_a="$1"
+    case "$_tf_a" in
+      --count)
+        [ $# -ge 2 ] || { echo "--count requires a value" >&2; return 2; }
+        _tf_count="$2"; shift 2 ;;
+      --latest) _tf_latest=1; shift ;;
+      -h|--help)
+        cat <<'TUSAGE'
+Usage:
+  minsky logs --failures [host-dir] [--count N] [--latest]
+
+Default host-dir is $PWD. Default --count is 5.
+
+  --count N       Show the N most recent capture dirs (default 5)
+  --latest        Shortcut: show JUST the most recent capture dir's
+                  metadata.json + brief.md (head) + stdout.log (tail).
+                  Operator's "show me what broke last" one-liner.
+
+Reads <host-dir>/.minsky/failures/*/ written by the failure-capture
+pattern (PR #866). If the dir is empty or missing, prints a friendly
+message and exits 0.
+TUSAGE
+        return 0
+        ;;
+      --*) echo "--failures: unknown flag: $_tf_a" >&2; return 2 ;;
+      *)
+        if [ -z "$_tf_host" ]; then
+          _tf_host="$_tf_a"; shift
+        else
+          echo "--failures: unexpected arg: $_tf_a" >&2; return 2
+        fi
+        ;;
+    esac
+  done
+  [ -z "$_tf_host" ] && _tf_host="$PWD"
+  if [ ! -d "$_tf_host" ]; then
+    echo "--failures: host-dir not found: $_tf_host" >&2
+    return 1
+  fi
+  _tf_host="$(cd "$_tf_host" && pwd)"
+  local _tf_failures_dir="$_tf_host/.minsky/failures"
+  if [ ! -d "$_tf_failures_dir" ]; then
+    echo "--failures: no failure-capture dir at $_tf_failures_dir"
+    echo "  (no iterations have failed on this host, or capture is disabled via MINSKY_CAPTURE_FAILURES=0)"
+    return 0
+  fi
+  local _tf_capture_dirs
+  _tf_capture_dirs=$(/usr/bin/find "$_tf_failures_dir" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
+    | xargs -0 ls -dt 2>/dev/null || true)
+  if [ -z "$_tf_capture_dirs" ]; then
+    echo "--failures: $_tf_failures_dir exists but is empty"
+    return 0
+  fi
+  if [ "$_tf_latest" = "1" ]; then
+    local _tf_latest_dir
+    _tf_latest_dir=$(echo "$_tf_capture_dirs" | head -1)
+    echo "=== latest failure capture: $_tf_latest_dir ==="
+    echo ""
+    if [ -f "$_tf_latest_dir/metadata.json" ]; then
+      echo "--- metadata.json ---"
+      if command -v jq >/dev/null 2>&1; then
+        jq . "$_tf_latest_dir/metadata.json"
+      else
+        cat "$_tf_latest_dir/metadata.json"
+      fi
+      echo ""
+    fi
+    if [ -f "$_tf_latest_dir/brief.md" ]; then
+      echo "--- brief.md (first 30 lines) ---"
+      head -30 "$_tf_latest_dir/brief.md"
+      echo ""
+    fi
+    if [ -f "$_tf_latest_dir/stdout.log" ]; then
+      echo "--- stdout.log (last 50 lines) ---"
+      tail -50 "$_tf_latest_dir/stdout.log"
+      echo ""
+    fi
+    echo "(full artifacts at $_tf_latest_dir/)"
+    return 0
+  fi
+  echo "=== last $_tf_count failure captures on $_tf_host ==="
+  echo "$_tf_capture_dirs" | head -"$_tf_count" | while read -r _tf_dir; do
+    [ -z "$_tf_dir" ] && continue
+    local _tf_verdict=""
+    local _tf_duration=""
+    local _tf_task_id=""
+    if [ -f "$_tf_dir/metadata.json" ] && command -v jq >/dev/null 2>&1; then
+      _tf_verdict=$(jq -r '.verdict // "?"' "$_tf_dir/metadata.json" 2>/dev/null)
+      _tf_duration=$(jq -r '.duration_ms // "?"' "$_tf_dir/metadata.json" 2>/dev/null)
+      _tf_task_id=$(jq -r '.task_id // "?"' "$_tf_dir/metadata.json" 2>/dev/null)
+    fi
+    printf "  %-60s  verdict=%s  task=%s  duration_ms=%s\n" "$(basename "$_tf_dir")" "$_tf_verdict" "$_tf_task_id" "$_tf_duration"
+  done
+  echo ""
+  echo "(deep-dive: minsky logs --failures $_tf_host --latest)"
+  return 0
+}
+
 # ── 1. Handle subcommands that DON'T need the repo ──────────
 #
 # `minsky status` / `minsky stop` / `minsky logs` only need
@@ -532,11 +812,30 @@ case "${1:-}" in
     exit 0
     ;;
   logs)
+    # `minsky logs` — tail the daemon stdout log (default).
+    # `minsky logs --failures [host] [--latest|--count N]` — list/show
+    # failure-capture artifacts written by the capture pattern (PR #866).
+    #
+    # The `--failures` mode is the consolidated form of what was
+    # previously its own `tail-failures` subcommand (PR #867). Folded
+    # here per rule #16 CLI consolidation corollary (2026-05-25):
+    # failure-tailing is a refinement of "show me what the daemon did",
+    # not a fundamentally new verb.
+    shift
+    if [ "${1:-}" = "--failures" ]; then
+      shift
+      _run_tail_failures "$@"
+      exit $?
+    fi
     if [ -f "$MINSKY_DAEMON_LOG" ]; then
       exec tail -f "$MINSKY_DAEMON_LOG"
     fi
     echo "no daemon log found at $MINSKY_DAEMON_LOG"
     echo "start minsky with --daemon to enable logging"
+    echo ""
+    echo "subcommands:"
+    echo "  minsky logs --failures [host] [--latest|--count N]"
+    echo "    Tail per-iteration failure-capture artifacts."
     exit 1
     ;;
   reset-host-if-crashed)
@@ -1167,286 +1466,38 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     fi
     ;;
   iter-once)
-    # `minsky iter-once <host-dir> [--live] [--no-capture]` — run
-    # EXACTLY ONE iteration of the bash skeleton against <host-dir>,
-    # tee'ing all I/O to <host-dir>/.minsky/iter-once.log so the
-    # operator can `cat` it without re-running.
+    # DEPRECATED 2026-05-25 — use `minsky --once <host-dir> [--live]
+    # [--no-capture]` instead. Per rule #16 CLI consolidation
+    # corollary: `--once` is a flag on the `minsky` no-args entry
+    # point, not its own verb. The body lives in
+    # `_run_iter_once()` at the top of this file — both this alias
+    # and the `--once` flag share that single source of truth.
     #
-    # Default mode is `--dry-run` (no agent spawn, just plan+record).
-    # That's the safe default for the operator's tight-loop "did my
-    # change to bin/minsky-run.sh do what I expected?" workflow —
-    # zero LLM tokens, zero risk of side effects on the host's
-    # branches.
-    #
-    # `--live` flips to a real spawn — burns tokens, can push commits +
-    # open PRs against the host. Always pair with `bash-doctor` first.
-    #
-    # On exit, prints a one-line summary: verdict + ledger path +
-    # failure-capture path (if any). The operator's mental model is:
-    #
-    #   minsky bash-doctor    # is this machine healthy?
-    #   minsky iter-once foo  # try one dry iteration
-    #   minsky iter-once foo --live  # if dry was good, try a real one
-    #   minsky tail-failures foo  # if something broke, what was it?
-    #
-    # Source: 2026-05-25 retro slice 3 — operator-facing "quick iterate"
-    # surface; rule #1 (don't reinvent — wraps bin/minsky-run.sh's
-    # existing --max-iterations=1 path, no new agent code); rule #4
-    # (everything measurable, everything visible — the iter-once log is
-    # the visible surface).
-    HOST_DIR=""
-    ITER_ONCE_LIVE=0
-    ITER_ONCE_NO_CAPTURE=0
-    shift  # consume `iter-once`
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --live) ITER_ONCE_LIVE=1; shift ;;
-        --no-capture) ITER_ONCE_NO_CAPTURE=1; shift ;;
-        -h|--help)
-          cat <<'IUSAGE'
-Usage:
-  minsky iter-once <host-dir> [--live] [--no-capture]
-
-Options:
-  --live          Spawn the agent for real (default: --dry-run, no spawn)
-  --no-capture    Disable failure-capture for this iteration (sets
-                  MINSKY_CAPTURE_FAILURES=0)
-  -h, --help      Print this help
-
-Output: <host-dir>/.minsky/iter-once.log — full stdout+stderr of the
-iteration; survives across runs (appended).
-
-After exit, the summary line names:
-  - the verdict from the JSONL ledger row
-  - the ledger path: <host-dir>/.minsky/experiment-store/cross-repo/<task-id>.jsonl
-  - the failure-capture path: <host-dir>/.minsky/failures/<latest>/
-    (only if the verdict was non-validated AND capture was on)
-IUSAGE
-          exit 0
-          ;;
-        --*) echo "iter-once: unknown flag: $1" >&2; exit 2 ;;
-        *)
-          if [ -z "$HOST_DIR" ]; then
-            HOST_DIR="$1"; shift
-          else
-            echo "iter-once: unexpected arg: $1" >&2; exit 2
-          fi
-          ;;
-      esac
-    done
-    if [ -z "$HOST_DIR" ]; then
-      echo "iter-once: host-dir required" >&2
-      echo "  usage: minsky iter-once <host-dir> [--live] [--no-capture]" >&2
-      exit 2
+    # The alias is kept (rule #1, no breaking change) and emits a
+    # one-line deprecation banner unless `MINSKY_ITER_ONCE_FOLD=1`
+    # is set (which the no-args dispatch sets to suppress double-
+    # banner noise — though that path uses --once, not iter-once,
+    # so the env var is mainly for paired tests).
+    shift
+    if [ "${MINSKY_ITER_ONCE_FOLD:-0}" != "1" ]; then
+      echo "minsky: NOTE — \`iter-once\` is deprecated; use \`minsky --once <host-dir>\` instead." >&2
     fi
-    if [ ! -d "$HOST_DIR" ]; then
-      echo "iter-once: host-dir not found: $HOST_DIR" >&2
-      exit 1
-    fi
-    # Absolute path so the parent-dir resolution below is unambiguous.
-    HOST_DIR="$(cd "$HOST_DIR" && pwd)"
-    HOSTS_PARENT="$(dirname "$HOST_DIR")"
-    _real_bin=$(_minsky_realpath "$0")
-    _repo_dir=$(dirname "$(dirname "$_real_bin")")
-    RUNNER="$_repo_dir/bin/minsky-run.sh"
-    if [ ! -x "$RUNNER" ]; then
-      echo "iter-once: $RUNNER not executable (run: chmod +x $RUNNER)" >&2
-      exit 1
-    fi
-    # Iter log lives inside the host's .minsky/ — survives the
-    # iteration's own mktemp cleanup.
-    mkdir -p "$HOST_DIR/.minsky"
-    ITER_LOG="$HOST_DIR/.minsky/iter-once.log"
-    {
-      echo ""
-      echo "=== minsky iter-once @ $(date -u +%Y-%m-%dT%H:%M:%S.000Z) ==="
-      echo "host:        $HOST_DIR"
-      echo "mode:        $([ "$ITER_ONCE_LIVE" = "1" ] && echo "LIVE (agent will spawn)" || echo "dry-run (no agent spawn)")"
-      echo "capture:     $([ "$ITER_ONCE_NO_CAPTURE" = "1" ] && echo "OFF" || echo "on")"
-      echo "---"
-    } >> "$ITER_LOG"
-
-    # Dispatch. --max-iterations 1 + --iterations-per-host 1 guarantees
-    # exactly one iteration even if more hosts share the parent.
-    RUNNER_ARGS=(--hosts-dir "$HOSTS_PARENT" --max-iterations 1 --iterations-per-host 1)
-    if [ "$ITER_ONCE_LIVE" != "1" ]; then
-      RUNNER_ARGS+=(--dry-run)
-    fi
-    if [ "$ITER_ONCE_NO_CAPTURE" = "1" ]; then
-      export MINSKY_CAPTURE_FAILURES=0
-    fi
-
-    echo "iter-once: running $RUNNER ${RUNNER_ARGS[*]}" >&2
-    set +e
-    bash "$RUNNER" "${RUNNER_ARGS[@]}" 2>&1 | tee -a "$ITER_LOG"
-    RUN_EXIT=${PIPESTATUS[0]}
-    set -e
-
-    # Summarize: find the JSONL row this iteration wrote (most recent
-    # file under cross-repo/) and the failure-capture (if any).
-    LEDGER_DIR="$HOST_DIR/.minsky/experiment-store/cross-repo"
-    LATEST_LEDGER=""
-    if [ -d "$LEDGER_DIR" ]; then
-      LATEST_LEDGER=$(/usr/bin/find "$LEDGER_DIR" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null \
-        | xargs -0 ls -t 2>/dev/null \
-        | head -1 || true)
-    fi
-    LATEST_VERDICT="(unknown)"
-    LATEST_NOTES=""
-    LATEST_PR_URL=""
-    if [ -n "$LATEST_LEDGER" ] && [ -f "$LATEST_LEDGER" ]; then
-      LATEST_VERDICT=$(tail -1 "$LATEST_LEDGER" | jq -r '.verdict // "(no-verdict-field)"' 2>/dev/null || echo "(parse-error)")
-      LATEST_NOTES=$(tail -1 "$LATEST_LEDGER" | jq -r '.notes // ""' 2>/dev/null || echo "")
-      LATEST_PR_URL=$(tail -1 "$LATEST_LEDGER" | jq -r '.pr_url // ""' 2>/dev/null || echo "")
-    fi
-    LATEST_FAILURE_DIR=""
-    LATEST_DURATION_MS=""
-    if [ -d "$HOST_DIR/.minsky/failures" ]; then
-      LATEST_FAILURE_DIR=$(/usr/bin/find "$HOST_DIR/.minsky/failures" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
-        | xargs -0 ls -dt 2>/dev/null \
-        | head -1 || true)
-      if [ -n "$LATEST_FAILURE_DIR" ] && [ -f "$LATEST_FAILURE_DIR/metadata.json" ]; then
-        LATEST_DURATION_MS=$(jq -r '.duration_ms // ""' "$LATEST_FAILURE_DIR/metadata.json" 2>/dev/null || echo "")
-      fi
-    fi
-
-    echo ""
-    echo "=== iter-once summary ==="
-    echo "  verdict:        $LATEST_VERDICT"
-    if [ -n "$LATEST_DURATION_MS" ] && [ "$LATEST_DURATION_MS" != "0" ] && [ "$LATEST_DURATION_MS" != "null" ]; then
-      echo "  spawn duration: ${LATEST_DURATION_MS}ms"
-    fi
-    if [ -n "$LATEST_NOTES" ] && [ "$LATEST_NOTES" != "null" ]; then
-      # Truncate notes to 120 chars so the summary stays scannable
-      _notes_short=$(printf '%s' "$LATEST_NOTES" | head -c 120)
-      [ "${#LATEST_NOTES}" -gt 120 ] && _notes_short="${_notes_short}..."
-      echo "  notes:          $_notes_short"
-    fi
-    if [ -n "$LATEST_PR_URL" ] && [ "$LATEST_PR_URL" != "null" ] && [ "$LATEST_PR_URL" != "" ]; then
-      echo "  pr url:         $LATEST_PR_URL"
-    fi
-    echo "  ledger row:     ${LATEST_LEDGER:-(none)}"
-    echo "  iter log:       $ITER_LOG"
-    if [ -n "$LATEST_FAILURE_DIR" ] && [ "$LATEST_VERDICT" != "validated" ] && [ "$LATEST_VERDICT" != "planned" ]; then
-      echo "  failure capture: $LATEST_FAILURE_DIR"
-      echo "                   (cat $LATEST_FAILURE_DIR/metadata.json | jq .)"
-      echo "                   (minsky tail-failures $HOST_DIR --latest)"
-    fi
-    exit "$RUN_EXIT"
+    _run_iter_once "$@"
+    exit $?
     ;;
   tail-failures)
-    # `minsky tail-failures [host-dir] [--count N] [--latest]` — show
-    # the most recent failure-capture dirs (from PR #866's failure-
-    # capture pattern) for a host.
-    #
-    # Without args, defaults to $PWD as the host.
-    # Default --count is 5 (most recent 5 capture dirs).
-    # --latest is a shortcut for --count 1 + cat metadata.json + show
-    #   the brief + tail of stdout.log; the operator's "show me what
-    #   broke last" one-liner.
-    #
-    # Source: 2026-05-25 retro slice 4 — operator-facing "quick detect"
-    # surface; rule #4 (everything measurable, everything visible).
-    HOST_DIR=""
-    TAIL_COUNT=5
-    TAIL_LATEST=0
-    shift  # consume `tail-failures`
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --count)
-          [ $# -ge 2 ] || { echo "--count requires a value" >&2; exit 2; }
-          TAIL_COUNT="$2"; shift 2 ;;
-        --latest) TAIL_LATEST=1; shift ;;
-        -h|--help)
-          cat <<'TUSAGE'
-Usage:
-  minsky tail-failures [host-dir] [--count N] [--latest]
-
-Default host-dir is $PWD. Default --count is 5.
-
-  --count N       Show the N most recent capture dirs (default 5)
-  --latest        Shortcut: show JUST the most recent capture dir's
-                  metadata.json + brief.md (head) + stdout.log (tail).
-                  Operator's "show me what broke last" one-liner.
-
-Reads <host-dir>/.minsky/failures/*/ written by the failure-capture
-pattern (PR #866). If the dir is empty or missing, prints a friendly
-message and exits 0.
-TUSAGE
-          exit 0
-          ;;
-        --*) echo "tail-failures: unknown flag: $1" >&2; exit 2 ;;
-        *)
-          if [ -z "$HOST_DIR" ]; then
-            HOST_DIR="$1"; shift
-          else
-            echo "tail-failures: unexpected arg: $1" >&2; exit 2
-          fi
-          ;;
-      esac
-    done
-    [ -z "$HOST_DIR" ] && HOST_DIR="$PWD"
-    if [ ! -d "$HOST_DIR" ]; then
-      echo "tail-failures: host-dir not found: $HOST_DIR" >&2
-      exit 1
+    # DEPRECATED 2026-05-25 — use `minsky logs --failures [host]
+    # [--latest|--count N]` instead. Per rule #16 CLI consolidation
+    # corollary: failure-tailing is a refinement of `logs`, not its
+    # own verb. The body lives in `_run_tail_failures()` at the top
+    # of this file — both this alias and the `--failures` flag on
+    # `logs` share that single source of truth.
+    shift
+    if [ "${MINSKY_TAIL_FAILURES_FOLD:-0}" != "1" ]; then
+      echo "minsky: NOTE — \`tail-failures\` is deprecated; use \`minsky logs --failures\` instead." >&2
     fi
-    HOST_DIR="$(cd "$HOST_DIR" && pwd)"
-    FAILURES_DIR="$HOST_DIR/.minsky/failures"
-    if [ ! -d "$FAILURES_DIR" ]; then
-      echo "tail-failures: no failure-capture dir at $FAILURES_DIR"
-      echo "  (no iterations have failed on this host, or capture is disabled via MINSKY_CAPTURE_FAILURES=0)"
-      exit 0
-    fi
-    # Sort by mtime desc.
-    CAPTURE_DIRS=$(/usr/bin/find "$FAILURES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null \
-      | xargs -0 ls -dt 2>/dev/null || true)
-    if [ -z "$CAPTURE_DIRS" ]; then
-      echo "tail-failures: $FAILURES_DIR exists but is empty"
-      exit 0
-    fi
-    if [ "$TAIL_LATEST" = "1" ]; then
-      LATEST=$(echo "$CAPTURE_DIRS" | head -1)
-      echo "=== latest failure capture: $LATEST ==="
-      echo ""
-      if [ -f "$LATEST/metadata.json" ]; then
-        echo "--- metadata.json ---"
-        if command -v jq >/dev/null 2>&1; then
-          jq . "$LATEST/metadata.json"
-        else
-          cat "$LATEST/metadata.json"
-        fi
-        echo ""
-      fi
-      if [ -f "$LATEST/brief.md" ]; then
-        echo "--- brief.md (first 30 lines) ---"
-        head -30 "$LATEST/brief.md"
-        echo ""
-      fi
-      if [ -f "$LATEST/stdout.log" ]; then
-        echo "--- stdout.log (last 50 lines) ---"
-        tail -50 "$LATEST/stdout.log"
-        echo ""
-      fi
-      echo "(full artifacts at $LATEST/)"
-      exit 0
-    fi
-    # Default: list up to TAIL_COUNT dirs with a one-line summary each.
-    echo "=== last $TAIL_COUNT failure captures on $HOST_DIR ==="
-    echo "$CAPTURE_DIRS" | head -"$TAIL_COUNT" | while read -r dir; do
-      [ -z "$dir" ] && continue
-      verdict=""
-      duration=""
-      task_id=""
-      if [ -f "$dir/metadata.json" ] && command -v jq >/dev/null 2>&1; then
-        verdict=$(jq -r '.verdict // "?"' "$dir/metadata.json" 2>/dev/null)
-        duration=$(jq -r '.duration_ms // "?"' "$dir/metadata.json" 2>/dev/null)
-        task_id=$(jq -r '.task_id // "?"' "$dir/metadata.json" 2>/dev/null)
-      fi
-      printf "  %-60s  verdict=%s  task=%s  duration_ms=%s\n" "$(basename "$dir")" "$verdict" "$task_id" "$duration"
-    done
-    echo ""
-    echo "(deep-dive: minsky tail-failures $HOST_DIR --latest)"
-    exit 0
+    _run_tail_failures "$@"
+    exit $?
     ;;
   report)
     # `minsky report [--baseline | --delta] [--repo <path>]` — print
@@ -1960,6 +2011,37 @@ EOF
     ;;
 esac
 
+# ── 1c. Early `--once` dispatch (no repo resolver needed) ────────
+#
+# `minsky --once <host>` is a fast probe — it shells out to
+# bin/minsky-run.sh which is found via `realpath $0`, not via the
+# MINSKY_REPO_PATH resolver below. Dispatch it here BEFORE the
+# resolver runs so that bats tests (which set HOME to a tmp dir
+# without ~/minsky) still work.
+#
+# This is the same trade-off the subcommand-case dispatch above
+# makes: every subcommand that doesn't need MINSKY_REPO_PATH should
+# resolve before the resolver, because the resolver is the slow +
+# brittle part of startup.
+_early_use_once=0
+_early_once_args=()
+_early_in_once=0
+for _early_arg in "$@"; do
+  if [ "$_early_in_once" = "1" ]; then
+    _early_once_args+=("$_early_arg")
+    continue
+  fi
+  if [ "$_early_arg" = "--once" ]; then
+    _early_use_once=1
+    _early_in_once=1
+  fi
+done
+if [ "$_early_use_once" = "1" ]; then
+  # Safe-expansion idiom: bash 3.2 + `set -u` raises on empty arrays.
+  _run_iter_once "${_early_once_args[@]+"${_early_once_args[@]}"}"
+  exit $?
+fi
+
 # ── 2. Resolve the minsky repo via the pure `resolveMinskyRepo` ─
 #
 # The resolver lives in TypeScript; ship a tiny node inline-eval that
@@ -2045,6 +2127,9 @@ fi
 MINSKY_ARGS=()
 USE_BASH_RUNNER="${MINSKY_BASH_RUNNER:-0}"
 USE_TRANSFORM="0"
+# `--once` is handled in the EARLY-dispatch block before the resolver
+# runs (search for "1c. Early --once dispatch" above), so we don't
+# parse it here. If the user passed `--once` we already exited.
 for arg in "$@"; do
   if [ "$arg" = "--local" ]; then
     export MINSKY_LLM_PROVIDER="local-only"
