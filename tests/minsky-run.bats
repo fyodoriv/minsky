@@ -606,6 +606,33 @@ EOF
   [[ "$output" == *"--report-only requires existing"* ]]
 }
 
+@test "bin/minsky --transform dispatches to bin/minsky-default-session.sh against \$PWD" {
+  # Vertical slice 3 dispatch wiring: confirms `minsky --transform`
+  # from any folder routes to the orchestrator with PWD as the host.
+  # Uses the worktree's actual bin/minsky + bin/minsky-default-session.sh
+  # (both already in place — no stubbing). The `--baseline-only` flag
+  # short-circuits the run loop, so the test exercises the dispatch
+  # chain end-to-end without needing openhands.
+  workdir="$TMPDIR_TEST/transform-workdir"
+  mkdir -p "$workdir"
+  # Make the workdir look like a git repo so bootstrap+baseline work.
+  (cd "$workdir" && git init -q && git symbolic-ref HEAD refs/heads/main && \
+     git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/transform-fixture.git)
+  printf '# Tasks\n' > "$workdir/TASKS.md"
+  printf '# fake\n' > "$workdir/README.md"
+
+  MINSKY_REPO="$REPO_ROOT" XDG_CONFIG_HOME="$TMPDIR_TEST/xdg-tx" \
+    run bash -c "cd '$workdir' && '$REPO_ROOT/bin/minsky' --transform --baseline-only 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"orchestrating bootstrap + baseline + run + report"* ]]
+  [[ "$output" == *"baseline-only mode"* ]]
+
+  # Bootstrap + baseline both ran end-to-end against PWD.
+  [ -f "$workdir/.minsky/repo.yaml" ]
+  [ -f "$workdir/.minsky/baseline.json" ]
+}
+
 @test "bin/minsky-default-session.sh --report-only emits delta against existing baseline" {
   session="$REPO_ROOT/bin/minsky-default-session.sh"
   fixture="$TMPDIR_TEST/default-session-report"
