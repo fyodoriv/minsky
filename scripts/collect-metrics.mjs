@@ -217,6 +217,152 @@ function collectWristDwell() {
   return { value: "no watch-surface telemetry yet (M1 gap)", higherIsBetter: false };
 }
 
+// ---- Ledger-backed collectors (.minsky/transform-runs.jsonl) ----
+//
+// The MAPE-K Monitor surface (PR #824) writes one record per
+// `minsky --transform` session to `.minsky/transform-runs.jsonl` in
+// every host repo. PRs #825 + #827 ship `transform_trend.py` (per-host
+// Analyse) + `transform_knowledge.py` (cross-host Knowledge). The
+// three collectors below wrap those scripts to fulfil M1.2 / M1.5 /
+// M1.7 — closing 3 of the 5 metric-only milestone-alignment gaps left
+// after PR #831 fixed the path-mismatch bug. Per the operator brief
+// "doesn't reinvent / uses existing solutions": the ledger + the
+// aggregators exist; this is the no-reinvent wire-up.
+
+/**
+ * Run a python3 script and parse its stdout as JSON. Returns `null` on
+ * any failure (script missing, exit≠0, invalid JSON). The collectors
+ * below use this to defend against missing python3, missing ledger,
+ * etc. — each fallback path produces an honest descriptive value
+ * (never `(stub)`).
+ */
+function runPyJson(scriptPath, args) {
+  try {
+    const stdout = execFileSync("python3", [scriptPath, ...args], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+// ---- Pure formatters (exported so paired tests can hit them
+//      without spawning subprocesses) -------------------------------
+//
+// Each `format*` function takes the parsed JSON from the matching
+// python script and returns the same `{ value, higherIsBetter }`
+// shape every collector emits. The Honest-zero invariant (Ries 2011,
+// rule #10) is enforced here: `null` input → honest descriptive
+// string, NEVER `(stub)`. Tests can mock-feed any of the n=0 / no-
+// fleet / populated cases without going through `execFileSync`.
+
+/**
+ * @param {string | undefined} hostsDir
+ * @param {{ host_count?: number, per_host?: Array<{ session_count: number, lint_pass_fraction: number | null }> } | null} data
+ */
+export function formatFleetStability(hostsDir, data) {
+  if (!hostsDir) {
+    return {
+      value: "no fleet — set $MINSKY_HOSTS_DIR to aggregate across hosts",
+      higherIsBetter: true,
+    };
+  }
+  if (data === null) return null;
+  if ((data.host_count ?? 0) === 0) {
+    return { value: `n=0 hosts with ledger data under ${hostsDir}`, higherIsBetter: true };
+  }
+  let totalSessions = 0;
+  let weightedPass = 0;
+  for (const h of data.per_host ?? []) {
+    if (typeof h.lint_pass_fraction !== "number") continue;
+    totalSessions += h.session_count;
+    weightedPass += h.session_count * h.lint_pass_fraction;
+  }
+  if (totalSessions === 0) {
+    return {
+      value: `n=0 sessions across ${data.host_count} hosts (fleet observed, no iterations yet)`,
+      higherIsBetter: true,
+    };
+  }
+  const pct = ((weightedPass / totalSessions) * 100).toFixed(1);
+  return {
+    value: `${pct}% lint-pass (${data.host_count} hosts, ${totalSessions} sessions)`,
+    higherIsBetter: true,
+  };
+}
+
+/**
+ * @param {{ session_count: number, files_delta_per_session: number[], tests_delta_per_session: number[], loc_delta_per_session: number[] } | null} data
+ */
+export function formatSessionConvertsRepo(data) {
+  if (data === null) {
+    return {
+      value: "n=0 sessions in local ledger (ledger not yet created)",
+      higherIsBetter: true,
+    };
+  }
+  if (data.session_count === 0) {
+    return { value: "n=0 sessions in local ledger", higherIsBetter: true };
+  }
+  let converted = 0;
+  for (let i = 0; i < data.session_count; i++) {
+    const filesDelta = data.files_delta_per_session[i] ?? 0;
+    const testsDelta = data.tests_delta_per_session[i] ?? 0;
+    const locDelta = data.loc_delta_per_session[i] ?? 0;
+    if (filesDelta !== 0 || testsDelta !== 0 || locDelta !== 0) converted++;
+  }
+  const pct = ((converted / data.session_count) * 100).toFixed(1);
+  return {
+    value: `${pct}% of sessions changed code (${converted}/${data.session_count})`,
+    higherIsBetter: true,
+  };
+}
+
+/**
+ * @param {{ session_count: number, files_delta_cumulative: number[], tests_delta_cumulative: number[], loc_delta_cumulative: number[] } | null} data
+ */
+export function formatBaselineDeltaPerCycle(data) {
+  if (data === null) {
+    return {
+      value: "n=0 sessions in local ledger (ledger not yet created)",
+      higherIsBetter: true,
+    };
+  }
+  if (data.session_count === 0) {
+    return { value: "n=0 sessions in local ledger", higherIsBetter: true };
+  }
+  const filesCum = data.files_delta_cumulative.at(-1) ?? 0;
+  const testsCum = data.tests_delta_cumulative.at(-1) ?? 0;
+  const locCum = data.loc_delta_cumulative.at(-1) ?? 0;
+  const n = data.session_count;
+  return {
+    value: `per-cycle avg: +${(filesCum / n).toFixed(1)} files, +${(testsCum / n).toFixed(1)} tests, +${(locCum / n).toFixed(1)} loc (n=${n})`,
+    higherIsBetter: true,
+  };
+}
+
+// ---- Collectors (thin wrappers — subprocess + format) ------------
+
+function collectFleetStabilityAggregated() {
+  const hostsDir = process.env.MINSKY_HOSTS_DIR;
+  if (!hostsDir) return formatFleetStability(undefined, null);
+  const data = runPyJson("scripts/transform_knowledge.py", ["--hosts-dir", hostsDir, "--json"]);
+  return formatFleetStability(hostsDir, data);
+}
+
+function collectSessionConvertsRepo() {
+  const data = runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"]);
+  return formatSessionConvertsRepo(data);
+}
+
+function collectBaselineDeltaPerCycle() {
+  const data = runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"]);
+  return formatBaselineDeltaPerCycle(data);
+}
+
 // ---- Main ----
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates ≥10 metric collectors with fallback logic — refactor tracked in TASKS.md `scripts-complexity-refactor`
@@ -235,6 +381,9 @@ async function main() {
     mttr: collectMttr,
     "mttr-self-heal": collectMttrSelfHeal,
     "wrist-dwell": collectWristDwell,
+    "fleet-stability-aggregated": collectFleetStabilityAggregated,
+    "session-converts-repo": collectSessionConvertsRepo,
+    "baseline-delta-per-cycle": collectBaselineDeltaPerCycle,
     "tokens-per-story": () => ({
       value: "no OTEL backend — not measurable yet (M1 gap)",
       higherIsBetter: false,
@@ -282,5 +431,17 @@ async function main() {
   return failed > collected ? 1 : 0;
 }
 
-const code = await main();
-process.exit(code);
+// Guard CLI execution so dynamic `import("./collect-metrics.mjs")`
+// from test files can pull `formatFleetStability` / `formatSessionConvertsRepo`
+// / `formatBaselineDeltaPerCycle` without triggering `main()` — which
+// spawns every collector, hits the network via `gh`, writes a
+// snapshot file, and calls `process.exit`. Matches the
+// `generate-metrics-md.mjs` pattern (rule #2 — one idiom across the
+// scripts/ tree).
+const invokedDirectly =
+  import.meta.url === `file://${process.argv[1]}` ||
+  process.argv[1]?.endsWith("collect-metrics.mjs");
+if (invokedDirectly) {
+  const code = await main();
+  process.exit(code);
+}
