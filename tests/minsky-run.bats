@@ -475,6 +475,13 @@ EOF
 
   # Global gitignore registration
   grep -q '^\.minsky/$' "$TMPDIR_TEST/xdg/git/ignore"
+
+  # Next-steps hint surfaces the killer-feature command after bootstrap
+  # (closes the "what do I do now?" operator-onboarding gap).
+  [[ "$output" == *"Next steps:"* ]]
+  [[ "$output" == *"minsky --transform"* ]]
+  [[ "$output" == *"baseline-only"* ]]
+  [[ "$output" == *"report-only"* ]]
 }
 
 @test "bin/minsky-bootstrap.sh normalizes HTTPS-style remote URLs to owner/repo" {
