@@ -248,6 +248,56 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     anchor: "Goldratt TOC (throughput as the goal of any system)",
     milestone: "M1 (cadence)",
   },
+  // ---- Ledger-backed M1 metrics (PR `feat/m1-2-m1-7-collectors-from-transform-ledger`) ----
+  // These three metrics consume the `.minsky/transform-runs.jsonl` ledger
+  // shipped in PRs #824–#828 (MAPE-K Monitor → Analyse → Knowledge) via
+  // `scripts/collect-metrics.mjs` wrappers around `transform_trend.py`
+  // (per-host) + `transform_knowledge.py` (cross-host). Promoting them
+  // from PROPOSED_METRICS to SUCCESS_METRICS closes 3 of the 5 remaining
+  // metric-only milestone-alignment gaps (M1.2 / M1.5 / M1.7) — the
+  // no-reinvent path filed as `wire-transform-runs-jsonl-into-m1-metric-collectors`.
+  {
+    id: "fleet-stability-aggregated",
+    label: "Fleet-wide stability (% sessions lint-pass across all hosts)",
+    formula:
+      "MINSKY_HOSTS_DIR=<parent> python3 scripts/transform_knowledge.py --hosts-dir $MINSKY_HOSTS_DIR --json | jq '[.per_host[] | .session_count * .lint_pass_fraction] | add / ([.per_host[].session_count] | add)'",
+    unit: "fraction",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "≥90% of sessions across the fleet land with lint clean (matches M1.2 acceptance: stability measured across the fleet, not per-machine)",
+    pivot:
+      "<80% over 30 d → fleet aggregation is masking systematic per-host failure; revisit the `--hosts-dir` design and per-host alert thresholds before declaring the fleet stable",
+    anchor:
+      "Beyer et al., _SRE_ 2016, Ch. 4 (multi-region SLI aggregation = weighted mean of per-region availability, NOT simple average); rule #1 (don't reinvent — the ledger + the cross-host aggregator already exist in PRs #824/#827, this metric is the wrap)",
+    milestone: "M1.2",
+  },
+  {
+    id: "session-converts-repo",
+    label: "% of `minsky --transform` sessions that applied at least one code change",
+    formula:
+      "python3 scripts/transform_trend.py --repo $PWD --json | jq '[.files_delta_per_session + .tests_delta_per_session + .loc_delta_per_session | .[] | select(. != 0)] | length / .session_count'",
+    unit: "fraction",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "≥80% of sessions changed at least one file / test / loc (M1.5 acceptance: 8h session converts the repo, not just observes it)",
+    pivot:
+      "<50% sustained over 30 d → the 8h brief isn't producing useful action; redesign the brief template + revisit the agent's decision threshold before declaring M1.5 met",
+    anchor:
+      "rule #1 (don't reinvent — `transform_trend.py` already exposes per-session deltas; the metric is the existence of non-zero deltas, not a new measurement)",
+    milestone: "M1.5",
+  },
+  {
+    id: "baseline-delta-per-cycle",
+    label: "Baseline improvement delta per 8h cycle (files + tests + loc averaged)",
+    formula:
+      "python3 scripts/transform_trend.py --repo $PWD --json | jq '{files: (.files_delta_cumulative | last) / .session_count, tests: (.tests_delta_cumulative | last) / .session_count, loc: (.loc_delta_cumulative | last) / .session_count}'",
+    unit: "files+tests+loc/cycle",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "Per-cycle averages positive on ≥2 of the 3 axes (M1.7 acceptance: before/after improvement per cycle)",
+    pivot:
+      "All three per-cycle averages = 0 for 30 d → minsky isn't transforming the repo, just observing it; pivot the brief + session length before declaring M1.7 met",
+    anchor:
+      "Forsgren, Humble & Kim, _Accelerate_ 2018 (DORA — measure what matters via ratios over a fixed window, not absolute counts); rule #1 (`transform_trend.py` is the existing aggregator)",
+    milestone: "M1.7",
+  },
 ];
 
 /**
@@ -269,16 +319,16 @@ export const PROPOSED_METRICS: readonly ProposedMetric[] = [
     formula:
       "node scripts/stability-report.mjs --window=10h ⟨TBD-AFTER: fleet-stability-centralized-reporting⟩",
   },
-  {
-    id: "fleet-stability-aggregated",
-    label: "Fleet-wide stability across all reporting machines",
-    rationale:
-      "M1.2 acceptance requires a shared ledger — stability is measured across the fleet, not per-machine. Multi-host roll-up of `stability-10h-unattended`.",
-    milestone: "M1.2",
-    blockedBy: "fleet-stability-centralized-reporting",
-    formula:
-      "node scripts/fleet-stability-report.mjs ⟨TBD-AFTER: fleet-stability-centralized-reporting⟩",
-  },
+  // 2026-05-25: `fleet-stability-aggregated` (M1.2) and
+  // `baseline-delta-per-cycle` (M1.7) were here. Both promoted to
+  // SUCCESS_METRICS above with real collectors that wrap
+  // `transform_knowledge.py` / `transform_trend.py` (PRs #824/#827) over
+  // the `.minsky/transform-runs.jsonl` ledger — see
+  // `wire-transform-runs-jsonl-into-m1-metric-collectors` (TASKS.md, P2)
+  // for the no-reinvent rationale. The remaining PROPOSED entries
+  // (`stability-10h-unattended`, `human-blocked-task-rate`, ...) are
+  // still missing real collectors and stay here as the explicit gap
+  // surface (Operator directive 2026-05-21).
   {
     id: "human-blocked-task-rate",
     label: "Fraction of tasks marked `Blocked: needs-human-action` per 8h session",
@@ -288,16 +338,6 @@ export const PROPOSED_METRICS: readonly ProposedMetric[] = [
     blockedBy: "minsky-default-8h-repo-transformation",
     formula:
       "grep -c '^\\*\\*Blocked\\*\\*: needs-human-action' TASKS.md ⟨TBD-AFTER: minsky-default-8h-repo-transformation⟩",
-  },
-  {
-    id: "baseline-delta-per-cycle",
-    label: "Repo improvement delta per 8h cycle (test count, coverage, lint, doc coverage)",
-    rationale:
-      "M1.7 acceptance: `minsky report --delta` shows before/after improvement. Needs a baseline-snapshot + delta-snapshot to compute the 4-axis improvement vector per cycle.",
-    milestone: "M1.7",
-    blockedBy: "minsky-init-one-command-bootstrap",
-    formula:
-      "minsky report --delta --since-baseline ⟨TBD-AFTER: minsky-init-one-command-bootstrap⟩",
   },
   {
     id: "mttr-self-heal",
