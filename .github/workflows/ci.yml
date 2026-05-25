@@ -1713,6 +1713,27 @@ jobs:
           path: tmp/rule-11/*-task-block.md tmp/rule-11/*-workflow.patch
           if-no-files-found: ignore
 
+  milestone-alignment:
+    # Slice (c) of `milestone-alignment-gate-enforcement` — every PR
+    # re-runs the alignment gate (rule #10, vision.md § 15). Reads only
+    # static files (MILESTONES.md, docs/METRICS.md, user-stories/*.md,
+    # README.md) — no install needed, same shape as `tasks-lint`. The
+    # `--min-aligned=10` floor matches the parent task's Success
+    # threshold (≥10/14 M1 criteria aligned, audited 2026-05-24); the
+    # `--strict` flag turns the informational mode into an exit-1 gate
+    # so criterion drift is a CI failure, not a silent log line.
+    # Anchor: AGENTS.md § 15 (milestone alignment gate); operator
+    # directive 2026-05-18; rule #10 (deterministic enforcement);
+    # Forsgren/Humble/Kim 2018 (the gate humans pass through must gate
+    # the bot too).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+      - run: node scripts/check-milestone-alignment.mjs --strict --min-aligned=10
+
   metric-freshness:
     # Substrate slice 2/N of `canonical-metric-list-per-repo` — gates the
     # canonical `METRICS.md` artefact (vision.md row 82) against drift.
@@ -1771,6 +1792,7 @@ jobs:
       - measure-agent-install
       - measurement-inspects-output
       - metric-freshness
+      - milestone-alignment
       - no-singleton-experiment
       - orphan-tests
       - otel-no-pii
@@ -1838,6 +1860,7 @@ jobs:
                    "${{ needs.measure-agent-install.result }}" \
                    "${{ needs.measurement-inspects-output.result }}" \
                    "${{ needs.metric-freshness.result }}" \
+                   "${{ needs.milestone-alignment.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
                    "${{ needs.orphan-tests.result }}" \
                    "${{ needs.otel-no-pii.result }}" \
