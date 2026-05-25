@@ -1256,7 +1256,17 @@ const snapshotSeam = (() => {
 const metricsRenderSeam = (() => {
   if (!changelogEnabled) return undefined;
   return {
-    getLastRenderedDate: createFileBackedLastRenderedDate(resolve(minskyHome, "METRICS.md")),
+    // Mtime probe MUST point at the same file `pnpm metrics:render` writes
+    // to — `docs/METRICS.md` is the canonical location read by the
+    // alignment gate (`scripts/check-milestone-alignment.mjs:605`) and
+    // documented in `vision.md` / `docs/metrics-discipline.md`. Was
+    // probing root `METRICS.md` (which doesn't exist) so
+    // `getLastRenderedDate` always returned `null`, triggering a fresh
+    // render every tick — but the render itself was also writing to root,
+    // so `docs/METRICS.md` stayed stale forever. See
+    // `scripts/metrics-render.mjs` line 186 for the matching output
+    // default.
+    getLastRenderedDate: createFileBackedLastRenderedDate(resolve(minskyHome, "docs/METRICS.md")),
     render: createPnpmMetricsRender({ cwd: minskyHome }),
   };
 })();
