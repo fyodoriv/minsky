@@ -4,6 +4,14 @@
 //
 // These tests exercise the REAL bin/minsky script against fixture
 // state — not mocks.
+//
+// History: PR #880 (phase-7b step 4) stripped the TS-daemon-loop-only
+// tests (auto-restart-on-pull sentinel + runLoopWithSentinel helper)
+// because the bash skeleton (`bin/minsky-run.sh`) has no in-process
+// sentinel-driven loop — launchd's `KeepAlive` is the restart
+// mechanism, not the loop. The remaining tests cover the install/
+// uninstall/plist/PID surface of `bin/minsky`, which IS the bash
+// skeleton.
 
 import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -11,100 +19,9 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
-import { runHostLoop } from "../../novel/cross-repo-runner/dist/index.js";
-import type { LoopStopReason, RestartRequest } from "../../novel/cross-repo-runner/dist/index.js";
-import { RESTART_SENTINEL_PATH } from "../../scripts/post-merge-auto-install.mjs";
-
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const MINSKY_BIN = join(REPO_ROOT, "bin", "minsky");
 
-/**
- * Helper: drive `runHostLoop` with an on-disk sentinel reader pointed
- * at `sentinelPath`. Returns the loop result plus call counters. The
- * fakes mirror `host-loop.test.ts`'s `fakeSeams` + `baseTask` /
- * `makePlan` / `makeOutcome` helpers, but inlined here because the
- * integration test imports from the dist (where the test fixtures
- * aren't published). Extracted from the test body so the test itself
- * stays under the cognitive-complexity cap.
- */
-async function runLoopWithSentinel(sentinelPath: string): Promise<{
-  stopReason: LoopStopReason;
-  iterations: readonly unknown[];
-  pickCalls: number;
-  liveCalls: number;
-}> {
-  // Reader: same defensive shape as
-  // `bin/minsky-run.mjs:readRestartSentinel`.
-  const readSentinel = (): RestartRequest | null => {
-    if (!existsSync(sentinelPath)) return null;
-    const raw = readFileSync(sentinelPath, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      ts: typeof parsed.ts === "string" ? parsed.ts : new Date().toISOString(),
-      reason: typeof parsed.reason === "string" ? parsed.reason : "unspecified",
-      changedFiles: Array.isArray(parsed.changedFiles)
-        ? (parsed.changedFiles as readonly string[])
-        : [],
-    };
-  };
-  const clearSentinel = (): void => {
-    rmSync(sentinelPath, { force: true });
-  };
-  let pickCalls = 0;
-  let liveCalls = 0;
-  const fakeTask = {
-    id: "fake-task-1",
-    title: "fake",
-    priority: "P0" as const,
-    tags: [] as readonly string[],
-    details: "",
-  };
-  const fakePlan = {
-    workingDirectory: "/tmp/fake",
-    taskId: fakeTask.id,
-    branchName: `feat/${fakeTask.id}`,
-    experimentYamlPath: "/tmp/fake/.minsky/x.yaml",
-    env: {} as Record<string, string>,
-    systemPromptOverlay: "",
-    brief: "",
-    preCommitCommand: "",
-  };
-  const fakeOutcome = {
-    verdict: "validated" as const,
-    stdoutTail: "",
-    stderrTail: "",
-    exitCode: 0,
-    durationMs: 1,
-    scopeLeakPaths: [] as readonly string[],
-    prUrl: null,
-    baselineRef: "abc",
-  };
-  const result = await runHostLoop({
-    pickTask: () => {
-      pickCalls++;
-      return fakeTask;
-    },
-    buildPlan: () => fakePlan,
-    resolveAllowedPaths: () => [],
-    runLive: () => {
-      liveCalls++;
-      return Promise.resolve(fakeOutcome);
-    },
-    spawn: {
-      spawn: () => Promise.resolve({ exitCode: 0, durationMs: 0, stdoutTail: "", stderrTail: "" }),
-    },
-    git: {
-      captureBaseline: () => Promise.resolve("abc"),
-      changedFiles: () => Promise.resolve([]),
-    },
-    globMatchesPath: () => true,
-    maxIterations: 3,
-    tickIntervalMs: 0,
-    checkRestartRequest: readSentinel,
-    clearRestartRequest: clearSentinel,
-  });
-  return { ...result, pickCalls, liveCalls };
-}
 
 function run(cmd: string, env?: Record<string, string>): string {
   return execSync(cmd, {
@@ -534,107 +451,3 @@ describe("daemon-restart: simulated crash recovery", () => {
   });
 });
 
-// ─── auto-restart-on-pull: writer + reader sentinel integration ──────
-//
-// The post-merge `request-daemon-restart` action writes a JSON sentinel
-// at `~/.minsky/restart-requested`; the daemon's `runHostLoop` reads it
-// between iterations and exits cleanly so launchd's `KeepAlive=true`
-// respawns the daemon with the new code. These integration tests
-// exercise the WRITER + READER contract end-to-end on a real filesystem
-// (tmpdir-scoped to avoid clobbering the operator's actual sentinel).
-//
-// Source: TASKS.md `minsky-auto-restart-daemon-on-pull`. Hypothesis: a
-// JSON sentinel left on disk between iterations causes the loop to
-// exit `restart-requested` within ≤2 iterations and clears the
-// sentinel before exit (no respawn storm). Pivot: if the sentinel
-// races KeepAlive and produces respawn storms (>1 / 5 min in
-// production), gate behind `MINSKY_AUTO_RESTART_ON_PULL=1`.
-
-describe("daemon-restart: auto-restart-on-pull sentinel contract", () => {
-  test("writer + reader agree on RESTART_SENTINEL_PATH", () => {
-    // Both sides of the contract hardcode `~/.minsky/restart-requested`.
-    // The writer exports `RESTART_SENTINEL_PATH` as a constant; the
-    // reader in `bin/minsky-run.mjs` rebuilds the same join expression
-    // (it can't import the writer's constant without a circular layering
-    // inversion — see the comment in minsky-run.mjs near the constant).
-    // This test pins the contract: any drift here would silently break
-    // auto-restart.
-    expect(RESTART_SENTINEL_PATH).toBe(join(homedir(), ".minsky", "restart-requested"));
-    const runnerSrc = readFileSync(
-      join(REPO_ROOT, "novel/cross-repo-runner/bin/minsky-run.mjs"),
-      "utf8",
-    );
-    expect(runnerSrc).toContain('join(homedir(), ".minsky", "restart-requested")');
-  });
-
-  test("JSON sentinel between iterations → loop exits restart-requested, sentinel cleared", async () => {
-    // True integration: write a real JSON sentinel to a tmpdir-scoped
-    // path; the loop's `checkRestartRequest`/`clearRestartRequest`
-    // wiring mirrors `bin/minsky-run.mjs`'s `readRestartSentinel` /
-    // `clearRestartSentinel` (same on-disk JSON shape, same rmSync
-    // clear). We deliberately do NOT touch `~/.minsky/restart-requested`
-    // to avoid clobbering the operator's actual sentinel.
-    const tmpDir = mkdtempSync(join(tmpdir(), "minsky-restart-it-"));
-    const sentinelPath = join(tmpDir, "restart-requested");
-    try {
-      // Mirror the writer's JSON shape from
-      // `scripts/post-merge-auto-install.mjs:writeRestartSentinel`.
-      writeFileSync(
-        sentinelPath,
-        `${JSON.stringify(
-          {
-            ts: "2026-05-20T10:00:00.000Z",
-            reason: "bin/minsky changed",
-            changedFiles: ["bin/minsky"],
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
-
-      const result = await runLoopWithSentinel(sentinelPath);
-
-      // The sentinel was present BEFORE iteration #0 → loop exits with
-      // `restart-requested` and iteration count is 0. The post-merge
-      // hook intentionally guards against writing while
-      // daemonRunning=false, but if a stale sentinel survives a daemon
-      // crash, the next daemon's first iteration MUST honour it.
-      expect(result.stopReason).toBe("restart-requested");
-      expect(result.iterations).toHaveLength(0);
-      expect(result.pickCalls).toBe(0);
-      expect(result.liveCalls).toBe(0);
-      // And the sentinel was cleared (no respawn storm — the post-
-      // restart daemon won't see it again).
-      expect(existsSync(sentinelPath)).toBe(false);
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  test("sentinel JSON shape matches the writer's payload (writer + reader contract)", () => {
-    // The writer (`scripts/post-merge-auto-install.mjs`) produces a
-    // 3-field JSON: `{ ts, reason, changedFiles }`. The reader
-    // (`bin/minsky-run.mjs:readRestartSentinel`) accepts that exact
-    // shape. This test pins the contract by inspecting the writer's
-    // source for the field names and the reader's source for the
-    // matching `typeof parsed.X === "string"` checks. A future PR
-    // that adds a field to one side without the other fails this
-    // test loudly.
-    const writerSrc = readFileSync(join(REPO_ROOT, "scripts/post-merge-auto-install.mjs"), "utf8");
-    const readerSrc = readFileSync(
-      join(REPO_ROOT, "novel/cross-repo-runner/bin/minsky-run.mjs"),
-      "utf8",
-    );
-    // Writer payload — search for the JSON.stringify call inside
-    // writeRestartSentinel.
-    expect(writerSrc).toMatch(/ts: new Date\(\)\.toISOString\(\)/);
-    expect(writerSrc).toMatch(/reason,/);
-    expect(writerSrc).toMatch(/changedFiles: \[\.\.\.changedFiles\]/);
-    // Reader expectations — defensive parse with `typeof === "string"`
-    // for ts + reason, `Array.isArray` for changedFiles.
-    expect(readerSrc).toMatch(/typeof parsed\.ts === "string"/);
-    expect(readerSrc).toMatch(/typeof parsed\.reason === "string"/);
-    expect(readerSrc).toMatch(/Array\.isArray\(parsed\.changedFiles\)/);
-  });
-});
