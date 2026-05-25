@@ -149,11 +149,46 @@ fi
 # the daemon re-picks the same task on every iteration after a salvage-
 # merge (2026-05-16 oncall-hub-plugin regression).
 
+resolve_gh_host_for() {
+  # Resolve the GH_HOST that gh calls inside `$host` should use. Parity
+  # port of `novel/cross-repo-runner/src/gh-host-resolve.ts`. Without
+  # this, on Intuit machines gh inherits `github.intuit.com` from
+  # `gh auth status` and any iteration against a `github.com` host repo
+  # (e.g. fyodoriv/minsky) 401s ≥6× per iteration. Vision rule #17
+  # (proactive healing) + operator directive 2026-05-19.
+  #
+  # Prints the resolved hostname (or empty string if the caller MUST NOT
+  # set GH_HOST and should let gh use its own default — graceful-degrade
+  # per rule #7).
+  local host="$1"
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  python3 "$script_dir/../scripts/resolve_gh_host.py" \
+    --host-root "$host" 2>/dev/null | head -1 || true
+}
+
+_gh_in_host() {
+  # Shell-out to gh INSIDE $host with the resolved GH_HOST. Hides the
+  # env+cd boilerplate so call sites stay readable. Empty $gh_host ⇒
+  # don't set GH_HOST (matches the TS null-host contract — fall back to
+  # gh's own default).
+  local host="$1"
+  local gh_host="$2"
+  shift 2
+  if [[ -n "$gh_host" ]]; then
+    ( cd "$host" && GH_HOST="$gh_host" gh "$@" )
+  else
+    ( cd "$host" && gh "$@" )
+  fi
+}
+
 current_open_pr_branches() {
   # Print a CSV of feat/<id> branches with currently-open PRs in the
   # current repo. Safe-default to empty on `gh` errors (rule #7).
   local host="$1"
-  ( cd "$host" && gh pr list --state open --json headRefName --jq '.[].headRefName' 2>/dev/null ) \
+  local gh_host="${2:-}"
+  _gh_in_host "$host" "$gh_host" pr list --state open \
+      --json headRefName --jq '.[].headRefName' 2>/dev/null \
     | paste -sd, - 2>/dev/null || true
 }
 
@@ -175,10 +210,11 @@ dump_all_prs_json() {
   # Limit 200: enough for ≥6 months of daemon PRs at typical cadence
   # without blowing past gh's pagination; tunable via $MINSKY_PR_FETCH_LIMIT.
   local host="$1" outfile="$2"
+  local gh_host="${3:-}"
   local limit="${MINSKY_PR_FETCH_LIMIT:-200}"
-  if ( cd "$host" && gh pr list --state all --limit "$limit" \
+  if _gh_in_host "$host" "$gh_host" pr list --state all --limit "$limit" \
         --json number,title,state,closedAt 2>/dev/null \
-        > "$outfile" ); then
+        > "$outfile"; then
     return 0
   fi
   echo '[]' > "$outfile"
@@ -275,6 +311,18 @@ iterate_host() {
   invariant_host_bootstrapped "$host" || return 1
   invariant_host_experiment_store_writable "$host"
 
+  # Resolve the GH_HOST for every gh call this iteration makes. Parity
+  # port of `novel/cross-repo-runner/src/gh-host-resolve.ts`. The probe
+  # is cheap (single `git remote get-url origin`) and we do it once per
+  # iteration; the resolved value is reused for the 3 gh calls below
+  # (open-PR scan, full-PR snapshot, repo-view at record time).
+  #
+  # Empty string ⇒ leave GH_HOST unset (let gh use its own default).
+  # Operator escape hatch: `GH_HOST=<host>` in the runner's environment
+  # wins (`source="env"` path in the resolver).
+  local gh_host
+  gh_host="$(resolve_gh_host_for "$host")"
+
   # Tasks with open PRs are skipped (matches host-loop.ts behaviour added
   # for the 2026-05-16 oncall-hub-plugin regression).
   # Plus: tasks with TITLE-matching open OR merged-recently-≤7d PRs are
@@ -284,7 +332,7 @@ iterate_host() {
   # branch names → unique `headRefName` per attempt; title still contains
   # the task ID).
   local open_branches
-  open_branches="$(current_open_pr_branches "$host")"
+  open_branches="$(current_open_pr_branches "$host" "$gh_host")"
   # mktemp generates a unique path per iteration; the file is small (≤200
   # PR entries), under /tmp, and cleaned up explicitly before return.
   # NOT using `trap RETURN` because `set -u` (set -euo pipefail at the
@@ -292,7 +340,7 @@ iterate_host() {
   # variable in the caller's scope after the function unwinds.
   local all_prs_json
   all_prs_json="$(mktemp -t minsky-run-prs-XXXXXX.json)"
-  dump_all_prs_json "$host" "$all_prs_json"
+  dump_all_prs_json "$host" "$all_prs_json" "$gh_host"
   local task_id
   task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
     "$host/TASKS.md" \
@@ -302,7 +350,7 @@ iterate_host() {
   rm -f "$all_prs_json"
 
   if [[ -z "$task_id" ]]; then
-    record_iteration "$host" "$iter_n" "" "" "aborted" "" "no eligible task"
+    record_iteration "$host" "$iter_n" "" "" "aborted" "" "no eligible task" "$gh_host"
     echo "no eligible task in $host" >&2
     # Return non-zero so walk_hosts() breaks the inner loop and moves
     # to the next host instead of burning N round-robin slots emitting
@@ -314,7 +362,7 @@ iterate_host() {
   echo "host=$host iter=$iter_n task=$task_id branch=$branch" >&2
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    record_iteration "$host" "$iter_n" "$task_id" "$branch" "planned" "" "dry-run; no spawn"
+    record_iteration "$host" "$iter_n" "$task_id" "$branch" "planned" "" "dry-run; no spawn" "$gh_host"
     return 0
   fi
 
@@ -424,7 +472,7 @@ EOF
   fi
 
   rm -f "$brief_file" "$stdout_log"
-  record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes"
+  record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host"
 }
 
 # --- 6. Iteration record (JSONL ledger) -------------------------------------
@@ -443,6 +491,7 @@ record_iteration() {
   local verdict="$5"
   local pr_url="$6"
   local notes="$7"
+  local gh_host="${8:-}"
   local store_dir="$host/.minsky/experiment-store/cross-repo"
   mkdir -p "$store_dir"
   local out
@@ -456,8 +505,11 @@ record_iteration() {
   # version uses `<owner>/<repo>` from `gh repo view`; we degrade
   # gracefully to the basename when `gh` isn't available. (Explicit
   # if/else avoids the SC2015 "A && B || C" ambiguity.)
+  # GH_HOST is set per-iteration so this `gh repo view` reaches the
+  # right registry (rule #17 — proactive healing). Falls back to gh's
+  # own default when $gh_host is empty.
   local host_repo
-  if host_repo="$( cd "$host" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null )" \
+  if host_repo="$(_gh_in_host "$host" "$gh_host" repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" \
      && [[ -n "$host_repo" ]]; then
     :
   else

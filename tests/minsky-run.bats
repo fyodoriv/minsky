@@ -244,6 +244,137 @@ EOF
   [ -f "$dir/.minsky/experiment-store/cross-repo/pick-me-first.jsonl" ]
 }
 
+@test "iterate_host injects GH_HOST=github.com when host remote is github.com" {
+  # Parity port of `novel/cross-repo-runner/src/gh-host-resolve.ts`.
+  # Without this, on Intuit machines the bash runner would inherit
+  # `gh auth status`'s default (github.intuit.com) and 401 ≥6× per
+  # iteration against a github.com host. Rule #17 (proactive healing).
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  # Shim gh: record the GH_HOST it sees on every call, then noop with
+  # sane defaults for the queries the runner makes.
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "test-org/host-fixture" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Host with a github.com remote — the resolver should pick this up.
+  host="$(make_host gh-host-com "$(complete_task_block)")"
+  (cd "$host" && git remote add origin git@github.com:test-org/host-fixture.git)
+
+  PATH="$shim_dir:$PATH" run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # The shim recorded at least one gh call with GH_HOST=github.com.
+  # Three calls expected per iteration: pr list (open), pr list (all),
+  # repo view (from record_iteration).
+  grep -q "GH_HOST=github.com" "$gh_env_dump"
+  ! grep -q "GH_HOST=<unset>" "$gh_env_dump"
+}
+
+@test "iterate_host injects GH_HOST=github.intuit.com when host remote is github.intuit.com" {
+  # The same proactive-healing logic in reverse: an Intuit host gets
+  # the Intuit registry. Confirms the resolver isn't hard-coded to
+  # github.com and that it actually parses the remote URL.
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "team/intuit-repo" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  host="$(make_host gh-host-intuit "$(complete_task_block)")"
+  (cd "$host" && git remote add origin https://github.intuit.com/team/intuit-repo.git)
+
+  PATH="$shim_dir:$PATH" run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  grep -q "GH_HOST=github.intuit.com" "$gh_env_dump"
+  ! grep -q "GH_HOST=github.com" "$gh_env_dump"
+}
+
+@test "iterate_host leaves GH_HOST unset when host has no git remote" {
+  # Graceful-degrade (rule #7): when neither $GH_HOST nor a remote
+  # is available, the resolver returns the empty string and the runner
+  # must NOT inject GH_HOST — gh uses its own default.
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "fallback/repo" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Host with NO remote — git remote get-url origin returns nonzero.
+  host="$(make_host gh-host-bare "$(complete_task_block)")"
+  # No `git remote add` — intentional.
+
+  # Strip any ambient GH_HOST from the test environment so the
+  # resolver's env-source path can't win and pollute the result.
+  PATH="$shim_dir:$PATH" GH_HOST="" run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" \
+    --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # Every gh call saw GH_HOST=<unset> — confirms the runner did NOT
+  # set the env var (fall through to gh's own default).
+  grep -q "GH_HOST=<unset>" "$gh_env_dump"
+  ! grep -q "GH_HOST=github" "$gh_env_dump"
+}
+
+@test "explicit GH_HOST env wins over the host's git remote (operator escape hatch)" {
+  # The TS resolver gives env precedence over the git-remote probe.
+  # This is the operator escape hatch — set GH_HOST in the runner's
+  # environment to force every iteration's gh calls to a specific
+  # registry, regardless of what each host's remote points at.
+  shim_dir="$TMPDIR_TEST/shim-gh"
+  mkdir -p "$shim_dir"
+  gh_env_dump="$TMPDIR_TEST/gh-env-dump.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+echo "call=\$*  GH_HOST=\${GH_HOST:-<unset>}" >> "$gh_env_dump"
+case "\$1 \$2" in
+  "repo view") echo "test-org/fixture" ;;
+  "pr list")   echo '[]' ;;
+  *)           : ;;
+esac
+exit 0
+EOF
+  chmod +x "$shim_dir/gh"
+
+  host="$(make_host gh-host-override "$(complete_task_block)")"
+  # Host points at github.com but the operator override should force
+  # github.intuit.com — this proves the precedence order works.
+  (cd "$host" && git remote add origin git@github.com:test-org/fixture.git)
+
+  PATH="$shim_dir:$PATH" GH_HOST="github.intuit.com" run "$MINSKY_RUN" \
+    --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  grep -q "GH_HOST=github.intuit.com" "$gh_env_dump"
+  ! grep -q "GH_HOST=github.com$" "$gh_env_dump"
+}
+
 # --- 8. Round-robin iterates each host fairly ------------------------------
 
 @test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {
