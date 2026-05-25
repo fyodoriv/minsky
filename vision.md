@@ -209,6 +209,8 @@ When you implement a new behavior or fix, **make it the default immediately** �
 
 Every new default ships with (1) an experiment in `.minsky/experiments/<id>.yaml`, (2) a runnable measurement, (3) an opt-out env var or flag (for debugging only, documented in DEPRECATED.md as soon as it's never used). The burden of proof is on the opt-in side.
 
+**CLI surface consolidation (corollary).** New CLI capabilities default to **flags on existing commands** or **default behavior of existing commands** — never new subcommands. Before adding `<cli> newverb`, answer three questions: (1) Is this a refinement of an existing command? → add a flag. (2) Should this happen automatically when the user runs the parent? → make it the parent's default. (3) Are the semantics fundamentally different from every existing command? Only when all three answers force "no, no, yes" does a new verb earn a slot. Specifically for `minsky`: invoked with no subcommand it MUST run `doctor` first (pre-flight), exit non-zero on critical failure, attach to a running daemon for $PWD if present, else start one with sensible defaults. The smartest defaults live HERE, not behind verbs. Existing subcommands that violate the rule are folded into their parent with a one-major-version-deprecated alias for backwards compat. See [`.claude/skills/cli-consolidation/SKILL.md`](.claude/skills/cli-consolidation/SKILL.md).
+
 ### 17. Proactive healing — observation IS the fix (iron, no exemption)
 
 Every error you see — `spawn-failed`, `scope-leak`, `ETIMEDOUT`, `GraphQL 401`, stack traces, hung processes, flaky tests, red CI checks — is treated as work to ship in the SAME session, the SAME PR if possible. "Observe and report" is forbidden. "Mental note for later" is forbidden.
