@@ -1,0 +1,31 @@
+{
+  "_note": "Generated source-of-truth for dashboard-web's SUCCESS_METRICS.id list and WATCH_METRIC_IDS map. Decoupled from `@minsky/dashboard-web` package imports so that distribution/shortcuts/test/shortcuts-json.test.mjs no longer requires the dashboard-web TS package to be built. Drift gate at `dashboard-metric-ids-sync.test.mjs` asserts every TS-side ID also appears here. Path A decouple-before-delete step toward dashboard-web's eventual deletion (operator-gated on dashboard replacement landing).",
+  "success_metric_ids": [
+    "loop-uptime",
+    "cross-repo-pr-rate",
+    "tokens-per-story",
+    "spec-alignment",
+    "self-improvement-velocity",
+    "mttr",
+    "wrist-dwell",
+    "extraction-count",
+    "dep-interface-coverage",
+    "token-budget-honoring",
+    "task-throughput",
+    "stability-10h-unattended",
+    "fleet-stability-aggregated",
+    "human-blocked-task-rate",
+    "baseline-delta-per-cycle",
+    "mttr-self-heal",
+    "swe-bench-resolve-rate",
+    "time-to-pr-median",
+    "ci-green-on-first-push",
+    "audit-log-completeness",
+    "secret-scan-findings"
+  ],
+  "watch_metric_ids": {
+    "tokens-remaining": "token-budget-honoring",
+    "last-task-status": "task-throughput",
+    "constraint-of-the-week": "self-improvement-velocity"
+  }
+}

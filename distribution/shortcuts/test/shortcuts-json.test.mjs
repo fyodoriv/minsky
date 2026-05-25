@@ -27,12 +27,25 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { SUCCESS_METRICS, WATCH_METRIC_IDS } from "@minsky/dashboard-web";
-
+// Path A decouple-before-delete (2026-05-25): read the metric-ID
+// contract from `dashboard-metric-ids.json` (source-of-truth for the
+// shortcut drift checks) instead of importing from
+// `@minsky/dashboard-web`. The drift gate against the TS source lives
+// in the sibling `dashboard-metric-ids-sync.test.mjs`. This means the
+// shortcut test no longer requires `@minsky/dashboard-web` to be
+// built, and `novel/dashboard-web/` can be deleted without breaking
+// the distribution/shortcuts test set.
 import { validateShortcut } from "./validate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SHORTCUTS_DIR = resolve(HERE, "..");
+
+/** @type {{ success_metric_ids: readonly string[]; watch_metric_ids: Record<string,string> }} */
+const METRIC_IDS = JSON.parse(
+  readFileSync(resolve(HERE, "dashboard-metric-ids.json"), "utf8"),
+);
+const SUCCESS_METRIC_IDS = new Set(METRIC_IDS.success_metric_ids);
+const WATCH_METRIC_IDS = METRIC_IDS.watch_metric_ids;
 
 const KIND_FETCH = "fetch-and-show";
 const KIND_POST = "post-control";
@@ -58,7 +71,7 @@ const HOST_PLACEHOLDER = "<tailscale-host>";
 const HOST_VARIABLE_PATTERNS = [/\$\{host\}/, /\{\{host\}\}/];
 
 const VALIDATOR_CTX = {
-  successMetricIds: new Set(SUCCESS_METRICS.map((m) => m.id)),
+  successMetricIds: SUCCESS_METRIC_IDS,
   watchMetricIds: WATCH_METRIC_IDS,
 };
 
