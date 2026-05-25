@@ -670,6 +670,36 @@ EOF
   [[ "$output" == *"lint-regression"* ]]
 }
 
+@test "bin/minsky recommend --append <tasks-md> --yes forwards to transform_recommend.py and writes TASKS.md" {
+  # Closes the MAPE-K Execute phase: `recommend --append` lets the
+  # operator turn detected patterns into concrete TASKS.md entries
+  # under explicit `--yes` gate. The bin/minsky CLI verb must
+  # forward both flags transparently through "$@".
+  fixture="$TMPDIR_TEST/recommend-append-fixture"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/transform-runs.jsonl" <<EOF
+{"after_ts":"t1","code":{"total_files_walked":{"delta":2},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":30}}},"lint":{"after_exit_code":0},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+{"after_ts":"t2","code":{"total_files_walked":{"delta":1},"test_file_count":{"delta":0},"loc_by_language":{"ts":{"delta":20}}},"lint":{"after_exit_code":1},"build":{"after_exit_code":0},"dependencies":{"after_outdated_count":0},"schema_version":1}
+EOF
+  cat > "$fixture/TASKS.md" <<'EOF'
+# Tasks
+
+## P3
+
+- [ ] Existing placeholder task
+  - **ID**: existing-placeholder
+EOF
+
+  MINSKY_REPO="$REPO_ROOT" run bash -c "cd '$fixture' && '$REPO_ROOT/bin/minsky' recommend --append TASKS.md --yes 2>&1"
+  [ "$status" -eq 0 ]
+  # Append marker must land in TASKS.md
+  grep -q '<!-- transform-recommend: appended' "$fixture/TASKS.md"
+  # Existing task is preserved (no clobber)
+  grep -q 'existing-placeholder' "$fixture/TASKS.md"
+  # At least one recommended pattern ID landed
+  grep -qE '(test-coverage-gap|lint-regression)' "$fixture/TASKS.md"
+}
+
 @test "bin/minsky knowledge dispatches to scripts/transform_knowledge.py with --hosts-dir" {
   parent="$TMPDIR_TEST/knowledge-parent"
   for h in alpha bravo; do
