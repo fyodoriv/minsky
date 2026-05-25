@@ -128,8 +128,22 @@ def compute_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, An
             "test_file_count": _diff_int(
                 b_code.get("test_file_count"), a_code.get("test_file_count")
             ),
+            "files_source_before": b_code.get("files_source"),
+            "files_source_after": a_code.get("files_source"),
+            "files_source_mismatch": (
+                b_code.get("files_source") is not None
+                and a_code.get("files_source") is not None
+                and b_code.get("files_source") != a_code.get("files_source")
+            ),
             "loc_by_language": _diff_loc(
                 b_code.get("loc_by_language"), a_code.get("loc_by_language")
+            ),
+            "loc_source_before": b_code.get("loc_source"),
+            "loc_source_after": a_code.get("loc_source"),
+            "loc_source_mismatch": (
+                b_code.get("loc_source") is not None
+                and a_code.get("loc_source") is not None
+                and b_code.get("loc_source") != a_code.get("loc_source")
             ),
         },
         "docs": {
@@ -190,9 +204,31 @@ def render_text(delta: dict[str, Any]) -> str:
     code = delta.get("code", {})
     lines.append("  " + _fmt_delta(code.get("total_files_walked"), prefix="files walked"))
     lines.append("  " + _fmt_delta(code.get("test_file_count"), prefix="test files"))
+    # Surface files_source — git-ls-files vs walk (PR #818). Operators
+    # who see "files walked: 850 → 1450 (+600)" want to know whether
+    # that's actually real code growth or a sourcing-method change.
+    files_source_after = code.get("files_source_after") or "unknown"
+    files_source_before = code.get("files_source_before") or files_source_after
+    if code.get("files_source_mismatch"):
+        lines.append(
+            f"  ⚠ files source CHANGED: {files_source_before} → {files_source_after} "
+            "(counts are not directly comparable — re-run baseline)"
+        )
+    else:
+        lines.append(f"  files source: {files_source_after}")
     for lang, d in (code.get("loc_by_language") or {}).items():
         sign = "+" if d["delta"] >= 0 else ""
         lines.append(f"  loc.{lang}: {d['before']} → {d['after']} ({sign}{d['delta']})")
+    # Same for loc_source — tokei / scc / cloc / walk (PR #817).
+    loc_source_after = code.get("loc_source_after") or "unknown"
+    loc_source_before = code.get("loc_source_before") or loc_source_after
+    if code.get("loc_source_mismatch"):
+        lines.append(
+            f"  ⚠ loc source CHANGED: {loc_source_before} → {loc_source_after} "
+            "(code-only vs all-lines counts diverge — re-run baseline)"
+        )
+    else:
+        lines.append(f"  loc source: {loc_source_after}")
     lines.append("")
     lines.append("Docs:")
     docs = delta.get("docs", {})

@@ -191,6 +191,72 @@ def test_render_text_negative_delta_shows_sign() -> None:
     assert "test files: 5 → 2 (-3)" in out
 
 
+def test_compute_delta_surfaces_files_source_when_matched() -> None:
+    before = {"ts": "t1", "repo": "/r", "code": {"files_source": "git-ls-files"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    after = {"ts": "t2", "repo": "/r", "code": {"files_source": "git-ls-files"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    d = mr.compute_delta(before, after)
+    assert d["code"]["files_source_before"] == "git-ls-files"
+    assert d["code"]["files_source_after"] == "git-ls-files"
+    assert d["code"]["files_source_mismatch"] is False
+
+
+def test_compute_delta_surfaces_files_source_mismatch() -> None:
+    before = {"ts": "t1", "repo": "/r", "code": {"files_source": "walk"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    after = {"ts": "t2", "repo": "/r", "code": {"files_source": "git-ls-files"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    d = mr.compute_delta(before, after)
+    assert d["code"]["files_source_mismatch"] is True
+
+
+def test_compute_delta_surfaces_loc_source_mismatch() -> None:
+    before = {"ts": "t1", "repo": "/r", "code": {"loc_source": "walk"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    after = {"ts": "t2", "repo": "/r", "code": {"loc_source": "tokei"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    d = mr.compute_delta(before, after)
+    assert d["code"]["loc_source_before"] == "walk"
+    assert d["code"]["loc_source_after"] == "tokei"
+    assert d["code"]["loc_source_mismatch"] is True
+
+
+def test_compute_delta_no_mismatch_when_either_source_missing() -> None:
+    # When one snapshot lacks a source tag (older baseline format),
+    # mismatch is False — we don't have evidence to flag.
+    before = {"ts": "t1", "repo": "/r", "code": {}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    after = {"ts": "t2", "repo": "/r", "code": {"loc_source": "tokei"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}}
+    d = mr.compute_delta(before, after)
+    assert d["code"]["loc_source_mismatch"] is False
+
+
+def test_render_text_shows_files_source_when_matched() -> None:
+    delta = mr.compute_delta(
+        {"ts": "t1", "repo": "/r", "code": {"files_source": "git-ls-files", "loc_source": "walk"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}},
+        {"ts": "t2", "repo": "/r", "code": {"files_source": "git-ls-files", "loc_source": "walk"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}},
+    )
+    out = mr.render_text(delta)
+    assert "files source: git-ls-files" in out
+    assert "loc source: walk" in out
+    # No warning since no mismatch.
+    assert "⚠" not in out
+
+
+def test_render_text_warns_on_files_source_mismatch() -> None:
+    delta = mr.compute_delta(
+        {"ts": "t1", "repo": "/r", "code": {"files_source": "walk"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}},
+        {"ts": "t2", "repo": "/r", "code": {"files_source": "git-ls-files"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}},
+    )
+    out = mr.render_text(delta)
+    assert "⚠ files source CHANGED: walk → git-ls-files" in out
+    assert "not directly comparable" in out
+
+
+def test_render_text_warns_on_loc_source_mismatch() -> None:
+    delta = mr.compute_delta(
+        {"ts": "t1", "repo": "/r", "code": {"loc_source": "walk"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}},
+        {"ts": "t2", "repo": "/r", "code": {"loc_source": "tokei"}, "docs": {}, "lint": {}, "build": {}, "dependencies": {}},
+    )
+    out = mr.render_text(delta)
+    assert "⚠ loc source CHANGED: walk → tokei" in out
+    assert "code-only vs all-lines counts diverge" in out
+
+
 def test_main_exits_1_on_missing_baseline(tmp_path: Path) -> None:
     rc = mr.main(["--repo", str(tmp_path)])
     assert rc == 1
