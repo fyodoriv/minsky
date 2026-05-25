@@ -238,23 +238,72 @@ Anti-pattern surfaced 2026-05-20 (operator review of minsky's own README): "you 
 
 PRs ship to reviewers who are MORE time-pressed than README readers. A reviewer scanning a list of 12 open PRs gives each one ~8 seconds; if the title + first sentence don't deliver "what does this PR do for me as a reviewer?", they bounce and pick a friendlier-looking PR. The investigation chronology that lives in the author's head — "I noticed X, then realised Y, then dug into Z" — is the WRONG order for the body.
 
+### The two-layer rule: repo template OUTSIDE, reader-priority INSIDE
+
+Most monorepos ship a `.github/pull_request_template.md` (or per-issue-type variants) that fixes the **section order**: `## Why`, `## What changed`, `## How to test`, `## Screenshots / recordings`, `## IXPs`, `## JIRA`, `### PR checklist`, and so on. **Follow that template's section order exactly** — reviewers, CI lints (`Danger`, `Jira PMC`), and downstream tooling depend on it. Don't invent your own structure when one exists.
+
+Within EACH section the reader-priority rules — TL;DR before detail, one-line problem summary before numbered edge-case list, outcome-first bullets, screenshots above prose where the section allows them — apply unchanged. The template tells you *which sections exist and in what order*; this skill tells you *how the prose inside each section flows for a cold reader*.
+
+There is ONE allowed addition that lives outside the template's section list: a **TL;DR paragraph above the first `## section`**. The template never forbids it (templates specify what `##` sections must exist; they don't forbid pre-section prose), and the TL;DR is the single most load-bearing line in the body. Add it. Don't add other unexpected top-level sections.
+
+> Template → outer structure (section order, names, count).
+> Reader-priority rules → inner structure (lede before detail, in every section).
+> TL;DR paragraph → above the first section, always.
+
+Concrete worked example for the iep-capabilities template (`## Why → ## What changed → ## How to test → ## Screenshots / recordings → ## IXPs → ## JIRA → ### PR checklist`):
+
+```markdown
+<TL;DR — 1-3 sentences. Outcome + risk class. Lives ABOVE ## Why.>
+
+## Why
+<One-line problem summary.>
+<Then the numbered failure-mode list / motivation. Never lead with the list.>
+
+## What changed
+<One-line scope summary.>
+- **<Outcome bullet 1>** — file path.
+- **<Outcome bullet 2>** — ...
+
+## How to test
+<vitest commands, manual repro, negative-case proof.>
+
+## Screenshots / recordings
+<Visual evidence. For PRs where the screenshot IS the demonstration of the
+PR's purpose — e.g., this PR adds a CI gate; show the CI failure UI — embed
+the most compelling image first, with a one-line caption above it.>
+
+## IXPs
+<None / list, one bullet each.>
+
+## JIRA
+[TICKET-XXX](https://...)
+
+---
+
+### PR checklist
+- [x] ...
+```
+
+The Screenshots section is template-mandated to come AFTER How-to-test in this repo, so a UI-affecting screenshot lives there — NOT above `## Why`. The earlier draft of this skill recommended "screenshot above prose"; that's right for screenshot-first PRs IN A REPO WHOSE TEMPLATE PUTS SCREENSHOTS NEAR THE TOP. For repos whose template puts Screenshots after How-to-test, the template wins; the visual proof goes in Screenshots, AND the TL;DR carries one or two key sentences about what the picture shows so a reviewer who only reads the TL;DR still gets the headline.
+
 ### The PR-body cold-reader contract
 
-A reviewer opening the PR for the first time must answer these questions in this order, and the body's sections must appear in the matching order:
+A reviewer opening the PR for the first time must answer these questions in this order. The body's `## section` headings are FIXED by the repo's PR template (`.github/pull_request_template.md`) and you must use exactly the names + order the template specifies. The "where in the body" column below maps the reviewer's questions to the slot the template names — adjust the section names to your repo's actual template (this table uses the iep-capabilities convention as an example).
 
-| Reviewer question | Time budget | Where in the body |
+| Reviewer question | Time budget | Where in the body (assuming standard template) |
 |---|---|---|
 | **What does this PR do?** (one-sentence summary) | 5 sec | Title + first sentence of body |
-| **Should I care? Does this affect me?** | 15 sec | TL;DR paragraph (1–3 sentences, ≤60 words) immediately after the title — before any `## section` |
-| **What does it look like?** (visual changes only) | 30 sec | Screenshot / before-after / storyshot — ABOVE the `## Why`, NOT under "How to test" |
+| **Should I care? Does this affect me?** | 15 sec | **TL;DR paragraph (1–3 sentences, ≤60 words) immediately after the title — ABOVE the first `## section`.** This is the one allowed addition outside the template's section list. |
 | **Why was this needed?** | 1 min | `## Why` — one-line problem statement first, then failure-mode list / motivation |
 | **What changed?** | 2 min | `## What changed` — high-level summary by area (Tests / UI / Storage / etc.), file paths in collapsible sub-detail if long |
 | **How do I verify it works?** | reference | `## How to test` |
-| **What if it breaks in prod?** | reference | `## Rollback` (only if there's runtime impact — test-only PRs explicitly say "no runtime change, no rollback needed") |
-| **Where's the ticket?** | reference | `## JIRA` near the bottom |
+| **What does it look like?** (visual changes) | 30 sec — embedded image | `## Screenshots / recordings` (or whatever the template names this section). For purpose-of-PR-is-the-picture cases, ALSO embed the lead image directly after the TL;DR (see PR Rule 2). |
+| **What experiments / flags?** | reference | `## IXPs` |
+| **Where's the ticket?** | reference | `## JIRA` |
 | **Did the author check the boxes?** | reference | Checklist at the very bottom |
+| **What if it breaks in prod?** | reference | `## Rollback` IF the template includes it, OR a sub-section under the checklist; otherwise inline a one-liner in the TL;DR ("test-only PR — no runtime change") |
 
-The "TL;DR paragraph immediately after the title" is the single most load-bearing line in a PR body and is the rule violated most often. It is NOT optional. It is NOT "obvious from the title" — the title carries the conventional-commit verb and the ticket, not the WHY.
+The "TL;DR paragraph immediately after the title, above the first `## section`" is the single most load-bearing line in a PR body and is the rule violated most often. It is NOT optional. It is NOT "obvious from the title" — the title carries the conventional-commit verb and the ticket, not the WHY. The PR template does not forbid a pre-section TL;DR; templates specify what `##` sections must exist, not whether prose can precede them.
 
 ### Six iron rules for PR-body order
 
@@ -291,9 +340,14 @@ The first prose the reviewer sees must be a 1–3 sentence outcome statement. NO
 
 The TL;DR must answer "what does this PR do?" and ideally also "what risk does it carry?" (e.g., "test-only, no runtime impact"). The reviewer should be able to assign rough urgency from the TL;DR alone.
 
-#### PR Rule 2 — Screenshot above prose for visual changes
+#### PR Rule 2 — Screenshot in the template's Screenshots slot; TL;DR carries the headline
 
-If the PR changes pixels — UI, design system, story snapshots, dashboard, generated docs site — the screenshot or before-after pair appears BETWEEN the TL;DR and the `## Why`. Not under `## How to test`. Not at the bottom under `## Screenshots`. Reviewers form their opinion from the picture first.
+If the PR changes pixels — UI, design system, story snapshots, dashboard, generated docs site — the screenshot or before-after pair goes in the repo template's Screenshots section (most repos have one; iep-capabilities calls it `## Screenshots / recordings`). The TL;DR carries a one-sentence summary of what the screenshot proves so a reviewer who only reads the lede still understands the visual change.
+
+Two exceptions where the screenshot ALSO appears above `## Why` (or wherever your repo's template starts the substantive sections):
+
+1. **The repo's template puts Screenshots near the top of the body** — in that case the screenshot is already in tier-2 position; the template wins, no contradiction.
+2. **The screenshot IS the demonstration of the PR's entire purpose** — e.g., a PR that ships a new CI gate and the screenshot is the failing-CI output that proves the gate works; a PR adding a Storybook story whose baseline is the deliverable. In that case the picture is the lede, and a reviewer who doesn't see it in their 8-second scan misses the headline. Embed the most compelling image AGAIN immediately after the TL;DR (in addition to the Screenshots section copy) with a one-line caption. Yes, this duplicates one image; that's the price of meeting the cold-reader contract.
 
 For PRs that add a new Storybook story or storyshot, embed the baseline PNG inline near the top with one sentence of caption.
 
@@ -363,19 +417,20 @@ Good title (reflects full PR scope): `test(iep-ai-native): vitest + storybook ga
 
 ### Canonical PR-body skeleton
 
-A reader-priority PR body in order:
+A reader-priority PR body whose `## section` order matches the repo template exactly, with the reader-priority lede / inverted-pyramid rules applied inside each section. The example below uses the iep-capabilities template (`Why → What changed → How to test → Screenshots → IXPs → JIRA → PR checklist`); substitute your repo's actual template section names + order.
 
 ```markdown
 <!-- Title (set via gh pr edit --title): type(scope): subject TICKET-XXX (≤72 chars) -->
 
-<TL;DR — 1-3 sentences, ≤60 words. Outcome + scope + risk class.        <!-- tier 1 -->
+<TL;DR — 1-3 sentences, ≤60 words. Outcome + scope + risk class.        <!-- pre-section -->
 Example: "Adds three runtime gates that prevent shipping a CC tool with
 an invalid icon. Test-only PR; no runtime change.">
 
-<Screenshot / before-after / storyshot — for visual changes only.       <!-- tier 2 -->
-Inline embed at full width. One sentence of caption.>
+<Optional: lead screenshot AFTER the TL;DR — only for PRs where the     <!-- pre-section -->
+picture IS the PR's purpose (see PR Rule 2 exception 2). Most PRs put
+their screenshots in the template's Screenshots section below.>
 
-## Why                                                                  <!-- tier 3 -->
+## Why                                                                  <!-- template-mandated -->
 
 <One-line problem statement.>
 
@@ -383,7 +438,7 @@ Inline embed at full width. One sentence of caption.>
 can't catch, why now. Numbered list of edge cases is OK HERE, after
 the one-line summary established the headline.>
 
-## What changed                                                         <!-- tier 4 -->
+## What changed                                                         <!-- template-mandated -->
 
 <One-line scope summary.>
 
@@ -392,31 +447,49 @@ the one-line summary established the headline.>
 
 (For ≥10-file PRs, group by area with `### Tests` / `### UI` sub-sections.)
 
-## How to test                                                          <!-- tier 5 -->
+## How to test                                                          <!-- template-mandated -->
 
-<vitest command(s), storyshot path, manual repro steps if needed.>
+<vitest command(s), storyshot path, manual repro steps if needed.
+Include negative-case proof for new gate/lint PRs.>
 
-## Rollback                                                             <!-- tier 6 -->
+## Screenshots / recordings                                             <!-- template-mandated -->
 
-<"No rollback needed — no runtime change" for test-only PRs,
-or specific affected plugin(s) for runtime PRs.>
+<Visual evidence with one-sentence captions above each image. Order
+by importance: the picture that proves the PR's purpose first, then
+supporting visuals. Use the github.intuit.com /raw/<branch>/<path>
+URL pattern so images render inline.>
 
-## JIRA                                                                 <!-- tier 7 -->
+## IXPs                                                                 <!-- template-mandated -->
+
+<None / list, one bullet each.>
+
+## JIRA                                                                 <!-- template-mandated -->
 
 [TICKET-XXX](https://...)
 
 ---
 
-### PR checklist                                                        <!-- tier 8 -->
+### PR checklist                                                        <!-- template-mandated -->
 
-- [x] ...
+- [x] Tests cover new/changed behavior
+- [x] Manually tested with plugin overrides in e2e
+- [x] No removed/renamed public exports
+
+#### Rollback                                                           <!-- under checklist -->
+
+<"No rollback needed — no runtime change" for test-only PRs,
+or specific affected plugin(s) for runtime PRs.>
+
+#### Follow-ups (filed, not in this PR)                                 <!-- under checklist -->
+
+<One-paragraph list with ticket links. NEVER above the substance.>
 ```
 
 Note what's NOT in the skeleton:
 
 - A `## Why this is needed` opening section before the TL;DR — the TL;DR IS the lede, and `## Why` follows it
-- A separate `## Screenshots` section at the bottom for visual PRs — screenshot goes above the `## Why`
-- A "Follow-ups" section at the top — those go at the very bottom or in TASKS.md
+- Custom `##` sections that aren't in the repo's template (e.g., a top-level `## Rollback` if the template doesn't ship one — fold under the checklist instead)
+- A "Follow-ups" section at the top of the body — those go under the checklist at the bottom or in TASKS.md
 - Long quoted ticket descriptions / Slack-thread copy-paste — link to the ticket; don't inline-quote
 - Marketing voice ("This PR ships X to enable Y" — replace with "Adds X. Y now works.")
 
@@ -434,23 +507,46 @@ Note what's NOT in the skeleton:
 | **"Follow-ups" / "Future work" section at the TOP of the body** | Implies the PR is incomplete before the reviewer has seen the substance | Move to the very bottom. Better: file the follow-ups as TASKS.md entries in the same commit, link from the bottom of the PR body. |
 | **No risk class in the TL;DR** (reviewer can't tell if this is `test-only`, `infra change`, `production behavior change`, `revert`) | Forces the reviewer to scan the whole body just to assign rough urgency | Add one phrase to the TL;DR: "test-only, no runtime change" / "behavior change in prod for X% of users" / "revert of PR #YYY" |
 | **PR description rewrites in `## What changed` what's already in the diff** (a 30-line file-by-file enumeration when the diff has 4 files) | Duplication of the diff in prose form; the reviewer reads both and trusts neither | Outcome-first bullets at the area level; if a file enumeration is genuinely useful, put it in `<details>` collapsible |
+| **PR body invents its own `##` section structure instead of following the repo's `.github/pull_request_template.md`** | Downstream tooling (Danger, Jira PMC, automated reviewers) parses by section name; custom structure breaks them. Reviewers also expect a familiar shape across PRs in the same repo. | Copy the section order from the repo's template verbatim. Apply reader-priority rules INSIDE each section. The only allowed addition outside the template is a TL;DR paragraph above the first `##`. |
+| **Screenshot for a PR-whose-entire-purpose-is-the-picture lives only in the template's Screenshots section at the bottom** (e.g., a PR that adds a CI gate, where the demonstration is the failing-CI screenshot, but the picture sits below How-to-test) | The picture IS the lede; relegating it below substance loses the cold-reader scan | Embed the lead image directly after the TL;DR with a one-line caption (in addition to the Screenshots-section copy). PR Rule 2 exception 2. |
 
 ### PR-description verification checklist
 
 Before running `gh pr create` or `gh pr edit --body-file`, verify:
 
+**Template adherence (outer structure):**
+
+- [ ] **Body's `## section` headings match the repo's `.github/pull_request_template.md`** — exact names, exact order. Diff `gh pr view --json body -q .body` against the template to confirm.
+- [ ] **No custom `##` sections invented beyond the template** — e.g., if the template doesn't have `## Rollback`, fold rollback content under the checklist as `#### Rollback` (level-4 heading)
+
+**TL;DR (outside the template's section list — the one allowed addition):**
+
 - [ ] **TL;DR paragraph exists** — 1–3 sentences, ≤60 words, immediately after the title and before any `## section`
 - [ ] **TL;DR states the outcome and the risk class** — reviewer can tell from those sentences alone "what does this do?" and "test-only or runtime change?"
+- [ ] **TL;DR carries the headline of any embedded screenshot** — even when the screenshot lives in the Screenshots section, the TL;DR names what it proves
+- [ ] **For PRs whose entire purpose is a visual change** (CI gate output, new design, dashboard before/after), the lead screenshot is ALSO embedded directly after the TL;DR with a one-line caption (PR Rule 2 exception 2)
+
+**Title (the tier-0 read):**
+
 - [ ] **Title reflects full PR scope** — not just the first commit's subject if the PR has grown
 - [ ] **Title is ≤72 chars and matches the repo's commitlint format**
-- [ ] **Screenshot / storyshot appears above `## Why`** (for visual-affecting PRs only)
+
+**Inner structure (reader-priority inside each template-mandated section):**
+
 - [ ] **`## Why` opens with a one-line problem summary** — numbered failure-mode lists come AFTER that one line
 - [ ] **`## What changed` bullets are outcome-first** — no leading file paths
-- [ ] **`## How to test` and `## Rollback` come AFTER `## Why` and `## What changed`** — not before
+- [ ] **`## How to test` includes negative-case proof** when the PR adds a gate / lint / invariant — show what failure looks like, not only the green pass
+- [ ] **`## Screenshots / recordings` orders by importance** — the picture that proves the PR's purpose first, supporting visuals after
+
+**Content quality:**
+
 - [ ] **No inline quote of >1 sentence from the ticket / Slack / RFC** — replace with a one-line summary + link
 - [ ] **No marketing voice** — dev-to-dev descriptive verbs
-- [ ] **No `## Follow-ups` section above the substance** — bottom or in TASKS.md
-- [ ] **Cold-reader test passes**: a reviewer who has never seen the PR can answer (1) what does this do, (2) what's the risk class, after reading ONLY the title + TL;DR paragraph
+- [ ] **No `## Follow-ups` section above the substance** — under the checklist at the bottom, or in TASKS.md
+
+**Cold-reader test (the final gate):**
+
+- [ ] A reviewer who has never seen the PR can answer (1) what does this do, (2) what's the risk class, (3) for visual PRs, what does it look like — after reading ONLY the title + TL;DR paragraph + lead screenshot if any
 
 ## The procedure
 
@@ -685,3 +781,5 @@ Pattern conformance: information architecture by audience priority (Krug, _Don't
 Anti-patterns sourced from observed bugs in this repo's README (PR #648 README rewrite + PR #668 clarity pass + 2026-05-20 operator review + 2026-05-22 operator review surfacing the five iron rules — no-time-banner, no-top-navigation, taxonomy-goes-deep, why-before-what, one-section-per-topic).
 
 PR-description section sourced from 2026-05-25 operator directive: "all PRs you create or update strictly follow great useful order of info for cold readers. Eg don't spam readers with technical details until you give them an overview." Surfaced by iep-capabilities PR #2095 (https://github.intuit.com/expertnetwrk-portal/iep-capabilities/pull/2095) — agent shipped a PR body that opened with a `## Why this is needed` heading followed by a numbered list of failure modes, with no TL;DR sentence between the title and the technical analysis. Reviewer cold-read fail. The PR-body skeleton, the cold-reader contract table, and PR Rules 1–6 are the fix.
+
+Two-layer rule (template OUTSIDE, reader-priority INSIDE) added 2026-05-25 second iteration after the same PR #2095 review surfaced an unstated assumption in the earlier draft: "ofc prs must follow pr templates but inside each section text must follow our rational rules." The earlier draft had implied the skeleton could replace the repo's PR template; this iteration corrects that to: section ORDER comes from the repo's `.github/pull_request_template.md` (because Danger, Jira PMC, and automated reviewers parse by section name); reader-priority rules apply INSIDE each section; the TL;DR paragraph is the ONE allowed addition outside the template's section list. The "screenshot above prose" rule was relaxed to "screenshot in the template's Screenshots slot, with TL;DR carrying the visual headline" — plus a stated exception for PRs where the picture IS the PR's purpose (lead image after TL;DR in addition to the Screenshots-section copy).
