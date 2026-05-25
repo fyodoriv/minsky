@@ -379,6 +379,35 @@ function collectSessionConvertsRepo() {
   return formatSessionConvertsRepo(data);
 }
 
+/**
+ * Path A scoreboard collectors. Each runs `fd -e ts -e tsx --type f
+ * --exclude '*.test.*' . <subtree>/ | xargs wc -l | tail -1 | awk
+ * '{print $1}'` and reports the LOC integer. Pure observation — no
+ * goal/pivot logic here (those live in `SUCCESS_METRICS` in
+ * `novel/dashboard-web/src/metrics.ts`).
+ *
+ * Source: TASKS.md `path-a-loc-scoreboard-metric` (P1, M1);
+ * `docs/plans/2026-05-24-path-a-aggressive-cut.md` (the 5-10K
+ * target); rule #4 (everything measurable, everything visible).
+ *
+ * @param {string} subtree  — relative path under repo root (e.g. "novel", "novel/cross-repo-runner")
+ * @returns {{ value: number, higherIsBetter: boolean } | null}
+ */
+function collectPathALoc(subtree) {
+  // Use a shell with pipefail so the value is meaningful — if fd
+  // finds nothing OR xargs / wc / awk fail, we return null rather
+  // than a misleading 0.
+  const cmd = `set -o pipefail; fd -e ts -e tsx --type f --exclude '*.test.*' . ${subtree}/ | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}'`;
+  const raw = run(cmd);
+  if (raw === null || raw.trim().length === 0) return null;
+  const value = Number.parseInt(raw, 10);
+  if (Number.isNaN(value)) return null;
+  // higherIsBetter=false because Path A's stated goal is shrinking
+  // — the budget threshold is ≤10K for the parent metric, 0 for the
+  // sub-tree deletion targets.
+  return { value, higherIsBetter: false };
+}
+
 function collectBaselineDeltaPerCycle() {
   const data = /** @type {Parameters<typeof formatBaselineDeltaPerCycle>[0]} */ (
     runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
@@ -411,6 +440,11 @@ async function main() {
       value: "no OTEL backend — not measurable yet (M1 gap)",
       higherIsBetter: false,
     }),
+    // Path A scoreboard — see `SUCCESS_METRICS` for goal/pivot/anchor.
+    // Source: TASKS.md `path-a-loc-scoreboard-metric` (P1, M1).
+    "path-a-loc-novel-tree": () => collectPathALoc("novel"),
+    "path-a-loc-cross-repo-runner": () => collectPathALoc("novel/cross-repo-runner"),
+    "path-a-loc-tick-loop": () => collectPathALoc("novel/tick-loop"),
   };
 
   /** @type {Record<string, {value: any, higherIsBetter?: boolean}>} */
