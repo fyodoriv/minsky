@@ -42,9 +42,6 @@ importers:
       '@minsky/experiment-record':
         specifier: workspace:*
         version: link:novel/experiment-record
-      '@minsky/tick-loop':
-        specifier: workspace:*
-        version: link:novel/tick-loop
       '@minsky/token-monitor':
         specifier: workspace:*
         version: link:novel/adapters/token-monitor
@@ -160,8 +157,6 @@ importers:
 
   novel/adapters/types: {}
 
-  novel/bridges/omc-tasksmd: {}
-
   novel/budget-guard:
     dependencies:
       '@hono/node-server':
@@ -175,28 +170,6 @@ importers:
         version: 4.12.21
 
   novel/competitive-benchmark: {}
-
-  novel/cross-repo-runner:
-    dependencies:
-      '@minsky/agent-runtime-openhands':
-        specifier: workspace:*
-        version: link:../adapters/agent-runtime-openhands
-      '@minsky/sidecar-bootstrap':
-        specifier: workspace:*
-        version: link:../sidecar-bootstrap
-      '@minsky/tick-loop':
-        specifier: workspace:*
-        version: link:../tick-loop
-    devDependencies:
-      '@types/node':
-        specifier: 25.9.1
-        version: 25.9.1
-      typescript:
-        specifier: 5.7.2
-        version: 5.7.2
-      vitest:
-        specifier: 2.1.9
-        version: 2.1.9(@types/node@25.9.1)
 
   novel/dashboard-web:
     dependencies:
@@ -212,8 +185,6 @@ importers:
       yaml:
         specifier: ^2.6.0
         version: 2.9.0
-
-  novel/handoff-spec: {}
 
   novel/human-loop:
     devDependencies:
@@ -252,27 +223,6 @@ importers:
       vitest:
         specifier: 2.1.9
         version: 2.1.9(@types/node@25.9.1)
-
-  novel/tick-loop:
-    dependencies:
-      '@minsky/budget-guard':
-        specifier: workspace:*
-        version: link:../budget-guard
-      '@minsky/notifier':
-        specifier: workspace:*
-        version: link:../adapters/notifier
-      '@minsky/observability':
-        specifier: workspace:*
-        version: link:../adapters/observability
-      '@minsky/token-monitor':
-        specifier: workspace:*
-        version: link:../adapters/token-monitor
-
-  novel/tui:
-    dependencies:
-      '@minsky/cross-repo-runner':
-        specifier: workspace:^
-        version: link:../cross-repo-runner
 
 packages:
 

@@ -18,11 +18,7 @@
         "!scripts/fixtures/**",
         "!**/dist/**"
       ],
-      "ignoreDependencies": [
-        "@minsky/experiment-record",
-        "@minsky/tick-loop",
-        "@minsky/token-monitor"
-      ]
+      "ignoreDependencies": ["@minsky/experiment-record", "@minsky/token-monitor"]
     },
     "novel/*": {
       "entry": ["src/index.ts", "src/*.test.ts", "bin/*.mjs", "bin/*.ts", "test/**/*.test.ts"],

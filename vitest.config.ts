@@ -25,7 +25,6 @@ export default defineConfig({
       "@minsky/observer-heals": r("./novel/observer/heals/src/index.ts"),
       "@minsky/omc-tasksmd-bridge": r("./novel/bridges/omc-tasksmd/src/index.ts"),
       "@minsky/sidecar-bootstrap": r("./novel/sidecar-bootstrap/src/index.ts"),
-      "@minsky/tick-loop": r("./novel/tick-loop/src/index.ts"),
     },
   },
   test: {

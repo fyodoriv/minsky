@@ -442,11 +442,12 @@ async function main() {
     }),
     // Path A scoreboard — see `SUCCESS_METRICS` for goal/pivot/anchor.
     // Source: TASKS.md `path-a-loc-scoreboard-metric` (P1, M1).
-    // `path-a-loc-cross-repo-runner` was retired in PR #882
-    // (phase-7b step 6) once the cross-repo-runner-decoupling work
-    // landed; its terminal value will be 0 after phase-7b step 7.
+    // `path-a-loc-cross-repo-runner` was retired in PR #883
+    // (phase-7b step 6/7) and `path-a-loc-tick-loop` was retired in
+    // PR #888 (phase-11b step 6/7/8) once their respective
+    // deletion-target packages were removed. `path-a-loc-novel-tree`
+    // continues to track the aggregate.
     "path-a-loc-novel-tree": () => collectPathALoc("novel"),
-    "path-a-loc-tick-loop": () => collectPathALoc("novel/tick-loop"),
   };
 
   /** @type {Record<string, {value: any, higherIsBetter?: boolean}>} */

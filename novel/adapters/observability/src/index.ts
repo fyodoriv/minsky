@@ -36,11 +36,14 @@ export { aggregateStatus, type SelfTestResult, type SelfTestStatus } from "@mins
 import type { SelfTestResult } from "@minsky/adapter-types";
 
 /**
- * Minimal span event shape that callers (e.g. `@minsky/tick-loop`'s daemon)
- * emit per phase. Mirrors the daemon's existing `TickSpan` type so the
- * CLI can pass `obs.emitTickSpan` straight in as the `emit` callback to
- * `runDaemon` without any adapter glue. `attributes` values are restricted
- * to the OTEL primitive scalars so the OTLP exporter can serialise them.
+ * Minimal span event shape that callers emit per phase. Originally
+ * mirrored the TS daemon's `TickSpan` type so the CLI could pass
+ * `obs.emitTickSpan` straight in as the `emit` callback to `runDaemon`
+ * without any adapter glue. After phase-11b's tick-loop deletion (PR
+ * #888), the bash skeleton + OpenHands adapter emit OTEL spans directly;
+ * this shape is the canonical contract those callers conform to.
+ * `attributes` values are restricted to the OTEL primitive scalars so
+ * the OTLP exporter can serialise them.
  */
 export interface ObservabilityEvent {
   readonly name: string;
