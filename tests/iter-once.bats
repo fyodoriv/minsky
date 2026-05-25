@@ -1,20 +1,33 @@
 #!/usr/bin/env bats
-# tests/iter-once.bats — paired tests for `minsky iter-once` and
-# `minsky tail-failures` subcommands (PR follow-up to bash-doctor +
-# failure-capture in PR #866).
+# tests/iter-once.bats — paired tests for the consolidated forms
+# `minsky --once <host>` and `minsky logs --failures [host]`, plus a
+# small "deprecated alias still works" set for the older
+# `iter-once` / `tail-failures` subcommand spelling.
+#
+# History:
+#   - PR #867 introduced `iter-once` and `tail-failures` subcommands.
+#   - PR #868 (rule #16 CLI consolidation corollary) folded the bodies
+#     into a `_run_iter_once()` + `_run_tail_failures()` shared
+#     function pair, exposed them via `--once` (flag on no-args
+#     entry) and `logs --failures` (refinement of an existing verb),
+#     and kept the old subcommands as thin deprecation aliases. These
+#     tests pin BOTH spellings against the same shared function so
+#     accidental drift between alias and canonical form is caught.
 #
 # What this pins:
-# - `iter-once` with no args exits 2 + prints usage hint.
-# - `iter-once` with a non-existent host-dir exits 1.
-# - `iter-once --help` exits 0 + prints usage.
-# - `iter-once` writes <host>/.minsky/iter-once.log (append-only).
-# - `iter-once` defaults to --dry-run (no agent spawn).
-# - `iter-once --live` omits --dry-run from the runner args.
-# - `iter-once` summary names verdict + ledger + (if non-validated) capture.
-# - `tail-failures` with no failures dir prints friendly message + exits 0.
-# - `tail-failures --latest` shows metadata + brief + stdout sections.
-# - `tail-failures --count N` lists at most N capture dirs.
-# - `tail-failures --help` exits 0.
+# - `--once` with no args exits 2 + prints usage hint naming `--once`.
+# - `--once` with a non-existent host-dir exits 1.
+# - `--once --help` exits 0 + prints usage.
+# - `--once` writes <host>/.minsky/iter-once.log (append-only).
+# - `--once` defaults to --dry-run (no agent spawn).
+# - `--once --live` flips the header to LIVE.
+# - `--once` summary names verdict + ledger + (if non-validated) capture.
+# - `logs --failures` with no failures dir prints friendly message + exits 0.
+# - `logs --failures --latest` shows metadata + brief + stdout sections.
+# - `logs --failures --count N` lists at most N capture dirs.
+# - `logs --failures --help` exits 0.
+# - Deprecated `iter-once` alias prints a banner then delegates.
+# - Deprecated `tail-failures` alias prints a banner then delegates.
 #
 # Run: bats tests/iter-once.bats
 
@@ -37,109 +50,109 @@ teardown() {
   rm -rf "$TMPDIR_TEST"
 }
 
-# --- iter-once: CLI contract --------------------------------------------
+# --- --once: CLI contract --------------------------------------------------
 
-@test "iter-once: missing host-dir exits 2 + prints usage hint" {
-  run "$MINSKY_BIN" iter-once
+@test "--once: missing host-dir exits 2 + prints usage hint" {
+  run "$MINSKY_BIN" --once
   [ "$status" -eq 2 ]
   [[ "$output" == *"host-dir required"* ]]
-  [[ "$output" == *"usage: minsky iter-once"* ]]
+  [[ "$output" == *"usage: minsky --once"* ]]
 }
 
-@test "iter-once: non-existent host-dir exits 1" {
-  run "$MINSKY_BIN" iter-once /nonexistent/path
+@test "--once: non-existent host-dir exits 1" {
+  run "$MINSKY_BIN" --once /nonexistent/path
   [ "$status" -eq 1 ]
   [[ "$output" == *"host-dir not found"* ]]
 }
 
-@test "iter-once: --help exits 0 + prints usage" {
-  run "$MINSKY_BIN" iter-once --help
+@test "--once: --help exits 0 + prints usage" {
+  run "$MINSKY_BIN" --once --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"--live"* ]]
   [[ "$output" == *"--no-capture"* ]]
 }
 
-@test "iter-once: unknown flag exits 2" {
-  run "$MINSKY_BIN" iter-once --frobnicate "$TEST_HOST"
+@test "--once: unknown flag exits 2" {
+  run "$MINSKY_BIN" --once --frobnicate "$TEST_HOST"
   [ "$status" -eq 2 ]
   [[ "$output" == *"unknown flag"* ]]
 }
 
-# --- iter-once: behavior ---------------------------------------------------
+# --- --once: behavior -----------------------------------------------------
 
-@test "iter-once: writes <host>/.minsky/iter-once.log with run header" {
-  HOME="$FAKE_HOME" run "$MINSKY_BIN" iter-once "$TEST_HOST"
+@test "--once: writes <host>/.minsky/iter-once.log with run header" {
+  HOME="$FAKE_HOME" run "$MINSKY_BIN" --once "$TEST_HOST"
   # Status varies (may abort on invariants in test env) — we only pin
   # that the log was written with the expected header.
   [ -f "$TEST_HOST/.minsky/iter-once.log" ]
-  grep -q "=== minsky iter-once @" "$TEST_HOST/.minsky/iter-once.log"
+  grep -q "=== minsky --once @" "$TEST_HOST/.minsky/iter-once.log"
   grep -q "host:" "$TEST_HOST/.minsky/iter-once.log"
   grep -q "mode:.*dry-run" "$TEST_HOST/.minsky/iter-once.log"
 }
 
-@test "iter-once: --live mode header reports LIVE" {
-  HOME="$FAKE_HOME" run "$MINSKY_BIN" iter-once "$TEST_HOST" --live
+@test "--once: --live mode header reports LIVE" {
+  HOME="$FAKE_HOME" run "$MINSKY_BIN" --once "$TEST_HOST" --live
   [ -f "$TEST_HOST/.minsky/iter-once.log" ]
   grep -q "mode:.*LIVE" "$TEST_HOST/.minsky/iter-once.log"
 }
 
-@test "iter-once: log is APPENDED across invocations (not truncated)" {
-  HOME="$FAKE_HOME" "$MINSKY_BIN" iter-once "$TEST_HOST" >/dev/null 2>&1 || true
+@test "--once: log is APPENDED across invocations (not truncated)" {
+  HOME="$FAKE_HOME" "$MINSKY_BIN" --once "$TEST_HOST" >/dev/null 2>&1 || true
   sleep 1
-  HOME="$FAKE_HOME" "$MINSKY_BIN" iter-once "$TEST_HOST" >/dev/null 2>&1 || true
+  HOME="$FAKE_HOME" "$MINSKY_BIN" --once "$TEST_HOST" >/dev/null 2>&1 || true
   # Two header lines means two invocations were appended
-  count=$(grep -c "=== minsky iter-once @" "$TEST_HOST/.minsky/iter-once.log")
+  count=$(grep -c "=== minsky --once @" "$TEST_HOST/.minsky/iter-once.log")
   [ "$count" -eq 2 ]
 }
 
-@test "iter-once: prints summary block with verdict + ledger + iter log paths" {
-  HOME="$FAKE_HOME" run "$MINSKY_BIN" iter-once "$TEST_HOST"
+@test "--once: prints summary block with verdict + ledger + iter log paths" {
+  HOME="$FAKE_HOME" run "$MINSKY_BIN" --once "$TEST_HOST"
   # Don't pin exit code (may vary in test env)
-  [[ "$output" == *"iter-once summary"* ]]
+  [[ "$output" == *"--once summary"* ]]
   [[ "$output" == *"verdict:"* ]]
   [[ "$output" == *"iter log:"* ]]
 }
 
-# --- tail-failures: CLI contract -------------------------------------------
+# --- logs --failures: CLI contract ----------------------------------------
 
-@test "tail-failures: --help exits 0 + prints usage" {
-  run "$MINSKY_BIN" tail-failures --help
+@test "logs --failures: --help exits 0 + prints usage" {
+  run "$MINSKY_BIN" logs --failures --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"--count"* ]]
   [[ "$output" == *"--latest"* ]]
 }
 
-@test "tail-failures: non-existent host-dir exits 1" {
-  run "$MINSKY_BIN" tail-failures /nonexistent/path
+@test "logs --failures: non-existent host-dir exits 1" {
+  run "$MINSKY_BIN" logs --failures /nonexistent/path
   [ "$status" -eq 1 ]
   [[ "$output" == *"host-dir not found"* ]]
 }
 
-@test "tail-failures: unknown flag exits 2" {
-  run "$MINSKY_BIN" tail-failures --frobnicate "$TEST_HOST"
+@test "logs --failures: unknown flag exits 2" {
+  run "$MINSKY_BIN" logs --failures --frobnicate "$TEST_HOST"
   [ "$status" -eq 2 ]
   [[ "$output" == *"unknown flag"* ]]
 }
 
-# --- tail-failures: behavior -----------------------------------------------
+# --- logs --failures: behavior --------------------------------------------
 
-@test "tail-failures: no failures dir prints friendly message + exits 0" {
-  run "$MINSKY_BIN" tail-failures "$TEST_HOST"
+@test "logs --failures: no failures dir prints friendly message + exits 0" {
+  run "$MINSKY_BIN" logs --failures "$TEST_HOST"
   [ "$status" -eq 0 ]
   [[ "$output" == *"no failure-capture dir"* ]]
   [[ "$output" == *"$TEST_HOST/.minsky/failures"* ]]
 }
 
-@test "tail-failures: empty failures dir prints friendly message + exits 0" {
+@test "logs --failures: empty failures dir prints friendly message + exits 0" {
   mkdir -p "$TEST_HOST/.minsky/failures"
-  run "$MINSKY_BIN" tail-failures "$TEST_HOST"
+  run "$MINSKY_BIN" logs --failures "$TEST_HOST"
   [ "$status" -eq 0 ]
   [[ "$output" == *"is empty"* ]]
 }
 
-@test "tail-failures: lists capture dirs sorted by mtime desc" {
+@test "logs --failures: lists capture dirs sorted by mtime desc" {
   mkdir -p "$TEST_HOST/.minsky/failures/2026-05-24T120000Z-task-old"
   mkdir -p "$TEST_HOST/.minsky/failures/2026-05-25T120000Z-task-new"
   # Set mtimes explicitly
@@ -149,7 +162,7 @@ teardown() {
   for d in "$TEST_HOST/.minsky/failures"/*/; do
     echo '{"verdict":"spawn-failed","duration_ms":100,"task_id":"task-x"}' > "$d/metadata.json"
   done
-  run "$MINSKY_BIN" tail-failures "$TEST_HOST" --count 5
+  run "$MINSKY_BIN" logs --failures "$TEST_HOST" --count 5
   [ "$status" -eq 0 ]
   # Newer dir should appear before older in the output
   newer_line=$(echo "$output" | grep -n "task-new" | head -1 | cut -d: -f1)
@@ -157,13 +170,13 @@ teardown() {
   [ -n "$newer_line" ] && [ -n "$older_line" ] && [ "$newer_line" -lt "$older_line" ]
 }
 
-@test "tail-failures: --latest shows metadata.json + brief.md head + stdout.log tail" {
+@test "logs --failures: --latest shows metadata.json + brief.md head + stdout.log tail" {
   capture_dir="$TEST_HOST/.minsky/failures/2026-05-25T120000Z-task-x"
   mkdir -p "$capture_dir"
   echo '{"verdict":"spawn-failed","task_id":"task-x","exit_code":1}' > "$capture_dir/metadata.json"
   echo "test brief content" > "$capture_dir/brief.md"
   echo "test stdout content" > "$capture_dir/stdout.log"
-  run "$MINSKY_BIN" tail-failures "$TEST_HOST" --latest
+  run "$MINSKY_BIN" logs --failures "$TEST_HOST" --latest
   [ "$status" -eq 0 ]
   [[ "$output" == *"metadata.json"* ]]
   [[ "$output" == *"brief.md"* ]]
@@ -173,22 +186,57 @@ teardown() {
   [[ "$output" == *"test stdout content"* ]]
 }
 
-@test "tail-failures: --count N caps the listing" {
+@test "logs --failures: --count N caps the listing" {
   for i in 1 2 3 4 5; do
     d="$TEST_HOST/.minsky/failures/2026-05-25T12000${i}Z-task-$i"
     mkdir -p "$d"
     echo '{"verdict":"spawn-failed","task_id":"task-'"$i"'","duration_ms":'"$i"'00}' > "$d/metadata.json"
   done
-  run "$MINSKY_BIN" tail-failures "$TEST_HOST" --count 3
+  run "$MINSKY_BIN" logs --failures "$TEST_HOST" --count 3
   [ "$status" -eq 0 ]
   count=$(echo "$output" | grep -c "verdict=" || true)
   [ "$count" -eq 3 ]
 }
 
-@test "tail-failures: defaults to PWD when no host arg given" {
+@test "logs --failures: defaults to PWD when no host arg given" {
   cd "$TEST_HOST"
   mkdir -p "$TEST_HOST/.minsky/failures"
-  run "$MINSKY_BIN" tail-failures
+  run "$MINSKY_BIN" logs --failures
   [ "$status" -eq 0 ]
   [[ "$output" == *"$TEST_HOST"* ]] || [[ "$output" == *"is empty"* ]]
+}
+
+# --- Deprecated aliases — pin that they still delegate -------------------
+
+@test "deprecated iter-once: prints banner + delegates to --once body" {
+  run "$MINSKY_BIN" iter-once /nonexistent/path
+  # Same exit code as canonical form
+  [ "$status" -eq 1 ]
+  # Deprecation banner appears on stderr (run captures both into $output)
+  [[ "$output" == *"\`iter-once\` is deprecated"* ]]
+  [[ "$output" == *"--once"* ]]
+  # And the canonical error from _run_iter_once is also printed
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "deprecated iter-once: MINSKY_ITER_ONCE_FOLD=1 suppresses banner" {
+  MINSKY_ITER_ONCE_FOLD=1 run "$MINSKY_BIN" iter-once /nonexistent/path
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"iter-once\` is deprecated"* ]]
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "deprecated tail-failures: prints banner + delegates to logs --failures body" {
+  run "$MINSKY_BIN" tail-failures /nonexistent/path
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"\`tail-failures\` is deprecated"* ]]
+  [[ "$output" == *"logs --failures"* ]]
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "deprecated tail-failures: MINSKY_TAIL_FAILURES_FOLD=1 suppresses banner" {
+  MINSKY_TAIL_FAILURES_FOLD=1 run "$MINSKY_BIN" tail-failures /nonexistent/path
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"tail-failures\` is deprecated"* ]]
+  [[ "$output" == *"host-dir not found"* ]]
 }
