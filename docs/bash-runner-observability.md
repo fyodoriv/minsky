@@ -92,14 +92,59 @@ ls -lt /tmp/minsky-stdout.* | head -1 | awk '{print $NF}' | xargs tail -f
 
 ## When something breaks: triage order
 
-1. `minsky bash-doctor` — is the machine still healthy?
-2. `ls -t <host>/.minsky/failures/ | head -3` — what failed most recently?
-3. `cat <host>/.minsky/failures/<latest>/metadata.json | jq .` — verdict + exit code + duration.
-4. `head -50 <host>/.minsky/failures/<latest>/brief.md` — was the agent told the right thing?
-5. `tail -100 <host>/.minsky/failures/<latest>/stdout.log` — what did the agent actually do/say?
-6. `cat <host>/.minsky/failures/<latest>/env.txt | grep -i 'minsky\|host\|task'` — was the env shaped correctly?
+```bash
+minsky bash-doctor          # is the machine still healthy?
+minsky tail-failures <host> --latest  # show me what broke last
+```
 
-This sequence takes < 30s and replaces what used to require eye-bisecting `bin/minsky-run.sh` output.
+`tail-failures --latest` is the operator's one-liner — it prints the metadata.json (verdict, exit_code, duration_ms, tool versions), the first 30 lines of brief.md (what was the agent told?), and the last 50 lines of stdout.log (what did the agent actually do?). One command, all the evidence.
+
+Without `--latest`, `tail-failures` lists the most recent N capture dirs (default 5) with one-line summaries — verdict, task ID, duration — so the operator can spot patterns (e.g. "all 5 most recent failures are `spawn-failed` with duration ~30s — the watchdog is firing").
+
+The legacy manual sequence still works for deeper digging:
+
+```bash
+ls -t <host>/.minsky/failures/ | head -3       # what failed recently?
+cat <host>/.minsky/failures/<id>/metadata.json | jq .
+head -50 <host>/.minsky/failures/<id>/brief.md
+tail -100 <host>/.minsky/failures/<id>/stdout.log
+grep -i 'minsky\|host\|task' <host>/.minsky/failures/<id>/env.txt
+```
+
+## Tight iteration loop: `minsky iter-once`
+
+When you're debugging a change to `bin/minsky-run.sh` or `scripts/*.py`, you don't want to run a full 8-iteration session each time. `minsky iter-once <host-dir>` runs EXACTLY ONE iteration against a host, tee'ing all I/O into `<host-dir>/.minsky/iter-once.log` so you can `cat` it after.
+
+```bash
+minsky iter-once ~/apps/toronto-rentals          # dry-run (no spawn, no tokens)
+minsky iter-once ~/apps/toronto-rentals --live   # real spawn (burns tokens)
+minsky iter-once ~/apps/toronto-rentals --no-capture  # disable failure-capture
+                                                       # for this run
+```
+
+Defaults to `--dry-run` — safe for the tight loop. After exit, prints:
+
+```text
+=== iter-once summary ===
+  verdict:        spawn-failed
+  ledger row:     <host>/.minsky/experiment-store/cross-repo/task-foo.jsonl
+  iter log:       <host>/.minsky/iter-once.log
+  failure capture: <host>/.minsky/failures/<latest>/
+                   (cat <host>/.minsky/failures/<latest>/metadata.json | jq .)
+```
+
+The operator's mental model:
+
+```bash
+minsky bash-doctor                          # is the machine healthy?
+minsky iter-once foo                        # try one dry iteration
+minsky iter-once foo --live                 # if dry was good, try real
+minsky tail-failures foo --latest           # if something broke, show me
+# (edit code) (edit code)
+minsky iter-once foo                        # try again, loop until green
+```
+
+Each cycle ≤30s of operator attention. Without `iter-once`, every code change forced a full session run (8h budget) + manual JSONL inspection.
 
 ## Source
 
