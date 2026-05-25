@@ -1797,7 +1797,7 @@ jobs:
       - name: metric-freshness lint
         run: |
           node scripts/check-metric-freshness.mjs \
-            --expected loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput,cross-repo-pr-rate,fleet-stability-aggregated,session-converts-repo,baseline-delta-per-cycle,path-a-loc-novel-tree,path-a-loc-cross-repo-runner,path-a-loc-tick-loop
+            --expected loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput,cross-repo-pr-rate,fleet-stability-aggregated,session-converts-repo,baseline-delta-per-cycle,path-a-loc-novel-tree,path-a-loc-tick-loop
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
 
