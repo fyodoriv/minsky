@@ -441,6 +441,106 @@ EOF
   [[ "$output" == *"NODE_RUNNER_INVOKED"* ]]
 }
 
+@test "bin/minsky-bootstrap.sh materializes sidecar with inferred owner/repo (Phase 11)" {
+  # Phase 11: the bash bootstrap replaces 1.6K LOC of TS inference with
+  # template substitution + 6 git/file-system actions. This pins the
+  # SSH-URL normalization + the 6-action plan from one fixture host.
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  [ -x "$bootstrap" ]
+
+  fixture="$TMPDIR_TEST/bootstrap-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:fyodoriv/test-host.git)
+  printf '{"scripts":{"check":"echo ok"}}' > "$fixture/package.json"
+  printf '# Tasks\n\n## P0\n' > "$fixture/TASKS.md"
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sidecar materialized"* ]]
+
+  # Sidecar layout
+  [ -f "$fixture/.minsky/repo.yaml" ]
+  [ -L "$fixture/.minsky/vision.md" ]
+  [ -d "$fixture/.minsky/experiments" ]
+
+  # SSH-URL normalization → owner/repo
+  grep -q '^host_repo: "fyodoriv/test-host"$' "$fixture/.minsky/repo.yaml"
+
+  # Inferred fields
+  grep -q '^tasks_md_path: "TASKS.md"$' "$fixture/.minsky/repo.yaml"
+  grep -q '^pre_commit_command: "pnpm run check"$' "$fixture/.minsky/repo.yaml"
+  grep -q '^default_branch: "main"$' "$fixture/.minsky/repo.yaml"
+
+  # Global gitignore registration
+  grep -q '^\.minsky/$' "$TMPDIR_TEST/xdg/git/ignore"
+}
+
+@test "bin/minsky-bootstrap.sh normalizes HTTPS-style remote URLs to owner/repo" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  fixture="$TMPDIR_TEST/https-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin https://github.com/foo/bar.git)
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg2" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  grep -q '^host_repo: "foo/bar"$' "$fixture/.minsky/repo.yaml"
+}
+
+@test "bin/minsky-bootstrap.sh --doctor is read-only and lists inferred signals" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  fixture="$TMPDIR_TEST/doctor-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/doctor-target.git)
+
+  run "$bootstrap" --doctor "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"host_repo:"* ]]
+  [[ "$output" == *"foo/doctor-target"* ]]
+  [[ "$output" == *".minsky/ exists:     no"* ]]
+
+  # Doctor mode MUST NOT write the sidecar.
+  [ ! -d "$fixture/.minsky" ]
+}
+
+@test "bin/minsky-bootstrap.sh is idempotent (second run does not corrupt)" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  fixture="$TMPDIR_TEST/idempotent-fixture"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/idem.git)
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg3" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  first_hash="$(shasum "$fixture/.minsky/repo.yaml" | awk '{print $1}')"
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg3" run "$bootstrap" "$fixture"
+  [ "$status" -eq 0 ]
+  second_hash="$(shasum "$fixture/.minsky/repo.yaml" | awk '{print $1}')"
+
+  # Same input → same repo.yaml (no clock-dependent fields).
+  [ "$first_hash" = "$second_hash" ]
+
+  # Global gitignore registered ONCE (idempotent append).
+  occurrences="$(grep -c '^\.minsky/$' "$TMPDIR_TEST/xdg3/git/ignore" | tr -d ' ')"
+  [ "$occurrences" = "1" ]
+}
+
+@test "bin/minsky-bootstrap.sh exits 1 on missing host-dir" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  run "$bootstrap" /this/path/does/not/exist
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "bin/minsky-bootstrap.sh exits 2 on missing arg" {
+  bootstrap="$REPO_ROOT/bin/minsky-bootstrap.sh"
+  run "$bootstrap"
+  [ "$status" -eq 2 ]
+}
+
 @test "round-robin iterates each host the expected number of times" {
   host_a="$(make_host alpha "$(complete_task_block | sed s/pick-me-first/task-a/)")"
   host_b="$(make_host bravo "$(complete_task_block | sed s/pick-me-first/task-b/)")"
