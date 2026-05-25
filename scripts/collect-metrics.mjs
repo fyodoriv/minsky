@@ -235,6 +235,10 @@ function collectWristDwell() {
  * below use this to defend against missing python3, missing ledger,
  * etc. — each fallback path produces an honest descriptive value
  * (never `(stub)`).
+ *
+ * @param {string} scriptPath
+ * @param {string[]} args
+ * @returns {unknown}
  */
 function runPyJson(scriptPath, args) {
   try {
@@ -262,6 +266,7 @@ function runPyJson(scriptPath, args) {
 /**
  * @param {string | undefined} hostsDir
  * @param {{ host_count?: number, per_host?: Array<{ session_count: number, lint_pass_fraction: number | null }> } | null} data
+ * @returns {{ value: string, higherIsBetter: boolean }}
  */
 export function formatFleetStability(hostsDir, data) {
   if (!hostsDir) {
@@ -270,7 +275,17 @@ export function formatFleetStability(hostsDir, data) {
       higherIsBetter: true,
     };
   }
-  if (data === null) return null;
+  if (data === null) {
+    // Python script failed (e.g. transform_knowledge.py not found or
+    // exit≠0). Honest descriptive rather than `null` so the collector
+    // surface stays uniform — Ries 2011 (no silent zero), and so the
+    // type is `{value, higherIsBetter}` not `… | null` (downstream
+    // consumers don't need to null-guard).
+    return {
+      value: `transform_knowledge.py failed against ${hostsDir} (see script stderr)`,
+      higherIsBetter: true,
+    };
+  }
   if ((data.host_count ?? 0) === 0) {
     return { value: `n=0 hosts with ledger data under ${hostsDir}`, higherIsBetter: true };
   }
@@ -296,6 +311,7 @@ export function formatFleetStability(hostsDir, data) {
 
 /**
  * @param {{ session_count: number, files_delta_per_session: number[], tests_delta_per_session: number[], loc_delta_per_session: number[] } | null} data
+ * @returns {{ value: string, higherIsBetter: boolean }}
  */
 export function formatSessionConvertsRepo(data) {
   if (data === null) {
@@ -323,6 +339,7 @@ export function formatSessionConvertsRepo(data) {
 
 /**
  * @param {{ session_count: number, files_delta_cumulative: number[], tests_delta_cumulative: number[], loc_delta_cumulative: number[] } | null} data
+ * @returns {{ value: string, higherIsBetter: boolean }}
  */
 export function formatBaselineDeltaPerCycle(data) {
   if (data === null) {
@@ -347,19 +364,25 @@ export function formatBaselineDeltaPerCycle(data) {
 // ---- Collectors (thin wrappers — subprocess + format) ------------
 
 function collectFleetStabilityAggregated() {
-  const hostsDir = process.env.MINSKY_HOSTS_DIR;
+  const hostsDir = process.env["MINSKY_HOSTS_DIR"];
   if (!hostsDir) return formatFleetStability(undefined, null);
-  const data = runPyJson("scripts/transform_knowledge.py", ["--hosts-dir", hostsDir, "--json"]);
+  const data = /** @type {Parameters<typeof formatFleetStability>[1]} */ (
+    runPyJson("scripts/transform_knowledge.py", ["--hosts-dir", hostsDir, "--json"])
+  );
   return formatFleetStability(hostsDir, data);
 }
 
 function collectSessionConvertsRepo() {
-  const data = runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"]);
+  const data = /** @type {Parameters<typeof formatSessionConvertsRepo>[0]} */ (
+    runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
+  );
   return formatSessionConvertsRepo(data);
 }
 
 function collectBaselineDeltaPerCycle() {
-  const data = runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"]);
+  const data = /** @type {Parameters<typeof formatBaselineDeltaPerCycle>[0]} */ (
+    runPyJson("scripts/transform_trend.py", ["--repo", ROOT, "--json"])
+  );
   return formatBaselineDeltaPerCycle(data);
 }
 
