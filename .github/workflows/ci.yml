@@ -1035,12 +1035,15 @@ jobs:
   cloud-agent-config-audit-matrix:
     # `add-openhands-as-pluggable-backend` § Measurement: the 4-agent
     # cloud-agent contract lint. Asserts AGENT_MATRIX has exactly 4 rows
-    # (claude / devin / aider / openhands) in that order, every row has
-    # a valid briefDeliveryShape + modelFlag, and the openhands row's
-    # pendingExternalDep field matches the today-vs-2026-06-01 contract.
-    # Self-flips on 2026-06-01: pre-release the lint asserts openhands.
-    # pendingExternalDep === "2026-06-01"; post-release it asserts ===
-    # null, refusing to be green during the operator's required flip.
+    # (openhands / claude / devin / aider) in that order, every row has
+    # a valid briefDeliveryShape + modelFlag, and post-integration steady
+    # state — pendingExternalDep === null for all rows. As of PR #879
+    # (phase-7b step 3) the source-of-truth and lint live in
+    # `scripts/lib/cloud-agent-config.mjs` +
+    # `scripts/cloud-agent-config-audit-matrix-lint.mjs` (ported from
+    # the deleted `novel/cross-repo-runner/src/agent-config.ts`). No
+    # pre-build step needed — the source module is plain .mjs with
+    # JSDoc types; the lint imports it directly.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1052,12 +1055,10 @@ jobs:
           node-version-file: ".node-version"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: build cross-repo-runner (for the dist/agent-config.js the lint reads)
-        run: pnpm -F @minsky/cross-repo-runner build
       - name: cloud-agent-config-audit-matrix lint
-        run: node novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.mjs
-      - name: vitest for the underlying agent-config module
-        run: pnpm exec vitest run novel/cross-repo-runner/src/agent-config.test.ts
+        run: node scripts/cloud-agent-config-audit-matrix-lint.mjs
+      - name: vitest for the underlying cloud-agent-config module
+        run: pnpm exec vitest run scripts/lib/cloud-agent-config.test.mjs
 
   security-docs-cohesion:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`:
