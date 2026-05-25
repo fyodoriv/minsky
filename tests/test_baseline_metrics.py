@@ -161,6 +161,108 @@ def test_has_script_handles_malformed_json(tmp_path: Path) -> None:
     assert bm.has_script(pkg, "lint") is False
 
 
+def test_try_tokei_returns_none_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Force PATH to a dir with no tokei → graceful None return.
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert bm._try_tokei(tmp_path) is None
+
+
+def test_try_scc_returns_none_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert bm._try_scc(tmp_path) is None
+
+
+def test_try_cloc_returns_none_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert bm._try_cloc(tmp_path) is None
+
+
+def test_loc_by_language_falls_back_to_walk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # With no external counters installed, the fallback returns the
+    # walk_repo LOC + source="walk".
+    monkeypatch.setenv("PATH", str(tmp_path))
+    write(tmp_path / "src" / "a.ts", "line1\nline2\n")
+    write(tmp_path / "main.py", "py1\npy2\npy3\n")
+    loc, source = bm.loc_by_language(tmp_path)
+    assert source == "walk"
+    assert loc == {"typescript": 2, "python": 3}
+
+
+def test_loc_by_language_uses_tokei_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Stub a fake `tokei` binary on PATH that emits the documented JSON.
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    tokei_stub = fake_bin / "tokei"
+    tokei_stub.write_text(
+        '#!/bin/bash\ncat <<\'JSON\'\n'
+        '{"TypeScript": {"code": 1234, "comments": 5, "blanks": 10, "lines": 1249},'
+        ' "Python": {"code": 567, "comments": 2, "blanks": 3, "lines": 572}}\n'
+        "JSON\n"
+    )
+    os.chmod(tokei_stub, 0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+    loc, source = bm.loc_by_language(tmp_path)
+    assert source == "tokei"
+    assert loc == {"typescript": 1234, "python": 567}
+
+
+def test_loc_by_language_uses_scc_when_tokei_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    scc_stub = fake_bin / "scc"
+    scc_stub.write_text(
+        '#!/bin/bash\ncat <<\'JSON\'\n'
+        '[{"Name": "TypeScript", "Code": 100}, {"Name": "Python", "Code": 50}]\n'
+        "JSON\n"
+    )
+    os.chmod(scc_stub, 0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+    loc, source = bm.loc_by_language(tmp_path)
+    assert source == "scc"
+    assert loc == {"typescript": 100, "python": 50}
+
+
+def test_loc_by_language_uses_cloc_when_others_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    cloc_stub = fake_bin / "cloc"
+    cloc_stub.write_text(
+        '#!/bin/bash\ncat <<\'JSON\'\n'
+        '{"header": {"foo": "bar"},'
+        ' "TypeScript": {"code": 200, "comment": 5, "blank": 3, "nFiles": 2},'
+        ' "SUM": {"code": 200, "nFiles": 2}}\n'
+        "JSON\n"
+    )
+    os.chmod(cloc_stub, 0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ.get('PATH', '')}")
+    loc, source = bm.loc_by_language(tmp_path)
+    assert source == "cloc"
+    assert loc == {"typescript": 200}
+
+
+def test_loc_by_language_falls_through_on_malformed_tokei(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # If tokei is installed but emits non-JSON, fall through to scc / cloc
+    # / walk. Here all 3 are absent except tokei → fall through to walk.
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    broken = fake_bin / "tokei"
+    broken.write_text("#!/bin/bash\necho 'NOT JSON AT ALL'\n")
+    os.chmod(broken, 0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{tmp_path}")
+    write(tmp_path / "x.ts", "1\n")
+    loc, source = bm.loc_by_language(tmp_path)
+    assert source == "walk"
+    assert loc == {"typescript": 1}
+
+
+def test_capture_includes_loc_source_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # With no external counters, source defaults to "walk".
+    monkeypatch.setenv("PATH", str(tmp_path))
+    write(tmp_path / "a.ts", "1\n")
+    snap = bm.capture(tmp_path)
+    assert snap["code"]["loc_source"] == "walk"
+
+
 def test_capture_returns_full_schema(tmp_path: Path) -> None:
     write(tmp_path / "README.md", "# t")
     write(tmp_path / "src" / "a.ts", "x\n")
