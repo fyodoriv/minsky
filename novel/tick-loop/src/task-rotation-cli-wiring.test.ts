@@ -78,7 +78,11 @@ interface FakeSpawnOpts {
 function makeFakeSpawn(opts: FakeSpawnOpts) {
   const calls: Array<{ command: string; args: string[]; cwd?: string }> = [];
   const fakeSpawn = ((command: string, args: readonly string[], options: { cwd?: string }) => {
-    calls.push({ command, args: [...args], ...(options.cwd === undefined ? {} : { cwd: options.cwd }) });
+    calls.push({
+      command,
+      args: [...args],
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    });
     const ee = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter | null;
       stderr: EventEmitter | null;
@@ -180,11 +184,13 @@ describe("createGitBackedApplyRemoval", () => {
     const applyRemoval = createGitBackedApplyRemoval({
       tasksMdPath: "/repo/TASKS.md",
       cwd: "/repo",
-      writeFileFn: async (path, content) => {
+      writeFileFn: (path, content) => {
         writes.push({ path, content });
+        return Promise.resolve();
       },
-      execFn: async (command, args, cwd) => {
+      execFn: (command, args, cwd) => {
         execs.push({ command, args, ...(cwd === undefined ? {} : { cwd }) });
+        return Promise.resolve();
       },
     });
     await applyRemoval({
@@ -211,11 +217,10 @@ describe("createGitBackedApplyRemoval", () => {
     const applyRemoval = createGitBackedApplyRemoval({
       tasksMdPath: "/repo/TASKS.md",
       cwd: "/repo",
-      writeFileFn: async () => {
-        throw new Error("EACCES: read-only filesystem");
-      },
-      execFn: async (command, args, cwd) => {
+      writeFileFn: () => Promise.reject(new Error("EACCES: read-only filesystem")),
+      execFn: (command, args, cwd) => {
         execs.push({ command, args, ...(cwd === undefined ? {} : { cwd }) });
+        return Promise.resolve();
       },
     });
     await expect(
@@ -233,10 +238,8 @@ describe("createGitBackedApplyRemoval", () => {
     const applyRemoval = createGitBackedApplyRemoval({
       tasksMdPath: "/repo/TASKS.md",
       cwd: "/repo",
-      writeFileFn: async () => {},
-      execFn: async () => {
-        throw new Error("git commit exited 1: nothing to commit");
-      },
+      writeFileFn: () => Promise.resolve(),
+      execFn: () => Promise.reject(new Error("git commit exited 1: nothing to commit")),
     });
     await expect(
       applyRemoval({
@@ -252,9 +255,10 @@ describe("createGitBackedApplyRemoval", () => {
     const execs: Array<{ command: string; args: readonly string[]; cwd?: string }> = [];
     const applyRemoval = createGitBackedApplyRemoval({
       tasksMdPath: "/repo/TASKS.md",
-      writeFileFn: async () => {},
-      execFn: async (command, args, cwd) => {
+      writeFileFn: () => Promise.resolve(),
+      execFn: (command, args, cwd) => {
         execs.push({ command, args, ...(cwd === undefined ? {} : { cwd }) });
+        return Promise.resolve();
       },
     });
     await applyRemoval({

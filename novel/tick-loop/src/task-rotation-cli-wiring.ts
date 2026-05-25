@@ -42,11 +42,7 @@
 import { type ChildProcess, spawn as nodeSpawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 
-import type {
-  ApplyRemoval,
-  GetTasksMd,
-  ListMergedPrs,
-} from "./daemon-task-rotation.js";
+import type { ApplyRemoval, GetTasksMd, ListMergedPrs } from "./daemon-task-rotation.js";
 import type { MergedPrSnapshot } from "./task-completion-detector.js";
 
 // ---- Constants ------------------------------------------------------------
@@ -122,7 +118,7 @@ export function createGhMergedPrList(opts: GhMergedPrListOptions = {}): ListMerg
   const spawnFn = opts.spawnFn ?? nodeSpawn;
   const cwd = opts.cwd;
 
-  return async (): Promise<readonly MergedPrSnapshot[]> => {
+  return (): Promise<readonly MergedPrSnapshot[]> => {
     const args = [
       "pr",
       "list",
@@ -138,49 +134,58 @@ export function createGhMergedPrList(opts: GhMergedPrListOptions = {}): ListMerg
         stdio: ["ignore", "pipe", "pipe"],
         ...(cwd === undefined ? {} : { cwd }),
       });
-
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
-
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk);
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderrChunks.push(chunk);
-      });
-
-      child.on("error", (err) => {
-        rejectResult(err);
-      });
-
-      child.on("close", (code) => {
-        if (code !== 0) {
-          const stderr = Buffer.concat(stderrChunks as Buffer[]).toString("utf8");
-          rejectResult(
-            new Error(`gh pr list exited ${code}: ${stderr.trim() || "(no stderr)"}`),
-          );
-          return;
-        }
-        const stdout = Buffer.concat(stdoutChunks as Buffer[]).toString("utf8");
-        try {
-          const parsed = JSON.parse(stdout) as ReadonlyArray<{
-            readonly number: number;
-            readonly title: string;
-          }>;
-          if (!Array.isArray(parsed)) {
-            rejectResult(new Error(`gh pr list returned non-array JSON: ${stdout.slice(0, 200)}`));
-            return;
-          }
-          resolveResult(parsed);
-          // rule-6: handled-locally — JSON.parse can throw on malformed `gh` output; convert to a rejected promise so the daemon sees a clean async error rather than an unhandled exception.
-        } catch (err) {
-          rejectResult(
-            new Error(`gh pr list returned malformed JSON: ${(err as Error).message}`),
-          );
-        }
-      });
+      child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+      child.on("error", rejectResult);
+      child.on("close", (code) =>
+        finalizeGhMergedPrList(code, stdoutChunks, stderrChunks, resolveResult, rejectResult),
+      );
     });
   };
+}
+
+/**
+ * Resolve / reject the `createGhMergedPrList` promise based on the
+ * subprocess exit code + buffered stdout. Extracted from the spawn
+ * callback so the factory's body stays under biome's
+ * `noExcessiveCognitiveComplexity` ceiling (max 10) — the close handler
+ * had two early-return branches + a try/catch over `JSON.parse`, which
+ * pushed the lambda's complexity into error territory.
+ *
+ * @otel-exempt internal helper of `createGhMergedPrList`.
+ */
+function finalizeGhMergedPrList(
+  code: number | null,
+  stdoutChunks: readonly Buffer[],
+  stderrChunks: readonly Buffer[],
+  resolveResult: (v: readonly MergedPrSnapshot[]) => void,
+  rejectResult: (e: Error) => void,
+): void {
+  if (code !== 0) {
+    const stderr = Buffer.concat(stderrChunks as Buffer[]).toString("utf8");
+    rejectResult(new Error(`gh pr list exited ${code}: ${stderr.trim() || "(no stderr)"}`));
+    return;
+  }
+  const stdout = Buffer.concat(stdoutChunks as Buffer[]).toString("utf8");
+  // rule-6: handled-locally — JSON.parse can throw on malformed `gh`
+  // output; convert to a rejected promise so the daemon sees a clean
+  // async error rather than an unhandled exception.
+  try {
+    const parsed = JSON.parse(stdout) as ReadonlyArray<{
+      readonly number: number;
+      readonly title: string;
+    }>;
+    if (!Array.isArray(parsed)) {
+      rejectResult(new Error(`gh pr list returned non-array JSON: ${stdout.slice(0, 200)}`));
+      return;
+    }
+    resolveResult(parsed);
+    // rule-6: handled-locally — JSON.parse can throw on malformed `gh` output; convert to a rejected promise so the daemon sees a clean async error rather than an unhandled exception at the spawn boundary.
+  } catch (err) {
+    rejectResult(new Error(`gh pr list returned malformed JSON: ${(err as Error).message}`));
+  }
 }
 
 // ---- git-backed write + commit --------------------------------------------
@@ -278,7 +283,9 @@ function createDefaultSpawnCheckedCall(): SpawnCheckedCallFn {
         }
         const stderr = Buffer.concat(stderrChunks as Buffer[]).toString("utf8");
         rejectResult(
-          new Error(`${command} ${args.join(" ")} exited ${code}: ${stderr.trim() || "(no stderr)"}`),
+          new Error(
+            `${command} ${args.join(" ")} exited ${code}: ${stderr.trim() || "(no stderr)"}`,
+          ),
         );
       });
     });

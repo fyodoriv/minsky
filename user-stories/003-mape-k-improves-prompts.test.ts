@@ -72,9 +72,14 @@ const sustainedHistoryFor = (variantId: string): RolloutHistoryEntry[] => {
  * ruleId is the constraint. The Plan catalogue's first mutation is
  * `enumerate-failure-modes`, so this favors `<ruleId>-enumerate-failure-modes`.
  */
-const metricFavouringEnumerate = async (output: string): Promise<number> => {
-  if (output.includes("enumerate-failure-modes")) return 1.0;
-  return 0.5;
+// Returns a `Promise<number>` (the metric signature is Promise-based to
+// allow real I/O on production paths) but does not await anything itself —
+// rewritten from `async` + bare returns to plain `Promise.resolve()` so
+// biome's `useAwait` rule (which CI runs whole-tree, escalates warnings
+// to errors) doesn't fire on this pre-existing test fixture.
+const metricFavouringEnumerate = (output: string): Promise<number> => {
+  if (output.includes("enumerate-failure-modes")) return Promise.resolve(1.0);
+  return Promise.resolve(0.5);
 };
 
 const happyVerdictLog: VerdictLogEntry[] = [

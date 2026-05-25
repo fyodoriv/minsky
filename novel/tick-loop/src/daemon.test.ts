@@ -1645,11 +1645,13 @@ describe("tick-loop / daemon / runDaemon", () => {
    * defaults to an empty list (drives the `no-merged-pr` verdict — useful
    * for the operator-quiet skip-fast tests).
    */
-  function makeTaskRotationSeam(opts: {
-    tasksMdHasBlock?: boolean;
-    taskId?: string;
-    mergedPrs?: ReadonlyArray<{ readonly number: number; readonly title: string }>;
-  } = {}): {
+  function makeTaskRotationSeam(
+    opts: {
+      tasksMdHasBlock?: boolean;
+      taskId?: string;
+      mergedPrs?: ReadonlyArray<{ readonly number: number; readonly title: string }>;
+    } = {},
+  ): {
     readonly seam: TaskRotationSeam;
     readonly getTasksMdCalls: { count: number };
     readonly listMergedPrsCalls: { count: number };
@@ -1676,21 +1678,26 @@ describe("tick-loop / daemon / runDaemon", () => {
       viaPrNumber: number;
       commitMessage: string;
     }> = [];
+    // Plain Promise.resolve / Promise.resolve(undefined) rather than `async`
+    // arrow functions — biome's `useAwait` (whole-tree CI run, escalates
+    // warnings to errors) flags `async` without `await`. The seam's
+    // Promise-returning contract is preserved either way.
     const seam: TaskRotationSeam = {
-      getTasksMd: async () => {
+      getTasksMd: () => {
         getTasksMdCalls.count++;
-        return tasksMd;
+        return Promise.resolve(tasksMd);
       },
-      listMergedPrs: async () => {
+      listMergedPrs: () => {
         listMergedPrsCalls.count++;
-        return mergedPrs;
+        return Promise.resolve(mergedPrs);
       },
-      applyRemoval: async (input) => {
+      applyRemoval: (input) => {
         applyRemovalCalls.push({
           taskId: input.taskId,
           viaPrNumber: input.viaPrNumber,
           commitMessage: input.commitMessage,
         });
+        return Promise.resolve();
       },
     };
     return { seam, getTasksMdCalls, listMergedPrsCalls, applyRemovalCalls };
