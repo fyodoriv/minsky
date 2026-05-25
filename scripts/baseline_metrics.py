@@ -93,6 +93,160 @@ SKIP_DIRS = {
 }
 
 
+def _try_tokei(repo: Path) -> dict[str, int] | None:
+    """Best-effort `tokei --output json .` invocation. Returns
+    `{lang: code-line-count}` on success, `None` if tokei isn't
+    installed / errors / produces unparseable output. Rule #1 (don't
+    reinvent) — tokei has language-specific lexers that distinguish
+    code lines from comments + blanks, which our os.walk fallback
+    cannot. We use tokei when available and degrade gracefully when
+    not."""
+    try:
+        proc = subprocess.run(
+            ["tokei", "--output", "json", str(repo)],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    # Tokei's JSON: top-level keys are language names (e.g. "TypeScript"),
+    # each with `code`, `comments`, `blanks`, `lines`. We want `code`.
+    # Tokei uses canonical English names — normalize to our extension-
+    # based lowercase tags for schema-shape compatibility with the
+    # walk_repo fallback.
+    name_map = {
+        "TypeScript": "typescript",
+        "JavaScript": "javascript",
+        "Python": "python",
+        "Rust": "rust",
+        "Go": "go",
+        "Shell": "shell",
+        "BASH": "shell",
+        "Bash": "shell",
+    }
+    out: dict[str, int] = {}
+    for k, v in data.items():
+        if not isinstance(v, dict) or "code" not in v:
+            continue
+        canonical = name_map.get(k)
+        if canonical is None:
+            continue
+        out[canonical] = out.get(canonical, 0) + int(v["code"])
+    return out or None
+
+
+def _try_scc(repo: Path) -> dict[str, int] | None:
+    """Best-effort `scc --format json .` invocation. Same shape as
+    `_try_tokei`. SCC is a Go-implemented LOC counter, faster than
+    tokei on large repos."""
+    try:
+        proc = subprocess.run(
+            ["scc", "--format", "json", str(repo)],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    # SCC JSON: top-level is an array of `{Name: "TypeScript", Code: N, ...}`.
+    name_map = {
+        "TypeScript": "typescript",
+        "JavaScript": "javascript",
+        "Python": "python",
+        "Rust": "rust",
+        "Go": "go",
+        "Shell": "shell",
+        "Bourne Shell": "shell",
+    }
+    out: dict[str, int] = {}
+    if not isinstance(data, list):
+        return None
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("Name")
+        code = entry.get("Code")
+        canonical = name_map.get(name)
+        if canonical is None or not isinstance(code, int):
+            continue
+        out[canonical] = out.get(canonical, 0) + code
+    return out or None
+
+
+def _try_cloc(repo: Path) -> dict[str, int] | None:
+    """Best-effort `cloc --json .` invocation. Cloc is the OG Perl-based
+    LOC counter; pre-installed on many Linux distros via the
+    `cloc` package. Same return shape as `_try_tokei`."""
+    try:
+        proc = subprocess.run(
+            ["cloc", "--json", str(repo)],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    # cloc JSON: top-level keys are language names + `header` + `SUM`;
+    # each entry has `code`, `comment`, `blank`, `nFiles`.
+    name_map = {
+        "TypeScript": "typescript",
+        "JavaScript": "javascript",
+        "Python": "python",
+        "Rust": "rust",
+        "Go": "go",
+        "Bourne Shell": "shell",
+        "Bourne Again Shell": "shell",
+    }
+    out: dict[str, int] = {}
+    for k, v in data.items():
+        if k in ("header", "SUM") or not isinstance(v, dict) or "code" not in v:
+            continue
+        canonical = name_map.get(k)
+        if canonical is None:
+            continue
+        out[canonical] = out.get(canonical, 0) + int(v["code"])
+    return out or None
+
+
+def loc_by_language(repo: Path) -> tuple[dict[str, int], str]:
+    """Return `(loc_map, source)` for the repo. Tries tokei → scc → cloc
+    → walk_repo's pure-Python fallback in that order. The `source` tag
+    is recorded in the snapshot so a downstream consumer can tell
+    whether the LOC is a tokei-quality code-only count or our cruder
+    "all lines including blank+comment" walk fallback.
+
+    Rule #1 — prefer existing solutions when available; degrade to
+    the walk fallback only when nothing's installed.
+    """
+    for name, fn in (("tokei", _try_tokei), ("scc", _try_scc), ("cloc", _try_cloc)):
+        result = fn(repo)
+        if result:
+            return result, name
+    # walk-fallback path: caller already has the walk-LOC from
+    # walk_repo; we re-invoke here only when called standalone.
+    loc, _, _ = walk_repo(repo)
+    return loc, "walk"
+
+
 def walk_repo(repo: Path) -> tuple[dict[str, int], int, int]:
     """Walk repo, return (loc-by-language, test-count, total-files).
 
@@ -252,15 +406,33 @@ def collect_dependencies(repo: Path) -> dict[str, Any]:
 
 
 def capture(repo: Path) -> dict[str, Any]:
-    """Single-pass capture — never raises."""
-    loc, tests, files = walk_repo(repo)
+    """Single-pass capture — never raises.
+
+    LOC is sourced via `loc_by_language(repo)` which prefers external
+    counters (tokei → scc → cloc) for code-only line counts; falls back
+    to `walk_repo`'s "all lines including blank + comments" count when
+    none are installed. The `loc_source` field records which path won
+    so a downstream comparator can compare like-for-like.
+    """
+    walk_loc, tests, files = walk_repo(repo)
+    external_loc, source = loc_by_language(repo)
+    # When the external probe returned a non-empty result, prefer it;
+    # otherwise the walk-LOC remains the canonical reading. The
+    # `loc_by_language` helper already returns the walk-LOC when no
+    # external tool is available, but we re-affirm it here to keep
+    # the capture() one-step contract obvious to readers.
+    if source == "walk":
+        loc_final = walk_loc
+    else:
+        loc_final = external_loc
     return {
         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "repo": str(repo.resolve()),
         "code": {
             "total_files_walked": files,
             "test_file_count": tests,
-            "loc_by_language": loc,
+            "loc_by_language": loc_final,
+            "loc_source": source,
         },
         "docs": collect_docs(repo),
         "lint": collect_lint(repo),
