@@ -154,6 +154,75 @@ describe("runGateSweep (injected seam)", () => {
       mergeFn: () => {
         throw new Error("gh exploded");
       },
+      // Genuine failure → state oracle returns "OPEN" (or null), confirms
+      // the merge did NOT happen. Inject explicitly so the test doesn't
+      // spawn real `gh`.
+      prStateFn: () => "OPEN",
+      noReview: true,
+      log: () => {},
+    });
+    expect(res.merged).toEqual([]);
+    expect(res.skipped[0]?.reason).toContain("merge-failed");
+  });
+
+  // Regression tests for `local-gate-merge-false-negative-on-worktree-
+  // bound-branch-delete` (TASKS.md). The mergeFn throws because of the
+  // worktree-bound-delete shape (remote merged, local `git branch -d`
+  // failed), but the prStateFn confirms `state == "MERGED"`. The PR
+  // must count as merged, not skipped. The fix shape was filed in the
+  // 2026-05-17 live supervision session.
+
+  it("counts a PR as MERGED when mergeFn throws but prStateFn returns 'MERGED' (worktree-bound-delete soft-fail)", () => {
+    const res = runGateSweep({
+      snapshotFn: () => [pr({ number: 575 })],
+      vetFn: () => ({ stdout: greenStdout }),
+      mergeFn: () => {
+        // The canonical reproduction from 2026-05-17: gh's exit is non-zero
+        // because the post-merge `git branch -d` rejects a branch checked
+        // out in `.claude/worktrees/`, but the remote squash-merge HAS
+        // already succeeded.
+        throw new Error(
+          "failed to delete local branch worktree-daemon-0-minsky-claude-exhaustion-persisted-state: cannot delete branch '…' used by worktree at '$MINSKY_REPO/.claude/worktrees/daemon-0-minsky-…'",
+        );
+      },
+      prStateFn: () => "MERGED",
+      noReview: true,
+      log: () => {},
+    });
+    expect(res.merged.map((m) => m.number)).toEqual([575]);
+    expect(res.merged[0]?.reason).toContain("local-delete soft-fail");
+    expect(res.skipped).toEqual([]);
+  });
+
+  it("counts a PR as MERGED when mergeFn throws with `was already merged` and prStateFn confirms MERGED (re-run case)", () => {
+    // A re-run of the gate against an already-merged PR also exits
+    // non-zero on the worktree-bound-delete, but the stdout/stderr
+    // contains "was already merged". Same state-oracle logic applies.
+    const res = runGateSweep({
+      snapshotFn: () => [pr({ number: 575 })],
+      vetFn: () => ({ stdout: greenStdout }),
+      mergeFn: () => {
+        throw new Error("! Pull request fyodoriv/minsky#575 was already merged");
+      },
+      prStateFn: () => "MERGED",
+      noReview: true,
+      log: () => {},
+    });
+    expect(res.merged.map((m) => m.number)).toEqual([575]);
+    expect(res.skipped).toEqual([]);
+  });
+
+  it("treats prStateFn returning null (probe failure) as not-merged → records merge-failed", () => {
+    // Network/auth/unknown-PR probe failure must NOT silently mask a
+    // genuine merge failure. defaultPrState returns null on catch; the
+    // caller must treat that the same as "not MERGED".
+    const res = runGateSweep({
+      snapshotFn: () => [pr({ number: 999 })],
+      vetFn: () => ({ stdout: greenStdout }),
+      mergeFn: () => {
+        throw new Error("gh: connection reset by peer");
+      },
+      prStateFn: () => null,
       noReview: true,
       log: () => {},
     });

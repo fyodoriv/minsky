@@ -152,7 +152,7 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1 (cadence)_
 
-**Value:** 24.2 commits/day (725 in 30d) tasks/day
+**Value:** 24.2 commits/day (726 in 30d) tasks/day
 
 **How to view:** `git log --since="30 days ago" --oneline --grep='^feat\|^fix\|^docs\|^chore' | wc -l / 30`
 
