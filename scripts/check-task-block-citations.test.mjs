@@ -45,9 +45,7 @@ describe("parseRemovedTaskBlocks", () => {
       "-  - **Tags**: p1, demo",
       "-  - **Details**: ...",
     ].join("\n");
-    expect(parseRemovedTaskBlocks(diff)).toEqual([
-      { id: "foo-bar", blockHadEscapeHatch: false },
-    ]);
+    expect(parseRemovedTaskBlocks(diff)).toEqual([{ id: "foo-bar", blockHadEscapeHatch: false }]);
   });
 
   test("escape-hatch marker is detected when present in the deletion span", () => {
@@ -134,9 +132,7 @@ describe("parseRemovedTaskBlocks", () => {
       "-  - **Details**: (a) ... (d) Escape hatch: a `<!-- DO NOT DELETE — citation site for tests/X.test.mjs:Y -->` line-comment inside the task block silences the lint.",
       "-  - **Acceptance**: ...",
     ].join("\n");
-    expect(parseRemovedTaskBlocks(diff)).toEqual([
-      { id: "task-a", blockHadEscapeHatch: false },
-    ]);
+    expect(parseRemovedTaskBlocks(diff)).toEqual([{ id: "task-a", blockHadEscapeHatch: false }]);
   });
 
   test("(j) marker at the END of a line — without leading whitespace — is NOT matched (avoids the embedded-in-list-item false positive)", () => {
@@ -155,9 +151,7 @@ describe("parseRemovedTaskBlocks", () => {
       "-  - <!-- DO NOT DELETE — citation site for tests/foo.test.mjs:1 -->",
       "-  - **ID**: task-a",
     ].join("\n");
-    expect(parseRemovedTaskBlocks(diff)).toEqual([
-      { id: "task-a", blockHadEscapeHatch: false },
-    ]);
+    expect(parseRemovedTaskBlocks(diff)).toEqual([{ id: "task-a", blockHadEscapeHatch: false }]);
   });
 });
 
@@ -183,7 +177,9 @@ describe("findCitations", () => {
       ["tests/foo.test.mjs", 'expect(tasks).toContain("task-a");'],
       [
         "tests/bar.test.mjs",
-        ['// task-a appears here in a comment too', 'expect(tasks).toContain("task-a");'].join("\n"),
+        ["// task-a appears here in a comment too", 'expect(tasks).toContain("task-a");'].join(
+          "\n",
+        ),
       ],
     ]);
     expect(findCitations("task-a", corpus)).toEqual([
@@ -200,9 +196,7 @@ describe("findCitations", () => {
         ["line 1", "line 2", 'expect(tasks).toContain("target-id");', "line 4"].join("\n"),
       ],
     ]);
-    expect(findCitations("target-id", corpus)).toEqual([
-      { file: "tests/multi.test.mjs", line: 3 },
-    ]);
+    expect(findCitations("target-id", corpus)).toEqual([{ file: "tests/multi.test.mjs", line: 3 }]);
   });
 });
 
@@ -246,10 +240,7 @@ describe("checkTaskBlockCitations — the four canonical cases", () => {
     // The HEAD-state corpus has NO citation for the removed ID (the
     // test file was updated in the same PR).
     const corpus = new Map([
-      [
-        "scripts/daemon-pr-lint-metrics.test.mjs",
-        "expect(tasks).toContain('some-other-task');",
-      ],
+      ["scripts/daemon-pr-lint-metrics.test.mjs", "expect(tasks).toContain('some-other-task');"],
     ]);
     expect(checkTaskBlockCitations(diff, corpus)).toEqual({ ok: true });
   });
@@ -263,9 +254,7 @@ describe("checkTaskBlockCitations — the four canonical cases", () => {
     ].join("\n");
     // Citation still exists in corpus — but the marker says we're
     // doing this on purpose.
-    const corpus = new Map([
-      ["tests/foo.test.mjs", 'expect(tasks).toContain("legacy-task");'],
-    ]);
+    const corpus = new Map([["tests/foo.test.mjs", 'expect(tasks).toContain("legacy-task");']]);
     expect(checkTaskBlockCitations(diff, corpus)).toEqual({ ok: true });
   });
 });
@@ -280,9 +269,7 @@ describe("checkTaskBlockCitations — composite cases", () => {
       "-- [ ] `clean-task` — block whose ID is NOT cited",
       "-  - **ID**: clean-task",
     ].join("\n");
-    const corpus = new Map([
-      ["tests/foo.test.mjs", 'expect(tasks).toContain("orphaned-task");'],
-    ]);
+    const corpus = new Map([["tests/foo.test.mjs", 'expect(tasks).toContain("orphaned-task");']]);
     const verdict = checkTaskBlockCitations(diff, corpus);
     expect(verdict.ok).toBe(false);
     if (verdict.ok) throw new Error("unreachable");
@@ -300,9 +287,7 @@ describe("checkTaskBlockCitations — composite cases", () => {
       "-- [ ] `truly-orphaned` — old task",
       "-  - **ID**: truly-orphaned",
     ].join("\n");
-    const corpus = new Map([
-      ["tests/foo.test.mjs", "expect(1).toBe(1);"],
-    ]);
+    const corpus = new Map([["tests/foo.test.mjs", "expect(1).toBe(1);"]]);
     expect(checkTaskBlockCitations(diff, corpus)).toEqual({ ok: true });
   });
 
@@ -317,9 +302,7 @@ describe("checkTaskBlockCitations — composite cases", () => {
       "-  <!-- DO NOT DELETE — citation site for tests/foo.test.mjs:42 -->",
       "-  - **Acceptance**: ...",
     ].join("\n");
-    const corpus = new Map([
-      ["tests/foo.test.mjs", 'expect(tasks).toContain("marked-task");'],
-    ]);
+    const corpus = new Map([["tests/foo.test.mjs", 'expect(tasks).toContain("marked-task");']]);
     expect(checkTaskBlockCitations(diff, corpus)).toEqual({ ok: true });
   });
 

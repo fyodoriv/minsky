@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved closes PR #864 failure mode per task `orphan-cleanup-task-block-citation-lint` -->
 // Pattern: deterministic gate over a TASKS.md ↔ test-corpus invariant.
 // Source: TASKS.md `orphan-cleanup-task-block-citation-lint` (P1, M1);
 //   rule #10 (deterministic enforcement — encode the "grep before
@@ -53,7 +54,6 @@ import { fileURLToPath } from "node:url";
  * @typedef {{ ok: true } | { ok: false; orphans: OrphanCitation[] }} CheckResult
  */
 
-const TASK_HEADER_RE = /^- \[\s?\] `([a-z0-9][a-z0-9-]*)`/;
 const REMOVED_TASK_HEADER_RE = /^-- \[\s?\] `([a-z0-9][a-z0-9-]*)`/m;
 // Escape-hatch marker must be a STANDALONE comment line — after the diff
 // deletion prefix `-` and leading whitespace, the line content starts
@@ -66,8 +66,62 @@ const REMOVED_TASK_HEADER_RE = /^-- \[\s?\] `([a-z0-9][a-z0-9-]*)`/m;
 // Discovered 2026-05-25 while filing this lint's own task block —
 // the block's `**Details**` field cited the example marker pattern,
 // which the looser regex matched. Adding paired test case (i).
-const ESCAPE_HATCH_RE =
-  /^-\s*<!--\s*DO NOT DELETE\s*[—-]?\s*citation site for/i;
+const ESCAPE_HATCH_RE = /^-\s*<!--\s*DO NOT DELETE\s*[—-]?\s*citation site for/i;
+
+/**
+ * Predicate: is this diff line a "hunk boundary" that closes a
+ * removal span we're tracking? A context line (` `), an addition
+ * (`+`), a hunk header (`@@`), or a diff-file header (`diff `,
+ * `index `, `---`, `+++`) closes the span. Addition lines starting
+ * with `- [` shouldn't fire here because they'd start with `+- [`,
+ * which fails REMOVED_TASK_HEADER_RE on the deletion path.
+ *
+ * Extracted to drop parseRemovedTaskBlocks's cognitive complexity
+ * below biome's 10 threshold.
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isHunkBoundary(line) {
+  return (
+    line.startsWith(" ") ||
+    line.startsWith("+") ||
+    line.startsWith("@@") ||
+    line.startsWith("diff ") ||
+    line.startsWith("index ") ||
+    line.startsWith("---") ||
+    line.startsWith("+++")
+  );
+}
+
+/**
+ * One-line state-machine step for `parseRemovedTaskBlocks`. Mutates
+ * the passed state object in place and pushes a completed block to
+ * `removed` when the span ends. Returns the new state. Extracted to
+ * keep `parseRemovedTaskBlocks`'s cognitive complexity ≤10.
+ *
+ * @param {string} line
+ * @param {{ blockId: string | null; hasMarker: boolean }} state
+ * @param {RemovedBlock[]} removed
+ * @returns {{ blockId: string | null; hasMarker: boolean }}
+ */
+function stepParseLine(line, state, removed) {
+  const headerMatch = REMOVED_TASK_HEADER_RE.exec(line);
+  if (headerMatch !== null) {
+    // New block starts — flush the previous (if any), then start fresh.
+    if (state.blockId !== null) {
+      removed.push({ id: state.blockId, blockHadEscapeHatch: state.hasMarker });
+    }
+    return { blockId: headerMatch[1] ?? null, hasMarker: false };
+  }
+  if (state.blockId === null) return state;
+  const hasMarker = state.hasMarker || (line.startsWith("-") && ESCAPE_HATCH_RE.test(line));
+  if (isHunkBoundary(line)) {
+    removed.push({ id: state.blockId, blockHadEscapeHatch: hasMarker });
+    return { blockId: null, hasMarker: false };
+  }
+  return { blockId: state.blockId, hasMarker };
+}
 
 /**
  * Parse a `git diff` of TASKS.md and return the IDs of task blocks
@@ -83,58 +137,16 @@ const ESCAPE_HATCH_RE =
  * @returns {RemovedBlock[]}
  */
 export function parseRemovedTaskBlocks(diff) {
-  const lines = diff.split("\n");
   /** @type {RemovedBlock[]} */
   const removed = [];
-  /** @type {string | null} */
-  let currentBlockId = null;
-  let currentBlockHasMarker = false;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    // `git diff` deletion-side lines start with `-` (not `--`,
-    // which is the file marker). REMOVED_TASK_HEADER_RE uses `--`
-    // because in the diff a single `-` prefixes the deletion AND
-    // the line content itself starts with `- [ ] ...`, so combined
-    // it's `-- [ ] ...`.
-    const headerMatch = REMOVED_TASK_HEADER_RE.exec(line);
-    if (headerMatch !== null) {
-      // Flush the previous block (if any) before starting the new one.
-      if (currentBlockId !== null) {
-        removed.push({ id: currentBlockId, blockHadEscapeHatch: currentBlockHasMarker });
-      }
-      currentBlockId = headerMatch[1] ?? null;
-      currentBlockHasMarker = false;
-      continue;
-    }
-    if (currentBlockId === null) continue;
-    // Block continuation — deletion-side lines (start with `-`) that
-    // are NOT a new task header. Check for escape-hatch marker.
-    if (line.startsWith("-") && ESCAPE_HATCH_RE.test(line)) {
-      currentBlockHasMarker = true;
-    }
-    // Hunk boundary: a context line (starts with " ") OR an addition
-    // (starts with "+") OR a hunk header (starts with "@@") OR a
-    // diff-file header (starts with "diff " / "index " / "---" /
-    // "+++") closes the current removal-span. Note: addition lines
-    // STARTING WITH `- [` shouldn't fire here because they'd start
-    // with `+- [`, which doesn't match the removed-header regex.
-    if (
-      line.startsWith(" ") ||
-      line.startsWith("+") ||
-      line.startsWith("@@") ||
-      line.startsWith("diff ") ||
-      line.startsWith("index ") ||
-      line.startsWith("---") ||
-      line.startsWith("+++")
-    ) {
-      removed.push({ id: currentBlockId, blockHadEscapeHatch: currentBlockHasMarker });
-      currentBlockId = null;
-      currentBlockHasMarker = false;
-    }
+  /** @type {{ blockId: string | null; hasMarker: boolean }} */
+  let state = { blockId: null, hasMarker: false };
+  for (const line of diff.split("\n")) {
+    state = stepParseLine(line, state, removed);
   }
-  // Flush the trailing block (diff that ends inside a removal span).
-  if (currentBlockId !== null) {
-    removed.push({ id: currentBlockId, blockHadEscapeHatch: currentBlockHasMarker });
+  // Flush the trailing block (diff ends inside a removal span).
+  if (state.blockId !== null) {
+    removed.push({ id: state.blockId, blockHadEscapeHatch: state.hasMarker });
   }
   return removed;
 }
@@ -195,14 +207,67 @@ export function checkTaskBlockCitations(diff, corpus) {
 }
 
 /**
+ * Build the test corpus from `git ls-files`. Restricted to the
+ * test-file globs the lint considers "citation sites": `*.test.{mjs,
+ * ts,tsx,js}` and `*.bats`. Unreadable entries (e.g. submodule
+ * pointers) are silently skipped.
+ *
+ * @param {string} repoRoot
+ * @returns {Map<string, string>}
+ */
+function buildTestCorpus(repoRoot) {
+  const filesRaw = execSync(
+    "git ls-files '*.test.mjs' '*.test.ts' '*.test.tsx' '*.test.js' '*.bats'",
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  /** @type {Map<string, string>} */
+  const corpus = new Map();
+  for (const file of filesRaw.split("\n")) {
+    if (file.trim().length === 0) continue;
+    try {
+      corpus.set(file, readFileSync(resolve(repoRoot, file), "utf8"));
+    } catch {
+      // File listed but unreadable (e.g. submodule pointer). Skip.
+    }
+  }
+  return corpus;
+}
+
+/**
+ * Print the failure verdict to stderr in operator-actionable shape:
+ * one bullet per orphaned ID + nested file:line list + the three
+ * fix paths. Pure side effect — no return value.
+ *
+ * @param {OrphanCitation[]} orphans
+ * @returns {void}
+ */
+function printFailure(orphans) {
+  process.stderr.write("check-task-block-citations: FAIL\n");
+  process.stderr.write("  Removed task block(s) whose IDs are still cited by test files:\n\n");
+  for (const { id, citations } of orphans) {
+    process.stderr.write(`  - \`${id}\`:\n`);
+    for (const { file, line } of citations) {
+      process.stderr.write(`      ${file}:${line}\n`);
+    }
+  }
+  process.stderr.write(
+    "\n  Fix by ONE of:\n" +
+      "    (1) Remove the citation from the test in the same PR.\n" +
+      "    (2) Migrate the cited prose to a stable file (e.g. docs/), then update the test, then remove the task block in a follow-up PR.\n" +
+      "    (3) Add the escape-hatch marker INSIDE the task block before removing it:\n" +
+      "        <!-- DO NOT DELETE — citation site for tests/<file>:<line> -->\n",
+  );
+}
+
+/**
  * I/O wrapper for the CI / pre-pr-lint invocation: resolves the diff
  * range, reads the test corpus, calls the pure checker, formats the
  * verdict, exits 0/1. The pure helpers above are unit-testable
  * without this wrapper (rule #2 — pure core + thin I/O shell).
  *
- * @returns {Promise<void>}
+ * @returns {void}
  */
-async function main() {
+function main() {
   const repoRoot = resolve(fileURLToPath(import.meta.url), "../..");
   // Default base: origin/main. Override via env (matches the
   // lockfile-integrity pattern).
@@ -225,50 +290,17 @@ async function main() {
     // No TASKS.md changes — nothing to check.
     process.exit(0);
   }
-  // Build the test corpus: every `*.test.{mjs,ts}` + `*.bats` file
-  // under the repo. Use git ls-files so .gitignored junk doesn't bias
-  // the check, and so external sandbox dirs aren't traversed.
-  const filesRaw = execSync(
-    "git ls-files '*.test.mjs' '*.test.ts' '*.test.tsx' '*.test.js' '*.bats'",
-    { cwd: repoRoot, encoding: "utf8" },
-  );
-  /** @type {Map<string, string>} */
-  const corpus = new Map();
-  for (const file of filesRaw.split("\n")) {
-    if (file.trim().length === 0) continue;
-    try {
-      corpus.set(file, readFileSync(resolve(repoRoot, file), "utf8"));
-    } catch {
-      // File listed but unreadable (e.g. submodule pointer). Skip.
-    }
-  }
+  const corpus = buildTestCorpus(repoRoot);
   const verdict = checkTaskBlockCitations(diff, corpus);
   if (verdict.ok) {
     process.exit(0);
   }
-  // Failure — pretty-print orphans.
-  process.stderr.write("check-task-block-citations: FAIL\n");
-  process.stderr.write(
-    "  Removed task block(s) whose IDs are still cited by test files:\n\n",
-  );
-  for (const { id, citations } of verdict.orphans) {
-    process.stderr.write(`  - \`${id}\`:\n`);
-    for (const { file, line } of citations) {
-      process.stderr.write(`      ${file}:${line}\n`);
-    }
-  }
-  process.stderr.write(
-    "\n  Fix by ONE of:\n" +
-      "    (1) Remove the citation from the test in the same PR.\n" +
-      "    (2) Migrate the cited prose to a stable file (e.g. docs/), then update the test, then remove the task block in a follow-up PR.\n" +
-      "    (3) Add the escape-hatch marker INSIDE the task block before removing it:\n" +
-      "        <!-- DO NOT DELETE — citation site for tests/<file>:<line> -->\n",
-  );
+  printFailure(verdict.orphans);
   process.exit(1);
 }
 
 const invokedAsScript =
   process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedAsScript) {
-  await main();
+  main();
 }
