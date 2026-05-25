@@ -432,6 +432,34 @@ function defaultMerge(pr) {
 }
 
 /**
+ * Read a PR's GitHub state (MERGED / OPEN / CLOSED). Used as the
+ * authoritative oracle for merge success when `defaultMerge` throws
+ * because of a non-fatal local-side error (e.g. the post-merge
+ * `git branch -d` rejects a branch bound to a `.claude/worktrees/`
+ * worktree — the remote squash-merge already succeeded). Fix shape
+ * for TASKS.md `local-gate-merge-false-negative-on-worktree-bound-
+ * branch-delete`: never infer merge outcome from `gh pr merge`'s exit
+ * code alone; verify against the remote state.
+ *
+ * @param {number} number
+ * @returns {string | null}  the state string, or `null` on probe error
+ */
+function defaultPrState(number) {
+  try {
+    const out = execFileSync(
+      "gh",
+      ["pr", "view", String(number), "--json", "state", "-q", ".state"],
+      { cwd: REPO, encoding: "utf8" },
+    );
+    return out.trim();
+  } catch {
+    // Probe failed (network / auth / unknown PR). Caller treats `null`
+    // the same as "not MERGED" so a genuine merge failure isn't masked.
+    return null;
+  }
+}
+
+/**
  * How many commits the local branch is ahead of `origin/main`. Fail-open:
  * if the ref or `origin/main` can't be counted, return 1 so the gate still
  * runs — a probe error must never be misread as "nothing to land" and
@@ -630,12 +658,24 @@ function vetAndDecide(pr, vetFn, reviewFn) {
  * @property {(pr: PrSnapshot) => {stdout: string} | {vetError: string}} vetFn
  * @property {((pr: PrSnapshot) => {approve: boolean, reason: string}) | undefined} reviewFn
  * @property {(pr: PrSnapshot) => void} mergeFn
+ * @property {(number: number) => string | null} prStateFn
  * @property {boolean} dryRun
  * @property {(s: string) => void} log
  */
 
 /**
  * Vet → decide → (dry-run log | merge) one PR.
+ *
+ * When `mergeFn` throws, the merge outcome is NOT inferred from the
+ * exit code — instead the state oracle (`prStateFn`) is consulted.
+ * The remote squash-merge can succeed even while the post-merge local
+ * `git branch -d` rejects a branch checked out in a `.claude/worktrees/`
+ * worktree (TASKS.md `local-gate-merge-false-negative-on-worktree-
+ * bound-branch-delete`, observed 2026-05-17). If GitHub says state
+ * == "MERGED", the merge succeeded — the local-delete failure is a
+ * non-fatal cleanup issue. Otherwise the merge truly failed and the
+ * caller records it as skipped.
+ *
  * @param {PrSnapshot} pr
  * @param {SweepCtx} ctx
  * @returns {{outcome: "merged" | "skipped", number: number, reason: string}}
@@ -657,6 +697,23 @@ function processOnePr(pr, ctx) {
     return { outcome: "merged", number: pr.number, reason: decision.reason };
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
+    // State oracle: was the remote merge actually successful despite
+    // the non-zero exit? The worktree-bound-delete case is the
+    // canonical mismatch (see TASKS.md task body for the 2026-05-17
+    // reproduction). If state == "MERGED", report as merged; the
+    // local-delete failure is recorded in `reason` so an operator
+    // can still see + clean stale worktrees.
+    const state = ctx.prStateFn(pr.number);
+    if (state === "MERGED") {
+      ctx.log(
+        `  #${pr.number}: MERGED (remote ok; local-delete soft-fail: ${m.slice(0, 80)}) — ${decision.reason}\n`,
+      );
+      return {
+        outcome: "merged",
+        number: pr.number,
+        reason: `${decision.reason} (local-delete soft-fail)`,
+      };
+    }
     ctx.log(`  #${pr.number}: merge call failed: ${m.slice(0, 160)}\n`);
     return { outcome: "skipped", number: pr.number, reason: `merge-failed: ${m.slice(0, 120)}` };
   }
@@ -689,6 +746,7 @@ function appendLedger(mergedNumbers, skippedCount) {
  * @property {(pr: PrSnapshot) => {approve: boolean, reason: string}} [reviewFn]
  * @property {boolean} [noReview]  deterministic-only mode (skip the Opus brain)
  * @property {(pr: PrSnapshot) => void} [mergeFn]
+ * @property {(number: number) => string | null} [prStateFn]  state oracle when mergeFn throws (default: `gh pr view --json state`)
  * @property {(s: string) => void} [log]
  */
 
@@ -704,6 +762,7 @@ function prepareSweep(opts) {
     vetFn: opts.vetFn ?? defaultVet,
     reviewFn: opts.noReview ? undefined : (opts.reviewFn ?? defaultReview),
     mergeFn: opts.mergeFn ?? defaultMerge,
+    prStateFn: opts.prStateFn ?? defaultPrState,
     dryRun: opts.dryRun === true,
     log: opts.log ?? ((s) => process.stdout.write(s)),
   };
