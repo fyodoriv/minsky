@@ -8,6 +8,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  DEFAULT_OUTPUT_RELATIVE,
   dateToMidnightUtcMs,
   mapSnapshotToObservations,
   runMetricsRender,
@@ -238,5 +239,25 @@ describe("runMetricsRender — pipeline", () => {
     expect(md).toContain("3.4");
     expect(md).not.toContain("unexpected_id");
     expect(md).not.toContain("999");
+  });
+});
+
+describe("DEFAULT_OUTPUT_RELATIVE", () => {
+  // The default-output path is the contract between three independent
+  // surfaces: this CLI's writer, the daemon's mtime probe
+  // (`novel/tick-loop/bin/tick-loop.mjs:1259`), and the milestone-
+  // alignment gate (`scripts/check-milestone-alignment.mjs:605`). If
+  // any of those drift, the daemon's daily render silently writes to
+  // a file no one reads — the bug that left `docs/METRICS.md` stale
+  // and every M1.X metric-tagged criterion stuck in `(stub)` state
+  // pre-this-PR. Pinning the value here is the rule-#10 ratchet: any
+  // future PR that changes the constant must update both other
+  // surfaces in the same commit, or this test fails.
+  test("is exactly 'docs/METRICS.md' (canonical location, read by alignment gate)", () => {
+    expect(DEFAULT_OUTPUT_RELATIVE).toBe("docs/METRICS.md");
+  });
+
+  test("is a relative path (the CLI resolves against process.cwd() so the constant must not be absolute)", () => {
+    expect(DEFAULT_OUTPUT_RELATIVE.startsWith("/")).toBe(false);
   });
 });
