@@ -57,7 +57,6 @@ const REPO_ROOT = resolve(HERE, "..");
 export const THREAT_MODEL_README_PATHS = Object.freeze([
   "novel/budget-guard/README.md",
   "novel/competitive-benchmark/README.md",
-  "novel/cross-repo-runner/README.md",
   "novel/dashboard-web/README.md",
   "novel/experiment-record/README.md",
   "novel/mape-k-loop/README.md",

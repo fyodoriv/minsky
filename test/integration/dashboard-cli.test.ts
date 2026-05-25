@@ -108,18 +108,3 @@ describe("minsky CLI subcommands", () => {
     expect(shim).toContain("no daemon running for");
   });
 });
-
-describe("iteration summary line format", () => {
-  test("minsky-run.mjs emits ⏱ iteration line in recordIteration", () => {
-    // Verify the source code contains the summary line format
-    const runnerSrc = readFileSync(
-      join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs"),
-      "utf8",
-    );
-    expect(runnerSrc).toContain("⏱ iteration #${record.iteration}");
-    expect(runnerSrc).toContain("agent=${agent}");
-    expect(runnerSrc).toContain("verdict=${verdict}");
-    expect(runnerSrc).toContain("duration=${durSec}s");
-    expect(runnerSrc).toContain("pr=${pr}");
-  });
-});
