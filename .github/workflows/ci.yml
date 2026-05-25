@@ -1330,6 +1330,42 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-brief-pr-instructions.test.mjs
 
+  check-task-block-citations:
+    # Refuses to remove a TASKS.md task block when the ID is still
+    # referenced by any test file. Closes the PR #864 failure mode
+    # where removing `daemon-pre-pr-lint-gate` broke 5 parity tests
+    # that grep'd TASKS.md for the block's threshold + selector prose.
+    # Anchor: TASKS.md `orphan-cleanup-task-block-citation-lint`
+    # (P1, M1); rule #10 (deterministic enforcement); rule #17
+    # (proactive heal — every bug becomes a rule); Hyrum's Law (the
+    # TEXT of a task block becomes load-bearing for tests that pin
+    # its claims).
+    #
+    # Pure regex over a `git diff` text + the test corpus, no LLM in
+    # the chain. Mirrors `pnpm pre-pr-lint --stage=fast` so any
+    # failure surfaces locally before push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need history to diff against origin/main
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - name: ensure origin/main is fetched
+        run: git fetch --no-tags --depth=1 origin main
+      - name: check-task-block-citations lint
+        env:
+          TASK_CITATION_DIFF_BASE: origin/main
+        run: node scripts/check-task-block-citations.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-task-block-citations.test.mjs
+
   skill-rule-cap:
     # rule #10 ratchet applied to the spec-monitor advisory Skill itself:
     # `novel/spec-monitor/SKILL.md` declares a hard cap of ≤5 advisory
@@ -1772,6 +1808,7 @@ jobs:
       - brief-pr-instructions
       - cadence-pivot-threshold
       - check-cross-repo-pr-rate
+      - check-task-block-citations
       - cloud-audit-gate
       - competitive-goal
       - dashboard-localhost-bind
@@ -1843,6 +1880,7 @@ jobs:
                    "${{ needs.brief-pr-instructions.result }}" \
                    "${{ needs.cadence-pivot-threshold.result }}" \
                    "${{ needs.check-cross-repo-pr-rate.result }}" \
+                   "${{ needs.check-task-block-citations.result }}" \
                    "${{ needs.cloud-audit-gate.result }}" \
                    "${{ needs.dashboard-localhost-bind.result }}" \
                    "${{ needs.depcruise.result }}" \
