@@ -37,6 +37,13 @@
 #   minsky status        → show running minsky processes + tail of daemon log.
 #   minsky stop          → SIGTERM any running minsky-run processes.
 #   minsky logs          → tail -f the daemon log.
+#   minsky trend         → read $PWD/.minsky/transform-runs.jsonl, emit
+#                          MAPE-K Analyse trajectories (#825).
+#   minsky recommend     → read $PWD/.minsky/transform-runs.jsonl, emit
+#                          MAPE-K Plan rule-based interventions (#826).
+#   minsky knowledge     → aggregate ledgers across N hosts via
+#                          --hosts-dir; emit MAPE-K Knowledge cross-host
+#                          rankings (#827).
 #
 # Resolution order (via `resolveMinskyRepo`):
 #   1. $MINSKY_REPO env var (if set + exists)
@@ -598,6 +605,47 @@ if (endpoint) {
 console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + timestamp);
 "
     exit $?
+    ;;
+  trend|recommend|knowledge)
+    # `minsky trend|recommend|knowledge [args...]` — MAPE-K
+    # Analyse/Plan/Knowledge consumers of the per-host
+    # `.minsky/transform-runs.jsonl` ledger. Each subcommand wraps
+    # the matching `scripts/transform_<name>.py` script with $PWD
+    # (or --hosts-dir for knowledge) as the default target. Operators
+    # type `minsky trend` instead of remembering the python3-script
+    # invocation path.
+    #
+    # See:
+    #   - scripts/transform_trend.py     (PR #825, Analyse phase)
+    #   - scripts/transform_recommend.py (PR #826, Plan phase)
+    #   - scripts/transform_knowledge.py (PR #827, K phase)
+    #
+    # Each python script auto-detects its target — `trend` and
+    # `recommend` default to $PWD; `knowledge` requires `--hosts-dir`
+    # (cross-host aggregation has no "current host" default).
+    _subcmd="$1"
+    shift
+    _script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+    _python_script="$_script_dir/../scripts/transform_${_subcmd}.py"
+    if [ ! -f "$_python_script" ]; then
+      echo "minsky $_subcmd: script not found at $_python_script" >&2
+      echo "  this usually means MINSKY_REPO is misconfigured. Run \`minsky doctor\`." >&2
+      exit 1
+    fi
+    # `knowledge` doesn't take --repo; the rest default --repo to $PWD
+    # if the operator didn't pass one.
+    if [ "$_subcmd" = "knowledge" ]; then
+      exec python3 "$_python_script" "$@"
+    fi
+    _has_repo=0
+    for _a in "$@"; do
+      [ "$_a" = "--repo" ] && _has_repo=1
+    done
+    if [ "$_has_repo" = "1" ]; then
+      exec python3 "$_python_script" "$@"
+    else
+      exec python3 "$_python_script" --repo "$PWD" "$@"
+    fi
     ;;
   doctor)
     # `minsky doctor [--quiet]` — health probe for this machine.
