@@ -326,25 +326,6 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     milestone: "M1",
   },
   {
-    // Path A sub-tree scoreboard. Tracks the LOC in `novel/cross-
-    // repo-runner/` — the bash-port deletion target. Phase 7b of
-    // `docs/plans/2026-05-24-path-a-aggressive-cut.md` deletes the
-    // entire TS runner once bash-port parity is confirmed via the
-    // live-fire-smoke gate. Hits 0 when phase-7b ships.
-    id: "path-a-loc-cross-repo-runner",
-    label: "Path A sub-tree: LOC in novel/cross-repo-runner/ (deletion target)",
-    formula:
-      "fd -e ts -e tsx --type f --exclude '*.test.*' . novel/cross-repo-runner/ | xargs wc -l | tail -1 | awk '{print $1}'",
-    unit: "LOC",
-    freshnessBudgetMs: 1 * DAY_MS,
-    goal: "0 (post phase-7b deletion); today (~4.2K) is the bash-port runtime parity target",
-    pivot:
-      "Stays >0 for ≥30 d AFTER bash-port parity validates → cannot delete cleanly; surface as `Pivot to coexist` with deprecation banner in the Path A plan.",
-    anchor:
-      "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 7b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)",
-    milestone: "M1",
-  },
-  {
     // Path A sub-tree scoreboard. Tracks the LOC in
     // `novel/tick-loop/` — the daemon-deletion target. Phase 11b
     // of the Path A plan deletes the TS daemon once the

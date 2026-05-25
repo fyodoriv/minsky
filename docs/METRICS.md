@@ -218,20 +218,6 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 
 **Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)
 
-## path-a-loc-cross-repo-runner — Path A sub-tree: LOC in novel/cross-repo-runner/ (deletion target)
-
-_Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1_
-
-**Value:** 4189 LOC
-
-**How to view:** `fd -e ts -e tsx --type f --exclude '*.test.*' . novel/cross-repo-runner/ | xargs wc -l | tail -1 | awk '{print $1}'`
-
-**Goal:** 0 (post phase-7b deletion); today (~4.2K) is the bash-port runtime parity target
-
-**Pivot:** Stays >0 for ≥30 d AFTER bash-port parity validates → cannot delete cleanly; surface as `Pivot to coexist` with deprecation banner in the Path A plan.
-
-**Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 7b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)
-
 ## path-a-loc-tick-loop — Path A sub-tree: LOC in novel/tick-loop/ (deletion target)
 
 _Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1_
