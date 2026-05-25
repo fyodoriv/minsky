@@ -42,6 +42,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import sys
@@ -171,6 +172,90 @@ def recommend(trend: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def append_to_tasks_md(
+    recs: list[dict[str, Any]],
+    tasks_md_path: Path,
+    confirmed: bool,
+) -> dict[str, Any]:
+    """Append recommendations to TASKS.md (operator-gated, 2-step).
+
+    The Execute phase of MAPE-K. Iron rule: a script that modifies
+    TASKS.md without explicit operator confirmation corrupts the
+    queue. This function requires `confirmed=True` (set by --yes
+    on the CLI); otherwise it returns a dry-run preview without
+    writing.
+
+    Idempotent: recommendations whose `id` already appears in the
+    existing TASKS.md are skipped — re-running doesn't duplicate.
+
+    Returns a dict describing what was (or would be) appended:
+        {
+          "dry_run": bool,
+          "tasks_md": str,
+          "would_append": [id, ...],   # NEW recs not yet in TASKS.md
+          "already_present": [id, ...] # recs that match existing IDs
+        }
+    """
+    existing = tasks_md_path.read_text() if tasks_md_path.exists() else ""
+    would_append: list[dict[str, Any]] = []
+    already_present: list[str] = []
+    for rec in recs:
+        # Match the task-block-format id: `\`<id>\`` appears on the
+        # checkbox line. Existence check is simple substring search;
+        # tasks.md spec uses backtick-wrapped IDs as the canonical
+        # identifier.
+        marker = f"`{rec['id']}`"
+        if marker in existing:
+            already_present.append(rec["id"])
+        else:
+            would_append.append(rec)
+    result = {
+        "dry_run": not confirmed,
+        "tasks_md": str(tasks_md_path),
+        "would_append": [r["id"] for r in would_append],
+        "already_present": already_present,
+    }
+    if confirmed and would_append:
+        # Build the append block. Always include a machine-generated
+        # marker comment + timestamp so the operator can see what was
+        # appended automatically vs hand-authored. Group by priority
+        # to match the tasks.md spec's `## P0/P1/P2/P3` section pattern.
+        ts = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+        block_lines: list[str] = []
+        block_lines.append("")
+        block_lines.append(f"<!-- transform-recommend: appended {len(would_append)} recommendation(s) at {ts} -->")
+        block_lines.append("")
+        # Group by priority (P0 first, then P1, P2, P3).
+        by_priority: dict[str, list[dict[str, Any]]] = {}
+        for r in would_append:
+            by_priority.setdefault(r["priority"], []).append(r)
+        for priority in ("P0", "P1", "P2", "P3"):
+            if priority not in by_priority:
+                continue
+            block_lines.append(f"## {priority}")
+            block_lines.append("")
+            for r in by_priority[priority]:
+                block_lines.append(f"- [ ] `{r['id']}` — {r['title']}")
+                block_lines.append(f"  - **ID**: {r['id']}")
+                block_lines.append(f"  - **Tags**: {priority.lower()}, suggested-by-transform-recommend")
+                block_lines.append(f"  - **Details**: {r['rationale']}")
+                block_lines.append(f"  - **Evidence**: {json.dumps(r['evidence'], sort_keys=True)}")
+                block_lines.append(
+                    "  - **Acceptance**: operator reviews the rationale + evidence, then either "
+                    "accepts (moves to active priority) or marks **Blocked**: not-needed with reason."
+                )
+                block_lines.append("")
+        block = "\n".join(block_lines)
+        # Append atomically — write to a tmp file in the same dir, fsync, rename.
+        tmp = tasks_md_path.with_suffix(tasks_md_path.suffix + ".tmp")
+        # Preserve existing file's trailing-newline state.
+        sep = "" if existing.endswith("\n") else "\n"
+        tmp.write_text(existing + sep + block)
+        os.replace(tmp, tasks_md_path)
+        result["appended"] = True
+    return result
+
+
 def render_markdown(recs: list[dict[str, Any]]) -> str:
     """Render recommendations as TASKS.md-ready blocks.
 
@@ -203,6 +288,8 @@ def main(argv: list[str]) -> int:
     ledger_path: Path | None = None
     window: int = DEFAULT_WINDOW
     emit_json = False
+    append_path: Path | None = None
+    confirmed = False
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -222,6 +309,12 @@ def main(argv: list[str]) -> int:
         elif a == "--json":
             emit_json = True
             i += 1
+        elif a == "--append" and i + 1 < len(argv):
+            append_path = Path(argv[i + 1])
+            i += 2
+        elif a == "--yes":
+            confirmed = True
+            i += 1
         elif a in ("--help", "-h"):
             print(__doc__)
             return 0
@@ -240,6 +333,50 @@ def main(argv: list[str]) -> int:
     records = tt.load_ledger(ledger_path, window=window)
     trend = tt.compute_trend(records)
     recs = recommend(trend)
+
+    # --append: operator-gated 2-step Execute phase of MAPE-K.
+    if append_path is not None:
+        result = append_to_tasks_md(recs, append_path, confirmed=confirmed)
+        if emit_json:
+            print(json.dumps(result, indent=2))
+        else:
+            if result["dry_run"]:
+                print(
+                    f"transform-recommend: dry-run. Would append {len(result['would_append'])} "
+                    f"recommendation(s) to {result['tasks_md']}:",
+                    file=sys.stderr,
+                )
+                for rid in result["would_append"]:
+                    print(f"  + {rid}", file=sys.stderr)
+                if result["already_present"]:
+                    print(
+                        f"  ({len(result['already_present'])} already present, skipped: "
+                        f"{', '.join(result['already_present'])})",
+                        file=sys.stderr,
+                    )
+                if result["would_append"]:
+                    print(
+                        f"\nTo actually append, re-run with --yes:\n  "
+                        f"python3 scripts/transform_recommend.py "
+                        f"--repo {repo} --append {append_path} --yes",
+                        file=sys.stderr,
+                    )
+            else:
+                appended = result.get("appended", False)
+                if appended:
+                    print(
+                        f"transform-recommend: appended {len(result['would_append'])} "
+                        f"recommendation(s) to {result['tasks_md']}",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"transform-recommend: no new recommendations to append to "
+                        f"{result['tasks_md']} (all {len(result['already_present'])} already present)",
+                        file=sys.stderr,
+                    )
+        return 0
+
     if emit_json:
         print(
             json.dumps(
