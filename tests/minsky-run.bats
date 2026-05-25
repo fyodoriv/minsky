@@ -451,6 +451,7 @@ EOF
   fixture="$TMPDIR_TEST/bootstrap-fixture"
   mkdir -p "$fixture"
   (cd "$fixture" && git init -q && git config user.email t@t && git config user.name t && \
+     git symbolic-ref HEAD refs/heads/main && \
      git remote add origin git@github.com:fyodoriv/test-host.git)
   printf '{"scripts":{"check":"echo ok"}}' > "$fixture/package.json"
   printf '# Tasks\n\n## P0\n' > "$fixture/TASKS.md"
