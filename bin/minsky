@@ -130,6 +130,284 @@ _minsky_config_value() {
   ' "$_cfg" 2>/dev/null
 }
 
+# ── Bash-skeleton probe set (shared by `doctor` and the deprecated
+#    `bash-doctor` alias) ──────────────────────────────────────────────
+#
+# Single source of truth for the Path A bash + Python skeleton's
+# pre-flight checks (jq, python3 ≥3.10, executable bits on bash
+# entrypoints, agent backend, API key, host bootstrap, machine config,
+# disk space, git HEAD state, lockfile, optional --smoke).
+#
+# Previously this probe set was duplicated: a `bash-doctor` case block
+# (~280 lines) and a sub-shell call from the `doctor` case block.
+# Merged into ONE function (rule #16 CLI-consolidation corollary,
+# 2026-05-25 follow-up): both surfaces call this function inline —
+# no sub-shell, no second front door.
+#
+# Inputs (args parsed from $@):
+#   --quiet   — suppress PASS lines
+#   --smoke   — additionally syntax-check every pipeline script + lint
+#               every bash entrypoint with the shell-script linter
+#
+# Outputs:
+#   PASS / FAIL / WARN status lines on stdout via _bd_print.
+#   Sets the global `_bd_skeleton_crit_fail` (0 = no critical fails;
+#   1 = at least one critical fail). Callers decide whether to
+#   propagate this into the overall doctor exit code.
+#
+# Source: 2026-05-25 retro slice 1+2 (PR #866 introduced the probes;
+# PR #868 folded the front door); rule #1 (don't reinvent — single
+# probe body across both callers).
+_run_bash_skeleton_probes() {
+  local _bd_quiet=0
+  local _bd_smoke=0
+  local _a
+  for _a in "$@"; do
+    case "$_a" in
+      --quiet) _bd_quiet=1 ;;
+      --smoke) _bd_smoke=1 ;;
+    esac
+  done
+
+  _bd_skeleton_crit_fail=0  # GLOBAL — callers read this
+
+  _bd_print() {
+    # _bd_print STATUS NAME MESSAGE — quiet hides PASS lines.
+    [ "$_bd_quiet" = "1" ] && [ "$1" = "PASS" ] && return 0
+    printf "  %-4s  %-22s %s\n" "$1" "$2" "$3"
+  }
+
+  local _bd_real_bin
+  _bd_real_bin=$(_minsky_realpath "$0")
+  local _bd_repo_dir
+  _bd_repo_dir=$(dirname "$(dirname "$_bd_real_bin")")
+  local _bd_probes="$_bd_repo_dir/scripts/bash-doctor-probes.sh"
+
+  # CRITICAL — jq (record_iteration depends on it)
+  if command -v jq >/dev/null 2>&1; then
+    local _v
+    _v=$(jq --version 2>/dev/null | sed 's/^jq-//')
+    _bd_print PASS "jq" "$_v"
+  else
+    _bd_print FAIL "jq" "not on PATH (record_iteration cannot serialize JSONL — install via brew install jq / apt-get install jq)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — python3 ≥3.10. Delegates to scripts/bash-doctor-probes.sh
+  # to keep `python3 -c` out of bin/minsky (rule enforced by
+  # test/integration/m1-red-green.test.ts § "bin/minsky uses portable
+  # shell helpers, not python3"). Corporate Python wrappers can take
+  # 30+ seconds to bootstrap uv on a fresh HOME — this function only
+  # runs when the caller has opted into the bash-skeleton path; the
+  # cost is intentional.
+  if [ -x "$_bd_probes" ]; then
+    local _pyv
+    if _pyv=$(bash "$_bd_probes" python-version 2>/dev/null); then
+      _bd_print PASS "python3" "$_pyv"
+    else
+      local _pyv_fallback
+      _pyv_fallback=$(bash "$_bd_probes" python-version 2>/dev/null || echo "?")
+      _bd_print FAIL "python3" "$_pyv_fallback (need 3.10+ for scripts/*.py)"
+      _bd_skeleton_crit_fail=1
+    fi
+  else
+    _bd_print FAIL "python3" "probe helper missing at $_bd_probes"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — bin/minsky-run.sh executable
+  if [ -x "$_bd_repo_dir/bin/minsky-run.sh" ]; then
+    _bd_print PASS "minsky-run.sh" "$_bd_repo_dir/bin/minsky-run.sh"
+  else
+    _bd_print FAIL "minsky-run.sh" "not executable at $_bd_repo_dir/bin/minsky-run.sh (run: chmod +x $_bd_repo_dir/bin/minsky-run.sh)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — bin/minsky-default-session.sh executable
+  if [ -x "$_bd_repo_dir/bin/minsky-default-session.sh" ]; then
+    _bd_print PASS "default-session.sh" "$_bd_repo_dir/bin/minsky-default-session.sh"
+  else
+    _bd_print FAIL "default-session.sh" "not executable at $_bd_repo_dir/bin/minsky-default-session.sh"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — scripts/spawn_agent.py exists and is python-parseable
+  if [ -f "$_bd_repo_dir/scripts/spawn_agent.py" ]; then
+    if [ -x "$_bd_probes" ] && bash "$_bd_probes" syntax "$_bd_repo_dir/scripts/spawn_agent.py" >/dev/null 2>&1; then
+      _bd_print PASS "spawn_agent.py" "syntax OK"
+    else
+      _bd_print FAIL "spawn_agent.py" "syntax error or probe missing — bash $_bd_probes syntax $_bd_repo_dir/scripts/spawn_agent.py"
+      _bd_skeleton_crit_fail=1
+    fi
+  else
+    _bd_print FAIL "spawn_agent.py" "missing at $_bd_repo_dir/scripts/spawn_agent.py"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # CRITICAL — at least ONE agent backend reachable: canonical
+  # `openhands` CLI (post-June-2026 world) OR OpenHands SDK importable.
+  local _bd_agent_ok=0
+  local _ohv _sdkv
+  if [ -x "$_bd_probes" ] && _ohv=$(bash "$_bd_probes" openhands-cli 2>/dev/null); then
+    _bd_print PASS "openhands CLI" "$_ohv"
+    _bd_agent_ok=1
+  fi
+  if [ -x "$_bd_probes" ] && _sdkv=$(bash "$_bd_probes" openhands-sdk 2>/dev/null); then
+    _bd_print PASS "OpenHands SDK" "importable (v$_sdkv)"
+    _bd_agent_ok=1
+  elif [ "$_bd_agent_ok" = "0" ]; then
+    _bd_print FAIL "agent backend" "neither \`openhands\` CLI nor OpenHands SDK importable (install via: pip install openhands-ai OR install the canonical CLI when shipped)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # WARN — API key env (OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY)
+  if [ -n "${OPENHANDS_API_KEY:-}" ] || [ -n "${LLM_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    _bd_print PASS "API key env" "set (OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY)"
+  else
+    _bd_print WARN "API key env" "none of OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY set — agent will fail at spawn time"
+  fi
+
+  # WARN — .minsky/repo.yaml in $PWD (only meaningful when called from a host)
+  if [ -f "$PWD/.minsky/repo.yaml" ]; then
+    _bd_print PASS "host bootstrap" "$PWD/.minsky/repo.yaml exists"
+  else
+    _bd_print WARN "host bootstrap" "$PWD/.minsky/repo.yaml missing (run: $_bd_repo_dir/bin/minsky-bootstrap.sh $PWD before --transform)"
+  fi
+
+  # CRITICAL — ~/.minsky/config.json (bash runner's Invariant 1)
+  if [ -f "$HOME/.minsky/config.json" ]; then
+    _bd_print PASS "machine config" "$HOME/.minsky/config.json exists"
+  else
+    _bd_print FAIL "machine config" "$HOME/.minsky/config.json missing (run \`minsky init\` to create it; without this, every iteration fails at Invariant 1)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # WARN — shellcheck on bin/minsky-run.sh
+  if command -v shellcheck >/dev/null 2>&1; then
+    if shellcheck -x "$_bd_repo_dir/bin/minsky-run.sh" >/dev/null 2>&1; then
+      _bd_print PASS "shellcheck" "minsky-run.sh clean"
+    else
+      _bd_print WARN "shellcheck" "minsky-run.sh has violations (run: shellcheck -x $_bd_repo_dir/bin/minsky-run.sh)"
+    fi
+  else
+    _bd_print WARN "shellcheck" "not installed (install via brew install shellcheck — non-blocking but recommended)"
+  fi
+
+  # WARN — gh CLI authenticated
+  if command -v gh >/dev/null 2>&1; then
+    local _ghv
+    _ghv=$(gh --version 2>/dev/null | head -1 | sed 's/^gh version //')
+    if gh auth status >/dev/null 2>&1; then
+      _bd_print PASS "gh CLI" "$_ghv (authenticated)"
+    else
+      _bd_print WARN "gh CLI" "$_ghv (not authenticated — run \`gh auth login\` before --transform)"
+    fi
+  else
+    _bd_print FAIL "gh CLI" "not on PATH (record_iteration + PR-state probes require it)"
+    _bd_skeleton_crit_fail=1
+  fi
+
+  # WARN — disk space (failure captures + JSONL ledger grow over time)
+  local _df_threshold_mb=1024
+  if command -v df >/dev/null 2>&1; then
+    local _avail_kb
+    _avail_kb=$(df -k "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$_avail_kb" ] && [ "$_avail_kb" -gt 0 ] 2>/dev/null; then
+      local _avail_mb=$((_avail_kb / 1024))
+      if [ "$_avail_mb" -ge "$_df_threshold_mb" ]; then
+        _bd_print PASS "disk free ($HOME)" "${_avail_mb}MB available"
+      else
+        _bd_print WARN "disk free ($HOME)" "${_avail_mb}MB available (below ${_df_threshold_mb}MB threshold — failure captures + JSONL ledger may hit ENOSPC mid-iteration)"
+      fi
+    else
+      _bd_print WARN "disk free ($HOME)" "(df unparseable)"
+    fi
+  else
+    _bd_print WARN "disk free" "df not on PATH (cannot probe)"
+  fi
+
+  # WARN — git HEAD state in $PWD (rebase/merge/cherry-pick in progress breaks per-iter git push)
+  if [ -d "$PWD/.git" ] || git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
+    local _git_branch
+    _git_branch=$(git -C "$PWD" symbolic-ref --short HEAD 2>/dev/null || echo "")
+    if [ -n "$_git_branch" ]; then
+      local _git_dir
+      _git_dir=$(git -C "$PWD" rev-parse --git-dir 2>/dev/null)
+      if [ -d "$_git_dir/rebase-merge" ] || [ -d "$_git_dir/rebase-apply" ]; then
+        _bd_print WARN "git HEAD ($PWD)" "rebase in progress (run \`git rebase --abort\` or finish it before --transform)"
+      elif [ -f "$_git_dir/MERGE_HEAD" ]; then
+        _bd_print WARN "git HEAD ($PWD)" "merge in progress (run \`git merge --abort\` or commit it before --transform)"
+      elif [ -f "$_git_dir/CHERRY_PICK_HEAD" ]; then
+        _bd_print WARN "git HEAD ($PWD)" "cherry-pick in progress (run \`git cherry-pick --abort\` before --transform)"
+      else
+        _bd_print PASS "git HEAD ($PWD)" "on branch $_git_branch"
+      fi
+    else
+      _bd_print WARN "git HEAD ($PWD)" "detached HEAD (agent cannot push to a non-branch ref — \`git checkout main\` or similar)"
+    fi
+  else
+    _bd_print PASS "git HEAD" "$PWD is not a git repo (skipped — only checked when called from inside one)"
+  fi
+
+  # WARN — lockfile presence when $PWD/package.json exists
+  if [ -f "$PWD/package.json" ]; then
+    if [ -f "$PWD/pnpm-lock.yaml" ] || [ -f "$PWD/package-lock.json" ] || [ -f "$PWD/yarn.lock" ]; then
+      _bd_print PASS "lockfile" "found (pnpm-lock.yaml / package-lock.json / yarn.lock)"
+    else
+      _bd_print WARN "lockfile" "$PWD/package.json exists but no lockfile (every iteration's install will resolve fresh — slow + non-deterministic)"
+    fi
+  fi
+
+  # --smoke — opt-in deeper checks: dry-run pipeline scripts + shellcheck
+  # every bash entrypoint. ~5s extra runtime.
+  if [ "$_bd_smoke" = "1" ]; then
+    [ "$_bd_quiet" = "0" ] && echo "" && echo "--smoke: dry-running pipeline scripts to catch integration bugs"
+    local _bd_smoke_fail=0
+    local _bd_script _bd_path
+    for _bd_script in "scripts/pick_task.py" "scripts/build_brief.py" "scripts/build_cto_brief.py" "scripts/spawn_agent.py" "scripts/extract_pr_url.py" "scripts/resolve_gh_host.py" "scripts/transform_trend.py" "scripts/transform_recommend.py" "scripts/transform_knowledge.py" "scripts/baseline_metrics.py" "scripts/minsky_report.py" "scripts/iteration_ship_rate.py" "scripts/dynamic_timeout.py" "scripts/synth_experiment_yaml.py" "scripts/spawn_with_watchdog.py"; do
+      _bd_path="$_bd_repo_dir/$_bd_script"
+      if [ ! -f "$_bd_path" ]; then
+        _bd_print FAIL "smoke: $_bd_script" "missing"
+        _bd_smoke_fail=1
+        continue
+      fi
+      if bash "$_bd_probes" syntax "$_bd_path" >/dev/null 2>&1; then
+        _bd_print PASS "smoke: $_bd_script" "syntax OK"
+      else
+        _bd_print FAIL "smoke: $_bd_script" "syntax error or import-time crash"
+        _bd_smoke_fail=1
+      fi
+    done
+    for _bd_script in "bin/minsky-bootstrap.sh" "bin/minsky-default-session.sh" "scripts/capture-failure.sh" "scripts/bash-doctor-probes.sh"; do
+      _bd_path="$_bd_repo_dir/$_bd_script"
+      if [ ! -f "$_bd_path" ]; then
+        _bd_print FAIL "smoke: $_bd_script" "missing"
+        _bd_smoke_fail=1
+        continue
+      fi
+      if command -v shellcheck >/dev/null 2>&1; then
+        if shellcheck -x "$_bd_path" >/dev/null 2>&1; then
+          _bd_print PASS "smoke: $_bd_script" "shellcheck clean"
+        else
+          _bd_print WARN "smoke: $_bd_script" "shellcheck violations (run: shellcheck -x $_bd_path)"
+        fi
+      else
+        if bash -n "$_bd_path" 2>/dev/null; then
+          _bd_print PASS "smoke: $_bd_script" "bash -n clean"
+        else
+          _bd_print FAIL "smoke: $_bd_script" "bash -n syntax error"
+          _bd_smoke_fail=1
+        fi
+      fi
+    done
+    if [ "$_bd_smoke_fail" = "1" ]; then
+      _bd_skeleton_crit_fail=1
+    fi
+  fi
+
+  return "$_bd_skeleton_crit_fail"
+}
+
 # ── 1. Handle subcommands that DON'T need the repo ──────────
 #
 # `minsky status` / `minsky stop` / `minsky logs` only need
@@ -814,39 +1092,31 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     done
 
     if [ "$_bd_should_run" = "1" ]; then
-      _bd_args=()
-      [ "$_quiet" = "1" ] && _bd_args+=("--quiet")
-      for _a in "$@"; do
-        [ "$_a" = "--smoke" ] && _bd_args+=("--smoke")
-      done
       [ "$_quiet" = "0" ] && echo "" && echo "--- bash-skeleton probes (Path A) — informational ---"
-      set +e
-      # `${arr[@]:-}` rather than `${arr[@]}` so set -u doesn't trip when
-      # the array is empty (no --quiet / --smoke passed). Bash's set -u
-      # treats unset array access as a fatal error.
-      # MINSKY_DOCTOR_FOLD=1 suppresses bash-doctor's own deprecation
-      # banner (no point telling the operator "use minsky doctor" when
-      # that's exactly what they ran).
-      MINSKY_DOCTOR_FOLD=1 "$0" bash-doctor "${_bd_args[@]:-}" 2>&1
-      _bd_exit=$?
-      set -e
-      # Do NOT propagate bash-doctor's exit code into _crit_fail. Rationale:
-      # `doctor`'s invariant is "the machine can run AT LEAST ONE Minsky
-      # path" — if the TS substrate is healthy, doctor passes even when
-      # the Path A bash skeleton lacks `openhands` SDK or API key. The
-      # bash-skeleton output is shown for visibility (FAILs are actionable
-      # via `minsky --transform`); a strict check is available via
-      # `minsky bash-doctor` (direct invocation) for operators who
-      # specifically need the bash path. This matches the integration
-      # test pin in test/integration/m1-red-green.test.ts § "minsky doctor
-      # exits 0 when no critical checks fail" — TS-substrate critical
-      # checks gate exit code; bash-skeleton checks are informational.
-      if [ "$_bd_exit" != "0" ] && [ "$_quiet" = "0" ]; then
-        echo "(bash-skeleton exited $_bd_exit — see above; run \`minsky bash-doctor\` for strict mode)"
+      _bd_probe_args=()
+      [ "$_quiet" = "1" ] && _bd_probe_args+=("--quiet")
+      for _a in "$@"; do
+        [ "$_a" = "--smoke" ] && _bd_probe_args+=("--smoke")
+      done
+      # Direct function call — no subshell, no second front door (rule
+      # #16 CLI-consolidation corollary, 2026-05-25 follow-up). The
+      # function sets `_bd_skeleton_crit_fail` globally; we read it but
+      # do NOT propagate into `_crit_fail` because `doctor`'s invariant
+      # is "the machine can run AT LEAST ONE Minsky path" — TS-substrate
+      # critical checks gate exit code; bash-skeleton fails are
+      # informational. This matches the integration test pin in
+      # test/integration/m1-red-green.test.ts § "minsky doctor exits 0
+      # when no critical checks fail".
+      # `|| true` because the function returns non-zero on bash-skeleton
+      # crit-fail (so the deprecated `bash-doctor` alias can preserve
+      # strict semantics), and we have `set -e` at the top of bin/minsky.
+      _run_bash_skeleton_probes "${_bd_probe_args[@]:-}" || true
+      if [ "${_bd_skeleton_crit_fail:-0}" != "0" ] && [ "$_quiet" = "0" ]; then
+        echo "(bash-skeleton has critical fails — see above; operator must fix before \`minsky --transform\`)"
       fi
     elif [ "$_quiet" = "0" ]; then
       echo ""
-      echo "(bash-skeleton probes skipped: no .minsky/repo.yaml in \$PWD; run \`minsky bash-doctor\` for the full Path A check or \`minsky doctor --all\` to force)"
+      echo "(bash-skeleton probes skipped: no .minsky/repo.yaml in \$PWD; run \`minsky doctor --all\` to force)"
     fi
 
     [ "$_quiet" = "0" ] && echo ""
@@ -859,304 +1129,37 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     fi
     ;;
   bash-doctor)
-    # `minsky bash-doctor [--quiet] [--smoke]` — DEPRECATED alias kept
-    # for backwards compatibility. Use `minsky doctor` (which now runs
-    # both the TS substrate checks and these bash-skeleton checks in
-    # one pass). Will be removed in the next major version per rule
-    # #16 CLI consolidation corollary (2026-05-25): one health-check
-    # surface, not two.
-    #
-    # The probe set itself (jq, python ≥3.10, the OpenHands SDK shim,
-    # OPENHANDS_API_KEY, `.minsky/repo.yaml`, executable bits, shellcheck,
-    # disk space, git HEAD, lockfile, optional --smoke) is unchanged —
-    # only the front door consolidated.
-    #
-    # Exit codes:
-    #   0 — all critical checks pass (bash skeleton can run)
-    #   1 — at least one critical check failed (bash skeleton will fail)
-    #
-    # Source: 2026-05-25 retro — observed gap between "parity tests
-    # pass" and "first live run works"; rule #17 (proactive healing —
-    # gap becomes a probe); composes with `minsky-transform-live-smoke-
-    # on-real-repo` P0 task as the pre-flight gate. Folded into
-    # `doctor` per rule #16 (CLI consolidation corollary).
+    # DEPRECATED alias for `minsky doctor --all` (rule #16 CLI-
+    # consolidation corollary, 2026-05-25). The probe body lives once
+    # in `_run_bash_skeleton_probes` (top of file). Direct invocation
+    # is preserved for PR-#866-era operator habits + test backwards
+    # compat; will be removed in the next major version.
     # <!-- @deprecated 2026-05-25 — folded into `minsky doctor` -->
-    # Suppress the deprecation banner when invoked internally by `doctor`
-    # (it's the fold's purpose; the user already ran the consolidated
-    # command). Show it when invoked directly so PR-#866-era habits
-    # migrate.
-    if [ "${MINSKY_DOCTOR_FOLD:-0}" != "1" ]; then
-      [ "${1:-}" != "--quiet" ] && [ "${2:-}" != "--quiet" ] && echo "minsky bash-doctor: DEPRECATED — use \`minsky doctor\` (now runs both surfaces). bash-doctor will be removed in the next major version." >&2
-    fi
-    _crit_fail=0
-    _quiet=0
-    _smoke=0
+    #
+    # Direct semantics differ from `doctor --all` in ONE way:
+    # `bash-doctor` exits 1 when bash-skeleton has critical fails
+    # (strict mode — script callers may rely on this). `doctor --all`
+    # exits 0 even when bash-skeleton fails (informational, per
+    # doctor's "at least one path works" invariant).
+    [ "${MINSKY_DOCTOR_FOLD:-0}" != "1" ] && \
+      echo "minsky bash-doctor: DEPRECATED — use \`minsky doctor --all\` (single front door). bash-doctor will be removed in the next major version." >&2
+
+    # Print header for direct callers (consistent with old behavior).
+    _bd_alias_quiet=0
     for _a in "$@"; do
-      [ "$_a" = "--quiet" ] && _quiet=1
-      [ "$_a" = "--smoke" ] && _smoke=1
+      [ "$_a" = "--quiet" ] && _bd_alias_quiet=1
     done
+    [ "$_bd_alias_quiet" = "0" ] && echo "minsky bash-doctor — pre-flight for Path A bash + Python skeleton" && echo ""
 
-    _bash_doctor_print() {
-      # _bash_doctor_print STATUS NAME MESSAGE
-      [ "$_quiet" = "1" ] && [ "$1" = "PASS" ] && return 0
-      printf "  %-4s  %-22s %s\n" "$1" "$2" "$3"
-    }
+    # Single body — shared with `doctor`. Exit code reflects strict
+    # bash-skeleton semantics (the only behavioral delta vs `doctor`).
+    # `|| true` because we want to read $_bd_skeleton_crit_fail below
+    # before script-wide errexit aborts us.
+    _run_bash_skeleton_probes "$@" || true
 
-    [ "$_quiet" = "0" ] && echo "minsky bash-doctor — pre-flight for Path A bash + Python skeleton" && echo ""
-
-    # Resolve repo root early — used by python-probes + executable-bit
-    # checks below.
-    _real_bin=$(_minsky_realpath "$0")
-    _repo_dir=$(dirname "$(dirname "$_real_bin")")
-    _bash_doctor_probes="$_repo_dir/scripts/bash-doctor-probes.sh"
-
-    # CRITICAL — jq (record_iteration depends on it)
-    if command -v jq >/dev/null 2>&1; then
-      _v=$(jq --version 2>/dev/null | sed 's/^jq-//')
-      _bash_doctor_print PASS "jq" "$_v"
-    else
-      _bash_doctor_print FAIL "jq" "not on PATH (record_iteration cannot serialize JSONL — install via brew install jq / apt-get install jq)"
-      _crit_fail=1
-    fi
-
-    # CRITICAL — python3 ≥3.10 (all scripts/*.py target 3.10+ via type
-    # hints / match-case). Delegates to scripts/bash-doctor-probes.sh
-    # to keep `python3 -c` out of bin/minsky (rule enforced by
-    # test/integration/m1-red-green.test.ts § "bin/minsky uses portable
-    # shell helpers, not python3"). Corporate Python wrappers can take
-    # 30+ seconds to bootstrap uv on a fresh HOME — the bash-doctor
-    # path opts in to that cost; bin/minsky itself stays python-free.
-    _bash_doctor_probes="$_repo_dir/scripts/bash-doctor-probes.sh"
-    if [ -x "$_bash_doctor_probes" ]; then
-      if _pyv=$(bash "$_bash_doctor_probes" python-version 2>/dev/null); then
-        _bash_doctor_print PASS "python3" "$_pyv"
-      else
-        _pyv_fallback=$(bash "$_bash_doctor_probes" python-version 2>/dev/null || echo "?")
-        _bash_doctor_print FAIL "python3" "$_pyv_fallback (need 3.10+ for scripts/*.py)"
-        _crit_fail=1
-      fi
-    else
-      _bash_doctor_print FAIL "python3" "probe helper missing at $_bash_doctor_probes"
-      _crit_fail=1
-    fi
-
-    # CRITICAL — bin/minsky-run.sh executable
-    if [ -x "$_repo_dir/bin/minsky-run.sh" ]; then
-      _bash_doctor_print PASS "minsky-run.sh" "$_repo_dir/bin/minsky-run.sh"
-    else
-      _bash_doctor_print FAIL "minsky-run.sh" "not executable at $_repo_dir/bin/minsky-run.sh (run: chmod +x $_repo_dir/bin/minsky-run.sh)"
-      _crit_fail=1
-    fi
-
-    # CRITICAL — bin/minsky-default-session.sh executable
-    if [ -x "$_repo_dir/bin/minsky-default-session.sh" ]; then
-      _bash_doctor_print PASS "default-session.sh" "$_repo_dir/bin/minsky-default-session.sh"
-    else
-      _bash_doctor_print FAIL "default-session.sh" "not executable at $_repo_dir/bin/minsky-default-session.sh"
-      _crit_fail=1
-    fi
-
-    # CRITICAL — scripts/spawn_agent.py exists and is python-parseable
-    # (delegated to bash-doctor-probes.sh § syntax to keep python3 -m
-    # py_compile out of bin/minsky proper).
-    if [ -f "$_repo_dir/scripts/spawn_agent.py" ]; then
-      if [ -x "$_bash_doctor_probes" ] && bash "$_bash_doctor_probes" syntax "$_repo_dir/scripts/spawn_agent.py" >/dev/null 2>&1; then
-        _bash_doctor_print PASS "spawn_agent.py" "syntax OK"
-      else
-        _bash_doctor_print FAIL "spawn_agent.py" "syntax error or probe missing — bash $_bash_doctor_probes syntax $_repo_dir/scripts/spawn_agent.py"
-        _crit_fail=1
-      fi
-    else
-      _bash_doctor_print FAIL "spawn_agent.py" "missing at $_repo_dir/scripts/spawn_agent.py"
-      _crit_fail=1
-    fi
-
-    # CRITICAL — at least ONE agent backend is reachable: either the
-    # canonical `openhands` CLI (post-June-2026 world) OR the OpenHands
-    # SDK importable from python3 (today's world via the shim).
-    # Both probes delegate to bash-doctor-probes.sh (the SDK probe is
-    # the load-bearing one: `python3 -c "import openhands"` is what
-    # keeps python3-import calls out of bin/minsky).
-    _agent_ok=0
-    if [ -x "$_bash_doctor_probes" ] && _ohv=$(bash "$_bash_doctor_probes" openhands-cli 2>/dev/null); then
-      _bash_doctor_print PASS "openhands CLI" "$_ohv"
-      _agent_ok=1
-    fi
-    if [ -x "$_bash_doctor_probes" ] && _sdkv=$(bash "$_bash_doctor_probes" openhands-sdk 2>/dev/null); then
-      _bash_doctor_print PASS "OpenHands SDK" "importable (v$_sdkv)"
-      _agent_ok=1
-    elif [ "$_agent_ok" = "0" ]; then
-      _bash_doctor_print FAIL "agent backend" "neither \`openhands\` CLI nor OpenHands SDK importable (install via: pip install openhands-ai OR install the canonical CLI when shipped)"
-      _crit_fail=1
-    fi
-
-    # WARN — OPENHANDS_API_KEY env var (or compatible)
-    if [ -n "${OPENHANDS_API_KEY:-}" ] || [ -n "${LLM_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-      _bash_doctor_print PASS "API key env" "set (OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY)"
-    else
-      _bash_doctor_print WARN "API key env" "none of OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY set — agent will fail at spawn time"
-    fi
-
-    # WARN — .minsky/repo.yaml in $PWD (only when called from inside a host)
-    if [ -f "$PWD/.minsky/repo.yaml" ]; then
-      _bash_doctor_print PASS "host bootstrap" "$PWD/.minsky/repo.yaml exists"
-    else
-      _bash_doctor_print WARN "host bootstrap" "$PWD/.minsky/repo.yaml missing (run: $_repo_dir/bin/minsky-bootstrap.sh $PWD before --transform)"
-    fi
-
-    # CRITICAL — ~/.minsky/config.json (bash runner's Invariant 1).
-    # Without it, every iteration aborts at "INVARIANT FAIL: config not
-    # at ~/.minsky/config.json" before reaching the spawn step.
-    # Discovered 2026-05-25 via `minsky iter-once` smoke test —
-    # bash-doctor missed this dep originally; observed gap → probe.
-    if [ -f "$HOME/.minsky/config.json" ]; then
-      _bash_doctor_print PASS "machine config" "$HOME/.minsky/config.json exists"
-    else
-      _bash_doctor_print FAIL "machine config" "$HOME/.minsky/config.json missing (run \`minsky init\` to create it; without this, every iteration fails at Invariant 1)"
-      _crit_fail=1
-    fi
-
-    # WARN — shellcheck on bin/minsky-run.sh (catches set-flag drift)
-    if command -v shellcheck >/dev/null 2>&1; then
-      if shellcheck -x "$_repo_dir/bin/minsky-run.sh" >/dev/null 2>&1; then
-        _bash_doctor_print PASS "shellcheck" "minsky-run.sh clean"
-      else
-        _bash_doctor_print WARN "shellcheck" "minsky-run.sh has violations (run: shellcheck -x $_repo_dir/bin/minsky-run.sh)"
-      fi
-    else
-      _bash_doctor_print WARN "shellcheck" "not installed (install via brew install shellcheck — non-blocking but recommended)"
-    fi
-
-    # WARN — gh CLI (used for PR-state probing inside iterations)
-    if command -v gh >/dev/null 2>&1; then
-      _ghv=$(gh --version 2>/dev/null | head -1 | sed 's/^gh version //')
-      if gh auth status >/dev/null 2>&1; then
-        _bash_doctor_print PASS "gh CLI" "$_ghv (authenticated)"
-      else
-        _bash_doctor_print WARN "gh CLI" "$_ghv (not authenticated — run \`gh auth login\` before --transform)"
-      fi
-    else
-      _bash_doctor_print FAIL "gh CLI" "not on PATH (record_iteration + PR-state probes require it)"
-      _crit_fail=1
-    fi
-
-    # WARN — disk space in $HOME/.minsky and $PWD/.minsky (failure
-    # captures + ledger writes grow over time; iter loops on a full
-    # disk produce confusing "ENOSPC" mid-run). Threshold: 1GB free.
-    # Discovered: a live run that filled the disk mid-iteration left
-    # partial JSONL + partial capture dirs; recovery required `rm -rf`.
-    _df_threshold_mb=1024
-    if command -v df >/dev/null 2>&1; then
-      # df -k output column 4 is "available" in 1K blocks; convert to MB.
-      _avail_kb=$(df -k "$HOME" 2>/dev/null | awk 'NR==2 {print $4}')
-      if [ -n "$_avail_kb" ] && [ "$_avail_kb" -gt 0 ] 2>/dev/null; then
-        _avail_mb=$((_avail_kb / 1024))
-        if [ "$_avail_mb" -ge "$_df_threshold_mb" ]; then
-          _bash_doctor_print PASS "disk free ($HOME)" "${_avail_mb}MB available"
-        else
-          _bash_doctor_print WARN "disk free ($HOME)" "${_avail_mb}MB available (below ${_df_threshold_mb}MB threshold — failure captures + JSONL ledger may hit ENOSPC mid-iteration)"
-        fi
-      else
-        _bash_doctor_print WARN "disk free ($HOME)" "(df unparseable)"
-      fi
-    else
-      _bash_doctor_print WARN "disk free" "df not on PATH (cannot probe)"
-    fi
-
-    # WARN — git HEAD state in $PWD. A detached HEAD or in-flight
-    # rebase/merge state breaks the per-iteration git branch+push
-    # path. Skipped when $PWD is not a git repo (e.g. operator runs
-    # bash-doctor from /tmp).
-    if [ -d "$PWD/.git" ] || git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then
-      _git_branch=$(git -C "$PWD" symbolic-ref --short HEAD 2>/dev/null || echo "")
-      if [ -n "$_git_branch" ]; then
-        # Check for in-progress merge / rebase / cherry-pick.
-        _git_dir=$(git -C "$PWD" rev-parse --git-dir 2>/dev/null)
-        if [ -d "$_git_dir/rebase-merge" ] || [ -d "$_git_dir/rebase-apply" ]; then
-          _bash_doctor_print WARN "git HEAD ($PWD)" "rebase in progress (run \`git rebase --abort\` or finish it before --transform)"
-        elif [ -f "$_git_dir/MERGE_HEAD" ]; then
-          _bash_doctor_print WARN "git HEAD ($PWD)" "merge in progress (run \`git merge --abort\` or commit it before --transform)"
-        elif [ -f "$_git_dir/CHERRY_PICK_HEAD" ]; then
-          _bash_doctor_print WARN "git HEAD ($PWD)" "cherry-pick in progress (run \`git cherry-pick --abort\` before --transform)"
-        else
-          _bash_doctor_print PASS "git HEAD ($PWD)" "on branch $_git_branch"
-        fi
-      else
-        _bash_doctor_print WARN "git HEAD ($PWD)" "detached HEAD (agent cannot push to a non-branch ref — \`git checkout main\` or similar)"
-      fi
-    else
-      _bash_doctor_print PASS "git HEAD" "$PWD is not a git repo (skipped — only checked when called from inside one)"
-    fi
-
-    # WARN — lockfile presence when $PWD/package.json exists. Without
-    # the lockfile, the agent's `pnpm install` (or `npm install`) on
-    # the host runs unbounded, may pull breaking versions, and slows
-    # every iteration by 30s+. Skipped when no package.json.
-    if [ -f "$PWD/package.json" ]; then
-      if [ -f "$PWD/pnpm-lock.yaml" ] || [ -f "$PWD/package-lock.json" ] || [ -f "$PWD/yarn.lock" ]; then
-        _bash_doctor_print PASS "lockfile" "found (pnpm-lock.yaml / package-lock.json / yarn.lock)"
-      else
-        _bash_doctor_print WARN "lockfile" "$PWD/package.json exists but no lockfile (every iteration's install will resolve fresh — slow + non-deterministic)"
-      fi
-    fi
-
-    # --smoke — deeper checks. Dry-runs each Python pipeline script
-    # with `--help` to catch broken installs / import errors / missing
-    # deps that the static existence checks above miss. Adds ~5s of
-    # runtime so it's opt-in via the --smoke flag.
-    if [ "$_smoke" = "1" ]; then
-      [ "$_quiet" = "0" ] && echo "" && echo "--smoke: dry-running pipeline scripts to catch integration bugs"
-      _smoke_fail=0
-      for _script in "scripts/pick_task.py" "scripts/build_brief.py" "scripts/build_cto_brief.py" "scripts/spawn_agent.py" "scripts/extract_pr_url.py" "scripts/resolve_gh_host.py" "scripts/transform_trend.py" "scripts/transform_recommend.py" "scripts/transform_knowledge.py" "scripts/baseline_metrics.py" "scripts/minsky_report.py" "scripts/iteration_ship_rate.py" "scripts/dynamic_timeout.py" "scripts/synth_experiment_yaml.py" "scripts/spawn_with_watchdog.py"; do
-        _script_path="$_repo_dir/$_script"
-        if [ ! -f "$_script_path" ]; then
-          _bash_doctor_print FAIL "smoke: $_script" "missing"
-          _smoke_fail=1
-          continue
-        fi
-        # python3 -m py_compile is fast (no import side effects) — runs
-        # via the bash-doctor-probes helper to keep python3 -c out of
-        # bin/minsky.
-        if bash "$_bash_doctor_probes" syntax "$_script_path" >/dev/null 2>&1; then
-          _bash_doctor_print PASS "smoke: $_script" "syntax OK"
-        else
-          _bash_doctor_print FAIL "smoke: $_script" "syntax error or import-time crash (bash $_bash_doctor_probes syntax $_script_path)"
-          _smoke_fail=1
-        fi
-      done
-      # Also dry-run the two bash entry-points via shellcheck (already
-      # checked above for minsky-run.sh; here we check the rest).
-      for _bash_script in "bin/minsky-bootstrap.sh" "bin/minsky-default-session.sh" "scripts/capture-failure.sh" "scripts/bash-doctor-probes.sh"; do
-        _bash_path="$_repo_dir/$_bash_script"
-        if [ ! -f "$_bash_path" ]; then
-          _bash_doctor_print FAIL "smoke: $_bash_script" "missing"
-          _smoke_fail=1
-          continue
-        fi
-        if command -v shellcheck >/dev/null 2>&1; then
-          if shellcheck -x "$_bash_path" >/dev/null 2>&1; then
-            _bash_doctor_print PASS "smoke: $_bash_script" "shellcheck clean"
-          else
-            _bash_doctor_print WARN "smoke: $_bash_script" "shellcheck violations (run: shellcheck -x $_bash_path)"
-          fi
-        else
-          # Without shellcheck, bash -n is a weaker syntax check
-          if bash -n "$_bash_path" 2>/dev/null; then
-            _bash_doctor_print PASS "smoke: $_bash_script" "bash -n clean"
-          else
-            _bash_doctor_print FAIL "smoke: $_bash_script" "bash -n syntax error"
-            _smoke_fail=1
-          fi
-        fi
-      done
-      if [ "$_smoke_fail" = "1" ]; then
-        _crit_fail=1
-      fi
-    fi
-
-    echo ""
-    if [ "$_crit_fail" = "0" ]; then
-      [ "$_quiet" = "0" ] && echo "✅ bash-doctor: bash + Python skeleton is ready for \`minsky --transform\`"
+    [ "$_bd_alias_quiet" = "0" ] && echo ""
+    if [ "${_bd_skeleton_crit_fail:-0}" = "0" ]; then
+      [ "$_bd_alias_quiet" = "0" ] && echo "✅ bash-doctor: bash + Python skeleton is ready for \`minsky --transform\`"
       exit 0
     else
       echo "❌ bash-doctor: critical checks failed — \`minsky --transform\` will fail until the above are fixed"
