@@ -542,6 +542,90 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+@test "bin/minsky-default-session.sh --help prints usage and exits 0" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  [ -x "$session" ]
+  run "$session" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"--baseline-only"* ]]
+  [[ "$output" == *"--report-only"* ]]
+}
+
+@test "bin/minsky-default-session.sh exits 2 on missing host-dir arg" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  run "$session"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"host-dir required"* ]]
+}
+
+@test "bin/minsky-default-session.sh exits 1 when host-dir does not exist" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  run "$session" /this/path/definitely/does/not/exist
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"host-dir not found"* ]]
+}
+
+@test "bin/minsky-default-session.sh exits 2 on unknown flag" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  run "$session" /tmp --frobnicate
+  [ "$status" -eq 2 ]
+}
+
+@test "bin/minsky-default-session.sh --baseline-only writes baseline + exits without running" {
+  # Smoke vertical slice 3: confirms bootstrap → baseline capture
+  # composition works end-to-end on a fixture host.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-baseline"
+  mkdir -p "$fixture"
+  (cd "$fixture" && git init -q && git symbolic-ref HEAD refs/heads/main && \
+     git config user.email t@t && git config user.name t && \
+     git remote add origin git@github.com:foo/bar.git)
+  printf '# Tasks\n' > "$fixture/TASKS.md"
+  printf '# fake\n' > "$fixture/README.md"
+
+  XDG_CONFIG_HOME="$TMPDIR_TEST/xdg-bo" run "$session" "$fixture" --baseline-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"baseline-only mode"* ]]
+
+  # Bootstrap + baseline + sidecar all materialized
+  [ -f "$fixture/.minsky/repo.yaml" ]
+  [ -f "$fixture/.minsky/baseline.json" ]
+
+  # JSON is well-formed and has the documented schema
+  python3 -c "import json,sys; d=json.load(open('$fixture/.minsky/baseline.json')); assert d['schema_version']==1; assert 'code' in d; assert 'docs' in d"
+}
+
+@test "bin/minsky-default-session.sh --report-only requires existing baseline" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-no-baseline"
+  mkdir -p "$fixture/.minsky"
+  # No baseline.json present.
+  run "$session" "$fixture" --report-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--report-only requires existing"* ]]
+}
+
+@test "bin/minsky-default-session.sh --report-only emits delta against existing baseline" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-report"
+  mkdir -p "$fixture/.minsky"
+  # Synthetic baseline.
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+
+  # Add a file so the report shows a delta.
+  printf '# README\n' > "$fixture/README.md"
+
+  run "$session" "$fixture" --report-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"minsky report"* ]]
+  [[ "$output" == *"baseline: 2026-05-25T00:00:00+00:00"* ]]
+  # The "after" snapshot saw the README we just added.
+  [[ "$output" == *"has_readme: False → True"* ]]
+}
+
 @test "restart-sentinel exits 75 and clears the sentinel file (Phase 7-closing parity)" {
   # Mirrors host-loop.ts checkRestartRequest/clearRestartRequest semantics.
   # The TS side returns stop reason "restart-requested"; the bash side
