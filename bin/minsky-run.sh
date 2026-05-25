@@ -458,6 +458,21 @@ EOF
   # loop produced no PRs.
   local spawn_agent="$script_dir/../scripts/spawn_agent.py"
 
+  # Export the three MINSKY_* env vars the spawned agent (and the host's
+  # rule lints) expect. Parity port of TS `spawn-plan.ts` § `env: { … }`.
+  # Without these, the 12 host-side rule lints that key off
+  # `MINSKY_HOST_ROOT` can't find the host's `.minsky/` substrate
+  # (breaks Acceptance criterion #6 of user-stories/006-runner-on-any-
+  # repo.md). Pre-PR: bash runner spawned with empty env beyond the
+  # caller's shell — silently broke host-side lints.
+  #
+  # `local -x` exports the variable into iterate_host's subshells. The
+  # watchdog wrappers below inherit the parent process env by default
+  # (Python subprocess.run, GNU timeout, bash) so the agent sees them.
+  local -x MINSKY_HOST_ROOT="$host/.minsky"
+  local -x MINSKY_TASK_ID="$task_id"
+  local -x MINSKY_BRANCH_NAME="$branch"
+
   # Watchdog binary resolution order (rule #1 — prefer existing solutions):
   #   1. Python wrapper at scripts/spawn_with_watchdog.py — POSIX-portable,
   #      handles process-group SIGTERM/SIGKILL, no external deps.

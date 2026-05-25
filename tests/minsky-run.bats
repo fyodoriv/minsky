@@ -472,6 +472,72 @@ EOF
   ! grep -q "ARG=--workspace" "$shim_record"
 }
 
+@test "spawn_agent receives MINSKY_HOST_ROOT / MINSKY_TASK_ID / MINSKY_BRANCH_NAME env vars" {
+  # Parity port of TS `spawn-plan.ts` § `env: { MINSKY_HOST_ROOT, ... }`.
+  # Without these, the host's 12 rule lints that key off MINSKY_HOST_ROOT
+  # can't find the host's `.minsky/` substrate — breaks Acceptance
+  # criterion #6 of user-stories/006-runner-on-any-repo.md.
+  #
+  # Fixture: a fake openhands binary that dumps its env vars to a
+  # known path. Run a single iteration; assert all three vars reach
+  # the spawned agent.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  env_dump="$TMPDIR_TEST/agent-env-dump.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+# Dump only the MINSKY_* vars we care about (filters env noise).
+env | grep -E '^MINSKY_(HOST_ROOT|TASK_ID|BRANCH_NAME)=' > $env_dump || true
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host minsky-env-vars "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-env.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  [ -f "$env_dump" ]
+  # All three MINSKY_* env vars reached the agent.
+  grep -q "^MINSKY_HOST_ROOT=$host/.minsky$" "$env_dump"
+  grep -q "^MINSKY_TASK_ID=pick-me-first$" "$env_dump"
+  grep -q "^MINSKY_BRANCH_NAME=feat/pick-me-first$" "$env_dump"
+}
+
 # --- 8. Round-robin iterates each host fairly ------------------------------
 
 @test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {
