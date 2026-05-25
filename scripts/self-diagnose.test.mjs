@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   claudeBinaryReachableInvariant,
+  claudePrintTimeoutFrequencyInvariant,
   daemonInFlightPrCollisionInvariant,
   daemonIterationRuntimeInvariant,
   daemonNoopIterationRateInvariant,
@@ -793,6 +794,67 @@ describe("daemonTaskScopeExplosionInvariant", () => {
     const mergedPrCountByTaskId = async () => new Map([["task-x", 6]]);
     const result = await daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId })();
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("claudePrintTimeoutFrequencyInvariant", () => {
+  it("passes when count is 0 (no timeouts in window)", async () => {
+    const countTimeoutsInRollingWindow = () => Promise.resolve(0);
+    const result = await claudePrintTimeoutFrequencyInvariant({ countTimeoutsInRollingWindow })();
+    expect(result.ok).toBe(true);
+    expect(result.id).toBe("claude-print-timeout-frequency");
+  });
+
+  it("passes at the default threshold boundary (count == 14)", async () => {
+    const countTimeoutsInRollingWindow = () => Promise.resolve(14);
+    const result = await claudePrintTimeoutFrequencyInvariant({ countTimeoutsInRollingWindow })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires when count exceeds the default threshold (15 > 14)", async () => {
+    const countTimeoutsInRollingWindow = () => Promise.resolve(15);
+    const result = await claudePrintTimeoutFrequencyInvariant({ countTimeoutsInRollingWindow })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("claude-print-timeout-frequency");
+    expect(result.evidence).toContain("15");
+    expect(result.evidence).toContain("rolling 7d window");
+    expect(result.evidence).toContain("threshold 14");
+    expect(result.suggestedTaskTitle).toContain("15 in 7d");
+    expect(result.suggestedFix).toContain("MINSKY_CLAUDE_PRINT_TIMEOUT_MS");
+    expect(result.suggestedFix).toContain(".minsky/workers/*.log");
+  });
+
+  it("honours custom threshold and names it in evidence + title", async () => {
+    const countTimeoutsInRollingWindow = () => Promise.resolve(6);
+    const result = await claudePrintTimeoutFrequencyInvariant({
+      countTimeoutsInRollingWindow,
+      threshold: 5,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("threshold 5");
+    expect(result.suggestedTaskTitle).toContain("threshold 5");
+  });
+
+  it("uses default threshold of 14 when none provided", async () => {
+    // count == 14 should pass (boundary), count == 15 should fail (above)
+    const passResult = await claudePrintTimeoutFrequencyInvariant({
+      countTimeoutsInRollingWindow: () => Promise.resolve(14),
+    })();
+    const fireResult = await claudePrintTimeoutFrequencyInvariant({
+      countTimeoutsInRollingWindow: () => Promise.resolve(15),
+    })();
+    expect(passResult.ok).toBe(true);
+    expect(fireResult.ok).toBe(false);
+  });
+
+  it("attaches invariantId on the function for runInvariants dispatch", () => {
+    const fn = claudePrintTimeoutFrequencyInvariant({
+      countTimeoutsInRollingWindow: () => Promise.resolve(0),
+    });
+    const id = /** @type {{ invariantId?: string }} */ (fn).invariantId;
+    expect(id).toBe("claude-print-timeout-frequency");
   });
 });
 
