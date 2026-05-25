@@ -172,9 +172,10 @@ Slice 3 (this PR) closes the `controlToken=undefined` fail-open default for prod
 
 PR #873 adds three rows to `SUCCESS_METRICS` that track Path A's deletion progress as the canonical scoreboard:
 
-- `path-a-loc-novel-tree` — total LOC under `novel/` (TS+TSX, tests excluded). Budget: ≤10K. Today (~31K) is 3× over and stays red until phase-7b + 11b deletions land.
-- `path-a-loc-cross-repo-runner` — `novel/cross-repo-runner/` LOC. Phase-7b deletion target. Today (~4.2K) → 0 post-bash-port-parity.
+- `path-a-loc-novel-tree` — total LOC under `novel/` (TS+TSX, tests excluded). Budget: ≤10K. Today (~27K after phase-7b deletion) is 2.7× over and stays red until phase-11b deletion lands.
 - `path-a-loc-tick-loop` — `novel/tick-loop/` LOC. Phase-11b deletion target. Today (~17K) → 0 post-supervisor-parity. Largest single tree in `novel/`.
+
+> `path-a-loc-cross-repo-runner` was retired in PR #883 (phase-7b step 6/7); `novel/cross-repo-runner/` was deleted, the metric's terminal value is 0.
 
 The collectors live in `scripts/collect-metrics.mjs` as `collectPathALoc(subtree)` (single helper, three CLI bindings — one per metric ID). Each runs `fd -e ts -e tsx --type f --exclude '*.test.*' . <subtree>/ | xargs wc -l | tail -1 | awk '{print $1}'` under bash pipefail so a fd / xargs / wc failure returns null rather than a misleading 0. The renderer (`scripts/metrics-render.mjs` → `scripts/generate-metrics-md.mjs`) picks them up from the daily snapshot just like every other `SUCCESS_METRICS` entry — no per-metric wiring.
 
