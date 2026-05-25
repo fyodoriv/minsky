@@ -255,6 +255,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "measure-agent-install",
       "measurement-inspects-output",
       "metric-freshness",
+      "milestone-alignment",
       "no-singleton-experiment",
       "orphan-tests",
       "otel-no-pii",
@@ -438,6 +439,21 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-competitive-goal.mjs"],
+  },
+  {
+    // Slice (c) of `milestone-alignment-gate-enforcement`: every PR must
+    // keep M1's per-criterion alignment count at ≥10/14. The script
+    // reads only static files (MILESTONES.md, docs/METRICS.md, user-
+    // stories/*.md, README.md) — no network, no LLM — so it fits the
+    // fast-stage budget. Pure rule-#10 ratchet: criterion drift below
+    // the threshold (e.g. an `<!-- exempt: ... -->` is removed without
+    // landing a real metric for the row) flips this red. Anchor: AGENTS.md
+    // § 15 (milestone alignment gate), operator directive 2026-05-18,
+    // TASKS.md `milestone-alignment-wire-into-verify`.
+    name: "milestone-alignment",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-milestone-alignment.mjs", "--strict", "--min-aligned=10"],
   },
   // ---- full stage ----------------------------------------------------------
   {

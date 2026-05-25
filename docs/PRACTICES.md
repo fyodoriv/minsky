@@ -208,6 +208,14 @@ The third beat is the load-bearing one. A reader who landed on the wrong doc fin
 
 **Where in Minsky.** Every `novel/*` package has a `THREAT-MODEL.md`. Enforced by `scripts/run-pre-pr-lint-stack.mjs` (the `threat-model-section` check) which rejects packages missing the section, and by `scripts/check-pr-security-review.mjs` which gates PRs touching security-sensitive paths.
 
+### Milestone alignment gate (every-PR ratchet)
+
+**Citation.** Forsgren, Nicole; Humble, Jez; Kim, Gene. *Accelerate: The Science of Lean Software and DevOps*. IT Revolution, 2018. ISBN 978-1942788331. The book's central thesis: the gate humans pass through must gate the bot too — drift in measurement is drift in outcomes.
+
+**Claim.** Every PR re-runs the milestone-alignment gate; criterion drift is a CI failure, not a silent log line. Every named M1 exit criterion must keep all five surfaces aligned (user-story · sections · test-file · metric · README mention) or carry an explicit `<!-- exempt: ... -->` reason in MILESTONES.md.
+
+**Where in Minsky.** Constitution [rule #15](../vision.md) (milestone alignment gate). Enforced by the `milestone-alignment` step in `scripts/run-pre-pr-lint-stack.mjs` — runs `node scripts/check-milestone-alignment.mjs --strict --min-aligned=10` in the fast stage, mirrored as the `milestone-alignment` job in `.github/workflows/ci.yml`. Pure file reads (MILESTONES.md + docs/METRICS.md + user-stories/*.md + README.md), so the fast-stage budget is unaffected. The `--min-aligned=10` floor is a rule-#10 ratchet — lowering it would silently weaken the gate; raising it (after another criterion lands) is the discipline that keeps M1 honest.
+
 ## Cited but not yet enforced
 
 These shape the design but don't have a deterministic linter yet. They live in [vision.md "Theoretical foundations"](../vision.md) and are listed here for honest tracking — adding an enforcement linter for any one of them is good first-PR material.
