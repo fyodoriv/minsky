@@ -18,13 +18,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
-      # Pinned to 0.15.0 (matches the package.json devDependency). Rule #7
-      # (chaos engineering — trust no unverified dependency); ARCHITECTURE.md
-      # § "Versioning & dependency evolution".
-      - run: npx -y markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.worktrees" "#.minsky" "#.obsidian" "#.claude"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Invoke the same `pnpm lint:md` script local pre-pr-lint runs.
+      # The version of `markdownlint-cli2` is pinned in `package.json`'s
+      # devDependencies (currently 0.22.1) + locked in `pnpm-lock.yaml`,
+      # so CI and local now resolve to byte-identical binaries. Closes
+      # TASKS.md `align-markdownlint-cli2-local-vs-ci` (P1, observed
+      # 2026-05-22): the prior CI line was `npx -y markdownlint-cli2@0.15.0`
+      # — an out-of-band version, drift-prone, and missing the local
+      # exclude list (`.claire`, `opencode.notes.md`, `.aider*`).
+      # Single source of truth for the invocation now is `package.json`.
+      - run: pnpm lint:md
 
   tasks-lint:
     runs-on: ubuntu-latest

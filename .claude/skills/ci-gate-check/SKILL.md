@@ -47,7 +47,7 @@ Run these locally to catch failures before pushing:
 # Always (fast, <30s)
 pnpm exec biome check .
 pnpm typecheck
-npx markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.minsky" "#.claude"
+pnpm lint:md
 npx @tasks-md/lint@^0.7.0 TASKS.md
 
 # When novel/** changed
@@ -80,7 +80,7 @@ Error: MD013/line-length Line length [Expected: 80; Actual: 123]
 Fix: wrap the long line. The `.markdownlint-cli2.yaml` config file shows the exact rules.
 
 ```bash
-npx markdownlint-cli2@0.15.0 "**/*.md" "#**/node_modules" "#.minsky" "#.claude"
+pnpm lint:md
 ```
 
 ### `tasks-lint`
