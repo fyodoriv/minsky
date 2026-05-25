@@ -32,6 +32,11 @@ Inside Claude Code / Devin / Cursor, paste:
 
 Manual: `git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky`. Full runbook: [INSTALL.md](./INSTALL.md) · uninstall: [docs/uninstall.md](docs/uninstall.md).
 
+**Two ways to run**:
+
+- **`minsky`** (or `minsky --daemon`) — the 24/7 loop. Picks tasks from `TASKS.md`, ships draft PRs, never merges without you. The default.
+- **`minsky --transform`** — single improvement session against the current folder. Captures a baseline (test count, lint exit, build exit, dependencies outdated, doc coverage), runs 8 iterations, prints a before/after delta. The killer-feature demo: `cd /any/repo && minsky --transform`.
+
 ## Why Minsky
 
 - **Unattended improvement** — picks `TASKS.md` tasks, ships draft PRs, never merges without you ([loop](user-stories/001-loop-runs-overnight.md)).
