@@ -15,6 +15,7 @@ import {
   CI_TO_MANIFEST_ALIAS,
   STACK_MANIFEST,
   appendBodyChecks,
+  buildSkippedBodyChecksWarning,
   buildStepResult,
   parseArgs,
   renderJson,
@@ -361,36 +362,47 @@ describe("resolveBodyPath (slice 35/N — `pnpm pre-pr-lint` auto-discovers `pr-
   });
 });
 
-describe("appendBodyChecks (slice 30/N — `--body=<path>` consolidates 3 commands → 1)", () => {
-  // The two body-only checks (`pr-self-grade`, `pr-security-review`) sit in
-  // `CI_ENV_DEPENDENT_JOBS` because in CI they read the GitHub PR body. The
-  // daemon writes the draft body to a local file before `gh pr create -F
-  // <file>`; that file is exactly what both check scripts already accept as
-  // their first arg. Surfacing them as manifest steps closes the body-only
-  // blind spot inside the same retry budget the rest of the gate uses.
+describe("appendBodyChecks (slice 30/N — `--body=<path>` consolidates 4 commands → 1)", () => {
+  // The three body-only checks (`pr-self-grade`, `pr-security-review`,
+  // `pr-vision-trace`) sit in `CI_ENV_DEPENDENT_JOBS` because in CI they
+  // read the GitHub PR body. The daemon writes the draft body to a local
+  // file before `gh pr create -F <file>`; that file is exactly what all
+  // three check scripts already accept as their first arg. Surfacing
+  // them as manifest steps closes the body-only blind spot inside the
+  // same retry budget the rest of the gate uses.
+  //
+  // `pr-vision-trace` was added 2026-05-25 per task `pre-pr-lint-mirror-
+  // ci-body-checks` (P1, M1) — same trip-and-fall pattern that caught
+  // PRs #863, #869, #870 (body-only edits needed an empty `chore(ci):
+  // retrigger` commit). Lifting all three body lints to the local stack
+  // closes the operator's feedback loop.
 
-  test("appends two new steps named `pr-self-grade` and `pr-security-review`", () => {
+  test("appends three new steps named `pr-self-grade`, `pr-security-review`, `pr-vision-trace`", () => {
     const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
-    expect(augmented.length).toBe(STACK_MANIFEST.length + 2);
+    expect(augmented.length).toBe(STACK_MANIFEST.length + 3);
     const names = augmented.slice(STACK_MANIFEST.length).map((s) => s.name);
-    expect(names).toEqual(["pr-self-grade", "pr-security-review"]);
+    expect(names).toEqual(["pr-self-grade", "pr-security-review", "pr-vision-trace"]);
   });
 
   test("each appended step invokes its canonical `scripts/check-pr-*.mjs` with the body path", () => {
     const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
     const selfGrade = augmented.find((s) => s.name === "pr-self-grade");
     const securityReview = augmented.find((s) => s.name === "pr-security-review");
+    const visionTrace = augmented.find((s) => s.name === "pr-vision-trace");
     if (selfGrade === undefined) throw new Error("pr-self-grade step missing");
     if (securityReview === undefined) throw new Error("pr-security-review step missing");
+    if (visionTrace === undefined) throw new Error("pr-vision-trace step missing");
     expect(selfGrade.cmd).toBe("node");
     expect(selfGrade.args).toEqual(["scripts/check-pr-self-grade.mjs", "draft.md"]);
     expect(securityReview.cmd).toBe("node");
     expect(securityReview.args).toEqual(["scripts/check-pr-security-review.mjs", "draft.md"]);
+    expect(visionTrace.cmd).toBe("node");
+    expect(visionTrace.args).toEqual(["scripts/check-pr-vision-trace.mjs", "draft.md"]);
   });
 
   test("appended steps participate in both stages (cheap regex — fast-stage budget unaffected)", () => {
     const augmented = appendBodyChecks(STACK_MANIFEST, "draft.md");
-    for (const name of ["pr-self-grade", "pr-security-review"]) {
+    for (const name of ["pr-self-grade", "pr-security-review", "pr-vision-trace"]) {
       const step = augmented.find((s) => s.name === name);
       if (step === undefined) throw new Error(`${name} step missing`);
       expect(step.stages).toContain("fast");
@@ -417,15 +429,64 @@ describe("appendBodyChecks (slice 30/N — `--body=<path>` consolidates 3 comman
     await runStack("fast", fakeRunStep, augmented);
     expect(seen).toContain("pr-self-grade");
     expect(seen).toContain("pr-security-review");
+    expect(seen).toContain("pr-vision-trace");
   });
 
-  test("the two body checks ARE listed in CI_ENV_DEPENDENT_JOBS — pinning the rationale this slice exists to bridge", () => {
+  test("all three body checks ARE listed in CI_ENV_DEPENDENT_JOBS — pinning the rationale this slice exists to bridge", () => {
     // Drift guard: if a future PR moves these into the static manifest, the
     // `--body` extension becomes redundant. This test fails the moment that
     // happens, surfacing the redundancy instead of letting both code paths
     // silently coexist (rule #2 — single seam).
     expect(CI_ENV_DEPENDENT_JOBS.has("pr-self-grade")).toBe(true);
     expect(CI_ENV_DEPENDENT_JOBS.has("pr-security-review")).toBe(true);
+    expect(CI_ENV_DEPENDENT_JOBS.has("pr-vision-trace")).toBe(true);
+  });
+});
+
+describe("buildSkippedBodyChecksWarning (task `pre-pr-lint-mirror-ci-body-checks` — closes the operator-local-vs-CI feedback gap)", () => {
+  // Pure function — the test pins the exact wording so an accidental
+  // rename of the body-check names in `appendBodyChecks` immediately
+  // surfaces here. Rule #2 — single source of truth for the operator-
+  // facing surface.
+  //
+  // Source: task `pre-pr-lint-mirror-ci-body-checks` (P1, M1).
+  // Observed 2026-05-25 across PRs #863, #869, #870 — every body-only
+  // edit shipped without the operator knowing 3 CI gates were going to
+  // re-run. Without the warning the feedback loop is "push → wait 2-3
+  // min → CI fails → re-edit body → push again with empty retrigger
+  // commit"; with the warning the operator knows immediately that
+  // `--body=<path>` enables full local coverage.
+
+  test("warning names all three body-only CI gates", () => {
+    const w = buildSkippedBodyChecksWarning();
+    expect(w).toContain("pr-self-grade");
+    expect(w).toContain("pr-security-review");
+    expect(w).toContain("pr-vision-trace");
+  });
+
+  test("warning names the canonical `--body=<path>` flag the operator should pass", () => {
+    const w = buildSkippedBodyChecksWarning();
+    expect(w).toContain("--body=");
+  });
+
+  test("warning names the auto-discovery path `pr-body.md` as a no-flag alternative", () => {
+    const w = buildSkippedBodyChecksWarning();
+    expect(w).toContain("pr-body.md");
+  });
+
+  test("warning makes clear CI will still run the gates — local skip is a fast-path, not a bypass", () => {
+    const w = buildSkippedBodyChecksWarning();
+    // Operator must understand that no `--body=<path>` is NOT a green
+    // light to skip the gates — CI will still enforce them. Rule #10
+    // (deterministic enforcement is in CI; local mirror is a feedback
+    // accelerator).
+    expect(w).toMatch(/CI will still run them/i);
+  });
+
+  test("warning is multi-line + has the canonical `[pre-pr-lint] note` prefix the operator can grep for", () => {
+    const w = buildSkippedBodyChecksWarning();
+    expect(w.startsWith("[pre-pr-lint] note")).toBe(true);
+    expect(w.split("\n").length).toBeGreaterThanOrEqual(3);
   });
 });
 
