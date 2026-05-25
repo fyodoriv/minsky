@@ -32,6 +32,9 @@ set -euo pipefail
 
 CONFIG_FILE="${MINSKY_CONFIG:-$HOME/.minsky/config.json}"
 HOSTS_DIR=""
+SINGLE_HOST=""  # --host <repo> filter mode (PR #875: closes the smoke
+                # finding that `minsky --once <repo>` was iterating every
+                # sibling of <repo> instead of <repo> itself)
 DRY_RUN=0
 SELF_CHECK=0
 MAX_ITERATIONS=0       # 0 = unbounded (matches TS runner default)
@@ -40,23 +43,27 @@ ITERATIONS_PER_HOST=3  # matches the TS scheduler's round-robin slice size
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --hosts-dir) HOSTS_DIR="$2"; shift 2 ;;
+    --host) SINGLE_HOST="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --self-check) SELF_CHECK=1; shift ;;
     --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
     --iterations-per-host) ITERATIONS_PER_HOST="$2"; shift 2 ;;
     --help|-h)
       cat <<'EOF'
-Usage: minsky-run [--hosts-dir <parent>] [--dry-run] [--self-check]
+Usage: minsky-run [--hosts-dir <parent> | --host <repo>] [--dry-run] [--self-check]
                   [--max-iterations N] [--iterations-per-host N]
 
-Walks N host repos under <parent> in round-robin. For each host, picks
-the top-priority unclaimed TASKS.md task (rule-9 fields validated by
+Walks N host repos under <parent> in round-robin (--hosts-dir mode), OR
+iterates exactly ONE host (--host mode). For each host, picks the top-
+priority unclaimed TASKS.md task (rule-9 fields validated by
 scripts/pick_task.py), spawns `openhands solve --task-file <brief>
 --workspace <host>`, records the iteration to:
   <host>/.minsky/experiment-store/cross-repo/<task-id>.jsonl
 
 Flags:
-  --hosts-dir <parent>      Directory containing host repos (required for run)
+  --hosts-dir <parent>      Directory containing host repos (scan mode)
+  --host <repo>             Iterate exactly THIS host (filter mode);
+                            mutually exclusive with --hosts-dir
   --dry-run                 Plan + record "planned" verdict, don't spawn
   --self-check              Run all 5 runtime invariants and exit 0
   --max-iterations N        Stop after N total iterations across all hosts
@@ -71,6 +78,22 @@ EOF
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+
+# `--host` is mutually exclusive with `--hosts-dir`. When `--host` is
+# set, synthesize a single-element host list and skip the parent-dir
+# enumeration entirely. The TS runner had no equivalent shape — this
+# is a bash-runner ergonomic improvement landed alongside the smoke
+# findings (PR #875).
+if [[ -n "$SINGLE_HOST" ]]; then
+  if [[ -n "$HOSTS_DIR" ]]; then
+    echo "INVARIANT FAIL: --host and --hosts-dir are mutually exclusive" >&2
+    exit 2
+  fi
+  if [[ ! -d "$SINGLE_HOST" ]]; then
+    echo "INVARIANT FAIL: --host $SINGLE_HOST is not a directory" >&2
+    exit 1
+  fi
+fi
 
 # --- 2. Runtime invariants (Phase 8 fold-in target) -------------------------
 # These 5 inline checks replace the 8K-LOC observer + spec-monitor stack
@@ -115,8 +138,14 @@ invariant_openhands_in_path() {
 }
 
 invariant_hosts_dir_readable() {
-  # Invariant 3: --hosts-dir is set and readable.
-  [[ -n "$HOSTS_DIR" ]] || { echo "INVARIANT FAIL: --hosts-dir required" >&2; return 1; }
+  # Invariant 3: either --hosts-dir is set + readable (scan mode), or
+  # --host is set + readable (filter mode). Mutual exclusivity is
+  # already enforced at arg-parse time (see SINGLE_HOST block).
+  if [[ -n "$SINGLE_HOST" ]]; then
+    [[ -d "$SINGLE_HOST" ]] || { echo "INVARIANT FAIL: --host not a directory" >&2; return 1; }
+    return 0
+  fi
+  [[ -n "$HOSTS_DIR" ]] || { echo "INVARIANT FAIL: --hosts-dir or --host required" >&2; return 1; }
   [[ -d "$HOSTS_DIR" ]] || { echo "INVARIANT FAIL: --hosts-dir not a directory" >&2; return 1; }
 }
 
@@ -264,21 +293,39 @@ COMPLETED_COUNT=0
 walk_hosts() {
   invariant_hosts_dir_readable
   local hosts=()
-  # Pure-bash globbing — portable everywhere (`find` is shimmed to `fd`
-  # on some operator machines, and `fd` doesn't accept the same args).
-  # One level deep: $HOSTS_DIR/*/.git → host = ${d%/.git}.
-  shopt -s nullglob
-  local d
-  for d in "$HOSTS_DIR"/*/; do
-    [[ -d "${d}.git" ]] && hosts+=("${d%/}")
-  done
-  shopt -u nullglob
-  # Deterministic order so round-robin tests are reproducible.
-  if [[ ${#hosts[@]} -gt 0 ]]; then
-    IFS=$'\n' read -r -d '' -a hosts < <(printf '%s\n' "${hosts[@]}" | LC_ALL=C sort && printf '\0') || true
+  # Two modes: filter (--host one repo) vs scan (--hosts-dir parent +
+  # walk children). Filter mode skips the enumeration; scan mode is
+  # the historical default. Both require the host to have `.git` —
+  # matches scan-mode's child filter so the "not a git repo, skip"
+  # behavior is symmetric.
+  if [[ -n "$SINGLE_HOST" ]]; then
+    # Resolve symlinks + trailing slashes so the host path the rest
+    # of the runner sees matches what the operator passed.
+    local resolved
+    resolved="$(cd "$SINGLE_HOST" && pwd)"
+    if [[ ! -d "$resolved/.git" ]]; then
+      echo "iterating single host $resolved — but it has no .git/, skipping" >&2
+      echo "no host repos found — nothing to do" >&2
+      return 0
+    fi
+    hosts=("$resolved")
+    echo "iterating single host $resolved (--host filter mode)" >&2
+  else
+    # Pure-bash globbing — portable everywhere (`find` is shimmed to `fd`
+    # on some operator machines, and `fd` doesn't accept the same args).
+    # One level deep: $HOSTS_DIR/*/.git → host = ${d%/.git}.
+    shopt -s nullglob
+    local d
+    for d in "$HOSTS_DIR"/*/; do
+      [[ -d "${d}.git" ]] && hosts+=("${d%/}")
+    done
+    shopt -u nullglob
+    # Deterministic order so round-robin tests are reproducible.
+    if [[ ${#hosts[@]} -gt 0 ]]; then
+      IFS=$'\n' read -r -d '' -a hosts < <(printf '%s\n' "${hosts[@]}" | LC_ALL=C sort && printf '\0') || true
+    fi
+    echo "found ${#hosts[@]} host repos under $HOSTS_DIR" >&2
   fi
-
-  echo "found ${#hosts[@]} host repos under $HOSTS_DIR" >&2
   if [[ ${#hosts[@]} -eq 0 ]]; then
     echo "no host repos found — nothing to do" >&2
     return 0

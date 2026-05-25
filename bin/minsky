@@ -482,8 +482,6 @@ IUSAGE
     return 1
   fi
   _io_host="$(cd "$_io_host" && pwd)"
-  local _io_hosts_parent
-  _io_hosts_parent="$(dirname "$_io_host")"
   local _io_real_bin
   _io_real_bin=$(_minsky_realpath "$0")
   local _io_repo_dir
@@ -491,6 +489,19 @@ IUSAGE
   local _io_runner="$_io_repo_dir/bin/minsky-run.sh"
   if [ ! -x "$_io_runner" ]; then
     echo "--once: $_io_runner not executable (run: chmod +x $_io_runner)" >&2
+    return 1
+  fi
+  # PR #875: upgrade the doctor's "config not found" check from a
+  # silent WARN-then-proceed (which lets the bash runner hard-fail
+  # deep with `INVARIANT FAIL: config not at <path>`) to a fast-
+  # path actionable error. The bash runner's invariant chain still
+  # runs as a defense-in-depth backstop on machines where the env
+  # var hides the standard path.
+  local _io_cfg_file="${MINSKY_CONFIG:-$HOME/.minsky/config.json}"
+  if [ ! -f "$_io_cfg_file" ]; then
+    echo "minsky --once: $_io_cfg_file not found." >&2
+    echo "  Run: minsky init $_io_host" >&2
+    echo "  (or set MINSKY_CONFIG=<path> if your config lives elsewhere)" >&2
     return 1
   fi
   mkdir -p "$_io_host/.minsky"
@@ -504,7 +515,13 @@ IUSAGE
     echo "---"
   } >> "$_io_log"
 
-  local _io_runner_args=(--hosts-dir "$_io_hosts_parent" --max-iterations 1 --iterations-per-host 1)
+  # PR #875: pass `--host "$_io_host"` (filter mode) instead of
+  # `--hosts-dir "$(dirname "$_io_host")"` (scan mode) — closes the
+  # live-smoke finding that `minsky --once <repo>` was iterating
+  # every sibling of <repo> instead of just <repo>. The bash runner
+  # now distinguishes single-host (--host) from multi-host
+  # (--hosts-dir) mode at arg-parse time.
+  local _io_runner_args=(--host "$_io_host" --max-iterations 1 --iterations-per-host 1)
   if [ "$_io_live" != "1" ]; then
     _io_runner_args+=(--dry-run)
   fi
@@ -512,21 +529,39 @@ IUSAGE
     export MINSKY_CAPTURE_FAILURES=0
   fi
 
+  # PR #875: capture iteration start time so the summary block can
+  # filter ledger candidates by "written THIS iteration" instead of
+  # "most-recently-mtimed-on-disk-ever". Closes the live-smoke
+  # finding that on a multi-ledger host (like minsky-on-itself), the
+  # summary reported a verdict from a stale ledger when the
+  # iteration didn't write a new one.
+  #
+  # Marker file is touched immediately before invoking the runner; we
+  # then use `find -newer <marker>` to find ONLY ledger files
+  # mtime-newer than the marker. POSIX-portable; no clock-skew
+  # concerns because the marker and the candidate files are on the
+  # same filesystem with the same clock.
+  local _io_start_marker
+  _io_start_marker="$(mktemp -t minsky-once-start.XXXXXX)"
   echo "--once: running $_io_runner ${_io_runner_args[*]}" >&2
   set +e
   bash "$_io_runner" "${_io_runner_args[@]}" 2>&1 | tee -a "$_io_log"
   local _io_run_exit=${PIPESTATUS[0]}
   set -e
 
-  # Summarize.
+  # Summarize. The ledger candidate must be mtime-NEWER than the
+  # iteration's start marker — otherwise we report "no ledger
+  # written this iteration" instead of silently surfacing a
+  # historical row from a prior run.
   local _io_ledger_dir="$_io_host/.minsky/experiment-store/cross-repo"
   local _io_latest_ledger=""
   if [ -d "$_io_ledger_dir" ]; then
-    _io_latest_ledger=$(/usr/bin/find "$_io_ledger_dir" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null \
+    _io_latest_ledger=$(/usr/bin/find "$_io_ledger_dir" -maxdepth 1 -type f -name '*.jsonl' -newer "$_io_start_marker" -print0 2>/dev/null \
       | xargs -0 ls -t 2>/dev/null \
       | head -1 || true)
   fi
-  local _io_latest_verdict="(unknown)"
+  rm -f "$_io_start_marker"
+  local _io_latest_verdict=""
   local _io_latest_notes=""
   local _io_latest_pr_url=""
   if [ -n "$_io_latest_ledger" ] && [ -f "$_io_latest_ledger" ]; then
@@ -547,6 +582,14 @@ IUSAGE
 
   echo ""
   echo "=== --once summary ==="
+  if [ -z "$_io_latest_ledger" ]; then
+    # No ledger written THIS iteration. Per PR #875, don't surface a
+    # historical row — name the gap instead so the operator knows to
+    # check the iter log.
+    echo "  ledger:         (no ledger written this iteration — see iter log)"
+    echo "  iter log:       $_io_log"
+    return "$_io_run_exit"
+  fi
   echo "  verdict:        $_io_latest_verdict"
   if [ -n "$_io_latest_duration_ms" ] && [ "$_io_latest_duration_ms" != "0" ] && [ "$_io_latest_duration_ms" != "null" ]; then
     echo "  spawn duration: ${_io_latest_duration_ms}ms"
@@ -560,7 +603,7 @@ IUSAGE
   if [ -n "$_io_latest_pr_url" ] && [ "$_io_latest_pr_url" != "null" ] && [ "$_io_latest_pr_url" != "" ]; then
     echo "  pr url:         $_io_latest_pr_url"
   fi
-  echo "  ledger row:     ${_io_latest_ledger:-(none)}"
+  echo "  ledger row:     $_io_latest_ledger"
   echo "  iter log:       $_io_log"
   if [ -n "$_io_latest_failure_dir" ] && [ "$_io_latest_verdict" != "validated" ] && [ "$_io_latest_verdict" != "planned" ]; then
     echo "  failure capture: $_io_latest_failure_dir"
