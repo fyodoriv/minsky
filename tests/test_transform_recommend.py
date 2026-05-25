@@ -319,6 +319,139 @@ def test_main_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert data["trend_summary"]["session_count"] == 2
 
 
+def test_append_to_tasks_md_dry_run_does_not_write(tmp_path: Path) -> None:
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n")
+    recs = [
+        {"id": "test-coverage-gap", "priority": "P2", "title": "add tests", "evidence": {}, "rationale": "r"},
+    ]
+    result = tr.append_to_tasks_md(recs, tasks_md, confirmed=False)
+    assert result["dry_run"] is True
+    assert result["would_append"] == ["test-coverage-gap"]
+    assert result["already_present"] == []
+    # File unchanged.
+    assert tasks_md.read_text() == "# Tasks\n"
+
+
+def test_append_to_tasks_md_with_confirmation_writes(tmp_path: Path) -> None:
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n")
+    recs = [
+        {"id": "test-coverage-gap", "priority": "P2", "title": "add tests", "evidence": {}, "rationale": "r"},
+    ]
+    result = tr.append_to_tasks_md(recs, tasks_md, confirmed=True)
+    assert result["dry_run"] is False
+    assert result.get("appended") is True
+    content = tasks_md.read_text()
+    assert "# Tasks" in content
+    assert "test-coverage-gap" in content
+    assert "## P2" in content
+    assert "suggested-by-transform-recommend" in content
+    # Auto-generated marker present.
+    assert "<!-- transform-recommend: appended 1 recommendation(s) at" in content
+
+
+def test_append_to_tasks_md_idempotent(tmp_path: Path) -> None:
+    """Re-running --append with --yes does not duplicate existing IDs."""
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n\n- [ ] `existing-task` — already here\n")
+    recs = [
+        {"id": "existing-task", "priority": "P2", "title": "x", "evidence": {}, "rationale": "r"},
+        {"id": "new-task", "priority": "P2", "title": "y", "evidence": {}, "rationale": "r"},
+    ]
+    result = tr.append_to_tasks_md(recs, tasks_md, confirmed=True)
+    assert result["already_present"] == ["existing-task"]
+    assert result["would_append"] == ["new-task"]
+    content = tasks_md.read_text()
+    # `existing-task` appears once (from the initial seed), not twice.
+    assert content.count("`existing-task`") == 1
+    assert content.count("`new-task`") == 1
+
+
+def test_append_to_tasks_md_no_append_when_all_present(tmp_path: Path) -> None:
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n\n- [ ] `recA` — x\n- [ ] `recB` — y\n")
+    recs = [
+        {"id": "recA", "priority": "P2", "title": "x", "evidence": {}, "rationale": "r"},
+        {"id": "recB", "priority": "P3", "title": "y", "evidence": {}, "rationale": "r"},
+    ]
+    before = tasks_md.read_text()
+    result = tr.append_to_tasks_md(recs, tasks_md, confirmed=True)
+    assert result["would_append"] == []
+    assert result["already_present"] == ["recA", "recB"]
+    # File unchanged because nothing new to append.
+    assert tasks_md.read_text() == before
+
+
+def test_append_to_tasks_md_groups_by_priority(tmp_path: Path) -> None:
+    """P0 first, then P1, P2, P3 — matches the tasks.md spec."""
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n")
+    recs = [
+        {"id": "c", "priority": "P3", "title": "p3 task", "evidence": {}, "rationale": "r"},
+        {"id": "a", "priority": "P1", "title": "p1 task", "evidence": {}, "rationale": "r"},
+        {"id": "b", "priority": "P2", "title": "p2 task", "evidence": {}, "rationale": "r"},
+    ]
+    tr.append_to_tasks_md(recs, tasks_md, confirmed=True)
+    content = tasks_md.read_text()
+    # P1 should appear before P2, which appears before P3.
+    p1_idx = content.find("## P1")
+    p2_idx = content.find("## P2")
+    p3_idx = content.find("## P3")
+    assert p1_idx < p2_idx < p3_idx
+
+
+def test_main_append_dry_run_default(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """--append without --yes is dry-run."""
+    p = tmp_path / ".minsky" / "transform-runs.jsonl"
+    write_ledger(p, [
+        make_record(ts="t1", loc_delta={"ts": 30}, tests_delta=0, lint_exit=0),
+        make_record(ts="t2", loc_delta={"ts": 20}, tests_delta=0, lint_exit=1),
+    ])
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n")
+    rc = tr.main(["--repo", str(tmp_path), "--append", str(tasks_md)])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "dry-run" in err
+    assert "To actually append, re-run with --yes" in err
+    # File still pristine.
+    assert tasks_md.read_text() == "# Tasks\n"
+
+
+def test_main_append_with_yes_writes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    p = tmp_path / ".minsky" / "transform-runs.jsonl"
+    write_ledger(p, [
+        make_record(ts="t1", loc_delta={"ts": 30}, tests_delta=0, lint_exit=0),
+        make_record(ts="t2", loc_delta={"ts": 20}, tests_delta=0, lint_exit=1),
+    ])
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n")
+    rc = tr.main(["--repo", str(tmp_path), "--append", str(tasks_md), "--yes"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "appended" in err
+    content = tasks_md.read_text()
+    assert "test-coverage-gap" in content
+    assert "lint-regression" in content
+
+
+def test_main_append_json_mode_returns_structured_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    p = tmp_path / ".minsky" / "transform-runs.jsonl"
+    write_ledger(p, [
+        make_record(ts="t1", loc_delta={"ts": 30}, tests_delta=0, lint_exit=0),
+        make_record(ts="t2", loc_delta={"ts": 20}, tests_delta=0, lint_exit=1),
+    ])
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text("# Tasks\n")
+    rc = tr.main(["--repo", str(tmp_path), "--append", str(tasks_md), "--json"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["dry_run"] is True
+    assert "test-coverage-gap" in data["would_append"]
+    assert "lint-regression" in data["would_append"]
+
+
 def test_main_window_limits_records(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     p = tmp_path / ".minsky" / "transform-runs.jsonl"
     # 5 records, but --window 2 should only see the last 2.
