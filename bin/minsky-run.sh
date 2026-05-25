@@ -108,6 +108,34 @@ invariant_pick_task_present() {
   [[ -f "$pick" ]] || { echo "INVARIANT FAIL: $pick missing" >&2; return 1; }
 }
 
+invariant_host_bootstrapped() {
+  # Invariant 6: each host has a `.minsky/repo.yaml` sidecar (the
+  # bootstrap marker file `bin/minsky-bootstrap.sh` writes). Parity with
+  # the TS runner's `loadHostConfig`, which exits 1 with the same
+  # operator-actionable hint when the file is missing. Without this
+  # check, the bash runner silently creates `.minsky/experiment-store/`
+  # via Invariant 4 and proceeds to iterate against an unbootstrapped
+  # host — confusing the operator and producing iteration records that
+  # don't trace back to a known host config.
+  #
+  # Operator escape hatch: `MINSKY_SKIP_BOOTSTRAP_CHECK=1` bypasses,
+  # for the post-bootstrap migration window when an existing host
+  # already has experiment-store data but pre-dates the sidecar
+  # convention (rule #6 — fail loud but expose the override at the
+  # right boundary).
+  local host="$1"
+  local repo_yaml="$host/.minsky/repo.yaml"
+  if [[ "${MINSKY_SKIP_BOOTSTRAP_CHECK:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$repo_yaml" ]]; then
+    echo "INVARIANT FAIL: host is not bootstrapped: $repo_yaml not found." >&2
+    echo "  run \`bin/minsky-bootstrap.sh $host\` first," >&2
+    echo "  or set MINSKY_SKIP_BOOTSTRAP_CHECK=1 to override (post-bootstrap migration)." >&2
+    return 1
+  fi
+}
+
 if [[ "$SELF_CHECK" == "1" ]]; then
   invariant_config_loadable || true   # may be missing on a fresh machine
   invariant_openhands_in_path || true # may be missing pre-openhands-install
@@ -239,6 +267,12 @@ iterate_host() {
   local iter_n="$2"
   local script_dir
   script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  # Order matters: check bootstrapped state BEFORE creating the
+  # experiment-store dir. Otherwise Invariant 4's `mkdir -p` would
+  # silently bootstrap a wrapper-shaped `.minsky/` on the host and
+  # produce confusing iteration records against a host that's never
+  # been intentionally bootstrapped.
+  invariant_host_bootstrapped "$host" || return 1
   invariant_host_experiment_store_writable "$host"
 
   # Tasks with open PRs are skipped (matches host-loop.ts behaviour added
