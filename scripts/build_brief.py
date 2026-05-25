@@ -51,21 +51,25 @@ class HostConfig(NamedTuple):
     host_repo: str
     branch_prefix: str
     pre_commit_command: str
+    default_branch: str
 
 
 def load_host_config(host_dir: Path) -> HostConfig:
     """Load `.minsky/repo.yaml` if present; otherwise return safe defaults.
 
     Defaults: host_repo = basename(host_dir), branch_prefix = "feat/",
-    pre_commit_command = "" (no host hooks).
+    pre_commit_command = "" (no host hooks), default_branch = "main".
     """
     repo_yaml = host_dir / ".minsky" / "repo.yaml"
     # Resolve `.` → absolute basename so the brief shows a real name.
     host_repo = host_dir.resolve().name
     branch_prefix = DEFAULT_BRANCH_PREFIX
     pre_commit_command = ""
+    # default_branch defaults to "main" — matches the GitHub-default
+    # for new repos and the TS substrate's `loadRepoConfig` fallback.
+    default_branch = "main"
     if repo_yaml.is_file():
-        # Minimal hand-roll parser — we only need 3 fields and don't
+        # Minimal hand-roll parser — we only need 4 fields and don't
         # want to add a yaml dependency. Format is one `key: value` per
         # line, no nesting.
         for raw in repo_yaml.read_text(encoding="utf-8").splitlines():
@@ -82,8 +86,11 @@ def load_host_config(host_dir: Path) -> HostConfig:
                 branch_prefix = value
             elif key.strip() == "pre_commit_command":
                 pre_commit_command = value
+            elif key.strip() == "default_branch":
+                default_branch = value
     return HostConfig(host_repo=host_repo, branch_prefix=branch_prefix,
-                      pre_commit_command=pre_commit_command)
+                      pre_commit_command=pre_commit_command,
+                      default_branch=default_branch)
 
 
 def render_brief(task: pick_task.ParsedTask, host_repo: str, branch_name: str) -> str:

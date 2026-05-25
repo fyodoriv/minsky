@@ -935,6 +935,232 @@ EOF
   grep -q '"verdict":"validated"' "$record_file"
 }
 
+@test "pr_url stage 3: gh pr create backstop when branch pushed but agent skipped gh pr create" {
+  # Parity port of TS `ensurePrUrl` stage 3 + `defaultBackstopTitle`/
+  # `defaultBackstopBody`. When the agent committed + pushed the
+  # branch but didn't run `gh pr create` (a known claude-opus regression
+  # documented in `devin-spawn-no-pr-opened` pivot 2026-05-18), the
+  # runner opens the PR itself and records the URL.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Agent committed and pushed but did not call gh pr create"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake gh + git: branch exists on origin; gh pr list returns nothing
+  # (stage 2 misses); gh pr create returns the backstop URL.
+  pr_create_record="$TMPDIR_TEST/pr-create-record.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "pr list")
+    # Empty array → jq '.[0].url // ""' → "" → stage 2 misses.
+    echo "" ; exit 0 ;;
+  "pr create")
+    # Record what flags + body the backstop sent so the test can
+    # assert the format.
+    {
+      echo "PR_CREATE_INVOKED"
+      for arg in "\$@"; do echo "ARG=\$arg"; done
+    } > "$pr_create_record"
+    echo "https://github.com/team/repo/pull/12345"
+    exit 0 ;;
+  "repo view")
+    echo "team/repo" ; exit 0 ;;
+  *)
+    : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Fake git: ls-remote --exit-code --heads → success (branch exists).
+  # Real git is used for the make_host repo init; this shim ONLY runs
+  # for ls-remote (other git commands fall through via PATH).
+  cat > "$shim_dir/git" <<'EOF'
+#!/usr/bin/env bash
+# When called with `-C <host> ls-remote --exit-code --heads origin <branch>`,
+# return success to simulate the branch existing. For all other git
+# invocations, exec the real git binary (find it on PATH minus our shim).
+for arg in "$@"; do
+  if [[ "$arg" == "ls-remote" ]]; then
+    exit 0
+  fi
+done
+# Locate real git: scan PATH for a `git` that's not this shim.
+SHIM_DIR="$(dirname "$0")"
+IFS=: read -ra DIRS <<< "$PATH"
+for d in "${DIRS[@]}"; do
+  [[ "$d" == "$SHIM_DIR" ]] && continue
+  if [[ -x "$d/git" ]]; then
+    exec "$d/git" "$@"
+  fi
+done
+echo "git: real binary not found" >&2
+exit 127
+EOF
+  chmod +x "$shim_dir/git"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-stage3 "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+# Put our shim FIRST so the shim git wins for ls-remote.
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-pr3.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # Stage 3 successfully created a PR.
+  grep -q '"pr_url":"https://github.com/team/repo/pull/12345"' "$record_file"
+  # The backstop invocation used the right flag set.
+  [ -f "$pr_create_record" ]
+  grep -q "PR_CREATE_INVOKED" "$pr_create_record"
+  grep -q "ARG=--base" "$pr_create_record"
+  grep -q "ARG=main" "$pr_create_record"
+  grep -q "ARG=--head" "$pr_create_record"
+  grep -q "ARG=feat/pick-me-first" "$pr_create_record"
+  grep -q "ARG=--title" "$pr_create_record"
+  # Title contains the task id (matches TS defaultBackstopTitle).
+  grep -q "backstop PR for pick-me-first" "$pr_create_record"
+  # Body contains the rule-#9 self-grade block (required by
+  # check-pr-self-grade.mjs — backstop PRs must pass the same lint).
+  grep -q "Hypothesis self-grade" "$pr_create_record"
+  grep -q "Predicted:" "$pr_create_record"
+  grep -q "Match:" "$pr_create_record"
+}
+
+@test "pr_url stage 3: skipped when branch wasn't pushed (no backstop PR for ghost branches)" {
+  # Stage 3 must NOT call `gh pr create` when the agent didn't actually
+  # push the branch (e.g. agent crashed before commit). Otherwise we'd
+  # be filing PRs against empty branches, polluting the queue. The
+  # branch-existence check via `git ls-remote --exit-code` is the gate.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Agent did nothing"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  pr_create_record="$TMPDIR_TEST/pr-create-NOT-invoked.txt"
+  cat > "$shim_dir/gh" <<EOF
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "pr list") echo "" ; exit 0 ;;
+  "pr create")
+    # This MUST NOT run — write a sentinel the test checks for absence.
+    echo "PR_CREATE_INVOKED_UNEXPECTEDLY" > "$pr_create_record"
+    echo "https://nope.example/pull/1"
+    exit 0 ;;
+  "repo view") echo "team/nopush" ; exit 0 ;;
+  *) : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  # Fake git: ls-remote --exit-code returns 2 (branch does NOT exist).
+  cat > "$shim_dir/git" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == "ls-remote" ]]; then
+    exit 2
+  fi
+done
+SHIM_DIR="$(dirname "$0")"
+IFS=: read -ra DIRS <<< "$PATH"
+for d in "${DIRS[@]}"; do
+  [[ "$d" == "$SHIM_DIR" ]] && continue
+  if [[ -x "$d/git" ]]; then
+    exec "$d/git" "$@"
+  fi
+done
+exit 127
+EOF
+  chmod +x "$shim_dir/git"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-no-push "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-nopush.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # Stage 3 was skipped — record stays pr_url=null.
+  grep -q '"pr_url":null' "$record_file"
+  # Sentinel file MUST NOT exist — proves gh pr create didn't fire.
+  [ ! -f "$pr_create_record" ]
+}
+
 @test "pr_url backstop: stays null when neither stdout nor gh has a PR (graceful degrade)" {
   # The opposite path: agent succeeds, no stdout URL, gh returns no
   # matching open PR. The backstop returns empty string from
