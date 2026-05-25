@@ -150,12 +150,33 @@ export function dateToMidnightUtcMs(date) {
 // one source of truth — rule #2), loads today's snapshot via the file
 // store (graceful-degrades to `undefined` on ENOENT — rule #7 — so a
 // fresh repo pre-instrumentation still renders all-stubs), runs the
-// pure orchestrator, and writes `METRICS.md` to the repo root.
+// pure orchestrator, and writes the rendered markdown to
+// `DEFAULT_OUTPUT_RELATIVE` (`docs/METRICS.md`) below — the canonical
+// location read by the alignment gate and documented in
+// `docs/metrics-discipline.md`. `--output <path>` overrides.
 
 /** @returns {string} */
 function todayUtc() {
   return new Date().toISOString().slice(0, 10);
 }
+
+/**
+ * Canonical location of the rendered metrics document, relative to the
+ * repo root. Exported so tests can pin the value — see
+ * `scripts/metrics-render.test.mjs` — and so the daemon-side mtime
+ * probe (`novel/tick-loop/bin/tick-loop.mjs:1259`) and the alignment
+ * gate (`scripts/check-milestone-alignment.mjs:605`) can be cross-
+ * checked against one source of truth (rule #2 — data-not-code).
+ *
+ * Prior value was bare `METRICS.md` (repo root), which neither the
+ * alignment gate nor any documented surface looked at — the daemon's
+ * daily render was silently going to the wrong file, leaving the
+ * canonical `docs/METRICS.md` stale and every M1.X metric-tagged
+ * criterion stuck in `(stub)` state. Pinning to `docs/METRICS.md`
+ * matches `vision.md`, `docs/metrics-discipline.md`, and the alignment
+ * check reader. Operators can still pass `--output <path>` to override.
+ */
+export const DEFAULT_OUTPUT_RELATIVE = "docs/METRICS.md";
 
 /**
  * @param {string[]} argv
@@ -175,7 +196,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const date = args.date ?? todayUtc();
   const rootDir = process.cwd();
-  const outputPath = args.output ?? resolvePath(rootDir, "METRICS.md");
+  const outputPath = args.output ?? resolvePath(rootDir, DEFAULT_OUTPUT_RELATIVE);
 
   // Re-resolve the SUCCESS_METRICS source from this script's location so
   // the CLI works regardless of `cwd`. The dist file is the workspace

@@ -237,32 +237,34 @@ describe("checkMetricFreshness — current METRICS.md", () => {
     const result = checkMetricFreshness({ markdown: md, nowMs: Date.now() });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // METRICS.md renders all 10 vision.md success criteria.
-    expect(result.sections.length).toBe(10);
+    // METRICS.md renders the SUCCESS_METRICS array. The literal count
+    // (currently 11 — 10 vision.md success criteria + `cross-repo-pr-rate`
+    // added in PR #790) is read from the live source so this test never
+    // freezes the count when a new metric ships.
+    const { SUCCESS_METRICS } = await import("../novel/dashboard-web/dist/metrics.js");
+    expect(result.sections.length).toBe(SUCCESS_METRICS.length);
   });
 
-  test("expectedIds against the 10 SUCCESS_METRICS ids → ok", async () => {
+  test("expectedIds against the live SUCCESS_METRICS ids → ok", async () => {
     const { readFile } = await import("node:fs/promises");
     const { dirname, resolve } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const here = dirname(fileURLToPath(import.meta.url));
     const repoRoot = resolve(here, "..");
     const md = await readFile(resolve(repoRoot, "docs/METRICS.md"), "utf8");
+    // Read `expectedIds` from the live `SUCCESS_METRICS` source so any
+    // metric added in `novel/dashboard-web/src/metrics.ts` is auto-
+    // included here. Previously this test hand-listed 10 ids; the
+    // `cross-repo-pr-rate` metric (PR #790) drifted out of sync until
+    // the freshness lint surfaced it after PR
+    // `fix/metrics-render-default-output-docs-path` refreshed the
+    // canonical `docs/METRICS.md`.
+    const { SUCCESS_METRICS } = await import("../novel/dashboard-web/dist/metrics.js");
+    const expectedIds = SUCCESS_METRICS.map((m) => m.id);
     const result = checkMetricFreshness({
       markdown: md,
       nowMs: Date.now(),
-      expectedIds: [
-        "loop-uptime",
-        "tokens-per-story",
-        "spec-alignment",
-        "self-improvement-velocity",
-        "mttr",
-        "wrist-dwell",
-        "extraction-count",
-        "dep-interface-coverage",
-        "token-budget-honoring",
-        "task-throughput",
-      ],
+      expectedIds,
     });
     expect(result.ok).toBe(true);
   });
