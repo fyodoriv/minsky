@@ -442,8 +442,10 @@ async function main() {
     }),
     // Path A scoreboard — see `SUCCESS_METRICS` for goal/pivot/anchor.
     // Source: TASKS.md `path-a-loc-scoreboard-metric` (P1, M1).
+    // `path-a-loc-cross-repo-runner` was retired in PR #882
+    // (phase-7b step 6) once the cross-repo-runner-decoupling work
+    // landed; its terminal value will be 0 after phase-7b step 7.
     "path-a-loc-novel-tree": () => collectPathALoc("novel"),
-    "path-a-loc-cross-repo-runner": () => collectPathALoc("novel/cross-repo-runner"),
     "path-a-loc-tick-loop": () => collectPathALoc("novel/tick-loop"),
   };
 
