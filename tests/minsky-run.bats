@@ -667,6 +667,71 @@ EOF
   [ -f "$workdir/.minsky/baseline.json" ]
 }
 
+@test "bin/minsky-default-session.sh prints trend + recommend summary when ledger has 2+ records" {
+  # Step 6 contract: after the report renders + appends, the
+  # orchestrator surfaces the MAPE-K Analyse (trend) + Plan
+  # (recommend) blocks inline. Closes the M→A→P chain in real-time.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-summary"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+
+  # Accumulate 3 ledger records via 3 silent sessions...
+  for _ in 1 2 3; do
+    "$session" "$fixture" --report-only --no-summary > /dev/null 2>&1
+  done
+
+  # ... then run a 4th session WITHOUT --no-summary; the trend +
+  # recommend blocks should appear in the output.
+  run "$session" "$fixture" --report-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"trend (last 10 sessions)"* ]]
+  [[ "$output" == *"transform-runs trend"* ]]
+  [[ "$output" == *"recommendations"* ]]
+}
+
+@test "bin/minsky-default-session.sh --no-summary suppresses trend + recommend output" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-nosummary"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+  for _ in 1 2 3; do
+    "$session" "$fixture" --report-only --no-summary > /dev/null 2>&1
+  done
+
+  run "$session" "$fixture" --report-only --no-summary
+  [ "$status" -eq 0 ]
+  # No trend / recommend blocks
+  [[ "$output" != *"trend (last 10 sessions)"* ]]
+  [[ "$output" != *"recommendations"* ]]
+}
+
+@test "bin/minsky-default-session.sh --json suppresses trend + recommend (downstream tools want clean JSON)" {
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-json-nosummary"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+  for _ in 1 2; do
+    "$session" "$fixture" --report-only --no-summary > /dev/null 2>&1
+  done
+
+  run "$session" "$fixture" --report-only --json
+  [ "$status" -eq 0 ]
+  # Even though ledger has 2+ records, --json mode suppresses the
+  # trailing summary so downstream tools get clean JSON payload.
+  [[ "$output" != *"trend (last 10 sessions)"* ]]
+  [[ "$output" != *"recommendations"* ]]
+}
+
 @test "bin/minsky-default-session.sh appends every session to .minsky/transform-runs.jsonl ledger" {
   # MAPE-K Monitor surface: every session's delta accrues in the
   # per-host ledger so the operator can see trends over time without

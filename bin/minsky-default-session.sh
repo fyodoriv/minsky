@@ -8,9 +8,14 @@
 #   2. scripts/baseline_metrics.py (PR #812) — captures `.minsky/baseline.json`
 #   3. bin/minsky-run.sh         (PR #797…)  — the autonomous tick loop
 #   4. scripts/minsky_report.py  (PR #813) — before/after delta
-# Plus a MAPE-K Monitor surface (PR #824 — this file):
+# Plus the MAPE-K Monitor+Analyse+Plan surface inline:
 #   5. .minsky/transform-runs.jsonl — append-only per-host session ledger
-#      so trends accrue over multiple sessions without recomputation.
+#      so trends accrue over multiple sessions without recomputation
+#      (PR #824, Monitor).
+#   6. trend + recommend summary printed at the tail when ledger has
+#      ≥2 records — closes the M→A→P chain inline so the operator
+#      sees both "what just happened" + "what's trending" + "what
+#      to do about it" in one invocation (PR #828, Analyse + Plan).
 #
 # Path A aligned — no new logic, no new packages. Pure bash orchestration
 # of existing tools. Total LOC ≈ 100.
@@ -61,6 +66,9 @@ Options:
   --json                Emit the report as structured JSON (forwards
                         to scripts/minsky_report.py --json). Useful
                         for piping the delta to other tools.
+  --no-summary          Skip the trailing MAPE-K trend + recommend
+                        summary. Use when piping --json into a tool
+                        that only wants the report shape.
   -h, --help            Print this help and exit
 
 Exit codes:
@@ -77,6 +85,7 @@ REPORT_ONLY=0
 BASELINE_ONLY=0
 SKIP_BOOTSTRAP=0
 EMIT_JSON=0
+SKIP_SUMMARY=0
 HOST_DIR=""
 
 # Parse args. Single positional + flagged options.
@@ -90,6 +99,7 @@ while [[ $# -gt 0 ]]; do
     --baseline-only) BASELINE_ONLY=1; shift ;;
     --no-bootstrap)  SKIP_BOOTSTRAP=1; shift ;;
     --json)          EMIT_JSON=1; shift ;;
+    --no-summary)    SKIP_SUMMARY=1; shift ;;
     --*) echo "unknown flag: $1" >&2; exit 2 ;;
     *)
       if [[ -z "$HOST_DIR" ]]; then HOST_DIR="$1"; shift
@@ -195,6 +205,28 @@ if delta_json="$(python3 "$REPO_ROOT/scripts/minsky_report.py" --repo "$HOST_DIR
   printf '%s\n' "$delta_json" | jq -c '.' >> "$LEDGER_FILE" 2>/dev/null || \
     printf '%s\n' "$delta_json" >> "$LEDGER_FILE"
   echo "minsky-default-session: report appended to $LEDGER_FILE" >&2
+fi
+
+# Step 6 — MAPE-K self-summary: trend + recommend.
+# After the report renders + appends, if the ledger has ≥2 records
+# AND --no-summary was not set AND --json was not set (json mode
+# is for downstream tools that want a clean JSON payload, not a
+# trailing summary), surface trends + interventions inline. Each
+# subprocess is best-effort per rule #6 — a failed summary doesn't
+# kill the session. Closes the M→A→P chain at the moment the
+# operator cares most: end of session.
+if [[ "$SKIP_SUMMARY" != "1" ]] && [[ "$EMIT_JSON" != "1" ]] && [[ -f "$LEDGER_FILE" ]]; then
+  ledger_lines=$(wc -l < "$LEDGER_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+  if [[ "$ledger_lines" -ge "2" ]]; then
+    echo "" >&2
+    echo "─── trend (last 10 sessions) ───" >&2
+    python3 "$REPO_ROOT/scripts/transform_trend.py" \
+      --repo "$HOST_DIR" --window 10 2>&1 || true
+    echo "" >&2
+    echo "─── recommendations ───" >&2
+    python3 "$REPO_ROOT/scripts/transform_recommend.py" \
+      --repo "$HOST_DIR" --window 3 2>&1 || true
+  fi
 fi
 
 exit 0
