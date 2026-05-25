@@ -217,21 +217,6 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 **Pivot:** >25000 for ≥30 d AFTER phase-7b'+11b deletions ship → surviving substrate has irreducible complexity at higher floor than predicted; raise budget to 25K with operator signoff in the Path A plan. Don't fake the metric to make the budget.
 
 **Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)
-
-## path-a-loc-tick-loop — Path A sub-tree: LOC in novel/tick-loop/ (deletion target)
-
-_Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1_
-
-**Value:** 17253 LOC
-
-**How to view:** `fd -e ts -e tsx --type f --exclude '*.test.*' . novel/tick-loop/ | xargs wc -l | tail -1 | awk '{print $1}'`
-
-**Goal:** 0 (post phase-11b deletion); today (~17K) is the supervisor-parity deletion target — the single largest tree in novel/
-
-**Pivot:** Stays >0 for ≥30 d AFTER supervisor-parity validates → tick-loop's surface is broader than the bash skeleton covers (extension points the operator hasn't migrated); document the residual coupling in the Path A plan and re-scope.
-
-**Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 11b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)
-
 ## Metrics to add
 
 _8 metrics that should exist on the dashboard but don't yet. Each row names the milestone that introduces it, the task that lands the collector, and a sketch of the future formula. Operator directive 2026-05-21 — gap is surfaced explicitly so the 10-metric set above is understood as the current state, not the steady state._

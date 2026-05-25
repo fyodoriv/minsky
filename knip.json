@@ -20,7 +20,6 @@
       ],
       "ignoreDependencies": [
         "@minsky/experiment-record",
-        "@minsky/tick-loop",
         "@minsky/token-monitor"
       ]
     },
