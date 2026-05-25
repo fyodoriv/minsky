@@ -14,7 +14,7 @@
 //
 // When dashboard-web is deleted, this test is deleted alongside it.
 
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

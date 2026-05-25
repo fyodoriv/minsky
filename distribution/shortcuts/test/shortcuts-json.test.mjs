@@ -41,9 +41,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SHORTCUTS_DIR = resolve(HERE, "..");
 
 /** @type {{ success_metric_ids: readonly string[]; watch_metric_ids: Record<string,string> }} */
-const METRIC_IDS = JSON.parse(
-  readFileSync(resolve(HERE, "dashboard-metric-ids.json"), "utf8"),
-);
+const METRIC_IDS = JSON.parse(readFileSync(resolve(HERE, "dashboard-metric-ids.json"), "utf8"));
 const SUCCESS_METRIC_IDS = new Set(METRIC_IDS.success_metric_ids);
 const WATCH_METRIC_IDS = METRIC_IDS.watch_metric_ids;
 
