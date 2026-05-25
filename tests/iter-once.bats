@@ -106,12 +106,75 @@ teardown() {
   [ "$count" -eq 2 ]
 }
 
-@test "--once: prints summary block with verdict + ledger + iter log paths" {
+@test "--once: prints summary block with iter log path (no ledger when fixture has no .git)" {
   HOME="$FAKE_HOME" run "$MINSKY_BIN" --once "$TEST_HOST"
-  # Don't pin exit code (may vary in test env)
+  # Don't pin exit code (may vary in test env).
+  # The test fixture's TEST_HOST has no `.git`, so the bash runner
+  # (post PR #875) cleanly skips iteration and the summary reports
+  # "no ledger written this iteration" — that's the correct shape
+  # for a non-git host. A separate test below exercises the
+  # ledger-written path with a fixture that DOES have `.git`.
   [[ "$output" == *"--once summary"* ]]
-  [[ "$output" == *"verdict:"* ]]
   [[ "$output" == *"iter log:"* ]]
+  [[ "$output" == *"no ledger written this iteration"* ]]
+}
+
+@test "--once: stale ledger from prior runs is filtered out (PR #875 stale-ledger fix)" {
+  # Reproduces the bug surfaced by the 2026-05-25 live smoke: pre-
+  # PR #875, the summary picked up the most-recently-mtimed ledger
+  # file on disk even when this iteration didn't write a new one.
+  # Post-fix, ledgers older than the iteration's start marker are
+  # filtered out and the summary reports "no ledger written".
+  local stale_ledger="$TEST_HOST/.minsky/experiment-store/cross-repo/stale-task.jsonl"
+  mkdir -p "$(dirname "$stale_ledger")"
+  echo '{"verdict":"validated","pr_url":"https://example/pr/999","notes":"stale-from-prior-run"}' > "$stale_ledger"
+  # Backdate the stale ledger so it's mtime-older than the iteration's
+  # start marker (mktemp's marker is created during _run_iter_once).
+  touch -t 202405011200 "$stale_ledger"
+  HOME="$FAKE_HOME" run "$MINSKY_BIN" --once "$TEST_HOST"
+  # The stale ledger MUST NOT appear in the summary.
+  [[ "$output" != *"pr_url"*"999"* ]]
+  [[ "$output" != *"stale-from-prior-run"* ]]
+  # And the "no ledger written" message MUST appear because the
+  # current iteration didn't write a new ledger.
+  [[ "$output" == *"no ledger written this iteration"* ]]
+}
+
+@test "--once with --host filter: bash runner iterates EXACTLY one host (PR #875 host-filter fix)" {
+  # Reproduces the bug surfaced by the 2026-05-25 live smoke: pre-
+  # PR #875, `minsky --once <repo>` was passed to the runner as
+  # `--hosts-dir $(dirname <repo>)` and iterated every sibling.
+  # Post-fix, `--once <repo>` passes `--host <repo>` and the runner
+  # iterates EXACTLY that host (and ignores siblings, even alphabetical
+  # ones).
+  local sibling="$HOSTS_PARENT/sibling-host"
+  mkdir -p "$sibling/.minsky" "$sibling/.git"
+  echo '{"repo":"sibling"}' > "$sibling/.minsky/repo.yaml"
+  echo "# Tasks" > "$sibling/TASKS.md"
+  HOME="$FAKE_HOME" run "$MINSKY_BIN" --once "$TEST_HOST"
+  # The summary's iter log should be on the target host (TEST_HOST),
+  # NOT on the sibling.
+  [[ "$output" == *"$TEST_HOST/.minsky/iter-once.log"* ]]
+  # And the runner should NOT print "found <n> host repos under" — that
+  # banner is scan-mode only. Filter mode prints "iterating single host".
+  [[ "$output" != *"found "*"host repos under "*"$HOSTS_PARENT"* ]]
+}
+
+@test "--once: missing ~/.minsky/config.json prints actionable hint (PR #875 doctor preamble)" {
+  # Reproduces the bug surfaced by the 2026-05-25 live smoke: pre-
+  # PR #875, missing config produced `INVARIANT FAIL: config not at
+  # <path>` with no fix hint. Post-fix, the wrapper checks the config
+  # before invoking the runner and emits an actionable "Run: minsky
+  # init <host>" line.
+  local empty_home="$TMPDIR_TEST/empty-home"
+  mkdir -p "$empty_home"
+  HOME="$empty_home" run "$MINSKY_BIN" --once "$TEST_HOST"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$empty_home/.minsky/config.json not found"* ]]
+  [[ "$output" == *"minsky init"* ]]
+  # Must NOT leak the raw INVARIANT FAIL — the operator should see
+  # the actionable hint, not the deep invariant string.
+  [[ "$output" != *"INVARIANT FAIL: config not at"* ]]
 }
 
 # --- logs --failures: CLI contract ----------------------------------------
