@@ -490,8 +490,9 @@ export const STACK_MANIFEST = Object.freeze([
     // `.minsky/experiment-store/cross-repo/*.jsonl`, computes the
     // rolling-30d rate, exits non-zero when verdict=BELOW (rate <
     // SHIP_RATE_FLOOR=0.10). Threshold constants live in
-    // `novel/cross-repo-runner/src/iteration-ship-rate.ts` (one source of
-    // truth per rule #9 + Munafò 2017). FULL stage only — the daemon's
+    // `scripts/lib/iteration-ship-rate.mjs` (one source of truth per
+    // rule #9 + Munafò 2017 — Phase 7b decoupled this from the
+    // soon-to-be-deleted TS package). FULL stage only — the daemon's
     // fast gate doesn't need a metric over its own history (by design:
     // daemon pushes can still file fix-the-rate PRs even when BELOW;
     // only operator pushes are blocked).
@@ -890,7 +891,7 @@ export async function runStack(stage, runStep, manifest = STACK_MANIFEST) {
 /**
  * Names `git push` exports to its hooks (GIT_DIR points at the bare repo,
  * GIT_INDEX_FILE at a transient index, etc.). They poison children that
- * spawn their own `git` against a tmpdir fixture (e.g., the cross-repo-runner
+ * spawn their own `git` against a tmpdir fixture (e.g., the bash-runner
  * integration tests bootstrap a host repo) — the inner `git` reuses the
  * outer GIT_DIR instead of inferring from cwd, and the test fails with
  * "host is not bootstrapped" / "not a git repository". The standalone

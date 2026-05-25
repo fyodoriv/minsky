@@ -1,13 +1,12 @@
 // @ts-check
-// <!-- scope: human-approved 2026-05-24 phase-7b-decouple-from-cross-repo-runner — minimal in-scripts port of the pure-function ship-rate logic so scripts/check-cross-repo-pr-rate.mjs no longer depends on novel/cross-repo-runner/ at runtime, clearing the last live consumer for Phase 7b deletion. -->
+// <!-- scope: human-approved 2026-05-24 phase-7b-decouple-from-cross-repo-runner — canonical pure-function ship-rate logic per Phase 7b. -->
 //
-// Pure-function ship-rate computation. Ported from
-// `novel/cross-repo-runner/src/iteration-ship-rate.ts` so that
-// `scripts/check-cross-repo-pr-rate.mjs` no longer needs to import
-// from `novel/cross-repo-runner/dist/`. Phase 7b of the Path A
-// aggressive cut — clears the last production consumer of the package
-// (the 2 integration tests test the package itself and will be
-// deleted with it).
+// Pure-function ship-rate computation. This module is the canonical
+// home of the ship-rate logic — a self-contained port that
+// `scripts/check-cross-repo-pr-rate.mjs` reads from directly. Phase
+// 7b of the Path A aggressive cut decoupled this file from
+// `novel/cross-repo-runner/` so the TS package's eventual deletion
+// doesn't take the ship-rate computation with it.
 //
 // The Python equivalent at `scripts/iteration_ship_rate.py` carries
 // the same pre-registered thresholds + the bash-callable CLI. Both
