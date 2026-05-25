@@ -363,6 +363,8 @@ mkdir -p "\$TMP_SCRIPT"
 cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
 cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
 cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
 cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
@@ -384,6 +386,24 @@ EOF
   grep -q "gh pr create" "$brief_dump"
   # The brief is not the 4-line stub anymore.
   [ "$(wc -l < "$brief_dump" | tr -d ' ')" -gt 20 ]
+  # Acceptance criterion of user-stories/006-runner-on-any-repo.md:
+  # "$host/.minsky/experiments/<task-id>.yaml is materialised with all
+  # 5 rule-#9 fields populated from the task row". This is the parity
+  # port of the TS runner's `synthesiseExperimentYaml` call site.
+  local host_dir
+  host_dir="$(dirname "$(dirname "$brief_dump")")"
+  # Brief dump lives in shim-bin/dump dir; the actual host is under
+  # $HOSTS_DIR. The runner targets the only host in $HOSTS_DIR.
+  local host_under_test
+  host_under_test="$(ls -d "$HOSTS_DIR"/*/ | head -1)"
+  host_under_test="${host_under_test%/}"
+  [ -f "$host_under_test/.minsky/experiments/pick-me-first.yaml" ]
+  grep -q "^id: pick-me-first" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^hypothesis: |" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^success:" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^pivot:" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^measurement:" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
+  grep -q "^anchor: |" "$host_under_test/.minsky/experiments/pick-me-first.yaml"
 }
 
 @test "bin/minsky --bash-runner dispatches to bin/minsky-run.sh (Phase 7c)" {
