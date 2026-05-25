@@ -25,7 +25,8 @@
 
 import process from "node:process";
 
-import { MODEL_CATALOG, decideRunAnyProvider } from "@minsky/tick-loop";
+import { MODEL_CATALOG } from "./lib/model-catalog.mjs";
+import { decideRunAnyProvider } from "./lib/runany-provider-decision.mjs";
 
 /**
  * One provider decision. Deliberately loose on `kind`/`agent` (typed as
