@@ -645,6 +645,28 @@ print(load_host_config(Path('$host')).default_branch)
     notes="openhands exited $exit_code; ${duration_ms}ms; tail: $(tail -1 "$stdout_log" | tr -d '"' | cut -c1-100)"
   fi
 
+  # Failure capture (Slice 2 of bash-runner observability, 2026-05-25):
+  # On any non-validated verdict, snapshot the brief + stdout + env +
+  # metadata into <host>/.minsky/failures/<iso-ts>-<task-id>/ BEFORE
+  # the mktemp cleanup. Without this, every failed iteration's brief +
+  # full stdout are lost; the operator only sees the 100-char `notes`
+  # tail in the JSONL row. Best-effort per rule #6 — capture failures
+  # don't abort the iteration loop (the `|| true` swallows non-zero).
+  if [[ "$verdict" != "validated" ]] && [[ "${MINSKY_CAPTURE_FAILURES:-1}" != "0" ]]; then
+    bash "$script_dir/../scripts/capture-failure.sh" \
+      --host "$host" \
+      --task-id "${task_id:-_no-task}" \
+      --verdict "$verdict" \
+      --exit-code "${exit_code:-0}" \
+      --duration-ms "${duration_ms:-0}" \
+      --brief-file "$brief_file" \
+      --stdout-log "$stdout_log" \
+      --branch "${branch:-}" \
+      --pr-url "${pr_url:-}" \
+      --notes "${notes:-}" \
+      --gh-host "${gh_host:-}" >/dev/null 2>&1 || true
+  fi
+
   rm -f "$brief_file" "$stdout_log"
   record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host"
 }

@@ -772,6 +772,178 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
       exit 1
     fi
     ;;
+  bash-doctor)
+    # `minsky bash-doctor [--quiet]` — pre-flight check specifically for
+    # the Path A bash + Python skeleton (`bin/minsky-run.sh` +
+    # `scripts/spawn_agent.py` + the OpenHands SDK fallback path).
+    #
+    # `minsky doctor` covers the TS substrate (node, daemon, agents).
+    # `minsky bash-doctor` covers what the bash skeleton actually
+    # depends on: jq, python ≥3.10, the OpenHands SDK shim, OPENHANDS_
+    # API_KEY (or a working canonical CLI), `.minsky/repo.yaml` in $PWD,
+    # executable bits on the bash entrypoints, and shellcheck cleanliness
+    # of `bin/minsky-run.sh` itself.
+    #
+    # Without this check, the 24h parity-port (PRs #794-857) has been
+    # validated only via bats tests against fixtures — never against a
+    # real host. The first thing the live smoke (`minsky-transform-
+    # live-smoke-on-real-repo`) does should be this probe.
+    #
+    # Exit codes:
+    #   0 — all critical checks pass (bash skeleton can run)
+    #   1 — at least one critical check failed (bash skeleton will fail)
+    #
+    # Source: 2026-05-25 retro — observed gap between "parity tests
+    # pass" and "first live run works"; rule #17 (proactive healing —
+    # gap becomes a probe); composes with `minsky-transform-live-smoke-
+    # on-real-repo` P0 task as the pre-flight gate.
+    _crit_fail=0
+    _quiet=0
+    for _a in "$@"; do
+      [ "$_a" = "--quiet" ] && _quiet=1
+    done
+
+    _bash_doctor_print() {
+      # _bash_doctor_print STATUS NAME MESSAGE
+      [ "$_quiet" = "1" ] && [ "$1" = "PASS" ] && return 0
+      printf "  %-4s  %-22s %s\n" "$1" "$2" "$3"
+    }
+
+    [ "$_quiet" = "0" ] && echo "minsky bash-doctor — pre-flight for Path A bash + Python skeleton" && echo ""
+
+    # Resolve repo root early — used by python-probes + executable-bit
+    # checks below.
+    _real_bin=$(_minsky_realpath "$0")
+    _repo_dir=$(dirname "$(dirname "$_real_bin")")
+    _bash_doctor_probes="$_repo_dir/scripts/bash-doctor-probes.sh"
+
+    # CRITICAL — jq (record_iteration depends on it)
+    if command -v jq >/dev/null 2>&1; then
+      _v=$(jq --version 2>/dev/null | sed 's/^jq-//')
+      _bash_doctor_print PASS "jq" "$_v"
+    else
+      _bash_doctor_print FAIL "jq" "not on PATH (record_iteration cannot serialize JSONL — install via brew install jq / apt-get install jq)"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — python3 ≥3.10 (all scripts/*.py target 3.10+ via type
+    # hints / match-case). Delegates to scripts/bash-doctor-probes.sh
+    # to keep `python3 -c` out of bin/minsky (rule enforced by
+    # test/integration/m1-red-green.test.ts § "bin/minsky uses portable
+    # shell helpers, not python3"). Corporate Python wrappers can take
+    # 30+ seconds to bootstrap uv on a fresh HOME — the bash-doctor
+    # path opts in to that cost; bin/minsky itself stays python-free.
+    _bash_doctor_probes="$_repo_dir/scripts/bash-doctor-probes.sh"
+    if [ -x "$_bash_doctor_probes" ]; then
+      if _pyv=$(bash "$_bash_doctor_probes" python-version 2>/dev/null); then
+        _bash_doctor_print PASS "python3" "$_pyv"
+      else
+        _pyv_fallback=$(bash "$_bash_doctor_probes" python-version 2>/dev/null || echo "?")
+        _bash_doctor_print FAIL "python3" "$_pyv_fallback (need 3.10+ for scripts/*.py)"
+        _crit_fail=1
+      fi
+    else
+      _bash_doctor_print FAIL "python3" "probe helper missing at $_bash_doctor_probes"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — bin/minsky-run.sh executable
+    if [ -x "$_repo_dir/bin/minsky-run.sh" ]; then
+      _bash_doctor_print PASS "minsky-run.sh" "$_repo_dir/bin/minsky-run.sh"
+    else
+      _bash_doctor_print FAIL "minsky-run.sh" "not executable at $_repo_dir/bin/minsky-run.sh (run: chmod +x $_repo_dir/bin/minsky-run.sh)"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — bin/minsky-default-session.sh executable
+    if [ -x "$_repo_dir/bin/minsky-default-session.sh" ]; then
+      _bash_doctor_print PASS "default-session.sh" "$_repo_dir/bin/minsky-default-session.sh"
+    else
+      _bash_doctor_print FAIL "default-session.sh" "not executable at $_repo_dir/bin/minsky-default-session.sh"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — scripts/spawn_agent.py exists and is python-parseable
+    # (delegated to bash-doctor-probes.sh § syntax to keep python3 -m
+    # py_compile out of bin/minsky proper).
+    if [ -f "$_repo_dir/scripts/spawn_agent.py" ]; then
+      if [ -x "$_bash_doctor_probes" ] && bash "$_bash_doctor_probes" syntax "$_repo_dir/scripts/spawn_agent.py" >/dev/null 2>&1; then
+        _bash_doctor_print PASS "spawn_agent.py" "syntax OK"
+      else
+        _bash_doctor_print FAIL "spawn_agent.py" "syntax error or probe missing — bash $_bash_doctor_probes syntax $_repo_dir/scripts/spawn_agent.py"
+        _crit_fail=1
+      fi
+    else
+      _bash_doctor_print FAIL "spawn_agent.py" "missing at $_repo_dir/scripts/spawn_agent.py"
+      _crit_fail=1
+    fi
+
+    # CRITICAL — at least ONE agent backend is reachable: either the
+    # canonical `openhands` CLI (post-June-2026 world) OR the OpenHands
+    # SDK importable from python3 (today's world via the shim).
+    # Both probes delegate to bash-doctor-probes.sh (the SDK probe is
+    # the load-bearing one: `python3 -c "import openhands"` is what
+    # keeps python3-import calls out of bin/minsky).
+    _agent_ok=0
+    if [ -x "$_bash_doctor_probes" ] && _ohv=$(bash "$_bash_doctor_probes" openhands-cli 2>/dev/null); then
+      _bash_doctor_print PASS "openhands CLI" "$_ohv"
+      _agent_ok=1
+    fi
+    if [ -x "$_bash_doctor_probes" ] && _sdkv=$(bash "$_bash_doctor_probes" openhands-sdk 2>/dev/null); then
+      _bash_doctor_print PASS "OpenHands SDK" "importable (v$_sdkv)"
+      _agent_ok=1
+    elif [ "$_agent_ok" = "0" ]; then
+      _bash_doctor_print FAIL "agent backend" "neither \`openhands\` CLI nor OpenHands SDK importable (install via: pip install openhands-ai OR install the canonical CLI when shipped)"
+      _crit_fail=1
+    fi
+
+    # WARN — OPENHANDS_API_KEY env var (or compatible)
+    if [ -n "${OPENHANDS_API_KEY:-}" ] || [ -n "${LLM_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+      _bash_doctor_print PASS "API key env" "set (OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY)"
+    else
+      _bash_doctor_print WARN "API key env" "none of OPENHANDS_API_KEY / LLM_API_KEY / ANTHROPIC_API_KEY set — agent will fail at spawn time"
+    fi
+
+    # WARN — .minsky/repo.yaml in $PWD (only when called from inside a host)
+    if [ -f "$PWD/.minsky/repo.yaml" ]; then
+      _bash_doctor_print PASS "host bootstrap" "$PWD/.minsky/repo.yaml exists"
+    else
+      _bash_doctor_print WARN "host bootstrap" "$PWD/.minsky/repo.yaml missing (run: $_repo_dir/bin/minsky-bootstrap.sh $PWD before --transform)"
+    fi
+
+    # WARN — shellcheck on bin/minsky-run.sh (catches set-flag drift)
+    if command -v shellcheck >/dev/null 2>&1; then
+      if shellcheck -x "$_repo_dir/bin/minsky-run.sh" >/dev/null 2>&1; then
+        _bash_doctor_print PASS "shellcheck" "minsky-run.sh clean"
+      else
+        _bash_doctor_print WARN "shellcheck" "minsky-run.sh has violations (run: shellcheck -x $_repo_dir/bin/minsky-run.sh)"
+      fi
+    else
+      _bash_doctor_print WARN "shellcheck" "not installed (install via brew install shellcheck — non-blocking but recommended)"
+    fi
+
+    # WARN — gh CLI (used for PR-state probing inside iterations)
+    if command -v gh >/dev/null 2>&1; then
+      _ghv=$(gh --version 2>/dev/null | head -1 | sed 's/^gh version //')
+      if gh auth status >/dev/null 2>&1; then
+        _bash_doctor_print PASS "gh CLI" "$_ghv (authenticated)"
+      else
+        _bash_doctor_print WARN "gh CLI" "$_ghv (not authenticated — run \`gh auth login\` before --transform)"
+      fi
+    else
+      _bash_doctor_print FAIL "gh CLI" "not on PATH (record_iteration + PR-state probes require it)"
+      _crit_fail=1
+    fi
+
+    echo ""
+    if [ "$_crit_fail" = "0" ]; then
+      [ "$_quiet" = "0" ] && echo "✅ bash-doctor: bash + Python skeleton is ready for \`minsky --transform\`"
+      exit 0
+    else
+      echo "❌ bash-doctor: critical checks failed — \`minsky --transform\` will fail until the above are fixed"
+      exit 1
+    fi
+    ;;
   report)
     # `minsky report [--baseline | --delta] [--repo <path>]` — print
     # the latest metric snapshot, the diff against the previous, or
