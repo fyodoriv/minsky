@@ -442,3 +442,248 @@ def test_pick_host_task_against_real_tasks_md() -> None:
     assert chosen is not None
     assert chosen.id is not None
     assert chosen.priority in {"P0", "P1"}
+
+
+# --- Duplicate-PR detection (parity with TS decideDuplicate) -------------
+
+
+class TestPrTitleNamesTask:
+    """Pure title-matching parity tests."""
+
+    def test_matches_feat_prefix_with_parens(self) -> None:
+        # The daemon's commit convention is `feat(<task-id>): …`.
+        assert pick_task.pr_title_names_task(
+            "feat(some-task-id): wire the substrate",
+            "some-task-id",
+        )
+
+    def test_matches_fix_prefix_with_parens(self) -> None:
+        assert pick_task.pr_title_names_task(
+            "fix(daemon-noop-iteration-rate-too-high): bounded backoff",
+            "daemon-noop-iteration-rate-too-high",
+        )
+
+    def test_matches_task_id_in_brackets(self) -> None:
+        # Markdown autolink shape `[[task-id]]`.
+        assert pick_task.pr_title_names_task("foo [[task-x]] bar", "task-x")
+
+    def test_matches_id_at_start_of_title(self) -> None:
+        assert pick_task.pr_title_names_task("task-x: bar", "task-x")
+
+    def test_matches_id_at_end_of_title(self) -> None:
+        assert pick_task.pr_title_names_task("foo task-x", "task-x")
+
+    def test_rejects_substring_match(self) -> None:
+        # `task-x` must not match `task-xy` (no word boundary).
+        assert not pick_task.pr_title_names_task("feat(task-xy): bar", "task-x")
+
+    def test_rejects_id_in_word_prefix(self) -> None:
+        # `task-x` must not match a title containing `mytask-x`.
+        assert not pick_task.pr_title_names_task("feat(mytask-x): bar", "task-x")
+
+    def test_rejects_id_in_word_suffix(self) -> None:
+        # `task-x` must not match `task-xtra`.
+        assert not pick_task.pr_title_names_task("feat(task-xtra): bar", "task-x")
+
+    def test_handles_empty_inputs(self) -> None:
+        assert not pick_task.pr_title_names_task("", "task-x")
+        assert not pick_task.pr_title_names_task("feat(task-x): foo", "")
+
+
+class TestDecideDuplicate:
+    """Parity port of `decideDuplicate` in duplicate-pr-detector.ts."""
+
+    def test_no_matching_prs_returns_none(self) -> None:
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [{"number": 1, "title": "feat(other-task): foo", "state": "OPEN"}],
+        )
+        assert verdict is None
+
+    def test_open_pr_takes_precedence(self) -> None:
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [
+                {"number": 42, "title": "feat(my-task): shipping it", "state": "OPEN"},
+                {
+                    "number": 41,
+                    "title": "feat(my-task): old attempt",
+                    "state": "MERGED",
+                    "closedAt": "2026-05-20T12:00:00Z",
+                },
+            ],
+            now_ms=int(__import__("time").time() * 1000),
+        )
+        assert verdict == {"kind": "open", "pr_number": 42}
+
+    def test_merged_recent_within_window(self) -> None:
+        # Merged 3 days ago — within the default 7-day window.
+        from datetime import datetime, timedelta, timezone
+
+        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [
+                {
+                    "number": 100,
+                    "title": "feat(my-task): shipped",
+                    "state": "MERGED",
+                    "closedAt": three_days_ago,
+                },
+            ],
+        )
+        assert verdict is not None
+        assert verdict["kind"] == "merged-recent"
+        assert verdict["pr_number"] == 100
+        assert 2.5 < verdict["days_ago"] < 3.5
+
+    def test_merged_outside_window_returns_none(self) -> None:
+        # Merged 10 days ago — outside the default 7-day window.
+        from datetime import datetime, timedelta, timezone
+
+        ten_days_ago = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [
+                {
+                    "number": 100,
+                    "title": "feat(my-task): shipped long ago",
+                    "state": "MERGED",
+                    "closedAt": ten_days_ago,
+                },
+            ],
+        )
+        assert verdict is None
+
+    def test_picks_most_recent_merged(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        five_days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [
+                {
+                    "number": 200,
+                    "title": "feat(my-task): older",
+                    "state": "MERGED",
+                    "closedAt": five_days_ago,
+                },
+                {
+                    "number": 300,
+                    "title": "feat(my-task): newer",
+                    "state": "MERGED",
+                    "closedAt": two_days_ago,
+                },
+            ],
+        )
+        assert verdict is not None
+        assert verdict["pr_number"] == 300  # The newer one
+
+    def test_closed_but_not_merged_returns_none(self) -> None:
+        # CLOSED (not MERGED) PRs are NOT counted as duplicates — they
+        # represent abandoned work; re-opening a fresh PR is OK.
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [
+                {
+                    "number": 1,
+                    "title": "feat(my-task): abandoned",
+                    "state": "CLOSED",
+                    "closedAt": "2026-05-20T12:00:00Z",
+                },
+            ],
+        )
+        assert verdict is None
+
+    def test_merged_without_closed_at_is_skipped(self) -> None:
+        # MERGED without closedAt is malformed gh output — skip silently.
+        verdict = pick_task.decide_duplicate(
+            "my-task",
+            [
+                {
+                    "number": 1,
+                    "title": "feat(my-task): no timestamp",
+                    "state": "MERGED",
+                },
+            ],
+        )
+        assert verdict is None
+
+
+class TestPickHostTaskWithAllPrs:
+    """`pick_host_task` accepts `all_prs` and filters via decide_duplicate."""
+
+    def test_filters_task_with_matching_open_pr(self) -> None:
+        # Build a TASKS.md with one rule-9-compliant task whose ID matches
+        # an open PR in the snapshot. Picker must skip it.
+        tasks_md = _build_tasks_md_with_one_task("my-task")
+        chosen = pick_task.pick_host_task(
+            tasks_md,
+            all_prs=[{"number": 1, "title": "feat(my-task): foo", "state": "OPEN"}],
+        )
+        assert chosen is None
+
+    def test_picks_task_when_no_matching_pr(self) -> None:
+        tasks_md = _build_tasks_md_with_one_task("my-task")
+        chosen = pick_task.pick_host_task(
+            tasks_md,
+            all_prs=[{"number": 1, "title": "feat(other-task): bar", "state": "OPEN"}],
+        )
+        assert chosen is not None
+        assert chosen.id == "my-task"
+
+    def test_filters_task_with_recent_merged_pr(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        recent = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        tasks_md = _build_tasks_md_with_one_task("my-task")
+        chosen = pick_task.pick_host_task(
+            tasks_md,
+            all_prs=[
+                {
+                    "number": 1,
+                    "title": "feat(my-task): shipped",
+                    "state": "MERGED",
+                    "closedAt": recent,
+                },
+            ],
+        )
+        assert chosen is None
+
+    def test_backcompat_when_all_prs_not_provided(self) -> None:
+        # Same TASKS.md, no all_prs → picker must return the task (no
+        # filter applied). This is the back-compat case for callers
+        # that haven't wired the broader fetch yet.
+        tasks_md = _build_tasks_md_with_one_task("my-task")
+        chosen = pick_task.pick_host_task(tasks_md)
+        assert chosen is not None
+        assert chosen.id == "my-task"
+
+
+def _build_tasks_md_with_one_task(task_id: str) -> str:
+    """Build a minimal rule-9-compliant TASKS.md with one P0 task."""
+    return f"""# Tasks
+
+## P0
+
+- [ ] `{task_id}` — fixture task
+  - **ID**: {task_id}
+  - **Tags**: fixture
+  - **Hypothesis**: fixture hypothesis
+  - **Success**: fixture success
+  - **Pivot**: fixture pivot
+  - **Measurement**: test exits 0
+  - **Anchor**: rule #1, fixture
+  - **Details**: fixture
+"""
