@@ -633,6 +633,34 @@ EOF
   [ -f "$workdir/.minsky/baseline.json" ]
 }
 
+@test "bin/minsky-default-session.sh --json emits structured JSON report" {
+  # Forward --json to scripts/minsky_report.py; confirms the report
+  # is parseable JSON instead of the human-readable text.
+  session="$REPO_ROOT/bin/minsky-default-session.sh"
+  fixture="$TMPDIR_TEST/default-session-json"
+  mkdir -p "$fixture/.minsky"
+  cat > "$fixture/.minsky/baseline.json" <<EOF
+{"ts":"2026-05-25T00:00:00+00:00","repo":"$fixture","code":{"total_files_walked":0,"test_file_count":0,"loc_by_language":{}},"docs":{"markdown_file_count":0,"has_readme":false,"has_agents_md":false,"has_claude_md":false,"has_vision_md":false,"has_tasks_md":false},"lint":{"exit_code":null},"build":{"exit_code":null},"dependencies":{"package_manager":"none","outdated_count":null},"schema_version":1}
+EOF
+  printf '# README\n' > "$fixture/README.md"
+
+  run "$session" "$fixture" --report-only --json
+  [ "$status" -eq 0 ]
+  # Strip stderr noise; just the stdout should be JSON.
+  # bats captures stdout+stderr together in $output, so we re-run
+  # capturing just stdout to verify the JSON contract.
+  stdout_only="$("$session" "$fixture" --report-only --json 2>/dev/null)"
+  # Must parse as JSON with the documented schema fields.
+  python3 -c "
+import json,sys
+d = json.loads(r'''$stdout_only''')
+assert d['schema_version'] == 1
+assert 'code' in d
+assert 'before_ts' in d
+print('json shape ok')
+"
+}
+
 @test "bin/minsky-default-session.sh --report-only emits delta against existing baseline" {
   session="$REPO_ROOT/bin/minsky-default-session.sh"
   fixture="$TMPDIR_TEST/default-session-report"
