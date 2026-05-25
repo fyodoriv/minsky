@@ -26,12 +26,12 @@ As a solo developer, I close my laptop at 11pm with the loop running, sleep thro
 
 ## Integration test
 
-- **File**: `user-stories/001-loop-runs-overnight.test.ts` (forthcoming)
+- **File**: `tests/iter-once.bats` + `tests/minsky-run.bats` — covers the bash skeleton's overnight loop (the canonical implementation post phase-11b deletion of `novel/tick-loop/`). The previous `user-stories/001-loop-runs-overnight.test.ts` drove the TS daemon's `runDaemon` orchestrator; it was deleted in phase-11b step 3 when the TS daemon's deletion began (the test imported `runDaemon`, `DryRunSpawnStrategy`, `TestFakeMockAnthropic`, `BudgetGuardLike`, `BudgetDecisionLike`, `SpanRecorder` — all surfaces that exist only in the deletion-target package).
 - **Setup**:
   - Seed `TASKS.md` with 20 trivial P2 tasks (deterministic outcomes)
   - Pin OMC to v4.13.x
   - Mock token monitor to report unconstrained budget (separate test covers budget exhaustion)
-- **Action**: Run supervisor for 60 minutes (compressed simulation of overnight)
+- **Action**: Run supervisor for 60 minutes (compressed simulation of overnight) — the bash skeleton's launchd `KeepAlive=true` provides the same overnight-survival semantics the TS daemon's in-process loop did.
 - **Assert**:
   - Supervisor reports healthy throughout (no >30s gaps)
   - At least 15 tasks completed (allowing for overhead)
