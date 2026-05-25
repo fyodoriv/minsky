@@ -181,6 +181,20 @@ EOF
   grep -q -- "--open-pr-branches=" "$MINSKY_RUN"
 }
 
+@test "pick_task.py is also invoked with --all-prs-json (duplicate-PR detection parity)" {
+  # The bash runner's branch-based dedup misses two classes:
+  #   (a) daemon-authored close-out PRs whose branch names have
+  #       timestamp suffixes (`daemon/<id>/<task-id>-2026-05-19T123456`)
+  #       — `feat/<id>` never matches.
+  #   (b) merged-recently PRs — branch-based only looks at OPEN PRs.
+  #
+  # `--all-prs-json=<path>` is the title-matching + merged-recent path
+  # (parity with the TS `decideDuplicate` substrate from PR #309). This
+  # test pins the wire-up so the call site can't silently regress to
+  # branch-only detection.
+  grep -q -- "--all-prs-json=" "$MINSKY_RUN"
+}
+
 # --- 8. Round-robin iterates each host fairly ------------------------------
 
 @test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {

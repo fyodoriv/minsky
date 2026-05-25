@@ -129,6 +129,34 @@ current_open_pr_branches() {
     | paste -sd, - 2>/dev/null || true
 }
 
+dump_all_prs_json() {
+  # Write the full PR snapshot for `host` to `outfile` so pick_task.py can
+  # apply the title-based duplicate filter (the parity-with-decideDuplicate
+  # path; closes the daemon-duplicate-work-detection coverage gap that the
+  # branch-based filter misses for daemon-authored close-out PRs with
+  # timestamped branch names + merged-recently re-creation).
+  #
+  # Schema: an array of {number, title, state, closedAt} objects, the
+  # exact shape `gh pr list --json …` emits and `decide_duplicate` /
+  # `pr_title_names_task` consume.
+  #
+  # Safe-default to writing an empty array (`[]`) on any `gh` failure so
+  # the loop never wedges on a transient network blip (rule #7 — chaos
+  # engineering: the watchdog must never make the system worse).
+  #
+  # Limit 200: enough for ≥6 months of daemon PRs at typical cadence
+  # without blowing past gh's pagination; tunable via $MINSKY_PR_FETCH_LIMIT.
+  local host="$1" outfile="$2"
+  local limit="${MINSKY_PR_FETCH_LIMIT:-200}"
+  if ( cd "$host" && gh pr list --state all --limit "$limit" \
+        --json number,title,state,closedAt 2>/dev/null \
+        > "$outfile" ); then
+    return 0
+  fi
+  echo '[]' > "$outfile"
+  return 0
+}
+
 # --- 4. Host walker (round-robin) -------------------------------------------
 # Replaces novel/cross-repo-runner/src/host-walker.ts. Walks every git
 # repo under $HOSTS_DIR (one level deep), gives each host N iterations
@@ -215,13 +243,29 @@ iterate_host() {
 
   # Tasks with open PRs are skipped (matches host-loop.ts behaviour added
   # for the 2026-05-16 example-service-plugin regression).
+  # Plus: tasks with TITLE-matching open OR merged-recently-≤7d PRs are
+  # filtered via `decide_duplicate` (parity with the TS substrate shipped
+  # in PR #309 — `daemon-duplicate-work-detection`). Catches the daemon-
+  # authored close-out PR class that branch-name dedup misses (timestamped
+  # branch names → unique `headRefName` per attempt; title still contains
+  # the task ID).
   local open_branches
   open_branches="$(current_open_pr_branches "$host")"
+  # mktemp generates a unique path per iteration; the file is small (≤200
+  # PR entries), under /tmp, and cleaned up explicitly before return.
+  # NOT using `trap RETURN` because `set -u` (set -euo pipefail at the
+  # top of this script) trips when the RETURN trap's body evaluates the
+  # variable in the caller's scope after the function unwinds.
+  local all_prs_json
+  all_prs_json="$(mktemp -t minsky-run-prs-XXXXXX.json)"
+  dump_all_prs_json "$host" "$all_prs_json"
   local task_id
   task_id="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/pick_task.py" \
     "$host/TASKS.md" \
     "--open-pr-branches=${open_branches}" \
+    "--all-prs-json=${all_prs_json}" \
     2>/dev/null || true)"
+  rm -f "$all_prs_json"
 
   if [[ -z "$task_id" ]]; then
     record_iteration "$host" "$iter_n" "" "" "aborted" "" "no eligible task"
