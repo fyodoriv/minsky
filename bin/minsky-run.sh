@@ -529,6 +529,21 @@ EOF
     # out or no URL is found.
     pr_url="$(python3 "$script_dir/../scripts/extract_pr_url.py" \
               --stdout-file "$stdout_log" 2>/dev/null || true)"
+    # Backstop (parity port of TS `ensurePrUrl` stage 2): when the
+    # agent printed no PR URL — possible if (a) stdout was truncated
+    # by the bounded log buffer, (b) the agent committed + pushed but
+    # skipped `gh pr create` and only the operator-side webhook
+    # opened a PR, or (c) the iteration's URL fell off the tail —
+    # query `gh pr list` for any open PR matching the iteration's
+    # branch. Recovers the otherwise-silent `pr_url=null` records.
+    # Safe-default to empty on gh failures (rule #7 graceful-degrade —
+    # gh-not-on-PATH / gh-auth-expired / branch-not-pushed are all
+    # recoverable on the next iteration, never crash the loop).
+    if [[ -z "$pr_url" ]]; then
+      pr_url="$(_gh_in_host "$host" "$gh_host" pr list \
+                  --head "$branch" --state open \
+                  --json url --jq '.[0].url // ""' 2>/dev/null || true)"
+    fi
     notes="openhands exited 0; ${duration_ms}ms"
   elif [[ "$exit_code" -eq 124 ]]; then
     # GNU timeout(1) exits 124 when the watchdog fires.

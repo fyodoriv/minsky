@@ -840,6 +840,177 @@ EOF
   ! grep -q '"pr_url":"https://github.com/old/repo/pull/1"' "$record_file"
 }
 
+@test "pr_url backstop: query gh pr list --head when stdout has no URL (parity port of TS ensurePrUrl stage 2)" {
+  # Real silent-failure path: agent runs successfully, commits + pushes,
+  # but stdout doesn't contain a parseable PR URL (e.g. truncated by
+  # the bounded log buffer, OR the webhook auto-opened the PR while
+  # the agent's `gh pr create` was still in flight). Pre-PR: bash
+  # runner recorded `pr_url=null` even though a PR existed.
+  #
+  # Fixture: a fake openhands that succeeds but emits no PR URL on
+  # stdout. A fake `gh` that responds to `pr list --head <branch>` with
+  # a JSON envelope containing the URL the runner should backstop to.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Working..."
+echo "Done — committed and pushed (URL fell off the tail)"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake gh: matches the bash runner's exact invocation shape:
+  #   `gh pr list --head <branch> --state open --json url --jq '.[0].url // ""'`
+  # Also responds to `gh repo view --json nameWithOwner --jq .nameWithOwner`
+  # which record_iteration calls (or it'll wedge).
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list")
+    # Find --head flag and emit the URL the test expects.
+    for ((i=1; i<=$#; i++)); do
+      if [[ "${!i}" == "--head" ]]; then
+        next=$((i+1))
+        branch="${!next}"
+        # Return a backstop URL (mirrors what gh would return for the
+        # branch's open PR).
+        echo "https://github.example.com/team/backstop-recovery/pull/77"
+        exit 0
+      fi
+    done
+    echo "" ; exit 0 ;;
+  "repo view")
+    echo "team/backstop-recovery" ; exit 0 ;;
+  *)
+    : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-backstop "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-prbs.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # The backstop query recovered the PR URL even though stdout had none.
+  grep -q '"pr_url":"https://github.example.com/team/backstop-recovery/pull/77"' "$record_file"
+  # Iteration is still verdict=validated (openhands exited 0).
+  grep -q '"verdict":"validated"' "$record_file"
+}
+
+@test "pr_url backstop: stays null when neither stdout nor gh has a PR (graceful degrade)" {
+  # The opposite path: agent succeeds, no stdout URL, gh returns no
+  # matching open PR. The backstop returns empty string from
+  # `--jq '.[0].url // ""'` and the iteration record stores pr_url=null
+  # (the legacy behaviour). This proves the backstop doesn't crash on
+  # the no-match path (rule #7 graceful-degrade).
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/openhands" <<'EOF'
+#!/usr/bin/env bash
+echo "Agent did nothing"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  # Fake gh: pr list returns empty array → jq '.[0].url // ""' → "".
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list")
+    # Empty array — no PR matches the branch.
+    echo "" ; exit 0 ;;
+  "repo view")
+    echo "team/nopr" ; exit 0 ;;
+  *)
+    : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host pr-url-no-match "$(complete_task_block)")"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-pbnm.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  local record_file="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$record_file" ]
+  # pr_url is the JSON null literal (not the string "null") — matches
+  # record_iteration's null-handling for empty pr_url.
+  grep -q '"pr_url":null' "$record_file"
+}
+
 @test "bin/minsky --bash-runner dispatches to bin/minsky-run.sh (Phase 7c)" {
   # Test the dispatch in isolation by extracting + sourcing only the
   # flag-parser + dispatch section of `bin/minsky`. Bypasses the
