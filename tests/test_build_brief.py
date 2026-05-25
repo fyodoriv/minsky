@@ -161,7 +161,7 @@ def test_overlay_includes_final_step_block() -> None:
 
 def test_build_brief_concatenates_task_block_and_overlay_with_separator() -> None:
     task = _pick_task_from_sample()
-    cfg = build_brief.HostConfig(host_repo="h", branch_prefix="feat/", pre_commit_command="")
+    cfg = build_brief.HostConfig(host_repo="h", branch_prefix="feat/", pre_commit_command="", default_branch="main")
     brief = build_brief.build_brief(task, cfg)
     # Section separator between task block and overlay (matches TS).
     assert "\n---\n" in brief
@@ -173,7 +173,7 @@ def test_build_brief_concatenates_task_block_and_overlay_with_separator() -> Non
 
 def test_build_brief_uses_branch_prefix_from_config() -> None:
     task = _pick_task_from_sample()
-    cfg = build_brief.HostConfig(host_repo="h", branch_prefix="agent/", pre_commit_command="")
+    cfg = build_brief.HostConfig(host_repo="h", branch_prefix="agent/", pre_commit_command="", default_branch="main")
     brief = build_brief.build_brief(task, cfg)
     assert "Branch: agent/aifn-840-slash-command-labels" in brief
 
@@ -186,6 +186,7 @@ def test_load_host_config_returns_defaults_when_no_repo_yaml(tmp_path: Path) -> 
     assert cfg.host_repo == tmp_path.name
     assert cfg.branch_prefix == "feat/"
     assert cfg.pre_commit_command == ""
+    assert cfg.default_branch == "main"
 
 
 def test_load_host_config_reads_repo_yaml(tmp_path: Path) -> None:
@@ -194,13 +195,30 @@ def test_load_host_config_reads_repo_yaml(tmp_path: Path) -> None:
     (minsky_dir / "repo.yaml").write_text(
         'host_repo: "fyodoriv/minsky"\n'
         "branch_prefix: agent/\n"
-        'pre_commit_command: "pnpm pre-pr-lint"\n',
+        'pre_commit_command: "pnpm pre-pr-lint"\n'
+        'default_branch: "master"\n',
         encoding="utf-8",
     )
     cfg = build_brief.load_host_config(tmp_path)
     assert cfg.host_repo == "fyodoriv/minsky"
     assert cfg.branch_prefix == "agent/"
     assert cfg.pre_commit_command == "pnpm pre-pr-lint"
+    assert cfg.default_branch == "master"
+
+
+def test_load_host_config_default_branch_falls_back_to_main(tmp_path: Path) -> None:
+    """When repo.yaml omits default_branch, it should default to 'main'
+    (matches the GitHub-default for new repos and the TS substrate's
+    loadRepoConfig fallback)."""
+    minsky_dir = tmp_path / ".minsky"
+    minsky_dir.mkdir()
+    (minsky_dir / "repo.yaml").write_text(
+        'host_repo: "team/repo"\n',  # no default_branch
+        encoding="utf-8",
+    )
+    cfg = build_brief.load_host_config(tmp_path)
+    assert cfg.host_repo == "team/repo"
+    assert cfg.default_branch == "main"
 
 
 def test_load_host_config_tolerates_comments_and_blank_lines(tmp_path: Path) -> None:
