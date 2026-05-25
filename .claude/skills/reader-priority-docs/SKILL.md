@@ -1,13 +1,13 @@
 ---
 name: reader-priority-docs
-description: Structure technical docs by reader priority — what a brand-new reader needs to know RIGHT NOW, not by author chronology or feature completeness. Use when writing or restructuring READMEs, getting-started guides, contributor docs, or any operator-facing markdown that a reader unfamiliar with the project will land on. Don't use for API reference docs (alphabetical/type-based order is correct there), in-code docstrings (follow language convention), or spec docs (use `spec-driven-development` instead).
+description: Structure technical docs AND pull-request descriptions by reader priority — what a cold reviewer or stranger needs to know RIGHT NOW, not the author's investigation chronology. Use when writing or restructuring READMEs, getting-started guides, contributor docs, any operator-facing markdown, and EVERY PR description / PR body the agent authors or edits. Don't use for API reference docs (alphabetical/type-based order is correct there), in-code docstrings (follow language convention), or spec docs (use `spec-driven-development` instead).
 ---
 
 # reader-priority-docs
 
 ## When to invoke
 
-Trigger phrases:
+Trigger phrases (docs):
 
 - "this doc is confusing", "wrong order", "I keep getting lost"
 - "section X is in the wrong place"
@@ -15,13 +15,29 @@ Trigger phrases:
 - "rewrite/restructure the README"
 - "what does a new reader see first?"
 
-Hard signals:
+Trigger phrases (PR descriptions — invoke EVERY time you author or edit a PR body):
+
+- "open a PR", "create a PR", "write the PR description", "update the PR body"
+- "PR is hard to read", "reviewer doesn't get it", "PR buries the lede"
+- "rewrite the PR description"
+- Implicit: ANY `gh pr create` / `gh pr edit --body*` invocation goes through this skill's PR-description section. PR descriptions ship to reviewers who are even more time-pressed than README readers; the cold-reader order is non-negotiable.
+
+Hard signals (docs):
 
 - A README that mentions maintenance / update / uninstall in the first 5 sections
 - A walkthrough that requires the reader to know a niche term defined later
 - Forward-references to tracker IDs (`P0 foo-bar`) inside the install or quick-start section
 - Total reading time >5 min for a tool README
 - An operator says they read the README and "still don't know what it does"
+
+Hard signals (PR descriptions):
+
+- The first paragraph of the PR body opens with implementation detail ("TypeScript can't catch X", "the resolver in selectFoo silently drops Y") before any sentence the reviewer could answer "what does this PR do?" from
+- The PR body opens with a numbered list of failure modes / edge cases — that's tier 3+ content
+- A reviewer who reads only the title + first sentence still doesn't know what the PR changes
+- "Why this is needed" runs >100 words and mentions internal artifacts (file paths, selector names) before the user-facing outcome
+- Screenshots / visual evidence buried below several sections of prose for a UI-affecting PR
+- Test plan or rollback content above the "what changed" summary
 
 ## When NOT to invoke
 
@@ -217,6 +233,224 @@ When ANY of those conditions fails, positioning moves OUT of the README:
 The deferral rule: **build the tool worth comparing first, then add the comparison**. Positioning is a confidence move; only make it when you can back it up. For unstable or pre-1.0 tools, the absence of a positioning section in the README is itself a signal that the team is focused on the work, not the marketing.
 
 Anti-pattern surfaced 2026-05-20 (operator review of minsky's own README): "you don't really explain what it does and go into what it competes with" — a tagline followed immediately by a competitor table, with no explanation paragraph in between, asks the reader to evaluate positioning before they understand the tool. The fix (applied in the same commit that updated this skill): remove the competitor section entirely from the README (the three conditions all failed: stability ~10-24%, M1 not yet shipped, competitors evolving weekly), restore an explanation paragraph after the tagline, and keep `competitors/` as a dedicated directory linked from "Key files".
+
+## PR descriptions — cold-reader order (IRON LAW)
+
+PRs ship to reviewers who are MORE time-pressed than README readers. A reviewer scanning a list of 12 open PRs gives each one ~8 seconds; if the title + first sentence don't deliver "what does this PR do for me as a reviewer?", they bounce and pick a friendlier-looking PR. The investigation chronology that lives in the author's head — "I noticed X, then realised Y, then dug into Z" — is the WRONG order for the body.
+
+### The PR-body cold-reader contract
+
+A reviewer opening the PR for the first time must answer these questions in this order, and the body's sections must appear in the matching order:
+
+| Reviewer question | Time budget | Where in the body |
+|---|---|---|
+| **What does this PR do?** (one-sentence summary) | 5 sec | Title + first sentence of body |
+| **Should I care? Does this affect me?** | 15 sec | TL;DR paragraph (1–3 sentences, ≤60 words) immediately after the title — before any `## section` |
+| **What does it look like?** (visual changes only) | 30 sec | Screenshot / before-after / storyshot — ABOVE the `## Why`, NOT under "How to test" |
+| **Why was this needed?** | 1 min | `## Why` — one-line problem statement first, then failure-mode list / motivation |
+| **What changed?** | 2 min | `## What changed` — high-level summary by area (Tests / UI / Storage / etc.), file paths in collapsible sub-detail if long |
+| **How do I verify it works?** | reference | `## How to test` |
+| **What if it breaks in prod?** | reference | `## Rollback` (only if there's runtime impact — test-only PRs explicitly say "no runtime change, no rollback needed") |
+| **Where's the ticket?** | reference | `## JIRA` near the bottom |
+| **Did the author check the boxes?** | reference | Checklist at the very bottom |
+
+The "TL;DR paragraph immediately after the title" is the single most load-bearing line in a PR body and is the rule violated most often. It is NOT optional. It is NOT "obvious from the title" — the title carries the conventional-commit verb and the ticket, not the WHY.
+
+### Six iron rules for PR-body order
+
+These are the load-bearing rules for PR descriptions specifically. They override the doc-tier hierarchy when they conflict.
+
+#### PR Rule 1 — TL;DR paragraph immediately after the title, before any `##`
+
+The first prose the reviewer sees must be a 1–3 sentence outcome statement. NOT a numbered list. NOT a bullet list. NOT a `## Why` section heading. Prose.
+
+> Wrong (jumps straight to the problem analysis):
+> ```
+> ## Why this is needed
+>
+> `ToolConfig.icon` is `string` (non-optional), so `tsc` rejects entries
+> missing the field. TypeScript can't reject three remaining failure modes...
+>
+> 1. `icon: ""` — empty string passes `icon: string`.
+> 2. `icon: "Emial"` — a typo or removed-icon name passes...
+> 3. An engagement type whose `order: [...]` lists a tool ID that has...
+> ```
+>
+> Right (TL;DR first, then `## Why`):
+> ```
+> Adds three runtime gates plus a Storybook visual reference that prevent a
+> Command Center tool from shipping with an invalid icon — empty string, typo,
+> or referenced-but-unregistered tool ID. Test-only PR; no runtime change.
+>
+> ## Why
+>
+> TypeScript already enforces "icon is required". It can't enforce "icon is
+> non-empty and resolves to a real generated component", or "every tool ID
+> in an engagement's order array is registered"...
+> ```
+
+The TL;DR must answer "what does this PR do?" and ideally also "what risk does it carry?" (e.g., "test-only, no runtime impact"). The reviewer should be able to assign rough urgency from the TL;DR alone.
+
+#### PR Rule 2 — Screenshot above prose for visual changes
+
+If the PR changes pixels — UI, design system, story snapshots, dashboard, generated docs site — the screenshot or before-after pair appears BETWEEN the TL;DR and the `## Why`. Not under `## How to test`. Not at the bottom under `## Screenshots`. Reviewers form their opinion from the picture first.
+
+For PRs that add a new Storybook story or storyshot, embed the baseline PNG inline near the top with one sentence of caption.
+
+For pure-backend / pure-test PRs with no visual diff, no screenshot needed — but still call that out explicitly in the TL;DR: "no UI change" / "test-only PR".
+
+#### PR Rule 3 — Inverted pyramid inside every section
+
+Each `## section` follows the same lede-then-detail order at its own scale. `## Why` opens with a one-line problem summary, then expands. `## What changed` opens with a one-line scope summary, then bullets. Never lead a section with a numbered list of edge cases — the reviewer can't tell which case is the headline.
+
+> Wrong:
+> ```
+> ## Why
+>
+> 1. `icon: ""` — empty string passes...
+> 2. `icon: "Emial"` — typo passes...
+> 3. An engagement type whose `order: [...]` lists a tool ID...
+> ```
+>
+> Right:
+> ```
+> ## Why
+>
+> TypeScript enforces "icon is required" but cannot enforce the three
+> runtime invariants that determine whether a tool actually renders.
+> The gaps:
+>
+> 1. `icon: ""` — empty string passes...
+> 2. ...
+> ```
+
+#### PR Rule 4 — Implementation detail below the user-facing outcome
+
+In `## What changed`, lead with the user-facing or reviewer-facing outcome (what the PR accomplishes), THEN list file-level changes. A bullet that opens with a file path is wrong; a bullet that opens with the outcome and ends with the file path is right.
+
+> Wrong:
+> ```
+> - `plugins/foo/src/Bar.ts` — added the `validate()` function
+> - `plugins/foo/src/Bar.spec.ts` — added 14 tests
+> ```
+>
+> Right:
+> ```
+> - **Validates Bar inputs at runtime** (added in `Bar.ts:42`, covered by
+>   14 vitest cases in `Bar.spec.ts`).
+> ```
+
+For PRs touching ≥10 files, group by area first (`### Tests` / `### Storage` / `### UI`), one paragraph of outcome per group, file paths in collapsible `<details>` blocks below.
+
+#### PR Rule 5 — Test plan and rollback come AFTER the substance, not before
+
+`## How to test` and `## Rollback` are operational/reference content. They go AFTER `## Why` and `## What changed`. A reviewer who hasn't decided whether they care about the change yet doesn't need to know which vitest project to run.
+
+The PR template's section ORDER is the source of truth — if the repo's template puts `## Why` first, follow that. Don't reorder template sections; the rule is about not adding test-plan content ABOVE the template's where-it-belongs slot.
+
+#### PR Rule 6 — Title is the tier-0 read
+
+The PR title is the first (and often ONLY) thing a reviewer sees in the PR list view, in Slack notifications, and in Jenkins build emails. It carries more weight per byte than any other prose in the PR. It must:
+
+- Use the conventional-commit format the repo enforces (`type(scope): subject TICKET-0000`)
+- Stay ≤72 characters (most repos enforce this via commitlint)
+- Capture the scope of the PR's contents — if the PR added Storybook coverage on top of vitest gates, the title should reflect both, not just the first commit's subject
+- NOT be the first commit's literal subject when the PR has grown to cover more
+
+Bad title (the first commit's subject, PR has since grown to add Storybook + JSDoc): `test(iep-ai-native): block CC tools with empty icon strings AIFN-994`
+
+Good title (reflects full PR scope): `test(iep-ai-native): vitest + storybook gates for cc icons AIFN-994`
+
+### Canonical PR-body skeleton
+
+A reader-priority PR body in order:
+
+```markdown
+<!-- Title (set via gh pr edit --title): type(scope): subject TICKET-XXX (≤72 chars) -->
+
+<TL;DR — 1-3 sentences, ≤60 words. Outcome + scope + risk class.        <!-- tier 1 -->
+Example: "Adds three runtime gates that prevent shipping a CC tool with
+an invalid icon. Test-only PR; no runtime change.">
+
+<Screenshot / before-after / storyshot — for visual changes only.       <!-- tier 2 -->
+Inline embed at full width. One sentence of caption.>
+
+## Why                                                                  <!-- tier 3 -->
+
+<One-line problem statement.>
+
+<Expanded motivation — failure modes, what TypeScript / existing tests
+can't catch, why now. Numbered list of edge cases is OK HERE, after
+the one-line summary established the headline.>
+
+## What changed                                                         <!-- tier 4 -->
+
+<One-line scope summary.>
+
+- **<User-facing outcome 1>** — implementation detail / file path.
+- **<User-facing outcome 2>** — ...
+
+(For ≥10-file PRs, group by area with `### Tests` / `### UI` sub-sections.)
+
+## How to test                                                          <!-- tier 5 -->
+
+<vitest command(s), storyshot path, manual repro steps if needed.>
+
+## Rollback                                                             <!-- tier 6 -->
+
+<"No rollback needed — no runtime change" for test-only PRs,
+or specific affected plugin(s) for runtime PRs.>
+
+## JIRA                                                                 <!-- tier 7 -->
+
+[TICKET-XXX](https://...)
+
+---
+
+### PR checklist                                                        <!-- tier 8 -->
+
+- [x] ...
+```
+
+Note what's NOT in the skeleton:
+
+- A `## Why this is needed` opening section before the TL;DR — the TL;DR IS the lede, and `## Why` follows it
+- A separate `## Screenshots` section at the bottom for visual PRs — screenshot goes above the `## Why`
+- A "Follow-ups" section at the top — those go at the very bottom or in TASKS.md
+- Long quoted ticket descriptions / Slack-thread copy-paste — link to the ticket; don't inline-quote
+- Marketing voice ("This PR ships X to enable Y" — replace with "Adds X. Y now works.")
+
+### Anti-patterns specific to PR descriptions
+
+| Red flag | Why it's wrong | Fix |
+|---|---|---|
+| **PR body opens with `## Why this is needed` followed by numbered failure modes** | No TL;DR; reviewer dropped into the problem analysis with no idea what the PR DOES | Add a 1–3 sentence TL;DR paragraph BEFORE any `## section`. State the outcome + risk class. |
+| **PR title is the first commit's literal subject after the PR has grown beyond that commit's scope** | Misleads list-view scanners; PR seems narrower than it is | Update the title via `gh pr edit --title` to reflect the FULL scope of all commits |
+| **Screenshot for a UI-affecting PR is below `## How to test`** | Visual context buried under operational detail; reviewer can't form a visual opinion in their 8-second scan | Move the screenshot to immediately after the TL;DR paragraph, before `## Why` |
+| **`## Why` leads with a numbered list of edge cases** | Reviewer can't tell which case is the headline; reads as "here are 3 problems" not "here's the unified gap we're closing" | Add a one-line problem summary before the list — `TypeScript enforces X but can't enforce Y. The gaps:` then the list |
+| **File-path-first bullets in `## What changed`** (`- plugins/foo/Bar.ts — added validate()`) | Reader has to mentally translate file paths into outcomes; the diff already shows the paths | Outcome-first bullets — `- Validates Bar inputs at runtime (Bar.ts:42, 14 tests in Bar.spec.ts)` |
+| **Long inline quote of the ticket description / Slack thread / RFC paragraph** | Bloats the body without adding signal; the reader can follow the link if they want context | Replace with a one-line summary + link. Inline-quote at most one sentence. |
+| **Marketing voice in a PR body** ("This PR ships X to enable Y", "Empowers reviewers to ...") | PR bodies are dev-to-dev communication; marketing voice signals "I'm not sure this PR stands on its own" | Replace with descriptive verbs. "Adds X. Y now works." |
+| **"Follow-ups" / "Future work" section at the TOP of the body** | Implies the PR is incomplete before the reviewer has seen the substance | Move to the very bottom. Better: file the follow-ups as TASKS.md entries in the same commit, link from the bottom of the PR body. |
+| **No risk class in the TL;DR** (reviewer can't tell if this is `test-only`, `infra change`, `production behavior change`, `revert`) | Forces the reviewer to scan the whole body just to assign rough urgency | Add one phrase to the TL;DR: "test-only, no runtime change" / "behavior change in prod for X% of users" / "revert of PR #YYY" |
+| **PR description rewrites in `## What changed` what's already in the diff** (a 30-line file-by-file enumeration when the diff has 4 files) | Duplication of the diff in prose form; the reviewer reads both and trusts neither | Outcome-first bullets at the area level; if a file enumeration is genuinely useful, put it in `<details>` collapsible |
+
+### PR-description verification checklist
+
+Before running `gh pr create` or `gh pr edit --body-file`, verify:
+
+- [ ] **TL;DR paragraph exists** — 1–3 sentences, ≤60 words, immediately after the title and before any `## section`
+- [ ] **TL;DR states the outcome and the risk class** — reviewer can tell from those sentences alone "what does this do?" and "test-only or runtime change?"
+- [ ] **Title reflects full PR scope** — not just the first commit's subject if the PR has grown
+- [ ] **Title is ≤72 chars and matches the repo's commitlint format**
+- [ ] **Screenshot / storyshot appears above `## Why`** (for visual-affecting PRs only)
+- [ ] **`## Why` opens with a one-line problem summary** — numbered failure-mode lists come AFTER that one line
+- [ ] **`## What changed` bullets are outcome-first** — no leading file paths
+- [ ] **`## How to test` and `## Rollback` come AFTER `## Why` and `## What changed`** — not before
+- [ ] **No inline quote of >1 sentence from the ticket / Slack / RFC** — replace with a one-line summary + link
+- [ ] **No marketing voice** — dev-to-dev descriptive verbs
+- [ ] **No `## Follow-ups` section above the substance** — bottom or in TASKS.md
+- [ ] **Cold-reader test passes**: a reviewer who has never seen the PR can answer (1) what does this do, (2) what's the risk class, after reading ONLY the title + TL;DR paragraph
 
 ## The procedure
 
@@ -449,3 +683,5 @@ The skill doesn't write new content — it only restructures what's already ther
 Pattern conformance: information architecture by audience priority (Krug, _Don't Make Me Think_, 2014, Ch. 2 — "the average user spends 10 seconds on a page before deciding whether to leave"); progressive disclosure (Nielsen, _Usability Engineering_, 1993); reader-driven document order (Williams, _Style: Lessons in Clarity and Grace_, 2007, Ch. 4 — "old information before new").
 
 Anti-patterns sourced from observed bugs in this repo's README (PR #648 README rewrite + PR #668 clarity pass + 2026-05-20 operator review + 2026-05-22 operator review surfacing the five iron rules — no-time-banner, no-top-navigation, taxonomy-goes-deep, why-before-what, one-section-per-topic).
+
+PR-description section sourced from 2026-05-25 operator directive: "all PRs you create or update strictly follow great useful order of info for cold readers. Eg don't spam readers with technical details until you give them an overview." Surfaced by iep-capabilities PR #2095 (https://github.intuit.com/expertnetwrk-portal/iep-capabilities/pull/2095) — agent shipped a PR body that opened with a `## Why this is needed` heading followed by a numbered list of failure modes, with no TL;DR sentence between the title and the technical analysis. Reviewer cold-read fail. The PR-body skeleton, the cold-reader contract table, and PR Rules 1–6 are the fix.
