@@ -458,7 +458,20 @@ EOF
   local verdict notes pr_url
   if [[ "$exit_code" -eq 0 ]]; then
     verdict="validated"
-    pr_url="$(grep -oE 'https://github\.com/[^[:space:]]+/pull/[0-9]+' "$stdout_log" | head -1 || true)"
+    # Parity port of `extractPrUrl` from
+    # novel/cross-repo-runner/src/runner.ts. Two bugs in the previous
+    # inline bash regex:
+    #   1. It hard-coded `github\.com`, so PR URLs printed by Example
+    #      hosts (`https://github.example.com/...`) silently never
+    #      matched — every successful Example-host iteration recorded
+    #      `pr_url=null`.
+    #   2. It used `head -1` (first match), but the TS substrate uses
+    #      LAST match — important when the agent cites a related PR
+    #      before printing the newly-created one at the end of stdout.
+    # Falls back to empty (graceful-degrade) when the script errors
+    # out or no URL is found.
+    pr_url="$(python3 "$script_dir/../scripts/extract_pr_url.py" \
+              --stdout-file "$stdout_log" 2>/dev/null || true)"
     notes="openhands exited 0; ${duration_ms}ms"
   elif [[ "$exit_code" -eq 124 ]]; then
     # GNU timeout(1) exits 124 when the watchdog fires.
