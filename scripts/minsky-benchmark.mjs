@@ -147,17 +147,25 @@ export function formatBenchmarkSummary(report) {
 }
 
 /** Run one iteration of the runner and return `{ verdict, durationMs, exitCode }`.
- *  Side-effects: spawns `node novel/cross-repo-runner/bin/minsky-run.mjs`.
+ *  Side-effects: spawns `bash bin/minsky-run.sh`.
+ *
+ *  Phase 7b (PR #878): migrated from spawning
+ *  `node novel/cross-repo-runner/bin/minsky-run.mjs --host <h> --once`
+ *  to spawning `bash bin/minsky-run.sh --host <h> --max-iterations 1
+ *  --iterations-per-host 1 [--dry-run]`. The bash skeleton is the
+ *  canonical runner; the TS spawn-path it replaced will be deleted
+ *  with `novel/cross-repo-runner/`.
+ *
  *  Pure helpers above don't depend on this — they take outcomes as input.
  *  @param {{ host: string; live: boolean }} input
  *  @returns {IterationOutcome}
  */
 function runOneIteration({ host, live }) {
-  const runnerBin = join(REPO_ROOT, "novel", "cross-repo-runner", "bin", "minsky-run.mjs");
-  const args = ["--host", host, "--once"];
-  if (!live) args.push("--no-live");
+  const runnerBin = join(REPO_ROOT, "bin", "minsky-run.sh");
+  const args = ["--host", host, "--max-iterations", "1", "--iterations-per-host", "1"];
+  if (!live) args.push("--dry-run");
   const t0 = Date.now();
-  const result = spawnSync("node", [runnerBin, ...args], {
+  const result = spawnSync("bash", [runnerBin, ...args], {
     encoding: "utf8",
     timeout: 120_000,
     env: { ...process.env, MINSKY_NON_INTERACTIVE: "1" },
