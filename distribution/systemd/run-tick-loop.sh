@@ -105,12 +105,27 @@ export PATH
 
 # Optional env-var → CLI arg mapping. The CLI itself accepts the same
 # flags directly, so explicit args (passed by the operator) override.
+#
+# Phase-11b step 5 (2026-05-25): the exec target flipped from
+# `node novel/tick-loop/bin/tick-loop.mjs` to
+# `bash ${MINSKY_HOME}/bin/minsky-run.sh --host ${MINSKY_HOME}`. The bash
+# skeleton has no in-process tick interval (the TS daemon's 5-min
+# `--tick-interval-ms` is dropped); cadence is "as fast as one iteration
+# takes" with launchd's `ThrottleInterval=5` respawning between batches.
+# `MINSKY_TICK_INTERVAL_MS` is now a no-op until a `--tick-interval-ms`
+# flag is added to the bash skeleton (P3 follow-up if cadence proves
+# too aggressive in production). `MINSKY_TICK_MAX_ITERATIONS` maps
+# directly to bash's `--max-iterations`. `MINSKY_TICK_DRY_RUN=1` maps
+# to bash's `--dry-run` flag.
 EXTRA_ARGS=()
 if [[ -n "${MINSKY_TICK_INTERVAL_MS:-}" ]]; then
-  EXTRA_ARGS+=("--tick-interval-ms=${MINSKY_TICK_INTERVAL_MS}")
+  printf 'run-tick-loop: MINSKY_TICK_INTERVAL_MS=%s is currently a no-op (bash skeleton has no in-process sleep; launchd ThrottleInterval governs cadence). Filed as P3 if you need this.\n' "${MINSKY_TICK_INTERVAL_MS}" >&2
 fi
 if [[ -n "${MINSKY_TICK_MAX_ITERATIONS:-}" ]]; then
-  EXTRA_ARGS+=("--max-iterations=${MINSKY_TICK_MAX_ITERATIONS}")
+  EXTRA_ARGS+=("--max-iterations" "${MINSKY_TICK_MAX_ITERATIONS}")
+fi
+if [[ "${MINSKY_TICK_DRY_RUN:-}" == "1" || "${MINSKY_TICK_DRY_RUN:-}" == "true" ]]; then
+  EXTRA_ARGS+=("--dry-run")
 fi
 
 # `MINSKY_TICK_DRY_RUN` (read by the CLI directly) is the env-var control
@@ -157,4 +172,16 @@ fi
 # above). The `+"${EXTRA_ARGS[@]}"` parameter-substitution form expands
 # to nothing when the array is unset/empty and to the array contents
 # otherwise — portable across bash 3 (macOS default) and bash 5 (Linux).
-exec node "${MINSKY_HOME}/novel/tick-loop/bin/tick-loop.mjs" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} "$@"
+#
+# Phase-11b step 5 (2026-05-25): exec target flipped from
+# `node novel/tick-loop/bin/tick-loop.mjs` (the TS daemon's main entry,
+# being deleted in step 8) to `bash bin/minsky-run.sh` (the canonical
+# bash skeleton; see vision.md § 16). The `--host ${MINSKY_HOME}`
+# arg pins the bash walker to the Minsky-on-itself host — the same
+# single-host scope the TS daemon implicitly had. launchd's
+# `KeepAlive=true` respawns the bash skeleton after each iteration
+# batch exits (typical tick: process N hosts → exit → ThrottleInterval
+# 5s → respawn). The TS daemon's in-process 5-min sleep is gone; if
+# cadence proves too aggressive, file
+# `bash-skeleton-tick-interval-ms-flag` (P3).
+exec bash "${MINSKY_HOME}/bin/minsky-run.sh" --host "${MINSKY_HOME}" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} "$@"
