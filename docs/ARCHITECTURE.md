@@ -330,7 +330,7 @@ Pin major versions of all dependencies. Test integration on every dep update. Th
 Currently pinned (index — pins live in `package.json` / `.github/workflows/*.yml`; this list is the *index*, not a duplicate state):
 
 - `@tasks-md/lint@^0.7.0` — `.github/workflows/ci.yml:39` (per PR #44)
-- `markdownlint-cli2@0.15.0` — `.github/workflows/ci.yml:27` + `package.json:29` (per PR #44)
+- `markdownlint-cli2@0.22.1` — pinned in `package.json` devDependencies + `pnpm-lock.yaml`; both CI (`.github/workflows/ci.yml` markdownlint job) and local (`pnpm lint:md` script invoked by `scripts/run-pre-pr-lint-stack.mjs`) resolve to the same binary via `pnpm exec`. Previously drifted: CI hardcoded `npx -y markdownlint-cli2@0.15.0` while local used 0.22.1 — fixed in PR `fix/markdownlint-version-parity-ci-vs-local`.
 - `lighthouse@12.4.0` — `.github/workflows/lighthouse.yml:108` (per PR #66)
 - `@anthropic-ai/sdk@^0.92.0` — `novel/adapters/prompt-optimizer/package.json` (per PR #55)
 - `@opentelemetry/core@^1.30.0` — `novel/adapters/observability/package.json` (per PR #62)
