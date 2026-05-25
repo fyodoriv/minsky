@@ -1,3 +1,4 @@
+// <!-- scope: human-approved phase-7b-delete-cross-repo-runner-multistep step 3 — ports the cloud-agent matrix data + resolver out of `novel/cross-repo-runner/src/agent-config.ts` (deletion target) to `scripts/lib/` (canonical home). Not a new public artefact; the original at `novel/cross-repo-runner/src/agent-config.ts` is the equivalent surface. -->
 // Per-machine cloud-agent matrix and resolver — the source-of-truth
 // data table for which agent runtimes Minsky supports and how each
 // expects its brief delivered.

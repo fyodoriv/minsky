@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved phase-7b-delete-cross-repo-runner-multistep step 3 — ports the existing audit lint out of `novel/cross-repo-runner/test/` (deletion target) to `scripts/` (canonical home). Not a new public artefact; the original at `novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.mjs` is the equivalent surface. -->
 // Audit-matrix lint for the cloud-agent contract — proves the 4-agent
 // matrix contract is in place AND openhands is the canonical default.
 //

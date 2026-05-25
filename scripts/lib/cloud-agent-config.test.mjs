@@ -1,3 +1,4 @@
+// <!-- scope: human-approved phase-7b-delete-cross-repo-runner-multistep step 3 — paired tests for the ported `cloud-agent-config.mjs` module. Not a new public artefact; the original at `novel/cross-repo-runner/src/agent-config.test.ts` is the equivalent surface. -->
 // Tests for the per-machine cloud-agent matrix and resolver. xUnit
 // paired fixtures (Meszaros 2007).
 //
