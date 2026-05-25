@@ -614,15 +614,18 @@ export const STACK_MANIFEST = Object.freeze([
     // The 4-agent cloud-agent contract lint referenced by
     // `add-openhands-as-pluggable-backend` § Measurement. Standalone
     // node script (not vitest) so the lint can run pre-build against
-    // the published AGENT_MATRIX in `novel/cross-repo-runner/dist/
-    // agent-config.js`. Self-flips on 2026-06-01: pre-release the lint
-    // asserts openhands.pendingExternalDep === "2026-06-01"; post-
-    // release it asserts === null, refusing to be green during the
-    // operator's required flip-the-flag transition.
+    // the published AGENT_MATRIX. As of PR #879 (phase-7b step 3) the
+    // source-of-truth lives at `scripts/lib/cloud-agent-config.mjs`
+    // (ported from the deleted `novel/cross-repo-runner/src/
+    // agent-config.ts`); the lint asserts the post-integration steady
+    // state — openhands is row 0, all four rows have
+    // pendingExternalDep === null, brief-file is the delivery shape
+    // for openhands. Date-flip logic was removed when the 2026-06-01
+    // gate lifted on 2026-05-24.
     name: "cloud-agent-config-audit-matrix",
     stages: ["fast", "full"],
     cmd: "node",
-    args: ["novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.mjs"],
+    args: ["scripts/cloud-agent-config-audit-matrix-lint.mjs"],
   },
   {
     name: "security-docs-cohesion",
