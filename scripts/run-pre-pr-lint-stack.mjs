@@ -178,6 +178,7 @@ export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
     ["maciek-smoke", "pipx Python install"],
     ["pr-self-grade", "PR body context (`## Hypothesis self-grade`)"],
     ["pr-security-review", "PR body context (`## Security & privacy` or typed opt-out)"],
+    ["pr-vision-trace", "PR body context (`## Vision trace` block)"],
     [
       "fresh-clone-smoke",
       "destroys `novel/tick-loop/dist/` (simulates stale-build path); runs in `.github/workflows/fresh-clone.yml`, not `ci.yml` — can't replicate locally without wiping the build",
@@ -293,6 +294,11 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
     new Set(["linux-supervisor-integration", "macos-supervisor-integration"]),
   ),
   prOnlySkippable: Object.freeze(
+    // Note: `pr-vision-trace` is body-aware but lives in its own workflow
+    // (.github/workflows/pr-vision-trace.yml), not in ci.yml's `ci:` aggregator
+    // `needs:` list. So it appears in `CI_ENV_DEPENDENT_JOBS` (the body-checks
+    // allowlist that lifts it into the local stack via appendBodyChecks) but
+    // NOT in any bash-gate bucket — bash buckets are scoped to the aggregator.
     new Set(["pr-self-grade", "pr-security-review", "pattern-index", "skill-rule-cap"]),
   ),
 });
@@ -1028,19 +1034,29 @@ export function resolveBodyPath(explicit, fileExists, repoRoot) {
 }
 
 /**
- * Append the two body-only checks (`pr-self-grade`, `pr-security-review`) to
- * the manifest when the operator passes `--body=<path>`. Both checks live in
- * `CI_ENV_DEPENDENT_JOBS` because in CI they read from the GitHub PR body —
- * the daemon's gate has no PR body until `gh pr create` has run, but the
- * draft-body file the daemon writes BEFORE `gh pr create -F <file>` is
- * exactly the input these scripts already accept (both their `main()` reads
- * `process.argv[2]` as a path). Surfacing both as manifest steps consolidates
- * three commands (`pnpm pre-pr-lint`, `node scripts/check-pr-self-grade.mjs`,
- * `node scripts/check-pr-security-review.mjs`) into one — one round-trip in
- * the daemon's iteration vs three, and a single retry budget instead of
- * three independent decisions about how to react to red.
+ * Append the three body-only checks (`pr-self-grade`, `pr-security-review`,
+ * `pr-vision-trace`) to the manifest when the operator passes `--body=<path>`
+ * (or the auto-discovery in `resolveBodyPath` finds an adjacent `pr-body.md`).
  *
- * Both steps participate in `fast` and `full` so the daemon's fast-stage
+ * All three checks live in `CI_ENV_DEPENDENT_JOBS` because in CI they read
+ * from the GitHub PR body — the daemon's gate has no PR body until `gh pr
+ * create` has run, but the draft-body file the daemon writes BEFORE `gh pr
+ * create -F <file>` is exactly the input these scripts already accept (each
+ * `main()` reads `process.argv[2]` as a path). Surfacing them as manifest
+ * steps consolidates four commands (`pnpm pre-pr-lint`, `node scripts/check-
+ * pr-self-grade.mjs`, `node scripts/check-pr-security-review.mjs`, `node
+ * scripts/check-pr-vision-trace.mjs`) into one — one round-trip in the
+ * daemon's iteration vs four, and a single retry budget instead of four
+ * independent decisions about how to react to red.
+ *
+ * `pr-vision-trace` was added 2026-05-25 per task `pre-pr-lint-mirror-ci-
+ * body-checks` (P1, M1) — same trip-and-fall pattern that caught PRs #863,
+ * #869, #870 (body-only edits that needed an empty `chore(ci): retrigger`
+ * commit before CI re-ran). Lifting all three body lints to the local
+ * stack closes the operator's feedback loop: see the failure in 1s, not
+ * after a 2-3 min CI round-trip.
+ *
+ * All steps participate in `fast` and `full` so the daemon's fast-stage
  * gate exercises them too — they're cheap (regex-over-body) so the ≤2 min
  * fast-stage budget is unaffected.
  *
@@ -1062,6 +1078,12 @@ export function appendBodyChecks(manifest, bodyPath) {
       stages: ["fast", "full"],
       cmd: "node",
       args: ["scripts/check-pr-security-review.mjs", bodyPath],
+    },
+    {
+      name: "pr-vision-trace",
+      stages: ["fast", "full"],
+      cmd: "node",
+      args: ["scripts/check-pr-vision-trace.mjs", bodyPath],
     },
   ]);
 }
@@ -1111,12 +1133,45 @@ export function renderJson(result) {
   return lines.join("\n");
 }
 
+/**
+ * Build the human-readable warning that prints to stderr when the operator
+ * runs `pnpm pre-pr-lint` without a body file present. Tells them which
+ * checks are skipped + how to enable. Pure helper so the test can pin the
+ * exact wording.
+ *
+ * Source: task `pre-pr-lint-mirror-ci-body-checks` (P1, M1) — observed
+ * 2026-05-25 across PRs #863, #869, #870. Without this warning the
+ * operator has no visibility that 3 CI gates won't run locally, and
+ * silently ships PRs with body-shape failures that only surface in CI.
+ *
+ * @returns {string}
+ */
+export function buildSkippedBodyChecksWarning() {
+  return [
+    "[pre-pr-lint] note — no pr-body.md found, skipping these CI gates locally:",
+    "             - pr-self-grade   (Predicted/Observed/Match/Lesson)",
+    "             - pr-security-review (## Security & privacy section / typed opt-out)",
+    "             - pr-vision-trace (## Vision trace block)",
+    "             Run `pnpm pre-pr-lint --body=<path/to/body.md>` (or drop the file at",
+    "             ./pr-body.md) for full local coverage. CI will still run them.",
+  ].join("\n");
+}
+
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   const diffBase = resolveDiffBase();
   const resolved = withResolvedDiffBase(STACK_MANIFEST, diffBase);
   const body = resolveBodyPath(parsed.body, existsSync, REPO_ROOT);
   const manifest = body === undefined ? resolved : appendBodyChecks(resolved, body);
+  if (body === undefined && !parsed.json) {
+    // One-line warning so the operator sees the gap. Stays on stderr so
+    // it doesn't pollute the renderHuman output the CI parses.
+    // Suppressed in JSON mode because the daemon pipes the JSON to
+    // structured downstream code (rule #2 — one canonical render
+    // surface per consumer). Operator pre-PR runs are human-mode by
+    // default and benefit from the visibility.
+    process.stderr.write(`${buildSkippedBodyChecksWarning()}\n`);
+  }
   const result = await runStack(parsed.stage, defaultRunStep, manifest);
   process.stdout.write(`${parsed.json ? renderJson(result) : renderHuman(result)}\n`);
   process.exit(result.allPass ? 0 : 1);
