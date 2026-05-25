@@ -67,3 +67,9 @@ tmp/
 # Use `gh pr create --body "$(cat <<'EOF' ...` directly instead of leaving
 # pr-body.md sitting at root.
 pr-body.md
+
+# pytest's local cache. Created on first `uv run --with pytest pytest`,
+# never committed. Auto-generated `.pytest_cache/README.md` would
+# otherwise be linted by `pnpm lint:md` against the markdownlint atx-
+# heading rule and fail — but the file is pytest's, not ours.
+.pytest_cache/
