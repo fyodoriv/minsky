@@ -29,6 +29,7 @@ case-sensitive first, then case-insensitive substring on title.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from dataclasses import dataclass, field
@@ -197,27 +198,146 @@ def is_not_blocked(task: ParsedTask) -> bool:
     return task.blocked is None or task.blocked.strip() == ""
 
 
+# --- Duplicate-PR detection (parity port of decideDuplicate) ---------------
+# Parity port of `novel/tick-loop/src/duplicate-pr-detector.ts` (`decideDuplicate`
+# + `prTitleNamesTask`). Closes the daemon-duplicate-work-detection gap in
+# the bash runner: branch-based detection (`open_pr_branches` above) only
+# catches `feat/<id>` shapes and only OPEN PRs. Title-based detection
+# catches daemon-authored close-out PRs (`daemon/<id>/<task-id>-...`
+# timestamps) AND merged-recently PRs (re-creation guard).
+
+# Matches the TS regex: word-boundary around the task ID, accepting
+# common separators (space, colon, paren, bracket, slash). The daemon's
+# commit convention `feat(<task-id>): …` always trips this; a title
+# that just mentions the ID in prose also matches (conservative).
+_TASK_ID_BOUNDARY = re.compile(r"[\s:()/\[\]]")
+
+
+def pr_title_names_task(title: str, task_id: str) -> bool:
+    """True when `title` contains `task_id` as a whole token."""
+    if not title or not task_id:
+        return False
+    if task_id not in title:
+        return False
+    # Whole-token check: chars before/after the match must be word
+    # boundaries (start/end of string or a separator char).
+    idx = title.find(task_id)
+    while idx != -1:
+        before_ok = idx == 0 or bool(_TASK_ID_BOUNDARY.match(title[idx - 1]))
+        end = idx + len(task_id)
+        after_ok = end == len(title) or bool(_TASK_ID_BOUNDARY.match(title[end]))
+        if before_ok and after_ok:
+            return True
+        idx = title.find(task_id, idx + 1)
+    return False
+
+
+def decide_duplicate(
+    task_id: str,
+    prs: Iterable[dict],
+    *,
+    now_ms: int | None = None,
+    recent_merged_window_days: int = 7,
+) -> dict | None:
+    """Pure decision: should the daemon open a new PR for `task_id`?
+
+    Parity contract: matches `decideDuplicate` in
+    `novel/tick-loop/src/duplicate-pr-detector.ts`.
+
+    `prs` is an iterable of dicts with `number`, `title`, `state`, and
+    optional `closedAt` keys — the shape `gh pr list --json
+    number,title,state,closedAt` emits, and what `parse_gh_pr_list`
+    below produces from that JSON.
+
+    Returns:
+        - None when no matching PR (clear to open)
+        - {"kind": "open", "pr_number": N} when a matching OPEN PR exists
+        - {"kind": "merged-recent", "pr_number": N, "days_ago": float}
+          when a matching MERGED PR closed within the window
+    """
+    import time
+
+    matching = [p for p in prs if pr_title_names_task(p.get("title", ""), task_id)]
+    if not matching:
+        return None
+    open_pr = next((p for p in matching if p.get("state") == "OPEN"), None)
+    if open_pr is not None:
+        return {"kind": "open", "pr_number": open_pr["number"]}
+    # No open match; look for merged-recent
+    now = now_ms if now_ms is not None else int(time.time() * 1000)
+    merged = [
+        p
+        for p in matching
+        if p.get("state") == "MERGED" and p.get("closedAt")
+    ]
+    if not merged:
+        return None
+    # Pick most recent merge (smallest days_ago)
+    best: dict | None = None
+    for p in merged:
+        try:
+            ts_ms = _parse_iso_to_ms(p["closedAt"])
+        except (ValueError, TypeError):
+            continue
+        days_ago = (now - ts_ms) / (24 * 3_600_000)
+        if best is None or days_ago < best["days_ago"]:
+            best = {"pr_number": p["number"], "days_ago": days_ago}
+    if best is None or best["days_ago"] > recent_merged_window_days:
+        return None
+    return {"kind": "merged-recent", "pr_number": best["pr_number"], "days_ago": best["days_ago"]}
+
+
+def _parse_iso_to_ms(iso: str) -> int:
+    """Parse an ISO-8601 timestamp string into epoch milliseconds.
+
+    Tolerates the `Z` suffix that `gh pr list --json closedAt` emits
+    (Python's `datetime.fromisoformat` rejected `Z` pre-3.11; this
+    normalises to the equivalent `+00:00` so both shapes parse).
+    """
+    from datetime import datetime
+
+    s = iso.replace("Z", "+00:00") if iso.endswith("Z") else iso
+    return int(datetime.fromisoformat(s).timestamp() * 1000)
+
+
 def pick_host_task(
     content: str,
     open_pr_branches: Iterable[str] = (),
     branch_prefix: str = "feat/",
     skip_task_ids: Iterable[str] = (),
+    all_prs: Iterable[dict] | None = None,
 ) -> ParsedTask | None:
     """Top-priority unclaimed rule-#9-compliant task across P0 then P1.
 
-    Parity contract: matches `pickHostTask` in task-finder.ts.
+    Parity contract: matches `pickHostTask` in task-finder.ts; the
+    `all_prs` parameter is the title-based duplicate-PR filter added
+    2026-05-25 (parity with `decideDuplicate` in the TS substrate).
+
+    `all_prs` (optional): full PR snapshot list with `state`/`title`/
+    `closedAt` keys. When supplied, tasks with a matching open OR
+    merged-recently (≤7d) PR by title are filtered out. When omitted,
+    only the branch-based filter applies (back-compat with callers
+    that haven't wired the broader PR fetch yet).
     """
     open_branches = set(open_pr_branches)
     skip_ids = set(skip_task_ids)
+    pr_snapshots = list(all_prs) if all_prs is not None else None
     tasks = parse_tasks_md(content)
-    eligible = [
-        t for t in tasks
-        if is_rule_9_compliant(t)
-        and is_not_blocked(t)
-        and t.id is not None
-        and f"{branch_prefix}{t.id}" not in open_branches
-        and t.id not in skip_ids
-    ]
+    eligible = []
+    for t in tasks:
+        if not is_rule_9_compliant(t):
+            continue
+        if not is_not_blocked(t):
+            continue
+        if t.id is None:
+            continue
+        if f"{branch_prefix}{t.id}" in open_branches:
+            continue
+        if t.id in skip_ids:
+            continue
+        if pr_snapshots is not None and decide_duplicate(t.id, pr_snapshots) is not None:
+            continue
+        eligible.append(t)
     for priority in PRIORITY_ORDER:
         for task in eligible:
             if task.priority == priority:
@@ -272,14 +392,18 @@ def find_task(content: str, query: str) -> FindTaskResult:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("usage: pick_task.py <path-to-TASKS.md> [--branch-prefix=feat/]"
-              " [--open-pr-branches=<csv>] [--skip-task-ids=<csv>] [--find=<query>]",
-              file=sys.stderr)
+        print(
+            "usage: pick_task.py <path-to-TASKS.md> [--branch-prefix=feat/]"
+            " [--open-pr-branches=<csv>] [--skip-task-ids=<csv>]"
+            " [--all-prs-json=<path>] [--find=<query>]",
+            file=sys.stderr,
+        )
         return 2
     path = Path(argv[1])
     branch_prefix = "feat/"
     open_pr_branches: list[str] = []
     skip_task_ids: list[str] = []
+    all_prs: list[dict] | None = None
     find_query: str | None = None
     for arg in argv[2:]:
         if arg.startswith("--branch-prefix="):
@@ -288,6 +412,28 @@ def main(argv: list[str]) -> int:
             open_pr_branches = [s for s in arg.split("=", 1)[1].split(",") if s]
         elif arg.startswith("--skip-task-ids="):
             skip_task_ids = [s for s in arg.split("=", 1)[1].split(",") if s]
+        elif arg.startswith("--all-prs-json="):
+            # Path to a JSON file containing the output of
+            # `gh pr list --state all --json number,title,state,closedAt`.
+            # Enables the title-based duplicate-PR filter on top of the
+            # branch-based one — closes the parity gap with the TS
+            # `decideDuplicate` substrate (PR #309, TASKS.md
+            # `daemon-duplicate-work-detection`). Missing/unreadable file
+            # is non-fatal: degrade to branch-only filtering (rule #6 —
+            # the watchdog must not crash the loop on a transient `gh`
+            # outage).
+            prs_path = Path(arg.split("=", 1)[1])
+            try:
+                all_prs = json.loads(prs_path.read_text(encoding="utf-8"))
+                if not isinstance(all_prs, list):
+                    print(
+                        f"--all-prs-json: expected JSON array, got {type(all_prs).__name__}",
+                        file=sys.stderr,
+                    )
+                    all_prs = None
+            except (OSError, ValueError) as e:
+                print(f"--all-prs-json: read failed ({e}); falling back to branch-only filter", file=sys.stderr)
+                all_prs = None
         elif arg.startswith("--find="):
             find_query = arg.split("=", 1)[1]
         else:
@@ -311,6 +457,7 @@ def main(argv: list[str]) -> int:
         open_pr_branches=open_pr_branches,
         branch_prefix=branch_prefix,
         skip_task_ids=skip_task_ids,
+        all_prs=all_prs,
     )
     if chosen is not None and chosen.id is not None:
         print(chosen.id)
