@@ -39,7 +39,7 @@
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
     "dogfood": "./setup.sh --dogfood",
     "dogfood:doctor": "./setup.sh --doctor",
-    "minsky": "node novel/tick-loop/bin/minsky.mjs",
+    "minsky": "bash bin/minsky",
     "dogfood:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
     "dogfood:logs": "tail -F .minsky/tick-loop.out.log .minsky/tick-loop.err.log",
     "dogfood:status": "launchctl list 2>/dev/null | grep -i minsky || systemctl --user status minsky-supervisor.target 2>/dev/null",
