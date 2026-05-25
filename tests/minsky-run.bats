@@ -1856,3 +1856,237 @@ EOF
   [ "$(wc -l < "$host_a/.minsky/experiment-store/cross-repo/task-a.jsonl" | tr -d ' ')" = "2" ]
   [ "$(wc -l < "$host_b/.minsky/experiment-store/cross-repo/task-b.jsonl" | tr -d ' ')" = "2" ]
 }
+
+# --- CTO audit on drain (PR #856 slice 2) ---------------------------------
+
+@test "CTO audit fires on drain when MINSKY_CTO_AUDIT_ON_DRAIN=1 (opt-in)" {
+  # Parity port slice 2 of TS host-cto-audit.ts § runHostCtoAudit
+  # (queue-empty trigger). When all hosts are drained AND the operator
+  # opted in, the daemon spawns a CTO-mode agent session via the same
+  # spawn_agent.py dispatcher used by regular iterations. The brief
+  # builder is scripts/build_cto_brief.py (PR #856).
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  brief_dump="$TMPDIR_TEST/cto-brief-dump.md"
+  # Fake openhands: captures the brief content so we can assert it's
+  # the CTO brief (not the regular iteration brief).
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --task-file) cp "\$2" "$brief_dump" 2>/dev/null || true; shift 2 ;;
+    *) shift ;;
+  esac
+done
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+  # gh stub: pr list returns empty (no audit PR found via backstop);
+  # repo view returns the host repo name.
+  cat > "$shim_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr list") echo "" ; exit 0 ;;
+  "repo view") echo "test-org/audit-host" ; exit 0 ;;
+  *) : ; exit 0 ;;
+esac
+EOF
+  chmod +x "$shim_dir/gh"
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  # Empty TASKS.md to force drain (no eligible tasks across all hosts).
+  local dir="$HOSTS_DIR/drained-host"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  echo "# Tasks" > "$dir/TASKS.md"
+  mkdir -p "$dir/.minsky"
+  cat > "$dir/.minsky/repo.yaml" <<EOF
+host_repo: "test-org/audit-host"
+default_branch: "main"
+EOF
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+export MINSKY_CTO_AUDIT_ON_DRAIN=1
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-cto.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/build_cto_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_cto_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # The CTO brief reached the agent — proves the trigger fired.
+  [ -f "$brief_dump" ]
+  grep -q "Queue-empty seed audit" "$brief_dump"
+  grep -q "audit/" "$brief_dump"
+  grep -q "test-org/audit-host" "$brief_dump"
+  # The audit was recorded in the experiment-store ledger.
+  local audit_log
+  audit_log="$dir/.minsky/experiment-store/cross-repo/host-cto-audit-$(date -u +%Y-%m-%d).jsonl"
+  [ -f "$audit_log" ]
+  grep -q '"experiment_id":"host-cto-audit-' "$audit_log"
+  grep -q '"verdict":"validated"' "$audit_log"
+  grep -q '"notes":"cto-audit; exit 0"' "$audit_log"
+}
+
+@test "CTO audit is skipped by default (opt-out preserved when MINSKY_CTO_AUDIT_ON_DRAIN is unset)" {
+  # Default behavior: NO auto-audit on drain. Operator must explicitly
+  # set MINSKY_CTO_AUDIT_ON_DRAIN=1 to enable. This preserves the
+  # legacy behavior + respects LLM cost discipline.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  # If the audit fires unexpectedly, the openhands binary will be
+  # invoked. We track invocation via a sentinel.
+  sentinel="$TMPDIR_TEST/openhands-WAS-invoked.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+echo "OPENHANDS_INVOKED_UNEXPECTEDLY" > "$sentinel"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  local dir="$HOSTS_DIR/drained-host"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  echo "# Tasks" > "$dir/TASKS.md"
+  mkdir -p "$dir/.minsky"
+  cat > "$dir/.minsky/repo.yaml" <<EOF
+host_repo: "test-org/no-audit-host"
+default_branch: "main"
+EOF
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+# MINSKY_CTO_AUDIT_ON_DRAIN NOT set — default OFF.
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-nocto.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/build_cto_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_cto_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # Sentinel MUST NOT exist — openhands wasn't invoked.
+  [ ! -f "$sentinel" ]
+}
+
+@test "CTO audit is skipped in --dry-run mode (no real spawn during planning)" {
+  # Even when opted-in, --dry-run mode skips the audit. Dry-run is for
+  # planning only; spawning a real LLM session contradicts that intent.
+  shim_dir="$TMPDIR_TEST/shim-bin"
+  mkdir -p "$shim_dir"
+  sentinel="$TMPDIR_TEST/openhands-WAS-invoked.txt"
+  cat > "$shim_dir/openhands" <<EOF
+#!/usr/bin/env bash
+echo "OPENHANDS_INVOKED_UNEXPECTEDLY" > "$sentinel"
+exit 0
+EOF
+  chmod +x "$shim_dir/openhands"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  local dir="$HOSTS_DIR/drained-host"
+  mkdir -p "$dir"
+  (cd "$dir" && git init -q && git config user.email "t@t" && git config user.name "t")
+  echo "# Tasks" > "$dir/TASKS.md"
+  mkdir -p "$dir/.minsky"
+  echo 'host_repo: "x/y"' > "$dir/.minsky/repo.yaml"
+
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$shim_dir:\$PATH"
+export MINSKY_CTO_AUDIT_ON_DRAIN=1
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-dry.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/build_cto_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_cto_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # Even with opt-in env var, --dry-run gates out the audit.
+  [ ! -f "$sentinel" ]
+}

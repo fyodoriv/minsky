@@ -254,6 +254,12 @@ dump_all_prs_json() {
 # in turn (round-robin fairness), stops at $MAX_ITERATIONS if set.
 
 ITER_COUNT=0
+# Counts only iterations that returned 0 from iterate_host — i.e. ones
+# that picked a task and spawned (or planned in dry-run). Aborted
+# iterations (no eligible task) do NOT increment this counter. Used by
+# the post-walk CTO audit trigger: if zero successful iterations
+# occurred AND >0 hosts were visited, the queue is drained.
+COMPLETED_COUNT=0
 
 walk_hosts() {
   invariant_hosts_dir_readable
@@ -293,10 +299,36 @@ walk_hosts() {
       # Break the inner loop when the host has no eligible task — no
       # point burning N round-robin slots emitting "aborted" records;
       # move to the next host. Matches host-walker.ts behaviour.
-      iterate_host "$host" "$n" || { ITER_COUNT=$((ITER_COUNT + 1)); break; }
+      if iterate_host "$host" "$n"; then
+        COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
+      else
+        ITER_COUNT=$((ITER_COUNT + 1))
+        break
+      fi
       ITER_COUNT=$((ITER_COUNT + 1))
     done
   done
+
+  # CTO audit on drain (parity port slice 2 — wires PR #856's
+  # `scripts/build_cto_brief.py` into the bash runner's drain path).
+  # When zero successful iterations occurred across all hosts AND the
+  # operator opted in via `MINSKY_CTO_AUDIT_ON_DRAIN=1`, spawn a
+  # CTO-mode agent session on the first host. The agent reviews
+  # recent state and proposes new high-leverage tasks via a PR.
+  # The next daemon respawn picks them up.
+  #
+  # Default: NO auto-audit (preserves current behavior). LLM cost
+  # discipline is the gate — opt-in by setting the env var.
+  #
+  # Parity reference: novel/cross-repo-runner/src/host-cto-audit.ts §
+  # runHostCtoAudit (queue-empty trigger path). The bash runner only
+  # implements the queue-empty path; the post-iteration trigger
+  # (audit after every successful iteration) is deferred — it doubles
+  # iteration cost and the operator may not want that by default.
+  if [[ "$COMPLETED_COUNT" -eq 0 && "${MINSKY_CTO_AUDIT_ON_DRAIN:-0}" == "1" && "$DRY_RUN" != "1" ]]; then
+    echo "all hosts drained; running CTO audit on first host (opt-in MINSKY_CTO_AUDIT_ON_DRAIN=1)" >&2
+    cto_audit_host "${hosts[0]}"
+  fi
 }
 
 # --- Restart sentinel ------------------------------------------------------
@@ -615,6 +647,107 @@ print(load_host_config(Path('$host')).default_branch)
 
   rm -f "$brief_file" "$stdout_log"
   record_iteration "$host" "$iter_n" "$task_id" "$branch" "$verdict" "$pr_url" "$notes" "$gh_host"
+}
+
+# --- 5b. CTO audit (queue-empty trigger) -----------------------------------
+# Parity port slice 2 of `novel/cross-repo-runner/src/host-cto-audit.ts §
+# runHostCtoAudit`. Wires `scripts/build_cto_brief.py` (PR #856) into a
+# real agent spawn when the daemon's queue drains. The spawned agent
+# reads the brief, looks at host state, and opens a PR proposing 1–3
+# new tasks. On the next daemon respawn, those tasks get picked up.
+# That's the self-improvement loop the operator brief asks for.
+
+cto_audit_host() {
+  local host="$1"
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  local utc_date
+  utc_date="$(date -u +%Y-%m-%d)"
+
+  # Resolve host_repo via build_brief.load_host_config (consistent with
+  # the iteration brief's path). Falls back to basename if repo.yaml
+  # is missing — same graceful-degrade as the iteration path.
+  local host_repo
+  host_repo="$(python3 -c "
+import sys
+sys.path.insert(0, '$script_dir/../scripts')
+from build_brief import load_host_config
+from pathlib import Path
+print(load_host_config(Path('$host')).host_repo)
+" 2>/dev/null || basename "$host")"
+
+  # Build the CTO brief. Queue-empty trigger means no completed task
+  # and no PR URL — the agent gets a "seed audit" prompt.
+  local audit_brief
+  audit_brief="$(mktemp -t minsky-cto-brief.XXXXXX)"
+  if ! python3 "$script_dir/../scripts/build_cto_brief.py" \
+      --host-repo "$host_repo" \
+      --host-root "$host" \
+      --reason queue-empty \
+      --utc-date "$utc_date" \
+      > "$audit_brief" 2>/dev/null; then
+    echo "WARN: build_cto_brief.py failed for $host (skipping audit)" >&2
+    rm -f "$audit_brief"
+    return 0
+  fi
+
+  # Audit identifiers (parity with TS substrate naming):
+  local audit_task_id="host-cto-audit-${utc_date}"
+  local audit_branch="audit/${utc_date}-cross-repo-seed"
+
+  # Resolve GH_HOST + model — same plumbing as iterate_host.
+  local gh_host
+  gh_host="$(resolve_gh_host_for "$host")"
+  local model
+  model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
+
+  # Same env vars as a regular iteration so the agent's host-side
+  # rule lints work (parity port from PR #853).
+  local -x MINSKY_HOST_ROOT="$host/.minsky"
+  local -x MINSKY_TASK_ID="$audit_task_id"
+  local -x MINSKY_BRANCH_NAME="$audit_branch"
+
+  # No watchdog wrapping — CTO audits are slower (look at full repo
+  # context) and a watchdog kill mid-audit would leave the agent's
+  # work-in-progress on disk. The operator can ^C to stop. The audit
+  # is opt-in anyway (MINSKY_CTO_AUDIT_ON_DRAIN=1).
+  local audit_log
+  audit_log="$host/.minsky/cto-audit-${utc_date}.log"
+  mkdir -p "$(dirname "$audit_log")"
+
+  local audit_exit=0
+  python3 "$script_dir/../scripts/spawn_agent.py" \
+    --brief-file "$audit_brief" \
+    --repo "$host" \
+    --model "$model" \
+    >"$audit_log" 2>&1 || audit_exit=$?
+
+  rm -f "$audit_brief"
+
+  # Record the audit as an iteration so it appears in the experiment-
+  # store ledger alongside normal iterations. Verdict = "validated"
+  # when audit exited 0; "spawn-failed" otherwise. PR URL captured
+  # via the same extract+backstop cascade as regular iterations.
+  local pr_url=""
+  local verdict notes
+  if [[ "$audit_exit" -eq 0 ]]; then
+    verdict="validated"
+    pr_url="$(python3 "$script_dir/../scripts/extract_pr_url.py" \
+              --stdout-file "$audit_log" 2>/dev/null || true)"
+    # gh-backstop: query for an audit PR matching the audit branch.
+    if [[ -z "$pr_url" ]]; then
+      pr_url="$(_gh_in_host "$host" "$gh_host" pr list \
+                  --head "$audit_branch" --state open \
+                  --json url --jq '.[0].url // ""' 2>/dev/null || true)"
+    fi
+    notes="cto-audit; exit 0"
+  else
+    verdict="spawn-failed"
+    notes="cto-audit; exit $audit_exit"
+  fi
+
+  record_iteration "$host" 0 "$audit_task_id" "$audit_branch" \
+    "$verdict" "$pr_url" "$notes" "$gh_host"
 }
 
 # --- 6. Iteration record (JSONL ledger) -------------------------------------
