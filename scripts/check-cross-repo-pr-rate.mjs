@@ -8,7 +8,7 @@
 // ------------
 // Reads every JSONL line from `<host-dir>/.minsky/experiment-store/cross-repo/*.jsonl`,
 // filters to the rolling window (default 30d), calls the pure
-// `computeShipRate` exported from `novel/cross-repo-runner/dist/iteration-ship-rate.js`,
+// `computeShipRate` exported from `scripts/lib/iteration-ship-rate.mjs`,
 // and prints a single-line JSON verdict on stdout.
 //
 // Exit codes:
@@ -55,12 +55,13 @@ import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-// Phase 7b: import from the local in-scripts port at
-// scripts/lib/iteration-ship-rate.mjs instead of
-// novel/cross-repo-runner/dist/. The Python equivalent at
-// scripts/iteration_ship_rate.py carries the same pre-registered
-// thresholds for bash-callable code paths; both share constants and a
-// threshold edit must land in both files in the same PR.
+// Phase 7b: imports from the canonical port at
+// scripts/lib/iteration-ship-rate.mjs (which decoupled the
+// ship-rate logic from the about-to-be-deleted TS package). The
+// Python equivalent at scripts/iteration_ship_rate.py carries the
+// same pre-registered thresholds for bash-callable code paths; both
+// share constants and a threshold edit must land in both files in
+// the same PR.
 import { computeShipRate } from "./lib/iteration-ship-rate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

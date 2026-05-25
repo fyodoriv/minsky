@@ -106,7 +106,7 @@ describe("decideActions — pnpm install trigger", () => {
   test("nested package.json (workspace) changed → emits pnpm-install action", () => {
     const result = decideActions({
       ...baseInput,
-      changedFiles: ["novel/cross-repo-runner/package.json"],
+      changedFiles: ["novel/mape-k-loop/package.json"],
     });
     expect(result.actions).toContainEqual({ kind: "pnpm-install" });
   });
@@ -243,7 +243,7 @@ describe("decideActions — composite scenarios (the realistic case)", () => {
       changedFiles: [
         "bin/minsky",
         "pnpm-lock.yaml",
-        "novel/cross-repo-runner/src/runner.ts",
+        "novel/mape-k-loop/src/orchestrator.ts",
         "test/integration/daemon-restart.test.ts",
       ],
       plistExists: true,
@@ -270,7 +270,7 @@ describe("decideActions — composite scenarios (the realistic case)", () => {
 
 // Tests for the `request-daemon-restart` action — the writer side of the
 // auto-restart-on-pull sentinel mechanism. The reader lives in
-// `novel/cross-repo-runner/src/host-loop.ts`; the integration test in
+// `novel/mape-k-loop/src/host-loop.ts`; the integration test in
 // `test/integration/daemon-restart.test.ts` exercises both ends together.
 //
 // Source: TASKS.md `minsky-auto-restart-daemon-on-pull`. Hypothesis: a
@@ -313,7 +313,7 @@ describe("decideActions — request-daemon-restart trigger", () => {
   test("novel/**/*.ts changed + daemon running → emits request-daemon-restart", () => {
     const result = decideActions({
       ...baseInput,
-      changedFiles: ["novel/cross-repo-runner/src/runner.ts"],
+      changedFiles: ["novel/mape-k-loop/src/orchestrator.ts"],
       daemonRunning: true,
       platform: "darwin",
     });
@@ -321,14 +321,14 @@ describe("decideActions — request-daemon-restart trigger", () => {
     expect(restart).toBeDefined();
     if (restart !== undefined && restart.kind === "request-daemon-restart") {
       expect(restart.reason).toMatch(/novel/);
-      expect(restart.changedFiles).toContain("novel/cross-repo-runner/src/runner.ts");
+      expect(restart.changedFiles).toContain("novel/mape-k-loop/src/orchestrator.ts");
     }
   });
 
   test("novel/**/*.mjs changed + daemon running → emits request-daemon-restart", () => {
     const result = decideActions({
       ...baseInput,
-      changedFiles: ["novel/cross-repo-runner/bin/minsky-run.mjs"],
+      changedFiles: ["novel/mape-k-loop/bin/orchestrator.mjs"],
       daemonRunning: true,
       platform: "darwin",
     });
@@ -390,7 +390,7 @@ describe("decideActions — request-daemon-restart trigger", () => {
         "README.md", // doc-only — filter out
         "bin/minsky", // keep
         "TASKS.md", // operator-driven — filter out
-        "novel/cross-repo-runner/src/runner.ts", // keep
+        "novel/mape-k-loop/src/orchestrator.ts", // keep
         "docs/architecture.md", // doc-only — filter out
       ],
       daemonRunning: true,
@@ -399,7 +399,7 @@ describe("decideActions — request-daemon-restart trigger", () => {
     const restart = result.actions.find((a) => a.kind === "request-daemon-restart");
     expect(restart).toBeDefined();
     if (restart !== undefined && restart.kind === "request-daemon-restart") {
-      expect(restart.changedFiles).toEqual(["bin/minsky", "novel/cross-repo-runner/src/runner.ts"]);
+      expect(restart.changedFiles).toEqual(["bin/minsky", "novel/mape-k-loop/src/orchestrator.ts"]);
     }
   });
 
@@ -413,7 +413,7 @@ describe("decideActions — request-daemon-restart trigger", () => {
       changedFiles: [
         "bin/minsky",
         "pnpm-lock.yaml",
-        "novel/cross-repo-runner/src/host-loop.ts",
+        "novel/mape-k-loop/src/host-loop.ts",
         "scripts/post-merge-auto-install.mjs",
       ],
       plistExists: true,
