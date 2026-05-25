@@ -318,6 +318,23 @@ iterate_host() {
     return 0
   fi
 
+  # Synthesise the host's .minsky/experiments/<task-id>.yaml — parity
+  # port of the TS runner's `synthesiseExperimentYaml` (rule-#9 fields
+  # captured BEFORE the spawn, so the experiment record exists even if
+  # the spawn crashes mid-flight). Acceptance criterion of
+  # user-stories/006-runner-on-any-repo.md § "Acceptance criteria":
+  # "$host/.minsky/experiments/<task-id>.yaml is materialised with all
+  # 5 rule-#9 fields populated from the task row".
+  #
+  # Falls back to a WARN log + continues without the file (rule #6 —
+  # the iteration's brief is the load-bearing input to openhands; the
+  # experiment.yaml is the post-hoc record). The brief still has the
+  # rule-#9 fields inline, so the spawn doesn't lose information.
+  if ! python3 "$script_dir/../scripts/synth_experiment_yaml.py" \
+       "$task_id" "$host" 2>/dev/null > /dev/null; then
+    echo "WARN: synth_experiment_yaml.py failed for $task_id (continuing)" >&2
+  fi
+
   # Build the brief via scripts/build_brief.py — full TS-parity brief
   # with the task block + system-prompt overlay (constitution + FINAL
   # STEP block). Replaces the 4-line stub. Falls back to a minimal
