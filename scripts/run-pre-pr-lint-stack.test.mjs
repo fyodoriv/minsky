@@ -2,6 +2,7 @@
 // the manifest + an injected `runStep`; tests stub `runStep` and assert the
 // stage filter + green/red verdict logic.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,6 +110,7 @@ describe("STACK_MANIFEST", () => {
         "cloud-agent-config-audit-matrix",
         "competitive-goal",
         "markdownlint",
+        "milestone-alignment",
         "no-hardcoded-user-paths",
         "no-personal-paths-in-docs",
         "orphan-tests",
@@ -134,6 +136,57 @@ describe("STACK_MANIFEST", () => {
 
   test("full strictly extends fast (the slow lints exist in full only)", () => {
     expect(selectSteps("full").length).toBeGreaterThan(selectSteps("fast").length);
+  });
+
+  // Slice (c) of `milestone-alignment-gate-enforcement` — pin the alignment
+  // step's wiring + gate-effectiveness so a future edit can't silently drop
+  // the `--strict --min-aligned=10` flags. The args are the gate's contract:
+  // dropping `--strict` neuters exit-on-drift; lowering `--min-aligned` is
+  // the lower-the-bar anti-pattern rule #14 explicitly forbids.
+  test("`milestone-alignment` step is registered with --strict --min-aligned=10 (the gate's contract)", () => {
+    const step = STACK_MANIFEST.find((s) => s.name === "milestone-alignment");
+    expect(step).toBeDefined();
+    expect(step?.cmd).toBe("node");
+    expect(step?.args).toEqual([
+      "scripts/check-milestone-alignment.mjs",
+      "--strict",
+      "--min-aligned=10",
+    ]);
+    expect(step?.stages).toContain("fast"); // task body: "Place it in the `--stage=fast` set"
+    expect(step?.stages).toContain("full");
+  });
+
+  // The "gate is effective" demo from the task's Success criterion: a fixture
+  // that lowers the threshold to a value the repo doesn't meet (11/14)
+  // exits non-zero. Proves the gate's exit code is wired to the alignment
+  // count, not stubbed. Runs the real script against the live repo —
+  // execution time is <100ms (pure file reads).
+  test("gate is effective: `--min-aligned=11` (a threshold the repo doesn't meet) exits non-zero", () => {
+    const checkScript = resolve(REPO_ROOT, "scripts/check-milestone-alignment.mjs");
+    let exitCode = 0;
+    try {
+      execFileSync("node", [checkScript, "--strict", "--min-aligned=11"], {
+        cwd: REPO_ROOT,
+        stdio: "ignore",
+      });
+    } catch (err) {
+      // execFileSync throws on non-zero exit. Capture the status as proof.
+      // rule-6: handled-locally — script exits 1 by design when aligned_count
+      // < minAligned; we want the boolean assertion, not the thrown error.
+      exitCode = /** @type {{ status?: number }} */ (err).status ?? 1;
+    }
+    expect(exitCode).toBe(1);
+  });
+
+  test("gate passes on main: `--min-aligned=10` exits 0 (regression floor — operator's Success threshold)", () => {
+    const checkScript = resolve(REPO_ROOT, "scripts/check-milestone-alignment.mjs");
+    // If this fails, the gate is RED on main — a regression that must be
+    // fixed before this PR lands; landing it would permanently red CI.
+    execFileSync("node", [checkScript, "--strict", "--min-aligned=10"], {
+      cwd: REPO_ROOT,
+      stdio: "ignore",
+    });
+    // No throw means exit 0.
   });
 });
 
