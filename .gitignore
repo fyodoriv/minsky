@@ -73,3 +73,4 @@ pr-body.md
 # otherwise be linted by `pnpm lint:md` against the markdownlint atx-
 # heading rule and fail — but the file is pytest's, not ours.
 .pytest_cache/
+pr-body.md

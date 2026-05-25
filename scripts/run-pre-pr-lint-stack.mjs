@@ -238,6 +238,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "brief-pr-instructions",
       "cadence-pivot-threshold",
       "check-cross-repo-pr-rate",
+      "check-task-block-citations",
       "cloud-audit-gate",
       "competitive-goal",
       "dashboard-localhost-bind",
@@ -550,6 +551,20 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-brief-pr-instructions.mjs"],
+  },
+  {
+    // task-block-citations: refuses to remove a TASKS.md task block
+    // when the ID is still referenced by any test file. Closes the
+    // PR #864 failure mode (block was a load-bearing citation site
+    // for 5 parity tests; removing it broke them all). Pure regex
+    // over a `git diff` text + the test corpus, fast-stage budget
+    // unaffected. Anchor: TASKS.md `orphan-cleanup-task-block-
+    // citation-lint` (P1, M1); rule #10; rule #17.
+    name: "check-task-block-citations",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-task-block-citations.mjs"],
+    env: { TASK_CITATION_DIFF_BASE: "origin/main" },
   },
   {
     name: "lockfile-integrity",
