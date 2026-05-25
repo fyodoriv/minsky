@@ -485,6 +485,21 @@ export {
   createPnpmMetricsRender,
 } from "./metrics-render-cli-wiring.js";
 
+// CLI-side construction of the `TaskRotationSeam` (file-backed TASKS.md
+// reader + gh-backed merged-PR list + git-backed write-and-commit). Twin
+// of `metrics-render-cli-wiring` — keeps `bin/tick-loop.mjs` thin: the
+// bin only decides whether to opt-in (env var) and forwards the
+// TASKS.md path / repo root here. Wire-in slice of
+// `daemon-task-rotation-on-completion` (P0).
+export {
+  type GhMergedPrListOptions,
+  type GitBackedApplyRemovalOptions,
+  type SpawnCheckedCallFn,
+  createFileBackedGetTasksMd,
+  createGhMergedPrList,
+  createGitBackedApplyRemoval,
+} from "./task-rotation-cli-wiring.js";
+
 // Sub-task (c) of `post-task-cto-audit` — expose the CTO-audit primitives
 // so the CLI (`bin/tick-loop.mjs`) can wire the seam without reaching past
 // `dist/`. The pure builder + gate stay testable in isolation; `runCtoAudit`
