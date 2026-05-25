@@ -298,6 +298,71 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       "Forsgren, Humble & Kim, _Accelerate_ 2018 (DORA — measure what matters via ratios over a fixed window, not absolute counts); rule #1 (`transform_trend.py` is the existing aggregator)",
     milestone: "M1.7",
   },
+  {
+    // Path A scoreboard metric. Closes task `path-a-loc-scoreboard-
+    // metric` (P1, M1). Tracks the LOC in `novel/` (TS + TSX, tests
+    // excluded) as the single honest measure of whether the
+    // aggressive-cut is moving in the right direction. 2026-05-25
+    // retro found 72 PRs / +13,981 LOC delta over 24h — vanity
+    // metric (PRs) up, strategic metric (LOC) up by 14K against
+    // a stated goal of shrinking to ≤10K. The metric makes the
+    // Goodhart-trap impossible to hide.
+    //
+    // Source: `docs/plans/2026-05-24-path-a-aggressive-cut.md`
+    // (the 5-10K target); rule #4 (everything measurable); rule
+    // #10 (deterministic — same repo state, same output); Ries
+    // 2011 (no vanity metrics).
+    id: "path-a-loc-novel-tree",
+    label: "Path A scoreboard: LOC in novel/ (TS+TSX, excl. tests)",
+    formula:
+      "fd -e ts -e tsx --type f --exclude '*.test.*' . novel/ | xargs wc -l | tail -1 | awk '{print $1}'",
+    unit: "LOC",
+    freshnessBudgetMs: 1 * DAY_MS,
+    goal: "≤10000 (Path A target — aggressive cut from ~31K to ≤10K via phase-7b + 11b deletions); today (~31K) is 3x over budget and stays red until deletion lands",
+    pivot:
+      ">25000 for ≥30 d AFTER phase-7b'+11b deletions ship → surviving substrate has irreducible complexity at higher floor than predicted; raise budget to 25K with operator signoff in the Path A plan. Don't fake the metric to make the budget.",
+    anchor:
+      "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)",
+    milestone: "M1",
+  },
+  {
+    // Path A sub-tree scoreboard. Tracks the LOC in `novel/cross-
+    // repo-runner/` — the bash-port deletion target. Phase 7b of
+    // `docs/plans/2026-05-24-path-a-aggressive-cut.md` deletes the
+    // entire TS runner once bash-port parity is confirmed via the
+    // live-fire-smoke gate. Hits 0 when phase-7b ships.
+    id: "path-a-loc-cross-repo-runner",
+    label: "Path A sub-tree: LOC in novel/cross-repo-runner/ (deletion target)",
+    formula:
+      "fd -e ts -e tsx --type f --exclude '*.test.*' . novel/cross-repo-runner/ | xargs wc -l | tail -1 | awk '{print $1}'",
+    unit: "LOC",
+    freshnessBudgetMs: 1 * DAY_MS,
+    goal: "0 (post phase-7b deletion); today (~4.2K) is the bash-port runtime parity target",
+    pivot:
+      "Stays >0 for ≥30 d AFTER bash-port parity validates → cannot delete cleanly; surface as `Pivot to coexist` with deprecation banner in the Path A plan.",
+    anchor:
+      "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 7b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)",
+    milestone: "M1",
+  },
+  {
+    // Path A sub-tree scoreboard. Tracks the LOC in
+    // `novel/tick-loop/` — the daemon-deletion target. Phase 11b
+    // of the Path A plan deletes the TS daemon once the
+    // bash-skeleton supervisor (launchd / systemd-user) carries
+    // the loop. Hits 0 when phase-11b ships.
+    id: "path-a-loc-tick-loop",
+    label: "Path A sub-tree: LOC in novel/tick-loop/ (deletion target)",
+    formula:
+      "fd -e ts -e tsx --type f --exclude '*.test.*' . novel/tick-loop/ | xargs wc -l | tail -1 | awk '{print $1}'",
+    unit: "LOC",
+    freshnessBudgetMs: 1 * DAY_MS,
+    goal: "0 (post phase-11b deletion); today (~17K) is the supervisor-parity deletion target — the single largest tree in novel/",
+    pivot:
+      "Stays >0 for ≥30 d AFTER supervisor-parity validates → tick-loop's surface is broader than the bash skeleton covers (extension points the operator hasn't migrated); document the residual coupling in the Path A plan and re-scope.",
+    anchor:
+      "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 11b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)",
+    milestone: "M1",
+  },
 ];
 
 /**

@@ -67,6 +67,17 @@ Environment=MINSKY_CTO_AUDIT_ENABLE=1
 # `PrivateTmp`, and `RestrictAddressFamilies` — flipping to `enforce` today
 # does not actually sandbox anything.
 # Environment=MINSKY_SANDBOX=off
+# Task-rotation auto-cleanup (PR #862 wired the seam, this flag
+# activates it). When set, the daemon's iteration loop runs
+# `runTaskRotation` after every successful merge — auto-removes
+# TASKS.md task blocks whose substrate shipped (matched by merged-PR
+# title or explicit `**Status**: shipped` field). Closes the
+# "substrate shipped, default not flipped" anti-pattern observed in
+# 4 manual orphan-cleanup PRs (#861, #864, #870, #872 — three of which
+# were filed manually because this var was 0). Rule #16 (default by
+# default). Reversible — unset + `systemctl --user daemon-reload &&
+# systemctl --user restart minsky-tick-loop.service` to revert.
+Environment=MINSKY_TASK_ROTATION_ENABLE=1
 ExecStart=/bin/sh ${MINSKY_HOME}/distribution/systemd/run-tick-loop.sh
 
 # Sandboxing — stage 0 of `supervisor-sandbox-syscall-restriction`

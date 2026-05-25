@@ -54,7 +54,7 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1 (gates every milestone)_
 
-**Value:** 71.0% (71/100 runs green) fraction
+**Value:** 83.0% (83/100 runs green) fraction
 
 **How to view:** `gh run list --workflow ci.yml --branch main --status completed --created ">=$(date -v-30d +%Y-%m-%d)" --limit 1000 --json conclusion --jq '([.[] | select(.conclusion=="success")] | length) / (length | if . == 0 then 1 else . end)'`
 
@@ -68,7 +68,7 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M4 (autonomous rollouts)_
 
-**Value:** 60 mape-k-related commits (30d) rollouts/month
+**Value:** 62 mape-k-related commits (30d) rollouts/month
 
 **How to view:** `git log --grep='mape-k rollout' constraints.md --since="30 days ago" | wc -l`
 
@@ -152,7 +152,7 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 
 _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1 (cadence)_
 
-**Value:** 24.2 commits/day (726 in 30d) tasks/day
+**Value:** 25.1 commits/day (754 in 30d) tasks/day
 
 **How to view:** `git log --since="30 days ago" --oneline --grep='^feat\|^fix\|^docs\|^chore' | wc -l / 30`
 
@@ -203,6 +203,48 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 **Pivot:** All three per-cycle averages = 0 for 30 d → minsky isn't transforming the repo, just observing it; pivot the brief + session length before declaring M1.7 met
 
 **Anchor:** Forsgren, Humble & Kim, _Accelerate_ 2018 (DORA — measure what matters via ratios over a fixed window, not absolute counts); rule #1 (`transform_trend.py` is the existing aggregator)
+
+## path-a-loc-novel-tree — Path A scoreboard: LOC in novel/ (TS+TSX, excl. tests)
+
+_Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1_
+
+**Value:** 31234 LOC
+
+**How to view:** `fd -e ts -e tsx --type f --exclude '*.test.*' . novel/ | xargs wc -l | tail -1 | awk '{print $1}'`
+
+**Goal:** ≤10000 (Path A target — aggressive cut from ~31K to ≤10K via phase-7b + 11b deletions); today (~31K) is 3x over budget and stays red until deletion lands
+
+**Pivot:** >25000 for ≥30 d AFTER phase-7b'+11b deletions ship → surviving substrate has irreducible complexity at higher floor than predicted; raise budget to 25K with operator signoff in the Path A plan. Don't fake the metric to make the budget.
+
+**Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)
+
+## path-a-loc-cross-repo-runner — Path A sub-tree: LOC in novel/cross-repo-runner/ (deletion target)
+
+_Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1_
+
+**Value:** 4189 LOC
+
+**How to view:** `fd -e ts -e tsx --type f --exclude '*.test.*' . novel/cross-repo-runner/ | xargs wc -l | tail -1 | awk '{print $1}'`
+
+**Goal:** 0 (post phase-7b deletion); today (~4.2K) is the bash-port runtime parity target
+
+**Pivot:** Stays >0 for ≥30 d AFTER bash-port parity validates → cannot delete cleanly; surface as `Pivot to coexist` with deprecation banner in the Path A plan.
+
+**Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 7b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)
+
+## path-a-loc-tick-loop — Path A sub-tree: LOC in novel/tick-loop/ (deletion target)
+
+_Updated: 2026-05-25T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1_
+
+**Value:** 17253 LOC
+
+**How to view:** `fd -e ts -e tsx --type f --exclude '*.test.*' . novel/tick-loop/ | xargs wc -l | tail -1 | awk '{print $1}'`
+
+**Goal:** 0 (post phase-11b deletion); today (~17K) is the supervisor-parity deletion target — the single largest tree in novel/
+
+**Pivot:** Stays >0 for ≥30 d AFTER supervisor-parity validates → tick-loop's surface is broader than the bash skeleton covers (extension points the operator hasn't migrated); document the residual coupling in the Path A plan and re-scope.
+
+**Anchor:** `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 11b; sibling task `phase-7b-11b-deletion-after-live-smoke` (P0, M1)
 
 ## Metrics to add
 

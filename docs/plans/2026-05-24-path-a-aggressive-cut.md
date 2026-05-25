@@ -13,6 +13,17 @@ Shrink Minsky from ~70K LOC (today) past the Path C target (~30K LOC) all the wa
 
 Path A is the **maximum-leverage operator-time cut**. Path C kept the cross-repo-runner (10.8K LOC) and tick-loop (3K LOC) as moat anchors. Path A says: those moats can be defended with ~500 lines of careful shell + the OpenHands SDK, freeing the operator's 15-20 hours/month maintenance ceiling down to ~5 hours/month.
 
+## Scoreboard
+
+The single honest measure of whether Path A is working is the LOC count under `novel/` (TS + TSX, tests excluded). Today it's ~31K; the target is **≤10K**. Vanity metrics (PRs merged, sessions completed, hours saved) are explicitly NOT the scoreboard — see the 2026-05-25 retro that found 72 PRs / +13,981 LOC delta over 24h, vanity-metric green, strategic-metric red.
+
+The metric lives in `docs/METRICS.md` as `path-a-loc-novel-tree` (the canonical row, refreshed daily by `scripts/collect-metrics.mjs`), with two sub-tree companions:
+
+- `path-a-loc-cross-repo-runner` — phase-7b deletion target (today ~4.2K → 0).
+- `path-a-loc-tick-loop` — phase-11b deletion target (today ~17K → 0).
+
+Together, deleting both sub-trees drops `novel/` from ~31K → ~10K, landing in budget. Every PR's diff is read through this lens: did it move the scoreboard in the right direction, or was it vanity LOC?
+
 ## Why Path A over Path C
 
 Three reasons:
