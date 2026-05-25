@@ -31,7 +31,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { MODEL_CATALOG, validateModelCatalog } from "@minsky/tick-loop";
+import { MODEL_CATALOG, validateModelCatalog } from "./lib/model-catalog.mjs";
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
 
 import {
