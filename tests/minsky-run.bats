@@ -606,6 +606,33 @@ EOF
   [[ "$output" == *"--report-only requires existing"* ]]
 }
 
+@test "bin/minsky --help prints usage block and lists --transform without starting daemon" {
+  # Real UX gap fix: before this PR, `minsky --help` fell through the
+  # subcommand case → smart-auto-attach → tried to start the daemon.
+  # Now there's a real --help handler that prints the docstring and
+  # exits 0, listing every flag including --transform (the killer-
+  # feature command added in PR #815).
+  MINSKY_REPO="$REPO_ROOT" run "$REPO_ROOT/bin/minsky" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"--transform"* ]]
+  [[ "$output" == *"--daemon"* ]]
+  [[ "$output" == *"--bash-runner"* ]]
+  # The leading "# " from the source-of-truth docstring must be
+  # stripped from the output.
+  [[ "$output" != *"# Usage:"* ]]
+  # No daemon-starting noise.
+  [[ "$output" != *"daemon started"* ]]
+  [[ "$output" != *"no daemon running"* ]]
+}
+
+@test "bin/minsky -h is an alias for --help" {
+  MINSKY_REPO="$REPO_ROOT" run "$REPO_ROOT/bin/minsky" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"--transform"* ]]
+}
+
 @test "bin/minsky --transform dispatches to bin/minsky-default-session.sh against \$PWD" {
   # Vertical slice 3 dispatch wiring: confirms `minsky --transform`
   # from any folder routes to the orchestrator with PWD as the host.
