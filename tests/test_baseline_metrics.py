@@ -263,6 +263,77 @@ def test_capture_includes_loc_source_field(tmp_path: Path, monkeypatch: pytest.M
     assert snap["code"]["loc_source"] == "walk"
 
 
+def test_try_git_ls_files_returns_none_for_non_git_dir(tmp_path: Path) -> None:
+    # tmp_path has no .git → graceful None return.
+    assert bm._try_git_ls_files(tmp_path) is None
+
+
+def test_try_git_ls_files_returns_counts_for_git_repo(tmp_path: Path) -> None:
+    # Initialize a real git repo with tracked + untracked files.
+    write(tmp_path / "src" / "a.ts", "x\n")
+    write(tmp_path / "src" / "a.test.ts", "y\n")
+    write(tmp_path / "ignored.log", "noise\n")
+    write(tmp_path / ".gitignore", "*.log\n")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    # The host's global commit-msg hook enforces conventional commits;
+    # `--no-verify` bypasses it for the fixture commit only (no
+    # behavior tested by the hook is relevant to this unit test).
+    subprocess.run(
+        ["git", "commit", "-q", "--no-verify", "-m", "fixture"],
+        cwd=tmp_path,
+        check=True,
+    )
+    result = bm._try_git_ls_files(tmp_path)
+    assert result is not None
+    files, tests = result
+    # 3 tracked files: src/a.ts + src/a.test.ts + .gitignore
+    # (ignored.log is NOT tracked → not in ls-files output)
+    assert files == 3
+    assert tests == 1
+
+
+def test_try_git_ls_files_empty_repo_returns_zero_zero(tmp_path: Path) -> None:
+    # Git-initialized but no tracked files yet → (0, 0).
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    result = bm._try_git_ls_files(tmp_path)
+    assert result == (0, 0)
+
+
+def test_capture_uses_git_ls_files_when_available(tmp_path: Path) -> None:
+    # End-to-end: capture()'s code block reports files_source=git-ls-files
+    # when the repo is git-managed, and the count matches the tracked-only
+    # set (not the os.walk all-files set).
+    write(tmp_path / "src" / "a.ts", "x\n")
+    write(tmp_path / "ignored.log", "noise\n")
+    write(tmp_path / ".gitignore", "*.log\n")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--no-verify", "-m", "fixture"],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    snap = bm.capture(tmp_path)
+    assert snap["code"]["files_source"] == "git-ls-files"
+    # 2 tracked files: src/a.ts + .gitignore (ignored.log is untracked).
+    assert snap["code"]["total_files_walked"] == 2
+
+
+def test_capture_falls_back_to_walk_when_not_a_git_repo(tmp_path: Path) -> None:
+    # No .git → files_source falls back to walk.
+    write(tmp_path / "a.ts", "1\n")
+    write(tmp_path / "b.ts", "2\n")
+    snap = bm.capture(tmp_path)
+    assert snap["code"]["files_source"] == "walk"
+    assert snap["code"]["total_files_walked"] == 2
+
+
 def test_capture_returns_full_schema(tmp_path: Path) -> None:
     write(tmp_path / "README.md", "# t")
     write(tmp_path / "src" / "a.ts", "x\n")

@@ -247,6 +247,51 @@ def loc_by_language(repo: Path) -> tuple[dict[str, int], str]:
     return loc, "walk"
 
 
+def _try_git_ls_files(repo: Path) -> tuple[int, int] | None:
+    """Best-effort `git ls-files` invocation. Returns `(file_count,
+    test_file_count)` or `None` if not a git repo / git missing.
+
+    Rule #1 — every minsky-managed repo is a git repo by construction,
+    so `git ls-files` is the canonical "files we care about" query:
+    respects .gitignore, ignores submodule contents, ignores
+    node_modules / dist / .venv without us having to maintain a
+    skip-dir list. Faster than `os.walk` on large repos because git
+    keeps the tracked-file list in its index.
+
+    Caller-side fallback: when this returns `None` (no git, or git
+    errored), capture() falls back to walk_repo's existing counts.
+    """
+    if not (repo / ".git").exists():
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), "ls-files"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.decode("utf-8", errors="replace")
+    if not out.strip():
+        return 0, 0
+    file_count = 0
+    test_count = 0
+    for line in out.splitlines():
+        if not line:
+            continue
+        file_count += 1
+        # The basename for the test-pattern check — `git ls-files`
+        # returns repo-root-relative paths, so split off the last
+        # path segment to compare against TEST_PATTERNS.
+        basename = line.rsplit("/", 1)[-1]
+        if any(basename.endswith(p) for p in TEST_PATTERNS):
+            test_count += 1
+    return file_count, test_count
+
+
 def walk_repo(repo: Path) -> tuple[dict[str, int], int, int]:
     """Walk repo, return (loc-by-language, test-count, total-files).
 
@@ -413,26 +458,37 @@ def capture(repo: Path) -> dict[str, Any]:
     to `walk_repo`'s "all lines including blank + comments" count when
     none are installed. The `loc_source` field records which path won
     so a downstream comparator can compare like-for-like.
+
+    File / test counts prefer `git ls-files` (respects .gitignore +
+    submodules + is faster than os.walk on large repos) when the repo
+    is git-managed; falls back to `walk_repo`'s os.walk pass otherwise.
+    The `files_source` field records which path won.
     """
-    walk_loc, tests, files = walk_repo(repo)
-    external_loc, source = loc_by_language(repo)
-    # When the external probe returned a non-empty result, prefer it;
-    # otherwise the walk-LOC remains the canonical reading. The
-    # `loc_by_language` helper already returns the walk-LOC when no
-    # external tool is available, but we re-affirm it here to keep
-    # the capture() one-step contract obvious to readers.
-    if source == "walk":
+    walk_loc, walk_tests, walk_files = walk_repo(repo)
+    external_loc, loc_source = loc_by_language(repo)
+    if loc_source == "walk":
         loc_final = walk_loc
     else:
         loc_final = external_loc
+
+    # File + test counts: prefer git ls-files when available.
+    git_files_result = _try_git_ls_files(repo)
+    if git_files_result is not None:
+        files_final, tests_final = git_files_result
+        files_source = "git-ls-files"
+    else:
+        files_final, tests_final = walk_files, walk_tests
+        files_source = "walk"
+
     return {
         "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "repo": str(repo.resolve()),
         "code": {
-            "total_files_walked": files,
-            "test_file_count": tests,
+            "total_files_walked": files_final,
+            "test_file_count": tests_final,
+            "files_source": files_source,
             "loc_by_language": loc_final,
-            "loc_source": source,
+            "loc_source": loc_source,
         },
         "docs": collect_docs(repo),
         "lint": collect_lint(repo),
