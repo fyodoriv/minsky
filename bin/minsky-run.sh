@@ -83,8 +83,35 @@ invariant_config_loadable() {
 }
 
 invariant_openhands_in_path() {
-  # Invariant 2: openhands CLI resolves on PATH (per Phase C reshape).
-  command -v openhands >/dev/null 2>&1 || { echo "INVARIANT FAIL: openhands not on PATH" >&2; return 1; }
+  # Invariant 2: an OpenHands backend is reachable. Either the canonical
+  # `openhands` CLI (post-June-1-2026 / Agent Canvas Initiative) is on
+  # PATH, OR the existing Python shim at
+  # novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py
+  # exists. The dispatcher (scripts/spawn_agent.py) picks whichever is
+  # available — this invariant just confirms one of them is.
+  #
+  # Before scripts/spawn_agent.py landed, the bash runner hard-coded
+  # `openhands solve` and would have refused to start on every machine
+  # without the future CLI (i.e. every machine today). Updated to match
+  # the new dispatcher's resolution order.
+  if command -v openhands >/dev/null 2>&1; then
+    return 0
+  fi
+  # MINSKY_OPENHANDS_SHIM_PATH overrides the default path (test hook +
+  # escape hatch for operators who installed the shim somewhere else).
+  if [[ -n "${MINSKY_OPENHANDS_SHIM_PATH:-}" && -f "${MINSKY_OPENHANDS_SHIM_PATH}" ]]; then
+    return 0
+  fi
+  local shim_path
+  shim_path="$(dirname "${BASH_SOURCE[0]}")/../novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py"
+  if [[ -f "$shim_path" ]]; then
+    return 0
+  fi
+  echo "INVARIANT FAIL: no OpenHands backend available." >&2
+  echo "  install \`openhands\` (https://docs.openhands.dev), set" >&2
+  echo "  MINSKY_OPENHANDS_SHIM_PATH to a custom shim, or ensure" >&2
+  echo "  $shim_path exists." >&2
+  return 1
 }
 
 invariant_hosts_dir_readable() {
@@ -417,6 +444,20 @@ EOF
   local start_ms
   start_ms="$(python3 -c 'import time; print(int(time.time() * 1000))')"
 
+  # Agent dispatch via scripts/spawn_agent.py — resolves the right
+  # OpenHands backend at spawn time. The canonical `openhands solve`
+  # CLI ships June 1, 2026 (Agent Canvas Initiative); until then the
+  # dispatcher falls back to the existing Python shim at
+  # novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py
+  # which the TS substrate has been using since Path C reshape (rule #1 —
+  # don't reinvent; the shim already works against the OpenHands SDK).
+  #
+  # Before this dispatcher, the bash runner hard-coded `openhands solve`
+  # — on every operator machine without the future CLI (i.e. all of
+  # them today), every spawn failed with exit 127 and the autonomous
+  # loop produced no PRs.
+  local spawn_agent="$script_dir/../scripts/spawn_agent.py"
+
   # Watchdog binary resolution order (rule #1 — prefer existing solutions):
   #   1. Python wrapper at scripts/spawn_with_watchdog.py — POSIX-portable,
   #      handles process-group SIGTERM/SIGKILL, no external deps.
@@ -426,28 +467,29 @@ EOF
   #      the daemon. Logged at warn-level so operators know.
   local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
   if [[ -x "$spawn_wrapper" ]]; then
-    python3 "$spawn_wrapper" "$watchdog_s" openhands solve \
-      --task-file "$brief_file" \
-      --workspace "$host" \
+    python3 "$spawn_wrapper" "$watchdog_s" \
+      python3 "$spawn_agent" \
+      --brief-file "$brief_file" \
+      --repo "$host" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v timeout >/dev/null 2>&1; then
-    timeout "${watchdog_s}s" openhands solve \
-      --task-file "$brief_file" \
-      --workspace "$host" \
+    timeout "${watchdog_s}s" python3 "$spawn_agent" \
+      --brief-file "$brief_file" \
+      --repo "$host" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "${watchdog_s}s" openhands solve \
-      --task-file "$brief_file" \
-      --workspace "$host" \
+    gtimeout "${watchdog_s}s" python3 "$spawn_agent" \
+      --brief-file "$brief_file" \
+      --repo "$host" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   else
-    echo "WARN: no watchdog available — running unbounded openhands" >&2
-    openhands solve \
-      --task-file "$brief_file" \
-      --workspace "$host" \
+    echo "WARN: no watchdog available — running unbounded agent spawn" >&2
+    python3 "$spawn_agent" \
+      --brief-file "$brief_file" \
+      --repo "$host" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   fi

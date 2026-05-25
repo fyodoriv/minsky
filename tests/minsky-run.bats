@@ -375,6 +375,103 @@ EOF
   ! grep -q "GH_HOST=github.com$" "$gh_env_dump"
 }
 
+@test "spawn_agent falls back to the OpenHands SDK shim when canonical CLI is absent" {
+  # The canonical `openhands solve` CLI ships June 1, 2026 (Agent
+  # Canvas Initiative). Until then — on every operator machine — the
+  # bash runner must fall back to the existing Python shim at
+  # novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py
+  # which the TS substrate has been using since Path C reshape. Without
+  # this dispatcher, every spawn against today's machines would exit
+  # 127 (command not found) and the autonomous loop would produce no
+  # PRs (rule #6 — fail loud).
+  #
+  # Fixture: a fake shim that records its argv. We do NOT install a
+  # fake `openhands` binary, so spawn_agent.py sees no openhands on
+  # PATH and falls back. The fake shim records the (translated) argv
+  # so we can assert (a) the dispatcher picked the shim, (b) it used
+  # the SHIM flag names (--brief-file / --repo, NOT --task-file /
+  # --workspace).
+  shim_record="$TMPDIR_TEST/shim-record.txt"
+  fake_shim="$TMPDIR_TEST/fake-shim.py"
+  cat > "$fake_shim" <<EOF
+#!/usr/bin/env python3
+import sys
+with open("$shim_record", "w") as f:
+    f.write("SHIM_INVOKED\n")
+    for arg in sys.argv[1:]:
+        f.write(f"ARG={arg}\n")
+sys.exit(0)
+EOF
+  chmod +x "$fake_shim"
+
+  shim_scripts="$TMPDIR_TEST/shim-scripts"
+  mkdir -p "$shim_scripts"
+  cat > "$shim_scripts/dynamic_timeout.py" <<'EOF'
+#!/usr/bin/env python3
+print(30)
+EOF
+  chmod +x "$shim_scripts/dynamic_timeout.py"
+
+  host="$(make_host shim-fallback "$(complete_task_block)")"
+
+  # Wrapper: scrub openhands from PATH so spawn_agent.py falls back to
+  # the shim. Use a custom --shim-path via MINSKY_SPAWN_SHIM_PATH (no
+  # such env exists yet; we override by patching spawn_agent's
+  # DEFAULT_SHIM_PATH for the test by copying our fake shim to that
+  # location). Simpler: rebuild a tmp scripts/ that has spawn_agent.py
+  # AND a novel/.../minsky-openhands-spawn.py replacement.
+  wrapper="$TMPDIR_TEST/minsky-run-wrapper.sh"
+  cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+# Scrub openhands from PATH so the dispatcher must fall back.
+NEW_PATH="\$(echo "\$PATH" | tr ':' '\n' | while IFS= read -r p; do [[ -x "\$p/openhands" ]] || printf '%s\n' "\$p"; done | paste -sd: -)"
+export PATH="\$NEW_PATH"
+# Point the invariant + dispatcher at the fake shim (test hook).
+export MINSKY_OPENHANDS_SHIM_PATH="$fake_shim"
+TMP_SCRIPT="\$(mktemp -d -t minsky-run-shim-fb.XXXXXX)/scripts"
+mkdir -p "\$TMP_SCRIPT"
+cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/build_brief.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/build_brief.py"
+cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
+cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
+cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
+cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
+chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
+# Place a wrapper spawn_agent.py that hard-codes our fake shim path.
+cat > "\$TMP_SCRIPT/spawn_agent.py" <<PYEOF
+#!/usr/bin/env python3
+import os, sys
+# Force shim path to our fixture, then re-exec the real spawn_agent.
+os.execv(sys.executable, [sys.executable, "$REPO_ROOT/scripts/spawn_agent.py", "--shim-path", "$fake_shim", *sys.argv[1:]])
+PYEOF
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
+TMP_BIN="\$(dirname "\$TMP_SCRIPT")/bin"
+mkdir -p "\$TMP_BIN"
+cp "$REPO_ROOT/bin/minsky-run.sh" "\$TMP_BIN/"
+exec "\$TMP_BIN/minsky-run.sh" "\$@"
+EOF
+  chmod +x "$wrapper"
+
+  run "$wrapper" --hosts-dir "$HOSTS_DIR" --iterations-per-host 1 --max-iterations 1
+  [ "$status" -eq 0 ]
+  # The fake shim was invoked — proves the dispatcher fell back rather
+  # than crashing with "openhands not found".
+  [ -f "$shim_record" ]
+  grep -q "SHIM_INVOKED" "$shim_record"
+  # The dispatcher translated the flags correctly for the shim.
+  grep -q "ARG=--brief-file" "$shim_record"
+  grep -q "ARG=--repo" "$shim_record"
+  grep -q "ARG=--model" "$shim_record"
+  # Canonical flags MUST NOT appear (proves the translation worked).
+  ! grep -q "ARG=--task-file" "$shim_record"
+  ! grep -q "ARG=--workspace" "$shim_record"
+}
+
 # --- 8. Round-robin iterates each host fairly ------------------------------
 
 @test "watchdog kills a hanging openhands and records spawn-failed with timeout notes" {
@@ -424,6 +521,8 @@ TMP_SCRIPT="\$(mktemp -d -t minsky-run-shim.XXXXXX)/scripts"
 mkdir -p "\$TMP_SCRIPT"
 cp "$REPO_ROOT/scripts/pick_task.py" "\$TMP_SCRIPT/"
 cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
 chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
 cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
 chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
@@ -497,6 +596,8 @@ chmod +x "\$TMP_SCRIPT/build_brief.py"
 cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
 cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
 chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
 cp "$shim_scripts/dynamic_timeout.py" "\$TMP_SCRIPT/dynamic_timeout.py"
 chmod +x "\$TMP_SCRIPT/dynamic_timeout.py"
@@ -584,6 +685,8 @@ chmod +x "\$TMP_SCRIPT/build_brief.py"
 cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
 cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
 chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
 cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
@@ -647,6 +750,8 @@ chmod +x "\$TMP_SCRIPT/build_brief.py"
 cp "$REPO_ROOT/scripts/synth_experiment_yaml.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/synth_experiment_yaml.py"
 cp "$REPO_ROOT/scripts/spawn_with_watchdog.py" "\$TMP_SCRIPT/"
+cp "$REPO_ROOT/scripts/spawn_agent.py" "\$TMP_SCRIPT/"
+chmod +x "\$TMP_SCRIPT/spawn_agent.py"
 chmod +x "\$TMP_SCRIPT/spawn_with_watchdog.py"
 cp "$REPO_ROOT/scripts/extract_pr_url.py" "\$TMP_SCRIPT/"
 chmod +x "\$TMP_SCRIPT/extract_pr_url.py"
