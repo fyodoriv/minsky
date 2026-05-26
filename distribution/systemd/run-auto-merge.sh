@@ -18,7 +18,7 @@
 # onto current main in scratch, runs `pre-pr-lint --stage=full`,
 # admin-squash-merges if green) — it's just never invoked automatically.
 #
-# This runner closes that loop. Every 5 min, the supervisor wakes this
+# This runner closes that loop. Every 1 min, the supervisor wakes (was 5min until 2026-05-26 — operator directive "auto-merged within 1 minute when green") this
 # script. It runs `local-gate-merge.mjs --no-review --limit=10`, which
 # picks up to 10 of the daemon's open MERGEABLE PRs and gates each one.
 # Greens land in main; reds stay open with their gate verdict in the
@@ -32,8 +32,8 @@
 # holding a process slot the operator can't ignore in `top`. A
 # 5-min periodic cycle is cheap when there's nothing to merge (script
 # exits in <1s) and naturally rate-limits when there are many PRs (only
-# 10 per pass, more next cycle). The cadence is `StartInterval=300`
-# in `com.minsky.auto-merge.plist` and `OnUnitActiveSec=5min` in
+# 10 per pass, more next cycle). The cadence is `StartInterval=60`
+# in `com.minsky.auto-merge.plist` and `OnUnitActiveSec=1min` in
 # `minsky-auto-merge.timer`. Source: rule #15 (operator machine-
 # utilisation budget) — bursty work scheduled outside the steady-state
 # budget is the right shape.

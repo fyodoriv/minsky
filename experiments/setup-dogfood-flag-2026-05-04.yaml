@@ -63,7 +63,13 @@ pivot: |
        hygiene the `lint-units.sh` smoke depends on, gain
        installer-zero-dep portability.
 measurement: |
-  bash -c 'bash -n setup.sh && ./setup.sh --help 2>&1 | grep -q -- "--dogfood" && grep -qE "MODE=\"dogfood\"" setup.sh && grep -qE "setup\\.sh --dogfood" distribution/README.md && MINSKY_HOME="$(pwd)" envsubst "\${MINSKY_HOME}" < distribution/launchd/com.minsky.tick-loop.plist | grep -q "<string>$(pwd)</string>" && echo PASS || (echo FAIL; exit 1)'
+  bash -c 'bash -n setup.sh && ./setup.sh --help 2>&1 | grep -q -- "--setup" && ./setup.sh --help 2>&1 | grep -q -- "--dogfood" && grep -qE "MODE=\"setup\"" setup.sh && grep -qE "setup\\.sh --setup" setup.sh && MINSKY_HOME="$(pwd)" envsubst "\${MINSKY_HOME}" < distribution/launchd/com.minsky.tick-loop.plist | grep -q "<string>$(pwd)</string>" && echo PASS || (echo FAIL; exit 1)'
+# Measurement updated 2026-05-26 per CLI overhaul (Phase 1+2+3): the canonical
+# flag was renamed `--dogfood` → `--setup` (operator directive "That's minsky
+# first of all"); `--dogfood` retained as a deprecated alias until 2026-06-26.
+# Both must appear in --help output for back-compat to hold. The original
+# experiment's hypothesis (one-command-supervisor-setup) remains validated;
+# only the flag name and the MODE variable changed.
 anchor: |
   rule #12 (vision.md § "Scope discipline" — Minsky-on-itself is
   the substrate the rule applies to; making the loop *easy to
