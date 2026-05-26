@@ -19,7 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "vitest run test/integration/ --testTimeout=120000",
+    "test:integration": "MINSKY_RUN_INTEGRATION=1 vitest run test/integration/ --testTimeout=120000",
     "test:m1-tdd": "vitest run test/integration/m1-red-green.test.ts",
     "check": "pnpm check-toolchain && pnpm lint && pnpm typecheck && pnpm test:coverage",
     "m1:metrics": "printf '⚠ deprecated 2026-05-26 (removed 2026-06-26): use \\`bin/minsky m1 metrics\\` instead\\n' >&2; bash bin/minsky m1 metrics",
