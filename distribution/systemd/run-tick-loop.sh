@@ -155,6 +155,23 @@ if [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" 
   # consumes it in this script.
   printf 'self-diagnose: ran at %s\n' "${diagnose_start}"
   node "${MINSKY_HOME}/scripts/self-diagnose.mjs" --human 2>&1 || true
+
+  # Autonomic-fix passes (operator directive 2026-05-26: "In minsky I
+  # don't want to run anything, it should resolve things automatically
+  # as rational"). For every `[👤 needs-operator]` finding that has a
+  # safe + bounded + idempotent fix, run the fix instead of asking.
+  #
+  # Both are gated by env vars in case the operator wants to disable
+  # (rule #2 escape hatch). Default ON per rule #16 (Default by default)
+  # — the autonomic action is the right default for a self-supervised
+  # dogfood loop.
+  #
+  # Errors are advisory: a failed auto-fix leaves the finding on the
+  # log; the supervisor's next cycle retries. Never blocks startup.
+  printf 'autonomic-fix: pass 1 — close orphan PRs (MINSKY_AUTO_CLOSE_ORPHAN_PRS=%s)\n' "${MINSKY_AUTO_CLOSE_ORPHAN_PRS:-on}"
+  node "${MINSKY_HOME}/scripts/daemon-auto-close-orphan-prs.mjs" 2>&1 || true
+  printf 'autonomic-fix: pass 2 — rebase dirty PRs (MINSKY_AUTO_REBASE_DIRTY_PRS=%s)\n' "${MINSKY_AUTO_REBASE_DIRTY_PRS:-on}"
+  node "${MINSKY_HOME}/scripts/daemon-auto-rebase-dirty-prs.mjs" 2>&1 || true
 fi
 
 # Auto-merge sweep (advisory). Runs `scripts/auto-merge-clean-prs.mjs`

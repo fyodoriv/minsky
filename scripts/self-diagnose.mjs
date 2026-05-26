@@ -520,16 +520,17 @@ export function daemonTaskIdStalenessInvariant(opts) {
     return {
       id: "daemon-task-id-staleness",
       ok: false,
-      // Today the daemon does NOT auto-close orphan PRs — operator must
-      // act manually (close the PR or re-file the task block). The
-      // suggestedFix below is partly aspirational; until the close-on-
-      // orphan automation lands, the operator is the actor. Tracked via
-      // task `daemon-auto-close-orphan-prs` (file if missing).
-      actor: "operator",
+      // 2026-05-26: auto-close orphan PRs landed in
+      // `scripts/daemon-auto-close-orphan-prs.mjs` + wired into
+      // `distribution/systemd/run-tick-loop.sh`. The daemon now closes
+      // these on the next supervisor cycle. Operator-action only when
+      // the env-var gate is explicitly off OR the auto-close itself
+      // fails (rare — `gh pr close` is idempotent).
+      actor: "minsky",
       evidence: `in-flight task ids absent from TASKS.md: ${stale.join(", ")}.`,
       suggestedTaskTitle: `daemon iterating on stale task id(s): ${stale.join(", ")}`,
       suggestedFix:
-        "The daemon has work-in-flight (open PRs / active branches / claimed task entries) for task ids that no longer have a `**ID**: <id>` block in TASKS.md. The operator likely removed or renamed the task. **Operator action**: close the orphan PR(s), OR re-file the task block with the same ID to retarget the in-flight branch. The daemon does NOT auto-close orphans today (filed as `daemon-auto-close-orphan-prs` — until that ships, this finding will repeat every iteration).",
+        "The daemon has work-in-flight (open PRs / active branches / claimed task entries) for task ids that no longer have a `**ID**: <id>` block in TASKS.md. **Minsky auto-fix**: `scripts/daemon-auto-close-orphan-prs.mjs` runs every supervisor cycle and closes orphan PRs with a paper-trail comment. To disable, set `MINSKY_AUTO_CLOSE_ORPHAN_PRS=off`. If the work is still wanted, re-file the task block with the same ID and the daemon will re-open the PR on its next pick.",
     };
   };
   /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-task-id-staleness";
@@ -745,16 +746,22 @@ export function daemonPrStuckDirtyInvariant(opts) {
     return {
       id: "daemon-pr-stuck-dirty",
       ok: false,
-      // Today the daemon does NOT auto-run `gh pr update-branch` (the
-      // auto-merge supervisor is the only thing that touches stuck PRs,
-      // and `local-gate-merge.mjs` only handles MERGEABLE PRs, not
-      // DIRTY). Operator must run the command manually OR close the PR
-      // as superseded. Tracked via task `daemon-auto-rebase-dirty-prs`
-      // (file if missing).
-      actor: "operator",
+      // 2026-05-26: auto-rebase landed in
+      // `scripts/daemon-auto-rebase-dirty-prs.mjs` + wired into the
+      // supervisor. The daemon now runs `gh pr update-branch` on every
+      // cycle; if that succeeds, the PR transitions to MERGEABLE and CI
+      // re-triggers. If `gh pr update-branch` fails with conflicts, the
+      // daemon escalates to close-as-superseded automatically. Both
+      // paths are gated by `MINSKY_AUTO_REBASE_DIRTY_PRS` (default on).
+      // The "minsky-then-operator" actor signals: minsky tries first; if
+      // both the rebase AND the close-superseded fail (unlikely — `gh`
+      // returning non-zero on a transient network/auth issue), the
+      // operator may need to clear the PR manually. In practice that's
+      // a rare failure mode.
+      actor: "minsky-then-operator",
       evidence,
       suggestedTaskTitle: `${stuck.length} daemon PR(s) stuck dirty (merge conflict) for >${maxAgeHours}h`,
-      suggestedFix: `One or more daemon-authored PRs have been in DIRTY (merge-conflict) state for >${maxAgeHours}h. **Operator action**: run \`${updateCmds}\` — if it succeeds, CI re-triggers. If \`gh pr update-branch\` fails with conflicts, close the PR as superseded (the recurring 2026-05-06 #227 pattern) and the daemon will re-open a fresh PR on next iteration. Pivot if false-positives ≥1/week: raise threshold to 4h. The daemon does NOT auto-rebase today (filed as \`daemon-auto-rebase-dirty-prs\`).`,
+      suggestedFix: `One or more daemon-authored PRs have been in DIRTY (merge-conflict) state for >${maxAgeHours}h. **Minsky auto-fix**: \`scripts/daemon-auto-rebase-dirty-prs.mjs\` runs every supervisor cycle and (a) tries \`gh pr update-branch\`, (b) escalates to close-as-superseded on conflict. To disable, set \`MINSKY_AUTO_REBASE_DIRTY_PRS=off\`. Manual fallback: \`${updateCmds}\` (only needed if both auto-paths hit a transient \`gh\` error). Pivot if auto-close-superseded false-positives ≥1/week: raise threshold to 4h.`,
     };
   };
   /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-pr-stuck-dirty";
