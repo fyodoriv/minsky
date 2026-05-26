@@ -25,14 +25,14 @@
 //   - Pivot: if false-positive rate >1/week (operator complains "you
 //     closed my real PR"), revert to `actor: "operator"` and ship
 //     just the diagnostic surface (which we already have).
-//   - Measurement: `node scripts/daemon-auto-close-orphan-prs.mjs
+//   - Measurement: `node scripts/auto-close-orphan-prs.mjs
 //     --dry-run --json` returns `{closed, skipped}` counts.
 //   - Anchor: Kephart & Chess 2003 *The Vision of Autonomic Computing*
 //     (MAPE-K Execute step); rule #6 (stay loud — closed PRs leave a
 //     paper trail; silently abandoned PRs do not).
 //
 // Usage:
-//   node scripts/daemon-auto-close-orphan-prs.mjs [--dry-run] [--limit=N] [--json]
+//   node scripts/auto-close-orphan-prs.mjs [--dry-run] [--limit=N] [--json]
 //   --dry-run : list the actions but don't call `gh pr close`
 //   --limit=N : cap per-cycle work (default 5)
 //   --json    : emit the result as JSON (for the supervisor's ledger)
@@ -170,7 +170,7 @@ function closeOrphanPrViaGh(prNumber, taskId) {
       "close",
       String(prNumber),
       "--comment",
-      `Auto-closed by \`daemon-auto-close-orphan-prs\` — the task block \`${taskId}\` is no longer in TASKS.md (operator removed or renamed). Closing leaves a paper trail; the daemon's next iteration will pick a different task. If the work is still wanted, re-file the task block with the same ID and the daemon will re-open the PR. See \`scripts/daemon-auto-close-orphan-prs.mjs\` for the autonomic-loop rationale.`,
+      `Auto-closed by \`daemon-auto-close-orphan-prs\` — the task block \`${taskId}\` is no longer in TASKS.md (operator removed or renamed). Closing leaves a paper trail; the daemon's next iteration will pick a different task. If the work is still wanted, re-file the task block with the same ID and the daemon will re-open the PR. See \`scripts/auto-close-orphan-prs.mjs\` for the autonomic-loop rationale.`,
     ],
     { encoding: "utf8" },
   );

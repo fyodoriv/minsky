@@ -1,16 +1,16 @@
-// Paired tests for `daemon-auto-rebase-dirty-prs.mjs`. Pure-function
+// Paired tests for `auto-rebase-dirty-prs.mjs`. Pure-function
 // tests over `decideRebaseAction` + `executeDecisions` with injected
 // I/O seams (rule #2 — Strategy seam). No `gh` calls, no network.
 
 import { describe, expect, test } from "vitest";
 
-import { decideRebaseAction, executeDecisions } from "./daemon-auto-rebase-dirty-prs.mjs";
+import { decideRebaseAction, executeDecisions } from "./auto-rebase-dirty-prs.mjs";
 
 const NOW = Date.parse("2026-05-26T18:00:00Z");
 const THREE_H_AGO = new Date(NOW - 3 * 3_600_000).toISOString();
 const ONE_H_AGO = new Date(NOW - 1 * 3_600_000).toISOString();
 
-/** @returns {import("./daemon-auto-rebase-dirty-prs.mjs").OpenPrSnapshot} */
+/** @returns {import("./auto-rebase-dirty-prs.mjs").OpenPrSnapshot} */
 function pr(over = {}) {
   return {
     number: 100,

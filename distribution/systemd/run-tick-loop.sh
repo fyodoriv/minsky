@@ -169,9 +169,9 @@ if [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" 
   # Errors are advisory: a failed auto-fix leaves the finding on the
   # log; the supervisor's next cycle retries. Never blocks startup.
   printf 'autonomic-fix: pass 1 — close orphan PRs (MINSKY_AUTO_CLOSE_ORPHAN_PRS=%s)\n' "${MINSKY_AUTO_CLOSE_ORPHAN_PRS:-on}"
-  node "${MINSKY_HOME}/scripts/daemon-auto-close-orphan-prs.mjs" 2>&1 || true
+  node "${MINSKY_HOME}/scripts/auto-close-orphan-prs.mjs" 2>&1 || true
   printf 'autonomic-fix: pass 2 — rebase dirty PRs (MINSKY_AUTO_REBASE_DIRTY_PRS=%s)\n' "${MINSKY_AUTO_REBASE_DIRTY_PRS:-on}"
-  node "${MINSKY_HOME}/scripts/daemon-auto-rebase-dirty-prs.mjs" 2>&1 || true
+  node "${MINSKY_HOME}/scripts/auto-rebase-dirty-prs.mjs" 2>&1 || true
 fi
 
 # Auto-merge sweep (advisory). Runs `scripts/auto-merge-clean-prs.mjs`
