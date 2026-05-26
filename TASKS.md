@@ -818,6 +818,435 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) tick-loop directory is gone. (2) `minsky` binstub invokes bash skeleton. (3) launchd/systemd units use bash. (4) Pnpm typecheck + test green. (5) Live smoke fresh ledger. (6) Scoreboard ≤10K.
   - **Risk**: high. Multi-month effort if done conservatively. Mitigations: each migration is its own PR; the launchd/systemd flip is reversible via a single env var; revert path is `git revert` of the final deletion PR.
 
+- [ ] `competitor-add-auto-code-rover` — research AutoCodeRover (AutoCodeRoverSG/auto-code-rover, 3.1k★, STALE April 2025); produce `competitors/auto-code-rover.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-auto-code-rover
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
+  - **Milestone**: M1
+  - **Hypothesis**: AutoCodeRover's ISSTA-2024 paper (46.2% SWE-bench Verified at <$0.70/issue) is high-quality research but the project is stale. Q2 should extract the AST-aware fault-localization technique for Minsky's adapter layer.
+  - **Success**: `competitors/auto-code-rover.md` with Post-mortem + Five Pivot Questions sections.
+  - **Pivot**: stale; extract the technical lessons.
+  - **Measurement**: `test -f competitors/auto-code-rover.md && grep -c '^## Post-mortem' competitors/auto-code-rover.md` ≥ 1.
+  - **Anchor**: rule #1; AutoCodeRover paper arXiv:2404.05427 ISSTA 2024 (Zhang et al.); `https://github.com/AutoCodeRoverSG/auto-code-rover`.
+
+- [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-pr-agent
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: PR-Agent is an event-driven PR review/fix bot — fundamentally a different category from Minsky's repo-supervisor. Q5 mostly N/A; Q2 may extract the PR-review-prompt strategy.
+  - **Success**: `competitors/pr-agent.md` created.
+  - **Pivot**: trivial — different category.
+  - **Measurement**: `test -f competitors/pr-agent.md && grep -c '^## Five pivot questions' competitors/pr-agent.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/qodo-ai/pr-agent`.
+
+- [ ] `competitor-deepen-cursor-agent` — apply Five Pivot Questions framework to Cursor Background Agents (commercial); deepen `competitors/cursor-agent.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-cursor-agent
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Cursor Background Agents (up to 8 parallel, Slack/Linear/GitHub triggers, $20/mo with usage) is the highest-volume mainstream competitor in the "async on a repo" axis. Q3 may force a Minsky vision-change if Cursor's commercial trajectory makes M5 (managed product) infeasible for an OSS-led player.
+  - **Success**: `competitors/cursor-agent.md § Five pivot questions` populated with Cursor pricing + parallel-agent UX comparison.
+  - **Pivot**: if Cursor's enterprise tier kills the M5 business case, file vision-threat.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/cursor-agent.md` ≥ 1.
+  - **Anchor**: rule #1; Cursor docs at `cursor.com`; the Cursor 0.50 background-agents launch post.
+
+- [ ] `competitor-add-autogpt` — research AutoGPT (Significant-Gravitas/AutoGPT, 184.5k★, alive); produce `competitors/autogpt.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-autogpt
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: AutoGPT is the most-starred autonomous-agent OSS by 2.5× — Q2 should extract why it grew so big and why its actual capability lags the star count. Q3 may surface a vision-threat from AutoGPT's "platform for continuous agents" pivot.
+  - **Success**: `competitors/autogpt.md` created with full template + Five Pivot Questions section + Post-mortem-light on the original AutoGPT vs the current platform.
+  - **Pivot**: if AutoGPT's autonomy claims are mostly vaporware (the established consensus), the doc records that finding and Minsky's positioning doesn't change.
+  - **Measurement**: `test -f competitors/autogpt.md && grep -c '^## Five pivot questions' competitors/autogpt.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/Significant-Gravitas/AutoGPT`; AutoGPT 2026 platform docs.
+
+- [ ] `competitor-add-open-interpreter` — research Open Interpreter (openinterpreter/open-interpreter, 63.6k★, semi-stale Feb 2026); produce `competitors/open-interpreter.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-open-interpreter
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
+  - **Milestone**: M1
+  - **Hypothesis**: Open Interpreter's `loop=True` mode + Skidudeaa's multi-agent fork (Scout + Surgeon + Validator) is the closest "natural language interface for computers" framing. Q2 should extract the adaptive-autonomy mode pattern.
+  - **Success**: `competitors/open-interpreter.md` created.
+  - **Pivot**: if upstream is dead (no commits ≥180d at execution time), run `--post-mortem` mode.
+  - **Measurement**: `gh api repos/openinterpreter/open-interpreter --jq .pushed_at`; days since > 180 ⇒ post-mortem mode.
+  - **Anchor**: rule #1; `https://github.com/openinterpreter/open-interpreter`.
+
+- [ ] `competitor-add-continue-dev` — research Continue.dev (continuedev/continue, 33.4k★, alive); produce `competitors/continue-dev.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-continue-dev
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Continue.dev's Cloud Agents (async, event-driven) + Mission Control dashboard is the closest competitor on the dashboard axis. Q5 should grade whether Continue's open-source plumbing can replace Minsky's CLI dashboard layer.
+  - **Success**: `competitors/continue-dev.md` created.
+  - **Pivot**: if Continue.dev's stack covers ≥40% of Minsky's M2 single-task-delivery surface, file vision-threat.
+  - **Measurement**: `test -f competitors/continue-dev.md && grep -c '^## Five pivot questions' competitors/continue-dev.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/continuedev/continue`; continue.dev docs.
+
+- [ ] `competitor-deepen-ralph-wiggum-official` — apply Five Pivot Questions framework to Anthropic's official Ralph Wiggum plugin (in-tree dependency); deepen `competitors/ralph-wiggum-official.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-ralph-wiggum-official
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency
+  - **Milestone**: M1
+  - **Hypothesis**: Ralph Wiggum is adopted as Minsky's InnerLoop primitive. Q5 should be all-KEEP (no replace candidate). Q2 may surface refinements from Anthropic's official-plugin form vs Geoffrey Huntley's original.
+  - **Success**: `competitors/ralph-wiggum-official.md § Five pivot questions` populated.
+  - **Pivot**: trivial — this is an in-tree Anthropic plugin; no replace.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/ralph-wiggum-official.md` ≥ 1.
+  - **Anchor**: rule #1; Anthropic's claude-code/plugins/ralph-wiggum directory; Geoffrey Huntley's "Ralph technique" blog post.
+
+- [ ] `competitor-deepen-codex-cli` — apply Five Pivot Questions framework to OpenAI Codex CLI (openai/codex, 85.2k★, alive); deepen `competitors/codex-cli.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-codex-cli
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Codex CLI's growth to 85k★ in <1y signals OpenAI is the default "background coding agent" in the bottom-half of the funnel. Q5 should grade whether Minsky's tick-loop survives if `codex --background` is a one-flag default in Cursor / Copilot / Replit.
+  - **Success**: `competitors/codex-cli.md § Five pivot questions` populated with Codex's published SWE-bench numbers + ChatGPT-cloud integration model.
+  - **Pivot**: if Codex's cloud variant covers Minsky's whole M5 ("managed product") vision, file vision-threat.
+  - **Measurement**: `gh api repos/openai/codex --jq .stargazers_count` ≥ 80000; `grep -c '^## Five pivot questions' competitors/codex-cli.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/openai/codex`; OpenAI Codex announcement post.
+
+- [ ] `competitor-deepen-openhands` — apply Five Pivot Questions framework to OpenHands (OpenHands/OpenHands, 74.7k★, alive, in-progress dependency adoption); deepen `competitors/openhands.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-openhands
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-in-progress
+  - **Milestone**: M1
+  - **Hypothesis**: OpenHands is already in-progress adoption (35-50% Minsky surface coverage per 2026-05-22 reassessment). Q5 should formalize the surface-by-surface KEEP/REPLACE/AUGMENT decisions. Q3 may surface vision-threats from OpenHands V1's SDK reference architecture (arXiv:2511.03690) — does Minsky's tick-loop reference architecture survive that paper?
+  - **Success**: `competitors/openhands.md § Five pivot questions` populated; concrete Minsky-surface-coverage table updated to V1 baseline.
+  - **Pivot**: if OpenHands V1 SDK fully subsumes Minsky's MAPE-K + adapter layer, file vision-threat for a "thinner Minsky" pivot.
+  - **Measurement**: `gh api repos/OpenHands/OpenHands --jq .stargazers_count` ≥ 70000; `grep -c '^## Five pivot questions' competitors/openhands.md` ≥ 1.
+  - **Anchor**: rule #1; OpenHands V1 paper arXiv:2511.03690; OpenHands Cloud blog post 2025-11-12.
+
+- [ ] `daemon-silent-on-claude-account-rate-limit` — `claude --print` exits 1 with `You've hit your limit · resets <date>` when the operator's account is rate-limit-exhausted; minsky's daemon does NOT parse this signal, doesn't transition to `budget-paused`, doesn't notify the operator, doesn't sleep until reset — it just keeps emitting `iteration.status=failed, provider=""` forever, burning machine cycles and obscuring the actual root cause behind the symptom "spawn failed"
+  - **ID**: daemon-silent-on-claude-account-rate-limit
+  - **Tags**: p0, milestone-m1, m1-1, rule-1, rule-6, observability, budget-guard, observed-2026-05-26, blocker, anti-stub-marker
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-26 operator session — ran `pnpm dogfood`, watched first iteration fail. Strategic router span: `{kind:"strategic-router","agent":"local","reason":"tier-3 local qualifies","weekly":0.000}`. Iteration: `{"iteration.status":"failed","iteration.provider":""}`. When I ran `echo test | claude --print` directly on this machine, output was: `You've hit your limit · resets May 31 at 8pm (America/Toronto)` (exit 1). So `weekly=0.00` was NOT a cold-start observation — it was the `MaciekTokenMonitor` correctly observing that the operator's weekly Claude window is exhausted. The strategic router did the right thing routing to local. The bug: (a) local has no backend wired AND (b) the daemon doesn't surface "claude exhausted until <reset>" anywhere — no ntfy push, no budget-pause supervisor state, no log line, no nothing. The operator only finds out by running `claude --print` themselves. Connect to M1.1 (90% stability target): with claude exhausted, the daemon spends 100% of iterations on silent spawn-failure until reset. **No amount of work in the cwd can heal this — it's account-level.**
+  - **Hypothesis**: spawn the `claude --print` child with stderr captured; if stderr matches `/You've hit your limit · resets (.+)/`, the spawn handler emits a structured `iteration.failure_reason: "claude-account-rate-limit"` field with the parsed reset time, the supervisor transitions to a new `budget-paused-claude` state, the ntfy notifier (if wired) pushes one alert ("Claude exhausted until <reset>; minsky paused"), and the tick-loop sleeps until `reset_time - now` instead of busy-looping every 5 min. After fix: an operator who lets minsky run through a rate-limit transition sees ONE clear log line + ONE push notification, the daemon stops burning cycles, and `pnpm dogfood:status` shows the supervisor in `budget-paused-claude` (not `running`) so it's mechanically visible.
+  - **Success**: (1) Live-fire reproduction: trigger the rate-limit by running 5+ concurrent `claude --print` invocations; observe the daemon catches the stderr signal within 1 iteration; (2) `tail .minsky/tick-loop.out.log | grep budget-paused-claude` returns a line; (3) `pnpm dogfood:status` shows `budget-paused-claude` state with the parsed reset time; (4) the tick-loop sleeps until reset (verified via no new iteration spans between trigger and reset); (5) when reset time passes, the daemon auto-resumes WITHOUT operator intervention (single retry tests the wall).
+  - **Pivot**: if parsing claude's stderr is fragile (Anthropic changes the message string and our regex breaks silently), the failure mode is "we stop catching the signal and silently busy-loop again." Pivot trigger: ≥1 operator report of "minsky kept running through a rate-limit" within 30 days of rollout. Pivot to: don't parse — implement a separate `canMintAccessToken` probe (a 1-token `claude --print` probe at boot + every 10 min) that returns a structured `{exhausted, resetAt}` and feed THAT into the budget-guard. The probe is fragile in a different way (Anthropic could change the limit-error wire shape) but at least separates the signal from the per-iteration spawn path.
+  - **Measurement**: `tail -200 ~/.minsky/tick-loop.out.log | grep -E "budget-paused-claude|hit your limit" | wc -l | awk '$1 > 0 {print "PASS"} $1 == 0 {print "FAIL"}'`
+  - **Anchor**: Rule #1 (loud-crash > silent failure — a rate-limit exhausted account IS a loud signal that the system should propagate, not absorb). Rule #6 (handled-locally — the spawn handler is the right boundary for parsing the rate-limit signal). Beyer SRE 2016 Ch. 4 (SLI/SLO — minsky's stability SLO can't be 90% if budget exhaustion silently zeros it). MILESTONES.md M1.1 (the 90% threshold assumes minsky can DETECT what's wrong; a silent budget-exhausted loop is worse than a crash because it lies).
+  - **Details**: (a) Modify the `claude --print` spawn invocation in `novel/tick-loop/src/llm-invocation.ts` (or wherever `buildClaudePrintInvocation` runs) to capture stderr and pattern-match `/You've hit your limit · resets (.+)/`. (b) On match, emit a new span `tick-loop.budget-paused-claude` with `{reset_at, parsed_from_stderr}` AND return a structured outcome `{verdict: "budget-paused-claude", resetAt}` instead of `spawn-failed`. (c) The supervisor's iteration boundary (in `novel/cross-repo-runner/src/host-loop.ts`) detects this verdict and transitions the supervisor state to `budget-paused-claude`; the strategic-router gates subsequent picks (returns `kind: "budget-paused"` with no spawn). (d) The tick-loop's sleep computation factors in the resetAt: `sleep = max(MINSKY_TICK_INTERVAL_MS, resetAt - now)` so the daemon naturally idles until reset. (e) If ntfy is wired, push ONE notification per transition (edge-triggered debounce — don't spam). (f) Paired tests for: regex parsing variants (with/without timezone string, different date formats Anthropic might emit), state transition idempotency (multiple consecutive limits don't re-notify), reset-time-elapsed auto-resume.
+  - **Files**: `novel/tick-loop/src/llm-invocation.ts` (stderr capture + rate-limit pattern match), `novel/tick-loop/src/budget-paused-claude.ts` (new — pure state-transition function), `novel/tick-loop/src/budget-paused-claude.test.ts` (new), `novel/cross-repo-runner/src/host-loop.ts` (recognize `budget-paused-claude` verdict), `novel/cross-repo-runner/src/host-loop.test.ts` (test the verdict), `bin/tick-loop.mjs` (wire the resetAt into sleep computation).
+  - **Acceptance**: (1) `pnpm vitest run novel/tick-loop/src/budget-paused-claude.test.ts` passes; (2) `pnpm typecheck` clean; (3) Live-fire: when the OPERATOR's claude session is rate-limited (verified by `echo x | claude --print` returning the "hit your limit" message), `pnpm dogfood` running for ≥1 iteration produces a `budget-paused-claude` span in the log within 5 min, the supervisor's PID exits cleanly OR the tick-loop visibly idles (no new strategic-pick spans for the duration until reset), and `pnpm dogfood:status` reflects the state; (4) when the operator's claude session recovers (or the reset wall passes), the next tick fires a real iteration without operator intervention.
+
+- [ ] `competitor-add-factory` — research Factory.ai's OSS facade (Factory-AI/factory, 906★, commercial-with-OSS-CLI); produce `competitors/factory.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-factory
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, commercial
+  - **Milestone**: M1
+  - **Hypothesis**: Factory.ai (commercial, GA Oct 2025, #1 Terminal-Bench at 58.8%, org-level memory across sessions) is the strongest commercial competitor on the "Droid fleet" axis. The OSS CLI facade is a small entry point — the real product is closed. Q5 should grade what Minsky can credibly do against a $50M-Series-B-funded competitor with org-level memory and 6 SDLC Droids.
+  - **Success**: `competitors/factory.md` created; explicit "Minsky vs Factory" positioning section.
+  - **Pivot**: if Factory's offering is shown to make Minsky's commercial M5 vision infeasible, file vision-threat.
+  - **Measurement**: `test -f competitors/factory.md && grep -c '^## Five pivot questions' competitors/factory.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/factory-ai/factory`; Factory's "Code Droid: A Technical Report" (factory.ai/news/code-droid-technical-report); Factory GA announcement.
+
+- [ ] `competitor-add-smol-developer` — research Smol Developer (smol-ai/developer, 12.2k★, DEAD since April 2024); produce `competitors/smol-developer.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-smol-developer
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
+  - **Milestone**: M1
+  - **Hypothesis**: Smol-Developer's one-shot-codebase-generation thesis was killed by "field moved to more capable agents". The post-mortem should identify what makes that pivot inevitable for one-shot projects — a guardrail Minsky's incremental-improvement thesis should formalize.
+  - **Success**: `competitors/smol-developer.md` with Post-mortem + Five Pivot Questions sections.
+  - **Pivot**: archived; lesson-extraction only.
+  - **Measurement**: `test -f competitors/smol-developer.md && grep -c '^## Post-mortem' competitors/smol-developer.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/smol-ai/developer`.
+
+- [ ] `competitor-add-gpt-engineer` — research GPT-Engineer (AntonOsika/gpt-engineer, 55.2k★, ARCHIVED 2025-05); produce `competitors/gpt-engineer.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-gpt-engineer
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
+  - **Milestone**: M1
+  - **Hypothesis**: GPT-Engineer was the most-anticipated 2023 OSS coding agent, then archived May 2025 after the team pivoted to Lovable.dev. Post-mortem should identify the architectural-dead-end vs business-model-failure root cause. Q3 may surface Minsky guardrails against the same death pattern.
+  - **Success**: `competitors/gpt-engineer.md` with `## Post-mortem: why it died` section (≥3 sources) + `## Five pivot questions` section.
+  - **Pivot**: the project is already dead — no pivot beyond extracting the lesson.
+  - **Measurement**: `test -f competitors/gpt-engineer.md && grep -c '^## Post-mortem' competitors/gpt-engineer.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/AntonOsika/gpt-engineer` (archived); Lovable.dev announcement post.
+
+- [ ] `competitor-add-continuous-claude` — research Continuous Claude (AnandChowdhary/continuous-claude, 1.3k★, alive); produce `competitors/continuous-claude.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-continuous-claude
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, ralph-loop
+  - **Milestone**: M1
+  - **Hypothesis**: continuous-claude is the simplest Ralph-loop-with-PRs implementation. Q5 should grade whether Minsky's tick-loop adds enough over a 200-line continuous-claude wrapper to justify its complexity. This may be a small vision-threat: if a 200-line wrapper gets 80% of Minsky's value, the moat is the rule #9 + MAPE-K + rule-1 discipline, not the loop itself.
+  - **Success**: `competitors/continuous-claude.md` created; concrete "what does Minsky add over continuous-claude" answer.
+  - **Pivot**: if continuous-claude covers ≥70% of Minsky's tick-loop surface, file vision-threat asking whether Minsky should pivot to "discipline-as-a-product" framing.
+  - **Measurement**: `test -f competitors/continuous-claude.md && grep -c '^## Five pivot questions' competitors/continuous-claude.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/AnandChowdhary/continuous-claude`; the Ralph-loop blog post that inspired it (Geoffrey Huntley).
+
+- [ ] `competitor-deepen-goose` — apply Five Pivot Questions framework to Goose (aaif-goose/goose, 45.8k★, alive, AAIF/Linux Foundation); deepen `competitors/goose.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-goose
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Goose's move from Block/Square to AAIF (Linux Foundation) is a strategic signal — Q3 should evaluate whether Minsky should similarly seek a foundation home. The Goosetown multi-agent sibling project may overlap with Minsky's tick-loop.
+  - **Success**: `competitors/goose.md § Five pivot questions` populated; explicit AAIF-home pros/cons analysis.
+  - **Pivot**: if Goose's foundation model + MCP support fully covers Minsky's adapter layer, file vision-threat.
+  - **Measurement**: `gh api repos/aaif-goose/goose --jq .stargazers_count` ≥ 40000; `grep -c '^## Five pivot questions' competitors/goose.md` ≥ 1.
+  - **Anchor**: rule #1; AAIF announcement post; `https://github.com/aaif-goose/goose`.
+
+- [ ] `competitor-deepen-langgraph` — apply Five Pivot Questions framework to LangGraph (langchain-ai/langgraph, 32.8k★, alive, framework); deepen `competitors/langgraph.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-langgraph
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: LangGraph's checkpoint + resumption primitives are the most relevant prior art for Minsky's tick-loop durability story. Q2 should extract the checkpoint pattern. Q5 evaluates replace-tick-loop-with-LangGraph viability.
+  - **Success**: `competitors/langgraph.md § Five pivot questions` populated; concrete answer on LangGraph-as-tick-loop-substrate viability.
+  - **Pivot**: if LangGraph's adoption cost > the gain from replacing tick-loop, keep current implementation.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/langgraph.md` ≥ 1.
+  - **Anchor**: rule #1; LangGraph docs; `https://github.com/langchain-ai/langgraph`.
+
+- [ ] `competitor-deepen-omc` — apply Five Pivot Questions framework to Oh My Claude Code (Yeachan-Heo/oh-my-claudecode, 31.3k★, alive, dependency under reassessment); deepen `competitors/omc.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-omc
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-reassess
+  - **Milestone**: M1
+  - **Hypothesis**: OMC is already classified as a dependency under reassessment (2026-05-22) given OpenHands' native persona stack covers most of OMC's surface. Q5 should close that reassessment with a concrete keep / deprecate / consolidate decision.
+  - **Success**: `competitors/omc.md § Five pivot questions` populated; the 2026-05-22 reassessment flag is replaced with a concrete decision (keep + scope-shrink, OR deprecate + migrate).
+  - **Pivot**: if OMC's remaining unique value (cross-model routing + architect verification) is also covered by OpenHands skills, deprecate.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/omc.md` ≥ 1; `grep -c '2026-05-22 reassessment flag added' competitors/omc.md` after this task should be replaced with a `2026-05-XX reassessment closed` marker.
+  - **Anchor**: rule #1; `https://github.com/Yeachan-Heo/oh-my-claudecode`; `docs/visions/2026-05-22-openhands-fulfillment.md`.
+
+- [ ] `devin-per-worker-isolation-primitive` — claude has `--worktree <name>` which auto-creates an isolated git worktree per session; devin has no equivalent today. When the daemon scales to ≥2 workers (`MINSKY_AUTO_SCALE_WORKERS=1`, max 5) and cloud_agent=devin, all workers iterate against the shared main checkout — concurrent commits could collide
+  - **ID**: devin-per-worker-isolation-primitive
+  - **Tags**: p2, milestone-m1, m1-1, devin-support, parallel-workers, observed-2026-05-26
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-26 — operator switched to devin (`MINSKY_CLOUD_AGENT=devin`). Auto-scale is on by default (initial=1, max=5). With cloud_agent=devin, the worker-config's `--worktree` flag is stripped (per `claude-args-for-worker-should-be-cloud-agent-aware`), so all workers share the main checkout. The worker-claim layer prevents two workers from picking the SAME task, but two workers picking DIFFERENT tasks both run in the same git checkout → race conditions in `git status`, branch switches, commit ordering.
+  - **Hypothesis**: extend `worker-config.ts` with `ensureDevinWorktree(taskId)` — a pure helper that runs `git worktree add daemon-<workerId>-<taskId>` against the main checkout BEFORE devin spawn, then passes `cwd: <worktree-path>` to `buildDevinPrintInvocation`. Mirror the pattern of `ensureLocalWorktree` (already in `bin/tick-loop.mjs`). On iteration completion, `git worktree remove` cleans up. Falsifiable: with `MINSKY_AUTO_SCALE_WORKERS=1` + 2 active workers + cloud_agent=devin, the daemon log shows each worker spawning devin with a distinct cwd path.
+  - **Success**: (1) Two concurrent devin workers don't collide on `git status` / branch state; (2) Each worker's PR lands cleanly against its dedicated worktree-branch; (3) Removed worktrees don't leave stale entries in `.git/worktrees/`; (4) `git worktree list` after iteration completion shows only the main checkout (no `daemon-N-<task>` leftovers).
+  - **Pivot**: if `git worktree add` is too slow at iteration scale (>3s p95 worktree creation), gate the multi-worker devin path behind `MINSKY_AUTO_SCALE_WORKERS=0` and run single-worker devin only. Threshold: ≥1 worker spawn took >5s on worktree creation → pivot.
+  - **Measurement**: `git worktree list | grep -c "daemon-" | awk '$1 == 0 {print "PASS"} $1 > 0 {print "FAIL: " $1 " orphaned worktrees"}'`
+  - **Anchor**: MILESTONES.md M1.9 (works from Claude Code, Devin, and local models — parity means devin needs the same per-worker isolation claude got from `--worktree`). Rule #2 (single source of truth — worktree-creation logic lives in one helper, not scattered).
+  - **Details**: (a) Add `ensureDevinWorktree(taskId, workerId)` to `bin/tick-loop.mjs` (mirrors `ensureLocalWorktree`). (b) When `cloud_agent === "devin"` AND `workerConfig !== undefined`, call `ensureDevinWorktree` before spawn; pass cwd to `buildDevinPrintInvocation`. (c) `removeDevinWorktree(name)` cleanup on iteration completion (in the per-iteration finally block, similar to local). (d) Test: spawn 2 workers with cloud_agent=devin, assert each gets a distinct cwd, both worktrees removed at completion.
+  - **Files**: `novel/tick-loop/bin/tick-loop.mjs` (add ensureDevinWorktree + removeDevinWorktree functions and call them in the devin invocation path), `novel/tick-loop/test/devin-worktree-isolation.test.mjs` (new — chaos test for the 2-worker collision case).
+  - **Acceptance**: (1) Test passes; (2) Live-fire: `MINSKY_AUTO_SCALE_WORKERS=1`, observe 2 concurrent workers spawning devin with distinct cwds (visible in spawn span); (3) After 5 iterations, `git worktree list` shows only the main checkout (no leftover daemon-N-<task> worktrees).
+
+- [ ] `competitor-deepen-swe-agent` — apply Five Pivot Questions framework to SWE-agent (SWE-agent/SWE-agent, 19.3k★, alive, NeurIPS 2024); deepen `competitors/swe-agent.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-swe-agent
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper
+  - **Milestone**: M1
+  - **Hypothesis**: SWE-agent's NeurIPS-2024 ACI thesis is the reference research scaffold. Q2 should extract concrete ACI design principles for Minsky's adapter layer. Mini-SWE-agent at 65% SWE-bench Verified in 100 lines is the canonical "minimal scaffold" Q5 evaluates against Minsky's surface.
+  - **Success**: `competitors/swe-agent.md § Five pivot questions` populated with ACI-design lessons.
+  - **Pivot**: if mini-SWE-agent's 100-line scaffold + a good model achieves what Minsky tick-loop does, that's a vision-threat.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/swe-agent.md` ≥ 1.
+  - **Anchor**: rule #1; SWE-agent paper arXiv:2405.15793 NeurIPS 2024 (Yang et al.); mini-SWE-agent leaderboard post (2025-07).
+
+- [ ] `watchdog-timeout-kills-productive-devin` — the 900s (15min) watchdog SIGKILLs devin mid-work; devin iterations take 5-6min when productive but the watchdog fires on slow iterations, wasting the entire iteration
+  - **ID**: watchdog-timeout-kills-productive-devin
+  - **Tags**: p0, milestone-m1, devin, watchdog, reliability
+  - **Milestone**: M1
+  - **Competitive-goal**: a killed productive iteration wastes 15min of devin time with zero output — directly regresses cost-per-PR and stability.
+  - **Surfaced-by**: 2026-05-18 live daemon: one `spawn-failed` at exactly 900014ms (the 900s watchdog) while the other iterations completed in 335-382s. The watchdog killed what was likely a productive-but-slow iteration.
+  - **Details**: the default `claudePrintTimeoutMs` is 900_000 (15 min), set in `tick-loop.mjs:340`. But minsky-run.mjs (the cross-repo runner) doesn't use the tick-loop's spawn strategy — it has its own spawn path. Check which timeout the cross-repo runner uses and whether it's too aggressive for devin. Devin may legitimately take >15min on complex tasks. The existing P2 task `worker-watchdog-scale-by-pinned-model-latency` addresses this for the tick-loop but not for the cross-repo runner.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (spawn timeout configuration), `novel/tick-loop/bin/tick-loop.mjs` (reference — already has `MINSKY_CLAUDE_PRINT_TIMEOUT_MS` env override)
+  - **Hypothesis**: raising the cross-repo runner's spawn timeout to 1800s (30min) eliminates watchdog-killed productive iterations while still catching truly stuck spawns.
+  - **Success**: 0 `spawn-failed` at exactly 900s over 10 consecutive iterations; productive iterations that take 10-20min complete normally.
+  - **Pivot**: if 30min is too long for stuck detection, implement a "progress watchdog" that checks whether the spawn has produced any stdout in the last 5min instead of a fixed wall-clock timeout.
+  - **Measurement**: `jq 'select(.verdict=="spawn-failed") | .notes' .minsky/experiment-store/cross-repo/*.jsonl | grep -c '900'` → 0 (was: 1).
+  - **Anchor**: 2026-05-18 live daemon (900014ms spawn-failed). Existing P2 `worker-watchdog-scale-by-pinned-model-latency`.
+
+- [ ] `competitor-deepen-microsoft-agent-framework` — apply Five Pivot Questions framework to Microsoft Agent Framework (microsoft/agent-framework, 10.7k★, alive); deepen `competitors/microsoft-agent-framework.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-microsoft-agent-framework
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Microsoft's Agent Framework (evolution of AutoGen + Magentic-One) is the enterprise-backed orchestrator competitor. Q5 should grade replace-tick-loop-with-Magentic-One; Q3 should answer whether Microsoft's roadmap forces Minsky to either commit to a specific runtime or stay runtime-agnostic.
+  - **Success**: `competitors/microsoft-agent-framework.md § Five pivot questions` populated; concrete comparison to AutoGen + Magentic-One.
+  - **Pivot**: if Magentic-One's Orchestrator covers Minsky's MAPE-K layer, file vision-threat for the MAPE-K module home (build it on Magentic-One vs build it ourselves).
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/microsoft-agent-framework.md` ≥ 1.
+  - **Anchor**: rule #1; Microsoft's Magentic-One MSR-TR-2024-47; `https://github.com/microsoft/agent-framework`.
+
+- [ ] `competitor-add-babyagi` — research BabyAGI (yoheinakajima/babyagi, 22.3k★, mostly-archived); produce `competitors/babyagi.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-babyagi
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-stale
+  - **Milestone**: M1
+  - **Hypothesis**: BabyAGI's task-planning + execution-loop framing was hugely viral mid-2023 but the original is archived. The post-mortem should identify "demo viral ≠ production viable" as the root cause. Q3 unlikely vision-changing.
+  - **Success**: `competitors/babyagi.md` with Post-mortem + Five Pivot Questions sections.
+  - **Pivot**: archived; lesson-extraction only.
+  - **Measurement**: `test -f competitors/babyagi.md && grep -c '^## Post-mortem' competitors/babyagi.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/yoheinakajima/babyagi`.
+
+- [ ] `competitor-add-pydantic-ai` — research Pydantic-AI (pydantic/pydantic-ai, 17.3k★, alive); produce `competitors/pydantic-ai.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-pydantic-ai
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Pydantic-AI's durable-execution + type-safe framework + Sequoia/Partech backing is a credible enterprise-Python alternative to LangChain. Q5 framework-vs-product framing.
+  - **Success**: `competitors/pydantic-ai.md` created.
+  - **Pivot**: framework, mostly N/A on Minsky product surfaces.
+  - **Measurement**: `test -f competitors/pydantic-ai.md && grep -c '^## Five pivot questions' competitors/pydantic-ai.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/pydantic/pydantic-ai`; Pydantic-AI docs.
+
+- [ ] `competitor-add-roo-code` — research Roo Code (RooCodeInc/Roo-Code, 24.1k★, ARCHIVED); produce `competitors/roo-code.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-roo-code
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
+  - **Milestone**: M1
+  - **Hypothesis**: Roo Code (Cline fork with "Adaptive Autonomy" + custom modes) is archived as of 2026-05-15 despite 24k★ — the post-mortem should answer what killed a fork-with-momentum. Possibly: forks struggle when upstream (Cline) closes the differentiation gap.
+  - **Success**: `competitors/roo-code.md` with Post-mortem + Five Pivot Questions sections.
+  - **Pivot**: archived already; extract lesson and move on.
+  - **Measurement**: `test -f competitors/roo-code.md && grep -c '^## Post-mortem' competitors/roo-code.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/RooCodeInc/Roo-Code` (archived).
+
+- [ ] `minsky-config-json-support-local-llm-pref` — `~/.minsky/config.json` supports `cloud_agent` + `cloud_agent_model` as documented persistent keys, but NOT `local_llm_enabled`, `strategic_router_enabled`, or `cloud_agent_fallback`. So an operator who wants "use devin, fall back to local" has to add `MINSKY_LOCAL_LLM=1` to the rendered launchd plist, which gets wiped on the next `pnpm dogfood` regeneration. Per-machine preferences should live in ONE place
+  - **ID**: minsky-config-json-support-local-llm-pref
+  - **Tags**: p1, milestone-m1, m1-1, config-as-code, rule-2, persistence, observed-2026-05-26
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-26 operator directive — "update minsky on this machine so it always uses devin... and falls back to local model." Devin part went into `cloud_agent` (existing persistent key). Local-fallback part has NO persistent key — only the env var `MINSKY_LOCAL_LLM=1` exists. The operator's preference is now split: cloud_agent in config.json, local_llm in rendered plist (transient).
+  - **Hypothesis**: extend `MinskyConfig` schema with three optional booleans: `local_llm_enabled?: boolean`, `strategic_router_enabled?: boolean`, `cloud_agent_fallback?: "local" | "claude" | "none"`. Each maps 1:1 to the equivalent env var (env wins on conflict). `bin/tick-loop.mjs` reads config.json at startup and sets the env vars BEFORE the rest of the daemon code runs, so the downstream env-var reads continue to work without refactor. Falsifiable: operator writes `{local_llm_enabled: true}` to config.json, restarts daemon, observes `[tick-loop] local-llm wired (...)` log line.
+  - **Success**: (1) operator's complete preference fits in `~/.minsky/config.json` — no rendered-plist edits needed; (2) `pnpm dogfood` regeneration preserves operator preferences (the plist template doesn't carry per-machine state); (3) the three new config keys are documented in the README + an example config.json shipped at `docs/example-config.json`.
+  - **Pivot**: if the config-to-env translation layer at supervisor startup proves fragile (config drift between read time and downstream module load), gate the new keys behind a `MINSKY_CONFIG_AUTOLOAD=1` opt-in env var for the first 30 days of rollout. Threshold: ≥1 operator report of "I set the config but the daemon ignored it" → keep the auto-load gated.
+  - **Measurement**: `node -e 'const fs=await import("fs"); fs.writeFileSync(process.env.HOME + "/.minsky/config.json", JSON.stringify({...JSON.parse(fs.readFileSync(process.env.HOME+"/.minsky/config.json","utf8")), local_llm_enabled: true})); ' && pnpm dogfood && sleep 5 && grep -c "local-llm wired" /Users/fivanishche/apps/tooling/minsky/.minsky/tick-loop.out.log | awk '$1 > 0 {print "PASS"}'`
+  - **Anchor**: Rule #2 (single source of truth — config.json IS that source). MILESTONES.md M1.3 (one-command install — install writes ONE file the operator can edit to express ALL their preferences).
+  - **Details**: (a) Extend `MinskyConfig` interface in `bin/minsky-run.mjs` (or extract to a shared types file) with the three optional booleans. (b) Add a small startup block in `bin/tick-loop.mjs` that reads config.json, translates the booleans to env vars `MINSKY_LOCAL_LLM` / `MINSKY_STRATEGIC_ROUTER` / `MINSKY_CLOUD_AGENT_FALLBACK`, setting them on `process.env` BEFORE the existing env-var reads downstream. (c) Env vars still take precedence (rule #2 — env override is documented one-session lever). (d) Document in README's config section + ship `docs/example-config.json`.
+  - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (extend MinskyConfig type), `novel/tick-loop/bin/tick-loop.mjs` (startup config-to-env block), `docs/example-config.json` (new), `README.md` (config section update).
+  - **Acceptance**: (1) Operator writes `{local_llm_enabled: true}` to config.json, restarts daemon, sees the local-llm-wired log line; (2) Existing operators with no config.json continue working unchanged; (3) `MINSKY_LOCAL_LLM=0` env still overrides `local_llm_enabled: true` (env wins).
+
+- [ ] `competitor-deepen-metagpt` — apply Five Pivot Questions framework to MetaGPT (FoundationAgents/MetaGPT, 68.3k★, stale Jan 2026); deepen `competitors/metagpt.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-metagpt
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, status-stale
+  - **Milestone**: M1
+  - **Hypothesis**: MetaGPT's "multi-agent software company" framing + AFlow MCTS-workflow-generation may seed Minsky's research-agenda layer, but the project's 4-month stale signal suggests the framing under-delivered. Q3 unlikely vision-changing.
+  - **Success**: `competitors/metagpt.md § Five pivot questions` populated; post-mortem-lite section (last commit, why activity slowed) if stale ≥ 180 days.
+  - **Pivot**: if MetaGPT becomes archived between filing and execution, run the full `--post-mortem` mode of the skill.
+  - **Measurement**: `gh api repos/FoundationAgents/MetaGPT --jq .pushed_at` returns ISO date — compute days since; if > 180, flag for post-mortem treatment.
+  - **Anchor**: rule #1; MetaGPT paper arXiv:2308.00352; `https://github.com/FoundationAgents/MetaGPT`.
+
+- [ ] `competitor-deepen-composio-ao` — apply Five Pivot Questions framework to Composio Agent Orchestrator (ComposioHQ/composio, 28.4k★, alive); deepen `competitors/composio-ao.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-composio-ao
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Composio's Feb 2026 "Agent Orchestrator" (30 parallel agents, autonomous CI-fix + merge-conflict resolution) is the closest competitor to Minsky's tick-loop in the "parallel-worker pool" axis. Q5 should grade replace vs augment.
+  - **Success**: `competitors/composio-ao.md § Five pivot questions` populated; concrete comparison of Composio's orchestration model vs Minsky's tick-loop.
+  - **Pivot**: if Composio Orchestrator covers ≥50% of cross-repo-runner surface, downgrade cross-repo-runner roadmap.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/composio-ao.md` ≥ 1.
+  - **Anchor**: rule #1; Composio Orchestrator announcement (Feb 2026); `https://github.com/ComposioHQ/composio`.
+
+- [ ] `competitor-add-devika` — research Devika (stitionai/devika, 19.5k★, semi-stale Sep 2025); produce `competitors/devika.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-devika
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
+  - **Milestone**: M1
+  - **Hypothesis**: Devika was the first OSS "Devin alternative". The deep-dive should evaluate whether the project succeeded as a research vehicle or as a product, and what Minsky inherits or avoids from the Devika lineage.
+  - **Success**: `competitors/devika.md` created; if stale at execution time, run `--post-mortem` mode.
+  - **Pivot**: if execution finds Devika archived, run post-mortem.
+  - **Measurement**: `gh api repos/stitionai/devika --jq .pushed_at`; days since > 180 ⇒ post-mortem.
+  - **Anchor**: rule #1; `https://github.com/stitionai/devika`.
+
+- [ ] `competitor-deepen-cline` — apply Five Pivot Questions framework to Cline (cline/cline, 62.3k★, alive); deepen `competitors/cline.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-cline
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Cline's `--yolo` flag + IDE-extension lineage is the closest mainstream "agent runs unattended" UX. Q2 should surface the YOLO mode's task-persistence model. Q5 likely says KEEP-with-augment — Cline solves the IDE-pair-programming UX, Minsky solves the 24/7-supervisor UX; the two compose.
+  - **Success**: `competitors/cline.md § Five pivot questions` populated; ≥1 Q-block in ask_human.md if YOLO mode reveals a vision-changing autonomy framing.
+  - **Pivot**: if Cline's autonomy is shown to fully cover Minsky's M1 stability claim, file a vision-trace question.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/cline.md` ≥ 1; `gh api repos/cline/cline --jq .stargazers_count` ≥ 55000.
+  - **Anchor**: rule #1; Cline repo; the `--yolo` flag documentation in their CLI docs.
+
+- [ ] `competitor-add-refact-ai` — research Refact.ai (smallcloudai/refact, 3.5k★, alive); produce `competitors/refact-ai.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-refact-ai
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Refact.ai's local-first Rust engine + agent mode + claimed SWE-bench Verified leadership (unverified) is a niche enterprise offering. Q2 may extract the local-first deployment pattern; Q3 unlikely vision-changing.
+  - **Success**: `competitors/refact-ai.md` created.
+  - **Pivot**: niche; mostly N/A on Minsky surfaces.
+  - **Measurement**: `test -f competitors/refact-ai.md && grep -c '^## Five pivot questions' competitors/refact-ai.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/smallcloudai/refact`; refact.ai docs.
+
+- [ ] `competitor-deepen-agentless` — apply Five Pivot Questions framework to Agentless (OpenAutoCoder/Agentless, 2.0k★, FSE 2025, semi-stale); deepen `competitors/agentless.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-agentless
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper, contrarian
+  - **Milestone**: M1
+  - **Hypothesis**: Agentless's FSE-2025 thesis ("do you even need an agent?" 32% SWE-bench Lite at $0.70/issue) is the strongest contrarian voice. Q3 may force a vision-threat: if Agentless's three-phase non-agent approach is the rational frontier, what does Minsky's tick-loop add? Q5 should grade whether Minsky can adopt Agentless as a baseline.
+  - **Success**: `competitors/agentless.md § Five pivot questions` populated; explicit "what would Minsky's loop need to add over Agentless to justify itself" framing.
+  - **Pivot**: if Agentless's approach + a frontier model beats Minsky-on-tick-loop on a cost-adjusted SWE-bench score, Minsky's autonomy moat shrinks.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/agentless.md` ≥ 1.
+  - **Anchor**: rule #1; Agentless paper arXiv:2407.01489 FSE 2025 (Xia et al.); `https://github.com/OpenAutoCoder/Agentless`.
+
+<!-- ── 17 net-new adds for ≥500-star OSS not yet documented ── -->
+
+- [ ] `competitor-deepen-crewai` — apply Five Pivot Questions framework to CrewAI (crewAIInc/crewAI, 52.1k★, alive); deepen `competitors/crewai.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-crewai
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: CrewAI is a framework, not an end-user agent — Q5 should mostly grade N/A on Minsky surfaces, but the Crews/Flows pattern may seed Minsky's persona model. Q3 unlikely vision-changing.
+  - **Success**: `competitors/crewai.md § Five pivot questions` populated; explicit "framework vs Minsky's product" framing.
+  - **Pivot**: trivial — CrewAI is a framework. If Q5 is all N/A, the doc stays as it is.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/crewai.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/crewAIInc/crewAI`; CrewAI docs.
+
+- [ ] `competitor-deep-dive-wave-2026-05-24` — umbrella task tracking the 35-competitor deep-research wave (Five Pivot Questions framework applied to every existing `competitors/<id>.md` + every new ≥500-star OSS autonomous-coding agent); decision-relevant findings route to `ask_human.md`
+  - **ID**: competitor-deep-dive-wave-2026-05-24
+  - **Tags**: p0, milestone-m1, rule-1, competitive, umbrella, operator-directive, observed-2026-05-24
+  - **Milestone**: M1
+  - **Surfaced-by**: operator directive 2026-05-24 after reviewing the 4-stream autonomous-coding-landscape research — "Next I need full deepest information about all of these similar to minsky tools. For each one of them that has at least 500 stars on github (include dead repos for analysis on what went wrong) create a P0 task in minsky to fully research it. Research must be written to competitors docs, and questions for pivoting should be put to a file for human communication."
+  - **Hypothesis**: completing this 35-competitor wave produces ≥3 vision-changing findings (operator-resolved via ask_human.md), ≥10 architectural patterns we should absorb (filed as research-finding-* P3 tasks via the skill's Phase 6), and ≥1 "cuttable Minsky surface" (Minsky surface % to drop) per existing competitors/<id>.md row in the moats table. The wave operationalizes rule #1 (don't reinvent) by forcing a per-competitor decision on every Minsky surface.
+  - **Success**: (a) Every sub-task `competitor-deepen-<id>` and `competitor-add-<id>` below has its `competitors/<id>.md` containing a populated `## Five pivot questions` section; (b) ≥1 Q-block in `ask_human.md` per vision-changing finding (or explicit "no vision-changing finding" answer in §3 of each competitor's doc); (c) the wave-summary row in `vision.md § Strategic moats` updates the "% of Minsky surface possibly cuttable" headline number; (d) `bin/minsky competitive --json | jq '.competitors | length'` ≥ 8 (corpus grew from the 6 current entries — many of these competitors publish primary metrics worth adding).
+  - **Pivot**: if the first 5 deepens (`aider`, `cline`, `openhands`, `cursor-agent`, `swe-agent`) all produce "no vision-changing finding", abandon the remaining 30 — the wave's signal-to-noise is too low, and operator time is better spent shipping Minsky's existing differentiation. Threshold: 0 vision-changing findings + 0 cuttable-surface findings across the first 5 ⇒ stop, demote remaining 30 to P3 background.
+  - **Measurement**: `ls competitors/*.md | wc -l` ≥ 35 (target file count); `grep -l '## Five pivot questions' competitors/*.md | wc -l` ≥ 35 (every doc has the new section); `grep -c '^### Q' ask_human.md` reflects the vision-threat count; `gh api search/repositories?q=... | jq` confirms star counts at time of research (anti-stale-data check).
+  - **Anchor**: rule #1 (don't reinvent the wheel — research the existing field before building); rule #5 (theoretical grounding — every competitor cites their own primary source); `~/.claude/skills/competitor-research/SKILL.md` Phase 7 (the framework being applied here); 2026-05-24 4-stream research output (the seed list); operator directive 2026-05-24.
+  - **Details**: track 35 sub-tasks below. **Existing-doc deepens** (17): aider, cline, claude-agent-sdk, codex-cli, composio-ao, crewai, cursor-agent, devin, goose, langgraph, metagpt, microsoft-agent-framework, omc, openhands, ralph-wiggum-official, swe-agent, agentless. **Net-new ≥500-★ adds** (17): autogpt, open-interpreter, gpt-engineer, continue-dev, smolagents, roo-code, babyagi, devika, pydantic-ai, plandex, smol-developer, pr-agent, sweep, refact-ai, auto-code-rover, continuous-claude, factory. **One under-500-★ exception flagged for operator decision via ask_human.md**: live-swe-agent (396★, 79.2% SWE-bench Verified SoTA Nov 2025) — file `competitor-add-live-swe-agent` only if the operator answers "include" on that Q.
+  - **Files**: `competitors/<id>.md` × 35, `ask_human.md`, optional `novel/competitive-benchmark/src/competitors.ts` (per-competitor — only if vendor publishes a primary metric), `vision.md § Strategic moats` (headline-number update at wave completion).
+  - **Acceptance**: (a) 35 sub-task IDs are closed (block removed from TASKS.md per spec); (b) `ask_human.md` has all answered Q-blocks (or explicit "defer" markers); (c) a wave-summary commit lands titled `competitor-deep-dive-wave-2026-05-24: <N> vision-changing findings, <M> cuttable surfaces, <K> adopted patterns`; (d) the Five Pivot Questions skill phase is preserved in `~/.claude/skills/competitor-research/SKILL.md` (DONE 2026-05-24).
+  - **Risk**: medium. (a) Scope-bloat — 35 tasks is a lot. Mitigation: the Pivot above; each sub-task is ~30-60 min of focused work (the existing competitors/<id>.md files mostly need the Five Pivot Questions section appended, not full rewrites). (b) Star-count drift — counts were as of 2026-05-24 via `gh api repos/<owner>/<repo>` and may have shifted by the time the work runs; the picker re-checks in each sub-task's measurement step.
+
+<!-- ── 17 deepens for competitors with existing competitors/<id>.md ── -->
+
+- [ ] `competitor-deepen-devin` — apply Five Pivot Questions framework to Devin (Cognition Labs, commercial, in corpus); deepen `competitors/devin.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-devin
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Devin's 48.2% SWE-bench Verified (vs 68.3% Full, a 29% gap suggesting easy-task overfitting) + Answer.AI's 15% real-world success-rate data is the canonical "marketing-vs-reality gap" in the field. Q2 should extract the "what makes a Devin task succeed vs fail" pattern. Q5 is N/A — Devin is closed-commercial.
+  - **Success**: `competitors/devin.md § Five pivot questions` populated; explicit "Devin's headline number is benchmark-inflated" framing with citations.
+  - **Pivot**: Devin's API is closed; we can't adopt anything from it directly. If the deep-dive surfaces no transferable lesson, demote to honest-comparison reference.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/devin.md` ≥ 1.
+  - **Anchor**: rule #1; Cognition's 2025 annual review; Answer.AI HN post on Devin real-world success rate; OpenAI's SWE-bench Verified Feb 2025 retraction post.
+
+- [ ] `competitor-add-plandex` — research Plandex (plandex-ai/plandex, 15.4k★, alive); produce `competitors/plandex.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-plandex
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Plandex's "full auto mode" + persistent plan state + 2M-effective-context targeting large projects is the closest OSS competitor to Minsky's tick-loop in the "unattended long-running" axis. Q3 may surface vision-threat: Plandex's PR pipeline + auto-debug loop overlaps significantly with Minsky's cross-repo-runner.
+  - **Success**: `competitors/plandex.md` created; concrete surface-coverage table.
+  - **Pivot**: if Plandex's cross-repo-runner equivalent matches Minsky's, file vision-threat.
+  - **Measurement**: `test -f competitors/plandex.md && grep -c '^## Five pivot questions' competitors/plandex.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/plandex-ai/plandex`; plandex.ai docs.
+
+- [ ] `minsky-repo-git-config-bare-misset` — `.git/config` on the operator's minsky checkout has `bare = true`, but the directory contains a working tree with active worktrees (`.git/worktrees/daemon-0-*`, `fix-ci-main`, `fleet-stability`, `minsky-bench`). Every `git status` from the main checkout fails with `fatal: this operation must be run in a work tree`. Daemon self-diagnose flagged it under `git-config-parseable` but proposed the wrong fix (`rm .git/index.lock` — index lock is not the issue). Real fix: one-line `bare = false`. The self-diagnose handler should detect `bare = true` AND working files coexisting, propose the correct fix
+  - **ID**: minsky-repo-git-config-bare-misset
+  - **Tags**: p1, milestone-m1, m1-1, observed-2026-05-26, self-diagnose-misdirection
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-26 — every iteration's self-diagnose emits `git status failed (...fatal: this operation must be run in a work tree)`. Confirmed via `cat /Users/fivanishche/apps/tooling/minsky/.git/config` → `[core] bare = true`. `.git/worktrees/` shows 5 active worktrees (4 daemon-spawned + 3 operator). The daemon's self-diagnose suggested `rm .git/index.lock` (the index isn't locked — `ls .git` shows no `index.lock`). Real fix: flip `bare = false` (or remove the line). Tracked to a likely accidental `git init --bare` or similar tool misconfig at some point in the repo's history.
+  - **Hypothesis**: extend the self-diagnose handler in `novel/cross-repo-runner/src/daemon.ts` (or wherever `git-config-parseable` is computed) — when `git status` fails with `fatal: this operation must be run in a work tree`, ALSO probe `git config core.bare` and `ls .git/worktrees/`. If both `bare = true` AND worktree-entries exist, suggest `git config core.bare false` instead of the index-lock fix. The combination is mechanically diagnostic. Falsifiable: simulate the bug on a test fixture (`git init && git config core.bare true && touch a.txt`), run the daemon's self-diagnose, assert the suggested fix is the bare flip — not the index lock.
+  - **Success**: (1) Self-diagnose detects bare-misset and proposes the correct fix string; (2) Test fixture in `novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` (new) reproduces both detection AND correct suggestion; (3) Operator runs the suggested `git config core.bare false`, `git status` works, daemon iteration completes normally.
+  - **Pivot**: if detecting `bare = true` is too fragile (different git versions emit slightly different error messages), gate the new diagnostic behind a `MINSKY_SELF_DIAGNOSE_BARE_DETECTION=1` env var. Threshold: ≥1 false-positive ("flagged bare-misset when actually a different issue") within 7 days of rollout.
+  - **Measurement**: `cd /Users/fivanishche/apps/tooling/minsky && git status --short 2>&1 | head -1 | awk '/fatal/ {print "FAIL"} !/fatal/ {print "PASS"}'`
+  - **Anchor**: Rule #1 (loud-crash > silent failure — the daemon DOES emit a self-diagnose finding, but the suggested fix is wrong, so the operator follows the misleading advice and the bug persists). Rule #17 (proactive healing — once the correct fix is detected, the next step is auto-applying it; this task only fixes the diagnosis layer, auto-apply is a follow-up).
+  - **Details**: (a) Find the self-diagnose handler that emits `git-config-parseable`. (b) After confirming `git status` fails, probe `git config core.bare` (read-only). (c) If `true`, probe `ls -d .git/worktrees/* 2>/dev/null` for active worktrees. (d) If both signals match, suggest `git config core.bare false` instead of the index-lock fix. (e) Paired tests for: bare=false (no false positive), bare=true with no worktrees (true bare repo — different fix needed), bare=true with worktrees (the bug case — propose correct fix). (f) Don't auto-apply the fix yet — that's a follow-up task once the detection is proven stable.
+  - **Files**: `novel/cross-repo-runner/src/daemon.ts` (extend self-diagnose handler — locate via `grep -n git-config-parseable`), `novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` (new — paired tests with fixture worktrees), `~/.minsky/daemon.log` (verify after rollout — new suggestedFix string visible).
+  - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat /Users/fivanishche/apps/tooling/minsky/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
+
+- [ ] `competitor-add-smolagents` — research Hugging Face smolagents (huggingface/smolagents, 27.5k★, alive); produce `competitors/smolagents.md` + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-smolagents
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: smolagents' "agents that think in code" + 1000-line core is the minimal-agent thesis. Q2 should extract the CodeAct-pattern integration. Q5 evaluates whether smolagents-as-substrate is viable.
+  - **Success**: `competitors/smolagents.md` created.
+  - **Pivot**: framework-vs-product framing; mostly N/A on Minsky surfaces.
+  - **Measurement**: `test -f competitors/smolagents.md && grep -c '^## Five pivot questions' competitors/smolagents.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/huggingface/smolagents`; Hugging Face smolagents blog.
+
+- [ ] `competitor-deepen-aider` — apply Five Pivot Questions framework to Aider (Aider-AI/aider, 45.2k★, alive); deepen `competitors/aider.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-aider
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Aider's "explicitly NOT autonomous" stance (Paul Gauthier publicly rejects too much agentic behavior) is itself a strategic signal: the most-used CLI coding agent's maintainer believes the autonomy framing is wrong. Q3 may be vision-changing for Minsky's autonomy claims. Q5 should affirm KEEP for Aider's adoption as Minsky's local_agent — that surface is already settled.
+  - **Success**: `competitors/aider.md § Five pivot questions` populated with primary-source citations (Aider blog, Paul's HN comments, repo issues); ≥1 lesson identified for absorbing (e.g. their diff-format prompt, repo-map context window strategy).
+  - **Pivot**: if Aider's surface overlap with Minsky drops to <30% after the deep-dive (it's already classified as Integration not Competitor), demote to "single-dependency reference" P3 maintenance.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/aider.md` ≥ 1; `gh api repos/Aider-AI/aider --jq .stargazers_count` ≥ 40000 (sanity check the project is still where research said).
+  - **Anchor**: rule #1; Aider repo `https://github.com/Aider-AI/aider`; aider.chat docs.
+
+- [ ] `competitor-deepen-claude-agent-sdk` — apply Five Pivot Questions framework to Anthropic Claude Agent SDK; deepen `competitors/claude-agent-sdk.md` and emit any vision-threats to `ask_human.md`
+  - **ID**: competitor-deepen-claude-agent-sdk
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
+  - **Milestone**: M1
+  - **Hypothesis**: Anthropic's first-party Agent SDK + Claude Code background-task primitives may reframe what Minsky uniquely provides; in particular, if Anthropic ships durable background-session APIs, Minsky's tick-loop becomes a thinner wrapper.
+  - **Success**: `competitors/claude-agent-sdk.md § Five pivot questions` populated; Q3 explicitly answers whether Anthropic's roadmap forces a Minsky vision rewrite.
+  - **Pivot**: if SDK roadmap obviates ≥40% of Minsky's tick-loop surface, file vision-threat Q.
+  - **Measurement**: `grep -c '^## Five pivot questions' competitors/claude-agent-sdk.md` ≥ 1.
+  - **Anchor**: rule #1; Anthropic docs at `docs.anthropic.com` / Claude Code docs.
+
+- [ ] `competitor-add-sweep` — research Sweep AI (sweepai/sweep, 7.7k★, DEAD as GitHub App, pivoted to JetBrains); produce `competitors/sweep.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+  - **ID**: competitor-add-sweep
+  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
+  - **Milestone**: M1
+  - **Hypothesis**: Sweep's failure as a GitHub App (issue → PR autonomously) is the canonical "stateless GitHub App can't sustain autonomous PR generation" lesson. The post-mortem should formalize that as a Minsky guardrail: never depend on a stateless webhook architecture for sustained autonomy.
+  - **Success**: `competitors/sweep.md` with Post-mortem + Five Pivot Questions sections; ≥1 Minsky guardrail named.
+  - **Pivot**: extract guardrail; project is dead.
+  - **Measurement**: `test -f competitors/sweep.md && grep -c '^## Post-mortem' competitors/sweep.md` ≥ 1.
+  - **Anchor**: rule #1; `https://github.com/sweepai/sweep`; sweep.dev pivot announcement.
+
 ## P1
 
 - [ ] `launcher-agnostic-feature-parity-chaos-test` — chaos test asserts that two Minsky installs on the same OS, same fixture repo, same model, driven through `INSTALL.md` by two different launcher agents (fake-claude, fake-cursor) produce byte-identical runtime behavior; the only permitted delta is the `agent` string in `~/.minsky/telemetry-consent.json`
@@ -1789,6 +2218,96 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if any individual M1 criterion is structurally unfillable (e.g. M1.1 requires real 10h-run data we can't fabricate), exempt it explicitly via a new `**Exempt**: <reason>` field in MILESTONES.md that the script recognises, count toward the ≥10 threshold accordingly, AND file a separate `unblock-mX-Y-data-collection` task. Don't fake the metric to make the count.
   - **Measurement**: `node scripts/check-milestone-alignment.mjs --json | jq '.aligned_count'` ≥10; `grep -c '(stub)' docs/METRICS.md` ≤3.
   - **Anchor**: parent task `milestone-alignment-gate-enforcement` (this is its slice (b)); operator directive 2026-05-18 (`AGENTS.md` § 15); rule #10 (deterministic enforcement — gap-fill IS the enforcement). Composes with `Forsgren/Humble/Kim 2018` (measure what matters).
+
+- [ ] `local-gate-merge-false-negative-on-worktree-bound-branch-delete` — `gh pr merge --delete-branch` exits non-zero on its post-merge LOCAL branch-delete (branch is bound to a `.claude/worktrees/` worktree) even though the remote squash-merge succeeded; the gate reads that non-zero exit as "merge failed", so every worker PR that actually merges is mis-recorded as failed
+  - **ID**: local-gate-merge-false-negative-on-worktree-bound-branch-delete
+  - **Tags**: p1, reliability, orchestrator, gate, merge-accounting, rule-6, self-metrics
+  - **Milestone**: M1
+  - **Competitive-goal**: this bug makes the autonomous-merge-rate (DORA deployment-frequency) on the `self-metrics-competitive-benchmark` scorecard read **0 even while merges are succeeding** — the single most load-bearing scorecard metric is structurally understated until this is fixed; it also masks the real effect of fixing [[orchestrator-gh-graphql-401-token-source-divergence]] (resolving the auth P1 yields merges that this bug still records as failures).
+  - **Surfaced-by**: 2026-05-17 ~06:11Z live supervision — manual `node scripts/local-gate-merge.mjs --limit=5` vetted #575 (docs, MERGEABLE), called `gh pr merge 575 --squash --admin --delete-branch`, and logged `#575: merge call failed: Command failed: …` + `local-gate-merge: done — merged=0 skipped=1`. Ground truth: `gh pr view 575` → `state=MERGED mergedAt=2026-05-17T06:11:28Z`. The remote squash-merge SUCCEEDED; the command exited non-zero solely on the post-merge step `failed to delete local branch worktree-daemon-0-minsky-claude-exhaustion-persisted-state: cannot delete branch '…' used by worktree at '$MINSKY_REPO/.claude/worktrees/daemon-0-minsky-claude-exhaustion-persisted-state'`. A re-run prints `! Pull request fyodoriv/minsky#575 was already merged` and STILL exits non-zero on the same local-delete.
+  - **Details**: every worker-produced PR's head branch is, by construction, the HEAD of a live `.claude/worktrees/<branch>` worktree (the worker's own checkout). `git branch -d` (what `gh pr merge --delete-branch` runs locally after the remote merge) can never delete a worktree-bound branch, so `gh pr merge --delete-branch` will ALWAYS exit non-zero for worker PRs even on a fully successful merge. `scripts/local-gate-merge.mjs` (and the same merge-result interpretation in `scripts/orchestrate.mjs`'s conductor path) treats any non-zero `gh pr merge` exit as merge-failed → records `merged=0`, increments `skipped`, and the conductor may re-vet/retry/skip an already-merged PR on subsequent ticks. This is structural and 100%-reproducible, not a flake. Fix: the merge-success oracle must be `gh pr view <n> --json state` == `MERGED` (or `gh pr merge` stdout containing `was already merged` / a success line), NOT the `gh pr merge` process exit code; the local branch-delete failure must be downgraded to a non-fatal warning. Additionally clean the leaked worktree (`git worktree remove --force .claude/worktrees/<branch>` then delete the branch) OR stop passing local `--delete-branch` and rely on remote branch deletion only (stale local worktrees are a secondary disk/branch-clutter bug — file a P3 follow-up if scoped out here). Apply the identical parsing fix in both `local-gate-merge.mjs` and `orchestrate.mjs` so the autonomous path and the manual path agree.
+  - **Files**: `scripts/local-gate-merge.mjs` (merge-result interpretation: state-oracle not exit-code; downgrade local-delete error to warning; optional worktree cleanup), `scripts/orchestrate.mjs` (same merge-result parsing in the conductor merge step + `.minsky/orchestrate.jsonl` `merged:[]` accounting), paired tests with an injected gh-exec seam returning the exact shape "remote merge ok, stderr `cannot delete branch … used by worktree`, exit≠0" and asserting the PR is counted MERGED
+  - **Acceptance**: given a gh-exec seam that simulates a successful remote merge followed by a non-zero exit whose stderr is the worktree-bound local-delete error, `local-gate-merge.mjs` and `orchestrate.mjs` both count the PR as MERGED (merged=1, skipped=0) and emit no false "merge call failed"; a genuinely-failed merge (remote mutation error, PR still OPEN) is still counted as failed; `.minsky/orchestrate.jsonl` `merged:[]` includes the PR number on the tick it merged.
+  - **Hypothesis**: today the autonomous/manual merge accounting has a ~100% false-negative rate for worker PRs (every worktree-bound-branch merge is recorded as failed); with the state-oracle fix, recorded merge-rate converges to the true merge-rate, so the `self-metrics-competitive-benchmark` deployment-frequency stops reading 0-while-merging and the conductor stops re-processing already-merged PRs.
+  - **Success**: post-fix, for ≥3 consecutive worker PRs that reach GitHub `state=MERGED`, the gate/conductor records each as merged (0 false "merge call failed"); a forced true-failure (PR left OPEN) is still recorded failed (no false positives introduced).
+  - **Pivot**: if reliably distinguishing "remote merged, local-delete failed" from "remote merge failed" via stdout/stderr parsing proves brittle across gh versions, drop `--delete-branch` entirely (remote-only deletion via a follow-up `gh api -X DELETE` or leave the remote branch and reap it separately) and make `gh pr view --json state,mergedAt` the sole merge oracle — never infer merge outcome from the `gh pr merge` exit code at all.
+  - **Measurement**: before/after, run the gate over a window of N worker PRs that GitHub confirms `state=MERGED`; metric = recorded-merged / actually-merged (today ≈ 0/N, target = N/N); plus an injected-seam unit test asserting the merged count for the worktree-bound-delete shape.
+  - **Anchor**: live Opus-on-Opus run 2026-05-17 ~06:11Z (#575 GitHub `state=MERGED mergedAt=2026-05-17T06:11:28Z` while `local-gate-merge` logged `merged=0 skipped=1` + `merge call failed`; re-run prints `was already merged` yet still exits non-zero on the worktree-bound local-delete); `git-branch(1)` (a branch checked out in a worktree cannot be deleted); vision.md rule #6 (fail at the right boundary — a successful merge must not be reported as a failure); rule #9 (pre-registered HDD). Cross-link [[orchestrator-gh-graphql-401-token-source-divergence]] (auth P1: merge never happens — orthogonal root cause, same requirement-6 surface; fixing that one is only observable once THIS one stops eating the resulting merges) and [[worker-liveness-detect-by-label-not-argv]] (sibling argv/worktree-shape fragility class).
+
+- [ ] `reintegrate-preserved-pr-backlog-2026-05-21` — 32 PRs (28 CONFLICTING + 4 gate-red) from the autonomous-daemon backlog were closed during the 2026-05-21 drain after their semantic conflicts or substantive code-fixes couldn't be auto-resolved in the drain window; each PR's diff is preserved on GitHub (closed PR diffs are retained indefinitely by GitHub — `gh pr diff <N>` works on closed PRs); this umbrella task tracks reintegration of any preserved work that's worth reviving
+  - **ID**: reintegrate-preserved-pr-backlog-2026-05-21
+  - **Tags**: p1, milestone-m1, backlog, cleanup, observed-2026-05-21
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PR-drain session. The parallel auto-merge drain merged everything mergeable; the remaining 28 PRs had semantic conflicts with current main (different parallel implementations of the same task, daemon-spawned worker collisions). Closing with preserved-on-GitHub diffs lets the queue reach 0 while keeping every line of agent-authored work recoverable.
+  - **Hypothesis**: most of the 28 preserved PRs were SUPERSEDED by work that landed on main via other PRs in the same task family (the daemon spawned multiple workers per task). The unique work that ISN'T on main is small (~20% of total diff lines, based on a sample inspection). Reintegrating that unique work into NEW PRs against current main captures the value without the conflict overhead.
+  - **Success**: every preserved PR is classified into one of {SUPERSEDED — work already on main; UNIQUE-REINTEGRATE — reopen and rebase, or reimplement as a new PR; UNIQUE-OBSOLETE — work no longer relevant given how main evolved}. Filed sub-task per UNIQUE-REINTEGRATE entry. Operator-runnable: `gh pr list --state closed --search "head:<branch>" --limit 50` to verify GitHub still retains the diffs.
+  - **Pivot**: if more than 50% of preserved PRs turn out UNIQUE-REINTEGRATE, the close-with-preservation strategy was wrong and we should instead pause auto-merge until the operator manually resolves each conflict. Threshold: 14+ of 28 preserved PRs need reintegration.
+  - **Measurement**: `ls .minsky/preserved-diffs/` after re-running `bash /tmp/minsky-drain/check-vs-main.sh` (or its committed sibling) — should produce <5 patch files (the truly unique-and-relevant set). And `gh pr list --state closed --search "preserved-via-2026-05-21-drain in:comments" --limit 50 | wc -l` = 28 (confirms each got the closure comment).
+  - **Anchor**: rule #17 (proactive heal — the closure was the same-session fix to the unresolvable-conflict class); composes with `verify-pr-closure-is-lossless.mjs` (which would have caught these as lossy, which is why they were preserved); GitHub closed-PR retention semantics.
+  - **Details**: The 32 closed PRs split into two categories. CONFLICTING-with-main (28): #574, #577, #599, #601, #602, #603, #605, #608, #609, #613, #614, #615, #616, #617, #618, #620, #621, #622, #623, #635, #637, #638, #639, #640, #643, #658, #673, #678. Gate-red (4) with their underlying fix-class: #611 (rule-3-doc-first — add doc paired with novel/* code), #646 (rule-12-scope-discipline — add task block or opt-out), #670 (no-personal-paths-in-docs — replace `/Users/<other>/...` with placeholder), #681 (typecheck + vitest — migrate `novel/adapters/observability/src/*` to the OTel 0.218 / 2.7 API). All 32 diffs are accessible via `gh pr diff <N>`. The CONFLICTING patch sizes range from 29 lines (#658, mostly a task-close PR) to 1889 lines (#622, runany-permission-scoped-writes). Task families that map to multiple of the CONFLICTING set: `runany-zero-arg-entrypoint` (#609, #617, #623, #638), `runany-permission-scoped-writes` (#602, #622), `runany-retro-tui-dashboard` (#603, #620, #639), `runany-dynamic-model-or-local-fallback` (#608, #640), `commit-hook-toolchain-resilience` (#618, #635), `operator-machine-budget-autoscale` (#621, #637), `minsky-cli-context-aware-ux` (#605, #615) — for these families, identify the single most-complete PR per family and reintegrate. The singletons (#574, #577, #599, #601, #613, #614, #616, #643, #658, #673, #678) are case-by-case. The 4 gate-red ones are each a coherent fix-the-blocker-and-reapply task: #611/#646 take ~5min, #670 takes ~10min (find/replace), #681 is a real ~30min OTel migration.
+  - **Files**: TASKS.md (this entry); ad-hoc recovery via `gh pr diff <N> > recover-<N>.patch && git apply recover-<N>.patch` if a closed PR's work is worth reviving.
+  - **Touches**: none (this is a tracking task; actual work happens in follow-up sub-PRs).
+  - **Acceptance**: per-preserved-PR classification documented in this task block's `**Progress**:` updates as triage happens. The first triage pass (within 7 days of close) classifies all 28; the reintegration pass (within 30 days) ships the UNIQUE-REINTEGRATE subset as new PRs.
+  - **Risk**: medium. The risk is the daemon (or future operator session) doesn't review the preserved diffs and the unique work stays buried. Mitigation: this task's `**Status**: open` keeps it visible in TASKS.md; the daemon's task-picker prioritizes P1; and the operator's normal `gh pr list --state closed` workflow exposes the diffs anyway.
+  - **Note**: opposite-of-loss strategy — the work IS preserved by GitHub's closed-PR retention; this task is the bookkeeping that turns "28 closed PRs nobody looks at" into "explicit recovery candidates we either revive or formally drop." Composes with `scripts/verify-pr-closure-is-lossless.mjs` (the close-side gate) — that script would have flagged these as lossy, which is why they got preserved rather than silently closed.
+  - **Progress (2026-05-21 evening drain — Devin session)**:
+    - **Gate-red trio rescued and merged** (now 3 of 4 — #681 was independently closed):
+      - #646 — `feat(ci): deterministic check-brief-pr-instructions gate` — rebased onto main, added `<!-- scope: human-approved -->` marker on the new lint script (rule-12 fix), added security opt-out marker on PR body, all 60 CI checks green, MERGED.
+      - #611 — `feat(daemon-fix-own-pr-on-ci-failure): gh I/O wrapper + fix-iteration planner (slice 3/N)` — rebased onto main, added rule-3 doc paragraph in `novel/tick-loop/README.md` (the README touch the gate required), all 61 CI checks green, MERGED.
+      - #670 — `no-personal-paths-in-docs` rescue — independently MERGED earlier in the drain (not by this session).
+      - #681 — OTel migration — independently CLOSED (the ~30min OTel migration the umbrella named is unblocked but not yet picked up).
+    - **All 16 still-open CONFLICTING PRs closed-with-preservation** per this task's policy (paired closure comment cites the recovery `gh pr diff <N> | git apply` path and lists the SUPERSEDED / UNIQUE-REINTEGRATE / UNIQUE-OBSOLETE classification checkboxes for the next triage pass):
+      - #599, #601, #602, #603, #608, #616, #617, #620, #621, #622, #623, #638, #639, #640, #643, #673.
+    - **Queue state after the drain**: `gh pr list --state=open --repo fyodoriv/minsky` returns 0 — every backlogged conflicting PR is now closed-with-preservation; every gate-red one (with the exception of #681's OTel migration) is merged.
+    - **Triage-pass status**: pending (none of the 16 closed PRs classified yet — the next operator session should walk the list with `gh pr diff <N>` and update the per-PR checkboxes in the closure comments).
+<!-- Observations filed 2026-05-19 — rule-17 sweep, two pre-existing flakes the daemon was bleeding. -->
+
+- [ ] `local-gate-merge-minsky-home-hardcoded-path` — `scripts/local-gate-merge.mjs` line 48 hardcodes `MINSKY_HOME` default to `$MINSKY_REPO`, breaking the gate for every operator who isn't `cbrwizard`
+  - **ID**: local-gate-merge-minsky-home-hardcoded-path
+  - **Tags**: p1, rule-17, rule-1, hardcoded-path, multi-user-portability
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-19 Devin session — running `node scripts/local-gate-merge.mjs --pr=648` from a non-cbrwizard machine produced `spawnSync gh ENOENT` because the script `cwd`-ed into `$MINSKY_REPO` (which doesn't exist on this machine).
+  - **Details**: replace the hardcoded fallback with `dirname(fileURLToPath(import.meta.url)) + "/.."` so the script always derives `REPO` from its own location. Same pattern `bin/minsky` already uses for resolving `MINSKY_REPO_ROOT`.
+  - **Files**: `scripts/local-gate-merge.mjs:48`.
+  - **Hypothesis**: deriving `REPO` from `import.meta.url` works for every operator on every machine; the hardcoded path works for one operator on one machine. Pre-fix: 0/N operators ≠ cbrwizard can use the gate. Post-fix: N/N.
+  - **Success**: `node scripts/local-gate-merge.mjs --pr=N` succeeds (or runs to a real verdict) on a machine where `<minsky-repo>` is the repo path AND on a machine where `~/code/minsky` is.
+  - **Pivot**: keep `MINSKY_HOME` env override (operator escape hatch), only change the default.
+  - **Measurement**: `node -e 'console.log(require("node:path").resolve(require("node:url").fileURLToPath(import.meta.url), ".."))' $MINSKY_REPO/scripts/local-gate-merge.mjs` → prints `$MINSKY_REPO/scripts`.
+  - **Anchor**: rule #17 (proactive healing); rule #1 (don't reinvent the wheel — the same `import.meta.url` pattern is in `bin/minsky` already); operator directive 2026-05-19.
+
+<!-- Observations filed 2026-05-18 from live daemon session (P1 findings). -->
+
+- [ ] `metrics-render-finite-number-validation-bug` — `pnpm metrics:render` fails with `metric "loop-uptime" value must be a finite number` against today's snapshot at `.minsky/metric-snapshots/<date>.json`, blocking the daily refresh of `METRICS.md`; this caused the 2026-05-21 `check-metric-freshness` failure that took main red for ~24h and stalled the auto-merge gate (every PR's vet failed `vitest` on `metric-freshness` until the operator manually bumped the stale `_Updated` timestamps)
+  - **ID**: metrics-render-finite-number-validation-bug
+  - **Tags**: p1, milestone-m1, observability, daemon, bug, observed-2026-05-21, rule-17, blocker
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-21 PR-drain session — discovered when the parallel auto-merge drain showed every PR failing on `gate red: vitest,metric-freshness`. Root cause: the daily metrics-render daemon step (`maybeRunMetricsRender` in `novel/tick-loop/src/daemon.ts`) silently failed to update `METRICS.md` because `scripts/metrics-render.mjs` errors on the snapshot `loop-uptime` field (`metric-snapshot-store.mjs:114 validateMetricEntry → must be a finite number`). The snapshot generator (`scripts/collect-metrics.mjs`) emits values for `loop-uptime` that aren't finite numbers (likely a percent-as-string like `"53.3%"` instead of a numeric `0.533`).
+  - **Hypothesis**: `scripts/collect-metrics.mjs` writes the `loop-uptime` value as a string (`"53.3%"`) but `scripts/metric-snapshot-store.mjs:114 validateMetricEntry` requires a finite number. Fixing the collector to emit numeric values (with `_unit: "percent"` or `_unit: "fraction"` as a sibling key) plus relaxing the validator to accept the matching shape closes the loop. Same fix shape for any future percent/ratio metrics.
+  - **Success**: (1) `pnpm metrics:render` exits 0 against today's snapshot. (2) The daily `maybeRunMetricsRender` step in `runDaemon` produces a fresh `METRICS.md` within the 1d freshness budget for `dep-interface-coverage` and `token-budget-honoring` (the 1d-budget metrics that went stale 2026-05-20 → 2026-05-21). (3) The `check-metric-freshness` lint stays green for ≥7 consecutive days without operator intervention.
+  - **Pivot**: if `metrics-render` proves architecturally entangled with the snapshot format (e.g., a wider serialization-mismatch class than just `loop-uptime`), pivot to a snapshot-validation pre-step that converts string-percents → numeric-fractions at write time. Threshold: if fixing `loop-uptime` reveals ≥3 other metrics with similar type mismatches, the validator should be relaxed (with explicit `_unit` annotation) rather than each collector path patched individually.
+  - **Measurement**: `pnpm metrics:render && node scripts/check-metric-freshness.mjs` — both exit 0.
+  - **Anchor**: rule #11 (vision.md § 11 — no flaky metric is load-bearing; metrics MUST be deterministic and freshly observed) composed with rule #17 (proactive healing — observation IS the fix; this bug surfaced during PR-drain ops and is being filed in the same session it was observed). Conformance pattern: validated-snapshot (Beyer SRE 2016 — schema-checked observation records).
+  - **Details**: (a) Reproduce: `node scripts/collect-metrics.mjs && cat .minsky/metric-snapshots/$(date -u +%Y-%m-%d).json | jq '.metrics["loop-uptime"]'` shows the offending value shape. (b) Fix `scripts/collect-metrics.mjs` `loop-uptime` collector to emit `{ value: 0.533, _unit: "fraction" }` or similar numeric shape. (c) Verify `scripts/metric-snapshot-store.mjs` `validateMetricEntry` accepts the new shape; extend the validator if needed. (d) Re-run `pnpm metrics:render` against the fixed snapshot; verify `METRICS.md` regenerates with fresh `_Updated` timestamps. (e) Add a paired test asserting that `loop-uptime` collector output passes `validateMetricEntry`.
+  - **Files**: `scripts/collect-metrics.mjs` (fix the collector); `scripts/metric-snapshot-store.mjs` (relax/extend validator if needed); paired test additions.
+  - **Touches**: scripts/collect-metrics.mjs, scripts/metric-snapshot-store.mjs, .minsky/metric-snapshots/* (regenerated)
+  - **Acceptance**: Measurement command exits 0. The daemon's `maybeRunMetricsRender` step completes successfully on its next daily firing (verified by checking `~/.minsky/daemon.log` for `metrics-render: ok`).
+  - **Risk**: low. Pure type-fix in a well-isolated collector. The freshness lint is already passing against the bumped timestamps, so this fix is for the durable substrate (so the operator doesn't need to bump timestamps manually next week).
+  - **Note**: composes with `canonical-metric-list-per-repo` (the broader metric-source curation task).
+
+- [ ] `investigate-claude-native-task-standard` — research Claude Code's native task standard/format (the agent-teams shared task list + interactive-mode task list) and produce a decision doc: adopt it natively, bridge to it, or reject — quantifying how much of minsky's bespoke TASKS.md tooling could be deleted (rule #14 in action)
+  - **ID**: investigate-claude-native-task-standard
+  - **Tags**: p0, operator-directive, research, agent-teams, tasks-md, rule-1, rule-9, rule-14, replace-or-relocate
+  - **Milestone**: M2
+  - **Touches**: `docs/research/claude-native-task-standard.md`, `TASKS.md`, `vision.md`
+  - **Competitive-goal**: if Claude's native task standard can replace minsky's hand-rolled TASKS.md tracking/claiming/lint stack, minsky deletes a whole owned subsystem (rule #14 scope-shrink) — lowering maintenance surface and raising native interop, which improves the cost-per-merged-PR and coordination-overhead lines on the `self-metrics-competitive-benchmark` scorecard; the answer also de-risks (or redirects) the [[native-agent-teams-with-tiered-adapter]] bridge slice.
+  - **Surfaced-by**: operator directive 2026-05-17 ("claude has a standard for tasks — investigate it") + the agent-teams doc 2026-05-17 (native task list stored at `~/.claude/tasks/{team-name}/`, states pending/in-progress/completed, inter-task dependencies, file-locked claiming; the interactive-mode task list `/en/interactive-mode#task-list`; hooks `TaskCreated`/`TaskCompleted`). This is the first concrete instance of the new vision.md **rule #14** (delegate to agents; adopt native capabilities; shrink to fit).
+  - **Details**: this is an investigation/spike — the deliverable is `docs/research/claude-native-task-standard.md`, not a code change (no production wiring in this task; it scopes the follow-ups). It must answer, with citations to the live Claude Code docs (start from the docs index `https://code.claude.com/docs/llms.txt`, then agent-teams + interactive-mode + hooks + settings pages): (a) **Is there a documented, stable task schema/standard?** exact on-disk format/location (`~/.claude/tasks/{team}/…`), fields, state machine, dependency model, claim/lock semantics, and whether it is a *supported public contract* vs an *experimental internal* layout (agent-teams is flagged experimental — weight this heavily). (b) **Gap vs minsky's TASKS.md** (the `tasks.md` spec: `## P0..P3`, checkbox tasks, bold metadata, `(@agent)` claim, kebab IDs, `npx @tasks-md/lint`): a field-by-field comparison matrix — what maps 1:1, what minsky has that the native standard lacks (priority sections, HDD fields, `**Competitive-goal**`, scout discipline), what the native standard has that minsky lacks (file-locked claim, native hook lifecycle, dependency auto-unblock). (c) **Three options costed**: (i) **Adopt** — minsky emits/consumes the native standard as source of truth, TASKS.md becomes a generated view; estimate the minsky modules/lines deletable. (ii) **Bridge** — keep TASKS.md authoritative, sync to the native list (this is the existing [[native-agent-teams-with-tiered-adapter]] slice (c)); estimate net scope delta (likely +). (iii) **Reject/Watch** — native standard too unstable/experimental to depend on; re-file as a monthly watch task per rule #14. (d) **Recommendation** with a single go/no-go and a quantified owned-surface delta (modules/lines added or removed), plus the migration risk to TASKS.md's scout/priority/HDD discipline (must not be lost — see CLAUDE.md tasks.md policy). (e) Coordinate with the `tasks.md` spec owners (tasksmd/tasks.md) if convergence is viable — note as a relocate candidate per rule #1.
+  - **Files**: `docs/research/claude-native-task-standard.md` (new — the decision doc + comparison matrix + costed options + recommendation), `TASKS.md` (this block; on accept/bridge the doc files the concrete follow-up P0s), optionally `vision.md` Pattern-conformance-index row if a decision lands.
+  - **Hypothesis**: today minsky owns a full bespoke task-tracking/claiming/lint stack while the agent runtime ships an overlapping native task standard; a rigorous comparison will show either (i) the native standard is a stable public contract → adopting it deletes ≥1 minsky subsystem with behavioural parity (rule #14 win), or (ii) it is experimental/internal → the correct answer is bridge-only + a monthly watch task. Pre-registration: the recommendation and the quantified scope-delta are written in the doc *before* any adoption code is filed.
+  - **Success**: `docs/research/claude-native-task-standard.md` exists and contains (1) the exact native format/lifecycle/lock/dep semantics with doc citations; (2) the field-by-field comparison matrix vs the `tasks.md` spec; (3) the three options each with a quantified owned-surface delta (modules/lines); (4) a single explicit go/no-go recommendation; (5) the named follow-up tasks (P0 if scope-deleting) it would spawn; reviewed against rule #14's "must net-reduce owned surface" test.
+  - **Pivot**: if no stable, documented public task standard exists (only the experimental agent-teams internal layout), do NOT design an adoption — the recommendation is "bridge-only, treat native task list as opaque, re-file `watch-claude-task-standard` as a monthly rule-#14 scan task"; never make the daemon depend on an experimental internal file layout (rule #6).
+  - **Measurement**: deliverable-gated research task — `test -f docs/research/claude-native-task-standard.md` and a checklist assertion (a `scripts/check-research-doc.mjs`-style or manual reviewer rubric) that all five Success items are present incl. a numeric owned-surface delta; the follow-on adoption/bridge tasks (if any) carry their own HDD with the real before/after metric.
+  - **Anchor**: operator directive 2026-05-17 (verbatim); vision.md **rule #14** (delegate/adopt-native/shrink — this task is its first scheduled instance), rule #1 (replace-or-relocate — `tasks.md` repo is the relocate candidate), rule #9 (pre-registered HDD — recommendation committed before adoption code), rule #12 (scope discipline — the costed options are scored on owned-surface delta); Claude Code docs 2026-05-17 (agent-teams task list `~/.claude/tasks/{team}/`, interactive-mode task list, `TaskCreated`/`TaskCompleted` hooks); the `tasks.md` spec (github.com/tasksmd/tasks.md) as the incumbent standard. Composes [[native-agent-teams-with-tiered-adapter]] (its bridge slice is option (ii) here) and [[self-metrics-competitive-benchmark]] (scope-delta feeds the scorecard).
 
 ## P2
 
@@ -2991,6 +3510,20 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: 2026-05-16 oncall-hub-plugin run — operator (this session) had two minsky-runs concurrent (plugin + api on the other session), needed to restart only the plugin one without killing the api one. Today's `minsky stop` would have killed both. Workaround used: direct PID kill via `kill -TERM <pid>`. Rule #6 (let-it-crash AT the right boundary — `minsky stop --host` is the operator's per-host kill switch; today's global stop crosses the wrong boundary). Hyrum's Law: the host-filter capability is exactly what multi-operator machines need.
   - **Risk**: low. Bash-shim-only change, additive (no flag preserves today's behavior + adds the safety banner), gated by the first paired test for the shim.
   - **Surfaced-by**: 2026-05-16 oncall-hub-plugin autonomous run — supervisor log at `/tmp/minsky-oncall-hub-plugin/supervisor.log` documents that the operator had to be careful about `minsky stop` interaction with the other session's API minsky-run. Workaround was direct PID kill; this task documents the right CLI shape.
+
+- [ ] `competitor-deep-research-tier-s-2026-05` — deep-research the 4 Tier-S competitor stubs in `competitors/` (Agentless, Claude Agent SDK, Goose, Cline) under the sharpened identity *"OpenHands that improves itself + follows hard rules and principles"*; each must resolve to a concrete Dependency / Competitor / Reference verdict with cited sources
+  - **ID**: competitor-deep-research-tier-s-2026-05
+  - **Tags**: p2, competitive-research, dependency-decision, rule-1, rule-9, observed-2026-05-22, vision-fulfillment
+  - **Milestone**: M1
+  - **Surfaced-by**: operator 2026-05-22 conversation about competitor research priorities. Produced 5 STUB files in `competitors/`; the operator then sharpened the surviving-minsky identity (no task-level persona pipeline; two axes only: self-improvement loop + hard rules and principles), which demoted LangGraph from Tier-S (no concrete use case post-OpenHands-adoption); the active backlog is the 4 remaining stubs. OpenHands flipped from Competitor → Dependency same day as the precedent.
+  - **Hypothesis**: deep-researching these 4 stubs under the sharpened identity surfaces at least one additional concrete change (adoption, benchmark addition, or interface alignment) beyond the OpenHands adoption already approved. Strongest prior: Agentless is a thesis falsifier we MUST include in the benchmark corpus regardless of adoption verdict, because the surviving-minsky thesis (autonomic loop + hard rules on top of OpenHands) is exactly what Agentless's 3-step pipeline implicitly tests.
+  - **Success**: all 4 active stubs (`agentless.md`, `claude-agent-sdk.md`, `goose.md`, `cline.md`) have the `<!-- STUB -->` HTML comment removed AND the "OPEN: research questions" section replaced by cited answers AND the `Relationship` line classified as one of `Dependency` / `Competitor` / `Reference` per the README decision rule; at least 1 of the 4 results in a new row in either `novel/competitive-benchmark/src/competitors.ts` (benchmark corpus) or `ARCHITECTURE.md` § dependency table (runtime adoption); Agentless row must exist in `novel/competitive-benchmark/src/competitors.ts` regardless of its adoption verdict.
+  - **Pivot**: if 0 of 4 produce a concrete change AND Agentless's benchmark reading is within the noise band of OpenHands, the current dependency landscape is settled for M1; close the Tier-S backlog, document in `validated-learnings.md` why prior expectations were wrong, revisit at M2.
+  - **Measurement**: `grep -l "<!-- STUB" competitors/agentless.md competitors/claude-agent-sdk.md competitors/goose.md competitors/cline.md 2>/dev/null | wc -l` returns `0`; `git log --since=2026-05-22 --diff-filter=AM -- competitors/ novel/competitive-benchmark/src/competitors.ts ARCHITECTURE.md` shows the closing commit(s); `grep -c "Agentless" novel/competitive-benchmark/src/competitors.ts` returns at least 1.
+  - **Anchor**: Porter, *Competitive Strategy*, 1980 — Ch. 2 (Five Forces analysis structures each entry's threat / dependency / substitute profile); reinforces vision.md rule #1 (don't reinvent the wheel — adopt where the OSS is best-in-class).
+  - **Details**: For each of the 4 active stubs invoke the `competitor-research` skill to: (1) verify existence + license + version + maintainer health from primary sources; (2) answer every line under "OPEN: research questions" with a cited reading; (3) re-classify Relationship under the README decision rule (fit-a-layer → best-in-class → no-lock-in → preserves-thesis); (4) for adoption candidates draft the `novel/adapters/<name>.ts` interface stub in the same PR (rule #2); (5) for Agentless specifically, also add it to `novel/competitive-benchmark/src/competitors.ts` with a `local-harness` ResultSource because it is a load-bearing thesis falsifier regardless of adoption verdict. Order by priority: Agentless (thesis-falsifier — directly tests whether the surviving minsky layer adds value over a vanilla agent loop, highest impact) → Claude Agent SDK (affects how the OpenHands adapter could optionally use Anthropic-native primitives) → Goose (second runtime backend candidate alongside OpenHands) → Cline (reference / IDE niche — learn from rather than adopt). LangGraph's stub is on file (`competitors/langgraph.md`) with a re-promote criterion; do NOT research unless one of the 3 named concrete use cases surfaces.
+  - **Files**: `competitors/agentless.md`, `competitors/claude-agent-sdk.md`, `competitors/goose.md`, `competitors/cline.md`, `competitors/README.md` (priority backlog table), `novel/competitive-benchmark/src/competitors.ts` (Agentless row, required), possibly `ARCHITECTURE.md` § dependency table (Goose adoption as second backend), possibly `vision.md` § Pattern conformance index (any new adapter row).
+  - **Acceptance**: (1) measurement command returns `0`; (2) `competitors/README.md` Deep-research backlog table is updated to show each entry as moved-to-adopted, moved-to-competitor, or marked-not-applicable with reason; (3) Agentless row exists in `novel/competitive-benchmark/src/competitors.ts`; (4) a fresh reviewer reading each of the 4 final entries cold reaches the same Relationship verdict; (5) all literature citations resolve to real, primary sources (rule #5 anchor-primary-source lint passes).
 
 ## P3
 
