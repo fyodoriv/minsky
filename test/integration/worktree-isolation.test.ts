@@ -107,7 +107,15 @@ function runOneIteration(hostDir: string): { stdout: string; stderr: string } {
   ]
     .filter(Boolean)
     .join(":");
-  const env = { ...process.env, PATH: augmentedPath };
+  // Write a minimal MINSKY_CONFIG so the supervisor's invariant probe
+  // passes on a CI runner that doesn't have `~/.minsky/config.json` set up.
+  const fakeConfig = join(hostDir, ".minsky", "config.json");
+  writeFileSync(fakeConfig, JSON.stringify({ openhands: { model: "test-model" } }));
+  const env = {
+    ...process.env,
+    PATH: augmentedPath,
+    MINSKY_CONFIG: fakeConfig,
+  };
   const result = execSync(`MINSKY_TICK_DRY_RUN=1 bash "${MINSKY_RUN}" --host "${hostDir}"`, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
