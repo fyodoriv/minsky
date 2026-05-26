@@ -1,6 +1,6 @@
 # Story 007 — Daemon files new tasks against the host repo from its own observations
 
-**Milestone(s)**: M1.5, M1.8
+**Milestone(s)**: M1.5
 
 > **Why this story exists.** Motivation bullet #2 in [README.md § "Why Minsky?"](../README.md#why-minsky): *"the agent that knows the codebase best is also the one who should be writing tickets"*. The operator-facing promise: the daemon doesn't just consume `TASKS.md` — after every iteration it reviews the diff, the iteration log, and the existing queue, then files new tasks for things it observed (regressions, missing tests, stale docs, footguns). The implementation is `novel/cross-repo-runner/src/host-cto-audit.ts`; this story documents the operator experience and the load-bearing acceptance criteria.
 
