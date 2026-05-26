@@ -6,7 +6,7 @@ The auto-merge feature closes that loop. Every 5 minutes, a supervisor-managed p
 
 ## Default behaviour
 
-**For the minsky repo itself (the dogfood case):** ON by default. `setup.sh --dogfood` installs the auto-merge unit alongside the other supervisor children (tick-loop, budget-guard, watchdog). Rule #16 — default by default.
+**For the minsky repo itself (the self-supervised case):** ON by default. `setup.sh --setup` installs the auto-merge unit alongside the other supervisor children (tick-loop, budget-guard, watchdog). Rule #16 — default by default.
 
 **For other repos minsky operates on:** OFF by default. The supervisor unit is only installed if the operator explicitly enables it. This is the "destructive operations require explicit consent" boundary — auto-merging PRs against someone else's repo without their consent would be unacceptable.
 
@@ -19,7 +19,7 @@ The gate runs `local-gate-merge.mjs --no-review --limit=10` per cycle. That mean
 - **Merge** if the gate is green: `gh pr merge <N> --squash --admin`.
 - **Skip** if red, with the failed step recorded in the ledger at `.minsky/local-gate-merge.jsonl`.
 
-`--no-review` skips the optional Claude Opus brain layer. The operator's directive (2026-05-20) was explicit: "without reviews if everything else passes" — the deterministic gate IS sufficient for the dogfood case.
+`--no-review` skips the optional Claude Opus brain layer. The operator's directive (2026-05-20) was explicit: "without reviews if everything else passes" — the deterministic gate IS sufficient for the self-supervised case.
 
 ## Schedule
 
@@ -35,7 +35,7 @@ Three escape hatches, in order of granularity:
 |---|---|---|
 | `MINSKY_AUTO_MERGE=off` in the operator's shell profile | Disables auto-merge for the next cycle; the runner exits with `auto-merge disabled` and returns 0. | Temporary disable for one debugging session. |
 | `MINSKY_AUTO_MERGE=off` in `~/.minsky/config.json` | Same effect, persisted across reboots. | Persistent per-machine disable without removing the supervisor unit. |
-| `launchctl bootout gui/$UID com.minsky.auto-merge` (macOS) / `systemctl --user disable --now minsky-auto-merge.timer` (Linux) | Removes the unit from the supervisor entirely. | Permanent disable + reclaim the disk space the plist/timer occupies. Rerun `setup.sh --dogfood` to reinstall. |
+| `launchctl bootout gui/$UID com.minsky.auto-merge` (macOS) / `systemctl --user disable --now minsky-auto-merge.timer` (Linux) | Removes the unit from the supervisor entirely. | Permanent disable + reclaim the disk space the plist/timer occupies. Rerun `setup.sh --setup` to reinstall. |
 
 ## Lossless-close verification (operator directive 2026-05-21)
 
@@ -81,4 +81,4 @@ Both paths are valid; the periodic-task path ships first because it's a smaller 
 - Beyer SRE 2016 ch. on toil-reduction — automate every step that can be automated; humans are for novel work.
 - Borg/Bashir/Burns/Hightower *Designing Distributed Systems* 2017 — the periodic-task pattern, supervisor-as-cadence-kernel.
 - vision.md rule #6 (stay alive — stability features default-on with opt-OUT) — the auto-merge unit is part of the supervisor's stability contract; without it, the "ship features autonomously" claim is half a rule.
-- vision.md rule #16 (default by default — never hide a useful behaviour behind an opt-in flag) — the dogfood case ships the unit ON.
+- vision.md rule #16 (default by default — never hide a useful behaviour behind an opt-in flag) — the self-supervised case ships the unit ON.

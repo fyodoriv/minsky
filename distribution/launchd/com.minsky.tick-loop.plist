@@ -32,7 +32,7 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
              flush #146). Production default is now `ProcessSpawnStrategy`
              (real `claude --print` per iteration). To re-enter dry-run
              temporarily (e.g., for a chaos test or a fresh-install
-             smoke), set `MINSKY_TICK_DRY_RUN=1` here, `pnpm dogfood`
+             smoke), set `MINSKY_TICK_DRY_RUN=1` here, `pnpm minsky:setup`
              to reload, then drop it again. -->
         <!-- Daily-changelog umbrella opt-in (acceptance criterion (3) of
              `daily-changelog-for-humans`). Enables BOTH `runDaemon` seams

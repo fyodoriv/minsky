@@ -180,3 +180,15 @@ PR #873 adds three rows to `SUCCESS_METRICS` that track Path A's deletion progre
 The collectors live in `scripts/collect-metrics.mjs` as `collectPathALoc(subtree)` (single helper, three CLI bindings — one per metric ID). Each runs `fd -e ts -e tsx --type f --exclude '*.test.*' . <subtree>/ | xargs wc -l | tail -1 | awk '{print $1}'` under bash pipefail so a fd / xargs / wc failure returns null rather than a misleading 0. The renderer (`scripts/metrics-render.mjs` → `scripts/generate-metrics-md.mjs`) picks them up from the daily snapshot just like every other `SUCCESS_METRICS` entry — no per-metric wiring.
 
 Anchor: `docs/plans/2026-05-24-path-a-aggressive-cut.md` § "Scoreboard"; Goodhart's Law (the 2026-05-25 retro found 72 PRs / +14K LOC delta over 24h — vanity green, strategic red, exactly the failure mode this metric makes impossible to hide); Ries 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters). Closes TASKS.md `path-a-loc-scoreboard-metric` (P1, M1).
+
+## Operator commands (2026-05-26 — `pnpm dogfood:*` → `pnpm minsky:*` rename)
+
+The dashboard's `start.ts` / `activity.ts` / `render.ts` reference operator commands in user-facing strings (the "No recent iterations — start the supervisor with …" empty-state hint, the `:8181` port-conflict hint, the supervisor-restart cross-link). All were updated to point at the renamed `pnpm minsky:*` family per the 2026-05-26 operator directive ("Why is this command even called dogfood? That's minsky first of all").
+
+The relevant cross-links emitted by this package:
+
+- Empty-state CTA → `pnpm minsky:setup` (was: `pnpm dogfood`)
+- Port-conflict help → `PORT=8888 pnpm minsky:ui` (was: `PORT=8888 pnpm dogfood:ui`)
+- Supervisor-restart hint in `activity.ts` → `pnpm minsky:stop` (was: `pnpm dogfood:stop`)
+
+Old `pnpm dogfood:*` names are removed in `package.json`; `./setup.sh --dogfood` is a deprecated alias kept until 2026-06-26 (prints a one-line warning, runs as `--setup`). See `.claude/skills/minsky-supervisor/SKILL.md` for the full operator-side command surface.

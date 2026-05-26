@@ -144,12 +144,17 @@ fi
 # false-positive against an empty fixture and obscure real findings.
 if [[ "${MINSKY_TICK_DRY_RUN:-}" != "1" && "${MINSKY_TICK_DRY_RUN:-}" != "true" ]]; then
   diagnose_start=$(date -u +%FT%TZ)
-  diagnose_findings=$(node "${MINSKY_HOME}/scripts/self-diagnose.mjs" --json 2>&1 || true)
-  diagnose_count=$(printf '%s' "${diagnose_findings}" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).length))}catch{process.stdout.write("?")}})' 2>/dev/null || printf '?')
-  printf 'self-diagnose: ran at %s, %s findings\n' "${diagnose_start}" "${diagnose_count}"
-  if [[ "${diagnose_count}" != "0" && "${diagnose_count}" != "?" ]]; then
-    printf 'self-diagnose findings (advisory):\n%s\n' "${diagnose_findings}"
-  fi
+  # `--human` format (operator directive 2026-05-26): one block per
+  # finding with an explicit `[🤖 minsky-will-fix]` / `[🤖→👤 minsky-tries
+  # -then-operator]` / `[👤 needs-operator]` actor label so the operator
+  # reading the boot log can tell at a glance which findings are their
+  # action items versus which the daemon will handle on its own.
+  # Previous shape was `--json` — readable to scrapers but the operator
+  # had to mentally parse a multi-line JSON dump to find their action
+  # items. The `--json` mode is still available for scrapers; nothing
+  # consumes it in this script.
+  printf 'self-diagnose: ran at %s\n' "${diagnose_start}"
+  node "${MINSKY_HOME}/scripts/self-diagnose.mjs" --human 2>&1 || true
 fi
 
 # Auto-merge sweep (advisory). Runs `scripts/auto-merge-clean-prs.mjs`

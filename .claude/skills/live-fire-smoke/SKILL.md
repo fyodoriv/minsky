@@ -80,9 +80,9 @@ Run all three. Report which pass / fail. If all pass, the user can push with the
 - Environment-variable interactions specific to the operator's shell rc (we strip env on purpose).
 - Real-spawn `claude --print` failures (that requires the operator's actual Claude Code session — too costly for a smoke).
 
-For those, a separate skill or the actual `pnpm dogfood` invocation is the right surface.
+For those, a separate skill or the actual `pnpm minsky:setup` invocation is the right surface.
 
 ## When NOT to use
 
 - The PR doesn't touch `distribution/{systemd,launchd}/*.{sh,plist,service,target}` → skip; the smokes have nothing to validate.
-- You've already run `pnpm dogfood` and verified live behaviour → the smokes are subsumed by the live run.
+- You've already run `pnpm minsky:setup` and verified live behaviour → the smokes are subsumed by the live run.

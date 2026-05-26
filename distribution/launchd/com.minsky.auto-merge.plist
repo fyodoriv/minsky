@@ -50,20 +50,25 @@ Placeholders substituted by setup.sh via envsubst:
     </array>
 
     <!--
-    StartInterval (NOT KeepAlive): fire every 300s (5 min). The previous
-    cycle's exit doesn't influence the next; if a cycle hangs at the
-    25-min VET_TIMEOUT_MS in local-gate-merge.mjs, launchd will wait
-    for it to complete before the next StartInterval fires (launchd
-    guarantees serial invocation under StartInterval). This is the right
-    behaviour — concurrent gate invocations would fight over the
-    `gh pr merge --admin` lock anyway.
+    StartInterval (NOT KeepAlive): fire every 60s (1 min). Operator
+    directive 2026-05-26: "I expect all prs for minsky to be auto-merged
+    within 1 minute when they're green." Previous cadence (300s = 5min)
+    made green-PR-to-merged latency the bottleneck. The previous cycle's
+    exit doesn't influence the next; if a cycle hangs at the 25-min
+    VET_TIMEOUT_MS in local-gate-merge.mjs, launchd waits for it to
+    complete before the next StartInterval fires (launchd guarantees
+    serial invocation under StartInterval). This is the right behaviour
+    — concurrent gate invocations would fight over the
+    `gh pr merge --admin` lock anyway. Each empty cycle costs <1s when
+    no MERGEABLE PRs are waiting (gh-list short-circuit), so 1min is
+    free; the only cost is a 1-min CPU tick the operator wouldn't notice.
     -->
     <key>StartInterval</key>
-    <integer>300</integer>
+    <integer>60</integer>
 
     <!--
     RunAtLoad: drain whatever is already in the queue on supervisor
-    startup. Without this, a freshly-rebooted host waits up to 5 min
+    startup. Without this, a freshly-rebooted host waits up to 1 min
     before the first cycle.
     -->
     <key>RunAtLoad</key>

@@ -85,7 +85,7 @@ const l2Pct = Math.round((featuresTestedCount / RUNTIME_FEATURES.length) * 100);
 // ── L3: CLI shim coverage ──
 // The 4 real bin/minsky subcommands. `doctor` was in the catalogue
 // historically but is not actually a bin/minsky subcommand (the
-// `pnpm dogfood:doctor` script is `setup.sh --doctor`); removed
+// `pnpm minsky:doctor` script is `setup.sh --doctor`); removed
 // 2026-05-19 per rule #4 (everything measurable, MEASURED honestly).
 // `install-daemon` and `uninstall-daemon` exist but are tested by the
 // daemon-restart suite directly; not listed here to keep L3 focused

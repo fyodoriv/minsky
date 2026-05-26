@@ -18,7 +18,7 @@
 # onto current main in scratch, runs `pre-pr-lint --stage=full`,
 # admin-squash-merges if green) — it's just never invoked automatically.
 #
-# This runner closes that loop. Every 5 min, the supervisor wakes this
+# This runner closes that loop. Every 1 min, the supervisor wakes (was 5min until 2026-05-26 — operator directive "auto-merged within 1 minute when green") this
 # script. It runs `local-gate-merge.mjs --no-review --limit=10`, which
 # picks up to 10 of the daemon's open MERGEABLE PRs and gates each one.
 # Greens land in main; reds stay open with their gate verdict in the
@@ -32,8 +32,8 @@
 # holding a process slot the operator can't ignore in `top`. A
 # 5-min periodic cycle is cheap when there's nothing to merge (script
 # exits in <1s) and naturally rate-limits when there are many PRs (only
-# 10 per pass, more next cycle). The cadence is `StartInterval=300`
-# in `com.minsky.auto-merge.plist` and `OnUnitActiveSec=5min` in
+# 10 per pass, more next cycle). The cadence is `StartInterval=60`
+# in `com.minsky.auto-merge.plist` and `OnUnitActiveSec=1min` in
 # `minsky-auto-merge.timer`. Source: rule #15 (operator machine-
 # utilisation budget) — bursty work scheduled outside the steady-state
 # budget is the right shape.
@@ -92,12 +92,40 @@ mkdir -p "$(dirname "$LOG_FILE")"
 ts="[$(date -u +%Y-%m-%dT%H:%M:%SZ)]"
 echo "$ts cycle start (MINSKY_HOME=$MINSKY_HOME)" | tee -a "$LOG_FILE"
 
+# Two-stage drain (operator directive 2026-05-26: "I expect all PRs for
+# minsky to be auto-merged within 1 minute when they're green"):
+#
+#   Stage 1 (FAST):  `auto-merge-clean-prs.mjs` — gh-native CLEAN merge.
+#                    When CI completes green, GitHub flips the PR to
+#                    `mergeStateStatus=CLEAN` and this script picks it up
+#                    within the next 60s cycle. Cost: ~5s per cycle when
+#                    nothing's CLEAN (single `gh pr list`). The expected
+#                    path for >95% of PRs now that CI is real (previously
+#                    `local-gate-merge.mjs` was the only option because
+#                    GHA was disabled; that constraint has lifted).
+#
+#   Stage 2 (SLOW):  `local-gate-merge.mjs --no-review --limit=10` —
+#                    scratch-clone + full-vet defense-in-depth for PRs
+#                    that CLEAN doesn't apply to (e.g., required check
+#                    drift, branch-protection misconfig). Same deterministic
+#                    gate as before, just runs SECOND so the fast path's
+#                    latency win isn't lost when CI is green.
+#
 # `--no-review` skips the Claude Opus brain layer (operator directive
 # 2026-05-20: "without reviews if everything else passes" — the
-# deterministic gate IS sufficient for the dogfood case). `--limit=10`
-# caps per-cycle work so a single backlog spike doesn't lock up the host.
-node "$MINSKY_HOME/scripts/local-gate-merge.mjs" --no-review --limit=10 2>&1 | tee -a "$LOG_FILE"
-exit_code="${PIPESTATUS[0]}"
+# deterministic gate IS sufficient for the self-supervised case).
+# `--limit=10` caps per-cycle work so a single backlog spike doesn't
+# lock up the host.
+echo "$ts stage 1: gh-native CLEAN drain" | tee -a "$LOG_FILE"
+MINSKY_AUTO_MERGE=1 node "$MINSKY_HOME/scripts/auto-merge-clean-prs.mjs" 2>&1 | tee -a "$LOG_FILE"
+stage1_exit="${PIPESTATUS[0]}"
 
-echo "$ts cycle done exit=$exit_code" | tee -a "$LOG_FILE"
+echo "$ts stage 2: local-gate vet (defense-in-depth)" | tee -a "$LOG_FILE"
+node "$MINSKY_HOME/scripts/local-gate-merge.mjs" --no-review --limit=10 2>&1 | tee -a "$LOG_FILE"
+stage2_exit="${PIPESTATUS[0]}"
+
+# Worst exit wins (rule #6 — surface the failure that needs attention).
+exit_code=$(( stage1_exit > stage2_exit ? stage1_exit : stage2_exit ))
+
+echo "$ts cycle done stage1=$stage1_exit stage2=$stage2_exit exit=$exit_code" | tee -a "$LOG_FILE"
 exit "$exit_code"

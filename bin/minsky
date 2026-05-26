@@ -12,38 +12,68 @@
 # Conformance: full — no business logic here, only DI + forwarding.
 #
 # Usage:
-#   minsky               → autonomous run (foreground, SIGHUP-immune).
-#   minsky --daemon       → autonomous run (background, survives terminal
-#                           close + IDE restart). Logs to ~/.minsky/daemon.log.
-#   minsky --local        → local-only mode (no cloud tokens). Combinable
-#                           with --daemon: `minsky --local --daemon`.
-#   minsky --host <dir>  → explicit single-host.
-#   minsky --hosts-dir <parent> → explicit multi-host walk.
-#   minsky --bash-runner → dispatch to the Path A bash port at
-#                           `bin/minsky-run.sh` instead of the Node
-#                           runner (opt-in; multi-host walker only).
-#                           Equivalent: `MINSKY_BASH_RUNNER=1 minsky`.
-#   minsky --transform   → dispatch to `bin/minsky-default-session.sh`
-#                           against $PWD. Composes bootstrap +
-#                           baseline-capture + run + before/after
-#                           report. The killer-feature command —
-#                           "point at any repo, demo improvement"
-#                           (TASKS.md `minsky-default-8h-repo-
-#                           transformation` P0). Remaining args are
-#                           forwarded: `--max-hours N`,
-#                           `--baseline-only`, `--report-only`,
-#                           `--no-bootstrap`.
-#   minsky --help        → prints this usage block and exits.
-#   minsky status        → show running minsky processes + tail of daemon log.
-#   minsky stop          → SIGTERM any running minsky-run processes.
-#   minsky logs          → tail -f the daemon log.
-#   minsky trend         → read $PWD/.minsky/transform-runs.jsonl, emit
-#                          MAPE-K Analyse trajectories (#825).
-#   minsky recommend     → read $PWD/.minsky/transform-runs.jsonl, emit
-#                          MAPE-K Plan rule-based interventions (#826).
-#   minsky knowledge     → aggregate ledgers across N hosts via
-#                          --hosts-dir; emit MAPE-K Knowledge cross-host
-#                          rankings (#827).
+# (subcommand-style, nx + openhands shape — 2026-05-26 CLI overhaul)
+#
+#   ─── Lifecycle ─────────────────────────────────────────────────
+#   minsky init [path]              → write per-machine config for this repo
+#   minsky setup                    → install supervisor + openhands SDK
+#   minsky update                   → pull + rebuild + re-render plists
+#   minsky uninstall [--force]      → remove all per-machine state
+#   minsky reset [--hard]           → clear iteration store + claims + truncate logs
+#                                     (--hard also stops supervisor)
+#
+#   ─── Run ───────────────────────────────────────────────────────
+#   minsky run                      → autonomous run (foreground, SIGHUP-immune)
+#   minsky run --once               → one iteration
+#   minsky run --host <dir>         → explicit single-host
+#   minsky run --hosts-dir <p>      → explicit multi-host walk
+#   minsky run --local              → local-only mode (no cloud tokens)
+#   minsky solve <task-id>          → one iteration of one task (openhands-pattern
+#                                     killer-feature verb — "minsky solve" answers
+#                                     "what does minsky do for me?" in one line)
+#   minsky transform [<path>]       → "point at any repo, demo improvement"
+#                                     (composes bootstrap + baseline + run + report;
+#                                     forwards --max-hours / --baseline-only / etc.)
+#
+#   ─── Daemon (supervisor lifecycle, nx-pattern noun-space) ──────
+#   minsky daemon start             → was: minsky --daemon
+#   minsky daemon stop              → was: minsky stop
+#   minsky daemon status            → was: minsky status
+#   minsky daemon logs              → was: minsky logs
+#   minsky daemon restart           → stop then start
+#   minsky daemon doctor            → was: minsky doctor / setup.sh --doctor
+#
+#   ─── Show / list (read-only introspection, nx-pattern) ─────────
+#   minsky show tasks               → queued tasks + next-pick + per-priority counts
+#   minsky show task <id>           → one task block from TASKS.md
+#   minsky show iterations          → recent iterations
+#   minsky show config              → effective ~/.minsky/config.json
+#   minsky show supervisors         → loaded launchd/systemd units
+#   minsky show findings            → self-diagnose with actor labels
+#   minsky list agents              → available cloud-agent backends
+#   minsky list scripts             → operator-facing command surface
+#
+#   ─── Resources (openhands-pattern noun-spaces) ─────────────────
+#   minsky config show / set <k>=<v>     → ~/.minsky/config.json
+#   minsky agent list / set <name> / test <name>  → cloud-agent backend mgmt
+#
+#   ─── Reports & analyses ────────────────────────────────────────
+#   minsky metrics [collect|render]      → success-metrics ops
+#   minsky changelog [today|snapshot]    → release notes
+#   minsky milestone check               → 7-surface alignment gate
+#   minsky m1 metrics / observability / coverage → M1 milestone reporting
+#   minsky audit cto / runany / lint / chaos / llm-throughput → diagnostics
+#   minsky trend / recommend / knowledge → MAPE-K analyses
+#
+#   ─── Help / global ─────────────────────────────────────────────
+#   minsky --help / minsky help          → this block
+#   minsky <cmd> --help                  → per-command help (every subcommand)
+#   minsky ui                            → open dashboard at http://localhost:8181
+#
+# DEPRECATED aliases (kept ≤30 days, removed 2026-06-26):
+#   `minsky --daemon` / `--once` / `--transform` / `--bash-runner` flag-style
+#   entrypoints still work but the subcommand form (`minsky run --once`,
+#   `minsky daemon start`, `minsky transform`) is preferred.
 #
 # Resolution order (via `resolveMinskyRepo`):
 #   1. $MINSKY_REPO env var (if set + exists)
@@ -953,30 +983,35 @@ case "${1:-}" in
       echo "stash: n/a"
       exit 0
     fi
-    # Dirty tree — stash with a recoverable label, then reset. Never delete.
-    # Rule #6 pivot: if stash itself fails (worktree / submodule edge case),
-    # loud-crash rather than silently clobber state.
-    _rh_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    _rh_label="minsky auto-stash $_rh_ts"
-    if ! git -C "$_rh_host" stash push -u -m "$_rh_label" >/dev/null 2>&1; then
-      echo "minsky: REFUSING to start daemon — host $_rh_host has dirty state and 'git stash push -u' failed" >&2
-      echo "minsky: resolve manually (commit, stash, or move files out), then retry" >&2
-      exit 1
-    fi
-    _rh_stash_ref="stash@{0}"
-    if [ "$_rh_current" != "$_rh_default" ] && [ -n "$_rh_current" ]; then
-      if ! git -C "$_rh_host" checkout "$_rh_default" >/dev/null 2>&1; then
-        echo "minsky: REFUSING to start daemon — failed to checkout $_rh_default on $_rh_host" >&2
-        echo "minsky: stash succeeded but branch switch did not; inspect 'git -C $_rh_host status'" >&2
-        exit 1
-      fi
-    fi
-    echo "action: stash-and-reset"
-    echo "branch: $(git -C "$_rh_host" branch --show-current 2>/dev/null)"
-    echo "stash: $_rh_stash_ref ($_rh_label)"
-    echo "recover-with: git -C \"$_rh_host\" stash pop $_rh_stash_ref"
-    echo "minsky: stashed dirty state as: $_rh_label"
-    exit 0
+    # Dirty tree — REFUSE to recover. Operator confirms manually.
+    #
+    # Previous behavior (removed 2026-05-26): auto-stash + checkout default.
+    # That was a feature for unattended crash recovery, but the side-effect
+    # was that an operator's (or parallel agent's) concurrent WIP got
+    # silently swept into the stash list every time the supervisor
+    # respawned. Over the 2026-05-19 to 2026-05-21 stability window the
+    # stash list grew to 10+ entries of lost context.
+    #
+    # New behavior: refuse-with-error. Print what's dirty, suggest the
+    # three legitimate next steps (commit / manual stash / move out),
+    # exit 1. Operator runs `git -C <host> status` and decides what to
+    # do, then re-runs the daemon manually. Loud surface ≫ silent recovery.
+    #
+    # Rule #6 (loud-crash > silent failure — never destroy state without
+    # explicit confirmation; auto-stash is destruction-by-side-effect from
+    # the operator's perspective even though git keeps the bits).
+    # Operator directive 2026-05-26: "fix the root cause of [auto-stashes]
+    # even appearing".
+    echo "minsky: REFUSING to recover host — $_rh_host has dirty state:" >&2
+    git -C "$_rh_host" status --short 2>&1 | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "minsky: resolve manually before restarting the daemon:" >&2
+    echo "  - commit:  cd $_rh_host && git add -A && git commit -m '<msg>'" >&2
+    echo "  - stash:   cd $_rh_host && git stash push -u -m 'manual: <reason>'" >&2
+    echo "  - move:    mv unwanted-file <somewhere outside the work tree>" >&2
+    echo "" >&2
+    echo "minsky: then re-run \`minsky\` (or \`pnpm dogfood\`)" >&2
+    exit 1
     ;;
   init)
     # `minsky init [host]` — write per-machine config so subsequent
@@ -2051,6 +2086,498 @@ EOF
 
       sleep 10
     done
+    ;;
+
+  # ─── Phase 1+2+3 CLI overhaul (2026-05-26 operator directive) ────
+  #
+  # nx- and openhands-shaped subcommand surface. Each block delegates to
+  # the existing implementation (pnpm scripts, supervisor commands, jq).
+  # Old surfaces (`pnpm <name>` for audit/m1/metrics/changelog/milestone;
+  # `minsky --once / --daemon / --transform`) keep working as deprecated
+  # aliases for ≤30 days (removed 2026-06-26). This block is additive;
+  # nothing existing breaks.
+
+  # ─── Phase 1: noun-spaces for diagnostics (collapses 13 pnpm scripts) ──
+
+  audit)
+    # `minsky audit <noun>` — diagnostic one-shots that used to be top-
+    # level `pnpm <name>:metrics` scripts. Consolidates: chaos:budget-
+    # exhaust, cto-audit:metrics, runany:audit, daemon-pr-lint:metrics,
+    # llm-provider:throughput. All read-only.
+    _audit_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      cto)            node "$_audit_repo/scripts/cto-audit-metrics.mjs" "${@:3}" ;;
+      runany)         node "$_audit_repo/scripts/runany-model-audit.mjs" "${@:3}" ;;
+      lint|pr-lint)   node "$_audit_repo/scripts/daemon-pr-lint-metrics.mjs" "${@:3}" ;;
+      chaos)
+        case "${3:-}" in
+          budget-exhaust) node "$_audit_repo/scripts/chaos-budget-exhaust.mjs" "${@:4}" ;;
+          *) echo "minsky audit chaos: known sub: budget-exhaust" >&2; exit 2 ;;
+        esac
+        ;;
+      llm-throughput) node "$_audit_repo/scripts/llm-provider-throughput.mjs" "${@:3}" ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky audit <noun> — diagnostic one-shots (read-only)
+
+  cto              — cto-audit metrics (was: pnpm cto-audit:metrics)
+  runany           — runany model audit (was: pnpm runany:audit)
+  lint             — daemon-pr-lint metrics (was: pnpm daemon-pr-lint:metrics)
+  chaos <test>     — chaos engineering tests (was: pnpm chaos:<test>)
+                     known: budget-exhaust
+  llm-throughput   — LLM provider throughput (was: pnpm llm-provider:throughput)
+EOF
+        ;;
+      *) echo "minsky audit: unknown noun '$2'. See: minsky audit --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  m1)
+    # `minsky m1 <verb>` — M1 milestone reporting (collapses 3 pnpm
+    # scripts: m1:metrics, m1:observability, m1:coverage).
+    _m1_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      metrics)       node "$_m1_repo/scripts/m1-metrics-dashboard.mjs" "${@:3}" ;;
+      observability) node "$_m1_repo/scripts/m1-observability-plan.mjs" --gaps-only "${@:3}" ;;
+      coverage)
+        cd "$_m1_repo" && CI=1 pnpm test:coverage && node scripts/full-coverage-report.mjs "${@:3}"
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky m1 <verb> — M1 milestone reporting
+
+  metrics        — dashboard for M1.1-M1.14 (was: pnpm m1:metrics)
+  observability  — gaps in observability surface (was: pnpm m1:observability)
+  coverage       — full coverage report (was: pnpm m1:coverage)
+EOF
+        ;;
+      *) echo "minsky m1: unknown verb '$2'. See: minsky m1 --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  metrics)
+    # `minsky metrics <verb>` — metrics ops (was: metrics:collect / metrics:render).
+    _met_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      collect) node "$_met_repo/scripts/collect-metrics.mjs" "${@:3}" ;;
+      render)  node "$_met_repo/scripts/metrics-render.mjs" "${@:3}" ;;
+      ""|show)
+        # `minsky metrics` with no verb = show current METRICS.md
+        if [ -f "$_met_repo/docs/METRICS.md" ]; then
+          less -R "$_met_repo/docs/METRICS.md" 2>/dev/null || cat "$_met_repo/docs/METRICS.md"
+        else
+          echo "minsky metrics: docs/METRICS.md missing (run \`minsky metrics render\` first)" >&2
+          exit 1
+        fi
+        ;;
+      --help|-h)
+        cat <<'EOF'
+minsky metrics [verb] — success-metrics ops
+
+  (no verb)  — show current docs/METRICS.md (default)
+  collect    — collect current metric values (was: pnpm metrics:collect)
+  render     — regenerate docs/METRICS.md (was: pnpm metrics:render)
+EOF
+        ;;
+      *) echo "minsky metrics: unknown verb '$2'. See: minsky metrics --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  changelog)
+    # `minsky changelog [verb]` — was: changelog:today / changelog:snapshot.
+    _cl_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      today|"") node "$_cl_repo/scripts/changelog-today.mjs" "${@:3}" ;;
+      snapshot) node "$_cl_repo/scripts/changelog-snapshot.mjs" "${@:3}" ;;
+      --help|-h)
+        cat <<'EOF'
+minsky changelog [verb] — release-note builders
+
+  (no verb / today) — today's changelog (was: pnpm changelog:today)
+  snapshot          — snapshot current state (was: pnpm changelog:snapshot)
+EOF
+        ;;
+      *) echo "minsky changelog: unknown verb '$2'. See: minsky changelog --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  milestone)
+    # `minsky milestone <verb>` — was: pnpm milestone:check.
+    _ml_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      check|"") node "$_ml_repo/scripts/check-milestone-alignment.mjs" "${@:3}" ;;
+      --help|-h)
+        cat <<'EOF'
+minsky milestone [verb] — milestone alignment checks
+
+  (no verb / check) — verify the 7 alignment surfaces (was: pnpm milestone:check)
+EOF
+        ;;
+      *) echo "minsky milestone: unknown verb '$2'. See: minsky milestone --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  # ─── Phase 2: subcommand discipline (`run`, `daemon` noun-space) ────
+
+  run)
+    # `minsky run [--once|--host <dir>|--hosts-dir <p>|--local|--dry-run]`
+    # Subcommand form of the previously flag-styled top-level
+    # invocations. The bare `minsky` (no args) still triggers the old
+    # smart-auto-attach behavior below for backward compat. Use `minsky
+    # run` explicitly when the operator wants intent visible in shell
+    # history. Phase 2 of the 2026-05-26 CLI overhaul.
+    _run_args=()
+    shift  # drop the `run` token; pass everything else through
+    for _ra in "$@"; do
+      _run_args+=("$_ra")
+    done
+    # Re-exec self with the args so the smart-auto-attach block below
+    # picks up `--once`, `--host`, etc. as if they'd been passed at
+    # top level. Idempotent: `minsky run --once` ≡ `minsky --once`.
+    exec "$0" "${_run_args[@]}"
+    ;;
+
+  transform)
+    # `minsky transform [<path>] [--max-hours N] [--baseline-only] ...`
+    # Subcommand form of the previously `--transform` flag — the
+    # killer-feature "point at any repo, demo improvement" command.
+    # Delegates to `bin/minsky-default-session.sh` exactly as the flag
+    # path does (the dispatch site below detects `--transform` either
+    # as the first arg OR set in MINSKY_TRANSFORM_MODE env).
+    MINSKY_TRANSFORM_MODE=1 exec "$0" --transform "${@:2}"
+    ;;
+
+  daemon)
+    # `minsky daemon <verb>` — supervisor lifecycle consolidated under
+    # one noun. Each verb delegates to the existing implementation.
+    # nx-pattern (`nx daemon ...`) — gives the operator one mental
+    # bucket for "stuff that touches the launchd/systemd supervisor".
+    case "${2:-}" in
+      start) exec "$0" --daemon "${@:3}" ;;
+      stop) exec "$0" stop "${@:3}" ;;
+      status) exec "$0" status "${@:3}" ;;
+      logs) exec "$0" logs "${@:3}" ;;
+      doctor) exec "$0" doctor "${@:3}" ;;
+      restart)
+        # Compose stop + start as a single atomic verb.
+        "$0" stop "${@:3}" >/dev/null 2>&1 || true
+        exec "$0" --daemon "${@:3}"
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky daemon <verb> — supervisor lifecycle
+
+  start    — start the supervisor (was: minsky --daemon)
+  stop     — stop the supervisor (was: minsky stop)
+  status   — show running daemon + tail (was: minsky status)
+  logs     — tail the daemon log (was: minsky logs)
+  restart  — stop then start
+  doctor   — health probe (was: minsky doctor; equiv: setup.sh --doctor)
+EOF
+        ;;
+      *) echo "minsky daemon: unknown verb '$2'. See: minsky daemon --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  # ─── Phase 3: noun-spaces for resource introspection ─────────────
+
+  show)
+    # `minsky show <noun>` — read-only introspection. nx pattern.
+    _show_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      tasks)
+        # What's queued? Show the next picker choice + count by priority.
+        python3 "$_show_repo/scripts/pick_task.py" "$_show_repo/TASKS.md" 2>/dev/null \
+          | { read -r _next; echo "next-pick: ${_next:-<none>}"; }
+        echo ""
+        echo "tasks by priority:"
+        for _p in P0 P1 P2 P3; do
+          _ct=$(awk -v p="^## $_p\$" '
+            $0 ~ p {in_p=1; next}
+            /^## P/ {in_p=0}
+            in_p && /^- \[ \] `/ {n++}
+            END {print n+0}
+          ' "$_show_repo/TASKS.md")
+          printf "  %s: %d\n" "$_p" "$_ct"
+        done
+        ;;
+      task)
+        # `minsky show task <id>` — print the task block.
+        [ -z "${3:-}" ] && { echo "minsky show task: id required" >&2; exit 2; }
+        awk -v id="\`$3\`" '
+          $0 ~ "^- \\[ \\] " id { in_b=1 }
+          in_b { print }
+          in_b && /^- \[ \] / && !($0 ~ "^- \\[ \\] " id) { exit }
+        ' "$_show_repo/TASKS.md"
+        ;;
+      iterations)
+        # Per-iteration ledger — last 20 entries from .minsky/iteration-store.
+        if [ -d "$_show_repo/.minsky/iteration-store" ]; then
+          /bin/ls -t "$_show_repo/.minsky/iteration-store"/*.jsonl 2>/dev/null | head -20
+        else
+          echo "minsky show iterations: .minsky/iteration-store/ missing" >&2
+          exit 1
+        fi
+        ;;
+      config)
+        # Effective config — ~/.minsky/config.json + env-var overrides.
+        if [ -f "$HOME/.minsky/config.json" ]; then
+          jq . "$HOME/.minsky/config.json" 2>/dev/null || cat "$HOME/.minsky/config.json"
+        else
+          echo "{}"  # default
+        fi
+        ;;
+      supervisors)
+        # What's loaded into launchctl / systemctl?
+        echo "=== launchctl (Darwin) ==="
+        launchctl list 2>/dev/null | grep -i minsky || echo "  (none)"
+        echo ""
+        echo "=== systemctl --user (Linux) ==="
+        systemctl --user list-units 'minsky-*' 2>/dev/null || echo "  (not on Linux or no units)"
+        ;;
+      findings)
+        # Self-diagnose findings with actor labels.
+        node "$_show_repo/scripts/self-diagnose.mjs" --human 2>&1
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky show <noun> — read-only introspection
+
+  tasks         — queued tasks + next-pick + per-priority counts
+  task <id>     — one task block from TASKS.md
+  iterations    — recent iterations (~/.minsky/iteration-store/)
+  config        — effective ~/.minsky/config.json
+  supervisors   — loaded launchd/systemd units
+  findings      — self-diagnose findings with actor labels
+EOF
+        ;;
+      *) echo "minsky show: unknown noun '$2'. See: minsky show --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  list)
+    # `minsky list <noun>` — enumerative introspection (nx + openhands pattern).
+    _list_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    case "${2:-}" in
+      agents)
+        # Read the agent matrix — claude / devin / aider / openhands.
+        cat <<'EOF'
+Available cloud-agent backends (set via `minsky config set cloud_agent=<name>`):
+
+  openhands  — DEFAULT. Python SDK + future canonical `openhands solve` CLI (2026-06-01).
+               Install via `pnpm minsky:setup` (auto-installs the Python SDK into ~/.minsky/openhands-venv).
+  claude     — Anthropic Claude Code (`claude --print`). Requires ANTHROPIC_API_KEY.
+  devin      — Cognition Devin (`devin --print --prompt-file`). Requires DEVIN_API_KEY.
+  aider      — Aider CLI against local LLM via Ollama / LM Studio / MLX. No cloud key.
+
+Current setting:
+EOF
+        if [ -f "$HOME/.minsky/config.json" ] && command -v jq >/dev/null 2>&1; then
+          jq -r '"  cloud_agent: " + (.cloud_agent // "openhands (default)")' "$HOME/.minsky/config.json"
+        else
+          echo "  cloud_agent: openhands (default)"
+        fi
+        ;;
+      scripts)
+        # List the operator-facing scripts (used to be drowning in `pnpm run`).
+        cat <<'EOF'
+Operator commands (one canonical surface — `bin/minsky <subcommand>`):
+
+  Lifecycle:   init, setup, update, uninstall, reset
+  Run:         run [--once|--host|--hosts-dir], solve, transform
+  Daemon:      daemon {start|stop|status|logs|restart|doctor}
+  Show:        show {tasks|task <id>|iterations|config|supervisors|findings}
+  List:        list {agents|scripts}
+  Config:      config {show|set <k>=<v>}
+  Agent:       agent {list|set <name>|test <name>}
+  Audit:       audit {cto|runany|lint|chaos <test>|llm-throughput}
+  Reports:     metrics, changelog [snapshot], milestone check, m1 {metrics|observability|coverage}
+  Analyses:    trend, recommend, knowledge
+  Other:       qa, watch, consent, doctor, ui
+
+Dev surface (pnpm — for the minsky repo itself, not operator use):
+  test, test:watch, test:coverage, test:integration
+  lint, lint:fix, format, lint:md, typecheck, check
+  pre-pr-lint, prepare
+EOF
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky list <noun> — enumerative introspection
+
+  agents     — available cloud-agent backends
+  scripts    — operator-facing command surface
+EOF
+        ;;
+      *) echo "minsky list: unknown noun '$2'. See: minsky list --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  config)
+    # `minsky config <verb>` — config get/set (openhands pattern).
+    _cfg_path="$HOME/.minsky/config.json"
+    case "${2:-}" in
+      show|"")
+        if [ -f "$_cfg_path" ]; then
+          jq . "$_cfg_path" 2>/dev/null || cat "$_cfg_path"
+        else
+          echo "{}"
+        fi
+        ;;
+      set)
+        # `minsky config set <key>=<value>` — preserves other keys (jq merge).
+        [ -z "${3:-}" ] && { echo "minsky config set: <key>=<value> required" >&2; exit 2; }
+        _kv="$3"
+        _key="${_kv%%=*}"
+        _val="${_kv#*=}"
+        [ "$_key" = "$_kv" ] && { echo "minsky config set: malformed '$_kv', expected <key>=<value>" >&2; exit 2; }
+        mkdir -p "$HOME/.minsky"
+        [ -f "$_cfg_path" ] || echo "{}" > "$_cfg_path"
+        # Detect numeric / bool / string and merge atomically via temp file.
+        if [[ "$_val" =~ ^[0-9]+$ ]] || [ "$_val" = "true" ] || [ "$_val" = "false" ]; then
+          jq --arg k "$_key" --argjson v "$_val" '. + {($k): $v}' "$_cfg_path" > "$_cfg_path.tmp" && mv "$_cfg_path.tmp" "$_cfg_path"
+        else
+          jq --arg k "$_key" --arg v "$_val" '. + {($k): $v}' "$_cfg_path" > "$_cfg_path.tmp" && mv "$_cfg_path.tmp" "$_cfg_path"
+        fi
+        echo "minsky config set: ${_key}=${_val}"
+        ;;
+      --help|-h)
+        cat <<'EOF'
+minsky config <verb> — manage ~/.minsky/config.json
+
+  show              — print the effective config (default)
+  set <key>=<val>   — atomically set a key (preserves other keys)
+
+Examples:
+  minsky config show
+  minsky config set cloud_agent=openhands
+  minsky config set cloud_agent_model=ollama_chat/qwen3-coder:30b
+EOF
+        ;;
+      *) echo "minsky config: unknown verb '$2'. See: minsky config --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  agent)
+    # `minsky agent <verb>` — agent backend management (openhands pattern).
+    case "${2:-}" in
+      list)
+        # Delegate to `minsky list agents` so there's one source of truth.
+        exec "$0" list agents
+        ;;
+      set)
+        [ -z "${3:-}" ] && { echo "minsky agent set: <name> required (openhands|claude|devin|aider)" >&2; exit 2; }
+        exec "$0" config set "cloud_agent=$3"
+        ;;
+      test)
+        # Smoke-test the named backend.
+        [ -z "${3:-}" ] && { echo "minsky agent test: <name> required" >&2; exit 2; }
+        case "$3" in
+          openhands)
+            if [ -d "$HOME/.minsky/openhands-venv" ]; then
+              OPENHANDS_SUPPRESS_BANNER=1 "$HOME/.minsky/openhands-venv/bin/python" \
+                -c "from openhands.sdk import Agent, LLM, Conversation; print('openhands-ai: ready')"
+            else
+              echo "openhands: venv missing — run \`pnpm minsky:setup\` to install" >&2
+              exit 1
+            fi
+            ;;
+          claude)
+            echo "smoke" | claude --print 2>&1 | head -3
+            ;;
+          devin)
+            echo "smoke" > /tmp/minsky-devin-smoke.txt && devin --print --prompt-file /tmp/minsky-devin-smoke.txt 2>&1 | head -3
+            rm -f /tmp/minsky-devin-smoke.txt
+            ;;
+          aider)
+            command -v aider >/dev/null 2>&1 && echo "aider: ready" || { echo "aider: not on PATH" >&2; exit 1; }
+            ;;
+          *) echo "minsky agent test: unknown agent '$3'. See: minsky list agents" >&2; exit 2 ;;
+        esac
+        ;;
+      ""|--help|-h)
+        cat <<'EOF'
+minsky agent <verb> — agent-backend management
+
+  list              — list available agents
+  set <name>        — change cloud_agent in ~/.minsky/config.json
+  test <name>       — smoke-test the named backend
+EOF
+        ;;
+      *) echo "minsky agent: unknown verb '$2'. See: minsky agent --help" >&2; exit 2 ;;
+    esac
+    exit 0
+    ;;
+
+  solve)
+    # `minsky solve <task-id|--task-file <path>>` — single-task without
+    # the daemon loop. openhands pattern (`openhands solve --task-file
+    # X`). Spawns one iteration against the current repo via the bash
+    # skeleton's iterate_host function — same code path the supervisor
+    # uses, just one-shot. The "killer-feature verb" — one command that
+    # names what minsky does for an operator.
+    _solve_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    _solve_task="${2:-}"
+    if [ "$_solve_task" = "--help" ] || [ "$_solve_task" = "-h" ] || [ -z "$_solve_task" ]; then
+      cat <<'EOF'
+minsky solve <task-id> [--dry-run] — run ONE iteration of a single task
+
+  <task-id>           — task ID from TASKS.md (exact match on `**ID**:`)
+  --task-file <path>  — ad-hoc brief file (skips the picker)
+  --dry-run           — print the resolved plan + exit (no spawn)
+
+The same code path the supervisor uses (bin/minsky-run.sh iterate_host),
+just one-shot. The killer-feature verb (openhands solve pattern).
+EOF
+      [ -z "$_solve_task" ] && exit 2 || exit 0
+    fi
+    # Pin the picker via env so iterate_host picks THIS task, not the top P0.
+    MINSKY_SOLVE_TASK_ID="$_solve_task" exec bash "$_solve_repo/bin/minsky-run.sh" \
+      --host "$_solve_repo" --once "${@:3}"
+    ;;
+
+  reset)
+    # `minsky reset [--hard]` — clear iteration store + claim records.
+    # nx pattern (`nx reset` clears cache + daemon). `--hard` also
+    # bootouts the supervisor.
+    _reset_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    _hard=0
+    for _r in "${@:2}"; do
+      [ "$_r" = "--hard" ] && _hard=1
+    done
+    if [ "$_hard" = "1" ]; then
+      "$0" stop >/dev/null 2>&1 || true
+    fi
+    [ -d "$_reset_repo/.minsky/iteration-store" ] && rm -rf "$_reset_repo/.minsky/iteration-store"
+    [ -d "$_reset_repo/.minsky/claims" ]          && rm -rf "$_reset_repo/.minsky/claims"
+    [ -f "$_reset_repo/.minsky/tick-loop.out.log" ] && : > "$_reset_repo/.minsky/tick-loop.out.log"
+    [ -f "$_reset_repo/.minsky/tick-loop.err.log" ] && : > "$_reset_repo/.minsky/tick-loop.err.log"
+    echo "minsky reset: cleared iteration store + claims + truncated logs"
+    [ "$_hard" = "1" ] && echo "minsky reset --hard: supervisor stopped (re-run \`minsky daemon start\` to resume)"
+    exit 0
+    ;;
+
+  setup)
+    # `minsky setup` — subcommand alias for `pnpm minsky:setup` /
+    # `setup.sh --setup`. Renders unit files + bootstraps the
+    # supervisor + installs openhands SDK.
+    _setup_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    exec bash "$_setup_repo/setup.sh" --setup "${@:2}"
+    ;;
+
+  ui)
+    # `minsky ui` — subcommand alias for `pnpm minsky:ui`.
+    _ui_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
+    PORT="${PORT:-8181}" exec bash "$_ui_repo/distribution/run-dashboard-web.sh" "${@:2}"
     ;;
 esac
 

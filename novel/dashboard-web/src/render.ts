@@ -107,7 +107,7 @@ export function render(args: {
   const rows = args.metrics.map((m) => renderRow(m, getValue)).join("");
   const activityRows =
     activity.length === 0
-      ? `<p class="activity-empty">No recent iterations — start the supervisor with <code>pnpm dogfood</code>.</p>`
+      ? `<p class="activity-empty">No recent iterations — start the supervisor with <code>pnpm minsky:setup</code>.</p>`
       : `<ul class="activity">${activity.map(renderActivityRow).join("")}</ul>`;
   const refresh = activity.length > 0 ? `<meta http-equiv="refresh" content="5">` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}<title>Minsky dashboard</title><style>${STYLE}</style></head><body><main><header><h1>Minsky</h1><span class="subtitle">success metrics</span></header><ul class="metrics">${rows}</ul><h2 class="section-title">Recent activity</h2>${activityRows}</main></body></html>`;

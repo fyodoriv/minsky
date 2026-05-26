@@ -59,8 +59,8 @@ Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/b
 
 ```bash
 minsky                               # autonomous run (foreground, SIGHUP-immune)
-minsky --daemon                      # background daemon (survives terminal close / IDE restart)
-minsky --daemon --hosts-dir ~/apps   # daemon across multiple repos
+minsky daemon start                      # background daemon (survives terminal close / IDE restart)
+minsky daemon start --hosts-dir ~/apps   # daemon across multiple repos
 minsky --local                       # local-only mode (zero cloud tokens)
 minsky --local --daemon              # local-only background daemon
 minsky status                        # PID, uptime, last 10 log lines
@@ -71,7 +71,7 @@ pnpm minsky doctor                   # health probe — claude / local-LLM / mod
 
 ### Daemon mode (`--daemon`)
 
-`minsky --daemon` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Windsurf/Cursor restart, and SSH disconnect. Guards against double-start (PID check).
+`minsky daemon start` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Windsurf/Cursor restart, and SSH disconnect. Guards against double-start (PID check).
 
 ### Local-only mode (`--local`)
 
@@ -121,7 +121,7 @@ runner from any folder and automatically watch the loop from outside.
 agentbrew sync --agentfile "$MINSKY_REPO/Agentfile.yaml"
 
 # Then, from any shell in any bootstrapped host:
-minsky --daemon --hosts-dir <repos-parent>   # background daemon across all repos
+minsky daemon start --hosts-dir <repos-parent>   # background daemon across all repos
 minsky --local --daemon              # same, but local models only (zero tokens)
 minsky status                        # PID + uptime + log tail
 minsky logs                          # follow the daemon log live
@@ -196,7 +196,7 @@ pnpm minsky doctor   # verify health
 
 `pnpm install` runs a `prepare` hook that does two things in sequence: (a) `tsc -b` builds every workspace package's `dist/` (the CLI's runtime artifacts) so `pnpm minsky` works on a fresh clone with no separate build step, and (b) `lefthook install` writes the pre-commit + pre-push gates into `.git/hooks/` so commits are linted locally before they reach CI. If `dist/` is somehow missing at runtime (e.g., `prepare` was skipped, or a stale `.tsbuildinfo` short-circuited the build), `pnpm minsky` exits 1 with a one-line message naming the recovery command — no node `ERR_MODULE_NOT_FOUND` stack traces.
 
-For the full supervisor + dashboard install + dogfood-on-self loop, run `./setup.sh`:
+For the full supervisor + dashboard install + run-minsky-on-itself loop, run `./setup.sh`:
 
 ```bash
 ./setup.sh
@@ -207,8 +207,8 @@ For the full supervisor + dashboard install + dogfood-on-self loop, run `./setup
 To start Minsky **on this repo** (Minsky-on-itself; rule #12 / `user-stories/001-loop-runs-overnight.md`):
 
 ```bash
-pnpm dogfood          # one-command supervisor start (renders + loads launchd / systemd units)
-pnpm dogfood:doctor   # read-only health probe
+pnpm minsky:setup          # one-command supervisor start (renders + loads launchd / systemd units)
+pnpm minsky:doctor   # read-only health probe
 ```
 
 Then in [Claude Code](https://docs.claude.com/en/docs/claude-code) from this directory:
