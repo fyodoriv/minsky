@@ -20,7 +20,7 @@ Then restart the supervisor unit. The CLI prints `[tick-loop] CTO audit wired (f
 `MINSKY_CTO_AUDIT=off` short-circuits the gate inside `runCtoAudit` even when the seam is wired — useful when the operator wants to land a sequence of small ships without an audit fire after each:
 
 ```bash
-MINSKY_CTO_AUDIT=off pnpm dogfood:start
+MINSKY_CTO_AUDIT=off pnpm minsky:setup
 ```
 
 Any value other than `off` (including unset) leaves the audit armed.

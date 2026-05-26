@@ -196,7 +196,7 @@ pnpm minsky doctor   # verify health
 
 `pnpm install` runs a `prepare` hook that does two things in sequence: (a) `tsc -b` builds every workspace package's `dist/` (the CLI's runtime artifacts) so `pnpm minsky` works on a fresh clone with no separate build step, and (b) `lefthook install` writes the pre-commit + pre-push gates into `.git/hooks/` so commits are linted locally before they reach CI. If `dist/` is somehow missing at runtime (e.g., `prepare` was skipped, or a stale `.tsbuildinfo` short-circuited the build), `pnpm minsky` exits 1 with a one-line message naming the recovery command — no node `ERR_MODULE_NOT_FOUND` stack traces.
 
-For the full supervisor + dashboard install + dogfood-on-self loop, run `./setup.sh`:
+For the full supervisor + dashboard install + run-minsky-on-itself loop, run `./setup.sh`:
 
 ```bash
 ./setup.sh
@@ -207,8 +207,8 @@ For the full supervisor + dashboard install + dogfood-on-self loop, run `./setup
 To start Minsky **on this repo** (Minsky-on-itself; rule #12 / `user-stories/001-loop-runs-overnight.md`):
 
 ```bash
-pnpm dogfood          # one-command supervisor start (renders + loads launchd / systemd units)
-pnpm dogfood:doctor   # read-only health probe
+pnpm minsky:setup          # one-command supervisor start (renders + loads launchd / systemd units)
+pnpm minsky:doctor   # read-only health probe
 ```
 
 Then in [Claude Code](https://docs.claude.com/en/docs/claude-code) from this directory:

@@ -8,7 +8,7 @@ The canonical runbook for any AI agent (Claude Code, OMC personas, future tools)
 
 If you're an agent reading this for the first time, read in this order: `MILESTONES.md` (the roadmap), then `vision.md` (the constitution), then `TASKS.md` (the work queue), then come back here.
 
-**Before implementing any feature**, check `DEPRECATED.md` — it lists features that should NOT receive new work (hard scope-leak mode, observer-watch.sh, dogfood scripts, dashboard-web, hardcoded timeout env vars, manual stop/start flows). Use the replacement instead.
+**Before implementing any feature**, check `DEPRECATED.md` — it lists features that should NOT receive new work (hard scope-leak mode, observer-watch.sh, dashboard-web, hardcoded timeout env vars, manual stop/start flows). Use the replacement instead.
 
 ## What this file is not
 
@@ -338,7 +338,7 @@ Do not loop. Do not try the same approach repeatedly. Per the constitution, "let
 
 ## `**Touches**:` field on task blocks (parallel-launch coordination)
 
-When the daemon runs in parallel mode (`pnpm dogfood --worker-id=N --workers-total=M`), each task block in `TASKS.md` may declare a `**Touches**: <glob>[, <glob>…]` field listing the file globs the task is expected to modify. The daemon's pre-spawn collision check (slice 3 of `daemon-parallel-worktree-launch`, see `novel/tick-loop/src/touches-glob.ts`) refuses to start a worker on a task whose globs overlap any open daemon PR's changed-file list — the second line of defense after `acquireTaskClaim` (slice 1).
+When the daemon runs in parallel mode (`pnpm minsky:setup --worker-id=N --workers-total=M`), each task block in `TASKS.md` may declare a `**Touches**: <glob>[, <glob>…]` field listing the file globs the task is expected to modify. The daemon's pre-spawn collision check (slice 3 of `daemon-parallel-worktree-launch`, see `novel/tick-loop/src/touches-glob.ts`) refuses to start a worker on a task whose globs overlap any open daemon PR's changed-file list — the second line of defense after `acquireTaskClaim` (slice 1).
 
 Format:
 
@@ -358,7 +358,7 @@ If a task description is wrong, or a constitutional rule is being misapplied, pu
 
 ## Pipeline-managed repos — dedicated worktree pattern
 
-When you (the agent) are doing a multi-PR batch on this repo (e.g. a backlog drain, a CI stabilization sweep, a rule rollout), do NOT work in the main checkout. Other agents (the dogfood launchd, parallel Devin sessions, the daemon itself) `git checkout` the main repo dir at unpredictable times and wipe your uncommitted edits.
+When you (the agent) are doing a multi-PR batch on this repo (e.g. a backlog drain, a CI stabilization sweep, a rule rollout), do NOT work in the main checkout. Other agents (the minsky supervisor launchd, parallel Devin sessions, the daemon itself) `git checkout` the main repo dir at unpredictable times and wipe your uncommitted edits.
 
 The discipline is:
 
@@ -370,7 +370,7 @@ pnpm install --frozen-lockfile
 # when done: git worktree remove /tmp/minsky-<short-task-name> --force
 ```
 
-The `/tmp/` path is unique per task and parallel agents have no business touching it. The branch lives on the same git object store as the main checkout but the working tree is yours alone. Operator's `bin/minsky` cleanup commands (e.g. `pnpm dogfood:gc`) leave `/tmp/` worktrees alone — they only clean `.worktrees/<id>` under the repo.
+The `/tmp/` path is unique per task and parallel agents have no business touching it. The branch lives on the same git object store as the main checkout but the working tree is yours alone. Operator's `bin/minsky` cleanup commands (e.g. `pnpm minsky:gc` once filed) leave `/tmp/` worktrees alone — they only clean `.worktrees/<id>` under the repo.
 
 When the merge lands, remove the worktree:
 

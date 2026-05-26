@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// <!-- scope: human-approved 2026-05-26 — operator-directed UX improvement to `pnpm dogfood:logs` (structured viewer with tags + colors + span pretty-printing). Pre-emptively opted out of rule-12-scope-discipline because the task lives in the operator's session log, not a TASKS.md block; the script is the deliverable, not the artifact-of-a-task. -->
+// <!-- scope: human-approved 2026-05-26 — operator-directed UX improvement to `pnpm minsky:logs` (structured viewer with tags + colors + span pretty-printing; renamed from `pnpm dogfood:logs` same session). Pre-emptively opted out of rule-12-scope-discipline because the task lives in the operator's session log, not a TASKS.md block; the script is the deliverable, not the artifact-of-a-task. -->
 // Pretty log viewer for the minsky tick-loop. Pattern: pure shape-transform
 // (`formatLine`, `formatSpan`) composed with one I/O seam (`tailFile`) above
 // a tiny CLI — rule #2 (data-not-code), rule #10 (deterministic transforms).
@@ -9,11 +9,12 @@
 // of the JSON payloads (iteration / strategic-pick / llm-provider.dispatch
 // are the high-signal events the operator wants to read at a glance).
 //
-// Anchor: 2026-05-26 operator directive — "improve pnpm dogfood:logs so that
-//   it has proper tags, colors, etc". The previous shape (`tail -F a b`) had
-//   zero structure: same color for every line, JSON spans inline, no source
-//   distinction beyond the `==> file <==` headers.
-// Conformance: full — pure formatters export to `dogfood-logs.test.mjs`;
+// Anchor: 2026-05-26 operator directive — "improve pnpm dogfood:logs [renamed
+//   to pnpm minsky:logs same session] so that it has proper tags, colors, etc".
+//   The previous shape (`tail -F a b`) had zero structure: same color for every
+//   line, JSON spans inline, no source distinction beyond the `==> file <==`
+//   headers.
+// Conformance: full — pure formatters export to `minsky-logs.test.mjs`;
 //   `tailFile` is the only spawn site.
 // Pivot (rule #9): if span shapes drift (`tick-loop.iteration` field names
 //   change) and the per-name formatters silently fall through to the generic
@@ -250,7 +251,7 @@ function tailFile(file, stream) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const header = color(
     ANSI.bold + ANSI.cyan,
-    "minsky dogfood:logs — tailing tick-loop {out,err} (Ctrl-C to exit)",
+    "pnpm minsky:logs — tailing tick-loop {out,err} (Ctrl-C to exit)",
   );
   process.stdout.write(`${header}\n${color(ANSI.dim, "─".repeat(80))}\n`);
 

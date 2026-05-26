@@ -42,16 +42,16 @@ Templates use shell-style `${VAR}` placeholders that `setup.sh` (P0 `setup-sh-re
 
 Any new placeholder added to a template must be (a) added to the table above and (b) accepted by `lint-units.sh`'s placeholder-hygiene check (which allows only the documented set).
 
-## Install (one command — Minsky dogfooding itself)
+## Install (one command — Minsky on itself)
 
 ```bash
-pnpm dogfood       # canonical
-./setup.sh --dogfood  # equivalent shell-script form
+pnpm minsky:setup       # canonical
+./setup.sh --setup  # equivalent shell-script form
 ```
 
 Detects the OS, renders the unit-file templates with `${MINSKY_HOME}` substituted, drops them in the user-scope unit dir (`~/.config/systemd/user/` on Linux, `~/Library/LaunchAgents/` on macOS), idempotently loads the supervisor target, and prints the operator's tail-logs / pause / status commands. Re-running is idempotent — re-renders the templates (catches drift) and re-loads the supervisor; no-op on an already-active unit. This is the canonical "start Minsky on this repo" invocation per `vision.md` § "What Minsky is" + rule #12 (Scope discipline) + `user-stories/001-loop-runs-overnight.md`.
 
-A read-only health probe lives at `pnpm dogfood:doctor` (equivalent to `./setup.sh --doctor`) — verifies prereqs without touching state.
+A read-only health probe lives at `pnpm minsky:doctor` (equivalent to `./setup.sh --doctor`) — verifies prereqs without touching state.
 
 The under-the-hood snippets below remain as the reference for operators who need to debug the install (e.g., custom unit dir, sandboxed shell without `setup.sh`'s lock).
 

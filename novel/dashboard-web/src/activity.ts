@@ -112,7 +112,7 @@ export function takeRecentSpans(lines: readonly string[], n: number): ActivityEn
  *
  * The whole file is read in one pass — `.minsky/tick-loop.out.log`
  * is operator-side and bounded (a few hundred KB at most before
- * the supervisor rotates / the operator runs `pnpm dogfood:stop`),
+ * the supervisor rotates / the operator runs `pnpm minsky:stop`),
  * so the simpler shape beats a streaming reverse-tail. If the log
  * grows past a few MB, swap this for a streaming reader.
  *

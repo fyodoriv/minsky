@@ -1,4 +1,4 @@
-// Paired tests for `dogfood-logs.mjs`. Pure formatters get pinned shapes
+// Paired tests for `minsky-logs.mjs`. Pure formatters get pinned shapes
 // here so a daemon-side rename of `iteration.status` / `task.id` / etc.
 // trips a deterministic test failure (rule #10).
 //
@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatLine, formatSpan } from "./dogfood-logs.mjs";
+import { formatLine, formatSpan } from "./minsky-logs.mjs";
 
 describe("formatSpan — iteration", () => {
   it("formats a failed iteration with FAIL tag, task id, provider, reason", () => {

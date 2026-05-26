@@ -37,13 +37,13 @@
     "daemon-pr-lint:metrics": "node scripts/daemon-pr-lint-metrics.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.worktrees\" \"#.minsky\" \"#.obsidian\" \"#.claude\" \"#.claire\" \"#opencode.notes.md\" \"#.aider*\" \"#.pytest_cache\"",
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
-    "dogfood": "./setup.sh --dogfood",
-    "dogfood:doctor": "./setup.sh --doctor",
     "minsky": "bash bin/minsky",
-    "dogfood:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
-    "dogfood:logs": "node scripts/dogfood-logs.mjs",
-    "dogfood:status": "launchctl list 2>/dev/null | grep -i minsky || systemctl --user status minsky-supervisor.target 2>/dev/null",
-    "dogfood:stop": "launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist 2>/dev/null; launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.budget-guard.plist 2>/dev/null; systemctl --user stop minsky-supervisor.target 2>/dev/null; echo 'supervisor stopped'"
+    "minsky:setup": "./setup.sh --setup",
+    "minsky:doctor": "./setup.sh --doctor",
+    "minsky:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
+    "minsky:logs": "node scripts/minsky-logs.mjs",
+    "minsky:status": "launchctl list 2>/dev/null | grep -i minsky || systemctl --user status minsky-supervisor.target 2>/dev/null",
+    "minsky:stop": "launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist 2>/dev/null; launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.budget-guard.plist 2>/dev/null; systemctl --user stop minsky-supervisor.target 2>/dev/null; echo 'supervisor stopped'"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
