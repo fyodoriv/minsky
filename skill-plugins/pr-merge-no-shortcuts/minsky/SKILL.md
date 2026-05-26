@@ -115,6 +115,7 @@ If any of these are missing or stale on the next drain, that's its own bug — f
 ## When you're tempted
 
 You'll feel the temptation toward shortcuts when:
+
 - The session budget is running out and there are still N PRs open.
 - A specific PR's lint failures look unfixable (typecheck against a major dependency upgrade, for example).
 - You've already merged a lot in the session and a single remaining PR feels like "diminishing returns".

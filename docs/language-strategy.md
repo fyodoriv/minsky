@@ -23,11 +23,13 @@ Five concrete strengths:
 Even though Python is the AI/ML lingua franca, minsky's control plane isn't ML code. The rewrite cost (3-6 months of focused work, regression risk in the safety gates) is high and the benefit is low. The strengths Python offers (Pydantic, DSPy, numpy, pandas, HuggingFace, mature LLM SDKs) all apply to **workers** that minsky invokes — not to the loop that schedules them.
 
 What minsky would lose by going Python:
+
 - Type-system rigor at the discriminated-union / strict-null level
 - The current `novel/` workspace structure and its passing test suite (~3500+ tests)
 - 18 months of TS-shaped institutional code conventions
 
 What minsky would gain:
+
 - In-process access to Python LLM SDKs (instead of subprocess)
 - Direct access to LangGraph / CrewAI / Pydantic AI as in-process libraries
 - Bigger contributor pool

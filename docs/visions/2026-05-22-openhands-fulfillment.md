@@ -93,12 +93,14 @@ Searched 2026-05-22 across: GitHub topics, awesome-* lists, OpenHands' own ecosy
 OMC was adopted as the persona orchestrator on Claude Code, providing 32 specialist agents + multi-coordination modes + smart Haiku/Sonnet/Opus routing + architect verification gate + inter-agent messaging.
 
 OpenHands' native delegation primitives (Q1) cover most of OMC's surface:
+
 - 32 specialist agents → MicroAgents + AgentDefinition cover this directly
 - Multi-coordination modes (autopilot/ultrawork/team/ralph) → DelegateTool (parallel) + TaskToolSet (sequential) cover the major modes; ralph mode is independently provided by [`competitors/ralph-wiggum-official.md`](../../competitors/ralph-wiggum-official.md)
 - Inter-agent messaging → handled via delegation result-passing
 - Open source / community → OpenHands is larger
 
 What OMC adds that OpenHands doesn't natively provide:
+
 - **Smart cross-model routing** (Haiku for cheap tasks, Opus for reasoning) — OpenHands picks one model per session, no auto-routing by task shape
 - **Architect verification gate** (Ralph mode never says "done" until verified) — OpenHands has no equivalent yet; the Supervisor Agent draft PR is the closest
 
