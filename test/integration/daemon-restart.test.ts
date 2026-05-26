@@ -187,38 +187,49 @@ describe("daemon-restart: dirty-state cleanup delegates to reset-host-if-crashed
 
   test("reset-host-if-crashed subcommand exists and accepts --host + --sentinel", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
-    const resetBlock = src.match(/reset-host-if-crashed\)[\s\S]*?exit 0\n\s*;;/);
+    // Block boundary: the case branch ends at `exit 1\n    ;;` (post
+    // 2026-05-26 refuse-with-error semantics). Non-greedy match up to that
+    // is unambiguous — inner `;;` inside the `case "$1" in` argparse don't
+    // match because they sit at deeper indentation than the closing `;;`.
+    const resetBlock = src.match(/reset-host-if-crashed\)[\s\S]*?exit 1\n {4};;/);
     expect(resetBlock).not.toBeNull();
     expect(resetBlock?.[0]).toContain("--host");
     expect(resetBlock?.[0]).toContain("--sentinel");
-    // It stashes (never deletes) on the dirty crash path.
-    expect(resetBlock?.[0]).toContain('git -C "$_rh_host" stash push');
+    // It REFUSES on dirty trees (auto-stash was removed 2026-05-26 — the
+    // side-effect of swallowing operator/parallel-agent WIP into the
+    // stash list outweighed the crash-recovery convenience). Operator
+    // resolves manually and re-runs the daemon.
+    expect(resetBlock?.[0]).toContain("REFUSING to recover host");
+    expect(resetBlock?.[0]).not.toContain('git -C "$_rh_host" stash push');
   });
 
-  test("daemon refuses to start if stash itself fails (rule #6 pivot)", () => {
+  test("daemon refuses to recover on dirty state (rule #6 — no auto-stash)", () => {
     const src = readFileSync(MINSKY_BIN, "utf8");
-    // If `git stash push` fails (worktree / submodule edge case), we must
-    // loud-crash rather than silently clobber state.
-    expect(src).toContain("REFUSING to start daemon");
-    expect(src).toContain("'git stash push -u' failed");
+    // Replaces the previous "refuses if stash itself fails" test. The new
+    // semantic is: dirty trees ALWAYS refuse-with-error, never stash.
+    expect(src).toContain("REFUSING to recover host");
+    expect(src).toContain("resolve manually before restarting the daemon");
   });
 });
 
-// ─── dirty-state stash: end-to-end ──────────────────────────
+// ─── dirty-state refuse: end-to-end ──────────────────────────
 
-describe("daemon-restart: dirty-state stash (e2e)", () => {
-  test("untracked file survives daemon startup as a recoverable stash", () => {
-    // Synthesise a host repo with: (1) a default branch `main`, (2) a
-    // checked-out feature branch with an untracked file, (3) an origin
-    // remote pointing at itself so `symbolic-ref refs/remotes/origin/HEAD`
-    // resolves. Then exec the dirty-state block from `bin/minsky` and
-    // assert the untracked file is in `git stash list`, NOT deleted.
+describe("daemon-restart: dirty-state refuse (e2e)", () => {
+  test("untracked file is PRESERVED on disk; daemon refuses to recover (no auto-stash)", () => {
+    // Operator directive 2026-05-26: auto-stash on dirty-tree crash-recovery
+    // was silently swallowing operator/parallel-agent WIP into the stash
+    // list. New semantic: refuse-with-error, leave the workspace exactly
+    // as the operator left it, exit 1.
+    //
+    // Synthesise a host repo with: (1) default branch `main`, (2) checked-
+    // out feature branch with an untracked file. Run `bin/minsky
+    // reset-host-if-crashed --host <fixture>` against it (no sentinel = crash
+    // path) and assert (a) exit code 1, (b) the untracked file is STILL on
+    // disk, (c) git stash list is empty, (d) branch is unchanged, (e) the
+    // error message points the operator at the three manual recovery paths.
     const fixtureDir = join(tmpdir(), `minsky-fixture-${Date.now()}`);
     const bareDir = `${fixtureDir}.bare.git`;
     try {
-      // `-c core.hooksPath=/dev/null` neutralises any inherited global
-      // hook path (the user's dotfiles install lefthook globally, which
-      // would reject the fixture's `init` commit for not being conventional).
       const G = "git -c core.hooksPath=/dev/null";
       execSync(`mkdir -p '${fixtureDir}' && ${G} init -b main '${fixtureDir}'`, { stdio: "pipe" });
       execSync(
@@ -237,48 +248,39 @@ describe("daemon-restart: dirty-state stash (e2e)", () => {
         { stdio: "pipe", shell: "/bin/bash" },
       );
 
-      // Pre-condition: untracked file exists, on feature branch
+      // Pre-condition: untracked file exists, on feature branch, no stash
       expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
       expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
         "feat/crashed-iteration",
       );
+      expect(execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" }).trim()).toBe("");
 
-      // Inline the dirty-state block (the part that runs before `node`
-      // spawns) so we exercise the real shell logic without spinning up
-      // the runner. Mirrors `bin/minsky` lines 632-659.
-      const cleanupScript = `
-        set -e
-        _host_arg='${fixtureDir}'
-        _default_br=$(git -C "$_host_arg" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-        _current_br=$(git -C "$_host_arg" branch --show-current 2>/dev/null)
-        if [ "$_current_br" != "$_default_br" ] && [ -n "$_current_br" ]; then
-          if [ -n "$(git -C "$_host_arg" status --porcelain 2>/dev/null)" ]; then
-            _stash_label="minsky auto-stash $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            git -C "$_host_arg" stash push -u -m "$_stash_label" >/dev/null
-            echo "stashed: $_stash_label"
-          fi
-          git -C "$_host_arg" checkout "$_default_br" >/dev/null 2>&1
-        fi
-      `;
-      const out = execSync(cleanupScript, { shell: "/bin/bash", encoding: "utf8" });
-      expect(out).toContain("stashed: minsky auto-stash");
+      // Invoke the subcommand (no --sentinel = crash path)
+      let exitCode = 0;
+      let stderr = "";
+      try {
+        execSync(`bash '${MINSKY_BIN}' reset-host-if-crashed --host '${fixtureDir}'`, {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (err) {
+        const e = err as { status?: number; stderr?: Buffer };
+        exitCode = e.status ?? 1;
+        stderr = e.stderr?.toString() ?? "";
+      }
 
-      // Post-condition: untracked file is NOT on disk (it's in the stash)
-      expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(false);
-
-      // …but it IS recoverable from the stash list
-      const stashList = execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" });
-      expect(stashList).toContain("minsky auto-stash");
-
-      // And we're back on the default branch
-      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
-        "main",
-      );
-
-      // Final: applying the stash restores the file (proves recoverability)
-      execSync(`git -C '${fixtureDir}' stash apply stash@{0}`, { stdio: "pipe" });
+      // Post-conditions
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REFUSING to recover host");
+      expect(stderr).toContain("resolve manually");
+      // Untracked file STILL on disk (no stash, no destruction)
       expect(existsSync(join(fixtureDir, "unsaved.txt"))).toBe(true);
       expect(readFileSync(join(fixtureDir, "unsaved.txt"), "utf8")).toContain("unsaved work");
+      // Stash list still empty
+      expect(execSync(`git -C '${fixtureDir}' stash list`, { encoding: "utf8" }).trim()).toBe("");
+      // Branch unchanged
+      expect(execSync(`git -C '${fixtureDir}' branch --show-current`).toString().trim()).toBe(
+        "feat/crashed-iteration",
+      );
     } finally {
       try {
         execSync(`rm -rf '${fixtureDir}' '${bareDir}'`, { stdio: "pipe" });

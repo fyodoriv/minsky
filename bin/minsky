@@ -953,30 +953,35 @@ case "${1:-}" in
       echo "stash: n/a"
       exit 0
     fi
-    # Dirty tree — stash with a recoverable label, then reset. Never delete.
-    # Rule #6 pivot: if stash itself fails (worktree / submodule edge case),
-    # loud-crash rather than silently clobber state.
-    _rh_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    _rh_label="minsky auto-stash $_rh_ts"
-    if ! git -C "$_rh_host" stash push -u -m "$_rh_label" >/dev/null 2>&1; then
-      echo "minsky: REFUSING to start daemon — host $_rh_host has dirty state and 'git stash push -u' failed" >&2
-      echo "minsky: resolve manually (commit, stash, or move files out), then retry" >&2
-      exit 1
-    fi
-    _rh_stash_ref="stash@{0}"
-    if [ "$_rh_current" != "$_rh_default" ] && [ -n "$_rh_current" ]; then
-      if ! git -C "$_rh_host" checkout "$_rh_default" >/dev/null 2>&1; then
-        echo "minsky: REFUSING to start daemon — failed to checkout $_rh_default on $_rh_host" >&2
-        echo "minsky: stash succeeded but branch switch did not; inspect 'git -C $_rh_host status'" >&2
-        exit 1
-      fi
-    fi
-    echo "action: stash-and-reset"
-    echo "branch: $(git -C "$_rh_host" branch --show-current 2>/dev/null)"
-    echo "stash: $_rh_stash_ref ($_rh_label)"
-    echo "recover-with: git -C \"$_rh_host\" stash pop $_rh_stash_ref"
-    echo "minsky: stashed dirty state as: $_rh_label"
-    exit 0
+    # Dirty tree — REFUSE to recover. Operator confirms manually.
+    #
+    # Previous behavior (removed 2026-05-26): auto-stash + checkout default.
+    # That was a feature for unattended crash recovery, but the side-effect
+    # was that an operator's (or parallel agent's) concurrent WIP got
+    # silently swept into the stash list every time the supervisor
+    # respawned. Over the 2026-05-19 to 2026-05-21 stability window the
+    # stash list grew to 10+ entries of lost context.
+    #
+    # New behavior: refuse-with-error. Print what's dirty, suggest the
+    # three legitimate next steps (commit / manual stash / move out),
+    # exit 1. Operator runs `git -C <host> status` and decides what to
+    # do, then re-runs the daemon manually. Loud surface ≫ silent recovery.
+    #
+    # Rule #6 (loud-crash > silent failure — never destroy state without
+    # explicit confirmation; auto-stash is destruction-by-side-effect from
+    # the operator's perspective even though git keeps the bits).
+    # Operator directive 2026-05-26: "fix the root cause of [auto-stashes]
+    # even appearing".
+    echo "minsky: REFUSING to recover host — $_rh_host has dirty state:" >&2
+    git -C "$_rh_host" status --short 2>&1 | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "minsky: resolve manually before restarting the daemon:" >&2
+    echo "  - commit:  cd $_rh_host && git add -A && git commit -m '<msg>'" >&2
+    echo "  - stash:   cd $_rh_host && git stash push -u -m 'manual: <reason>'" >&2
+    echo "  - move:    mv unwanted-file <somewhere outside the work tree>" >&2
+    echo "" >&2
+    echo "minsky: then re-run \`minsky\` (or \`pnpm dogfood\`)" >&2
+    exit 1
     ;;
   init)
     # `minsky init [host]` — write per-machine config so subsequent
