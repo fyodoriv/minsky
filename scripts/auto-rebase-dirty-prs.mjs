@@ -26,14 +26,14 @@
 //   - Pivot: if `gh pr update-branch` produces a no-op-rebase (network
 //     flake / GH API hiccup) ≥1/week, add a 3-strikes gate before
 //     declaring close-as-superseded.
-//   - Measurement: `node scripts/daemon-auto-rebase-dirty-prs.mjs
+//   - Measurement: `node scripts/auto-rebase-dirty-prs.mjs
 //     --dry-run --json` returns `{rebased, closed, skipped}` counts.
 //   - Anchor: Kephart & Chess 2003 *The Vision of Autonomic Computing*
 //     (MAPE-K Execute step — the autonomic loop must ACT on the
 //     analysed findings, not just analyse them).
 //
 // Usage:
-//   node scripts/daemon-auto-rebase-dirty-prs.mjs [--dry-run] [--limit=N] [--json]
+//   node scripts/auto-rebase-dirty-prs.mjs [--dry-run] [--limit=N] [--json]
 //   --dry-run : list the actions but don't call `gh pr update-branch` / `gh pr close`
 //   --limit=N : cap per-cycle work (default 3 — bounded so one cycle can't burn through
 //               every DIRTY PR in one shot if the daemon is having a bad day)
@@ -189,7 +189,7 @@ function closePrAsSupersededViaGh(prNumber) {
       "close",
       String(prNumber),
       "--comment",
-      `Auto-closed by \`daemon-auto-rebase-dirty-prs\` — \`gh pr update-branch\` failed with conflicts after >${MIN_AGE_HOURS}h DIRTY. The daemon's next iteration will re-open a fresh PR if the underlying task is still picked. See \`scripts/daemon-auto-rebase-dirty-prs.mjs\` for the autonomic-loop rationale.`,
+      `Auto-closed by \`daemon-auto-rebase-dirty-prs\` — \`gh pr update-branch\` failed with conflicts after >${MIN_AGE_HOURS}h DIRTY. The daemon's next iteration will re-open a fresh PR if the underlying task is still picked. See \`scripts/auto-rebase-dirty-prs.mjs\` for the autonomic-loop rationale.`,
     ],
     { encoding: "utf8" },
   );
