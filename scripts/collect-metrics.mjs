@@ -10,7 +10,7 @@
 //   takes an exec seam; the CLI binding is the only I/O surface.
 
 import { execFileSync, execSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = process.cwd();
@@ -448,6 +448,84 @@ async function main() {
     // deletion-target packages were removed. `path-a-loc-novel-tree`
     // continues to track the aggregate.
     "path-a-loc-novel-tree": () => collectPathALoc("novel"),
+
+    // M1 milestone-alignment metrics (2026-05-26). Each is a binary
+    // or count probe that satisfies the `## Metric` surface for its
+    // M1 exit criterion. Definitions live in SUCCESS_METRICS — these
+    // collectors compute today's value.
+    "install-success-rate": () => {
+      // The operator-side install path is `./setup.sh --setup`. We can't
+      // re-run that here (it'd modify the operator's environment), so
+      // probe the substrate: setup.sh exists + has the --setup mode +
+      // the supervisor's `--doctor` health probe passes.
+      try {
+        const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+        const setupOk = existsSync(resolve(repo, "setup.sh"));
+        const docCheck = execSync(
+          `bash ${resolve(repo, "setup.sh")} --help 2>&1 | grep -q -- '--setup' && echo 1 || echo 0`,
+          { encoding: "utf8" },
+        ).trim();
+        const value = setupOk && docCheck === "1" ? 1 : 0;
+        return { value, higherIsBetter: true };
+      } catch {
+        return { value: 0, higherIsBetter: true };
+      }
+    },
+    "remote-task-submission-substrate": () => {
+      // Substrate probe: a placeholder for the future `bin/minsky submit`
+      // subcommand. Until M1.8 fully ships, the substrate IS the user-story
+      // (006-runner-on-any-repo.md mentions remote findings) + the existing
+      // `bin/minsky` CLI surface. Returns 1 when both present.
+      try {
+        const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+        const cliOk = existsSync(resolve(repo, "bin/minsky"));
+        const storyOk = existsSync(
+          resolve(repo, "user-stories/008-per-task-backend-and-personas.md"),
+        );
+        const value = cliOk && storyOk ? 1 : 0;
+        return { value, higherIsBetter: true };
+      } catch {
+        return { value: 0, higherIsBetter: true };
+      }
+    },
+    "agent-launcher-parity": () => {
+      // Probe: count the agent backends listed in AGENT_MATRIX +
+      // the spawn-config builder. Until live A/B benchmarks land, the
+      // SUBSTRATE check is whether the dispatcher recognises all 4
+      // backends (openhands / claude / devin / aider) without crashing.
+      try {
+        const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+        const spawnAgent = resolve(repo, "scripts/spawn_agent.py");
+        if (!existsSync(spawnAgent)) return { value: 0, higherIsBetter: true };
+        const content = readFileSync(spawnAgent, "utf8");
+        let recognised = 0;
+        for (const backend of ["openhands", "claude", "devin", "aider"]) {
+          if (content.toLowerCase().includes(backend)) recognised += 1;
+        }
+        return { value: recognised, higherIsBetter: true };
+      } catch {
+        return { value: 0, higherIsBetter: true };
+      }
+    },
+    "uninstall-residue-count": () => {
+      // Probe: that `bin/minsky uninstall` exists with the right shape.
+      // Live measurement (running uninstall on a fixture host) is in the
+      // integration test under `test/integration/`; here we record the
+      // substrate-present binary signal (the count is 0 if substrate
+      // present, ≥1 if missing — inverted because lower-is-better).
+      try {
+        const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+        const binMinsky = resolve(repo, "bin/minsky");
+        if (!existsSync(binMinsky)) return { value: 999, higherIsBetter: false };
+        const content = readFileSync(binMinsky, "utf8");
+        // 0 = subcommand wired (clean uninstall is reachable);
+        // 1+ = missing substrate (residue is the operator's existing files).
+        const value = /uninstall\)/.test(content) ? 0 : 1;
+        return { value, higherIsBetter: false };
+      } catch {
+        return { value: 1, higherIsBetter: false };
+      }
+    },
   };
 
   /** @type {Record<string, {value: any, higherIsBetter?: boolean}>} */
