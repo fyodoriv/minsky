@@ -514,6 +514,75 @@ EOF
   local stdout_log
   stdout_log="$(mktemp -t minsky-stdout.XXXXXX)"
 
+  # ──────────────────────────────────────────────────────────────────
+  # Worktree isolation (operator directive 2026-05-26):
+  # spawn the cloud agent INSIDE `$host/.worktrees/daemon-<task-id>/`,
+  # never against the host's main checkout. Before this, every
+  # iteration ran the agent with `--repo $host`, giving it write access
+  # to the operator's main working tree. The 2026-05-26 incident: while
+  # iterating on the (just-shipped) `daemon-auto-close-orphan-prs`
+  # task, the agent staged `git rm TASKS.md` (4257 lines) in the
+  # operator's main checkout. The push never happened (the iteration
+  # crashed) but `git status` showed the destruction on the next
+  # operator command. Worktree isolation makes this class of destruction
+  # impossible: the agent's `git add -A` / `git rm` / `rm -rf` all land
+  # in the worktree, NEVER in `$host`.
+  #
+  # Same code path the OLD TS daemon used (`.claude/worktrees/daemon-N-
+  # <task>/`); bash skeleton lost it during phase-11b's flip. Restoring.
+  #
+  # Pattern: `git worktree add --force` is idempotent — if a previous
+  # iteration left a worktree behind, --force takes it over (we re-
+  # check out the same branch ref). The agent's pushes go through the
+  # worktree's git remote, which is the same origin as the host's, so
+  # PRs open the same way.
+  local worktree="$host/.worktrees/daemon-${task_id}"
+  mkdir -p "$host/.worktrees"
+
+  # Step 1: REUSE path. If the worktree directory already exists AND is
+  # on the right branch (from a previous iteration of the same task),
+  # just reuse it — `git worktree add` against an existing path fails
+  # even with --force when the branch is the same, and we'd then
+  # fall back to host-root spawn unnecessarily. The agent's previous
+  # work-in-progress in this worktree is intentional state we want to
+  # carry forward across iterations.
+  if [[ -d "$worktree/.git" ]] || [[ -f "$worktree/.git" ]]; then
+    local existing_branch
+    existing_branch="$(git -C "$worktree" branch --show-current 2>/dev/null || true)"
+    if [[ "$existing_branch" == "$branch" ]]; then
+      # Worktree already on right branch — reuse. Fetch latest origin
+      # so the agent sees up-to-date main when it computes diffs.
+      git -C "$worktree" fetch origin --quiet 2>/dev/null || true
+      echo "host=$host worktree=$worktree (isolated, reused from prev iter)" >&2
+    else
+      # Worktree exists but on wrong branch — prune + recreate.
+      git -C "$host" worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"
+      worktree=""  # signal recreate
+    fi
+  fi
+
+  # Step 2: CREATE path. Worktree doesn't exist (or was just pruned).
+  # A worktree's `.git` is a FILE (`gitdir: ...`), not a directory, so
+  # we check for either. If Step 1 reused successfully, $worktree is
+  # set and one of these exists — skip Step 2.
+  if [[ -z "$worktree" ]] || { [[ ! -d "$worktree/.git" ]] && [[ ! -f "$worktree/.git" ]]; }; then
+    worktree="$host/.worktrees/daemon-${task_id}"
+    if git -C "$host" rev-parse --verify "refs/heads/${branch}" >/dev/null 2>&1; then
+      git -C "$host" worktree add --force "$worktree" "$branch" >/dev/null 2>&1 \
+        || { echo "WARN: worktree add failed for ${branch}; falling back to host-root spawn (NOT ISOLATED)" >&2; worktree="$host"; }
+    elif git -C "$host" rev-parse --verify "refs/remotes/origin/${branch}" >/dev/null 2>&1; then
+      git -C "$host" worktree add --force -b "$branch" "$worktree" "refs/remotes/origin/${branch}" >/dev/null 2>&1 \
+        || { echo "WARN: worktree add (tracking) failed for ${branch}; falling back to host-root spawn (NOT ISOLATED)" >&2; worktree="$host"; }
+    else
+      git -C "$host" worktree add --force -b "$branch" "$worktree" "refs/remotes/origin/main" >/dev/null 2>&1 \
+        || git -C "$host" worktree add --force -b "$branch" "$worktree" "HEAD" >/dev/null 2>&1 \
+        || { echo "WARN: worktree add (new branch) failed for ${branch}; falling back to host-root spawn (NOT ISOLATED)" >&2; worktree="$host"; }
+    fi
+    if [[ "$worktree" != "$host" ]]; then
+      echo "host=$host worktree=$worktree (isolated)" >&2
+    fi
+  fi
+
   # Dynamic watchdog — p95×1.5 of recent successful iterations, with a
   # conservative 1200s (20min) fallback when history is thin. Mirrors the
   # TS `dynamic-timeouts.ts` algorithm (rule #1 — port, don't reinvent).
@@ -559,31 +628,37 @@ EOF
   #   3. `gtimeout` (macOS with `brew install coreutils`).
   #   4. No wrapper — graceful degrade (rule #6); a hung openhands hangs
   #      the daemon. Logged at warn-level so operators know.
+  # `--repo "$worktree"` is the worktree isolation point: the agent
+  # only sees + writes to the isolated checkout, never the host's main
+  # tree. If worktree creation fell back above (rare; --force should
+  # always succeed), `$worktree` equals `$host` and the spawn runs at
+  # the host root — matching pre-2026-05-26 behavior. The fallback is
+  # logged loudly so the operator catches it.
   local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
   if [[ -x "$spawn_wrapper" ]]; then
     python3 "$spawn_wrapper" "$watchdog_s" \
       python3 "$spawn_agent" \
       --brief-file "$brief_file" \
-      --repo "$host" \
+      --repo "$worktree" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v timeout >/dev/null 2>&1; then
     timeout "${watchdog_s}s" python3 "$spawn_agent" \
       --brief-file "$brief_file" \
-      --repo "$host" \
+      --repo "$worktree" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v gtimeout >/dev/null 2>&1; then
     gtimeout "${watchdog_s}s" python3 "$spawn_agent" \
       --brief-file "$brief_file" \
-      --repo "$host" \
+      --repo "$worktree" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   else
     echo "WARN: no watchdog available — running unbounded agent spawn" >&2
     python3 "$spawn_agent" \
       --brief-file "$brief_file" \
-      --repo "$host" \
+      --repo "$worktree" \
       --model "$model" \
       >"$stdout_log" 2>&1 || exit_code=$?
   fi
@@ -784,10 +859,25 @@ print(load_host_config(Path('$host')).host_repo)
   audit_log="$host/.minsky/cto-audit-${utc_date}.log"
   mkdir -p "$(dirname "$audit_log")"
 
+  # Same worktree-isolation pattern as iterate_host — the CTO audit
+  # ALSO runs a cloud agent with full git write access; if we leave it
+  # spawning against `$host`, the operator-tree-destruction bug
+  # (2026-05-26 incident) returns through the audit path.
+  local audit_worktree="$host/.worktrees/daemon-${audit_task_id}"
+  mkdir -p "$host/.worktrees"
+  if git -C "$host" rev-parse --verify "refs/heads/${audit_branch}" >/dev/null 2>&1; then
+    git -C "$host" worktree add --force "$audit_worktree" "$audit_branch" >/dev/null 2>&1 \
+      || { echo "WARN: cto-audit worktree add failed; falling back to host-root spawn (NOT ISOLATED)" >&2; audit_worktree="$host"; }
+  else
+    git -C "$host" worktree add --force -b "$audit_branch" "$audit_worktree" "refs/remotes/origin/main" >/dev/null 2>&1 \
+      || git -C "$host" worktree add --force -b "$audit_branch" "$audit_worktree" "HEAD" >/dev/null 2>&1 \
+      || { echo "WARN: cto-audit worktree add (new branch) failed; falling back to host-root spawn (NOT ISOLATED)" >&2; audit_worktree="$host"; }
+  fi
+
   local audit_exit=0
   python3 "$script_dir/../scripts/spawn_agent.py" \
     --brief-file "$audit_brief" \
-    --repo "$host" \
+    --repo "$audit_worktree" \
     --model "$model" \
     >"$audit_log" 2>&1 || audit_exit=$?
 
