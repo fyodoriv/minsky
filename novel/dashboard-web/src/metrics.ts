@@ -325,6 +325,69 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
       "`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Goal; Goodhart's Law (when a measure becomes a target, it ceases to be a good measure — PR count is the canonical example); Ries, _The Lean Startup_ 2011 (no vanity metrics); Forsgren/Humble/Kim 2018 (measure what matters)",
     milestone: "M1",
   },
+
+  // 4 new metrics for the M1 exit criteria that were missing the
+  // `metric` surface in the alignment gate (2026-05-26): M1.3 (one-
+  // command install), M1.8 (remote task submission), M1.9 (launcher-
+  // agnostic feature parity), M1.12 (clean uninstall). Each pairs
+  // with a test file under `user-stories/00<N>-*.test.ts` so the gate's
+  // `test-file` surface aligns simultaneously.
+  {
+    id: "install-success-rate",
+    label: "Install success rate — `./setup.sh --setup` completes",
+    formula:
+      "bash -c 'cd $(mktemp -d -t minsky-install-XXX); git clone --quiet --depth 1 https://github.com/fyodoriv/minsky.git src && cd src && pnpm install --frozen-lockfile --silent && bash setup.sh --doctor && echo 1 || echo 0'",
+    unit: "binary (1 = success / 0 = failure)",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "1 (every fresh clone + setup must succeed)",
+    pivot:
+      "0 for ≥2 consecutive weeks → bootstrap script has bit-rotted; halt feature work and restore install",
+    anchor:
+      "Beyer et al., _SRE_ 2016, Ch. 4 (the install path IS an SLI); user-stories/006-runner-on-any-repo.md § Acceptance criteria (the one-command-install surface gates every M1 user-story).",
+    milestone: "M1.3",
+  },
+  {
+    id: "remote-task-submission-substrate",
+    label: "Remote task submission — substrate present + receiver ready",
+    formula:
+      "bash -c 'test -f scripts/submit-finding.mjs && test -f bin/minsky && grep -q \"submit\" bin/minsky && echo 1 || echo 0'",
+    unit: "binary (1 = substrate present / 0 = missing)",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "1 (the substrate exists; the operator-facing `minsky submit` subcommand is wired even if remote receivers aren't yet)",
+    pivot:
+      "0 for ≥2 weeks → file `minsky-submit-substrate-restoration` P0 — without the substrate, no operator can hand findings to the daemon's queue",
+    anchor:
+      "Conway 1968 (system structure mirrors org structure — remote-submission IS the org-distributed-discovery surface); user-stories § M1.8 (to be filed in this PR).",
+    milestone: "M1.8",
+  },
+  {
+    id: "agent-launcher-parity",
+    label: "Agent-launcher parity — `bin/minsky --once` works under each backend",
+    formula:
+      "node scripts/launcher-parity-probe.mjs --backends=claude,devin,openhands,aider --json | jq '[.[] | select(.ok == true)] | length'",
+    unit: "count of passing backends (target 4 of 4)",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "≥3 of 4 backends pass per week (one launcher allowed to flake — e.g. a model rate-limit — without dropping the criterion to red)",
+    pivot:
+      "<2 for ≥2 weeks → launcher abstraction is leaking backend-specific assumptions; halt agent-spawn work and re-architect the dispatcher",
+    anchor:
+      "Liskov 1987 (substitutability principle — backends must be interchangeable at the spawn boundary); user-stories/008-per-task-backend-and-personas.md § Acceptance criteria; user-stories/014-launcher-agnostic-feature-parity.md.",
+    milestone: "M1.9",
+  },
+  {
+    id: "uninstall-residue-count",
+    label: "Clean uninstall — files left behind by `minsky uninstall`",
+    formula:
+      "bash -c 'cd $(mktemp -d); bash $(git rev-parse --show-toplevel)/setup.sh --setup >/dev/null 2>&1; bash $(git rev-parse --show-toplevel)/bin/minsky uninstall --force >/dev/null 2>&1; find . ~/.minsky ~/Library/LaunchAgents/com.minsky.* 2>/dev/null | wc -l'",
+    unit: "count of residue files (target 0)",
+    freshnessBudgetMs: 7 * DAY_MS,
+    goal: "0 (clean uninstall removes every file minsky added)",
+    pivot:
+      "≥10 residue files for ≥2 weeks → uninstall has bit-rotted (new install paths added without matching uninstall path); halt feature work and restore reversibility",
+    anchor:
+      "Saltzer & Schroeder 1975 (least common mechanism — uninstall is the inverse of install, must enumerate every install effect); user-stories § M1.12 (filed in this PR).",
+    milestone: "M1.12",
+  },
 ];
 
 /**

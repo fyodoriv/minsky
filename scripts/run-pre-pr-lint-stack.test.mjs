@@ -159,15 +159,18 @@ describe("STACK_MANIFEST", () => {
   });
 
   // The "gate is effective" demo from the task's Success criterion: a fixture
-  // that lowers the threshold to a value the repo doesn't meet (11/14)
-  // exits non-zero. Proves the gate's exit code is wired to the alignment
-  // count, not stubbed. Runs the real script against the live repo —
+  // that lowers the threshold to a value the repo doesn't meet exits
+  // non-zero. Proves the gate's exit code is wired to the alignment count,
+  // not stubbed. Runs the real script against the live repo —
   // execution time is <100ms (pure file reads).
-  test("gate is effective: `--min-aligned=11` (a threshold the repo doesn't meet) exits non-zero", () => {
+  // Threshold updated 2026-05-26 (14/14 alignment shipped in PR #893):
+  // 15 is one above the total criterion count and stays unreachable
+  // until M2 expands the criterion list.
+  test("gate is effective: `--min-aligned=15` (a threshold the repo doesn't meet) exits non-zero", () => {
     const checkScript = resolve(REPO_ROOT, "scripts/check-milestone-alignment.mjs");
     let exitCode = 0;
     try {
-      execFileSync("node", [checkScript, "--strict", "--min-aligned=11"], {
+      execFileSync("node", [checkScript, "--strict", "--min-aligned=15"], {
         cwd: REPO_ROOT,
         stdio: "ignore",
       });
