@@ -1,3 +1,13 @@
+---
+schema: vision-v1
+version: 1
+last_reviewed: 2026-05-23
+# Goals list to be derived from § "What Minsky is" and § "Permanent scope".
+# Until then, verify-vision-trace falls back to soft validation; cite goals
+# by section name in PR vision-trace blocks (e.g. "Vision goal: permanent-scope-tick-loop").
+goals: []
+---
+
 # Vision
 
 > A society of minds. Building yours.
