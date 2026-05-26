@@ -203,6 +203,21 @@ export function formatLine(stream, line) {
   if (line.startsWith("self-diagnose:") || line.startsWith("self-diagnose findings")) {
     return `${ts} ${streamTag} ${color(ANSI.magenta + ANSI.bold, "[self-diagnose]")} ${color(ANSI.dim, line.replace(/^self-diagnose:?\s*/, "").replace(/^findings.*:?/, "findings:"))}`;
   }
+  // Actor labels emitted by `self-diagnose --human` (operator directive
+  // 2026-05-26 — make it clear whether intervention is needed). Color
+  // by responsibility so the operator can find their action items at
+  // a glance: red for 👤 needs-operator (the operator must act); cyan
+  // for 🤖 minsky-will-fix (the daemon handles it next iter); yellow
+  // for 🤖→👤 minsky-tries-then-operator (auto-attempt then escalate).
+  if (line.includes("[👤 needs-operator]")) {
+    return `${ts} ${streamTag} ${color(ANSI.red + ANSI.bold, line)}`;
+  }
+  if (line.includes("[🤖 minsky-will-fix]")) {
+    return `${ts} ${streamTag} ${color(ANSI.cyan + ANSI.bold, line)}`;
+  }
+  if (line.includes("[🤖→👤 minsky-tries-then-operator]")) {
+    return `${ts} ${streamTag} ${color(ANSI.yellow + ANSI.bold, line)}`;
+  }
   if (line.startsWith("tick-loop: worker")) {
     return `${ts} ${streamTag} ${color(ANSI.magenta, "[worker]")} ${line.slice("tick-loop:".length).trim()}`;
   }

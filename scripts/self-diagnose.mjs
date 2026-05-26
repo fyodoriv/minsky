@@ -50,17 +50,41 @@ const execFileAsync = promisify(execFile);
  * @property {string} id
  * @property {true} ok
  *
+ * @typedef {"minsky" | "operator" | "minsky-then-operator"} Actor
+ *  — "minsky"               = the daemon auto-handles on next iteration; no operator action
+ *  — "operator"             = the operator must act; the daemon will keep flagging this
+ *  — "minsky-then-operator" = the daemon attempts an auto-resolution first; if it fails the operator must intervene
+ *
  * @typedef {object} InvariantViolation
  * @property {string} id
  * @property {false} ok
  * @property {string} evidence — human-readable proof of the violation
  * @property {string} suggestedTaskTitle — one-line title for TASKS.md
  * @property {string} suggestedFix — one-paragraph hypothesis for the fix
+ * @property {Actor} [actor] - who acts on this finding (defaults to "operator" if absent; operator directive 2026-05-26: make it clear whether we need an intervention or do we expect minsky to fix the problem in logs)
  *
  * @typedef {InvariantOk | InvariantViolation} InvariantResult
  *
  * @typedef {() => Promise<InvariantResult>} Invariant
  */
+
+/**
+ * Render the actor label as a one-line `[<emoji> <verb>]` prefix for log lines.
+ * Stable text — log scrapers grep on the bracketed text, not the emoji.
+ *
+ * @param {Actor | undefined} actor
+ * @returns {string}
+ */
+export function actorLabel(actor) {
+  switch (actor ?? "operator") {
+    case "minsky":
+      return "[🤖 minsky-will-fix]";
+    case "minsky-then-operator":
+      return "[🤖→👤 minsky-tries-then-operator]";
+    case "operator":
+      return "[👤 needs-operator]";
+  }
+}
 
 /**
  * Pure runner — runs every invariant; returns the violations list.
@@ -90,6 +114,9 @@ export async function runInvariants(invariants) {
       findings.push({
         id,
         ok: false,
+        // Probe-itself-broken always requires operator action — minsky
+        // can't fix its own diagnostic instrument.
+        actor: "operator",
         evidence: `invariant threw: ${message}`,
         suggestedTaskTitle: `self-diagnose: ${id} probe is itself broken`,
         suggestedFix: `The probe for invariant ${id} threw before it could decide. Either the probe is wrong or its inputs (env, file paths, network) drifted. Read the probe at scripts/self-diagnose.mjs and the throwing site in the tracelog above.`,
@@ -493,10 +520,16 @@ export function daemonTaskIdStalenessInvariant(opts) {
     return {
       id: "daemon-task-id-staleness",
       ok: false,
+      // Today the daemon does NOT auto-close orphan PRs — operator must
+      // act manually (close the PR or re-file the task block). The
+      // suggestedFix below is partly aspirational; until the close-on-
+      // orphan automation lands, the operator is the actor. Tracked via
+      // task `daemon-auto-close-orphan-prs` (file if missing).
+      actor: "operator",
       evidence: `in-flight task ids absent from TASKS.md: ${stale.join(", ")}.`,
       suggestedTaskTitle: `daemon iterating on stale task id(s): ${stale.join(", ")}`,
       suggestedFix:
-        "The daemon has work-in-flight (open PRs / active branches / claimed task entries) for task ids that no longer have a `**ID**: <id>` block in TASKS.md. The operator likely removed or renamed the task. The daemon should refuse to keep iterating: close the orphan PR(s), abandon the branch, and pick a fresh task on the next iteration. If the work is still valuable, re-file the task block with a new ID and retarget the in-flight branch.",
+        "The daemon has work-in-flight (open PRs / active branches / claimed task entries) for task ids that no longer have a `**ID**: <id>` block in TASKS.md. The operator likely removed or renamed the task. **Operator action**: close the orphan PR(s), OR re-file the task block with the same ID to retarget the in-flight branch. The daemon does NOT auto-close orphans today (filed as `daemon-auto-close-orphan-prs` — until that ships, this finding will repeat every iteration).",
     };
   };
   /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-task-id-staleness";
@@ -712,9 +745,16 @@ export function daemonPrStuckDirtyInvariant(opts) {
     return {
       id: "daemon-pr-stuck-dirty",
       ok: false,
+      // Today the daemon does NOT auto-run `gh pr update-branch` (the
+      // auto-merge supervisor is the only thing that touches stuck PRs,
+      // and `local-gate-merge.mjs` only handles MERGEABLE PRs, not
+      // DIRTY). Operator must run the command manually OR close the PR
+      // as superseded. Tracked via task `daemon-auto-rebase-dirty-prs`
+      // (file if missing).
+      actor: "operator",
       evidence,
       suggestedTaskTitle: `${stuck.length} daemon PR(s) stuck dirty (merge conflict) for >${maxAgeHours}h`,
-      suggestedFix: `One or more daemon-authored PRs have been in DIRTY (merge-conflict) state for >${maxAgeHours}h. Auto-resolution: \`${updateCmds}\` — if that succeeds, daemon can re-trigger CI. If \`gh pr update-branch\` fails with conflicts, the daemon must rebase manually OR the operator should close the PR as superseded (the recurring 2026-05-06 #227 pattern). Pivot if false-positives ≥1/week: raise threshold to 4h.`,
+      suggestedFix: `One or more daemon-authored PRs have been in DIRTY (merge-conflict) state for >${maxAgeHours}h. **Operator action**: run \`${updateCmds}\` — if it succeeds, CI re-triggers. If \`gh pr update-branch\` fails with conflicts, close the PR as superseded (the recurring 2026-05-06 #227 pattern) and the daemon will re-open a fresh PR on next iteration. Pivot if false-positives ≥1/week: raise threshold to 4h. The daemon does NOT auto-rebase today (filed as \`daemon-auto-rebase-dirty-prs\`).`,
     };
   };
   /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-pr-stuck-dirty";
@@ -1685,11 +1725,35 @@ if (isMain) {
   const findings = await runInvariants(defaultInvariants());
   if (process.argv.includes("--json")) {
     process.stdout.write(`${JSON.stringify(findings, null, 2)}\n`);
+  } else if (process.argv.includes("--human")) {
+    // Compact one-finding-per-block format, with explicit actor labels.
+    // This is what the tick-loop supervisor invokes for its boot log
+    // (was `--json` until 2026-05-26 operator directive: "make it clear
+    // whether we need an intervention or do we expect minsky to fix the
+    // problem in logs"). One JSON-formatted dump per boot was unreadable
+    // — every finding ran together and the operator couldn't tell which
+    // ones were their action items.
+    if (findings.length === 0) {
+      process.stdout.write("self-diagnose: all invariants pass ✓\n");
+    } else {
+      // Roll-up first so the operator sees the count-by-actor at a glance.
+      const byActor = { minsky: 0, "minsky-then-operator": 0, operator: 0 };
+      for (const f of findings) byActor[f.actor ?? "operator"] += 1;
+      process.stdout.write(
+        `self-diagnose: ${findings.length} finding(s) — 🤖 ${byActor.minsky} auto-fix · 🤖→👤 ${byActor["minsky-then-operator"]} auto-then-operator · 👤 ${byActor.operator} needs-operator\n`,
+      );
+      for (const f of findings) {
+        process.stdout.write(`\n  ${actorLabel(f.actor)} ${f.id}\n`);
+        process.stdout.write(`    evidence: ${f.evidence}\n`);
+        process.stdout.write(`    fix:      ${f.suggestedFix}\n`);
+      }
+      process.stdout.write("\n");
+    }
   } else if (findings.length === 0) {
     process.stdout.write("self-diagnose: all invariants pass\n");
   } else {
     for (const f of findings) {
-      process.stdout.write(`✗ ${f.id}: ${f.evidence}\n`);
+      process.stdout.write(`✗ ${actorLabel(f.actor)} ${f.id}: ${f.evidence}\n`);
       process.stdout.write(`  fix: ${f.suggestedFix}\n`);
     }
     if (process.argv.includes("--write-tasks-md")) {

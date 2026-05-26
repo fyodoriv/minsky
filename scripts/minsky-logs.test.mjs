@@ -183,3 +183,35 @@ describe("formatLine — non-span prefixes", () => {
     expect(formatLine("err", "   ")).toBe("");
   });
 });
+
+describe("formatLine — self-diagnose actor labels (operator directive 2026-05-26)", () => {
+  it("preserves the [👤 needs-operator] label so the operator can grep for action items", () => {
+    const line = "  [👤 needs-operator] daemon-pr-stuck-dirty";
+    const out = formatLine("out", line);
+    expect(out).toContain("[👤 needs-operator]");
+    expect(out).toContain("daemon-pr-stuck-dirty");
+  });
+
+  it("preserves the [🤖 minsky-will-fix] label for auto-fix findings", () => {
+    const line = "  [🤖 minsky-will-fix] some-auto-id";
+    const out = formatLine("out", line);
+    expect(out).toContain("[🤖 minsky-will-fix]");
+    expect(out).toContain("some-auto-id");
+  });
+
+  it("preserves the [🤖→👤 minsky-tries-then-operator] label for escalation findings", () => {
+    const line = "  [🤖→👤 minsky-tries-then-operator] some-escalation-id";
+    const out = formatLine("out", line);
+    expect(out).toContain("[🤖→👤 minsky-tries-then-operator]");
+    expect(out).toContain("some-escalation-id");
+  });
+
+  it("rolls up the count-by-actor header line through cleanly", () => {
+    const line =
+      "self-diagnose: 2 finding(s) — 🤖 0 auto-fix · 🤖→👤 0 auto-then-operator · 👤 2 needs-operator";
+    const out = formatLine("out", line);
+    expect(out).toContain("self-diagnose");
+    expect(out).toContain("2 finding(s)");
+    expect(out).toContain("👤 2 needs-operator");
+  });
+});
