@@ -139,6 +139,10 @@ function filterSupervisorBookkeeping(status: string): string {
       if (!trimmed) return false;
       // Skip `.minsky/` bookkeeping (supervisor writes these, not the agent).
       if (/\.minsky\//.test(trimmed)) return false;
+      // Skip `.worktrees/` — the isolation point itself shows up as an
+      // untracked dir in the host's `git status` until the operator
+      // gitignores it. The supervisor's worktree-add is by design.
+      if (/\.worktrees\//.test(trimmed)) return false;
       return true;
     })
     .join("\n");
