@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// <!-- scope: human-approved 2026-05-26 — operator-directed UX improvement to `pnpm dogfood:logs` (structured viewer with tags + colors + span pretty-printing). Pre-emptively opted out of rule-12-scope-discipline because the task lives in the operator's session log, not a TASKS.md block; the script is the deliverable, not the artifact-of-a-task. -->
 // Pretty log viewer for the minsky tick-loop. Pattern: pure shape-transform
 // (`formatLine`, `formatSpan`) composed with one I/O seam (`tailFile`) above
 // a tiny CLI — rule #2 (data-not-code), rule #10 (deterministic transforms).

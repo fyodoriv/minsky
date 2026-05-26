@@ -1,7 +1,7 @@
 # Dependency (status under reassessment 2026-05-22): Oh My Claude Code (OMC)
 
 > **Reassessment flag added 2026-05-22.** OMC was adopted as the persona orchestrator on Claude Code. Under the in-progress OpenHands adoption (see [`openhands.md`](./openhands.md) and [`../docs/visions/2026-05-22-openhands-fulfillment.md`](../docs/visions/2026-05-22-openhands-fulfillment.md)), OpenHands' native persona stack (MicroAgents + DelegateTool + TaskToolSet + AgentDefinition) covers most of OMC's surface — see [`../docs/validated-learnings.md`](../docs/validated-learnings.md) entry `openhands-natively-covers-personas-and-skills` for the full mapping. OMC's remaining unique value is cross-model Haiku/Sonnet/Opus routing + architect verification gate. Decision pending: keep OMC as a Claude-Code-specific optional layer, or deprecate from the dependency table.
-
+>
 > Oh My Claude Code — was adopted as Minsky's `Orchestrator` layer (the persona/CLI substrate). Reassessment in progress.
 
 - **URL**: <https://github.com/Yeachan-Heo/oh-my-claudecode>

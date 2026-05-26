@@ -53,13 +53,14 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `regression-test-no-git-checkout-against-host` — the OLD TS daemon (`novel/tick-loop/bin/tick-loop.mjs`, deleted by phase-11b PR #888) did `git checkout` against the operator's main checkout to switch HEAD to each task's feature branch. Side-effect: an operator's (or another agent's) in-flight uncommitted work got auto-stashed at every iteration boundary, silently losing untracked files unless restored from `stash@{0}^3`. Phase-11b's new bash skeleton (`bin/minsky-run.sh`) structurally fixes this by NEVER calling `git checkout` against the host. Need a regression test to ensure no future refactor reintroduces the bug
   - **ID**: regression-test-no-git-checkout-against-host
+  - **Competitive-goal**: drives `agent-fleet-trust-rate` toward 100% — competitors silently lose operator work via dirty-tree checkouts (Devin, Cursor agent, Cline auto-checkpoint); a regression test that proves Minsky never does this is a measurable trust gap closure.
   - **Tags**: p0, milestone-m1, m1-1, rule-1, rule-10, regression, observed-2026-05-26, operator-directive
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-26 operator session — the TS daemon (running in-memory from before phase-11b landed) silently stashed our work-in-flight when it switched the main checkout to the task branch. Operator quote: "prevent this from happening ever again". Forensic evidence: `git reflog HEAD` shows `checkout: moving from feat/X to feat/<task-id>` matching the auto-stash timestamp. Phase-11b PR #888 deleted the offending code, but there's nothing preventing a future PR from reintroducing the pattern.
   - **Hypothesis**: a static-analysis-style test in `tests/no-host-checkout.test.mjs` greps `bin/minsky-run.sh` (and any future supervisor entrypoint) for `git checkout|git switch|git worktree add ${HOST_ROOT}` patterns; fails the build if any match. Falsifiable: add `git checkout feat/foo` to `bin/minsky-run.sh` in a fixture → test fails with a clear message.
   - **Success**: (1) Test passes today against the current bash skeleton; (2) Future refactor adding `git checkout <branch>` to the host-walker fails CI before merge; (3) Test runs in ≤1s (string grep, not exec).
   - **Pivot**: if the regex catches false positives (e.g., comments mentioning `git checkout` in docs), tighten to "command form only" (line not starting with `#`) OR allow a list of explicit-allow paths. Threshold: ≥1 false positive on a real PR within 14 days.
-  - **Measurement**: `grep -rnE '^[^#]*(git checkout|git switch)' /Users/fivanishche/apps/tooling/minsky/bin/minsky-run.sh /Users/fivanishche/apps/tooling/minsky/scripts/spawn_agent.py /Users/fivanishche/apps/tooling/minsky/scripts/build_brief.py 2>/dev/null | wc -l | awk '$1 == 0 {print "PASS"} $1 > 0 {print "FAIL: " $1 " host-mutating checkouts"}'`
+  - **Measurement**: `grep -rnE '^[^#]*(git checkout|git switch)' <minsky-repo>/bin/minsky-run.sh <minsky-repo>/scripts/spawn_agent.py <minsky-repo>/scripts/build_brief.py 2>/dev/null | wc -l | awk '$1 == 0 {print "PASS"} $1 > 0 {print "FAIL: " $1 " host-mutating checkouts"}'`
   - **Anchor**: Rule #1 (loud-crash > silent failure — silently auto-stashing an operator's work IS silent failure of catastrophic kind). Beck 1999 (CI as the constraint enforcer — once a class of bug surfaces, the regression test for it never goes away). MILESTONES.md M1.6 (human-blocked task list — operator's untracked work IS human work the daemon must never destructively touch).
   - **Details**: (a) New file `tests/no-host-checkout.test.mjs`. (b) Grep `bin/minsky-run.sh` + `scripts/spawn_agent.py` + `scripts/build_brief.py` + any future `bin/*.sh` for the offending patterns. (c) Allow-list: lines starting with `#` (comments), lines containing the string "in scratch" or "in worktree" (acceptable contexts). (d) Fail the build with a clear message pointing at this task for context.
   - **Files**: `tests/no-host-checkout.test.mjs` (new — regression test), `bin/minsky-run.sh` (verify the grep passes today — no code change), CI workflow already runs the test via `pnpm test`.
@@ -820,6 +821,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-auto-code-rover` — research AutoCodeRover (AutoCodeRoverSG/auto-code-rover, 3.1k★, STALE April 2025); produce `competitors/auto-code-rover.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-auto-code-rover
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
   - **Milestone**: M1
   - **Hypothesis**: AutoCodeRover's ISSTA-2024 paper (46.2% SWE-bench Verified at <$0.70/issue) is high-quality research but the project is stale. Q2 should extract the AST-aware fault-localization technique for Minsky's adapter layer.
@@ -830,6 +832,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-pr-agent
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: PR-Agent is an event-driven PR review/fix bot — fundamentally a different category from Minsky's repo-supervisor. Q5 mostly N/A; Q2 may extract the PR-review-prompt strategy.
@@ -840,6 +843,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-cursor-agent` — apply Five Pivot Questions framework to Cursor Background Agents (commercial); deepen `competitors/cursor-agent.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-cursor-agent
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Cursor Background Agents (up to 8 parallel, Slack/Linear/GitHub triggers, $20/mo with usage) is the highest-volume mainstream competitor in the "async on a repo" axis. Q3 may force a Minsky vision-change if Cursor's commercial trajectory makes M5 (managed product) infeasible for an OSS-led player.
@@ -850,6 +854,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-autogpt` — research AutoGPT (Significant-Gravitas/AutoGPT, 184.5k★, alive); produce `competitors/autogpt.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-autogpt
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: AutoGPT is the most-starred autonomous-agent OSS by 2.5× — Q2 should extract why it grew so big and why its actual capability lags the star count. Q3 may surface a vision-threat from AutoGPT's "platform for continuous agents" pivot.
@@ -860,6 +865,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-open-interpreter` — research Open Interpreter (openinterpreter/open-interpreter, 63.6k★, semi-stale Feb 2026); produce `competitors/open-interpreter.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-open-interpreter
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
   - **Milestone**: M1
   - **Hypothesis**: Open Interpreter's `loop=True` mode + Skidudeaa's multi-agent fork (Scout + Surgeon + Validator) is the closest "natural language interface for computers" framing. Q2 should extract the adaptive-autonomy mode pattern.
@@ -870,6 +876,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-continue-dev` — research Continue.dev (continuedev/continue, 33.4k★, alive); produce `competitors/continue-dev.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-continue-dev
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Continue.dev's Cloud Agents (async, event-driven) + Mission Control dashboard is the closest competitor on the dashboard axis. Q5 should grade whether Continue's open-source plumbing can replace Minsky's CLI dashboard layer.
@@ -880,6 +887,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-ralph-wiggum-official` — apply Five Pivot Questions framework to Anthropic's official Ralph Wiggum plugin (in-tree dependency); deepen `competitors/ralph-wiggum-official.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-ralph-wiggum-official
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency
   - **Milestone**: M1
   - **Hypothesis**: Ralph Wiggum is adopted as Minsky's InnerLoop primitive. Q5 should be all-KEEP (no replace candidate). Q2 may surface refinements from Anthropic's official-plugin form vs Geoffrey Huntley's original.
@@ -890,6 +898,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-codex-cli` — apply Five Pivot Questions framework to OpenAI Codex CLI (openai/codex, 85.2k★, alive); deepen `competitors/codex-cli.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-codex-cli
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Codex CLI's growth to 85k★ in <1y signals OpenAI is the default "background coding agent" in the bottom-half of the funnel. Q5 should grade whether Minsky's tick-loop survives if `codex --background` is a one-flag default in Cursor / Copilot / Replit.
@@ -900,6 +909,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-openhands` — apply Five Pivot Questions framework to OpenHands (OpenHands/OpenHands, 74.7k★, alive, in-progress dependency adoption); deepen `competitors/openhands.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-openhands
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-in-progress
   - **Milestone**: M1
   - **Hypothesis**: OpenHands is already in-progress adoption (35-50% Minsky surface coverage per 2026-05-22 reassessment). Q5 should formalize the surface-by-surface KEEP/REPLACE/AUGMENT decisions. Q3 may surface vision-threats from OpenHands V1's SDK reference architecture (arXiv:2511.03690) — does Minsky's tick-loop reference architecture survive that paper?
@@ -910,6 +920,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `daemon-silent-on-claude-account-rate-limit` — `claude --print` exits 1 with `You've hit your limit · resets <date>` when the operator's account is rate-limit-exhausted; minsky's daemon does NOT parse this signal, doesn't transition to `budget-paused`, doesn't notify the operator, doesn't sleep until reset — it just keeps emitting `iteration.status=failed, provider=""` forever, burning machine cycles and obscuring the actual root cause behind the symptom "spawn failed"
   - **ID**: daemon-silent-on-claude-account-rate-limit
+  - **Competitive-goal**: drives `unattended-iteration-rate` toward 0.95 — competitors silently retry on provider rate-limits (busy-loops in OpenHands, Aider, Devin queue). Minsky pausing-with-notify on parsed exhaustion signal is observable budget-aware operation, closes the silent-retry-forever gap.
   - **Tags**: p0, milestone-m1, m1-1, rule-1, rule-6, observability, budget-guard, observed-2026-05-26, blocker, anti-stub-marker
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-26 operator session — ran `pnpm dogfood`, watched first iteration fail. Strategic router span: `{kind:"strategic-router","agent":"local","reason":"tier-3 local qualifies","weekly":0.000}`. Iteration: `{"iteration.status":"failed","iteration.provider":""}`. When I ran `echo test | claude --print` directly on this machine, output was: `You've hit your limit · resets May 31 at 8pm (America/Toronto)` (exit 1). So `weekly=0.00` was NOT a cold-start observation — it was the `MaciekTokenMonitor` correctly observing that the operator's weekly Claude window is exhausted. The strategic router did the right thing routing to local. The bug: (a) local has no backend wired AND (b) the daemon doesn't surface "claude exhausted until <reset>" anywhere — no ntfy push, no budget-pause supervisor state, no log line, no nothing. The operator only finds out by running `claude --print` themselves. Connect to M1.1 (90% stability target): with claude exhausted, the daemon spends 100% of iterations on silent spawn-failure until reset. **No amount of work in the cwd can heal this — it's account-level.**
@@ -924,6 +935,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-factory` — research Factory.ai's OSS facade (Factory-AI/factory, 906★, commercial-with-OSS-CLI); produce `competitors/factory.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-factory
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, commercial
   - **Milestone**: M1
   - **Hypothesis**: Factory.ai (commercial, GA Oct 2025, #1 Terminal-Bench at 58.8%, org-level memory across sessions) is the strongest commercial competitor on the "Droid fleet" axis. The OSS CLI facade is a small entry point — the real product is closed. Q5 should grade what Minsky can credibly do against a $50M-Series-B-funded competitor with org-level memory and 6 SDLC Droids.
@@ -934,6 +946,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-smol-developer` — research Smol Developer (smol-ai/developer, 12.2k★, DEAD since April 2024); produce `competitors/smol-developer.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-smol-developer
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
   - **Milestone**: M1
   - **Hypothesis**: Smol-Developer's one-shot-codebase-generation thesis was killed by "field moved to more capable agents". The post-mortem should identify what makes that pivot inevitable for one-shot projects — a guardrail Minsky's incremental-improvement thesis should formalize.
@@ -944,6 +957,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-gpt-engineer` — research GPT-Engineer (AntonOsika/gpt-engineer, 55.2k★, ARCHIVED 2025-05); produce `competitors/gpt-engineer.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-gpt-engineer
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
   - **Milestone**: M1
   - **Hypothesis**: GPT-Engineer was the most-anticipated 2023 OSS coding agent, then archived May 2025 after the team pivoted to Lovable.dev. Post-mortem should identify the architectural-dead-end vs business-model-failure root cause. Q3 may surface Minsky guardrails against the same death pattern.
@@ -954,6 +968,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-continuous-claude` — research Continuous Claude (AnandChowdhary/continuous-claude, 1.3k★, alive); produce `competitors/continuous-claude.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-continuous-claude
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, ralph-loop
   - **Milestone**: M1
   - **Hypothesis**: continuous-claude is the simplest Ralph-loop-with-PRs implementation. Q5 should grade whether Minsky's tick-loop adds enough over a 200-line continuous-claude wrapper to justify its complexity. This may be a small vision-threat: if a 200-line wrapper gets 80% of Minsky's value, the moat is the rule #9 + MAPE-K + rule-1 discipline, not the loop itself.
@@ -964,6 +979,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-goose` — apply Five Pivot Questions framework to Goose (aaif-goose/goose, 45.8k★, alive, AAIF/Linux Foundation); deepen `competitors/goose.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-goose
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Goose's move from Block/Square to AAIF (Linux Foundation) is a strategic signal — Q3 should evaluate whether Minsky should similarly seek a foundation home. The Goosetown multi-agent sibling project may overlap with Minsky's tick-loop.
@@ -974,6 +990,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-langgraph` — apply Five Pivot Questions framework to LangGraph (langchain-ai/langgraph, 32.8k★, alive, framework); deepen `competitors/langgraph.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-langgraph
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: LangGraph's checkpoint + resumption primitives are the most relevant prior art for Minsky's tick-loop durability story. Q2 should extract the checkpoint pattern. Q5 evaluates replace-tick-loop-with-LangGraph viability.
@@ -984,6 +1001,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-omc` — apply Five Pivot Questions framework to Oh My Claude Code (Yeachan-Heo/oh-my-claudecode, 31.3k★, alive, dependency under reassessment); deepen `competitors/omc.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-omc
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-reassess
   - **Milestone**: M1
   - **Hypothesis**: OMC is already classified as a dependency under reassessment (2026-05-22) given OpenHands' native persona stack covers most of OMC's surface. Q5 should close that reassessment with a concrete keep / deprecate / consolidate decision.
@@ -994,6 +1012,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `devin-per-worker-isolation-primitive` — claude has `--worktree <name>` which auto-creates an isolated git worktree per session; devin has no equivalent today. When the daemon scales to ≥2 workers (`MINSKY_AUTO_SCALE_WORKERS=1`, max 5) and cloud_agent=devin, all workers iterate against the shared main checkout — concurrent commits could collide
   - **ID**: devin-per-worker-isolation-primitive
+  - **Competitive-goal**: drives `agent-parity-coverage` toward 1.00 (M1.9) — Claude Code ships `--worktree`; Devin doesn't. Minsky's own worktree primitive on top makes M1.9 (works from Claude, Devin, local) verifiable end-to-end with the same parallel-iteration semantics regardless of CLI backend.
   - **Tags**: p2, milestone-m1, m1-1, devin-support, parallel-workers, observed-2026-05-26
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-26 — operator switched to devin (`MINSKY_CLOUD_AGENT=devin`). Auto-scale is on by default (initial=1, max=5). With cloud_agent=devin, the worker-config's `--worktree` flag is stripped (per `claude-args-for-worker-should-be-cloud-agent-aware`), so all workers share the main checkout. The worker-claim layer prevents two workers from picking the SAME task, but two workers picking DIFFERENT tasks both run in the same git checkout → race conditions in `git status`, branch switches, commit ordering.
@@ -1008,6 +1027,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-swe-agent` — apply Five Pivot Questions framework to SWE-agent (SWE-agent/SWE-agent, 19.3k★, alive, NeurIPS 2024); deepen `competitors/swe-agent.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-swe-agent
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper
   - **Milestone**: M1
   - **Hypothesis**: SWE-agent's NeurIPS-2024 ACI thesis is the reference research scaffold. Q2 should extract concrete ACI design principles for Minsky's adapter layer. Mini-SWE-agent at 65% SWE-bench Verified in 100 lines is the canonical "minimal scaffold" Q5 evaluates against Minsky's surface.
@@ -1032,6 +1052,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-microsoft-agent-framework` — apply Five Pivot Questions framework to Microsoft Agent Framework (microsoft/agent-framework, 10.7k★, alive); deepen `competitors/microsoft-agent-framework.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-microsoft-agent-framework
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Microsoft's Agent Framework (evolution of AutoGen + Magentic-One) is the enterprise-backed orchestrator competitor. Q5 should grade replace-tick-loop-with-Magentic-One; Q3 should answer whether Microsoft's roadmap forces Minsky to either commit to a specific runtime or stay runtime-agnostic.
@@ -1042,6 +1063,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-babyagi` — research BabyAGI (yoheinakajima/babyagi, 22.3k★, mostly-archived); produce `competitors/babyagi.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-babyagi
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-stale
   - **Milestone**: M1
   - **Hypothesis**: BabyAGI's task-planning + execution-loop framing was hugely viral mid-2023 but the original is archived. The post-mortem should identify "demo viral ≠ production viable" as the root cause. Q3 unlikely vision-changing.
@@ -1052,6 +1074,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-pydantic-ai` — research Pydantic-AI (pydantic/pydantic-ai, 17.3k★, alive); produce `competitors/pydantic-ai.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-pydantic-ai
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Pydantic-AI's durable-execution + type-safe framework + Sequoia/Partech backing is a credible enterprise-Python alternative to LangChain. Q5 framework-vs-product framing.
@@ -1062,6 +1085,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-roo-code` — research Roo Code (RooCodeInc/Roo-Code, 24.1k★, ARCHIVED); produce `competitors/roo-code.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-roo-code
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
   - **Milestone**: M1
   - **Hypothesis**: Roo Code (Cline fork with "Adaptive Autonomy" + custom modes) is archived as of 2026-05-15 despite 24k★ — the post-mortem should answer what killed a fork-with-momentum. Possibly: forks struggle when upstream (Cline) closes the differentiation gap.
@@ -1072,13 +1096,14 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `minsky-config-json-support-local-llm-pref` — `~/.minsky/config.json` supports `cloud_agent` + `cloud_agent_model` as documented persistent keys, but NOT `local_llm_enabled`, `strategic_router_enabled`, or `cloud_agent_fallback`. So an operator who wants "use devin, fall back to local" has to add `MINSKY_LOCAL_LLM=1` to the rendered launchd plist, which gets wiped on the next `pnpm dogfood` regeneration. Per-machine preferences should live in ONE place
   - **ID**: minsky-config-json-support-local-llm-pref
+  - **Competitive-goal**: drives `unattended-iteration-rate` toward 0.95 — competitor agents' per-machine config (Aider .aiderconfig, Cline settings.json) lives in one file. Minsky splitting cloud_agent (config.json) vs local_llm (rendered plist env) is a UX regression vs the field; closing it removes a friction point operators see in head-to-head trials.
   - **Tags**: p1, milestone-m1, m1-1, config-as-code, rule-2, persistence, observed-2026-05-26
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-26 operator directive — "update minsky on this machine so it always uses devin... and falls back to local model." Devin part went into `cloud_agent` (existing persistent key). Local-fallback part has NO persistent key — only the env var `MINSKY_LOCAL_LLM=1` exists. The operator's preference is now split: cloud_agent in config.json, local_llm in rendered plist (transient).
   - **Hypothesis**: extend `MinskyConfig` schema with three optional booleans: `local_llm_enabled?: boolean`, `strategic_router_enabled?: boolean`, `cloud_agent_fallback?: "local" | "claude" | "none"`. Each maps 1:1 to the equivalent env var (env wins on conflict). `bin/tick-loop.mjs` reads config.json at startup and sets the env vars BEFORE the rest of the daemon code runs, so the downstream env-var reads continue to work without refactor. Falsifiable: operator writes `{local_llm_enabled: true}` to config.json, restarts daemon, observes `[tick-loop] local-llm wired (...)` log line.
   - **Success**: (1) operator's complete preference fits in `~/.minsky/config.json` — no rendered-plist edits needed; (2) `pnpm dogfood` regeneration preserves operator preferences (the plist template doesn't carry per-machine state); (3) the three new config keys are documented in the README + an example config.json shipped at `docs/example-config.json`.
   - **Pivot**: if the config-to-env translation layer at supervisor startup proves fragile (config drift between read time and downstream module load), gate the new keys behind a `MINSKY_CONFIG_AUTOLOAD=1` opt-in env var for the first 30 days of rollout. Threshold: ≥1 operator report of "I set the config but the daemon ignored it" → keep the auto-load gated.
-  - **Measurement**: `node -e 'const fs=await import("fs"); fs.writeFileSync(process.env.HOME + "/.minsky/config.json", JSON.stringify({...JSON.parse(fs.readFileSync(process.env.HOME+"/.minsky/config.json","utf8")), local_llm_enabled: true})); ' && pnpm dogfood && sleep 5 && grep -c "local-llm wired" /Users/fivanishche/apps/tooling/minsky/.minsky/tick-loop.out.log | awk '$1 > 0 {print "PASS"}'`
+  - **Measurement**: `node -e 'const fs=await import("fs"); fs.writeFileSync(process.env.HOME + "/.minsky/config.json", JSON.stringify({...JSON.parse(fs.readFileSync(process.env.HOME+"/.minsky/config.json","utf8")), local_llm_enabled: true})); ' && pnpm dogfood && sleep 5 && grep -c "local-llm wired" <minsky-repo>/.minsky/tick-loop.out.log | awk '$1 > 0 {print "PASS"}'`
   - **Anchor**: Rule #2 (single source of truth — config.json IS that source). MILESTONES.md M1.3 (one-command install — install writes ONE file the operator can edit to express ALL their preferences).
   - **Details**: (a) Extend `MinskyConfig` interface in `bin/minsky-run.mjs` (or extract to a shared types file) with the three optional booleans. (b) Add a small startup block in `bin/tick-loop.mjs` that reads config.json, translates the booleans to env vars `MINSKY_LOCAL_LLM` / `MINSKY_STRATEGIC_ROUTER` / `MINSKY_CLOUD_AGENT_FALLBACK`, setting them on `process.env` BEFORE the existing env-var reads downstream. (c) Env vars still take precedence (rule #2 — env override is documented one-session lever). (d) Document in README's config section + ship `docs/example-config.json`.
   - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (extend MinskyConfig type), `novel/tick-loop/bin/tick-loop.mjs` (startup config-to-env block), `docs/example-config.json` (new), `README.md` (config section update).
@@ -1086,6 +1111,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-metagpt` — apply Five Pivot Questions framework to MetaGPT (FoundationAgents/MetaGPT, 68.3k★, stale Jan 2026); deepen `competitors/metagpt.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-metagpt
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, status-stale
   - **Milestone**: M1
   - **Hypothesis**: MetaGPT's "multi-agent software company" framing + AFlow MCTS-workflow-generation may seed Minsky's research-agenda layer, but the project's 4-month stale signal suggests the framing under-delivered. Q3 unlikely vision-changing.
@@ -1096,6 +1122,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-composio-ao` — apply Five Pivot Questions framework to Composio Agent Orchestrator (ComposioHQ/composio, 28.4k★, alive); deepen `competitors/composio-ao.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-composio-ao
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Composio's Feb 2026 "Agent Orchestrator" (30 parallel agents, autonomous CI-fix + merge-conflict resolution) is the closest competitor to Minsky's tick-loop in the "parallel-worker pool" axis. Q5 should grade replace vs augment.
@@ -1106,6 +1133,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-devika` — research Devika (stitionai/devika, 19.5k★, semi-stale Sep 2025); produce `competitors/devika.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-devika
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
   - **Milestone**: M1
   - **Hypothesis**: Devika was the first OSS "Devin alternative". The deep-dive should evaluate whether the project succeeded as a research vehicle or as a product, and what Minsky inherits or avoids from the Devika lineage.
@@ -1116,6 +1144,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-cline` — apply Five Pivot Questions framework to Cline (cline/cline, 62.3k★, alive); deepen `competitors/cline.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-cline
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Cline's `--yolo` flag + IDE-extension lineage is the closest mainstream "agent runs unattended" UX. Q2 should surface the YOLO mode's task-persistence model. Q5 likely says KEEP-with-augment — Cline solves the IDE-pair-programming UX, Minsky solves the 24/7-supervisor UX; the two compose.
@@ -1126,6 +1155,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-refact-ai` — research Refact.ai (smallcloudai/refact, 3.5k★, alive); produce `competitors/refact-ai.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-refact-ai
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Refact.ai's local-first Rust engine + agent mode + claimed SWE-bench Verified leadership (unverified) is a niche enterprise offering. Q2 may extract the local-first deployment pattern; Q3 unlikely vision-changing.
@@ -1136,6 +1166,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-agentless` — apply Five Pivot Questions framework to Agentless (OpenAutoCoder/Agentless, 2.0k★, FSE 2025, semi-stale); deepen `competitors/agentless.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-agentless
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper, contrarian
   - **Milestone**: M1
   - **Hypothesis**: Agentless's FSE-2025 thesis ("do you even need an agent?" 32% SWE-bench Lite at $0.70/issue) is the strongest contrarian voice. Q3 may force a vision-threat: if Agentless's three-phase non-agent approach is the rational frontier, what does Minsky's tick-loop add? Q5 should grade whether Minsky can adopt Agentless as a baseline.
@@ -1148,6 +1179,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-crewai` — apply Five Pivot Questions framework to CrewAI (crewAIInc/crewAI, 52.1k★, alive); deepen `competitors/crewai.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-crewai
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: CrewAI is a framework, not an end-user agent — Q5 should mostly grade N/A on Minsky surfaces, but the Crews/Flows pattern may seed Minsky's persona model. Q3 unlikely vision-changing.
@@ -1158,6 +1190,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deep-dive-wave-2026-05-24` — umbrella task tracking the 35-competitor deep-research wave (Five Pivot Questions framework applied to every existing `competitors/<id>.md` + every new ≥500-star OSS autonomous-coding agent); decision-relevant findings route to `ask_human.md`
   - **ID**: competitor-deep-dive-wave-2026-05-24
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (M1.10) — the umbrella wave hits every Tier-S/A entry in one pass so the corpus-refresh-check supervisor stops auto-filing single-competitor tasks; replaces drip-fed maintenance with a one-shot scorecard refresh.
   - **Tags**: p0, milestone-m1, rule-1, competitive, umbrella, operator-directive, observed-2026-05-24
   - **Milestone**: M1
   - **Surfaced-by**: operator directive 2026-05-24 after reviewing the 4-stream autonomous-coding-landscape research — "Next I need full deepest information about all of these similar to minsky tools. For each one of them that has at least 500 stars on github (include dead repos for analysis on what went wrong) create a P0 task in minsky to fully research it. Research must be written to competitors docs, and questions for pivoting should be put to a file for human communication."
@@ -1175,6 +1208,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-devin` — apply Five Pivot Questions framework to Devin (Cognition Labs, commercial, in corpus); deepen `competitors/devin.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-devin
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Devin's 48.2% SWE-bench Verified (vs 68.3% Full, a 29% gap suggesting easy-task overfitting) + Answer.AI's 15% real-world success-rate data is the canonical "marketing-vs-reality gap" in the field. Q2 should extract the "what makes a Devin task succeed vs fail" pattern. Q5 is N/A — Devin is closed-commercial.
@@ -1185,6 +1219,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-plandex` — research Plandex (plandex-ai/plandex, 15.4k★, alive); produce `competitors/plandex.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-plandex
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Plandex's "full auto mode" + persistent plan state + 2M-effective-context targeting large projects is the closest OSS competitor to Minsky's tick-loop in the "unattended long-running" axis. Q3 may surface vision-threat: Plandex's PR pipeline + auto-debug loop overlaps significantly with Minsky's cross-repo-runner.
@@ -1195,20 +1230,22 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `minsky-repo-git-config-bare-misset` — `.git/config` on the operator's minsky checkout has `bare = true`, but the directory contains a working tree with active worktrees (`.git/worktrees/daemon-0-*`, `fix-ci-main`, `fleet-stability`, `minsky-bench`). Every `git status` from the main checkout fails with `fatal: this operation must be run in a work tree`. Daemon self-diagnose flagged it under `git-config-parseable` but proposed the wrong fix (`rm .git/index.lock` — index lock is not the issue). Real fix: one-line `bare = false`. The self-diagnose handler should detect `bare = true` AND working files coexisting, propose the correct fix
   - **ID**: minsky-repo-git-config-bare-misset
+  - **Competitive-goal**: drives `mttr-self-heal` p95 toward <5min (M1.13) — competitors' self-diagnose surfaces (Devin's `diagnose`, Cursor's health-check) don't propose actionable fixes for unusual git states; Minsky's self-diagnose that flags `bare=true with worktrees` AND proposes `git config core.bare false` is a measurable diagnose-vs-suggest quality win.
   - **Tags**: p1, milestone-m1, m1-1, observed-2026-05-26, self-diagnose-misdirection
   - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-26 — every iteration's self-diagnose emits `git status failed (...fatal: this operation must be run in a work tree)`. Confirmed via `cat /Users/fivanishche/apps/tooling/minsky/.git/config` → `[core] bare = true`. `.git/worktrees/` shows 5 active worktrees (4 daemon-spawned + 3 operator). The daemon's self-diagnose suggested `rm .git/index.lock` (the index isn't locked — `ls .git` shows no `index.lock`). Real fix: flip `bare = false` (or remove the line). Tracked to a likely accidental `git init --bare` or similar tool misconfig at some point in the repo's history.
+  - **Surfaced-by**: 2026-05-26 — every iteration's self-diagnose emits `git status failed (...fatal: this operation must be run in a work tree)`. Confirmed via `cat <minsky-repo>/.git/config` → `[core] bare = true`. `.git/worktrees/` shows 5 active worktrees (4 daemon-spawned + 3 operator). The daemon's self-diagnose suggested `rm .git/index.lock` (the index isn't locked — `ls .git` shows no `index.lock`). Real fix: flip `bare = false` (or remove the line). Tracked to a likely accidental `git init --bare` or similar tool misconfig at some point in the repo's history.
   - **Hypothesis**: extend the self-diagnose handler in `novel/cross-repo-runner/src/daemon.ts` (or wherever `git-config-parseable` is computed) — when `git status` fails with `fatal: this operation must be run in a work tree`, ALSO probe `git config core.bare` and `ls .git/worktrees/`. If both `bare = true` AND worktree-entries exist, suggest `git config core.bare false` instead of the index-lock fix. The combination is mechanically diagnostic. Falsifiable: simulate the bug on a test fixture (`git init && git config core.bare true && touch a.txt`), run the daemon's self-diagnose, assert the suggested fix is the bare flip — not the index lock.
   - **Success**: (1) Self-diagnose detects bare-misset and proposes the correct fix string; (2) Test fixture in `novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` (new) reproduces both detection AND correct suggestion; (3) Operator runs the suggested `git config core.bare false`, `git status` works, daemon iteration completes normally.
   - **Pivot**: if detecting `bare = true` is too fragile (different git versions emit slightly different error messages), gate the new diagnostic behind a `MINSKY_SELF_DIAGNOSE_BARE_DETECTION=1` env var. Threshold: ≥1 false-positive ("flagged bare-misset when actually a different issue") within 7 days of rollout.
-  - **Measurement**: `cd /Users/fivanishche/apps/tooling/minsky && git status --short 2>&1 | head -1 | awk '/fatal/ {print "FAIL"} !/fatal/ {print "PASS"}'`
+  - **Measurement**: `cd <minsky-repo> && git status --short 2>&1 | head -1 | awk '/fatal/ {print "FAIL"} !/fatal/ {print "PASS"}'`
   - **Anchor**: Rule #1 (loud-crash > silent failure — the daemon DOES emit a self-diagnose finding, but the suggested fix is wrong, so the operator follows the misleading advice and the bug persists). Rule #17 (proactive healing — once the correct fix is detected, the next step is auto-applying it; this task only fixes the diagnosis layer, auto-apply is a follow-up).
   - **Details**: (a) Find the self-diagnose handler that emits `git-config-parseable`. (b) After confirming `git status` fails, probe `git config core.bare` (read-only). (c) If `true`, probe `ls -d .git/worktrees/* 2>/dev/null` for active worktrees. (d) If both signals match, suggest `git config core.bare false` instead of the index-lock fix. (e) Paired tests for: bare=false (no false positive), bare=true with no worktrees (true bare repo — different fix needed), bare=true with worktrees (the bug case — propose correct fix). (f) Don't auto-apply the fix yet — that's a follow-up task once the detection is proven stable.
   - **Files**: `novel/cross-repo-runner/src/daemon.ts` (extend self-diagnose handler — locate via `grep -n git-config-parseable`), `novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` (new — paired tests with fixture worktrees), `~/.minsky/daemon.log` (verify after rollout — new suggestedFix string visible).
-  - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat /Users/fivanishche/apps/tooling/minsky/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
+  - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat <minsky-repo>/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
 
 - [ ] `competitor-add-smolagents` — research Hugging Face smolagents (huggingface/smolagents, 27.5k★, alive); produce `competitors/smolagents.md` + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-smolagents
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: smolagents' "agents that think in code" + 1000-line core is the minimal-agent thesis. Q2 should extract the CodeAct-pattern integration. Q5 evaluates whether smolagents-as-substrate is viable.
@@ -1219,6 +1256,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-aider` — apply Five Pivot Questions framework to Aider (Aider-AI/aider, 45.2k★, alive); deepen `competitors/aider.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-aider
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Aider's "explicitly NOT autonomous" stance (Paul Gauthier publicly rejects too much agentic behavior) is itself a strategic signal: the most-used CLI coding agent's maintainer believes the autonomy framing is wrong. Q3 may be vision-changing for Minsky's autonomy claims. Q5 should affirm KEEP for Aider's adoption as Minsky's local_agent — that surface is already settled.
@@ -1229,6 +1267,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deepen-claude-agent-sdk` — apply Five Pivot Questions framework to Anthropic Claude Agent SDK; deepen `competitors/claude-agent-sdk.md` and emit any vision-threats to `ask_human.md`
   - **ID**: competitor-deepen-claude-agent-sdk
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Anthropic's first-party Agent SDK + Claude Code background-task primitives may reframe what Minsky uniquely provides; in particular, if Anthropic ships durable background-session APIs, Minsky's tick-loop becomes a thinner wrapper.
@@ -1239,6 +1278,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-sweep` — research Sweep AI (sweepai/sweep, 7.7k★, DEAD as GitHub App, pivoted to JetBrains); produce `competitors/sweep.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
   - **ID**: competitor-add-sweep
+  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
   - **Milestone**: M1
   - **Hypothesis**: Sweep's failure as a GitHub App (issue → PR autonomously) is the canonical "stateless GitHub App can't sustain autonomous PR generation" lesson. The post-mortem should formalize that as a Minsky guardrail: never depend on a stateless webhook architecture for sustained autonomy.
@@ -2236,6 +2276,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `reintegrate-preserved-pr-backlog-2026-05-21` — 32 PRs (28 CONFLICTING + 4 gate-red) from the autonomous-daemon backlog were closed during the 2026-05-21 drain after their semantic conflicts or substantive code-fixes couldn't be auto-resolved in the drain window; each PR's diff is preserved on GitHub (closed PR diffs are retained indefinitely by GitHub — `gh pr diff <N>` works on closed PRs); this umbrella task tracks reintegration of any preserved work that's worth reviving
   - **ID**: reintegrate-preserved-pr-backlog-2026-05-21
+  - **Competitive-goal**: drives `agent-merge-rate` toward 0.80 (M2.1 target) — close-with-preservation closures count as not-merged; the reintegration pass turns recoverable unique work into landed PRs, which is the ground truth for the merge-rate metric.
   - **Tags**: p1, milestone-m1, backlog, cleanup, observed-2026-05-21
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-21 PR-drain session. The parallel auto-merge drain merged everything mergeable; the remaining 28 PRs had semantic conflicts with current main (different parallel implementations of the same task, daemon-spawned worker collisions). Closing with preserved-on-GitHub diffs lets the queue reach 0 while keeping every line of agent-authored work recoverable.
