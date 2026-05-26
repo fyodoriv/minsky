@@ -8,11 +8,16 @@
 //
 // Hypothesis (rule #9): a graceful `minsky stop` followed by `minsky`
 // preserves the working tree's branch + uncommitted files; a crashed
-// shutdown (no sentinel) reverts to `default_branch` but STASHES
-// uncommitted work with a recoverable label instead of deleting it.
-// Success: every test below passes. Pivot: if stash is unsafe in any
-// path (worktrees, submodules), refuse to start the daemon when dirty
-// rather than silently destroy.
+// shutdown (no sentinel) reverts to `default_branch` ONLY if the tree
+// is clean. If the tree is dirty, the daemon REFUSES to recover (exit
+// 1 with a clear error pointing at the three manual recovery paths —
+// commit / stash / move) and leaves the workspace exactly as the
+// operator left it. The pivot (originally "if stash is unsafe, refuse
+// to start when dirty") landed 2026-05-26 per operator directive
+// "first of all fix the root cause of [unwanted stashes] even appearing"
+// — auto-stashing on crash-recovery was silently swallowing operator
+// WIP into the stash list every supervisor respawn.
+// Success: every test below passes.
 // Measurement: this test file.
 // Anchor: rule #6 (stay alive — never by destroying state); rule #17
 // (proactive healing — every observed multi-agent-safety violation is
@@ -61,6 +66,33 @@ function invokeReset(hostDir: string, sentinelPath: string): string {
   );
 }
 
+/**
+ * Invoke `bin/minsky reset-host-if-crashed` and CAPTURE the failure path
+ * (exit ≠ 0 since 2026-05-26 — see the e2e refuse-on-dirty test in
+ * `daemon-restart.test.ts`). Returns the captured stderr so the test can
+ * assert the manual-recovery hint text.
+ */
+function invokeResetExpectingFailure(
+  hostDir: string,
+  sentinelPath: string,
+): {
+  exitCode: number;
+  stderr: string;
+} {
+  try {
+    execSync(
+      `${MINSKY_BIN} reset-host-if-crashed --host "${hostDir}" --sentinel "${sentinelPath}"`,
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    return { exitCode: 0, stderr: "" };
+  } catch (err) {
+    const e = err as { status?: number; stderr?: Buffer };
+    return { exitCode: e.status ?? 1, stderr: e.stderr?.toString() ?? "" };
+  }
+}
+
 describe("bin/minsky multi-agent safety — never `git clean -fd`", () => {
   test("graceful stop sentinel present → branch + untracked files PRESERVED", () => {
     const { dir, untrackedPath } = makeFixtureHost();
@@ -76,23 +108,26 @@ describe("bin/minsky multi-agent safety — never `git clean -fd`", () => {
     expect(branch).toBe("feat/work-in-progress");
   });
 
-  test("no sentinel (crashed) + dirty tree → STASHES + resets to main + no data loss", () => {
+  test("no sentinel (crashed) + dirty tree → REFUSES, preserves workspace + branch (2026-05-26 refuse-on-dirty semantic)", () => {
     const { dir, untrackedPath } = makeFixtureHost();
     // No sentinel — simulates a crashed previous shutdown
     const sentinel = join(dir, ".minsky", "graceful-stop");
 
-    const out = invokeReset(dir, sentinel);
+    const { exitCode, stderr } = invokeResetExpectingFailure(dir, sentinel);
 
-    expect(out).toContain("action: stash-and-reset");
-    // The untracked file MUST live in a stash, not be deleted
-    expect(existsSync(untrackedPath)).toBe(false); // moved into stash
+    // Refuse-with-error semantic — exit 1, no destructive action.
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("REFUSING to recover host");
+    expect(stderr).toContain("resolve manually");
+    // Untracked file STILL on disk (no stash, no destruction).
+    expect(existsSync(untrackedPath)).toBe(true);
+    expect(readFileSync(untrackedPath, "utf8")).toContain("valuable work in progress");
+    // Stash list still empty.
     const stashList = execSync("git stash list", { cwd: dir, encoding: "utf8" }).trim();
-    expect(stashList).toMatch(/minsky auto-stash/);
-    // We reset to main
+    expect(stashList).toBe("");
+    // Branch unchanged (still on the feature branch we were on).
     const branch = execSync("git branch --show-current", { cwd: dir, encoding: "utf8" }).trim();
-    expect(branch).toBe("main");
-    // The operator-recovery hint appears in stdout
-    expect(out).toMatch(/stash:\s*stash@\{0\}/);
+    expect(branch).toBe("feat/work-in-progress");
   });
 
   test("no sentinel + clean tree → resets branch only, no stash needed", () => {

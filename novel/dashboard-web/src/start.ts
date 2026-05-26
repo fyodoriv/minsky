@@ -80,7 +80,7 @@ process.stderr.write(`${controlTokenStartupHint(controlToken)}\n`);
 // MBs) and the 5-second auto-refresh is the operator's expectation. The
 // log path follows `MINSKY_HOME/.minsky/tick-loop.out.log`; if MINSKY_HOME
 // is unset we fall back to the dashboard-web package's CWD which is the
-// repo root under `pnpm dogfood:ui`.
+// repo root under `pnpm minsky:ui`.
 const minskyHome = process.env["MINSKY_HOME"] ?? process.cwd();
 const activityLogPath = resolve(minskyHome, ".minsky/tick-loop.out.log");
 const getActivity = () => loadRecentSpans(activityLogPath, ACTIVITY_LIMIT);
@@ -97,7 +97,7 @@ const { fetch } = createServer(args);
 // operator as a confusing crash. Catch the common case (port-already-in-use,
 // usually a stale dashboard process) and exit with an actionable message
 // instead. The supervisor (if any) sees exit 1 and applies its restart
-// policy; the operator running `pnpm dogfood:ui` directly sees the hint.
+// policy; the operator running `pnpm minsky:ui` directly sees the hint.
 const server = serve({ fetch, hostname, port }, (info) => {
   process.stdout.write(`dashboard-web listening on http://${hostname}:${info.port}/\n`);
 });
@@ -106,7 +106,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
     process.stderr.write(
       `dashboard-web: port ${port} is already in use.
   - Another dashboard is probably running already; open http://localhost:${port}/
-  - Or pick a different port: \`PORT=8888 pnpm dogfood:ui\`
+  - Or pick a different port: \`PORT=8888 pnpm minsky:ui\`
   - Or free this one: \`lsof -ti :${port} | xargs kill\`
 `,
     );

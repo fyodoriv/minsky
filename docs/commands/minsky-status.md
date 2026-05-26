@@ -28,4 +28,4 @@ tail -30 ~/.minsky/daemon.log 2>/dev/null || echo "no daemon log"
 Produce a one-line verdict: "Minsky daemon running (PID X, uptime Yh),
 walking N hosts, last iteration on `<host>` verdict `validated`." OR
 "Not running. Last run ended at <ts> with stopReason `<reason>`.
-Restart with: `minsky --daemon --hosts-dir ~/apps/tooling`"
+Restart with: `minsky daemon start --hosts-dir ~/apps/tooling`"

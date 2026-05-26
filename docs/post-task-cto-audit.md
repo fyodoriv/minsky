@@ -20,7 +20,7 @@ Then restart the supervisor unit. The CLI prints `[tick-loop] CTO audit wired (f
 `MINSKY_CTO_AUDIT=off` short-circuits the gate inside `runCtoAudit` even when the seam is wired — useful when the operator wants to land a sequence of small ships without an audit fire after each:
 
 ```bash
-MINSKY_CTO_AUDIT=off pnpm dogfood:start
+MINSKY_CTO_AUDIT=off pnpm minsky:setup
 ```
 
 Any value other than `off` (including unset) leaves the audit armed.
@@ -56,7 +56,7 @@ The label is load-bearing for the success metric (see below); a missing label si
 The audit's pre-registered success metric is *PR throughput at the right cadence*. Operator-facing query:
 
 ```bash
-pnpm cto-audit:metrics
+`bin/minsky audit cto`
 ```
 
 The script (`scripts/cto-audit-metrics.mjs`, paired tests in `scripts/cto-audit-metrics.test.mjs`) fires three `gh pr list --label minsky:cto-audit` calls in parallel and prints both verdicts side-by-side: rolling 7d created (`≥ 1` per week) and rolling 28d ship-rate (`merged / created ≥ 0.30`). The thresholds are pinned as exported constants so a typo in the query becomes a test break, not a 7-day silent zero — which is the failure mode the script exists to prevent (Munafò et al. 2017's pre-registration discipline only works when the post-hoc query can actually see the artefacts it was committed to count).
@@ -104,4 +104,4 @@ If the audit ran but produced no PR, inspect the spawn's `stderrTail` in the `ti
 - `novel/tick-loop/src/post-task-cto-audit.ts` — pure brief + gate + I/O wrapper (with paired tests).
 - `novel/tick-loop/src/cto-audit-cli-wiring.ts` — file-backed lock + signals collector (with paired tests).
 - TASKS.md `post-task-cto-audit` — the umbrella task block carrying the rule-#9 substrate.
-- `scripts/cto-audit-metrics.mjs` — versioned pre-registered measurement query (`pnpm cto-audit:metrics`).
+- `scripts/cto-audit-metrics.mjs` — versioned pre-registered measurement query (`bin/minsky audit cto`).

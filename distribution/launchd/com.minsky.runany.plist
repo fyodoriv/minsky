@@ -28,7 +28,7 @@ named `.plist` not `.plist.tmpl` so setup.sh's Darwin `*.plist` glob
 (setup.sh:409) renders + bootstraps it; a `.tmpl` suffix would make it
 inert. See docs/run-anywhere.md.
 
-Install (handled by `pnpm dogfood` / setup.sh):
+Install (handled by `pnpm minsky:setup` / setup.sh):
   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.minsky.runany.plist
   launchctl enable gui/$(id -u)/com.minsky.runany
 -->

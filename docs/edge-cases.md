@@ -14,7 +14,7 @@ What happens when things aren't normal.
 
 The only ways to stop it: `minsky stop`, machine power-off, or `minsky uninstall`.
 
-Cap explicitly with `--max-iterations=N` (default: `Infinity`) or `minsky --once` for one task.
+Cap explicitly with `--max-iterations=N` (default: `Infinity`) or `minsky run --once` for one task.
 
 ## What if `TASKS.md` is empty or doesn't exist?
 

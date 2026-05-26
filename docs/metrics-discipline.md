@@ -6,7 +6,7 @@
 
 `METRICS.md` is the canonical observability surface every Minsky-managed repo (this one + every host the cross-repo runner governs) ships at its root. It exists because dashboards rot in private, and rotting numbers steer the loop in the wrong direction faster than missing numbers do (Ries 2011, Ch. 7 — wrong data is worse than no data). The discipline below makes "trustworthy" mechanically checkable rather than an opinion.
 
-The substrate is one source of truth (`SUCCESS_METRICS` in `novel/dashboard-web/src/metrics.ts` — rule #2), one pure builder (`scripts/generate-metrics-md.mjs`), one daily snapshot (`.minsky/metric-snapshots/<date>.json`), one operator binding (`pnpm metrics:render`), one CI gate (`scripts/check-metric-freshness.mjs`), and one daemon wire-in that fires the pipeline once per UTC day. The rest of this doc explains how those parts compose and what invariants the gate enforces.
+The substrate is one source of truth (`SUCCESS_METRICS` in `novel/dashboard-web/src/metrics.ts` — rule #2), one pure builder (`scripts/generate-metrics-md.mjs`), one daily snapshot (`.minsky/metric-snapshots/<date>.json`), one operator binding (`bin/minsky metrics render`), one CI gate (`scripts/check-metric-freshness.mjs`), and one daemon wire-in that fires the pipeline once per UTC day. The rest of this doc explains how those parts compose and what invariants the gate enforces.
 
 ## Why a static file, not a dashboard
 
@@ -34,7 +34,7 @@ SUCCESS_METRICS (rule #2 source of truth)        novel/dashboard-web/src/metrics
         │
         ▼
    daily refresh (supervisor)                    novel/tick-loop/src/metrics-render-cli-wiring.ts
-                                                 fires `pnpm metrics:render --date <today>` once per UTC date
+                                                 fires `bin/minsky metrics render --date <today>` once per UTC date
 ```
 
 Each stage has one job. The pure builder (`buildMetricsMd`) takes `metrics` + `observations` + `nowMs` and returns the markdown — no I/O, no clock, no env. The orchestrator (`runMetricsRender`) projects today's snapshot onto the metric ids and calls the builder. The CLI binding (`scripts/metrics-render.mjs`) is the only filesystem surface. The daemon wire-in fires the binding once per UTC date via a file-backed mtime probe on `METRICS.md`. The freshness lint reads the rendered markdown back and rejects what the pipeline shouldn't have produced.
@@ -60,13 +60,13 @@ The lint's structural half (the `_monotonic: ok_` annotation per section) is in 
 
 Three commands cover the everyday surface:
 
-- `pnpm metrics:render` — regenerate `METRICS.md` from today's snapshot. Idempotent: against a snapshot whose ids do not align with `SUCCESS_METRICS`, the output is byte-identical to the genesis (all stubs); against a snapshot with a `SUCCESS_METRICS`-keyed entry, the matching section flips to a real value with a fresh `_Updated:` line. `pnpm metrics:render --date 2026-05-05` re-renders against an older snapshot for replay.
+- `bin/minsky metrics render` — regenerate `METRICS.md` from today's snapshot. Idempotent: against a snapshot whose ids do not align with `SUCCESS_METRICS`, the output is byte-identical to the genesis (all stubs); against a snapshot with a `SUCCESS_METRICS`-keyed entry, the matching section flips to a real value with a fresh `_Updated:` line. `bin/minsky metrics render --date 2026-05-05` re-renders against an older snapshot for replay.
 - `node scripts/check-metric-freshness.mjs --expected loop-uptime,tokens-per-story,…` — what CI runs in the `metric-freshness` job in `.github/workflows/ci.yml`. Fails with a per-section reason on the four invariants above.
 - `cat METRICS.md` — the audit surface. Each section is one heading, one `_Updated: … · Budget: … · Source: …_` line (or `_Budget: …_` for stubs), one `**Value:** …` line, one ``Formula: `…` `` line. The 10 sections fit on one operator screen.
 
 ## Daily refresh
 
-The supervisor (`bin/tick-loop.mjs`) wires `metricsRenderSeam` under the same `MINSKY_CHANGELOG_ENABLE` umbrella as the snapshot + changelog legs. Once per UTC date, after a successful daemon iteration, the seam spawns `pnpm metrics:render --date <today>` and writes `METRICS.md`. The mtime of the resulting file is the gate: if its UTC date matches today, the render is skipped on subsequent iterations (cheap probe — no parsing). A snapshot-capture failure (e.g. `gh` rate-limit) does NOT suppress today's render — yesterday's snapshot still produces a usable `METRICS.md` rather than no `METRICS.md` (Helland 2007 again — degrade visibly, never silently).
+The supervisor (`bin/tick-loop.mjs`) wires `metricsRenderSeam` under the same `MINSKY_CHANGELOG_ENABLE` umbrella as the snapshot + changelog legs. Once per UTC date, after a successful daemon iteration, the seam spawns `bin/minsky metrics render --date <today>` and writes `METRICS.md`. The mtime of the resulting file is the gate: if its UTC date matches today, the render is skipped on subsequent iterations (cheap probe — no parsing). A snapshot-capture failure (e.g. `gh` rate-limit) does NOT suppress today's render — yesterday's snapshot still produces a usable `METRICS.md` rather than no `METRICS.md` (Helland 2007 again — degrade visibly, never silently).
 
 ## Pivots
 
@@ -82,7 +82,7 @@ The discipline has three pre-registered pivot signals (rule #9 — when do we ab
 - [`vision.md` § "Success criteria"](../vision.md) — the 10 metrics this discipline projects, in their canonical order.
 - [`novel/dashboard-web/src/metrics.ts`](../novel/dashboard-web/src/metrics.ts) — `SUCCESS_METRICS` (rule #2 source of truth).
 - [`scripts/generate-metrics-md.mjs`](../scripts/generate-metrics-md.mjs) — pure builder.
-- [`scripts/metrics-render.mjs`](../scripts/metrics-render.mjs) — operator binding (`pnpm metrics:render`).
+- [`scripts/metrics-render.mjs`](../scripts/metrics-render.mjs) — operator binding (`bin/minsky metrics render`).
 - [`scripts/check-metric-freshness.mjs`](../scripts/check-metric-freshness.mjs) — the CI gate.
 - [`novel/tick-loop/src/metrics-render-cli-wiring.ts`](../novel/tick-loop/src/metrics-render-cli-wiring.ts) — the daemon's daily-refresh wire-in.
 - [`docs/host-transformation-checklist.md`](host-transformation-checklist.md) — the broader checklist a host repo signs onto when it adopts Minsky principles; metrics discipline is one of its enforcers.

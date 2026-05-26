@@ -63,6 +63,8 @@ The three lower layers (Coordination, Operations, Nervous System) are mostly oth
 
 **Every external dependency is accessed through an interface defined in `novel/adapters/`.** Business logic never imports a vendor library directly. This is what makes "don't reinvent the wheel" tractable over a decade — without interfaces, "use someone else's tool" calcifies into vendor lock-in.
 
+**Polyglot through process boundaries.** Adapter interfaces are TypeScript. Implementations behind those interfaces can wrap any language — Python subprocesses (OpenHands, DSPy, Agentless), OS daemons (systemd, launchd), HTTP services (Tailscale, ntfy), MCP servers, or bash scripts. The process boundary is the language seam. See [`language-strategy.md`](./language-strategy.md) for the decision rule on when to add a worker in a non-TS language.
+
 Pattern:
 
 ```text

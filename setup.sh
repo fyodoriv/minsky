@@ -5,7 +5,8 @@
 #   ./setup.sh             — install / repair (idempotent; safe to re-run)
 #   ./setup.sh --doctor    — self-tests only; no mutations
 #   ./setup.sh --reset     — remove .minsky/ and re-install from scratch
-#   ./setup.sh --dogfood   — start the supervisor on this repo (Minsky-on-itself)
+#   ./setup.sh --setup     — render unit files + bootstrap supervisor on this repo
+#   ./setup.sh --dogfood   — DEPRECATED alias for --setup (kept for ≤30d)
 #   ./setup.sh --help      — print this header
 #
 # Anti-patterns refused (per constitutional rule #6 stay-alive + rule #7 chaos):
@@ -71,7 +72,16 @@ for arg in "$@"; do
   case "$arg" in
     --doctor)  MODE="doctor" ;;
     --reset)   MODE="reset" ;;
-    --dogfood) MODE="dogfood" ;;
+    --setup)   MODE="setup" ;;
+    --dogfood)
+      # Deprecated 2026-05-26 — operator directive: "Why is this command
+      # even called dogfood? That's minsky first of all". Map to --setup.
+      # Keep this alias for ≤30 days (until 2026-06-26) so muscle-memory
+      # invocations don't break; remove after.
+      MODE="setup"
+      printf '%swarning:%s --dogfood is deprecated; use --setup instead (alias retained until 2026-06-26)\n' \
+        "${C_BOLD:-}" "${C_RESET:-}" >&2
+      ;;
     -h|--help)
       # Print the leading documentation block of this script.
       sed -n '2,/^set -euo/p' "$0" | sed -e 's/^# \?//' -e '$d'
@@ -364,7 +374,7 @@ if [ "$MODE" = "doctor" ]; then
   exit 0
 fi
 
-# --- mode: --dogfood (start Minsky's supervisor on this repo) ---
+# --- mode: --setup (start Minsky's supervisor on this repo) ---
 #
 # Implements user-stories/001-loop-runs-overnight.md (Minsky on itself —
 # the dual-purpose framing's first surface per vision.md § "What Minsky
@@ -375,7 +385,7 @@ fi
 # `launchctl bootstrap gui/$(id -u)` (macOS), and verifies the
 # supervisor reports active.
 #
-# Idempotent: re-invoking `--dogfood` on a host where the supervisor
+# Idempotent: re-invoking `--setup` on a host where the supervisor
 # is already loaded re-renders the units (catches drift if templates
 # change) and re-runs the load-confirm step. The operator's escape
 # hatch is documented at the end of the run.
@@ -386,19 +396,55 @@ fi
 # consolidates into one command); Armstrong, *Programming Erlang*,
 # 2007 (supervision tree — `enable --now` mirrors OTP's "start the
 # supervisor and let it boot the children").
-if [ "$MODE" = "dogfood" ]; then
-  bold "Minsky dogfood — start supervisor on this repo (Minsky on itself)"
+if [ "$MODE" = "setup" ]; then
+  bold "Minsky setup — render unit files + bootstrap supervisor on this repo"
   echo
 
-  # Prereq: doctor must be at least YELLOW (red blocks dogfood — pushes
+  # Prereq: doctor must be at least YELLOW (red blocks setup — pushes
   # would silently drop, budget-guard couldn't read state, etc.).
-  CURRENT_STEP="dogfood-doctor-precheck"
+  CURRENT_STEP="setup-doctor-precheck"
   if ! command -v envsubst >/dev/null 2>&1; then
     err "envsubst not found — install gettext (brew install gettext / apt install gettext-base)"
     SETUP_FAILED=1
     exit 1
   fi
   ok "envsubst on PATH"
+
+  # OpenHands SDK install. Operator directive 2026-05-26: "install
+  # openhands always" — the default `cloud_agent: "openhands"` config
+  # (INSTALL.md Step 4) requires the Python SDK until the canonical
+  # `openhands solve` CLI ships (Agent Canvas Initiative, 2026-06-01).
+  # Idempotent: existing venv + already-installed package short-circuit
+  # to a no-op. Graceful-degrade per rule #7: any failure here logs a
+  # warning but does NOT block setup — operator can fall back to
+  # `cloud_agent: "claude" | "devin" | "aider"` by editing config.json.
+  CURRENT_STEP="setup-install-openhands-sdk"
+  OPENHANDS_VENV="${HOME}/.minsky/openhands-venv"
+  if [ ! -d "$OPENHANDS_VENV" ]; then
+    if command -v uv >/dev/null 2>&1; then
+      if uv venv --quiet "$OPENHANDS_VENV" 2>/dev/null; then
+        ok "created openhands venv at $OPENHANDS_VENV"
+      else
+        warn "uv venv $OPENHANDS_VENV failed — skipping openhands install (operator can run \`uv venv $OPENHANDS_VENV && uv pip install --python $OPENHANDS_VENV/bin/python openhands-ai\` manually; non-openhands cloud_agent values still work)"
+      fi
+    else
+      warn "uv not on PATH — skipping openhands venv creation (install uv via \`brew install uv\` or \`curl -LsSf https://astral.sh/uv/install.sh | sh\`, then re-run setup; non-openhands cloud_agent values still work)"
+    fi
+  fi
+  if [ -d "$OPENHANDS_VENV" ] && command -v uv >/dev/null 2>&1; then
+    # `uv pip install` is idempotent — re-running on an already-installed
+    # package short-circuits in ~50ms.
+    if uv pip install --quiet --python "$OPENHANDS_VENV/bin/python" openhands-ai 2>/dev/null; then
+      # Verify by importing the SDK against the venv's python.
+      if OPENHANDS_SUPPRESS_BANNER=1 "$OPENHANDS_VENV/bin/python" -c "from openhands.sdk import Agent, LLM, Conversation" 2>/dev/null; then
+        ok "openhands-ai installed at $OPENHANDS_VENV (SDK import verified)"
+      else
+        warn "openhands-ai installed but \`from openhands.sdk import …\` failed — operator should verify with \`OPENHANDS_SUPPRESS_BANNER=1 $OPENHANDS_VENV/bin/python -c 'from openhands.sdk import Agent, LLM, Conversation'\`"
+      fi
+    else
+      warn "\`uv pip install openhands-ai\` failed — operator can re-run \`uv pip install --python $OPENHANDS_VENV/bin/python openhands-ai\` manually; non-openhands cloud_agent values still work"
+    fi
+  fi
 
   # OS detect → choose unit dir + load command.
   os="$(uname -s)"
@@ -434,7 +480,7 @@ if [ "$MODE" = "dogfood" ]; then
   mkdir -p "$unit_dir"
 
   # Render templates with `${MINSKY_HOME}` → $ROOT. Idempotent overwrite.
-  CURRENT_STEP="dogfood-render-units"
+  CURRENT_STEP="setup-render-units"
   rendered=0
   # Use $template_glob without quoting so the * expands in the templates.
   # shellcheck disable=SC2086
@@ -447,7 +493,7 @@ if [ "$MODE" = "dogfood" ]; then
   ok "rendered $rendered unit-file template(s) into $unit_dir"
 
   # Load + confirm.
-  CURRENT_STEP="dogfood-load-supervisor"
+  CURRENT_STEP="setup-load-supervisor"
   case "$os" in
     Darwin)
       for f in "$unit_dir"/com.minsky.*.plist; do
@@ -478,9 +524,9 @@ if [ "$MODE" = "dogfood" ]; then
 
   # Report next steps.
   echo
-  bold "Minsky is now dogfooding itself."
+  bold "Minsky setup complete — supervisor is loaded."
   echo
-  dim "  Web UI:       pnpm dogfood:ui   →   open http://localhost:8181/"
+  dim "  Web UI:       pnpm minsky:ui   →   open http://localhost:8181/"
   dim "  Stream logs:  tail -F $STATE_DIR/tick-loop.out.log $STATE_DIR/tick-loop.err.log"
   case "$os" in
     Darwin)
@@ -491,7 +537,7 @@ if [ "$MODE" = "dogfood" ]; then
       ;;
   esac
   dim "  Status:       launchctl list | grep -i minsky    (macOS)  /  systemctl --user status minsky-supervisor.target  (Linux)"
-  dim "  Re-run:       ./setup.sh --dogfood (idempotent; re-renders templates)"
+  dim "  Re-run:       ./setup.sh --setup (idempotent; re-renders templates)"
   echo
   ok "GREEN — supervisor loaded; tick-loop will pick the next P0 task on its next cadence"
   exit 0

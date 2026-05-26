@@ -53,26 +53,29 @@ If any prerequisite is missing or too old, tell the operator the exact missing p
 
 **Why Python 3.10+ is required**: Minsky's default agent runtime is OpenHands (per the operator's 2026-05-22 Path C reshape directive). Today's OpenHands ships as a Python SDK; Minsky's adapter ([`@minsky/agent-runtime-openhands`](novel/adapters/agent-runtime-openhands/README.md)) spawns it via a tiny Python shim. From `2026-06-01` (OpenHands' Agent Canvas Initiative CLI release) the shim is replaced with a direct CLI invocation and the Python dep can move from required to optional. Until then, Python is required if the operator uses the default `cloud_agent: "openhands"`. Operators can fall back to `cloud_agent: "claude"` / `"devin"` / `"aider"` (no Python required) by editing `~/.minsky/config.json` after Step 4.
 
-## Step 1.5 — install the OpenHands SDK (only if using the default `openhands` backend)
+## Step 1.5 — install the OpenHands SDK (automatic during `pnpm minsky:setup`)
 
-If the operator is using the default `openhands` backend (recommended), install the SDK into a dedicated venv:
+**Updated 2026-05-26 — operator directive "install openhands always".** Step 1.5 used to be a manual command; `pnpm minsky:setup` (Step 6 below) now does it automatically as part of the supervisor bootstrap. Skip ahead to Step 2.
+
+For reference / debugging only — the equivalent manual command (what `pnpm minsky:setup` runs internally):
 
 ```bash
-# Use uv (modern + fast) — install it first if not present
+# Install uv if not present
 python3 -m pip install --user uv 2>/dev/null || true
 
 # Create the venv at ~/.minsky/openhands-venv
 uv venv ~/.minsky/openhands-venv
-source ~/.minsky/openhands-venv/bin/activate
-uv pip install openhands-ai
+
+# Idempotent install of the SDK into the venv
+uv pip install --python ~/.minsky/openhands-venv/bin/python openhands-ai
 
 # Verify the import works (suppress the SDK banner)
-OPENHANDS_SUPPRESS_BANNER=1 python3 -c "from openhands.sdk import Agent, LLM, Conversation; print('openhands-ai ready')"
+OPENHANDS_SUPPRESS_BANNER=1 ~/.minsky/openhands-venv/bin/python -c "from openhands.sdk import Agent, LLM, Conversation; print('openhands-ai ready')"
 ```
 
 The operator must export their LLM API key (default: `ANTHROPIC_API_KEY`) in their shell rc before the daemon spawns its first task. If they use a different provider (OpenAI, Gemini, etc.), set `MINSKY_OPENHANDS_API_KEY_ENV=OPENAI_API_KEY` (or equivalent) in `~/.minsky/config.json`.
 
-**Skip Step 1.5 entirely** if the operator chose a non-openhands backend in Step 4 — the SDK is only needed for `cloud_agent: "openhands"`.
+If `pnpm minsky:setup` reports `⚠ uv not on PATH` (graceful-degrade — supervisor still loads), install `uv` first (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`), then re-run `pnpm minsky:setup`. Operators using a non-openhands backend (`cloud_agent: "claude" | "devin" | "aider"`) can ignore the openhands SDK entirely.
 
 ## Step 2 — record the current host
 

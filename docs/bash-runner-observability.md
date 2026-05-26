@@ -111,14 +111,14 @@ tail -100 <host>/.minsky/failures/<id>/stdout.log
 grep -i 'minsky\|host\|task' <host>/.minsky/failures/<id>/env.txt
 ```
 
-## Tight iteration loop: `minsky --once`
+## Tight iteration loop: `minsky run --once`
 
-When you're debugging a change to `bin/minsky-run.sh` or `scripts/*.py`, you don't want to run a full 8-iteration session each time. `minsky --once <host-dir>` runs EXACTLY ONE iteration against a host, tee'ing all I/O into `<host-dir>/.minsky/iter-once.log` so you can `cat` it after.
+When you're debugging a change to `bin/minsky-run.sh` or `scripts/*.py`, you don't want to run a full 8-iteration session each time. `minsky run --once <host-dir>` runs EXACTLY ONE iteration against a host, tee'ing all I/O into `<host-dir>/.minsky/iter-once.log` so you can `cat` it after.
 
 ```bash
-minsky --once ~/apps/toronto-rentals          # dry-run (no spawn, no tokens)
-minsky --once ~/apps/toronto-rentals --live   # real spawn (burns tokens)
-minsky --once ~/apps/toronto-rentals --no-capture  # disable failure-capture
+minsky run --once ~/apps/toronto-rentals          # dry-run (no spawn, no tokens)
+minsky run --once ~/apps/toronto-rentals --live   # real spawn (burns tokens)
+minsky run --once ~/apps/toronto-rentals --no-capture  # disable failure-capture
                                                     # for this run
 ```
 
@@ -137,11 +137,11 @@ The operator's mental model:
 
 ```bash
 minsky doctor                                  # is the machine healthy?
-minsky --once foo                              # try one dry iteration
-minsky --once foo --live                       # if dry was good, try real
+minsky run --once foo                              # try one dry iteration
+minsky run --once foo --live                       # if dry was good, try real
 minsky logs --failures foo --latest            # if something broke, show me
 # (edit code) (edit code)
-minsky --once foo                              # try again, loop until green
+minsky run --once foo                              # try again, loop until green
 ```
 
 Each cycle ≤30s of operator attention. Without `--once`, every code change forced a full session run (8h budget) + manual JSONL inspection.
@@ -156,7 +156,7 @@ minsky iter-once foo
 minsky tail-failures foo --latest
 
 # New (canonical)
-minsky --once foo
+minsky run --once foo
 minsky logs --failures foo --latest
 ```
 
