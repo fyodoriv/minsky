@@ -34,8 +34,9 @@ Manual: `git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm i
 
 **Two ways to run**:
 
-- **`minsky`** (or `minsky --daemon`) — the 24/7 loop. Picks tasks from `TASKS.md`, ships draft PRs, never merges without you. The default.
-- **`minsky --transform`** — single improvement session against the current folder. Captures a baseline (test count, lint exit, build exit, dependencies outdated, doc coverage), runs 8 iterations, prints a before/after delta. The killer-feature demo: `cd /any/repo && minsky --transform`.
+- **`minsky`** (or `minsky daemon start`) — the 24/7 loop. Picks tasks from `TASKS.md`, ships draft PRs, never merges without you. The default.
+- **`minsky transform`** — single improvement session against the current folder. Captures a baseline (test count, lint exit, build exit, dependencies outdated, doc coverage), runs 8 iterations, prints a before/after delta. The killer-feature demo: `cd /any/repo && minsky transform`.
+- **`minsky solve <task-id>`** — one iteration of one task (openhands-pattern killer-feature verb). Same code path as the daemon, just one-shot.
 
 ## Why Minsky
 

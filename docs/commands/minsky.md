@@ -5,7 +5,7 @@ description: Start the Minsky autonomous run loop on the current folder (or a na
 # /minsky — run Minsky on this folder, observed
 
 Launch minsky as a background daemon that survives terminal close, IDE
-restart, and SSH disconnect. Uses `minsky --daemon` so the agent returns
+restart, and SSH disconnect. Uses `minsky daemon start` so the agent returns
 immediately and can observe/heal via `minsky status` and `minsky logs`.
 
 ## Steps
@@ -37,13 +37,13 @@ Do NOT start a second daemon.
 
 <!-- turbo -->
 ```bash
-minsky --daemon --max-iterations=120
+minsky daemon start --max-iterations=120
 ```
 
 For multi-host (all repos in a parent dir):
 
 ```bash
-minsky --daemon --hosts-dir ~/apps/tooling --max-iterations=120
+minsky daemon start --hosts-dir ~/apps/tooling --max-iterations=120
 ```
 
 The daemon logs to `~/.minsky/daemon.log`, writes PID to

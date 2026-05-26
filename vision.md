@@ -365,7 +365,7 @@ scenario; pure helpers `parseArgs`, `assertSteadyState`, `countProviders`,
 on `/v1/models`), spawns the daemon with `MINSKY_LLM_PROVIDER=local-preferred` +
 `MINSKY_TICK_DRY_RUN=1`, captures stdout, asserts ≥1
 `iteration.provider: "local"` entry, exits 0 / 1 / 2;
-`pnpm chaos:budget-exhaust` is the public surface) | Chaos engineering — Basiri
+`bin/minsky audit chaos budget-exhaust` is the public surface) | Chaos engineering — Basiri
 et al., "Principles of Chaos Engineering", *IEEE Software* 2016 (steady-state
 hypothesis + fault injection + assertion) + Synthetic-fault injection (the
 in-process HTTP probe server is the synthetic local-LLM target; no real
@@ -385,7 +385,7 @@ assert PR opened" (this script implements the assertion half) | full | The chaos
 test verifies the wrapper's local-dispatch path end-to-end via the daemon's
 iteration log without needing real CLI binaries, real budget exhaustion, or real
 PR creation. 13 paired tests for the pure half; one live integration test (the
-script itself, run as `pnpm chaos:budget-exhaust`). The fault injection method
+script itself, run as `bin/minsky audit chaos budget-exhaust`). The fault injection method
 (preferLocal + reachable probe) is documented in JSDoc; alternatives (forcing
 claude hard-limit via stub stderr, or forcing budget circuit-break via fake
 JSONL) are listed for future expansion. Pivot threshold (rule #9): if the chaos
@@ -398,7 +398,7 @@ the spawn actually ran. | | 87 | `scripts/llm-provider-throughput.mjs` +
 `tick-loop.iteration` span log producing per-provider iteration / completed /
 switches counters; `parseIterationLine` + `aggregate` are pure, `main` is the
 I/O boundary; `--json` for the rule-#9 measurement query, plain text for
-operator terminal; `pnpm llm-provider:throughput` is the public surface; the
+operator terminal; `bin/minsky audit llm-throughput` is the public surface; the
 dashboard's activity feed gains an `iteration.provider` field on
 `ActivityEntry` + a small badge per row colored by provider — claude/local/hold;
 SSR layout grid extended from 3 to 4 columns; legacy single-strategy iterations

@@ -33,14 +33,28 @@ No separate build step needed. `pnpm install` runs the root `prepare` hook which
 ## Running minsky
 
 ```bash
-minsky --daemon --hosts-dir <repos-parent-dir>  # background daemon across repos
-minsky --local --daemon                     # local-only (zero cloud tokens)
-minsky status                               # PID, uptime, log tail
-minsky logs                                 # tail -f daemon log
-minsky stop                                 # SIGTERM → graceful drain
+# Subcommand-style (canonical, 2026-05-26 CLI overhaul — nx + openhands shape):
+minsky daemon start --hosts-dir <repos-parent-dir>  # background across repos
+minsky daemon start --local                         # local-only (zero cloud tokens)
+minsky daemon status                                 # PID, uptime, log tail
+minsky daemon logs                                   # tail -f daemon log
+minsky daemon stop                                   # SIGTERM → graceful drain
+
+# Killer-feature verbs:
+minsky transform [<path>]                            # one improvement session w/ before/after delta
+minsky solve <task-id>                               # one iteration of one task (openhands-pattern)
+minsky run --once --host <dir>                       # one iteration, ad-hoc
+
+# Introspection:
+minsky show tasks                                    # next-pick + per-priority counts
+minsky show findings                                 # self-diagnose with actor labels
+minsky list agents                                   # claude / devin / aider / openhands
+minsky config show                                   # ~/.minsky/config.json
 ```
 
-**`--daemon`** backgrounds the process (logs to `~/.minsky/daemon.log`, PID file at `~/.minsky/daemon.pid`). SIGHUP-immune — survives terminal close / IDE restart.
+Backward-compat flag-style entrypoints (`minsky --daemon`, `--once`, `--transform`, `--bash-runner`) and bare subcommands (`minsky stop / status / logs / doctor`) still work; the subcommand form above is canonical and will be the only form after 2026-06-26.
+
+**`minsky daemon start`** backgrounds the process (logs to `~/.minsky/daemon.log`, PID file at `~/.minsky/daemon.pid`). SIGHUP-immune — survives terminal close / IDE restart.
 
 **`--local`** forces local-only mode (`MINSKY_LLM_PROVIDER=local-only`). Uses the local agent (aider + ollama) from `~/.minsky/config.json`. Zero cloud tokens.
 

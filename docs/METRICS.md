@@ -176,7 +176,7 @@ _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 **Anchor:** Beyer et al., _SRE_ 2016, Ch. 4 (multi-region SLI aggregation = weighted mean of per-region availability, NOT simple average); rule #1 (don't reinvent — the ledger + the cross-host aggregator already exist in PRs #824/#827, this metric is the wrap)
 
-## session-converts-repo — % of `minsky --transform` sessions that applied at least one code change
+## session-converts-repo — % of `minsky transform` sessions that applied at least one code change
 
 _Updated: 2026-05-25T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshots/2026-05-25.json` · Milestone: M1.5_
 

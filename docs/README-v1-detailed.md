@@ -59,8 +59,8 @@ Minsky ships a single repo-rooted CLI: `pnpm minsky` (or `node novel/tick-loop/b
 
 ```bash
 minsky                               # autonomous run (foreground, SIGHUP-immune)
-minsky --daemon                      # background daemon (survives terminal close / IDE restart)
-minsky --daemon --hosts-dir ~/apps   # daemon across multiple repos
+minsky daemon start                      # background daemon (survives terminal close / IDE restart)
+minsky daemon start --hosts-dir ~/apps   # daemon across multiple repos
 minsky --local                       # local-only mode (zero cloud tokens)
 minsky --local --daemon              # local-only background daemon
 minsky status                        # PID, uptime, last 10 log lines
@@ -71,7 +71,7 @@ pnpm minsky doctor                   # health probe — claude / local-LLM / mod
 
 ### Daemon mode (`--daemon`)
 
-`minsky --daemon` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Windsurf/Cursor restart, and SSH disconnect. Guards against double-start (PID check).
+`minsky daemon start` backgrounds the process, logs to `~/.minsky/daemon.log`, writes a PID file, and exits immediately. The process is SIGHUP-immune — survives IDE terminal close, Windsurf/Cursor restart, and SSH disconnect. Guards against double-start (PID check).
 
 ### Local-only mode (`--local`)
 
@@ -121,7 +121,7 @@ runner from any folder and automatically watch the loop from outside.
 agentbrew sync --agentfile "$MINSKY_REPO/Agentfile.yaml"
 
 # Then, from any shell in any bootstrapped host:
-minsky --daemon --hosts-dir <repos-parent>   # background daemon across all repos
+minsky daemon start --hosts-dir <repos-parent>   # background daemon across all repos
 minsky --local --daemon              # same, but local models only (zero tokens)
 minsky status                        # PID + uptime + log tail
 minsky logs                          # follow the daemon log live

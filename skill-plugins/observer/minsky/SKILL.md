@@ -70,10 +70,10 @@ a single repo. When in doubt, ask.
 
 | User intent | Command |
 |---|---|
-| "run minsky on minsky" / "minsky on itself" | `minsky --daemon --host $MINSKY_REPO` (or wherever minsky is cloned) |
-| "run minsky here" (from inside a repo) | `minsky --daemon --host $(pwd)` |
-| "run minsky on ~/apps/foo" | `minsky --daemon --host ~/apps/foo` |
-| "run minsky on ALL repos" (explicit) | `minsky --daemon --hosts-dir <parent-dir>` |
+| "run minsky on minsky" / "minsky on itself" | `minsky daemon start --host $MINSKY_REPO` (or wherever minsky is cloned) |
+| "run minsky here" (from inside a repo) | `minsky daemon start --host $(pwd)` |
+| "run minsky on ~/apps/foo" | `minsky daemon start --host ~/apps/foo` |
+| "run minsky on ALL repos" (explicit) | `minsky daemon start --hosts-dir <parent-dir>` |
 | "dry run" | `minsky --no-live --once` (blocking OK for dry-run) |
 
 **Path resolution**: `minsky` (the PATH shim) auto-discovers the minsky
@@ -87,7 +87,7 @@ After starting, **immediately verify TWO things**:
 2. It targets the **correct folder** (check the `--host` or `--hosts-dir` in the process args)
 
 ```bash
-minsky --daemon --host <TARGET_REPO> 2>&1
+minsky daemon start --host <TARGET_REPO> 2>&1
 sleep 3
 # Verify: must show "running" AND the correct --host path
 minsky status 2>&1 | head -5
@@ -101,14 +101,14 @@ than the operator requested, STOP and restart with the correct `--host`:
 ```bash
 # WRONG: operator said "minsky on minsky" but daemon shows --hosts-dir
 minsky stop 2>&1 || true; rm -f ~/.minsky/daemon.pid
-minsky --daemon --host <CORRECT_REPO> 2>&1
+minsky daemon start --host <CORRECT_REPO> 2>&1
 ```
 
 If `minsky status` shows "stale PID file", clean up and retry:
 
 ```bash
 rm -f ~/.minsky/daemon.pid
-minsky --daemon --host <TARGET_REPO> 2>&1
+minsky daemon start --host <TARGET_REPO> 2>&1
 ```
 
 ## 2. Monitor loop (the core of this skill)
@@ -172,7 +172,7 @@ Every 2-3 iterations, give a **one-line** summary:
 minsky stop 2>&1 || true
 rm -f ~/.minsky/daemon.pid
 sleep 2
-minsky --daemon --host <TARGET_REPO> 2>&1
+minsky daemon start --host <TARGET_REPO> 2>&1
 sleep 3
 minsky status 2>&1 | head -3   # verify
 ```
@@ -191,7 +191,7 @@ If budget exhausted → **STOP** and jump to §5 (Swift-PR).
 
 | Pattern | Symptom | Fix |
 |---|---|---|
-| **Stale PID** | `minsky --daemon` says "already running" but status says "stale" | `rm -f ~/.minsky/daemon.pid` then retry |
+| **Stale PID** | `minsky daemon start` says "already running" but status says "stale" | `rm -f ~/.minsky/daemon.pid` then retry |
 | **Walker stuck on one host** | daemon.log shows same host for 10+ iterations | Per-host cap should be 3 (fixed 2026-05-18); if still stuck, restart daemon |
 | **Devin stdin panic** | `spawn-failed` at <5s, stderr "unexpected argument" | Fixed 2026-05-18 (`--prompt-file` instead of stdin). If seen, pull latest minsky and rebuild. |
 | **15min watchdog kills** | `spawn-failed` at exactly 900000ms | Devin iterations take 5-15min; watchdog is too aggressive. Known P0. Daemon auto-continues. |
@@ -382,7 +382,7 @@ Every command should complete in <30s or be run non-blocking:
 
 - `minsky status` — always fast (<2s). Safe to block.
 - `minsky stop` — fast (<5s). Safe to block.
-- `minsky --daemon` — returns immediately (daemon backgrounds). Safe.
+- `minsky daemon start` — returns immediately (daemon backgrounds). Safe.
 - `minsky --host X --once --no-live` — can take minutes. Run non-blocking or with a timeout.
 - `minsky --host X --once --live` — can take 5-15 min. NEVER block on this.
 - `tail -N ~/.minsky/daemon.log` — always fast. Safe.
@@ -458,7 +458,7 @@ After any change to `bin/minsky`, test BOTH states:
 minsky stop; rm -f ~/.minsky/daemon.pid   # daemon off
 minsky watch                               # must not crash
 minsky status                              # must not crash
-minsky --daemon --host $(pwd)              # start
+minsky daemon start --host $(pwd)              # start
 minsky watch                               # must render with data
 ```
 
@@ -500,9 +500,9 @@ cat /tmp/m1-ci-metrics/m1-metrics.json | python3 -m json.tool
 pnpm test                    # unit tests (fast)
 pnpm test:integration        # integration tests (slow, 120s timeout)
 pnpm test:m1-tdd             # M1 red-green acceptance tests
-pnpm m1:metrics              # which M1 measurements pass
-pnpm m1:observability        # which M1 tasks have observability gaps
-pnpm m1:coverage             # 6-layer composite coverage number
+`bin/minsky m1 metrics`              # which M1 measurements pass
+`bin/minsky m1 observability`        # which M1 tasks have observability gaps
+`bin/minsky m1 coverage`             # 6-layer composite coverage number
 ```
 
 ### Proactive healing — observe-and-fix is ONE action (rule #17 — iron, no exemption)
