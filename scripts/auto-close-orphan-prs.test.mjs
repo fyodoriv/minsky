@@ -1,4 +1,4 @@
-// Paired tests for `daemon-auto-close-orphan-prs.mjs`. Pure-function
+// Paired tests for `auto-close-orphan-prs.mjs`. Pure-function
 // tests over `extractTaskIdFromBranch`, `decideOrphanClose`, and
 // `executeOrphanCloses` with injected I/O seams (rule #2).
 
@@ -8,7 +8,7 @@ import {
   decideOrphanClose,
   executeOrphanCloses,
   extractTaskIdFromBranch,
-} from "./daemon-auto-close-orphan-prs.mjs";
+} from "./auto-close-orphan-prs.mjs";
 
 describe("extractTaskIdFromBranch", () => {
   test("strips known daemon-shaped prefixes (feat/fix/chore/docs/refactor/test)", () => {
@@ -31,7 +31,7 @@ describe("extractTaskIdFromBranch", () => {
   });
 });
 
-/** @returns {import("./daemon-auto-close-orphan-prs.mjs").OpenPrSnapshot} */
+/** @returns {import("./auto-close-orphan-prs.mjs").OpenPrSnapshot} */
 function pr(over = {}) {
   return {
     number: 100,
