@@ -1498,6 +1498,31 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-tick-loop-backoff-schedule.test.mjs
 
+  claude-hooks-installed:
+    # Tier 1 hook substrate must remain installed. Per
+    # `det-tier1-hook-infrastructure-claude-code-stop-and-posttooluse` (vision
+    # rule #10 ratchet) — once Tier 1 lands, any PR that removes
+    # `.claude/settings.json` or any required `.claude/hooks/*.sh` fails this
+    # gate. The script is pure-ish; tests use injected FS seams.
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement); Sitnik
+    # 2026 (Evil Martians "Stop writing rules in AGENTS.md"); Anthropic 2026
+    # (Claude Code hooks reference, code.claude.com/docs/en/hooks).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: claude-hooks-installed lint
+        run: node scripts/check-claude-hooks-installed.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-claude-hooks-installed.test.mjs
+
   machine-budget:
     # rule #10 ratchet applied to vision.md rule #15 / operator directive
     # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
@@ -1846,6 +1871,7 @@ jobs:
       - threat-model-section
       - cloud-agent-config-audit-matrix
       - tick-loop-backoff-schedule
+      - claude-hooks-installed
       - typecheck
       - user-story-security-section
       - vision-rule-13-non-task-anchors
@@ -1911,6 +1937,7 @@ jobs:
                    "${{ needs.threat-model-section.result }}" \
                    "${{ needs.cloud-agent-config-audit-matrix.result }}" \
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
+                   "${{ needs.claude-hooks-installed.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
                    "${{ needs.vision-rule-13-non-task-anchors.result }}" \
