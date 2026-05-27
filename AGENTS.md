@@ -362,6 +362,18 @@ If you're an agent and you're stuck:
 
 Do not loop. Do not try the same approach repeatedly. Per the constitution, "let it crash" — escalate visibly and continue.
 
+## Operator directive vocabulary (load-bearing translations)
+
+Some operator phrases carry MORE intent than their literal reading suggests. Misreading them produces a passive agent when an active one was wanted. The 2026-05-27 session pinned this set:
+
+- **"Monitor it" / "watch this for Nh"** — does **NOT** mean "sit passively and report at the end". It means: **actively continue the self-heal work in the background.** Snapshot state at intervals (recorder script under `.minsky/monitor-<date>/`), AND keep finding gaps, AND keep fixing them as PRs, AND keep updating skills/rules from observed lessons. A 9h "monitor" window should produce ≥3 PRs of incremental fixes, not zero. (Source: 2026-05-27 operator clarification after a 9h window produced only state observations — operator quote: *"when I said keep monitoring I meant also keep fixing gaps in background, update skills/rules and do that"*).
+- **"Implement all those gaps"** — every gap surfaced in the findings doc gets a PR, not just the top one. Investigative gaps (e.g. "qwen3-coder engagement") still get an action: capture more diagnostic data, file a P0 task with concrete fix-paths, or ship a targeted intervention. Never "filed as P2 follow-up" without a PR that closes the discoverable surface.
+- **"How is it?"** — quick honest status. Not "give me a full report". 3–5 sentences naming the green / yellow / red state per surface, with the most-load-bearing finding called out.
+- **"Fix all those issues"** — same shape as "implement all those gaps": cascade of PRs, each catching a more specific failure class than the previous (see #897 → #898 → #899 → #900 → #901 → #902 chain on 2026-05-27).
+- **"Easy & fast to detect"** — invariant + verdict + capture, in `scripts/self-diagnose.mjs` + `bin/minsky-run.sh` + `scripts/capture-failure.sh`. The pattern is now codified — every new failure class follows it.
+
+The translation rule: if the literal reading of an operator phrase would have the agent stop short of shipping a PR, the active reading is correct. When in doubt, **ship the PR, update the rule, then summarize**.
+
 ## `**Touches**:` field on task blocks (parallel-launch coordination)
 
 When the daemon runs in parallel mode (`pnpm minsky:setup --worker-id=N --workers-total=M`), each task block in `TASKS.md` may declare a `**Touches**: <glob>[, <glob>…]` field listing the file globs the task is expected to modify. The daemon's pre-spawn collision check (slice 3 of `daemon-parallel-worktree-launch`, see `novel/tick-loop/src/touches-glob.ts`) refuses to start a worker on a task whose globs overlap any open daemon PR's changed-file list — the second line of defense after `acquireTaskClaim` (slice 1).
