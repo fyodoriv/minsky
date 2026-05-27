@@ -362,16 +362,15 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
   },
   {
     id: "agent-launcher-parity",
-    label: "Agent-launcher parity — `bin/minsky --once` works under each backend",
-    formula:
-      "node scripts/launcher-parity-probe.mjs --backends=claude,devin,openhands,aider --json | jq '[.[] | select(.ok == true)] | length'",
-    unit: "count of passing backends (target 4 of 4)",
+    label: "Agent-launcher parity — backends contractually runnable today",
+    formula: "grep -c 'pendingExternalDep:\\s*null' scripts/lib/cloud-agent-config.mjs",
+    unit: "count of contractually-runnable backends (target 4 of 4)",
     freshnessBudgetMs: 7 * DAY_MS,
-    goal: "≥3 of 4 backends pass per week (one launcher allowed to flake — e.g. a model rate-limit — without dropping the criterion to red)",
+    goal: "4 of 4 backends in AGENT_MATRIX with `pendingExternalDep: null` (openhands + claude + devin + aider)",
     pivot:
       "<2 for ≥2 weeks → launcher abstraction is leaking backend-specific assumptions; halt agent-spawn work and re-architect the dispatcher",
     anchor:
-      "Liskov 1987 (substitutability principle — backends must be interchangeable at the spawn boundary); user-stories/008-per-task-backend-and-personas.md § Acceptance criteria; user-stories/014-launcher-agnostic-feature-parity.md.",
+      "Liskov 1987 (substitutability principle — backends must be interchangeable at the spawn boundary); user-stories/008-per-task-backend-and-personas.md § Acceptance criteria; user-stories/014-launcher-agnostic-feature-parity.md; `scripts/lib/cloud-agent-config.mjs` (the source-of-truth matrix).",
     milestone: "M1.9",
   },
   {

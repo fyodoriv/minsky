@@ -489,20 +489,23 @@ async function main() {
       }
     },
     "agent-launcher-parity": () => {
-      // Probe: count the agent backends listed in AGENT_MATRIX +
-      // the spawn-config builder. Until live A/B benchmarks land, the
-      // SUBSTRATE check is whether the dispatcher recognises all 4
-      // backends (openhands / claude / devin / aider) without crashing.
+      // Probe: count backends in AGENT_MATRIX with `pendingExternalDep:
+      // null` (i.e. contractually runnable today). The matrix at
+      // `scripts/lib/cloud-agent-config.mjs` is the source-of-truth
+      // for which agent runtimes Minsky supports — the spawn_agent.py
+      // dispatcher and the runtime probes both derive from it. Using
+      // the matrix here (not the dispatcher impl) measures the
+      // contract, not the snapshot.
       try {
         const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
-        const spawnAgent = resolve(repo, "scripts/spawn_agent.py");
-        if (!existsSync(spawnAgent)) return { value: 0, higherIsBetter: true };
-        const content = readFileSync(spawnAgent, "utf8");
-        let recognised = 0;
-        for (const backend of ["openhands", "claude", "devin", "aider"]) {
-          if (content.toLowerCase().includes(backend)) recognised += 1;
-        }
-        return { value: recognised, higherIsBetter: true };
+        const matrixPath = resolve(repo, "scripts/lib/cloud-agent-config.mjs");
+        if (!existsSync(matrixPath)) return { value: 0, higherIsBetter: true };
+        const content = readFileSync(matrixPath, "utf8");
+        // Count `pendingExternalDep: null` entries. The matrix is a
+        // structured JS export; this regex is robust to formatting
+        // because biome enforces canonical indentation.
+        const matches = content.match(/pendingExternalDep:\s*null/g) ?? [];
+        return { value: matches.length, higherIsBetter: true };
       } catch {
         return { value: 0, higherIsBetter: true };
       }
