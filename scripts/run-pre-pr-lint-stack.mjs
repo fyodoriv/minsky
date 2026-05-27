@@ -636,10 +636,17 @@ export const STACK_MANIFEST = Object.freeze([
     name: "metric-freshness",
     stages: ["full"],
     cmd: "node",
+    // Keep in lockstep with .github/workflows/ci.yml's `--expected` list
+    // AND `novel/dashboard-web/src/metrics.ts`'s SUCCESS_METRICS. When
+    // adding a new metric, edit all THREE places (the local stack here,
+    // the CI workflow's --expected arg, and the SUCCESS_METRICS array)
+    // in the same PR. Pre-2026-05-27 the local stack drifted behind CI
+    // for 10 metrics added in #893/#897 — every PR through auto-merge
+    // failed locally even though CI passed.
     args: [
       "scripts/check-metric-freshness.mjs",
       "--expected",
-      "loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput",
+      "loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput,cross-repo-pr-rate,fleet-stability-aggregated,session-converts-repo,baseline-delta-per-cycle,path-a-loc-novel-tree,install-success-rate,remote-task-submission-substrate,agent-launcher-parity,uninstall-residue-count,spawn-failure-rate-24h",
     ],
   },
   {

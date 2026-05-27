@@ -487,7 +487,15 @@ if [ "$MODE" = "setup" ]; then
   for f in $template_dir/$template_glob; do
     [ -f "$f" ] || continue
     target="$unit_dir/$(basename "$f")"
-    MINSKY_HOME="$ROOT" envsubst '${MINSKY_HOME}' < "$f" > "$target"
+    # envsubst whitelist: substitute BOTH ${MINSKY_HOME} (the operator's
+    # repo checkout, set above) AND ${HOME} (the operator's home dir).
+    # launchd substitutes ${HOME} for `Program` and `ProgramArguments`,
+    # but NOT for `StandardOutPath` / `StandardErrorPath` — so a plist
+    # left with literal `${HOME}/.minsky/auto-merge.log` causes launchd
+    # to create a directory literally named `${HOME}` inside the cwd
+    # (observed in operator's repo root, 2026-05-26: `${HOME}/.minsky/`
+    # tree appeared alongside the real `.minsky/`).
+    MINSKY_HOME="$ROOT" envsubst '${MINSKY_HOME} ${HOME}' < "$f" > "$target"
     rendered=$((rendered + 1))
   done
   ok "rendered $rendered unit-file template(s) into $unit_dir"

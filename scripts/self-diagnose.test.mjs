@@ -9,6 +9,7 @@ import {
   claudePrintTimeoutFrequencyInvariant,
   daemonInFlightPrCollisionInvariant,
   daemonIterationRuntimeInvariant,
+  daemonNoProgressRateInvariant,
   daemonNoopIterationRateInvariant,
   daemonPrLintPassRateInvariant,
   daemonPrStuckDirtyInvariant,
@@ -334,6 +335,102 @@ describe("daemonSpawnFailureRateInvariant", () => {
       ],
       windowSize: 3,
       maxFailures: 2,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("2/3");
+  });
+
+  it("does NOT fire on no-progress verdicts (those are the other invariant's domain)", async () => {
+    // Cross-invariant isolation: spawn-failure-rate counts only the
+    // spawn-failed verdict class. No-progress is a different bug class
+    // (model engagement, not spawn mechanics) caught by
+    // daemon-no-progress-rate. Mixing them under one invariant would
+    // produce a generic "something is broken" finding instead of two
+    // distinct ones with different fix paths.
+    const result = await daemonSpawnFailureRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "no-progress", timestampMs: T0 + 5 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 4 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 1 * 60_000 },
+      ],
+    })();
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("daemonNoProgressRateInvariant", () => {
+  const T0 = Date.parse("2026-05-27T00:00:00Z");
+
+  it("passes when there are no iterations yet", async () => {
+    const result = await daemonNoProgressRateInvariant({
+      recentVerdicts: async () => [],
+    })();
+    expect(result.id).toBe("daemon-no-progress-rate");
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when fewer than threshold of last-5 are no-progress", async () => {
+    const result = await daemonNoProgressRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "no-progress", timestampMs: T0 + 5 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 4 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 1 * 60_000 },
+      ],
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("FIRES when 3 of last 5 iterations are no-progress (default threshold)", async () => {
+    // Reproduces the 2026-05-27 9-hour-monitor pattern: 13/13 iterations
+    // exited 0 with one `ls -la` and no further work. Pre-fix, every
+    // iteration recorded verdict=validated and self-diagnose was green.
+    // Post-fix, those iterations record verdict=no-progress and THIS
+    // invariant fires within one supervisor cycle.
+    const result = await daemonNoProgressRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "no-progress", timestampMs: T0 + 5 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 4 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 1 * 60_000 },
+      ],
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.actor).toBe("operator");
+    expect(result.evidence).toContain("3/5");
+    expect(result.evidence).toContain("no progress");
+    expect(result.suggestedFix).toMatch(/under-engaging/);
+    expect(result.suggestedFix).toMatch(/\.minsky\/failures/);
+  });
+
+  it("does NOT fire on spawn-failed verdicts (cross-invariant isolation)", async () => {
+    const result = await daemonNoProgressRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "spawn-failed", timestampMs: T0 + 5 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 4 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 1 * 60_000 },
+      ],
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("respects custom windowSize + maxNoProgress", async () => {
+    const result = await daemonNoProgressRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "no-progress", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "no-progress", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 1 * 60_000 },
+      ],
+      windowSize: 3,
+      maxNoProgress: 2,
     })();
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
