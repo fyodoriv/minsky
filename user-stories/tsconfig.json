@@ -11,6 +11,7 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
+      "@minsky/budget-guard": ["../novel/budget-guard/src/index.ts"],
       "@minsky/mape-k-loop": ["../novel/mape-k-loop/src/index.ts"],
       "@minsky/notifier": ["../novel/adapters/notifier/src/index.ts"],
       "@minsky/prompt-optimizer": ["../novel/adapters/prompt-optimizer/src/index.ts"],
@@ -21,6 +22,7 @@
   "references": [
     { "path": "../novel/adapters/notifier" },
     { "path": "../novel/adapters/prompt-optimizer" },
+    { "path": "../novel/budget-guard" },
     { "path": "../novel/mape-k-loop" }
   ]
 }
