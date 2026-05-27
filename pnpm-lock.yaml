@@ -21,8 +21,8 @@ importers:
         specifier: 1.9.4
         version: 1.9.4
       '@biomejs/cli-linux-arm64-musl':
-        specifier: 1.9.4
-        version: 1.9.4
+        specifier: 2.4.15
+        version: 2.4.15
       '@biomejs/cli-linux-x64':
         specifier: 1.9.4
         version: 1.9.4
@@ -304,6 +304,12 @@ packages:
 
   '@biomejs/cli-linux-arm64-musl@1.9.4':
     resolution: {integrity: sha512-v665Ct9WCRjGa8+kTr0CzApU0+XXtRgwmzIf1SeKSGAv+2scAlW6JR5PMFo6FzqqZ64Po79cKODKf3/AAmECqA==}
+    engines: {node: '>=14.21.3'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@biomejs/cli-linux-arm64-musl@2.4.15':
+    resolution: {integrity: sha512-ZPcxznxm0pogHBLZhYntyR3sR+MrZjqJIKEr7ZqVen0Rl+P/4upVmfYXjftizi9RoqZntg33fv/1fbdhbYXpEQ==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
@@ -3105,6 +3111,9 @@ snapshots:
     optional: true
 
   '@biomejs/cli-linux-arm64-musl@1.9.4':
+    optional: true
+
+  '@biomejs/cli-linux-arm64-musl@2.4.15':
     optional: true
 
   '@biomejs/cli-linux-arm64@1.9.4':
