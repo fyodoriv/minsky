@@ -43,6 +43,11 @@ const REQUIRED_FILES = [
   { path: ".claude/hooks/post-edit.sh", kind: "script" },
   { path: ".claude/hooks/stop-gate.sh", kind: "script" },
   { path: ".claude/hooks/block-dangerous-bash.sh", kind: "script" },
+  // Tier 1 extensions (PR #911 cohort tasks 14-17):
+  { path: ".claude/hooks/block-vision-md-edit.sh", kind: "script" },
+  { path: ".claude/hooks/spec-driven-precondition.sh", kind: "script" },
+  { path: ".claude/hooks/worker-uses-tmp-worktree.sh", kind: "script" },
+  { path: ".claude/hooks/live-fire-smoke-post-edit.sh", kind: "script" },
 ];
 
 /**
