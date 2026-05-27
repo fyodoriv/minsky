@@ -15,8 +15,8 @@ importers:
         specifier: 2.4.15
         version: 2.4.15
       '@biomejs/cli-darwin-x64':
-        specifier: 1.9.4
-        version: 1.9.4
+        specifier: 2.4.15
+        version: 2.4.15
       '@biomejs/cli-linux-arm64':
         specifier: 1.9.4
         version: 1.9.4
@@ -298,6 +298,12 @@ packages:
 
   '@biomejs/cli-darwin-x64@1.9.4':
     resolution: {integrity: sha512-ngYBh/+bEedqkSevPVhLP4QfVPCpb+4BBe2p7Xs32dBgs7rh9nY2AIYUL6BgLw1JVXV8GlpKmb/hNiuIxfPfZg==}
+    engines: {node: '>=14.21.3'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@biomejs/cli-darwin-x64@2.4.15':
+    resolution: {integrity: sha512-/5KHXYMfSJs1fNXiX30xFtI8JcCFV6zaVVLxOa0M2sfqBKHkpQhRTv94yxQWxeTY2lzo2OuTlNvPC+hDQt2wcQ==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [darwin]
@@ -3119,6 +3125,9 @@ snapshots:
     optional: true
 
   '@biomejs/cli-darwin-x64@1.9.4':
+    optional: true
+
+  '@biomejs/cli-darwin-x64@2.4.15':
     optional: true
 
   '@biomejs/cli-linux-arm64-musl@1.9.4':
