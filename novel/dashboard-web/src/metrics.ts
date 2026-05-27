@@ -374,6 +374,30 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
     milestone: "M1.9",
   },
   {
+    // 2026-05-27 added — the spawn-failure-rate metric.
+    //
+    // Source: 2026-05-27 operator session — 30 consecutive iterations
+    // spawn-failed silently because `~/.minsky/config.json` had
+    // `local_llm_enabled: true` but the openhands shim still required
+    // `ANTHROPIC_API_KEY`. self-diagnose missed it because no invariant
+    // looked at iteration verdict distribution. New
+    // `daemon-spawn-failure-rate` invariant ships in the same PR; this
+    // metric is its quantitative counterpart so the dashboard surfaces
+    // the trend before the binary threshold fires.
+    id: "spawn-failure-rate-24h",
+    label: "Spawn-failure rate (last 24h) — count of `spawn-failed` iterations",
+    formula:
+      "find .minsky/experiment-store/cross-repo -name '*.jsonl' -mtime -1 -exec cat {} + | jq -s '[.[] | select(.verdict == \"spawn-failed\")] | length'",
+    unit: "count of spawn-failures",
+    freshnessBudgetMs: 1 * DAY_MS,
+    goal: "0 — every iteration should produce a usable spawn (validated / inconclusive / aborted-no-task are all fine; spawn-failed means the agent runtime is misconfigured)",
+    pivot:
+      "≥5 for ≥2 consecutive days → the daemon's runtime credentials / config are persistently broken; halt iteration work and fix the launchd-env / ollama-availability gap before resuming",
+    anchor:
+      "rule #6 (loud-crash > silent failure — spawn failures are silent because the supervisor's stdout writes to `.minsky/tick-loop.out.log` not the operator's terminal); paired with `daemon-spawn-failure-rate` invariant in `scripts/self-diagnose.mjs`.",
+    milestone: "M1.1",
+  },
+  {
     id: "uninstall-residue-count",
     label: "Clean uninstall — files left behind by `minsky uninstall`",
     formula:

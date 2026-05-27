@@ -256,11 +256,29 @@ def main() -> int:
         return 64
     api_key = _resolve_api_key(args.api_key_env)
     if api_key is None:
-        sys.stderr.write(
-            f"[openhands-spawn] missing API key: env var '{args.api_key_env}' is unset. "
-            f"Export it before spawning, e.g. `export {args.api_key_env}=sk-...`.\n"
-        )
-        return 64
+        # Local-LLM bypass — when `--base-url` points at a local endpoint
+        # (Ollama / LM Studio / vLLM), the API key is a no-op. LiteLLM
+        # accepts any non-empty string (or `"ollama"` literally) and the
+        # local server doesn't validate it. Skipping the check here is
+        # what makes `local_llm_enabled: true` in `~/.minsky/config.json`
+        # actually work — pre-fix, the operator had to set
+        # `ANTHROPIC_API_KEY=anything` as a workaround.
+        #
+        # Source: 2026-05-27 operator session — 30 consecutive iterations
+        # spawn-failed with "missing API key: ANTHROPIC_API_KEY unset"
+        # because the shim required the cloud-credential env var even
+        # when routing to a local model. user-stories/015 (local models
+        # are the default until we're stable) is the load-bearing rule.
+        if args.base_url:
+            api_key = "ollama"  # litellm sentinel for local endpoints
+        else:
+            sys.stderr.write(
+                f"[openhands-spawn] missing API key: env var '{args.api_key_env}' is unset. "
+                f"Either export it (`export {args.api_key_env}=sk-...`) for cloud models, "
+                f"OR pass `--base-url http://localhost:11434` for local Ollama / LM Studio "
+                f"(api key is then a no-op).\n"
+            )
+            return 64
 
     brief = brief_path.read_text(encoding="utf-8")
     baseline = _baseline_sha(repo_root)

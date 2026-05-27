@@ -10,7 +10,7 @@
 //   takes an exec seam; the CLI binding is the only I/O surface.
 
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = process.cwd();
@@ -393,6 +393,82 @@ function collectSessionConvertsRepo() {
  * @param {string} subtree  — relative path under repo root (e.g. "novel", "novel/cross-repo-runner")
  * @returns {{ value: number, higherIsBetter: boolean } | null}
  */
+/**
+ * Predicate: is this parsed JSONL record a spawn-failed verdict whose
+ * `ts` falls within the cutoff window? Returns false on any parse error
+ * or non-matching shape (defensive — the caller only cares about counts).
+ *
+ * @param {string} line
+ * @param {number} cutoffMs
+ * @returns {boolean}
+ */
+function isRecentSpawnFailure(line, cutoffMs) {
+  if (!line.trim()) return false;
+  try {
+    const r = JSON.parse(line);
+    if (r.verdict !== "spawn-failed") return false;
+    const ts = r.ts || r.iso_timestamp || r.timestamp;
+    if (!ts) return false;
+    const ms = Date.parse(ts);
+    return Number.isFinite(ms) && ms >= cutoffMs;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Count spawn-failed verdicts in one JSONL file with timestamp >= cutoff.
+ * Extracted to keep the inline collector under biome's cognitive-
+ * complexity ceiling.
+ *
+ * @param {string} filepath
+ * @param {number} cutoffMs
+ * @returns {number}
+ */
+function countSpawnFailuresInFile(filepath, cutoffMs) {
+  let content;
+  try {
+    content = readFileSync(filepath, "utf8");
+  } catch {
+    return 0;
+  }
+  return content.split("\n").filter((line) => isRecentSpawnFailure(line, cutoffMs)).length;
+}
+
+/**
+ * Spawn-failure-rate-24h metric collector. Counts `verdict: "spawn-failed"`
+ * records across all .jsonl files in `.minsky/experiment-store/cross-repo/`
+ * with `ts` within the last 24h. Returns `{value, higherIsBetter: false}`.
+ *
+ * Paired with `daemon-spawn-failure-rate` invariant in scripts/self-diagnose.mjs.
+ *
+ * @returns {{value: number, higherIsBetter: boolean}}
+ */
+function collectSpawnFailureRate24h() {
+  try {
+    const repo = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+    const dir = resolve(repo, ".minsky/experiment-store/cross-repo");
+    if (!existsSync(dir)) return { value: 0, higherIsBetter: false };
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    let count = 0;
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".jsonl")) continue;
+      count += countSpawnFailuresInFile(resolve(dir, f), cutoff);
+    }
+    return { value: count, higherIsBetter: false };
+  } catch {
+    return { value: 0, higherIsBetter: false };
+  }
+}
+
+/**
+ * Path-A LOC scoreboard collector — see `path-a-loc-novel-tree` metric
+ * in `SUCCESS_METRICS` for goal/pivot/anchor. JSDoc separated from the
+ * declaration because the spawn-failure helpers above moved between them.
+ *
+ * @param {string} subtree -- relative path under repo root (e.g. "novel")
+ * @returns {{ value: number, higherIsBetter: boolean } | null}
+ */
 function collectPathALoc(subtree) {
   // Use a shell with pipefail so the value is meaningful — if fd
   // finds nothing OR xargs / wc / awk fail, we return null rather
@@ -510,6 +586,7 @@ async function main() {
         return { value: 0, higherIsBetter: true };
       }
     },
+    "spawn-failure-rate-24h": () => collectSpawnFailureRate24h(),
     "uninstall-residue-count": () => {
       // Probe: that `bin/minsky uninstall` exists with the right shape.
       // Live measurement (running uninstall on a fixture host) is in the
