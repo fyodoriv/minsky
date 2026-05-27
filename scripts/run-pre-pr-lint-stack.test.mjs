@@ -77,7 +77,7 @@ describe("STACK_MANIFEST", () => {
       expect(Array.isArray(step.stages)).toBe(true);
       expect(step.stages.length).toBeGreaterThan(0);
       for (const s of step.stages) {
-        expect(s === "fast" || s === "full").toBe(true);
+        expect(s === "stop-gate" || s === "fast" || s === "full").toBe(true);
       }
     }
   });

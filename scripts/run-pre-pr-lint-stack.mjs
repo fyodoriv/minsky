@@ -130,7 +130,22 @@ function defaultRefTimestamp(ref) {
 }
 
 /**
- * @typedef {"fast" | "full"} Stage
+ * @typedef {"stop-gate" | "fast" | "full"} Stage
+ *
+ * Stages are nested supersets:
+ *   stop-gate ⊂ fast ⊂ full
+ *
+ * - **stop-gate** — the Claude Code Stop-hook subset. Target wall-clock ≤2s
+ *   warm cache. Cheap file-format + tasks-md + agents-md-coherence checks
+ *   only. NO typecheck, NO vitest, NO diff-context lints (which require
+ *   `git diff origin/main...HEAD` and can be slow / unreliable in agent
+ *   sessions). Wired into `.claude/hooks/stop-gate.sh`.
+ * - **fast** — the daemon pre-PR gate + pre-push lefthook. ~7s. Adds the
+ *   diff-relative rule checks (rule-2, rule-3, rule-6, rule-12, rule-17).
+ *   Closes ~80% of failure modes (per `daemon-pre-pr-lint-gate` Pivot).
+ * - **full** — the operator-side gate before pushing + CI's `--stage=full`
+ *   matrix expansion. ~35s+. Adds vitest, knip, supervisor-integration,
+ *   and the dormant config-cap lints.
  */
 
 /**
@@ -284,6 +299,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "threat-model-section",
       "cloud-agent-config-audit-matrix",
       "tick-loop-backoff-schedule",
+      "claude-hooks-installed",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -328,7 +344,7 @@ export const STACK_MANIFEST = Object.freeze([
     // `biome` job still runs whole-tree (`pnpm biome ci .`) so committed
     // biome debt is still surfaced — just not flapped onto every push.
     name: "biome",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "pnpm",
     args: ["biome", "ci", "--changed", "--since=origin/main", "--no-errors-on-unmatched", "."],
   },
@@ -351,14 +367,14 @@ export const STACK_MANIFEST = Object.freeze([
     // whole-tree — paying down that committed debt is the task's separate
     // step (c).
     name: "markdownlint",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/lint-md-diff.mjs"],
     env: { LINT_MD_DIFF_BASE: "origin/main" },
   },
   {
     name: "tasks-lint",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "npx",
     args: ["-y", "@tasks-md/lint@^0.7.0", "TASKS.md"],
   },
@@ -414,7 +430,7 @@ export const STACK_MANIFEST = Object.freeze([
   },
   {
     name: "no-hardcoded-user-paths",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-hardcoded-user-paths.mjs"],
   },
@@ -426,13 +442,13 @@ export const STACK_MANIFEST = Object.freeze([
   },
   {
     name: "agents-md-coherence",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-agents-md-coherence.mjs"],
   },
   {
     name: "rule-9-tasksmd-fields",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-rule-9-tasksmd-fields.mjs"],
   },
@@ -442,7 +458,7 @@ export const STACK_MANIFEST = Object.freeze([
     // which scorecard metric it moves. Ratchet pattern: 81 grandfathered
     // task ids at lint-introduction; new tasks MUST carry the field.
     name: "competitive-goal",
-    stages: ["fast", "full"],
+    stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-competitive-goal.mjs"],
   },
@@ -675,6 +691,17 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-tick-loop-backoff-schedule.mjs"],
+  },
+  {
+    // Tier 1 hook substrate must remain installed. Per
+    // `det-tier1-hook-infrastructure-claude-code-stop-and-posttooluse` (vision
+    // rule #10 ratchet) — once Tier 1 lands, any PR that removes
+    // `.claude/settings.json` or any required `.claude/hooks/*.sh` fails this
+    // gate. The script is pure-ish; tests use injected FS seams.
+    name: "claude-hooks-installed",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-claude-hooks-installed.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",
@@ -1015,7 +1042,7 @@ export function parseArgs(argv) {
       json = true;
       continue;
     }
-    const stageMatch = /^--stage=(fast|full)$/.exec(arg);
+    const stageMatch = /^--stage=(stop-gate|fast|full)$/.exec(arg);
     if (stageMatch !== null && stageMatch[1] !== undefined) {
       stage = /** @type {Stage} */ (stageMatch[1]);
       continue;
