@@ -122,21 +122,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- vision rule #1 (don't reinvent the wheel — GET, don't IMPLEMENT).    -->
 <!-- ===================================================================== -->
 
-- [ ] `det-no-x-checkbox-marking-in-tasks-md` — TASKS.md spec mandates completed tasks be REMOVED entirely (history lives in git log) — NEVER marked `[x]`. AGENTS.md §"How to claim and work a task" pins this verbatim. No deterministic enforcement today; agents periodically mark `[x]` instead of deleting, polluting the queue. Adopt `@tasks-md/lint` (npm package, 278 weekly downloads, MIT, designed exactly for this) — the "No completed tasks" rule flags `- [x]` lines as errors. Zero net-new code; just wire into pre-pr-lint and CI.
-  - **ID**: det-no-x-checkbox-marking-in-tasks-md
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, tasks-md, lint, adopt-upstream
-  - **Milestone**: M1
-  - **Competitive-goal**: drives task-queue hygiene → operator-friction-reduction (cosmetic but compounds: a queue with `[x]` marks costs the operator a re-read every time).
-  - **Surfaced-by**: 2026-05-27 audit; subagent b75cb8ad research finding (`@tasks-md/lint` is exact-match upstream, MIT, actively maintained); AGENTS.md §"How to claim and work a task" step 4 ("history lives in git log per the tasks.md spec").
-  - **Hypothesis**: wiring `npx @tasks-md/lint TASKS.md` into `pre-pr-lint --stage=fast` AND `.github/workflows/ci.yml` catches `[x]` regressions at commit time. The lint also enforces (free, same script): header format, priority order, unique IDs across files, valid blocker references, policy comments shape — six rules for one wire.
-  - **Success**: (1) `pre-pr-lint` runs `npx @tasks-md/lint TASKS.md` (zero-config call, exit 1 = fail). (2) Wired into ci.yml `needs:` aggregator. (3) CHANGELOG.md entry: "adopt @tasks-md/lint per vision rule #1 (don't reinvent — upstream solves it)". (4) Old custom rule `check-rule-9-tasksmd-fields.mjs` stays (rule-9-specific), but the `[x]`-detection part is delegated to @tasks-md/lint (no duplication; rule #10 ratchet pattern).
-  - **Pivot**: if `@tasks-md/lint` becomes unmaintained (current sole maintainer, 3 stars, low community — risk per subagent assessment), fork to `@minsky/tasks-md-lint` at the same commit SHA and pin in pnpm catalog; the API surface is tiny (1 CLI command).
-  - **Measurement**: `npx @tasks-md/lint TASKS.md` exits 0 on the current main; exits 1 on a deliberate `- [x] foo` injection; the failure message names the violating line.
-  - **Anchor**: vision rule #1 (don't reinvent — adopt upstream); tasksmd/tasks.md SPEC.md (2026); subagent b75cb8ad findings 2026-05-27.
-  - **Details**: add `@tasks-md/lint` to pnpm devDependencies via `pnpm add -D @tasks-md/lint`; add to `STACK_MANIFEST` in `run-pre-pr-lint-stack.mjs` under fast stage; wire into ci.yml; document in AGENTS.md under "What never to commit" section.
-  - **Files**: `package.json`, `pnpm-lock.yaml`, `scripts/run-pre-pr-lint-stack.mjs`, `.github/workflows/ci.yml`, `AGENTS.md`.
-  - **Acceptance**: a deliberate `- [x]` injection in a PR fails the gate within 5s; the failure message names the file + line.
-
 - [ ] `det-vision-md-protected-from-non-mape-k-edits` — AGENTS.md §"What never to commit" pins: "Edits to `vision.md` from a working task — only the MAPE-K loop's specification-monitor process amends the behavioral spec". No deterministic enforcement today; any agent can edit vision.md and have it land via squash-merge. A diff-relative lint fails if a PR touches `vision.md` AND the PR description doesn't contain a verbatim `MAPE-K spec-monitor authorized` block (or the touching commit's author is the spec-monitor identity).
   - **ID**: det-vision-md-protected-from-non-mape-k-edits
   - **Tags**: p0, milestone-m1, deterministic-enforcement, constitution-protection, mape-k, spec-monitor
@@ -212,21 +197,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Details**: ~80 LOC Node; regex-based first pass (fast); opt-out comment scanner; allowlist file for existing violations during rollout (`.no-hardcoded-timeouts-allowlist.txt`); tests cover all cases.
   - **Files**: `scripts/check-no-hardcoded-timeouts.mjs` (new), `scripts/check-no-hardcoded-timeouts.test.mjs` (new), `.no-hardcoded-timeouts-allowlist.txt` (new), `scripts/run-pre-pr-lint-stack.mjs`.
   - **Acceptance**: a deliberate `setTimeout(60000, ...)` in a new `novel/*` file fails the gate; the same with `// dynamic-timeout-ok: brief sleep for X` passes; `setTimeout(dynamicTimeouts.spawnWatchdog(), ...)` passes.
-
-- [ ] `det-cli-integration-test-coverage-bin-minsky-subcommands` — AGENTS.md §"3b. Integration tests for CLI features (reinforcement)" pins: "Every CLI-facing feature (`bin/minsky` subcommands, `minsky watch`, `minsky status`, any operator-visible UX) must ship with an integration test in `test/integration/`". No enforcement today; a `bin/minsky` subcommand can land without a paired integration test. Lint walks `bin/minsky` switch statements (or registry) and asserts every subcommand has a corresponding `test/integration/<subcommand>.test.ts`.
-  - **ID**: det-cli-integration-test-coverage-bin-minsky-subcommands
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, rule-3b, integration-tests, cli-discipline
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `install-success-rate` (M1.3) — every CLI subcommand without an integration test is a regression-waiting-to-happen (per AGENTS.md §3b literally).
-  - **Surfaced-by**: 2026-05-27 audit; AGENTS.md §"3b. Integration tests for CLI features" verbatim; subagent 37a10a7a finding (no upstream — custom required).
-  - **Hypothesis**: a script that grep-extracts subcommand names from `bin/minsky` (or the centralised CLI registry under `novel/cli/`) and verifies each has a `test/integration/<verb>.test.ts` (or `<verb>-<subverb>.test.ts` for `daemon start`) catches missing tests at PR time.
-  - **Success**: (1) `scripts/check-cli-integration-test-coverage.mjs` exists; reads the canonical subcommand list (parsed from `bin/minsky` source); fails with the missing test paths if any subcommand lacks coverage. (2) Wired into `pre-pr-lint --stage=full`. (3) Companion test (15+ cases). (4) Backfill PR fills the gaps as P1 sibling.
-  - **Pivot**: if `bin/minsky` is a Bash dispatcher today (not a TypeScript registry), parse the switch/case via a shell-AST approach OR temporarily use a manifest file `bin/minsky.subcommands.txt` that the script reads — pivot tracked as P2 follow-up.
-  - **Measurement**: `node scripts/check-cli-integration-test-coverage.mjs` exits 0 against the current main if every subcommand has its integration test; exits 1 with the missing test paths otherwise.
-  - **Anchor**: AGENTS.md §"3b. Integration tests for CLI features"; subagent 37a10a7a (no upstream); rule #3 (test-first); rule #10 (deterministic enforcement).
-  - **Details**: ~100 LOC Node; subcommand extraction depends on `bin/minsky` shape (script handles both bash dispatcher AND TS registry forms); existence check on `test/integration/<verb>.test.ts`; allowlist for known aliases.
-  - **Files**: `scripts/check-cli-integration-test-coverage.mjs` (new), `scripts/check-cli-integration-test-coverage.test.mjs` (new), `scripts/run-pre-pr-lint-stack.mjs`, sibling P1 `det-cli-integration-test-coverage-backfill-sweep`.
-  - **Acceptance**: a deliberate new `bin/minsky foo` subcommand without `test/integration/foo.test.ts` fails the gate; adding the test passes; aliasing `foo` → `bar` (where `bar` already has a test) passes via the allowlist.
 
 - [ ] `det-changelog-md-update-required-on-code-changes` — repo has `CHANGELOG.md`; no rule today requires a PR touching code files to also touch CHANGELOG.md OR have a `chore(no-changelog):` / `docs:` commit prefix. Result: many PRs land code changes without changelog entries, eroding the user-facing release notes. Diff-relative lint: if a PR touches files matching `novel/**/*.ts`, `bin/**/*`, `scripts/**/*.{mjs,py}` (i.e. shippable code), require either (a) `CHANGELOG.md` is in the diff, OR (b) the PR commit message starts with `docs:` / `chore:` / `test:` (no user-facing impact).
   - **ID**: det-changelog-md-update-required-on-code-changes
@@ -319,21 +289,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `.claude/hooks/pre-edit-spec-check.sh` (new), `.claude/settings.json` (extend PreToolUse), `scripts/build_brief.py` (export MINSKY_TASK_ID), tests under `tests/`.
   - **Acceptance**: a simulated session with 4+ novel/*.ts edits and no spec file triggers `exit 2`; same with spec file passes; operator session (no `MINSKY_TASK_ID`) bypasses.
   - **Unblocked-by-merge**: det-tier1-hook-infrastructure shipped 2026-05-27 (this PR superseded by merge)
-
-- [ ] `det-omc-mode-and-persona-tag-gating` — AGENTS.md pins two persona/mode rules: (a) "OMC mode" — tasks tagged `multi-domain`/`coordination` should run `/team`; tagged `parallel`/`refactor` should run `/ultrawork`; tagged `relentless`/`verify-required` should run `/ralph`; everything else `/autopilot`. (b) "Investor / growth-hacker personas only when Tags includes business/growth/revenue/customer/pricing". Neither enforced today. Lint walks `TASKS.md` and either (a) confirms tagged tasks have a `**OMC-Mode**:` declaration matching the canonical mapping, OR (b) warns if a brief reaching a worker for an untagged task carries `product-manager` / `analyst` persona content (transcript-walk equivalent of rule (b)).
-  - **ID**: det-omc-mode-and-persona-tag-gating
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, omc-mode, persona-discipline, tag-discipline
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `task-persona-cost-efficiency` — running investor personas on engineering tasks wastes tokens; running `/autopilot` on a multi-domain coordination task underspecifies. The lint pins the mapping mechanically.
-  - **Surfaced-by**: 2026-05-27 audit; AGENTS.md §"Choosing an OMC mode for a task" + §"Investor / growth-hacker personas" verbatim; no current enforcement.
-  - **Hypothesis**: a TASKS.md walker that parses each task's `**Tags**:` field against the canonical mode-mapping table (declared in AGENTS.md §"Choosing OMC mode") catches misalignments. Persona-tag gating is enforced via a `scripts/build_brief.py` extension: if a task's `**Tags**:` doesn't include any business/growth/etc keyword, the brief omits investor-persona sections.
-  - **Success**: (1) `scripts/check-omc-mode-tag-alignment.mjs` exists; reads the canonical mode-mapping table (from AGENTS.md, parsed once); fails if a tagged task lacks a matching `**OMC-Mode**:` field OR has a mismatched mode. (2) `scripts/build_brief.py` extended: a method `includeInvestorPersonas(tags)` returns False unless tags ∩ {business, growth, revenue, customer, pricing} is non-empty. (3) Brief overlay test asserts investor sections are absent on a non-tagged task and present on a tagged one. (4) Companion lint test (12+ cases).
-  - **Pivot**: if `**OMC-Mode**:` field-declaration is too high-friction for task authors, drop it — auto-derive the mode from `**Tags**:` via the mapping table. The lint then just verifies the mapping function returns the expected output for each existing task.
-  - **Measurement**: `node scripts/check-omc-mode-tag-alignment.mjs` exits 0 against a TASKS.md state where every tagged task has the right mode (or no explicit mode field if auto-derive is the pivot); exits 1 otherwise. Brief-overlay test asserts investor personas absent from a non-business-tagged task.
-  - **Anchor**: AGENTS.md §"Choosing an OMC mode" + §"Investor / growth-hacker personas" verbatim; vision rule #10.
-  - **Details**: ~100 LOC Node for the TASKS.md walker; ~30 LOC Python for the build_brief.py extension; tests in both Node + Python.
-  - **Files**: `scripts/check-omc-mode-tag-alignment.mjs` (new), `scripts/check-omc-mode-tag-alignment.test.mjs` (new), `scripts/build_brief.py`, `tests/test_build_brief.py`, `scripts/run-pre-pr-lint-stack.mjs`.
-  - **Acceptance**: a task tagged `parallel` without `**OMC-Mode**: /ultrawork` (or equivalent in the pivot auto-derive shape) fails the gate; a task tagged `business` triggers investor personas in the brief; a task NOT tagged business does not.
 
 - [ ] `det-worker-uses-tmp-worktree-not-main-checkout` — AGENTS.md §"Pipeline-managed repos — dedicated worktree pattern" pins: "When you (the agent) are doing a multi-PR batch on this repo, do NOT work in the main checkout. Other agents `git checkout` the main repo dir at unpredictable times and wipe your uncommitted edits." Verbatim. The discipline is `git worktree add /tmp/minsky-<short-task-name>`. No enforcement today. A PreToolUse hook on Bash matching `git checkout *` / `git switch *` / any `cd` that takes the agent OUT of `/tmp/minsky-*` and INTO the main checkout fires `exit 2` with the canonical worktree-add command.
   - **ID**: det-worker-uses-tmp-worktree-not-main-checkout
