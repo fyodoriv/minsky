@@ -38,6 +38,9 @@ ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cd "$PROJECT_DIR"
 
+# Parse transcript_path so the tool-call-discipline check below can read it.
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || echo "")
+
 if [ "$ACTIVE" = "true" ]; then
   # Already in forced-continuation loop — run advisory, never block.
   # The agent has seen the error once and either (a) is genuinely stuck
@@ -46,6 +49,34 @@ if [ "$ACTIVE" = "true" ]; then
   # counter-productive.
   pnpm pre-pr-lint --stage=stop-gate 2>&1 || true
   exit 0
+fi
+
+# Sub-check #1 — tool-call-discipline (cheap, fast, transcript-walking).
+# Catches the "Let me examine X" prose-without-tool-call failure mode
+# documented in AGENTS.md §"Tool-call discipline". Runs BEFORE the
+# heavier pre-pr-lint subset because (a) it's faster, (b) if it fires
+# the agent's next turn needs to ATTACH a tool call, not fix a lint —
+# better to surface that first.
+if [ -n "$TRANSCRIPT_PATH" ]; then
+  if ! node scripts/check-tool-call-discipline.mjs --transcript="$TRANSCRIPT_PATH" >&2; then
+    cat >&2 <<'EOF'
+
+stop-gate hook blocked: tool-call-discipline violation.
+
+The last assistant turn contains prose like "Let me examine X" / "Now I'll
+do Y" with NO attached tool call. Per AGENTS.md §"Tool-call discipline",
+every reply must include a tool call (terminal, file_editor, task_tracker,
+or finish). Many agent frameworks (OpenHands SDK, qwen-coder bindings)
+treat a prose-only reply as the conversation-end signal and terminate
+the turn — producing zero commits / zero PRs / zero pushes.
+
+Use the `think` tool if you only need to deliberate. Use `Bash` /
+`Read` / `Edit` / `Write` to actually do something. If the work is
+genuinely complete, end with a terminal signal (PR URL, "task complete",
+"shipped").
+EOF
+    exit 2
+  fi
 fi
 
 # First-pass: run the gate. Block on failure.

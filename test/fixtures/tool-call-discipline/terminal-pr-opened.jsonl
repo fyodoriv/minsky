@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Pick the next task from TASKS.md and ship it."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"gh pr create ..."}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"https://github.com/fyodoriv/minsky/pull/913"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"PR opened at https://github.com/fyodoriv/minsky/pull/913 — let me check the CI status before we end the turn."}]}}
