@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatLine, formatSpan } from "./minsky-logs.mjs";
+import { formatLine, formatSpan, prefixSourceTag, resolveSources } from "./minsky-logs.mjs";
 
 describe("formatSpan — iteration", () => {
   it("formats a failed iteration with FAIL tag, task id, provider, reason", () => {
@@ -213,5 +213,56 @@ describe("formatLine — self-diagnose actor labels (operator directive 2026-05-
     expect(out).toContain("self-diagnose");
     expect(out).toContain("2 finding(s)");
     expect(out).toContain("👤 2 needs-operator");
+  });
+});
+
+describe("prefixSourceTag — interleaved-stream tag prefix", () => {
+  it("prepends a [source-tag] in front of a pre-formatted line", () => {
+    const out = prefixSourceTag("tick-loop:err", "\x1b[33m", "hello world");
+    expect(out).toContain("[tick-loop:err]");
+    expect(out).toContain("hello world");
+    // Tag appears BEFORE the formatted content (left-to-right reading)
+    expect(out.indexOf("[tick-loop:err]")).toBeLessThan(out.indexOf("hello world"));
+  });
+
+  it("preserves the formatted content unchanged (idempotent on the body)", () => {
+    const body = "12:34:56 ERR something happened";
+    const out = prefixSourceTag("auto-merge", "\x1b[32m", body);
+    expect(out).toContain(body);
+  });
+});
+
+describe("resolveSources — CLI flag routing", () => {
+  it("returns default sources (tick-loop only) when no args", () => {
+    const { sources, mode } = resolveSources([]);
+    expect(mode).toBe("default");
+    expect(sources.every((s) => s.tag.startsWith("tick-loop"))).toBe(true);
+  });
+
+  it("returns the full set when --all is passed", () => {
+    const { sources, mode } = resolveSources(["--all"]);
+    expect(mode).toBe("all");
+    expect(sources.some((s) => s.tag === "auto-merge")).toBe(true);
+    expect(sources.some((s) => s.tag === "watchdog")).toBe(true);
+    expect(sources.some((s) => s.tag === "tick-loop:err")).toBe(true);
+  });
+
+  it("--source <name> filters to exact-or-prefix matches", () => {
+    // `tick-loop` should match both `tick-loop:err` and `tick-loop:out`
+    const result = resolveSources(["--source", "tick-loop"]);
+    expect(result.mode).toBe("filter");
+    expect(result.sources.map((s) => s.tag).sort()).toEqual(["tick-loop:err", "tick-loop:out"]);
+  });
+
+  it("--source <name> matches an exact single tag", () => {
+    const result = resolveSources(["--source", "auto-merge"]);
+    expect(result.mode).toBe("filter");
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0]?.tag).toBe("auto-merge");
+  });
+
+  it("--source with no matches falls back to default", () => {
+    const result = resolveSources(["--source", "nonexistent-source-name"]);
+    expect(result.mode).toBe("default");
   });
 });

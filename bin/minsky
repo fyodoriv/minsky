@@ -885,7 +885,14 @@ case "${1:-}" in
     exit 0
     ;;
   logs)
-    # `minsky logs` — tail the daemon stdout log (default).
+    # `minsky logs` — tail every operator-relevant log stream (tick-loop
+    # out + err, auto-merge, daemon, watchdog, runany) with full ANSI
+    # colors and a `[source-tag]` prefix per line. Routes through
+    # `scripts/minsky-logs.mjs --all` since 2026-05-27 (operator
+    # directive "ensure all logs commands have full colors & tags") —
+    # the previous shape was a raw `tail -f $MINSKY_DAEMON_LOG`, which
+    # showed only the legacy `daemon.log` and stripped all context.
+    #
     # `minsky logs --failures [host] [--latest|--count N]` — list/show
     # failure-capture artifacts written by the capture pattern (PR #866).
     #
@@ -900,6 +907,20 @@ case "${1:-}" in
       _run_tail_failures "$@"
       exit $?
     fi
+    # `--source <name>` and `--all` flags pass through to the node
+    # formatter; `--help` does too. Default (no args) = the formatter's
+    # `--all` mode, which is the most operator-useful default.
+    _logs_script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+    _logs_script="$_logs_script_dir/../scripts/minsky-logs.mjs"
+    if [ -f "$_logs_script" ]; then
+      if [ "$#" -eq 0 ]; then
+        exec node "$_logs_script" --all
+      fi
+      exec node "$_logs_script" "$@"
+    fi
+    # Fallback: scripts/minsky-logs.mjs not present (very old checkout
+    # or fresh `npx minsky init` substrate). Preserve the legacy
+    # raw-tail behavior so the operator at least sees something.
     if [ -f "$MINSKY_DAEMON_LOG" ]; then
       exec tail -f "$MINSKY_DAEMON_LOG"
     fi
