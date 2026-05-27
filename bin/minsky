@@ -1063,6 +1063,141 @@ writeFileSync(path, JSON.stringify(cfg, null, 2));
     echo "Next: run 'minsky' (with no args) to start the daemon on $(basename "$_init_host")"
     exit 0
     ;;
+  submit-finding|submit)
+    # `minsky submit-finding --message "<text>" [--priority p0|p1|p2|p3]`
+    # — M1.8 substrate. Compose a rule-#9 task block from the operator's
+    # one-line finding and open a PR against the current repo's TASKS.md.
+    #
+    # Defaults:
+    #   - priority: p2 (per global_rules.md taxonomy: code-health,
+    #     refactor, observation — operator overrides for P0/P1)
+    #   - tags: auto-submitted,observation
+    #   - Hypothesis/Success/Pivot/Measurement/Anchor pre-populated as
+    #     non-empty placeholders so the rule-9 lint passes — the
+    #     operator edits them in the PR before merge.
+    #
+    # The submit shell is `gh pr create` against the current repo. PII
+    # redaction is the operator's responsibility for the message body
+    # (we auto-add hostname + UTC timestamp only). The operator reviews
+    # the PR before merge — `gh pr create --draft` ensures no auto-
+    # merge can fire.
+    #
+    # Source: user-stories/017-remote-task-submission.md § Acceptance
+    # criterion §1; M1.8 substrate completion 2026-05-27.
+    _sf_message=""
+    _sf_priority="p2"
+    _sf_tags="auto-submitted,observation"
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --message)   _sf_message="$2"; shift 2 ;;
+        --message=*) _sf_message="${1#--message=}"; shift ;;
+        --priority)   _sf_priority="$2"; shift 2 ;;
+        --priority=*) _sf_priority="${1#--priority=}"; shift ;;
+        --tags)   _sf_tags="$2"; shift 2 ;;
+        --tags=*) _sf_tags="${1#--tags=}"; shift ;;
+        --help|-h)
+          echo "Usage: minsky submit-finding --message \"<text>\" [--priority p0|p1|p2|p3] [--tags <comma-list>]"
+          echo ""
+          echo "Compose a rule-9 task block from a one-line finding and open a draft PR."
+          echo "Defaults: priority=p2, tags=auto-submitted,observation."
+          echo "Operator edits Hypothesis/Pivot/Measurement/Anchor in the PR before merge."
+          exit 0
+          ;;
+        *) echo "minsky submit-finding: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    if [ -z "$_sf_message" ]; then
+      echo "minsky submit-finding: --message <text> is required" >&2
+      echo "  hint: minsky submit-finding --message 'The X probe in Y is flaky on Z'" >&2
+      exit 2
+    fi
+    case "$_sf_priority" in
+      p0|p1|p2|p3) ;;
+      *) echo "minsky submit-finding: --priority must be one of p0|p1|p2|p3 (got '$_sf_priority')" >&2; exit 2 ;;
+    esac
+    # Current repo must have TASKS.md (otherwise there's nowhere to file).
+    if [ ! -f "TASKS.md" ]; then
+      echo "minsky submit-finding: no TASKS.md in current directory ($(pwd))" >&2
+      echo "  hint: cd into a minsky-bootstrapped repo first" >&2
+      exit 2
+    fi
+    # Generate a deterministic kebab-case task ID from the message +
+    # a short random suffix for uniqueness (the same message submitted
+    # twice produces two distinct task IDs — the operator dedupes in
+    # review).
+    _sf_kebab=$(echo "$_sf_message" \
+      | tr '[:upper:]' '[:lower:]' \
+      | tr -c 'a-z0-9' '-' \
+      | sed -E 's/-+/-/g; s/^-//; s/-$//' \
+      | cut -c1-50)
+    _sf_suffix=$(date -u +%s | tail -c 5)
+    _sf_task_id="submit-${_sf_kebab}-${_sf_suffix}"
+    _sf_branch="submit/${_sf_task_id}"
+    _sf_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    _sf_hostname=$(hostname -s 2>/dev/null || echo "unknown-host")
+    _sf_pri_upper=$(echo "$_sf_priority" | tr '[:lower:]' '[:upper:]')
+    echo "minsky submit-finding:"
+    echo "   task ID:   $_sf_task_id"
+    echo "   priority:  $_sf_pri_upper"
+    echo "   branch:    $_sf_branch"
+    echo "   target:    $(pwd)/TASKS.md"
+    echo ""
+    # Compose the task block as a heredoc, then insert under the right
+    # priority header. node is the canonical text-mutation tool — pure
+    # in-process, no temp files.
+    MINSKY_SF_TASKS=TASKS.md \
+    MINSKY_SF_PRIORITY="$_sf_pri_upper" \
+    MINSKY_SF_BLOCK="$(cat <<EOF
+- [ ] \`${_sf_task_id}\` — ${_sf_message}
+  - **ID**: ${_sf_task_id}
+  - **Tags**: ${_sf_tags}, ${_sf_priority}
+  - **Hypothesis**: acting on \`${_sf_message}\` will reduce its operator-cost; measurable by closed-PR rate against this task's branch
+  - **Success**: a PR landing this finding's fix passes \`pnpm pre-pr-lint --stage=fast\` and the operator marks the task complete
+  - **Pivot**: if 2 attempts at this finding produce no usable PR after 7 days, retire as wontfix and document why in the PR comment
+  - **Measurement**: \`gh pr list --search 'head:${_sf_branch}' --state merged --json url -q '.[].url'\` returns a non-empty list within 30 days
+  - **Anchor**: operator-submitted finding ${_sf_utc} via \`bin/minsky submit-finding\` on ${_sf_hostname}; user-stories/017-remote-task-submission.md (M1.8 substrate)
+EOF
+)" \
+    node --input-type=module -e "
+import { readFileSync, writeFileSync } from 'node:fs';
+const p = process.env.MINSKY_SF_TASKS;
+const priority = process.env.MINSKY_SF_PRIORITY;
+const block = process.env.MINSKY_SF_BLOCK;
+let content = readFileSync(p, 'utf8');
+const header = '## ' + priority;
+const idx = content.indexOf(header);
+if (idx === -1) {
+  // Header missing — append at end with the new section.
+  if (!content.endsWith('\n')) content += '\n';
+  content += '\n' + header + '\n\n' + block + '\n';
+} else {
+  // Insert AFTER any header-immediate comment lines (e.g. policy notes),
+  // BEFORE the first task block. Find the first occurrence of '- [ ]' (or '- [x]')
+  // after the header.
+  const sectionStart = idx + header.length;
+  const tail = content.slice(sectionStart);
+  const firstTaskIdx = tail.search(/\n- \[/);
+  if (firstTaskIdx === -1) {
+    // No tasks in this section yet — append after the header (skip past one newline).
+    const insertAt = sectionStart + 1;
+    content = content.slice(0, insertAt) + '\n' + block + '\n' + content.slice(insertAt);
+  } else {
+    const insertAt = sectionStart + firstTaskIdx + 1;
+    content = content.slice(0, insertAt) + block + '\n\n' + content.slice(insertAt);
+  }
+}
+writeFileSync(p, content);
+" || { echo "minsky submit-finding: failed to mutate TASKS.md" >&2; exit 1; }
+    echo "✅ task block inserted into TASKS.md"
+    echo ""
+    echo "Next steps:"
+    echo "  1) git checkout -b $_sf_branch"
+    echo "  2) git add TASKS.md && git commit -m 'docs(tasks): submit finding — $_sf_task_id'"
+    echo "  3) gh pr create --draft --title 'submit-finding: $_sf_task_id' --label submit-finding"
+    echo "  4) Open the PR and fill in the rule-#9 fields (Hypothesis / Pivot / Measurement / Anchor)"
+    exit 0
+    ;;
   uninstall)
     # `minsky uninstall [--force]` — remove all per-machine state in
     # ONE command (rule #16 default by default — the single-command

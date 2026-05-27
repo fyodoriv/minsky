@@ -34,8 +34,25 @@ import { describe, expect, test } from "vitest";
 const REPO_ROOT = join(import.meta.dirname, "..");
 
 describe("user-story 017 — remote task submission (M1.8) substrate", () => {
-  test("bin/minsky exists (the dispatcher hosts the future submit-finding subcommand)", () => {
+  test("bin/minsky exists and has the submit-finding subcommand wired (M1.8 substantive)", () => {
     expect(existsSync(join(REPO_ROOT, "bin/minsky"))).toBe(true);
+    const binMinsky = readFileSync(join(REPO_ROOT, "bin/minsky"), "utf8");
+    expect(binMinsky).toMatch(/^\s+submit-finding\|submit\)/m);
+  });
+
+  test("submit-finding handler requires --message (no silent default) and emits rule-9 fields", () => {
+    const binMinsky = readFileSync(join(REPO_ROOT, "bin/minsky"), "utf8");
+    expect(binMinsky).toMatch(/--message <text> is required/);
+    // All 5 rule-9 fields must appear in the composed heredoc.
+    expect(binMinsky).toMatch(/\*\*Hypothesis\*\*: acting on/);
+    expect(binMinsky).toMatch(/\*\*Success\*\*: a PR landing this finding's fix/);
+    expect(binMinsky).toMatch(/\*\*Pivot\*\*: if 2 attempts/);
+    // The bin/minsky source has `\`gh pr list` (escaped backtick inside
+    // a bash heredoc inside a variable assignment) — match the
+    // measurement field's content without requiring the exact backtick
+    // escaping shape.
+    expect(binMinsky).toMatch(/\*\*Measurement\*\*:.*gh pr list/);
+    expect(binMinsky).toMatch(/\*\*Anchor\*\*: operator-submitted finding/);
   });
 
   test("scripts/self-diagnose.mjs has invariants whose findings would be remote-submission inputs", () => {
