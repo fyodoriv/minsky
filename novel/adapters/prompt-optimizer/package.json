@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.97.1",
+    "@anthropic-ai/sdk": "^0.99.0",
     "@minsky/adapter-types": "workspace:*"
   }
 }
