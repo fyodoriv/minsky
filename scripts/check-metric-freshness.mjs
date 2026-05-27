@@ -284,29 +284,106 @@ function truncate(s, n) {
 // pins the clock for hermetic re-execution; defaults to `Date.now()`.
 
 /**
+ * Parse the `--expected id1,id2,...` value into a clean string[].
+ * Empty / whitespace-only segments are dropped.
+ *
+ * @param {string} raw
+ * @returns {string[]}
+ */
+function parseExpectedList(raw) {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * @typedef {{ input: string, expected: string[] | null, now: number | null, expectedFromSuccessMetrics: boolean }} ParsedArgs
+ */
+
+/**
+ * Dispatch table: flag → handler that mutates args + returns the
+ * number of additional argv slots consumed. Cuts cognitive complexity
+ * compared to an if/else-if chain (biome's noExcessiveCognitiveComplexity
+ * counts every branch).
+ *
+ * @type {Record<string, (args: ParsedArgs, next: string | undefined) => number>}
+ */
+const FLAG_HANDLERS = {
+  "--input": (args, next) => {
+    if (next !== undefined) args.input = next;
+    return 1;
+  },
+  "--expected": (args, next) => {
+    args.expected = parseExpectedList(next ?? "");
+    return 1;
+  },
+  "--expected-from-success-metrics": (args) => {
+    args.expectedFromSuccessMetrics = true;
+    return 0;
+  },
+  "--now": (args, next) => {
+    args.now = Number(next);
+    return 1;
+  },
+};
+
+/**
  * @param {string[]} argv
+ * @returns {ParsedArgs}
  */
 function parseArgs(argv) {
-  /** @type {{ input: string, expected: string[] | null, now: number | null }} */
-  const args = { input: "docs/METRICS.md", expected: null, now: null };
+  /** @type {ParsedArgs} */
+  const args = {
+    input: "docs/METRICS.md",
+    expected: null,
+    now: null,
+    expectedFromSuccessMetrics: false,
+  };
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--input") args.input = argv[++i] ?? args.input;
-    else if (a === "--expected") {
-      const v = argv[++i] ?? "";
-      args.expected = v
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    } else if (a === "--now") args.now = Number(argv[++i]);
+    const flag = argv[i];
+    if (flag === undefined) continue;
+    const handler = FLAG_HANDLERS[flag];
+    if (handler) i += handler(args, argv[i + 1]);
   }
   return args;
+}
+
+/**
+ * Load the canonical SUCCESS_METRICS ids from the compiled dashboard
+ * package — single source of truth for the metric-freshness gate.
+ * Pre-2026-05-27 the same list was hardcoded in three places (this
+ * script's `--expected` callers in run-pre-pr-lint-stack.mjs + CI YAML
+ * + a JSON shortcut fixture), drifting independently. The
+ * `--expected-from-success-metrics` flag replaces hardcoded callers
+ * with a single import that can't drift from the TS source. Mirrors
+ * the same `dist/metrics.js` import strategy used by
+ * `scripts/metrics-render.mjs` (rule #1).
+ *
+ * @returns {Promise<string[]>}
+ */
+async function loadSuccessMetricIds() {
+  const { fileURLToPath } = await import("node:url");
+  const { resolve: resolvePath } = await import("node:path");
+  const scriptDir = fileURLToPath(new URL(".", import.meta.url));
+  const metricsUrl = new URL(
+    `file://${resolvePath(scriptDir, "../novel/dashboard-web/dist/metrics.js")}`,
+  );
+  const { SUCCESS_METRICS } = await import(metricsUrl.href);
+  return /** @type {readonly {id: string}[]} */ (SUCCESS_METRICS).map((m) => m.id);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const { readFile } = await import("node:fs/promises");
   const markdown = await readFile(args.input, "utf8");
+  // --expected-from-success-metrics: import the canonical id list from
+  // the compiled dashboard package instead of a hardcoded CLI arg. The
+  // two flags are mutually exclusive (--expected wins if both are set,
+  // for explicit-override use cases in tests).
+  if (args.expected === null && args.expectedFromSuccessMetrics) {
+    args.expected = await loadSuccessMetricIds();
+  }
   /** @type {CheckInput} */
   const input =
     args.expected !== null
