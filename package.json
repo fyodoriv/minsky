@@ -1,14 +1,47 @@
 {
   "name": "minsky",
-  "version": "0.0.0",
-  "private": true,
-  "description": "An integration distribution for autonomous Claude Code on Max5.",
+  "version": "0.1.0-rc.0",
+  "description": "Autonomous coding agent — runs itself on any git repo via `npx minsky init`.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
   },
   "packageManager": "pnpm@9.12.0",
+  "bin": {
+    "minsky": "./bin/minsky"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "distribution/",
+    "lefthook.yml",
+    "AGENTS.md",
+    "vision.md",
+    "TASKS.md",
+    "MILESTONES.md",
+    "INSTALL.md",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fyodoriv/minsky.git"
+  },
+  "homepage": "https://github.com/fyodoriv/minsky#readme",
+  "bugs": {
+    "url": "https://github.com/fyodoriv/minsky/issues"
+  },
+  "keywords": [
+    "autonomous",
+    "agent",
+    "coding-agent",
+    "ci",
+    "developer-tools",
+    "automation",
+    "openhands",
+    "claude-code",
+    "devin"
+  ],
   "scripts": {
     "prepare": "tsc -b --force && node scripts/install-lefthook-best-effort.mjs && node scripts/check-toolchain.mjs",
     "lint": "biome check .",
