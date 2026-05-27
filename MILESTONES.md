@@ -1,6 +1,6 @@
 # Milestones
 
-Minsky's roadmap. Each milestone is a ship-gate: done when every exit criterion is met and independently verified. Milestones are sequential — M2 builds on M1, M3 on M2 — but tasks within a milestone can parallelize.
+This document is the canonical roadmap for Minsky. Each milestone is a ship-gate: done when every exit criterion is met and independently verified. Milestones are sequential — M2 builds on M1, M3 on M2 — but tasks within a milestone can parallelize.
 
 **North star**: a developer attaches Minsky to any git repo with one command, runs it with one command, and it measurably outperforms doing the same work manually or with any competing autonomous coding tool — with proof.
 

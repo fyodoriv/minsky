@@ -137,21 +137,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `package.json`, `pnpm-lock.yaml`, `scripts/run-pre-pr-lint-stack.mjs`, `.github/workflows/ci.yml`, `AGENTS.md`.
   - **Acceptance**: a deliberate `- [x]` injection in a PR fails the gate within 5s; the failure message names the file + line.
 
-- [ ] `det-ui-tasks-default-p0-p1-not-p2-p3` — operator directive 2026-05-27: "every user-facing CLI surface defaults to P0-P1 priority — never P2-P3" (AGENTS.md §"All user interface is P0-P1 (by definition)"). No deterministic enforcement today; agents periodically file UI tasks at P2/P3. A lint scans every task block under `## P2` / `## P3` for UI/UX/CLI/dashboard/operator-friction tags AND keyword matches in the description (e.g. "operator", "`bin/minsky`", "`pnpm minsky:`", "`--help`", "dashboard", "Watch"), and fails if any match without an explicit deferral block (`**Deferred-because**:` field with ≥3-char reason).
-  - **ID**: det-ui-tasks-default-p0-p1-not-p2-p3
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, ux, priority-discipline, operator-directive
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `install-success-rate` and `operator-friction-score` (M1.3) — UI tasks at P2 are operator friction; the lint pulls them forward.
-  - **Surfaced-by**: 2026-05-27 operator directive verbatim in AGENTS.md §"All user interface is P0-P1 (by definition)"; PR #908 backfilled the rule but did not add the lint.
-  - **Hypothesis**: a TASKS.md walker that finds every task block under `## P2` or `## P3`, checks each for UI-shaped tags or keywords, and fails if any matches without an explicit `**Deferred-because**:` field catches misclassifications at PR time. Existing P2/P3 violations are batched into a one-time backfill PR (filed as sibling `ui-tasks-priority-backfill-sweep`).
-  - **Success**: (1) `scripts/check-ui-tasks-priority.mjs` exists; parses TASKS.md, walks P2/P3 sections, applies tag + keyword match (tag list and keyword list both extracted from AGENTS.md §"All UI is P0-P1"); fails with the offending task IDs + suggested promotion. (2) Wired into `pre-pr-lint --stage=full`. (3) Companion test (15+ cases). (4) Acceptable opt-out: `**Deferred-because**: <reason ≥3 chars>` field on the task block; tested in the suite.
-  - **Pivot**: if the keyword match has unacceptable false-positive rate (>5% of P2/P3 tasks), narrow the keyword list to ONLY operator-facing surfaces (`bin/minsky`, `pnpm minsky:`, dashboard URLs, watch widgets) and drop generic words like "operator" / "user".
-  - **Measurement**: `node scripts/check-ui-tasks-priority.mjs` exits 0 against a TASKS.md where every UI-tagged task is in P0/P1 OR carries `**Deferred-because**:`; exits 1 against the current TASKS.md backfill state until `ui-tasks-priority-backfill-sweep` lands.
-  - **Anchor**: AGENTS.md §"All user interface is P0-P1 (by definition)" (operator directive 2026-05-27); vision rule #10; subagent b75cb8ad finding "no existing tool validates task keywords against priority levels — custom required".
-  - **Details**: pure-function TASKS.md parser (already exists as `parseTasksMd` in `scripts/check-rule-9-tasksmd-fields.mjs` — reuse); tag list `["p2", "p3", "ux", "cli", "dashboard", "watch", "operator-ux", "minsky-supervisor"]`; keyword list explicit in script; `**Deferred-because**:` opt-out parser.
-  - **Files**: `scripts/check-ui-tasks-priority.mjs` (new), `scripts/check-ui-tasks-priority.test.mjs` (new), `scripts/run-pre-pr-lint-stack.mjs`, sibling task `ui-tasks-priority-backfill-sweep` (filed by the same PR as P1).
-  - **Acceptance**: a PR adding a UI-tagged task to P2/P3 without `**Deferred-because**:` fails the gate; failure message names the task ID + the canonical promotion or deferral fix.
-
 - [ ] `det-vision-md-protected-from-non-mape-k-edits` — AGENTS.md §"What never to commit" pins: "Edits to `vision.md` from a working task — only the MAPE-K loop's specification-monitor process amends the behavioral spec". No deterministic enforcement today; any agent can edit vision.md and have it land via squash-merge. A diff-relative lint fails if a PR touches `vision.md` AND the PR description doesn't contain a verbatim `MAPE-K spec-monitor authorized` block (or the touching commit's author is the spec-monitor identity).
   - **ID**: det-vision-md-protected-from-non-mape-k-edits
   - **Tags**: p0, milestone-m1, deterministic-enforcement, constitution-protection, mape-k, spec-monitor
@@ -212,21 +197,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Details**: ~80 LOC Node script using `fast-glob`; opt-out via `// no-test:` comment scanner; `--allow-existing-violations` flag reads from `.colocation-allowlist.txt`; tests cover the allowlist, opt-out, normal paths.
   - **Files**: `scripts/check-test-colocation.mjs` (new), `scripts/check-test-colocation.test.mjs` (new), `.colocation-allowlist.txt` (new — initial backfill list), `scripts/run-pre-pr-lint-stack.mjs`, sibling P1 `det-test-colocation-backfill-sweep`.
   - **Acceptance**: a deliberate new `novel/cross-repo-runner/src/foo.ts` without `foo.test.ts` fails the gate; adding the test passes; adding `// no-test: pure type re-exports` to the file passes.
-
-- [ ] `det-filename-casing-cardinal-md-files` — AGENTS.md §"Filename casing" pins: vision.md lowercase, AGENTS.md / TASKS.md / ARCHITECTURE.md / LICENSE / README.md uppercase, everything else kebab-case lowercase. No deterministic enforcement today; nothing prevents a `Vision.md` or `tasks.md` file from landing. A glob-walker lint at repo root + `docs/` asserts the expected casing for the cardinal files, and fails on any other top-level `*.md` that isn't lowercase-kebab.
-  - **ID**: det-filename-casing-cardinal-md-files
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, filename-conventions, low-stakes
-  - **Milestone**: M1
-  - **Competitive-goal**: protects the load-bearing-filename property — `scripts/check-agents-md-coherence.mjs` and 84 other scripts grep for `vision.md` literally. A case-variant breaks every downstream consumer silently.
-  - **Surfaced-by**: 2026-05-27 audit; subagent fadee2e4 finding ("None of these tools enforce mixed conventions without custom logic" — Biome's `useFilenamingConvention` is camelCase-only style); AGENTS.md §"Filename casing" verbatim.
-  - **Hypothesis**: a small Node script that reads a pinned allowlist of `{filename: casing}` mappings and walks the repo root + `docs/` against it catches case-variants at PR time. The allowlist is short (~13 entries); maintenance cost is one line per new cardinal file.
-  - **Success**: (1) `scripts/check-filename-casing.mjs` exists; pins `["vision.md", "AGENTS.md", "TASKS.md", "ARCHITECTURE.md", "LICENSE", "README.md", "MILESTONES.md", "CHANGELOG.md", "CONTRIBUTING.md", "METRICS.md", "DEPRECATED.md", "INSTALL.md", "research.md"]`; fails if any case-variant exists OR any other root-level `*.md` is not kebab-case-lowercase. (2) Wired into `pre-pr-lint --stage=fast`. (3) Companion test (10+ cases).
-  - **Pivot**: if the kebab-case-lowercase rule has false positives (e.g. `THREAT-MODEL.md` exists as a convention for a per-package file), narrow the rule to ONLY the explicit allowlist + a documented exception list; do NOT escalate to per-directory rules until clear need.
-  - **Measurement**: `node scripts/check-filename-casing.mjs` exits 0 on current main; exits 1 if `Vision.md` or `Tasks.md` or any non-kebab-case root `*.md` exists.
-  - **Anchor**: AGENTS.md §"Filename casing"; subagent fadee2e4 finding (no upstream tool handles mixed conventions — custom required); UNIX convention (lowercase) + ALL-CAPS convention (standard spec files like LICENSE).
-  - **Details**: ~40 LOC Node; reads allowlist, scans `fs.readdirSync('.')` + `fs.readdirSync('docs/')`; checks each `*.md` against allowlist OR kebab-case-lowercase regex.
-  - **Files**: `scripts/check-filename-casing.mjs` (new), `scripts/check-filename-casing.test.mjs` (new), `scripts/run-pre-pr-lint-stack.mjs`.
-  - **Acceptance**: a deliberate rename of `vision.md` to `Vision.md` (or addition of `MyDoc.md` at root) fails the gate; suggested-fix output shows the canonical path.
 
 - [ ] `det-no-hardcoded-timeouts-novel-and-bin` — AGENTS.md §"14b. Dynamic settings (no hardcoded timeouts)" pins: "All timeouts, intervals, thresholds, and resource limits must be **dynamically computed** from actual iteration history... never hardcoded". No enforcement today; agents periodically write `setTimeout(60000, ...)` literals. A lint walks `novel/**/*.ts` and `bin/**/*.{ts,mjs,sh}` and fails on any `setTimeout(N, ...)` / `setInterval(N, ...)` / `await sleep(N)` where N is a numeric literal AND N > 100 (the threshold below which it's clearly a debouncer, not a timeout).
   - **ID**: det-no-hardcoded-timeouts-novel-and-bin
@@ -364,21 +334,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `.claude/hooks/pre-edit-spec-check.sh` (new), `.claude/settings.json` (extend PreToolUse), `scripts/build_brief.py` (export MINSKY_TASK_ID), tests under `tests/`.
   - **Acceptance**: a simulated session with 4+ novel/*.ts edits and no spec file triggers `exit 2`; same with spec file passes; operator session (no `MINSKY_TASK_ID`) bypasses.
   - **Unblocked-by-merge**: det-tier1-hook-infrastructure shipped 2026-05-27 (this PR superseded by merge)
-
-- [ ] `det-doc-why-first-paragraph-every-cardinal-md` — AGENTS.md §"Documentation rules" pins: "Every doc starts with one paragraph answering 'why does this file exist?'". No enforcement today. A lint walks the cardinal `*.md` files (vision.md, AGENTS.md, README.md, MILESTONES.md, ARCHITECTURE.md, etc. — same allowlist as `det-filename-casing`) and asserts the first non-frontmatter, non-heading paragraph contains either the literal phrase "this file" / "this doc" / "this document" / "this is" / equivalent. Cheap heuristic but catches the entire class of "no opening summary" failures.
-  - **ID**: det-doc-why-first-paragraph-every-cardinal-md
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, docs-discipline, low-stakes
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `operator-onboarding-time-to-first-task` — every cardinal doc without a "why" paragraph costs new operators (or new agent sessions) extra context-loading time.
-  - **Surfaced-by**: 2026-05-27 audit; AGENTS.md §"Documentation rules" verbatim; no current enforcement.
-  - **Hypothesis**: a parser that extracts the first non-frontmatter, non-heading paragraph of each cardinal `*.md` file and regex-matches against the why-phrase set catches the entire "no opening summary" class with low false-positive rate (cardinal docs are stable; once they pass, they keep passing).
-  - **Success**: (1) `scripts/check-doc-why-paragraph.mjs` exists; reads the same allowlist as `det-filename-casing`; extracts each file's first paragraph; matches against `(this (file|doc|document) (exists|is|describes|explains|defines)|the (canonical|definitive) (runbook|spec|guide))`; fails with file:line otherwise. (2) Wired into `pre-pr-lint --stage=full`. (3) Companion test (10+ cases).
-  - **Pivot**: if the regex is too restrictive for legitimate doc-opening styles (e.g. README.md starting with a logo / badge block before any prose), allow a 3-line grace period — the regex matches anywhere in the first 3 paragraphs, not strictly the first.
-  - **Measurement**: `node scripts/check-doc-why-paragraph.mjs` exits 0 against current main (assuming the docs are compliant; if not, the initial pass identifies the gaps for backfill); exits 1 on any cardinal doc lacking the why-phrase.
-  - **Anchor**: AGENTS.md §"Documentation rules" verbatim; reader-priority-docs skill (`.claude/skills/reader-priority-docs/SKILL.md`); subagent b75cb8ad (no upstream — niche, custom required).
-  - **Details**: ~60 LOC Node; markdown frontmatter parser (gray-matter or inline); paragraph extractor; regex matcher; precise error messages with the canonical example.
-  - **Files**: `scripts/check-doc-why-paragraph.mjs` (new), `scripts/check-doc-why-paragraph.test.mjs` (new), `scripts/run-pre-pr-lint-stack.mjs`.
-  - **Acceptance**: a deliberate rewrite of a cardinal doc that removes the why-paragraph fails the gate; adding it back passes; the test fixtures cover the 8 cardinal docs.
 
 - [ ] `det-omc-mode-and-persona-tag-gating` — AGENTS.md pins two persona/mode rules: (a) "OMC mode" — tasks tagged `multi-domain`/`coordination` should run `/team`; tagged `parallel`/`refactor` should run `/ultrawork`; tagged `relentless`/`verify-required` should run `/ralph`; everything else `/autopilot`. (b) "Investor / growth-hacker personas only when Tags includes business/growth/revenue/customer/pricing". Neither enforced today. Lint walks `TASKS.md` and either (a) confirms tagged tasks have a `**OMC-Mode**:` declaration matching the canonical mapping, OR (b) warns if a brief reaching a worker for an untagged task carries `product-manager` / `analyst` persona content (transcript-walk equivalent of rule (b)).
   - **ID**: det-omc-mode-and-persona-tag-gating
@@ -1110,7 +1065,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Milestone**: M1
   - **Competitive-goal**: shrinks Minsky LOC by ~3K (the competitive-benchmark package). The scorecard moves from executable to static markdown — same `swe-bench-verified-resolve-rate`, `autonomous-merge-rate`, etc. visible to readers, lower per-iteration overhead (no `bin/minsky competitive` CLI in the daemon's PATH).
   - **Hypothesis**: the M1.10 milestone is met (the corpus shape gate is satisfied). The corpus doesn't need to be executable anymore — static markdown at `competitors/scorecard.md` is the right surface for a once-per-quarter refresh cadence. The `competitor-research` skill already supports writing to markdown.
-  - **Success**: `competitors/scorecard.md` exists with the same content shape as today's `bin/minsky competitive --json | jq`. `bin/minsky competitive` subcommand removed. The `competitor-research` skill (already updated 2026-05-24 to use ask_human.md) continues to update individual `competitors/<id>.md` files.
+  - **Success**: `competitors/scorecard.md` exists with the same content shape as today's `bin/minsky competitive --json | jq`. `bin/minsky competitive` subcommand removed. The `competitor-research` skill (already updated 2026-05-24 to use ask-human.md) continues to update individual `competitors/<id>.md` files.
   - **Pivot**: if the scorecard needs to be live (vendor numbers update weekly, not quarterly), keep the corpus.ts + scorecard.html generator and only delete the CLI subcommand.
   - **Measurement**: `test -f competitors/scorecard.md` returns 0; `bin/minsky --help | grep -c competitive` returns 0.
   - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 10.
@@ -1197,7 +1152,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) tick-loop directory is gone. (2) `minsky` binstub invokes bash skeleton. (3) launchd/systemd units use bash. (4) Pnpm typecheck + test green. (5) Live smoke fresh ledger. (6) Scoreboard ≤10K.
   - **Risk**: high. Multi-month effort if done conservatively. Mitigations: each migration is its own PR; the launchd/systemd flip is reversible via a single env var; revert path is `git revert` of the final deletion PR.
 
-- [ ] `competitor-add-auto-code-rover` — research AutoCodeRover (AutoCodeRoverSG/auto-code-rover, 3.1k★, STALE April 2025); produce `competitors/auto-code-rover.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-auto-code-rover` — research AutoCodeRover (AutoCodeRoverSG/auto-code-rover, 3.1k★, STALE April 2025); produce `competitors/auto-code-rover.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-auto-code-rover
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
@@ -1208,7 +1163,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/auto-code-rover.md && grep -c '^## Post-mortem' competitors/auto-code-rover.md` ≥ 1.
   - **Anchor**: rule #1; AutoCodeRover paper arXiv:2404.05427 ISSTA 2024 (Zhang et al.); `https://github.com/AutoCodeRoverSG/auto-code-rover`.
 
-- [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-pr-agent
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1219,7 +1174,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/pr-agent.md && grep -c '^## Five pivot questions' competitors/pr-agent.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/qodo-ai/pr-agent`.
 
-- [ ] `competitor-deepen-cursor-agent` — apply Five Pivot Questions framework to Cursor Background Agents (commercial); deepen `competitors/cursor-agent.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-cursor-agent` — apply Five Pivot Questions framework to Cursor Background Agents (commercial); deepen `competitors/cursor-agent.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-cursor-agent
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1230,7 +1185,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/cursor-agent.md` ≥ 1.
   - **Anchor**: rule #1; Cursor docs at `cursor.com`; the Cursor 0.50 background-agents launch post.
 
-- [ ] `competitor-add-autogpt` — research AutoGPT (Significant-Gravitas/AutoGPT, 184.5k★, alive); produce `competitors/autogpt.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-autogpt` — research AutoGPT (Significant-Gravitas/AutoGPT, 184.5k★, alive); produce `competitors/autogpt.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-autogpt
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1241,7 +1196,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/autogpt.md && grep -c '^## Five pivot questions' competitors/autogpt.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/Significant-Gravitas/AutoGPT`; AutoGPT 2026 platform docs.
 
-- [ ] `competitor-add-open-interpreter` — research Open Interpreter (openinterpreter/open-interpreter, 63.6k★, semi-stale Feb 2026); produce `competitors/open-interpreter.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-open-interpreter` — research Open Interpreter (openinterpreter/open-interpreter, 63.6k★, semi-stale Feb 2026); produce `competitors/open-interpreter.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-open-interpreter
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
@@ -1252,7 +1207,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `gh api repos/openinterpreter/open-interpreter --jq .pushed_at`; days since > 180 ⇒ post-mortem mode.
   - **Anchor**: rule #1; `https://github.com/openinterpreter/open-interpreter`.
 
-- [ ] `competitor-add-continue-dev` — research Continue.dev (continuedev/continue, 33.4k★, alive); produce `competitors/continue-dev.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-continue-dev` — research Continue.dev (continuedev/continue, 33.4k★, alive); produce `competitors/continue-dev.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-continue-dev
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1263,7 +1218,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/continue-dev.md && grep -c '^## Five pivot questions' competitors/continue-dev.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/continuedev/continue`; continue.dev docs.
 
-- [ ] `competitor-deepen-ralph-wiggum-official` — apply Five Pivot Questions framework to Anthropic's official Ralph Wiggum plugin (in-tree dependency); deepen `competitors/ralph-wiggum-official.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-ralph-wiggum-official` — apply Five Pivot Questions framework to Anthropic's official Ralph Wiggum plugin (in-tree dependency); deepen `competitors/ralph-wiggum-official.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-ralph-wiggum-official
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency
@@ -1274,7 +1229,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/ralph-wiggum-official.md` ≥ 1.
   - **Anchor**: rule #1; Anthropic's claude-code/plugins/ralph-wiggum directory; Geoffrey Huntley's "Ralph technique" blog post.
 
-- [ ] `competitor-deepen-codex-cli` — apply Five Pivot Questions framework to OpenAI Codex CLI (openai/codex, 85.2k★, alive); deepen `competitors/codex-cli.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-codex-cli` — apply Five Pivot Questions framework to OpenAI Codex CLI (openai/codex, 85.2k★, alive); deepen `competitors/codex-cli.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-codex-cli
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1285,7 +1240,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `gh api repos/openai/codex --jq .stargazers_count` ≥ 80000; `grep -c '^## Five pivot questions' competitors/codex-cli.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/openai/codex`; OpenAI Codex announcement post.
 
-- [ ] `competitor-deepen-openhands` — apply Five Pivot Questions framework to OpenHands (OpenHands/OpenHands, 74.7k★, alive, in-progress dependency adoption); deepen `competitors/openhands.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-openhands` — apply Five Pivot Questions framework to OpenHands (OpenHands/OpenHands, 74.7k★, alive, in-progress dependency adoption); deepen `competitors/openhands.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-openhands
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-in-progress
@@ -1311,7 +1266,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `novel/tick-loop/src/llm-invocation.ts` (stderr capture + rate-limit pattern match), `novel/tick-loop/src/budget-paused-claude.ts` (new — pure state-transition function), `novel/tick-loop/src/budget-paused-claude.test.ts` (new), `novel/cross-repo-runner/src/host-loop.ts` (recognize `budget-paused-claude` verdict), `novel/cross-repo-runner/src/host-loop.test.ts` (test the verdict), `bin/tick-loop.mjs` (wire the resetAt into sleep computation).
   - **Acceptance**: (1) `pnpm vitest run novel/tick-loop/src/budget-paused-claude.test.ts` passes; (2) `pnpm typecheck` clean; (3) Live-fire: when the OPERATOR's claude session is rate-limited (verified by `echo x | claude --print` returning the "hit your limit" message), `pnpm minsky:setup` running for ≥1 iteration produces a `budget-paused-claude` span in the log within 5 min, the supervisor's PID exits cleanly OR the tick-loop visibly idles (no new strategic-pick spans for the duration until reset), and `pnpm minsky:status` reflects the state; (4) when the operator's claude session recovers (or the reset wall passes), the next tick fires a real iteration without operator intervention.
 
-- [ ] `competitor-add-factory` — research Factory.ai's OSS facade (Factory-AI/factory, 906★, commercial-with-OSS-CLI); produce `competitors/factory.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-factory` — research Factory.ai's OSS facade (Factory-AI/factory, 906★, commercial-with-OSS-CLI); produce `competitors/factory.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-factory
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, commercial
@@ -1322,7 +1277,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/factory.md && grep -c '^## Five pivot questions' competitors/factory.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/factory-ai/factory`; Factory's "Code Droid: A Technical Report" (factory.ai/news/code-droid-technical-report); Factory GA announcement.
 
-- [ ] `competitor-add-smol-developer` — research Smol Developer (smol-ai/developer, 12.2k★, DEAD since April 2024); produce `competitors/smol-developer.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-smol-developer` — research Smol Developer (smol-ai/developer, 12.2k★, DEAD since April 2024); produce `competitors/smol-developer.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-smol-developer
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
@@ -1333,7 +1288,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/smol-developer.md && grep -c '^## Post-mortem' competitors/smol-developer.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/smol-ai/developer`.
 
-- [ ] `competitor-add-gpt-engineer` — research GPT-Engineer (AntonOsika/gpt-engineer, 55.2k★, ARCHIVED 2025-05); produce `competitors/gpt-engineer.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-gpt-engineer` — research GPT-Engineer (AntonOsika/gpt-engineer, 55.2k★, ARCHIVED 2025-05); produce `competitors/gpt-engineer.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-gpt-engineer
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
@@ -1344,7 +1299,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/gpt-engineer.md && grep -c '^## Post-mortem' competitors/gpt-engineer.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/AntonOsika/gpt-engineer` (archived); Lovable.dev announcement post.
 
-- [ ] `competitor-add-continuous-claude` — research Continuous Claude (AnandChowdhary/continuous-claude, 1.3k★, alive); produce `competitors/continuous-claude.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-continuous-claude` — research Continuous Claude (AnandChowdhary/continuous-claude, 1.3k★, alive); produce `competitors/continuous-claude.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-continuous-claude
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, ralph-loop
@@ -1355,7 +1310,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/continuous-claude.md && grep -c '^## Five pivot questions' competitors/continuous-claude.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/AnandChowdhary/continuous-claude`; the Ralph-loop blog post that inspired it (Geoffrey Huntley).
 
-- [ ] `competitor-deepen-goose` — apply Five Pivot Questions framework to Goose (aaif-goose/goose, 45.8k★, alive, AAIF/Linux Foundation); deepen `competitors/goose.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-goose` — apply Five Pivot Questions framework to Goose (aaif-goose/goose, 45.8k★, alive, AAIF/Linux Foundation); deepen `competitors/goose.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-goose
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1366,7 +1321,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `gh api repos/aaif-goose/goose --jq .stargazers_count` ≥ 40000; `grep -c '^## Five pivot questions' competitors/goose.md` ≥ 1.
   - **Anchor**: rule #1; AAIF announcement post; `https://github.com/aaif-goose/goose`.
 
-- [ ] `competitor-deepen-langgraph` — apply Five Pivot Questions framework to LangGraph (langchain-ai/langgraph, 32.8k★, alive, framework); deepen `competitors/langgraph.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-langgraph` — apply Five Pivot Questions framework to LangGraph (langchain-ai/langgraph, 32.8k★, alive, framework); deepen `competitors/langgraph.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-langgraph
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1377,7 +1332,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/langgraph.md` ≥ 1.
   - **Anchor**: rule #1; LangGraph docs; `https://github.com/langchain-ai/langgraph`.
 
-- [ ] `competitor-deepen-omc` — apply Five Pivot Questions framework to Oh My Claude Code (Yeachan-Heo/oh-my-claudecode, 31.3k★, alive, dependency under reassessment); deepen `competitors/omc.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-omc` — apply Five Pivot Questions framework to Oh My Claude Code (Yeachan-Heo/oh-my-claudecode, 31.3k★, alive, dependency under reassessment); deepen `competitors/omc.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-omc
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-reassess
@@ -1403,7 +1358,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `novel/tick-loop/bin/tick-loop.mjs` (add ensureDevinWorktree + removeDevinWorktree functions and call them in the devin invocation path), `novel/tick-loop/test/devin-worktree-isolation.test.mjs` (new — chaos test for the 2-worker collision case).
   - **Acceptance**: (1) Test passes; (2) Live-fire: `MINSKY_AUTO_SCALE_WORKERS=1`, observe 2 concurrent workers spawning devin with distinct cwds (visible in spawn span); (3) After 5 iterations, `git worktree list` shows only the main checkout (no leftover daemon-N-<task> worktrees).
 
-- [ ] `competitor-deepen-swe-agent` — apply Five Pivot Questions framework to SWE-agent (SWE-agent/SWE-agent, 19.3k★, alive, NeurIPS 2024); deepen `competitors/swe-agent.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-swe-agent` — apply Five Pivot Questions framework to SWE-agent (SWE-agent/SWE-agent, 19.3k★, alive, NeurIPS 2024); deepen `competitors/swe-agent.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-swe-agent
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper
@@ -1428,7 +1383,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `jq 'select(.verdict=="spawn-failed") | .notes' .minsky/experiment-store/cross-repo/*.jsonl | grep -c '900'` → 0 (was: 1).
   - **Anchor**: 2026-05-18 live daemon (900014ms spawn-failed). Existing P2 `worker-watchdog-scale-by-pinned-model-latency`.
 
-- [ ] `competitor-deepen-microsoft-agent-framework` — apply Five Pivot Questions framework to Microsoft Agent Framework (microsoft/agent-framework, 10.7k★, alive); deepen `competitors/microsoft-agent-framework.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-microsoft-agent-framework` — apply Five Pivot Questions framework to Microsoft Agent Framework (microsoft/agent-framework, 10.7k★, alive); deepen `competitors/microsoft-agent-framework.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-microsoft-agent-framework
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1439,7 +1394,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/microsoft-agent-framework.md` ≥ 1.
   - **Anchor**: rule #1; Microsoft's Magentic-One MSR-TR-2024-47; `https://github.com/microsoft/agent-framework`.
 
-- [ ] `competitor-add-babyagi` — research BabyAGI (yoheinakajima/babyagi, 22.3k★, mostly-archived); produce `competitors/babyagi.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-babyagi` — research BabyAGI (yoheinakajima/babyagi, 22.3k★, mostly-archived); produce `competitors/babyagi.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-babyagi
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-stale
@@ -1450,7 +1405,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/babyagi.md && grep -c '^## Post-mortem' competitors/babyagi.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/yoheinakajima/babyagi`.
 
-- [ ] `competitor-add-pydantic-ai` — research Pydantic-AI (pydantic/pydantic-ai, 17.3k★, alive); produce `competitors/pydantic-ai.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-pydantic-ai` — research Pydantic-AI (pydantic/pydantic-ai, 17.3k★, alive); produce `competitors/pydantic-ai.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-pydantic-ai
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1461,7 +1416,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/pydantic-ai.md && grep -c '^## Five pivot questions' competitors/pydantic-ai.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/pydantic/pydantic-ai`; Pydantic-AI docs.
 
-- [ ] `competitor-add-roo-code` — research Roo Code (RooCodeInc/Roo-Code, 24.1k★, ARCHIVED); produce `competitors/roo-code.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-roo-code` — research Roo Code (RooCodeInc/Roo-Code, 24.1k★, ARCHIVED); produce `competitors/roo-code.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-roo-code
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
@@ -1487,7 +1442,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `novel/cross-repo-runner/bin/minsky-run.mjs` (extend MinskyConfig type), `novel/tick-loop/bin/tick-loop.mjs` (startup config-to-env block), `docs/example-config.json` (new), `README.md` (config section update).
   - **Acceptance**: (1) Operator writes `{local_llm_enabled: true}` to config.json, restarts daemon, sees the local-llm-wired log line; (2) Existing operators with no config.json continue working unchanged; (3) `MINSKY_LOCAL_LLM=0` env still overrides `local_llm_enabled: true` (env wins).
 
-- [ ] `competitor-deepen-metagpt` — apply Five Pivot Questions framework to MetaGPT (FoundationAgents/MetaGPT, 68.3k★, stale Jan 2026); deepen `competitors/metagpt.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-metagpt` — apply Five Pivot Questions framework to MetaGPT (FoundationAgents/MetaGPT, 68.3k★, stale Jan 2026); deepen `competitors/metagpt.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-metagpt
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, status-stale
@@ -1498,7 +1453,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `gh api repos/FoundationAgents/MetaGPT --jq .pushed_at` returns ISO date — compute days since; if > 180, flag for post-mortem treatment.
   - **Anchor**: rule #1; MetaGPT paper arXiv:2308.00352; `https://github.com/FoundationAgents/MetaGPT`.
 
-- [ ] `competitor-deepen-composio-ao` — apply Five Pivot Questions framework to Composio Agent Orchestrator (ComposioHQ/composio, 28.4k★, alive); deepen `competitors/composio-ao.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-composio-ao` — apply Five Pivot Questions framework to Composio Agent Orchestrator (ComposioHQ/composio, 28.4k★, alive); deepen `competitors/composio-ao.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-composio-ao
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1509,7 +1464,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/composio-ao.md` ≥ 1.
   - **Anchor**: rule #1; Composio Orchestrator announcement (Feb 2026); `https://github.com/ComposioHQ/composio`.
 
-- [ ] `competitor-add-devika` — research Devika (stitionai/devika, 19.5k★, semi-stale Sep 2025); produce `competitors/devika.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-devika` — research Devika (stitionai/devika, 19.5k★, semi-stale Sep 2025); produce `competitors/devika.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-devika
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
@@ -1520,18 +1475,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `gh api repos/stitionai/devika --jq .pushed_at`; days since > 180 ⇒ post-mortem.
   - **Anchor**: rule #1; `https://github.com/stitionai/devika`.
 
-- [ ] `competitor-deepen-cline` — apply Five Pivot Questions framework to Cline (cline/cline, 62.3k★, alive); deepen `competitors/cline.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-cline` — apply Five Pivot Questions framework to Cline (cline/cline, 62.3k★, alive); deepen `competitors/cline.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-cline
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
   - **Milestone**: M1
   - **Hypothesis**: Cline's `--yolo` flag + IDE-extension lineage is the closest mainstream "agent runs unattended" UX. Q2 should surface the YOLO mode's task-persistence model. Q5 likely says KEEP-with-augment — Cline solves the IDE-pair-programming UX, Minsky solves the 24/7-supervisor UX; the two compose.
-  - **Success**: `competitors/cline.md § Five pivot questions` populated; ≥1 Q-block in ask_human.md if YOLO mode reveals a vision-changing autonomy framing.
+  - **Success**: `competitors/cline.md § Five pivot questions` populated; ≥1 Q-block in ask-human.md if YOLO mode reveals a vision-changing autonomy framing.
   - **Pivot**: if Cline's autonomy is shown to fully cover Minsky's M1 stability claim, file a vision-trace question.
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/cline.md` ≥ 1; `gh api repos/cline/cline --jq .stargazers_count` ≥ 55000.
   - **Anchor**: rule #1; Cline repo; the `--yolo` flag documentation in their CLI docs.
 
-- [ ] `competitor-add-refact-ai` — research Refact.ai (smallcloudai/refact, 3.5k★, alive); produce `competitors/refact-ai.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-refact-ai` — research Refact.ai (smallcloudai/refact, 3.5k★, alive); produce `competitors/refact-ai.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-refact-ai
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1542,7 +1497,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/refact-ai.md && grep -c '^## Five pivot questions' competitors/refact-ai.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/smallcloudai/refact`; refact.ai docs.
 
-- [ ] `competitor-deepen-agentless` — apply Five Pivot Questions framework to Agentless (OpenAutoCoder/Agentless, 2.0k★, FSE 2025, semi-stale); deepen `competitors/agentless.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-agentless` — apply Five Pivot Questions framework to Agentless (OpenAutoCoder/Agentless, 2.0k★, FSE 2025, semi-stale); deepen `competitors/agentless.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-agentless
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper, contrarian
@@ -1555,7 +1510,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- ── 17 net-new adds for ≥500-star OSS not yet documented ── -->
 
-- [ ] `competitor-deepen-crewai` — apply Five Pivot Questions framework to CrewAI (crewAIInc/crewAI, 52.1k★, alive); deepen `competitors/crewai.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-crewai` — apply Five Pivot Questions framework to CrewAI (crewAIInc/crewAI, 52.1k★, alive); deepen `competitors/crewai.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-crewai
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1566,25 +1521,25 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/crewai.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/crewAIInc/crewAI`; CrewAI docs.
 
-- [ ] `competitor-deep-dive-wave-2026-05-24` — umbrella task tracking the 35-competitor deep-research wave (Five Pivot Questions framework applied to every existing `competitors/<id>.md` + every new ≥500-star OSS autonomous-coding agent); decision-relevant findings route to `ask_human.md`
+- [ ] `competitor-deep-dive-wave-2026-05-24` — umbrella task tracking the 35-competitor deep-research wave (Five Pivot Questions framework applied to every existing `competitors/<id>.md` + every new ≥500-star OSS autonomous-coding agent); decision-relevant findings route to `ask-human.md`
   - **ID**: competitor-deep-dive-wave-2026-05-24
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (M1.10) — the umbrella wave hits every Tier-S/A entry in one pass so the corpus-refresh-check supervisor stops auto-filing single-competitor tasks; replaces drip-fed maintenance with a one-shot scorecard refresh.
   - **Tags**: p0, milestone-m1, rule-1, competitive, umbrella, operator-directive, observed-2026-05-24
   - **Milestone**: M1
   - **Surfaced-by**: operator directive 2026-05-24 after reviewing the 4-stream autonomous-coding-landscape research — "Next I need full deepest information about all of these similar to minsky tools. For each one of them that has at least 500 stars on github (include dead repos for analysis on what went wrong) create a P0 task in minsky to fully research it. Research must be written to competitors docs, and questions for pivoting should be put to a file for human communication."
-  - **Hypothesis**: completing this 35-competitor wave produces ≥3 vision-changing findings (operator-resolved via ask_human.md), ≥10 architectural patterns we should absorb (filed as research-finding-* P3 tasks via the skill's Phase 6), and ≥1 "cuttable Minsky surface" (Minsky surface % to drop) per existing competitors/<id>.md row in the moats table. The wave operationalizes rule #1 (don't reinvent) by forcing a per-competitor decision on every Minsky surface.
-  - **Success**: (a) Every sub-task `competitor-deepen-<id>` and `competitor-add-<id>` below has its `competitors/<id>.md` containing a populated `## Five pivot questions` section; (b) ≥1 Q-block in `ask_human.md` per vision-changing finding (or explicit "no vision-changing finding" answer in §3 of each competitor's doc); (c) the wave-summary row in `vision.md § Strategic moats` updates the "% of Minsky surface possibly cuttable" headline number; (d) `bin/minsky competitive --json | jq '.competitors | length'` ≥ 8 (corpus grew from the 6 current entries — many of these competitors publish primary metrics worth adding).
+  - **Hypothesis**: completing this 35-competitor wave produces ≥3 vision-changing findings (operator-resolved via ask-human.md), ≥10 architectural patterns we should absorb (filed as research-finding-* P3 tasks via the skill's Phase 6), and ≥1 "cuttable Minsky surface" (Minsky surface % to drop) per existing competitors/<id>.md row in the moats table. The wave operationalizes rule #1 (don't reinvent) by forcing a per-competitor decision on every Minsky surface.
+  - **Success**: (a) Every sub-task `competitor-deepen-<id>` and `competitor-add-<id>` below has its `competitors/<id>.md` containing a populated `## Five pivot questions` section; (b) ≥1 Q-block in `ask-human.md` per vision-changing finding (or explicit "no vision-changing finding" answer in §3 of each competitor's doc); (c) the wave-summary row in `vision.md § Strategic moats` updates the "% of Minsky surface possibly cuttable" headline number; (d) `bin/minsky competitive --json | jq '.competitors | length'` ≥ 8 (corpus grew from the 6 current entries — many of these competitors publish primary metrics worth adding).
   - **Pivot**: if the first 5 deepens (`aider`, `cline`, `openhands`, `cursor-agent`, `swe-agent`) all produce "no vision-changing finding", abandon the remaining 30 — the wave's signal-to-noise is too low, and operator time is better spent shipping Minsky's existing differentiation. Threshold: 0 vision-changing findings + 0 cuttable-surface findings across the first 5 ⇒ stop, demote remaining 30 to P3 background.
-  - **Measurement**: `ls competitors/*.md | wc -l` ≥ 35 (target file count); `grep -l '## Five pivot questions' competitors/*.md | wc -l` ≥ 35 (every doc has the new section); `grep -c '^### Q' ask_human.md` reflects the vision-threat count; `gh api search/repositories?q=... | jq` confirms star counts at time of research (anti-stale-data check).
+  - **Measurement**: `ls competitors/*.md | wc -l` ≥ 35 (target file count); `grep -l '## Five pivot questions' competitors/*.md | wc -l` ≥ 35 (every doc has the new section); `grep -c '^### Q' ask-human.md` reflects the vision-threat count; `gh api search/repositories?q=... | jq` confirms star counts at time of research (anti-stale-data check).
   - **Anchor**: rule #1 (don't reinvent the wheel — research the existing field before building); rule #5 (theoretical grounding — every competitor cites their own primary source); `~/.claude/skills/competitor-research/SKILL.md` Phase 7 (the framework being applied here); 2026-05-24 4-stream research output (the seed list); operator directive 2026-05-24.
-  - **Details**: track 35 sub-tasks below. **Existing-doc deepens** (17): aider, cline, claude-agent-sdk, codex-cli, composio-ao, crewai, cursor-agent, devin, goose, langgraph, metagpt, microsoft-agent-framework, omc, openhands, ralph-wiggum-official, swe-agent, agentless. **Net-new ≥500-★ adds** (17): autogpt, open-interpreter, gpt-engineer, continue-dev, smolagents, roo-code, babyagi, devika, pydantic-ai, plandex, smol-developer, pr-agent, sweep, refact-ai, auto-code-rover, continuous-claude, factory. **One under-500-★ exception flagged for operator decision via ask_human.md**: live-swe-agent (396★, 79.2% SWE-bench Verified SoTA Nov 2025) — file `competitor-add-live-swe-agent` only if the operator answers "include" on that Q.
-  - **Files**: `competitors/<id>.md` × 35, `ask_human.md`, optional `novel/competitive-benchmark/src/competitors.ts` (per-competitor — only if vendor publishes a primary metric), `vision.md § Strategic moats` (headline-number update at wave completion).
-  - **Acceptance**: (a) 35 sub-task IDs are closed (block removed from TASKS.md per spec); (b) `ask_human.md` has all answered Q-blocks (or explicit "defer" markers); (c) a wave-summary commit lands titled `competitor-deep-dive-wave-2026-05-24: <N> vision-changing findings, <M> cuttable surfaces, <K> adopted patterns`; (d) the Five Pivot Questions skill phase is preserved in `~/.claude/skills/competitor-research/SKILL.md` (DONE 2026-05-24).
+  - **Details**: track 35 sub-tasks below. **Existing-doc deepens** (17): aider, cline, claude-agent-sdk, codex-cli, composio-ao, crewai, cursor-agent, devin, goose, langgraph, metagpt, microsoft-agent-framework, omc, openhands, ralph-wiggum-official, swe-agent, agentless. **Net-new ≥500-★ adds** (17): autogpt, open-interpreter, gpt-engineer, continue-dev, smolagents, roo-code, babyagi, devika, pydantic-ai, plandex, smol-developer, pr-agent, sweep, refact-ai, auto-code-rover, continuous-claude, factory. **One under-500-★ exception flagged for operator decision via ask-human.md**: live-swe-agent (396★, 79.2% SWE-bench Verified SoTA Nov 2025) — file `competitor-add-live-swe-agent` only if the operator answers "include" on that Q.
+  - **Files**: `competitors/<id>.md` × 35, `ask-human.md`, optional `novel/competitive-benchmark/src/competitors.ts` (per-competitor — only if vendor publishes a primary metric), `vision.md § Strategic moats` (headline-number update at wave completion).
+  - **Acceptance**: (a) 35 sub-task IDs are closed (block removed from TASKS.md per spec); (b) `ask-human.md` has all answered Q-blocks (or explicit "defer" markers); (c) a wave-summary commit lands titled `competitor-deep-dive-wave-2026-05-24: <N> vision-changing findings, <M> cuttable surfaces, <K> adopted patterns`; (d) the Five Pivot Questions skill phase is preserved in `~/.claude/skills/competitor-research/SKILL.md` (DONE 2026-05-24).
   - **Risk**: medium. (a) Scope-bloat — 35 tasks is a lot. Mitigation: the Pivot above; each sub-task is ~30-60 min of focused work (the existing competitors/<id>.md files mostly need the Five Pivot Questions section appended, not full rewrites). (b) Star-count drift — counts were as of 2026-05-24 via `gh api repos/<owner>/<repo>` and may have shifted by the time the work runs; the picker re-checks in each sub-task's measurement step.
 
 <!-- ── 17 deepens for competitors with existing competitors/<id>.md ── -->
 
-- [ ] `competitor-deepen-devin` — apply Five Pivot Questions framework to Devin (Cognition Labs, commercial, in corpus); deepen `competitors/devin.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-devin` — apply Five Pivot Questions framework to Devin (Cognition Labs, commercial, in corpus); deepen `competitors/devin.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-devin
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1595,7 +1550,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/devin.md` ≥ 1.
   - **Anchor**: rule #1; Cognition's 2025 annual review; Answer.AI HN post on Devin real-world success rate; OpenAI's SWE-bench Verified Feb 2025 retraction post.
 
-- [ ] `competitor-add-plandex` — research Plandex (plandex-ai/plandex, 15.4k★, alive); produce `competitors/plandex.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-plandex` — research Plandex (plandex-ai/plandex, 15.4k★, alive); produce `competitors/plandex.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-plandex
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1621,7 +1576,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `novel/cross-repo-runner/src/daemon.ts` (extend self-diagnose handler — locate via `grep -n git-config-parseable`), `novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` (new — paired tests with fixture worktrees), `~/.minsky/daemon.log` (verify after rollout — new suggestedFix string visible).
   - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat <minsky-repo>/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
 
-- [ ] `competitor-add-smolagents` — research Hugging Face smolagents (huggingface/smolagents, 27.5k★, alive); produce `competitors/smolagents.md` + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-smolagents` — research Hugging Face smolagents (huggingface/smolagents, 27.5k★, alive); produce `competitors/smolagents.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-smolagents
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -1632,7 +1587,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/smolagents.md && grep -c '^## Five pivot questions' competitors/smolagents.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/huggingface/smolagents`; Hugging Face smolagents blog.
 
-- [ ] `competitor-deepen-aider` — apply Five Pivot Questions framework to Aider (Aider-AI/aider, 45.2k★, alive); deepen `competitors/aider.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-aider` — apply Five Pivot Questions framework to Aider (Aider-AI/aider, 45.2k★, alive); deepen `competitors/aider.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-aider
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1643,7 +1598,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/aider.md` ≥ 1; `gh api repos/Aider-AI/aider --jq .stargazers_count` ≥ 40000 (sanity check the project is still where research said).
   - **Anchor**: rule #1; Aider repo `https://github.com/Aider-AI/aider`; aider.chat docs.
 
-- [ ] `competitor-deepen-claude-agent-sdk` — apply Five Pivot Questions framework to Anthropic Claude Agent SDK; deepen `competitors/claude-agent-sdk.md` and emit any vision-threats to `ask_human.md`
+- [ ] `competitor-deepen-claude-agent-sdk` — apply Five Pivot Questions framework to Anthropic Claude Agent SDK; deepen `competitors/claude-agent-sdk.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-claude-agent-sdk
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1654,7 +1609,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/claude-agent-sdk.md` ≥ 1.
   - **Anchor**: rule #1; Anthropic docs at `docs.anthropic.com` / Claude Code docs.
 
-- [ ] `competitor-add-sweep` — research Sweep AI (sweepai/sweep, 7.7k★, DEAD as GitHub App, pivoted to JetBrains); produce `competitors/sweep.md` with `--post-mortem` analysis + emit vision-threats to `ask_human.md`
+- [ ] `competitor-add-sweep` — research Sweep AI (sweepai/sweep, 7.7k★, DEAD as GitHub App, pivoted to JetBrains); produce `competitors/sweep.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-sweep
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
@@ -2831,6 +2786,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `bin/minsky competitive --backend openhands --backend claude --corpus m1-10 --iterations 30 --output competitive-scorecard.json` exits 0; `jq '.backends[] | {id, verdict_rate, iteration_duration_p50_ms}' competitive-scorecard.json` shows both backends with non-null rows; the verdict_rate delta is within ±2pp.
   - **Anchor**: operator 2026-05-24 vision directive ("complete OpenHands integration today"); MILESTONES.md M1.14 closure criterion; All-Hands AI, *SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model*, all-hands.dev/blog, 2025-04-15 (the OpenHands 65.8% number we're inheriting via wrap).
   - **Files**: `scripts/competitive-benchmark-multi-backend.mjs` (new — extends existing `bin/minsky competitive` with `--backend <id>` repeatable flag); existing M1.10 corpus reused; `competitive-scorecard.json` output schema gets a `backends[]` array; new `docs/validated-learnings.md` entry recording the A/B result.
+  - **Deferred-because**: research/benchmark task (not interactive UI); the watch tag refers to passive observation, not an operator interaction
 
 - [ ] `path-c-deletion-prioritisation-by-consumer-count` — when continuing the Path C reshape phase 4+ (delete sweep 1 of redundant Minsky packages), run a consumer-count audit FIRST and prioritize zero-consumer packages. Per the validated learning from PR #784 (persona-spawner deletion took 30min not the predicted 1 week because consumer count was zero — an isolated package is the cheapest to delete)
   - **ID**: path-c-deletion-prioritisation-by-consumer-count
@@ -2880,6 +2836,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `node scripts/throughput-benchmark.mjs --fixture-hosts=5 --duration=24h` writes `minsky_throughput_prs_per_day` to the M1.10 scorecard; `bin/minsky competitive` includes the row in the next weekly auto-refresh.
   - **Anchor**: operator 2026-05-22 vision directive ("code factory" implies scale + throughput); rule #15 (machine-utilisation budget); M1.10 competitive benchmark substrate (already shipped — this adds one falsifiable row to the existing scorecard).
   - **Files**: new `scripts/throughput-benchmark.mjs`; extension to `bin/minsky competitive` for `--throughput` flag; new fixture-hosts dir under `test-fixtures/throughput/` (5 git-init fixture repos with seed TASKS.md); user-story file `user-stories/016-code-factory-throughput.md`.
+  - **Deferred-because**: benchmark task (not interactive UI); `bin/minsky competitive` is dev-only
 
 - [ ] `vision-md-line-width-chunking` — chunk `vision.md` so no line exceeds 1000 chars; current state has 89 lines >1000 chars (max 14107) which crushes any context window that loads the file whole
   - **ID**: vision-md-line-width-chunking
@@ -2945,6 +2902,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if Minsky-via-Claude scores >7pp BELOW bare Claude Sonnet 4.5 on GAIA, the orchestrator-tier substrate is HURTING long-horizon work — this is the worst possible outcome (since long-horizon is the moat). Pivot: trace which iteration's overhead is causing the regression (likely the persona-spawning latency); consider a "fast-path" code-gen path that bypasses persona handoffs for benchmark-tier tasks.
   - **Measurement**: `bin/minsky competitive --json | jq '.competitors[] | select(.id == "minsky-via-claude") | .resultSource.values."gaia-benchmark-score"'` returns a number in [0.696, 0.796].
   - **Anchor**: rule #4 (visible); rule #9 (the GAIA score IS the test of the orchestrator-tier moat — if Minsky doesn't beat bare Claude on GAIA, the moat doesn't help users); operator directive 2026-05-23; competitors/README.md § Honest gaps; Mialon, Fourrier, Swift, Wolf, LeCun, Scialom, "GAIA: a benchmark for General AI Assistants", arXiv 2311.12983, 2023; HAL: GAIA Leaderboard, hal.cs.princeton.edu/gaia (current SOTA numbers).
+  - **Deferred-because**: benchmark task (not interactive UI); subcommand is dev-only
 
 - [ ] `explore-multi-agent-ensembling-experiment` — investigate whether the Augment Code pattern (Sonnet driver + o1 ensembler) lifts Minsky-via-Claude's benchmark scores
   - **ID**: explore-multi-agent-ensembling-experiment
@@ -3928,6 +3886,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `minsky stop --host <dir>` SIGTERMs only the matching minsky-run; (2) `minsky stop` (no flag) prints the host-list banner and sleeps 3s before killing; (3) `MINSKY_NON_INTERACTIVE=1 minsky stop` skips the banner; (4) two paired tests pass; (5) `minsky stop --help` documents both shapes.
   - **Anchor**: 2026-05-16 oncall-hub-plugin run — operator (this session) had two minsky-runs concurrent (plugin + api on the other session), needed to restart only the plugin one without killing the api one. Today's `minsky stop` would have killed both. Workaround used: direct PID kill via `kill -TERM <pid>`. Rule #6 (let-it-crash AT the right boundary — `minsky stop --host` is the operator's per-host kill switch; today's global stop crosses the wrong boundary). Hyrum's Law: the host-filter capability is exactly what multi-operator machines need.
   - **Risk**: low. Bash-shim-only change, additive (no flag preserves today's behavior + adds the safety banner), gated by the first paired test for the shim.
+  - **Deferred-because**: P2 because `minsky stop` already kills all minsky-run processes correctly; --host filter is convenience for the rare multi-host operator
   - **Surfaced-by**: 2026-05-16 oncall-hub-plugin autonomous run — supervisor log at `/tmp/minsky-oncall-hub-plugin/supervisor.log` documents that the operator had to be careful about `minsky stop` interaction with the other session's API minsky-run. Workaround was direct PID kill; this task documents the right CLI shape.
 
 - [ ] `competitor-deep-research-tier-s-2026-05` — deep-research the 4 Tier-S competitor stubs in `competitors/` (Agentless, Claude Agent SDK, Goose, Cline) under the sharpened identity *"OpenHands that improves itself + follows hard rules and principles"*; each must resolve to a concrete Dependency / Competitor / Reference verdict with cited sources
@@ -3976,6 +3935,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: GIVEN an operator runs `pnpm minsky 1` after running `pnpm minsky` (worker 0), THEN both workers are alive AND each has its own pid + log file. GIVEN `pnpm minsky stop 0`, THEN worker 0 stops, worker 1 keeps running.
   - **Risk**: low. Per-worker isolation is a well-understood pattern; the bash skeleton's launchctl integration is already in place for single-worker; the per-worker variant is a templating change.
   - **Surfaced-by**: PR #887 (phase-11b step 4) — the binstub flip surfaced the TS wrapper's multi-worker feature didn't have a bash equivalent.
+  - **Deferred-because**: multi-worker is a P3 nice-to-have; single-worker default works; promote when an operator actually requests parallel daemons
 - [ ] `bash-skeleton-tick-interval-ms-flag` — add `--tick-interval-ms` flag to `bin/minsky-run.sh` that introduces an inter-iteration sleep matching the TS daemon's old 5-min cadence. Scout found while landing PR #888 (phase-11b step 5 supervisor migration) — the TS daemon had an in-process 5-min sleep; the bash skeleton has none, so launchd's `KeepAlive=true` respawns after each iteration batch with only `ThrottleInterval=5` (5s) between respawns. Net cadence: ~30-60s per iteration (real openhands) vs ~5min in the TS daemon. Not blocking; only needed if production cadence proves too aggressive (excessive API calls, excessive spawn overhead)
   - **ID**: bash-skeleton-tick-interval-ms-flag
   - **Tags**: p3, scout-finding, bash-skeleton, cadence, observed-2026-05-25
@@ -3991,6 +3951,8 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: GIVEN `--tick-interval-ms 1000 --max-iterations 2`, WHEN the script runs against a fixture host with ≥1 eligible task, THEN ≥1 second elapses between consecutive ledger entries. GIVEN `MINSKY_TICK_INTERVAL_MS=5000`, WHEN `run-tick-loop.sh` runs, THEN the bash skeleton receives `--tick-interval-ms 5000`.
   - **Risk**: low. Additive flag with default 0 (no sleep) — preserves current behavior.
   - **Surfaced-by**: PR #888 (phase-11b step 5) — the env-var → CLI arg mapping had to drop `MINSKY_TICK_INTERVAL_MS` because the bash skeleton doesn't support the flag yet.
+  - **Deferred-because**: multi-worker is a P3 nice-to-have; single-worker default works; promote when an operator actually requests parallel daemons
+  - **Deferred-because**: current cadence acceptable; promote when production cost analysis flags excessive API spawn
 
 - [ ] `metric-freshness-expected-should-read-from-success-metrics` — `.github/workflows/ci.yml`'s `metric-freshness` job hard-codes the `--expected` list of metric IDs inline (14 IDs as a single comma-separated string on the `node scripts/check-metric-freshness.mjs --expected ...` line). When a PR adds a new entry to `SUCCESS_METRICS` in `novel/dashboard-web/src/metrics.ts`, the metric-freshness gate fails CI with "unexpected metric `<id>` rendered — not present in `SUCCESS_METRICS` (drift)" until the operator ALSO edits the ci.yml line. Scout found while landing PR #873 — Path A LOC scoreboard added 3 IDs and the gate fired
   - **ID**: metric-freshness-expected-should-read-from-success-metrics
@@ -4089,6 +4051,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if 6 consecutive months produce no trigger AND Anthropic announces deprecation of Agent Teams entirely, escalate this watch task to a `wontfix`-flavored close: file `close-claude-native-task-standard-investigation` to delete `docs/research/claude-native-task-standard.md` from `docs/research/` (moving it to `docs/research/archive/` instead) and remove the P2 revisit + P3 watch tasks. The investigation is permanently closed at that point.
   - **Measurement**: `grep -c "^## Status " docs/research/claude-native-task-standard.md` rises by exactly 1 per calendar month after this task ships. Trigger detection: `gh issue view 33764 --repo anthropics/claude-code --json state` returns `closed` is the unblock condition for trigger 1. `curl -sf https://code.claude.com/docs/en/agent-teams | grep -c experimental` returns 0 is the unblock for trigger 2.
   - **Anchor**: `docs/research/claude-native-task-standard.md` § 6.1 (this task's filing record); vision.md rule #14 (delegate / adopt-native / shrink — the bar this loop re-evaluates); next-task protocol § "Standing audit loop tasks" (the self-re-filing mechanic); operator directive 2026-05-17 ("claude has a standard for tasks — investigate it" — the original directive this watch loop continues).
+  - **Deferred-because**: monthly research cadence (not interactive UI); the watch tag here means recurring scan, not Watch the dashboard
 
 - [ ] `prompt-optimizer-malformed-json-chaos-test` — add a chaos test for the prompt-optimizer adapter's behavior when the model returns malformed JSON inside `structured()` (row 3 of `novel/adapters/prompt-optimizer/README.md` § Failure modes)
   - **ID**: prompt-optimizer-malformed-json-chaos-test
@@ -4556,6 +4519,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: `minsky status` from a hosts-dir prints both the running-processes section AND the iteration digest; `--json` flag emits machine-readable form; paired tests cover empty / mixed / rate-limited cases; `pnpm exec vitest run novel/cross-repo-runner` passes.
   - **Anchor**: rule #4 (everything visible — the dashboard counts as observability; if you have to `cat` jsonl files, it isn't visible); Boyd's OODA loop, *A Discourse on Winning and Losing*, 1976 (Observe phase — the operator needs the data summarised before they can Orient); rule #1 (don't reinvent — `aggregateIterationRecords` is pure data manipulation, no new framework). Surfaced-by: porting `~/apps/oncall-hub/minsky-loop-status.mjs` (the predecessor script, 8h-loop-validated) into minsky proper after PR #500 (single-quote scalar fix) made the runner usable in that workspace.
   - **Risk**: low. Read-only over jsonl files we already write. The digest itself is a pure transformation — easy to test, easy to evolve.
+  - **Deferred-because**: P2 because `minsky status` already shows running processes; iteration count digest is nice-to-have telemetry
 
 - [ ] `minsky-push-stuck-branches` — `minsky push-stuck` finds local-only branches matching the loop's branch-prefix and pushes them + opens draft PRs
   - **ID**: minsky-push-stuck-branches
@@ -4571,6 +4535,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: `minsky push-stuck` subcommand exists; `--dry-run` is supported; paired tests cover the 5+ cases; idempotency: re-running has zero side effects when nothing is stuck; the recovered PRs carry the canonical attribution footer.
   - **Anchor**: rule #6 (vision.md § 6 — stay alive across process death; the loop crashing mid-push is exactly the failure mode this recovers from); Perrow, *Normal Accidents*, 1984 (recovery procedures must exist for the failure modes the system is known to produce); rule #1 (don't reinvent — `git push` + `gh pr create` are existing primitives; this is the composition). Surfaced-by: porting `~/apps/oncall-hub/minsky-loop-pusher.mjs` (the predecessor script, 8h-loop-validated) into minsky proper after PR #500 (single-quote scalar fix) made the runner usable in that workspace.
   - **Risk**: low-medium. The push step IS destructive (creates a remote branch + PR under the operator's identity), but the predicate is restrictive (matches branch_prefix + ahead-count > 0 + no existing remote) and the escape hatch (`--dry-run`) is the default first invocation pattern. The PR body's `Why needed` is derived from the commit, not invented — the operator can always close the PR if it's not wanted.
+  - **Deferred-because**: P3 because stuck-branch recovery is rare and the operator can pnpm git push manually; promote when 2+ operators report friction
 - [ ] `bosun-extraction-sweep-followups` — meta-task tracking the smaller bosun patterns deferred from the 2026-05-12 sweep (single follow-up audit pass before bosun is fully archived)
   - **ID**: bosun-extraction-sweep-followups
   - **Tags**: p3, meta, bosun-extraction, audit, deferred
