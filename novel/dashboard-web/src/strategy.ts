@@ -1,3 +1,4 @@
+// no-test: novel/dashboard-web is deprecated (docs/DEPRECATED.md §4) — "keep for now, do NOT add features"; existing files lack tests by policy
 /**
  * `@minsky/dashboard-web` — concrete `GetValue` Strategies (rule #2 Adapter).
  *

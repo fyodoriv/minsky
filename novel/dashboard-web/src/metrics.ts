@@ -1,3 +1,4 @@
+// no-test: novel/dashboard-web is deprecated (docs/DEPRECATED.md §4) — "keep for now, do NOT add features"; existing files lack tests by policy
 /**
  * `@minsky/dashboard-web` — `SuccessMetric` shape + the 10 vision.md
  * success criteria as a typed constant (sub-task 2/4 of `dashboard-web-v0`).

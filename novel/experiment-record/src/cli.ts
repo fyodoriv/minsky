@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// no-test: thin CLI wrapper — all behavior tested via validate.test.ts (the underlying validator) + record.test.ts; cli.ts is just "parse argv, call validate, print result"
 /**
  * `experiment-record validate <path>` — exit 0 on valid, non-zero on invalid.
  *
@@ -18,6 +19,7 @@ function usage(): void {
 function readOrFail(path: string): string | null {
   try {
     return readFileSync(path, "utf8");
+    // rule-6: handled-locally — CLI boundary; bad file path is operator error not system fault
   } catch (e) {
     stderr.write(`cannot read ${path}: ${e instanceof Error ? e.message : String(e)}\n`);
     return null;

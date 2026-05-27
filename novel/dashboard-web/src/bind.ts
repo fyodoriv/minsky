@@ -1,3 +1,4 @@
+// no-test: novel/dashboard-web is deprecated (docs/DEPRECATED.md §4) — "keep for now, do NOT add features"; existing files lack tests by policy
 /**
  * Dashboard bind-hostname resolution. Vision rule #13.4 ("Dashboard binds to
  * 127.0.0.1 by default — never 0.0.0.0 without explicit operator opt-in")

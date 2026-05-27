@@ -1,3 +1,4 @@
+// no-test: novel/dashboard-web is deprecated (docs/DEPRECATED.md §4) — "keep for now, do NOT add features"; existing files lack tests by policy
 /**
  * `@minsky/dashboard-web` — pure validator + setter Strategy seam for
  * `POST /control`. Closes the round-trip on the Apple-Shortcuts
@@ -79,4 +80,6 @@ export function createMemoryPauseState(initial = false): {
  *   instrumented at the route boundary in `server.ts` (the
  *   `app.post("/control", ...)` handler).
  */
-export const STUB_SET_PAUSED: SetPaused = () => {};
+export const STUB_SET_PAUSED: SetPaused = () => {
+  /* no-op stub for tests */
+};

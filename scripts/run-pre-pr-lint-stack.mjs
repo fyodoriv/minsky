@@ -305,6 +305,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "filename-casing",
       "doc-why-first-paragraph",
       "ui-tasks-priority",
+      "changelog-md-update",
+      "research-md-update",
+      "test-file-colocation",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -760,6 +763,36 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-ui-tasks-priority.mjs"],
+  },
+  {
+    // Diff-relative: any branch that touches code (novel/, scripts/, bin/,
+    // distribution/, .github/workflows/) must also update CHANGELOG.md, or
+    // carry a `<!-- no-changelog: <reason> -->` opt-out. Per det-changelog-
+    // md-update (PR #911 cohort).
+    name: "changelog-md-update",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-changelog-md-update.mjs"],
+    env: { CHANGELOG_DIFF_BASE: "origin/main" },
+  },
+  {
+    // Diff-relative: any dependency add/remove must also update research.md
+    // (the building-block evaluation log per vision §"What Minsky is not"),
+    // or carry a `<!-- no-research-update: <reason> -->` opt-out. Per
+    // det-research-md-update (PR #911 cohort).
+    name: "research-md-update",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-research-md-update.mjs"],
+    env: { RESEARCH_DIFF_BASE: "origin/main" },
+  },
+  {
+    // Every novel/*/src/**/*.ts source file must have a sibling .test.ts.
+    // Per AGENTS.md §"Test conventions"; det-test-file-colocation.
+    name: "test-file-colocation",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-test-file-colocation.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",
