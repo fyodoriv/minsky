@@ -147,8 +147,8 @@ importers:
   novel/adapters/prompt-optimizer:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.97.1
-        version: 0.97.1(zod@4.4.3)
+        specifier: ^0.99.0
+        version: 0.99.0(zod@4.4.3)
       '@minsky/adapter-types':
         specifier: workspace:*
         version: link:../types
@@ -161,13 +161,13 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.3
-        version: 2.0.3(hono@4.12.21)
+        version: 2.0.4(hono@4.12.23)
       '@minsky/token-monitor':
         specifier: workspace:*
         version: link:../adapters/token-monitor
       hono:
         specifier: ^4.12.18
-        version: 4.12.21
+        version: 4.12.23
 
   novel/competitive-benchmark: {}
 
@@ -175,10 +175,10 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.3
-        version: 2.0.3(hono@4.12.21)
+        version: 2.0.4(hono@4.12.23)
       hono:
         specifier: ^4.12.18
-        version: 4.12.21
+        version: 4.12.23
 
   novel/experiment-record:
     dependencies:
@@ -242,8 +242,8 @@ packages:
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
     engines: {node: '>=6.0.0'}
 
-  '@anthropic-ai/sdk@0.97.1':
-    resolution: {integrity: sha512-wOf7AUeJPitcVpvKO4UMu63mWH5SaVipkGd7OOQJt/G6VYGlV8D2Gp9dLxOrttDJh/9gqPqdaBwDGcBevumeAg==}
+  '@anthropic-ai/sdk@0.99.0':
+    resolution: {integrity: sha512-vdicFA9YjtvgpG8rxp39hqW4oxpkdRGPTq0QEts5TZhr2GkLozDduK/GiXrLQ7PzrKYBtIkQFdRW+QBjzlsABg==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -268,8 +268,8 @@ packages:
     engines: {node: '>=6.0.0'}
     hasBin: true
 
-  '@babel/runtime@7.29.2':
-    resolution: {integrity: sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g==}
+  '@babel/runtime@7.29.7':
+    resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
 
   '@babel/types@7.29.0':
@@ -489,8 +489,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@2.0.3':
-    resolution: {integrity: sha512-a0jV+/HRe3G5zjFID3zObAQFdkl6zpxTuqktdDDXS3MJKcrZIkB8OkLpNBlY/WXFqv2HF4a0takPej+aNFczWA==}
+  '@hono/node-server@2.0.4':
+    resolution: {integrity: sha512-Ut3y0dMMPWy6bZ2kVfx25EOVbZlm15dhF4mOsezMlhpNHy+4MkU1qN9Y6lnruYi4wPmFzimGX2X7LF/FwHli4A==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
@@ -1709,8 +1709,8 @@ packages:
   highlight.js@10.7.3:
     resolution: {integrity: sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A==}
 
-  hono@4.12.21:
-    resolution: {integrity: sha512-uV63apnb0kyPtAUwoWgaGh9HyIFcv8lgmzPZSiTBQAFOFGIzka5EZ1dZocmGnn0XdX0+XTqJ6Tqv7selMuGLRQ==}
+  hono@4.12.23:
+    resolution: {integrity: sha512-eIaZ9qDgu7XV0pxOCrg7/WhnQ6Ivm22UcxhXx/A3dcbqbbYgBEkc6e/J/s7j2tS96zoB0S9VBdLwQNCWwUo4LA==}
     engines: {node: '>=16.9.0'}
 
   hook-std@4.0.0:
@@ -3048,7 +3048,7 @@ snapshots:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
 
-  '@anthropic-ai/sdk@0.97.1(zod@4.4.3)':
+  '@anthropic-ai/sdk@0.99.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
@@ -3069,7 +3069,7 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.0
 
-  '@babel/runtime@7.29.2': {}
+  '@babel/runtime@7.29.7': {}
 
   '@babel/types@7.29.0':
     dependencies:
@@ -3204,9 +3204,9 @@ snapshots:
   '@esbuild/win32-x64@0.21.5':
     optional: true
 
-  '@hono/node-server@2.0.3(hono@4.12.21)':
+  '@hono/node-server@2.0.4(hono@4.12.23)':
     dependencies:
-      hono: 4.12.21
+      hono: 4.12.23
 
   '@isaacs/cliui@8.0.2':
     dependencies:
@@ -4393,7 +4393,7 @@ snapshots:
 
   highlight.js@10.7.3: {}
 
-  hono@4.12.21: {}
+  hono@4.12.23: {}
 
   hook-std@4.0.0: {}
 
@@ -4558,7 +4558,7 @@ snapshots:
 
   json-schema-to-ts@3.1.1:
     dependencies:
-      '@babel/runtime': 7.29.2
+      '@babel/runtime': 7.29.7
       ts-algebra: 2.0.0
 
   json-with-bigint@3.5.8: {}
