@@ -1576,9 +1576,79 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-rule-10-no-llm-in-load-bearing-gates.test.mjs
 
+  filename-casing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: filename-casing lint
+        run: node scripts/check-filename-casing.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-filename-casing.test.mjs
+
+  doc-why-first-paragraph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: doc-why-first-paragraph lint
+        run: node scripts/check-doc-why-first-paragraph.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-doc-why-first-paragraph.test.mjs
+
+  ui-tasks-priority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: ui-tasks-priority lint
+        run: node scripts/check-ui-tasks-priority.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-ui-tasks-priority.test.mjs
+
+  deprecated-md-respect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: deprecated-md-respect lint
+        run: node scripts/check-deprecated-md-respect.mjs
+        env:
+          DEPRECATED_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-deprecated-md-respect.test.mjs
+
   no-hardcoded-timeouts:
-    # No hardcoded timeouts in novel/ and bin/. Per AGENTS.md §14b;
-    # det-no-hardcoded-timeouts (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1596,8 +1666,6 @@ jobs:
         run: pnpm exec vitest run scripts/check-no-hardcoded-timeouts.test.mjs
 
   no-no-verify-bypass:
-    # Static scan for git --no-verify / -n in source. Per AGENTS.md
-    # §"Git Safety"; det-no-no-verify-bypass (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1615,8 +1683,6 @@ jobs:
         run: pnpm exec vitest run scripts/check-no-no-verify-bypass.test.mjs
 
   launchd-safe-paths:
-    # distribution wrapper scripts must use absolute paths or source
-    # lib-launchd-path.sh. Per det-launchd-safe-paths-lint (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1984,6 +2050,10 @@ jobs:
       - claude-hooks-installed
       - tool-call-discipline-smoke
       - rule-10-no-llm-in-load-bearing-gates
+      - filename-casing
+      - doc-why-first-paragraph
+      - ui-tasks-priority
+      - deprecated-md-respect
       - no-hardcoded-timeouts
       - no-no-verify-bypass
       - launchd-safe-paths
@@ -2055,6 +2125,10 @@ jobs:
                    "${{ needs.claude-hooks-installed.result }}" \
                    "${{ needs.tool-call-discipline-smoke.result }}" \
                    "${{ needs.rule-10-no-llm-in-load-bearing-gates.result }}" \
+                   "${{ needs.filename-casing.result }}" \
+                   "${{ needs.doc-why-first-paragraph.result }}" \
+                   "${{ needs.ui-tasks-priority.result }}" \
+                   "${{ needs.deprecated-md-respect.result }}" \
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \

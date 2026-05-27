@@ -74,8 +74,8 @@ export const EXEMPT_LINE_MARKERS = Object.freeze([
  * @type {readonly RegExp[]}
  */
 export const ALLOWLIST = Object.freeze([
-  // run-dashboard-web.sh launches the deprecated novel/dashboard-web
-  // feature (docs/DEPRECATED.md §4 — replacement is `minsky watch`).
+  // run-dashboard-web.sh launches the deprecated web-dashboard
+  // (docs/DEPRECATED.md §4 — replacement is `minsky watch`).
   // The deprecation policy is "keep for now, do NOT add features".
   // Fixing the launchd-safe-path drift would be a feature-add against
   // deprecated code; better to leave it.
