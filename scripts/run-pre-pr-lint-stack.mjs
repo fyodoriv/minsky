@@ -306,6 +306,8 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "doc-why-first-paragraph",
       "ui-tasks-priority",
       "deprecated-md-respect",
+      "cli-integration-test-coverage",
+      "omc-mode-persona-gating",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -772,6 +774,26 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-deprecated-md-respect.mjs"],
     env: { DEPRECATED_DIFF_BASE: "origin/main" },
+  },
+  {
+    // bin/minsky subcommands must have test/integration/<name>.test.ts,
+    // or be grandfathered in the GRANDFATHERED allowlist. Per AGENTS.md
+    // §3b; det-cli-integration-test-coverage.
+    name: "cli-integration-test-coverage",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-cli-integration-test-coverage.mjs"],
+  },
+  {
+    // TASKS.md task blocks: persona-gate check (gated personas only with
+    // business/growth/revenue/customer/pricing tags). Default mode is
+    // non-strict (persona-gate only); --strict adds OMC-Mode alignment.
+    // Per AGENTS.md §"Choosing an OMC mode" + §"Investor / growth-hacker
+    // personas"; det-omc-mode-and-persona-tag-gating.
+    name: "omc-mode-persona-gating",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-omc-mode-persona-gating.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",

@@ -1657,6 +1657,40 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-deprecated-md-respect.test.mjs
 
+  cli-integration-test-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: cli-integration-test-coverage lint
+        run: node scripts/check-cli-integration-test-coverage.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-cli-integration-test-coverage.test.mjs
+
+  omc-mode-persona-gating:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: omc-mode-persona-gating lint
+        run: node scripts/check-omc-mode-persona-gating.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-omc-mode-persona-gating.test.mjs
+
   machine-budget:
     # rule #10 ratchet applied to vision.md rule #15 / operator directive
     # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
@@ -2012,6 +2046,8 @@ jobs:
       - doc-why-first-paragraph
       - ui-tasks-priority
       - deprecated-md-respect
+      - cli-integration-test-coverage
+      - omc-mode-persona-gating
       - typecheck
       - user-story-security-section
       - vision-rule-13-non-task-anchors
@@ -2084,6 +2120,8 @@ jobs:
                    "${{ needs.doc-why-first-paragraph.result }}" \
                    "${{ needs.ui-tasks-priority.result }}" \
                    "${{ needs.deprecated-md-respect.result }}" \
+                   "${{ needs.cli-integration-test-coverage.result }}" \
+                   "${{ needs.omc-mode-persona-gating.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
                    "${{ needs.vision-rule-13-non-task-anchors.result }}" \
