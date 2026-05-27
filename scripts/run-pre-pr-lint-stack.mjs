@@ -308,6 +308,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "deprecated-md-respect",
       "cli-integration-test-coverage",
       "omc-mode-persona-gating",
+      "no-hardcoded-timeouts",
+      "no-no-verify-bypass",
+      "launchd-safe-paths",
       "changelog-md-update",
       "research-md-update",
       "test-file-colocation",
@@ -742,32 +745,48 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs"],
   },
   {
-    // Cardinal *.md files (vision.md, AGENTS.md, ...) have specific casing
-    // requirements; other root-level .md files must be kebab-case-lowercase.
-    // Per AGENTS.md §"Filename casing"; det-filename-casing-cardinal-md-files.
+    // Cardinal *.md files have specific casing requirements (vision.md
+    // lowercase, AGENTS.md uppercase, etc.); other root-level .md files
+    // must be kebab-case-lowercase. Per AGENTS.md §"Filename casing";
+    // det-filename-casing-cardinal-md-files (PR #911 cohort, merged in #916).
     name: "filename-casing",
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-filename-casing.mjs"],
   },
   {
-    // Every cardinal doc opens with a "why does this file exist?" paragraph.
-    // Per AGENTS.md §"Documentation rules"; det-doc-why-first-paragraph.
     name: "doc-why-first-paragraph",
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-doc-why-first-paragraph.mjs"],
   },
   {
-    // UI / CLI / dashboard / operator-facing tasks default to P0-P1, never
-    // P2-P3 (operator directive 2026-05-27). Exceptions require an explicit
-    // `**Deferred-because**: <reason>`. Per det-ui-tasks-default-p0-p1.
     name: "ui-tasks-priority",
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-ui-tasks-priority.mjs"],
   },
   {
+    name: "no-hardcoded-timeouts",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-hardcoded-timeouts.mjs"],
+  },
+  {
+    name: "no-no-verify-bypass",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-no-verify-bypass.mjs"],
+  },
+  {
+    name: "launchd-safe-paths",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-launchd-safe-paths.mjs"],
+  },
+  {
+    // Diff-relative: NEW references to a docs/DEPRECATED.md-listed
+    // identifier fail. Per det-deprecated-md-respect (PR #918).
     name: "deprecated-md-respect",
     stages: ["fast", "full"],
     cmd: "node",
