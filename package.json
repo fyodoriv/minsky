@@ -74,7 +74,7 @@
     "minsky:setup": "./setup.sh --setup",
     "minsky:doctor": "./setup.sh --doctor",
     "minsky:ui": "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
-    "minsky:logs": "node scripts/minsky-logs.mjs",
+    "minsky:logs": "bin/minsky logs",
     "minsky:status": "launchctl list 2>/dev/null | grep -i minsky || systemctl --user status minsky-supervisor.target 2>/dev/null",
     "minsky:stop": "launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.tick-loop.plist 2>/dev/null; launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.minsky.budget-guard.plist 2>/dev/null; systemctl --user stop minsky-supervisor.target 2>/dev/null; echo 'supervisor stopped'"
   },
