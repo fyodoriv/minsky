@@ -156,6 +156,31 @@ def test_overlay_includes_final_step_block() -> None:
     assert "scope-leak detector" in out
 
 
+def test_overlay_includes_tool_call_discipline_block() -> None:
+    """TOOL-CALL DISCIPLINE (2026-05-27 disengagement-fix regression).
+
+    Non-Claude models (observed: qwen3-coder:30b) emit `Let me examine X` as
+    PROSE without an attached tool call. The OpenHands SDK interprets a reply
+    with no tool call as the conversation-end signal and TERMINATES the
+    conversation immediately. Pre-fix, this caused 13/13 iterations on
+    2026-05-27 to exit after a single `ls -la` with verdict=no-progress (post
+    the verdict-classifier fix that landed in #900; pre-#900 the verdict was
+    false-positive `validated`).
+
+    The brief now carries an explicit `TOOL-CALL DISCIPLINE` block that names
+    the failure mode by example and gives the corrective pattern. This test
+    pins the block so a future refactor can't quietly drop it.
+    """
+    out = build_brief.render_system_prompt_overlay(
+        vision_md_path="v", task_id="x", host_repo="h", pre_commit_command="",
+    )
+    assert "TOOL-CALL DISCIPLINE" in out
+    assert "every reply you emit must include a tool" in out.lower()
+    # Names the specific failure-mode prose patterns
+    assert "Let me examine X" in out
+    assert "qwen3-coder" in out
+
+
 # --- build_brief — full integration ---------------------------------------
 
 
