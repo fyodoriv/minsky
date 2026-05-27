@@ -30,12 +30,71 @@
 //   - SIGINT/SIGTERM → terminate child `tail` processes cleanly.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
 const HOME = process.env["MINSKY_HOME"] ?? process.cwd();
-const OUT_LOG = resolve(HOME, ".minsky/tick-loop.out.log");
-const ERR_LOG = resolve(HOME, ".minsky/tick-loop.err.log");
+const STATE_DIR = process.env["MINSKY_STATE_DIR"] ?? `${process.env["HOME"]}/.minsky`;
+
+/**
+ * Per-source descriptor used by `--all` mode and `bin/minsky logs`. Each
+ * source becomes a `[tag]` prefix in front of every line, colored
+ * uniquely so the operator can disambiguate interleaved streams at a
+ * glance.
+ *
+ * Order matters: most-load-bearing sources first (tick-loop's err is the
+ * single highest-signal stream — that's where iteration verdicts land).
+ *
+ * Source: 2026-05-27 operator directive "ensure all logs commands have
+ * full colors & tags". Pre-2026-05-27 `pnpm minsky:logs` tailed only
+ * tick-loop.{out,err} and `bin/minsky logs` did a raw `tail -f`. Now
+ * both route through this dispatch table and any new operator-relevant
+ * log gets added here in one place.
+ *
+ * @type {readonly {path: string, tag: string, tagColor: string, stream: "out" | "err"}[]}
+ */
+const ALL_SOURCES = [
+  {
+    path: resolve(HOME, ".minsky/tick-loop.err.log"),
+    tag: "tick-loop:err",
+    tagColor: "\x1b[33m",
+    stream: "err",
+  },
+  {
+    path: resolve(HOME, ".minsky/tick-loop.out.log"),
+    tag: "tick-loop:out",
+    tagColor: "\x1b[36m",
+    stream: "out",
+  },
+  {
+    path: resolve(STATE_DIR, "auto-merge.log"),
+    tag: "auto-merge",
+    tagColor: "\x1b[32m",
+    stream: "out",
+  },
+  { path: resolve(STATE_DIR, "daemon.log"), tag: "daemon", tagColor: "\x1b[35m", stream: "out" },
+  {
+    path: resolve(HOME, ".minsky/watchdog.out.log"),
+    tag: "watchdog",
+    tagColor: "\x1b[34m",
+    stream: "out",
+  },
+  {
+    path: resolve(HOME, ".minsky/runany.err.log"),
+    tag: "runany:err",
+    tagColor: "\x1b[91m",
+    stream: "err",
+  },
+  {
+    path: resolve(HOME, ".minsky/runany.out.log"),
+    tag: "runany:out",
+    tagColor: "\x1b[94m",
+    stream: "out",
+  },
+];
+
+const DEFAULT_SOURCES = ALL_SOURCES.filter((s) => s.tag.startsWith("tick-loop"));
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -234,13 +293,29 @@ export function formatLine(stream, line) {
 }
 
 /**
- * Spawn `tail -F` on `file` and forward formatted lines to stdout.
- * @param {string} file
- * @param {"out" | "err"} stream
+ * Prepend a colored `[source-tag]` to a formatted line so interleaved
+ * streams stay readable when `--all` mode tails multiple sources at
+ * once. Pure — no I/O.
+ *
+ * @param {string} tag
+ * @param {string} tagColor  raw ANSI sequence (e.g. ANSI.yellow)
+ * @param {string} formatted  output of `formatLine`
+ * @returns {string}
+ */
+export function prefixSourceTag(tag, tagColor, formatted) {
+  return `${color(tagColor + ANSI.bold, `[${tag}]`)} ${formatted}`;
+}
+
+/**
+ * Spawn `tail -F` on `source.path` and forward formatted lines to
+ * stdout, prefixed with the source's tag.
+ *
+ * @param {{path: string, tag: string, tagColor: string, stream: "out" | "err"}} source
+ * @param {{includeSourceTag: boolean}} opts
  * @returns {import("node:child_process").ChildProcess}
  */
-function tailFile(file, stream) {
-  const child = spawn("tail", ["-F", "-n", "50", file], {
+function tailFile(source, opts) {
+  const child = spawn("tail", ["-F", "-n", "50", source.path], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let buffer = "";
@@ -249,28 +324,92 @@ function tailFile(file, stream) {
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
-      const formatted = formatLine(stream, line);
-      if (formatted !== "") process.stdout.write(`${formatted}\n`);
+      const formatted = formatLine(source.stream, line);
+      if (formatted === "") continue;
+      const out = opts.includeSourceTag
+        ? prefixSourceTag(source.tag, source.tagColor, formatted)
+        : formatted;
+      process.stdout.write(`${out}\n`);
     }
   });
   child.stderr.on("data", (chunk) => {
     process.stderr.write(chunk);
   });
   child.on("exit", (code) => {
-    process.stderr.write(`${color(ANSI.red, `tail ${file} exited with code ${code}`)}\n`);
+    process.stderr.write(`${color(ANSI.red, `tail ${source.path} exited with code ${code}`)}\n`);
   });
   return child;
 }
 
+/**
+ * Resolve which sources to tail based on CLI args.
+ *
+ * @param {string[]} argv
+ * @returns {{sources: typeof ALL_SOURCES, mode: "default" | "all" | "filter"}}
+ */
+export function resolveSources(argv) {
+  if (argv.includes("--all")) return { sources: ALL_SOURCES, mode: "all" };
+  const sourceIdx = argv.indexOf("--source");
+  if (sourceIdx !== -1) {
+    const name = argv[sourceIdx + 1];
+    if (name) {
+      const matched = ALL_SOURCES.filter((s) => s.tag === name || s.tag.startsWith(`${name}:`));
+      if (matched.length > 0) return { sources: matched, mode: "filter" };
+    }
+  }
+  return { sources: DEFAULT_SOURCES, mode: "default" };
+}
+
 // CLI entrypoint — only runs when invoked directly, never on import.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const header = color(
-    ANSI.bold + ANSI.cyan,
-    "pnpm minsky:logs — tailing tick-loop {out,err} (Ctrl-C to exit)",
-  );
+  const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(
+      [
+        "Usage: pnpm minsky:logs [--all] [--source <name>]",
+        "",
+        "Default: tails tick-loop.{out,err} with colors + per-source tags.",
+        "",
+        "Options:",
+        "  --all              tail every source in the registry (tick-loop, auto-merge,",
+        "                     daemon, watchdog, runany) — each line prefixed with",
+        "                     a colored [source-tag] for interleaved-stream readability",
+        "  --source <name>    tail only the matching source(s) — `--source tick-loop`",
+        "                     covers both `tick-loop:out` and `tick-loop:err`",
+        "",
+        "Available sources:",
+        ...ALL_SOURCES.map((s) => `  ${s.tag.padEnd(16)} ${s.path}`),
+        "",
+      ].join("\n"),
+    );
+    process.exit(0);
+  }
+  const { sources, mode } = resolveSources(argv);
+  // Existence check (rule #6 — fail loud, not silent). If NONE of the
+  // resolved source files exist, tailing them forever leaves the
+  // operator staring at an empty terminal forever. Exit 1 with a
+  // hint instead. Test pin: `test/integration/runtime-paths-coverage.
+  // test.ts` § "bin/minsky logs subcommand".
+  const existing = sources.filter((s) => existsSync(s.path));
+  if (existing.length === 0) {
+    process.stdout.write("no daemon log found at any source — try `minsky --daemon` first\n");
+    process.stdout.write("\nsource paths probed:\n");
+    for (const s of sources) {
+      process.stdout.write(`  ${s.path}\n`);
+    }
+    process.exit(1);
+  }
+  const includeSourceTag = mode !== "default"; // tags add noise to the legacy single-tick-loop view
+  const headerLabel =
+    mode === "all"
+      ? "pnpm minsky:logs --all — tailing every minsky log stream"
+      : mode === "filter"
+        ? `pnpm minsky:logs --source ${sources.map((s) => s.tag).join(",")}`
+        : "pnpm minsky:logs — tailing tick-loop {out,err}";
+  const header = color(ANSI.bold + ANSI.cyan, `${headerLabel} (Ctrl-C to exit)`);
   process.stdout.write(`${header}\n${color(ANSI.dim, "─".repeat(80))}\n`);
 
-  const children = [tailFile(OUT_LOG, "out"), tailFile(ERR_LOG, "err")];
+  const children = existing.map((s) => tailFile(s, { includeSourceTag }));
 
   for (const sig of /** @type {const} */ (["SIGINT", "SIGTERM"])) {
     process.on(sig, () => {
