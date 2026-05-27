@@ -308,6 +308,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "deprecated-md-respect",
       "cli-integration-test-coverage",
       "omc-mode-persona-gating",
+      "adapter-conventions",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -804,6 +805,15 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-omc-mode-persona-gating.mjs"],
+  },
+  {
+    // novel/adapters/**/*.ts: rule (2) every implementation file exports
+    // selfTest(); rule (3) public exports carry JSDoc. Per AGENTS.md
+    // §"Code conventions"; det-adapter-conventions-bundle.
+    name: "adapter-conventions",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-adapter-conventions.mjs"],
   },
   {
     name: "changelog-md-update",
