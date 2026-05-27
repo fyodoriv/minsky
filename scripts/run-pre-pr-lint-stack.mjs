@@ -306,6 +306,8 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "doc-why-first-paragraph",
       "ui-tasks-priority",
       "deprecated-md-respect",
+      "cli-integration-test-coverage",
+      "omc-mode-persona-gating",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -771,29 +773,30 @@ export const STACK_MANIFEST = Object.freeze([
     env: { DEPRECATED_DIFF_BASE: "origin/main" },
   },
   {
-    // Hardcoded timeouts (>= 1000ms in TS / >=10s in bash) outside the
-    // TimeoutPolicy seam are banned in novel/ and bin/. Per AGENTS.md
-    // §14b; det-no-hardcoded-timeouts.
+    name: "cli-integration-test-coverage",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-cli-integration-test-coverage.mjs"],
+  },
+  {
+    name: "omc-mode-persona-gating",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-omc-mode-persona-gating.mjs"],
+  },
+  {
     name: "no-hardcoded-timeouts",
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-hardcoded-timeouts.mjs"],
   },
   {
-    // Static scan for `git commit/push --no-verify` / `-n` / `git -c
-    // core.hooksPath=` in committed source. Complements the Tier 1
-    // PreToolUse hook. Per AGENTS.md §"Git Safety"; det-no-no-verify-bypass.
     name: "no-no-verify-bypass",
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-no-verify-bypass.mjs"],
   },
   {
-    // Distribution wrapper scripts must use absolute paths or source
-    // lib-launchd-path.sh — launchd's stripped env doesn't carry the
-    // operator's $PATH. Ratchets the launchd-safe-paths skill into a
-    // deterministic gate. Per .claude/skills/launchd-safe-paths/SKILL.md;
-    // det-launchd-safe-paths-lint.
     name: "launchd-safe-paths",
     stages: ["full"],
     cmd: "node",
