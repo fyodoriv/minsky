@@ -111,6 +111,7 @@ describe("STACK_MANIFEST", () => {
         "check-task-block-citations",
         "cloud-agent-config-audit-matrix",
         "competitive-goal",
+        "deprecated-md-respect",
         "doc-why-first-paragraph",
         "filename-casing",
         "markdownlint",
