@@ -301,6 +301,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "tick-loop-backoff-schedule",
       "claude-hooks-installed",
       "tool-call-discipline-smoke",
+      "rule-10-no-llm-in-load-bearing-gates",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -720,6 +721,20 @@ export const STACK_MANIFEST = Object.freeze([
       "scripts/check-tool-call-discipline.mjs",
       "--transcript=test/fixtures/tool-call-discipline/healthy-with-tool-use.jsonl",
     ],
+  },
+  {
+    // Self-referential rule-#10 enforcement: no load-bearing gate
+    // script (anything in this very STACK_MANIFEST) may import an LLM
+    // SDK or fetch an LLM API. Catches the silent failure mode where
+    // someone adds `import Anthropic from "@anthropic-ai/sdk"` to a
+    // check-*.mjs and turns rule #10 itself into an LLM-driven gate.
+    // Anchor: det-no-llm-sdk-in-ci-gate-scripts-meta-lint (PR #911
+    // cohort); vision rule #10 (deterministic enforcement); Javierlozo/
+    // llm-audit (Semgrep prior-art).
+    name: "rule-10-no-llm-in-load-bearing-gates",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",

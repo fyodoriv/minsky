@@ -1555,6 +1555,27 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-tool-call-discipline.test.mjs
 
+  rule-10-no-llm-in-load-bearing-gates:
+    # Self-referential rule-#10 enforcement: no load-bearing gate script
+    # in STACK_MANIFEST may import an LLM SDK or fetch an LLM API. Anchor:
+    # det-no-llm-sdk-in-ci-gate-scripts-meta-lint (PR #911 cohort); vision
+    # rule #10 (deterministic enforcement); Javierlozo/llm-audit prior art.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-10-no-llm-in-load-bearing-gates lint
+        run: node scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-rule-10-no-llm-in-load-bearing-gates.test.mjs
+
   machine-budget:
     # rule #10 ratchet applied to vision.md rule #15 / operator directive
     # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
@@ -1905,6 +1926,7 @@ jobs:
       - tick-loop-backoff-schedule
       - claude-hooks-installed
       - tool-call-discipline-smoke
+      - rule-10-no-llm-in-load-bearing-gates
       - typecheck
       - user-story-security-section
       - vision-rule-13-non-task-anchors
@@ -1972,6 +1994,7 @@ jobs:
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
                    "${{ needs.claude-hooks-installed.result }}" \
                    "${{ needs.tool-call-discipline-smoke.result }}" \
+                   "${{ needs.rule-10-no-llm-in-load-bearing-gates.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
                    "${{ needs.vision-rule-13-non-task-anchors.result }}" \
