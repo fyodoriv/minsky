@@ -305,6 +305,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "filename-casing",
       "doc-why-first-paragraph",
       "ui-tasks-priority",
+      "deprecated-md-respect",
+      "cli-integration-test-coverage",
+      "omc-mode-persona-gating",
       "changelog-md-update",
       "research-md-update",
       "test-file-colocation",
@@ -765,10 +768,25 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-ui-tasks-priority.mjs"],
   },
   {
-    // Diff-relative: any branch that touches code (novel/, scripts/, bin/,
-    // distribution/, .github/workflows/) must also update CHANGELOG.md, or
-    // carry a `<!-- no-changelog: <reason> -->` opt-out. Per det-changelog-
-    // md-update (PR #911 cohort).
+    name: "deprecated-md-respect",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-deprecated-md-respect.mjs"],
+    env: { DEPRECATED_DIFF_BASE: "origin/main" },
+  },
+  {
+    name: "cli-integration-test-coverage",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-cli-integration-test-coverage.mjs"],
+  },
+  {
+    name: "omc-mode-persona-gating",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-omc-mode-persona-gating.mjs"],
+  },
+  {
     name: "changelog-md-update",
     stages: ["fast", "full"],
     cmd: "node",
@@ -776,10 +794,6 @@ export const STACK_MANIFEST = Object.freeze([
     env: { CHANGELOG_DIFF_BASE: "origin/main" },
   },
   {
-    // Diff-relative: any dependency add/remove must also update research.md
-    // (the building-block evaluation log per vision §"What Minsky is not"),
-    // or carry a `<!-- no-research-update: <reason> -->` opt-out. Per
-    // det-research-md-update (PR #911 cohort).
     name: "research-md-update",
     stages: ["fast", "full"],
     cmd: "node",
@@ -787,8 +801,6 @@ export const STACK_MANIFEST = Object.freeze([
     env: { RESEARCH_DIFF_BASE: "origin/main" },
   },
   {
-    // Every novel/*/src/**/*.ts source file must have a sibling .test.ts.
-    // Per AGENTS.md §"Test conventions"; det-test-file-colocation.
     name: "test-file-colocation",
     stages: ["fast", "full"],
     cmd: "node",
