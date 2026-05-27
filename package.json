@@ -1,6 +1,6 @@
 {
   "name": "minsky",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0",
   "description": "Autonomous coding agent — runs itself on any git repo via `npx minsky init`.",
   "license": "MIT",
   "type": "module",
