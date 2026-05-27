@@ -300,6 +300,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "cloud-agent-config-audit-matrix",
       "tick-loop-backoff-schedule",
       "claude-hooks-installed",
+      "tool-call-discipline-smoke",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -702,6 +703,23 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-claude-hooks-installed.mjs"],
+  },
+  {
+    // Tool-call discipline — runs on the bundled fixture transcripts in CI
+    // (the live-transcript variant is the Stop-hook in `.claude/hooks/
+    // stop-gate.sh`). The full stage runs the unit suite via vitest; the
+    // CLI smoke-call here just verifies the script exits 0 against the
+    // healthy fixture (regression-protection for the script itself, in
+    // case a future edit breaks the parser).
+    // Anchor: det-tool-call-discipline-prose-without-tool-call (PR #911
+    // cohort task); AGENTS.md §"Tool-call discipline"; OpenHands #12462.
+    name: "tool-call-discipline-smoke",
+    stages: ["full"],
+    cmd: "node",
+    args: [
+      "scripts/check-tool-call-discipline.mjs",
+      "--transcript=test/fixtures/tool-call-discipline/healthy-with-tool-use.jsonl",
+    ],
   },
   {
     name: "supervisor-sandbox-hardening",

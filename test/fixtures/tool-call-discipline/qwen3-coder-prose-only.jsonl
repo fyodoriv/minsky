@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Pick the next task from TASKS.md and ship it."}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me examine the main supervisor script to understand the current behaviour before picking a task."}]}}

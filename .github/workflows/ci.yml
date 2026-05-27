@@ -1523,6 +1523,38 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-claude-hooks-installed.test.mjs
 
+  tool-call-discipline-smoke:
+    # Pinned smoke test for the tool-call-discipline transcript walker.
+    # The live invocation is the Stop-hook in `.claude/hooks/stop-gate.sh`;
+    # CI here runs the unit suite + a CLI smoke against the healthy fixture
+    # to catch regressions in the parser.
+    # Anchor: det-tool-call-discipline-prose-without-tool-call (PR #911
+    # cohort task); AGENTS.md §"Tool-call discipline (load-bearing for
+    # non-Claude models)"; OpenHands #12462.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: tool-call-discipline smoke (healthy fixture must exit 0)
+        run: node scripts/check-tool-call-discipline.mjs --transcript=test/fixtures/tool-call-discipline/healthy-with-tool-use.jsonl
+      - name: tool-call-discipline smoke (prose-only fixture must exit 2)
+        run: |
+          set +e
+          node scripts/check-tool-call-discipline.mjs --transcript=test/fixtures/tool-call-discipline/qwen3-coder-prose-only.jsonl
+          if [ $? -ne 2 ]; then
+            echo "expected exit 2 on prose-only fixture; the lint regressed" >&2
+            exit 1
+          fi
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-tool-call-discipline.test.mjs
+
   machine-budget:
     # rule #10 ratchet applied to vision.md rule #15 / operator directive
     # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
@@ -1872,6 +1904,7 @@ jobs:
       - cloud-agent-config-audit-matrix
       - tick-loop-backoff-schedule
       - claude-hooks-installed
+      - tool-call-discipline-smoke
       - typecheck
       - user-story-security-section
       - vision-rule-13-non-task-anchors
@@ -1938,6 +1971,7 @@ jobs:
                    "${{ needs.cloud-agent-config-audit-matrix.result }}" \
                    "${{ needs.tick-loop-backoff-schedule.result }}" \
                    "${{ needs.claude-hooks-installed.result }}" \
+                   "${{ needs.tool-call-discipline-smoke.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
                    "${{ needs.vision-rule-13-non-task-anchors.result }}" \
