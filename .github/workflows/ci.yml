@@ -1633,6 +1633,30 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-ui-tasks-priority.test.mjs
 
+  deprecated-md-respect:
+    # Diff-relative scan: NEW references to a docs/DEPRECATED.md-listed
+    # identifier fail. Per AGENTS.md §"What this file is not";
+    # det-deprecated-md-respect (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: deprecated-md-respect lint
+        run: node scripts/check-deprecated-md-respect.mjs
+        env:
+          DEPRECATED_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-deprecated-md-respect.test.mjs
+
   machine-budget:
     # rule #10 ratchet applied to vision.md rule #15 / operator directive
     # 2026-05-17 — the operator machine-utilisation budget contract. Asserts
@@ -1987,6 +2011,7 @@ jobs:
       - filename-casing
       - doc-why-first-paragraph
       - ui-tasks-priority
+      - deprecated-md-respect
       - typecheck
       - user-story-security-section
       - vision-rule-13-non-task-anchors
@@ -2058,6 +2083,7 @@ jobs:
                    "${{ needs.filename-casing.result }}" \
                    "${{ needs.doc-why-first-paragraph.result }}" \
                    "${{ needs.ui-tasks-priority.result }}" \
+                   "${{ needs.deprecated-md-respect.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
                    "${{ needs.vision-rule-13-non-task-anchors.result }}" \
