@@ -308,6 +308,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "deprecated-md-respect",
       "cli-integration-test-coverage",
       "omc-mode-persona-gating",
+      "no-hardcoded-timeouts",
+      "no-no-verify-bypass",
+      "launchd-safe-paths",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -739,26 +742,22 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs"],
   },
   {
-    // Cardinal *.md files (vision.md, AGENTS.md, ...) have specific casing
-    // requirements; other root-level .md files must be kebab-case-lowercase.
-    // Per AGENTS.md §"Filename casing"; det-filename-casing-cardinal-md-files.
+    // Cardinal *.md files have specific casing requirements (vision.md
+    // lowercase, AGENTS.md uppercase, etc.); other root-level .md files
+    // must be kebab-case-lowercase. Per AGENTS.md §"Filename casing";
+    // det-filename-casing-cardinal-md-files (PR #911 cohort, merged in #916).
     name: "filename-casing",
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-filename-casing.mjs"],
   },
   {
-    // Every cardinal doc opens with a "why does this file exist?" paragraph.
-    // Per AGENTS.md §"Documentation rules"; det-doc-why-first-paragraph.
     name: "doc-why-first-paragraph",
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-doc-why-first-paragraph.mjs"],
   },
   {
-    // UI / CLI / dashboard / operator-facing tasks default to P0-P1, never
-    // P2-P3 (operator directive 2026-05-27). Exceptions require an explicit
-    // `**Deferred-because**: <reason>`. Per det-ui-tasks-default-p0-p1.
     name: "ui-tasks-priority",
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
@@ -766,9 +765,7 @@ export const STACK_MANIFEST = Object.freeze([
   },
   {
     // Diff-relative: NEW references to a docs/DEPRECATED.md-listed
-    // identifier (env var, file path, package name) fail. Existing
-    // references grandfathered. Per AGENTS.md §"What this file is not";
-    // det-deprecated-md-respect.
+    // identifier fail. Per det-deprecated-md-respect (PR #918).
     name: "deprecated-md-respect",
     stages: ["fast", "full"],
     cmd: "node",
@@ -776,24 +773,34 @@ export const STACK_MANIFEST = Object.freeze([
     env: { DEPRECATED_DIFF_BASE: "origin/main" },
   },
   {
-    // bin/minsky subcommands must have test/integration/<name>.test.ts,
-    // or be grandfathered in the GRANDFATHERED allowlist. Per AGENTS.md
-    // §3b; det-cli-integration-test-coverage.
     name: "cli-integration-test-coverage",
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-cli-integration-test-coverage.mjs"],
   },
   {
-    // TASKS.md task blocks: persona-gate check (gated personas only with
-    // business/growth/revenue/customer/pricing tags). Default mode is
-    // non-strict (persona-gate only); --strict adds OMC-Mode alignment.
-    // Per AGENTS.md §"Choosing an OMC mode" + §"Investor / growth-hacker
-    // personas"; det-omc-mode-and-persona-tag-gating.
     name: "omc-mode-persona-gating",
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-omc-mode-persona-gating.mjs"],
+  },
+  {
+    name: "no-hardcoded-timeouts",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-hardcoded-timeouts.mjs"],
+  },
+  {
+    name: "no-no-verify-bypass",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-no-verify-bypass.mjs"],
+  },
+  {
+    name: "launchd-safe-paths",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-launchd-safe-paths.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",

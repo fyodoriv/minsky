@@ -1577,8 +1577,6 @@ jobs:
         run: pnpm exec vitest run scripts/check-rule-10-no-llm-in-load-bearing-gates.test.mjs
 
   filename-casing:
-    # Cardinal docs have specific casing; root *.md must be kebab-case-lowercase.
-    # Per AGENTS.md §"Filename casing"; det-filename-casing-cardinal-md-files.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1596,8 +1594,6 @@ jobs:
         run: pnpm exec vitest run scripts/check-filename-casing.test.mjs
 
   doc-why-first-paragraph:
-    # Every cardinal doc opens with a "why does this file exist?" paragraph.
-    # Per AGENTS.md §"Documentation rules"; det-doc-why-first-paragraph.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1615,8 +1611,6 @@ jobs:
         run: pnpm exec vitest run scripts/check-doc-why-first-paragraph.test.mjs
 
   ui-tasks-priority:
-    # UI / CLI / dashboard tasks default to P0-P1 (operator directive 2026-05-27).
-    # Per AGENTS.md §"All UI is P0-P1"; det-ui-tasks-default-p0-p1.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1634,9 +1628,6 @@ jobs:
         run: pnpm exec vitest run scripts/check-ui-tasks-priority.test.mjs
 
   deprecated-md-respect:
-    # Diff-relative scan: NEW references to a docs/DEPRECATED.md-listed
-    # identifier fail. Per AGENTS.md §"What this file is not";
-    # det-deprecated-md-respect (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1690,6 +1681,57 @@ jobs:
         run: node scripts/check-omc-mode-persona-gating.mjs
       - name: unit tests
         run: pnpm exec vitest run scripts/check-omc-mode-persona-gating.test.mjs
+
+  no-hardcoded-timeouts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-hardcoded-timeouts lint
+        run: node scripts/check-no-hardcoded-timeouts.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-hardcoded-timeouts.test.mjs
+
+  no-no-verify-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: no-no-verify-bypass lint
+        run: node scripts/check-no-no-verify-bypass.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-no-no-verify-bypass.test.mjs
+
+  launchd-safe-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: launchd-safe-paths lint
+        run: node scripts/check-launchd-safe-paths.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-launchd-safe-paths.test.mjs
 
   machine-budget:
     # rule #10 ratchet applied to vision.md rule #15 / operator directive
@@ -2048,6 +2090,9 @@ jobs:
       - deprecated-md-respect
       - cli-integration-test-coverage
       - omc-mode-persona-gating
+      - no-hardcoded-timeouts
+      - no-no-verify-bypass
+      - launchd-safe-paths
       - typecheck
       - user-story-security-section
       - vision-rule-13-non-task-anchors
@@ -2122,6 +2167,9 @@ jobs:
                    "${{ needs.deprecated-md-respect.result }}" \
                    "${{ needs.cli-integration-test-coverage.result }}" \
                    "${{ needs.omc-mode-persona-gating.result }}" \
+                   "${{ needs.no-hardcoded-timeouts.result }}" \
+                   "${{ needs.no-no-verify-bypass.result }}" \
+                   "${{ needs.launchd-safe-paths.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
                    "${{ needs.vision-rule-13-non-task-anchors.result }}" \
