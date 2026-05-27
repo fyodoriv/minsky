@@ -1627,6 +1627,71 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-ui-tasks-priority.test.mjs
 
+  changelog-md-update:
+    # Diff-relative: code changes require a CHANGELOG.md entry. Per
+    # det-changelog-md-update (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: changelog-md-update lint
+        run: node scripts/check-changelog-md-update.mjs
+        env:
+          CHANGELOG_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-changelog-md-update.test.mjs
+
+  research-md-update:
+    # Diff-relative: dep changes require a research.md entry. Per
+    # det-research-md-update (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: research-md-update lint
+        run: node scripts/check-research-md-update.mjs
+        env:
+          RESEARCH_DIFF_BASE: origin/main
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-research-md-update.test.mjs
+
+  test-file-colocation:
+    # Every novel/*/src/**/*.ts source file has a sibling .test.ts. Per
+    # AGENTS.md §"Test conventions"; det-test-file-colocation (PR #911 cohort).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: test-file-colocation lint
+        run: node scripts/check-test-file-colocation.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-test-file-colocation.test.mjs
+
   deprecated-md-respect:
     runs-on: ubuntu-latest
     steps:
@@ -2087,6 +2152,10 @@ jobs:
       - filename-casing
       - doc-why-first-paragraph
       - ui-tasks-priority
+      - changelog-md-update
+      - research-md-update
+      - test-file-colocation
+
       - deprecated-md-respect
       - cli-integration-test-coverage
       - omc-mode-persona-gating
@@ -2164,6 +2233,9 @@ jobs:
                    "${{ needs.filename-casing.result }}" \
                    "${{ needs.doc-why-first-paragraph.result }}" \
                    "${{ needs.ui-tasks-priority.result }}" \
+                   "${{ needs.changelog-md-update.result }}" \
+                   "${{ needs.research-md-update.result }}" \
+                   "${{ needs.test-file-colocation.result }}" \
                    "${{ needs.deprecated-md-respect.result }}" \
                    "${{ needs.cli-integration-test-coverage.result }}" \
                    "${{ needs.omc-mode-persona-gating.result }}" \
