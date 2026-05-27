@@ -581,7 +581,16 @@ EOF
     local local_base_url
     local_base_url="$(jq -r '.local_llm.base_url // "http://localhost:11434"' "$CONFIG_FILE" 2>/dev/null || echo "http://localhost:11434")"
     model="$local_model"
-    extra_spawn_flags="--base-url $local_base_url --no-extended-thinking"
+    # --no-extended-thinking AND --reasoning-effort=none are BOTH required
+    # for non-thinking providers (Ollama, LM Studio). Pre-2026-05-27 the
+    # runner only passed --no-extended-thinking; ollama still rejected the
+    # default reasoning_effort=high with
+    # `{"error":"\"qwen3-coder:30b\" does not support thinking"}`,
+    # surfacing as `openhands.sdk.conversation.exceptions.
+    # ConversationRunError` after 4 retries (~128s per iteration). See
+    # the shim's docstring at novel/adapters/agent-runtime-openhands/bin/
+    # minsky-openhands-spawn.py lines 140-146 for the canonical knob set.
+    extra_spawn_flags="--base-url $local_base_url --no-extended-thinking --reasoning-effort none"
     echo "host=$host local_llm=on model=$model base-url=$local_base_url" >&2
   fi
 
