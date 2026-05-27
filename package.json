@@ -100,7 +100,7 @@
     "vitest": "2.1.9"
   },
   "optionalDependencies": {
-    "@biomejs/cli-darwin-arm64": "1.9.4",
+    "@biomejs/cli-darwin-arm64": "2.4.15",
     "@biomejs/cli-darwin-x64": "1.9.4",
     "@biomejs/cli-linux-arm64": "1.9.4",
     "@biomejs/cli-linux-arm64-musl": "1.9.4",
