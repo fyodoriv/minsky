@@ -862,7 +862,49 @@ print(load_host_config(Path('$host')).default_branch)
                     --body "$backstop_body" 2>/dev/null || true)"
       fi
     fi
-    notes="openhands exited 0; ${duration_ms}ms"
+    # Evidence-of-work gate (2026-05-27 operator session: 9-hour monitor
+    # of the qwen3-coder:30b daemon caught 13/13 iterations exiting 0
+    # while doing one `ls -la` and quitting — verdict was `validated` and
+    # `daemon-spawn-failure-rate` invariant said all-green, but the agent
+    # produced zero PRs). After the 3-stage PR backstop above, if pr_url
+    # is STILL empty AND the agent did not even commit anything in its
+    # isolated worktree, the iteration shipped no work. Downgrade verdict
+    # to `no-progress` so:
+    #   - the invariant counts it as a failure class (catches the new
+    #     bug-class within ≤60s instead of 9-hour pattern-spotting);
+    #   - capture-failure.sh preserves the stdout (rule: every
+    #     non-validated verdict gets captured for diagnosis);
+    #   - dynamic_timeout.py automatically excludes it from the p95
+    #     baseline (its whitelist is `validated` + `scope-leak` only —
+    #     no-progress isn't a successful completion).
+    #
+    # `commits_count > 0` is a partial-progress signal: the agent
+    # committed work but didn't push or open a PR. Still no-progress
+    # from the ship-it perspective (the change didn't reach origin),
+    # but the notes field captures the nuance so the operator can choose
+    # to manually push the worktree if the work is salvageable.
+    if [[ -z "$pr_url" ]]; then
+      local commits_count=0
+      if [[ -d "$worktree/.git" ]] || [[ -f "$worktree/.git" ]]; then
+        local default_branch_for_count
+        default_branch_for_count="$(python3 -c "
+import sys
+sys.path.insert(0, '$script_dir/../scripts')
+from build_brief import load_host_config
+from pathlib import Path
+print(load_host_config(Path('$host')).default_branch)
+" 2>/dev/null || echo "main")"
+        commits_count="$(git -C "$worktree" rev-list --count "origin/${default_branch_for_count}..HEAD" 2>/dev/null || echo 0)"
+      fi
+      verdict="no-progress"
+      if [[ "$commits_count" -gt 0 ]]; then
+        notes="openhands exited 0; ${duration_ms}ms; no PR opened but agent committed ${commits_count} change(s) — not pushed"
+      else
+        notes="openhands exited 0; ${duration_ms}ms; agent exited cleanly without commits/PR/push (no useful work)"
+      fi
+    else
+      notes="openhands exited 0; ${duration_ms}ms"
+    fi
   elif [[ "$exit_code" -eq 124 ]]; then
     # GNU timeout(1) exits 124 when the watchdog fires.
     verdict="spawn-failed"

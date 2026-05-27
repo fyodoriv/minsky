@@ -1471,6 +1471,67 @@ export function daemonSpawnFailureRateInvariant(opts) {
 }
 
 /**
+ * @typedef {Object} DaemonNoProgressRateOpts
+ * @property {() => Promise<readonly {verdict: string, timestampMs: number}[]>} recentVerdicts
+ * @property {number} [windowSize] -- default 5
+ * @property {number} [maxNoProgress] -- default 3
+ */
+
+/**
+ * No-progress-rate invariant: fire when ≥`maxNoProgress` of the last
+ * `windowSize` iterations have `verdict: "no-progress"`. Distinct from
+ * spawn-failure-rate because it catches a DIFFERENT bug class — the
+ * agent reaches the model and converses cleanly (so `spawn-failed`
+ * never fires), but produces zero useful output (no PR, no commits, no
+ * push). Surfaces engagement / brief / model-choice problems instead of
+ * configuration problems.
+ *
+ * Source: 2026-05-27 operator session — 9-hour monitor of the
+ * qwen3-coder:30b daemon caught 13/13 iterations exiting 0 with one
+ * `ls -la` and no further engagement. Pre-fix the verdict was
+ * `validated` (false positive) and `self-diagnose` was all-green.
+ * Pair-PR landed evidence-of-work gate in bin/minsky-run.sh that
+ * downgrades verdict to `no-progress` when none of the 3-stage PR
+ * backstops found/created a PR; this invariant catches the new class
+ * within ≤60s of recurrence.
+ *
+ * @param {DaemonNoProgressRateOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonNoProgressRateInvariant(opts) {
+  const { recentVerdicts, windowSize = 5, maxNoProgress = 3 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const all = await recentVerdicts();
+    if (all.length === 0) return { id: "daemon-no-progress-rate", ok: true };
+    const sorted = [...all].sort((a, b) => b.timestampMs - a.timestampMs);
+    const window = sorted.slice(0, windowSize);
+    const noProgress = window.filter((v) => v.verdict === "no-progress");
+    if (noProgress.length < maxNoProgress) {
+      return { id: "daemon-no-progress-rate", ok: true };
+    }
+    const evidence = `${noProgress.length}/${window.length} of the last ${windowSize} iterations made no progress (exit 0, no PR, no commits, no push)`;
+    return {
+      id: "daemon-no-progress-rate",
+      ok: false,
+      actor: "operator",
+      evidence,
+      suggestedTaskTitle: `Daemon agent makes no progress ${noProgress.length}/${window.length} of the time — model engagement issue`,
+      suggestedFix:
+        "The agent reaches the model cleanly but produces zero useful output (no PR, no commits, no push). " +
+        "This is distinct from spawn failures — the conversation completes, just produces nothing. Common causes: " +
+        "(a) model is under-engaging the brief — read `.minsky/failures/<latest>/stdout.log` to see what the agent actually output; " +
+        "(b) brief is too verbose for the model — local-LLM path should use a shorter brief than the cloud-LLM path; " +
+        "(c) tool-call format mismatch — qwen / non-Claude models may need different agent framework (try aider over openhands); " +
+        "(d) model is too small for autonomous coding — qwen3-coder:30b is the floor; try claude-opus-4-7 or qwen3-coder:480b. " +
+        "Operator-action: inspect the latest `.minsky/failures/<ts>-<task>/stdout.log` to triage.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId = "daemon-no-progress-rate";
+  return fn;
+}
+
+/**
  * Parse one JSONL line into a verdict-timestamp pair. Returns null for
  * malformed lines or lines missing a parseable timestamp.
  *
@@ -1802,6 +1863,9 @@ export function defaultInvariants() {
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
     daemonPrThrashInvariant({ openDaemonPrs: openDaemonPrsForThrash }),
     daemonSpawnFailureRateInvariant({
+      recentVerdicts: () => readExperimentStoreVerdicts(repoRoot),
+    }),
+    daemonNoProgressRateInvariant({
       recentVerdicts: () => readExperimentStoreVerdicts(repoRoot),
     }),
     daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
