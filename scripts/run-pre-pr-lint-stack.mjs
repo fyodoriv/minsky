@@ -302,6 +302,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "claude-hooks-installed",
       "tool-call-discipline-smoke",
       "rule-10-no-llm-in-load-bearing-gates",
+      "no-hardcoded-timeouts",
+      "no-no-verify-bypass",
+      "launchd-safe-paths",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -735,6 +738,35 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs"],
+  },
+  {
+    // Hardcoded timeouts (>= 1000ms in TS / >=10s in bash) outside the
+    // TimeoutPolicy seam are banned in novel/ and bin/. Per AGENTS.md
+    // §14b; det-no-hardcoded-timeouts.
+    name: "no-hardcoded-timeouts",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-hardcoded-timeouts.mjs"],
+  },
+  {
+    // Static scan for `git commit/push --no-verify` / `-n` / `git -c
+    // core.hooksPath=` in committed source. Complements the Tier 1
+    // PreToolUse hook. Per AGENTS.md §"Git Safety"; det-no-no-verify-bypass.
+    name: "no-no-verify-bypass",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-no-verify-bypass.mjs"],
+  },
+  {
+    // Distribution wrapper scripts must use absolute paths or source
+    // lib-launchd-path.sh — launchd's stripped env doesn't carry the
+    // operator's $PATH. Ratchets the launchd-safe-paths skill into a
+    // deterministic gate. Per .claude/skills/launchd-safe-paths/SKILL.md;
+    // det-launchd-safe-paths-lint.
+    name: "launchd-safe-paths",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-launchd-safe-paths.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",

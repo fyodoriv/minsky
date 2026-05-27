@@ -37,6 +37,13 @@
 
 set -euo pipefail
 
+# Source the launchd-safe PATH helper so bare `python3` / `node` resolve
+# in the stripped systemd / launchd environment. Per .claude/skills/
+# launchd-safe-paths/SKILL.md + det-launchd-safe-paths-lint.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib-launchd-path.sh
+. "${SCRIPT_DIR}/lib-launchd-path.sh"
+
 if [ -z "${MINSKY_HOME:-}" ]; then
   echo "minsky-daemon: MINSKY_HOME not set — refusing to start" >&2
   exit 1
