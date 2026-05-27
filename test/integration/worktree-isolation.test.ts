@@ -116,10 +116,23 @@ function runOneIteration(hostDir: string): { stdout: string; stderr: string } {
     PATH: augmentedPath,
     MINSKY_CONFIG: fakeConfig,
   };
-  const result = execSync(`MINSKY_TICK_DRY_RUN=1 bash "${MINSKY_RUN}" --host "${hostDir}"`, {
+  // Stub the openhands spawn shim with a no-op script — both the
+  // startup invariant (invariant_openhands_in_path) and the dispatcher
+  // (scripts/spawn_agent.py) honor `MINSKY_OPENHANDS_SHIM_PATH` as the
+  // operator-escape-hatch. Setting it here lets the worktree-creation
+  // path run end-to-end without needing the openhands venv on the CI
+  // runner. Pre-fix, the test set `MINSKY_TICK_DRY_RUN=1` (an env var
+  // bin/minsky-run.sh does NOT read) and the invariant accidentally
+  // passed because the OLD check only tested shim file existence. The
+  // new importability-aware invariant correctly fails on a CI runner
+  // without openhands installed; this stub is the clean way around.
+  const fakeShim = join(hostDir, ".minsky", "fake-openhands-shim.py");
+  writeFileSync(fakeShim, "#!/usr/bin/env python3\nimport sys; sys.exit(0)\n");
+  const envWithShim = { ...env, MINSKY_OPENHANDS_SHIM_PATH: fakeShim };
+  const result = execSync(`bash "${MINSKY_RUN}" --host "${hostDir}"`, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env,
+    env: envWithShim,
   });
   return { stdout: result, stderr: "" };
 }
