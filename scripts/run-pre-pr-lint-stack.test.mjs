@@ -105,6 +105,7 @@ describe("STACK_MANIFEST", () => {
       .sort();
     expect(fastNames).toEqual(
       [
+        "adapter-conventions",
         "agents-md-coherence",
         "biome",
         "brief-pr-instructions",
