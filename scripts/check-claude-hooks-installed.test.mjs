@@ -75,6 +75,10 @@ const ALL_REQUIRED = [
   "/repo/.claude/hooks/post-edit.sh",
   "/repo/.claude/hooks/stop-gate.sh",
   "/repo/.claude/hooks/block-dangerous-bash.sh",
+  "/repo/.claude/hooks/block-vision-md-edit.sh",
+  "/repo/.claude/hooks/spec-driven-precondition.sh",
+  "/repo/.claude/hooks/worker-uses-tmp-worktree.sh",
+  "/repo/.claude/hooks/live-fire-smoke-post-edit.sh",
 ];
 
 describe("checkClaudeHooksInstalled", () => {
@@ -253,6 +257,6 @@ describe("checkClaudeHooksInstalled", () => {
       }),
     );
     expect(result.ok).toBe(false);
-    expect(result.violations.length).toBeGreaterThanOrEqual(4);
+    expect(result.violations.length).toBeGreaterThanOrEqual(8);
   });
 });
