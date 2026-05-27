@@ -41,7 +41,7 @@ set -euo pipefail
 # in the stripped systemd / launchd environment. Per .claude/skills/
 # launchd-safe-paths/SKILL.md + det-launchd-safe-paths-lint.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./lib-launchd-path.sh
+# shellcheck disable=SC1091  # sibling script in distribution/systemd/ resolved at runtime
 . "${SCRIPT_DIR}/lib-launchd-path.sh"
 
 if [ -z "${MINSKY_HOME:-}" ]; then
