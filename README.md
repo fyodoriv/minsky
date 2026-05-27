@@ -26,11 +26,22 @@ The operator's stated vision is *"a 24/7 self-improving code factory that relies
 
 ## Getting started
 
-Inside Claude Code / Devin / Cursor, paste:
+**Fastest path (release-candidate, gated on operator's first publish)**:
+
+```bash
+npx -y minsky init
+minsky                 # start the 24/7 daemon
+```
+
+`npx minsky init` writes `~/.minsky/config.json` pointing at the current git repo. Subsequent `minsky` invocations pick up the config automatically. Cleanup: `minsky uninstall --force`.
+
+Status: package.json is `0.1.0-rc.0`, the publishable tarball builds locally and `bin/minsky init` runs end-to-end from the unpacked tarball (regression-tested at `test/integration/npx-init-tarball.test.ts`). The first `npm publish` is an operator step — see TASKS.md `minsky-npm-publish-v0-1-0`.
+
+**Inside an AI coding agent (Claude Code / Devin / Cursor / Windsurf), paste**:
 
 > Install minsky for this folder per the runbook at <https://github.com/fyodoriv/minsky/blob/main/INSTALL.md>, then start it. Ask me only the consent question.
 
-Manual: `git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky`. Full runbook: [INSTALL.md](./INSTALL.md) · uninstall: [docs/uninstall.md](docs/uninstall.md).
+**Manual clone (always works)**: `git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky`. Full runbook: [INSTALL.md](./INSTALL.md) · uninstall: [docs/uninstall.md](docs/uninstall.md).
 
 **Two ways to run**:
 
