@@ -1,3 +1,4 @@
+// no-test: the web-dashboard is deprecated (docs/DEPRECATED.md §4) — "keep for now, do NOT add features"; existing files lack tests by policy
 /**
  * `@minsky/dashboard-web` — bin entry. Starts the SSR server on
  * `process.env.PORT` (default `8080`) so `distribution/run-dashboard-web.sh`

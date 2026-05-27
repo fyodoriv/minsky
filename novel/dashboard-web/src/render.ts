@@ -1,3 +1,4 @@
+// no-test: the web-dashboard is deprecated (docs/DEPRECATED.md §4) — "keep for now, do NOT add features"; existing files lack tests by policy
 /**
  * `@minsky/dashboard-web` — pure SSR HTML renderer.
  * Escapes every interpolated string so an attacker-controlled metric
