@@ -40,8 +40,8 @@
 // Disable globally via `MINSKY_AUTO_CLOSE_ORPHAN_PRS=off`. Default: ON.
 
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = process.env["MINSKY_HOME"] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -90,11 +90,28 @@ export function extractTaskIdFromBranch(branchName) {
  * Pure decision function — for each open PR, determine if its task ID
  * is missing from TASKS.md (orphan).
  *
+ * Distinguishes daemon-opened PRs from operator-authored ones via the
+ * positive signal `daemonOpenedTaskIds` — the set of task IDs that
+ * have at least one row in `.minsky/experiment-store/cross-repo/*.jsonl`.
+ * Only the daemon writes those files; operator-authored PRs whose
+ * branches happen to match the daemon prefix shape (e.g.
+ * `feat/<arbitrary-slug>`) will have NO experiment-store rows and
+ * will be skipped as "not opened by daemon".
+ *
+ * Pre-2026-05-27 the heuristic treated ANY `feat/<slug>` branch as a
+ * daemon PR. PR #902 (operator-authored, branch `feat/metric-list-
+ * single-source`) was falsely closed because the slug wasn't in
+ * TASKS.md — but the daemon never opened the PR. The
+ * `daemonOpenedTaskIds` check below is the fix.
+ *
  * @param {readonly OpenPrSnapshot[]} prs
- * @param {{ tasksMdContent: string, limit?: number }} opts
+ * @param {{ tasksMdContent: string, daemonOpenedTaskIds?: ReadonlySet<string>, limit?: number }} opts
  * @returns {readonly OrphanCloseDecision[]}
  */
-export function decideOrphanClose(prs, { tasksMdContent, limit = DEFAULT_LIMIT }) {
+export function decideOrphanClose(
+  prs,
+  { tasksMdContent, daemonOpenedTaskIds, limit = DEFAULT_LIMIT },
+) {
   /** @type {OrphanCloseDecision[]} */
   const decisions = [];
   let acted = 0;
@@ -107,6 +124,23 @@ export function decideOrphanClose(prs, { tasksMdContent, limit = DEFAULT_LIMIT }
         taskId: "",
         action: "skip",
         reason: `branch ${pr.headRefName} is not daemon-shaped (no recognised prefix)`,
+      });
+      continue;
+    }
+    // Positive-signal check: was this task ever iterated by the daemon?
+    // The daemon's only side effect is writing to .minsky/experiment-
+    // store/cross-repo/<task-id>.jsonl. If `daemonOpenedTaskIds` was
+    // provided AND the task ID isn't in it, this PR was opened by the
+    // operator (or another agent) and the orphan heuristic shouldn't
+    // touch it. Backward-compat: if no set is provided, fall through
+    // to the legacy TASKS.md check (preserves pre-2026-05-27 behavior
+    // for tests + scripts that haven't been updated yet).
+    if (daemonOpenedTaskIds !== undefined && !daemonOpenedTaskIds.has(taskId)) {
+      decisions.push({
+        pr: pr.number,
+        taskId,
+        action: "skip",
+        reason: `task ${taskId} has no experiment-store row — PR was not opened by daemon (operator-authored)`,
       });
       continue;
     }
@@ -132,6 +166,40 @@ export function decideOrphanClose(prs, { tasksMdContent, limit = DEFAULT_LIMIT }
     acted += 1;
   }
   return decisions;
+}
+
+/**
+ * Load the set of task IDs that have at least one row in
+ * `.minsky/experiment-store/cross-repo/*.jsonl`. The daemon's only
+ * side effect is writing to those files — so a task in this set was
+ * iterated by the daemon. A task NOT in this set has only ever been
+ * touched by operator-authored work (or never touched at all).
+ *
+ * Returns an empty set if the store directory doesn't exist (fresh
+ * checkout, daemon never ran).
+ *
+ * @param {string} repoRoot
+ * @returns {Promise<Set<string>>}
+ */
+export async function loadDaemonOpenedTaskIds(repoRoot) {
+  const storeDir = resolve(repoRoot, ".minsky", "experiment-store", "cross-repo");
+  /** @type {string[]} */
+  let entries;
+  try {
+    entries = await readdir(storeDir);
+  } catch {
+    return new Set();
+  }
+  const ids = new Set();
+  for (const entry of entries) {
+    if (!entry.endsWith(".jsonl")) continue;
+    const id = basename(entry, ".jsonl");
+    // Skip the synthetic `_no-task.jsonl` ledger — it's the daemon's
+    // bookkeeping for "no eligible task" iterations, not a real task.
+    if (id === "_no-task") continue;
+    ids.add(id);
+  }
+  return ids;
 }
 
 /**
@@ -229,7 +297,8 @@ if (isMain) {
 
   const prs = listOpenPrsViaGh();
   const tasksMdContent = await readFile(resolve(REPO, "TASKS.md"), "utf8").catch(() => "");
-  const decisions = decideOrphanClose(prs, { tasksMdContent, limit });
+  const daemonOpenedTaskIds = await loadDaemonOpenedTaskIds(REPO);
+  const decisions = decideOrphanClose(prs, { tasksMdContent, daemonOpenedTaskIds, limit });
   const outcomes = executeOrphanCloses(decisions, {
     closeFn: closeOrphanPrViaGh,
     dryRun,

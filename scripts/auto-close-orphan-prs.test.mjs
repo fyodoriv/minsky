@@ -88,6 +88,37 @@ describe("decideOrphanClose — pure decisions", () => {
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.action).toBe("close");
   });
+
+  test("skips an operator-authored daemon-shaped branch (no experiment-store row)", () => {
+    // Regression for 2026-05-27 PR #902 false-positive: branch
+    // `feat/metric-list-single-source` matched the daemon prefix
+    // shape but was operator-authored — no experiment-store row exists
+    // for that task ID. The daemon never opened the PR, so the orphan
+    // heuristic must NOT close it. The positive `daemonOpenedTaskIds`
+    // signal is the discriminator.
+    const decisions = decideOrphanClose([pr({ headRefName: "feat/metric-list-single-source" })], {
+      tasksMdContent: "# Tasks\n\n## P0\n\n- [ ] some unrelated task\n  - **ID**: other\n",
+      daemonOpenedTaskIds: new Set(["daemon-iterated-task-1", "daemon-iterated-task-2"]),
+    });
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.action).toBe("skip");
+    expect(decisions[0]?.reason).toMatch(/operator-authored|not opened by daemon/);
+  });
+
+  test("closes a daemon-opened PR when its task ID is absent from TASKS.md AND present in experiment-store", () => {
+    // Companion to the regression test above: when the daemon HAS
+    // touched the task (experiment-store row exists) AND the task is
+    // absent from TASKS.md (operator removed it), the orphan
+    // heuristic should still close the PR — that's the load-bearing
+    // case the script was originally written for.
+    const decisions = decideOrphanClose([pr({ headRefName: "feat/daemon-shipped-task" })], {
+      tasksMdContent: "# Tasks\n\n## P0\n\n- [ ] some other task\n  - **ID**: other\n",
+      daemonOpenedTaskIds: new Set(["daemon-shipped-task"]),
+    });
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.action).toBe("close");
+    expect(decisions[0]?.taskId).toBe("daemon-shipped-task");
+  });
 });
 
 describe("executeOrphanCloses — actions via injected seams", () => {
