@@ -21,6 +21,7 @@
     "install-success-rate",
     "remote-task-submission-substrate",
     "agent-launcher-parity",
+    "spawn-failure-rate-24h",
     "uninstall-residue-count",
     "stability-10h-unattended",
     "human-blocked-task-rate",

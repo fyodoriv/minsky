@@ -510,6 +510,31 @@ EOF
 
   local model
   model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
+
+  # Local-LLM routing — when `~/.minsky/config.json` has
+  # `local_llm_enabled: true`, point the openhands shim at the operator's
+  # local Ollama (default port 11434) AND override the model to
+  # `ollama_chat/<name>` so LiteLLM routes correctly. Without this, the
+  # shim defaults to Anthropic and hard-fails on missing API key — even
+  # with `local_llm_enabled: true` set, as observed 2026-05-27 (30
+  # consecutive iterations spawn-failed with "ANTHROPIC_API_KEY unset").
+  #
+  # Source: 2026-05-27 operator session; user-stories/015 (local models
+  # are the default until stability); the openhands shim's
+  # `--base-url`-aware api_key skip lands in the same PR.
+  local local_llm_enabled
+  local_llm_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+  local extra_spawn_flags=""
+  if [[ "$local_llm_enabled" == "true" ]]; then
+    local local_model
+    local_model="$(jq -r '.local_llm.model // "ollama_chat/qwen3-coder:30b"' "$CONFIG_FILE" 2>/dev/null || echo "ollama_chat/qwen3-coder:30b")"
+    local local_base_url
+    local_base_url="$(jq -r '.local_llm.base_url // "http://localhost:11434"' "$CONFIG_FILE" 2>/dev/null || echo "http://localhost:11434")"
+    model="$local_model"
+    extra_spawn_flags="--base-url $local_base_url --no-extended-thinking"
+    echo "host=$host local_llm=on model=$model base-url=$local_base_url" >&2
+  fi
+
   local exit_code=0
   local stdout_log
   stdout_log="$(mktemp -t minsky-stdout.XXXXXX)"
@@ -634,32 +659,47 @@ EOF
   # always succeed), `$worktree` equals `$host` and the spawn runs at
   # the host root — matching pre-2026-05-26 behavior. The fallback is
   # logged loudly so the operator catches it.
+  # `$extra_spawn_flags` is set above when `local_llm_enabled: true` —
+  # it's deliberately unquoted in the spawn invocations so empty-string
+  # (cloud-LLM path) becomes a no-op and non-empty (local-LLM path)
+  # expands to `--base-url <url> --no-extended-thinking`. Shellcheck
+  # would normally yell about unquoted expansion; the `# shellcheck`
+  # pragmas below opt out for the load-bearing word-splitting that the
+  # flag-list pattern needs.
   local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
   if [[ -x "$spawn_wrapper" ]]; then
+    # shellcheck disable=SC2086
     python3 "$spawn_wrapper" "$watchdog_s" \
       python3 "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
+      $extra_spawn_flags \
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v timeout >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
     timeout "${watchdog_s}s" python3 "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
+      $extra_spawn_flags \
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v gtimeout >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
     gtimeout "${watchdog_s}s" python3 "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
+      $extra_spawn_flags \
       >"$stdout_log" 2>&1 || exit_code=$?
   else
     echo "WARN: no watchdog available — running unbounded agent spawn" >&2
+    # shellcheck disable=SC2086
     python3 "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
+      $extra_spawn_flags \
       >"$stdout_log" 2>&1 || exit_code=$?
   fi
   local end_ms

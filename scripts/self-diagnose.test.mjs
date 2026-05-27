@@ -15,6 +15,7 @@ import {
   daemonPrStuckOnCiInvariant,
   daemonPrThrashInvariant,
   daemonShippedRatioInvariant,
+  daemonSpawnFailureRateInvariant,
   daemonTaskIdStalenessInvariant,
   daemonTaskScopeExplosionInvariant,
   defaultInvariants,
@@ -259,6 +260,84 @@ describe("daemonInFlightPrCollisionInvariant", () => {
     expect(result.id).toBe("daemon-in-flight-pr-collision");
     expect(result.evidence).toContain("daily-changelog-for-humans");
     expect(result.evidence).toContain("#180");
+  });
+});
+
+describe("daemonSpawnFailureRateInvariant", () => {
+  const T0 = Date.parse("2026-05-27T00:00:00Z");
+
+  it("passes when there are no iterations yet", async () => {
+    const result = await daemonSpawnFailureRateInvariant({
+      recentVerdicts: async () => [],
+    })();
+    expect(result.id).toBe("daemon-spawn-failure-rate");
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when fewer than threshold of last-5 are spawn-failed", async () => {
+    // 2 of 5 spawn-failed — below the default threshold of 3.
+    const result = await daemonSpawnFailureRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "spawn-failed", timestampMs: T0 + 5 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 4 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 1 * 60_000 },
+      ],
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("FIRES when 3 of last 5 iterations are spawn-failed (default threshold)", async () => {
+    const result = await daemonSpawnFailureRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "spawn-failed", timestampMs: T0 + 5 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 4 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 1 * 60_000 },
+      ],
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.actor).toBe("operator");
+    expect(result.evidence).toContain("3/5");
+    expect(result.suggestedFix).toMatch(/ANTHROPIC_API_KEY/);
+    expect(result.suggestedFix).toMatch(/Ollama/);
+    expect(result.suggestedFix).toMatch(/pnpm minsky:setup/);
+  });
+
+  it("only looks at the LAST `windowSize` iterations (not all history)", async () => {
+    // 100 older spawn-failed entries, but the last 5 are all validated —
+    // invariant should pass because the window is only the last 5.
+    /** @type {{verdict: string, timestampMs: number}[]} */
+    const verdicts = [];
+    for (let i = 0; i < 100; i++) {
+      verdicts.push({ verdict: "spawn-failed", timestampMs: T0 + i * 60_000 });
+    }
+    // 5 newest are validated (timestamps higher).
+    for (let i = 0; i < 5; i++) {
+      verdicts.push({ verdict: "validated", timestampMs: T0 + (200 + i) * 60_000 });
+    }
+    const result = await daemonSpawnFailureRateInvariant({
+      recentVerdicts: async () => verdicts,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("respects custom windowSize + maxFailures", async () => {
+    const result = await daemonSpawnFailureRateInvariant({
+      recentVerdicts: async () => [
+        { verdict: "spawn-failed", timestampMs: T0 + 3 * 60_000 },
+        { verdict: "spawn-failed", timestampMs: T0 + 2 * 60_000 },
+        { verdict: "validated", timestampMs: T0 + 1 * 60_000 },
+      ],
+      windowSize: 3,
+      maxFailures: 2,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("2/3");
   });
 });
 

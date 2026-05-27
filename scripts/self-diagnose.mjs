@@ -1404,6 +1404,150 @@ function hasConcurrencyHint(body) {
 }
 
 /**
+ * @typedef {Object} DaemonSpawnFailureRateOpts
+ * @property {() => Promise<readonly {verdict: string, timestampMs: number}[]>} recentVerdicts
+ *   -- returns the most recent iteration verdicts across all tasks. Each
+ *   record needs `verdict` and `timestampMs` (ms-since-epoch). Production
+ *   wires this to scan `.minsky/experiment-store/cross-repo/*.jsonl`.
+ * @property {number} [windowSize] -- number of most-recent iterations to
+ *   evaluate. Default 5.
+ * @property {number} [maxFailures] -- number of `spawn-failed` verdicts in
+ *   the window above which the invariant fires. Default 3.
+ */
+
+/**
+ * Spawn-failure-rate invariant: fire when ≥`maxFailures` of the last
+ * `windowSize` iterations have `verdict: "spawn-failed"`. This catches
+ * the silent class of failure where:
+ *   - launchd-managed supervisor doesn't see the operator's
+ *     `ANTHROPIC_API_KEY` shell export (the spawn shim hard-fails with
+ *     exit 64), AND
+ *   - `self-diagnose` reported "all invariants pass ✓" because no
+ *     existing invariant looked at the iteration verdict distribution.
+ *
+ * Source: 2026-05-27 operator session — 30 consecutive `spawn-failed`
+ * iterations went undetected for ~12h. The pre-fix self-diagnose was
+ * GREEN throughout. New invariant closes the gap.
+ *
+ * @param {DaemonSpawnFailureRateOpts} opts
+ * @returns {Invariant}
+ */
+export function daemonSpawnFailureRateInvariant(opts) {
+  const { recentVerdicts, windowSize = 5, maxFailures = 3 } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const all = await recentVerdicts();
+    if (all.length === 0) return { id: "daemon-spawn-failure-rate", ok: true };
+    // Take the last `windowSize` verdicts (already sorted newest-first
+    // by the production loader, but we re-sort defensively).
+    const sorted = [...all].sort((a, b) => b.timestampMs - a.timestampMs);
+    const window = sorted.slice(0, windowSize);
+    const failed = window.filter((v) => v.verdict === "spawn-failed");
+    if (failed.length < maxFailures) {
+      return { id: "daemon-spawn-failure-rate", ok: true };
+    }
+    const evidence = `${failed.length}/${window.length} of the last ${windowSize} iterations spawn-failed`;
+    return {
+      id: "daemon-spawn-failure-rate",
+      ok: false,
+      actor: "operator",
+      evidence,
+      suggestedTaskTitle: `Daemon spawning fails ${failed.length}/${window.length} of the time — agent runtime is misconfigured`,
+      suggestedFix:
+        "The cloud-agent spawn has been failing repeatedly. Common causes: " +
+        "(a) `ANTHROPIC_API_KEY` not set in the launchd env — set via " +
+        "`launchctl setenv ANTHROPIC_API_KEY sk-...` and restart the supervisor; " +
+        "(b) `local_llm_enabled: true` in `~/.minsky/config.json` but Ollama isn't running — " +
+        "`brew services start ollama` and verify `curl http://localhost:11434/api/tags`; " +
+        "(c) `cloud_agent` field names a backend the dispatcher doesn't recognize — " +
+        "check `tail -5 .minsky/experiment-store/cross-repo/*.jsonl` for the exact " +
+        "`notes` field to see the agent's stderr. Operator-action: pick one of (a/b/c) " +
+        "and restart the tick-loop via `pnpm minsky:setup`.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "daemon-spawn-failure-rate";
+  return fn;
+}
+
+/**
+ * Parse one JSONL line into a verdict-timestamp pair. Returns null for
+ * malformed lines or lines missing a parseable timestamp.
+ *
+ * @param {string} line
+ * @returns {{verdict: string, timestampMs: number} | null}
+ */
+function parseExperimentStoreLine(line) {
+  if (!line.trim()) return null;
+  /** @type {Record<string, unknown> | null} */
+  let r;
+  try {
+    r = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!r || typeof r !== "object") return null;
+  // The cross-repo experiment-store record format (`bin/minsky-run.sh`
+  // § `record_iteration`) uses `ts` as the ISO-8601 timestamp field.
+  // Also accept `iso_timestamp` / `timestamp` for forward-compat.
+  const ts = /** @type {string | null} */ (r["ts"] ?? r["iso_timestamp"] ?? r["timestamp"] ?? null);
+  const verdict = typeof r["verdict"] === "string" ? r["verdict"] : "unknown";
+  const timestampMs = ts ? Date.parse(ts) : 0;
+  if (!Number.isFinite(timestampMs) || timestampMs <= 0) return null;
+  return { verdict, timestampMs };
+}
+
+/**
+ * Read one JSONL file and accumulate its parsed verdict entries into
+ * `acc`. Skips unreadable files and malformed lines silently (the
+ * caller is interested in aggregate counts, not per-record errors).
+ *
+ * @param {string} filepath
+ * @param {{verdict: string, timestampMs: number}[]} acc
+ */
+async function accumulateVerdictsFromFile(filepath, acc) {
+  /** @type {string} */
+  let raw;
+  try {
+    raw = await readFile(filepath, "utf8");
+  } catch {
+    return;
+  }
+  for (const line of raw.split("\n")) {
+    const entry = parseExperimentStoreLine(line);
+    if (entry) acc.push(entry);
+  }
+}
+
+/**
+ * Read all iteration JSONL records from `.minsky/experiment-store/
+ * cross-repo/*.jsonl`, returning the union with `timestampMs` parsed
+ * from the iso_timestamp field. Used by the spawn-failure-rate
+ * invariant and the matching metric collector.
+ *
+ * @param {string} repoRoot
+ * @returns {Promise<readonly {verdict: string, timestampMs: number}[]>}
+ */
+export async function readExperimentStoreVerdicts(repoRoot) {
+  const dir = resolve(repoRoot, ".minsky/experiment-store/cross-repo");
+  /** @type {{verdict: string, timestampMs: number}[]} */
+  const acc = [];
+  /** @type {string[]} */
+  let files;
+  try {
+    const { readdir } = await import("node:fs/promises");
+    files = await readdir(dir);
+  } catch {
+    return [];
+  }
+  for (const f of files) {
+    if (!f.endsWith(".jsonl")) continue;
+    await accumulateVerdictsFromFile(resolve(dir, f), acc);
+  }
+  return acc;
+}
+
+/**
  * Production wiring — the invariants the supervisor probes at start-up.
  * Each invariant closes over its production data source; tests bypass
  * this by calling {@link runInvariants} directly with synthetic
@@ -1657,6 +1801,9 @@ export function defaultInvariants() {
     gitConfigParseableInvariant({ probeGitStatus, scanGitConfigForConflicts }),
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
     daemonPrThrashInvariant({ openDaemonPrs: openDaemonPrsForThrash }),
+    daemonSpawnFailureRateInvariant({
+      recentVerdicts: () => readExperimentStoreVerdicts(repoRoot),
+    }),
     daemonTaskScopeExplosionInvariant({ mergedPrCountByTaskId }),
     claudePrintTimeoutFrequencyInvariant({
       countTimeoutsInRollingWindow: () => countClaudePrintTimeoutsIn7d(repoRoot),
