@@ -53,6 +53,20 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Operator directive 2026-05-27 (UI = P0-P1 by definition): every user-facing CLI surface (bin/minsky subcommands, pnpm minsky:* scripts) defaults to P0-P1 priority — never P2-P3. UX friction compounds: a flag operators have to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours. Backfill any UI task currently at P2-P3 to P1 unless explicitly deferred with a written reason. -->
 
+- [ ] Audit minsky's persona AGENTS.md / vision.md for rules now enforced by agentbrew hooks
+  - **ID**: minsky-persona-rule-decommissioning-post-hooks
+  - **Tags**: scout, minsky, hooks, iron-law, persona-prompts, PROJ-720
+  - **Milestone**: M4
+  - **Competitive-goal**: drives `persona-prompt-token-budget` (a new M4 metric) toward 20K tokens per pipeline run — current baseline is ~55K tokens, with ~35K of that being duplication of agentbrew shared-rules.md content. Reducing duplication frees the model's effective attention window for the actual persona work.
+  - **Cross-repo dependency**: blocked on agentbrew shipping Phase 3 of its `hooks-foundation-iron-law-decommissioning` task (the 38 rules must be hook-enforced before minsky can safely drop them from persona prompts).
+  - **Hypothesis**: minsky's pipeline persona prompts duplicate many of the same IRON LAW rules that live in agentbrew's shared-rules.md (because both are delivered to Claude Code at session start, the duplication grows the persona-prompt token cost without changing behaviour). Once agentbrew's hooks enforce the 38 rules deterministically, minsky's personas can drop the duplicated text and lean on the hook layer. Estimated shrink: ~5K tokens per persona × 7 personas = ~35K tokens of prompt savings across the pipeline.
+  - **Success**: After audit, each persona's AGENTS.md / SKILL.md has the rule-text replaced with a one-line breadcrumb ("Rules formerly listed here are now enforced by agentbrew Claude Code hooks — see `agentbrew/hooks/manifest.yaml`"). Pipeline still passes its existing self-test (rule #17 check-rule-orchestrator-self-test).
+  - **Pivot**: If pipeline self-test fails after rule decommissioning (some hook isn't catching a violation it should), keep the rule in the persona prompt and file a follow-up task in agentbrew to extend the hook. Don't silently weaken enforcement.
+  - **Measurement**: `wc -l skill-plugins/orchestrator/**/*.md` baseline vs post-audit count; `node scripts/check-rule-orchestrator-self-test.mjs` exits 0 throughout.
+  - **Anchor**: 2026-05-27 user directive (agentbrew TASKS.md `hooks-foundation-iron-law-decommissioning`); minsky vision.md rule #1 "Don't reinvent the wheel" — if agentbrew hooks enforce a rule, minsky shouldn't ALSO duplicate it in persona prompts.
+  - **Details**: Inspect every file under `skill-plugins/orchestrator/`, `AGENTS.md`, and `vision.md` for IRON LAW / ABSOLUTE / MUST NOT prose that overlaps with the 38 rules being decommissioned in agentbrew Phase 3. For each match: replace the prose with the one-line breadcrumb. Verify the pipeline self-test still passes (rule #17 check-rule-orchestrator-self-test). Bonus: identify minsky-specific rules that DON'T overlap with agentbrew but could benefit from the same hook treatment (e.g. minsky's "backend agnosticism IRON LAW") — file follow-up tasks at agentbrew if so.
+  - **Files**: `skill-plugins/orchestrator/*/SKILL.md` (7 persona files); `AGENTS.md`; `vision.md`; `scripts/check-rule-*.mjs` (verify no rule script depends on prose that gets removed).
+
 - [ ] `cli-consolidate-pnpm-minsky-scripts` — consolidate the 5 duplicated `pnpm minsky:*` scripts to thin aliases of `bin/minsky` subcommands. Pre-2026-05-27 each had a separate implementation (one shell snippet in package.json, one bash block in bin/minsky) → behavioral skew. PR #907 fixed `pnpm minsky:logs`; this task closes the remaining 5 (`setup`, `doctor`, `status`, `stop`, `ui`).
   - **ID**: cli-consolidate-pnpm-minsky-scripts
   - **Tags**: p0, milestone-m1, ux, cli-consolidation
