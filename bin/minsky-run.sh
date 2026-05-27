@@ -106,35 +106,85 @@ invariant_config_loadable() {
 }
 
 invariant_openhands_in_path() {
-  # Invariant 2: an OpenHands backend is reachable. Either the canonical
-  # `openhands` CLI (post-June-1-2026 / Agent Canvas Initiative) is on
-  # PATH, OR the existing Python shim at
-  # novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py
-  # exists. The dispatcher (scripts/spawn_agent.py) picks whichever is
-  # available — this invariant just confirms one of them is.
+  # Invariant 2: an OpenHands backend is reachable AND the python the
+  # dispatcher will use can actually `import openhands`. Pre-2026-05-27
+  # this invariant only checked shim/CLI EXISTENCE — it passed on every
+  # machine where `~/.minsky/openhands-venv/` was set up correctly AND
+  # on every machine where it WASN'T (because the shim file existed
+  # regardless). That false-positive masked 30+ consecutive spawn-
+  # failures whose stderr was `ModuleNotFoundError: No module named
+  # 'openhands'`. Now the invariant resolves the same python the spawn
+  # site will use and tries `import openhands` — if that fails, surface
+  # it BEFORE the daemon iterates and burns budget on guaranteed-failed
+  # spawns.
   #
-  # Before scripts/spawn_agent.py landed, the bash runner hard-coded
-  # `openhands solve` and would have refused to start on every machine
-  # without the future CLI (i.e. every machine today). Updated to match
-  # the new dispatcher's resolution order.
+  # Resolution order matches `resolve_openhands_python` below:
+  #   1. canonical `openhands` CLI on PATH (Agent Canvas Initiative post-
+  #      June-1-2026) — return success without further check.
+  #   2. `MINSKY_OPENHANDS_PYTHON` env override — verify importable.
+  #   3. `~/.minsky/openhands-venv/bin/python` (INSTALL.md default) —
+  #      verify importable.
+  #   4. `python3` on PATH — verify importable (graceful for operators
+  #      who installed openhands globally / via pipx).
   if command -v openhands >/dev/null 2>&1; then
     return 0
   fi
   # MINSKY_OPENHANDS_SHIM_PATH overrides the default path (test hook +
   # escape hatch for operators who installed the shim somewhere else).
   if [[ -n "${MINSKY_OPENHANDS_SHIM_PATH:-}" && -f "${MINSKY_OPENHANDS_SHIM_PATH}" ]]; then
+    # Skip the importability check when the operator pointed us at a
+    # custom shim — they've explicitly opted out of the default layout.
     return 0
   fi
   local shim_path
   shim_path="$(dirname "${BASH_SOURCE[0]}")/../novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py"
-  if [[ -f "$shim_path" ]]; then
+  if [[ ! -f "$shim_path" ]]; then
+    echo "INVARIANT FAIL: no OpenHands backend available." >&2
+    echo "  install \`openhands\` (https://docs.openhands.dev), set" >&2
+    echo "  MINSKY_OPENHANDS_SHIM_PATH to a custom shim, or ensure" >&2
+    echo "  $shim_path exists." >&2
+    return 1
+  fi
+  # Shim exists — now verify the resolved python can import openhands.
+  local oh_py
+  oh_py="$(resolve_openhands_python)"
+  if ! "$oh_py" -c 'import openhands' >/dev/null 2>&1; then
+    echo "INVARIANT FAIL: openhands not importable from $oh_py." >&2
+    echo "  Install per INSTALL.md:" >&2
+    echo "    uv venv ~/.minsky/openhands-venv --python 3.13" >&2
+    echo "    uv pip install --python ~/.minsky/openhands-venv/bin/python openhands-ai" >&2
+    echo "  Or set MINSKY_OPENHANDS_PYTHON=/path/to/python that has it installed." >&2
+    return 1
+  fi
+  return 0
+}
+
+resolve_openhands_python() {
+  # Resolve the python interpreter used to invoke the OpenHands spawn
+  # shim. Pre-2026-05-27 the runner hardcoded bare `python3`, which on
+  # launchd-spawned supervisors resolves to /usr/bin/python3 — a python
+  # that does NOT have `openhands-ai` installed. INSTALL.md documents the
+  # canonical venv at `~/.minsky/openhands-venv/`; this helper picks that
+  # up automatically.
+  #
+  # Resolution order (first hit wins):
+  #   1. $MINSKY_OPENHANDS_PYTHON — explicit operator override.
+  #   2. ~/.minsky/openhands-venv/bin/python — the documented venv path.
+  #   3. `python3` on PATH — graceful fallback (operators may have
+  #      installed openhands-ai via pipx or globally).
+  #
+  # Always prints to stdout (no stderr). The invariant above tests
+  # importability separately and surfaces missing-openhands errors.
+  if [[ -n "${MINSKY_OPENHANDS_PYTHON:-}" && -x "${MINSKY_OPENHANDS_PYTHON}" ]]; then
+    echo "${MINSKY_OPENHANDS_PYTHON}"
     return 0
   fi
-  echo "INVARIANT FAIL: no OpenHands backend available." >&2
-  echo "  install \`openhands\` (https://docs.openhands.dev), set" >&2
-  echo "  MINSKY_OPENHANDS_SHIM_PATH to a custom shim, or ensure" >&2
-  echo "  $shim_path exists." >&2
-  return 1
+  local venv_py="${HOME}/.minsky/openhands-venv/bin/python"
+  if [[ -x "$venv_py" ]]; then
+    echo "$venv_py"
+    return 0
+  fi
+  echo "python3"
 }
 
 invariant_hosts_dir_readable() {
@@ -667,10 +717,18 @@ EOF
   # pragmas below opt out for the load-bearing word-splitting that the
   # flag-list pattern needs.
   local spawn_wrapper="$script_dir/../scripts/spawn_with_watchdog.py"
+  # Resolve the python interpreter for the spawn shim — prefers
+  # ~/.minsky/openhands-venv/bin/python over bare python3. See
+  # resolve_openhands_python() above for the resolution order. The
+  # outer watchdog wrapper (spawn_with_watchdog.py / timeout / gtimeout)
+  # itself is a thin process supervisor that doesn't import openhands;
+  # it continues to use bare python3 from PATH.
+  local openhands_python
+  openhands_python="$(resolve_openhands_python)"
   if [[ -x "$spawn_wrapper" ]]; then
     # shellcheck disable=SC2086
     python3 "$spawn_wrapper" "$watchdog_s" \
-      python3 "$spawn_agent" \
+      "$openhands_python" "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
@@ -678,7 +736,7 @@ EOF
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v timeout >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    timeout "${watchdog_s}s" python3 "$spawn_agent" \
+    timeout "${watchdog_s}s" "$openhands_python" "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
@@ -686,7 +744,7 @@ EOF
       >"$stdout_log" 2>&1 || exit_code=$?
   elif command -v gtimeout >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    gtimeout "${watchdog_s}s" python3 "$spawn_agent" \
+    gtimeout "${watchdog_s}s" "$openhands_python" "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
@@ -695,7 +753,7 @@ EOF
   else
     echo "WARN: no watchdog available — running unbounded agent spawn" >&2
     # shellcheck disable=SC2086
-    python3 "$spawn_agent" \
+    "$openhands_python" "$spawn_agent" \
       --brief-file "$brief_file" \
       --repo "$worktree" \
       --model "$model" \
