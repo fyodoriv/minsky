@@ -96,10 +96,19 @@ describe("L3: bin/minsky stop subcommand", () => {
 
 describe("L3: bin/minsky logs subcommand", () => {
   test("bin/minsky logs exits 1 with operator-readable hint when no log present", () => {
-    // When there's no daemon log yet, `logs` exits 1 with a hint about
-    // starting `minsky --daemon`. This is the graceful-degrade path
-    // (rule #6) — not a crash.
+    // When NO log files exist at any of the registered source paths,
+    // `bin/minsky logs` exits 1 with a hint about starting the daemon.
+    // This is the graceful-degrade path (rule #6) — not a crash.
+    //
+    // We pin `MINSKY_HOME` + `MINSKY_STATE_DIR` to the test's isolated
+    // tmpdir so the formatter's `existsSync` probe finds nothing.
+    // Without this, the script falls back to `process.cwd()` for
+    // MINSKY_HOME (i.e. the repo root), finds live `.minsky/tick-
+    // loop.{out,err}.log` from the actually-running daemon, and tails
+    // them forever — defeating the existence-check assertion.
     const env = cleanEnv();
+    env.MINSKY_HOME = env.HOME;
+    env.MINSKY_STATE_DIR = env.HOME ? `${env.HOME}/.minsky` : undefined;
     const result = spawnSync(MINSKY_BIN, ["logs"], {
       encoding: "utf8",
       env,
