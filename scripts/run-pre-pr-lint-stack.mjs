@@ -302,6 +302,10 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "claude-hooks-installed",
       "tool-call-discipline-smoke",
       "rule-10-no-llm-in-load-bearing-gates",
+      "filename-casing",
+      "doc-why-first-paragraph",
+      "ui-tasks-priority",
+      "deprecated-md-respect",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -728,16 +732,43 @@ export const STACK_MANIFEST = Object.freeze([
   {
     // Self-referential rule-#10 enforcement: no load-bearing gate
     // script (anything in this very STACK_MANIFEST) may import an LLM
-    // SDK or fetch an LLM API. Catches the silent failure mode where
-    // someone adds `import Anthropic from "@anthropic-ai/sdk"` to a
-    // check-*.mjs and turns rule #10 itself into an LLM-driven gate.
-    // Anchor: det-no-llm-sdk-in-ci-gate-scripts-meta-lint (PR #911
-    // cohort); vision rule #10 (deterministic enforcement); Javierlozo/
-    // llm-audit (Semgrep prior-art).
+    // SDK or fetch an LLM API. Anchor: det-no-llm-sdk-in-ci-gate-scripts-
+    // meta-lint (PR #911 cohort); vision rule #10.
     name: "rule-10-no-llm-in-load-bearing-gates",
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs"],
+  },
+  {
+    // Cardinal *.md files have specific casing requirements (vision.md
+    // lowercase, AGENTS.md uppercase, etc.); other root-level .md files
+    // must be kebab-case-lowercase. Per AGENTS.md §"Filename casing";
+    // det-filename-casing-cardinal-md-files (PR #911 cohort, merged in #916).
+    name: "filename-casing",
+    stages: ["stop-gate", "fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-filename-casing.mjs"],
+  },
+  {
+    name: "doc-why-first-paragraph",
+    stages: ["stop-gate", "fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-doc-why-first-paragraph.mjs"],
+  },
+  {
+    name: "ui-tasks-priority",
+    stages: ["stop-gate", "fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-ui-tasks-priority.mjs"],
+  },
+  {
+    // Diff-relative: NEW references to a docs/DEPRECATED.md-listed
+    // identifier fail. Per det-deprecated-md-respect (PR #918).
+    name: "deprecated-md-respect",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-deprecated-md-respect.mjs"],
+    env: { DEPRECATED_DIFF_BASE: "origin/main" },
   },
   {
     // Hardcoded timeouts (>= 1000ms in TS / >=10s in bash) outside the

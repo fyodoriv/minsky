@@ -73,7 +73,7 @@ The Path C plan kept 14 packages → ~10 packages. Path A keeps 14 → **~5-6 pa
 | `novel/dashboard-web/` | ~6K | Delete | **Delete** | `minsky watch` CLI + OpenHands WebSocket |
 | `novel/experiment-record/` | ~2K | Keep + absorb | **Keep** | — (MAPE-K anchor) |
 | `novel/handoff-spec/` | ~1.5K | Re-scope | **AGGRESSIVE DELETE** — the brief format becomes a Markdown template, no TypeScript needed | `templates/task-brief.md` |
-| `novel/human-loop/` | (planned, never built) | Planned | **Delete the directory entirely** — replaced by `ask_human.md` + ask-human-mcp (adopted 2026-05-24 in PR #791) | `ask_human.md` |
+| `novel/human-loop/` | (planned, never built) | Planned | **Delete the directory entirely** — replaced by `ask-human.md` + ask-human-mcp (adopted 2026-05-24 in PR #791) | `ask-human.md` |
 | `novel/mape-k-loop/` | ~4K | Keep | **Keep** | — (the moat) |
 | `novel/observer/` | ~3K | Keep + merge | **AGGRESSIVE DELETE** — runtime invariants become inline checks in the shell-based `bin/minsky-run`; the observer pattern is over-engineered for 5 invariants | inline in `bin/minsky-run` |
 | `novel/sidecar-bootstrap/` | ~1K | Keep | **Keep** (operator-machine-identity glue) | — |
@@ -99,7 +99,7 @@ The Path C plan kept 14 packages → ~10 packages. Path A keeps 14 → **~5-6 pa
 - `bin/minsky-run` — NEW, ~300 lines of bash replacing all of cross-repo-runner + tick-loop
 - `scripts/pick_task.py` — NEW, ~200 lines of Python replacing the TASKS.md picker logic
 - `templates/task-brief.md` — NEW, the task-brief markdown template (replaces handoff-spec)
-- `ask_human.md` — already shipped 2026-05-24 (PR #791)
+- `ask-human.md` — already shipped 2026-05-24 (PR #791)
 - `distribution/launchd/*.plist` + `distribution/systemd/*` — KEEP (already minimal)
 
 Total LOC: **~7-9K**. Inside the 1-FTE sustainable budget. Mission accomplished.
@@ -233,7 +233,7 @@ Path C's failure-modes section already documented 5 losses. Path A adds:
 
 ## Open questions
 
-These are filed as Q-blocks in `ask_human.md` per the adopted convention. They block Phase 13 (identity promotion) but not earlier phases:
+These are filed as Q-blocks in `ask-human.md` per the adopted convention. They block Phase 13 (identity promotion) but not earlier phases:
 
 1. After Path A completes, should the minsky repo be renamed to `minsky-discipline-pack` or stay as `minsky`?
 2. After Path A completes, should the discipline pack also publish as an npm package (so it can install standalone without the full minsky repo)?
