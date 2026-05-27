@@ -305,6 +305,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "filename-casing",
       "doc-why-first-paragraph",
       "ui-tasks-priority",
+      "deprecated-md-respect",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -760,6 +761,17 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["stop-gate", "fast", "full"],
     cmd: "node",
     args: ["scripts/check-ui-tasks-priority.mjs"],
+  },
+  {
+    // Diff-relative: NEW references to a docs/DEPRECATED.md-listed
+    // identifier (env var, file path, package name) fail. Existing
+    // references grandfathered. Per AGENTS.md §"What this file is not";
+    // det-deprecated-md-respect.
+    name: "deprecated-md-respect",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-deprecated-md-respect.mjs"],
+    env: { DEPRECATED_DIFF_BASE: "origin/main" },
   },
   {
     name: "supervisor-sandbox-hardening",
