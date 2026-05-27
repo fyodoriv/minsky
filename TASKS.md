@@ -122,22 +122,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- vision rule #1 (don't reinvent the wheel — GET, don't IMPLEMENT).    -->
 <!-- ===================================================================== -->
 
-- [ ] `det-touches-field-strict-mode-flip-lenient-default` — **Blocked**: novel/tick-loop/src/touches-glob.ts does not exist in main (only in worktrees and dist/). The task's "small TS change in touches-glob.ts" cannot land until the source file is restored to main. Unblock path: revert the refactor that moved/deleted novel/tick-loop/src/ (or wait for the source-resurrection task to ship). AGENTS.md §"`**Touches**:` field on task blocks" pins the daemon's pre-spawn collision check, but explicitly notes: "Empty / absent `**Touches**` is treated as 'no globs declared' — the collision check returns `proceed` (lenient default during rollout); strict mode is a future policy choice." Time to flip the default. Strict mode = collision check refuses to start a worker on a task without `**Touches**:` declared, forcing every task author (human or agent) to think about file-set disjointness.
-  - **ID**: det-touches-field-strict-mode-flip-lenient-default
-  - **Blocked**: needs-novel-tick-loop-src-restored — touches-glob.ts deleted from main; cohort PR #911-#922 cannot reach it
-  - **Tags**: p0, milestone-m1, deterministic-enforcement, parallel-daemon, touches-field, default-by-default
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `parallel-daemon-collision-rate` toward 0 — collisions today are silently rare only because tasks rarely overlap; absent declarations are landmines.
-  - **Surfaced-by**: 2026-05-27 audit; AGENTS.md §"`**Touches**:` field on task blocks" cites strict mode as a future policy choice; vision rule #16 ("default by default").
-  - **Hypothesis**: flipping `acquireTaskClaim`'s default from `proceed` to `refuse` for tasks without `**Touches**:` forces every task author to declare globs. The opt-out is `**Touches**: <none>` (explicit empty — author considered it). Backfill: a one-shot script adds `**Touches**:` to every existing task block (defaults to `<broad>` for meta-tasks, explicit globs for narrow ones) before the flag flips.
-  - **Success**: (1) `novel/tick-loop/src/touches-glob.ts` (the existing checker) gets a `strict: boolean` parameter, defaulting to `true`. (2) `daemon-parallel-worktree-launch` config switches to strict by default. (3) `scripts/check-rule-9-tasksmd-fields.mjs` extends to require `**Touches**:` on every P0/P1 task (P2/P3 lenient until M2). (4) Backfill PR adds the field to all current open tasks (P1 sibling task `det-touches-field-backfill-sweep`). (5) AGENTS.md updated: "lenient" replaced with "strict by default — `<none>` to explicitly opt out".
-  - **Pivot**: if the backfill load is unexpectedly large (>100 tasks today — likely), defer strict-mode flip until backfill lands; the lint without the flag flip is still valuable as advisory output during the transition.
-  - **Measurement**: `node novel/tick-loop/src/touches-glob.test.ts` proves strict mode is the default; `node scripts/check-rule-9-tasksmd-fields.mjs --require-touches` exits 0 against the backfilled state.
-  - **Anchor**: AGENTS.md §"`**Touches**:` field" (cited as future policy choice); vision rule #16 (default by default); rule #10 (deterministic enforcement of the collision check).
-  - **Details**: small TS change (~10 LOC) in touches-glob.ts; rule-9 lint extension (~30 LOC); backfill is its own task (~100 task blocks × 1 line each = ~30 min of mechanical edits).
-  - **Files**: `novel/tick-loop/src/touches-glob.ts`, `novel/tick-loop/src/touches-glob.test.ts`, `scripts/check-rule-9-tasksmd-fields.mjs`, `AGENTS.md`, sibling P1 `det-touches-field-backfill-sweep`.
-  - **Acceptance**: a new task without `**Touches**:` fails the rule-9 lint; with `**Touches**: <none>`, passes; the daemon refuses to spawn a worker on a task without the field declared.
-
 - [ ] `minsky-npm-publish-v0-1-0` — operator-step: publish the first release of the `minsky` npm package so `npx minsky init` works for any operator on any machine. The publishable substrate (package.json bin + files, regression test, smoke test) shipped in PR (this PR) — what's left is the credentials-gated push to npmjs.com
   - **ID**: minsky-npm-publish-v0-1-0
   - **Tags**: p0, milestone-m1, m1-3, operator-step, install, distribution, blocked-needs-operator
