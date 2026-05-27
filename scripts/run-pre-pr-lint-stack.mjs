@@ -311,6 +311,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
+      "changelog-md-update",
+      "research-md-update",
+      "test-file-colocation",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -764,6 +767,24 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-ui-tasks-priority.mjs"],
   },
   {
+    name: "no-hardcoded-timeouts",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-hardcoded-timeouts.mjs"],
+  },
+  {
+    name: "no-no-verify-bypass",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-no-no-verify-bypass.mjs"],
+  },
+  {
+    name: "launchd-safe-paths",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-launchd-safe-paths.mjs"],
+  },
+  {
     // Diff-relative: NEW references to a docs/DEPRECATED.md-listed
     // identifier fail. Per det-deprecated-md-respect (PR #918).
     name: "deprecated-md-respect",
@@ -785,22 +806,24 @@ export const STACK_MANIFEST = Object.freeze([
     args: ["scripts/check-omc-mode-persona-gating.mjs"],
   },
   {
-    name: "no-hardcoded-timeouts",
+    name: "changelog-md-update",
     stages: ["fast", "full"],
     cmd: "node",
-    args: ["scripts/check-no-hardcoded-timeouts.mjs"],
+    args: ["scripts/check-changelog-md-update.mjs"],
+    env: { CHANGELOG_DIFF_BASE: "origin/main" },
   },
   {
-    name: "no-no-verify-bypass",
+    name: "research-md-update",
     stages: ["fast", "full"],
     cmd: "node",
-    args: ["scripts/check-no-no-verify-bypass.mjs"],
+    args: ["scripts/check-research-md-update.mjs"],
+    env: { RESEARCH_DIFF_BASE: "origin/main" },
   },
   {
-    name: "launchd-safe-paths",
-    stages: ["full"],
+    name: "test-file-colocation",
+    stages: ["fast", "full"],
     cmd: "node",
-    args: ["scripts/check-launchd-safe-paths.mjs"],
+    args: ["scripts/check-test-file-colocation.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",
