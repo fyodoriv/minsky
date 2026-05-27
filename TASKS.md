@@ -51,6 +51,45 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Operator directive 2026-05-18 (ABSOLUTE PRIORITY — supersedes ALL other P0s including self-metrics-competitive-benchmark): the milestone-alignment-gate task below must be picked FIRST by any agent. No implementation task may be claimed until the 7 surfaces are verified aligned. This is the pre-condition for all other work. -->
 
+<!-- Operator directive 2026-05-27 (UI = P0-P1 by definition): every user-facing CLI surface (bin/minsky subcommands, pnpm minsky:* scripts) defaults to P0-P1 priority — never P2-P3. UX friction compounds: a flag operators have to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours. Backfill any UI task currently at P2-P3 to P1 unless explicitly deferred with a written reason. -->
+
+- [ ] `cli-consolidate-pnpm-minsky-scripts` — consolidate the 5 duplicated `pnpm minsky:*` scripts to thin aliases of `bin/minsky` subcommands. Pre-2026-05-27 each had a separate implementation (one shell snippet in package.json, one bash block in bin/minsky) → behavioral skew. PR #907 fixed `pnpm minsky:logs`; this task closes the remaining 5 (`setup`, `doctor`, `status`, `stop`, `ui`).
+  - **ID**: cli-consolidate-pnpm-minsky-scripts
+  - **Tags**: p0, milestone-m1, ux, cli-consolidation
+  - **Milestone**: M1
+  - **Competitive-goal**: drives `install-success-rate` (M1.3) — operator UX friction on the daily-driver commands is the bottleneck between "works on the developer's machine" and "works on a fresh operator's machine".
+  - **Surfaced-by**: 2026-05-27 operator directive "Let's just have one log command with sane defaults. Apply the same pattern for all other commands and file P0 tasks for that. All user interface is P0-P1." See PR #907 for the canonical pattern.
+  - **Hypothesis**: making every `pnpm minsky:X` script delegate to `bin/minsky X` (one canonical entry per command) eliminates an entire class of UX skew. The pattern is structural: drift is impossible because there's only one implementation.
+  - **Success**: (1) `package.json` `scripts/minsky:setup`, `scripts/minsky:doctor`, `scripts/minsky:status`, `scripts/minsky:stop`, `scripts/minsky:ui` all match the regex `^bin/minsky\s+\w+(\s|$)` (delegate-only, no extra logic). (2) Behavior parity: running each pair (`pnpm minsky:X` vs `bin/minsky X`) produces identical stdout + exit code under `MINSKY_NON_INTERACTIVE=1`. (3) The `bin/minsky X` subcommand has SANE DEFAULTS — no flags needed for the 90% case.
+  - **Pivot**: if any `bin/minsky X` subcommand lacks the equivalent surface (e.g. `bin/minsky setup` doesn't have all the flags `setup.sh --setup` accepts), expand `bin/minsky X` to cover them BEFORE flipping the alias. The goal is one canonical entry, not "drop functionality."
+  - **Measurement**: `node -e 'const p=require("./package.json").scripts; for (const k of ["minsky:setup","minsky:doctor","minsky:status","minsky:stop","minsky:ui"]) if (!/^bin\/minsky\s+\w+(\s|$)/.test(p[k])) { console.error(k+": "+p[k]); process.exit(1) }'` exits 0.
+  - **Anchor**: rule #1 (one canonical implementation per concern); Krug *Don't Make Me Think* 2014 (one obvious path); operator session 2026-05-27 (the consolidated-logs PR #907 + this follow-up).
+  - **Details**:
+    - [ ] `pnpm minsky:setup` → `bin/minsky setup` (currently runs `./setup.sh --setup` directly)
+    - [ ] `pnpm minsky:doctor` → `bin/minsky doctor` (currently runs `./setup.sh --doctor` directly)
+    - [ ] `pnpm minsky:status` → `bin/minsky status` (currently a launchctl/systemctl one-liner)
+    - [ ] `pnpm minsky:stop` → `bin/minsky stop` (currently a launchctl/systemctl bootout one-liner)
+    - [ ] `pnpm minsky:ui` → `bin/minsky ui` (currently runs `distribution/run-dashboard-web.sh` directly)
+    - [ ] Each delegated subcommand has `--help` that documents the sane default + escape-hatch flags
+    - [ ] Regression test pins the delegation: `test/integration/pnpm-minsky-aliases.test.ts` runs each pair and asserts behavior parity
+  - **Files**: `package.json` (scripts block), `bin/minsky` (each subcommand may need `--help` + sane defaults), `test/integration/pnpm-minsky-aliases.test.ts` (new)
+  - **Acceptance**: every `pnpm minsky:X` script invocation is interchangeable with `bin/minsky X`; the regression test enforces this; the operator can rely on muscle memory in either direction without surprise.
+
+- [ ] `cli-consolidation-lint-prevents-regression` — add a deterministic lint rule (`scripts/check-pnpm-minsky-aliases.mjs`, wired into `pre-pr-lint --stage=full`) that fails the build when any `pnpm minsky:X` script grows logic beyond `bin/minsky X` delegation. The structural fix on its own (PR #907 + `cli-consolidate-pnpm-minsky-scripts`) is one-time; this lint catches future drift.
+  - **ID**: cli-consolidation-lint-prevents-regression
+  - **Tags**: p0, milestone-m1, ux, cli-consolidation, lint
+  - **Milestone**: M1
+  - **Competitive-goal**: drives `install-success-rate` (M1.3) — a one-time fix that decays is worse than no fix. The lint prevents the decay.
+  - **Surfaced-by**: 2026-05-27 operator directive. Pattern: "every recurring review comment must become a lint rule" — applied to CLI surface consistency.
+  - **Hypothesis**: a lint check that asserts every `pnpm minsky:X` script matches the regex `^bin/minsky\s+\w+(\s|$)` is deterministic enforcement of the consolidation invariant. Future PRs can't add a fancy one-liner without surfacing the regression in CI.
+  - **Success**: (1) `scripts/check-pnpm-minsky-aliases.mjs` exists, exits 0 when all minsky:* scripts are delegate-only, exits 1 with a specific error per non-delegate script. (2) Wired into `run-pre-pr-lint-stack.mjs` under `--stage=full`. (3) Wired into `.github/workflows/ci.yml` so external contributors hit the gate too. (4) Companion test in `scripts/check-pnpm-minsky-aliases.test.mjs` pins the rule (15+ tests covering pass / fail / multi-fail / edge cases).
+  - **Pivot**: if the regex is too strict and legitimate use-cases need extra args (e.g. `bin/minsky run --once` to pass a flag), expand the regex to `^bin/minsky\s+\w+(\s+--?[\w-]+(=[\w./-]+)?)*$` — args yes, additional shell commands no.
+  - **Measurement**: `node scripts/check-pnpm-minsky-aliases.mjs` exits 0 against the current `package.json` post `cli-consolidate-pnpm-minsky-scripts`, exits 1 against any PR that adds an arbitrary shell command to a `minsky:*` script.
+  - **Anchor**: rule #10 (deterministic enforcement, not vibes); feedback-loop guardrails ("every recurring review comment must become a lint rule"); operator session 2026-05-27.
+  - **Details**: write the script (~30 LOC node), write the test (~100 LOC, vitest), wire into `STACK_MANIFEST` in `run-pre-pr-lint-stack.mjs` AND `.github/workflows/ci.yml` (mirror the metric-freshness shape).
+  - **Files**: `scripts/check-pnpm-minsky-aliases.mjs` (new), `scripts/check-pnpm-minsky-aliases.test.mjs` (new), `scripts/run-pre-pr-lint-stack.mjs`, `.github/workflows/ci.yml`
+  - **Acceptance**: the lint runs on every PR; a regression (any `minsky:*` script growing logic beyond delegation) fails the gate; the failure message names the violating script + the canonical fix.
+
 - [ ] `minsky-npm-publish-v0-1-0` — operator-step: publish the first release of the `minsky` npm package so `npx minsky init` works for any operator on any machine. The publishable substrate (package.json bin + files, regression test, smoke test) shipped in PR (this PR) — what's left is the credentials-gated push to npmjs.com
   - **ID**: minsky-npm-publish-v0-1-0
   - **Tags**: p0, milestone-m1, m1-3, operator-step, install, distribution, blocked-needs-operator

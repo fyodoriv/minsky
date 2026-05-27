@@ -295,6 +295,24 @@ When in doubt, just describe the work — OMC auto-selects.
 
 These OMC personas (`product-manager`, `product-analyst`, `analyst`) only run when the task's `**Tags**` includes one of: `business`, `growth`, `revenue`, `customer`, `pricing`. Otherwise skip them — saves tokens and prevents drift into unrelated commentary.
 
+### All user interface is P0-P1 (by definition)
+
+Operator directive 2026-05-27: every user-facing CLI surface — `bin/minsky` subcommands, `pnpm minsky:*` scripts, `bin/minsky <verb> --help` text, error messages the operator sees, dashboard widgets, the `init` flow, the `doctor` output — **defaults to P0 or P1 priority, never P2-P3**. UX friction compounds: a flag the operator has to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours.
+
+When filing a UI task in `TASKS.md`:
+
+- **P0** — user-facing default is wrong / surprising / forces a workaround (e.g. `pnpm minsky:logs` defaulting to tick-loop-only when the operator wants every source — see PR #907)
+- **P1** — user-facing surface works correctly but is inconsistent across entry points (e.g. `pnpm minsky:status` ≠ `bin/minsky status`) or lacks `--help`
+- **P2** — only acceptable for explicitly-deferred UX work with a written reason (e.g. a redesign blocked on upstream dependency)
+- **P3** — never. If something is "minor UX polish", it's still P1.
+
+Two concrete sub-rules implied by this:
+
+1. **One canonical command per operation.** Two CLI surfaces with the same name (`pnpm minsky:X` + `bin/minsky X`) MUST behave identically — one delegates to the other. Drift is a P0 bug. The 2026-05-27 lint (`scripts/check-pnpm-minsky-aliases.mjs`, when it lands) makes this deterministic.
+2. **Sane defaults.** No-args invocation should do the right thing for the 90% case. Flags are for the 10% drill-down. If the operator has to remember a flag for the common case, the default is wrong.
+
+This rule applies retroactively: when scanning `TASKS.md`, if you find a UI task at P2 or P3, surface the misclassification and propose promotion to P1.
+
 ## File and folder conventions
 
 ```text
