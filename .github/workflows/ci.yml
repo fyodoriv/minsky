@@ -2236,7 +2236,6 @@ jobs:
                    "${{ needs.changelog-md-update.result }}" \
                    "${{ needs.research-md-update.result }}" \
                    "${{ needs.test-file-colocation.result }}" \
-
                    "${{ needs.deprecated-md-respect.result }}" \
                    "${{ needs.cli-integration-test-coverage.result }}" \
                    "${{ needs.omc-mode-persona-gating.result }}" \
