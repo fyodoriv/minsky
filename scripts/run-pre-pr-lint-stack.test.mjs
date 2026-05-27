@@ -111,6 +111,8 @@ describe("STACK_MANIFEST", () => {
         "check-task-block-citations",
         "cloud-agent-config-audit-matrix",
         "competitive-goal",
+        "doc-why-first-paragraph",
+        "filename-casing",
         "markdownlint",
         "milestone-alignment",
         "no-hardcoded-user-paths",
@@ -126,6 +128,7 @@ describe("STACK_MANIFEST", () => {
         "tasks-lint",
         "threat-model-section",
         "typecheck",
+        "ui-tasks-priority",
       ].sort(),
     );
   });
