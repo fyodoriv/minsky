@@ -404,7 +404,7 @@ Format:
 
 Multiple comma-separated globs allowed; backticks optional but encouraged for markdown rendering. Supported glob syntax (per `globMatchesPath`): `*` matches any chars including `/`, `?` matches a single char, exact text matches literally — no brace expansion, no character classes. The matcher is intentionally minimal to avoid a `micromatch` / `minimatch` dependency.
 
-Single-process daemon (no `--worker-id`) ignores the field entirely. Empty / absent `**Touches**` is treated as "no globs declared" — the collision check returns `proceed` (lenient default during rollout); strict mode is a future policy choice.
+Single-process daemon (no `--worker-id`) ignores the field entirely. **Strict by default** for P0/P1 task blocks (PR #924, det-touches-field-strict-mode): every P0/P1 task block MUST declare `**Touches**:` — either a comma-separated list of globs the task is expected to edit, OR `**Touches**: <none>` to explicitly opt out (cross-cutting work that doesn't fit a glob). The `check-touches-field` lint enforces this at pre-PR and CI time with a grandfathered allowlist of 92 pre-existing violators; new tasks must declare the field or fail the gate. The daemon-side collision-check substrate (`novel/tick-loop/src/touches-glob.ts`) was deleted in phase-11b — the field's value today is task-author discipline (declaring blast radius forces thinking about file-set disjointness) plus future-proofing for the M2 parallel-daemon work.
 
 Declare `**Touches**:` on tasks the daemon is likely to pick. Broad meta-tasks (e.g. `security-privacy-priority-substrate`) that span many directories should be decomposed into narrower sub-tasks rather than declaring `novel/**` as a glob — the latter would over-collide.
 

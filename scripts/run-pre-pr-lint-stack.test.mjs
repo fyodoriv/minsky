@@ -136,6 +136,7 @@ describe("STACK_MANIFEST", () => {
         "rule-9-tasksmd-fields",
         "tasks-lint",
         "threat-model-section",
+        "touches-field",
         "typecheck",
         "ui-tasks-priority",
       ].sort(),
