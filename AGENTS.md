@@ -266,6 +266,18 @@ Tasks live in `TASKS.md` and follow the [tasks.md spec](https://github.com/tasks
 4. When the task is complete, **remove its entire block from `TASKS.md`** — history lives in git log per the tasks.md spec
 5. Commit and push
 
+### Tool-call discipline (load-bearing for non-Claude models)
+
+**EVERY reply you emit must include a tool call** — `terminal`, `file_editor`, `task_tracker`, or `finish`. The OpenHands SDK (and similar agent frameworks) treat a reply containing only prose with no tool call as the conversation-end signal and TERMINATE the conversation immediately, regardless of whether the work has shipped.
+
+Observed failure mode (2026-05-27, `ollama_chat/qwen3-coder:30b`): 13/13 consecutive iterations emitted a final message like `Let me examine the main supervisor script` AS PROSE WITH NO ATTACHED TOOL CALL. Each conversation ended right there, producing zero commits / zero PRs / zero pushes. Detection now lives in `daemon-no-progress-rate` invariant (`scripts/self-diagnose.mjs`) which fires within 3 such iterations.
+
+**Forbidden patterns**: emitting `Let me examine X` / `Now I'll do Y` / `Let me check Z` as prose without the attached tool call. Use the `think` tool if you need to deliberate without doing.
+
+**Correct pattern**: every planning sentence is followed (in the SAME reply) by the tool call that executes the plan. Call `finish` ONLY when (a) the PR is open and the URL is printed, OR (b) you've hit an irrecoverable blocker that you've reported verbatim.
+
+This rule is baked into the brief that `scripts/build_brief.py` ships to every agent spawn — `tests/test_build_brief.py::test_overlay_includes_tool_call_discipline_block` pins it so a future refactor can't quietly drop it.
+
 ### Choosing an OMC mode for a task
 
 When you invoke OMC commands inside a task, choose the mode based on the task's `**Tags**`:
