@@ -907,15 +907,14 @@ case "${1:-}" in
       _run_tail_failures "$@"
       exit $?
     fi
-    # `--source <name>` and `--all` flags pass through to the node
-    # formatter; `--help` does too. Default (no args) = the formatter's
-    # `--all` mode, which is the most operator-useful default.
+    # `--source <name>` and `--help` flags pass through to the node
+    # formatter. Default (no args) tails EVERY source — sane-default
+    # per the 2026-05-27 operator directive "one log command with sane
+    # defaults". `--all` is kept as an explicit no-op alias for back-
+    # compat.
     _logs_script_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
     _logs_script="$_logs_script_dir/../scripts/minsky-logs.mjs"
     if [ -f "$_logs_script" ]; then
-      if [ "$#" -eq 0 ]; then
-        exec node "$_logs_script" --all
-      fi
       exec node "$_logs_script" "$@"
     fi
     # Fallback: scripts/minsky-logs.mjs not present (very old checkout

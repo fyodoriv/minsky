@@ -233,17 +233,25 @@ describe("prefixSourceTag — interleaved-stream tag prefix", () => {
 });
 
 describe("resolveSources — CLI flag routing", () => {
-  it("returns default sources (tick-loop only) when no args", () => {
+  it("returns every source by default (sane-default per 2026-05-27 directive)", () => {
+    // Pre-2026-05-27: default was tick-loop only, operator had to
+    // remember --all. Post-fix: default IS the full set — the
+    // operator gets everything without thinking about flags.
     const { sources, mode } = resolveSources([]);
     expect(mode).toBe("default");
-    expect(sources.every((s) => s.tag.startsWith("tick-loop"))).toBe(true);
-  });
-
-  it("returns the full set when --all is passed", () => {
-    const { sources, mode } = resolveSources(["--all"]);
-    expect(mode).toBe("all");
     expect(sources.some((s) => s.tag === "auto-merge")).toBe(true);
     expect(sources.some((s) => s.tag === "watchdog")).toBe(true);
+    expect(sources.some((s) => s.tag === "tick-loop:err")).toBe(true);
+    expect(sources.some((s) => s.tag === "tick-loop:out")).toBe(true);
+  });
+
+  it("--all is an explicit alias for the (now-default) full set", () => {
+    // --all stays as a no-op explicit form so back-compat scripts /
+    // muscle-memory invocations don't break. Both modes route through
+    // the same source list — just `--all` returns "default" mode.
+    const { sources, mode } = resolveSources(["--all"]);
+    expect(mode).toBe("default");
+    expect(sources.some((s) => s.tag === "auto-merge")).toBe(true);
     expect(sources.some((s) => s.tag === "tick-loop:err")).toBe(true);
   });
 

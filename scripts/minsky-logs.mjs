@@ -94,7 +94,13 @@ const ALL_SOURCES = [
   },
 ];
 
-const DEFAULT_SOURCES = ALL_SOURCES.filter((s) => s.tag.startsWith("tick-loop"));
+// Sane default = every source. Operator directive 2026-05-27:
+// "Let's just have one log command with sane defaults." The old
+// `tick-loop only` default forced the operator to remember --all to
+// see auto-merge / watchdog / runany streams. With this change, the
+// no-args invocation gives the operator EVERYTHING — `--source tick-
+// loop` is the focus-mode flag, not the implicit default.
+const DEFAULT_SOURCES = ALL_SOURCES;
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -344,11 +350,16 @@ function tailFile(source, opts) {
 /**
  * Resolve which sources to tail based on CLI args.
  *
+ * Default = every source in `ALL_SOURCES` (sane default — the operator
+ * gets EVERYTHING without remembering a flag). `--source <name>` is the
+ * focus-mode escape hatch. `--all` is retained as an explicit alias for
+ * the default so back-compat scripts don't break.
+ *
  * @param {string[]} argv
- * @returns {{sources: typeof ALL_SOURCES, mode: "default" | "all" | "filter"}}
+ * @returns {{sources: typeof ALL_SOURCES, mode: "default" | "filter"}}
  */
 export function resolveSources(argv) {
-  if (argv.includes("--all")) return { sources: ALL_SOURCES, mode: "all" };
+  if (argv.includes("--all")) return { sources: ALL_SOURCES, mode: "default" };
   const sourceIdx = argv.indexOf("--source");
   if (sourceIdx !== -1) {
     const name = argv[sourceIdx + 1];
@@ -366,16 +377,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(
       [
-        "Usage: pnpm minsky:logs [--all] [--source <name>]",
+        "Usage: bin/minsky logs [--source <name>]",
+        "  Aliases: `pnpm minsky:logs`",
         "",
-        "Default: tails tick-loop.{out,err} with colors + per-source tags.",
+        "Default: tails EVERY source in the registry (tick-loop, auto-merge,",
+        "daemon, watchdog, runany) with ANSI colors + per-source [tag] prefixes.",
         "",
         "Options:",
-        "  --all              tail every source in the registry (tick-loop, auto-merge,",
-        "                     daemon, watchdog, runany) — each line prefixed with",
-        "                     a colored [source-tag] for interleaved-stream readability",
         "  --source <name>    tail only the matching source(s) — `--source tick-loop`",
         "                     covers both `tick-loop:out` and `tick-loop:err`",
+        "  --all              explicit alias for the default (no-op kept for back-compat)",
+        "  --help, -h         this message",
         "",
         "Available sources:",
         ...ALL_SOURCES.map((s) => `  ${s.tag.padEnd(16)} ${s.path}`),
@@ -399,13 +411,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
     process.exit(1);
   }
-  const includeSourceTag = mode !== "default"; // tags add noise to the legacy single-tick-loop view
+  // ALWAYS show source tags now that the default tails every source.
+  // The legacy "no tags in default" shape made sense when default was
+  // tick-loop-only (every line had implicit context); with the
+  // sane-default flip to ALL_SOURCES, tags are load-bearing — they're
+  // the only way to disambiguate interleaved streams.
+  const includeSourceTag = true;
   const headerLabel =
-    mode === "all"
-      ? "pnpm minsky:logs --all — tailing every minsky log stream"
-      : mode === "filter"
-        ? `pnpm minsky:logs --source ${sources.map((s) => s.tag).join(",")}`
-        : "pnpm minsky:logs — tailing tick-loop {out,err}";
+    mode === "filter"
+      ? `bin/minsky logs --source ${sources.map((s) => s.tag).join(",")}`
+      : "bin/minsky logs — tailing every minsky log stream";
   const header = color(ANSI.bold + ANSI.cyan, `${headerLabel} (Ctrl-C to exit)`);
   process.stdout.write(`${header}\n${color(ANSI.dim, "─".repeat(80))}\n`);
 
