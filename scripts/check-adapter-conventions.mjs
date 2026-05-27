@@ -3,9 +3,11 @@
 // <!-- scope: human-approved det-* cohort task per det-adapter-conventions-bundle-self-test-jsdoc-metric-one-per-file (PR #911) -->
 //
 // check-adapter-conventions — three adapter rules in one lint:
-//   (1) One adapter per file (interface and implementation in separate
-//       files; the interface lives in src/index.ts, implementation in
-//       src/<vendor>.ts).
+//   (1) One adapter per file: each implementation file in
+//       novel/adapters/<pkg>/src/ (not index.ts) exports AT MOST ONE
+//       `class X implements Y` — the primary implementation. Helper
+//       types, config interfaces, and supporting functions remain
+//       permitted. The abstract interface itself lives in index.ts.
 //   (2) Every adapter implementation file exports `selfTest()` (string
 //       match on the function name — regex over the source, not AST).
 //   (3) Public exports in adapter source files carry JSDoc.
@@ -54,10 +56,10 @@ export const ADAPTER_FILE_EXEMPTIONS = Object.freeze([
  * drain via P2 backfill tasks. Per the rule-#10 ratchet pattern (same
  * shape as rule-9-tasksmd-fields, competitive-goal).
  *
- * Each entry's key is the relative path; value is "selfTest" or "jsdoc"
- * or "all" (both rules grandfathered for that file).
+ * Each entry's key is the relative path; value identifies which
+ * rule(s) are exempted: "oneAdapter", "selfTest", "jsdoc", or "all".
  *
- * @type {Readonly<Record<string, "selfTest" | "jsdoc" | "all">>}
+ * @type {Readonly<Record<string, "oneAdapter" | "selfTest" | "jsdoc" | "all">>}
  */
 export const GRANDFATHERED = Object.freeze({
   "novel/adapters/prompt-optimizer/src/anthropic.ts": "jsdoc",
@@ -121,11 +123,47 @@ function checkOneFile(relPath, repoRoot, readText, violations) {
     return;
   }
   const grandfathered = GRANDFATHERED[relPath];
+  if (grandfathered !== "oneAdapter" && grandfathered !== "all") {
+    checkOneAdapterPerFile(relPath, src, violations);
+  }
   if (grandfathered !== "selfTest" && grandfathered !== "all") {
     checkSelfTest(relPath, src, violations);
   }
   if (grandfathered !== "jsdoc" && grandfathered !== "all") {
     checkJsDocOnPublicExports(relPath, src, violations);
+  }
+}
+
+/**
+ * Rule (1): one adapter per file. Each implementation file (not
+ * `index.ts`) in `novel/adapters/<pkg>/src/` must export AT MOST ONE
+ * `class X implements Y` — the primary implementation. Helper types,
+ * config interfaces, and supporting functions remain permitted; the
+ * single-adapter rule applies only to `export class ... implements ...`.
+ *
+ * Why: ensures the Strategy implementation surface stays one-class-per-
+ * file (rule #8 — Gamma et al. 1994 Strategy shape). Multiple
+ * implementations in one file would force one file to be loaded by
+ * everyone, defeating the dependency-isolation goal of rule #2.
+ *
+ * @param {string} relPath
+ * @param {string} src
+ * @param {string[]} violations
+ */
+function checkOneAdapterPerFile(relPath, src, violations) {
+  // Find every `export class <Name> implements <Interface>`. The
+  // `implements` keyword distinguishes the primary adapter from helper
+  // classes (which lack `implements`).
+  const matches = src.matchAll(/^export\s+(?:abstract\s+)?class\s+(\w+)[^{]*\bimplements\b/gm);
+  /** @type {string[]} */
+  const classNames = [];
+  for (const m of matches) {
+    if (m[1] !== undefined) classNames.push(m[1]);
+  }
+  if (classNames.length > 1) {
+    violations.push(
+      `${relPath}: ${classNames.length} \`export class ... implements\` declarations found (${classNames.join(", ")}); rule (1) limits each implementation file to one adapter. Per AGENTS.md §"Code conventions": "One adapter per file; interface and implementation in separate files".`,
+    );
   }
 }
 

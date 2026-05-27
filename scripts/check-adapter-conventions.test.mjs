@@ -112,6 +112,63 @@ describe("checkAdapterConventions", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("rule (1): flags two `implements` classes in one impl file", () => {
+    const result = checkAdapterConventions(
+      fakeFs({
+        "novel/adapters/foo/src/bar.ts": [
+          "/** Foo */",
+          "export class Foo implements Notifier {",
+          "  async selfTest() { return { ok: true }; }",
+          "  push() {}",
+          "}",
+          "/** Baz */",
+          "export class Baz implements Notifier {",
+          "  push() {}",
+          "}",
+        ].join("\n"),
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.violations.some((v) => /rule \(1\)/.test(v))).toBe(true);
+    expect(result.violations.some((v) => /Foo, Baz/.test(v))).toBe(true);
+  });
+
+  it("rule (1): passes one `implements` class with helper class beside it", () => {
+    const result = checkAdapterConventions(
+      fakeFs({
+        "novel/adapters/foo/src/bar.ts": [
+          "/** Primary impl */",
+          "export class Foo implements Notifier {",
+          "  async selfTest() { return { ok: true }; }",
+          "}",
+          "/** Helper — not an adapter */",
+          "export class FooHelper {",
+          "  format(x: string) { return x; }",
+          "}",
+        ].join("\n"),
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("rule (1): passes export interface + config types alongside the impl", () => {
+    const result = checkAdapterConventions(
+      fakeFs({
+        "novel/adapters/foo/src/bar.ts": [
+          "/** Config */",
+          "export interface FooConfig { x: number }",
+          "/** Helper */",
+          "export type FetchLike = (url: string) => Promise<unknown>;",
+          "/** Impl */",
+          "export class Foo implements Notifier {",
+          "  async selfTest() { return { ok: true }; }",
+          "}",
+        ].join("\n"),
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it("real production scan passes (smoke)", () => {
     const result = checkAdapterConventions();
     expect(result.ok).toBe(true);
