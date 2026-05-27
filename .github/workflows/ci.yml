@@ -1775,10 +1775,14 @@ jobs:
           node-version-file: ".node-version"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: build dashboard-web dist (needed by --expected-from-success-metrics)
+        run: pnpm --filter @minsky/dashboard-web tsc -b
       - name: metric-freshness lint
-        run: |
-          node scripts/check-metric-freshness.mjs \
-            --expected loop-uptime,tokens-per-story,spec-alignment,self-improvement-velocity,mttr,wrist-dwell,extraction-count,dep-interface-coverage,token-budget-honoring,task-throughput,cross-repo-pr-rate,fleet-stability-aggregated,session-converts-repo,baseline-delta-per-cycle,path-a-loc-novel-tree,install-success-rate,remote-task-submission-substrate,agent-launcher-parity,uninstall-residue-count,spawn-failure-rate-24h
+        # Reads SUCCESS_METRICS directly from the compiled
+        # novel/dashboard-web/dist/metrics.js — single source of truth.
+        # Pre-2026-05-27 this used a hardcoded --expected list that
+        # drifted independently from the local pre-pr-lint stack.
+        run: node scripts/check-metric-freshness.mjs --expected-from-success-metrics
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
 
