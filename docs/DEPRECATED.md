@@ -82,7 +82,7 @@ The list is consulted by `AGENTS.md` (which tells every agent to read this file 
 - **Replacement**: Same — dynamic timeouts via `computeDynamicSettingsForHost`.
 - **Status**: Escape hatch only. Do not set in plists.
 
-### 8. Manual `minsky stop` + `rm -f daemon.pid` + `minsky --daemon`
+### 8. Manual three-step restart (stop + rm + start)
 
 - **Replacement**: `minsky update` (one command).
 - **Rationale**: The three-step restart was error-prone (forgot to

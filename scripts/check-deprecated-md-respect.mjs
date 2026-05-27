@@ -58,6 +58,11 @@ export const ALLOWLIST = Object.freeze([
   /^docs\/.*\.md$/, // any doc may discuss
   /^scripts\/check-deprecated-md-respect\.mjs$/,
   /^scripts\/check-deprecated-md-respect\.test\.mjs$/,
+  // Tests that exist precisely to ASSERT the deprecated substrate
+  // is not used — they BAN the string, which the lint would otherwise
+  // count as a use. Per AGENTS.md §"Self-referential lints": a lint
+  // pinning the deprecated path's absence may name the path.
+  /^test\/integration\/pnpm-minsky-aliases\.test\.ts$/,
 ]);
 
 /**
