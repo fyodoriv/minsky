@@ -274,7 +274,7 @@ Triggered by `--deep` flag, by `--post-mortem`, or by any operator phrase that i
 <Bullet list of ≥2 architectural patterns, design decisions, or operational practices Minsky should consider absorbing. Each lesson MUST cite the exact file/blog/paper section.>
 
 ### 3. Are any of these lessons potentially vision-changing?
-<If yes: name them explicitly AND append a new entry to the repo's `ask_human.md` (per the agentbrew shared rule "Async human comms — ask_human.md"; this is the adopted [ask-human-mcp](https://github.com/masony817/ask-human-mcp) convention). If no: state "no vision-changing finding" with one-sentence reasoning so the negative finding is auditable. Vision-changing means the lesson would force a rewrite of `vision.md § What Minsky is` or invalidate one of the 17 rules — not "we should add a feature".>
+<If yes: name them explicitly AND append a new entry to the repo's `ask-human.md` (per the agentbrew shared rule "Async human comms — ask-human.md"; this is the adopted [ask-human-mcp](https://github.com/masony817/ask-human-mcp) convention). If no: state "no vision-changing finding" with one-sentence reasoning so the negative finding is auditable. Vision-changing means the lesson would force a rewrite of `vision.md § What Minsky is` or invalidate one of the 17 rules — not "we should add a feature".>
 
 ### 4. How can we improve our strategy based on this?
 <Concrete, actionable strategy-level improvements (NOT individual feature requests). Examples of valid answers: "Tighten the 'no framework' moat by publishing comparison X." / "Accept that Y is commodity and stop building it ourselves." Each improvement MUST trace to a specific lesson from §2.>
@@ -283,7 +283,7 @@ Triggered by `--deep` flag, by `--post-mortem`, or by any operator phrase that i
 <For each Minsky surface (tick-loop, MAPE-K, adapters, sandbox, corpus, dashboard, etc.) say one of: REPLACE (with concrete migration sketch + estimated surface % cut), AUGMENT (use alongside, name the seam), KEEP (Minsky's version is superior, name why), or N/A (out of scope). Total replace % across all surfaces is the headline number for the operator.>
 ```
 
-**Operator escape hatch**: the repo's `ask_human.md` (the adopted [ask-human-mcp](https://github.com/masony817/ask-human-mcp) convention — see agentbrew shared-rules.md § "Async human comms — ask_human.md") is the human-↔-agent comm channel for question #3. Every finding flagged as vision-changing MUST be appended there using the canonical Q-block format. The operator reads the file (or the `ask-human-mcp` daemon notifies them), replaces `answer: PENDING` with their decision inline, and the agent re-reads to continue.
+**Operator escape hatch**: the repo's `ask-human.md` (the adopted [ask-human-mcp](https://github.com/masony817/ask-human-mcp) convention — see agentbrew shared-rules.md § "Async human comms — ask-human.md") is the human-↔-agent comm channel for question #3. Every finding flagged as vision-changing MUST be appended there using the canonical Q-block format. The operator reads the file (or the `ask-human-mcp` daemon notifies them), replaces `answer: PENDING` with their decision inline, and the agent re-reads to continue.
 
 ```md
 ### Q<8-char-hex-id>
@@ -379,7 +379,7 @@ After running this skill successfully you have:
 1. A new (or updated) entry in `novel/competitive-benchmark/src/competitors.ts` (if the competitor publishes ≥1 quantitative metric; skip if no primary number exists — `--deep` mode does NOT require corpus entry).
 2. A new (or updated) `competitors/<id>.md` research file with the Scorecard readings table.
 3. **In `--deep` mode**: a `## Five pivot questions` section at the bottom of `competitors/<id>.md` answering all 5 questions with primary-source citations.
-4. **In `--deep` mode, if vision-threat found**: ≥1 Q-block appended to `ask_human.md` (repo root) per the adopted ask-human-mcp convention. The block stays in the file even after the operator answers; it's the audit trail.
+4. **In `--deep` mode, if vision-threat found**: ≥1 Q-block appended to `ask-human.md` (repo root) per the adopted ask-human-mcp convention. The block stays in the file even after the operator answers; it's the audit trail.
 5. **In `--post-mortem` mode**: a `## Post-mortem: why it died` section with ≥3 evidence sources and ≥1 named Minsky guardrail.
 6. (Optional) P2/P3 follow-up TASKS.md entries per Phase 6 — for thin coverage, architectural-pattern findings, roadmap threats, capability gaps, etc.
 7. Green `bin/minsky competitive` showing the competitor in the scorecard grid (only if a corpus entry was added).

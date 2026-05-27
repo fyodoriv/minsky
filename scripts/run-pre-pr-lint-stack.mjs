@@ -302,6 +302,9 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "claude-hooks-installed",
       "tool-call-discipline-smoke",
       "rule-10-no-llm-in-load-bearing-gates",
+      "filename-casing",
+      "doc-why-first-paragraph",
+      "ui-tasks-priority",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -723,18 +726,30 @@ export const STACK_MANIFEST = Object.freeze([
     ],
   },
   {
-    // Self-referential rule-#10 enforcement: no load-bearing gate
-    // script (anything in this very STACK_MANIFEST) may import an LLM
-    // SDK or fetch an LLM API. Catches the silent failure mode where
-    // someone adds `import Anthropic from "@anthropic-ai/sdk"` to a
-    // check-*.mjs and turns rule #10 itself into an LLM-driven gate.
-    // Anchor: det-no-llm-sdk-in-ci-gate-scripts-meta-lint (PR #911
-    // cohort); vision rule #10 (deterministic enforcement); Javierlozo/
-    // llm-audit (Semgrep prior-art).
-    name: "rule-10-no-llm-in-load-bearing-gates",
-    stages: ["full"],
+    // Cardinal *.md files (vision.md, AGENTS.md, ...) have specific casing
+    // requirements; other root-level .md files must be kebab-case-lowercase.
+    // Per AGENTS.md §"Filename casing"; det-filename-casing-cardinal-md-files.
+    name: "filename-casing",
+    stages: ["stop-gate", "fast", "full"],
     cmd: "node",
-    args: ["scripts/check-rule-10-no-llm-in-load-bearing-gates.mjs"],
+    args: ["scripts/check-filename-casing.mjs"],
+  },
+  {
+    // Every cardinal doc opens with a "why does this file exist?" paragraph.
+    // Per AGENTS.md §"Documentation rules"; det-doc-why-first-paragraph.
+    name: "doc-why-first-paragraph",
+    stages: ["stop-gate", "fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-doc-why-first-paragraph.mjs"],
+  },
+  {
+    // UI / CLI / dashboard / operator-facing tasks default to P0-P1, never
+    // P2-P3 (operator directive 2026-05-27). Exceptions require an explicit
+    // `**Deferred-because**: <reason>`. Per det-ui-tasks-default-p0-p1.
+    name: "ui-tasks-priority",
+    stages: ["stop-gate", "fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-ui-tasks-priority.mjs"],
   },
   {
     name: "supervisor-sandbox-hardening",
