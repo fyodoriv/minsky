@@ -309,6 +309,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "cli-integration-test-coverage",
       "omc-mode-persona-gating",
       "adapter-conventions",
+      "touches-field",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -814,6 +815,17 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-adapter-conventions.mjs"],
+  },
+  {
+    // P0/P1 task blocks in TASKS.md must carry **Touches**: declaring
+    // file globs the task is expected to edit (strict by default;
+    // **Touches**: <none> as explicit opt-out). Ratchet model — 92
+    // existing violations grandfathered. Per AGENTS.md §"**Touches**:
+    // field on task blocks"; det-touches-field-strict-mode.
+    name: "touches-field",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-touches-field.mjs"],
   },
   {
     name: "changelog-md-update",

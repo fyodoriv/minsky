@@ -1764,6 +1764,23 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-adapter-conventions.test.mjs
 
+  touches-field:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: touches-field lint
+        run: node scripts/check-touches-field.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-touches-field.test.mjs
+
   no-hardcoded-timeouts:
     runs-on: ubuntu-latest
     steps:
@@ -2176,6 +2193,7 @@ jobs:
       - cli-integration-test-coverage
       - omc-mode-persona-gating
       - adapter-conventions
+      - touches-field
       - no-hardcoded-timeouts
       - no-no-verify-bypass
       - launchd-safe-paths
@@ -2257,6 +2275,7 @@ jobs:
                    "${{ needs.cli-integration-test-coverage.result }}" \
                    "${{ needs.omc-mode-persona-gating.result }}" \
                    "${{ needs.adapter-conventions.result }}" \
+                   "${{ needs.touches-field.result }}" \
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \
