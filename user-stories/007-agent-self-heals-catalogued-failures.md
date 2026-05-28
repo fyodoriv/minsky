@@ -292,6 +292,33 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **When** `detect()` runs
 - **Then** it returns `{ present: false }` — those signals belong to `heal-ollama-down` / `heal-agent-rate-limited`
 
+### Scenario: heal-brief-too-long-for-context-window detects context-window-exceeded signals
+
+- **Given** stderr containing `"context window exceeded"` or `"input too long"` or `"prompt_tokens (250000) > model_max_input_tokens (200000)"` or `"maximum context length is 200000 tokens"`
+- **When** `heal-brief-too-long-for-context-window.detect({ stderr, briefFilePath, rebuildFn, briefByteCountFn })` runs
+- **Then** it returns `{ present: true, signal: "brief-too-long-for-context-window", evidence: { briefFilePath, maxTokens, stderrPreview } }`
+
+### Scenario: heal-brief-too-long-for-context-window invokes rebuildFn with the cap
+
+- **Given** a detected signal AND default `maxTokens = 100_000`
+- **When** `apply()` runs
+- **Then** `rebuildFn` is called with `(100_000, briefFilePath)`
+- **And** `apply` returns `{ applied: true, changedFiles: [briefFilePath], notes: "regenerated brief with max-tokens=100000; caller should retry the spawn" }`
+
+### Scenario: heal-brief-too-long-for-context-window verifies via byte-count heuristic
+
+- **Given** `maxTokens = 100_000` (byte budget = 400_000 = 100_000 × 4)
+- **When** `verify()` runs against a brief at 300_000 bytes
+- **Then** it returns `{ healed: true }`
+- **When** `verify()` runs against a brief at 500_000 bytes
+- **Then** it returns `{ healed: false, residualSignal: "brief-too-long-for-context-window" }`
+
+### Scenario: heal-brief-too-long-for-context-window rebuildFn throw propagates (rule #6)
+
+- **Given** `rebuildFn` throws `Error("build_brief.py: --max-tokens not supported yet")` (the production state until `build-brief-supports-max-tokens` ships)
+- **When** `apply()` runs
+- **Then** the throw propagates to the caller — let-it-crash at the I/O boundary
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`
