@@ -227,6 +227,26 @@ def test_is_not_blocked_false_when_blocked_field_set() -> None:
     assert not pick_task.is_not_blocked(blocked)
 
 
+def test_is_not_blocked_false_when_blocked_because_alias_set() -> None:
+    """Regression for 2026-05-28: `**Blocked-because**:` was ignored by the
+    picker, so a task that declared its external dependency under that
+    field looped forever. The alias is now recognized."""
+    tasks_md = """## P0
+
+- [ ] Task that is blocked via alias
+  **ID**: blocked-because-task
+  **Hypothesis**: alias is honored
+  **Success**: skipped
+  **Pivot**: <0.5
+  **Measurement**: pytest
+  **Anchor**: rule #9
+  **Blocked-because**: needs upstream X to ship first
+"""
+    tasks = pick_task.parse_tasks_md(tasks_md)
+    blocked = next(t for t in tasks if t.id == "blocked-because-task")
+    assert not pick_task.is_not_blocked(blocked)
+
+
 # --- pickHostTask parity tests -------------------------------------------
 
 

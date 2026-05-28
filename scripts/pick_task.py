@@ -60,7 +60,13 @@ FIELD_REGEXES = {
     "pivot": re.compile(r"^\*\*Pivot\*\*:\s*(.+)$"),
     "measurement": re.compile(r"^\*\*Measurement\*\*:\s*(.+)$"),
     "anchor": re.compile(r"^\*\*Anchor\*\*:\s*(.+)$"),
-    "blocked": re.compile(r"^\*\*Blocked\*\*:\s*(.+)$"),
+    # `Blocked-because` is an accepted alias for `Blocked` — operators
+    # used both in TASKS.md before the supervisor's picker recognized
+    # only the latter (observed 2026-05-28: persona-rule task was
+    # `Blocked-because:` and looped because the picker ignored it).
+    # See `scripts/check-tasks-blocked-field-canonical.mjs` for the
+    # lint that nudges new tasks toward the canonical `**Blocked**:`.
+    "blocked": re.compile(r"^\*\*Blocked(?:-because)?\*\*:\s*(.+)$"),
 }
 
 
