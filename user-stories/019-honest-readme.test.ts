@@ -40,6 +40,17 @@ describe("user-story 019 — honest README in <5 min (M1.11) substrate", () => {
     expect(readme).toMatch(/^# [^\n]+\n+>\s+\S+/m);
   });
 
+  test("README has `## What this is` (reader-orientation doc frame, beat 2)", () => {
+    // Restored 2026-05-28 alongside `docs-frame-coherence` lift of
+    // README.md into DOCS_FRAME_ALLOWLIST. See user story § Acceptance
+    // criterion 1 for the frame's full 3-beat shape.
+    expect(readReadme()).toMatch(/^## What this is\b/m);
+  });
+
+  test("README has `## What this is not` (reader-orientation doc frame, beat 3)", () => {
+    expect(readReadme()).toMatch(/^## What this is not\b/m);
+  });
+
   test("README documents an install path (npx minsky init / pnpm install / bin/minsky)", () => {
     const readme = readReadme();
     // Three canonical install paths today: the RC `npx minsky init`,
