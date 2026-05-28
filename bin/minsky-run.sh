@@ -622,6 +622,45 @@ Follow the host repo's AGENTS.md + vision.md rules.
 EOF
   fi
 
+  # Prepend an "uncommitted-progress notice" to the brief when the
+  # worktree from a prior iteration still has uncommitted changes.
+  # Observed 2026-05-28: an iteration created a 221-line
+  # `novel/adapters/a2a.ts` (with broken imports — incomplete work),
+  # exited without `git add`/commit, and EVERY subsequent iteration
+  # started fresh "Analyzing the task requirements..." while ignoring
+  # the file the prior iteration had already written. Without this
+  # notice, the daemon cannot accumulate progress across iterations —
+  # each one re-does (or re-plans) the same first step.
+  #
+  # The notice is honest about state: it surfaces both the file list
+  # AND that the prior work may be incomplete/broken. The agent's
+  # choice (commit / fix / restart) is explicit; the alternative
+  # (silently overwrite or silently ignore) is what the bug looked
+  # like pre-fix.
+  local worktree_for_brief="$host/.worktrees/daemon-${task_id}"
+  if [[ -d "$worktree_for_brief/.git" ]] || [[ -f "$worktree_for_brief/.git" ]]; then
+    local uncommitted_summary
+    uncommitted_summary="$(git -C "$worktree_for_brief" status --porcelain 2>/dev/null | head -20)"
+    if [[ -n "$uncommitted_summary" ]]; then
+      local brief_prepend
+      brief_prepend="$(mktemp -t minsky-brief-prepend.XXXXXX)"
+      {
+        echo "PRIOR-ITERATION UNCOMMITTED WORK IN THIS WORKTREE (may be incomplete or broken):"
+        echo ""
+        echo '```'
+        echo "$uncommitted_summary"
+        echo '```'
+        echo ""
+        echo "Your FIRST tool call: \`cat\` (or file_editor view) any new file in the list above; \`git diff\` any modified file. If the prior work is correct, stage + commit + push it BEFORE doing anything else. If broken or incomplete, decide: continue editing OR \`git restore\`/\`rm\` and restart. Do NOT silently re-implement what's already there — that wastes the prior iteration's work and burns budget on the same first step."
+        echo ""
+        echo "---"
+        echo ""
+        cat "$brief_file"
+      } > "$brief_prepend"
+      mv "$brief_prepend" "$brief_file"
+    fi
+  fi
+
   local model
   model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
 
@@ -942,8 +981,22 @@ print(load_host_config(Path('$host')).default_branch)
     # from the ship-it perspective (the change didn't reach origin),
     # but the notes field captures the nuance so the operator can choose
     # to manually push the worktree if the work is salvageable.
+    #
+    # `working_tree_changes > 0` is an even weaker partial-progress
+    # signal: the agent EDITED files (modified or untracked) in the
+    # worktree but didn't even `git add` them. Common with local LLMs
+    # that produce broken/incomplete code and stop without realizing
+    # the brief's FINAL STEP block requires git add + commit + push.
+    # Pre-fix, this case recorded `no useful work` and the operator
+    # couldn't tell that the agent HAD done file edits — it just looked
+    # like a no-op iteration. Visibility fix observed 2026-05-28: agent
+    # created 221-line novel/adapters/a2a.ts (broken imports, but real
+    # work) and the verdict said `(no useful work)` because no commit
+    # landed. Now the notes call it out so the operator sees the
+    # uncommitted progress and can salvage / discard / iterate.
     if [[ -z "$pr_url" ]]; then
       local commits_count=0
+      local working_tree_changes=0
       if [[ -d "$worktree/.git" ]] || [[ -f "$worktree/.git" ]]; then
         local default_branch_for_count
         default_branch_for_count="$(python3 -c "
@@ -954,10 +1007,13 @@ from pathlib import Path
 print(load_host_config(Path('$host')).default_branch)
 " 2>/dev/null || echo "main")"
         commits_count="$(git -C "$worktree" rev-list --count "origin/${default_branch_for_count}..HEAD" 2>/dev/null || echo 0)"
+        working_tree_changes="$(git -C "$worktree" status --porcelain 2>/dev/null | grep -c '^' || echo 0)"
       fi
       verdict="no-progress"
       if [[ "$commits_count" -gt 0 ]]; then
         notes="openhands exited 0; ${duration_ms}ms; no PR opened but agent committed ${commits_count} change(s) — not pushed"
+      elif [[ "$working_tree_changes" -gt 0 ]]; then
+        notes="openhands exited 0; ${duration_ms}ms; agent edited ${working_tree_changes} file(s) in worktree but did not commit (uncommitted progress preserved in worktree)"
       else
         notes="openhands exited 0; ${duration_ms}ms; agent exited cleanly without commits/PR/push (no useful work)"
       fi
