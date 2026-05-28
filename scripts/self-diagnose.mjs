@@ -1319,7 +1319,7 @@ export function modelCatalogInvariantsHoldInvariant(opts) {
       suggestedTaskTitle:
         "MODEL_CATALOG broken — strategic-router will mis-route iterations until fixed",
       suggestedFix:
-        "Restore monotone-descending floors in `novel/tick-loop/src/model-catalog.ts`. Run `pnpm vitest run novel/tick-loop/src/model-catalog.test.ts` to verify.",
+        "Restore monotone-descending floors in `scripts/lib/model-catalog.mjs`. Run `pnpm vitest run scripts/lib/model-catalog.test.mjs` to verify.",
     };
   };
   /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
