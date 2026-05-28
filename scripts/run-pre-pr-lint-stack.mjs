@@ -312,6 +312,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "touches-field",
       "pnpm-minsky-aliases",
       "readme-byte-budget",
+      "docs-frame-coherence",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -848,6 +849,18 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-readme-byte-budget.mjs"],
+  },
+  {
+    // docs-frame-coherence: 3-beat frame (tagline / What-this-is /
+    // What-this-is-not) on the reader-orientation doc allowlist
+    // (currently AGENTS.md, INSTALL.md, docs/PRACTICES.md).
+    // Pin per docs/PRACTICES.md § "Unified reader-orientation doc
+    // frame". Source: `docs-frame-coherence-lint` (P3, surfaced
+    // 2026-05-21).
+    name: "docs-frame-coherence",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-docs-frame-coherence.mjs"],
   },
   {
     name: "changelog-md-update",
