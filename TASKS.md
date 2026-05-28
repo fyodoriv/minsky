@@ -1516,19 +1516,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c 'iteration #' ~/.minsky/daemon.log` matches the jsonl record count.
   - **Anchor**: 2026-05-18 live daemon. Card & Mackinlay 1999 (glanceable — the operator should see iteration health without digging).
 
-- [ ] `observer-launchd-exits-on-nonzero` — the observer-watch.sh script exits immediately when any minsky command returns non-zero (stale PID, already running) despite removing `set -e`; the launchd agent dies after one failed restart attempt
-  - **ID**: observer-launchd-exits-on-nonzero
-  - **Tags**: p1, milestone-m1, observer, reliability, launchd
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-18 live session: observer launchd agent started, detected daemon down, tried to restart, `minsky --daemon` returned "daemon already running (PID XXXX)" (stale PID), and the observer exited despite the `set -uo pipefail` (no -e) fix. Root cause: launchd captures the exit code and `pipefail` causes the pipe chain to propagate non-zero from `minsky --daemon`.
-  - **Details**: the observer script needs to be fully defensive: every minsky command should be wrapped with `|| true` or explicit error handling. Additionally, the `KeepAlive` key in the launchd plist should be set to `true` so launchd restarts the observer if it exits unexpectedly.
-  - **Files**: `scripts/observer-watch.sh` (defensive error handling), `~/Library/LaunchAgents/com.minsky.observer.plist` (add KeepAlive)
-  - **Hypothesis**: after making the observer fully defensive, it survives all minsky command failures and runs for the full 4h watch period.
-  - **Success**: observer runs for ≥1h without exiting unexpectedly; `launchctl list | grep minsky.observer` shows the service active for the full period.
-  - **Pivot**: if bash is too fragile for the observer, rewrite it as a node.js script that inherits minsky's error-handling patterns.
-  - **Measurement**: `wc -l /tmp/minsky-observer.log` ≥ 60 lines (one per minute for 1h) after the fix.
-  - **Anchor**: 2026-05-18 live session. Armstrong 2007 (let-it-crash at the right boundary — the observer must NOT crash on expected non-zero exits from the system it watches).
-
 <!-- Moved from P0 2026-05-18: M2 tasks deprioritized until M1 ships (see MILESTONES.md). -->
 - [ ] `native-agent-teams-with-tiered-adapter` — minsky drives Claude Code's native "agent teams" (lead + independent teammates + shared task list + mailbox + hooks) as its multi-worker backend when available, behind a capability-tiered agent adapter that still supports non-native agents (Devin, etc.) via the existing process-fan-out — native always preferred
   - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
