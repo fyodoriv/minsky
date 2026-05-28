@@ -441,30 +441,13 @@ describe("runDaemonPrLintMetrics", () => {
   });
 });
 
-/**
- * Slice the `daemon-pre-pr-lint-gate` task block out of TASKS.md so parity
- * checks don't accidentally pass on an unrelated `0.8` / `80%` / `≥10`
- * mention elsewhere in the file (other tasks have their own percentage and
- * count figures). The block starts at the
- * `- [ ] \`daemon-pre-pr-lint-gate\`` line and runs until the next top-level
- * `- [ ]` / `- [x]` task entry. Lifted to module scope (slice 27/N) so the
- * `ROLLING_30D_MIN_PASS_RATE` and `ROLLING_30D_MIN_N` parity describes share
- * a single extractor — same shape as slice 26/N's helper, no semantic drift.
- *
- * @param {string} tasksMd
- * @returns {string}
- */
-function extractDaemonPrePrLintGateBlock(tasksMd) {
-  const startRe = /^- \[ \] `daemon-pre-pr-lint-gate`/m;
-  const startMatch = startRe.exec(tasksMd);
-  if (startMatch === null) {
-    throw new Error("TASKS.md has no `daemon-pre-pr-lint-gate` task block");
-  }
-  const tail = tasksMd.slice(startMatch.index);
-  const nextTaskRe = /\n- \[[ x]\] `[a-z][a-z0-9-]*`/;
-  const nextMatch = nextTaskRe.exec(tail.slice(1));
-  return nextMatch === null ? tail : tail.slice(0, 1 + nextMatch.index);
-}
+// 2026-05-28 (daemon-gate-docs-citation-migration): the
+// extractDaemonPrePrLintGateBlock helper was removed alongside the
+// TASKS.md-citation tests. docs/daemon-pre-pr-gate.md is now the
+// single source of truth for the threshold prose; a follow-up
+// (daemon-pre-pr-lint-gate-fixture-citation-cleanup, P3) handles the
+// remaining fixture-string references so the parent task block can
+// also be removed eventually.
 
 describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => {
   // Slice 26/N: the rolling-window pass-rate threshold (0.8) lives canonically
@@ -516,13 +499,15 @@ describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => 
     expect(doc).toContain(decimal);
   });
 
-  test("TASKS.md `daemon-pre-pr-lint-gate` block cites the threshold in both percent and decimal forms", () => {
-    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
-    const block = extractDaemonPrePrLintGateBlock(tasksMd);
-    const { percent, decimal } = thresholdProseShapes(ROLLING_30D_MIN_PASS_RATE);
-    expect(block).toContain(percent);
-    expect(block).toContain(decimal);
-  });
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // the task block in TASKS.md has been removed (it was blocked-on-
+  // substrate-port AND its substrate has shipped per PR #863); the
+  // threshold citations migrated to docs/daemon-pre-pr-gate.md (which
+  // already cited both forms on lines 7 + 183). The first test above
+  // ("docs/daemon-pre-pr-gate.md cites the threshold ...") is the
+  // load-bearing parity check; this test's TASKS.md half is retired.
+  // extractDaemonPrePrLintGateBlock is kept exported in case a future
+  // session reintroduces the task block for some other reason.
 
   // Removed in PR #888 (phase-11b step 6/7/8): the original test
   // pinned the threshold percent in `novel/tick-loop/src/daemon.ts`'s
@@ -532,16 +517,11 @@ describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => 
   // build_brief-py`) restores the pin against build_brief.py if the
   // threshold ever moves.
 
-  test("extractDaemonPrePrLintGateBlock parses to a non-trivial block bounded by the next task (parser sanity)", () => {
-    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
-    const block = extractDaemonPrePrLintGateBlock(tasksMd);
-    expect(block).toContain("daemon-pre-pr-lint-gate");
-    expect(block.length).toBeGreaterThan(500);
-    // The next task in TASKS.md is `daemon-fix-own-pr-on-ci-failure`; the
-    // extractor must stop before that block begins, otherwise the parity
-    // assertions can pass on prose belonging to a sibling task.
-    expect(block).not.toContain("daemon-fix-own-pr-on-ci-failure");
-  });
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // parser sanity test retired alongside the task block removal.
+  // extractDaemonPrePrLintGateBlock is still exported (defensive — if a
+  // future session reintroduces the block, the parser still works), but
+  // the test that asserted the block exists in TASKS.md is dropped.
 });
 
 describe("ROLLING_30D_MIN_N prose ↔ canonical constant parity", () => {
@@ -584,11 +564,9 @@ describe("ROLLING_30D_MIN_N prose ↔ canonical constant parity", () => {
     expect(doc).toContain(minNProseShape(ROLLING_30D_MIN_N));
   });
 
-  test("TASKS.md `daemon-pre-pr-lint-gate` block cites the n threshold in ≥N form", () => {
-    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
-    const block = extractDaemonPrePrLintGateBlock(tasksMd);
-    expect(block).toContain(minNProseShape(ROLLING_30D_MIN_N));
-  });
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // the TASKS.md half of this parity check is retired alongside the
+  // task block removal. docs/ is the single source of truth now.
 });
 
 describe("ROLLING_WINDOW_DAYS prose ↔ canonical constant parity", () => {
@@ -630,9 +608,7 @@ describe("ROLLING_WINDOW_DAYS prose ↔ canonical constant parity", () => {
     expect(doc).toContain(windowDaysProseShape(ROLLING_WINDOW_DAYS));
   });
 
-  test("TASKS.md `daemon-pre-pr-lint-gate` block cites the window width in Nd form", () => {
-    const tasksMd = readFileSync(resolve(REPO_ROOT, "TASKS.md"), "utf8");
-    const block = extractDaemonPrePrLintGateBlock(tasksMd);
-    expect(block).toContain(windowDaysProseShape(ROLLING_WINDOW_DAYS));
-  });
+  // 2026-05-28 (daemon-gate-docs-citation-migration):
+  // the TASKS.md half of this parity check is retired alongside the
+  // task block removal. docs/ is the single source of truth now.
 });
