@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import * as healAgentRateLimited from "../../src/heal-agent-rate-limited.js";
+import * as healBriefTooLongForContextWindow from "../../src/heal-brief-too-long-for-context-window.js";
 import * as healCorruptStateJson from "../../src/heal-corrupt-state-json.js";
 import * as healNetworkPartitionMidSpawn from "../../src/heal-network-partition-mid-spawn.js";
 import * as healOllamaDown from "../../src/heal-ollama-down.js";
@@ -293,6 +294,32 @@ const CHAOS_CASES: ChaosCase[] = [
     },
   },
   {
+    id: "brief-too-long-for-context-window",
+    signal: "brief-too-long-for-context-window",
+    run: async () => {
+      // Stub rebuildFn → flip the byte-count below the budget.
+      let bytes = 500_000;
+      const seams: healBriefTooLongForContextWindow.BriefTooLongSeams = {
+        stderr: "Error: context window exceeded",
+        briefFilePath: "/tmp/chaos-brief.md",
+        rebuildFn: (_maxTokens, _path) => {
+          bytes = 200_000; // below the 400k budget for 100k tokens
+        },
+        briefByteCountFn: () => bytes,
+      };
+      const start = Date.now();
+      const detected = healBriefTooLongForContextWindow.detect(seams);
+      healBriefTooLongForContextWindow.apply(seams);
+      const verified = healBriefTooLongForContextWindow.verify(seams);
+      const durationMs = Date.now() - start;
+      return {
+        detected: detected.present,
+        healed: verified.healed,
+        durationMs,
+      };
+    },
+  },
+  {
     id: "stuck-command",
     signal: "stuck-command",
     run: async () => {
@@ -350,10 +377,11 @@ describe("heal-catalogue chaos: each automated heal completes within 5 min", () 
     // If a new heal is added to the catalogue, this test fails until the
     // chaos case is added too. Prevents the "≥10 automated heals but no
     // chaos coverage" drift the round-1 review flagged.
-    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(9);
+    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(10);
     const ids = CHAOS_CASES.map((c) => c.id).sort();
     expect(ids).toEqual([
       "agent-rate-limited",
+      "brief-too-long-for-context-window",
       "corrupt-state-json",
       "missing-node-modules",
       "network-partition-mid-spawn",

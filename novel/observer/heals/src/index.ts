@@ -9,6 +9,7 @@
 // BEFORE writing the helper's test file (AGENTS.md rule #3).
 
 export * as healAgentRateLimited from "./heal-agent-rate-limited.js";
+export * as healBriefTooLongForContextWindow from "./heal-brief-too-long-for-context-window.js";
 export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
 export * as healNetworkPartitionMidSpawn from "./heal-network-partition-mid-spawn.js";
 export * as healOllamaDown from "./heal-ollama-down.js";
@@ -58,6 +59,11 @@ export const automatedHealCatalogue = [
     id: "network-partition-mid-spawn",
     signal: "network-partition-mid-spawn",
     helperModule: "heal-network-partition-mid-spawn",
+  },
+  {
+    id: "brief-too-long-for-context-window",
+    signal: "brief-too-long-for-context-window",
+    helperModule: "heal-brief-too-long-for-context-window",
   },
 ] as const;
 
