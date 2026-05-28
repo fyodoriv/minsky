@@ -67,20 +67,27 @@ describe("checkSkillRuleCap", () => {
     expect(result.violation).toBeNull();
   });
 
-  test("the live novel/spec-monitor/SKILL.md (≤5 active rules) passes the gate", async () => {
-    // Reads the real file from disk so this test would catch in-repo drift
-    // past the cap before CI does. The exact rule count is the
-    // load-bearing-against-cap-only invariant — the deterministic ratchet
-    // (rule #10) retires individual A<N> rules as they are promoted to CI
-    // lints (e.g. A2 → `scripts/check-pivot-success-margin.mjs`,
-    // A4 → `scripts/check-measurement-inspects-output.mjs`), so the rule
-    // count strictly decreases over time. The gate is the upper bound, not
-    // the equality.
-    const { readFile } = await import("node:fs/promises");
+  test("the live novel/spec-monitor/SKILL.md (≤5 active rules) passes the gate, or is absent (rule-#10 terminal state)", async () => {
+    // The spec-monitor SKILL was the rule-#10 advisory-rule surface. Each
+    // A<N> rule was retired as it got promoted to a deterministic CI lint
+    // (e.g. A2 → check-pivot-success-margin, A4 → check-measurement-inspects-output).
+    // When the last rule is retired and the SKILL file is deleted, that
+    // IS the rule-#10 terminal state — a graceful pass, not a violation.
+    // Path-A phase-8 (2026-05-28) deleted the SKILL alongside the
+    // orphan spec-monitor directory; this test handles both states.
+    const { readFile, access } = await import("node:fs/promises");
     const { fileURLToPath } = await import("node:url");
     const { dirname, resolve } = await import("node:path");
     const here = dirname(fileURLToPath(import.meta.url));
     const path = resolve(here, "..", "novel", "spec-monitor", "SKILL.md");
+    try {
+      await access(path);
+    } catch {
+      // File doesn't exist — terminal state per the gate's own contract.
+      // The CLI path in check-skill-rule-cap.mjs returns exit 0 when the
+      // file is missing; mirror that here.
+      return;
+    }
     const skillContent = await readFile(path, "utf8");
     const result = checkSkillRuleCap({ skillContent, maxRules: MAX });
     expect(result.ruleCount).toBeLessThanOrEqual(MAX);
