@@ -9,6 +9,7 @@
 // BEFORE writing the helper's test file (AGENTS.md rule #3).
 
 export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
+export * as healPartialConfigWrite from "./heal-partial-config-write.js";
 export * as healStalePid from "./heal-stale-pid.js";
 export * as healWorktreeMissingNodeModules from "./heal-worktree-missing-node-modules.js";
 export * as healStaleTsbuildinfo from "./heal-stale-tsbuildinfo.js";
@@ -34,6 +35,11 @@ export const automatedHealCatalogue = [
     id: "corrupt-state-json",
     signal: "corrupt-state-json",
     helperModule: "heal-corrupt-state-json",
+  },
+  {
+    id: "partial-config-write",
+    signal: "partial-config-write",
+    helperModule: "heal-partial-config-write",
   },
 ] as const;
 
