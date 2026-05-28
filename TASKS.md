@@ -53,6 +53,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Operator directive 2026-05-27 (UI = P0-P1 by definition): every user-facing CLI surface (bin/minsky subcommands, pnpm minsky:* scripts) defaults to P0-P1 priority — never P2-P3. UX friction compounds: a flag operators have to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours. Backfill any UI task currently at P2-P3 to P1 unless explicitly deferred with a written reason. -->
 
+- [ ] `sweep-stale-novel-tick-loop-task-references` — many P0/P1 tasks reference deleted `novel/tick-loop/src/` and `novel/cross-repo-runner/src/` paths (substrate retired in phase-11b PR #888). Agents picking these tasks immediately hit "file does not exist" walls. Sweep TASKS.md for stale references; for each task, either (a) rewrite Files/Touches to point at the new `bin/minsky-run.sh` + `scripts/spawn_agent.py` + `scripts/build_brief.py` substrate, (b) mark `**Blocked**: needs-substrate-port` with the canonical re-implementation path, or (c) remove if the task is fully obsolete.
+  - **ID**: sweep-stale-novel-tick-loop-task-references
+  - **Tags**: p0, milestone-m1, grooming, scout-finding, observed-2026-05-28, substrate-staleness
+  - **Milestone**: M1
+  - **Touches**: TASKS.md
+  - **Competitive-goal**: drives `task-pickup-success-rate` — every agent that picks a stale task wastes a session before discovering the substrate is gone. The sweep makes every remaining P0 actually shippable.
+  - **Surfaced-by**: /next-task session 2026-05-28 — picked 6 P0 candidates in a row that all referenced deleted `novel/tick-loop/src/*.ts` / `novel/cross-repo-runner/src/*.ts`: `interactive-model-cost-picker` (cost-tier-picker.ts deleted), `minsky-on-minsky-as-regular-host` (minsky.mjs deleted), `fleet-log-aggregation` (fleet-log-hook.ts non-existent), `agent-mediated-install` slice for cli-consent.ts (deleted), `det-touches-field-strict-mode` (touches-glob.ts deleted; closed via different path in PR #924), `self-metrics-bootstrap-priority` (spawn-strategy.ts deleted).
+  - **Hypothesis**: a single pass through TASKS.md catching `novel/tick-loop/src` / `novel/cross-repo-runner/src` / `novel/tick-loop/bin` references and updating each to the bash substrate (or marking Blocked) unblocks ~15 task entries currently stranded.
+  - **Success**: (1) `grep -c 'novel/tick-loop/src\|novel/cross-repo-runner/src' TASKS.md` returns 0 for unblocked task bodies (currently >15); (2) each affected task either points at a real file path under `bin/`, `scripts/`, `distribution/`, OR carries `**Blocked**: needs-substrate-port` with explicit unblock guidance.
+  - **Pivot**: if too many tasks are obsoleted entirely (rewrite would require designing a new feature), mark them `**Blocked**: feature-obsoleted-by-phase-11b` instead of removing — preserves the design intent for a future operator.
+  - **Measurement**: `grep -cE '(novel/tick-loop/(src|bin)|novel/cross-repo-runner/src)' TASKS.md` per task block excluding ones with `**Blocked**:` markers — target 0.
+  - **Anchor**: rule #17 (proactive heal — observed pattern is a fix); rule #12 (scope discipline — every task block's Files/Touches must reference real paths); phase-11b PR #888 (the substrate-retirement event that orphaned these references).
+  - **Files**: TASKS.md (single-file sweep).
+  - **Acceptance**: every P0/P1 task with `novel/tick-loop/src` or `novel/cross-repo-runner/src` reference is either updated to the new substrate OR marked Blocked with unblock path; an audit grep confirms the count drops to 0 (excluding the Blocked tasks).
+
 - [ ] `minsky-persona-rule-decommissioning-post-hooks` — Audit minsky's persona AGENTS.md / vision.md for rules now enforced by agentbrew hooks
   - **ID**: minsky-persona-rule-decommissioning-post-hooks
   - **Tags**: p1, scout, minsky, hooks, iron-law, persona-prompts, AIFN-720
