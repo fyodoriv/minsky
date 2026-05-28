@@ -163,15 +163,69 @@ export function parseRemovedTaskBlocks(diff) {
  * @param {ReadonlyMap<string, string>} corpus
  * @returns {{ file: string; line: number }[]}
  */
+/**
+ * Lines matching this regex are skipped — they are code-level imports
+ * whose path happens to contain the task ID as a substring (because the
+ * implementation file is named for the task). They are NOT
+ * task-ID citations.
+ *
+ * Examples that should be ignored:
+ *   import * as healFoo from "../../src/heal-foo.js";
+ *   import { detect } from "./heal-foo.js";
+ *   require("./heal-foo.js")
+ *
+ * @type {RegExp}
+ */
+const IMPORT_LINE_RE =
+  /^\s*(import\s+[^;]*from\s+["'][^"']+["']|(?:const|let|var)\s+[^=]+=\s*require\s*\(["'][^"']+["']\s*\))/;
+
+/**
+ * Lines matching this regex are also skipped — they are the paired
+ * test file's own documentation of which unit it tests, not task-ID
+ * citations. Narrow header-only patterns:
+ *
+ *   // Tests for heal-foo
+ *   // Helper: heal-foo
+ *   describe("heal-foo", () => {
+ *   describe.skip("heal-foo", ...
+ *
+ * Arbitrary `// task-a appears in a comment` lines (NOT `Tests for X`
+ * / `Helper: X` headers) remain citations — those are documentation
+ * leakage the lint was originally written to catch.
+ *
+ * @type {RegExp}
+ */
+const SELF_DOC_LINE_RE =
+  /^\s*(\/\/|\*)\s*(Tests for|Helper:|Tests:|Scenarios:|Scenario:)\s+|^\s*describe(?:\.\w+)?\s*\(\s*["'][^"']+["']/;
+
+/**
+ * Returns true iff a single line should be skipped (false positive
+ * shape: import statement OR self-doc header / describe block).
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isFalsePositiveCitation(line) {
+  if (IMPORT_LINE_RE.test(line)) return true;
+  if (SELF_DOC_LINE_RE.test(line)) return true;
+  return false;
+}
+
+/**
+ * @param {string} id
+ * @param {ReadonlyMap<string, string>} corpus
+ * @returns {{ file: string; line: number }[]}
+ */
 export function findCitations(id, corpus) {
   /** @type {{ file: string; line: number }[]} */
   const hits = [];
   for (const [file, content] of corpus) {
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      if ((lines[i] ?? "").includes(id)) {
-        hits.push({ file, line: i + 1 });
-      }
+      const line = lines[i] ?? "";
+      if (!line.includes(id)) continue;
+      if (isFalsePositiveCitation(line)) continue;
+      hits.push({ file, line: i + 1 });
     }
   }
   return hits;

@@ -191,21 +191,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
   18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host $MINSKY_REPO`). -->
 
-- [ ] `heal-partial-config-write` — promote operator-recipe "partial config.json write (truncated mid-disk-write)" to an automated heal helper. Catalogue entry: a write to `~/.minsky/config.json` that crashed mid-write leaves a partial file; reads fail validation. Heal: detect via shape-validation throw → backup → reseed from defaults. Same shape as heal-corrupt-state-json but for config not state.
-  - **ID**: heal-partial-config-write
-  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
-  - **Milestone**: M1
-  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
-  - **Touches**: novel/observer/heals/src/heal-partial-config-write.ts, novel/observer/heals/src/heal-partial-config-write.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
-  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — same shape as `heal-corrupt-state-json` but for config not state.
-  - **Hypothesis**: detect = shape-validation (required fields missing) OR JSON.parse throws; apply = backup + reseed from `~/.minsky/config.default.json` template; verify = shape validates. ~150 LOC.
-  - **Success**: paired tests pass; chaos test injects the partial-config-write failure; SKILL.md row flipped.
-  - **Pivot**: if the corrupt config has user-provided fields that can't be reseeded from defaults (per-machine config_tier), refuse the heal and prompt operator. Heal only when the file is fully unparsable.
-  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-partial-config-write.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥6.
-  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
-  - **Files**: `novel/observer/heals/src/heal-partial-config-write.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
-  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥6 heal-*.ts files exist.
-
 - [ ] `heal-agent-rate-limited` — promote operator-recipe "agent rate-limited (HTTP 429 from cloud agent)" to an automated heal helper. Catalogue entry: cloud agent (claude / devin) returns 429 on a tool call; the worker stalls. Heal: detect via stderr regex `(rate.?limit|429|too.?many.?requests)` → wait + retry with exponential backoff (3 attempts, 30s/60s/120s) → mark spawn failed if exhausted. Idempotent: only fires when the regex matches.
   - **ID**: heal-agent-rate-limited
   - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
