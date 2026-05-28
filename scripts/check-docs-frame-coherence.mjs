@@ -58,6 +58,7 @@ const REPO_ROOT = resolve(HERE, "..");
 export const DOCS_FRAME_ALLOWLIST = Object.freeze([
   "AGENTS.md",
   "INSTALL.md",
+  "MILESTONES.md",
   "README.md",
   "docs/PRACTICES.md",
 ]);
@@ -71,7 +72,6 @@ export const DOCS_FRAME_ALLOWLIST = Object.freeze([
  * Not exported — purely a documentation artefact inside this file.
  */
 const PENDING_RESTORE = Object.freeze([
-  "MILESTONES.md", // never had the frame
   "vision.md", // never had the frame
   // competitors/*.md — 16 files, none have the frame
 ]);

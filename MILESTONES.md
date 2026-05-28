@@ -1,8 +1,21 @@
 # Milestones
 
-This document is the canonical roadmap for Minsky. Each milestone is a ship-gate: done when every exit criterion is met and independently verified. Milestones are sequential — M2 builds on M1, M3 on M2 — but tasks within a milestone can parallelize.
+> The canonical Minsky roadmap — each milestone is a ship-gate.
 
-**North star**: a developer attaches Minsky to any git repo with one command, runs it with one command, and it measurably outperforms doing the same work manually or with any competing autonomous coding tool — with proof.
+## What this file is
+
+- The ordered list of ship-gates (M1, M2, M3, …) for Minsky.
+- The single source of truth for milestone exit criteria; `pnpm milestone:check` walks this file to write the live alignment scorecard.
+- The "north star" anchor: a developer attaches Minsky to any git repo with one command, runs it with one command, and it measurably outperforms doing the same work manually or with any competing autonomous coding tool — with proof.
+
+## What this file is not
+
+- **Not the task queue.** See [TASKS.md](./TASKS.md) for the active P0–P3 work items.
+- **Not the constitution.** See [vision.md](./vision.md) for the 18 non-negotiable rules each PR honours.
+- **Not the install runbook.** See [INSTALL.md](./INSTALL.md) for first-time setup, and [AGENTS.md](./AGENTS.md) for the daemon's operational rules.
+- **Not the architecture.** See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the layered model and adapter table (when present).
+
+Milestones are sequential — M2 builds on M1, M3 on M2 — but tasks within a milestone can parallelize.
 
 ## How to read this file
 
