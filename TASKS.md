@@ -191,21 +191,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
   18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host $MINSKY_REPO`). -->
 
-- [ ] `heal-agent-rate-limited` — promote operator-recipe "agent rate-limited (HTTP 429 from cloud agent)" to an automated heal helper. Catalogue entry: cloud agent (claude / devin) returns 429 on a tool call; the worker stalls. Heal: detect via stderr regex `(rate.?limit|429|too.?many.?requests)` → wait + retry with exponential backoff (3 attempts, 30s/60s/120s) → mark spawn failed if exhausted. Idempotent: only fires when the regex matches.
-  - **ID**: heal-agent-rate-limited
-  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
-  - **Milestone**: M1
-  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
-  - **Touches**: novel/observer/heals/src/heal-agent-rate-limited.ts, novel/observer/heals/src/heal-agent-rate-limited.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
-  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — rate-limit failures stop blocking the iteration loop.
-  - **Hypothesis**: detect = stderr regex match on a rate-limit phrase; apply = sleep-and-retry-up-to-3; verify = no 429 in subsequent attempt. Pure function — sleep durations are injected via seam (test passes 0ms).
-  - **Success**: paired tests pass; chaos test injects a fake 429 stream and asserts the heal completes within the 3-attempt budget.
-  - **Pivot**: if the rate-limit is global (account-level, not per-call), retry-with-backoff is the wrong substrate — escalate to fleet-provider-mode-flip-to-local (the runtime-token-limit-auto-pivot task). The heal-helper exits with `attempted-but-deferred` verdict, the chaos test asserts the verdict, and the fleet-flip task carries the global case.
-  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-agent-rate-limited.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥7.
-  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
-  - **Files**: `novel/observer/heals/src/heal-agent-rate-limited.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
-  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥7 heal-*.ts files exist.
-
 - [ ] `heal-ollama-down` — promote operator-recipe "ollama daemon not running on local mode" to an automated heal helper. Catalogue entry: when `cloud_agent_model` is `ollama_chat/*` but ollama isn't running, the spawn fails with `ECONNREFUSED localhost:11434`. Heal: detect via stderr regex → `launchctl kickstart -k gui/$(id -u)/com.minsky.ollama-keepalive` (if the keepalive plist exists) OR shell `ollama serve &`. Verify with `curl -s http://localhost:11434/api/tags`. Idempotent: re-running on healthy ollama is a no-op.
   - **ID**: heal-ollama-down
   - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal

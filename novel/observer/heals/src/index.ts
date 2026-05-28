@@ -8,6 +8,7 @@
 // scenario block to user-stories/007-agent-self-heals-catalogued-failures.md
 // BEFORE writing the helper's test file (AGENTS.md rule #3).
 
+export * as healAgentRateLimited from "./heal-agent-rate-limited.js";
 export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
 export * as healPartialConfigWrite from "./heal-partial-config-write.js";
 export * as healStalePid from "./heal-stale-pid.js";
@@ -40,6 +41,11 @@ export const automatedHealCatalogue = [
     id: "partial-config-write",
     signal: "partial-config-write",
     helperModule: "heal-partial-config-write",
+  },
+  {
+    id: "agent-rate-limited",
+    signal: "agent-rate-limited",
+    helperModule: "heal-agent-rate-limited",
   },
 ] as const;
 

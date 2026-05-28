@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import * as healAgentRateLimited from "../../src/heal-agent-rate-limited.js";
 import * as healCorruptStateJson from "../../src/heal-corrupt-state-json.js";
 import * as healPartialConfigWrite from "../../src/heal-partial-config-write.js";
 import * as healStalePid from "../../src/heal-stale-pid.js";
@@ -215,6 +216,31 @@ const CHAOS_CASES: ChaosCase[] = [
     },
   },
   {
+    id: "agent-rate-limited",
+    signal: "agent-rate-limited",
+    run: async () => {
+      // No fs side-effect — the heal is pure (stderr-regex + sleep).
+      // Inject a no-op sleep so the chaos test stays hermetic + fast.
+      const seams: healAgentRateLimited.AgentRateLimitedSeams = {
+        stderr: "Error: 429 Too Many Requests — rate limit exceeded",
+        sleepMsFn: async () => {
+          await Promise.resolve();
+        },
+        attemptIndex: 0,
+      };
+      const start = Date.now();
+      const detected = healAgentRateLimited.detect(seams);
+      await healAgentRateLimited.apply(seams);
+      const verified = healAgentRateLimited.verify(seams);
+      const durationMs = Date.now() - start;
+      return {
+        detected: detected.present,
+        healed: verified.healed,
+        durationMs,
+      };
+    },
+  },
+  {
     id: "stuck-command",
     signal: "stuck-command",
     run: async () => {
@@ -272,9 +298,10 @@ describe("heal-catalogue chaos: each automated heal completes within 5 min", () 
     // If a new heal is added to the catalogue, this test fails until the
     // chaos case is added too. Prevents the "≥10 automated heals but no
     // chaos coverage" drift the round-1 review flagged.
-    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(6);
+    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(7);
     const ids = CHAOS_CASES.map((c) => c.id).sort();
     expect(ids).toEqual([
+      "agent-rate-limited",
       "corrupt-state-json",
       "missing-node-modules",
       "partial-config-write",
