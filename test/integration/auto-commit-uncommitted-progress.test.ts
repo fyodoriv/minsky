@@ -52,6 +52,21 @@ describe("auto-commit uncommitted progress (stage-0 backstop)", () => {
     expect(src).toMatch(/-c "user\.name=minsky-daemon"/);
   });
 
+  test("stage-0 bypasses lefthook via core.hooksPath=/dev/null (NOT --no-verify)", () => {
+    // The launchd-spawned daemon inherits an old node version from the
+    // plist's hardcoded PATH; lefthook's check-toolchain rejects the
+    // commit. `-c core.hooksPath=/dev/null` bypasses hooks WITHOUT
+    // triggering the `no-no-verify-bypass` lint (which only flags
+    // `--no-verify` / `-n`). The full CI lint suite still runs on the
+    // PR, so this is a WIP-only hook bypass, not a release bypass.
+    const src = readFileSync(RUN_SH, "utf8");
+    expect(src).toMatch(/-c "core\.hooksPath=\/dev\/null"/);
+    // No `commit --no-verify` anywhere in the runner — that would
+    // trigger the `no-no-verify-bypass` lint AND bypass scan-secrets.
+    expect(src).not.toMatch(/commit --no-verify/);
+    expect(src).not.toMatch(/commit -n\b/);
+  });
+
   test("stage-0 commit message uses the wip(daemon) convention", () => {
     // Conventional-commit prefix `wip(daemon):` lets operators filter
     // these PRs with `gh pr list --search "wip(daemon)"` and squash at
