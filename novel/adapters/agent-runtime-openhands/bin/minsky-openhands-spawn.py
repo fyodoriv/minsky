@@ -168,18 +168,90 @@ def _build_agent(
     )
 
 
-def _run_conversation(agent, brief: str, repo_root: Path, max_iterations: int) -> None:
-    """Send the brief to OpenHands and run the conversation to completion.
+# Re-engagement nudge prompts — applied in order when the model emits a
+# prose-only reply and OpenHands SDK marks the conversation FINISHED with
+# zero files_changed. Empirically observed against qwen3-coder:30b
+# (2026-05-28 daemon log): the model reads the brief, makes ONE tool
+# call, then emits prose like "Now let me check the X directory" with
+# no attached tool call — the SDK treats prose-only as conversation-end
+# and terminates. The brief reorder (PR #978) cut the rate but didn't
+# close the class. These nudges convert the SDK's one-shot-or-die
+# semantics into a multi-attempt loop without leaving the existing
+# Conversation primitive.
+#
+# Prompts are escalating in directness: first nudge is general, second
+# names the contract more sharply, third is the last-chance "ship
+# anything" prompt. They're short on purpose — the conversation context
+# is already large by the time these fire (50K+ input tokens), and a
+# verbose nudge just pads the next input without adding signal.
+_REENGAGE_NUDGES = [
+    "You stopped without making any changes. Your next reply MUST contain a "
+    "tool call — file_editor, terminal, or task_tracker. Do NOT reply with "
+    "prose alone. Continue working on the task.",
+    "Still no progress. Reply with EXACTLY ONE tool call: file_editor to "
+    "edit a file relevant to the task, OR terminal to run a shell command. "
+    "Nothing else — no prose, no explanation.",
+    "Final nudge. Pick ANY single file relevant to the task, open it with "
+    "file_editor, and make even a 1-line edit toward the task's goal. "
+    "Then commit and push. Reply with exactly one tool call.",
+]
+
+
+def _agent_made_progress(repo_root: Path, baseline_sha: str) -> bool:
+    """True when the agent has committed, modified, or created any files.
+
+    Reused at each re-engagement gate. We re-run `_capture_diff_stats`
+    every time rather than caching, because the SDK's `run()` mutates
+    the working tree between calls.
+    """
+    stats = _capture_diff_stats(repo_root, baseline_sha)
+    return stats.get("files_changed", 0) > 0
+
+
+def _run_conversation(
+    agent,
+    brief: str,
+    repo_root: Path,
+    max_iterations: int,
+    baseline_sha: str,
+    reengage_budget: int,
+) -> None:
+    """Send the brief to OpenHands and run the conversation, with optional
+    re-engagement when the model disengages without making changes.
 
     Streams agent activity to stdout as it happens (OpenHands' default
     callback writes to stdout) so the TS caller can show the operator
     real-time progress.
+
+    `reengage_budget`: how many re-engagement nudges to attempt when the
+    conversation finishes with zero files_changed. 0 (default for cloud
+    models like Claude) preserves the original single-shot behavior.
+    >0 (set by `--reengage-budget` from bin/minsky-run.sh when
+    `local_llm_enabled: true`) wraps the conversation with the nudge
+    loop. Capped by `len(_REENGAGE_NUDGES)`.
     """
     from openhands.sdk import Conversation
 
     conversation = Conversation(agent=agent, workspace=str(repo_root))
     conversation.send_message(brief)
     conversation.run()
+
+    if reengage_budget <= 0:
+        return  # cloud path: original single-shot behavior, unchanged
+
+    attempts = min(reengage_budget, len(_REENGAGE_NUDGES))
+    for nudge_index in range(attempts):
+        if _agent_made_progress(repo_root, baseline_sha):
+            # Real progress: agent committed, modified, or created files.
+            # Don't nudge a productive conversation; let it finish normally.
+            return
+        nudge = _REENGAGE_NUDGES[nudge_index]
+        sys.stderr.write(
+            f"[openhands-spawn] re-engagement nudge {nudge_index + 1}/{attempts} "
+            "(no files changed) — sending continuation prompt\n"
+        )
+        conversation.send_message(nudge)
+        conversation.run()
 
 
 def main() -> int:
@@ -243,6 +315,19 @@ def main() -> int:
         default=50,
         help="Reserved for future use; OpenHands SDK does not currently expose this knob.",
     )
+    parser.add_argument(
+        "--reengage-budget",
+        type=int,
+        default=0,
+        help=(
+            "How many re-engagement nudges to send when the conversation "
+            "finishes with zero files_changed. 0 (default; cloud-LLM path) "
+            "preserves the original single-shot behavior. >0 (set by "
+            "bin/minsky-run.sh for local_llm_enabled=true) wraps the "
+            "conversation with the nudge loop documented in _REENGAGE_NUDGES. "
+            "Capped by the number of nudge prompts available."
+        ),
+    )
     args = parser.parse_args()
 
     # Validate inputs before doing any SDK work — fast fail at the boundary.
@@ -296,6 +381,8 @@ def main() -> int:
             brief=brief,
             repo_root=repo_root,
             max_iterations=args.max_iterations,
+            baseline_sha=baseline,
+            reengage_budget=args.reengage_budget,
         )
     except Exception as exc:  # noqa: BLE001 — boundary catch
         sys.stderr.write(f"[openhands-spawn] agent run failed: {exc}\n")
