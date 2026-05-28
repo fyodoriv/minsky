@@ -8,6 +8,7 @@
 // scenario block to user-stories/007-agent-self-heals-catalogued-failures.md
 // BEFORE writing the helper's test file (AGENTS.md rule #3).
 
+export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
 export * as healStalePid from "./heal-stale-pid.js";
 export * as healWorktreeMissingNodeModules from "./heal-worktree-missing-node-modules.js";
 export * as healStaleTsbuildinfo from "./heal-stale-tsbuildinfo.js";
@@ -29,6 +30,11 @@ export const automatedHealCatalogue = [
     helperModule: "heal-stale-tsbuildinfo",
   },
   { id: "stuck-command", signal: "stuck-command", helperModule: "heal-stuck-command" },
+  {
+    id: "corrupt-state-json",
+    signal: "corrupt-state-json",
+    helperModule: "heal-corrupt-state-json",
+  },
 ] as const;
 
 export type AutomatedHealEntry = (typeof automatedHealCatalogue)[number];
