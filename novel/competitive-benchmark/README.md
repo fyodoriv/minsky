@@ -2,19 +2,22 @@
 
 <!-- rule-1: an off-the-shelf benchmark library (e.g. `benchmark`, `tinybench`, `swebench` harness) rejected because: those measure micro-throughput or run the SWE-bench harness; none define the DORA+agentic *outcome* metric set Minsky ranks itself and competitor autonomous-coding systems on. This is a cited domain catalogue, not a runner. -->
 
-Slices (a)+(b)+(c) of task `self-metrics-competitive-benchmark`: the
-**pure, cited metric set** + direction-aware comparison helpers (a), the
-**competitor corpus** with its pluggable result-source adapter seam (b),
-and the **ledger reducer + scorecard builder** that join them into the
-load-bearing `competitive-scorecard.json` artefact (c). The CLI shim
-`scripts/benchmark-run.mjs` (wired as `bin/minsky competitive`) reads
-`.minsky/orchestrate.jsonl`, runs the reducer, calls `buildScorecard()`,
-and writes the JSON.
+**2026-05-28 — Path-A Phase 10 cut.** The scorecard builder (`scorecard.ts`),
+ledger reducer (`ledger.ts`), and `bin/minsky competitive` CLI subcommand
+were deleted. What remains: the metric catalogue (a) + the competitor
+corpus (b) as data-only leaves. The static scorecard surface lives at
+`competitors/scorecard.md` (one-shot snapshot rendered before deletion;
+refresh manually via the `competitor-research` skill writing to
+`competitors/<id>.md` + updating `competitors.ts` directly).
 
-The scheduled launchd/systemd-timer job that fires the CLI weekly, the
-`**Competitive-goal**:` TASKS.md meta-rule (slice d), and the new-repo
-bootstrap-baseline priority (slice e) are separate, later-shipped
-surfaces. This package ships the substrate they stand on.
+Slices (a) + (b) of task `self-metrics-competitive-benchmark`: the
+**pure, cited metric set** + direction-aware comparison helpers (a),
+and the **competitor corpus** with its pluggable result-source adapter
+seam (b).
+
+The `**Competitive-goal**:` TASKS.md meta-rule (slice d) and the
+new-repo bootstrap-baseline priority (slice e) are separate, later-shipped
+surfaces. This package ships the data substrate they stand on.
 
 Public surface:
 
