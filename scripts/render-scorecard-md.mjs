@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // @ts-check
-// <!-- scope: human-approved sub-task `path-a-phase-10-render-scorecard-static-md`. One-shot renderer for `competitors/scorecard.md` from the existing `bin/minsky competitive --json` output. -->
+// <!-- scope: human-approved sub-task `path-a-phase-10-render-scorecard-static-md`. One-shot renderer for `competitors/scorecard.md` from scripts/benchmark-run.mjs. -->
 //
-// render-scorecard-md — invokes `bin/minsky competitive --json` and
-// renders the result as a static markdown table at
-// `competitors/scorecard.md`. Re-runnable per the corpus-freshness
-// 90-day cadence; the file is the durable readable artifact that
-// survives the upcoming `novel/competitive-benchmark/` package deletion
-// (Path-A phase-10 sub-tasks 2+3).
+// render-scorecard-md — invokes scripts/benchmark-run.mjs --json
+// directly (bypasses the deleted `bin/minsky competitive` CLI shim,
+// Path-A phase-10 sub-task 2) and renders the result as a static
+// markdown table at `competitors/scorecard.md`. Re-runnable per the
+// corpus-freshness 90-day cadence; the file is the durable readable
+// artifact that survives the upcoming `novel/competitive-benchmark/`
+// renderer-substrate deletion (sub-task 3).
 //
 // Anchors: rule #1 (delegate → contribute → absorb); Path A § Phase 10;
 // Jimenez et al. *SWE-bench* ICLR 2024 (published-corpus pattern).
@@ -21,7 +22,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** @returns {void} */
 function main() {
-  const raw = execSync("bin/minsky competitive --json", {
+  const raw = execSync("node scripts/benchmark-run.mjs --json", {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });
