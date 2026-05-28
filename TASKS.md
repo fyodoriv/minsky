@@ -191,21 +191,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
   18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host $MINSKY_REPO`). -->
 
-- [ ] `heal-ollama-down` — promote operator-recipe "ollama daemon not running on local mode" to an automated heal helper. Catalogue entry: when `cloud_agent_model` is `ollama_chat/*` but ollama isn't running, the spawn fails with `ECONNREFUSED localhost:11434`. Heal: detect via stderr regex → `launchctl kickstart -k gui/$(id -u)/com.minsky.ollama-keepalive` (if the keepalive plist exists) OR shell `ollama serve &`. Verify with `curl -s http://localhost:11434/api/tags`. Idempotent: re-running on healthy ollama is a no-op.
-  - **ID**: heal-ollama-down
-  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
-  - **Milestone**: M1
-  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
-  - **Touches**: novel/observer/heals/src/heal-ollama-down.ts, novel/observer/heals/src/heal-ollama-down.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
-  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — local-mode failures stop blocking the iteration loop on machines that have ollama installed.
-  - **Hypothesis**: detect = `ECONNREFUSED localhost:11434` in stderr; apply = launchctl kickstart OR shell `ollama serve &`; verify = `curl -s localhost:11434/api/tags` returns 200.
-  - **Success**: paired tests pass with injected exec/curl seams; chaos test injects the ECONNREFUSED stream; SKILL.md row flipped.
-  - **Pivot**: if the heal requires `sudo` to spawn ollama (not the case on macOS user-mode launchd, but possible on Linux), refuse and mark `operator-recipe` — don't escalate privileges.
-  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-ollama-down.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥8.
-  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
-  - **Files**: `novel/observer/heals/src/heal-ollama-down.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
-  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥8 heal-*.ts files exist.
-
 - [ ] `heal-network-partition-mid-spawn` — promote operator-recipe "network partition during spawn (DNS resolution fails / TLS handshake timeout)" to an automated heal helper. Catalogue entry: a spawn that hits DNS resolution failure or TLS timeout against the cloud agent. Heal: detect via stderr regex (`getaddrinfo ENOTFOUND|ETIMEDOUT.*tls|ECONNRESET`) → wait 30s and retry once → if still failing, abort with clear `verdict: network-unhealthy`. Idempotent.
   - **ID**: heal-network-partition-mid-spawn
   - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
