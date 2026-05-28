@@ -783,21 +783,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: `bin/minsky competitive` no longer in CLI help; `competitors/scorecard.md` matches the format Path C's M1.10 scorecard committed.
   - **Risk**: low. Static markdown is a strict subset of the executable scorecard.
 
-- [ ] `path-a-phase-13-identity-promotion` — rewrite README.md TL;DR + vision.md § "What Minsky is" for the post-aggressive-cut identity; update Pattern conformance index for deleted packages; add `minsky-discipline-pack` to agentbrew catalog
-  - **ID**: path-a-phase-13-identity-promotion
-  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phases-7-12
-  - **Milestone**: M1
-  - **Competitive-goal**: doesn't shrink LOC directly, but lowers the operator's per-month maintenance ceiling (the headline value of the whole Path A cut). User-facing capability against scorecard metrics (`swe-bench-verified-resolve-rate`, `autonomous-merge-rate`, `mean-autonomous-merge-latency`) is unchanged because OpenHands is the runtime in both pre- and post-cut states.
-  - **Hypothesis**: after the aggressive cut completes, Minsky's identity has shifted from "70K-LOC integration distribution" to "5-10K-LOC discipline pack running on OpenHands". The user-facing capability ("24/7 self-improving code factory") is unchanged, but the surface area is 85% smaller. The README + vision.md need to reflect the new identity so newcomers don't expect 70K LOC of TypeScript.
-  - **Success**: README TL;DR reads as a discipline-pack story (constitutional rules + MAPE-K substrate on OpenHands), not as a runtime story. `vision.md § "What Minsky is"` matches. Pattern conformance index has no orphan rows (deleted packages → no row). `agentbrew install minsky-discipline-pack` works.
-  - **Pivot**: trivial — this is docs.
-  - **Measurement**: `grep -c "plug-and-play repo transformer" README.md vision.md` returns 0; `grep -c "discipline pack" README.md vision.md` returns ≥ 2.
-  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
-  - **Details**: blocked on Phases 7-12 completing. Final cleanup PR.
-  - **Files**: `README.md`, `vision.md`, `AGENTS.md`, `INSTALL.md`, the agentbrew catalog source file (add `minsky-discipline-pack` source entry).
-  - **Acceptance**: a stranger reading only README.md understands that Minsky = discipline pack on OpenHands, not a 70K-LOC TypeScript codebase.
-  - **Risk**: low.
-
 - [ ] `phase-11b-delete-tick-loop-multistep` — staged deletion of `novel/tick-loop/` (~17K LOC). Follow-up to `phase-7b-delete-cross-repo-runner-multistep`. Tick-loop has ~50+ dependent files because it's the TS daemon's main surface; deletion is at LEAST a 10-step PR sequence
   - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: phase-11b-delete-tick-loop-multistep
@@ -1298,6 +1283,33 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1; `https://github.com/sweepai/sweep`; sweep.dev pivot announcement.
 
 ## P1
+
+- [ ] `path-a-phase-13-pattern-index-cleanup` — remove orphan rows in `vision.md` § "Pattern conformance index" for packages deleted during the Path-A cut: rows for `@minsky/budget-guard` (rows 26, 28), `@minsky/handoff-spec` (row 27), `novel/spec-monitor/` (row 35), `novel/sidecar-bootstrap/`, `novel/tick-loop/`. Also check for references to deleted `scripts/benchmark-run.mjs`, `scripts/render-scorecard-md.mjs`, and old prompt-optimizer rows. Each orphan row anchors `check-pattern-index.mjs` lint, but the row points at a path that no longer exists — they're now dead anchors. Audit cleanly first (`grep -nE '@minsky/(budget-guard|handoff-spec|sidecar-bootstrap)|novel/(spec-monitor|tick-loop|sidecar-bootstrap)' vision.md`), then remove matching rows + decrement the index numbering downstream of each removed row (currently 1-30+ rows; many gaps mean re-numbering is tricky — preserve the current numbering and just delete the row content if simpler).
+  - **ID**: path-a-phase-13-pattern-index-cleanup
+  - **Tags**: p1, milestone-m1, rule-1, path-a, docs-drift, observed-2026-05-28
+  - **Milestone**: M1
+  - **Parent**: path-a-phase-13-identity-promotion (split from the main phase-13 to ship the README + vision.md TL;DR rewrite independently 2026-05-28)
+  - **Touches**: `vision.md` (Pattern conformance index rows + surrounding numbering)
+  - **Competitive-goal**: removes dead anchors from the durable spec — no agent will accidentally read a row claiming `@minsky/budget-guard` ships when it doesn't.
+  - **Hypothesis**: pattern-index rows for deleted packages still parse + grep but reference non-existent code. They're docs-drift the cleanup PR can mechanically resolve. Each row is independent (deleting one doesn't cascade).
+  - **Success**: `grep -nE '@minsky/(budget-guard|handoff-spec|sidecar-bootstrap)' vision.md` returns no rows in the Pattern conformance index section; `pnpm pre-pr-lint --stage=fast` all gates green (specifically `check-pattern-index.mjs`).
+  - **Pivot**: if `check-pattern-index.mjs` REQUIRES contiguous numbering (no gaps allowed), re-number the entire index — but check first whether gaps are accepted (most likely they are, given prior partial deletions).
+  - **Measurement**: `grep -cE '@minsky/(budget-guard|handoff-spec|sidecar-bootstrap)|novel/(spec-monitor|tick-loop|sidecar-bootstrap)' vision.md` ≤ 5 (allows narrative references; rejects pattern-index rows).
+  - **Anchor**: rule #8 (pattern conformance); rule #1 (Path-A cut completion); `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
+
+- [ ] `path-a-phase-13-agentbrew-discipline-pack-catalog-entry` — add a `minsky-discipline-pack` source entry to the agentbrew catalog so `agentbrew install minsky-discipline-pack` works. This is the third sub-deliverable of the parent path-a-phase-13 identity-promotion task; not strictly required for the README/vision rewrite (split off 2026-05-28) but completes the parent's full scope. Touches the agentbrew catalog repo, not this repo.
+  - **ID**: path-a-phase-13-agentbrew-discipline-pack-catalog-entry
+  - **Tags**: p1, milestone-m1, rule-1, path-a, agentbrew-catalog, observed-2026-05-28
+  - **Milestone**: M1
+  - **Parent**: path-a-phase-13-identity-promotion (split from the main phase-13 2026-05-28)
+  - **Blocked**: cross-repo — this task edits the agentbrew catalog repo, not this minsky repo. Use the agentbrew-add-catalog-source skill in the agentbrew repo to define the entry. Will be unblocked once an operator opens that PR in the agentbrew repo + it merges; this task can then be removed.
+  - **Touches**: `agentbrew/catalog/sources/minsky-discipline-pack.yaml` (NEW in the agentbrew repo).
+  - **Competitive-goal**: makes the discipline-pack framing actionable — a stranger can `agentbrew install minsky-discipline-pack` after reading the README.
+  - **Hypothesis**: the agentbrew catalog already supports source entries; adding minsky-discipline-pack is a 5-line YAML entry pointing at this repo's relevant directories (skills, rules, commands).
+  - **Success**: `agentbrew install minsky-discipline-pack` resolves the source + installs without error.
+  - **Pivot**: if the agentbrew catalog requires a specific shape minsky doesn't fit (e.g. only single-file skills), retire the catalog-entry idea and pivot to a manual `npx tiged fyodoriv/minsky/skill-plugins my-skills` install instruction in the README.
+  - **Measurement**: `agentbrew catalog list | grep -c minsky-discipline-pack` ≥ 1 after the catalog PR merges.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
 
 - [ ] `research-md-lint-accepts-docs-research-log-md` — broaden `scripts/check-research-md-update.mjs` to accept changes to `docs/research-log.md` (and `docs/research-*.md` more broadly) as valid research-md updates. The current line-73 check is `changedFiles.includes("research.md")` — a strict root-level filename check. The repo's actual research log lives at `docs/research-log.md` (15K LOC, multiple anchored decision entries) and ad-hoc research files live at `docs/research-*.md` (e.g. `docs/research-hooks-vs-rules-2026-05-27.md`). A dep-change PR that legitimately documents the build/buy/borrow decision in `docs/research-log.md` is currently rejected by the lint, forcing PR-body opt-outs as the only escape. Fix: change the check to `changedFiles.some(f => f === "research.md" || f.startsWith("docs/research"))`.
   - **ID**: research-md-lint-accepts-docs-research-log-md
