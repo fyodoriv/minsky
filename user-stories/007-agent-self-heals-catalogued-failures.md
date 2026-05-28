@@ -266,6 +266,32 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **When** `apply()` runs
 - **Then** the throw propagates to the caller — let-it-crash at the I/O boundary
 
+### Scenario: heal-network-partition-mid-spawn detects DNS/TLS/TCP signals
+
+- **Given** stderr containing `"getaddrinfo ENOTFOUND api.anthropic.com"` or `"ETIMEDOUT during TLS handshake"` or `"ECONNRESET mid-stream"` or `"network unreachable"`
+- **When** `heal-network-partition-mid-spawn.detect({ stderr, alreadyRetried })` runs
+- **Then** it returns `{ present: true, signal: "network-partition-mid-spawn", evidence: { alreadyRetried, stderrPreview } }`
+
+### Scenario: heal-network-partition-mid-spawn sleeps 30s then signals caller-retry
+
+- **Given** a detected partition signal AND `alreadyRetried: false`
+- **When** `apply()` runs with default `retrySleepMs`
+- **Then** `sleepMsFn` is called with `30_000`
+- **And** `apply` returns `{ applied: true, notes: "slept 30000ms; caller should retry the spawn once" }`
+
+### Scenario: heal-network-partition-mid-spawn refuses retry when already retried
+
+- **Given** a detected partition signal AND `alreadyRetried: true`
+- **When** `apply()` runs
+- **Then** `sleepMsFn` is NOT called
+- **And** `apply` returns `{ applied: false, notes: "exhausted single retry — caller should escalate to fleet-provider-mode-flip-to-local (persistent network failure)" }`
+
+### Scenario: heal-network-partition-mid-spawn does NOT match ECONNREFUSED or 429
+
+- **Given** stderr `"ECONNREFUSED 127.0.0.1:11434"` (ollama-specific) or `"429 too many requests"` (rate-limit)
+- **When** `detect()` runs
+- **Then** it returns `{ present: false }` — those signals belong to `heal-ollama-down` / `heal-agent-rate-limited`
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`

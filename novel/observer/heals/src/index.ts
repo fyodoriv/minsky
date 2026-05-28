@@ -10,6 +10,7 @@
 
 export * as healAgentRateLimited from "./heal-agent-rate-limited.js";
 export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
+export * as healNetworkPartitionMidSpawn from "./heal-network-partition-mid-spawn.js";
 export * as healOllamaDown from "./heal-ollama-down.js";
 export * as healPartialConfigWrite from "./heal-partial-config-write.js";
 export * as healStalePid from "./heal-stale-pid.js";
@@ -52,6 +53,11 @@ export const automatedHealCatalogue = [
     id: "ollama-down",
     signal: "ollama-down",
     helperModule: "heal-ollama-down",
+  },
+  {
+    id: "network-partition-mid-spawn",
+    signal: "network-partition-mid-spawn",
+    helperModule: "heal-network-partition-mid-spawn",
   },
 ] as const;
 
