@@ -93,9 +93,24 @@ if [ "${MINSKY_BASH_RUNNER:-0}" = "1" ]; then
 fi
 
 RUNNER="$MINSKY_HOME/novel/cross-repo-runner/bin/minsky-run.mjs"
-if [ ! -f "$RUNNER" ]; then
-  echo "minsky-daemon: runner missing at $RUNNER — distribution layout drift" >&2
-  exit 1
+BASH_RUNNER="$MINSKY_HOME/bin/minsky-run.sh"
+
+# Path A Phase 7 cold-spawn guard (rule #6 stay-alive + rule #11
+# default-by-default): the Node runner has been gutted; the bash
+# runner is canonical. When the .mjs is missing, fall through to the
+# bash runner instead of exit-1ing — KeepAlive=true would otherwise
+# turn this into the 59K-MODULE_NOT_FOUND-lines daemon-log storm
+# documented in TASKS.md `daemon-cold-spawn-mjs-default-flip`. The
+# bash runner takes --hosts-dir (parent), not --host (repo); single-
+# host adaptation: pass dirname of $HOST so the walker discovers
+# exactly one host (matches MINSKY_BASH_RUNNER=1 branch above).
+if [ -f "$RUNNER" ] && [ "${MINSKY_NODE_RUNNER:-1}" = "1" ]; then
+  exec node "$RUNNER" --host "$HOST" --loop
 fi
 
-exec node "$RUNNER" --host "$HOST" --loop
+if [ ! -x "$BASH_RUNNER" ]; then
+  echo "minsky-daemon: Node runner missing at $RUNNER AND bash runner missing at $BASH_RUNNER — repo is broken" >&2
+  exit 1
+fi
+HOST_PARENT="$(dirname "$HOST")"
+exec bash "$BASH_RUNNER" --hosts-dir "$HOST_PARENT"
