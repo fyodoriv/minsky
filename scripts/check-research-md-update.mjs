@@ -70,7 +70,16 @@ export function checkResearchMdUpdate(opts = {}) {
 
   const depsChanged = collectDepChanges(pkgFiles, readAtRef, readCurrent, diffBase);
   if (depsChanged.length === 0) return passResult([]);
-  if (changedFiles.includes("research.md")) return passResult(depsChanged);
+  // Broadened 2026-05-28 (research-md-lint-accepts-docs-research-log-md):
+  // the original strict check was `changedFiles.includes("research.md")` —
+  // assumed a root-level file. The repo's actual research log lives at
+  // `docs/research-log.md` (the canonical accumulating log); ad-hoc
+  // decision files live at `docs/research-<topic>-YYYY-MM-DD.md`. Accept
+  // any of those shapes as satisfying the gate.
+  const hasResearchUpdate = changedFiles.some(
+    (f) => f === "research.md" || f === "docs/research-log.md" || f.startsWith("docs/research-"),
+  );
+  if (hasResearchUpdate) return passResult(depsChanged);
 
   return failResult(depsChanged);
 }
