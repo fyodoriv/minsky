@@ -1798,6 +1798,23 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-pnpm-minsky-aliases.test.mjs
 
+  readme-byte-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: readme-byte-budget lint
+        run: node scripts/check-readme-byte-budget.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-readme-byte-budget.test.mjs
+
   no-hardcoded-timeouts:
     runs-on: ubuntu-latest
     steps:
@@ -2212,6 +2229,7 @@ jobs:
       - adapter-conventions
       - touches-field
       - pnpm-minsky-aliases
+      - readme-byte-budget
       - no-hardcoded-timeouts
       - no-no-verify-bypass
       - launchd-safe-paths
@@ -2295,6 +2313,7 @@ jobs:
                    "${{ needs.adapter-conventions.result }}" \
                    "${{ needs.touches-field.result }}" \
                    "${{ needs.pnpm-minsky-aliases.result }}" \
+                   "${{ needs.readme-byte-budget.result }}" \
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \

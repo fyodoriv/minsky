@@ -311,6 +311,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "adapter-conventions",
       "touches-field",
       "pnpm-minsky-aliases",
+      "readme-byte-budget",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -836,6 +837,17 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-pnpm-minsky-aliases.mjs"],
+  },
+  {
+    // README.md must stay under the byte budget. Per the
+    // `readme-rewrite-5-min-install-guide` parent task: target <3KB,
+    // current hard-limit-with-headroom ratchets down toward target as
+    // compression slices land. Prevents the regrowth pattern observed
+    // 2026-05-23 → 2026-05-28 (2910 → 11058 bytes).
+    name: "readme-byte-budget",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-readme-byte-budget.mjs"],
   },
   {
     name: "changelog-md-update",

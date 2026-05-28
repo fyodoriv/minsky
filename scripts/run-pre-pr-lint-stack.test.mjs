@@ -126,6 +126,7 @@ describe("STACK_MANIFEST", () => {
         "omc-mode-persona-gating",
         "orphan-tests",
         "pnpm-minsky-aliases",
+        "readme-byte-budget",
         "research-md-update",
         "test-file-colocation",
         "rule-12-scope-discipline",
