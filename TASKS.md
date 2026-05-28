@@ -3898,15 +3898,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: `docs/local-llm-fallback.md` links the README worktree-ownership note; the 2h success_ratio is recorded in the PR or a follow-up comment and is ≥0.70 (else open a regression task).
   - **Surfaced-by**: 2026-05-16 Opus-director supervision session.
 
-- [ ] `gitignore-claire-runtime-dir` — `.claire/` (a local agent-runner's worktree/runtime dir) is neither git-ignored nor lint-ignored, so it pollutes `git status` and broke `pnpm lint:md` until `#.claire` was added to the glob
-  - **ID**: gitignore-claire-runtime-dir
-  - **Tags**: p3, dx, gitignore, hygiene
-  - **Milestone**: M1
-  - **Details**: `.claire/worktrees/**` is untracked runtime state (same class as `.claude/worktrees`, `.minsky`). Surfaced 2026-05-16 when `markdownlint-cli2` failed on `.claire/worktrees/daemon-0-fresh-clone-ci-regression-gate/pr-body.md` and blocked a push; worked around by adding `#.claire` to the `lint:md` glob in `package.json`. Add `.claire/` to `.gitignore` so it stops appearing as untracked and is consistently excluded like the sibling runtime dirs. Verify `git status --porcelain` no longer lists `.claire/` on a machine that has run the claire stack.
-  - **Files**: `.gitignore`
-  - **Acceptance**: `.gitignore` contains `.claire/`; `git status --porcelain | grep -q '\.claire'` is empty after a claire run; `git check-ignore .claire` exits 0.
-  - **Surfaced-by**: 2026-05-16 Opus-director supervision session (PR for `local-worker-worktree-never-created`).
-
 - [ ] `demo-pr-generator` — `minsky run --target=<oss-repo> --output-mode=pr-only` produces a single high-quality demo PR per OSS repo (the funnel)
   - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: demo-pr-generator
