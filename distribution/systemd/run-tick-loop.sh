@@ -203,4 +203,14 @@ fi
 # 5s → respawn). The TS daemon's in-process 5-min sleep is gone; if
 # cadence proves too aggressive, file
 # `bash-skeleton-tick-interval-ms-flag` (P3).
-exec bash "${MINSKY_HOME}/bin/minsky-run.sh" --host "${MINSKY_HOME}" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} "$@"
+# `--loop` (added 2026-05-28 in the supervisor-stays-alive refinement)
+# wraps walk_hosts in while-true so the bash never exits on its own.
+# Without it (and without the prior PR #983's MAX_ITERATIONS=0 wrapping),
+# walk_hosts returns 0 after iterations-per-host × #hosts iterations,
+# bash exits 0, and launchd's `KeepAlive: SuccessfulExit=false` (OTP
+# transient restart) refuses to respawn — supervisor dies for good.
+# Observed 2026-05-28: tick-loop stayed dead for 10+ minutes after 3
+# successful iterations. See bin/minsky-run.sh § "Iteration loop" for
+# the rule #6 (stay alive) anchor. Ad-hoc CLI invocations / tests don't
+# pass --loop and keep the one-walk-and-exit historical behavior.
+exec bash "${MINSKY_HOME}/bin/minsky-run.sh" --loop --host "${MINSKY_HOME}" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} "$@"
