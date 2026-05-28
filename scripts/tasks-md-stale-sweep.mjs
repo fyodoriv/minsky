@@ -52,10 +52,25 @@ const REPO_ROOT = resolve(HERE, "..");
  */
 
 /**
+ * @typedef {"citation" | "missing-paths"} StaleReason
+ *
+ * - `"citation"`: at least one cited file contains an inline mention
+ *   of the task ID (the canonical "fix shipped + marker outlived"
+ *   signal). See `findCitations`.
+ * - `"missing-paths"`: ALL paths in `**Files**:` are absent from
+ *   disk. Surfaced 2026-05-28 by PR #961 (4 research-replace-or-
+ *   relocate-* tasks whose target directories had been deleted in
+ *   earlier Path-A phases). The substrate's deletion IS the
+ *   executed verdict; the research task no longer has a target.
+ */
+
+/**
  * @typedef {object} StaleCandidate
  * @property {string} id
  * @property {string} firstLineSnippet
+ * @property {StaleReason} reason
  * @property {{path: string, line: number, snippet: string}[]} evidence
+ * @property {string[]} [missingPaths]   set when reason="missing-paths"
  */
 
 /**
@@ -242,8 +257,56 @@ function isSweepable(task) {
 }
 
 /**
+ * For each path in `paths`, check whether the resolved file or
+ * directory still exists on disk. Returns the subset that's missing
+ * AND whose PARENT DIRECTORY is also missing (the substrate-deleted
+ * shape, not the new-work-to-create shape).
+ *
+ * Surfaced 2026-05-28 by PR #961: 4 research-replace-or-relocate-*
+ * tasks all cited paths inside `novel/<pkg>/` directories that had
+ * been deleted in earlier Path-A phases. The substrate's deletion IS
+ * the executed verdict — no work remains.
+ *
+ * False-positive guard (added 2026-05-28 after over-flagging
+ * cto-audit-merge-rate-metric, which cites NEW files to be created
+ * in an existing directory): a missing leaf file inside an existing
+ * parent directory is new-work, not stale-substrate. Only count a
+ * path as missing if its parent directory is ALSO gone — that means
+ * the substrate (the containing package / data dir) was deleted.
+ *
+ * Path-resolution rule: strip trailing `:N` line refs (same as
+ * findCitations), then check via existsSync against repoRoot.
+ *
+ * @param {string[]} paths     paths relative to repoRoot
+ * @param {string} repoRoot
+ * @returns {string[]}         the subset whose parent dir is also missing
+ */
+export function findMissingFilesPaths(paths, repoRoot) {
+  /** @type {string[]} */
+  const missing = [];
+  for (const relPath of paths) {
+    const cleanPath = relPath.replace(/:\d+$/, "");
+    const abs = resolve(repoRoot, cleanPath);
+    if (existsSync(abs)) continue;
+    // Parent directory must also be missing — that's the substrate-
+    // deleted signal. A missing leaf in an existing dir is new-work.
+    const parentDir = dirname(abs);
+    if (existsSync(parentDir)) continue;
+    missing.push(cleanPath);
+  }
+  return missing;
+}
+
+/**
  * Pure entry point — given TASKS.md content + a repo root, return the
  * list of stale-marker candidates with evidence.
+ *
+ * A task is flagged as stale if EITHER:
+ *   (a) `**Files**:` paths contain inline citations of the task ID
+ *       (the "fix shipped + marker outlived" signal), OR
+ *   (b) ALL `**Files**:` paths are missing from disk (the substrate-
+ *       deleted-but-task-block-survived signal). Surfaced 2026-05-28
+ *       by PR #961.
  *
  * @param {string} tasksMdContent
  * @param {string} repoRoot
@@ -257,11 +320,27 @@ export function sweepStaleTasksMdMarkers(tasksMdContent, repoRoot) {
     if (!isSweepable(task)) continue;
     const paths = extractFilePaths(task.body);
     if (paths.length === 0) continue;
+
+    // Signal (b): all paths missing → substrate-deleted candidate.
+    const missingPaths = findMissingFilesPaths(paths, repoRoot);
+    if (missingPaths.length === paths.length) {
+      candidates.push({
+        id: task.id,
+        firstLineSnippet: task.firstLine.slice(0, 120),
+        reason: "missing-paths",
+        evidence: [],
+        missingPaths,
+      });
+      continue;
+    }
+
+    // Signal (a): citation in surviving file → fix-shipped candidate.
     const evidence = findCitations(task.id, paths, repoRoot);
     if (evidence.length === 0) continue;
     candidates.push({
       id: task.id,
       firstLineSnippet: task.firstLine.slice(0, 120),
+      reason: "citation",
       evidence,
     });
   }
@@ -287,6 +366,32 @@ function isInvokedAsScript() {
   }
 }
 
+/**
+ * @param {StaleCandidate} c
+ */
+function printCandidate(c) {
+  process.stdout.write(`  task: ${c.id}  [${c.reason}]\n`);
+  process.stdout.write(`    summary: ${c.firstLineSnippet}…\n`);
+  if (c.reason === "citation") {
+    process.stdout.write("    citations found in:\n");
+    for (const e of c.evidence) {
+      process.stdout.write(`      ${e.path}:${e.line}  — ${e.snippet}\n`);
+    }
+  } else if (c.reason === "missing-paths") {
+    process.stdout.write("    ALL cited **Files** paths are absent from disk:\n");
+    for (const p of c.missingPaths ?? []) {
+      process.stdout.write(`      ${p}  (gone)\n`);
+    }
+  }
+  process.stdout.write("\n");
+}
+
+const FOOTER =
+  "To close: read each task's full block, verify the reason matches the\n" +
+  "actual repo state (substrate deleted OR fix shipped + marker outlived),\n" +
+  "then remove the task block from TASKS.md (commit: 'chore(tasks):\n" +
+  "close <task-id> — <reason>').\n";
+
 function runCli() {
   const dryRun = process.argv.includes("--dry-run");
   if (!dryRun) {
@@ -310,20 +415,8 @@ function runCli() {
   process.stdout.write(
     `tasks-md-stale-sweep: ${candidates.length} likely-shipped candidate(s):\n\n`,
   );
-  for (const c of candidates) {
-    process.stdout.write(`  task: ${c.id}\n`);
-    process.stdout.write(`    summary: ${c.firstLineSnippet}…\n`);
-    process.stdout.write("    citations found in:\n");
-    for (const e of c.evidence) {
-      process.stdout.write(`      ${e.path}:${e.line}  — ${e.snippet}\n`);
-    }
-    process.stdout.write("\n");
-  }
-  process.stdout.write("To close: read each task's full block, verify the cited file's\n");
-  process.stdout.write("citation matches the described fix, then remove the task block\n");
-  process.stdout.write(
-    "from TASKS.md (commit: 'chore(tasks): close <task-id> — fix already shipped').\n",
-  );
+  for (const c of candidates) printCandidate(c);
+  process.stdout.write(FOOTER);
   process.exit(0);
 }
 

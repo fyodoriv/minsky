@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   extractFilePaths,
   findCitations,
+  findMissingFilesPaths,
   isBlocked,
   isClaimed,
   parseTaskBlocks,
@@ -309,5 +310,133 @@ describe("CLI smoke test (regression for issue surfaced 2026-05-28: CLI guard di
       expect(e.status).toBe(2);
       expect(e.stderr).toMatch(/usage:/);
     }
+  });
+});
+
+describe("findMissingFilesPaths (added 2026-05-28)", () => {
+  /** @type {string} */
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweep-missing-paths-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns empty when all paths exist", () => {
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(join(tmpDir, "scripts/foo.mjs"), "// content\n");
+    writeFileSync(join(tmpDir, "scripts/bar.mjs"), "// content\n");
+    expect(findMissingFilesPaths(["scripts/foo.mjs", "scripts/bar.mjs"], tmpDir)).toEqual([]);
+  });
+
+  it("returns ONLY paths whose PARENT DIR is also missing (false-positive guard)", () => {
+    // FP guard: scripts/ exists, so missing leaves are NEW WORK, not
+    // stale substrate. The guard should return empty here.
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(join(tmpDir, "scripts/foo.mjs"), "// content\n");
+    const missing = findMissingFilesPaths(
+      ["scripts/foo.mjs", "scripts/bar.mjs", "scripts/baz.mjs"],
+      tmpDir,
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("returns paths whose parent directory is gone (real substrate deleted)", () => {
+    // novel/deleted-pkg/ never existed; the cited path's parent is
+    // also missing → real substrate-deleted signal.
+    const missing = findMissingFilesPaths(
+      ["novel/deleted-pkg/REPLACE_OR_RELOCATE.md", "novel/another-deleted-pkg/src/index.ts"],
+      tmpDir,
+    );
+    expect(missing.sort()).toEqual([
+      "novel/another-deleted-pkg/src/index.ts",
+      "novel/deleted-pkg/REPLACE_OR_RELOCATE.md",
+    ]);
+  });
+
+  it("returns paths whose entire ancestor chain is missing", () => {
+    // Both paths have missing parent dirs.
+    expect(
+      findMissingFilesPaths(["novel/deleted/src/index.ts", "old-pkg/something.mjs"], tmpDir).sort(),
+    ).toEqual(["novel/deleted/src/index.ts", "old-pkg/something.mjs"]);
+  });
+
+  it("strips trailing :N line refs before checking", () => {
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(join(tmpDir, "scripts/foo.mjs"), "// content\n");
+    // Path exists, but the :42 line ref is part of the entry. Should resolve to foo.mjs.
+    expect(findMissingFilesPaths(["scripts/foo.mjs:42"], tmpDir)).toEqual([]);
+  });
+
+  it("treats missing parent directory the same as missing file", () => {
+    expect(findMissingFilesPaths(["novel/deleted-pkg/src/index.ts"], tmpDir)).toEqual([
+      "novel/deleted-pkg/src/index.ts",
+    ]);
+  });
+});
+
+describe("sweepStaleTasksMdMarkers: missing-paths signal (added 2026-05-28)", () => {
+  /** @type {string} */
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweep-missing-e2e-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("flags a task with missing-paths reason when ALL cited paths are gone", () => {
+    const md = `# Tasks
+
+## P3
+
+- [ ] \`research-replace-pkg\` — research what to do about pkg
+  - **ID**: research-replace-pkg
+  - **Tags**: p3, research
+  - **Files**: \`novel/deleted-pkg/REPLACE_OR_RELOCATE.md\`
+`;
+    const candidates = sweepStaleTasksMdMarkers(md, tmpDir);
+    expect(candidates.length).toBe(1);
+    expect(candidates[0]?.reason).toBe("missing-paths");
+    expect(candidates[0]?.missingPaths).toEqual(["novel/deleted-pkg/REPLACE_OR_RELOCATE.md"]);
+  });
+
+  it("does NOT flag missing-paths when at least one path exists", () => {
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(join(tmpDir, "scripts/foo.mjs"), "// content\n");
+    const md = `# Tasks
+
+## P3
+
+- [ ] \`partial-paths\` — has one existing and one missing path
+  - **ID**: partial-paths
+  - **Tags**: p3
+  - **Files**: \`scripts/foo.mjs\`, \`scripts/missing.mjs\`
+`;
+    const candidates = sweepStaleTasksMdMarkers(md, tmpDir);
+    expect(candidates.length).toBe(0);
+  });
+
+  it("missing-paths takes precedence over citation when both fire", () => {
+    // A task whose paths are all gone — citation check isn't attempted
+    // since the substrate is gone (the path-existence guard returns
+    // before findCitations runs against absent files).
+    const md = `# Tasks
+
+## P3
+
+- [ ] \`both-signals\` — substrate gone AND would have cited
+  - **ID**: both-signals
+  - **Tags**: p3
+  - **Files**: \`deleted-dir/some-file.ts\`
+`;
+    const candidates = sweepStaleTasksMdMarkers(md, tmpDir);
+    expect(candidates.length).toBe(1);
+    expect(candidates[0]?.reason).toBe("missing-paths");
   });
 });
