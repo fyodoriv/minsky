@@ -785,6 +785,23 @@ case "${1:-}" in
     exit 0
     ;;
   status)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky status
+
+Print a snapshot of the daemon state for this host:
+  - daemon process (running / not running) + recent log tail
+  - stability number from the experiment store (1.0 = no failures)
+  - on-call decisions captured by the tick-loop
+
+Sourced exclusively from local files in ~/.minsky and the repo's
+.minsky/ directory; no network calls.
+
+See also: `minsky logs` (tail every operator-relevant log stream),
+`minsky doctor` (health probe of the host machine itself).
+EOF
+      exit 0
+    fi
     echo "=== minsky daemon ==="
     # Stability number (from experiment store)
     # `set -e -o pipefail` aborts the script when any pipe stage exits
@@ -822,6 +839,21 @@ case "${1:-}" in
     exit 0
     ;;
   stop)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky stop
+
+Thorough daemon shutdown: bootout the launchd service (prevents
+auto-restart via KeepAlive), then kill every minsky-* process and
+its agent children. Zero ghost processes after this command exits.
+
+Idempotent — safe to invoke when the daemon is already stopped.
+
+See also: `minsky` (start the daemon), `minsky status` (snapshot
+of the daemon state).
+EOF
+      exit 0
+    fi
     # Thorough shutdown: kill ALL minsky processes + their agent children
     # + bootout the launchd service. Zero ghost processes after this.
     _killed=0
@@ -1458,6 +1490,25 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     fi
     ;;
   doctor)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky doctor [--quiet]
+
+Health probe for this host machine. Prints PASS / WARN / FAIL for
+each of: node 20+, git, gh CLI, pnpm, repo `.minsky/` directory,
+~/.minsky/ state, launchd / systemd-user supervisor wiring, OpenHands
+SDK installation, and any other invariant the supervisor needs.
+
+Flags:
+  --quiet   Only print FAIL lines + exit non-zero on any failure.
+
+Exit codes: 0 if every check passes; 1 if any check fails.
+
+See also: `minsky setup` (re-install or repair the supervisor),
+`minsky status` (running-state snapshot).
+EOF
+      exit 0
+    fi
     # `minsky doctor [--quiet]` — health probe for this machine.
     #
     # Checks (each prints PASS / WARN / FAIL):
@@ -2710,6 +2761,25 @@ EOF
     ;;
 
   ui)
+    if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
+      cat <<'EOF'
+Usage: minsky ui [--port N]
+
+Start the local dashboard web app at http://localhost:$PORT
+(default 8181). The dashboard reads ~/.minsky/iterations.jsonl and
+shows the per-host stability, on-call decisions, and recent
+iteration outcomes.
+
+Env vars:
+  PORT       Listen port (default 8181).
+
+Stop with Ctrl-C or `minsky stop`.
+
+See also: `minsky status` (CLI snapshot of the same state),
+`minsky logs` (live tail).
+EOF
+      exit 0
+    fi
     # `minsky ui` — subcommand alias for `pnpm minsky:ui`.
     _ui_repo="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.."
     PORT="${PORT:-8181}" exec bash "$_ui_repo/distribution/run-dashboard-web.sh" "${@:2}"
