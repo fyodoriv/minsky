@@ -1174,4 +1174,59 @@ record_iteration() {
 invariant_config_loadable
 [[ "$DRY_RUN" == "1" ]] || invariant_openhands_in_path
 invariant_pick_task_present
-walk_hosts
+
+# Graceful shutdown via SIGTERM (sent by launchd/systemd on `stop`).
+# Without this trap the supervisor's exit code on SIGTERM was 143
+# (128+SIGTERM=15), which launchd treats as "abnormal" with the OTP-
+# transient `SuccessfulExit=false` rule and immediately respawns.
+# Operators sending SIGTERM via `launchctl bootout` got an immediate
+# respawn — the opposite of "stop". With this trap, SIGTERM exits 0
+# AND launchd sees a clean exit AND respects the stop intent.
+trap 'echo "SIGTERM received — exiting cleanly" >&2; exit 0' TERM INT
+
+# Iteration loop:
+# - MAX_ITERATIONS=0 (unbounded; the supervisor / launchd default):
+#   wrap walk_hosts in while-true so the supervisor never exits on
+#   its own. Each walk runs N hosts × `--iterations-per-host` iterations,
+#   then we pause for the outer sleep before the next walk.
+# - MAX_ITERATIONS>0 (e.g. `--max-iterations 5` for ad-hoc runs / tests):
+#   run ONE walk and exit with whatever walk_hosts returns.
+#
+# Why this loop must live HERE and not in launchd: launchd's
+# `KeepAlive: SuccessfulExit=false` (OTP transient restart semantics)
+# refuses to respawn after a clean exit (exit 0). Without the outer
+# loop, walk_hosts returns 0 after iterations-per-host × #hosts
+# iterations — bash exits 0 — launchd treats it as "completed
+# successfully, no restart needed" — supervisor dies forever. Observed
+# 2026-05-28: tick-loop exited after 3 iterations of
+# `a2a-adapter-foundation` and never restarted; `launchctl print` showed
+# `state = not running, last exit code = 0`. This is the rule #6 (stay
+# alive) violation this loop closes.
+#
+# Restart sentinel: walk_hosts returns 75 (EX_TEMPFAIL) when
+# `~/.minsky/restart-requested` is present (set by
+# `scripts/post-merge-auto-install.mjs`). In that case we exit 75 —
+# launchd's `SuccessfulExit=false` sees a non-zero exit and restarts
+# the bash, picking up the freshly-updated code. The while-true wrapper
+# below preserves this contract: we exit the inner loop AND propagate
+# the 75.
+if [[ "$MAX_ITERATIONS" -eq 0 ]]; then
+  # Outer sleep between walks. TICK_INTERVAL_MS=0 (default) → 5s sleep
+  # to avoid hot-looping when no tasks are pickable. Operators set
+  # TICK_INTERVAL_MS=300000 (5 min) on noisy hosts.
+  outer_sleep_seconds=$(( TICK_INTERVAL_MS > 0 ? TICK_INTERVAL_MS / 1000 : 5 ))
+  [[ "$outer_sleep_seconds" -lt 1 ]] && outer_sleep_seconds=1
+  while true; do
+    walk_hosts
+    # Propagate restart-sentinel exit (75 from walk_hosts → exit 75 here →
+    # launchd respawns into the updated code).
+    walk_exit=$?
+    if [[ "$walk_exit" -eq 75 ]]; then
+      exit 75
+    fi
+    sleep "$outer_sleep_seconds"
+  done
+else
+  # Capped mode (ad-hoc test runs, --max-iterations N): one walk and out.
+  walk_hosts
+fi
