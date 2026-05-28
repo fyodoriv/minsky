@@ -1,6 +1,17 @@
 #!/bin/bash
 # Minsky observer — watches the daemon for 4h, heals on failure
 # Usage: bash scripts/observer-watch.sh [hours=4]
+#
+# launchd integration: when wired through `~/Library/LaunchAgents/com.minsky.observer.plist`,
+# set BOTH `RunAtLoad=true` AND `KeepAlive=true` in the plist. The script
+# defensively wraps every minsky-command invocation with `|| log <warn>`
+# (no `set -e`), but if the script is killed by an external signal or
+# the loop terminates, launchd KeepAlive=true restarts it. Without
+# KeepAlive=true a single defensive-but-non-zero exit can take the
+# observer down (the 2026-05-18 incident: "minsky --daemon" returned
+# 'daemon already running (PID XXXX)' (stale PID), the script handled
+# the non-zero exit defensively, but launchd then noticed the process
+# died with non-zero and didn't restart it because KeepAlive=false).
 set -uo pipefail
 # NOTE: no set -e — minsky commands return non-zero on expected conditions
 # (stale PID, already running, etc.) and we handle those explicitly.
@@ -99,9 +110,13 @@ done
 
 log "🏁 Observer finished — ${HOURS}h watch complete"
 log "Final status:"
-minsky status 2>&1
+minsky status 2>&1 || log "  Warning: terminal 'minsky status' exited non-zero — daemon likely down"
 log "Total restarts used: ${RESTARTS_USED}/${RESTART_BUDGET}"
 FINAL_ITERATIONS=$(grep -c 'iteration record' ~/.minsky/daemon.log 2>/dev/null || echo 0)
 FINAL_VALIDATED=$(grep -c 'validated' ~/.minsky/daemon.log 2>/dev/null || echo 0)
 FINAL_FAILED=$(grep -c 'spawn-failed' ~/.minsky/daemon.log 2>/dev/null || echo 0)
 log "Iterations: ${FINAL_ITERATIONS} total, ${FINAL_VALIDATED} validated, ${FINAL_FAILED} spawn-failed"
+# Force clean exit so launchd's KeepAlive (when wired per the header
+# block) only restarts the observer on UNEXPECTED termination, not on
+# clean completion of the configured watch period.
+exit 0
