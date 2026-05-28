@@ -1,6 +1,6 @@
 # Minsky
 
-> **A 24/7 self-improving code factory.** OpenHands runs the agent (canonical default since 2026-05-24). Minsky chooses what to work on next, enforces 18 constitutional rules on every PR, and turns each change into a pre-registered scientific experiment.
+> **A 24/7 self-improving code factory — packaged as a discipline pack on OpenHands.** Minsky is the small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A cut) that runs on top of OpenHands. It chooses what to work on next, enforces 18 constitutional rules on every PR, and turns each change into a pre-registered scientific experiment. The agent layer is OpenHands; the discipline pack is what's in this repo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
