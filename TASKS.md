@@ -53,21 +53,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Operator directive 2026-05-27 (UI = P0-P1 by definition): every user-facing CLI surface (bin/minsky subcommands, pnpm minsky:* scripts) defaults to P0-P1 priority — never P2-P3. UX friction compounds: a flag operators have to remember on every debugging session is a 5-second tax × N sessions × M operators = real wasted hours. Backfill any UI task currently at P2-P3 to P1 unless explicitly deferred with a written reason. -->
 
-- [ ] `sweep-stale-novel-tick-loop-task-references` — many P0/P1 tasks reference deleted `novel/tick-loop/src/` and `novel/cross-repo-runner/src/` paths (substrate retired in phase-11b PR #888). Agents picking these tasks immediately hit "file does not exist" walls. Sweep TASKS.md for stale references; for each task, either (a) rewrite Files/Touches to point at the new `bin/minsky-run.sh` + `scripts/spawn_agent.py` + `scripts/build_brief.py` substrate, (b) mark `**Blocked**: needs-substrate-port` with the canonical re-implementation path, or (c) remove if the task is fully obsolete.
-  - **ID**: sweep-stale-novel-tick-loop-task-references
-  - **Tags**: p0, milestone-m1, grooming, scout-finding, observed-2026-05-28, substrate-staleness
-  - **Milestone**: M1
-  - **Touches**: TASKS.md
-  - **Competitive-goal**: drives `task-pickup-success-rate` — every agent that picks a stale task wastes a session before discovering the substrate is gone. The sweep makes every remaining P0 actually shippable.
-  - **Surfaced-by**: /next-task session 2026-05-28 — picked 6 P0 candidates in a row that all referenced deleted `novel/tick-loop/src/*.ts` / `novel/cross-repo-runner/src/*.ts`: `interactive-model-cost-picker` (cost-tier-picker.ts deleted), `minsky-on-minsky-as-regular-host` (minsky.mjs deleted), `fleet-log-aggregation` (fleet-log-hook.ts non-existent), `agent-mediated-install` slice for cli-consent.ts (deleted), `det-touches-field-strict-mode` (touches-glob.ts deleted; closed via different path in PR #924), `self-metrics-bootstrap-priority` (spawn-strategy.ts deleted).
-  - **Hypothesis**: a single pass through TASKS.md catching `novel/tick-loop/src` / `novel/cross-repo-runner/src` / `novel/tick-loop/bin` references and updating each to the bash substrate (or marking Blocked) unblocks ~15 task entries currently stranded.
-  - **Success**: (1) `grep -c 'novel/tick-loop/src\|novel/cross-repo-runner/src' TASKS.md` returns 0 for unblocked task bodies (currently >15); (2) each affected task either points at a real file path under `bin/`, `scripts/`, `distribution/`, OR carries `**Blocked**: needs-substrate-port` with explicit unblock guidance.
-  - **Pivot**: if too many tasks are obsoleted entirely (rewrite would require designing a new feature), mark them `**Blocked**: feature-obsoleted-by-phase-11b` instead of removing — preserves the design intent for a future operator.
-  - **Measurement**: `grep -cE '(novel/tick-loop/(src|bin)|novel/cross-repo-runner/src)' TASKS.md` per task block excluding ones with `**Blocked**:` markers — target 0.
-  - **Anchor**: rule #17 (proactive heal — observed pattern is a fix); rule #12 (scope discipline — every task block's Files/Touches must reference real paths); phase-11b PR #888 (the substrate-retirement event that orphaned these references).
-  - **Files**: TASKS.md (single-file sweep).
-  - **Acceptance**: every P0/P1 task with `novel/tick-loop/src` or `novel/cross-repo-runner/src` reference is either updated to the new substrate OR marked Blocked with unblock path; an audit grep confirms the count drops to 0 (excluding the Blocked tasks).
-
 - [ ] `minsky-persona-rule-decommissioning-post-hooks` — Audit minsky's persona AGENTS.md / vision.md for rules now enforced by agentbrew hooks
   - **ID**: minsky-persona-rule-decommissioning-post-hooks
   - **Tags**: p1, scout, minsky, hooks, iron-law, persona-prompts, AIFN-720
@@ -138,6 +123,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-22 wrap-feasibility analysis pass (PR #732); first application of the rule #1 wrap-feasibility discipline now encoded as Phase 7 in `.claude/skills/competitor-research/SKILL.md`.
 
 - [ ] `agent-mediated-install` — any AI coding agent (Claude Code / Cursor / Windsurf / Devin / Codex / Ollama-via-aider) can install minsky for the operator's current folder in ≤60s with a single human prompt (telemetry consent), via a canonical `INSTALL.md` runbook colocated in the repo root
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: agent-mediated-install
   - **Tags**: p0, milestone-m1, install, dx, agent-ux, telemetry, operator-directive, observed-2026-05-20
   - **Milestone**: M1
@@ -279,6 +265,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Status 2026-05-23**: parent's <3KB target met (2910 bytes / 44 lines / 5 H2). Remaining gate per Success criterion: operator-side user-test ("3 developers who've never seen minsky can install and run it following only the README in <5 min"). Task stays open until that gate closes; demoted to P1 since no further code-side work is needed.
 
 - [ ] `minsky-remote-task-submission` — findings from any machine running minsky can be submitted as tasks to the minsky repo itself (with user approval + anonymized data preview)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-remote-task-submission
   - **Tags**: p0, milestone-m1, telemetry, community, growth
   - **Milestone**: M1
@@ -306,6 +293,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `interactive-model-cost-picker` — on first run (or when no `~/.minsky/config.json` exists), minsky asks the user to choose a brain+workers cost tier with clear $/hr expectations; the choice is saved to config and never asked again
   - **ID**: interactive-model-cost-picker
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **Tags**: p0, milestone-m1, ux, onboarding, cost, models
   - **Milestone**: M1
   - **Competitive-goal**: no competitor shows you the cost before you start — Devin charges $500/mo flat, OpenHands/SWE-agent don't estimate, Aider shows token counts post-hoc. Upfront cost transparency is a trust differentiator.
@@ -326,6 +314,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Progress 2026-05-23**: Slices 1+2 shipped via PRs #770+#771 (pure tier data + menu/parser/atomic-writer surfaces, 39 paired tests). Slice 3a shipped via PR #773 — `novel/tick-loop/src/cost-tier-picker-flow.ts` ships pure `decidePickerFlow({ existingCostTier, isTty })` returning a 3-way discriminated union: `skip` (config has known tier — print summary), `use-default` (no tier OR unknown tier OR no TTY — apply DEFAULT + log reason), `prompt` (no tier + TTY — slice 3b renders menu). 12 paired tests cover every branch + edge cases. Slice 3b (next): bin/minsky.mjs wiring — read config.json, detect TTY, dispatch the verdict (readline prompt loop for `prompt`, atomic write + log for the others). Slice 4: `docs/cost-tiers.md`.
 
 - [ ] `fleet-log-aggregation` — every machine running minsky ships iteration logs to a shared surface so the operator sees all machines' health in one place
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: fleet-log-aggregation
   - **Tags**: p0, milestone-m1, observability, fleet, logs
   - **Milestone**: M1
@@ -339,6 +328,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: Beyer SRE 2016 (observability — you can't manage what you can't see); Beer VSM 1972 (System 3 — the control layer needs a nerve channel from every System 1).
 
 - [ ] `minsky-on-minsky-as-regular-host` — minsky's own repo is a regular host destination (not special-cased), including remote task submission from other machines; full dogfood parity
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-on-minsky-as-regular-host
   - **Tags**: p0, milestone-m1, dogfood, cross-repo, self-hosting, experiment
   - **Milestone**: M1
@@ -370,6 +360,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- M1.10 substrate (slices a+b+c+d) shipped 2026-05-22 — `self-metrics-competitive-benchmark` umbrella task + the three sub-tasks corpus-expansion, weekly-scheduled-run, competitive-goal-field-and-lint completed and removed from the queue per tasks.md spec (history lives in git log). M1.10 milestone marked ✅ done in MILESTONES.md. Slice (e) bootstrap-priority remains open below as a P2 follow-up. -->
 
 - [ ] `self-metrics-bootstrap-priority` — slice (e) of M1.10: when `minsky` is bootstrapped on a NEW host, the first 1-2 iterations prioritize establishing/refreshing the competitive scorecard baseline before other task work
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: self-metrics-bootstrap-priority
   - **Tags**: p2, milestone-m1, m1-10, bootstrap, tick-loop, rule-9
   - **Milestone**: M1
@@ -385,6 +376,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Operator directive 2026-05-17 (TOP-PRIORITY runtime resilience): every time a tokens/usage limit is reached DURING a live `minsky run`, minsky must FULLY and AUTOMATICALLY pivot the entire worker fleet to local models, keep iterating, and switch the whole fleet BACK to remote automatically once tokens are available again — zero operator action, mid-run, bidirectional. This is the `runtime-token-limit-auto-pivot-local-and-back` P0 directly below; it composes existing substrates (rule #1) rather than reinventing them. It outranks the runany cluster and the 2026-05-08 CLI-shift blocks (but not `self-metrics-competitive-benchmark`, which remains the north-star P0). -->
 
 - [ ] `runtime-token-limit-auto-pivot-local-and-back` — on ANY token/usage-limit hit during a live run, the whole worker fleet auto-switches to local models, keeps iterating, and auto-switches back to remote when tokens return — bidirectional, mid-run, zero operator action
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runtime-token-limit-auto-pivot-local-and-back
   - **Tags**: p0, operator-directive, reliability, local-llm, failover, stay-alive, rule-1, rule-6, rule-9
   - **Milestone**: M1
@@ -401,6 +393,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Operator directive 2026-05-17: minsky must natively support Claude Code "agent teams" (https://code.claude.com/docs/en/agent-teams) — a real lead+teammates team with the native shared task list + mailbox + quality-gate hooks — and ALSO support agents that lack this feature (e.g. Devin) via a capability-tiered adapter. ALWAYS prefer the native solution when the running agent provides one; fall back to the generic process-fan-out only when it doesn't. The `native-agent-teams-with-tiered-adapter` P0 below is that capability; it composes minsky's existing orchestrator/worker/TASKS.md/gate substrates (rule #1) rather than reinventing the parallel-coordination layer minsky hand-rolls today. **ESCALATED 2026-05-17 (binding /goal "get that native support of claude multiple agents working in minsky fully"): this is now the TOP IMPLEMENTATION PRIORITY — workers/teammates must preferentially claim `native-agent-teams-with-tiered-adapter` and its slices ahead of other P0s, second only to the `self-metrics-competitive-benchmark` baseline-refresh. Self-bootstrapping: the `native-agent-view` tier IS the swarm substrate this fleet runs on, so shipping it directly grows the fleet's own effective parallelism (rule #14 — delegate the hand-rolled fan-out to the native primitive). Prefer its slices over lower P0s until it is fully working. -->
 
 - [ ] `runany-zero-arg-entrypoint` — `minsky` with NO args, run in any folder, starts the orchestrator scoped to that folder + all subfolders (no params ever required)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runany-zero-arg-entrypoint
   - **Tags**: p0, operator-directive, runany, cli, orchestrator
   - **Milestone**: M1
@@ -415,6 +408,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `minsky` no-args launches the scoped conductor; (2) handles git-repo / nested-repos / plain-dir; (3) `minsky stop` / `minsky status` work from the same folder; (4) measurement 5/5; (5) `docs/run-anywhere.md` documents it.
 
 - [ ] `minsky-cli-auto-bootstrap-local-llm` — `minsky` (no args) on a fresh machine auto-detects Claude exhaustion + auto-installs the local-LLM stack with a single confirm prompt
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-cli-auto-bootstrap-local-llm
   - **Tags**: p0, operator-directive, minsky-cli, local-llm, auto-bootstrap, multi-machine-sync
   - **Milestone**: M1
@@ -433,6 +427,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: operator request 2026-05-08 — "I have minsky on another machine in outdated stage with no claude tokens left. … I expect it to automatically understand that claude is out of tokens and to switch to local modal + install+set it up first if needed".
 
 - [ ] `minsky-cli-fresh-clone-bootstrap` — `git clone && pnpm install && minsky` works on a fresh checkout without a manual `pnpm build` step
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-cli-fresh-clone-bootstrap
   - **Tags**: p0, operator-directive, minsky-cli, bootstrap, fresh-clone, dx, multi-machine-sync
   - **Milestone**: M1
@@ -451,6 +446,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: operator live-run 2026-05-08 — fresh clone of `minsky` repo, ran `pnpm install`, then `minsky` (or `pnpm minsky`?) immediately failed with `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/.../novel/tick-loop/dist/index.js' imported from /Users/.../novel/tick-loop/bin/minsky.mjs`.
 
 - [ ] `minsky-runtime-resilience` — slice 2 of self-healing: graceful-degrade on log-path / workers-dir / tick-loop-bin failures so the CLI never crashes at "the simple part" instead of the operator-actionable boundary
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-runtime-resilience
   - **Tags**: p0, operator-directive, minsky-cli, self-healing, runtime, dx, multi-machine-sync
   - **Milestone**: M1
@@ -469,6 +465,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Progress**: PR #488 merged 2026-05-12 — 13th doctor row (workers-dir writable) + README. **Next iteration**: create `novel/tick-loop/src/log-path-fallback.ts` exporting `pickLogPath({ primary, fallbackTmp, openSyncFn })` (~40 LOC). On EACCES/EROFS/ENOSPC try fallbackTmp; return `{ path, fellBack, reason? }`. Re-throw if second try also throws. Commit only this one file.
 
 - [ ] `minsky-claude-exhaustion-persisted-state` — slice 4 of self-healing: persist last claude hard-limit hit in `.minsky/state.json` so a fresh `minsky` startup detects exhaustion without relying on a token-too-small live probe
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-claude-exhaustion-persisted-state
   - **Tags**: p0, operator-directive, minsky-cli, self-healing, claude-exhaustion, dx
   - **Milestone**: M1
@@ -486,6 +483,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: operator live-run 2026-05-08 — "I ran minsky and it happily started claude even though it's out of tokens. It shouldn't have happened, it should have quickly detected that & switched to local model". Root cause analysis: 1-token probe is below Anthropic's metering threshold; existing in-process per-iteration `decideProvider` correctly fires on iteration 2 but the user already saw iteration 1's wasted claude spawn.
 
 - [ ] `minsky-cli-context-aware-ux` — `minsky` (no args) reads the machine's full context (worker state, daemon state, claude state, git state, queue state) and offers a single confirm-or-multi-select prompt for what to do next
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-cli-context-aware-ux
   - **Tags**: p0, operator-directive, minsky-cli, ux, dx, multi-machine-sync
   - **Milestone**: M1
@@ -505,6 +503,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 found 4 minsky-loop bugs that lost throughput and required manual unblock. Filed below as P0 (operator directive 2026-05-07 — "use p0 for important things like minsky loop bugs"). They share the framing the operator articulated 2026-05-07: "monitor + unblock + file tasks so next time minsky unblocks itself" — i.e., the watchdog substrate that makes 10-worker mode safe. -->
 - [ ] `daemon-aider-brief-shrinker` — produce a slim brief for the local-LLM (aider+Qwen32B) path so iterations finish inside the watchdog window
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-aider-brief-shrinker
   - **Tags**: p0, daemon, local-llm, throughput, brief-shape, minsky-loop-bug, surfaced-by-live-run
   - **Milestone**: M1
@@ -521,6 +520,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: live-run 2026-05-07 — first end-to-end test of slices 1-6 of `local-llm-fallback-on-budget-pause` (PRs #370, #371) produced no aider edit before the 30-min watchdog fired; brief size + Qwen pace named as the root cause in `docs/local-llm-fallback.md`.
 
 - [ ] `daemon-stuck-pr-rebase-watchdog` — when a daemon's open PR goes CONFLICTING for >Nh, force the daemon to rebase or escalate as `Blocked: needs-operator-rebase`
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-stuck-pr-rebase-watchdog
   - **Tags**: p0, daemon, supervisor, watchdog, conflict-resolution, minsky-loop-bug
   - **Milestone**: M1
@@ -545,6 +545,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- post-task-cto-audit (P0) — closed 2026-05-06. All substrate on main across PRs #170 (filing), #175 (runCtoAudit pure builder + lock seams), #176 (daemon wire-in via CtoAuditSeam), #178 (CLI wiring + file-backed lock + git/gh signals), #199/#203 (branch + label conventions), #204 (operator runbook), #205 (MINSKY_CTO_AUDIT_ENABLE=1 in unit files), #212 (audit-branch ↔ label biconditional CI lint), #213 (ensureCtoAuditLabel preflight at startup), #214 (wire-status announcements at startup), #215 (env-drift detector), #216 (pnpm cto-audit:metrics — versioned pre-registered measurement query). Operator-side activation flipped in #205; daemon noop'd cleanly across iterations 53-67. Removed to free queue. -->
 
 - [ ] `daemon-pre-pr-lint-gate` — daemon runs all in-tree CI lints locally before opening any PR; refuses to open if any fails
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-pre-pr-lint-gate
   - **Tags**: p0, daemon, supervisor, throughput, self-improvement, pick-next
   - **Milestone**: M1
@@ -562,6 +563,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 user request — "I expect minsky to come up with these issues itself" + my analysis "the daemon's first-pass output reliably fails CI lints" identified two daemon self-improvements. This is one.
 
 - [ ] `daemon-fix-own-pr-on-ci-failure` — when daemon's PR fails CI, daemon automatically opens a fix commit on the same branch instead of noop-iterating
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-fix-own-pr-on-ci-failure
   - **Tags**: p0, daemon, supervisor, throughput, self-improvement, pick-next
   - **Milestone**: M1
@@ -579,6 +581,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 user request — "I expect minsky to come up with these issues itself" + my analysis identified the deadlock. This is the second daemon self-improvement.
 
 - [ ] `self-diagnose-iteration-log-probe-format` — fix the `recentIterations` probe in `scripts/self-diagnose.mjs` so it actually parses `.minsky/tick-loop.out.log`
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: self-diagnose-iteration-log-probe-format
   - **Tags**: p0, self-diagnose, follow-up
   - **Milestone**: M1
@@ -596,6 +599,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 dogfood — the operator ran `node scripts/self-diagnose.mjs --json` against a supervisor stuck in a 4-iteration noop streak; the new throughput invariants returned no findings because the probe couldn't read the live log format.
 
 - [ ] `daemon-priority-discipline-picktask-bug` — `pickTask` must consult `**Tags**:`, not just file ordering, so a misplaced p1-tagged block in the `## P0` section can no longer shadow genuine P0 work
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-priority-discipline-picktask-bug
   - **Tags**: p0, daemon, supervisor, throughput, priority-discipline, follow-up
   - **Milestone**: M1
@@ -613,6 +617,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 operator question — "Is it working efficiently, eg does it follow /next-task queue as expected?". Investigation revealed daemon picked P1 tasks 36/53 iterations (68%) while P0 work sat unclaimed.
 
 - [ ] `daemon-pr-self-grade-format-baked` — bake the strict pr-self-grade format into `buildDaemonBrief` so daemon never ships malformed `**Match:**` blocks
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-pr-self-grade-format-baked
   - **Tags**: p1, daemon, supervisor, throughput, brief, follow-up
   - **Milestone**: M1
@@ -630,6 +635,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 operator directive — "Measure speed of implementing a minsky feature here in claude code vs implementing it through minsky itself. Open tasks to improve it." Speed-comparison surfaced PR-self-grade-format-loop as a recurring 30min-cost failure mode.
 
 - [ ] `self-diagnose-on-start` — supervisor probes invariants at boot, escalates failures via TASKS.md
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: self-diagnose-on-start
   - **Tags**: observability, supervisor, self-detection, rule-7, rule-9
   - **Milestone**: M1
@@ -647,6 +653,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-04 user brief — "i want minsky to be able to detect bugs in its own launched state. so maybe as soon as minsky starts, it also analyzes its own bugs and delegates fixing itself to the parent". Seed invariant (`token-monitor-not-all-pegged`) directly encodes the bug PR #155 fixed: had this invariant been live before that PR, the cache_read regression would have surfaced as a self-detected P0 the moment the supervisor restarted.
 
 - [ ] `cross-repo-runner-budget-aware-halt` — distinguish claude budget exhaustion from systemic `spawn-failed` in `--loop` / `--hosts-dir` mode and retry-with-backoff so fleet loops survive budget pauses without operator restart
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cross-repo-runner-budget-aware-halt
   - **Tags**: p0, cross-repo-runner, resilience, automation, operator-babysitting
   - **Milestone**: M1
@@ -664,6 +671,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: CTO audit 2026-05-12 post `minsky-runtime-resilience` ship — code review of `novel/cross-repo-runner/bin/minsky-run.mjs` vs. `novel/tick-loop/bin/tick-loop.mjs`; the fleet-scale runner (PRs #489–#492, 2026-05-12) inherits none of the budget-resilience work that took months to land for the local daemon.
 
 - [ ] `cto-audit-skip-tasksmd-only-iterations` — guard `shouldRunCtoAudit` against TASKS.md-only commits (no PR opened) so the audit does not fire on progress-update-only iterations
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cto-audit-skip-tasksmd-only-iterations
   - **Tags**: p0, automation, cto-audit, noop-guard
   - **Milestone**: M1
@@ -689,6 +697,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- CTO audit 2026-05-19 after walker-drains-one-host-forever (#644): the walker now fairly distributes iterations across hosts, but the aggregate iteration→PR ship rate is the next unmeasured surface. Filed below. -->
 
 - [ ] `cloud-agent-spawn-argv-regression-matrix` — every cloud agent (claude, devin, aider, future-N) declares its required argv contract in a single fixture file; a parameterized test matrix asserts that spawning each agent without any required flag yields a recognizable failure mode, AND that spawning each agent WITH the contract argv succeeds — same `it.each(MATRIX)` shape that agentbrew PR #1021 used for its (agent × format × env-var) crash-class regression
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cloud-agent-spawn-argv-regression-matrix
   - **Tags**: p0, milestone-m1, rule-3a, rule-3b, rule-9, rule-17, test, spawn, regression-suite, agentbrew-parallel
   - **Milestone**: M1
@@ -704,6 +713,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: low-to-medium. (a) Real-tier flakiness if a cloud agent's API returns non-deterministic stdout — mitigated by matching against `successPatterns` as RegExp arrays, not literal strings. (b) Adding a 4th agent could surface a contract drift in the simulator — that's exactly the kind of regression this task is meant to surface, so it's a feature not a bug. (c) Agent CLIs evolving their required argv post-merge (devin adds a new required flag in 2026.7.x) — the fast tier catches the drift on the next local install, and the matrix update is a one-row edit; this is the SAME failure mode as agentbrew #1021 designed for and is documented in the PR body there as the intended drift-detection mechanism.
 
 - [ ] `cloud-agent-iteration-record-parity-matrix` — for each cloud agent in `CLOUD_AGENT_MATRIX` (depends on `cloud-agent-spawn-argv-regression-matrix`), the iteration record schema (`.minsky/experiment-store/cross-repo/*.jsonl`) produced by a successful spawn is structurally identical across agents — same fields, same types, same verdict vocabulary; a parameterized parity matrix asserts this property so swapping the default cloud agent from claude to devin (or to a future agent) doesn't silently change downstream metric pipelines (stability, ship-rate, walker-drains)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cloud-agent-iteration-record-parity-matrix
   - **Tags**: p0, milestone-m1, rule-3a, rule-4, rule-9, test, regression-suite, agentbrew-parallel
   - **Milestone**: M1
@@ -719,6 +729,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: medium. (a) The reference-agent choice (claude is the proposed reference) bakes in a single agent's quirks — mitigated by reviewing the schema file with the assumption "if we delete claude tomorrow, does the schema still describe reality?". (b) Migrating consumers in lockstep is a coordinated multi-file change — mitigated by landing the schema file first as an additive change, then migrating consumers one at a time. (c) The matrix's "byte-stable modulo agent-name and timestamps" comparison can be brittle when fields have non-deterministic ordering — mitigated by serialising records through a stable JSON canonicalizer (sorted keys) before diffing.
 
 - [ ] `cloud-agent-config-and-host-feature-matrix-audit` — per-`~/.minsky/config.json`-agent × per-cross-repo-runner-feature configuration matrix audit that catches drift between the documented config schema, what the runner ACTUALLY supports, and what the slow-tier real-spawn pipeline can exercise; sibling to agentbrew PR #1023 which applied the same audit pattern to the (agent × non-MCP-sync-surface) matrix
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cloud-agent-config-and-host-feature-matrix-audit
   - **Tags**: p0, milestone-m1, rule-3, rule-8, rule-9, test, regression-suite, agentbrew-parallel
   - **Milestone**: M1
@@ -827,30 +838,8 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: a stranger reading only README.md understands that Minsky = discipline pack on OpenHands, not a 70K-LOC TypeScript codebase.
   - **Risk**: low.
 
-- [ ] `phase-7b-delete-cross-repo-runner-multistep` — staged deletion of `novel/cross-repo-runner/` (~4.2K LOC + 6 dependent production files + 2 integration tests). First half of the Phase 7b/11b deletion; tick-loop's deletion follows as a sibling task once this lands clean
-  - **ID**: phase-7b-delete-cross-repo-runner-multistep
-  - **Tags**: p0, milestone-m1, path-a, aggressive-cut, deletion, observed-2026-05-25
-  - **Milestone**: M1
-  - **Competitive-goal**: moves `path-a-loc-novel-tree` from 31,234 → ~27K LOC (first ~4.2K cut). Closes the "ready-to-delete but not deleted" anti-pattern by actually shipping the deletion. The 2026-05-25 attempt surfaced that the deletion is NOT a single-PR job — there are 6 production files that reference cross-repo-runner outside the deleted tree.
-  - **Hypothesis**: PR #875's live smoke against minsky-on-itself proved the bash skeleton (`bin/minsky-run.sh`) handles end-to-end iteration. So `novel/cross-repo-runner/` IS deletable in principle. But a single-PR `git rm -rf novel/cross-repo-runner/` attempt (2026-05-25 session) found 6 production files referencing it (`novel/adapters/agent-runtime-openhands/src/spawner.ts`, `scripts/minsky-benchmark.mjs`, `scripts/lib/iteration-ship-rate.mjs`, `scripts/check-cross-repo-pr-rate.mjs`, `scripts/post-merge-auto-install.test.mjs`, `scripts/run-pre-pr-lint-stack.mjs`) + 2 integration tests (`test/integration/daemon-restart.test.ts`, `test/integration/proactive-healing-regressions.test.ts`) + 1 tsconfig path + 1 threat-model-section allowlist entry + 1 dashboard-metric-ids.json entry. Pre-registration: post-deletion, `pnpm typecheck && pnpm test` are both green AND `bash bin/minsky --once $MINSKY_REPO` produces a non-stale ledger entry. Falsifiable: if the 6 dependent files cannot be migrated to the bash skeleton cleanly (i.e. they need the TS code paths the bash runner doesn't replicate), the deletion blocks here and we file a parity-gap task for whichever surface is missing.
-  - **Success**: (1) `git rev-parse HEAD:novel/cross-repo-runner` returns "fatal: Path '...' does not exist". (2) `pnpm typecheck` green. (3) `pnpm test` green (or any newly-failing tests are explicitly deleted as no-longer-applicable). (4) `bash bin/minsky --once $MINSKY_REPO` exits 0 with non-stale ledger row written. (5) `path-a-loc-novel-tree` metric drops from 31,234 → ~27K.
-  - **Pivot**: if the 6 dependent files reveal a parity gap (the bash skeleton misses an API the TS runner exposed), STOP and file a `bash-runner-parity-gap-<surface>` P0 task. Don't paper over the gap with a stub. The whole point is to delete, not coexist.
-  - **Measurement**: `fd -e ts -e tsx --type f . novel/ --exclude '*.test.*' | xargs wc -l | tail -1 | awk '{print $1}'` returns ≤27,500 after deletion. AND `bash bin/minsky --once $MINSKY_REPO 2>&1 | grep -c "verdict:"` returns 1 (the post-deletion smoke writes a fresh ledger). AND `pnpm typecheck && pnpm test` both exit 0.
-  - **Anchor**: 2026-05-25 single-PR attempt (this session) — the naive `git rm -rf novel/cross-repo-runner/` revealed 6+ dependent files. The right shape is multi-step: (a) migrate / delete each dependent in its own PR, (b) THEN delete the package. PR #876's attempt reverted; this task captures the real plan; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § "Phase 7b"; rule #2 (the bash skeleton IS the canonical iteration surface; the TS runner is the soon-to-be-deleted shim it replaces); Hyrum's Law (every observable property of an interface becomes load-bearing).
-  - **Details**: Sequential PR plan (each is a separate PR that lands AND tests pass before the next starts):
-    - **Step 1 ✅ (PR #877)**: Comment-only references to cross-repo-runner cleaned up across 5 files; spawner.ts and ship-rate computation decoupled.
-    - **Step 2 ✅ (PR #878)**: `scripts/minsky-benchmark.mjs` migrated from `node novel/cross-repo-runner/bin/minsky-run.mjs` to `bash bin/minsky-run.sh`; 18/18 paired tests green.
-    - **Step 3 ✅ (PR #879)**: cloud-agent matrix (`agent-config.ts`) + audit lint + paired unit tests ported to `scripts/lib/cloud-agent-config.mjs` + `scripts/cloud-agent-config-audit-matrix-lint.mjs` + `scripts/lib/cloud-agent-config.test.mjs`. `scripts/run-pre-pr-lint-stack.mjs` + `.github/workflows/ci.yml` updated.
-    - **Step 4 ✅ (PR #880)**: Integration tests stripped of TS-runner dependencies — `test/integration/proactive-healing-regressions.test.ts` deleted (3 rule-17 lint tests extracted to `rule-17-proactive-heal-lint.test.ts`); `daemon-restart.test.ts` stripped of runHostLoop helper + auto-restart-on-pull block (kept 20 bin/minsky bash tests); `runtime-paths-coverage.test.ts` stripped of 11 L4 RUNNER_BIN tests (kept 4 L3 bin/minsky tests).
-    - **Step 5**: Migrate `scripts/check-brief-pr-instructions.mjs` to read from `scripts/build_brief.py` instead of `novel/cross-repo-runner/src/spawn-plan.ts` (the bash runner uses Python build_brief.py).
-    - **Step 6**: Update `tsconfig.json` (remove cross-repo-runner path), `scripts/check-threat-model-section.mjs` (remove from allowlist + adjust count), `distribution/shortcuts/test/dashboard-metric-ids.json` (remove path-a-loc-cross-repo-runner from list).
-    - **Step 7**: FINAL — `git rm -rf novel/cross-repo-runner/`. Re-run smoke. Verify scoreboard.
-  - **Files**: 8+ production files spread across the steps above. See the live-attempt's `rg` output for the full list.
-  - **Touches**: `novel/cross-repo-runner/**` (deletion in step 7); `novel/adapters/agent-runtime-openhands/src/spawner.ts` (step 1); `scripts/*` (steps 2-4); `test/integration/*` (step 5); `tsconfig.json` / `scripts/check-threat-model-section*` / `distribution/shortcuts/test/dashboard-metric-ids.json` (step 6).
-  - **Acceptance**: (1) Cross-repo-runner directory is gone. (2) All 6 dependent production files are either rewritten or deleted with rationale. (3) Pnpm typecheck + test green. (4) Live smoke against minsky-on-itself shows fresh ledger row. (5) `path-a-loc-novel-tree` metric drops from 31,234 → ~27K.
-  - **Risk**: medium-high. Multi-PR coordination is the risk. Mitigations: each step lands as its own PR + CI gate; each step is independently revertible; the live smoke is the final gate.
-
 - [ ] `phase-11b-delete-tick-loop-multistep` — staged deletion of `novel/tick-loop/` (~17K LOC). Follow-up to `phase-7b-delete-cross-repo-runner-multistep`. Tick-loop has ~50+ dependent files because it's the TS daemon's main surface; deletion is at LEAST a 10-step PR sequence
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: phase-11b-delete-tick-loop-multistep
   - **Tags**: p0, milestone-m1, path-a, aggressive-cut, deletion, observed-2026-05-25
   - **Milestone**: M1
@@ -975,6 +964,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1; OpenHands V1 paper arXiv:2511.03690; OpenHands Cloud blog post 2025-11-12.
 
 - [ ] `daemon-silent-on-claude-account-rate-limit` — `claude --print` exits 1 with `You've hit your limit · resets <date>` when the operator's account is rate-limit-exhausted; minsky's daemon does NOT parse this signal, doesn't transition to `budget-paused`, doesn't notify the operator, doesn't sleep until reset — it just keeps emitting `iteration.status=failed, provider=""` forever, burning machine cycles and obscuring the actual root cause behind the symptom "spawn failed"
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-silent-on-claude-account-rate-limit
   - **Competitive-goal**: drives `unattended-iteration-rate` toward 0.95 — competitors silently retry on provider rate-limits (busy-loops in OpenHands, Aider, Devin queue). Minsky pausing-with-notify on parsed exhaustion signal is observable budget-aware operation, closes the silent-retry-forever gap.
   - **Tags**: p0, milestone-m1, m1-1, rule-1, rule-6, observability, budget-guard, observed-2026-05-26, blocker, anti-stub-marker
@@ -1067,6 +1057,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1; `https://github.com/Yeachan-Heo/oh-my-claudecode`; `docs/visions/2026-05-22-openhands-fulfillment.md`.
 
 - [ ] `devin-per-worker-isolation-primitive` — claude has `--worktree <name>` which auto-creates an isolated git worktree per session; devin has no equivalent today. When the daemon scales to ≥2 workers (`MINSKY_AUTO_SCALE_WORKERS=1`, max 5) and cloud_agent=devin, all workers iterate against the shared main checkout — concurrent commits could collide
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: devin-per-worker-isolation-primitive
   - **Competitive-goal**: drives `agent-parity-coverage` toward 1.00 (M1.9) — Claude Code ships `--worktree`; Devin doesn't. Minsky's own worktree primitive on top makes M1.9 (works from Claude, Devin, local) verifiable end-to-end with the same parallel-iteration semantics regardless of CLI backend.
   - **Tags**: p2, milestone-m1, m1-1, devin-support, parallel-workers, observed-2026-05-26
@@ -1093,6 +1084,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1; SWE-agent paper arXiv:2405.15793 NeurIPS 2024 (Yang et al.); mini-SWE-agent leaderboard post (2025-07).
 
 - [ ] `watchdog-timeout-kills-productive-devin` — the 900s (15min) watchdog SIGKILLs devin mid-work; devin iterations take 5-6min when productive but the watchdog fires on slow iterations, wasting the entire iteration
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: watchdog-timeout-kills-productive-devin
   - **Tags**: p0, milestone-m1, devin, watchdog, reliability
   - **Milestone**: M1
@@ -1151,6 +1143,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1; `https://github.com/RooCodeInc/Roo-Code` (archived).
 
 - [ ] `minsky-config-json-support-local-llm-pref` — `~/.minsky/config.json` supports `cloud_agent` + `cloud_agent_model` as documented persistent keys, but NOT `local_llm_enabled`, `strategic_router_enabled`, or `cloud_agent_fallback`. So an operator who wants "use devin, fall back to local" has to add `MINSKY_LOCAL_LLM=1` to the rendered launchd plist, which gets wiped on the next `pnpm minsky:setup` regeneration. Per-machine preferences should live in ONE place
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-config-json-support-local-llm-pref
   - **Competitive-goal**: drives `unattended-iteration-rate` toward 0.95 — competitor agents' per-machine config (Aider .aiderconfig, Cline settings.json) lives in one file. Minsky splitting cloud_agent (config.json) vs local_llm (rendered plist env) is a UX regression vs the field; closing it removes a friction point operators see in head-to-head trials.
   - **Tags**: p1, milestone-m1, m1-1, config-as-code, rule-2, persistence, observed-2026-05-26
@@ -1285,6 +1278,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1; `https://github.com/plandex-ai/plandex`; plandex.ai docs.
 
 - [ ] `minsky-repo-git-config-bare-misset` — `.git/config` on the operator's minsky checkout has `bare = true`, but the directory contains a working tree with active worktrees (`.git/worktrees/daemon-0-*`, `fix-ci-main`, `fleet-stability`, `minsky-bench`). Every `git status` from the main checkout fails with `fatal: this operation must be run in a work tree`. Daemon self-diagnose flagged it under `git-config-parseable` but proposed the wrong fix (`rm .git/index.lock` — index lock is not the issue). Real fix: one-line `bare = false`. The self-diagnose handler should detect `bare = true` AND working files coexisting, propose the correct fix
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-repo-git-config-bare-misset
   - **Competitive-goal**: drives `mttr-self-heal` p95 toward <5min (M1.13) — competitors' self-diagnose surfaces (Devin's `diagnose`, Cursor's health-check) don't propose actionable fixes for unusual git states; Minsky's self-diagnose that flags `bare=true with worktrees` AND proposes `git config core.bare false` is a measurable diagnose-vs-suggest quality win.
   - **Tags**: p1, milestone-m1, m1-1, observed-2026-05-26, self-diagnose-misdirection
@@ -1431,6 +1425,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-22 docs sweep — the v0.2.0 auto-bump made the released-tag semantics confusing. Filing this as the durable shape so the operator doesn't have to fight semantic-release.
 
 - [ ] `motivation-bullet-test-coverage-completion` — every motivation bullet in the README's "Why Minsky?" section has a sibling integration test file that drives the claimed behaviour end-to-end against fixture data; 4 stories shipped without tests in this PR (007, 008, 009, 010) need their `.test.ts` files
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: motivation-bullet-test-coverage-completion
   - **Tags**: p1, milestone-m1, tests, user-stories, observability, observed-2026-05-20
   - **Milestone**: M1
@@ -1463,6 +1458,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: low. Pure aggregation over data sources that already exist (git history + gh CLI).
 
 - [ ] `multi-persona-pipeline-handoff-spec` — finalise `novel/handoff-spec/` (the JSON schema + validator + writer + reader for persona handoff files) so the M2 multi-persona pipeline can spawn researcher → planner → developer → QA → reviewer on a single task; user-story 008's `it.skip` cases activate when this ships
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: multi-persona-pipeline-handoff-spec
   - **Tags**: p1, milestone-m2, multi-persona, novel-package, handoffs
   - **Milestone**: M2
@@ -1573,6 +1569,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Moved from P0 2026-05-18: M2 tasks deprioritized until M1 ships (see MILESTONES.md). -->
 - [ ] `native-agent-teams-with-tiered-adapter` — minsky drives Claude Code's native "agent teams" (lead + independent teammates + shared task list + mailbox + hooks) as its multi-worker backend when available, behind a capability-tiered agent adapter that still supports non-native agents (Devin, etc.) via the existing process-fan-out — native always preferred
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: native-agent-teams-with-tiered-adapter
   - **Tags**: p0, operator-directive, orchestrator, agent-teams, claude-code, adapter, rule-1, rule-2, rule-9
   - **Milestone**: M2
@@ -1591,6 +1588,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Slice 2.5 shipped 2026-05-23**: `novel/tick-loop/src/probe-claude-version.ts` (bounded async probe — default 2s timeout, fail-soft on every error path) + 12 sibling tests + wired into `bin/tick-loop.mjs` at startup so the detector now receives the real `claude --version` output instead of `null`. End-to-end verified on operator's machine: `MINSKY_CLOUD_AGENT=claude` + `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` now promotes the tier from `native-subagents` to `native-agent-teams` (claude 2.1.138 >= 2.1.32 OK). Without the env flag, stays at `native-subagents` (the documented safe fallback). Every failure path (missing binary / timeout / ENOENT / non-zero exit) returns null and degrades to slice-2 behaviour without crashing the supervisor — rule #6 boundary stays at the runtime-spawn layer, not the version-probe layer.
 
 - [ ] `daemon-cross-iteration-prompt-cache` — share `claude --print` prompt prefix across iterations to hit Anthropic's prompt cache
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-cross-iteration-prompt-cache
   - **Tags**: p1, daemon, supervisor, throughput, prompt-cache, optimization, follow-up
   - **Milestone**: M2
@@ -1608,6 +1606,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 operator directive — "Measure speed of implementing a minsky feature here in claude code vs implementing it through minsky itself. Open tasks to improve it." Speed-comparison showed daemon at 6× operator's median open→merge; prompt cache miss is the leading single contributor (per Anthropic's 90% cache-read discount math).
 
 - [ ] `daemon-parallel-worktree-launch` — launch N non-conflicting Minsky processes on the same repo via Claude Code's native `--worktree` flag + `flock`-based TASKS.md row claim
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-parallel-worktree-launch
   - **Tags**: p0, daemon, supervisor, throughput, parallel, worktree, follow-up
   - **Milestone**: M2
@@ -1630,6 +1629,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `claude-orchestrator-local-worker-fanout` — Claude (top layer, brain) fans work out to N local-model workers in git worktrees; chaos-engineered cross-layer stability
   - **ID**: claude-orchestrator-local-worker-fanout
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **Tags**: p0, operator-directive, orchestrator, parallel, worktree, chaos-engineering, role-separation
   - **Milestone**: M2
   - **Operator-refinement (2026-05-16, supersedes the local-worker default below)**: workers are now **Claude Sonnet (`claude-sonnet-4-6`)**, not local-Qwen — local 30B was too slow + context-overflow-prone for a 24h sprint (15-min watchdog timeouts; aider context-window crashes). Architecture the operator wants: **Opus = orchestrator/brain** (queue decomposition, code-review of worker output, vet+merge decisions), **Sonnet = worker pool** (fast implementation), operator/Opus-session monitors and improves continuously. Until Slice 1 (role-pin) + Slice 2 (`minsky orchestrate --workers=N` entrypoint) ship, the orchestrator runs from the operator's Claude Code session (a documented valid mode per Open-questions (a)); the durable goal is the autonomous spawned-orchestrator. Re-grade the Hypothesis cells with worker-provider=`claude-sonnet-4-6` (not local-Qwen): cell (b) becomes "worker iterations consume ≥80 % on Sonnet"; cell (a) orchestrator-Opus-monopoly still holds. Slice 2's per-worker spawn = `--worker-id <i> --workers-total <N> --role=worker` with `MINSKY_LLM_PROVIDER=claude-only MINSKY_STRATEGIC_PIN_MODEL=claude-sonnet-4-6` (NOT `pnpm minsky`, which overrides the provider — see #budget-guard-correctness Slice C). This is the highest-priority P0; do it first.
@@ -1679,6 +1679,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-05 user request — "update web dashboard to be full of useful information about minsky's runs so that I don't have to ask you, just open it". Promotes from "operator asks me" to "operator opens the dashboard". The "how is it going?" question I answered earlier this session is the load-bearing data point.
 
 - [ ] `worker-model-per-machine-config` — local-LLM worker model is per-machine: env var → gitignored `.minsky/local-config.json` → repo default; pin this Mac to `mlx-community/Qwen3.6-27B-4bit` (Opus-quality dense)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: worker-model-per-machine-config
   - **Tags**: p0, local-llm, per-machine, model-pin, recency-checked, follow-up
   - **Milestone**: M2
@@ -1702,6 +1703,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-10 operator directive — *"I want opus-like approach for my models, so I'm ok with slower run but yet reasonable (as eg opus), which model should be for me then? … I'm getting qwen3.6:27b. Update minsky's tasks so that this model will be used by default for local runs on THIS machine. Note that on other machine I might want a different model."* The recency check that selected Qwen3.6-27B Dense — Terminal-Bench 2.0 Opus-parity, SWE-bench Verified 77.2, fits 32GB at Q4 — is documented in this PR's body and in `validated-learnings.md`.
 
 - [ ] `support-opencode-lmstudio-mlx-qwen3-14b-stack` — first-class second local stack (opencode → LM Studio → MLX → Qwen3-14B) parallel to aider+mlx_lm.server+Qwen3.6-27B; operator picks per machine via env / config-file
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: support-opencode-lmstudio-mlx-qwen3-14b-stack
   - **Tags**: p0, operator-directive, local-llm, opencode, lm-studio, agent-abstraction, follow-up
   - **Milestone**: M2
@@ -1727,6 +1729,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-10 operator directive — *"I need full support of opencode → LM Studio → MLX runtime → Qwen3-14B in minsky in every single action. Define gaps, list of tasks."* Composes with the existing aider+mlx_lm.server path; doesn't replace it. The 6-place hard-coding inventory above (DEFAULT_AIDER_MODEL, buildAiderInvocation, MINSKY_LOCAL_LLM_PROBE_URL default, MINSKY_LOCAL_LLM_AIDER_BIN, local-llm-bootstrap.ts planner, MINSKY_LOCAL_LLM_MODEL_ID write-shape) IS the gap analysis the operator asked for; each slice closes one or more of those places. Live-fire 2026-05-10 (this PR's verification): the operator's M1 Max with Qwen3.6-27B-4bit on mlx_lm.server proved the aider+mlx_lm path works end-to-end (PR #406 + #411 chain shipped); this task is the parallel-stack layer that lets the operator A/B against opencode+LM Studio+Qwen3-14B without forking the repo.
 
 - [ ] `claude-usage-aware-strategic-model-router` — daemon reads live Claude usage (5h window + weekly + monthly), persists it, and picks the highest-quality model that fits the remaining budget; "best model by default, downgrade only when forced"
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: claude-usage-aware-strategic-model-router
   - **Tags**: p0, operator-directive, daemon, budget-aware, model-router, performance-by-default, follow-up-of-task-aware-model-router
   - **Milestone**: M2
@@ -1755,6 +1758,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-10 operator directive — *"I want minsky to be able to strategically be able to switch to the best model available based on claude's remaining usage for this week/5 hours/month. So I want it to smartly be able to pick the right model (with best performance by default) based on remaining usage. I need it to read actual remaining usage left and keep it updated."* Three load-bearing pieces in that directive: **(i)** "based on claude's remaining usage for this week/5 hours/month" — three windows, not one (today only 5h is granular; weekly is binary; monthly is absent); **(ii)** "best performance by default" — the picker's optimization target is quality, not cost; cost is a constraint, not the objective; **(iii)** "read actual remaining usage left and keep it updated" — slice 6's refresh-cadence + ring-buffer + predictor address the "actual" and "keep updated" parts.
 
 - [ ] `minsky-multi-agent-executable` — minsky callable from CLI, Claude Code, and opencode with similar maximum functionality (MCP server + CLI + slash commands)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-multi-agent-executable
   - **Tags**: p0, operator-directive, mcp-server, multi-agent-surface, follow-up
   - **Milestone**: M2
@@ -1780,6 +1784,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-10 operator directive — *"I want minsky to be executable from cli, from claude, from opencode with similar maximum available functionality. Add tasks and implement it."* The composing tasks (#claude-orchestrator-local-worker-fanout, #support-opencode-lmstudio-mlx-qwen3-14b-stack, #claude-usage-aware-strategic-model-router) all point at minsky as the load-bearing daemon; making it agent-callable as a first-class tool surface is the natural next ratchet.
 
 - [ ] `local-agent-config-validation-at-boot` — pre-spawn validation of opencode/aider config + structured failure-class attribute on iteration spans
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: local-agent-config-validation-at-boot
   - **Tags**: p1, daemon, observability, local-llm, follow-up, surfaced-by-real-fire
   - **Milestone**: M2
@@ -1803,6 +1808,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-10 real-fire test of `pnpm minsky` with `MINSKY_LOCAL_AGENT=opencode` and `MINSKY_LLM_PROVIDER=local-preferred`. Iteration failed in 30s with `Configuration is invalid at $MINSKY_REPO/opencode.json — Unrecognized key: attachment`. The operator's `opencode.json` (which the operator was iterating on in a separate Claude session) had an `attachment` key that opencode 1.14.46 rejects. The daemon happily dispatched the iteration, opencode failed, the iteration was marked failed — but the actionable signal (which key, which file) was in the stderr tail rather than a structured failure-class attribute the operator could grep. This task surfaces it.
 
 - [ ] `local-server-concurrency-aware-worker-spawn` — local-LLM server (mlx_lm.server / LM Studio) is single-inference; N parallel workers all routed local serialize and divide throughput by N
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: local-server-concurrency-aware-worker-spawn
   - **Tags**: p0, daemon, concurrency, local-llm, parallel-workers, follow-up, surfaced-by-real-fire
   - **Milestone**: M2
@@ -1874,6 +1880,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `scripts/local-gate-merge.mjs` + paired tests shipped [done]; (2) wired into the Phase-1 orchestrator as its merge authority; (3) `--self-metric` reads the ledger; (4) measurement shows false-green rate 0 over ≥10 merges.
 
 - [ ] `budget-guard-correctness` — Minsky's budget model is factually wrong and silently degrades off Claude on bad estimates; operator (2026-05-16): "this is critical … fivehour limit is completely wrong … there is no monthly limit in Claude … when it reaches limit, it must tell to validate it"
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: budget-guard-correctness
   - **Tags**: p1, operator-directive, budget-guard, strategic-router, correctness
   - **Milestone**: M1
@@ -1894,6 +1901,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Observer-filed cluster 2026-05-12: surfaced by the minsky observer plugin (PRs #492 / #493 / #494) dogfooding itself on minsky's own repo. Each task below cites the observation that produced it. -->
 
 - [ ] `parser-accept-verification-acceptance-as-success-aliases` — `pickHostTask` accepts `**Verification**` / `**Acceptance**` as `**Success**` aliases so the runner can pick minsky's own P0 tasks (and every other tasks.md-conventional host)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: parser-accept-verification-acceptance-as-success-aliases
   - **Tags**: p1, observer-filed, bug, cross-repo-runner, parser, tasks.md-spec
   - **Milestone**: M1
@@ -1926,6 +1934,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: observer plugin slice E (PR #493) hypothesis self-grade lesson — "Future work: tighten rule-8 to also check `bin/**` + top-level manifests like `Agentfile.yaml` so the observer plugin's own pieces get indexed on the next sweep."
 
 - [ ] `integration-fixture-fake-fixture-smell-audit` — audit every integration-test fixture in this repo against real-world counterparts; add paired "real-world" fixtures wherever the synthetic fixture is the only test for a parser / synthesiser
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: integration-fixture-fake-fixture-smell-audit
   - **Tags**: p1, observer-filed, test-quality, technical-debt
   - **Milestone**: M2
@@ -1974,6 +1983,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: observer plugin design — the SKILL ships without a version anchor, which is fine for v1 but becomes a debt as the protocol evolves. Anticipatory task filed at v1 ship time.
 
 - [ ] `cross-repo-runner-adopt-tasksmd-parser` — replace in-repo `parseTasksMd` + `pickHostTask` with `@tasks-md/parser` from the canonical tasks.md repo (rule #1 — don't reinvent)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cross-repo-runner-adopt-tasksmd-parser
   - **Tags**: p1, observer-filed, rule-1, dont-reinvent, cross-repo-runner, parser, tasks.md
   - **Milestone**: M2
@@ -1993,6 +2003,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- task-aware-model-router (P1) — operator directive 2026-05-07 surfaced by an external "10-day routing experiment" post the operator shared: a developer logged 150 randomly-sampled coding tasks across 10 days, re-ran each on both cloud-frontier and local Qwen3.6-27B, and found a strong task-class × local-match-rate pattern: file-reads / scanning / "explain code" matched 97 % (35 % of workload), test-writing / boilerplate / single-file-edits matched 88 % (30 %), multi-file debugging dropped to 61 % (20 %), architecture / 5+ file refactors at 29 % (15 %). The operator's translation: "we want 25 workers working at the same time with claude max 20 and also no critical issues at the same time". This task formalises Minsky's per-iteration model router — composes with the P0 local-LLM-fallback substrate (#358 / #365) but with a different decision surface: the P0 fires on budget-circuit-break (emergency); this P1 fires every iteration (routine routing). -->
 
 - [ ] `task-aware-model-router` — daemon classifies each iteration into a routing bucket (docs / single-file slice / multi-file debug / architecture) and routes to the cheapest model that meets that bucket's quality bar, enabling 25-worker concurrent operation within Claude Max 20 budget
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: task-aware-model-router
   - **Tags**: p1, daemon, throughput, cost-optimization, model-routing, scale, pick-next-after-358-365
   - **Milestone**: M2
@@ -2011,6 +2022,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Composes-into**: parent task `claude-orchestrator-local-worker-fanout` (P0, line 446) — this block provides the 4-bucket classifier + provider router. The parent adds the **role-pin override** (orchestrator iterations always Opus; worker iterations always local-first) so role wins over per-iteration bucket when they conflict.
 
 - [ ] `daemon-local-model-self-tune` — daemon evaluates rolling per-iteration metrics by local-model and auto-swaps the per-machine pin when a better-fitting model is observed; operator approves once, daemon reconciles forever
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-local-model-self-tune
   - **Tags**: p1, daemon, local-llm, self-tuning, model-router, follow-up
   - **Milestone**: M2
@@ -2034,6 +2046,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Composes-into**: parent task `claude-orchestrator-local-worker-fanout` (P0, line 446) — the per-machine model auto-tuning is what makes the worker-role default (always local-first) actually correct over time, not just at file-edit-time.
 
 - [ ] `daemon-iteration-phase-tagged-spans` — emit OTEL spans per-phase (pickTask / claim / spawn / pre-pr-lint / pr-create) so hangs are diagnosable
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-iteration-phase-tagged-spans
   - **Tags**: p1, daemon, observability, watchdog
   - **Milestone**: M1
@@ -2049,6 +2062,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 9h monitoring window 2026-05-07.
 
 - [ ] `daemon-config-analyzer-auto-apply` — slice 3 of #299: auto-apply safe `enable` recommendations for self-dogfood (CTO_AUDIT, CHANGELOG, METRICS_RENDER) unless `MINSKY_NO_AUTO_OPTIMIZE=1`
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-config-analyzer-auto-apply
   - **Tags**: p1, daemon, config-analyzer, follow-up
   - **Milestone**: M1
@@ -2064,6 +2078,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: operator question 2026-05-07 ("why is CTO audit not default"), config-analyzer #299 left auto-apply for slice 3.
 
 - [ ] `daemon-launchd-drift-warning-suppress-when-cli-launched` — suppress `cto-audit env drift (drift-stale-install)` warning when daemon is launched via `pnpm minsky` not launchd
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-launchd-drift-warning-suppress-when-cli-launched
   - **Tags**: p1, daemon, ergonomics, follow-up
   - **Milestone**: M1
@@ -2079,6 +2094,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: operator question 2026-05-07.
 
 - [ ] `daemon-brief-test-pin-soft-tolerance` — relax `daemon.test.ts` brief-pin assertions to allow legitimate trims while preserving drift protection
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-brief-test-pin-soft-tolerance
   - **Tags**: p1, daemon, brief, test-quality
   - **Milestone**: M1
@@ -2179,6 +2195,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `devin-worker-auto-exit-after-pr-create` — devin headless worker doesn't exit voluntarily after `gh pr create` succeeds, burning the full spawn timeout on every iteration that completes its brief
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: devin-worker-auto-exit-after-pr-create
   - **Tags**: p1, devin-worker, headless, watchdog, observed-in-fleet
   - **Milestone**: M1
@@ -2196,6 +2213,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `runner-records-validated-when-pr-opened-despite-nonzero-exit` — `runLive` should treat a non-zero spawn exit as `validated` (not `spawn-failed`) when the spawn's stdoutTail contains an extracted PR URL
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runner-records-validated-when-pr-opened-despite-nonzero-exit
   - **Tags**: p1, runner, verdict, observed-in-fleet
   - **Milestone**: M1
@@ -2213,6 +2231,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `brief-mandates-task-block-removal-on-shipped-work` — sharpen the spawn brief so devin REMOVES the task block (per tasks.md spec) instead of annotating it with `[x]` ticks
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: brief-mandates-task-block-removal-on-shipped-work
   - **Tags**: cross-repo-runner, spawn-plan, brief, p1, rework-prevention, surfaced-by-oncall-hub-api-monitoring
   - **Milestone**: M1
@@ -2228,6 +2247,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `host-loop-spawn-failed-retry-budget` — wrap spawn-failed verdict in a configurable retry budget so a single bad iteration doesn't halt 8h+ autonomous runs
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: host-loop-spawn-failed-retry-budget
   - **Tags**: cross-repo-runner, host-loop, robustness, p1, observability, surfaced-by-oncall-hub-api-monitoring
   - **Milestone**: M1
@@ -2243,6 +2263,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `spawn-strategy-pre-sigkill-stash` — auto-stash worker WIP before the SIGKILL watchdog fires so devin's uncommitted implementation isn't lost on timeout
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: spawn-strategy-pre-sigkill-stash
   - **Tags**: cross-repo-runner, tick-loop, spawn-strategy, data-loss, p1, surfaced-by-oncall-hub-api-monitoring
   - **Milestone**: M1
@@ -2257,6 +2278,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `novel/tick-loop/src/spawn-strategy.ts` (the SIGKILL site, line ~306), `novel/tick-loop/src/spawn-strategy.test.ts` (paired tests).
 
 - [ ] `minsky-daemon-plist-multi-host` — launchd daemon targets only `<minsky-repo>` with `--host`, so other bootstrapped hosts (agentbrew, future hosts) are silently never visited even after they ship `.minsky/repo.yaml`
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-daemon-plist-multi-host
   - **Tags**: p1, daemon, launchd, multi-host, agentbrew, scout, AIFN-720
   - **Surfaced-by**: 2026-05-20 audit — `~/Library/LaunchAgents/com.minsky.daemon.plist` invokes `minsky-run.mjs --host $MINSKY_REPO --loop`. `<repos-parent>/agentbrew/.minsky/repo.yaml` has existed since 2026-05-19 13:14 but `~/.minsky/daemon.log` shows zero iterations against agentbrew — every loop is `host=fyodoriv/minsky`. `cwd-detect.ts` already correctly enumerates both hosts under `<repos-parent>/` when given `--hosts-dir`. Today the plist + the `install-daemon` codegen still emit the single-host form, so even a re-install reproduces the bug.
@@ -2272,6 +2294,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- 2026-05-21 drain session — 7 follow-up tasks codifying observed regression classes and gap classes. -->
 
 - [ ] `daemon-daily-metrics-render-not-firing` — `pnpm metrics:render` is supposed to auto-fire once per day from the daemon, but didn't on 2026-05-22; 4 `Budget: 1d` sections of METRICS.md went stale and broke `scripts/check-metric-freshness.test.mjs` until manually re-rendered in PR #712.
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-daily-metrics-render-not-firing
   - **Tags**: p1, daemon, observability, metrics, rule-17, observed-2026-05-22
   - **Milestone**: M1
@@ -2375,6 +2398,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Observations filed 2026-05-18 from live daemon session (P1 findings). -->
 
 - [ ] `metrics-render-finite-number-validation-bug` — `pnpm metrics:render` fails with `metric "loop-uptime" value must be a finite number` against today's snapshot at `.minsky/metric-snapshots/<date>.json`, blocking the daily refresh of `METRICS.md`; this caused the 2026-05-21 `check-metric-freshness` failure that took main red for ~24h and stalled the auto-merge gate (every PR's vet failed `vitest` on `metric-freshness` until the operator manually bumped the stale `_Updated` timestamps)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: metrics-render-finite-number-validation-bug
   - **Tags**: p1, milestone-m1, observability, daemon, bug, observed-2026-05-21, rule-17, blocker
   - **Milestone**: M1
@@ -2537,6 +2561,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: new agentbrew config update to target `.openhands/microagents/`; deletion of any `novel/*/src/skill-loader.ts` files (audit first — likely 0 today, but the agentbrew sync code that writes to `.claude/skills/` would need to switch targets); `competitors/openhands.md` updated with migration notes.
 
 - [ ] `autonomous-task-authoring-between-ticks` — the daemon doesn't currently author new tasks autonomously between iterations; agents file P1–P3 tasks WHILE running iterations (rule #17 scout discipline), but when the queue empties the daemon waits instead of running an audit pass that produces new work. Close the loop: every Nth tick (or whenever `pickHostTask` returns null), the daemon invokes the audit-pass equivalent (sweep / project-audit / standing-audit-gap-loop) and seeds the next ticks
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: autonomous-task-authoring-between-ticks
   - **Tags**: p2, m2, mape-k, task-authoring, self-improving-pillar, autonomy
   - **Milestone**: M2
@@ -2872,6 +2897,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Moved from P0 2026-05-18: M4 tasks deprioritized until M1+M2+M3 ship (see MILESTONES.md). -->
 - [ ] `operator-machine-budget-autoscale` — minsky reads a single operator-defined machine-utilisation budget (default 70%, raised explicitly for swarm), auto-scales worker concurrency to *match* it via effective-throughput feedback, strips OS throttles that make the budget unreachable, and propagates host changes to dotfiles/agentbrew so they're durable (vision.md rule #15 operationalised)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: operator-machine-budget-autoscale
   - **Tags**: p0, operator-directive, resource-governance, autoscale, launchd, rule-9, rule-10, rule-15, cross-repo-sync
   - **Milestone**: M4
@@ -2890,6 +2916,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Operator directive 2026-05-16: single-command run-anywhere multi-tenant minsky. `minsky` (zero args) in ANY project folder runs the orchestrator on that folder + subfolders, with: home-repo full push/PR; foreign-repo PR-only-into-TASKS.md; self-monitoring of minsky-on-itself; auto-restart with bounded backoff to a time limit; dynamic model-by-budget unless pinned; multi-tenant safe (dozens of concurrent processes, zero conflict); full local-model fallback. The 5 `runany-*` P0s below are that cluster — implement in order; each composes existing substrates rather than reinventing (rule #1). -->
 
 - [ ] `runany-permission-scoped-writes` — home repo: push commits + open PRs for any task; foreign repos under the tree: ONLY open a PR adding tasks to their TASKS.md from findings (never push code); always self-monitor minsky-on-itself and file improvement tasks into minsky's TASKS.md
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runany-permission-scoped-writes
   - **Tags**: p0, operator-directive, runany, security, policy, rule-13
   - **Milestone**: M4
@@ -2904,6 +2931,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `classifyRepo`/`assertWriteAllowed` shipped with paired tests (home vs foreign × push/PR/taskmd cells); (2) foreign push of non-TASKS.md refused + logged; (3) minsky-self scout files a task on seeded friction; (4) measurement thresholds met.
 
 - [ ] `runany-multitenant-no-conflict` — dozens of concurrent `minsky` processes on one machine must never conflict (worktrees, locks, branches, launchd labels, scratch dirs, claims)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runany-multitenant-no-conflict
   - **Tags**: p0, operator-directive, runany, concurrency, chaos-engineering
   - **Milestone**: M4
@@ -2932,6 +2960,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) escalating backoff schedule implemented + tested; (2) backoff resets after sustained health; (3) hard time-limit clean stop, 0 restarts after; (4) chaos measurement all-true.
 
 - [ ] `runany-dynamic-model-or-local-fallback` — model auto-selected by remaining tokens unless the operator explicitly pinned model(s); full automatic switch to local models when tokens are exhausted OR all remote backends are down/inaccessible
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runany-dynamic-model-or-local-fallback
   - **Tags**: p0, operator-directive, runany, model-router, local-llm
   - **Milestone**: M4
@@ -2978,6 +3007,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-06 operator directive — "Also add P0 to make security and privacy one of main priorities for Minsky. Add to vision, each user story; add P0 tasks. Note that performance comes first but that in a reasonable way comes second. Eg it's fine to follow industry standard solutions for that."
 
 - [ ] `daemon-self-optimize-speed-tokens` — every iteration tries to improve daemon's own speed and decrease token consumption (one measurable optimization per loop)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-self-optimize-speed-tokens
   - **Tags**: p0, daemon, supervisor, throughput, optimization, self-improvement
   - **Milestone**: M4
@@ -3079,6 +3109,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: Fowler 2011 *Eradicating Non-Determinism in Tests*; Nygard 2018 *Release It!* (resource contention / bulkhead); vision.md rule #6.
 
 - [ ] `worker-watchdog-scale-by-pinned-model-latency` — the 900s per-iteration watchdog default guarantees 100% iteration failure for Opus-pinned workers under host oversubscription; scale it by the pinned model's latency class
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: worker-watchdog-scale-by-pinned-model-latency
   - **Tags**: tick-loop, daemon, reliability, throughput, healing
   - **Milestone**: M1
@@ -3163,6 +3194,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `npm run verify` exit code with vs. without the install step stubbed; CI duration delta < 30s.
   - **Anchor**: vision.md rule #10 (deterministic enforcement / ratchet); global rule "every bug becomes a rule — prevent the category, not the instance".
 - [ ] `daemon-network-resilience-detector` — minsky daemon detects network loss, pauses the iteration timer, and extends the deadline on recovery so long-running daemons survive Wi-Fi drops without wasting iterations
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-network-resilience-detector
   - **Tags**: p2, daemon, supervisor, stability, network, taskgrind-extraction
   - **Milestone**: M1
@@ -3179,6 +3211,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-12 taskgrind-extraction analysis. Verified file:line by directly reading `bin/taskgrind:1167-1212` and `4566-4595` (functions confirmed present, retry-wrapper config confirmed via `DVB_DEFAULT_NET_RETRIES` constant in `lib/constants.sh`).
 
 - [ ] `daemon-stall-detection-per-task` — minsky daemon tracks per-task retry attempts in `.minsky/state.json` and bails out on a task that has been retried too many times, preventing infinite loops on broken tasks
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-stall-detection-per-task
   - **Tags**: p2, daemon, supervisor, stability, stall-detection, resume-state, taskgrind-extraction
   - **Milestone**: M1
@@ -3216,6 +3249,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Bosun-extraction cluster 2026-05-12: bosun is deprecated. These tasks extract battle-tested patterns from `<bosun-repo>/orchestrator/server/src/` where minsky has a clear gap and bosun's implementation is portable. Anti-recs (DO NOT port) are documented in /tmp/bosun-to-minsky-extraction-analysis.md: bosun's pipeline engine (minsky uses OMC per rule #1), bosun's persona skills (live in OMC), bosun's API routes + frontend (minsky is CLI + daemon, not a web service per rule #12), bosun's `eventBus.ts` (just 10-line wrapper over Node EventEmitter — not worth a port), and bosun's full learning bridge chain (minsky's iteration model is different). The 4 P2 tasks below are the high-confidence extractions; further smaller patterns are tracked under `bosun-extraction-sweep-followups` in P3. -->
 
 - [ ] `daemon-multi-provider-rate-limit-detector` — minsky gains a fixture-tested rate-limit detection pattern set covering Claude + aider/mlx + opencode/LM Studio + Devin so the daemon stops retry-looping on exhausted backends
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-multi-provider-rate-limit-detector
   - **Tags**: p2, daemon, supervisor, stability, rate-limit, bosun-extraction
   - **Milestone**: M4
@@ -3232,6 +3266,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-12 bosun-extraction analysis (see `/tmp/bosun-to-minsky-extraction-analysis.md` § Extraction #1 — verified by spot-check of `backendHealthService.ts:11-30` and the `RATE_LIMIT_PATTERNS` const).
 
 - [ ] `cross-repo-runner-per-repo-project-memory` — cross-repo-runner gains a per-host-repo SQLite learnings store so the runner stops repeating the same mistake against the same host across iterations
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cross-repo-runner-per-repo-project-memory
   - **Tags**: p2, cross-repo-runner, learning, bosun-extraction, memory
   - **Milestone**: M1
@@ -3248,6 +3283,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-12 bosun-extraction analysis (`/tmp/bosun-to-minsky-extraction-analysis.md` § Extraction #4 + #12) — bosun has a 1085-LOC `projectMemory.ts` + 116-LOC `prFeedbackService.ts` covering this gap; minsky's cross-repo-runner has no per-host learning today.
 
 - [ ] `daemon-cross-vendor-reviewer-bias-prevention` — CTO-audit reviewer (and any future review-shaped persona) runs against a DIFFERENT model/provider than the worker that produced the output, preventing self-validation bias
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-cross-vendor-reviewer-bias-prevention
   - **Tags**: p2, daemon, cto-audit, model-routing, bias, bosun-extraction
   - **Milestone**: M1
@@ -3264,6 +3300,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-12 bosun-extraction analysis — verified by reading `modelRouter.ts:148-204` which carries the cross-vendor logic + the explicit JSDoc rationale.
 
 - [ ] `daemon-pr-feedback-extraction` — daemon extracts substantive PR review comments from merged daemon PRs and feeds them into the next iteration's brief, learning from human feedback
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-pr-feedback-extraction
   - **Tags**: p2, daemon, learning, pr-feedback, bosun-extraction
   - **Milestone**: M1
@@ -3295,6 +3332,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 9h monitoring window — 8 stuck dependabot PRs.
 
 - [ ] `spawn-n-workers-with-watchdog-monitoring` — substrate for safely running N (4-10) parallel workers with a monitor that auto-unblocks stuck children + files incident tasks
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: spawn-n-workers-with-watchdog-monitoring
   - **Tags**: p2, daemon, supervisor, parallel, watchdog, follow-up
   - **Milestone**: M1
@@ -3311,6 +3349,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Composes-into**: parent task `claude-orchestrator-local-worker-fanout` (P0, line 446) — this block provides the watchdog substrate (kill stuck child, rebase stuck PR, body-patch). The parent adds the **cross-layer** chaos slice (orchestrator-death-recovery and worker-hang-detection-from-orchestrator-side via `chaos-orchestrator-kill.mjs` and `chaos-worker-hang.mjs`).
 
 - [ ] `brief-trim-coordinator` — workers compete on the same brief sections; need a coordinator so one PR/iter trims and others abstain
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: brief-trim-coordinator
   - **Tags**: p2, daemon, optimization, parallel-launch
   - **Milestone**: M1
@@ -3518,6 +3557,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `brief-instructs-exit-after-pr-open` — brief should tell devin to exit cleanly (`process.exit(0)`) immediately after `gh pr create` succeeds, instead of running to 15-min timeout
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: brief-instructs-exit-after-pr-open
   - **Tags**: cross-repo-runner, spawn-plan, brief, cost, p2, surfaced-by-oncall-hub-api-monitoring
   - **Milestone**: M1
@@ -3549,6 +3589,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `host-loop-operator-branch-pin-with-auto-stash` — minsky-run should checkout MINSKY_OPERATOR_BRANCH (with auto-stash) before each picker invocation so the operator's curated task queue is always visible
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: host-loop-operator-branch-pin-with-auto-stash
   - **Tags**: cross-repo-runner, host-loop, branch-strategy, p2, surfaced-by-oncall-hub-api-monitoring
   - **Milestone**: M1
@@ -3564,6 +3605,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `runner-scope-leak-soft-mode` — relax scope-leak verdict from "kills iteration" to "warns + continues" because devin's natural fix scope is broader than the task's **Files**: declaration
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: runner-scope-leak-soft-mode
   - **Tags**: cross-repo-runner, runner, verdict-tuning, p2, surfaced-by-oncall-hub-api-monitoring
   - **Milestone**: M1
@@ -3579,6 +3621,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `parse-files-field-multi-line-nested` — `parseFilesField` should accept the multi-line nested-bullet form, not just inline `**Files**: <globs>`
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: parse-files-field-multi-line-nested
   - **Tags**: p2, parser, scope-leak, observed-in-fleet
   - **Milestone**: M1
@@ -3660,6 +3703,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `jq '.scripts | keys | length' package.json` returns ≤20; (2) each retired script's stub prints the deprecation hint; (3) `docs/runbook.md` has the migrated commands; (4) `pnpm test` + `pnpm pre-pr-lint` still pass; (5) 30 days post-merge, retire the stubs entirely.
 
 - [ ] `bash-skeleton-multi-worker-numeric-ids` — the bash `bin/minsky` shim lacks the TS wrapper's `minsky 1` / `minsky 2` per-worker numeric IDs (the TS `novel/tick-loop/bin/minsky.mjs` mapped them to `.minsky/workers/<id>.pid` / `.minsky/workers/<id>.log` files for parallel-daemon scenarios). Scout found while landing PR #887 (phase-11b step 4 binstub flip) — the binstub now points at the bash shim; an operator who tries `pnpm minsky 1` gets an "unknown subcommand 1" error instead of spawning worker #1. Not blocking phase-11b deletion because (a) the bash skeleton's launchd `KeepAlive=true` provides single-daemon survival, (b) no current operator depends on multi-worker, (c) the TS `minsky.mjs` is being deleted in step 8 either way
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: bash-skeleton-multi-worker-numeric-ids
   - **Tags**: p3, scout-finding, bash-skeleton, cli-ux, observed-2026-05-25
   - **Milestone**: M2
@@ -3750,6 +3794,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) `ci.yml`'s `on: pull_request:` carries `types: [opened, edited, synchronize, ready_for_review, reopened]` matching `pr-vision-trace.yml`'s pattern. (2) Body-only PR edit (e.g., fixing the self-grade block) re-triggers `pr-self-grade` job within ≤60s without an empty commit.
 
 - [ ] `daemon-test-biome-useawait-cleanup` — 17 pre-existing `lint/suspicious/useAwait` warnings in `novel/tick-loop/src/daemon.test.ts` block `pre-commit` biome check (`--error-on-warnings`) when the file is touched; convert each `async (n) => { ...; return X }` to `(n) => Promise.resolve(X)` so the file becomes biome-clean and any future test addition can ship without warning-debt friction
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: daemon-test-biome-useawait-cleanup
   - **Tags**: p3, scout-finding, biome, test-hygiene, observed-2026-05-23
   - **Milestone**: M1
@@ -3819,6 +3864,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #11 (no flaky metric is load-bearing — daemon stability is load-bearing; this follow-up confirms the substrate fix is non-flaky); rule #17 (proactive healing — runtime verification IS the close-out of the substrate fix); PR #666 (env propagation, commit `cb11781`); PR #694 (signal-capture seam test, commit `2cfdde1`); the now-closed `spawn-failed-exit-minus-one-silent-empty-stderr` parent task block in git history.
 
 - [ ] `verify-watchdog-substrate-eliminates-900s-spawn-failures` — confirm the dynamic-timeouts substrate (commit `2d2c15b`, 2026-05-18) eliminates the 900s watchdog kill class from cross-repo-runner spawns
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: verify-watchdog-substrate-eliminates-900s-spawn-failures
   - **Tags**: p3, longitudinal-verification, watchdog, dynamic-timeouts, observed-2026-05-23, follow-up
   - **Milestone**: M1
@@ -3871,6 +3917,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1 (don't reinvent — Reflexion is the published pattern; instantiate, don't redesign); user-stories/003-mape-k-improves-prompts.md § "Theoretical anchors"; Shinn et al., *Reflexion: Language Agents with Verbal Reinforcement Learning*, NeurIPS 2023, arxiv.org/pdf/2303.11366; docs/prior-art-and-name-collisions.md § 6 "Self-improving AI agents".
 
 - [ ] `research-finding-alphaevolve-population-based-codegen` — evaluate AlphaEvolve's evolutionary code-gen pattern for Minsky's task-execution loop
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: research-finding-alphaevolve-population-based-codegen
   - **Tags**: p3, research-followup, observed-2026-05-22, prior-art, m4
   - **Milestone**: M4
@@ -3923,6 +3970,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1 (don't reinvent — CrewAI shipped this, evaluate before building from scratch); competitors/crewai.md § "What we learn / steal" bullet 1; CrewAI maintainers, `lib/crewai/src/crewai/memory/unified_memory.py`, github.com/crewAIInc/crewAI.
 
 - [ ] `research-finding-event-driven-orchestration-flows` — research CrewAI Flows; evaluate as alternative to procedural cross-repo-runner
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: research-finding-event-driven-orchestration-flows
   - **Tags**: p3, research-followup, observed-2026-05-22, crewai-deep-dive, m2, architecture
   - **Milestone**: M2
@@ -4025,6 +4073,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: `npx biome ci .` reports 0 errors; the 6 `biome-ignore lint/complexity/noExcessiveCognitiveComplexity` annotations are removed; full test suite stays green.
 
 - [ ] `minsky-run-record-iteration-extract-verdict-mapper` — extract the verdict-resolution + iteration-record logic from the inline `recordIteration` callback in `novel/cross-repo-runner/bin/minsky-run.mjs` so it can be unit-tested in isolation
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-run-record-iteration-extract-verdict-mapper
   - **Tags**: p3, cleanup, refactor, observability, observed-2026-05-19
   - **Milestone**: M1
@@ -4056,6 +4105,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-16 Opus-director supervision session (PR for `local-worker-worktree-never-created`).
 
 - [ ] `demo-pr-generator` — `minsky run --target=<oss-repo> --output-mode=pr-only` produces a single high-quality demo PR per OSS repo (the funnel)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: demo-pr-generator
   - **Tags**: vision, business, growth, distribution, cross-repo
   - **Milestone**: M3
@@ -4196,6 +4246,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-04 — operator wanted to one-shot AIFN-840 in iep-capabilities-3 and had to reason about how `/next-task` would interact with iep-capabilities-3's pre-existing P0/P1 queue (deep engagement-onboarding work that takes priority by ID order). Workaround: filed the bug as P1 above the larger refactors, but a Jira-key arg would have been cleaner.
 
 - [ ] `cross-repo-runner-v1-live-spawn` — graduate the cross-repo runner from v0 (dry-run plan) to v1 (live `claude --print` spawn against the host) (@devin)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cross-repo-runner-v1-live-spawn
   - **Tags**: novel, cross-repo, runner, v1
   - **Milestone**: M1
@@ -4213,6 +4264,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Surfaced-by**: 2026-05-04 sweep PR #132 — `chore: sweep closed task blocks` removed `cross-repo-runner-aifn-840-integration-test` (shipped #131) and the rule-7-chaos-coverage lint surfaced two README rows whose deferral target no longer existed. Filing this v1 follow-up converts the dangling deferrals into a real future-task reference.
 
 - [ ] `cross-repo-host-daemon-loop` — `minsky-run --loop` keeps invoking `runLive` against the host's TASKS.md until the queue is empty or SIGTERM (@devin)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cross-repo-host-daemon-loop
   - **Tags**: novel, cross-repo, runner, daemon, host
   - **Milestone**: M1
@@ -4229,6 +4281,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: low. The loop is in-process; SIGTERM cleanly exits. No supervisor unit yet — operator runs in foreground (or under their own nohup/screen). Long-running ergonomics (auto-restart on crash, log rotation) are explicit follow-ups, not v0 promises.
 
 - [ ] `cross-repo-cto-audit-host-mode` — `minsky-run --cto-audit` proposes rule-#9-compliant task blocks for the host repo so the daemon keeps going past empty-queue (@devin)
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: cross-repo-cto-audit-host-mode
   - **Tags**: novel, cross-repo, runner, cto-audit, autonomic
   - **Milestone**: M1
@@ -4245,6 +4298,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: medium. The CTO audit's brief is LLM-driven, so brief drift is the operational risk. Mitigation: the same prompt template as `@minsky/tick-loop`'s CTO audit (with host-mode parameterisation), and the gate predicate filters bad outputs before they hit the host's queue. The cap-1-per-iteration contract (lockfile in `experiment-store/cross-repo-cto/`) prevents runaway audit fanout.
 
 - [ ] `minsky-status-iteration-digest` — `minsky status` shows iteration counts, success/fail rates, and avg duration in addition to running processes
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-status-iteration-digest
   - **Tags**: p2, observer, cli, ergonomics, cross-repo
   - **Milestone**: M1
@@ -4261,6 +4315,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Deferred-because**: P2 because `minsky status` already shows running processes; iteration count digest is nice-to-have telemetry
 
 - [ ] `minsky-push-stuck-branches` — `minsky push-stuck` finds local-only branches matching the loop's branch-prefix and pushes them + opens draft PRs
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: minsky-push-stuck-branches
   - **Tags**: p2, observer, cli, recovery, cross-repo
   - **Milestone**: M1
@@ -4299,6 +4354,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `host-loop-soft-failure-continue-mode` — autonomous loop should keep iterating on `spawn-failed` instead of halting, so a single bad iteration doesn't end an N-hour fleet run
 
+  - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: host-loop-soft-failure-continue-mode
   - **Tags**: p3, host-loop, autonomous-fleet, observed-in-fleet
   - **Milestone**: M1
