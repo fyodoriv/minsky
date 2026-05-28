@@ -569,3 +569,68 @@ class TestResolveAgentArgvReengageBudget:
         assert result is not None
         assert "openhands" in result[0]
         assert "--reengage-budget" not in result
+
+
+# --- max_iterations propagation (runaway-exploration heal, 2026-05-28) -----
+
+
+class TestResolveAgentArgvMaxIterations:
+    """Tests for the max_iterations argument added 2026-05-28 to close the
+    runaway-exploration class against local LLMs (39-min watchdog kill on
+    a single OpenHands conversation with no files_changed).
+
+    Contract: max_iterations=None (default) omits the flag (shim uses its
+    own default 50); max_iterations=N threads through to the shim.
+    """
+
+    def _shim_path(self, tmp_path: Path) -> Path:
+        path = tmp_path / "shim.py"
+        path.write_text("# stub")
+        return path
+
+    def test_default_max_iterations_omits_flag(self, tmp_path: Path) -> None:
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="m",
+            openhands_on_path=False,
+            shim_path=shim,
+        )
+        assert result is not None
+        assert "--max-iterations" not in result, (
+            f"default max_iterations=None should not pass --max-iterations; got {result}"
+        )
+
+    def test_positive_max_iterations_threads_through(self, tmp_path: Path) -> None:
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="ollama_chat/qwen3-coder:30b",
+            openhands_on_path=False,
+            shim_path=shim,
+            max_iterations=50,
+        )
+        assert result is not None
+        assert "--max-iterations" in result, f"got {result!r}"
+        idx = result.index("--max-iterations")
+        assert result[idx + 1] == "50", f"got {result!r}"
+
+    def test_canonical_cli_path_ignores_max_iterations(
+        self, tmp_path: Path
+    ) -> None:
+        """The canonical `openhands solve` CLI may add its own max-
+        iterations knob; until then, the dispatcher doesn't pass it."""
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="m",
+            openhands_on_path=True,
+            shim_path=shim,
+            max_iterations=50,
+        )
+        assert result is not None
+        assert "openhands" in result[0]
+        assert "--max-iterations" not in result

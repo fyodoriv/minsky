@@ -42,16 +42,19 @@ class _FakeConversation:
     `from openhands.sdk import Conversation` (inside the shim) resolves
     it via the sys.modules stub installed by `_install_openhands_stub`.
 
-    Records send_message + run calls. Each instance also exposes the
-    last instance via a class-level `_instances` list so tests can
-    inspect interactions without re-patching the Conversation factory.
+    Records send_message + run calls AND every kwarg passed at init
+    time (so tests can pin `max_iteration_per_run` threading). Each
+    instance also exposes the last instance via a class-level
+    `_instances` list so tests can inspect interactions without
+    re-patching the Conversation factory.
     """
 
     _instances: list["_FakeConversation"] = []
 
-    def __init__(self, **_kwargs: Any) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         self.messages: list[str] = []
         self.run_count = 0
+        self.init_kwargs: dict[str, Any] = dict(kwargs)
         _FakeConversation._instances.append(self)
 
     def send_message(self, message: str) -> None:
@@ -243,3 +246,46 @@ class TestReengageNudgeContent:
     def test_nudges_are_escalating_in_directness(self, shim):
         # First nudge: general. Last: most prescriptive ("ANY file" / "1-line").
         assert "ANY single file" in shim._REENGAGE_NUDGES[-1] or "any file" in shim._REENGAGE_NUDGES[-1].lower()
+
+
+class TestMaxIterationsPerRunIsPlumbed:
+    """The shim must pass `max_iteration_per_run` to OpenHands SDK's
+    LocalConversation — that's the only way to cap a single run() call
+    and stop the runaway-exploration class (39-min watchdog kill
+    observed 2026-05-28 with OpenHands' default of 500).
+    """
+
+    def test_default_max_iterations_50_is_passed_to_conversation(
+        self, fake_conversation_class
+    ):
+        """When _run_conversation is called with max_iterations=50,
+        the kwarg threads through to Conversation as
+        max_iteration_per_run=50."""
+        shim = fake_conversation_class["shim"]
+        shim._run_conversation(
+            agent=object(),
+            brief="task brief",
+            repo_root=Path("/tmp"),
+            max_iterations=50,
+            baseline_sha="abc123",
+            reengage_budget=0,
+        )
+        conv = _FakeConversation._instances[0]
+        assert conv.init_kwargs.get("max_iteration_per_run") == 50, (
+            f"expected max_iteration_per_run=50, got "
+            f"{conv.init_kwargs.get('max_iteration_per_run')!r}"
+        )
+
+    def test_custom_max_iterations_threads_through(self, fake_conversation_class):
+        """Any explicit max_iterations value is passed verbatim."""
+        shim = fake_conversation_class["shim"]
+        shim._run_conversation(
+            agent=object(),
+            brief="task brief",
+            repo_root=Path("/tmp"),
+            max_iterations=25,
+            baseline_sha="abc123",
+            reengage_budget=0,
+        )
+        conv = _FakeConversation._instances[0]
+        assert conv.init_kwargs.get("max_iteration_per_run") == 25
