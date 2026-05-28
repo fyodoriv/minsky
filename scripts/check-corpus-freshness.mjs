@@ -21,7 +21,7 @@
 // 2024-03 looks the same in the JSON whether it's 1 month old or 24
 // months old. This check surfaces the age so:
 //
-//   1. The operator sees it in `bin/minsky competitive` summary.
+//   1. The operator sees it in `competitors/scorecard.md` (Path-A phase-10 — the executable `bin/minsky competitive` CLI was removed; the static scorecard markdown is the readable surface).
 //   2. The weekly launchd auto-refresh script consumes the JSON and
 //      files `corpus-refresh-<id>` TASKS.md entries when any reading
 //      goes very-stale (>180 days).

@@ -1758,26 +1758,6 @@ console.log('minsky consent: recorded ' + (consent ? 'yes' : 'no') + ' at ' + ti
     shift  # consume `benchmark`, forward remaining args
     exec node "$_repo_dir/scripts/minsky-benchmark.mjs" "$@"
     ;;
-  competitive)
-    # `minsky competitive [--host PATH] [--write-to PATH] [--json]`
-    # Build the M1.10 competitive scorecard. Reads the host's
-    # `.minsky/orchestrate.jsonl`, computes Minsky's metrics via
-    # @minsky/competitive-benchmark, joins them against the published
-    # competitor corpus (competitors/*.md → src/competitors.ts), and
-    # writes `competitive-scorecard.json`. Pure builder lives in
-    # `novel/competitive-benchmark/` with paired unit tests.
-    #
-    # Two-part acceptance (rule #9 pre-registered HDD):
-    #   1. Shape — ≥4 competitors × ≥5 metrics with published data
-    #   2. Live deltas — ≥1 Minsky-measured metric (cold-start gate)
-    #
-    # Exit 0 only when both hold; 1 when either gate is open.
-    # Source: M1.10 (docs/plans/self-metrics-competitive-benchmark.md).
-    _real_bin=$(_minsky_realpath "$0")
-    _repo_dir=$(dirname "$(dirname "$_real_bin")")
-    shift  # consume `competitive`, forward remaining args
-    exec node "$_repo_dir/scripts/benchmark-run.mjs" "$@"
-    ;;
   install-daemon)
     # Install a launchd plist so minsky auto-starts on login/reboot.
     # Reads default_host from ~/.minsky/config.json.
