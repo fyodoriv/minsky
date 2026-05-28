@@ -223,6 +223,16 @@ def _run_conversation(
     callback writes to stdout) so the TS caller can show the operator
     real-time progress.
 
+    `max_iterations`: cap on tool-call rounds per `conversation.run()` call.
+    Passed to OpenHands SDK's `LocalConversation.max_iteration_per_run`
+    (default 500 in the SDK). Lowering this is the load-bearing fix for
+    the runaway-exploration class (observed 2026-05-28: qwen3-coder:30b
+    on a complex task did 12,579 stdout lines / 4.2M cumulative input
+    tokens / 0 files_changed / watchdog SIGKILL at 39 min). With this
+    cap, each conversation finishes within a known turn budget; the
+    re-engagement loop below then fires between caps with explicit
+    'reply with one tool call' prompts.
+
     `reengage_budget`: how many re-engagement nudges to attempt when the
     conversation finishes with zero files_changed. 0 (default for cloud
     models like Claude) preserves the original single-shot behavior.
@@ -232,7 +242,11 @@ def _run_conversation(
     """
     from openhands.sdk import Conversation
 
-    conversation = Conversation(agent=agent, workspace=str(repo_root))
+    conversation = Conversation(
+        agent=agent,
+        workspace=str(repo_root),
+        max_iteration_per_run=max_iterations,
+    )
     conversation.send_message(brief)
     conversation.run()
 
@@ -313,7 +327,16 @@ def main() -> int:
         "--max-iterations",
         type=int,
         default=50,
-        help="Reserved for future use; OpenHands SDK does not currently expose this knob.",
+        help=(
+            "Cap on tool-call rounds per `conversation.run()` call. "
+            "Passed to OpenHands `LocalConversation.max_iteration_per_run` "
+            "(SDK default: 500). Lower this for local-LLM mode to prevent "
+            "the runaway-exploration class observed 2026-05-28 against "
+            "qwen3-coder:30b (39-min watchdog kill, 0 files_changed). "
+            "Default 50 is sane for both cloud and local — pairs with "
+            "--reengage-budget to give up to 50×(1+reengage_budget) total "
+            "tool rounds across the nudge loop."
+        ),
     )
     parser.add_argument(
         "--reengage-budget",

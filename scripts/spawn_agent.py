@@ -118,6 +118,7 @@ def resolve_agent_argv(
     reasoning_effort: Optional[str] = None,
     no_extended_thinking: bool = False,
     reengage_budget: int = 0,
+    max_iterations: Optional[int] = None,
 ) -> Optional[list[str]]:
     """Return the argv list to spawn — or ``None`` if no backend exists.
 
@@ -192,6 +193,8 @@ def resolve_agent_argv(
         argv.append("--no-extended-thinking")
     if reengage_budget > 0:
         argv.extend(["--reengage-budget", str(reengage_budget)])
+    if max_iterations is not None:
+        argv.extend(["--max-iterations", str(max_iterations)])
     return argv
 
 
@@ -240,6 +243,16 @@ def _main(argv: Optional[list[str]] = None) -> int:
         ),
     )
     parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=None,
+        help=(
+            "Cap on tool-call rounds per conversation.run() (shim fallback "
+            "only). Defaults to the shim's own default (50). Lower this to "
+            "prevent the runaway-exploration class against local LLMs."
+        ),
+    )
+    parser.add_argument(
         "--shim-path",
         default=None,
         type=Path,
@@ -272,6 +285,7 @@ def _main(argv: Optional[list[str]] = None) -> int:
         reasoning_effort=args.reasoning_effort,
         no_extended_thinking=args.no_extended_thinking,
         reengage_budget=args.reengage_budget,
+        max_iterations=args.max_iterations,
     )
 
     if resolved is None:
