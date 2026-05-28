@@ -753,9 +753,12 @@ describe("daemonPrLintPassRateInvariant ↔ docs/TASKS.md jq selector parity (sl
 
     const here = dirname(fileURLToPath(import.meta.url));
     const docs = readFileSync(resolve(here, "../docs/daemon-pre-pr-gate.md"), "utf8");
-    const tasks = readFileSync(resolve(here, "../TASKS.md"), "utf8");
     expect(docs).toContain(selector);
-    expect(tasks).toContain(selector);
+    // 2026-05-28 (daemon-gate-docs-citation-migration):
+    // the parallel TASKS.md citation was removed alongside the task
+    // block (the block was blocked-on-substrate-port AND its substrate
+    // had shipped); the docs/ citation is now the single source of
+    // truth for operator's jq probe.
   });
 });
 
