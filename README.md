@@ -1,13 +1,26 @@
 # Minsky
 
-> **A 24/7 self-improving code factory — packaged as a discipline pack on OpenHands.** Minsky is the small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A cut) that runs on top of OpenHands. It chooses what to work on next, enforces 18 constitutional rules on every PR, and turns each change into a pre-registered scientific experiment. The agent layer is OpenHands; the discipline pack is what's in this repo.
+> A 24/7 self-improving code factory — a discipline pack on OpenHands.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml/badge.svg)](https://github.com/fyodoriv/minsky/actions/workflows/ci.yml)
 
+## What this is
+
+- The small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A cut) that runs on top of OpenHands.
+- A task picker + 18 constitutional rule lints + a pre-registered-experiment harness — every change is a hypothesis with a measurement command.
+- The discipline pack: agent layer is OpenHands; what's in this repo is what makes OpenHands ship-safe.
+
+## What this is not
+
+- **Not an agent runtime.** See [OpenHands](https://github.com/All-Hands-AI/OpenHands) for the loop that spawns models and edits files.
+- **Not the operator's machine state.** See [INSTALL.md](./INSTALL.md) for per-machine setup; `~/.minsky/` is excluded from the repo.
+- **Not the M1 roadmap.** See [MILESTONES.md](./MILESTONES.md) for the live `pnpm milestone:check` scorecard.
+- **Not the agent's runbook.** See [AGENTS.md](./AGENTS.md) for daemon setup, claiming tasks, and the 18 rules.
+
 ## Where we are vs. the vision
 
-The operator's stated vision is *"a 24/7 self-improving code factory that relies on OpenHands as an orchestrator. It comes up with tasks and finds the best way to solve them based on science."* Honest scorecard, 2026-05-22:
+Honest scorecard, 2026-05-22 (the vision is the tagline above; the pillars are the substrate):
 
 | Pillar | Today | Status |
 |---|---|---|
@@ -18,7 +31,7 @@ The operator's stated vision is *"a 24/7 self-improving code factory that relies
 | **Comes up with tasks** | agents file P1–P3 tasks while iterating (rule #17 forces same-PR scout filings); `corpus-discover-quarterly` files competitor-research tasks autonomously every 90d; sweep / project-audit / standing-audit-gap-loop skills | 🟡 agents author tasks *inside* iterations; the daemon doesn't autonomously author tasks *between* ticks · file `autonomous-task-authoring-between-ticks` is the M2 gap |
 | **Best way based on science** | rule #9 pre-registered HDD enforced as CI lint on every PR (Hypothesis / Success / Pivot / Measurement / Anchor); M1.10 corpus scorecard with primary-source citations; every PR carries a `## Hypothesis self-grade` block | ✅ strongest pillar — this is the moat |
 
-**What landed 2026-05-24**: OpenHands is the canonical agent runtime, end-to-end verified. `cloud_agent: "openhands"` is the default in `~/.minsky/config.json` and the daemon auto-detects local models (Ollama / LM Studio) for operators without a cloud API key. The [Python-SDK shim adapter](novel/adapters/agent-runtime-openhands/README.md) lifted the original 2026-06-01 dep gate ahead of schedule; a live spawn against `ollama_chat/qwen3-coder:30b` reproducibly produces file edits + the iteration envelope. On `2026-06-01` the shim is replaced one-for-one with the canonical `openhands solve` CLI; the TS adapter shape stays the same. Full plan: [docs/plans/2026-05-22-path-c-openhands-reshape.md](docs/plans/2026-05-22-path-c-openhands-reshape.md).
+**What landed 2026-05-24**: OpenHands is the canonical agent runtime, end-to-end verified — `cloud_agent: "openhands"` is the default, local models auto-detected via prefix. Full plan: [docs/plans/2026-05-22-path-c-openhands-reshape.md](docs/plans/2026-05-22-path-c-openhands-reshape.md).
 
 **What also landed 2026-05-24**: a brutal-honest moat audit (across 35+ autonomous-coding competitors) determined that 2 of the 6 historically-claimed moats are genuinely unique and 4 are partial / easily replicated. The operator approved the **Path A aggressive cut**: shrink Minsky from ~62K LOC past the Path C target (~30K LOC) all the way to ~5-10K LOC by replacing `novel/cross-repo-runner/`, `novel/tick-loop/`, `novel/observer/`, `novel/spec-monitor/`, `novel/tui/`, `novel/handoff-spec/`, `novel/budget-guard/`, and `novel/bridges/omc-tasksmd/` with ~500 lines of bash + Python. The surviving Minsky surface is the constitutional discipline (rule lints + 65 CI jobs) + the MAPE-K substrate (across-session learning). The user-facing identity above doesn't change — Minsky is still a 24/7 self-improving code factory, just with 85% less implementation. Full plan: [docs/plans/2026-05-24-path-a-aggressive-cut.md](docs/plans/2026-05-24-path-a-aggressive-cut.md).
 
