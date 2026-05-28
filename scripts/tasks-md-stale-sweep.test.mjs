@@ -3,9 +3,11 @@
 // detector functions against the known-stale-marker shape that surfaced
 // 6+ times in the 2026-05-28 session (PRs #946 #947 #948 #951 #952 #955).
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -102,7 +104,7 @@ describe("findCitations", () => {
     mkdirSync(join(tmpDir, "scripts"));
     writeFileSync(
       join(tmpDir, "scripts/foo.mjs"),
-      "// see TASKS.md `my-stale-task` for context\nconst x = 1;\n",
+      "// rule-#17 fix per `my-stale-task` — shipped 2026-05-28\nconst x = 1;\n",
     );
     const hits = findCitations("my-stale-task", ["scripts/foo.mjs"], tmpDir);
     expect(hits.length).toBe(1);
@@ -150,6 +152,33 @@ describe("findCitations", () => {
     );
     const hits = findCitations("my-task", ["scripts/foo.mjs"], tmpDir);
     expect(hits.length).toBe(1);
+  });
+
+  it("filters out 'tracked as' / 'remaining gap' citations (negative-signal extension 2026-05-28)", () => {
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(
+      join(tmpDir, "scripts/foo.mjs"),
+      "// The remaining gap is `my-task` — tracked as P2.\n",
+    );
+    expect(findCitations("my-task", ["scripts/foo.mjs"], tmpDir)).toEqual([]);
+  });
+
+  it("filters out 'until it ships' citations (negative-signal extension 2026-05-28)", () => {
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(
+      join(tmpDir, "scripts/foo.mjs"),
+      "// Until it ships, see `my-task` for the gap-closing plan.\n",
+    );
+    expect(findCitations("my-task", ["scripts/foo.mjs"], tmpDir)).toEqual([]);
+  });
+
+  it("filters out 'see TASKS.md' citations (negative-signal extension 2026-05-28)", () => {
+    mkdirSync(join(tmpDir, "scripts"));
+    writeFileSync(
+      join(tmpDir, "scripts/foo.mjs"),
+      "// see TASKS.md `my-task` for context on the next step.\n",
+    );
+    expect(findCitations("my-task", ["scripts/foo.mjs"], tmpDir)).toEqual([]);
   });
 });
 
@@ -248,5 +277,37 @@ describe("sweepStaleTasksMdMarkers (end-to-end)", () => {
     const candidates = sweepStaleTasksMdMarkers(md, tmpDir);
     expect(candidates.length).toBe(2);
     expect(candidates.map((c) => c.id).sort()).toEqual(["task-one", "task-two"]);
+  });
+});
+
+describe("CLI smoke test (regression for issue surfaced 2026-05-28: CLI guard didn't fire on macOS)", () => {
+  const SCRIPT_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "tasks-md-stale-sweep.mjs");
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+  it("CLI --dry-run produces non-empty stdout when candidates exist", () => {
+    // The repo's live TASKS.md has known-stale candidates as of 2026-05-28.
+    // If output is silent, the CLI guard didn't fire (the bug we just fixed).
+    const stdout = execFileSync("node", [SCRIPT_PATH, "--dry-run"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    expect(stdout.length).toBeGreaterThan(0);
+    expect(stdout).toMatch(/tasks-md-stale-sweep:/);
+  });
+
+  it("CLI without --dry-run exits 2 with usage message on stderr", () => {
+    try {
+      execFileSync("node", [SCRIPT_PATH], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      });
+      throw new Error("expected non-zero exit");
+    } catch (err) {
+      // execFileSync throws on non-zero exit; the error object has .status
+      // and .stderr fields when the child exited non-zero.
+      const e = /** @type {{status: number, stderr: string}} */ (err);
+      expect(e.status).toBe(2);
+      expect(e.stderr).toMatch(/usage:/);
+    }
   });
 });
