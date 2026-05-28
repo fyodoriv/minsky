@@ -37,9 +37,11 @@ success: |
   - `grep -q "host-transformation-checklist" user-stories/006-runner-on-any-repo.md`
     exits 0 (cross-referenced from the umbrella user story per the
     Acceptance criterion).
-  - `grep -q "host-transformation-checklist" novel/sidecar-bootstrap/README.md`
-    exits 0 (cross-referenced from the bootstrap README so callers
-    reach the contract from both sides).
+  - `grep -q "host-transformation-checklist" bin/minsky-bootstrap.sh`
+    exits 0 (cross-referenced from the bootstrap shell so callers
+    reach the contract from both sides). 2026-05-28 — was
+    novel/sidecar-bootstrap/README.md until phase-11 deleted the
+    TS package; bash bootstrap is the durable surface.
 pivot: |
   If hosts in the wild surface a 7th discipline (e.g., supply-chain
   hygiene — SBOM coverage, dep-pin discipline), extend the checklist
@@ -59,7 +61,7 @@ pivot: |
   6 to opt-in). Below those thresholds, the checklist is working
   as intended.
 measurement: |
-  [ "$(wc -l < docs/host-transformation-checklist.md)" -ge 60 ] && [ "$(grep -c '^## ' docs/host-transformation-checklist.md)" -ge 6 ] && grep -q host-transformation-checklist vision.md && grep -q host-transformation-checklist user-stories/006-runner-on-any-repo.md && grep -q host-transformation-checklist novel/sidecar-bootstrap/README.md && node scripts/check-pattern-index.mjs
+  [ "$(wc -l < docs/host-transformation-checklist.md)" -ge 60 ] && [ "$(grep -c '^## ' docs/host-transformation-checklist.md)" -ge 6 ] && grep -q host-transformation-checklist vision.md && grep -q host-transformation-checklist user-stories/006-runner-on-any-repo.md && grep -q host-transformation-checklist bin/minsky-bootstrap.sh && node scripts/check-pattern-index.mjs
 anchor: |
   rule #12 (vision.md § "Scope discipline" — the checklist is the
   substrate the queue-empty audit cascade gates against; the
