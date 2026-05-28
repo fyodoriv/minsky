@@ -1837,17 +1837,31 @@ EOF
       _node_bin=$(which node)
     fi
     _runner="$_repo_dir/novel/cross-repo-runner/bin/minsky-run.mjs"
-    # Phase 7b'-prep: when MINSKY_INSTALL_DAEMON_BASH=1, generate a
-    # plist that invokes the Path A bash port (#797-#803) instead of
-    # the Node runner. Same supervisor semantics; one-line ProgramArguments
-    # switch. Operator opt-in:
-    #   MINSKY_INSTALL_DAEMON_BASH=1 minsky install-daemon
-    # The default (env unset / =0) keeps the Node runner so a casual
-    # `git pull` doesn't silently flip the runner under the operator.
-    if [ "${MINSKY_INSTALL_DAEMON_BASH:-0}" = "1" ]; then
+    # Phase 7 default-flip (TASKS.md `daemon-cold-spawn-mjs-default-
+    # flip`): the bash runner is now the unconditional default — the
+    # Node runner has been gutted in Path A Phase 7, so writing a
+    # plist that execs `node $_runner` produces a KeepAlive crash
+    # loop and a daemon log full of MODULE_NOT_FOUND.
+    #
+    # Back-compat: the legacy `MINSKY_INSTALL_DAEMON_BASH=1` env var
+    # still resolves to bash (it's a no-op now, since bash is the
+    # default). The new opt-IN for the Node runner is
+    # `MINSKY_INSTALL_DAEMON_NODE=1`, and it ALSO checks that the
+    # `.mjs` file actually exists — otherwise we silently fall back
+    # to bash with a stderr breadcrumb (rule #6 — never write a
+    # plist that crashes on first start).
+    _want_node_runner=0
+    if [ "${MINSKY_INSTALL_DAEMON_NODE:-0}" = "1" ]; then
+      if [ -f "$_runner" ]; then
+        _want_node_runner=1
+      else
+        echo "minsky: MINSKY_INSTALL_DAEMON_NODE=1 but $_runner is missing (Path A Phase 7 gut). Falling back to bash runner." >&2
+      fi
+    fi
+    if [ "$_want_node_runner" = "0" ]; then
       _bash_runner="$_repo_dir/bin/minsky-run.sh"
       if [ ! -x "$_bash_runner" ]; then
-        echo "minsky: MINSKY_INSTALL_DAEMON_BASH=1 but $_bash_runner not executable" >&2
+        echo "minsky: bash runner $_bash_runner not executable (run \`chmod +x $_bash_runner\`)" >&2
         exit 1
       fi
       # ProgramArguments for the bash variant: invoke bash directly so
@@ -2882,10 +2896,14 @@ for arg in "$@"; do
   esac
 done
 RUNNER_BIN="$MINSKY_REPO_PATH/novel/cross-repo-runner/bin/minsky-run.mjs"
-if [ "$_NEEDS_NODE_RUNNER" = "1" ] && [ ! -f "$RUNNER_BIN" ]; then
-  echo "minsky: resolved repo $MINSKY_REPO_PATH but runner bin not found at $RUNNER_BIN. Run \`cd $MINSKY_REPO_PATH && pnpm install\` first." >&2
-  exit 1
-fi
+# Note: a missing $RUNNER_BIN is no longer a hard-fail here. Per Path
+# A Phase 7 (`docs/plans/2026-05-24-path-a-aggressive-cut.md`), the
+# Node runner is gutted and scheduled for deletion; the bash runner
+# `bin/minsky-run.sh` is canonical. Every code path that would exec
+# `node "$RUNNER_BIN"` below guards on `[ -f "$RUNNER_BIN" ]` and
+# falls back to the bash runner when it's gone. See TASKS.md
+# `daemon-cold-spawn-mjs-default-flip` for the bug class this closes
+# (cold-spawn `MODULE_NOT_FOUND` storm in `~/.minsky/daemon.log`).
 
 # ── 3b. Parse --local flag ─────────────────────────────────
 # `minsky --local [args...]` sets the env vars for local-only mode
@@ -3085,9 +3103,20 @@ if [ "${1:-}" = "--daemon" ]; then
   # daemon log (append — preserves history across restarts). The
   # subshell + disown detaches from the controlling terminal's process
   # group so the node process is not a child of this shell.
-  MINSKY_NON_INTERACTIVE=1 node "$RUNNER_BIN" "$@" \
-    < /dev/null \
-    >> "$MINSKY_DAEMON_LOG" 2>&1 &
+  # Path A Phase 7 cold-spawn guard (rule #6 stay-alive): when the
+  # Node runner has been gutted, fall through to the bash runner
+  # instead of execing `node` against a missing .mjs (which writes
+  # 59K MODULE_NOT_FOUND lines into the daemon log before KeepAlive
+  # gives up). See TASKS.md `daemon-cold-spawn-mjs-default-flip`.
+  if [ -f "$RUNNER_BIN" ] && [ "${MINSKY_NODE_RUNNER:-0}" != "0-explicit-bash" ]; then
+    MINSKY_NON_INTERACTIVE=1 node "$RUNNER_BIN" "$@" \
+      < /dev/null \
+      >> "$MINSKY_DAEMON_LOG" 2>&1 &
+  else
+    MINSKY_NON_INTERACTIVE=1 bash "$MINSKY_REPO_PATH/bin/minsky-run.sh" "$@" \
+      < /dev/null \
+      >> "$MINSKY_DAEMON_LOG" 2>&1 &
+  fi
   daemon_pid=$!
   disown "$daemon_pid" 2>/dev/null || true
   echo "$daemon_pid" > "$MINSKY_DAEMON_PID"
@@ -3129,4 +3158,17 @@ if [ "$USE_BASH_RUNNER" = "1" ]; then
   echo "minsky: using bash runner ($BASH_RUNNER_BIN) — Phase 7c opt-in" >&2
   exec bash "$BASH_RUNNER_BIN" "$@"
 fi
-exec node "$RUNNER_BIN" "$@"
+# Foreground default. Same cold-spawn guard as the daemon path above:
+# when the Node runner is missing (Path A Phase 7 gut state),
+# fall through to the bash runner instead of execing `node`
+# against a non-existent .mjs. See TASKS.md
+# `daemon-cold-spawn-mjs-default-flip`.
+if [ -f "$RUNNER_BIN" ]; then
+  exec node "$RUNNER_BIN" "$@"
+fi
+BASH_RUNNER_FALLBACK="$MINSKY_REPO_PATH/bin/minsky-run.sh"
+if [ ! -x "$BASH_RUNNER_FALLBACK" ]; then
+  echo "minsky: Node runner missing at $RUNNER_BIN AND bash runner missing at $BASH_RUNNER_FALLBACK — repo is broken." >&2
+  exit 1
+fi
+exec bash "$BASH_RUNNER_FALLBACK" "$@"
