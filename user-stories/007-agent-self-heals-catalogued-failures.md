@@ -207,6 +207,37 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **Then** the second call is a no-op
 - **And** `verify()` returns `{ healed: true }`
 
+### Scenario: heal-agent-rate-limited detects rate-limit signals in stderr
+
+- **Given** a worker's stderr buffer containing `"Error: 429 Too Many Requests"` or `"rate_limit_error"` or `"rate limit exceeded"`
+- **When** `heal-agent-rate-limited.detect({ stderr, attemptIndex, sleepMsFn })` runs
+- **Then** it returns `{ present: true, signal: "agent-rate-limited", evidence: { attemptIndex, stderrPreview } }`
+
+### Scenario: heal-agent-rate-limited sleeps the backoff and signals retry
+
+- **Given** a detected rate-limit signal AND the default backoff schedule `[30_000, 60_000, 120_000]`
+- **When** `apply()` runs at `attemptIndex: 0`
+- **Then** `sleepMsFn` is called with `30_000` (first slot)
+- **And** `apply` returns `{ applied: true, notes: "slept 30000ms (attempt 1 of 3); caller should retry the spawn" }`
+- **When** `apply()` runs at `attemptIndex: 2`
+- **Then** `sleepMsFn` is called with `120_000` (third slot)
+
+### Scenario: heal-agent-rate-limited exhausts after the schedule
+
+- **Given** `attemptIndex: 3` (past the default 3-slot schedule)
+- **When** `apply()` runs
+- **Then** `sleepMsFn` is NOT called
+- **And** `apply` returns `{ applied: false, notes: "exhausted 3 retry attempts — caller should escalate to fleet-provider-mode-flip-to-local" }`
+
+### Scenario: heal-agent-rate-limited is a no-op on non-rate-limit stderr
+
+- **Given** stderr like `"ERR_NETWORK_TIMEOUT"` or `"MODULE_NOT_FOUND"`
+- **When** `detect()` runs
+- **Then** it returns `{ present: false }`
+- **When** `apply()` runs
+- **Then** `sleepMsFn` is NOT called
+- **And** `apply` returns `{ applied: false, notes: "no-op: stderr has no rate-limit signal" }`
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`
