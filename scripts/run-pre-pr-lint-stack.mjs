@@ -310,6 +310,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "omc-mode-persona-gating",
       "adapter-conventions",
       "touches-field",
+      "pnpm-minsky-aliases",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
       "launchd-safe-paths",
@@ -826,6 +827,15 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-touches-field.mjs"],
+  },
+  {
+    // Every `pnpm minsky:X` script must delegate to `bin/minsky X`
+    // (no inline shell, no legacy substrate). Per AGENTS.md §"CLI
+    // surface consolidation"; cli-consolidation-lint-prevents-regression.
+    name: "pnpm-minsky-aliases",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-pnpm-minsky-aliases.mjs"],
   },
   {
     name: "changelog-md-update",

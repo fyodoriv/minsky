@@ -63,6 +63,8 @@ export const ALLOWLIST = Object.freeze([
   // count as a use. Per AGENTS.md §"Self-referential lints": a lint
   // pinning the deprecated path's absence may name the path.
   /^test\/integration\/pnpm-minsky-aliases\.test\.ts$/,
+  /^scripts\/check-pnpm-minsky-aliases\.mjs$/,
+  /^scripts\/check-pnpm-minsky-aliases\.test\.mjs$/,
 ]);
 
 /**
