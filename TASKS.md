@@ -3321,48 +3321,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Replace-or-relocate research backfill (operator directive 2026-05-05) — vision.md rule #1 now requires this for every feature. Each block below evaluates one shipped novel/* module against (a) does an existing tool replace it? and (b) should it be relocated to agentbrew, dotfiles, or tasks.md? Output: <module>/REPLACE_OR_RELOCATE.md with a single Decision: line. Tasks intentionally tight — these are research, not engineering. -->
 
-- [ ] `research-replace-or-relocate-dashboard-web` — replace-or-relocate research for `novel/dashboard-web`
-  - **ID**: research-replace-or-relocate-dashboard-web
-  - **Tags**: p2, research, replace-or-relocate
-  - **Milestone**: M1
-  - **Estimate**: 0.5d
-  - **Hypothesis**: The operator dashboard (server-rendered metrics + activity feed) is a thin Express app over `SUCCESS_METRICS` + `getActivity`. Replacement candidates: Grafana (already an OTEL backend candidate), Datasette over a SQLite span store, plain `gh` + shell aliases. Relocation candidate: `agentbrew` (operator-facing operator-tools surface). The rendered HTML is small enough that replacement is realistic. Pre-registration: Decision: line in 14 days.
-  - **Files**: `novel/dashboard-web/REPLACE_OR_RELOCATE.md`.
-  - **Verification**: `[ -f novel/dashboard-web/REPLACE_OR_RELOCATE.md ]` exits 0 AND grep finds Decision line.
-  - **Measurement**: same as Verification.
-  - **Pivot**: if Grafana over OTEL spans wins, file the swap PR. If no candidate matches the dashboard's specific pattern (rendered-HTML, no JS, glanceable), keep + note why.
-  - **Acceptance**: same shape as `tick-loop` block.
-  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
-  - **Surfaced-by**: 2026-05-05 operator backfill.
-
-- [ ] `research-replace-or-relocate-experiment-record` — replace-or-relocate research for `novel/experiment-record`
-  - **ID**: research-replace-or-relocate-experiment-record
-  - **Tags**: p2, research, replace-or-relocate
-  - **Milestone**: M1
-  - **Estimate**: 0.5d
-  - **Hypothesis**: Experiment record stores hypothesis/result pairs per rule #9. Replacement candidates: GrowthBook (already cited), Statsig, mlflow, Weights & Biases. Relocation: less clear — closest fit is `agentbrew` if it grows an experiments surface. Pre-registration: GrowthBook integration may already obviate the local store; Decision likely "replace-by-GrowthBook" given vision.md anchor.
-  - **Files**: `novel/experiment-record/REPLACE_OR_RELOCATE.md`.
-  - **Verification**: file + Decision line.
-  - **Measurement**: same.
-  - **Pivot**: if GrowthBook integration shipped (per existing P0 task), this becomes a deletion PR.
-  - **Acceptance**: same shape.
-  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05); rule #9 (HDD).
-  - **Surfaced-by**: 2026-05-05 operator backfill.
-
-- [ ] `research-replace-or-relocate-adapters-token-monitor` — replace-or-relocate research for `novel/adapters/token-monitor`
-  - **ID**: research-replace-or-relocate-adapters-token-monitor
-  - **Tags**: p2, research, replace-or-relocate
-  - **Milestone**: M1
-  - **Estimate**: 0.5d
-  - **Hypothesis**: The token-monitor adapter wraps Maciek's upstream `claude-monitor` Python package. Replacement candidates: vendor it as-is (skip the wrapper), use Anthropic's billing API directly. Relocation: `agentbrew` (token economics is broadly applicable, same as budget-guard). Pre-registration: Decision likely "keep + relocate to agentbrew" since the wrapper is small and load-bearing.
-  - **Files**: `novel/adapters/token-monitor/REPLACE_OR_RELOCATE.md`.
-  - **Verification**: file + Decision line.
-  - **Measurement**: same.
-  - **Pivot**: if Anthropic's billing API covers the snapshot shape, drop claude-monitor altogether.
-  - **Acceptance**: same shape.
-  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
-  - **Surfaced-by**: 2026-05-05 operator backfill.
-
 - [ ] `brief-instructs-exit-after-pr-open` — brief should tell devin to exit cleanly (`process.exit(0)`) immediately after `gh pr create` succeeds, instead of running to 15-min timeout
 
   - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
