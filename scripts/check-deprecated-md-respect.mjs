@@ -65,6 +65,14 @@ export const ALLOWLIST = Object.freeze([
   /^test\/integration\/pnpm-minsky-aliases\.test\.ts$/,
   /^scripts\/check-pnpm-minsky-aliases\.mjs$/,
   /^scripts\/check-pnpm-minsky-aliases\.test\.mjs$/,
+  // Same self-referential carve-out: this regression test pins a
+  // specific bug-fix WITHIN setup.sh (the foreign-orphan-plist
+  // bootstrap failure surfaced 2026-05-28) — it MUST reference
+  // setup.sh by name to assert the heal landed in that file.
+  // Removing this allowlist row when setup.sh is ultimately retired
+  // (per docs/DEPRECATED.md § 5 — "Keep until `minsky init` ships")
+  // is the ratchet.
+  /^test\/integration\/setup-rendered-only-bootstrap\.test\.ts$/,
 ]);
 
 /**
