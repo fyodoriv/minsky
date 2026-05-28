@@ -191,20 +191,80 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
   18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host $MINSKY_REPO`). -->
 
-- [ ] `promote-remaining-heal-recipes` — phase 2 of M1.13: take the ≥10-automated-heals bar from "4 heals shipped (phase 1)" to "≥10 catalogued failure modes have automated heals with MTTR < 5 min"
-  - **ID**: promote-remaining-heal-recipes
+- [ ] `heal-partial-config-write` — promote operator-recipe "partial config.json write (truncated mid-disk-write)" to an automated heal helper. Catalogue entry: a write to `~/.minsky/config.json` that crashed mid-write leaves a partial file; reads fail validation. Heal: detect via shape-validation throw → backup → reseed from defaults. Same shape as heal-corrupt-state-json but for config not state.
+  - **ID**: heal-partial-config-write
   - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
   - **Milestone**: M1
-  - **Touches**: novel/observer/heals/src/heal-*.ts, skill-plugins/observer/minsky/SKILL.md, METRICS.md, scripts/collect-metrics.mjs
-  - **Parent**: agents-can-self-heal-minsky-m1-13 (phase 1 shipped 2026-05-21 via PR #675; this is phase 2)
-  - **Competitive-goal**: drives `human-intervention-rate` on the `self-metrics-competitive-benchmark` scorecard toward 0 — phase 1 shipped the substrate (workspace + 4 helpers + MTTR ledger + chaos test). Phase 2 promotes the remaining operator-recipes in `skill-plugins/observer/minsky/SKILL.md` § "Safe-heal" catalogue to automated helpers, bringing the count from 4 → ≥10.
-  - **Surfaced-by**: 2026-05-21 close-out of phase 1 (PR #675). The Observer skill's catalogue has 10 entries; phase 1 automated 4 of them (stale-pid, stale-tsbuildinfo, worktree-missing-node-modules, stuck-command). The remaining 6 are still operator-recipes: corrupt-state-json, partial-config-write, agent-rate-limited, ollama-down, network-partition-mid-spawn, brief-too-long-for-context-window. Each needs a pure `heal-<name>.ts` helper + paired test + chaos-test row.
-  - **Hypothesis**: each remaining operator-recipe in the Observer catalogue can be promoted to a pure-function helper following the phase-1 shape (detect signal → apply idempotent fix → record heal-event). After phase 2 ships ≥6 more helpers, `find novel/observer/heals/src -name "heal-*.ts" -not -name "*.test.ts" | wc -l` ≥ 10 AND the chaos test exits 0 with ≥10 failure modes injected.
-  - **Success**: (1) `find novel/observer/heals/src -name "heal-*.ts" -not -name "*.test.ts" | wc -l` ≥ 10; (2) `pnpm exec vitest run novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts` exits 0 with ≥10 failure modes injected + healed; (3) `node scripts/heal-mttr-report.mjs --window=30d --json | jq '.successful, .mttr_p95_ms'` — when any helper fires, successful counts incremented and p95 < 300_000ms.
-  - **Pivot**: if writing automated heals for a remaining recipe requires touching files outside `.minsky/` (destructive — modifying source, rotating credentials, etc.), keep that recipe as `operator-recipe` and document with `automation: blocked-by-policy` per phase-1's pivot. Don't lower the safety bar to hit the ≥10 number — accept a real count < 10 and explain the blocked-by-policy rows.
-  - **Measurement**: `find novel/observer/heals/src -name "heal-*.ts" -not -name "*.test.ts" | wc -l` ≥ 10 AND `pnpm exec vitest run novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts` exits 0.
-  - **Anchor**: MILESTONES.md M1.13 (≥10 automated heals + MTTR < 5min); Beyer et al. 2016 *Site Reliability Engineering* Ch. 6; Armstrong 2007; rule #17 (proactive heal) + rule #12 (scope discipline); phase-1 PR #675 (the substrate this builds on).
-  - **Files**: 6 new `novel/observer/heals/src/heal-<name>.ts` + sibling tests (corrupt-state-json, partial-config-write, agent-rate-limited, ollama-down, network-partition-mid-spawn, brief-too-long-for-context-window), update `novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts` to inject 6 new modes, update `skill-plugins/observer/minsky/SKILL.md` to flip the 6 recipes from `operator-recipe` to `automated`, regenerate `METRICS.md` once any helper fires.
+  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
+  - **Touches**: novel/observer/heals/src/heal-partial-config-write.ts, novel/observer/heals/src/heal-partial-config-write.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
+  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — same shape as `heal-corrupt-state-json` but for config not state.
+  - **Hypothesis**: detect = shape-validation (required fields missing) OR JSON.parse throws; apply = backup + reseed from `~/.minsky/config.default.json` template; verify = shape validates. ~150 LOC.
+  - **Success**: paired tests pass; chaos test injects the partial-config-write failure; SKILL.md row flipped.
+  - **Pivot**: if the corrupt config has user-provided fields that can't be reseeded from defaults (per-machine config_tier), refuse the heal and prompt operator. Heal only when the file is fully unparsable.
+  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-partial-config-write.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥6.
+  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
+  - **Files**: `novel/observer/heals/src/heal-partial-config-write.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
+  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥6 heal-*.ts files exist.
+
+- [ ] `heal-agent-rate-limited` — promote operator-recipe "agent rate-limited (HTTP 429 from cloud agent)" to an automated heal helper. Catalogue entry: cloud agent (claude / devin) returns 429 on a tool call; the worker stalls. Heal: detect via stderr regex `(rate.?limit|429|too.?many.?requests)` → wait + retry with exponential backoff (3 attempts, 30s/60s/120s) → mark spawn failed if exhausted. Idempotent: only fires when the regex matches.
+  - **ID**: heal-agent-rate-limited
+  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
+  - **Milestone**: M1
+  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
+  - **Touches**: novel/observer/heals/src/heal-agent-rate-limited.ts, novel/observer/heals/src/heal-agent-rate-limited.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
+  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — rate-limit failures stop blocking the iteration loop.
+  - **Hypothesis**: detect = stderr regex match on a rate-limit phrase; apply = sleep-and-retry-up-to-3; verify = no 429 in subsequent attempt. Pure function — sleep durations are injected via seam (test passes 0ms).
+  - **Success**: paired tests pass; chaos test injects a fake 429 stream and asserts the heal completes within the 3-attempt budget.
+  - **Pivot**: if the rate-limit is global (account-level, not per-call), retry-with-backoff is the wrong substrate — escalate to fleet-provider-mode-flip-to-local (the runtime-token-limit-auto-pivot task). The heal-helper exits with `attempted-but-deferred` verdict, the chaos test asserts the verdict, and the fleet-flip task carries the global case.
+  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-agent-rate-limited.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥7.
+  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
+  - **Files**: `novel/observer/heals/src/heal-agent-rate-limited.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
+  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥7 heal-*.ts files exist.
+
+- [ ] `heal-ollama-down` — promote operator-recipe "ollama daemon not running on local mode" to an automated heal helper. Catalogue entry: when `cloud_agent_model` is `ollama_chat/*` but ollama isn't running, the spawn fails with `ECONNREFUSED localhost:11434`. Heal: detect via stderr regex → `launchctl kickstart -k gui/$(id -u)/com.minsky.ollama-keepalive` (if the keepalive plist exists) OR shell `ollama serve &`. Verify with `curl -s http://localhost:11434/api/tags`. Idempotent: re-running on healthy ollama is a no-op.
+  - **ID**: heal-ollama-down
+  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
+  - **Milestone**: M1
+  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
+  - **Touches**: novel/observer/heals/src/heal-ollama-down.ts, novel/observer/heals/src/heal-ollama-down.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
+  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — local-mode failures stop blocking the iteration loop on machines that have ollama installed.
+  - **Hypothesis**: detect = `ECONNREFUSED localhost:11434` in stderr; apply = launchctl kickstart OR shell `ollama serve &`; verify = `curl -s localhost:11434/api/tags` returns 200.
+  - **Success**: paired tests pass with injected exec/curl seams; chaos test injects the ECONNREFUSED stream; SKILL.md row flipped.
+  - **Pivot**: if the heal requires `sudo` to spawn ollama (not the case on macOS user-mode launchd, but possible on Linux), refuse and mark `operator-recipe` — don't escalate privileges.
+  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-ollama-down.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥8.
+  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
+  - **Files**: `novel/observer/heals/src/heal-ollama-down.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
+  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥8 heal-*.ts files exist.
+
+- [ ] `heal-network-partition-mid-spawn` — promote operator-recipe "network partition during spawn (DNS resolution fails / TLS handshake timeout)" to an automated heal helper. Catalogue entry: a spawn that hits DNS resolution failure or TLS timeout against the cloud agent. Heal: detect via stderr regex (`getaddrinfo ENOTFOUND|ETIMEDOUT.*tls|ECONNRESET`) → wait 30s and retry once → if still failing, abort with clear `verdict: network-unhealthy`. Idempotent.
+  - **ID**: heal-network-partition-mid-spawn
+  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
+  - **Milestone**: M1
+  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
+  - **Touches**: novel/observer/heals/src/heal-network-partition-mid-spawn.ts, novel/observer/heals/src/heal-network-partition-mid-spawn.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md
+  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — transient network blips don't waste a session.
+  - **Hypothesis**: detect = stderr-regex match on DNS/TLS/ECONNRESET; apply = single retry after 30s; verify = subsequent attempt has no match. Conservative single retry — multiple retries amplify duplicate-spawn risk.
+  - **Success**: paired tests pass; chaos test injects a synthetic ENOTFOUND stream; SKILL.md row flipped.
+  - **Pivot**: if network failures are persistent (≥3 consecutive iterations), escalate to fleet-provider-mode-flip-to-local (same pivot as `heal-agent-rate-limited` global rate-limit case).
+  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-network-partition-mid-spawn.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥9.
+  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
+  - **Files**: `novel/observer/heals/src/heal-network-partition-mid-spawn.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip).
+  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥9 heal-*.ts files exist.
+
+- [ ] `heal-brief-too-long-for-context-window` — promote operator-recipe "brief exceeds the model's context window" to an automated heal helper. Catalogue entry: a brief generated by `scripts/build_brief.py` exceeds the model's `max_tokens` (e.g., 200k for Sonnet, 128k for some local models). The spawn fails with `context window exceeded` error. Heal: detect via stderr regex → re-invoke build_brief with `--max-tokens` flag set to the model's limit (drops low-priority context like aging task history). Verify the regenerated brief size ≤ limit.
+  - **ID**: heal-brief-too-long-for-context-window
+  - **Tags**: p0, milestone-m1, m1-13, self-healing, observer-skill, mttr, rule-12, rule-17, phase-2-of-agents-can-self-heal
+  - **Milestone**: M1
+  - **Parent**: promote-remaining-heal-recipes (decomposed 2026-05-28)
+  - **Touches**: novel/observer/heals/src/heal-brief-too-long-for-context-window.ts, novel/observer/heals/src/heal-brief-too-long-for-context-window.test.ts, novel/observer/heals/src/index.ts, novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts, skill-plugins/observer/minsky/SKILL.md, scripts/build_brief.py
+  - **Competitive-goal**: drives `human-intervention-rate` toward 0 — context-window failures stop blocking the iteration loop.
+  - **Hypothesis**: detect = stderr-regex match on "context window exceeded" or "input too long"; apply = re-spawn build_brief with `--max-tokens=N`; verify = regenerated brief byte-count ≤ N×4 (~4 bytes per token rough heuristic).
+  - **Success**: paired tests pass; chaos test injects a fake context-overflow stream; SKILL.md row flipped. May require adding the `--max-tokens` flag to `scripts/build_brief.py` if not present.
+  - **Pivot**: if `build_brief.py` doesn't currently support `--max-tokens`, this heal is blocked on a `build-brief-supports-max-tokens` sub-task (file as a separate task — don't bundle).
+  - **Measurement**: `pnpm exec vitest run novel/observer/heals/src/heal-brief-too-long-for-context-window.test.ts && find novel/observer/heals/src -name 'heal-*.ts' -not -name '*.test.ts' | wc -l` returns ≥10.
+  - **Anchor**: phase-1 PR #675; MILESTONES.md M1.13.
+  - **Files**: `novel/observer/heals/src/heal-brief-too-long-for-context-window.ts` (new), `.test.ts` (new), `index.ts` (export), `test/chaos/heal-catalogue-mttr.test.ts` (inject), `skill-plugins/observer/minsky/SKILL.md` (flip). Possibly `scripts/build_brief.py` (add `--max-tokens` if missing).
+  - **Acceptance**: paired tests pass + chaos test exits 0 + SKILL.md row flipped + ≥10 heal-*.ts files exist (closes the parent task's ≥10-automated bar).
 
 - [ ] `minsky-init-one-command-bootstrap` — `npx minsky init` (or `curl | sh`) on any git repo sets up everything minsky needs; `minsky doctor` is GREEN with zero prior setup beyond Node ≥20
   - **ID**: minsky-init-one-command-bootstrap

@@ -21,6 +21,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import * as healCorruptStateJson from "../../src/heal-corrupt-state-json.js";
 import * as healStalePid from "../../src/heal-stale-pid.js";
 import * as healStaleTsbuildinfo from "../../src/heal-stale-tsbuildinfo.js";
 import * as healStuckCommand from "../../src/heal-stuck-command.js";
@@ -153,6 +154,36 @@ const CHAOS_CASES: ChaosCase[] = [
     },
   },
   {
+    id: "corrupt-state-json",
+    signal: "corrupt-state-json",
+    run: async () => {
+      const dir = mkdtempSync(join(tmpdir(), "chaos-corrupt-state-"));
+      tmpDirs.push(dir);
+      const stateFilePath = join(dir, "state.json");
+      // Inject the failure: truncated JSON mid-write.
+      fs.writeFileSync(stateFilePath, '{"last_iter": 42, "incomplete');
+      const seams: healCorruptStateJson.CorruptStateJsonSeams = {
+        stateFilePath,
+        nowFn: () => Date.now(),
+        existsSyncFn: fs.existsSync,
+        readFileSyncFn:
+          fs.readFileSync as healCorruptStateJson.CorruptStateJsonSeams["readFileSyncFn"],
+        writeFileSyncFn: fs.writeFileSync,
+        renameSyncFn: fs.renameSync,
+      };
+      const start = Date.now();
+      const detected = healCorruptStateJson.detect(seams);
+      healCorruptStateJson.apply(seams);
+      const verified = healCorruptStateJson.verify(seams);
+      const durationMs = Date.now() - start;
+      return {
+        detected: detected.present,
+        healed: verified.healed,
+        durationMs,
+      };
+    },
+  },
+  {
     id: "stuck-command",
     signal: "stuck-command",
     run: async () => {
@@ -210,9 +241,10 @@ describe("heal-catalogue chaos: each automated heal completes within 5 min", () 
     // If a new heal is added to the catalogue, this test fails until the
     // chaos case is added too. Prevents the "≥10 automated heals but no
     // chaos coverage" drift the round-1 review flagged.
-    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(4);
+    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(5);
     const ids = CHAOS_CASES.map((c) => c.id).sort();
     expect(ids).toEqual([
+      "corrupt-state-json",
       "missing-node-modules",
       "stale-pid",
       "stale-tsbuildinfo",
