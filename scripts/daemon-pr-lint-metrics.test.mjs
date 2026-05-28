@@ -445,7 +445,7 @@ describe("runDaemonPrLintMetrics", () => {
 // extractDaemonPrePrLintGateBlock helper was removed alongside the
 // TASKS.md-citation tests. docs/daemon-pre-pr-gate.md is now the
 // single source of truth for the threshold prose; a follow-up
-// (daemon-pre-pr-lint-gate-fixture-citation-cleanup, P3) handles the
+// (daemon-pre-pr-gate-fixture-fixture-citation-cleanup, P3) handles the
 // remaining fixture-string references so the parent task block can
 // also be removed eventually.
 
@@ -459,7 +459,7 @@ describe("ROLLING_30D_MIN_PASS_RATE prose ↔ canonical constant parity", () => 
   //
   //   - `docs/daemon-pre-pr-gate.md` (the gate's explanation page —
   //     "≥80%" / "Below 0.8").
-  //   - `TASKS.md` `daemon-pre-pr-lint-gate` block (the task's pre-registered
+  //   - `TASKS.md` `daemon-pre-pr-gate-fixture` block (the task's pre-registered
   //     metric — Hypothesis "≥80%", Details "below 80%", Measurement "≥0.80").
   //   - `novel/tick-loop/src/daemon.ts` § buildDaemonBrief (the daemon's
   //     iteration prompt — "≥80% of daemon-authored PRs ...").
@@ -534,7 +534,7 @@ describe("ROLLING_30D_MIN_N prose ↔ canonical constant parity", () => {
   //
   //   - `docs/daemon-pre-pr-gate.md` (Operator commands § self-diagnose
   //     example — "fires only with ≥10 daemon PRs in the rolling window").
-  //   - `TASKS.md` `daemon-pre-pr-lint-gate` block — Measurement line
+  //   - `TASKS.md` `daemon-pre-pr-gate-fixture` block — Measurement line
   //     ("rolling 30d window holds ≥10 PRs" + "minimum sample size ≥10 in
   //     `ROLLING_30D_MIN_N`").
   //
@@ -579,7 +579,7 @@ describe("ROLLING_WINDOW_DAYS prose ↔ canonical constant parity", () => {
   //
   //   - `docs/daemon-pre-pr-gate.md` — "rolling 30d daemon-PR clean-CI
   //     fraction" (the gate's overview line).
-  //   - `TASKS.md` `daemon-pre-pr-lint-gate` block — Details "rolling 30d
+  //   - `TASKS.md` `daemon-pre-pr-gate-fixture` block — Details "rolling 30d
   //     pass-rate" + Measurement "rolling 30d window holds ≥10 PRs".
   //
   // A future PR widening the window to 60d (e.g., to dampen short-term noise

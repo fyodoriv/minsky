@@ -90,7 +90,7 @@ describe("STACK_MANIFEST", () => {
 
   test("the fast stage exercises biome / typecheck / markdownlint / tasks-lint / rule-2 / rule-3 / rule-6 / rule-7 / rule-12 / rule-17", () => {
     // Pre-registered scope of the daemon's pre-PR gate (TASKS.md
-    // `daemon-pre-pr-lint-gate` Pivot — fast lints close ~80% of the failure
+    // `daemon-pre-pr-gate-fixture` Pivot — fast lints close ~80% of the failure
     // modes the operator cleans up). Drift here is what the manifest is
     // supposed to detect; pin the set explicitly. rule-7 was promoted to
     // fast 2026-05-06 (slice 8/N) — it is the 5th of 5 empirically-named
@@ -514,7 +514,7 @@ describe("renderJson --json output shape", () => {
   // "Machine-readable output (one JSON line per step + a final summary)".
   // Pre-fix renderJson collapsed everything onto one line, contradicting the
   // documented shape. The shape matters: a consumer (e.g., the dashboard
-  // pre-PR gate widget filed under `daemon-pre-pr-lint-gate` follow-ups,
+  // pre-PR gate widget filed under `daemon-pre-pr-gate-fixture` follow-ups,
   // or `jq -c` invocations from the operator) should be able to discriminate
   // per-step lines from the summary without counting array indices.
 
@@ -628,7 +628,7 @@ describe("stripGitHookEnv", () => {
   // bootstrapped". The standalone `pnpm pre-pr-lint` invocation never
   // exhibits this, so the gate looked green locally but failed at push —
   // the canonical failure mode for "local lint stack drift vs CI" the brief
-  // calls out (TASKS.md daemon-pre-pr-lint-gate § Risk).
+  // calls out (TASKS.md daemon-pre-pr-gate-fixture § Risk).
 
   test("removes the names git exports to its hooks", () => {
     const stripped = stripGitHookEnv({
@@ -662,7 +662,7 @@ describe("stripGitHookEnv", () => {
 });
 
 describe("ci.yml drift-protection", () => {
-  // The brief of `daemon-pre-pr-lint-gate` (Risk § "Local lint stack drift vs CI")
+  // The brief of `daemon-pre-pr-gate-fixture` (Risk § "Local lint stack drift vs CI")
   // claims `scripts/run-pre-pr-lint-stack.mjs` is canonical and CI runs the same
   // logical set of steps. Without a test, that claim drifts: a future PR adds a
   // CI lint job, forgets the manifest, and the daemon's pre-PR gate silently
