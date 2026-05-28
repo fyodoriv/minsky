@@ -354,16 +354,15 @@ describe("real novel/**/README.md — the threat-model invariant on main", () =>
   });
 
   test("the hardcoded path list covers top-level novel/* and novel/adapters/* READMEs", () => {
-    // 2026-05-28: phase-8 orphan-deletion dropped novel/spec-monitor's
-    // README (alongside the empty novel/tick-loop/ shell), leaving 11:
-    // 5 top-level + 6 adapters.
-    expect(THREAT_MODEL_README_PATHS.length).toBe(11);
+    // 2026-05-28: phase-11 dropped novel/sidecar-bootstrap (replaced
+    // by bin/minsky-bootstrap.sh), leaving 10: 4 top-level + 6 adapters.
+    expect(THREAT_MODEL_README_PATHS.length).toBe(10);
     const adapterCount = THREAT_MODEL_README_PATHS.filter((p) => p.includes("/adapters/")).length;
     expect(adapterCount).toBe(6);
     const bridgeSubpkgCount = THREAT_MODEL_README_PATHS.filter((p) =>
       p.startsWith("novel/bridges/"),
     ).length;
     expect(bridgeSubpkgCount).toBe(0);
-    expect(THREAT_MODEL_README_PATHS.length - adapterCount - bridgeSubpkgCount).toBe(5);
+    expect(THREAT_MODEL_README_PATHS.length - adapterCount - bridgeSubpkgCount).toBe(4);
   });
 });
