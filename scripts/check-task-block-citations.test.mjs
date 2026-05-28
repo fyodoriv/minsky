@@ -372,7 +372,7 @@ describe("checkTaskBlockCitations — composite cases", () => {
     // local failure before push.
     //
     // Citation: PR #864 retro notes; TASKS.md
-    // `daemon-pre-pr-lint-gate-prose-citation-migration` (P3 follow-
+    // `daemon-gate-docs-citation-migration` (P3 follow-
     // up that resolves the underlying coupling).
     const diff = [
       "diff --git a/TASKS.md b/TASKS.md",
