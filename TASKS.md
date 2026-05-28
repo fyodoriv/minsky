@@ -3493,6 +3493,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P3
 
+- [ ] `docs-frame-restore-across-allowlist` — restore the 3-beat reader-orientation doc frame (tagline / `## What this is` / `## What this is not`) across the 15 docs that have drifted since PR #685 originally applied it. The `docs-frame-coherence` lint shipped 2026-05-28 with a SHRUNKEN live allowlist (`AGENTS.md`, `INSTALL.md`, `docs/PRACTICES.md`) because the originally-targeted 18 docs no longer all conform: `README.md` was rewritten in PR #948 (5-min-install-guide cut); `MILESTONES.md` and `vision.md` never had the frame; all 16 `competitors/*.md` lack the frame; `ARCHITECTURE.md`, `DEPRECATED.md`, `research.md` were retired during Path-A. Re-apply the frame and lift each restored doc into the live allowlist.
+  - **ID**: docs-frame-restore-across-allowlist
+  - **Tags**: p3, docs, scout-finding, observed-2026-05-28
+  - **Milestone**: M1
+  - **Touches**: `README.md`, `MILESTONES.md`, `vision.md`, `competitors/*.md` (16 files), `scripts/check-docs-frame-coherence.mjs` (extend `DOCS_FRAME_ALLOWLIST` as docs restore)
+  - **Surfaced-by**: PR # for `docs-frame-coherence-lint` (2026-05-28) — building the lint surfaced that the docs/PRACTICES.md-named 18-doc allowlist had drifted to 3 conforming docs. The lint shipped narrow + this follow-up restores the breadth.
+  - **Hypothesis**: each non-conforming doc gets a 5-minute frame-application edit (one tagline + 2-4 bullets for "What this is" + 3-5 bullets for "What this is not"). Most edits are mechanical — the doc's existing content already implies the frame; the work is putting the headings + tagline above. Once 5+ docs land, the pattern is mechanical; the lint guards each restored doc immediately.
+  - **Success**: `DOCS_FRAME_ALLOWLIST` in `scripts/check-docs-frame-coherence.mjs` contains ≥10 entries (vs 3 today). Each entry's frame conforms.
+  - **Pivot**: if competitor docs are too dense (each is a research artefact, not a navigational doc) and the frame degrades their utility, leave the 16 `competitors/*.md` files OUT of the allowlist permanently and document the exemption in `docs/PRACTICES.md`. Don't force the frame where it doesn't fit.
+  - **Measurement**: `node -e 'import("./scripts/check-docs-frame-coherence.mjs").then(m => console.log(m.DOCS_FRAME_ALLOWLIST.length))'` returns ≥10.
+  - **Anchor**: `docs/PRACTICES.md § Unified reader-orientation doc frame`; PR #685 (the original wholesale application); 2026-05-28 (the discovery that the surviving allowlist was 3 of 18).
+
 - [ ] `bin-minsky-subcommand-help-flag-consistency` — `bin/minsky setup|doctor|status|stop|ui` don't honor `--help` consistently. Running `bin/minsky doctor --help` executes the doctor probes instead of printing help. Only `setup` (passes --help to setup.sh) and `logs` (explicit handler) work. Operators learning the CLI hit a dead end the first time they reach for `--help`. Cheap fix: each subcommand's case block checks `[ "$2" = "--help" ] && { print_help_text; exit 0; }` before the action body.
   - **ID**: bin-minsky-subcommand-help-flag-consistency
   - **Tags**: p3, dx, ux, cli, scout-finding, observed-2026-05-27
@@ -3811,18 +3823,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if upstream tasks-lint output diverges from minsky's expected format in a way that breaks CI parsing, file a tasks.md PR to align — don't fork.
   - **Measurement**: `pnpm pre-pr-lint --stage=fast` produces the same `rule-9-tasksmd-fields: scanned N block(s); clean=X, grandfathered=Y, blocking=Z` line after migration.
   - **Anchor**: tasks.md PR #83 (the upstream lint), this PR (`chore/retire-local-rule-9-lint`, the partial cleanup), vision.md § 9 (rule-#9 itself).
-
-- [ ] `docs-frame-coherence-lint` — encode `docs/PRACTICES.md § Unified reader-orientation doc frame` as a deterministic gate. Walks an allowlist of reader-orientation docs (`README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `DEPRECATED.md`, `INSTALL.md`, `MILESTONES.md`, `docs/PRACTICES.md`, `research.md`, `vision.md`, `competitors/*.md`) and asserts each opens with: (1) a one-line tagline ≤12 words, (2) a `## What this file is` / `## What this is` block, (3) a `## What this file is not` / `## What this is not` block.
-  - **ID**: docs-frame-coherence-lint
-  - **Tags**: p3, lint, docs, rule-9, observed-2026-05-21
-  - **Milestone**: M1
-  - **Touches**: scripts/check-docs-frame-coherence.mjs, scripts/check-docs-frame-coherence.test.mjs, scripts/run-pre-pr-lint-stack.mjs, .github/workflows/ci.yml, lefthook.yml
-  - **Surfaced-by**: 2026-05-21 set-in-stone-rules sweep — operator directive ("set in stone as rules") + PR #685 (`docs: unify reader-orientation docs under one structural pattern`) shipped the frame; this lint encodes it.
-  - **Hypothesis**: a deterministic lint over the 18 listed reader-orientation docs will catch the next time someone adds a doc without the frame (or removes the frame from an existing doc), preventing the slow doc-shape drift that PR #685 fixed wholesale.
-  - **Success**: `node scripts/check-docs-frame-coherence.mjs` exits 0 on a frame-conformant `README.md` and exits 1 with a per-file diff when any of the 18 listed docs lacks the three structural beats. New file added to the allowlist auto-enforces. Test suite covers (a) all 18 currently-conformant files pass, (b) deleting `## What this is not` from any of them surfaces an error, (c) a doc not on the allowlist is silently passed (correct behavior — only allowlisted docs are guarded).
-  - **Pivot**: if maintaining the file allowlist becomes a constant churn point (every new `docs/<name>.md` requires an allowlist edit), switch to a heuristic — auto-detect "which markdown files are cited by ≥2 other root-level markdown files" — and re-evaluate the gate.
-  - **Measurement**: `node scripts/check-docs-frame-coherence.mjs && echo OK || echo VIOLATION` produces deterministic output for any TASKS.md / README.md content; CI gate `docs-frame-coherence` added to `.github/workflows/ci.yml` runs on every PR.
-  - **Anchor**: `docs/PRACTICES.md § Unified reader-orientation doc frame`; PR #685 (the wholesale application).
 
 - [ ] `tasks-md-trusted-publishing-setup` — `@tasks-md/lint@0.8.0` publish failed with 404 because the `NPM_TOKEN` secret expired. Rather than rotate the token, [tasks.md PR #84](https://github.com/tasksmd/tasks.md/pull/84) replaced the token-based publish path with [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC). The workflow change is merged; the **one-time operator setup on npmjs.com is still pending** — without it, the publish workflow on tag `v0.8.0` will still fail.
   - **ID**: tasks-md-trusted-publishing-setup
