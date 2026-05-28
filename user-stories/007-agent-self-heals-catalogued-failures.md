@@ -151,6 +151,34 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **When** the same `verify()` runs against a still-living pid (negative-control test)
 - **Then** it returns `{ healed: false, residualSignal: "process-still-alive" }`
 
+### Scenario: heal-corrupt-state-json detects an unparseable state file
+
+- **Given** `.minsky/state.json` contains truncated content (e.g. `'{"last_iter": 42, "incomplete'`) from a crashed mid-write
+- **When** `heal-corrupt-state-json.detect({ stateFilePath })` runs
+- **Then** it returns `{ present: true, signal: "corrupt-state-json", evidence: { stateFilePath, contentLength, contentPreview } }`
+
+### Scenario: heal-corrupt-state-json backs up the bad file and reseeds empty {}
+
+- **Given** an unparseable `.minsky/state.json` AND a current timestamp `1_700_000_000_000`
+- **When** `heal-corrupt-state-json.apply({ stateFilePath, nowFn })` runs
+- **Then** the file at `<stateFilePath>.corrupt.1700000000000` contains the original corrupt content
+- **And** the file at `<stateFilePath>` contains exactly `"{}\n"` (parseable empty object)
+- **And** `apply` returns `{ applied: true, changedFiles: [stateFilePath, backupPath], notes: "backed up to … and reseeded with empty object" }`
+
+### Scenario: heal-corrupt-state-json is a no-op when state.json parses cleanly
+
+- **Given** `.minsky/state.json` contains valid JSON like `'{"last_iter": 42, "last_task": "foo"}'`
+- **When** `heal-corrupt-state-json.apply({ stateFilePath })` runs
+- **Then** the file is unchanged
+- **And** `apply` returns `{ applied: false, changedFiles: [], notes: "no-op: state.json parses cleanly" }`
+
+### Scenario: heal-corrupt-state-json is idempotent under replay
+
+- **Given** an unparseable `.minsky/state.json` and a corresponding `nowFn`
+- **When** `apply()` runs once → second `apply()` runs on the resulting state
+- **Then** the second call is a no-op (the file is already `"{}\n"` and parses cleanly)
+- **And** `verify()` returns `{ healed: true }`
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`
