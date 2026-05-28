@@ -2344,19 +2344,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
     - **Triage-pass status**: pending (none of the 16 closed PRs classified yet — the next operator session should walk the list with `gh pr diff <N>` and update the per-PR checkboxes in the closure comments).
 <!-- Observations filed 2026-05-19 — rule-17 sweep, two pre-existing flakes the daemon was bleeding. -->
 
-- [ ] `local-gate-merge-minsky-home-hardcoded-path` — `scripts/local-gate-merge.mjs` line 48 hardcodes `MINSKY_HOME` default to `$MINSKY_REPO`, breaking the gate for every operator who isn't `cbrwizard`
-  - **ID**: local-gate-merge-minsky-home-hardcoded-path
-  - **Tags**: p1, rule-17, rule-1, hardcoded-path, multi-user-portability
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-19 Devin session — running `node scripts/local-gate-merge.mjs --pr=648` from a non-cbrwizard machine produced `spawnSync gh ENOENT` because the script `cwd`-ed into `$MINSKY_REPO` (which doesn't exist on this machine).
-  - **Details**: replace the hardcoded fallback with `dirname(fileURLToPath(import.meta.url)) + "/.."` so the script always derives `REPO` from its own location. Same pattern `bin/minsky` already uses for resolving `MINSKY_REPO_ROOT`.
-  - **Files**: `scripts/local-gate-merge.mjs:48`.
-  - **Hypothesis**: deriving `REPO` from `import.meta.url` works for every operator on every machine; the hardcoded path works for one operator on one machine. Pre-fix: 0/N operators ≠ cbrwizard can use the gate. Post-fix: N/N.
-  - **Success**: `node scripts/local-gate-merge.mjs --pr=N` succeeds (or runs to a real verdict) on a machine where `<minsky-repo>` is the repo path AND on a machine where `~/code/minsky` is.
-  - **Pivot**: keep `MINSKY_HOME` env override (operator escape hatch), only change the default.
-  - **Measurement**: `node -e 'console.log(require("node:path").resolve(require("node:url").fileURLToPath(import.meta.url), ".."))' $MINSKY_REPO/scripts/local-gate-merge.mjs` → prints `$MINSKY_REPO/scripts`.
-  - **Anchor**: rule #17 (proactive healing); rule #1 (don't reinvent the wheel — the same `import.meta.url` pattern is in `bin/minsky` already); operator directive 2026-05-19.
-
 <!-- Observations filed 2026-05-18 from live daemon session (P1 findings). -->
 
 - [ ] `metrics-render-finite-number-validation-bug` — `pnpm metrics:render` fails with `metric "loop-uptime" value must be a finite number` against today's snapshot at `.minsky/metric-snapshots/<date>.json`, blocking the daily refresh of `METRICS.md`; this caused the 2026-05-21 `check-metric-freshness` failure that took main red for ~24h and stalled the auto-merge gate (every PR's vet failed `vitest` on `metric-freshness` until the operator manually bumped the stale `_Updated` timestamps)
