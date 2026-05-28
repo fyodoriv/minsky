@@ -116,6 +116,7 @@ describe("STACK_MANIFEST", () => {
         "competitive-goal",
         "deprecated-md-respect",
         "doc-why-first-paragraph",
+        "docs-frame-coherence",
         "filename-casing",
         "markdownlint",
         "milestone-alignment",
