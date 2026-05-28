@@ -127,9 +127,12 @@ describe("classifyRule9Blocks", () => {
 });
 
 describe("RULE_9_GRANDFATHERED allowlist", () => {
-  test("contains the 32 known violators from the 2026-05-19 audit", () => {
-    expect(RULE_9_GRANDFATHERED.size).toBe(32);
-    expect(RULE_9_GRANDFATHERED.has("daemon-pre-pr-lint-gate")).toBe(true);
+  test("contains the surviving known violators from the 2026-05-19 audit", () => {
+    // Original audit was 32 entries. 2026-05-28 dropped one entry
+    // (the parent task block at task-block-fixture-cleanup) — the
+    // corresponding allowlist entry was retired as part of the parent
+    // task block's removal. Surviving count: 31.
+    expect(RULE_9_GRANDFATHERED.size).toBe(31);
     expect(RULE_9_GRANDFATHERED.has("self-metrics-competitive-benchmark")).toBe(true);
   });
 

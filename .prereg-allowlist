@@ -27,7 +27,6 @@ daemon-stuck-pr-rebase-watchdog
 daemon-duplicate-work-detection
 daemon-pr-age-watchdog
 cto-audit-pr-auto-merge
-daemon-pre-pr-lint-gate
 daemon-fix-own-pr-on-ci-failure
 daemon-self-detect-throughput-issues
 devin-spawn-missing-permission-mode-bypass

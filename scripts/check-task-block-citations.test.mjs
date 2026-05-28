@@ -8,7 +8,7 @@
 //   (e) PR removes 2 blocks, one orphan one clean     → ok: false, only the orphan reported
 //   (f) PR removes block but no test cites it         → ok: true
 //   (g) multi-line block — escape-hatch on line N+5   → ok: true (marker found anywhere in deletion span)
-//   (h) regression guard for PR #864 (daemon-pre-pr-lint-gate)
+//   (h) regression guard for PR #864 (daemon-pre-pr-gate-fixture)
 //   (i) the escape-hatch marker INSIDE prose (e.g. a `**Details**:` field that DESCRIBES the marker)
 //       does NOT trip detection — the regex requires the marker
 //       at the start of a standalone deletion-side line.
@@ -165,9 +165,9 @@ describe("findCitations", () => {
 
   test("finds the ID literally and reports file:line (1-indexed)", () => {
     const corpus = new Map([
-      ["tests/foo.test.mjs", 'expect(tasks).toContain("daemon-pre-pr-lint-gate");\n'],
+      ["tests/foo.test.mjs", 'expect(tasks).toContain("daemon-pre-pr-gate-fixture");\n'],
     ]);
-    expect(findCitations("daemon-pre-pr-lint-gate", corpus)).toEqual([
+    expect(findCitations("daemon-pre-pr-gate-fixture", corpus)).toEqual([
       { file: "tests/foo.test.mjs", line: 1 },
     ]);
   });
@@ -270,21 +270,21 @@ describe("checkTaskBlockCitations — the four canonical cases", () => {
   test("(b) block removed AND test still cites the ID → FAIL with orphan listing", () => {
     const diff = [
       "@@ -10,5 +10,0 @@",
-      "-- [ ] `daemon-pre-pr-lint-gate` — old shipped task",
-      "-  - **ID**: daemon-pre-pr-lint-gate",
+      "-- [ ] `daemon-pre-pr-gate-fixture` — old shipped task",
+      "-  - **ID**: daemon-pre-pr-gate-fixture",
       "-  - **Details**: ...",
     ].join("\n");
     const corpus = new Map([
       [
         "scripts/daemon-pr-lint-metrics.test.mjs",
-        'expect(tasks).toContain("daemon-pre-pr-lint-gate");',
+        'expect(tasks).toContain("daemon-pre-pr-gate-fixture");',
       ],
     ]);
     expect(checkTaskBlockCitations(diff, corpus)).toEqual({
       ok: false,
       orphans: [
         {
-          id: "daemon-pre-pr-lint-gate",
+          id: "daemon-pre-pr-gate-fixture",
           citations: [{ file: "scripts/daemon-pr-lint-metrics.test.mjs", line: 1 }],
         },
       ],
@@ -294,8 +294,8 @@ describe("checkTaskBlockCitations — the four canonical cases", () => {
   test("(c) block removed AND test ALSO removed the citation in same PR → ok (citation gone from HEAD corpus)", () => {
     const diff = [
       "@@ -10,5 +10,0 @@",
-      "-- [ ] `daemon-pre-pr-lint-gate` — old shipped task",
-      "-  - **ID**: daemon-pre-pr-lint-gate",
+      "-- [ ] `daemon-pre-pr-gate-fixture` — old shipped task",
+      "-  - **ID**: daemon-pre-pr-gate-fixture",
     ].join("\n");
     // The HEAD-state corpus has NO citation for the removed ID (the
     // test file was updated in the same PR).
@@ -366,7 +366,7 @@ describe("checkTaskBlockCitations — composite cases", () => {
     expect(checkTaskBlockCitations(diff, corpus)).toEqual({ ok: true });
   });
 
-  test("(h) regression guard for PR #864: removing `daemon-pre-pr-lint-gate` while parity tests cite it fires the gate", () => {
+  test("(h) regression guard for PR #864: removing `daemon-pre-pr-gate-fixture` while parity tests cite it fires the gate", () => {
     // This is the exact pattern that broke PR #864. Pin it here so a
     // future agent attempting the same orphan-cleanup gets a loud
     // local failure before push.
@@ -377,8 +377,8 @@ describe("checkTaskBlockCitations — composite cases", () => {
     const diff = [
       "diff --git a/TASKS.md b/TASKS.md",
       "@@ -200,20 +200,0 @@",
-      "-- [ ] `daemon-pre-pr-lint-gate` — original parent of the daemon's pre-PR-lint substrate",
-      "-  - **ID**: daemon-pre-pr-lint-gate",
+      "-- [ ] `daemon-pre-pr-gate-fixture` — original parent of the daemon's pre-PR-lint substrate",
+      "-  - **ID**: daemon-pre-pr-gate-fixture",
       "-  - **Tags**: p0, daemon, pre-pr-lint, shipped-acceptance",
       "-  - **Pivot**: if `daemon-pr-lint-pass-rate` < 80% over rolling 30d, ...",
     ].join("\n");
@@ -387,19 +387,19 @@ describe("checkTaskBlockCitations — composite cases", () => {
         "scripts/daemon-pr-lint-metrics.test.mjs",
         [
           "// PR #864 lesson — parity tests need the canonical block in TASKS.md",
-          'expect(tasks).toContain("daemon-pre-pr-lint-gate");',
+          'expect(tasks).toContain("daemon-pre-pr-gate-fixture");',
         ].join("\n"),
       ],
       [
         "scripts/self-diagnose.test.mjs",
-        'const ROLLING_30D_MIN_PASS_RATE = "80%"; // from daemon-pre-pr-lint-gate',
+        'const ROLLING_30D_MIN_PASS_RATE = "80%"; // from daemon-pre-pr-gate-fixture',
       ],
     ]);
     const verdict = checkTaskBlockCitations(diff, corpus);
     expect(verdict.ok).toBe(false);
     if (verdict.ok) throw new Error("unreachable");
     expect(verdict.orphans).toHaveLength(1);
-    expect(verdict.orphans[0]?.id).toBe("daemon-pre-pr-lint-gate");
+    expect(verdict.orphans[0]?.id).toBe("daemon-pre-pr-gate-fixture");
     // Both citation sites should be reported so the operator can fix in one pass.
     const cited = verdict.orphans[0]?.citations.map((c) => c.file) ?? [];
     expect(cited).toContain("scripts/daemon-pr-lint-metrics.test.mjs");

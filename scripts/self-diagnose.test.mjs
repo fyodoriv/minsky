@@ -707,7 +707,7 @@ describe("daemonPrLintPassRateInvariant ↔ docs root-cause enumeration parity (
 });
 
 describe("daemonPrLintPassRateInvariant ↔ docs/TASKS.md jq selector parity (slice 25/N)", () => {
-  // Drift protection (TASKS.md `daemon-pre-pr-lint-gate`): the invariant ID
+  // Drift protection (TASKS.md `daemon-pre-pr-gate-fixture`): the invariant ID
   // string `"daemon-pr-lint-pass-rate"` is set on `daemonPrLintPassRateInvariant`'s
   // returned function via `fn.invariantId = ...` (canonical source: the
   // factory in `scripts/self-diagnose.mjs`). Two operator-facing surfaces
@@ -937,7 +937,7 @@ describe("daemonTaskScopeExplosionInvariant", () => {
   it("fires when a taskId ships ≥threshold PRs in 24h and names the offender in suggestedFix", async () => {
     const mergedPrCountByTaskId = async () =>
       new Map([
-        ["daemon-pre-pr-lint-gate", 18],
+        ["daemon-pre-pr-gate-fixture", 18],
         ["task-b", 2],
       ]);
     const result = await daemonTaskScopeExplosionInvariant({
@@ -947,10 +947,10 @@ describe("daemonTaskScopeExplosionInvariant", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
     expect(result.id).toBe("daemon-task-scope-explosion");
-    expect(result.evidence).toContain("daemon-pre-pr-lint-gate: 18 PRs/24h");
+    expect(result.evidence).toContain("daemon-pre-pr-gate-fixture: 18 PRs/24h");
     expect(result.evidence).not.toContain("task-b");
     expect(result.suggestedFix).toContain("close the task block");
-    expect(result.suggestedFix).toContain("daemon-pre-pr-lint-gate");
+    expect(result.suggestedFix).toContain("daemon-pre-pr-gate-fixture");
   });
 
   it("fires across multiple exploded taskIds", async () => {
@@ -1042,12 +1042,12 @@ describe("daemonInFlightPrCollisionInvariant — task-prefix sibling-branch dete
     const openDaemonPrs = async () => [
       {
         number: 218,
-        taskId: "daemon-pre-pr-lint-gate",
+        taskId: "daemon-pre-pr-gate-fixture",
         files: ["scripts/run-pre-pr-lint-stack.mjs", "package.json"],
       },
       {
         number: 219,
-        taskId: "daemon-pre-pr-lint-gate",
+        taskId: "daemon-pre-pr-gate-fixture",
         files: ["scripts/run-pre-pr-lint-stack.mjs", "package.json"],
       },
     ];
@@ -1056,7 +1056,7 @@ describe("daemonInFlightPrCollisionInvariant — task-prefix sibling-branch dete
     if (result.ok) throw new Error("unreachable");
     expect(result.evidence).toContain("#218");
     expect(result.evidence).toContain("#219");
-    expect(result.evidence).toContain("daemon-pre-pr-lint-gate");
+    expect(result.evidence).toContain("daemon-pre-pr-gate-fixture");
   });
 });
 
@@ -1110,12 +1110,12 @@ describe("extractTaskIdFromPr", () => {
     expect(extractTaskIdFromPr("feat/daemon-foo", "x")).toBe("daemon-foo");
   });
   it("collapses sibling slice/substrate branches to same taskId", () => {
-    const a = extractTaskIdFromPr("daemon-pre-pr-lint-gate-substrate", "feat: ship");
-    const b = extractTaskIdFromPr("daemon-pre-pr-lint-gate-slice-2", "feat: ship");
-    const c = extractTaskIdFromPr("daemon-pre-pr-lint-gate-slice-12-docs", "feat: ship");
-    expect(a).toBe("daemon-pre-pr-lint-gate");
-    expect(b).toBe("daemon-pre-pr-lint-gate");
-    expect(c).toBe("daemon-pre-pr-lint-gate");
+    const a = extractTaskIdFromPr("daemon-pre-pr-gate-fixture-substrate", "feat: ship");
+    const b = extractTaskIdFromPr("daemon-pre-pr-gate-fixture-slice-2", "feat: ship");
+    const c = extractTaskIdFromPr("daemon-pre-pr-gate-fixture-slice-12-docs", "feat: ship");
+    expect(a).toBe("daemon-pre-pr-gate-fixture");
+    expect(b).toBe("daemon-pre-pr-gate-fixture");
+    expect(c).toBe("daemon-pre-pr-gate-fixture");
   });
   it("returns null when input has no recognizable taskId", () => {
     expect(extractTaskIdFromPr("", "")).toBeNull();
