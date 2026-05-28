@@ -23,7 +23,7 @@
 // Measurement: this test file.
 // Anchor: rule #6 (loud-crash > silent failure — fallback to host-root
 // spawn is loud); `~/.config/devin/AGENTS.md` § "Git Safety (Multi-Agent)";
-// regression-test-no-git-checkout-against-host (the sibling test for the
+// `test/integration/no-host-checkout.test.ts` (the sibling test for the
 // other end of the same safety surface).
 
 import { execSync } from "node:child_process";
