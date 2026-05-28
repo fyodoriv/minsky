@@ -780,6 +780,47 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: each sub-PR's parity test passes; the operator confirms `minsky watch` still surfaces useful information after `novel/tui/` deletion.
   - **Risk**: low-medium. Small packages are easier to delete than large ones; main risk is hidden cross-package coupling.
 
+- [ ] `path-a-phase-10-render-scorecard-static-md` — sub-task 1 of 3 of `path-a-phase-10-competitive-benchmark-static` decomposition. Render the current `bin/minsky competitive --json` output as a static markdown table at `competitors/scorecard.md`. No deletions in this PR — just the new file (one-shot snapshot of the M1.10 scorecard with 117 cells × 2 comparisons). The script that generates it (`scripts/render-scorecard-md.mjs`) is one-shot — runs against current corpus.ts + metrics.ts data, emits the same data as the JSON output but as a readable table. Re-running it later refreshes the snapshot quarterly per the corpus-freshness 90-day threshold.
+  - **ID**: path-a-phase-10-render-scorecard-static-md
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24
+  - **Milestone**: M1
+  - **Parent**: path-a-phase-10-competitive-benchmark-static (decomposed 2026-05-28)
+  - **Touches**: `competitors/scorecard.md` (NEW — ~117-row markdown table), `scripts/render-scorecard-md.mjs` (NEW — one-shot renderer reusing the existing `@minsky/competitive-benchmark` build).
+  - **Competitive-goal**: prepares the durable readable artifact that survives the package deletion. Without this PR, deleting the package loses the scorecard surface entirely.
+  - **Hypothesis**: the 117-cell × 2-competitor scorecard renders cleanly as a markdown table (~120 lines including header + footnotes). Reusing the existing TS scorecard builder via `node --import` gets us the same data shape without reimplementing.
+  - **Success**: `test -f competitors/scorecard.md && wc -l competitors/scorecard.md` returns ≥ 100 lines; `grep -c '| swe-bench-verified-resolve-rate' competitors/scorecard.md` ≥ 1 (the canonical metric row present); `pnpm pre-pr-lint --stage=fast` all gates green.
+  - **Pivot**: if the renderer is non-trivial (>50 LOC) because the JSON shape is too nested for a flat table, accept a 2-level grouped table (metric × competitor blocks) instead of forcing 117 rows.
+  - **Measurement**: `wc -l competitors/scorecard.md` ≥ 100 AND `bin/minsky competitive --json` still exits 0 (this PR doesn't delete the CLI yet).
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 10; Jimenez et al. SWE-bench *ICLR* 2024 (the published-corpus pattern).
+
+- [ ] `path-a-phase-10-remove-cli-subcommand` — sub-task 2 of 3. Delete the `bin/minsky competitive` subcommand from `bin/minsky` (the 30-line shell handler around line 1761-1820). Tests + the 5 lint scripts that reference `bin/minsky competitive` get updated: stop invoking it, point to `competitors/scorecard.md` instead. The package itself stays — competitors.ts + metrics.ts continue to be read by the lint scripts directly.
+  - **ID**: path-a-phase-10-remove-cli-subcommand
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24
+  - **Milestone**: M1
+  - **Parent**: path-a-phase-10-competitive-benchmark-static (decomposed 2026-05-28)
+  - **Blocked by**: path-a-phase-10-render-scorecard-static-md
+  - **Touches**: `bin/minsky` (delete the `competitive)` case around line 1761), 5 lint scripts that mention `bin/minsky competitive` in error messages (rewrite to point at `competitors/scorecard.md`), `scripts/auto-file-corpus-refresh-tasks.mjs` (replace the `bin/minsky competitive` invocation in the auto-filed task body with `cat competitors/scorecard.md`), `bin/minsky competitive` integration tests if any.
+  - **Competitive-goal**: removes the CLI surface from the daemon's PATH, lowering per-iteration agent-context cost.
+  - **Hypothesis**: the `bin/minsky competitive` subcommand is only invoked from (a) developer CLI use, (b) the 5 lint scripts, (c) operator-facing docs. After this PR, (b) reads the static scorecard.md and (a)+(c) get told via docs that the surface moved.
+  - **Success**: `bin/minsky --help | grep -c competitive` returns 0; `bin/minsky competitive 2>&1` exits non-zero ("unknown subcommand"); `pnpm exec vitest run` passes; `pnpm pre-pr-lint --stage=fast` all gates green.
+  - **Pivot**: if any lint script's `competitor-research-validate` logic genuinely needs the executable scorecard (rather than the static markdown), keep the index.ts + scorecard.ts files; only delete the CLI shim. Document why.
+  - **Measurement**: `bin/minsky --help | grep -c competitive` returns 0 AND `pnpm pre-pr-lint --stage=fast` all gates green.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 10.
+
+- [ ] `path-a-phase-10-delete-renderer-substrate` — sub-task 3 of 3. Delete `novel/competitive-benchmark/src/{scorecard,ledger,index}.ts` + paired tests (~2K LOC). The data leaves stay: `competitors.ts` + `metrics.ts` continue to be read by lint scripts; the workspace package shape stays but the executable surface (the renderer + the ledger + the public index) is gone. The `@minsky/competitive-benchmark` workspace either renames to `@minsky/competitor-corpus` (data-only) or stays under the same name with shrunk surface.
+  - **ID**: path-a-phase-10-delete-renderer-substrate
+  - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24
+  - **Milestone**: M1
+  - **Parent**: path-a-phase-10-competitive-benchmark-static (decomposed 2026-05-28)
+  - **Blocked by**: path-a-phase-10-remove-cli-subcommand
+  - **Touches**: `novel/competitive-benchmark/src/{scorecard,ledger,index}.ts` (DELETE), paired `.test.ts` files (DELETE), `novel/competitive-benchmark/src/index.ts` (RECREATE as data-only re-export of competitors.ts + metrics.ts OR delete entirely), `novel/competitive-benchmark/package.json` (update exports), `vitest.config.ts` (alias unchanged if workspace stays), `scripts/benchmark-run.mjs` (it currently invokes the scorecard renderer — either retire it or rewrite to consume static md).
+  - **Competitive-goal**: completes the ~3K LOC cut; leaves only the ~600-LOC data corpus.
+  - **Hypothesis**: after sub-tasks 1+2, the scorecard renderer + ledger + index are dead code (nobody invokes the scorecard builder anymore). Deleting them removes the workspace's only TS-level executable surface.
+  - **Success**: `ls novel/competitive-benchmark/src/ | wc -l` returns ≤ 4 (just competitors.ts + competitors.test.ts + metrics.ts + metrics.test.ts); `pnpm exec vitest run novel/competitive-benchmark/` exits 0 (the 2 data tests still pass); `pnpm pre-pr-lint --stage=fast` all gates green.
+  - **Pivot**: if `scripts/benchmark-run.mjs` is genuinely needed (the operator runs it regularly), preserve scorecard.ts as a `scripts/render-scorecard-md.mjs` internal helper instead of fully deleting it.
+  - **Measurement**: `ls novel/competitive-benchmark/src/*.ts | grep -v test | wc -l` ≤ 2 AND `pnpm pre-pr-lint --stage=fast` all gates green.
+  - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 10.
+
 - [ ] `path-a-phase-10-competitive-benchmark-static` — fold `novel/competitive-benchmark/` (3K LOC) to static markdown at `competitors/scorecard.md`; remove `bin/minsky competitive` subcommand; corpus refresh continues via the `competitor-research` skill writing to markdown directly
   - **ID**: path-a-phase-10-competitive-benchmark-static
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-9
