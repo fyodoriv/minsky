@@ -117,6 +117,7 @@ def resolve_agent_argv(
     base_url: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
     no_extended_thinking: bool = False,
+    reengage_budget: int = 0,
 ) -> Optional[list[str]]:
     """Return the argv list to spawn — or ``None`` if no backend exists.
 
@@ -140,6 +141,13 @@ def resolve_agent_argv(
         reasoning_effort: Optional reasoning-effort knob. Shim path only.
         no_extended_thinking: If True, sets ``--no-extended-thinking`` on
             the shim. Has no canonical-CLI equivalent yet.
+        reengage_budget: How many re-engagement nudges to send when the
+            conversation finishes with zero files_changed. 0 (default;
+            cloud-LLM path) preserves the original single-shot behavior.
+            >0 (set by bin/minsky-run.sh for local_llm_enabled=true)
+            enables the nudge loop in the shim. Has no canonical-CLI
+            equivalent yet — the canonical `openhands solve` ships
+            June 1, 2026 and may add its own retry knob then.
 
     Returns:
         The argv list (e.g. ``["openhands", "solve", "--task-file", ...]``
@@ -182,6 +190,8 @@ def resolve_agent_argv(
         argv.extend(["--reasoning-effort", reasoning_effort])
     if no_extended_thinking:
         argv.append("--no-extended-thinking")
+    if reengage_budget > 0:
+        argv.extend(["--reengage-budget", str(reengage_budget)])
     return argv
 
 
@@ -219,6 +229,17 @@ def _main(argv: Optional[list[str]] = None) -> int:
         help="Disable extended thinking budget (shim fallback only).",
     )
     parser.add_argument(
+        "--reengage-budget",
+        type=int,
+        default=0,
+        help=(
+            "How many re-engagement nudges the shim should send when the "
+            "conversation finishes with zero files_changed (shim fallback "
+            "only). 0 preserves single-shot cloud-LLM behavior; >0 enables "
+            "the local-LLM no-progress recovery loop."
+        ),
+    )
+    parser.add_argument(
         "--shim-path",
         default=None,
         type=Path,
@@ -250,6 +271,7 @@ def _main(argv: Optional[list[str]] = None) -> int:
         base_url=args.base_url,
         reasoning_effort=args.reasoning_effort,
         no_extended_thinking=args.no_extended_thinking,
+        reengage_budget=args.reengage_budget,
     )
 
     if resolved is None:

@@ -631,7 +631,15 @@ EOF
     # ConversationRunError` after 4 retries (~128s per iteration). See
     # the shim's docstring at novel/adapters/agent-runtime-openhands/bin/
     # minsky-openhands-spawn.py lines 140-146 for the canonical knob set.
-    extra_spawn_flags="--base-url $local_base_url --no-extended-thinking --reasoning-effort none"
+    # --reengage-budget 3 wraps the OpenHands conversation with a no-
+    # progress nudge loop (novel/adapters/agent-runtime-openhands/bin/
+    # minsky-openhands-spawn.py § _run_conversation). Activates only on
+    # local-LLM path because qwen3-coder:30b reliably disengages with
+    # prose-only replies after one tool call (PR #978 reduced the rate;
+    # this PR closes the residual). Cloud Claude almost never hits this
+    # class so the budget stays 0 on the cloud path (default), keeping
+    # cloud behavior unchanged.
+    extra_spawn_flags="--base-url $local_base_url --no-extended-thinking --reasoning-effort none --reengage-budget 3"
     echo "host=$host local_llm=on model=$model base-url=$local_base_url" >&2
   fi
 

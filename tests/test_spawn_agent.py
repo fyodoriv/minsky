@@ -480,3 +480,92 @@ sys.exit(99)
         assert result.returncode == 7, result.stderr
         assert flag_args_dump.read_text().startswith("SHIM_INVOKED")
         assert not env_args_dump.exists()
+
+
+# --- reengage_budget propagation (PR for no-useful-work class closure) ----
+
+
+class TestResolveAgentArgvReengageBudget:
+    """Tests for the reengage_budget argument added 2026-05-28 to close
+    the no-useful-work failure class on local-LLM (qwen3-coder:30b).
+
+    Contract: budget=0 is the default and keeps cloud Claude behavior
+    unchanged; budget>0 threads --reengage-budget through to the shim.
+    """
+
+    SHIM_PATH = Path("/tmp/fake-shim.py")  # any non-None value; the test
+    # injects shim_path_exists=True so the function takes the shim branch.
+
+    def _shim_path(self, tmp_path: Path) -> Path:
+        # Real existing file so the .is_file() check inside
+        # resolve_agent_argv passes (the function's shim_path arg only
+        # reaches it when the file exists per its contract).
+        path = tmp_path / "shim.py"
+        path.write_text("# stub")
+        return path
+
+    def test_default_budget_omits_reengage_flag(self, tmp_path: Path) -> None:
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="claude-opus-4-7",
+            openhands_on_path=False,
+            shim_path=shim,
+        )
+        assert result is not None
+        assert "--reengage-budget" not in result, (
+            f"default budget=0 should not pass --reengage-budget; got {result}"
+        )
+
+    def test_explicit_zero_budget_omits_reengage_flag(
+        self, tmp_path: Path
+    ) -> None:
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="m",
+            openhands_on_path=False,
+            shim_path=shim,
+            reengage_budget=0,
+        )
+        assert result is not None
+        assert "--reengage-budget" not in result
+
+    def test_positive_budget_threads_through_to_shim(
+        self, tmp_path: Path
+    ) -> None:
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="ollama_chat/qwen3-coder:30b",
+            openhands_on_path=False,
+            shim_path=shim,
+            base_url="http://localhost:11434",
+            reengage_budget=3,
+        )
+        assert result is not None
+        assert "--reengage-budget" in result, f"got {result}"
+        idx = result.index("--reengage-budget")
+        assert result[idx + 1] == "3", f"got {result!r}"
+
+    def test_canonical_cli_path_ignores_reengage_budget(
+        self, tmp_path: Path
+    ) -> None:
+        """When the canonical `openhands solve` CLI is on PATH, the
+        reengage flag has no canonical equivalent yet. The dispatcher
+        falls through to the openhands argv without adding it."""
+        shim = self._shim_path(tmp_path)
+        result = resolve_agent_argv(
+            brief_file="/b",
+            repo="/r",
+            model="m",
+            openhands_on_path=True,
+            shim_path=shim,
+            reengage_budget=3,
+        )
+        assert result is not None
+        assert "openhands" in result[0]
+        assert "--reengage-budget" not in result
