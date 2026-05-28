@@ -39,6 +39,15 @@ DRY_RUN=0
 SELF_CHECK=0
 MAX_ITERATIONS=0       # 0 = unbounded (matches TS runner default)
 ITERATIONS_PER_HOST=3  # matches the TS scheduler's round-robin slice size
+# `--tick-interval-ms N` inserts a `sleep N/1000` between iteration
+# batches (after the host walk completes one round). Default 0 = no
+# sleep (current bash-skeleton cadence); set to the TS daemon's old
+# 5-min value (300000) to match the legacy throttle. The TS daemon
+# had this baked in; the bash skeleton was relying purely on
+# launchd's `ThrottleInterval=5` (5s respawn floor), which is much
+# more aggressive. This flag is the operator's per-machine throttle.
+# Source: bash-skeleton-tick-interval-ms-flag (P3, surfaced PR #888).
+TICK_INTERVAL_MS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,10 +57,13 @@ while [[ $# -gt 0 ]]; do
     --self-check) SELF_CHECK=1; shift ;;
     --max-iterations) MAX_ITERATIONS="$2"; shift 2 ;;
     --iterations-per-host) ITERATIONS_PER_HOST="$2"; shift 2 ;;
+    --tick-interval-ms) TICK_INTERVAL_MS="$2"; shift 2 ;;
+    --tick-interval-ms=*) TICK_INTERVAL_MS="${1#*=}"; shift ;;
     --help|-h)
       cat <<'EOF'
 Usage: minsky-run [--hosts-dir <parent> | --host <repo>] [--dry-run] [--self-check]
                   [--max-iterations N] [--iterations-per-host N]
+                  [--tick-interval-ms N]
 
 Walks N host repos under <parent> in round-robin (--hosts-dir mode), OR
 iterates exactly ONE host (--host mode). For each host, picks the top-
@@ -69,6 +81,9 @@ Flags:
   --max-iterations N        Stop after N total iterations across all hosts
                             (default 0 = unbounded)
   --iterations-per-host N   Round-robin slice size (default 3, matches TS)
+  --tick-interval-ms N      Sleep N/1000 seconds between iteration batches
+                            (default 0 = no sleep; legacy TS daemon used
+                            300000 = 5 min)
 
 Environment:
   MINSKY_CONFIG             Override config path (default ~/.minsky/config.json)
@@ -405,6 +420,20 @@ walk_hosts() {
       ITER_COUNT=$((ITER_COUNT + 1))
     done
   done
+
+  # `--tick-interval-ms N` throttle (bash-skeleton-tick-interval-ms-flag,
+  # P3, surfaced PR #888). After the host walk completes one round, sleep
+  # N/1000 seconds before returning. The TS daemon had this baked in at
+  # 5min; the bash skeleton's default is 0 (no sleep — launchd's
+  # ThrottleInterval=5 governs cadence). Operators set N > 0 when the
+  # 5s-respawn cadence is too aggressive (excessive API cost,
+  # rate-limit cascade, spawn overhead).
+  if [[ "$TICK_INTERVAL_MS" -gt 0 ]]; then
+    local tick_interval_seconds=$((TICK_INTERVAL_MS / 1000))
+    [[ "$tick_interval_seconds" -lt 1 ]] && tick_interval_seconds=1
+    echo "tick-interval-ms throttle: sleeping ${tick_interval_seconds}s before returning" >&2
+    sleep "$tick_interval_seconds"
+  fi
 
   # CTO audit on drain (parity port slice 2 — wires PR #856's
   # `scripts/build_cto_brief.py` into the bash runner's drain path).

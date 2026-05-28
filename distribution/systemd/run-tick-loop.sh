@@ -108,18 +108,15 @@ export PATH
 #
 # Phase-11b step 5 (2026-05-25): the exec target flipped from
 # `node novel/tick-loop/bin/tick-loop.mjs` to
-# `bash ${MINSKY_HOME}/bin/minsky-run.sh --host ${MINSKY_HOME}`. The bash
-# skeleton has no in-process tick interval (the TS daemon's 5-min
-# `--tick-interval-ms` is dropped); cadence is "as fast as one iteration
-# takes" with launchd's `ThrottleInterval=5` respawning between batches.
-# `MINSKY_TICK_INTERVAL_MS` is now a no-op until a `--tick-interval-ms`
-# flag is added to the bash skeleton (P3 follow-up if cadence proves
-# too aggressive in production). `MINSKY_TICK_MAX_ITERATIONS` maps
-# directly to bash's `--max-iterations`. `MINSKY_TICK_DRY_RUN=1` maps
-# to bash's `--dry-run` flag.
+# `bash ${MINSKY_HOME}/bin/minsky-run.sh --host ${MINSKY_HOME}`.
+# `MINSKY_TICK_INTERVAL_MS` maps to bash's `--tick-interval-ms` (the
+# bash skeleton's per-batch sleep, restored 2026-05-28 via the
+# `bash-skeleton-tick-interval-ms-flag` task).
+# `MINSKY_TICK_MAX_ITERATIONS` maps directly to bash's
+# `--max-iterations`. `MINSKY_TICK_DRY_RUN=1` maps to `--dry-run`.
 EXTRA_ARGS=()
 if [[ -n "${MINSKY_TICK_INTERVAL_MS:-}" ]]; then
-  printf 'run-tick-loop: MINSKY_TICK_INTERVAL_MS=%s is currently a no-op (bash skeleton has no in-process sleep; launchd ThrottleInterval governs cadence). Filed as P3 if you need this.\n' "${MINSKY_TICK_INTERVAL_MS}" >&2
+  EXTRA_ARGS+=("--tick-interval-ms" "${MINSKY_TICK_INTERVAL_MS}")
 fi
 if [[ -n "${MINSKY_TICK_MAX_ITERATIONS:-}" ]]; then
   EXTRA_ARGS+=("--max-iterations" "${MINSKY_TICK_MAX_ITERATIONS}")

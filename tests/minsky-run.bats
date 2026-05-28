@@ -182,6 +182,51 @@ EOF
   [ "$found" -eq 2 ]
 }
 
+# --- 6b. --tick-interval-ms throttle (the bash-skeleton per-batch sleep flag) -
+
+@test "--tick-interval-ms with positive N inserts a sleep before returning" {
+  # Pre-registered measurement from the task body: 1000ms sleep =>
+  # ≥1 second elapses end-to-end (with one host, one iteration, dry-run).
+  make_host one "$(complete_task_block)" > /dev/null
+  local start_ts end_ts elapsed
+  start_ts=$(date +%s)
+  run "$MINSKY_RUN" --host "$HOSTS_DIR/one" --dry-run \
+       --iterations-per-host 1 --tick-interval-ms 1000
+  end_ts=$(date +%s)
+  [ "$status" -eq 0 ]
+  elapsed=$((end_ts - start_ts))
+  # Wall-clock can include the iteration itself (fast — dry-run is ~50ms)
+  # plus the 1s sleep, so ≥1 second is the minimum bound.
+  [ "$elapsed" -ge 1 ]
+  # Throttle log line is on stderr per the implementation.
+  echo "$output" | grep -q "tick-interval-ms throttle: sleeping 1s"
+}
+
+@test "--tick-interval-ms 0 (default) doesn't sleep" {
+  # Pre-registered: default 0 = no sleep; a 2-iteration drain should
+  # complete in well under 5 seconds (the legacy TS daemon's old cadence).
+  # This pins the default-behavior contract: opt-in throttle only.
+  make_host one "$(complete_task_block)" > /dev/null
+  local start_ts end_ts elapsed
+  start_ts=$(date +%s)
+  run "$MINSKY_RUN" --host "$HOSTS_DIR/one" --dry-run \
+       --iterations-per-host 1
+  end_ts=$(date +%s)
+  [ "$status" -eq 0 ]
+  elapsed=$((end_ts - start_ts))
+  [ "$elapsed" -lt 5 ]
+  # Throttle log should NOT appear.
+  ! echo "$output" | grep -q "tick-interval-ms throttle"
+}
+
+@test "--tick-interval-ms=N (equals form) is supported" {
+  make_host one "$(complete_task_block)" > /dev/null
+  run "$MINSKY_RUN" --host "$HOSTS_DIR/one" --dry-run \
+       --iterations-per-host 1 --tick-interval-ms=1000
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "tick-interval-ms throttle: sleeping 1s"
+}
+
 # --- 7. Open-PR filter wires through pick_task.py -------------------------
 
 @test "pick_task.py is invoked with --open-pr-branches" {
