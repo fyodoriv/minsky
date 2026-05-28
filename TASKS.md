@@ -1284,19 +1284,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
-- [ ] `path-a-phase-13-pattern-index-cleanup` — remove orphan rows in `vision.md` § "Pattern conformance index" for packages deleted during the Path-A cut: rows for `@minsky/budget-guard` (rows 26, 28), `@minsky/handoff-spec` (row 27), `novel/spec-monitor/` (row 35), `novel/sidecar-bootstrap/`, `novel/tick-loop/`. Also check for references to deleted `scripts/benchmark-run.mjs`, `scripts/render-scorecard-md.mjs`, and old prompt-optimizer rows. Each orphan row anchors `check-pattern-index.mjs` lint, but the row points at a path that no longer exists — they're now dead anchors. Audit cleanly first (`grep -nE '@minsky/(budget-guard|handoff-spec|sidecar-bootstrap)|novel/(spec-monitor|tick-loop|sidecar-bootstrap)' vision.md`), then remove matching rows + decrement the index numbering downstream of each removed row (currently 1-30+ rows; many gaps mean re-numbering is tricky — preserve the current numbering and just delete the row content if simpler).
-  - **ID**: path-a-phase-13-pattern-index-cleanup
-  - **Tags**: p1, milestone-m1, rule-1, path-a, docs-drift, observed-2026-05-28
-  - **Milestone**: M1
-  - **Parent**: path-a-phase-13-identity-promotion (split from the main phase-13 to ship the README + vision.md TL;DR rewrite independently 2026-05-28)
-  - **Touches**: `vision.md` (Pattern conformance index rows + surrounding numbering)
-  - **Competitive-goal**: removes dead anchors from the durable spec — no agent will accidentally read a row claiming `@minsky/budget-guard` ships when it doesn't.
-  - **Hypothesis**: pattern-index rows for deleted packages still parse + grep but reference non-existent code. They're docs-drift the cleanup PR can mechanically resolve. Each row is independent (deleting one doesn't cascade).
-  - **Success**: `grep -nE '@minsky/(budget-guard|handoff-spec|sidecar-bootstrap)' vision.md` returns no rows in the Pattern conformance index section; `pnpm pre-pr-lint --stage=fast` all gates green (specifically `check-pattern-index.mjs`).
-  - **Pivot**: if `check-pattern-index.mjs` REQUIRES contiguous numbering (no gaps allowed), re-number the entire index — but check first whether gaps are accepted (most likely they are, given prior partial deletions).
-  - **Measurement**: `grep -cE '@minsky/(budget-guard|handoff-spec|sidecar-bootstrap)|novel/(spec-monitor|tick-loop|sidecar-bootstrap)' vision.md` ≤ 5 (allows narrative references; rejects pattern-index rows).
-  - **Anchor**: rule #8 (pattern conformance); rule #1 (Path-A cut completion); `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
-
 - [ ] `path-a-phase-13-agentbrew-discipline-pack-catalog-entry` — add a `minsky-discipline-pack` source entry to the agentbrew catalog so `agentbrew install minsky-discipline-pack` works. This is the third sub-deliverable of the parent path-a-phase-13 identity-promotion task; not strictly required for the README/vision rewrite (split off 2026-05-28) but completes the parent's full scope. Touches the agentbrew catalog repo, not this repo.
   - **ID**: path-a-phase-13-agentbrew-discipline-pack-catalog-entry
   - **Tags**: p1, milestone-m1, rule-1, path-a, agentbrew-catalog, observed-2026-05-28
