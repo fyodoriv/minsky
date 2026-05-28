@@ -48,6 +48,15 @@ ITERATIONS_PER_HOST=3  # matches the TS scheduler's round-robin slice size
 # more aggressive. This flag is the operator's per-machine throttle.
 # Source: bash-skeleton-tick-interval-ms-flag (P3, surfaced PR #888).
 TICK_INTERVAL_MS=0
+# `--loop` flag (added 2026-05-28 in this PR, refining PR #983). Default 0 =
+# one walk and exit (preserves the historical behavior for ad-hoc CLI runs
+# and the many bats / integration tests that invoke this script without
+# expecting an infinite loop). Set to 1 by
+# `distribution/systemd/run-tick-loop.sh` when launchd / systemd-user
+# invokes the runner — wraps walk_hosts in while-true so the supervisor
+# never exits on its own. See § "Iteration loop" at the bottom of this
+# file for the full rationale + literature anchor.
+LOOP_FOREVER=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --iterations-per-host) ITERATIONS_PER_HOST="$2"; shift 2 ;;
     --tick-interval-ms) TICK_INTERVAL_MS="$2"; shift 2 ;;
     --tick-interval-ms=*) TICK_INTERVAL_MS="${1#*=}"; shift ;;
+    --loop) LOOP_FOREVER=1; shift ;;
     --help|-h)
       cat <<'EOF'
 Usage: minsky-run [--hosts-dir <parent> | --host <repo>] [--dry-run] [--self-check]
@@ -1185,32 +1195,39 @@ invariant_pick_task_present
 trap 'echo "SIGTERM received — exiting cleanly" >&2; exit 0' TERM INT
 
 # Iteration loop:
-# - MAX_ITERATIONS=0 (unbounded; the supervisor / launchd default):
-#   wrap walk_hosts in while-true so the supervisor never exits on
-#   its own. Each walk runs N hosts × `--iterations-per-host` iterations,
-#   then we pause for the outer sleep before the next walk.
-# - MAX_ITERATIONS>0 (e.g. `--max-iterations 5` for ad-hoc runs / tests):
-#   run ONE walk and exit with whatever walk_hosts returns.
+# - `--loop` flag (set by distribution/systemd/run-tick-loop.sh when
+#   invoked by launchd / systemd-user; opt-in for any other caller):
+#   wrap walk_hosts in while-true so the supervisor never exits on its
+#   own. Each walk runs N hosts × `--iterations-per-host` iterations,
+#   then we pause TICK_INTERVAL_MS / 5s before the next walk.
+# - No `--loop` (the historical default for ad-hoc CLI invocations,
+#   bats tests, integration tests): run ONE walk and exit with
+#   walk_hosts' return code. Backward-compatible — pre-2026-05-28
+#   callers don't pass --loop and see no behavioral change.
 #
-# Why this loop must live HERE and not in launchd: launchd's
+# Why --loop must live HERE and not in launchd: launchd's
 # `KeepAlive: SuccessfulExit=false` (OTP transient restart semantics)
-# refuses to respawn after a clean exit (exit 0). Without the outer
-# loop, walk_hosts returns 0 after iterations-per-host × #hosts
-# iterations — bash exits 0 — launchd treats it as "completed
+# refuses to respawn after a clean exit (exit 0). Without an outer
+# loop in the runner, walk_hosts returns 0 after iterations-per-host
+# × #hosts iterations — bash exits 0 — launchd treats it as "completed
 # successfully, no restart needed" — supervisor dies forever. Observed
 # 2026-05-28: tick-loop exited after 3 iterations of
 # `a2a-adapter-foundation` and never restarted; `launchctl print` showed
-# `state = not running, last exit code = 0`. This is the rule #6 (stay
-# alive) violation this loop closes.
+# `state = not running, last exit code = 0`. PR #983 introduced the
+# while-true loop but keyed it on MAX_ITERATIONS=0, which broke the
+# many bats and integration tests that invoke this script in unbounded
+# mode AND expect it to exit (they didn't pass --max-iterations N).
+# This PR (the refinement of #983) makes the loop opt-in via the new
+# --loop flag and updates the launchd bootstrap to pass it.
 #
 # Restart sentinel: walk_hosts returns 75 (EX_TEMPFAIL) when
 # `~/.minsky/restart-requested` is present (set by
-# `scripts/post-merge-auto-install.mjs`). In that case we exit 75 —
-# launchd's `SuccessfulExit=false` sees a non-zero exit and restarts
-# the bash, picking up the freshly-updated code. The while-true wrapper
-# below preserves this contract: we exit the inner loop AND propagate
-# the 75.
-if [[ "$MAX_ITERATIONS" -eq 0 ]]; then
+# `scripts/post-merge-auto-install.mjs`). In --loop mode we exit 75
+# directly — launchd's `SuccessfulExit=false` sees a non-zero exit and
+# respawns into the freshly-updated code. In non-loop mode the same
+# 75 propagates as the script's natural exit code.
+if [[ "$LOOP_FOREVER" == "1" ]]; then
+  # --loop mode (supervisor / launchd default via run-tick-loop.sh).
   # Outer sleep between walks. TICK_INTERVAL_MS=0 (default) → 5s sleep
   # to avoid hot-looping when no tasks are pickable. Operators set
   # TICK_INTERVAL_MS=300000 (5 min) on noisy hosts.
@@ -1218,8 +1235,6 @@ if [[ "$MAX_ITERATIONS" -eq 0 ]]; then
   [[ "$outer_sleep_seconds" -lt 1 ]] && outer_sleep_seconds=1
   while true; do
     walk_hosts
-    # Propagate restart-sentinel exit (75 from walk_hosts → exit 75 here →
-    # launchd respawns into the updated code).
     walk_exit=$?
     if [[ "$walk_exit" -eq 75 ]]; then
       exit 75
@@ -1227,6 +1242,8 @@ if [[ "$MAX_ITERATIONS" -eq 0 ]]; then
     sleep "$outer_sleep_seconds"
   done
 else
-  # Capped mode (ad-hoc test runs, --max-iterations N): one walk and out.
+  # Default mode (no --loop): one walk and exit. Preserves the pre-
+  # 2026-05-28 behavior for ad-hoc CLI runs, bats tests, integration
+  # tests, and any other caller that runs the bash interactively.
   walk_hosts
 fi
