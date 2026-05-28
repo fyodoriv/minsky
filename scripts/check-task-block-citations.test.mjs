@@ -198,6 +198,66 @@ describe("findCitations", () => {
     ]);
     expect(findCitations("target-id", corpus)).toEqual([{ file: "tests/multi.test.mjs", line: 3 }]);
   });
+
+  // The lint scans test files for literal task-ID substrings. When the
+  // implementation file is named for the task (`heal-foo.ts` implements
+  // task `heal-foo`), the import statement in the chaos test contains
+  // the literal substring as a file path, not a citation. Skip those
+  // — they are code-level deps, not task references.
+  test("ignores `import ... from '...heal-foo.js'` lines (code-level dep, not citation)", () => {
+    const corpus = new Map([
+      [
+        "tests/chaos.test.mjs",
+        'import * as healFoo from "../../src/heal-foo.js";\nexpect(true).toBe(true);\n',
+      ],
+    ]);
+    expect(findCitations("heal-foo", corpus)).toEqual([]);
+  });
+
+  test("ignores `import { detect } from './heal-foo.js'` named-import shape", () => {
+    const corpus = new Map([["tests/chaos.test.mjs", 'import { detect } from "./heal-foo.js";\n']]);
+    expect(findCitations("heal-foo", corpus)).toEqual([]);
+  });
+
+  test("ignores `const x = require('./heal-foo.js')` CJS shape", () => {
+    const corpus = new Map([["tests/chaos.test.mjs", 'const heal = require("./heal-foo.js");\n']]);
+    expect(findCitations("heal-foo", corpus)).toEqual([]);
+  });
+
+  test("still flags real citations on the same file even when imports also match", () => {
+    const corpus = new Map([
+      [
+        "tests/chaos.test.mjs",
+        [
+          'import * as healFoo from "../../src/heal-foo.js";',
+          'expect(tasks).toContain("heal-foo");',
+        ].join("\n"),
+      ],
+    ]);
+    expect(findCitations("heal-foo", corpus)).toEqual([{ file: "tests/chaos.test.mjs", line: 2 }]);
+  });
+
+  test("ignores `// Tests for heal-foo` comment line (self-doc)", () => {
+    const corpus = new Map([
+      ["tests/heal-foo.test.mjs", ["// Tests for heal-foo", "// Scenarios per …"].join("\n")],
+    ]);
+    expect(findCitations("heal-foo", corpus)).toEqual([]);
+  });
+
+  test('ignores `describe("heal-foo", ...)` block name (self-doc)', () => {
+    const corpus = new Map([
+      [
+        "tests/heal-foo.test.mjs",
+        ['describe("heal-foo", () => {', "  test('...', ...);", "});"].join("\n"),
+      ],
+    ]);
+    expect(findCitations("heal-foo", corpus)).toEqual([]);
+  });
+
+  test('ignores `describe.skip("heal-foo", ...)` block name (self-doc with modifier)', () => {
+    const corpus = new Map([["tests/heal-foo.test.mjs", 'describe.skip("heal-foo", () => {});\n']]);
+    expect(findCitations("heal-foo", corpus)).toEqual([]);
+  });
 });
 
 // ---- checkTaskBlockCitations (the orchestrator) --------------------------

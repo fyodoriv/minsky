@@ -179,6 +179,34 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **Then** the second call is a no-op (the file is already `"{}\n"` and parses cleanly)
 - **And** `verify()` returns `{ healed: true }`
 
+### Scenario: heal-partial-config-write detects an unparseable config file
+
+- **Given** `~/.minsky/config.json` contains truncated content (e.g. `'{"cost_tier": "opus-sonnet", "host_pat'`) from a crashed mid-write
+- **When** `heal-partial-config-write.detect({ configFilePath })` runs
+- **Then** it returns `{ present: true, signal: "partial-config-write", evidence: { configFilePath, contentLength, contentPreview } }`
+
+### Scenario: heal-partial-config-write backs up the bad file and reseeds empty {}
+
+- **Given** an unparseable `~/.minsky/config.json` AND a current timestamp `1_700_000_000_000`
+- **When** `heal-partial-config-write.apply({ configFilePath, nowFn })` runs
+- **Then** the file at `<configFilePath>.corrupt.1700000000000` contains the original corrupt content (operator-provided fields preserved in backup)
+- **And** the file at `<configFilePath>` contains exactly `"{}\n"` (parseable empty object — daemon's first-iteration path repopulates defaults)
+- **And** `apply` returns `{ applied: true, changedFiles: [configFilePath, backupPath] }`
+
+### Scenario: heal-partial-config-write is a no-op when config.json parses cleanly
+
+- **Given** `~/.minsky/config.json` contains valid JSON like `'{"cost_tier": "opus-sonnet"}'`
+- **When** `heal-partial-config-write.apply({ configFilePath })` runs
+- **Then** the file is unchanged
+- **And** `apply` returns `{ applied: false, changedFiles: [], notes: "no-op: config.json parses cleanly" }`
+
+### Scenario: heal-partial-config-write is idempotent under replay
+
+- **Given** an unparseable `~/.minsky/config.json` and a corresponding `nowFn`
+- **When** `apply()` runs once → second `apply()` runs on the resulting state
+- **Then** the second call is a no-op
+- **And** `verify()` returns `{ healed: true }`
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`

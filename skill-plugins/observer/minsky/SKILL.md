@@ -233,6 +233,7 @@ promotes the remaining 6 where policy allows.
 | `operator-recipe` | `GraphQL: Could not resolve` | Non-fatal. Ignore — gh token context mismatch between launchd and interactive shell. |
 | **`automated`** | Shell polled ≥3 times with no new output | `novel/observer/heals/heal-stuck-command.mjs` — invoked by the agent runtime's shell-polling loop (not the daemon). Detects via `pollsWithoutOutput >= 3`; applies via `kill_shell + retry narrowly`. See `templates/AGENTS.md` § "Stuck-command detection & recovery". |
 | **`automated`** | `.minsky/state.json` is unparseable (truncated mid-write / JSON syntax error / empty) | `novel/observer/heals/heal-corrupt-state-json.mjs` — detects via `JSON.parse` throw on read; applies via atomic rename to `state.json.corrupt.<ts>` + reseed `{}`; verifies parse succeeds. Idempotent. |
+| **`automated`** | `~/.minsky/config.json` is unparseable (truncated mid-write / JSON syntax error / empty) | `novel/observer/heals/heal-partial-config-write.mjs` — detects via `JSON.parse` throw on read; applies via atomic rename to `config.json.corrupt.<ts>` + reseed `{}`; verifies parse succeeds. Idempotent. Scoped to fully-unparseable only — operator-provided fields (cost_tier, etc.) preserved via the backup file. |
 
 **MTTR for automated heals** is published as `mttr-self-heal` in
 METRICS.md. Source: `.minsky/heal-events.jsonl` per host, aggregated

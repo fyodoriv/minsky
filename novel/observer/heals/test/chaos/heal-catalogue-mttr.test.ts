@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import * as healCorruptStateJson from "../../src/heal-corrupt-state-json.js";
+import * as healPartialConfigWrite from "../../src/heal-partial-config-write.js";
 import * as healStalePid from "../../src/heal-stale-pid.js";
 import * as healStaleTsbuildinfo from "../../src/heal-stale-tsbuildinfo.js";
 import * as healStuckCommand from "../../src/heal-stuck-command.js";
@@ -184,6 +185,36 @@ const CHAOS_CASES: ChaosCase[] = [
     },
   },
   {
+    id: "partial-config-write",
+    signal: "partial-config-write",
+    run: async () => {
+      const dir = mkdtempSync(join(tmpdir(), "chaos-partial-config-"));
+      tmpDirs.push(dir);
+      const configFilePath = join(dir, "config.json");
+      // Inject the failure: truncated JSON mid-write.
+      fs.writeFileSync(configFilePath, '{"cost_tier": "opus-sonnet", "host_pat');
+      const seams: healPartialConfigWrite.PartialConfigWriteSeams = {
+        configFilePath,
+        nowFn: () => Date.now(),
+        existsSyncFn: fs.existsSync,
+        readFileSyncFn:
+          fs.readFileSync as healPartialConfigWrite.PartialConfigWriteSeams["readFileSyncFn"],
+        writeFileSyncFn: fs.writeFileSync,
+        renameSyncFn: fs.renameSync,
+      };
+      const start = Date.now();
+      const detected = healPartialConfigWrite.detect(seams);
+      healPartialConfigWrite.apply(seams);
+      const verified = healPartialConfigWrite.verify(seams);
+      const durationMs = Date.now() - start;
+      return {
+        detected: detected.present,
+        healed: verified.healed,
+        durationMs,
+      };
+    },
+  },
+  {
     id: "stuck-command",
     signal: "stuck-command",
     run: async () => {
@@ -241,11 +272,12 @@ describe("heal-catalogue chaos: each automated heal completes within 5 min", () 
     // If a new heal is added to the catalogue, this test fails until the
     // chaos case is added too. Prevents the "≥10 automated heals but no
     // chaos coverage" drift the round-1 review flagged.
-    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(5);
+    expect(CHAOS_CASES.length).toBeGreaterThanOrEqual(6);
     const ids = CHAOS_CASES.map((c) => c.id).sort();
     expect(ids).toEqual([
       "corrupt-state-json",
       "missing-node-modules",
+      "partial-config-write",
       "stale-pid",
       "stale-tsbuildinfo",
       "stuck-command",
