@@ -79,9 +79,13 @@ describe("auto-commit uncommitted progress (stage-0 backstop)", () => {
   test("stage-0 pushes to origin so existing stage-3 backstop can open PR", () => {
     // The whole point of auto-committing is to make the work
     // observable. Push to origin so `gh pr create` in stage-3 finds
-    // the branch + can open the draft PR.
+    // the branch + can open the draft PR. The push ALSO bypasses
+    // lefthook (pre-push hook runs `pnpm pre-pr-lint` which needs
+    // node_modules in the worktree — but worktrees share .git with
+    // the parent, not node_modules, so the hook fails). Same
+    // core.hooksPath bypass as the commit.
     const src = readFileSync(RUN_SH, "utf8");
-    expect(src).toMatch(/git -C "\$worktree" push -u origin "\$branch"/);
+    expect(src).toMatch(/git -c "core\.hooksPath=\/dev\/null"[\s\S]+?push -u origin "\$branch"/);
   });
 
   test("stage-0 runs ONLY when worktree has uncommitted changes", () => {
