@@ -874,6 +874,53 @@ EOF
   local verdict notes pr_url
   if [[ "$exit_code" -eq 0 ]]; then
     verdict="validated"
+
+    # Stage 0 backstop (added 2026-05-28): auto-commit any uncommitted
+    # changes in the worktree BEFORE the existing PR-creation backstops
+    # run. Without this, every iteration that the agent edits files but
+    # doesn't git-add ends with verdict=no-progress AND the file sits
+    # in the worktree forever (the next iteration sees it via
+    # build_brief's prepend-notice, but qwen3-coder:30b reliably fails
+    # to commit it). 14+ iterations on `a2a-adapter-foundation` between
+    # 17:06 and 18:01 left the same `novel/adapters/a2a.ts` uncommitted —
+    # progress measurable on disk but invisible in the iteration ledger.
+    #
+    # The auto-commit:
+    #   - Stages ALL changes (`git add -A`) so untracked files, deletes,
+    #     and modifications all land together
+    #   - Commits with a deterministic "wip(daemon)" message — the
+    #     conventional-commit prefix lets the operator filter these PRs
+    #     in `gh pr list --label wip` and squash them at merge time
+    #   - Pushes the branch so the existing stage-3 backstop can open
+    #     a draft PR for the WIP work
+    #   - Sets daemon@minsky.local as author so the commit is
+    #     attributable to the supervisor, not the operator
+    #
+    # The WIP commit may be broken (the file might not even compile —
+    # observed-2026-05-28's a2a.ts imports `@minsky/adapter-types`
+    # which doesn't exist as a package). That's OK: the PR will land
+    # as a draft, CI will show the failures, and the next iteration
+    # has both the committed work AND the CI feedback to build on.
+    # The alternative (silently dropping the work) makes
+    # cross-iteration progress impossible.
+    if [[ -d "$worktree/.git" ]] || [[ -f "$worktree/.git" ]]; then
+      local wt_status_for_autocommit
+      wt_status_for_autocommit="$(git -C "$worktree" status --porcelain 2>/dev/null)"
+      if [[ -n "$wt_status_for_autocommit" ]]; then
+        git -C "$worktree" add -A 2>/dev/null || true
+        # Set author identity inline so no global git config is required
+        # on the operator's machine — the daemon's commits identify
+        # themselves regardless of operator setup.
+        git -C "$worktree" \
+            -c "user.email=daemon@minsky.local" \
+            -c "user.name=minsky-daemon" \
+            commit -m "wip(daemon): partial progress on ${task_id} (auto-committed by supervisor)" 2>/dev/null || true
+        # Push to origin so the existing stage-3 `gh pr create` backstop
+        # can find the branch and open the draft PR.
+        git -C "$worktree" push -u origin "$branch" 2>/dev/null || true
+      fi
+    fi
+
     # Parity port of `extractPrUrl` from
     # novel/cross-repo-runner/src/runner.ts. Two bugs in the previous
     # inline bash regex:
