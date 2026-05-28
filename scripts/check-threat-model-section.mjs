@@ -55,7 +55,6 @@ const REPO_ROOT = resolve(HERE, "..");
  * own row here in the same PR that adds them.
  */
 export const THREAT_MODEL_README_PATHS = Object.freeze([
-  "novel/budget-guard/README.md",
   "novel/competitive-benchmark/README.md",
   "novel/dashboard-web/README.md",
   "novel/experiment-record/README.md",
