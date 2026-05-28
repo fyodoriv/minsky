@@ -1414,7 +1414,7 @@ describe("modelCatalogInvariantsHoldInvariant — slice 7 of `claude-usage-aware
     expect(result.id).toBe("model-catalog-invariants-hold");
     expect(result.evidence).toContain("MODEL_CATALOG fails validation");
     expect(result.evidence).toContain("qualityTier 3 > prev tier 2");
-    expect(result.suggestedFix).toContain("model-catalog.ts");
+    expect(result.suggestedFix).toContain("model-catalog.mjs");
   });
 
   it("joins multiple validation errors with semicolons", async () => {
