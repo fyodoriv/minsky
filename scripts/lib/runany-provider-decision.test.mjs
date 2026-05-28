@@ -1,4 +1,4 @@
-// <!-- scope: human-approved phase-11b-delete-tick-loop-multistep step 2 — paired tests for the ported `runany-provider-decision.mjs` + `strategic-model-router.mjs` modules. Not a new public artefact; the originals at `novel/tick-loop/src/{runany-provider-decision,strategic-model-router}.test.ts` are the equivalent surface (with broader coverage that the original repo will keep until step 8 deletes the whole package). -->
+// <!-- scope: human-approved phase-11b step 2 — paired tests for the ported `runany-provider-decision.mjs` + `strategic-model-router.mjs` modules. Not a new public artefact; the originals at `novel/tick-loop/src/{runany-provider-decision,strategic-model-router}.test.ts` were deleted alongside the tick-loop package retirement. -->
 // Tests for the ported runany provider decision + strategic model router.
 // Smoke-test scope: exercises the three decision kinds (operator-pin,
 // dynamic, local-fallback), the catalog walk, and the hysteresis.
