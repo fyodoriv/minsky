@@ -361,3 +361,106 @@ def test_cli_max_tokens_rejects_non_integer(tmp_path: Path) -> None:
     )
     assert result.returncode == 2
     assert "--max-tokens" in result.stderr
+
+
+# --- local_llm_mode tests (2026-05-28 disengagement-fix for qwen3-coder:30b) ---
+
+
+def test_local_llm_mode_front_loads_tool_call_discipline() -> None:
+    """In local-LLM mode, the brief's overlay starts with the
+    TOOL-CALL DISCIPLINE block, not the constitution preamble."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    brief = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
+    overlay = brief.split("\n---\n", 1)[1].lstrip()
+    assert overlay.startswith("TOOL-CALL DISCIPLINE"), (
+        f"expected overlay to lead with TOOL-CALL DISCIPLINE, got: {overlay[:120]!r}"
+    )
+
+
+def test_local_llm_mode_drops_constitution_preamble() -> None:
+    """The 'Read .minsky/vision.md' preamble is dropped — local model
+    cannot hold the constitution in its context window."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    brief = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
+    assert "You are working under minsky's full constitution" not in brief
+    assert "Read .minsky/vision.md" not in brief
+
+
+def test_local_llm_mode_preserves_final_step_block() -> None:
+    """The FINAL STEP block (gh pr create invocation) is load-bearing
+    and MUST appear regardless of mode."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    brief = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
+    assert "FINAL STEP" in brief
+    assert "gh pr create" in brief
+    assert "git push -u origin HEAD" in brief
+
+
+def test_local_llm_mode_preserves_rule_9_fields() -> None:
+    """Task block (Hypothesis / Success / Pivot / Measurement / Anchor)
+    is preserved verbatim in local-LLM mode."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    brief = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
+    for header in (
+        "## Hypothesis (rule #9)",
+        "## Success threshold",
+        "## Pivot threshold",
+        "## Measurement",
+        "## Anchor",
+    ):
+        assert header in brief, f"missing rule-9 header: {header}"
+
+
+def test_cloud_mode_keeps_preamble_for_back_compat() -> None:
+    """Default (non-local) mode keeps the constitution preamble — the
+    cloud-LLM path (Claude / Devin) is unchanged by this PR."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    brief = build_brief.build_brief(task, host_cfg)
+    assert "You are working under minsky's full constitution" in brief
+    assert "Read .minsky/vision.md" in brief
+
+
+def test_local_llm_mode_is_shorter_than_cloud_mode() -> None:
+    """The local-LLM brief should be at least 100 bytes smaller than the
+    cloud-mode brief on the same task (the preamble is dropped)."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    cloud = build_brief.build_brief(task, host_cfg, local_llm_mode=False)
+    local = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
+    saved = len(cloud) - len(local)
+    assert saved >= 100, f"local-mode brief should be ≥100 bytes shorter; saved {saved}"
