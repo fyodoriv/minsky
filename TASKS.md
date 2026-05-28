@@ -2431,6 +2431,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `agentbrew-sync-missing-intuit-code-secure-to-openhands` — agentbrew syncs ~200 skills to `~/.openhands/skills/` for OpenHands SDK to load at agent boot, but `intuit-code-secure` is missing — it lives in `~/.claude/plugins/marketplaces/devassist-plugins-registry/code-secure-plugin/skills/intuit-code-secure/` but never gets propagated. The `~/.agents/agents/security-reviewer.md` (and `~/.claude/agents/security-reviewer.md`) reference `skills: [intuit-code-secure]`; OpenHands SDK's `register_file_agents` crashes with `ValueError: Skill 'intuit-code-secure' not found` whenever Conversation.run() is called. Today this is worked around by a manual stub at `~/.openhands/skills/intuit-code-secure/SKILL.md`; agentbrew should sync the canonical file directly
   - **ID**: agentbrew-sync-missing-intuit-code-secure-to-openhands
+  - **Blocked**: needs-external-action — fix lives in the agentbrew repo (sync rule + marketplace-plugin handling), not in minsky. Filed here because minsky's smoke test discovered it; the unblock path is a PR in the agentbrew repo. Block lifts when the agentbrew side ships.
   - **Tags**: p2, scout-finding, agentbrew, openhands-sync, observed-2026-05-24
   - **Milestone**: M2
   - **Competitive-goal**: closes the "OpenHands SDK crashes when ANY agent references intuit-code-secure" failure mode. Without this, every operator who has the `security-reviewer` agent and tries to spawn OpenHands gets a hard crash before the agent can run.
@@ -3320,20 +3321,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Replace-or-relocate research backfill (operator directive 2026-05-05) — vision.md rule #1 now requires this for every feature. Each block below evaluates one shipped novel/* module against (a) does an existing tool replace it? and (b) should it be relocated to agentbrew, dotfiles, or tasks.md? Output: <module>/REPLACE_OR_RELOCATE.md with a single Decision: line. Tasks intentionally tight — these are research, not engineering. -->
 
-- [ ] `research-replace-or-relocate-tick-loop` — replace-or-relocate research for `novel/tick-loop`
-  - **ID**: research-replace-or-relocate-tick-loop
-  - **Tags**: p2, research, replace-or-relocate
-  - **Milestone**: M1
-  - **Estimate**: 0.5d
-  - **Hypothesis**: Per vision.md rule #1's per-feature mandate (2026-05-05), the supervisor daemon (`tick-loop`: pickTask + runCtoAudit + runChangelog + runSnapshot + runMetricsRender + budget-guard wiring) should be evaluated for: (a) replacement by an existing tool — candidates: temporal.io, n8n, Camunda for the workflow engine; bullmq, agenda for the periodic-task scheduler; (b) relocation to `agentbrew` (most likely host since it's about Claude Code automation). The supervisor concept is highly Minsky-specific but the periodic-task scheduling + adapter pattern around `claude --print` could plausibly live elsewhere. Pre-registration: research lands a Decision: line within 14 days; if "replace", a swap PR is filed.
-  - **Files**: `novel/tick-loop/REPLACE_OR_RELOCATE.md` (research note + Decision: line).
-  - **Verification**: `[ -f novel/tick-loop/REPLACE_OR_RELOCATE.md ]` exits 0 AND `grep -c '^Decision: ' novel/tick-loop/REPLACE_OR_RELOCATE.md` returns 1.
-  - **Measurement**: same as Verification.
-  - **Pivot**: if no clean replacement exists, write the keep-as-is justification (1 paragraph max) and move on. Don't engineer an artificial extraction.
-  - **Acceptance**: (1) `REPLACE_OR_RELOCATE.md` with explicit `Decision: keep | replace-by-<x> | relocate-to-<x>`; (2) follow-up PR filed within 14 days if Decision != keep.
-  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05); operator 2026-05-05 — "for every feature now".
-  - **Surfaced-by**: 2026-05-05 operator backfill — vision update + research tasks for every feature.
-
 - [ ] `research-replace-or-relocate-dashboard-web` — replace-or-relocate research for `novel/dashboard-web`
   - **ID**: research-replace-or-relocate-dashboard-web
   - **Tags**: p2, research, replace-or-relocate
@@ -3345,20 +3332,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: same as Verification.
   - **Pivot**: if Grafana over OTEL spans wins, file the swap PR. If no candidate matches the dashboard's specific pattern (rendered-HTML, no JS, glanceable), keep + note why.
   - **Acceptance**: same shape as `tick-loop` block.
-  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
-  - **Surfaced-by**: 2026-05-05 operator backfill.
-
-- [ ] `research-replace-or-relocate-budget-guard` — replace-or-relocate research for `novel/budget-guard`
-  - **ID**: research-replace-or-relocate-budget-guard
-  - **Tags**: p2, research, replace-or-relocate
-  - **Milestone**: M1
-  - **Estimate**: 0.5d
-  - **Hypothesis**: The 5h-window budget guard is currently a wrapper over `MaciekTokenMonitor` + `PLAN_CAPS`. Replacement candidates: Anthropic's own 429-with-retry logic (now adopted post-#171 cap raise), shadcn's vercel/ai-sdk usage, claude-monitor stand-alone. Relocation: `agentbrew` (token economics is broadly applicable). Pre-registration: research evaluates whether trusting Anthropic's 429 is enough and budget-guard becomes a thin observability wrapper.
-  - **Files**: `novel/budget-guard/REPLACE_OR_RELOCATE.md`.
-  - **Verification**: file present + Decision line.
-  - **Measurement**: same.
-  - **Pivot**: if "trust the 429" wins, the guard reduces to OTEL-emit-only.
-  - **Acceptance**: same shape.
   - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
   - **Surfaced-by**: 2026-05-05 operator backfill.
 
@@ -3388,20 +3361,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if GrowthBook integration shipped (per existing P0 task), this becomes a deletion PR.
   - **Acceptance**: same shape.
   - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05); rule #9 (HDD).
-  - **Surfaced-by**: 2026-05-05 operator backfill.
-
-- [ ] `research-replace-or-relocate-spec-monitor` — replace-or-relocate research for `novel/spec-monitor`
-  - **ID**: research-replace-or-relocate-spec-monitor
-  - **Tags**: p2, research, replace-or-relocate
-  - **Milestone**: M1
-  - **Estimate**: 0.5d
-  - **Hypothesis**: Spec-monitor's deterministic linters live in `scripts/check-rule-*.mjs`; the residual judgement-heavy advisory shipped as a Claude Skill. Replacement candidates: existing CI lint frameworks (eslint plugins, danger.js, spectral). Relocation: `agentbrew` (skill artifact is a clean fit). Pre-registration: Decision likely "relocate-skill-to-agentbrew, keep determinstic linters here".
-  - **Files**: `novel/spec-monitor/REPLACE_OR_RELOCATE.md`.
-  - **Verification**: file + Decision line.
-  - **Measurement**: same.
-  - **Pivot**: if danger.js provides equivalent surface, the .mjs scripts can be ported.
-  - **Acceptance**: same shape.
-  - **Anchor**: vision.md rule #1 per-feature mandate (2026-05-05).
   - **Surfaced-by**: 2026-05-05 operator backfill.
 
 - [ ] `research-replace-or-relocate-adapters-token-monitor` — replace-or-relocate research for `novel/adapters/token-monitor`
@@ -4013,21 +3972,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #1 (don't reinvent the wheel); Fowler, *Refactoring*, 1999 (review cadence as a refactoring discipline at the architectural scale).
   - **Risk**: Skipped if no calendar reminder set. Add a calendar event before this task is due.
 
-- [ ] `audit-spec-monitor-coverage-q3-2026` — Q3 2026 quarterly audit of spec-monitor advisory rules (due 2026-08-03)
-  - **ID**: audit-spec-monitor-coverage-q3-2026
-  - **Tags**: audit, conformance, rule-10
-  - **Milestone**: M1
-  - **Estimate**: 30m / quarter
-  - **Hypothesis**: A quarterly read-through of `novel/spec-monitor/SKILL.md`'s ≤5 advisory rules, comparing each against the current `scripts/check-rule-*.mjs` lints (and any newly-shipped `ci-lint-*` linters since the Q2 2026 audit), catches scope-creep before the Skill becomes load-bearing — preserving rule #10's "deterministic checks are authoritative" invariant. Quarterly cadence is the Risk-mitigation note from the original `audit-spec-monitor-coverage` task.
-  - **Details**: Re-read SKILL.md. For each advisory rule, ask: "could this be a deterministic linter today, given any new lints shipped since Q2 2026?" If yes, file a follow-up `ci-lint-*` task and (only after the linter ships) remove the advisory rule from SKILL.md per rule #10's ratchet. Confirm rule count ≤5. Compare against the previous audit at `spec-advisories/2026-05-03-quarterly-audit.md`: if the same rules promoted then are still open AND new ones promote now, fire the pivot (reduce cap to 3). After running the audit, file the next quarterly task (`audit-spec-monitor-coverage-q4-2026`).
-  - **Files**: `novel/spec-monitor/SKILL.md`, `spec-advisories/2026-08-03-quarterly-audit.md` (or whatever date the audit runs)
-  - **Verification**: SKILL.md has ≤5 rules (mechanically enforced by `scripts/check-skill-rule-cap.mjs`); `spec-advisories/<audit-date>.md` exists with rule count and per-rule decisions; any deterministic-candidate filed as a `ci-lint-*` task with full Hypothesis/Success/Pivot/Measurement/Anchor; the Q4 2026 audit task is filed.
-  - **Measurement**: `test -f spec-advisories/2026-08-03-quarterly-audit.md && grep -q 'Rule count' spec-advisories/2026-08-03-quarterly-audit.md && grep -q 'audit-spec-monitor-coverage-q4-2026' TASKS.md`
-  - **Pivot**: if this audit AND the Q2 2026 audit both promoted ≥1 rule AND the Q2 candidates are still open, the Skill is leaking scope — reduce cap from 5 to 3 in `novel/spec-monitor/SKILL.md` (and update `scripts/check-skill-rule-cap.mjs` accordingly).
-  - **Acceptance**: Audit run; SKILL.md compliant; any conversions filed; Q4 task scheduled.
-  - **Anchor**: rule #10 (vision.md § 10); Munafò et al., *Nature Human Behaviour* 1, 0021, 2017 (pre-registration of audit pivot before result is observed).
-  - **Risk**: Audit forgotten. Mitigation: the next-task standing-loop convention reminds; the previous audit file at `spec-advisories/2026-05-03-quarterly-audit.md` records the cadence.
-
 - [ ] `ci-lint-watch-surface-cap` — CI lint enforcing the 3-value cap on the Watch surface (story 005)
   - **ID**: ci-lint-watch-surface-cap
   - **Tags**: ci, conformance, rule-10
@@ -4075,6 +4019,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `next-task-scope-to-jira-ticket` — `/next-task` should accept a Jira-key argument to pin one-shot bug fixes
   - **ID**: next-task-scope-to-jira-ticket
+  - **Blocked**: needs-external-action — `.claude/skills/next-task/SKILL.md` lives upstream in dotfiles or agentbrew (not in minsky). Filed here because the feature surfaced in minsky's next-task workflow; the unblock path is a PR in the upstream skill source repo. Block lifts when the upstream side ships the scoped-ID arg.
   - **Tags**: skill, ergonomics, one-shot, surfaced-by-fresh-install
   - **Milestone**: M1
   - **Estimate**: 1h
