@@ -480,8 +480,22 @@ if [ "$MODE" = "setup" ]; then
   mkdir -p "$unit_dir"
 
   # Render templates with `${MINSKY_HOME}` → $ROOT. Idempotent overwrite.
+  # Track rendered plists explicitly so the bootstrap loop below ONLY
+  # touches files we rendered — never foreign com.minsky.*.plist files
+  # an operator may have installed for unrelated minsky-runners (e.g.,
+  # per-repo minsky launchers in other repos under the operator's HOME).
+  # Pre-fix (2026-05-28 monitoring round): the bootstrap loop globbed
+  # $unit_dir/com.minsky.*.plist which matched a stale orphan
+  # com.minsky.oncall-hub-plugin.plist (operator-installed for a
+  # different repo's minsky integration, broken since the run-minsky.sh
+  # it points at no longer exists). Setup tried to bootstrap it,
+  # launchctl returned non-zero because the plist was disabled, and
+  # SETUP_FAILED=1 killed the whole setup — every other com.minsky.*
+  # plist that hadn't been processed yet was lost too. Fix: explicitly
+  # track our rendered set; loop over THAT.
   CURRENT_STEP="setup-render-units"
   rendered=0
+  rendered_plists=()
   # Use $template_glob without quoting so the * expands in the templates.
   # shellcheck disable=SC2086
   for f in $template_dir/$template_glob; do
@@ -497,14 +511,17 @@ if [ "$MODE" = "setup" ]; then
     # tree appeared alongside the real `.minsky/`).
     MINSKY_HOME="$ROOT" envsubst '${MINSKY_HOME} ${HOME}' < "$f" > "$target"
     rendered=$((rendered + 1))
+    rendered_plists+=("$target")
   done
   ok "rendered $rendered unit-file template(s) into $unit_dir"
 
-  # Load + confirm.
+  # Load + confirm. Iterate ONLY plists we rendered above (not a wildcard
+  # glob of $unit_dir) so foreign com.minsky.*.plist files an operator
+  # may have installed for other repos are left alone.
   CURRENT_STEP="setup-load-supervisor"
   case "$os" in
     Darwin)
-      for f in "$unit_dir"/com.minsky.*.plist; do
+      for f in "${rendered_plists[@]}"; do
         [ -f "$f" ] || continue
         # `bootstrap` errors if already loaded — bootout first (idempotent).
         launchctl bootout gui/"$(id -u)" "$f" 2>/dev/null || true
