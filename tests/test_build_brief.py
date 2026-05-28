@@ -464,3 +464,49 @@ def test_local_llm_mode_is_shorter_than_cloud_mode() -> None:
     local = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
     saved = len(cloud) - len(local)
     assert saved >= 100, f"local-mode brief should be ≥100 bytes shorter; saved {saved}"
+
+
+# --- think-tool spam heal (2026-05-28 monitoring round) -----------------
+
+
+def test_brief_explicitly_forbids_think_tool_spam() -> None:
+    """The brief must explicitly forbid calling the `think` tool more
+    than once per task. Observed 2026-05-28: qwen3-coder:30b hit the
+    50-iteration cap by calling `think` 44 times to satisfy the tool-
+    call-discipline above without ever calling file_editor / terminal.
+    The original brief told the model 'Use the think tool for pure
+    deliberation' — the model interpreted that as license to call think
+    forever. Anti-think rule heals this."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    brief = build_brief.build_brief(task, host_cfg, local_llm_mode=True)
+    # Must contain the explicit forbiddance:
+    assert "EXPLICITLY FORBIDDEN" in brief
+    assert "`think` tool more than ONCE" in brief
+    # Must redirect the agent to real-side-effect tools:
+    assert "`terminal` to `ls` or `cat`" in brief
+    # Must NOT contain the OLD "use think for pure deliberation" guidance
+    # which created the failure mode in the first place:
+    assert "Use the `think` tool" not in brief
+    assert "use the `think` tool for pure deliberation" not in brief.lower()
+
+
+def test_brief_cloud_mode_also_gets_anti_think_rule() -> None:
+    """The anti-think rule applies to BOTH cloud and local modes — Claude
+    may also call think excessively under the original guidance, just less
+    pathologically. The discipline block is shared between modes."""
+    task = _pick_task_from_sample()
+    host_cfg = build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+    cloud_brief = build_brief.build_brief(task, host_cfg, local_llm_mode=False)
+    assert "EXPLICITLY FORBIDDEN" in cloud_brief
+    assert "`think` tool more than ONCE" in cloud_brief
