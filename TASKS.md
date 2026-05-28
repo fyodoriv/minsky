@@ -1298,19 +1298,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `agentbrew catalog list | grep -c minsky-discipline-pack` ≥ 1 after the catalog PR merges.
   - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
 
-- [ ] `research-md-lint-accepts-docs-research-log-md` — broaden `scripts/check-research-md-update.mjs` to accept changes to `docs/research-log.md` (and `docs/research-*.md` more broadly) as valid research-md updates. The current line-73 check is `changedFiles.includes("research.md")` — a strict root-level filename check. The repo's actual research log lives at `docs/research-log.md` (15K LOC, multiple anchored decision entries) and ad-hoc research files live at `docs/research-*.md` (e.g. `docs/research-hooks-vs-rules-2026-05-27.md`). A dep-change PR that legitimately documents the build/buy/borrow decision in `docs/research-log.md` is currently rejected by the lint, forcing PR-body opt-outs as the only escape. Fix: change the check to `changedFiles.some(f => f === "research.md" || f.startsWith("docs/research"))`.
-  - **ID**: research-md-lint-accepts-docs-research-log-md
-  - **Tags**: p1, lint-correctness, det-cohort, rule-10, surfaced-by-budget-guard-deletion
-  - **Milestone**: M1
-  - **Touches**: `scripts/check-research-md-update.mjs` (extend the filename check), `scripts/check-research-md-update.test.mjs` (add paired tests for `docs/research-log.md` + `docs/research-some-decision-2026-MM-DD.md` shapes).
-  - **Competitive-goal**: removes a class of false-positive lint failures that force PR-body opt-outs instead of letting genuine research entries satisfy the rule.
-  - **Hypothesis**: a dep-change PR that adds a build/buy/borrow entry to `docs/research-log.md` should satisfy the lint without an opt-out. The current strict-filename check is too narrow — it was written when the canonical research log was a root file; the file has since moved under `docs/`.
-  - **Success**: `pnpm exec vitest run scripts/check-research-md-update.test.mjs` passes ≥2 new cases (docs/research-log.md change + docs/research-*.md change satisfy the lint without the PR-body opt-out).
-  - **Pivot**: if the lint's intent was to enforce a SPECIFIC file (e.g., the durable log at the root), reverse the decision — relocate `docs/research-log.md` to the root as `research.md` instead. Pick the cheaper path.
-  - **Measurement**: `pnpm exec vitest run scripts/check-research-md-update.test.mjs` exits 0 with ≥2 new docs/* cases.
-  - **Anchor**: `scripts/check-research-md-update.mjs:73` (the current strict check); vision.md § "What Minsky is not" (research log discipline).
-  - **Surfaced-by**: `path-a-phase-9-delete-budget-guard` (this PR) — added an entry to `docs/research-log.md` describing the build/buy/borrow decision; the lint rejected it because it expected the root `research.md` filename.
-
 - [ ] `build-brief-supports-max-tokens` — add `--max-tokens=N` flag to `scripts/build_brief.py` so the brief generator can produce a smaller brief on demand. Unblocks `heal-brief-too-long-for-context-window` (shipped 2026-05-28 PR-pending) — its `rebuildFn` production binding waits on this flag. Today the helper's rebuildFn throws with `"build_brief.py: --max-tokens not supported yet"`; once the flag lands, the binding becomes a one-line `python scripts/build_brief.py --max-tokens=$N > $briefPath` invocation.
   - **ID**: build-brief-supports-max-tokens
   - **Tags**: p1, milestone-m1, m1-13, self-healing, build-brief, rule-12
