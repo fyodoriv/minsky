@@ -70,21 +70,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `package.json` (scripts block), `bin/minsky` (each subcommand may need `--help` + sane defaults), `test/integration/pnpm-minsky-aliases.test.ts` (new)
   - **Acceptance**: every `pnpm minsky:X` script invocation is interchangeable with `bin/minsky X`; the regression test enforces this; the operator can rely on muscle memory in either direction without surprise.
 
-- [ ] `cli-consolidation-lint-prevents-regression` — add a deterministic lint rule (`scripts/check-pnpm-minsky-aliases.mjs`, wired into `pre-pr-lint --stage=full`) that fails the build when any `pnpm minsky:X` script grows logic beyond `bin/minsky X` delegation. The structural fix on its own (PR #907 + `cli-consolidate-pnpm-minsky-scripts`) is one-time; this lint catches future drift.
-  - **ID**: cli-consolidation-lint-prevents-regression
-  - **Tags**: p0, milestone-m1, ux, cli-consolidation, lint
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `install-success-rate` (M1.3) — a one-time fix that decays is worse than no fix. The lint prevents the decay.
-  - **Surfaced-by**: 2026-05-27 operator directive. Pattern: "every recurring review comment must become a lint rule" — applied to CLI surface consistency.
-  - **Hypothesis**: a lint check that asserts every `pnpm minsky:X` script matches the regex `^bin/minsky\s+\w+(\s|$)` is deterministic enforcement of the consolidation invariant. Future PRs can't add a fancy one-liner without surfacing the regression in CI.
-  - **Success**: (1) `scripts/check-pnpm-minsky-aliases.mjs` exists, exits 0 when all minsky:* scripts are delegate-only, exits 1 with a specific error per non-delegate script. (2) Wired into `run-pre-pr-lint-stack.mjs` under `--stage=full`. (3) Wired into `.github/workflows/ci.yml` so external contributors hit the gate too. (4) Companion test in `scripts/check-pnpm-minsky-aliases.test.mjs` pins the rule (15+ tests covering pass / fail / multi-fail / edge cases).
-  - **Pivot**: if the regex is too strict and legitimate use-cases need extra args (e.g. `bin/minsky run --once` to pass a flag), expand the regex to `^bin/minsky\s+\w+(\s+--?[\w-]+(=[\w./-]+)?)*$` — args yes, additional shell commands no.
-  - **Measurement**: `node scripts/check-pnpm-minsky-aliases.mjs` exits 0 against the current `package.json` post `cli-consolidate-pnpm-minsky-scripts`, exits 1 against any PR that adds an arbitrary shell command to a `minsky:*` script.
-  - **Anchor**: rule #10 (deterministic enforcement, not vibes); feedback-loop guardrails ("every recurring review comment must become a lint rule"); operator session 2026-05-27.
-  - **Details**: write the script (~30 LOC node), write the test (~100 LOC, vitest), wire into `STACK_MANIFEST` in `run-pre-pr-lint-stack.mjs` AND `.github/workflows/ci.yml` (mirror the metric-freshness shape).
-  - **Files**: `scripts/check-pnpm-minsky-aliases.mjs` (new), `scripts/check-pnpm-minsky-aliases.test.mjs` (new), `scripts/run-pre-pr-lint-stack.mjs`, `.github/workflows/ci.yml`
-  - **Acceptance**: the lint runs on every PR; a regression (any `minsky:*` script growing logic beyond delegation) fails the gate; the failure message names the violating script + the canonical fix.
-
 <!-- ===================================================================== -->
 <!-- DETERMINISTIC-ENFORCEMENT BACKFILL COHORT (2026-05-27 audit)          -->
 <!--                                                                       -->

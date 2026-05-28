@@ -125,6 +125,7 @@ describe("STACK_MANIFEST", () => {
         "no-personal-paths-in-docs",
         "omc-mode-persona-gating",
         "orphan-tests",
+        "pnpm-minsky-aliases",
         "research-md-update",
         "test-file-colocation",
         "rule-12-scope-discipline",
