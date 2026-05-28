@@ -67,25 +67,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Details**: Inspect every file under `skill-plugins/orchestrator/`, `AGENTS.md`, and `vision.md` for IRON LAW / ABSOLUTE / MUST NOT prose that overlaps with the 38 rules being decommissioned in agentbrew Phase 3. For each match: replace the prose with the one-line breadcrumb. Verify the pipeline self-test still passes (rule #17 check-rule-orchestrator-self-test). Bonus: identify minsky-specific rules that DON'T overlap with agentbrew but could benefit from the same hook treatment (e.g. minsky's "backend agnosticism IRON LAW") — file follow-up tasks at agentbrew if so.
   - **Files**: `skill-plugins/orchestrator/*/SKILL.md` (7 persona files); `AGENTS.md`; `vision.md`; `scripts/check-rule-*.mjs` (verify no rule script depends on prose that gets removed).
 
-- [ ] `cli-consolidate-pnpm-minsky-scripts` — consolidate the 5 duplicated `pnpm minsky:*` scripts to thin aliases of `bin/minsky` subcommands. Pre-2026-05-27 each had a separate implementation (one shell snippet in package.json, one bash block in bin/minsky) → behavioral skew. PR #907 fixed `pnpm minsky:logs`; this task closes the remaining 5 (`setup`, `doctor`, `status`, `stop`, `ui`).
-  - **ID**: cli-consolidate-pnpm-minsky-scripts
-  - **Tags**: p0, milestone-m1, ux, cli-consolidation
-  - **Milestone**: M1
-  - **Competitive-goal**: drives `install-success-rate` (M1.3) — operator UX friction on the daily-driver commands is the bottleneck between "works on the developer's machine" and "works on a fresh operator's machine".
-  - **Surfaced-by**: 2026-05-27 operator directive "Let's just have one log command with sane defaults. Apply the same pattern for all other commands and file P0 tasks for that. All user interface is P0-P1." See PR #907 for the canonical pattern.
-  - **Hypothesis**: making every `pnpm minsky:X` script delegate to `bin/minsky X` (one canonical entry per command) eliminates an entire class of UX skew. The pattern is structural: drift is impossible because there's only one implementation.
-  - **Success**: (1) `package.json` `scripts/minsky:setup`, `scripts/minsky:doctor`, `scripts/minsky:status`, `scripts/minsky:stop`, `scripts/minsky:ui` all match the regex `^bin/minsky\s+\w+(\s|$)` (delegate-only, no extra logic). (2) Behavior parity: running each pair (`pnpm minsky:X` vs `bin/minsky X`) produces identical stdout + exit code under `MINSKY_NON_INTERACTIVE=1`. (3) The `bin/minsky X` subcommand has SANE DEFAULTS — no flags needed for the 90% case.
-  - **Pivot**: if any `bin/minsky X` subcommand lacks the equivalent surface (e.g. `bin/minsky setup` doesn't have all the flags `setup.sh --setup` accepts), expand `bin/minsky X` to cover them BEFORE flipping the alias. The goal is one canonical entry, not "drop functionality."
-  - **Measurement**: `node -e 'const p=require("./package.json").scripts; for (const k of ["minsky:setup","minsky:doctor","minsky:status","minsky:stop","minsky:ui"]) if (!/^bin\/minsky\s+\w+(\s|$)/.test(p[k])) { console.error(k+": "+p[k]); process.exit(1) }'` exits 0.
-  - **Anchor**: rule #1 (one canonical implementation per concern); Krug *Don't Make Me Think* 2014 (one obvious path); operator session 2026-05-27 (the consolidated-logs PR #907 + this follow-up).
-  - **Details**:
-    - [ ] `pnpm minsky:setup` → `bin/minsky setup` (currently runs `./setup.sh --setup` directly)
-    - [ ] `pnpm minsky:doctor` → `bin/minsky doctor` (currently runs `./setup.sh --doctor` directly)
-    - [ ] `pnpm minsky:status` → `bin/minsky status` (currently a launchctl/systemctl one-liner)
-    - [ ] `pnpm minsky:stop` → `bin/minsky stop` (currently a launchctl/systemctl bootout one-liner)
-    - [ ] `pnpm minsky:ui` → `bin/minsky ui` (currently runs `distribution/run-dashboard-web.sh` directly)
-    - [ ] Each delegated subcommand has `--help` that documents the sane default + escape-hatch flags
-    - [ ] Regression test pins the delegation: `test/integration/pnpm-minsky-aliases.test.ts` runs each pair and asserts behavior parity
   - **Files**: `package.json` (scripts block), `bin/minsky` (each subcommand may need `--help` + sane defaults), `test/integration/pnpm-minsky-aliases.test.ts` (new)
   - **Acceptance**: every `pnpm minsky:X` script invocation is interchangeable with `bin/minsky X`; the regression test enforces this; the operator can rely on muscle memory in either direction without surprise.
 
@@ -3660,6 +3641,22 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) measurement command returns `0`; (2) `competitors/README.md` Deep-research backlog table is updated to show each entry as moved-to-adopted, moved-to-competitor, or marked-not-applicable with reason; (3) Agentless row exists in `novel/competitive-benchmark/src/competitors.ts`; (4) a fresh reviewer reading each of the 4 final entries cold reaches the same Relationship verdict; (5) all literature citations resolve to real, primary sources (rule #5 anchor-primary-source lint passes).
 
 ## P3
+
+- [ ] `bin-minsky-subcommand-help-flag-consistency` — `bin/minsky setup|doctor|status|stop|ui` don't honor `--help` consistently. Running `bin/minsky doctor --help` executes the doctor probes instead of printing help. Only `setup` (passes --help to setup.sh) and `logs` (explicit handler) work. Operators learning the CLI hit a dead end the first time they reach for `--help`. Cheap fix: each subcommand's case block checks `[ "$2" = "--help" ] && { print_help_text; exit 0; }` before the action body.
+  - **ID**: bin-minsky-subcommand-help-flag-consistency
+  - **Tags**: p3, dx, ux, cli, scout-finding, observed-2026-05-27
+  - **Milestone**: M1
+  - **Deferred-because**: cosmetic CLI exploration polish, not a behavior bug. The subcommands work; only `--help` is misrouted. Lower-priority than active stability/security tasks; pick when DX backlog comes up.
+  - **Competitive-goal**: drives `install-success-rate` (M1.3) — operator UX during exploration. A CLI that doesn't honor `--help` feels broken even when it works.
+  - **Surfaced-by**: 2026-05-27 PR (this one) — `cli-consolidate-pnpm-minsky-scripts` consolidation made the gap visible. Scout finding while testing parity.
+  - **Hypothesis**: adding 5 lines of `--help` handling per subcommand (~50 LOC total) closes the gap. Help text is short and discoverable.
+  - **Success**: `bin/minsky <verb> --help` for each of `setup`, `doctor`, `status`, `stop`, `ui`, `logs` prints a 5-10 line usage block + exits 0. None of the action paths execute on `--help`.
+  - **Pivot**: if the action paths have side effects that begin BEFORE the case block is evaluated (e.g., env var defaulting at the top of the script), restructure to defer side effects until after `--help` is checked. Don't add `--help` if the cost is restructuring 5 case blocks; defer to a follow-up.
+  - **Measurement**: `for v in setup doctor status stop ui logs; do bash bin/minsky "$v" --help 2>&1 | head -3 | grep -q -i 'usage\|help' || { echo "FAIL: $v"; exit 1; }; done`
+  - **Anchor**: rule #1 (npm/brew convention compliance — every CLI verb honors `--help`); Krug *Don't Make Me Think* 2014; cli-design skill at `~/.config/devin/skills/cli-design/SKILL.md`.
+  - **Details**: add a `--help` handler at the top of each case block; the help text documents the sane default + escape-hatch flags. Pattern from `bin/minsky logs` (already has the right shape).
+  - **Files**: `bin/minsky` (5 case blocks: `setup`, `doctor`, `status`, `stop`, `ui`).
+  - **Acceptance**: each of the 5 subcommands prints help on `--help`; the measurement command exits 0.
 
 - [ ] `cli-script-consolidation-pass` — the current `package.json` has 28+ scripts in 7 categories (build/lint/test/m1/changelog/metrics/diagnostic/minsky). Several are one-shot diagnostics (`chaos:budget-exhaust`, `runany:audit`, `cto-audit:metrics`, `llm-provider:throughput`, `daemon-pr-lint:metrics`, `m1:metrics`, `m1:observability`, `m1:coverage`, `test:m1-tdd`) that are used 0-1 times per quarter — they pollute the `pnpm run` list. Goal: collapse the rarely-run ones into `pnpm <category>` with a positional subverb, OR move them to docs/runbook with a `bash:` prefix so they're discoverable but not script-listed
   - **ID**: cli-script-consolidation-pass
