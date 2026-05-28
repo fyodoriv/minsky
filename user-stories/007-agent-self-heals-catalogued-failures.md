@@ -238,6 +238,34 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **Then** `sleepMsFn` is NOT called
 - **And** `apply` returns `{ applied: false, notes: "no-op: stderr has no rate-limit signal" }`
 
+### Scenario: heal-ollama-down detects the ECONNREFUSED signal
+
+- **Given** a worker's stderr buffer containing `"Error: connect ECONNREFUSED 127.0.0.1:11434"` or `"openhands: Connection error: cannot reach ollama"` or `"ollama daemon not running"`
+- **When** `heal-ollama-down.detect({ stderr, kickFn, probeFn })` runs
+- **Then** it returns `{ present: true, signal: "ollama-down", evidence: { stderrPreview } }`
+
+### Scenario: heal-ollama-down kicks the daemon and verifies via probe
+
+- **Given** a detected ollama-down signal AND injected `kickFn` (records the kick) + `probeFn` (returns true after kick)
+- **When** `apply()` runs
+- **Then** `kickFn` is called exactly once
+- **And** `apply` returns `{ applied: true, notes: "kicked ollama daemon — caller should retry the spawn" }`
+- **When** `verify()` runs
+- **Then** it returns `{ healed: true }` (probe came up)
+
+### Scenario: heal-ollama-down is idempotent — re-kicking healthy ollama is a no-op (launchctl-style)
+
+- **Given** ollama is already running (`probeFn` returns true) but stderr still mentions ECONNREFUSED (stale buffer)
+- **When** `apply()` runs twice
+- **Then** `kickFn` is called twice (the daemon recognizes the redundant kick — `launchctl kickstart` is a no-op against a healthy daemon)
+- **And** `verify()` returns `{ healed: true }`
+
+### Scenario: heal-ollama-down kickFn throw propagates (rule #6)
+
+- **Given** `kickFn` throws `Error("launchctl: kickstart failed")` (e.g., permission denied on a sudo-only host)
+- **When** `apply()` runs
+- **Then** the throw propagates to the caller — let-it-crash at the I/O boundary
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`
