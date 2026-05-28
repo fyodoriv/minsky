@@ -2,6 +2,9 @@
 # bin/minsky-bootstrap.sh — Path A Phase 11 bash bootstrap (rule #1 — replace
 # 1.6K LOC of TypeScript inferer with shell + template substitution).
 #
+# Contract: implements the 6 disciplines of the
+# `host-transformation-checklist` (docs/host-transformation-checklist.md).
+#
 # Materializes a per-host `.minsky/` sidecar so the cross-repo-runner can
 # govern any host repo. Idempotent (re-runs converge to the same shape).
 #
