@@ -60,7 +60,6 @@ export const THREAT_MODEL_README_PATHS = Object.freeze([
   "novel/experiment-record/README.md",
   "novel/mape-k-loop/README.md",
   "novel/sidecar-bootstrap/README.md",
-  "novel/spec-monitor/README.md",
   "novel/adapters/agent-runtime-openhands/README.md",
   "novel/adapters/notifier/README.md",
   "novel/adapters/observability/README.md",
