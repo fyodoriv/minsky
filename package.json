@@ -70,6 +70,7 @@
     "daemon-pr-lint:metrics": "printf '⚠ deprecated 2026-05-26 (removed 2026-06-26): use \\`bin/minsky audit lint\\` instead\\n' >&2; bash bin/minsky audit lint",
     "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\" \"#.worktrees\" \"#.minsky\" \"#.obsidian\" \"#.claude\" \"#.claire\" \"#opencode.notes.md\" \"#.aider*\" \"#.pytest_cache\"",
     "pre-pr-lint": "node scripts/run-pre-pr-lint-stack.mjs",
+    "tasks:sweep-stale": "node scripts/tasks-md-stale-sweep.mjs --dry-run",
     "minsky": "bash bin/minsky",
     "minsky:setup": "bin/minsky setup",
     "minsky:doctor": "bin/minsky doctor",
