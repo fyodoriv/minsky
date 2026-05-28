@@ -1,4 +1,4 @@
-// <!-- scope: human-approved phase-11b-delete-tick-loop-multistep step 1 — paired tests for the ported `model-catalog.mjs` module. Not a new public artefact; the original at `novel/tick-loop/src/model-catalog.test.ts` is the equivalent surface. -->
+// <!-- scope: human-approved phase-11b step 1 — paired tests for the ported `model-catalog.mjs` module. Not a new public artefact; the original at `novel/tick-loop/src/model-catalog.test.ts` was deleted alongside the tick-loop package retirement. -->
 // Tests for the per-machine model catalog and validation helper.
 // xUnit paired fixtures (Meszaros 2007).
 //
