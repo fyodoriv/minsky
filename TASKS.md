@@ -2381,6 +2381,19 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
+- [ ] `sweep-stale-tasks-md-markers` — periodic sweep that finds TASKS.md entries whose described fix has ALREADY shipped, then removes the stale tracking marker. 6+ instances surfaced during the 2026-05-28 Path-A session (PRs #946, #947, #948, #951, #952, +1 more); each was a task body claiming "do X" where the code at the cited file/line already did X. Pre-claim inspection caught each, but the catalogue accumulates these stale markers faster than implementation. A periodic sweep — comparing task `**Details**:` field against the cited `**Files**:` content — would catch them in bulk.
+  - **ID**: sweep-stale-tasks-md-markers
+  - **Tags**: p2, milestone-m1, tasks-md-hygiene, rule-17, observed-2026-05-28
+  - **Milestone**: M1
+  - **Surfaced-by**: 2026-05-28 long session that shipped 24 PRs against the Path-A cut; 6+ tasks turned out to be already-done. Discovery pattern: read task body, grep cited file path for the change description, confirm in-place ⇒ remove marker.
+  - **Competitive-goal**: keeps the queue's signal-to-noise ratio high. Each stale marker wastes the next agent's pre-claim inspection time.
+  - **Hypothesis**: a sweep can identify ≥10 stale markers in one pass by (a) grepping cited file/line for the change description's keywords, (b) running a paired test if the task lists one and the test passes against current code. Markers that match either heuristic are stale candidates.
+  - **Success**: `node scripts/sweep-stale-tasks-md-markers.mjs --dry-run` (NEW script) lists ≥5 stale candidates with file path + line evidence; manual review confirms ≥3 are truly stale.
+  - **Pivot**: if false-positive rate is high (more than 30% of flagged tasks are actually still-open work), retire the automated sweep and just file `pre-claim-inspect-aggressively` as a discipline reminder in `/next-task` instead.
+  - **Measurement**: `node scripts/sweep-stale-tasks-md-markers.mjs --dry-run | wc -l` ≥ 5 after first run.
+  - **Anchor**: rule #17 (proactive healing — file the recurring pattern as work); operator session pattern 2026-05-28 (6 stale markers across one session).
+  - **Touches**: `scripts/sweep-stale-tasks-md-markers.mjs` (NEW), `scripts/sweep-stale-tasks-md-markers.test.mjs` (NEW paired test).
+
 - [ ] `corpus-refresh-openhands` — refresh the published readings for `openhands` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-04-15, 406 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
   - **ID**: corpus-refresh-openhands
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
