@@ -55,7 +55,12 @@ const REPO_ROOT = resolve(HERE, "..");
  *
  * @type {readonly string[]}
  */
-export const DOCS_FRAME_ALLOWLIST = Object.freeze(["AGENTS.md", "INSTALL.md", "docs/PRACTICES.md"]);
+export const DOCS_FRAME_ALLOWLIST = Object.freeze([
+  "AGENTS.md",
+  "INSTALL.md",
+  "README.md",
+  "docs/PRACTICES.md",
+]);
 
 /**
  * Docs that BELONG in the allowlist per `docs/PRACTICES.md` but have
@@ -66,7 +71,6 @@ export const DOCS_FRAME_ALLOWLIST = Object.freeze(["AGENTS.md", "INSTALL.md", "d
  * Not exported — purely a documentation artefact inside this file.
  */
 const PENDING_RESTORE = Object.freeze([
-  "README.md", // rewritten PR #948 (5-min-install-guide cut)
   "MILESTONES.md", // never had the frame
   "vision.md", // never had the frame
   // competitors/*.md — 16 files, none have the frame
