@@ -1,18 +1,22 @@
-/**
- * `@minsky/competitive-benchmark` — public surface.
- *
- * Slices (a) + (b) + (c) of task `self-metrics-competitive-benchmark`:
- *   (a) the pure, cited metric set with direction-aware comparison helpers,
- *   (b) the competitor corpus with its pluggable result-source adapter seam,
- *   (c) the ledger reducer + scorecard builder that join the two into the
- *       load-bearing `competitive-scorecard.json` artefact.
- *
- * Slice (d) (the task-justification meta-rule via `**Competitive-goal**:`
- * field + lint) and slice (e) (new-repo bootstrap priority) are separate,
- * later-shipped surfaces that consume this leaf.
- *
- * See `README.md` for the catalogue rationale and chaos verification.
- */
+// <!-- scope: human-approved sub-task `path-a-phase-10-delete-renderer-substrate`. Data-only barrel after Path-A phase-10 cut. The scorecard renderer + ledger reducer were deleted; only the competitors corpus + metrics catalogue remain. -->
+//
+// `@minsky/competitive-benchmark` — data-only public surface.
+//
+// Phase 10 of the Path-A aggressive cut deleted the scorecard builder
+// (`scorecard.ts`), the ledger reducer (`ledger.ts`), and the public
+// barrel's executable exports. What remains:
+//
+//   (a) the metric catalogue (`metrics.ts`) — citations + direction
+//       semantics + comparison helpers.
+//   (b) the competitor corpus (`competitors.ts`) — published-number
+//       data + the vendor-exclusion allowlist.
+//
+// The static scorecard surface lives at `competitors/scorecard.md`
+// (one-shot snapshot, manually re-rendered when corpus refreshes).
+// The `competitor-research` skill writes to `competitors/<id>.md` and
+// updates `competitors.ts` directly.
+//
+// See `README.md` for the corpus rationale.
 
 export {
   type MetricCategory,
@@ -34,16 +38,3 @@ export {
   isExcludedVendor,
   publishedValue,
 } from "./competitors.js";
-export {
-  type IterationRecord,
-  type MinskyReadings,
-  computeMinskyReadings,
-  readingsToMetricValues,
-} from "./ledger.js";
-export {
-  type AcceptanceState,
-  type BuildScorecardInput,
-  type Scorecard,
-  type ScorecardCell,
-  buildScorecard,
-} from "./scorecard.js";
