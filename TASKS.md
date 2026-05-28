@@ -3608,6 +3608,16 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P3
 
+- [ ] `biome-auto-fix-strips-output-statements-warning` — biome's `noConsoleLog` warn-level rule combined with `--write --unsafe` auto-fix STRIPS `console.log`/`console.error` calls from CLI scripts entirely, leaving empty for-loops or silent CLI guards. Surfaced 2026-05-28 in `scripts/tasks-md-stale-sweep.mjs` (#956) — auto-fix removed every console.log call in `runCli()`, the CLI ran with exit-0 but no output. The fix in #(this-PR) was to use `process.stdout.write` (not flagged by `noConsoleLog`). Mitigation paths: (a) add an `// @ts-check`-style header marker to the script ("// biome-ignore-file lint/suspicious/noConsoleLog"); (b) make `noConsoleLog` an error (not warn) so `--write --unsafe` doesn't silently apply the destructive fix; (c) ban `--unsafe` in pre-pr-lint auto-fix passes — only apply safe fixes. Option (c) is the right answer per rule #6 (let it crash at the right boundary — the developer, not the silent transform).
+  - **ID**: biome-auto-fix-strips-output-statements-warning
+  - **Tags**: p3, dx, lint-policy, biome, observed-2026-05-28
+  - **Surfaced-by**: scripts/tasks-md-stale-sweep.mjs CLI bug (PR #956) — biome's --unsafe auto-fix during the cleanup pass removed every console.log call, leaving the CLI silent. Caught by manual smoke test only; no test would have caught it because the test file imports the pure functions, not the CLI.
+  - **Hypothesis**: changing `pnpm exec biome check --write` to drop `--unsafe` (or filing biome config to make `noConsoleLog` apply unsafe-only fixes for files with the ignore marker) prevents the silent-transform class of regression.
+  - **Success**: `pnpm exec biome check --write scripts/some-cli.mjs` containing `console.log` doesn't remove the log line. Verified via paired test fixture.
+  - **Pivot**: if dropping `--unsafe` causes the cumulative biome stage to fail on legit unsafe fixes (e.g. import reordering), keep `--unsafe` but lift `noConsoleLog` to `error` in `biome.json` so it's surfaced loudly instead of silently fixed.
+  - **Measurement**: a paired test fixture (`scripts/biome-noconsole-fixture.mjs` with one `console.log` line) survives `pnpm exec biome check --write` unchanged.
+  - **Anchor**: rule #6 (let it crash at the right boundary — silent auto-transforms violate this); biome docs on `noConsoleLog` (warn vs error semantics).
+
 - [ ] `bin-minsky-subcommand-help-flag-consistency` — `bin/minsky setup|doctor|status|stop|ui` don't honor `--help` consistently. Running `bin/minsky doctor --help` executes the doctor probes instead of printing help. Only `setup` (passes --help to setup.sh) and `logs` (explicit handler) work. Operators learning the CLI hit a dead end the first time they reach for `--help`. Cheap fix: each subcommand's case block checks `[ "$2" = "--help" ] && { print_help_text; exit 0; }` before the action body.
   - **ID**: bin-minsky-subcommand-help-flag-consistency
   - **Tags**: p3, dx, ux, cli, scout-finding, observed-2026-05-27

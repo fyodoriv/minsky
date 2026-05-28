@@ -147,11 +147,22 @@ export function isClaimed(firstLine) {
 /**
  * Negative-signal regex: when the citing line contains one of these
  * patterns near the task ID, it likely RECORDS that the task is still
- * unshipped (e.g. "filed as a follow-up", "TODO: address X", or "see
- * TASKS.md X for context"). Treat those as NOT a fix-shipped signal.
+ * unshipped. Treat those as NOT a fix-shipped signal.
+ *
+ * Pattern categories:
+ *   - "filed as / follow-up / TODO / FIXME": comment recording the
+ *     task creation
+ *   - "deferred / wishlist / backlog / pending / future": comment
+ *     parking the work
+ *   - "not yet implemented / supported / stub / placeholder": comment
+ *     marking the in-place stub
+ *   - "remaining gap / tracked as / until it ships / gap to":
+ *     prose recording that the task is the unshipped slice (surfaced
+ *     2026-05-28 against INSTALL.md:20 + 5 similar cites)
+ *   - "see also / see TASKS.md": reference for context, not closure
  */
 const NEGATIVE_SIGNAL_RE =
-  /\b(filed as|follow-?up|TODO|FIXME|HACK|deferred|wishlist|backlog|pending|future|will land|next session|not yet implemented|not yet supported|stub|placeholder)\b/i;
+  /\b(filed as|follow-?up|TODO|FIXME|HACK|deferred|wishlist|backlog|pending|future|will land|next session|not yet implemented|not yet supported|stub|placeholder|remaining gap|tracked as|until it ships|gap to|see also|see TASKS\.md)\b/i;
 
 /**
  * Read a file's text, returning null on missing or unreadable.
@@ -259,28 +270,63 @@ export function sweepStaleTasksMdMarkers(tasksMdContent, repoRoot) {
 
 // ── CLI ─────────────────────────────────────────────────────────────
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Robust "was this module run directly?" check. The naive
+ * `import.meta.url === \`file://${process.argv[1]}\`` form breaks on macOS
+ * because the URL encoding diverges from the raw path (e.g. spaces,
+ * symlinks, /private/ prefix). Compare the resolved file paths instead.
+ *
+ * @returns {boolean}
+ */
+function isInvokedAsScript() {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+function runCli() {
   const dryRun = process.argv.includes("--dry-run");
   if (!dryRun) {
-    console.error("usage: node scripts/tasks-md-stale-sweep.mjs --dry-run");
-    console.error(
-      "  (read-only sweep; auto-remove is not implemented — operators confirm + delete)",
+    process.stderr.write("usage: node scripts/tasks-md-stale-sweep.mjs --dry-run\n");
+    process.stderr.write(
+      "  (read-only sweep; auto-remove is not implemented — operators confirm + delete)\n",
     );
     process.exit(2);
   }
   const tasksMdPath = resolve(REPO_ROOT, "TASKS.md");
   if (!existsSync(tasksMdPath)) {
-    console.error(`TASKS.md not found at ${tasksMdPath}`);
+    process.stderr.write(`TASKS.md not found at ${tasksMdPath}\n`);
     process.exit(1);
   }
   const content = readFileSync(tasksMdPath, "utf8");
   const candidates = sweepStaleTasksMdMarkers(content, REPO_ROOT);
   if (candidates.length === 0) {
+    process.stdout.write("tasks-md-stale-sweep: 0 likely-shipped candidates found.\n");
     process.exit(0);
   }
+  process.stdout.write(
+    `tasks-md-stale-sweep: ${candidates.length} likely-shipped candidate(s):\n\n`,
+  );
   for (const c of candidates) {
-    for (const _e of c.evidence) {
+    process.stdout.write(`  task: ${c.id}\n`);
+    process.stdout.write(`    summary: ${c.firstLineSnippet}…\n`);
+    process.stdout.write("    citations found in:\n");
+    for (const e of c.evidence) {
+      process.stdout.write(`      ${e.path}:${e.line}  — ${e.snippet}\n`);
     }
+    process.stdout.write("\n");
   }
+  process.stdout.write("To close: read each task's full block, verify the cited file's\n");
+  process.stdout.write("citation matches the described fix, then remove the task block\n");
+  process.stdout.write(
+    "from TASKS.md (commit: 'chore(tasks): close <task-id> — fix already shipped').\n",
+  );
   process.exit(0);
+}
+
+if (isInvokedAsScript()) {
+  runCli();
 }
