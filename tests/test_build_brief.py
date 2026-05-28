@@ -297,3 +297,67 @@ def test_cli_exits_2_on_bad_args(tmp_path: Path) -> None:
     result = _run_cli([], cwd=tmp_path)
     assert result.returncode == 2
     assert "usage" in result.stderr
+
+
+# --- --max-tokens flag (heal-brief-too-long-for-context-window) -----------
+
+
+def test_clamp_unbounded_returns_brief_unchanged() -> None:
+    brief = "task block\n---\noverlay block"
+    assert build_brief.clamp_brief_to_tokens(brief, 0) == brief
+    assert build_brief.clamp_brief_to_tokens(brief, -1) == brief
+
+
+def test_clamp_under_budget_returns_brief_unchanged() -> None:
+    brief = "a" * 100 + "\n---\n" + "b" * 100
+    assert build_brief.clamp_brief_to_tokens(brief, 1000) == brief
+
+
+def test_clamp_over_budget_truncates_overlay_preserves_task_block() -> None:
+    task_block = "task " * 50
+    overlay = "overlay " * 500
+    brief = task_block + "\n---\n" + overlay
+    clamped = build_brief.clamp_brief_to_tokens(brief, 1000)
+    assert len(clamped) <= 1000 * build_brief.BYTES_PER_TOKEN
+    assert clamped.startswith(task_block)
+    assert "[truncated by build_brief.py --max-tokens=1000" in clamped
+
+
+def test_clamp_rejects_below_min_tokens_for_load_bearing() -> None:
+    brief = "a" * 5000
+    try:
+        build_brief.clamp_brief_to_tokens(brief, 500)
+    except ValueError as e:
+        assert "MIN_TOKENS_FOR_LOAD_BEARING" in str(e)
+    else:
+        raise AssertionError("expected ValueError for budget below MIN_TOKENS_FOR_LOAD_BEARING")
+
+
+def test_cli_max_tokens_flag_clamps_output(tmp_path: Path) -> None:
+    (tmp_path / "TASKS.md").write_text(SAMPLE_TASKS_MD, encoding="utf-8")
+    result = _run_cli(
+        ["aifn-840-slash-command-labels", str(tmp_path), "--max-tokens", "1000"],
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    assert len(result.stdout) <= 1000 * build_brief.BYTES_PER_TOKEN + 1
+
+
+def test_cli_max_tokens_equals_form(tmp_path: Path) -> None:
+    (tmp_path / "TASKS.md").write_text(SAMPLE_TASKS_MD, encoding="utf-8")
+    result = _run_cli(
+        ["aifn-840-slash-command-labels", str(tmp_path), "--max-tokens=1000"],
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    assert len(result.stdout) <= 1000 * build_brief.BYTES_PER_TOKEN + 1
+
+
+def test_cli_max_tokens_rejects_non_integer(tmp_path: Path) -> None:
+    (tmp_path / "TASKS.md").write_text(SAMPLE_TASKS_MD, encoding="utf-8")
+    result = _run_cli(
+        ["aifn-840-slash-command-labels", str(tmp_path), "--max-tokens", "abc"],
+        cwd=tmp_path,
+    )
+    assert result.returncode == 2
+    assert "--max-tokens" in result.stderr

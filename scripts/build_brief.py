@@ -13,12 +13,24 @@ byte-equivalent to the TypeScript output for the same task block + host
 config — see `tests/test_build_brief.py` for the fixture pin.
 
 CLI:
-    python3 scripts/build_brief.py <task-id> <host-dir> [--vision-md <path>]
+    python3 scripts/build_brief.py <task-id> <host-dir> [--vision-md <path>] [--max-tokens <N>]
 
 Prints the brief to stdout. Reads:
     <host-dir>/TASKS.md             — picks up the task block (must exist)
     <host-dir>/.minsky/repo.yaml    — picks up host_repo + pre_commit_command
                                        (optional; defaults degrade gracefully)
+
+`--max-tokens <N>` clamps the brief to ≤ N tokens (~4 bytes/token
+heuristic — sufficient for English; no tokenizer dependency). When
+the full brief exceeds N×4 bytes, the system-prompt overlay (the
+constitution + deliverables checklist) is truncated first, then the
+task description's narrative is trimmed; the rule-9 fields (Hypothesis,
+Success, Pivot, Measurement, Anchor) and the FINAL STEP block are
+never dropped — they're the load-bearing parts of the brief.
+
+Source for `--max-tokens`: heal-brief-too-long-for-context-window
+(M1.13 self-heal helper; PRs #938 + this PR's
+build-brief-supports-max-tokens follow-up).
 
 Exit codes:
     0 — brief printed
@@ -213,18 +225,74 @@ def render_system_prompt_overlay(
     return "\n".join(lines)
 
 
+# Bytes-per-token heuristic for English LLM input (rough average across
+# Anthropic / OpenAI / Llama tokenizers). When `--max-tokens=N` is set,
+# the brief is clamped to ≤ N × BYTES_PER_TOKEN bytes. Picked deliberately
+# loose (4 vs the tokenizer-accurate ~3.5) — we'd rather under-fill than
+# overshoot the LLM context window. Pivot per the heal task body: a real
+# tokenizer dependency is overkill for this gate.
+BYTES_PER_TOKEN = 4
+
+# Hard upper bound on the FINAL STEP block + rule-9 fields — the
+# load-bearing parts of the brief that must never be truncated. If the
+# operator passes a `--max-tokens` value so small that even the
+# load-bearing parts exceed it, fail loudly rather than silently produce
+# an incomplete brief.
+MIN_TOKENS_FOR_LOAD_BEARING = 1000
+
+
+def clamp_brief_to_tokens(brief: str, max_tokens: int) -> str:
+    """Clamp `brief` to ≤ max_tokens (~max_tokens × 4 bytes).
+
+    Strategy (preserves rule-9 fields + FINAL STEP block):
+      1. If the full brief fits under the budget, return unchanged.
+      2. Otherwise, truncate the system-prompt overlay (the second `---`-separated
+         half of the brief). The task block (which contains the rule-9 fields)
+         is preserved fully.
+      3. If even the task block alone exceeds the budget, truncate it with an
+         explicit `[truncated by build_brief.py --max-tokens=N — heal-brief]`
+         marker at the cut.
+    """
+    if max_tokens <= 0:
+        return brief
+    if max_tokens < MIN_TOKENS_FOR_LOAD_BEARING:
+        raise ValueError(
+            f"--max-tokens={max_tokens} is below MIN_TOKENS_FOR_LOAD_BEARING="
+            f"{MIN_TOKENS_FOR_LOAD_BEARING}; the rule-9 fields + FINAL STEP "
+            "block alone need more room. Pick a larger budget."
+        )
+    budget_bytes = max_tokens * BYTES_PER_TOKEN
+    if len(brief) <= budget_bytes:
+        return brief
+    parts = brief.split("\n---\n", 1)
+    task_block = parts[0]
+    overlay = parts[1] if len(parts) == 2 else ""
+    marker = "\n\n[truncated by build_brief.py --max-tokens=" + str(max_tokens) + " — heal-brief]\n"
+    task_block_with_separator = task_block + "\n---\n"
+    if len(task_block_with_separator) + len(marker) <= budget_bytes:
+        remaining = budget_bytes - len(task_block_with_separator) - len(marker)
+        return task_block_with_separator + overlay[:remaining] + marker
+    cut = budget_bytes - len(marker)
+    return brief[:cut] + marker
+
+
 def build_brief(
     task: pick_task.ParsedTask,
     host_config: HostConfig,
     vision_md_path: str = DEFAULT_VISION_MD_PATH,
+    max_tokens: int = 0,
 ) -> str:
     """Compose the full brief (task block + overlay separated by `---`).
 
     Parity contract: matches `RunnerPlan.brief` in spawn-plan.ts § buildSpawnPlan.
+
+    When max_tokens > 0, the brief is clamped to ≤ max_tokens × 4 bytes via
+    `clamp_brief_to_tokens` (preserving the rule-9 fields and the FINAL STEP
+    block). max_tokens = 0 (the default) means no clamping.
     """
     assert task.id is not None, "build_brief called with task lacking an ID"
     branch_name = f"{host_config.branch_prefix}{task.id}"
-    return "\n".join([
+    full = "\n".join([
         render_brief(task, host_config.host_repo, branch_name),
         "",
         "---",
@@ -236,21 +304,40 @@ def build_brief(
             pre_commit_command=host_config.pre_commit_command,
         ),
     ])
+    return clamp_brief_to_tokens(full, max_tokens)
 
 
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
-        print("usage: build_brief.py <task-id> <host-dir> [--vision-md <path>]",
-              file=sys.stderr)
+        print(
+            "usage: build_brief.py <task-id> <host-dir> "
+            "[--vision-md <path>] [--max-tokens <N>]",
+            file=sys.stderr,
+        )
         return 2
     task_id = argv[1]
     host_dir = Path(argv[2])
     vision_md_path = DEFAULT_VISION_MD_PATH
+    max_tokens = 0
     i = 3
     while i < len(argv):
         if argv[i] == "--vision-md" and i + 1 < len(argv):
             vision_md_path = argv[i + 1]
             i += 2
+        elif argv[i] == "--max-tokens" and i + 1 < len(argv):
+            try:
+                max_tokens = int(argv[i + 1])
+            except ValueError:
+                print(f"--max-tokens expects an integer, got: {argv[i + 1]}", file=sys.stderr)
+                return 2
+            i += 2
+        elif argv[i].startswith("--max-tokens="):
+            try:
+                max_tokens = int(argv[i].split("=", 1)[1])
+            except ValueError:
+                print(f"--max-tokens=N expects an integer, got: {argv[i]}", file=sys.stderr)
+                return 2
+            i += 1
         else:
             print(f"unknown arg: {argv[i]}", file=sys.stderr)
             return 2
@@ -264,7 +351,12 @@ def main(argv: list[str]) -> int:
         print(result.reason or f"task '{task_id}' not found", file=sys.stderr)
         return 1
     host_config = load_host_config(host_dir)
-    sys.stdout.write(build_brief(result.task, host_config, vision_md_path) + "\n")
+    try:
+        brief = build_brief(result.task, host_config, vision_md_path, max_tokens)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    sys.stdout.write(brief + "\n")
     return 0
 
 
