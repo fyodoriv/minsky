@@ -14,7 +14,7 @@ goals: []
 
 ## 30-second TL;DR
 
-Minsky is a **plug-and-play repo transformer** — a daemon you attach to any git repo, and it transforms that repo into one that follows Minsky's discipline: strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance. It is **not** a framework. It composes existing tools through versioned adapters and adds only what nobody else is building.
+Minsky is a **discipline pack** for OpenHands — a small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A aggressive cut, down from ~70K LOC of TypeScript at peak) that you attach to any git repo, and it makes that repo follow Minsky's discipline: strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance. It is **not** a framework. The agent layer is OpenHands. The discipline pack composes existing tools through versioned adapters and adds only what nobody else is building — constitutional rules, deterministic CI lints, the MAPE-K observation loop, and the 18-rule pre-PR gate.
 
 Minsky operates at the **orchestrator tier** (managing daemon lifecycle, MAPE-K loop, prompt evolution, cross-repo task queue, supervisor restart). It sits ABOVE the agents (Claude / Devin / Aider) it composes. Its peers are other orchestrators (MetaGPT, AutoGen, CrewAI, LangGraph), not the agents it consumes.
 
