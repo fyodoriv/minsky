@@ -60,6 +60,26 @@ describe("checkResearchMdUpdate", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("passes when new dep AND docs/research-log.md updated (the canonical research log)", () => {
+    const result = checkResearchMdUpdate({
+      changedFiles: ["package.json", "docs/research-log.md"],
+      readCurrent: () => JSON.stringify({ dependencies: { foo: "^1.0.0", bar: "^2.0.0" } }),
+      readAtRef: () => BASE_PKG,
+      prBody: "",
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when new dep AND ad-hoc docs/research-<topic>.md updated", () => {
+    const result = checkResearchMdUpdate({
+      changedFiles: ["package.json", "docs/research-hooks-vs-rules-2026-05-27.md"],
+      readCurrent: () => JSON.stringify({ dependencies: { foo: "^1.0.0", bar: "^2.0.0" } }),
+      readAtRef: () => BASE_PKG,
+      prBody: "",
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it("respects no-research-update opt-out", () => {
     const result = checkResearchMdUpdate({
       changedFiles: ["package.json"],
