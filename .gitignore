@@ -45,6 +45,12 @@ desktop.ini
 # Minsky setup.sh local state — reference template lives at distribution/state.example.json
 .minsky/
 
+# Claire local agent-runner runtime dir (same class as `.claude/worktrees`,
+# `.minsky`). Source: `gitignore-claire-runtime-dir` (P3, surfaced 2026-05-16
+# when markdownlint failed on a `.claire/worktrees/*/pr-body.md` and blocked
+# a push). Excluded alongside the sibling agent-runtime dirs.
+.claire/
+
 # Operator's per-machine opencode config (lives in repo for convenience but
 # never committed — operator manages it through their own workflow; minsky's
 # resolveLocalAgentConfig reads it as one of the machine-state inputs).
