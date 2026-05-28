@@ -3889,15 +3889,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: novel/cross-repo-runner/bin/minsky-run.mjs, novel/cross-repo-runner/src/iteration-record.ts (new, if extraction goes that way).
   - **Acceptance**: `recordIteration` is a single dispatch line (≤5 LOC) that calls extracted helpers; both helpers are exported and have paired unit tests; full integration suite green.
 
-- [ ] `local-worktree-followups` — close out the rule-#9 follow-through for the shipped `local-worker-worktree-never-created` fix (PR #572): the 2h longitudinal success-ratio window + a docs cross-link
-  - **ID**: local-worktree-followups
-  - **Tags**: p3, local-llm, rule-9, docs, followup
-  - **Milestone**: M1
-  - **Details**: PR #572 shipped the `ensureWorktree` fix; first-window local-provider success_ratio measured ≈0.71 (≥0.70 bar). Complete the pre-registered loop: (a) record the rolling-2h `node`-based success_ratio (command in the git history of the now-removed P0 block / PR #572 self-grade) once ≥10 post-fix local iterations exist, and (b) add a cross-link in `docs/local-llm-fallback.md` to the README "Worktree ownership" note so the local-path-owns-its-worktree contract is discoverable from the fallback doc.
-  - **Files**: `docs/local-llm-fallback.md`
-  - **Acceptance**: `docs/local-llm-fallback.md` links the README worktree-ownership note; the 2h success_ratio is recorded in the PR or a follow-up comment and is ≥0.70 (else open a regression task).
-  - **Surfaced-by**: 2026-05-16 Opus-director supervision session.
-
 - [ ] `demo-pr-generator` — `minsky run --target=<oss-repo> --output-mode=pr-only` produces a single high-quality demo PR per OSS repo (the funnel)
   - **Blocked**: needs-substrate-port — task body references deleted `novel/tick-loop/{src,bin}` or `novel/cross-repo-runner/src` paths (substrate retired in phase-11b PR #888). Unblock path: rewrite Files/Touches/Details to point at the current substrate (`bin/minsky-run.sh`, `scripts/spawn_agent.py`, `scripts/build_brief.py`, or the relevant adapter module under `novel/adapters/`) AND verify the intent is still valid in the post-phase-11b architecture. Blocked uniformly 2026-05-28 by sweep-stale-novel-tick-loop-task-references (PR #930).
   - **ID**: demo-pr-generator
