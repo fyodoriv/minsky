@@ -568,6 +568,27 @@ iterate_host() {
     echo "WARN: synth_experiment_yaml.py failed for $task_id (continuing)" >&2
   fi
 
+  # Local-LLM routing detection — when `~/.minsky/config.json` has
+  # `local_llm_enabled: true`, point the openhands shim at the operator's
+  # local Ollama (default port 11434) AND override the model to
+  # `ollama_chat/<name>` so LiteLLM routes correctly. Without this, the
+  # shim defaults to Anthropic and hard-fails on missing API key — even
+  # with `local_llm_enabled: true` set, as observed 2026-05-27 (30
+  # consecutive iterations spawn-failed with "ANTHROPIC_API_KEY unset").
+  #
+  # Source: 2026-05-27 operator session; user-stories/015 (local models
+  # are the default until stability); the openhands shim's
+  # `--base-url`-aware api_key skip lands in the same PR.
+  #
+  # Detected EARLY (before build_brief.py) so the brief itself can be
+  # tuned for the local-LLM path — front-loads the TOOL-CALL DISCIPLINE
+  # block (observation 2026-05-28: qwen3-coder:30b reads the brief
+  # serially and disengages with prose-only replies when the discipline
+  # warning is buried at line 60+). See scripts/build_brief.py §
+  # render_system_prompt_overlay for the restructure.
+  local local_llm_enabled
+  local_llm_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+
   # Build the brief via scripts/build_brief.py — full TS-parity brief
   # with the task block + system-prompt overlay (constitution + FINAL
   # STEP block). Replaces the 4-line stub. Falls back to a minimal
@@ -576,8 +597,12 @@ iterate_host() {
   # with no brief).
   local brief_file
   brief_file="$(mktemp -t minsky-brief.XXXXXX)"
+  local brief_args=("$task_id" "$host")
+  if [[ "$local_llm_enabled" == "true" ]]; then
+    brief_args+=("--local-llm-mode")
+  fi
   if ! python3 "$script_dir/../scripts/build_brief.py" \
-       "$task_id" "$host" > "$brief_file" 2>/dev/null; then
+       "${brief_args[@]}" > "$brief_file" 2>/dev/null; then
     echo "WARN: build_brief.py failed for $task_id; falling back to stub" >&2
     cat >"$brief_file" <<EOF
 # Brief for task ${task_id}
@@ -590,19 +615,6 @@ EOF
   local model
   model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
 
-  # Local-LLM routing — when `~/.minsky/config.json` has
-  # `local_llm_enabled: true`, point the openhands shim at the operator's
-  # local Ollama (default port 11434) AND override the model to
-  # `ollama_chat/<name>` so LiteLLM routes correctly. Without this, the
-  # shim defaults to Anthropic and hard-fails on missing API key — even
-  # with `local_llm_enabled: true` set, as observed 2026-05-27 (30
-  # consecutive iterations spawn-failed with "ANTHROPIC_API_KEY unset").
-  #
-  # Source: 2026-05-27 operator session; user-stories/015 (local models
-  # are the default until stability); the openhands shim's
-  # `--base-url`-aware api_key skip lands in the same PR.
-  local local_llm_enabled
-  local_llm_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
   local extra_spawn_flags=""
   if [[ "$local_llm_enabled" == "true" ]]; then
     local local_model

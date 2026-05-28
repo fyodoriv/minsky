@@ -145,12 +145,43 @@ def render_brief(task: pick_task.ParsedTask, host_repo: str, branch_name: str) -
     return "\n".join(line for line in lines if line != "")
 
 
+def _render_tool_call_discipline() -> list[str]:
+    """The tool-call discipline block — load-bearing for qwen3-coder:30b
+    and other non-Claude models that disengage on prose-only replies.
+
+    Extracted to a helper so `--local-llm-mode` can front-load it
+    (the model sees it BEFORE the task, not buried at line 60+).
+    """
+    return [
+        "TOOL-CALL DISCIPLINE (load-bearing, observed-2026-05-27 disengagement",
+        "fix for non-Claude models): EVERY reply you emit must include a tool",
+        "call — `terminal`, `file_editor`, `task_tracker`, or `finish`. The",
+        "OpenHands SDK treats a reply containing only prose (no tool call) as",
+        "the conversation-end signal and TERMINATES the conversation",
+        "immediately, regardless of whether you've shipped the work.",
+        "",
+        "Specifically forbidden: emitting `Let me examine X` / `Now I'll do Y`",
+        "/ `Let me check Z` AS PROSE WITHOUT THE ATTACHED TOOL CALL. The",
+        "system has caught 13+ iterations of `qwen3-coder:30b` doing this on",
+        "2026-05-27 — exiting after a single `ls -la` with no commits, no PR,",
+        "no push. Each such iteration cost ~60–180s of agent time and",
+        "produced zero progress.",
+        "",
+        "Correct pattern: every planning sentence is followed (in the SAME",
+        "reply) by the tool call that executes the plan. Use the `think` tool",
+        "for pure deliberation. Use `finish` ONLY when (a) the PR is open and",
+        "the URL is printed, OR (b) you've hit an irrecoverable blocker that",
+        "you've reported verbatim.",
+    ]
+
+
 def render_system_prompt_overlay(
     *,
     vision_md_path: str,
     task_id: str,
     host_repo: str,
     pre_commit_command: str,
+    local_llm_mode: bool = False,
 ) -> str:
     """Render the constitution + deliverables overlay.
 
@@ -158,17 +189,39 @@ def render_system_prompt_overlay(
     The FINAL STEP block (claude-print-must-ship-pr regression fix) is
     non-negotiable — without it the agent has been observed to make
     every edit but never call `gh pr create`.
+
+    `local_llm_mode=True` (set by bin/minsky-run.sh when
+    `local_llm_enabled: true` in `~/.minsky/config.json`) reorders the
+    overlay so the TOOL-CALL DISCIPLINE block is the FIRST thing the
+    agent reads. Observation 2026-05-28: with the discipline buried at
+    line 60+ of the brief, the model reads constitution + deliverables
+    + FINAL STEP first, then hits the discipline warning AFTER its
+    behavioural pattern is already primed. Front-loading the warning
+    forces the model to internalise "every reply needs a tool call"
+    before any other instruction lands. The constitution preamble
+    ("Read .minsky/vision.md") is also dropped in local mode — the
+    local model can't hold a 1MB constitution document in its context
+    window and ends up either ignoring the instruction or wasting
+    tokens trying to load it.
     """
     line_3 = (
         f"3. Run `{pre_commit_command}` and confirm zero errors before committing."
         if pre_commit_command
         else "3. Run the host's pre-commit hooks (if any) before committing."
     )
-    lines = [
-        "You are working under minsky's full constitution.",
-        f"Read {vision_md_path} (also linked at .minsky/vision.md from the host).",
-        f"The task is {task_id} in host repo {host_repo}.",
-        "",
+
+    preamble_lines = (
+        []
+        if local_llm_mode
+        else [
+            "You are working under minsky's full constitution.",
+            f"Read {vision_md_path} (also linked at .minsky/vision.md from the host).",
+            f"The task is {task_id} in host repo {host_repo}.",
+            "",
+        ]
+    )
+
+    deliverables_lines = [
         "Required deliverables (rule #9 is iron):",
         "1. Cut a branch from the host's default_branch.",
         "2. Ship the code change matching the task's acceptance criteria.",
@@ -202,26 +255,24 @@ def render_system_prompt_overlay(
         "the error verbatim and STOP — do not silently retry or leave the",
         "tree dirty. The operator will read your stdout tail and decide.",
         "",
-        "TOOL-CALL DISCIPLINE (load-bearing, observed-2026-05-27 disengagement",
-        "fix for non-Claude models): EVERY reply you emit must include a tool",
-        "call — `terminal`, `file_editor`, `task_tracker`, or `finish`. The",
-        "OpenHands SDK treats a reply containing only prose (no tool call) as",
-        "the conversation-end signal and TERMINATES the conversation",
-        "immediately, regardless of whether you've shipped the work.",
-        "",
-        "Specifically forbidden: emitting `Let me examine X` / `Now I'll do Y`",
-        "/ `Let me check Z` AS PROSE WITHOUT THE ATTACHED TOOL CALL. The",
-        "system has caught 13+ iterations of `qwen3-coder:30b` doing this on",
-        "2026-05-27 — exiting after a single `ls -la` with no commits, no PR,",
-        "no push. Each such iteration cost ~60–180s of agent time and",
-        "produced zero progress.",
-        "",
-        "Correct pattern: every planning sentence is followed (in the SAME",
-        "reply) by the tool call that executes the plan. Use the `think` tool",
-        "for pure deliberation. Use `finish` ONLY when (a) the PR is open and",
-        "the URL is printed, OR (b) you've hit an irrecoverable blocker that",
-        "you've reported verbatim.",
     ]
+
+    discipline_lines = _render_tool_call_discipline()
+
+    if local_llm_mode:
+        # Front-load the discipline: model sees it BEFORE the task spec.
+        lines = (
+            discipline_lines
+            + [""]
+            + [
+                f"The task is {task_id} in host repo {host_repo}.",
+                "",
+            ]
+            + deliverables_lines
+        )
+    else:
+        # Original (cloud-LLM) order: constitution preamble → deliverables → discipline.
+        lines = preamble_lines + deliverables_lines + discipline_lines
     return "\n".join(lines)
 
 
@@ -281,6 +332,7 @@ def build_brief(
     host_config: HostConfig,
     vision_md_path: str = DEFAULT_VISION_MD_PATH,
     max_tokens: int = 0,
+    local_llm_mode: bool = False,
 ) -> str:
     """Compose the full brief (task block + overlay separated by `---`).
 
@@ -289,6 +341,12 @@ def build_brief(
     When max_tokens > 0, the brief is clamped to ≤ max_tokens × 4 bytes via
     `clamp_brief_to_tokens` (preserving the rule-9 fields and the FINAL STEP
     block). max_tokens = 0 (the default) means no clamping.
+
+    When local_llm_mode is True, the overlay is restructured (see
+    `render_system_prompt_overlay`): the TOOL-CALL DISCIPLINE block moves to
+    the top, the constitution preamble is dropped. This is set automatically
+    by bin/minsky-run.sh when `local_llm_enabled: true` in
+    `~/.minsky/config.json`.
     """
     assert task.id is not None, "build_brief called with task lacking an ID"
     branch_name = f"{host_config.branch_prefix}{task.id}"
@@ -302,6 +360,7 @@ def build_brief(
             task_id=task.id,
             host_repo=host_config.host_repo,
             pre_commit_command=host_config.pre_commit_command,
+            local_llm_mode=local_llm_mode,
         ),
     ])
     return clamp_brief_to_tokens(full, max_tokens)
@@ -311,7 +370,7 @@ def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(
             "usage: build_brief.py <task-id> <host-dir> "
-            "[--vision-md <path>] [--max-tokens <N>]",
+            "[--vision-md <path>] [--max-tokens <N>] [--local-llm-mode]",
             file=sys.stderr,
         )
         return 2
@@ -319,6 +378,7 @@ def main(argv: list[str]) -> int:
     host_dir = Path(argv[2])
     vision_md_path = DEFAULT_VISION_MD_PATH
     max_tokens = 0
+    local_llm_mode = False
     i = 3
     while i < len(argv):
         if argv[i] == "--vision-md" and i + 1 < len(argv):
@@ -338,6 +398,9 @@ def main(argv: list[str]) -> int:
                 print(f"--max-tokens=N expects an integer, got: {argv[i]}", file=sys.stderr)
                 return 2
             i += 1
+        elif argv[i] == "--local-llm-mode":
+            local_llm_mode = True
+            i += 1
         else:
             print(f"unknown arg: {argv[i]}", file=sys.stderr)
             return 2
@@ -352,7 +415,13 @@ def main(argv: list[str]) -> int:
         return 1
     host_config = load_host_config(host_dir)
     try:
-        brief = build_brief(result.task, host_config, vision_md_path, max_tokens)
+        brief = build_brief(
+            result.task,
+            host_config,
+            vision_md_path,
+            max_tokens,
+            local_llm_mode=local_llm_mode,
+        )
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 2
