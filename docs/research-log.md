@@ -379,6 +379,17 @@ Each active dependency follows the same shape:
 
 ## Active dependencies
 
+### Agent-to-agent protocol — `A2A`
+
+- **Current**: A2A v1.0.0 (Linux-Foundation-hosted), adapter scaffold shipped 2026-05-29 as `@minsky/a2a` (`novel/adapters/a2a/`)
+- **Gives us**: a standardized agent-to-agent transport (`sendMessage` / `getTask` / `subscribeToTask` / `listTasks`) so Minsky never writes its own custom inter-agent protocol — the consolidation point that the M2 consumers (multi-persona pipeline, cross-vendor reviewer, remote task submission, fleet log aggregation) all collapse into.
+- **Why we picked it**: cross-vendor industry standard (Linux Foundation) — adopting it means Minsky doesn't pick a side among the custom protocols Composio / Charlie Labs / OpenAI Agents SDK each ship. Pure rule #1 (don't reinvent the wheel).
+- **Workspace dep added**: `@minsky/adapter-types` (`workspace:*`) — the internal leaf package supplying the shared `SelfTestResult` contract; not an external building-block (it's our own acyclic-dependency leaf per Martin 2017), so no separate evaluation is owed beyond this note.
+- **Replacement candidates**: AGNTCY (watch — would supersede A2A if it gains Linux-Foundation backing); raw JSON-RPC 2.0 (the fallback if A2A is deprecated before M2).
+- **Risks**: the real bridge (google-a2a-python via `child_process`) is gated on the 2026-06-01 OpenHands runtime; until then `A2AOpenHands` is a deterministic-mock scaffold whose `selfTest()` returns `yellow` (never a false `green`). The Python SDK is still maturing — artifact-streaming nuance is deferred to a follow-up.
+- **Adapter**: `novel/adapters/a2a/src/index.ts` (interface) + `src/a2a.openhands.ts` (scaffold Strategy)
+- **Last reviewed**: 2026-05-29
+
 ### Persona orchestration — `Orchestrator`
 
 - **Current**: OMC (oh-my-claudecode) v4.13.x, since 2026-05
