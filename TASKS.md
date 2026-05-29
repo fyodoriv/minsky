@@ -1287,6 +1287,59 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P1
 
+<!-- COHORT: github-issues-task-source (2026-05-29 operator directive). Teach the daemon
+     to pick tasks from GitHub Issues/Projects, not just TASKS.md, so minsky can drive
+     hosts that have retired TASKS.md (e.g. oncall-hub). Pure rule-#2 adapter work:
+     interface → github-issues impl → repo.yaml selector. Composes with agentbrew's
+     `ghi-task-backend-contract`. Origin: oncall-hub RFC `github-issues-task-tracking`. -->
+
+- [ ] `ghi-task-source-interface` — extract a `TaskSource` port (`novel/adapters/task-source.ts`) so `pickHostTask` reads from a backend-agnostic interface instead of parsing `TASKS.md` directly
+  - **ID**: ghi-task-source-interface
+  - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, rule-1-dont-reinvent, rule-2-interface, operator-directive-2026-05-29
+  - **Milestone**: M1
+  - **Competitive-goal**: drives `task-backend-coverage` (new metric — fraction of managed hosts whose task queue the daemon can read) by decoupling the picker from the on-disk markdown format; today the daemon can ONLY drive `TASKS.md` hosts, which excludes any repo that adopts GitHub Issues (the direction oncall-hub + the agentbrew tooling family are moving).
+  - **Hypothesis**: `pickHostTask`/`task-finder.ts` currently couples task selection to `TASKS.md` parsing. Extracting a `TaskSource` interface (per rule #2) with the existing markdown parser as the first implementation means a second backend (GitHub Issues) is an additive adapter, not a rewrite of the host loop.
+  - **Success**: `novel/adapters/task-source.ts` defines a `TaskSource` interface with `listOpenTasks(): Task[]`, `claim(id, agentId)`, `close(id)`, `getTask(id)`; `task-source.tasks-md.ts` wraps the existing `task-finder.ts` logic behind it with zero behavior change; `pickHostTask` consumes the interface; all existing cross-repo-runner tests stay green.
+  - **Pivot**: If the `Task` shape can't represent both rule-#9 markdown tasks and GitHub issues without lossy mapping, keep backend-specific `Task` subtypes behind a discriminated union rather than forcing one schema.
+  - **Measurement**: `pnpm vitest run novel/cross-repo-runner` exits 0 (all existing tests green after refactor); `grep -rE "readFileSync.*TASKS\.md|parseTasksMd" novel/cross-repo-runner/src/host-loop.ts novel/cross-repo-runner/src/index.ts | wc -l` returns 0 (host loop no longer parses markdown directly — it goes through the port).
+  - **Anchor**: Cockburn, *Hexagonal Architecture (Ports & Adapters)*, 2005 — `TaskSource` is the port. Aligns with agentbrew `ghi-task-backend-contract` (same two-backend model). vision.md rule #2 (every dependency through an interface).
+  - **Details**: Pure refactor + interface extraction. Define the port in `novel/adapters/task-source.ts`. Move the current `TASKS.md` parsing/priority-walk (`task-finder.ts` `pickHostTask`) behind `task-source.tasks-md.ts` implementing the port. Rewire `host-loop.ts`/`index.ts` to depend on the port. No GitHub code yet (that's the next task). Add a `TaskSource` row to `docs/ARCHITECTURE.md` § Dependencies.
+  - **Files**: `novel/adapters/task-source.ts` (new — interface), `novel/adapters/task-source.tasks-md.ts` (new — wraps existing parser), `novel/cross-repo-runner/src/task-finder.ts` (refactor to back the tasks-md adapter), `novel/cross-repo-runner/src/host-loop.ts` + `index.ts` (consume the port), `docs/ARCHITECTURE.md` (dependency row).
+  - **Acceptance**: (a) `TaskSource` interface defined, no `any`; (b) tasks-md adapter passes all current picker tests unchanged; (c) host loop depends only on the port; (d) ARCHITECTURE.md dependency table updated; (e) `pnpm pre-pr-lint --stage=fast` exits 0.
+  - **Composes-with**: agentbrew `ghi-task-backend-contract` (shared two-backend model); `ghi-task-source-github-issues-impl` (the next adapter).
+
+- [ ] `ghi-task-source-github-issues-impl` — implement `novel/adapters/task-source.github-issues.ts` so the daemon can pick, claim, and close GitHub Issues via `gh`
+  - **ID**: ghi-task-source-github-issues-impl
+  - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, projects-v2, rule-2-interface, operator-directive-2026-05-29
+  - **Milestone**: M1
+  - **Blocked by**: ghi-task-source-interface
+  - **Competitive-goal**: moves `task-backend-coverage` from TASKS.md-only to TASKS.md + github-issues — the daemon can now run an indefinite improvement loop on a repo whose queue is GitHub Issues, which is the prerequisite for driving oncall-hub after its migration.
+  - **Hypothesis**: A GitHub-Issues implementation of the `TaskSource` port — listing open issues on the host's org Project ordered by the Priority field, claiming by self-assigning the daemon's agent identity, and closing via the merged PR's `Closes #N` — lets the existing host loop drive an issues-backed repo with no host-loop changes.
+  - **Success**: `task-source.github-issues.ts` implements all four port verbs against `gh`/Projects v2, has a `selfTest()` that round-trips a fixture issue (create → list → claim → close), and an integration test drives the four verbs against a fixture repo; priority ordering matches the P0→P3 walk.
+  - **Pivot**: if Projects v2 GraphQL priority-ordering from `gh` is too brittle in CI, order by an `priority/P0..P3` label set instead of the Project single-select field, and document the label convention.
+  - **Measurement**: `pnpm vitest run novel/adapters/task-source.github-issues` exits 0 with ≥8 paired cases (4 verbs × success/error); `node novel/adapters/task-source.github-issues.selftest.mjs` round-trips a fixture issue and exits 0; `grep -rE "gh issue|gh api" novel/ | grep -v adapters/ | wc -l` returns 0 (rule #2 — gh only inside the adapter).
+  - **Anchor**: GitHub docs "Linking a pull request to an issue" (default-branch close keywords) + "Using the built-in automations" (Projects v2 "PR merged → Done"), GHES 3.18.4 (verified on github.intuit.com); Cockburn Ports & Adapters 2005.
+  - **Details**: Implement the four verbs: `listOpenTasks` = `gh issue list` on the host's Project filtered to open + ordered by Priority (from the agentbrew contract descriptor); `claim` = `gh issue edit --add-assignee <agentId>`; `close` is implicit via the agent's merged PR carrying `Closes #N` (the adapter's `close` is a safety net / no-op verify); `getTask` = `gh issue view --json`. Provide `selfTest()`. Reuse agentbrew's `gh-issues` helper shape where practical (don't duplicate the rate-limit/scope logic — cite it).
+  - **Files**: `novel/adapters/task-source.github-issues.ts` (new), `novel/adapters/task-source.github-issues.test.ts` (new), `novel/adapters/task-source.github-issues.selftest.mjs` (new), `test/integration/task-source-github-issues-fixture.test.ts` (new), `docs/ARCHITECTURE.md` (note the second adapter).
+  - **Acceptance**: (a) four verbs implemented, no `any`; (b) `selfTest()` round-trips a fixture issue; (c) integration test ≥8 cases green; (d) no `gh` calls outside the adapter; (e) priority ordering matches the P0→P3 walk; (f) `pnpm pre-pr-lint --stage=fast` exits 0.
+  - **Composes-with**: agentbrew `ghi-gh-issues-helper` (same gh-wrapper concerns); `ghi-repo-yaml-task-source-field` (the selector that activates this adapter).
+
+- [ ] `ghi-repo-yaml-task-source-field` — add a `task_source: tasks-md | github-issues` field to `.minsky/repo.yaml` so each host selects its backend, and wire the daemon to instantiate the right adapter
+  - **ID**: ghi-repo-yaml-task-source-field
+  - **Tags**: p1, milestone-m1, config, repo-yaml, task-source, github-issues, operator-directive-2026-05-29
+  - **Milestone**: M1
+  - **Blocked by**: ghi-task-source-github-issues-impl
+  - **Competitive-goal**: makes `task-backend-coverage` operator-selectable per host — an operator flips one field and the daemon drives that host's Issues queue, with `tasks-md` remaining the default so all existing hosts are unaffected.
+  - **Hypothesis**: Selecting the backend per host via the existing `.minsky/repo.yaml` overlay (which already carries `tasks_md_path`) is the lowest-friction switch — the daemon reads `task_source`, instantiates the matching adapter, and the rest of the loop is identical.
+  - **Success**: `.minsky/repo.yaml` accepts `task_source` (default `tasks-md`); the host loop instantiates `task-source.github-issues` when set; `INSTALL.md`/`AGENTS.md` document the field; a host configured with `github-issues` is driven end-to-end (pick → branch → PR with `Closes #N` → issue auto-closes) in an integration test.
+  - **Pivot**: if `repo.yaml` is the wrong layer (e.g. operators want a machine-wide default), fall back to a `~/.minsky/config.json` `default_task_source` with per-repo override, mirroring the existing agent-config resolution precedence.
+  - **Measurement**: `pnpm vitest run novel/cross-repo-runner -t "task_source"` exits 0; `node --input-type=module -e "import('./novel/cross-repo-runner/dist/index.js').then(m=>console.log(typeof m.pickHostTask))"` prints `function` (picker still resolves with the new selector); a github-issues fixture host drives one full iteration in the integration test.
+  - **Anchor**: minsky AGENTS.md § "Per-machine agent config" (the resolution-precedence pattern this mirrors); agentbrew `ghi-task-backend-contract` (same field semantics, kept consistent across tools).
+  - **Details**: Extend the `repo.yaml` schema + loader with `task_source` (validated enum, default `tasks-md`). In `host-loop.ts`, choose the adapter from the field. Keep `tasks_md_path` meaningful only for the tasks-md backend. Document in `INSTALL.md` + `AGENTS.md`. Add an integration test that runs one iteration against a github-issues fixture host.
+  - **Files**: `.minsky/repo.yaml` (schema + example), the repo.yaml loader in `novel/cross-repo-runner/src/`, `novel/cross-repo-runner/src/host-loop.ts` (adapter selection), `INSTALL.md`, `AGENTS.md`, `test/integration/task-source-selection.test.ts` (new).
+  - **Acceptance**: (a) `task_source` validated, defaults to `tasks-md`; (b) daemon instantiates the github-issues adapter when set; (c) docs updated; (d) end-to-end integration test green; (e) existing tasks-md hosts unaffected; (f) `pnpm pre-pr-lint --stage=fast` exits 0.
+  - **Composes-with**: agentbrew `ghi-task-backend-contract`; oncall-hub-plugin + oncall-hub-api-deployment cutover tasks (their `.minsky/repo.yaml` flips to `github-issues` once this ships).
+
 - [ ] `path-a-phase-13-agentbrew-discipline-pack-catalog-entry` — add a `minsky-discipline-pack` source entry to the agentbrew catalog so `agentbrew install minsky-discipline-pack` works. This is the third sub-deliverable of the parent path-a-phase-13 identity-promotion task; not strictly required for the README/vision rewrite (split off 2026-05-28) but completes the parent's full scope. Touches the agentbrew catalog repo, not this repo.
   - **ID**: path-a-phase-13-agentbrew-discipline-pack-catalog-entry
   - **Tags**: p1, milestone-m1, rule-1, path-a, agentbrew-catalog, observed-2026-05-28
