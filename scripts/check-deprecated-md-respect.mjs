@@ -81,6 +81,13 @@ export const ALLOWLIST = Object.freeze([
   // (machine reload silently brought 7 com.minsky.* plists back
   // online). Removed when setup.sh retires per DEPRECATED.md § 5.
   /^test\/integration\/setup-supervisor-opt-in\.test\.ts$/,
+  // The rule-19 supervisor-explicit-start lint + its tests: these
+  // files MUST name setup.sh (it's the canonical allowlisted caller of
+  // `launchctl bootstrap`, documented in the lint's ALLOWED_PATHS
+  // rationale). Same self-referential carve-out as the setup test
+  // files above. Remove when setup.sh retires per DEPRECATED.md § 5.
+  /^scripts\/check-supervisor-explicit-start\.mjs$/,
+  /^scripts\/check-supervisor-explicit-start\.test\.mjs$/,
   // setup.sh itself: bug-fix extensions to a "Keep until X" deprecated
   // surface are allowed during the keep-window, per the precedent set
   // by the setup-rendered-only-bootstrap.test.ts carve-out. setup.sh
