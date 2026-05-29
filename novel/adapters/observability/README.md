@@ -126,3 +126,12 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 ### 2026-05-12 — OpenTelemetry SDK 2.x migration (constructor → factory)
 
 `@opentelemetry/sdk-metrics` was bumped from `1.30.1` to `2.7.1` via dependabot (PR #462). The 2.x `MeterProvider` requires a `Resource` that implements `getRawAttributes()` — a method 1.x doesn't ship. The peer `@opentelemetry/resources` was still pinned at `^1.30.0`, so TypeScript flagged a structural mismatch between the two installed Resource shapes. The fix is the standard 2.x migration step: bump `@opentelemetry/resources` to `^2.7.0` and replace the `new Resource({...})` constructor (1.x class form) with the `resourceFromAttributes({...})` factory (2.x — `Resource` is now a non-user-implementable interface). The construction site is line 114 of `otel.ts`; behaviour is structurally identical, only the constructor shape changed. The other peers (`sdk-trace-base`, `sdk-logs`, `exporter-*-otlp-http`) stay at their `^1.30.0` / `^0.57.0` versions — they still accept the 2.x `Resource` via duck-typing on the read-only fields. A future PR will fold those peers up to 2.x once the upstream 2.x exporter releases stabilise.
+
+### 2026-05-29 — OTel SDK 2.x migration completed (the deferred peers)
+
+The "future PR" promised above. Dependabot's group bump (PR #842) moved the remaining peers to 2.x but left `@opentelemetry/sdk-trace-base` pinned at `^1.30.0`, re-introducing a `ReadableSpan` type skew (2.x adds the required `instrumentationScope` field that 1.x lacks). Two finishing changes complete the migration:
+
+- Bump `@opentelemetry/sdk-trace-base` `^1.30.0` → `^2.7.1` so every trace package shares one `ReadableSpan` shape.
+- `LoggerProvider`: SDK 2.x removed `addLogRecordProcessor()`; processors now pass through the constructor `processors` option (`new LoggerProvider({ resource, processors: [...] })`). The behaviour is identical; only the registration shape changed.
+
+The whole `@opentelemetry/*` surface (api `1.9`, sdk-trace/metrics/node + core + resources `2.7.x`, logs + exporters `0.218.x`) is now internally consistent and `tsc -b` clean.

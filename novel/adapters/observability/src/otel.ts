@@ -150,8 +150,10 @@ export class OtelObservability implements Observability {
       (endpoints.logs === undefined
         ? new OTLPLogExporter()
         : new OTLPLogExporter({ url: endpoints.logs }));
-    this.loggerProvider = new LoggerProvider({ resource });
-    this.loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
+    this.loggerProvider = new LoggerProvider({
+      resource,
+      processors: [new SimpleLogRecordProcessor(logExporter)],
+    });
     this.logger = this.loggerProvider.getLogger(serviceName);
   }
 
