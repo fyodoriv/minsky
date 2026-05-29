@@ -2171,6 +2171,33 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-metric-freshness.test.mjs
 
+  rule-19-supervisor-explicit-start:
+    # rule #19 (vision.md § "Operator-explicit-start" — iron): no
+    # `launchctl bootstrap` / `systemctl --user enable --now` may run
+    # outside the lint's ALLOWED_PATHS allowlist, so Minsky's supervisor
+    # never auto-starts at login without an explicit operator flag. The
+    # lint scans the whole repo and fails on any new unprovenanced
+    # bootstrap call (the regression that re-launched 7 com.minsky.*
+    # plists after a machine reload, 2026-05-29).
+    # Anchor: rule #10 (vision.md § 10 — deterministic enforcement);
+    # rule #19 itself; Beyer SRE 2016 Ch. 17 (operator intent is
+    # first-class — never auto-launch heavy work).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: rule-19 lint
+        run: node scripts/check-supervisor-explicit-start.mjs
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-supervisor-explicit-start.test.mjs
+
   ci:
     needs:
       - agents-md-coherence
@@ -2221,6 +2248,7 @@ jobs:
       - rule-12-scope-discipline
       - rule-13-sibling-anchors
       - rule-17-proactive-heal
+      - rule-19-supervisor-explicit-start
       - no-hardcoded-user-paths
       - no-personal-paths-in-docs
       - rule-9-tasksmd-fields
@@ -2305,6 +2333,7 @@ jobs:
                    "${{ needs.rule-12-scope-discipline.result }}" \
                    "${{ needs.rule-13-sibling-anchors.result }}" \
                    "${{ needs.rule-17-proactive-heal.result }}" \
+                   "${{ needs.rule-19-supervisor-explicit-start.result }}" \
                    "${{ needs.no-hardcoded-user-paths.result }}" \
                    "${{ needs.no-personal-paths-in-docs.result }}" \
                    "${{ needs.rule-9-tasksmd-fields.result }}" \
