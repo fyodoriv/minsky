@@ -81,6 +81,9 @@ novel/adapters/
   notifier.ts               ← interface Notifier { push(event, level), … }
   notifier.ntfy.ts          ← implements via ntfy.sh HTTP API
 
+  ollama.ts                 ← interface Ollama { warm(model), unload(model), ps(), selfTest() }
+  ollama.http.ts            ← implements via Ollama HTTP API (/api/generate + /api/ps)
+
   remote-access.ts          ← interface RemoteAccess { … }
   remote-access.tailscale.ts← implements via Tailscale CLI
 
@@ -114,6 +117,7 @@ Adapters are tested both **against the interface** (does the implementation sati
 | 7 | Mobile dashboard | `MobileDashboard` | claude-code-monitor (onikan27) | custom cross-platform web app | Medium — onikan27 is macOS only |
 | 8 | Remote VPN | `RemoteAccess` | Tailscale | WireGuard, ZeroTier, Cloudflare Tunnel | Low |
 | 9 | Push notifications | `Notifier` | ntfy.sh | Pushover, Telegram bot | Low |
+| 9a | Local LLM lifecycle | `Ollama` | Ollama HTTP API (`/api/generate` + `/api/ps`) for daemon-scoped warm/unload | LM Studio HTTP, MLX-LM server | Low — Ollama is the entrenched local-LLM serving daemon; the adapter is < 250 LOC and one Strategy. Closes [story 020](../user-stories/020-ollama-jit-warm-unload.md) — drops daemon-idle wired RAM from ~42 GB to ≤500 MB. |
 | 10 | Watch actions | `WatchActions` | Apple Shortcuts | (later: native WatchOS / Wear OS) | Medium — Apple-specific |
 | 11 | Process supervision | `Supervisor` | systemd (Linux) / launchd (macOS) | s6, runit, supervisord | Low |
 | 12 | Observability | `Observability` | Claude Code OTEL → local Loki/Tempo/Grafana | Honeycomb, Grafana Cloud | Low |
