@@ -73,6 +73,33 @@ export const ALLOWLIST = Object.freeze([
   // (per docs/DEPRECATED.md § 5 — "Keep until `minsky init` ships")
   // is the ratchet.
   /^test\/integration\/setup-rendered-only-bootstrap\.test\.ts$/,
+  // Same self-referential carve-out: this regression test pins the
+  // 2026-05-29 IRON gate (supervisor bootstrap requires explicit
+  // --with-supervisor flag). It MUST name setup.sh and the flag to
+  // assert the gate landed in that file. Source: operator directive
+  // "It must only run when I explicitly tell it so. Fix immediately"
+  // (machine reload silently brought 7 com.minsky.* plists back
+  // online). Removed when setup.sh retires per DEPRECATED.md § 5.
+  /^test\/integration\/setup-supervisor-opt-in\.test\.ts$/,
+  // The rule-19 supervisor-explicit-start lint + its tests: these
+  // files MUST name setup.sh (it's the canonical allowlisted caller of
+  // `launchctl bootstrap`, documented in the lint's ALLOWED_PATHS
+  // rationale). Same self-referential carve-out as the setup test
+  // files above. Remove when setup.sh retires per DEPRECATED.md § 5.
+  /^scripts\/check-supervisor-explicit-start\.mjs$/,
+  /^scripts\/check-supervisor-explicit-start\.test\.mjs$/,
+  // setup.sh itself: bug-fix extensions to a "Keep until X" deprecated
+  // surface are allowed during the keep-window, per the precedent set
+  // by the setup-rendered-only-bootstrap.test.ts carve-out. setup.sh
+  // is the canonical location for supervisor bootstrap until
+  // `minsky init` ships (DEPRECATED.md § 5) — the operator's
+  // explicit-start contract MUST be enforced here, in the file the
+  // operator actually invokes. Without this allowlist row, the IRON
+  // gate landed in this PR would have been impossible to express
+  // without contorting the user-facing dim "Re-run: ./setup.sh ..."
+  // messages into something the operator can't copy-paste. Remove
+  // when setup.sh retires.
+  /^setup\.sh$/,
 ]);
 
 /**

@@ -215,7 +215,9 @@ The operator declares a machine-utilisation budget (default 70%, raised explicit
 
 ### 16. Default by default — never hide a useful behaviour behind an opt-in flag
 
-When you implement a new behavior or fix, **make it the default immediately** — not an opt-in flag behind an env var. If a behavior is reasonable for all users, it should be on by default the moment it ships. Examples: scope-leak soft mode → default. Launchd persistence → auto-installed on first run. Dynamic timeouts → computed automatically. Smart auto-attach → just works.
+When you implement a new behavior or fix, **make it the default immediately** — not an opt-in flag behind an env var. If a behavior is reasonable for all users, it should be on by default the moment it ships. Examples: scope-leak soft mode → default. Dynamic timeouts → computed automatically. Smart auto-attach → just works.
+
+**Carve-out: resource-consuming long-running processes.** Rule #19 (operator-explicit-start) supersedes rule #16 for processes that hold significant memory / CPU between iterations. Supervisor bootstrap (launchd / systemd-user units that auto-start at login) is **opt-in** per rule #19, not opt-out. The earlier example "Launchd persistence → auto-installed on first run" was retracted 2026-05-29 after a machine reload silently brought 7 com.minsky.* plists back online and held ~42 GB of wired RAM hostage. See rule #19 below for the full contract.
 
 Every new default ships with (1) an experiment in `.minsky/experiments/<id>.yaml`, (2) a runnable measurement, (3) an opt-out env var or flag (for debugging only, documented in DEPRECATED.md as soon as it's never used). The burden of proof is on the opt-in side.
 
@@ -252,6 +254,34 @@ When the operator (or an upstream task) asks to **merge** a PR, the only accepta
 Enforced by: [`scripts/verify-pr-closure-is-lossless.mjs`](scripts/verify-pr-closure-is-lossless.mjs) on the close-side (every PR closure must carry the empty-diff proof comment); [`scripts/local-gate-merge.mjs`](scripts/local-gate-merge.mjs) on the merge-side (only ever merges, never closes); and the [`pr-merge-no-shortcuts`](.claude/skills/pr-merge-no-shortcuts/SKILL.md) skill primer that auto-loads in any drain-session agent context.
 
 Anchor: rule #9 (pre-registered HDD — a "merge" directive's success criterion is the commit on `main`, not the closed PR); Cockburn 2001 *Writing Effective Use Cases* (the success scenario IS the criterion — close-with-preservation fails the "merge" use-case's success scenario regardless of the metadata).
+
+### 19. Operator-explicit-start — agents never auto-launch resource-consuming processes (iron, no exemption)
+
+A Minsky-controlled launchd or systemd-user supervisor unit (a unit that auto-starts a long-running process at login / reboot, holds non-trivial RAM, or iterates against an LLM) **must not be bootstrapped without an explicit operator instruction in the same shell session**. The operator's intent must be a positive, copy-paste-able command — never an implicit side effect of running `setup.sh`, `pnpm install`, `git pull`, or any other routine flow.
+
+**Forbidden anti-patterns**:
+
+1. **`./setup.sh --setup` bootstraps launchd units unconditionally** — fixed 2026-05-29: setup.sh now requires `--with-supervisor` (or `MINSKY_SETUP_WITH_SUPERVISOR=1`). Default is render-only. Pinned by [`test/integration/setup-supervisor-opt-in.test.ts`](test/integration/setup-supervisor-opt-in.test.ts).
+2. **`bin/minsky install-daemon` invoked from a non-interactive context (e.g. `post-merge-auto-install.mjs`) silently bootstraps the daemon plist** — must be gated behind an existing-plist check (already in place — `plistExists: false` short-circuits) AND the `~/.minsky/no-auto-install` sentinel (already in place).
+3. **A new `launchctl bootstrap gui/$(id -u)` or `systemctl --user enable --now` call lands anywhere outside the allowlisted paths** — deterministically caught by [`scripts/check-supervisor-explicit-start.mjs`](scripts/check-supervisor-explicit-start.mjs). The allowlist names the exact paths that legitimately need to bootstrap; any new path fails the lint.
+4. **Adding a new launchd plist template under `distribution/launchd/` with `RunAtLoad: true` without a corresponding gate in setup.sh** — the rendered plist would auto-start at login the moment setup.sh's `--with-supervisor` flag is invoked, which is fine, but the plist's `RunAtLoad` MUST be paired with the `--with-supervisor` opt-in path.
+
+**Trigger phrases that activate this rule IMMEDIATELY**: "why is minsky running", "I didn't ask minsky to start", "make it dormant", "operator-explicit-start", "explicit-start contract".
+
+**Origin**: operator directive 2026-05-29 — "I've reloaded my machine, why is minsky running? It must only run when I explicitly tell it so. Fix immediately." After a machine reload, all 7 com.minsky.*.plist launchagents auto-started at login, re-eating ~42 GB of wired RAM. Root cause: setup.sh's bootstrap loop ran unconditionally on every `--setup` invocation, so any operator who ran setup once ended up with a permanent login-launch fleet they didn't ask for.
+
+**Why this rule is iron**: a stale daemon iterating against `qwen3-coder:30b` on a 64 GB MacBook holds 65% of system RAM hostage. Even one accidental auto-start across a session boundary is a real harm — the operator opens Chrome / Slack / Outlook and watches every app fight the memory compressor. The opt-in contract is the only design that survives "operator forgets, reboots, opens new apps" without surprise resource pressure.
+
+**Companion rule**: rule #16 (default by default) generally; the carve-out at the top of rule #16 explicitly cedes resource-consuming long-running processes to rule #19.
+
+**Companion adapter**: PR #993 (`feat/ollama-jit-warm-unload`) ensures that when the daemon DOES run (explicit start), it unloads the LLM model on SIGTERM. The two rules compose: rule #19 keeps the daemon dormant until asked; the SIGTERM-unload trap reclaims RAM the moment the operator stops it.
+
+Enforced by:
+
+- [`scripts/check-supervisor-explicit-start.mjs`](scripts/check-supervisor-explicit-start.mjs) — scans the whole repo for `launchctl bootstrap` / `systemctl --user enable --now` outside the allowlist; fails CI on every new unprovenanced call.
+- [`test/integration/setup-supervisor-opt-in.test.ts`](test/integration/setup-supervisor-opt-in.test.ts) — pins the `--with-supervisor` gate in setup.sh.
+
+Anchor: rule #6 (let-it-crash AT the right boundary — bootstrap is an explicit operator action, not a setup-script side effect); rule #10 (deterministic enforcement — the supervisor-explicit-start linter is the iron gate, not a Skill); Beyer SRE 2016 Ch. 17 (operator escape hatches are first-class — and so is operator INTENT: never auto-launch heavy work).
 
 ## Pattern conformance index
 
