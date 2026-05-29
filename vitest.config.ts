@@ -22,6 +22,7 @@ export default defineConfig({
       "@minsky/mape-k-loop": r("./novel/mape-k-loop/src/index.ts"),
       "@minsky/notifier": r("./novel/adapters/notifier/src/index.ts"),
       "@minsky/observer-heals": r("./novel/observer/heals/src/index.ts"),
+      "@minsky/ollama": r("./novel/adapters/ollama/src/index.ts"),
       "@minsky/omc-tasksmd-bridge": r("./novel/bridges/omc-tasksmd/src/index.ts"),
     },
   },

@@ -5,6 +5,7 @@
     { "path": "./novel/adapters/agent-runtime-openhands" },
     { "path": "./novel/adapters/notifier" },
     { "path": "./novel/adapters/observability" },
+    { "path": "./novel/adapters/ollama" },
     { "path": "./novel/adapters/prompt-optimizer" },
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/adapters/types" },

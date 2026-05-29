@@ -2320,6 +2320,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P2
 
+- [ ] `ollama-jit-warm-unload-14day-measurement` — sample the `ollama-daemon-idle-wired-memory-mb` metric across 14 days of operator-default use to validate or pivot user-story 020's hypothesis.
+  - **ID**: ollama-jit-warm-unload-14day-measurement
+  - **Tags**: p2, milestone-m1, m1-1-stability, ollama, measurement, rule-9-post-deploy, follow-up-to-pr-pending
+  - **Milestone**: M1
+  - **Hypothesis**: across 14 trailing days of normal operator use (start/stop the daemon naturally, no scripted patterns), the median `ollama_runner_rss_mb` reading from `scripts/measure-ollama-idle-memory.sh` while `daemon_running == false` and `loaded_models == []` is ≤500 MB. If true, story 020 validated. If between 500 and 5,000 MB, story 020 holds but margins are tighter than expected (no action). If > 5,000 MB sustained for 14 days AND the dotfiles plist's `OLLAMA_KEEP_ALIVE=10m` is verified active, the pivot in `experiments/ollama-jit-warm-unload-2026-05-29.yaml` fires — LiteLLM may be overriding the env-var default per-request, investigate via tcpdump on 127.0.0.1:11434 during a live iteration, contribute the override at the LiteLLM layer per rule #1 push-upstream.
+  - **Success**: 14 daily readings (`crontab -l | grep measure-ollama-idle-memory` confirms the launchd job runs once per 24 h appending to `~/.minsky/metrics/ollama-idle-memory.jsonl`); median of the `daemon_running: false` rows is ≤500 MB; verdict column is `UNDER_THRESHOLD` for ≥10/14 days.
+  - **Pivot**: see Hypothesis paragraph above — the 5,000 MB sustained-for-14d threshold; if hit, file a follow-up `ollama-litellm-keepalive-override` P1 task with the tcpdump finding.
+  - **Measurement**: `cat ~/.minsky/metrics/ollama-idle-memory.jsonl | jq -s '[.[] | select(.daemon_running == false and .verdict != "NO_OLLAMA")] | sort_by(.ollama_runner_rss_mb) | .[length / 2 | floor].ollama_runner_rss_mb'` (median of idle readings); count of `UNDER_THRESHOLD` verdicts.
+  - **Anchor**: user-stories/020-ollama-jit-warm-unload.md § "Metric"; experiments/ollama-jit-warm-unload-2026-05-29.yaml; rule #9 (the experiment yaml was filed before code; this task closes the post-deploy half of the loop); Hennessy & Patterson 2017 § 2.2 (working-set memory management as the framing).
+  - **Details**: requires a daily launchd plist that runs `scripts/measure-ollama-idle-memory.sh --json >> ~/.minsky/metrics/ollama-idle-memory.jsonl` once per 24 h. The plist is a sibling deliverable in the operator's dotfiles repo (out of scope for this minsky-side PR). For now, the operator can run the script manually each day until the plist lands.
+  - **Files**: `~/.minsky/metrics/ollama-idle-memory.jsonl` (created on first run); `scripts/measure-ollama-idle-memory.sh` (already shipped); future `~/Library/LaunchAgents/com.dotfiles.ollama-idle-memory-sample.plist` in the dotfiles repo.
+  - **Touches**: NONE in the minsky repo (the metric script is already shipped); the dotfiles repo gets the plist when this task is ready to land.
+  - **Acceptance**: when the 14 daily samples exist in `ollama-idle-memory.jsonl` AND median calculation yields ≤500 MB AND `UNDER_THRESHOLD` count is ≥10/14, this task can be removed from TASKS.md and the experiment yaml's status row updated to "validated" with the measurement attached.
+  - **Composes-with**: `ollama-keep-alive-plist-10m` in the dotfiles repo (the 24h → 10m plist change is the safety-net half; this task validates the daemon-scoped warm/unload half). Not blocked — can start collecting the day after this PR + the dotfiles PR merge.
+
 - [ ] `corpus-refresh-openhands` — refresh the published readings for `openhands` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-04-15, 406 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
   - **ID**: corpus-refresh-openhands
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed

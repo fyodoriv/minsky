@@ -480,6 +480,17 @@ Each active dependency follows the same shape:
 - **Risks**: iOS-only; Apple deprecation risk for Shortcuts; complex actions hit Shortcut UI limits
 - **Last reviewed**: 2026-05-03
 
+### Local LLM lifecycle — `Ollama`
+
+- **Current**: Ollama HTTP API (`/api/generate` for warm/unload via the `keep_alive` parameter; `/api/ps` for inspection), since 2026-05-29
+- **Gives us**: A pre-existing well-documented eviction primitive — `keep_alive: 0` on a `/api/generate` request unloads the model immediately; `keep_alive: "30m"` (or any duration) warms it and pins the lifetime; `/api/ps` returns the loaded model list with expiry timestamps. Ollama is already the operator's default local LLM serving daemon (per `user-stories/015-local-models-until-stable.md`), so this layer is "use what's already there" — no new install, no new auth.
+- **Why we picked it**: Rule #1 (GET, don't IMPLEMENT). The build/buy/borrow question was "how do we reclaim ~42 GB of wired RAM when the minsky daemon stops?" The answer turns out to be: Ollama already ships the eviction primitive; we just call it. Alternatives considered: (a) parent the ollama-runner process under minsky and `kill -9` on shutdown — fragile, race-prone, doesn't survive operator-restarts of Ollama; (b) write a watchdog that polls `ps aux` and kills the runner — duplicates ollama's own keep_alive timer; (c) push a `keep_alive: 0` upstream contribution to LiteLLM — useful long-term (filed as the pivot path) but doesn't help right now. The adapter at `novel/adapters/ollama/` is the thinnest wrap that makes Ollama's HTTP eviction primitive available to the bash skeleton without inlining `curl` calls (rule #2 — no vendor name in business logic).
+- **Replacement candidates**: LM Studio HTTP server (same HTTP shape, different defaults); MLX-LM server (Apple Silicon native, no `keep_alive` parameter today — would need its own Strategy with manual lifecycle); ollama-py library inside a Python sidecar (heavier, no benefit vs HTTP). All three are swap-in-able Strategy implementations behind the same `Ollama` interface.
+- **Risks**: LOW — Ollama's `keep_alive` parameter has been stable since v0.1.x (verified by inspecting the `/api/generate` request shape via tcpdump on 127.0.0.1:11434 during a live qwen3-coder:30b iteration on 2026-05-29). The one observable risk is LiteLLM (used by OpenHands) starting to set `keep_alive` per-request on its `/api/chat` payloads — today it doesn't, but a future LiteLLM upgrade could. The metric `ollama-daemon-idle-wired-memory-mb` catches this regression within 14 days (per user-story 020's pivot section).
+- **Adapter**: `novel/adapters/ollama/src/index.ts` (interface) + `novel/adapters/ollama/src/http.ts` (Strategy)
+- **Closes**: `user-stories/020-ollama-jit-warm-unload.md`; tracks the cross-repo dotfiles plist change (`OLLAMA_KEEP_ALIVE` 24h → 10m) as the env-var safety net for crash paths.
+- **Last reviewed**: 2026-05-29
+
 ### Process supervision — `Supervisor`
 
 - **Current**: systemd (Linux) / launchd (macOS) — built into the OS
