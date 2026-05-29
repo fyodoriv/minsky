@@ -3282,6 +3282,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 ## P3
 
+- [ ] `biome-2x-tree-reorg-and-warning-cleanup` — complete the biome 2.x style migration across the whole tree. The biome 1.9.4 -> 2.4.16 bump (PR #848 / its superseding migration PR) landed the version + config-schema migration only (the `--changed` gate means a bump needs no whole-tree reorg to merge). But biome 2.x's import organizer orders differently than 1.9.4, so `biome ci .` whole-tree reports ~106 `assist/source/organizeImports` errors, and 2.x's broader `recommended` set surfaces ~297 warnings (noConsole, useAwait, useOptionalChain, noTemplateCurlyInString). These are latent: the `biome ci --changed` gate only bites a future PR when it touches an affected file. This task drains them deliberately.
+  - **ID**: biome-2x-tree-reorg-and-warning-cleanup
+  - **Tags**: p3, tooling, biome, scout-finding, observed-2026-05-29
+  - **Milestone**: M1
+  - **Touches**: `**/*.{ts,mjs}` (import order — mechanical `biome check --write`), `biome.json` (re-triage `useAwait` strictness + the new 2.x recommended rules — fix or explicitly disable-with-rationale)
+  - **Surfaced-by**: the biome 2.x migration PR (2026-05-29) — reorganizing the whole tree drags every file into `--changed`, surfacing each file's latent 2.x warnings under the pre-commit `--error-on-warnings`; that's the wrong scope for a version bump, so the reorg was deferred here.
+  - **Hypothesis**: a single `biome check --write .` mechanically reorganizes all imports (zero behaviour change). The ~297 warnings then split into auto-fixable (useOptionalChain via `--write`) and manual (useAwait on Promise-returning interface methods needs a per-line ignore or signature change; noTemplateCurlyInString is usually a false positive on intentional `${}` strings). Landing it as one focused PR (not piggybacked on a bump) keeps the diff reviewable as "style-only".
+  - **Success**: `pnpm exec biome ci .` (whole tree) exits 0 with zero errors AND zero warnings; `biome.json` documents any rule kept disabled.
+  - **Pivot**: if 2.x's `useAwait` flags >20 interface-conformance async methods (Promise-returning by contract, no internal await), keep `useAwait` disabled in `biome.json` with a one-line rationale rather than churning signatures — the rule is advisory and the contract is intentional.
+  - **Measurement**: `pnpm exec biome ci . >/dev/null 2>&1; echo $?` returns `0`.
+  - **Anchor**: biome 2.0 migration guide (biomejs.dev/blog/biome-v2); the 2026-05-29 migration PR that deferred this; rule #10 (the `--changed` gate is the deterministic enforcement; whole-tree conformance is the lazy-drained ideal).
+
 - [ ] `docs-frame-restore-across-allowlist` — restore the 3-beat reader-orientation doc frame (tagline / `## What this is` / `## What this is not`) across the 15 docs that have drifted since PR #685 originally applied it. The `docs-frame-coherence` lint shipped 2026-05-28 with a SHRUNKEN live allowlist (`AGENTS.md`, `INSTALL.md`, `docs/PRACTICES.md`) because the originally-targeted 18 docs no longer all conform: `README.md` was rewritten in PR #948 (5-min-install-guide cut); `MILESTONES.md` and `vision.md` never had the frame; all 16 `competitors/*.md` lack the frame; `ARCHITECTURE.md`, `DEPRECATED.md`, `research.md` were retired during Path-A. Re-apply the frame and lift each restored doc into the live allowlist.
   - **ID**: docs-frame-restore-across-allowlist
   - **Tags**: p3, docs, scout-finding, observed-2026-05-28
