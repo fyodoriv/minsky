@@ -390,6 +390,17 @@ Each active dependency follows the same shape:
 - **Adapter**: `novel/adapters/a2a/src/index.ts` (interface) + `src/a2a.openhands.ts` (scaffold Strategy)
 - **Last reviewed**: 2026-05-29
 
+### Agent-to-tool protocol — `MCP`
+
+- **Current**: MCP v2025-11-25 (Anthropic, ~100+ public servers), adapter scaffold shipped 2026-05-29 as `@minsky/mcp` (`novel/adapters/mcp/`)
+- **Gives us**: a standardized agent-to-tool transport (`listResources` / `readResource` / `callTool`) so Minsky composes the existing MCP server ecosystem instead of writing its own tool-calling protocol. Companion to A2A: A2A handles agent ↔ agent, MCP handles agent ↔ tool.
+- **Why we picked it**: the de-facto agent-to-tool standard with the largest public server ecosystem — adopting it is pure rule #1 (don't reinvent the wheel); Minsky's substrate calls only the 3 verbs and never touches JSON-RPC internals.
+- **Workspace dep added**: `@minsky/adapter-types` (`workspace:*`) — the internal leaf package supplying the shared `SelfTestResult` contract; not an external building-block (our own acyclic-dependency leaf per Martin 2017), so no separate evaluation is owed beyond this note.
+- **Replacement candidates**: raw JSON-RPC 2.0 against individual tool servers (the fallback if MCP fragments); OpenAI's function-calling tool schema (different ecosystem — would only matter if Minsky pivoted off the MCP server population).
+- **Risks**: the real bridge (`@modelcontextprotocol/sdk` over the OpenHands shim's stdio transport) is gated on the 2026-06-01 OpenHands runtime; until then `MCPOpenHands` is a deterministic-mock scaffold whose `selfTest()` returns `yellow` (never a false `green`).
+- **Adapter**: `novel/adapters/mcp/src/index.ts` (interface) + `src/mcp.openhands.ts` (scaffold Strategy)
+- **Last reviewed**: 2026-05-29
+
 ### Persona orchestration — `Orchestrator`
 
 - **Current**: OMC (oh-my-claudecode) v4.13.x, since 2026-05

@@ -4,6 +4,7 @@
   "references": [
     { "path": "./novel/adapters/a2a" },
     { "path": "./novel/adapters/agent-runtime-openhands" },
+    { "path": "./novel/adapters/mcp" },
     { "path": "./novel/adapters/notifier" },
     { "path": "./novel/adapters/observability" },
     { "path": "./novel/adapters/ollama" },
