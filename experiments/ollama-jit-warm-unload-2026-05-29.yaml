@@ -30,43 +30,36 @@ hypothesis: |
   problem. The cold-start tax (loading ~42 GB into VRAM) is paid
   exactly once per daemon-start, not once per iteration. Steady-state
   iteration latency is unchanged.
-
-success_threshold:
-  # Metric A: daemon-idle wired memory after `minsky daemon stop` + 12s.
-  - ollama_daemon_idle_wired_memory_mb: 500
-  # Metric B: iteration throughput must NOT regress more than 5% vs
-  # the pre-change baseline (measured by scripts/stability-number.mjs
-  # over the trailing 7 days). Cold-start tax is one-time per session
-  # so steady-state iteration latency should be flat. A regression
-  # > 5% indicates an unexpected cost (e.g., warm-call latency leaks
-  # into iteration timing because of a missing async-await somewhere).
-  - iteration_clean_exit_fraction_delta: -0.05  # at most 5pp drop
-  # Metric C: the warm-CLI invocation itself completes in < 60s on a
-  # cold model load. The cold-start tax is empirically ~15-30s for
-  # qwen3-coder:30b on M3 Max; 60s gives 2x headroom.
-  - warm_cli_p95_latency_seconds: 60
-
-pivot:
-  if: |
-    Daemon-idle wired memory stays > 5000 MB across 14 days of
-    operator-default use AND the dotfiles plist's
-    OLLAMA_KEEP_ALIVE=10m env var has been verified active (via
-    `launchctl getenv OLLAMA_KEEP_ALIVE` on the host).
-  then: |
-    The unload path isn't firing reliably. Investigate LiteLLM
-    behaviour (might be hardcoding a long keep_alive on its newer
-    versions), Ollama upgrade compat (the unload endpoint shape may
-    have changed), or the trap handler ordering (something exits
-    before the unload CLI completes). If LiteLLM is the cause,
-    contribute a `keep_alive: 0` override at the LiteLLM layer (rule
-    #1 push-upstream). If Ollama API changed, re-pin the adapter to
-    the new shape.
-
-measurement:
-  - "bash scripts/measure-ollama-idle-memory.sh"
-  - "node scripts/stability-number.mjs --days=7 --baseline=pre-jit-warm-unload"
-  - "node scripts/measure-warm-cli-latency.mjs --runs=10"
-
+success: |
+  Numeric success thresholds (all three must hold):
+    Metric A — daemon-idle wired memory after `minsky daemon stop` + 12s
+      drops from the ~43,458 MB baseline (measured 2026-05-29 via
+      scripts/measure-ollama-idle-memory.sh, OVER_THRESHOLD) to
+      ≤ 500 MB.
+    Metric B — iteration throughput does NOT regress: the clean-exit
+      fraction (scripts/stability-number.mjs over the trailing 7 days)
+      drops by at most 0.05 (5 percentage points) vs the pre-change
+      baseline. Cold-start tax is one-time per session, so steady-state
+      iteration latency should be flat; a > 5pp drop signals an
+      unexpected cost (e.g. warm-call latency leaking into iteration
+      timing through a missing async-await).
+    Metric C — the warm-CLI invocation itself completes in < 60 s on a
+      cold model load. The cold-start tax is empirically ~15-30 s for
+      qwen3-coder:30b on M3 Max; 60 s gives 2x headroom.
+pivot: |
+  Pivot threshold (numeric): if daemon-idle wired memory stays
+  > 5000 MB across 14 days of operator-default use AND the dotfiles
+  plist's OLLAMA_KEEP_ALIVE=10m env var has been verified active (via
+  `launchctl getenv OLLAMA_KEEP_ALIVE` on the host), the unload path
+  isn't firing reliably. Investigate, in order: LiteLLM behaviour (a
+  newer version may hardcode a long keep_alive), Ollama upgrade compat
+  (the unload endpoint shape may have changed), or trap-handler
+  ordering (something exits before the unload CLI completes). If
+  LiteLLM is the cause, contribute a `keep_alive: 0` override at the
+  LiteLLM layer (rule #1 push-upstream). If the Ollama API changed,
+  re-pin the adapter to the new shape.
+measurement: |
+  bash scripts/measure-ollama-idle-memory.sh --json | jq -e '.ollama_runner_rss_mb <= 500' && node scripts/stability-number.mjs --json | jq -e '.stability_pct == null or .stability_pct >= 60'
 # Implementation artefacts (rule-12 scope-discipline cross-reference).
 # The hypothesis above is realised by these new public artefacts —
 # listed here so the rule-12 linter ties them back to this pre-
@@ -80,16 +73,6 @@ measurement:
 #   - bin/minsky-ollama
 #   - bin/minsky-run.sh (§ 7a, warm/unload wiring)
 #   - scripts/measure-ollama-idle-memory.sh
-artefacts:
-  - novel/adapters/ollama/package.json
-  - novel/adapters/ollama/tsconfig.json
-  - novel/adapters/ollama/README.md
-  - novel/adapters/ollama/src/index.ts
-  - novel/adapters/ollama/src/http.ts
-  - novel/adapters/ollama/bin/cli.mjs
-  - bin/minsky-ollama
-  - scripts/measure-ollama-idle-memory.sh
-
 anchor: |
   Hennessy, J. L. & Patterson, D. A., *Computer Architecture: A
   Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017, Ch. 2
