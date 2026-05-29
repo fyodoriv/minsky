@@ -119,3 +119,9 @@ pickHostTask
 # Task IDs filed 2026-05-24 in PR #788 (anchored in TASKS.md).
 launcher-agnostic-feature-parity-chaos-test  # P1 task in TASKS.md — implements story-014's chaos test
 local-models-stability-gate-90-percent  # P1 task in TASKS.md — implements story-015's M1.1 stability gate
+
+# Standard macOS launchd plist key (Apple launchd.plist(5) man page) — cited
+# in vision.md rule #19's anti-pattern list (a plist's `RunAtLoad: true` must
+# be paired with the `--with-supervisor` opt-in path). OS-level identifier,
+# not a Minsky concept, so it has no Glossary/Pattern-index entry.
+RunAtLoad

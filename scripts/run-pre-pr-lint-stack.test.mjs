@@ -132,6 +132,7 @@ describe("STACK_MANIFEST", () => {
         "test-file-colocation",
         "rule-12-scope-discipline",
         "rule-17-proactive-heal",
+        "rule-19-supervisor-explicit-start",
         "rule-2-dep-coverage",
         "rule-3-doc-first",
         "rule-6-let-it-crash",
