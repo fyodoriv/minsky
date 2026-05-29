@@ -67,6 +67,29 @@ measurement:
   - "node scripts/stability-number.mjs --days=7 --baseline=pre-jit-warm-unload"
   - "node scripts/measure-warm-cli-latency.mjs --runs=10"
 
+# Implementation artefacts (rule-12 scope-discipline cross-reference).
+# The hypothesis above is realised by these new public artefacts —
+# listed here so the rule-12 linter ties them back to this pre-
+# registered experiment and treats them as in-scope:
+#   - novel/adapters/ollama/package.json
+#   - novel/adapters/ollama/tsconfig.json
+#   - novel/adapters/ollama/README.md
+#   - novel/adapters/ollama/src/index.ts
+#   - novel/adapters/ollama/src/http.ts
+#   - novel/adapters/ollama/bin/cli.mjs
+#   - bin/minsky-ollama
+#   - bin/minsky-run.sh (§ 7a, warm/unload wiring)
+#   - scripts/measure-ollama-idle-memory.sh
+artefacts:
+  - novel/adapters/ollama/package.json
+  - novel/adapters/ollama/tsconfig.json
+  - novel/adapters/ollama/README.md
+  - novel/adapters/ollama/src/index.ts
+  - novel/adapters/ollama/src/http.ts
+  - novel/adapters/ollama/bin/cli.mjs
+  - bin/minsky-ollama
+  - scripts/measure-ollama-idle-memory.sh
+
 anchor: |
   Hennessy, J. L. & Patterson, D. A., *Computer Architecture: A
   Quantitative Approach*, 6th ed., Morgan Kaufmann, 2017, Ch. 2

@@ -29,7 +29,7 @@
 //
 // @otel-exempt thin CLI; the adapter's public methods own the spans.
 
-import { resolve, dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const thisDir = dirname(fileURLToPath(import.meta.url));
@@ -84,7 +84,9 @@ async function runWarmOrUnload(op, model, baseUrl) {
     process.stdout.write(`minsky-ollama: ${op} ok (model=${model})\n`);
     process.exit(0);
   }
-  process.stderr.write(`minsky-ollama: ${op} failed (model=${model}): ${result.reason ?? "unknown"}\n`);
+  process.stderr.write(
+    `minsky-ollama: ${op} failed (model=${model}): ${result.reason ?? "unknown"}\n`,
+  );
   process.exit(1);
 }
 
