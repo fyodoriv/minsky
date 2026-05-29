@@ -1,0 +1,39 @@
+{
+  "name": "@minsky/ollama",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ollama adapter — interface (Adapter pattern, Gamma 1994) + StubOllama test fake (Meszaros 2007) + HttpOllama HTTP Strategy. Daemon-scoped warm/unload of local LLM models so wired memory is reclaimed when the daemon stops (closes user-story 020).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./http": {
+      "import": "./dist/http.js",
+      "types": "./dist/http.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "bin/cli.mjs",
+    "README.md"
+  ],
+  "bin": {
+    "minsky-ollama-cli": "./bin/cli.mjs"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minsky/adapter-types": "workspace:*"
+  }
+}

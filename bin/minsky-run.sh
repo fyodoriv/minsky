@@ -1311,6 +1311,47 @@ invariant_config_loadable
 [[ "$DRY_RUN" == "1" ]] || invariant_openhands_in_path
 invariant_pick_task_present
 
+# --- 7a. Ollama daemon-scoped warm/unload (user-story 020) -----------------
+# When `local_llm_enabled: true` AND the operator hasn't disabled the
+# lifecycle hooks, warm the configured local model EXACTLY ONCE per
+# process before the iteration loop runs. The corresponding unload
+# fires from the SIGTERM/SIGINT trap below.
+#
+# Why here (not in `iterate_host`): warming is daemon-scoped, not
+# iteration-scoped. The cold-start tax of loading ~42 GB of qwen3-
+# coder:30b into VRAM is paid ONCE per daemon-start; each subsequent
+# LiteLLM request from openhands renews the keep_alive via Ollama's
+# env-var default (`OLLAMA_KEEP_ALIVE=10m` post-story-020). If we
+# warmed per-iteration, the daemon would pay 15-30 s of cold-start
+# tax on every iteration's first agent call.
+#
+# Graceful-degrade (rule #7): a warm failure does NOT abort the
+# runner. The bash script continues into walk_hosts; the first
+# openhands spawn will trip the same connection-refused, the existing
+# `heal-ollama-down` recipe kicks the daemon, and the runner proceeds.
+#
+# Escape hatch: `MINSKY_OLLAMA_DISABLE_LIFECYCLE=1` short-circuits
+# both warm and unload to no-op (handled inside bin/minsky-ollama).
+_minsky_local_llm_enabled="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+_minsky_local_llm_model=""
+_minsky_local_llm_base_url=""
+_minsky_ollama_warmed=0
+if [[ "$_minsky_local_llm_enabled" == "true" && "$DRY_RUN" != "1" ]]; then
+  _minsky_local_llm_model="$(jq -r '.local_llm.model // "ollama_chat/qwen3-coder:30b"' "$CONFIG_FILE" 2>/dev/null || echo "ollama_chat/qwen3-coder:30b")"
+  _minsky_local_llm_base_url="$(jq -r '.local_llm.base_url // "http://localhost:11434"' "$CONFIG_FILE" 2>/dev/null || echo "http://localhost:11434")"
+  _minsky_ollama_bin="$(dirname "${BASH_SOURCE[0]}")/minsky-ollama"
+  if [[ -x "$_minsky_ollama_bin" ]]; then
+    echo "minsky-run: warming ollama model=$_minsky_local_llm_model" >&2
+    if "$_minsky_ollama_bin" warm "$_minsky_local_llm_model" "$_minsky_local_llm_base_url"; then
+      _minsky_ollama_warmed=1
+    else
+      echo "minsky-run: warm failed (continuing — first iteration will pay cold-start tax)" >&2
+    fi
+  else
+    echo "minsky-run: bin/minsky-ollama not executable; skipping warm" >&2
+  fi
+fi
+
 # Graceful shutdown via SIGTERM (sent by launchd/systemd on `stop`).
 # Without this trap the supervisor's exit code on SIGTERM was 143
 # (128+SIGTERM=15), which launchd treats as "abnormal" with the OTP-
@@ -1318,7 +1359,20 @@ invariant_pick_task_present
 # Operators sending SIGTERM via `launchctl bootout` got an immediate
 # respawn — the opposite of "stop". With this trap, SIGTERM exits 0
 # AND launchd sees a clean exit AND respects the stop intent.
-trap 'echo "SIGTERM received — exiting cleanly" >&2; exit 0' TERM INT
+#
+# 2026-05-29: the trap also unloads any locally-warmed ollama model
+# so the operator gets ~42 GB of wired RAM back the moment the
+# daemon stops (user-story 020 § Scenario 2). Unload failure is
+# non-fatal — the env-var safety net (`OLLAMA_KEEP_ALIVE=10m` in
+# `com.dotfiles.ollama.plist`) catches any residual hold.
+_minsky_unload_ollama_on_exit() {
+  if [[ "$_minsky_ollama_warmed" == "1" ]]; then
+    echo "minsky-run: unloading ollama model=$_minsky_local_llm_model" >&2
+    "$_minsky_ollama_bin" unload "$_minsky_local_llm_model" "$_minsky_local_llm_base_url" || true
+  fi
+}
+trap '_minsky_unload_ollama_on_exit; echo "SIGTERM received — exiting cleanly" >&2; exit 0' TERM INT
+trap '_minsky_unload_ollama_on_exit' EXIT
 
 # Iteration loop:
 # - `--loop` flag (set by distribution/systemd/run-tick-loop.sh when
