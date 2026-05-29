@@ -2333,8 +2333,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `~/.minsky/metrics/ollama-idle-memory.jsonl` (created on first run); `scripts/measure-ollama-idle-memory.sh` (already shipped); future `~/Library/LaunchAgents/com.dotfiles.ollama-idle-memory-sample.plist` in the dotfiles repo.
   - **Touches**: NONE in the minsky repo (the metric script is already shipped); the dotfiles repo gets the plist when this task is ready to land.
   - **Acceptance**: when the 14 daily samples exist in `ollama-idle-memory.jsonl` AND median calculation yields ≤500 MB AND `UNDER_THRESHOLD` count is ≥10/14, this task can be removed from TASKS.md and the experiment yaml's status row updated to "validated" with the measurement attached.
-  - **Composes-with**: `ollama-keep-alive-plist-10m` in the dotfiles repo (the 24h → 10m plist change is the safety-net half; this task validates the daemon-scoped warm/unload half).
-  - **Blocked by**: zero — can start collecting the day after this PR + the dotfiles PR merge.
+  - **Composes-with**: `ollama-keep-alive-plist-10m` in the dotfiles repo (the 24h → 10m plist change is the safety-net half; this task validates the daemon-scoped warm/unload half). Not blocked — can start collecting the day after this PR + the dotfiles PR merge.
 
 - [ ] `corpus-refresh-openhands` — refresh the published readings for `openhands` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-04-15, 406 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
   - **ID**: corpus-refresh-openhands

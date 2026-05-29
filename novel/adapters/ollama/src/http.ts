@@ -213,6 +213,7 @@ export class HttpOllama implements Ollama {
         headers: { "Content-Type": "application/json" },
         body,
       });
+      // rule-6: handled-locally — fetch rejection is the supervisor boundary for unload; per rule #7 (chaos table row "ollama-returns-non-2xx-on-unload"), a missed unload must never crash the daemon's exit trap — the env-var safety net (10 m) catches the residual hold.
     } catch (err) {
       return { ok: false, reason: `network: ${errorMessage(err)}` };
     }
@@ -232,6 +233,7 @@ export class HttpOllama implements Ollama {
     let response: Response;
     try {
       response = await this.fetchWithTimeout(`${this.baseUrl}/api/ps`, { method: "GET" });
+      // rule-6: handled-locally — `ps()` is read-only and feeds selfTest + the metric script; transport errors return an empty model list so callers see the absence rather than a thrown exception that would break dashboard rendering.
     } catch (err) {
       return { ok: false, reason: `network: ${errorMessage(err)}`, models: [] };
     }
@@ -241,6 +243,7 @@ export class HttpOllama implements Ollama {
     let parsed: unknown;
     try {
       parsed = await response.json();
+      // rule-6: handled-locally — malformed JSON from `/api/ps` is treated like a transport error; the caller's handling is identical (empty model list + reason for logging).
     } catch (err) {
       return { ok: false, reason: `parse: ${errorMessage(err)}`, models: [] };
     }

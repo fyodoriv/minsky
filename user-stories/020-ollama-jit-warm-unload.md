@@ -26,26 +26,31 @@ Critically, story 015's "local models are the default" stance does **not** chang
 ### Given/When/Then (rule #3a — acceptance-scenario gate)
 
 **Scenario 1 — daemon-start warm**
+
 - **Given** `~/.minsky/config.json` has `local_llm_enabled: true` and the bash skeleton is about to start a host-walk
 - **When** the runner begins `walk_hosts()` for the first time in this process
 - **Then** it shells out to `bin/minsky-ollama-warm <model> <base_url>` exactly once, which POSTs `/api/generate` with an empty prompt and `keep_alive: "30m"`. The model is loaded into VRAM before the first iteration's openhands spawn so the first LiteLLM call doesn't pay the cold-start tax mid-agent-reasoning.
 
 **Scenario 2 — daemon-stop unload**
+
 - **Given** the daemon is running and has previously warmed a local model
 - **When** the runner receives `SIGTERM` or `SIGINT` (the existing trap at `bin/minsky-run.sh:1321`)
 - **Then** the trap handler shells out to `bin/minsky-ollama-unload <model> <base_url>` BEFORE `exit 0`. The Ollama `/api/generate` response carries `"done_reason": "unload"`. `curl /api/ps` shows the model gone within 2 s.
 
 **Scenario 3 — cloud-model iteration is untouched**
+
 - **Given** `~/.minsky/config.json` has `local_llm_enabled: false` (cloud Anthropic path)
 - **When** the daemon starts and stops
 - **Then** the runner does NOT touch Ollama. No `warm` call, no `unload` call. The adapter is a pure no-op on the cloud path.
 
 **Scenario 4 — Ollama unreachable at warm time**
+
 - **Given** `local_llm_enabled: true` but the Ollama daemon is down (port 11434 refuses connection)
 - **When** `bin/minsky-ollama-warm` runs
 - **Then** it exits non-zero and the bash runner CONTINUES walking hosts (graceful degrade per rule #7 — chaos table row `ollama-down-at-warm`). The existing `heal-ollama-down` recipe handles the actual heal; the warm-call failure must not block the iteration loop. (The first openhands spawn will trip the same connection refused, the heal fires, the daemon proceeds.)
 
 **Scenario 5 — abrupt crash safety net**
+
 - **Given** the daemon has warmed a local model and then is killed via `SIGKILL` (no trap firing)
 - **When** 10 minutes pass with no further LLM activity
 - **Then** Ollama's own `OLLAMA_KEEP_ALIVE=10m` env (set in the dotfiles launchd plist, lowered from `24h` in the same PR) auto-evicts the model. Worst-case memory hold across a crash = 10 min, not 24 h.
@@ -56,7 +61,7 @@ Critically, story 015's "local models are the default" stance does **not** chang
 2. Two thin CLI binaries — `bin/minsky-ollama-warm` and `bin/minsky-ollama-unload` — each accept `<model>` and `<base-url>` argv, instantiate the HTTP Strategy, and call `.warm()` / `.unload()`. Exit 0 on success, non-zero on transport failure. ~15 LOC each.
 3. `bin/minsky-run.sh` calls the warm binary once per process at the top of `walk_hosts()` when `local_llm_enabled == true`; idempotent (re-entering the function on a repeated `--loop` cycle does NOT re-warm — the SIGTERM trap is the only path that calls unload).
 4. The SIGTERM/SIGINT trap at `bin/minsky-run.sh:1321` calls the unload binary when the runner has warmed a local model in this process; the existing `echo "SIGTERM received — exiting cleanly"` + `exit 0` semantics are preserved.
-5. The adapter's HTTP shape matches Ollama's documented `/api/generate` and `/api/ps` endpoints (https://github.com/ollama/ollama/blob/main/docs/api.md § "Generate a completion" and § "List running models"). Specifically: empty `prompt` + `keep_alive: "30m"` warms; `keep_alive: 0` (or `"0"`) unloads.
+5. The adapter's HTTP shape matches Ollama's documented `/api/generate` and `/api/ps` endpoints (<https://github.com/ollama/ollama/blob/main/docs/api.md> § "Generate a completion" and § "List running models"). Specifically: empty `prompt` + `keep_alive: "30m"` warms; `keep_alive: 0` (or `"0"`) unloads.
 6. Tests are hermetic: the HTTP Strategy takes an injected `fetch`-like callable (mirrors `NtfyNotifier`'s pattern), and the test fake records calls without touching the network. No test spawns ollama. No test sets a real timer.
 7. The dotfiles launchd plist (`~/Library/LaunchAgents/com.dotfiles.ollama.plist`) is updated in a sibling PR in the **dotfiles** repo (NOT this minsky PR) from `OLLAMA_KEEP_ALIVE=24h` to `OLLAMA_KEEP_ALIVE=10m`. This minsky PR's TASKS.md entry documents the cross-repo dependency.
 8. `docs/ARCHITECTURE.md`'s dependency table grows a row: `ollama HTTP API` → `novel/adapters/ollama/src/http.ts` → "warm/unload Ollama models for daemon-scoped memory management".
@@ -85,6 +90,7 @@ Critically, story 015's "local models are the default" stance does **not** chang
 8. `selfTest()` calls `ps()` and returns `{ status: "green" }` on 200, `{ status: "red" }` on transport failure.
 
 `bin/minsky-run.sh` integration:
+
 - `tests/minsky-run-ollama-warm.bats` (new) — stubs `bin/minsky-ollama-warm` via PATH, sets `local_llm_enabled: true` in a fixture config, runs `bin/minsky-run.sh --hosts-dir <fixture> --max-iterations 1`, asserts the stub was invoked with the expected argv.
 - Same shape for `tests/minsky-run-ollama-unload.bats` — sends `SIGTERM` to the running script, asserts the unload stub was invoked before exit.
 

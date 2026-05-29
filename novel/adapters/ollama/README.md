@@ -84,6 +84,21 @@ the call sites.
   daemon-stop unload is the deterministic eviction primitive; the env
   var is the safety net.
 
+## Failure modes & chaos verification
+
+Per [vision.md § rule #7](../../../vision.md) — every novel package's README enumerates failure modes, expected behavior, and a chaos test row. Full table also lives in [user-stories/020-ollama-jit-warm-unload.md](../../../user-stories/020-ollama-jit-warm-unload.md) § "Failure modes & chaos verification".
+
+| Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
+|---|---|---|---|
+| Ollama unreachable at warm time | port 11434 refuses connection at daemon start | `graceful-degrade` — `warm()` returns `{ ok: false, reason: "network: ..." }`, the bash runner continues; the existing `heal-ollama-down` recipe kicks the daemon on the first iteration's spawn failure | `src/http.test.ts` § `returns ok: false with reason on network rejection — never throws` |
+| Ollama returns non-2xx on unload | model already unloaded; ollama upgraded mid-session; auth changed | `graceful-degrade` — `unload()` returns `{ ok: false, reason: "http <code>" }`; the trap STILL `exit 0`s the runner cleanly; the 10 m env-var safety net catches residual hold | `src/http.test.ts` § `returns ok: false on non-2xx response` |
+| Network partition mid-warm | fetch hangs forever | `circuit-break-and-notify` — `AbortController` per-call timeout (30 s default) aborts; the warm CLI exits non-zero; the runner continues; first iteration pays cold-start tax | `src/http.test.ts` § `aborts after the configured timeout and surfaces it as a network reason` |
+| Malformed `/api/ps` payload | upstream Ollama upgrade changes the shape | `graceful-degrade` — `ps()` returns `{ ok: false, reason: "parse: ..." }` AND `{ ok: true, models: [] }` when the payload is just missing the `models` field; never throws | `src/http.test.ts` § `returns empty models when /api/ps payload has no models field` + `skips malformed model rows rather than crashing the parse` |
+
+**Blast radius**: bounded to operators with `local_llm_enabled: true`. Cloud-path operators see zero behavior change.
+
+**Operator escape hatch**: `MINSKY_OLLAMA_DISABLE_LIFECYCLE=1` in the daemon's env short-circuits BOTH `warm` and `unload` to no-op. Iterations still work; memory management reverts to the env-var safety net (`OLLAMA_KEEP_ALIVE=10m`).
+
 ## Anchors
 
 - Gamma, Helm, Johnson, Vlissides, *Design Patterns*, Addison-Wesley,
@@ -92,7 +107,7 @@ the call sites.
 - Martin, R. C., *Clean Architecture*, Pearson, 2017 (acyclic
   dependency principle — `@minsky/adapter-types` is the leaf).
 - Ollama HTTP API docs (`/api/generate` § "Load a model"):
-  https://github.com/ollama/ollama/blob/main/docs/api.md
+  <https://github.com/ollama/ollama/blob/main/docs/api.md>
 - Hennessy & Patterson, *Computer Architecture: A Quantitative
   Approach*, 6th ed., 2017, § 2.2 — working-set management (the
   framing for why daemon-scoped unload is the right eviction
