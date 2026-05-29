@@ -9,6 +9,7 @@
     "noEmit": true,
     "rootDir": ".",
     "types": ["node"],
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@minsky/mape-k-loop": ["../novel/mape-k-loop/src/index.ts"],
