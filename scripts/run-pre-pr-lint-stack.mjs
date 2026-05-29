@@ -287,6 +287,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "rule-12-scope-discipline",
       "rule-13-sibling-anchors",
       "rule-17-proactive-heal",
+      "rule-19-supervisor-explicit-start",
       "no-hardcoded-user-paths",
       "no-personal-paths-in-docs",
       "rule-9-tasksmd-fields",
@@ -446,6 +447,19 @@ export const STACK_MANIFEST = Object.freeze([
     cmd: "node",
     args: ["scripts/check-rule-17-proactive-heal.mjs"],
     env: { RULE_17_DIFF_BASE: "origin/main" },
+  },
+  {
+    // vision.md § rule #19 (operator-explicit-start, IRON). Scans the
+    // whole repo for `launchctl bootstrap` and `systemctl --user
+    // enable --now` outside the allowlisted paths. Born from the
+    // 2026-05-29 incident — machine reload silently brought 7
+    // com.minsky.* plists back online and held ~42 GB of wired RAM
+    // hostage. The lint is the deterministic gate ensuring no future
+    // PR re-introduces unconditional supervisor bootstrap.
+    name: "rule-19-supervisor-explicit-start",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-supervisor-explicit-start.mjs"],
   },
   {
     name: "no-hardcoded-user-paths",
