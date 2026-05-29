@@ -5,7 +5,14 @@
 #   ./setup.sh             — install / repair (idempotent; safe to re-run)
 #   ./setup.sh --doctor    — self-tests only; no mutations
 #   ./setup.sh --reset     — remove .minsky/ and re-install from scratch
-#   ./setup.sh --setup     — render unit files + bootstrap supervisor on this repo
+#   ./setup.sh --setup     — render unit files into ~/Library/LaunchAgents/
+#                            (or ~/.config/systemd/user/) BUT do NOT bootstrap
+#                            them. The supervisor only auto-starts after the
+#                            operator explicitly opts in (see --with-supervisor).
+#   ./setup.sh --setup --with-supervisor
+#                          — render AND bootstrap so units run at login. IRON
+#                            opt-in (operator directive 2026-05-29:
+#                            "It must only run when I explicitly tell it so").
 #   ./setup.sh --dogfood   — DEPRECATED alias for --setup (kept for ≤30d)
 #   ./setup.sh --help      — print this header
 #
@@ -68,11 +75,26 @@ LOG_FILE="$STATE_DIR/setup.log"
 
 # --- mode parsing ---
 MODE="install"
+# `--with-supervisor` makes `--setup` ALSO bootstrap the unit files into
+# launchd / systemd-user so they start at login. Default is OFF (IRON):
+# minsky must NEVER auto-start unless the operator explicitly says so
+# (operator directive 2026-05-29 — "It must only run when I explicitly
+# tell it so"). The env var `MINSKY_SETUP_WITH_SUPERVISOR=1` is the
+# equivalent opt-in for non-interactive flows.
+WITH_SUPERVISOR="${MINSKY_SETUP_WITH_SUPERVISOR:-0}"
 for arg in "$@"; do
   case "$arg" in
     --doctor)  MODE="doctor" ;;
     --reset)   MODE="reset" ;;
     --setup)   MODE="setup" ;;
+    --with-supervisor)
+      # Opt-in: bootstrap launchd/systemd units after rendering them, so
+      # the supervisor auto-starts at login. WITHOUT this flag, --setup
+      # renders the unit-file templates but does NOT bootstrap them —
+      # the operator must invoke `launchctl bootstrap` / `systemctl
+      # --user enable --now` themselves (or re-run with this flag).
+      WITH_SUPERVISOR=1
+      ;;
     --dogfood)
       # Deprecated 2026-05-26 — operator directive: "Why is this command
       # even called dogfood? That's minsky first of all". Map to --setup.
@@ -518,7 +540,38 @@ if [ "$MODE" = "setup" ]; then
   # Load + confirm. Iterate ONLY plists we rendered above (not a wildcard
   # glob of $unit_dir) so foreign com.minsky.*.plist files an operator
   # may have installed for other repos are left alone.
+  #
+  # IRON gate: only bootstrap the units if the operator EXPLICITLY
+  # passed --with-supervisor (or set MINSKY_SETUP_WITH_SUPERVISOR=1).
+  # Default behavior is render-only — the templates land in the unit
+  # dir but DO NOT load at login. Source: operator directive 2026-05-29
+  # ("It must only run when I explicitly tell it so. Fix immediately")
+  # after a machine reload silently brought all 7 com.minsky.* plists
+  # back online and re-ate ~42 GB of RAM. Auto-starting the supervisor
+  # from a re-run of setup.sh violated the operator's expectation that
+  # minsky stays dormant unless explicitly told to start.
   CURRENT_STEP="setup-load-supervisor"
+  if [ "$WITH_SUPERVISOR" != "1" ]; then
+    echo
+    bold "Minsky setup complete — unit files rendered, supervisor NOT bootstrapped."
+    echo
+    dim "  Rendered $rendered unit file(s) into $unit_dir."
+    dim "  The supervisor is DORMANT. Minsky will not run until you explicitly start it."
+    echo
+    dim "  To start one explicit iteration:"
+    dim "    ./bin/minsky-run.sh --host \"\$PWD\" --max-iterations 1"
+    dim "  To enable auto-start at login (and start now):"
+    dim "    ./setup.sh --setup --with-supervisor"
+    dim "  To disable later:"
+    case "$os" in
+      Darwin) dim "    launchctl bootout gui/\$(id -u)/com.minsky.tick-loop" ;;
+      Linux)  dim "    systemctl --user disable --now minsky-supervisor.target" ;;
+    esac
+    echo
+    ok "GREEN — templates rendered; supervisor stays dormant per operator-explicit-start contract"
+    exit 0
+  fi
+
   case "$os" in
     Darwin)
       for f in "${rendered_plists[@]}"; do
@@ -549,7 +602,7 @@ if [ "$MODE" = "setup" ]; then
 
   # Report next steps.
   echo
-  bold "Minsky setup complete — supervisor is loaded."
+  bold "Minsky setup complete — supervisor is loaded (--with-supervisor opt-in)."
   echo
   dim "  Web UI:       pnpm minsky:ui   →   open http://localhost:8181/"
   dim "  Stream logs:  tail -F $STATE_DIR/tick-loop.out.log $STATE_DIR/tick-loop.err.log"
@@ -562,7 +615,7 @@ if [ "$MODE" = "setup" ]; then
       ;;
   esac
   dim "  Status:       launchctl list | grep -i minsky    (macOS)  /  systemctl --user status minsky-supervisor.target  (Linux)"
-  dim "  Re-run:       ./setup.sh --setup (idempotent; re-renders templates)"
+  dim "  Re-run:       ./setup.sh --setup --with-supervisor (idempotent; re-renders templates AND re-loads)"
   echo
   ok "GREEN — supervisor loaded; tick-loop will pick the next P0 task on its next cadence"
   exit 0
