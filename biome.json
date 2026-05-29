@@ -37,7 +37,7 @@
       "suspicious": {
         "noExplicitAny": "error",
         "noEmptyBlockStatements": "warn",
-        "useAwait": "warn",
+        "useAwait": "off",
         "noConsole": {
           "level": "warn",
           "options": {
