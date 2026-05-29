@@ -1,16 +1,17 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
   "files": {
-    "ignore": [
-      "dist",
-      "coverage",
-      "node_modules",
-      ".minsky",
-      ".obsidian",
-      ".claude",
-      ".worktrees",
-      "**/*.d.ts",
-      "novel/bridges/omc-tasksmd/test/fixtures/.omc/state/team/fixture-team/tasks/malformed.json"
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/coverage",
+      "!**/node_modules",
+      "!**/.minsky",
+      "!**/.obsidian",
+      "!**/.claude",
+      "!**/.worktrees",
+      "!**/*.d.ts",
+      "!**/novel/bridges/omc-tasksmd/test/fixtures/.omc/state/team/fixture-team/tasks/malformed.json"
     ]
   },
   "formatter": {
@@ -19,7 +20,7 @@
     "indentWidth": 2,
     "lineWidth": 100
   },
-  "organizeImports": { "enabled": true },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
@@ -35,9 +36,33 @@
       },
       "suspicious": {
         "noExplicitAny": "error",
-        "noConsoleLog": "warn",
         "noEmptyBlockStatements": "warn",
-        "useAwait": "warn"
+        "useAwait": "warn",
+        "noConsole": {
+          "level": "warn",
+          "options": {
+            "allow": [
+              "assert",
+              "clear",
+              "count",
+              "countReset",
+              "debug",
+              "dir",
+              "dirxml",
+              "error",
+              "group",
+              "groupCollapsed",
+              "groupEnd",
+              "info",
+              "table",
+              "time",
+              "timeEnd",
+              "timeLog",
+              "trace",
+              "warn"
+            ]
+          }
+        }
       },
       "style": {
         "noNonNullAssertion": "error",
