@@ -1293,7 +1293,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
      interface → github-issues impl → repo.yaml selector. Composes with agentbrew's
      `ghi-task-backend-contract`. Origin: oncall-hub RFC `github-issues-task-tracking`. -->
 
-- [ ] `ghi-task-source-interface` — extract a `TaskSource` port (`novel/adapters/task-source.ts`) so `pickHostTask` reads from a backend-agnostic interface instead of parsing `TASKS.md` directly
+- [ ] `ghi-task-source-interface` — extract a `TaskSource` port (`novel/adapters/task-source.ts`) so `pickHostTask` reads from a backend-agnostic interface instead of parsing `TASKS.md` directly (@minsky-daemon-0)
   - **ID**: ghi-task-source-interface
   - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, rule-1-dont-reinvent, rule-2-interface, operator-directive-2026-05-29
   - **Milestone**: M1
