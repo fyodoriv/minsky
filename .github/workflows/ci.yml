@@ -17,7 +17,7 @@ jobs:
   markdownlint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -40,7 +40,7 @@ jobs:
   tasks-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -60,7 +60,7 @@ jobs:
     # in this job — never run two enforcement mechanisms competing.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -69,7 +69,7 @@ jobs:
   biome:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -90,7 +90,7 @@ jobs:
     # per the rule-#10 ratchet.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -115,7 +115,7 @@ jobs:
     # actual iteration history accumulates and degrades.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -135,7 +135,7 @@ jobs:
     # exit code immediately.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -149,7 +149,7 @@ jobs:
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -163,7 +163,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -206,7 +206,7 @@ jobs:
   hygiene:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -226,7 +226,7 @@ jobs:
     # gate); rule #1 (bats + jq + GNU timeout are existing tools).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install bats + jq + shellcheck (apt)
         run: |
           sudo apt-get update
@@ -254,7 +254,7 @@ jobs:
     # lint); Martin, *Clean Architecture*, 2017 (dependency rule).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -268,7 +268,7 @@ jobs:
     # task-id exists in TASKS.md or the git log.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Full history so the linter can resolve `closes <task-id>` task
           # references from past commits.
@@ -293,7 +293,7 @@ jobs:
     # Anchor: rule #9 (preparation-PR pattern); rule #7 (pin versions, no floating tags).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -317,7 +317,7 @@ jobs:
     # heading mentioning <pkg>, or an opt-out comment in the package README.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Need the merge-base with main reachable for `git diff main...HEAD`.
           fetch-depth: 0
@@ -343,7 +343,7 @@ jobs:
     # (USE method — instrumentation as a structural property).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -370,7 +370,7 @@ jobs:
     # (literate programming); Beck 1999 (CI as constraint enforcer).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v6
@@ -405,7 +405,7 @@ jobs:
     # Ries 2011 (validated learning); Munafò 2017 (pre-registration).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -448,7 +448,7 @@ jobs:
     # away?").
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -486,7 +486,7 @@ jobs:
     # exempt (CI / local-machine self-references).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -509,7 +509,7 @@ jobs:
     # every tracked `*.md` and `*.markdown` file under the repo root.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -538,7 +538,7 @@ jobs:
     # 2026-05-21 "Let's ensure agents.md is always updated too".
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -562,7 +562,7 @@ jobs:
     # tasks added after 2026-05-19 are never grandfathered.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -586,7 +586,7 @@ jobs:
     # competitive-benchmark` block slice d).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -611,7 +611,7 @@ jobs:
     # crash); Lampson 1983 (use exceptions only for exceptional conditions).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -643,7 +643,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -670,7 +670,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -699,7 +699,7 @@ jobs:
     # lands via direct push must still surface (and rotate).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -730,7 +730,7 @@ jobs:
     # appears, without blocking the build on a missing artefact.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -756,7 +756,7 @@ jobs:
     # because a hijack landed via direct push must still surface and rotate.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # diff against origin/main needs the merge base.
       - uses: pnpm/action-setup@v6
@@ -783,7 +783,7 @@ jobs:
     # surface as well.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -811,7 +811,7 @@ jobs:
     # invariant.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -836,7 +836,7 @@ jobs:
     # `serve(...)` (whereupon @hono/node-server falls back to `0.0.0.0`).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -861,7 +861,7 @@ jobs:
     # than silently desynchronising the rule from its enforcement substrate.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -888,7 +888,7 @@ jobs:
     # operator-facing prose lives in `docs/security/audit-gate.md` § Layer 1.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -918,7 +918,7 @@ jobs:
     # direction for *every* numbered minimum-bar item.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -940,7 +940,7 @@ jobs:
     # Live mode is the P2 follow-up `measure-agent-install-live-mode`.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -967,7 +967,7 @@ jobs:
     # because a leak landed via direct push must still surface.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -993,7 +993,7 @@ jobs:
     # drop the allow-list rows or strip the methodological grounding.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1018,7 +1018,7 @@ jobs:
     # without one, surfaces in CI rather than silently slipping in.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1046,7 +1046,7 @@ jobs:
     # JSDoc types; the lint imports it directly.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1073,7 +1073,7 @@ jobs:
     # ship in `scripts/check-security-docs-cohesion.mjs`.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1104,7 +1104,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -1130,7 +1130,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -1166,7 +1166,7 @@ jobs:
     # signal — drift to OFF is a deliberate Pivot, not a default.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: install dbus-user-session + gettext (for envsubst)
         run: |
           sudo apt-get update
@@ -1189,7 +1189,7 @@ jobs:
     # so unlike Linux this side does not need a workaround.
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: run supervisor integration test (macos)
         run: bash distribution/test-supervisor.sh macos
 
@@ -1210,7 +1210,7 @@ jobs:
     # layer); Beck 1999 (CI as the constraint enforcer).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1246,7 +1246,7 @@ jobs:
     #   *Test-Driven Development*, Ch. 26 (one bug, one test).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1272,7 +1272,7 @@ jobs:
     # (one record per pre-registration).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1298,7 +1298,7 @@ jobs:
     # `briefIncludesPrInstructions` in runtime-invariants.ts).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1328,7 +1328,7 @@ jobs:
     # failure surfaces locally before push.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # need history to diff against origin/main
       - uses: pnpm/action-setup@v6
@@ -1362,7 +1362,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1392,7 +1392,7 @@ jobs:
     # (CI as the constraint enforcer).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1427,7 +1427,7 @@ jobs:
     # O'Reilly 2016, Ch. 3 (error-budget enforcement).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1457,7 +1457,7 @@ jobs:
     # enforcer).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1484,7 +1484,7 @@ jobs:
     # Beyer et al., *Site Reliability Engineering*, O'Reilly 2016, Ch. 3.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1509,7 +1509,7 @@ jobs:
     # (Claude Code hooks reference, code.claude.com/docs/en/hooks).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1533,7 +1533,7 @@ jobs:
     # non-Claude models)"; OpenHands #12462.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1562,7 +1562,7 @@ jobs:
     # rule #10 (deterministic enforcement); Javierlozo/llm-audit prior art.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1579,7 +1579,7 @@ jobs:
   filename-casing:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1596,7 +1596,7 @@ jobs:
   doc-why-first-paragraph:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1613,7 +1613,7 @@ jobs:
   ui-tasks-priority:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1632,7 +1632,7 @@ jobs:
     # det-changelog-md-update (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -1655,7 +1655,7 @@ jobs:
     # det-research-md-update (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -1678,7 +1678,7 @@ jobs:
     # AGENTS.md §"Test conventions"; det-test-file-colocation (PR #911 cohort).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1695,7 +1695,7 @@ jobs:
   deprecated-md-respect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v6
@@ -1716,7 +1716,7 @@ jobs:
   cli-integration-test-coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1733,7 +1733,7 @@ jobs:
   omc-mode-persona-gating:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1750,7 +1750,7 @@ jobs:
   adapter-conventions:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1767,7 +1767,7 @@ jobs:
   touches-field:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1784,7 +1784,7 @@ jobs:
   pnpm-minsky-aliases:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1801,7 +1801,7 @@ jobs:
   readme-byte-budget:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1818,7 +1818,7 @@ jobs:
   docs-frame-coherence:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1835,7 +1835,7 @@ jobs:
   no-hardcoded-timeouts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1852,7 +1852,7 @@ jobs:
   no-no-verify-bypass:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1869,7 +1869,7 @@ jobs:
   launchd-safe-paths:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1901,7 +1901,7 @@ jobs:
     # enforcement — a contradicting throttle trips a mechanical response).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1929,7 +1929,7 @@ jobs:
     # (principle of least privilege).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1955,7 +1955,7 @@ jobs:
     # *Site Reliability Engineering*, O'Reilly 2016, Ch. 3.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -1980,7 +1980,7 @@ jobs:
     # Engineering*, O'Reilly 2016, Ch. 3.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -2007,7 +2007,7 @@ jobs:
     # Startup*, Crown Business 2011 (pivot-or-persevere).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -2038,7 +2038,7 @@ jobs:
     # outlive any single source); Beck 1999 (CI as the constraint enforcer).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -2086,7 +2086,7 @@ jobs:
     if: github.event_name == 'pull_request'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -2131,7 +2131,7 @@ jobs:
     # the bot too).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
         with:
           node-version-file: ".node-version"
@@ -2151,7 +2151,7 @@ jobs:
     # Ries 2011 (vanity-metric anti-pattern; `_monotonic: ok_` opt-in).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
@@ -2184,7 +2184,7 @@ jobs:
     # first-class — never auto-launch heavy work).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
         with:
           version: 9.12.0
