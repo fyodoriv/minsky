@@ -1312,6 +1312,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `ghi-task-source-github-issues-impl` — implement `novel/adapters/task-source.github-issues.ts` so the daemon can pick, claim, and close GitHub Issues via `gh`
   - **ID**: ghi-task-source-github-issues-impl
   - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, projects-v2, rule-2-interface, operator-directive-2026-05-29
+  - **Status**: obsolete — blocked by ghi-task-source-interface which was superseded by Path A aggressive cut (2026-05-24). Re-scope this task if GitHub Issues task backend is still needed for the Python picker (`scripts/pick_task.py`).
   - **Milestone**: M1
   - **Blocked by**: ghi-task-source-interface
   - **Competitive-goal**: moves `task-backend-coverage` from TASKS.md-only to TASKS.md + github-issues — the daemon can now run an indefinite improvement loop on a repo whose queue is GitHub Issues, which is the prerequisite for driving oncall-hub after its migration.
@@ -1328,6 +1329,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `ghi-repo-yaml-task-source-field` — add a `task_source: tasks-md | github-issues` field to `.minsky/repo.yaml` so each host selects its backend, and wire the daemon to instantiate the right adapter
   - **ID**: ghi-repo-yaml-task-source-field
   - **Tags**: p1, milestone-m1, config, repo-yaml, task-source, github-issues, operator-directive-2026-05-29
+  - **Status**: obsolete — blocked by ghi-task-source-github-issues-impl which is itself obsolete due to Path A aggressive cut. Re-scope this task if GitHub Issues task backend is still needed for the Python picker (`scripts/pick_task.py`).
   - **Milestone**: M1
   - **Blocked by**: ghi-task-source-github-issues-impl
   - **Competitive-goal**: makes `task-backend-coverage` operator-selectable per host — an operator flips one field and the daemon drives that host's Issues queue, with `tasks-md` remaining the default so all existing hosts are unaffected.
