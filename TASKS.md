@@ -1293,9 +1293,10 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
      interface → github-issues impl → repo.yaml selector. Composes with agentbrew's
      `ghi-task-backend-contract`. Origin: oncall-hub RFC `github-issues-task-tracking`. -->
 
-- [ ] `ghi-task-source-interface` — extract a `TaskSource` port (`novel/adapters/task-source.ts`) so `pickHostTask` reads from a backend-agnostic interface instead of parsing `TASKS.md` directly (@minsky-daemon-0)
+- [ ] `ghi-task-source-interface` — extract a `TaskSource` port (`novel/adapters/task-source.ts`) so `pickHostTask` reads from a backend-agnostic interface instead of parsing `TASKS.md` directly
   - **ID**: ghi-task-source-interface
   - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, rule-1-dont-reinvent, rule-2-interface, operator-directive-2026-05-29
+  - **Status**: obsolete — superseded by Path A aggressive cut (2026-05-24). The `novel/cross-repo-runner/` package this task references was deleted and replaced with `scripts/pick_task.py` (Python). The task picker is now a 200-line Python script, not a TypeScript port. Re-scope this task if GitHub Issues task backend is still needed for the Python picker.
   - **Milestone**: M1
   - **Competitive-goal**: drives `task-backend-coverage` (new metric — fraction of managed hosts whose task queue the daemon can read) by decoupling the picker from the on-disk markdown format; today the daemon can ONLY drive `TASKS.md` hosts, which excludes any repo that adopts GitHub Issues (the direction oncall-hub + the agentbrew tooling family are moving).
   - **Hypothesis**: `pickHostTask`/`task-finder.ts` currently couples task selection to `TASKS.md` parsing. Extracting a `TaskSource` interface (per rule #2) with the existing markdown parser as the first implementation means a second backend (GitHub Issues) is an additive adapter, not a rewrite of the host loop.
@@ -3318,6 +3319,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Pivot**: if competitor docs are too dense (each is a research artefact, not a navigational doc) and the frame degrades their utility, leave the 16 `competitors/*.md` files OUT of the allowlist permanently and document the exemption in `docs/PRACTICES.md`. Don't force the frame where it doesn't fit.
   - **Measurement**: `node -e 'import("./scripts/check-docs-frame-coherence.mjs").then(m => console.log(m.DOCS_FRAME_ALLOWLIST.length))'` returns ≥10.
   - **Anchor**: `docs/PRACTICES.md § Unified reader-orientation doc frame`; PR #685 (the original wholesale application); 2026-05-28 (the discovery that the surviving allowlist was 3 of 18).
+
+- [ ] `path-a-delete-cross-repo-runner-dist-artifacts` — delete the remaining `novel/cross-repo-runner/` directory (contains only compiled dist artifacts, no source) to complete the Path A aggressive cut deletion
+  - **ID**: path-a-delete-cross-repo-runner-dist-artifacts
+  - **Tags**: p3, path-a, aggressive-cut, cleanup, observed-2026-05-31
+  - **Milestone**: M1
+  - **Competitive-goal**: completes the Path A aggressive cut by removing the last vestiges of `novel/cross-repo-runner/`, which was marked for AGGRESSIVE DELETE in the 2026-05-24 plan. The directory today contains only compiled dist artifacts (node_modules, dist/*.d.ts, tsconfig.tsbuildinfo) — the source was deleted in earlier phases. Removing it frees ~4.2K of misleading artifacts and prevents future confusion about whether the package still exists.
+  - **Surfaced-by**: 2026-05-31 next-task pass — attempted to claim `ghi-task-source-interface` (P1) which references `novel/cross-repo-runner/src/` files that no longer exist. Investigation revealed the source was deleted in Path A but the dist directory remains.
+  - **Hypothesis**: the dist directory is safe to delete because (a) no source files exist, (b) the package is not referenced by any production code (task picking moved to `scripts/pick_task.py`), and (c) the Path A plan explicitly marked the package for deletion.
+  - **Success**: `novel/cross-repo-runner/` directory is removed; no references to it remain in production code (scripts, bin, package.json); `grep -r cross-repo-runner package.json` returns 0.
+  - **Pivot**: if any critical reference is found (e.g., a CI workflow or import), update the reference to point at the replacement (`scripts/pick_task.py` or `bin/minsky-run.sh`) before deletion.
+  - **Measurement**: `test -d novel/cross-repo-runner && echo "EXISTS" || echo "DELETED"` returns "DELETED"; `grep -r cross-repo-runner . --exclude-dir=.git --exclude-dir=node_modules | grep -v TASKS.md | grep -v docs/plans/ | wc -l` returns 0.
+  - **Anchor**: Path A aggressive cut plan (`docs/plans/2026-05-24-path-a-aggressive-cut.md` § Package-by-package fate — cross-repo-runner marked AGGRESSIVE DELETE).
 
 - [ ] `cli-script-consolidation-pass` — the current `package.json` has 28+ scripts in 7 categories (build/lint/test/m1/changelog/metrics/diagnostic/minsky). Several are one-shot diagnostics (`chaos:budget-exhaust`, `runany:audit`, `cto-audit:metrics`, `llm-provider:throughput`, `daemon-pr-lint:metrics`, `m1:metrics`, `m1:observability`, `m1:coverage`, `test:m1-tdd`) that are used 0-1 times per quarter — they pollute the `pnpm run` list. Goal: collapse the rarely-run ones into `pnpm <category>` with a positional subverb, OR move them to docs/runbook with a `bash:` prefix so they're discoverable but not script-listed
   - **ID**: cli-script-consolidation-pass
