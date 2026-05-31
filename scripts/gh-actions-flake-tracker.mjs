@@ -10,15 +10,16 @@
  *   node scripts/gh-actions-flake-tracker.mjs --window=20-prs --filter='actions/checkout' --json
  */
 
-import { execSync } from "child_process";
-
 // Parse command-line arguments
 const args = process.argv.slice(2);
+/** @type {Record<string, string | boolean>} */
 const flags = {};
 
 for (let i = 0; i < args.length; i++) {
-  if (args[i].startsWith("--")) {
-    const key = args[i].slice(2);
+  const arg = args[i];
+  if (!arg) continue;
+  if (arg.startsWith("--")) {
+    const key = arg.slice(2);
     const next = args[i + 1];
     if (next && !next.startsWith("--")) {
       flags[key] = next;
@@ -29,9 +30,9 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
-const window = flags.window || "20-prs";
-const filter = flags.filter || "all";
-const json = flags.json;
+const window = flags["window"] || "20-prs";
+const filter = flags["filter"] || "all";
+const json = flags["json"];
 
 console.log(`Tracking GitHub Actions failures for window: ${window}, filter: ${filter}`);
 
