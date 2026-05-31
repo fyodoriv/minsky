@@ -1297,6 +1297,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: ghi-task-source-interface
   - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, rule-1-dont-reinvent, rule-2-interface, operator-directive-2026-05-29
   - **Status**: obsolete — superseded by Path A aggressive cut (2026-05-24). The `novel/cross-repo-runner/` package this task references was deleted and replaced with `scripts/pick_task.py` (Python). The task picker is now a 200-line Python script, not a TypeScript port. Re-scope this task if GitHub Issues task backend is still needed for the Python picker.
+  - **Touches**: <none>
   - **Milestone**: M1
   - **Competitive-goal**: drives `task-backend-coverage` (new metric — fraction of managed hosts whose task queue the daemon can read) by decoupling the picker from the on-disk markdown format; today the daemon can ONLY drive `TASKS.md` hosts, which excludes any repo that adopts GitHub Issues (the direction oncall-hub + the agentbrew tooling family are moving).
   - **Hypothesis**: `pickHostTask`/`task-finder.ts` currently couples task selection to `TASKS.md` parsing. Extracting a `TaskSource` interface (per rule #2) with the existing markdown parser as the first implementation means a second backend (GitHub Issues) is an additive adapter, not a rewrite of the host loop.
@@ -1313,6 +1314,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: ghi-task-source-github-issues-impl
   - **Tags**: p1, milestone-m1, adapter, task-source, github-issues, projects-v2, rule-2-interface, operator-directive-2026-05-29
   - **Status**: obsolete — blocked by ghi-task-source-interface which was superseded by Path A aggressive cut (2026-05-24). Re-scope this task if GitHub Issues task backend is still needed for the Python picker (`scripts/pick_task.py`).
+  - **Touches**: <none>
   - **Milestone**: M1
   - **Blocked by**: ghi-task-source-interface
   - **Competitive-goal**: moves `task-backend-coverage` from TASKS.md-only to TASKS.md + github-issues — the daemon can now run an indefinite improvement loop on a repo whose queue is GitHub Issues, which is the prerequisite for driving oncall-hub after its migration.
@@ -1330,6 +1332,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: ghi-repo-yaml-task-source-field
   - **Tags**: p1, milestone-m1, config, repo-yaml, task-source, github-issues, operator-directive-2026-05-29
   - **Status**: obsolete — blocked by ghi-task-source-github-issues-impl which is itself obsolete due to Path A aggressive cut. Re-scope this task if GitHub Issues task backend is still needed for the Python picker (`scripts/pick_task.py`).
+  - **Touches**: <none>
   - **Milestone**: M1
   - **Blocked by**: ghi-task-source-github-issues-impl
   - **Competitive-goal**: makes `task-backend-coverage` operator-selectable per host — an operator flips one field and the daemon drives that host's Issues queue, with `tasks-md` remaining the default so all existing hosts are unaffected.
