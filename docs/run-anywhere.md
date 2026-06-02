@@ -27,16 +27,35 @@ its ledger and sweep to that root.
 
 ## Implementation
 
-Detection priority (from `novel/cross-repo-runner/src/cwd-detect.ts`):
+The zero-arg scope is decided by the pure resolver
+`scripts/runany-context.mjs` (`resolveRunanyContext`), called from the
+smart-auto-attach block in `bin/minsky`. The decision is deterministic and
+side-effect-free — the filesystem probes (`readdir`, the `.git` check) are
+injected seams, so the classification is unit-tested in
+`scripts/runany-context.test.mjs` across all five cwd shapes.
 
-1. **Bootstrapped** (`.minsky/repo.yaml` present) → existing single-host path
-2. **Bootstrapped subdirs** → existing multi-host walk path
-3. **Git root** (`.git` present in cwd) → single-host via `detectAnyCwd`
-4. **Git-root subdirs** → multi-host via `detectAnyCwd`
-5. **Plain dir** → single-host, cwd as root
+Classification (first match wins):
 
-The `bin/minsky` shim uses `git rev-parse --show-toplevel` for git-root
-detection and falls back to `$PWD` when not in a git repository.
+1. **Git repo** (`.git` directory **or** file present in cwd) → single-host,
+   `--host <cwd>`. This covers a plain repo, a monorepo, and a detached
+   worktree checkout (whose `.git` is a file). Nested repos inside a git repo
+   are submodules/vendored, not separate targets.
+2. **Nested repos** (cwd is not a repo but has one or more git repos one
+   level down) → multi-host, `--hosts-dir <cwd>` — the conductor walks every
+   child repo.
+3. **Plain dir** (neither of the above) → single-host, `--host <cwd>`.
+
+Inspect the verdict without launching anything:
+
+```bash
+node scripts/runany-context.mjs "$PWD"          # the two-token daemon argv
+node scripts/runany-context.mjs "$PWD" --json   # full classification
+```
+
+The resolver follows rule #6 (stay alive): a missing/unreadable directory, a
+TOCTOU race on the `.git` probe, or a missing resolver script all degrade to
+single-host-at-cwd rather than crashing the launch — the `bin/minsky` shim
+falls back to `--host <cwd>` whenever the resolver returns nothing.
 
 ## Lifecycle
 
