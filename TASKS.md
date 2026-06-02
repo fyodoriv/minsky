@@ -252,20 +252,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   (d) systemd equivalent — `distribution/systemd/minsky-daemon.service` with `Restart=always`, `RestartSec=5`, `StartLimitBurst=10`, `WantedBy=default.target`; launcher `distribution/systemd/run-daemon.sh` reads `default_host` from `~/.minsky/config.json` (mirroring the launchd plist). Commit 18f31ae.
   18 integration tests in `test/integration/daemon-restart.test.ts` cover all four deliverables — 18/18 green at HEAD. Live `launchctl list | grep -c com.minsky.daemon` = 1 (KeepAlive=true, supervised, executing `node novel/cross-repo-runner/bin/minsky-run.mjs --host $MINSKY_REPO`). -->
 
-- [ ] `minsky-init-one-command-bootstrap` — `npx minsky init` (or `curl | sh`) on any git repo sets up everything minsky needs; `minsky doctor` is GREEN with zero prior setup beyond Node ≥20
-  - **ID**: minsky-init-one-command-bootstrap
-  - **Tags**: p0, milestone-m1, ux, install, distribution, rule-1
-  - **Milestone**: M1
-  - **Competitive-goal**: lowers the barrier to first-run to a single command — matching Devin (cloud, zero setup) and beating Aider/OpenHands (multi-step pip/docker install) on time-to-first-iteration; directly gates M1 adoption.
-  - **Details**: today installing minsky requires: `git clone` + `pnpm install` + `./setup.sh` + manual env config + OMC plugin install + per-machine `~/.minsky/config.json`. Reduce to a single command that: (a) detects if running inside a git repo (else abort with guidance); (b) writes a `.minsky/` sidecar with `repo.yaml`, default config, and symlinks; (c) installs the minsky CLI to `./node_modules/.bin/minsky` or a global `~/.minsky/bin/minsky`; (d) runs `minsky doctor` and reports GREEN/YELLOW/RED; (e) prints the one-line command to start: `minsky`. If Node <20 is detected, prints the exact install command. If pnpm is missing, installs it via corepack. Compose from existing `setup.sh` + `minsky-bootstrap` — this task unifies them into one entry point.
-  - **Files**: `bin/minsky-init` (new — the one-command entry point), `distribution/install.sh` (new — curl-pipe-sh variant), `setup.sh` (refactor to be callable from minsky-init), paired tests
-  - **Touches**: bin/minsky-init, distribution/install.sh, setup.sh, test/**/*minsky-init*
-  - **Hypothesis**: today time-to-first-iteration for a new user is >10 min (clone + install + config + troubleshoot); after this, it's <3 min on a machine with Node ≥20.
-  - **Success**: on a fresh macOS + Ubuntu VM with only Node 20 installed, `npx minsky init` produces a GREEN `minsky doctor` in <3 min; `minsky` starts an iteration within 60s of init completing.
-  - **Pivot**: if a zero-dependency `npx` entry point is infeasible (pnpm workspace complexity), fall back to `curl -fsSL https://minsky.dev/install | sh` which installs the standalone CLI binary.
-  - **Measurement**: time from `npx minsky init` to GREEN doctor on a fresh VM (target: <180s); user test with 3 developers who've never seen minsky.
-  - **Anchor**: Forsgren/Humble/Kim *Accelerate* 2018 (lead time — the install IS the first lead-time metric); Krug *Don't Make Me Think* 2014 (one obvious path).
-
 - [ ] `minsky-uninstall-clean-removal` — `minsky uninstall` removes everything minsky added to a repo and machine with zero residue
   - **ID**: minsky-uninstall-clean-removal
   - **Tags**: p0, milestone-m1, ux, install, trust, blocked-2026-05-23
@@ -3886,3 +3872,19 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: a new `tests/test_build_brief.py` case asserts the surviving section under `--persona` + `--max-tokens`; `uvx pytest tests/test_build_brief.py` exits 0.
   - **Acceptance**: the docstring matches the actual clamp behaviour under `--persona`; a paired test pins the persona+max-tokens interaction; `pnpm pre-pr-lint --stage=full` exits 0.
   - **Anchor**: vision.md rule #3 (doc-first — docs must match behaviour); the `heal-brief-too-long-for-context-window` clamp task that introduced `clamp_brief_to_tokens`.
+
+- [ ] `wire-npx-minsky-init-to-minsky-init-entry` — `npx -y minsky init` (the README's gated one-command install) and the new `bin/minsky-init` / `distribution/install.sh` entry points are two surfaces for the same job; converge them so an operator can't pick the "wrong" one
+  - **ID**: wire-npx-minsky-init-to-minsky-init-entry
+  - **Tags**: p3, scout, install, cli-ux, docs, observed-2026-06-01
+  - **Milestone**: M1
+  - **Deferred-because**: parent task `minsky-init-one-command-bootstrap` just shipped both surfaces; the converge-vs-document decision needs a separate evaluation pass and is not blocking any operator today (both paths work).
+  - **Details**: `minsky-init-one-command-bootstrap` (shipped 2026-06-01) added `bin/minsky-init` (full toolchain check + `pnpm install` + `bin/minsky init` + doctor) and `distribution/install.sh` (curl-pipe-sh fallback). The README still advertises `npx -y minsky init` as the "release-candidate" one-command install, and `bin/minsky init` (the subcommand) only writes config — it does NOT do the toolchain check or `pnpm install`. Decide the canonical surface: either (a) make `bin/minsky init` (no hyphen) delegate to `bin/minsky-init` (hyphen) so the README's `npx -y minsky init` triggers the full bootstrap, OR (b) document the two as distinct (`minsky init` = config-only; `minsky-init` = full bootstrap) in INSTALL.md so the split is intentional. Today the overlap risks the operator running config-only and wondering why dist/ is missing.
+  - **Files**: `bin/minsky` (the `init)` case), `bin/minsky-init`, `README.md`, `INSTALL.md`
+  - **Touches**: `bin/minsky`, `bin/minsky-init`, `INSTALL.md`
+  - **Surfaced-by**: 2026-06-01 implementing `minsky-init-one-command-bootstrap` — noticed `bin/minsky init` (config-only) and `bin/minsky-init` (full bootstrap) are easy to confuse, and the README's `npx -y minsky init` maps to the config-only path.
+  - **Hypothesis**: converging the two surfaces (or documenting the split) removes a "which command do I run?" decision — the exact API-surface footgun AGENTS.md §"All user interface is P0-P1" warns about; fresh-install success rate rises because `npx -y minsky init` then does the full bootstrap, not just config.
+  - **Success**: either `bin/minsky init` delegates to `bin/minsky-init` (verified by an integration test asserting `minsky init <repo>` runs the toolchain check), OR INSTALL.md has a section distinguishing the two with a decision rubric; `pnpm pre-pr-lint --stage=full` exits 0.
+  - **Pivot**: if delegating `minsky init` → `minsky-init` breaks the existing `npx-init-tarball.test.ts` contract (config-only write), keep them distinct and ship the INSTALL.md disambiguation only.
+  - **Measurement**: `grep -c "minsky-init" INSTALL.md` ≥ 1 after the doc path; or a new assertion in `test/integration/minsky-init.test.ts` pins the delegation.
+  - **Acceptance**: the two install surfaces are either unified or explicitly documented as distinct; no operator-facing ambiguity remains; gate green.
+  - **Anchor**: AGENTS.md §"All user interface is P0-P1" (one canonical command per operation); Krug *Don't Make Me Think* 2014; `minsky-init-one-command-bootstrap` (the parent task that shipped both entry points).
