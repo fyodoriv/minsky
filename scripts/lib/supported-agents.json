@@ -1,0 +1,33 @@
+{
+  "$comment": "Host-feature support matrix per cloud agent — the pivot-path JSON sidecar from TASKS.md `cloud-agent-config-and-host-feature-matrix-audit`. Canonical source for the (agent × host-feature) classification that the AGENTS.md § \"Agent support matrix\" table renders for humans. `cloud` / `local` mirror the table's Cloud / Local columns; `briefDelivery` / `modelFlag` mirror `AGENT_MATRIX` in cloud-agent-config.mjs so the audit can cross-check schema-doc vs implementation in both directions. Originally specced for novel/cross-repo-runner/src/supported-agents.json; that directory was deleted in phase-7b so this lives adjacent to its single source of truth in scripts/lib/.",
+  "agents": [
+    {
+      "id": "openhands",
+      "cloud": true,
+      "local": true,
+      "briefDelivery": "brief-file",
+      "modelFlag": "--model"
+    },
+    {
+      "id": "claude",
+      "cloud": true,
+      "local": false,
+      "briefDelivery": "stdin",
+      "modelFlag": "--model"
+    },
+    {
+      "id": "devin",
+      "cloud": true,
+      "local": false,
+      "briefDelivery": "prompt-file",
+      "modelFlag": "--model"
+    },
+    {
+      "id": "aider",
+      "cloud": false,
+      "local": true,
+      "briefDelivery": "message-file",
+      "modelFlag": "--model"
+    }
+  ]
+}
