@@ -300,13 +300,27 @@ export const COMPETITORS: readonly Competitor[] = [
   // § "Orchestrator vs agent tier" for the layering.
   {
     id: "metagpt",
+    // STALE-BY-VENDOR (corpus-refresh-metagpt Pivot, audited 2026-06-02): the
+    // FoundationAgents/MetaGPT corpus metric (`humaneval-pass-at-1`) is the
+    // ICLR-2024 headline; the `asOf` below stays at 2024-05-07 honestly rather
+    // than being restamped with a fresh date. The vendor's most recent
+    // publications carrying benchmark numbers are February 2025 — Atom of
+    // Thoughts (arXiv:2502.12018) and Self-Supervised Prompt Optimization
+    // (arXiv:2502.06855) — both >365 days before this audit, and neither
+    // restates a comparable HumanEval/MBPP Pass@1 absolute for the MetaGPT
+    // framework itself. Per the task Pivot ("if the vendor has not published a
+    // new number in the last 365 days, mark stale-by-vendor and do NOT refresh
+    // asOf — masking the staleness with a re-stated old number is worse than
+    // acknowledging it"). Re-audit when FoundationAgents publishes a new
+    // absolute coding-benchmark reading; see competitors/metagpt.md
+    // § "Scorecard readings" for the dated vendor-publication trail.
     label: "MetaGPT (Foundation Agents — ICLR 2024)",
     kind: "open-source",
     homepage: "https://github.com/FoundationAgents/MetaGPT",
     resultSource: {
       kind: "published",
       citation:
-        "Hong, Zhuge, Chen, Zheng, Cheng, Wang, Zhuge, Wang, Yau, Lin, Zhou, Ran, Xiao, Wu, Schmidhuber, 'MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework', arXiv 2308.00352, ICLR 2024 Oral (HumanEval Pass@1 = 0.859 — SoTA at publication; MBPP Pass@1 = 0.877; 28.2% relative improvement over GPT-4 on HumanEval via Standardized Operating Procedure-shaped multi-agent assembly line); reproducible at github.com/FoundationAgents/MetaGPT.",
+        "Hong, Zhuge, Chen, Zheng, Cheng, Wang, Zhuge, Wang, Yau, Lin, Zhou, Ran, Xiao, Wu, Schmidhuber, 'MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework', arXiv 2308.00352, ICLR 2024 Oral (HumanEval Pass@1 = 0.859 — SoTA at publication; MBPP Pass@1 = 0.877; 28.2% relative improvement over GPT-4 on HumanEval via Standardized Operating Procedure-shaped multi-agent assembly line); reproducible at github.com/FoundationAgents/MetaGPT. Stale-by-vendor as of 2026-06-02: the framework's last absolute coding-benchmark reading remains the ICLR-2024 number; subsequent FoundationAgents papers (Atom of Thoughts arXiv:2502.12018, Self-Supervised Prompt Optimization arXiv:2502.06855, both Feb 2025) optimise workflow/prompt scaffolding and do not republish a MetaGPT-framework HumanEval/MBPP Pass@1 to refresh against.",
       asOf: "2024-05-07",
       values: { "humaneval-pass-at-1": 0.859 },
     },
