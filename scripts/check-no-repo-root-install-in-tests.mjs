@@ -233,6 +233,13 @@ function scanFile(relPath, src, violations) {
  */
 function isBootstrapSpawnViolation(line, context, fileHasInstallMutationGate) {
   if (!BOOTSTRAP_SPAWN_RE.some((re) => re.test(line))) return false;
+  // Only a line that READS as a spawn/exec call is a violation — a bare path
+  // binding (`const MINSKY_INIT = join(REPO_ROOT, "bin", "minsky-init")`), a
+  // `mkdtempSync(…, "minsky-init-host-")` prefix, a describe/test title, or a
+  // `.toMatch(/minsky-init/)` assertion mentions the token without spawning
+  // it. Same `looksLikeCommand` guard Rule B uses; without it the gate fires
+  // on every incidental mention once a file drops its install-mutation skipIf.
+  if (!looksLikeCommand(line)) return false;
   if (SKIP_INSTALL_RE.test(context)) return false;
   if (NON_REPO_TARGET_RE.test(context)) return false;
   if (SPREAD_ARGS_RE.test(line)) return false;
