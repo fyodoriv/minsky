@@ -24,6 +24,20 @@
 // merge decision). Composes `run-pre-pr-lint-stack` + `gh` rather than
 // reinventing a gate (rule #1).
 //
+// Worktree-pinned head branches (proactive arm — TASKS.md `gate-merge-
+// delete-branch-vs-worktree-pin`): the parallel-worker swarm checks branches
+// out in `.claude/worktrees/`, which PINS the head ref. `gh pr merge
+// --delete-branch` would server-merge fine but then throw on the local
+// `git branch -d`, making the gate mis-record an already-merged PR as
+// `merge-failed` (the #580 false-negative). `defaultMerge` now detects the
+// pin via `git worktree list --porcelain` (pure `headBranchPinnedByWorktree`
+// + pure `mergeArgs`) and DROPS `--delete-branch` for a pinned head, leaving
+// the incidental branch cleanup to the worktree teardown — cleanup never
+// gates the merge result (rule #6). This is the proactive complement to the
+// post-hoc state-oracle recovery in `processOnePr` (`prStateFn` re-queries
+// `gh pr view --json state`; MERGED ⇒ success): prevention first, recovery
+// as the backstop.
+//
 // rule #9 (pre-registered): a gate-green admin-merged PR must not regress
 // `origin/main` — post-merge, a fresh `--stage=full` run on main stays green.
 // Success: 0 post-merge main regressions over ≥10 gate-merged PRs. Pivot: if
@@ -430,12 +444,58 @@ function bestEffortRmScratch(scratch) {
   }
 }
 
-/** @param {PrSnapshot} pr */
-function defaultMerge(pr) {
-  execFileSync("gh", ["pr", "merge", String(pr.number), "--squash", "--admin", "--delete-branch"], {
-    cwd: REPO,
-    encoding: "utf8",
-  });
+/**
+ * `git worktree list --porcelain` stdout, or `""` on probe error. Fail-open
+ * to `""` so a probe failure is read as "no pin" — `defaultMerge` then keeps
+ * `--delete-branch` and the post-hoc state oracle in `processOnePr` is still
+ * the backstop if a pin existed after all (rule #6: an infra hiccup must
+ * never make the merge over-cautious AND it must never silently swallow a
+ * real failure).
+ * @returns {string}
+ */
+function defaultWorktrees() {
+  try {
+    return execFileSync("git", ["-C", REPO, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+    });
+    // rule-6: handled-locally — a worktree-list probe failure (git error/none) is read as "no pin"; `--delete-branch` stays and the state oracle backstops.
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Pure: the `gh pr merge` argv for one PR. `--delete-branch` is appended
+ * only when the head branch is NOT worktree-pinned — a pinned branch's
+ * local `git branch -d` would throw on already-merged-but-pinned refs, so
+ * we leave its cleanup to the worktree teardown (rule #6). Extracted from
+ * `defaultMerge` so the pin → argv decision is exercisable without spawning
+ * `gh` (rule #2 / rule #10 — same input ⇒ same argv).
+ * @param {PrSnapshot} pr
+ * @param {boolean} pinned
+ * @returns {string[]}
+ */
+export function mergeArgs(pr, pinned) {
+  const args = ["pr", "merge", String(pr.number), "--squash", "--admin"];
+  if (!pinned) args.push("--delete-branch");
+  return args;
+}
+
+/**
+ * Squash-admin-merge one PR. When the PR head branch is checked out in a
+ * `git worktree` (the parallel-worker swarm provisions `.claude/worktrees/`
+ * checkouts), the head ref is PINNED — `gh pr merge --delete-branch` would
+ * server-merge fine but then throw on the local `git branch -d`. So we
+ * detect the pin first and drop `--delete-branch` in that case, leaving the
+ * incidental branch cleanup to be reaped when the worktree is torn down
+ * (rule #6: cleanup never gates the merge result). Non-pinned branches keep
+ * `--delete-branch` (the common path). `worktreesFn` is injected for tests.
+ * @param {PrSnapshot} pr
+ * @param {() => string} [worktreesFn]
+ */
+function defaultMerge(pr, worktreesFn = defaultWorktrees) {
+  const pinned = headBranchPinnedByWorktree(worktreesFn(), pr.headRefName);
+  execFileSync("gh", mergeArgs(pr, pinned), { cwd: REPO, encoding: "utf8" });
 }
 
 /**
@@ -581,6 +641,34 @@ function defaultLandBranch(branchName) {
     cwd: REPO,
     encoding: "utf8",
   });
+}
+
+/**
+ * Pure: is `headRefName` checked out in some `git worktree`? Parses the
+ * stanza-per-worktree `git worktree list --porcelain` output — each stanza
+ * is blank-line separated and carries a `branch refs/heads/<name>` line
+ * when (and only when) that worktree holds a branch (a detached/bare
+ * worktree carries `detached`/`bare` instead). A branch held by a worktree
+ * pins its ref, so a post-merge `git branch -d <name>` (which `gh pr merge
+ * --delete-branch` runs locally) FAILS with
+ * `cannot delete branch '…' used by worktree at '…'` — the canonical
+ * #580 false-negative (TASKS.md `gate-merge-delete-branch-vs-worktree-
+ * pin`). Detecting the pin BEFORE the merge lets `defaultMerge` drop
+ * `--delete-branch`, so the merge never throws on incidental cleanup
+ * (rule #6: cleanup is best-effort, never gates the result) and the
+ * conductor records `merged` directly — the proactive complement to the
+ * post-hoc state-oracle recovery in `processOnePr`.
+ * @param {string} porcelain  `git worktree list --porcelain` stdout
+ * @param {string} headRefName  the PR head branch name (no `refs/heads/`)
+ * @returns {boolean}
+ */
+export function headBranchPinnedByWorktree(porcelain, headRefName) {
+  if (!headRefName) return false;
+  const target = `refs/heads/${headRefName}`;
+  for (const line of porcelain.split("\n")) {
+    if (line.trim() === `branch ${target}`) return true;
+  }
+  return false;
 }
 
 /**

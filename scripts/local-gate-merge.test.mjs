@@ -5,7 +5,9 @@ import {
   decideLand,
   decideMerge,
   decidePreflight,
+  headBranchPinnedByWorktree,
   landLocalBranch,
+  mergeArgs,
   parseGateVerdict,
   parseReview,
   pickGateCandidates,
@@ -265,6 +267,60 @@ describe("parseReview (Opus brain reply parsing — fail-safe)", () => {
   it("ambiguous/garbage ⇒ NOT approved (never merge on ambiguity)", () => {
     expect(parseReview("hmm I am not sure").approve).toBe(false);
     expect(parseReview("").approve).toBe(false);
+  });
+});
+
+describe("headBranchPinnedByWorktree (worktree-pin detection — proactive arm)", () => {
+  // `git worktree list --porcelain` emits one blank-line-separated stanza
+  // per worktree; a branch-holding worktree carries `branch refs/heads/<name>`.
+  const porcelain = [
+    "worktree /repo",
+    "HEAD aaaa",
+    "branch refs/heads/main",
+    "",
+    "worktree /repo/.claude/worktrees/daemon-0",
+    "HEAD bbbb",
+    "branch refs/heads/worktree-daemon-0-minsky-cli-context-aware-ux",
+    "",
+  ].join("\n");
+
+  it("true when the head branch is checked out in a worktree", () => {
+    expect(
+      headBranchPinnedByWorktree(porcelain, "worktree-daemon-0-minsky-cli-context-aware-ux"),
+    ).toBe(true);
+  });
+  it("false when no worktree holds the head branch", () => {
+    expect(headBranchPinnedByWorktree(porcelain, "feat/not-pinned")).toBe(false);
+  });
+  it("false for a detached/bare worktree (no `branch` line) and empty input", () => {
+    const detached = ["worktree /repo/wt", "HEAD cccc", "detached", ""].join("\n");
+    expect(headBranchPinnedByWorktree(detached, "feat/x")).toBe(false);
+    expect(headBranchPinnedByWorktree("", "feat/x")).toBe(false);
+  });
+  it("false on empty head ref name (fail-safe — never claims a pin)", () => {
+    expect(headBranchPinnedByWorktree(porcelain, "")).toBe(false);
+  });
+  it("does not match on a prefix collision (exact ref only)", () => {
+    // `branch refs/heads/foo` must NOT count as a pin for head `fo`.
+    expect(headBranchPinnedByWorktree("branch refs/heads/foo\n", "fo")).toBe(false);
+    expect(headBranchPinnedByWorktree("branch refs/heads/foo\n", "foo")).toBe(true);
+  });
+});
+
+describe("mergeArgs (pin → gh argv — rule #6 cleanup-never-gates)", () => {
+  const p = pr({ number: 580, headRefName: "worktree-daemon-0-x" });
+  it("appends --delete-branch when the head branch is NOT worktree-pinned", () => {
+    expect(mergeArgs(p, false)).toEqual([
+      "pr",
+      "merge",
+      "580",
+      "--squash",
+      "--admin",
+      "--delete-branch",
+    ]);
+  });
+  it("drops --delete-branch when the head branch IS worktree-pinned", () => {
+    expect(mergeArgs(p, true)).toEqual(["pr", "merge", "580", "--squash", "--admin"]);
   });
 });
 
