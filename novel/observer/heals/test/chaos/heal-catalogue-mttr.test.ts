@@ -360,18 +360,17 @@ const CHAOS_CASES: ChaosCase[] = [
 
 describe("heal-catalogue chaos: each automated heal completes within 5 min", () => {
   // scenario (chaos): "each automated helper heals its injected failure within 5 min"
-  test.each(CHAOS_CASES)(
-    "heal-$id detects, applies, verifies within MTTR threshold",
-    async (chaosCase) => {
-      const result = await chaosCase.run();
-      expect(result.detected, `${chaosCase.id} should detect`).toBe(true);
-      expect(result.healed, `${chaosCase.id} should verify healed`).toBe(true);
-      expect(
-        result.durationMs,
-        `${chaosCase.id} should heal within ${MTTR_THRESHOLD_MS}ms (got ${result.durationMs}ms)`,
-      ).toBeLessThan(MTTR_THRESHOLD_MS);
-    },
-  );
+  test.each(
+    CHAOS_CASES,
+  )("heal-$id detects, applies, verifies within MTTR threshold", async (chaosCase) => {
+    const result = await chaosCase.run();
+    expect(result.detected, `${chaosCase.id} should detect`).toBe(true);
+    expect(result.healed, `${chaosCase.id} should verify healed`).toBe(true);
+    expect(
+      result.durationMs,
+      `${chaosCase.id} should heal within ${MTTR_THRESHOLD_MS}ms (got ${result.durationMs}ms)`,
+    ).toBeLessThan(MTTR_THRESHOLD_MS);
+  });
 
   test("CHAOS_CASES count matches automated catalogue size (rule #10 deterministic enforcement)", () => {
     // If a new heal is added to the catalogue, this test fails until the

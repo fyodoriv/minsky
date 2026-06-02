@@ -10,9 +10,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  SIBLING_P0_IDS,
   checkRule13SiblingAnchors,
   extractAnchorsForIds,
+  SIBLING_P0_IDS,
 } from "./check-rule-13-sibling-anchors.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

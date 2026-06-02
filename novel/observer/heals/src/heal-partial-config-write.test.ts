@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as heal from "./heal-partial-config-write.js";
 import type { PartialConfigWriteSeams } from "./heal-partial-config-write.js";
+import * as heal from "./heal-partial-config-write.js";
 
 function makeSeams(
   files: Record<string, string>,

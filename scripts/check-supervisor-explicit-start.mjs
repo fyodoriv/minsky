@@ -50,7 +50,7 @@
 // § rule #10 (deterministic enforcement); AGENTS.md § "Iron rules
 // have deterministic gates".
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";

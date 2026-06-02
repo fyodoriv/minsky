@@ -10,11 +10,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  REQUIRED_SECTIONS,
   checkAgentsMdCoherence,
   extractRelativeLinks,
   extractVisionRuleCitations,
   extractVisionRuleNumbers,
+  REQUIRED_SECTIONS,
 } from "./check-agents-md-coherence.mjs";
 
 const MIN_VISION_MD = `

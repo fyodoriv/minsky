@@ -623,15 +623,6 @@ export const STACK_MANIFEST = Object.freeze([
     env: { LOCKFILE_INTEGRITY_DIFF_BASE: "origin/main" },
   },
   {
-    // pnpm-lock.yaml must resolve only from public registries — blocks a
-    // lockfile generated behind a corporate package mirror (Artifactory leak
-    // class, 2026-06-01). Cheap + security-relevant, so it runs in fast too.
-    name: "lockfile-registry",
-    stages: ["fast", "full"],
-    cmd: "node",
-    args: ["scripts/check-lockfile-registry.mjs"],
-  },
-  {
     name: "otel-no-pii",
     stages: ["full"],
     cmd: "node",

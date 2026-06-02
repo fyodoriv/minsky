@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  checkReadmeByteBudget,
   README_BYTE_BUDGET_HARD_LIMIT,
   README_BYTE_BUDGET_TARGET,
-  checkReadmeByteBudget,
 } from "./check-readme-byte-budget.mjs";
 
 describe("checkReadmeByteBudget", () => {

@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   COMPETITORS,
   type Competitor,
-  EXCLUDED_VENDOR_SUBSTRINGS,
   competitorById,
+  EXCLUDED_VENDOR_SUBSTRINGS,
   isExcludedVendor,
   publishedValue,
 } from "./index.js";

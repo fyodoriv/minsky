@@ -1,8 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
 import { AggregationTemporality, InMemoryMetricExporter } from "@opentelemetry/sdk-metrics";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aggregateStatus } from "./index.js";
 import { OtelObservability, resolveOtlpEndpoints } from "./otel.js";

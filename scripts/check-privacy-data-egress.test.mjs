@@ -9,10 +9,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  checkPrivacyDataEgress,
   PRIVACY_DATA_EGRESS_PATH,
   REQUIRED_DESTINATIONS,
   REQUIRED_SECTIONS,
-  checkPrivacyDataEgress,
 } from "./check-privacy-data-egress.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

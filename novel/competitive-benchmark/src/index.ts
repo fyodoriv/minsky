@@ -19,22 +19,22 @@
 // See `README.md` for the corpus rationale.
 
 export {
+  COMPETITORS,
+  type Competitor,
+  type CompetitorKind,
+  competitorById,
+  EXCLUDED_VENDOR_SUBSTRINGS,
+  isExcludedVendor,
+  publishedValue,
+  type ResultSource,
+} from "./competitors.js";
+export {
+  compareValues,
+  computeDelta,
+  METRICS,
   type MetricCategory,
   type MetricDefinition,
   type MetricDirection,
   type MetricUnit,
-  METRICS,
-  compareValues,
-  computeDelta,
   metricById,
 } from "./metrics.js";
-export {
-  type Competitor,
-  type CompetitorKind,
-  type ResultSource,
-  COMPETITORS,
-  EXCLUDED_VENDOR_SUBSTRINGS,
-  competitorById,
-  isExcludedVendor,
-  publishedValue,
-} from "./competitors.js";

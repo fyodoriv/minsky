@@ -43,11 +43,11 @@ const HEADER_RE = /^#+[ \t]*vision[- ]?trace\b/im;
 const OPTOUT_RE =
   /<!--[ \t]*vision[- ]?trace:[ \t]*not[- ]?applicable[ \t]*[—\-:][ \t]*(.+?)[ \t]*-->/i;
 const FIELD_RES = {
-  "Vision goal": /^[ \t]*[-*•]?[ \t]*(?:\*\*)?vision[- ]?goal(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+  "Vision goal": /^[ \t]*[-*•]?[ \t]*(?:\*\*)?vision[- ]?goal(?:\*\*)?[ \t]*[:-][ \t]*(.+)$/im,
   "User story":
-    /^[ \t]*[-*•]?[ \t]*(?:\*\*)?user[- ]?stor(?:y|ies)(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+    /^[ \t]*[-*•]?[ \t]*(?:\*\*)?user[- ]?stor(?:y|ies)(?:\*\*)?[ \t]*[:-][ \t]*(.+)$/im,
   "Competitor prior art":
-    /^[ \t]*[-*•]?[ \t]*(?:\*\*)?competitor[- ]?(?:prior[- ]?art|check)(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+    /^[ \t]*[-*•]?[ \t]*(?:\*\*)?competitor[- ]?(?:prior[- ]?art|check)(?:\*\*)?[ \t]*[:-][ \t]*(.+)$/im,
 };
 
 const MIN_VALUE_LEN = 3;

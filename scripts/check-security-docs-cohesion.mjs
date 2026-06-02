@@ -34,7 +34,7 @@
 // the requirement is "name a published threat-modelling methodology", not
 // "STRIDE specifically". Same shape as `check-threat-model-section.mjs`.
 
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

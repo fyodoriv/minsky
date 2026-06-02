@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 // Import through the package barrel so `index.ts` (a pure re-export) is
 // covered by the same suite — mirrors `novel/adapters/types/src/index.test.ts`.
 import {
-  METRICS,
-  type MetricDefinition,
   compareValues,
   computeDelta,
+  METRICS,
+  type MetricDefinition,
   metricById,
 } from "./index.js";
 

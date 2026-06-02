@@ -21,7 +21,7 @@
 // the unit tests in `scripts/minsky-report.test.mjs`. The CLI wrapper
 // only does argv parsing + stdout writes.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**

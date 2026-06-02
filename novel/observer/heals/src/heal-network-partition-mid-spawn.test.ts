@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as heal from "./heal-network-partition-mid-spawn.js";
 import type { NetworkPartitionMidSpawnSeams } from "./heal-network-partition-mid-spawn.js";
+import * as heal from "./heal-network-partition-mid-spawn.js";
 
 function makeSeams(
   overrides: Partial<NetworkPartitionMidSpawnSeams> = {},

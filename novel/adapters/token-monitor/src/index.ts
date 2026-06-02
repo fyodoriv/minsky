@@ -179,7 +179,7 @@ export function consumedFraction(s: TokenSnapshot): number {
 
 export {
   MaciekTokenMonitor,
-  PLAN_CAPS,
   type MaciekTokenMonitorOpts,
+  PLAN_CAPS,
   type PlanName,
 } from "./maciek.js";

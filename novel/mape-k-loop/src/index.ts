@@ -20,32 +20,18 @@
  * @module mape-k-loop
  */
 
-import { analyze } from "./analyze.js";
-import type { Analysis } from "./analyze.js";
-import { execute } from "./execute.js";
-import type { EvalSetInput, ExecuteResult } from "./execute.js";
-import { knowledge } from "./knowledge.js";
-import type { KnowledgeResult, VerdictLogEntry } from "./knowledge.js";
-import { monitor } from "./monitor.js";
-import type { HealthSnapshot, MonitorInput } from "./monitor.js";
-import { plan } from "./plan.js";
-import type { Variant } from "./plan.js";
-import type { RolloutHistory } from "./sustained-gain.js";
-
 import type { PromptOptimizer } from "@minsky/prompt-optimizer";
-
-export {
-  type Advisory,
-  type CiRun,
-  CI_RULE_ID,
-  type ExperimentRecord,
-  type ExperimentTally,
-  type ExperimentVerdict,
-  type HealthSnapshot,
-  type MonitorInput,
-  monitor,
-  type RuleViolationStats,
-} from "./monitor.js";
+import type { Analysis } from "./analyze.js";
+import { analyze } from "./analyze.js";
+import type { EvalSetInput, ExecuteResult } from "./execute.js";
+import { execute } from "./execute.js";
+import type { KnowledgeResult, VerdictLogEntry } from "./knowledge.js";
+import { knowledge } from "./knowledge.js";
+import type { HealthSnapshot, MonitorInput } from "./monitor.js";
+import { monitor } from "./monitor.js";
+import type { Variant } from "./plan.js";
+import { plan } from "./plan.js";
+import type { RolloutHistory } from "./sustained-gain.js";
 
 export {
   type Analysis,
@@ -59,53 +45,59 @@ export {
   DEFAULT_RULE_COST,
   SEVERITY_THRESHOLDS,
 } from "./analyze.js";
-
 export { parseCostSchedule } from "./cost-schedule.js";
-
-export { MAX_VARIANTS_PER_PLAN, plan, type PlanArgs, type Variant } from "./plan.js";
-
 export {
   type EvalSetInput,
-  execute,
   type ExecuteArgs,
   type ExecuteDecision,
   type ExecuteResult,
+  execute,
   type VariantScore,
 } from "./execute.js";
+export {
+  DEFAULT_CALIBRATION_DRIFT_THRESHOLD,
+  type KnowledgeArgs,
+  type KnowledgeResult,
+  knowledge,
+  type VerdictLogEntry,
+} from "./knowledge.js";
+export {
+  type Advisory,
+  CI_RULE_ID,
+  type CiRun,
+  type ExperimentRecord,
+  type ExperimentTally,
+  type ExperimentVerdict,
+  type HealthSnapshot,
+  type MonitorInput,
+  monitor,
+  type RuleViolationStats,
+} from "./monitor.js";
+export {
+  DEFAULT_BRANCH_PREFIX,
+  type OrchestrateArgs,
+  type OrchestrateResult,
+  type OrchestratorKnowledge,
+  orchestrate,
+  type RolloutDraft,
+} from "./orchestrator.js";
 
+export {
+  DEFAULT_LOOKBACK_ITERATIONS,
+  type OscillationArgs,
+  type OscillationResult,
+  oscillation,
+} from "./oscillation.js";
+export { MAX_VARIANTS_PER_PLAN, type PlanArgs, plan, type Variant } from "./plan.js";
 export {
   DEFAULT_SCORE_THRESHOLD,
   DEFAULT_WINDOW_DAYS,
   type RolloutHistory,
   type RolloutHistoryEntry,
-  sustainedGain,
   type SustainedGainArgs,
   type SustainedGainResult,
+  sustainedGain,
 } from "./sustained-gain.js";
-
-export {
-  DEFAULT_LOOKBACK_ITERATIONS,
-  oscillation,
-  type OscillationArgs,
-  type OscillationResult,
-} from "./oscillation.js";
-
-export {
-  DEFAULT_CALIBRATION_DRIFT_THRESHOLD,
-  knowledge,
-  type KnowledgeArgs,
-  type KnowledgeResult,
-  type VerdictLogEntry,
-} from "./knowledge.js";
-
-export {
-  DEFAULT_BRANCH_PREFIX,
-  orchestrate,
-  type OrchestrateArgs,
-  type OrchestrateResult,
-  type OrchestratorKnowledge,
-  type RolloutDraft,
-} from "./orchestrator.js";
 
 /** Argument bundle for `tick`. The CLI wrapper assembles this from I/O. */
 export interface TickArgs {

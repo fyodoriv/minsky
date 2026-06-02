@@ -33,10 +33,7 @@ export type LedgerSeams = {
  * complete detect→apply→verify→record cycle; instrumenting the ledger writer
  * separately would double-count the heal duration.
  */
-export function recordHealEvent(args: {
-  event: HealEvent;
-  seams: LedgerSeams;
-}): void {
+export function recordHealEvent(args: { event: HealEvent; seams: LedgerSeams }): void {
   const dir = args.seams.dirnameFn(args.seams.ledgerPath);
   if (!args.seams.existsSyncFn(dir)) {
     args.seams.mkdirSyncFn(dir, { recursive: true });

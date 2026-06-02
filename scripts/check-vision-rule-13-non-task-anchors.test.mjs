@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  REQUIRED_ANCHORS,
   checkVisionRule13NonTaskAnchors,
+  REQUIRED_ANCHORS,
 } from "./check-vision-rule-13-non-task-anchors.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

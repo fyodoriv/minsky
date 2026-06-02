@@ -10,7 +10,7 @@
 //   and stability-report).
 // Conformance: full — pure functions over injected I/O seams.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**

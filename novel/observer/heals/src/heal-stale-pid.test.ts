@@ -4,8 +4,8 @@
 // user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as healStalePid from "./heal-stale-pid.js";
 import type { StalePidSeams } from "./heal-stale-pid.js";
+import * as healStalePid from "./heal-stale-pid.js";
 
 /** Build a hermetic in-memory seam set for testing. */
 function makeSeams(

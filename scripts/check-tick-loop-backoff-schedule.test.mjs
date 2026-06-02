@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_EXPECTED_SCHEDULE,
   checkTickLoopBackoffSchedule,
+  DEFAULT_EXPECTED_SCHEDULE,
   readTickLoopConfig,
 } from "./check-tick-loop-backoff-schedule.mjs";
 

@@ -17,7 +17,10 @@
       "types": "./dist/anthropic.d.ts"
     }
   },
-  "files": ["dist/**/*.js", "dist/**/*.d.ts"],
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --root .",

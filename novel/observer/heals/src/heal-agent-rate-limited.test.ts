@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as heal from "./heal-agent-rate-limited.js";
 import type { AgentRateLimitedSeams } from "./heal-agent-rate-limited.js";
+import * as heal from "./heal-agent-rate-limited.js";
 
 function makeSeams(overrides: Partial<AgentRateLimitedSeams> = {}): AgentRateLimitedSeams {
   return {

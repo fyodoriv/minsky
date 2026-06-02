@@ -19,8 +19,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  REQUIRED_BRIEF_SUBSTRINGS,
   checkBriefPrInstructions,
+  REQUIRED_BRIEF_SUBSTRINGS,
 } from "./check-brief-pr-instructions.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

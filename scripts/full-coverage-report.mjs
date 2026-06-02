@@ -12,7 +12,7 @@
 //   L5: Runtime invariants coverage (invariants / known failure classes)
 //   L6: Scripts coverage (scripts with paired .test.mjs files)
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

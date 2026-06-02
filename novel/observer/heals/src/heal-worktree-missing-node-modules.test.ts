@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as healMissing from "./heal-worktree-missing-node-modules.js";
 import type { ExecResult, WorktreeMissingSeams } from "./heal-worktree-missing-node-modules.js";
+import * as healMissing from "./heal-worktree-missing-node-modules.js";
 
 type ExecCall = { command: string; args: readonly string[]; cwd: string };
 

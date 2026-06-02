@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { remainingFractions } from "./index.js";
-
-import { StubTokenMonitor, type TokenSnapshot, consumedFraction } from "./index.js";
+import {
+  consumedFraction,
+  remainingFractions,
+  StubTokenMonitor,
+  type TokenSnapshot,
+} from "./index.js";
 
 describe("StubTokenMonitor", () => {
   it("returns the default snapshot until set() is called", async () => {

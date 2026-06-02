@@ -7,9 +7,9 @@ import { describe, expect, test } from "vitest";
 import {
   BLOCKED_TOKEN,
   CLOUD_TIER_PATH_PREFIXES,
-  TASK_ID,
   checkCloudAuditGate,
   extractBlockedLine,
+  TASK_ID,
 } from "./check-cloud-audit-gate.mjs";
 
 /**

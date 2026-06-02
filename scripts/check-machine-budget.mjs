@@ -50,7 +50,7 @@
 // replace it with one over whatever the new throttle surface is — never
 // weaken it to a warning.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

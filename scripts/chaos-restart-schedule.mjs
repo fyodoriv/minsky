@@ -32,8 +32,8 @@
 // .test.mjs drives it deterministically.
 
 import {
-  DEFAULT_BACKOFF_SCHEDULE_SEC,
   backoffMsFor,
+  DEFAULT_BACKOFF_SCHEDULE_SEC,
   decideRestart,
 } from "./restart-supervisor.mjs";
 

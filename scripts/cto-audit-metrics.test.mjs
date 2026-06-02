@@ -6,12 +6,12 @@ import { describe, expect, test } from "vitest";
 
 import {
   CTO_AUDIT_PR_LABEL,
-  ROLLING_7D_MIN_CREATED,
-  ROLLING_28D_MIN_SHIP_RATIO,
   daysAgoUtc,
   formatDateUtcYmd,
   formatReport,
   parseGhCount,
+  ROLLING_7D_MIN_CREATED,
+  ROLLING_28D_MIN_SHIP_RATIO,
   runCtoAuditMetrics,
 } from "./cto-audit-metrics.mjs";
 

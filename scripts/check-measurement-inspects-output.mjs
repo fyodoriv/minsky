@@ -49,7 +49,7 @@
 //   ships AND those `warn` cases are reviewed-OK by the maintainer (i.e.
 //   the lint is producing noise, not signal).
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

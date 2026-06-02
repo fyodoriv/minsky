@@ -27,15 +27,15 @@
  * Tracked as future task `register-otel-globals-at-bootstrap`.
  */
 
-import { type Meter, type Tracer, metrics, trace } from "@opentelemetry/api";
-import { type Logger, SeverityNumber, logs } from "@opentelemetry/api-logs";
+import { type Meter, metrics, type Tracer, trace } from "@opentelemetry/api";
+import { type Logger, logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
-  type LogRecordExporter,
   LoggerProvider,
+  type LogRecordExporter,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import {
@@ -251,4 +251,4 @@ export class OtelObservability implements Observability {
 
 // Re-export the API namespaces so consumers can access globals if they
 // register an instance themselves. v0 deviation: not registered automatically.
-export { metrics, trace, logs };
+export { logs, metrics, trace };

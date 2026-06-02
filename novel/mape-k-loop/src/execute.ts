@@ -20,9 +20,7 @@
  */
 
 import type { Variant as OptimizerVariant, PromptOptimizer } from "@minsky/prompt-optimizer";
-
-import { oscillation } from "./oscillation.js";
-import { DEFAULT_LOOKBACK_ITERATIONS } from "./oscillation.js";
+import { DEFAULT_LOOKBACK_ITERATIONS, oscillation } from "./oscillation.js";
 import type { Variant } from "./plan.js";
 import { DEFAULT_WINDOW_DAYS, type RolloutHistory, sustainedGain } from "./sustained-gain.js";
 

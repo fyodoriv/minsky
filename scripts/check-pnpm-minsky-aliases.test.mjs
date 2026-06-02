@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { DELEGATE_REGEX, checkPnpmMinskyAliases } from "./check-pnpm-minsky-aliases.mjs";
+import { checkPnpmMinskyAliases, DELEGATE_REGEX } from "./check-pnpm-minsky-aliases.mjs";
 
 describe("DELEGATE_REGEX", () => {
   it.each([
@@ -21,6 +21,7 @@ describe("DELEGATE_REGEX", () => {
   it.each([
     "./setup.sh --setup",
     "./setup.sh --doctor",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell command string (env-var default syntax), not a JS template literal
     "PORT=${PORT:-8181} bash distribution/run-dashboard-web.sh",
     "launchctl list 2>/dev/null | grep -i minsky",
     "systemctl --user status minsky-supervisor.target",

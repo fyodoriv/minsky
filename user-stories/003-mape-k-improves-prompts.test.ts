@@ -20,9 +20,6 @@
  * simulation time. We assert the wall-clock budget at the end of the suite.
  */
 
-import { StubPromptOptimizer } from "@minsky/prompt-optimizer";
-import { describe, expect, it } from "vitest";
-
 import type {
   Advisory,
   CiRun,
@@ -32,6 +29,8 @@ import type {
   VerdictLogEntry,
 } from "@minsky/mape-k-loop";
 import { tick } from "@minsky/mape-k-loop";
+import { StubPromptOptimizer } from "@minsky/prompt-optimizer";
+import { describe, expect, it } from "vitest";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date("2026-05-10T00:00:00Z");

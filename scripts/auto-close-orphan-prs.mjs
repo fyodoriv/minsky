@@ -40,7 +40,7 @@
 // Disable globally via `MINSKY_AUTO_CLOSE_ORPHAN_PRS=off`. Default: ON.
 
 import { execFileSync } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

@@ -10,10 +10,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  SECURITY_DOCS_DIR,
   checkAllSecurityDocs,
   checkSecurityDoc,
   listSecurityDocs,
+  SECURITY_DOCS_DIR,
 } from "./check-security-docs-cohesion.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

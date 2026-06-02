@@ -10,10 +10,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  THREAT_MODEL_README_PATHS,
   checkAllThreatModelSections,
   checkThreatModelSection,
   extractThreatModelSection,
+  THREAT_MODEL_README_PATHS,
 } from "./check-threat-model-section.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

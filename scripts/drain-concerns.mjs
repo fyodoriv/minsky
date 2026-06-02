@@ -36,8 +36,8 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmdirSync,
   writeFileSync,

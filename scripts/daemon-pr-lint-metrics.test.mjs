@@ -9,19 +9,19 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  CANONICAL_REPO,
-  GH_PR_LIST_LIMIT,
-  RED_CHECK_OUTCOMES,
-  ROLLING_30D_MIN_N,
-  ROLLING_30D_MIN_PASS_RATE,
-  ROLLING_WINDOW_DAYS,
   buildRecentPrListGhArgs,
+  CANONICAL_REPO,
   computeStats,
   daysAgoUtc,
   formatDateUtcYmd,
   formatReport,
+  GH_PR_LIST_LIMIT,
   parsePrList,
   parsePrListEntries,
+  RED_CHECK_OUTCOMES,
+  ROLLING_30D_MIN_N,
+  ROLLING_30D_MIN_PASS_RATE,
+  ROLLING_WINDOW_DAYS,
   runDaemonPrLintMetrics,
 } from "./daemon-pr-lint-metrics.mjs";
 

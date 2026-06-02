@@ -9,11 +9,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  bucketGate,
   DEFAULT_GATE_THRESHOLD,
   DEFAULT_WINDOW_DAYS,
-  KEEP_ACTIVE_FLOOR,
-  bucketGate,
   exitCodeForGate,
+  KEEP_ACTIVE_FLOOR,
   main,
   parseArgs,
 } from "./measure-stability.mjs";

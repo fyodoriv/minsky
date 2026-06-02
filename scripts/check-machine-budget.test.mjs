@@ -11,9 +11,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  TRIVIAL_BUDGET_PCT,
   checkMachineBudget,
   readLaunchdPlists,
+  TRIVIAL_BUDGET_PCT,
 } from "./check-machine-budget.mjs";
 
 /** Minimal controller source that satisfies all three contract checks. */

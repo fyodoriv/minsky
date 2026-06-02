@@ -34,10 +34,10 @@
 // line's value is empty.
 const HEADER_RE = /^#+[ \t]*hypothesis self-grade\b/im;
 const FIELD_RES = {
-  Predicted: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?predicted(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
-  Observed: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?observed(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
-  Match: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?match(?:\*\*)?[ \t]*[:\-][ \t]*(yes|no|partial)\b/im,
-  Lesson: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?lesson(?:\*\*)?[ \t]*[:\-][ \t]*(.+)$/im,
+  Predicted: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?predicted(?:\*\*)?[ \t]*[:-][ \t]*(.+)$/im,
+  Observed: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?observed(?:\*\*)?[ \t]*[:-][ \t]*(.+)$/im,
+  Match: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?match(?:\*\*)?[ \t]*[:-][ \t]*(yes|no|partial)\b/im,
+  Lesson: /^[ \t]*[-*•]?[ \t]*(?:\*\*)?lesson(?:\*\*)?[ \t]*[:-][ \t]*(.+)$/im,
 };
 
 const MIN_VALUE_LEN = 3;

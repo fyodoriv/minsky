@@ -23,7 +23,7 @@
 //   4. Inject the active context into a fresh carrier and emit
 //      `{"traceparent":"…"}` to stdout.
 
-import { ROOT_CONTEXT, context, propagation, trace } from "@opentelemetry/api";
+import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
   BasicTracerProvider,

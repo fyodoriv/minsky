@@ -13,7 +13,7 @@
 // rule #10 (every constitutional rule has a deterministic CI lint);
 // Martin, *Clean Architecture*, 2017 (dependency rule).
 
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { readdir, readFile, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 

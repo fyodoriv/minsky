@@ -12,11 +12,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  FLAKE_RATE_THRESHOLD,
-  MIN_PAIRS_FOR_REPORT,
   detectFlakeRate,
   emitPatches,
+  FLAKE_RATE_THRESHOLD,
   formatReportLine,
+  MIN_PAIRS_FOR_REPORT,
   parseCliArgs,
   renderTaskBlock,
   renderWorkflowPatch,

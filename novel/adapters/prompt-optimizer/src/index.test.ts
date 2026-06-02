@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  aggregateStatus,
   type RunABTestArgs,
+  runABTestPure,
   StubPromptOptimizer,
   type Variant,
-  aggregateStatus,
-  runABTestPure,
 } from "./index.js";
 
 const variantA: Variant = { id: "a", system: "you are A", user: "hi {{name}}" };

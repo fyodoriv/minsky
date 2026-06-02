@@ -26,7 +26,7 @@
 // Conformance: full — pure function over file contents, no LLM in the
 //   chain.
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";

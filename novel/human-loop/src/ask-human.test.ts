@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { TimeoutError, askHuman } from "./ask-human.js";
+import { askHuman, TimeoutError } from "./ask-human.js";
 import { formatAnswer } from "./qa-log-format.js";
 
 /**

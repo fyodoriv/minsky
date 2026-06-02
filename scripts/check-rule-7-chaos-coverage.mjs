@@ -24,7 +24,7 @@
 // can drive it deterministically.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

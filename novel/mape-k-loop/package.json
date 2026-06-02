@@ -44,7 +44,11 @@
   "bin": {
     "mape-k-orchestrator": "bin/mape-k-orchestrator.mjs"
   },
-  "files": ["dist/**/*.js", "dist/**/*.d.ts", "bin/**/*.mjs"],
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "bin/**/*.mjs"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --root .",

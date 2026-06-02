@@ -9,9 +9,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DOCS_FRAME_ALLOWLIST,
   checkAllowlist,
   checkContent,
+  DOCS_FRAME_ALLOWLIST,
   hasH1Tagline,
   hasWhatThisIs,
   hasWhatThisIsNot,

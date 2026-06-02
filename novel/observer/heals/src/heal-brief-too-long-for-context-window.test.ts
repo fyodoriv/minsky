@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as heal from "./heal-brief-too-long-for-context-window.js";
 import type { BriefTooLongSeams } from "./heal-brief-too-long-for-context-window.js";
+import * as heal from "./heal-brief-too-long-for-context-window.js";
 
 function makeSeams(overrides: Partial<BriefTooLongSeams> = {}): {
   seams: BriefTooLongSeams;

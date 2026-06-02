@@ -26,22 +26,21 @@
 // would change.
 
 import { execFile } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { MaciekTokenMonitor, PLAN_CAPS } from "@minsky/token-monitor";
-import { MODEL_CATALOG, validateModelCatalog } from "./lib/model-catalog.mjs";
-
 import {
+  buildRecentPrListGhArgs,
   CANONICAL_REPO,
+  parsePrListEntries,
   ROLLING_30D_MIN_N,
   ROLLING_30D_MIN_PASS_RATE,
   ROLLING_WINDOW_DAYS,
-  buildRecentPrListGhArgs,
-  parsePrListEntries,
 } from "./daemon-pr-lint-metrics.mjs";
+import { MODEL_CATALOG, validateModelCatalog } from "./lib/model-catalog.mjs";
 
 const execFileAsync = promisify(execFile);
 

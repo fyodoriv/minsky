@@ -34,7 +34,7 @@
  */
 
 import type { Dirent } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { TokenMonitor, TokenSnapshot } from "./index.js";

@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  REQUIRED_MERGIRAF_GLOBS,
   findMissingMergirafGlobs,
+  REQUIRED_MERGIRAF_GLOBS,
 } from "./check-gitattributes-mergiraf.mjs";
 
 describe("findMissingMergirafGlobs", () => {

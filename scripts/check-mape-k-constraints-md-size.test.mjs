@@ -14,9 +14,9 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
+  checkConstraintsMdSize,
   DEFAULT_CAP_ENTRIES,
   ENTRY_HEADING_RE,
-  checkConstraintsMdSize,
 } from "./check-mape-k-constraints-md-size.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

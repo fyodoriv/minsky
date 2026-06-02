@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type SelfTestResult, aggregateStatus } from "./index.js";
+import { aggregateStatus, type SelfTestResult } from "./index.js";
 
 const sample = (status: SelfTestResult["status"]): SelfTestResult => ({
   status,

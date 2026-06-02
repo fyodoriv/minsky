@@ -1,4 +1,4 @@
-import { type Mock, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 
 import type { FetchLike } from "./http.js";
 import { HttpOllama, stripLitellmPrefix } from "./http.js";

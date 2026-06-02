@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   ALLOWLIST,
-  DENYLIST,
   checkAnchorPrimarySource,
+  DENYLIST,
   detectSkipComment,
   mainDirectory,
 } from "./check-anchor-primary-source.mjs";

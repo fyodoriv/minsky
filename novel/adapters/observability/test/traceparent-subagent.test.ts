@@ -20,7 +20,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { ROOT_CONTEXT, context, propagation, trace } from "@opentelemetry/api";
+import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
   BasicTracerProvider,
