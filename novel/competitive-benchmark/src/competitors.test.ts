@@ -24,18 +24,15 @@ describe("COMPETITORS corpus", () => {
     }
   });
 
-  it("carries the published result-source arm (≥1 competitor; local-harness is the future-state arm)", () => {
-    // After the 2026-05-22 corpus-expansion (PR M1.10), all 6 shipped
-    // competitors carry `published` snapshots — the previous Cursor
-    // `local-harness` arm was promoted to `published` once the AIDev
-    // dataset (Pinna et al. arXiv 2602.08915, 2026-02-09) provided a
-    // primary citation. The `ResultSource` discriminated-union arm for
-    // `local-harness` is still part of the type, kept for the slice-(c)
-    // runner's future reproducible-harness path; this test asserts the
-    // adapter seam is exercised by `published` and tolerant of either.
+  it("exercises both result-source arms — published snapshots + the Agentless local-harness falsifier", () => {
+    // Most competitors carry `published` snapshots; the Agentless row
+    // (added by `competitor-deep-research-tier-s-2026-05`) is the corpus's
+    // `local-harness` thesis-falsifier arm — a method we run head-to-head
+    // ourselves rather than a vendor-published Minsky-metric number. This
+    // test pins that the adapter seam is exercised by BOTH arms.
     const kinds = new Set(COMPETITORS.map((c) => c.resultSource.kind));
     expect(kinds.has("published")).toBe(true);
-    // No assertion on `local-harness` — present-or-absent is acceptable.
+    expect(kinds.has("local-harness")).toBe(true);
   });
 
   it("every competitor carries a non-empty homepage and citation", () => {
@@ -95,6 +92,22 @@ describe("competitorById", () => {
 
   it("returns undefined for an unknown id", () => {
     expect(competitorById("not-a-competitor")).toBeUndefined();
+  });
+
+  it("resolves the agentless thesis-falsifier as a local-harness row (competitor-deep-research-tier-s-2026-05)", () => {
+    // Agentless is a fixed-pipeline *method*, not a vendor product; it joins
+    // the corpus as the `local-harness` arm so the slice-(c) runner can run it
+    // head-to-head against the published readings — the falsifiability
+    // guarantee for Minsky's reason-for-existing (rule #9). Including it is
+    // mandatory per the task's Success bar regardless of any adoption verdict.
+    const agentless = competitorById("agentless") as Competitor;
+    expect(agentless.kind).toBe("open-source");
+    expect(agentless.resultSource.kind).toBe("local-harness");
+    if (agentless.resultSource.kind === "local-harness") {
+      expect(agentless.resultSource.harnessId).toBe("agentless-swebench-lite");
+    }
+    // local-harness rows carry no published values — slice-(c) fills them.
+    expect(publishedValue(agentless, "swe-bench-verified-resolve-rate")).toBeUndefined();
   });
 
   it("resolves autogen-microsoft with its MATH whole-test reading (corpus-add-autogen-microsoft)", () => {

@@ -63,12 +63,26 @@ The agent tier (Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, O
 
 The M1.10 scorecard at `novel/competitive-benchmark/` measures Minsky against this set on shared metrics. Read [`novel/competitive-benchmark/README.md`](../novel/competitive-benchmark/README.md) for the metric catalogue + grid shape.
 
-Current corpus state (as of 2026-05-23):
+Current corpus state (as of 2026-06-02):
 
-- **9 competitors** (8 agent-tier + 1 orchestrator-tier — MetaGPT)
+- **11 corpus entries** — 8 agent-tier `published` snapshots + 2 orchestrator-tier `published` snapshots (MetaGPT, AutoGen) + 1 `local-harness` thesis-falsifier (Agentless)
+- **Both `ResultSource` arms exercised** — `published` (dated vendor numbers) and `local-harness` (Agentless: a fixed-pipeline method Minsky runs head-to-head, not a vendor-published reading)
 - **12 metrics** (DORA 4 + agentic 6 + public-benchmark 2: SWE-bench Verified + HumanEval Pass@1)
-- **Grid**: 108 cells (12 × 9)
 - **Self-refreshing**: weekly `corpus-refresh-check` + quarterly `corpus-discover-quarterly` (PR #719); `/competitor-research <url>` skill is the on-ramp for new vendors (PR #718)
+
+## Deep-research backlog — Tier-S resolution
+
+The 2026-05-22 operator conversation produced five Tier-S competitor stubs to deep-research under the sharpened identity *"OpenHands that improves itself + follows hard rules and principles"*. LangGraph was demoted same-day (no concrete use case post-OpenHands-adoption); the remaining four were resolved by tasks `competitor-deepen-goose`, `competitor-deepen-claude-agent-sdk`, and `competitor-deep-research-tier-s-2026-05`. Final dispositions:
+
+| Stub | Relationship verdict | Corpus / adapter change | Resolved by |
+|---|---|---|---|
+| **Agentless** | **Reference / thesis falsifier** | ADD to corpus as `local-harness` (`agentless`, harness `agentless-swebench-lite`) — required; optional Agentless-style routing target for bug fixes (gated on an experiment) | `competitor-deep-research-tier-s-2026-05` |
+| **Claude Agent SDK** | **Dependency** (Claude-backend adapter only) | ADOPT behind `novel/adapters/agent-runtime.claude.ts` (subprocess → typed SDK); no corpus entry (library, not a benchmarked competitor) | `competitor-deepen-claude-agent-sdk` |
+| **Goose** | **Competitor (agent-tier) + candidate wrap target** | ADD as an optional low-priority agent backend; absorb recipe→brief portability; no corpus entry (score = chosen model's, no standalone benchmark) | `competitor-deepen-goose` |
+| **Cline** | **Reference** | DO-NOT-WRAP (no headless mode); absorb Plan/Act-as-pre-registration + per-task cost UX; no corpus entry (rule #4 — no model-dependent double-count) | `competitor-deep-research-tier-s-2026-05` |
+| **LangGraph** | Demoted from Tier-S (re-promote criterion on file) | None — see `competitors/langgraph.md` re-promote criterion | 2026-05-22 (demoted) |
+
+The single corpus-landing result of the four researched stubs is **Agentless** — the thesis falsifier that earns a permanent seat because a reason-for-existing that cannot be falsified is not engineering (rule #9). The other three resolve to a Dependency (Claude Agent SDK), a candidate agent-backend ADD (Goose), and a learn-from Reference (Cline); none adds a corpus reading, by the rule-#4 no-fabricated-readings discipline.
 
 ## Per-vendor research files
 
