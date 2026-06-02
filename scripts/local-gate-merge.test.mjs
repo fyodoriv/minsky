@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideLand,
+  decideLoadShed,
   decideMerge,
   decidePreflight,
   landLocalBranch,
@@ -10,7 +11,9 @@ import {
   parseReview,
   pickGateCandidates,
   runGateSweep,
+  setWorkerPauseSeam,
   summarizeLedger,
+  withWorkerPaused,
 } from "./local-gate-merge.mjs";
 
 /** @param {Partial<import("./local-gate-merge.mjs").PrSnapshot> & {number:number}} p */
@@ -593,5 +596,99 @@ describe("summarizeLedger (--self-metric — rule #9 throughput)", () => {
       skipped: 4,
       mergedPrs: [7, 8],
     });
+  });
+});
+
+describe("decideLoadShed (gate-host-load-shed — pure load-shed plan)", () => {
+  it("default-on: niceness + pause-worker when both levers enabled", () => {
+    expect(decideLoadShed({ niceness: 10 })).toEqual({
+      niceness: 10,
+      pauseWorker: true,
+      reason: "load-shed: nice +10 + pause-worker",
+    });
+  });
+
+  it("clamps niceness to [0,20] and truncates fractions", () => {
+    expect(decideLoadShed({ niceness: 99 }).niceness).toBe(20);
+    expect(decideLoadShed({ niceness: 7.9 }).niceness).toBe(7);
+  });
+
+  it("niceness 0 / negative / NaN ⇒ no nice wrapper (debug opt-out)", () => {
+    expect(decideLoadShed({ niceness: 0 }).niceness).toBe(0);
+    expect(decideLoadShed({ niceness: -5 }).niceness).toBe(0);
+    expect(decideLoadShed({ niceness: Number.NaN }).niceness).toBe(0);
+  });
+
+  it("MINSKY_GATE_NO_WORKER_PAUSE=1 disables the worker pause", () => {
+    const d = decideLoadShed({ niceness: 10, noWorkerPause: "1" });
+    expect(d.pauseWorker).toBe(false);
+    expect(d.reason).toBe("load-shed: nice +10");
+  });
+
+  it("both levers off ⇒ reason 'load-shed: off'", () => {
+    expect(decideLoadShed({ niceness: 0, noWorkerPause: "1" })).toEqual({
+      niceness: 0,
+      pauseWorker: false,
+      reason: "load-shed: off",
+    });
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    expect(decideLoadShed({ niceness: 10 })).toEqual(decideLoadShed({ niceness: 10 }));
+  });
+});
+
+describe("withWorkerPaused (rule #6 — resume is guaranteed)", () => {
+  /** Reset the module-level seam to no-ops after each test so leakage can't occur. */
+  const noop = () => undefined;
+
+  it("pauses before the vet, resumes after (happy path)", () => {
+    const calls = /** @type {string[]} */ ([]);
+    setWorkerPauseSeam({ pause: () => calls.push("pause"), resume: () => calls.push("resume") });
+    const out = withWorkerPaused(true, () => {
+      calls.push("vet");
+      return "stdout";
+    });
+    expect(out).toBe("stdout");
+    expect(calls).toEqual(["pause", "vet", "resume"]);
+    setWorkerPauseSeam({ pause: noop, resume: noop });
+  });
+
+  it("resumes even when the vet throws (never leaves the worker SIGSTOP'd)", () => {
+    let resumed = false;
+    setWorkerPauseSeam({ pause: noop, resume: () => (resumed = true) });
+    expect(() =>
+      withWorkerPaused(true, () => {
+        throw new Error("vet boom");
+      }),
+    ).toThrow("vet boom");
+    expect(resumed).toBe(true);
+    setWorkerPauseSeam({ pause: noop, resume: noop });
+  });
+
+  it("a failed pause does NOT block the vet, and resume is not attempted (degrade gracefully)", () => {
+    let resumeCalls = 0;
+    setWorkerPauseSeam({
+      pause: () => {
+        throw new Error("SIGSTOP failed");
+      },
+      resume: () => {
+        resumeCalls += 1;
+      },
+    });
+    const out = withWorkerPaused(true, () => "ran-anyway");
+    expect(out).toBe("ran-anyway");
+    // pause never succeeded ⇒ no dangling SIGCONT is issued
+    expect(resumeCalls).toBe(0);
+    setWorkerPauseSeam({ pause: noop, resume: noop });
+  });
+
+  it("pauseWorker=false runs the vet without touching the seam", () => {
+    let touched = false;
+    setWorkerPauseSeam({ pause: () => (touched = true), resume: () => (touched = true) });
+    const out = withWorkerPaused(false, () => "direct");
+    expect(out).toBe("direct");
+    expect(touched).toBe(false);
+    setWorkerPauseSeam({ pause: noop, resume: noop });
   });
 });
