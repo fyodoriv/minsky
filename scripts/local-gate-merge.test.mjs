@@ -10,6 +10,7 @@ import {
   parseReview,
   pickGateCandidates,
   runGateSweep,
+  summarizeLedger,
 } from "./local-gate-merge.mjs";
 
 /** @param {Partial<import("./local-gate-merge.mjs").PrSnapshot> & {number:number}} p */
@@ -543,5 +544,54 @@ describe("runGateSweep — two-layer authority (gate + Opus brain)", () => {
     });
     expect(reviewCalls).toBe(0);
     expect(merged).toEqual([50]);
+  });
+});
+
+describe("summarizeLedger (--self-metric — rule #9 throughput)", () => {
+  it("empty ledger ⇒ zero snapshot", () => {
+    expect(summarizeLedger([])).toEqual({ sweeps: 0, merged: 0, skipped: 0, mergedPrs: [] });
+  });
+
+  it("folds merged PR numbers and skipped counts across sweeps", () => {
+    const lines = [
+      JSON.stringify({ ts: "t1", merged: [10, 11], skipped: 2 }),
+      JSON.stringify({ ts: "t2", merged: [], skipped: 3 }),
+      JSON.stringify({ ts: "t3", merged: [12], skipped: 0 }),
+    ];
+    expect(summarizeLedger(lines)).toEqual({
+      sweeps: 3,
+      merged: 3,
+      skipped: 5,
+      mergedPrs: [10, 11, 12],
+    });
+  });
+
+  it("skips garbage / non-object / unparseable lines without crashing (rule #6)", () => {
+    const lines = [
+      "",
+      "noise",
+      "{bad json",
+      JSON.stringify(["not", "an", "object"]),
+      JSON.stringify({ ts: "t1", merged: [42], skipped: 1 }),
+    ];
+    expect(summarizeLedger(lines)).toEqual({
+      sweeps: 1,
+      merged: 1,
+      skipped: 1,
+      mergedPrs: [42],
+    });
+  });
+
+  it("tolerates malformed merged/skipped fields (non-array merged, non-number skipped)", () => {
+    const lines = [
+      JSON.stringify({ ts: "t1", merged: "oops", skipped: "nope" }),
+      JSON.stringify({ ts: "t2", merged: [7, "x", 8], skipped: 4 }),
+    ];
+    expect(summarizeLedger(lines)).toEqual({
+      sweeps: 2,
+      merged: 2,
+      skipped: 4,
+      mergedPrs: [7, 8],
+    });
   });
 });

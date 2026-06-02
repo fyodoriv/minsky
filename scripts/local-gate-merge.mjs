@@ -30,18 +30,25 @@
 // ≥1 regression, add an auto-revert-on-red post-merge re-vet OR fall back to
 // label-gated (`minsky-auto-merge` required). Measurement:
 // `node scripts/local-gate-merge.mjs --self-metric` prints
-// `{merged, regressions}` from the run ledger at `.minsky/local-gate-merge.jsonl`.
+// `{sweeps, merged, skipped, mergedPrs}` from the run ledger at
+// `.minsky/local-gate-merge.jsonl` — `merged` is the throughput numerator
+// for the ≥10-merge window; the regression count is derived externally by
+// re-running `--stage=full` on main after each `mergedPrs` entry.
 // Anchor: Beyer SRE 2016 (the gate IS the release gate); rule #10 / #1.
 //
 // Usage:
 //   node scripts/local-gate-merge.mjs [--dry-run] [--no-review] [--limit=N] [--pr=N]
-//   --dry-run   : vet + print verdicts, do NOT call `gh pr merge`
-//   --no-review : deterministic-only (skip the Opus brain layer)
-//   --pr=N      : gate only PR N
-//   --limit=N   : cap how many candidates to process this sweep (default 5)
+//   node scripts/local-gate-merge.mjs --self-metric
+//   --dry-run     : vet + print verdicts, do NOT call `gh pr merge`
+//   --no-review   : deterministic-only (skip the Opus brain layer)
+//   --pr=N        : gate only PR N
+//   --limit=N     : cap how many candidates to process this sweep (default 5)
+//   --self-metric : print the rule-#9 ledger snapshot {sweeps, merged, skipped,
+//                   mergedPrs} from `.minsky/local-gate-merge.jsonl` and exit
+//                   (no sweep) — the pre-registered throughput measurement
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -737,6 +744,66 @@ function appendLedger(mergedNumbers, skippedCount) {
 }
 
 /**
+ * Pure: fold the run ledger's NDJSON lines into the rule-#9 self-metric
+ * snapshot. Each non-dry sweep appends one `{ts, merged:[…prNumbers], skipped}`
+ * line (see `appendLedger`); this reads them back. Counterpart to the header's
+ * documented `--self-metric` contract — the deterministic measurement the
+ * task's pre-registration cites (Beyer SRE 2016 Ch. 6: the gate's effect must
+ * be observable from a durable ledger, not inferred). Garbage / non-object /
+ * unparseable lines are skipped (rule #6: a corrupt ledger line must never
+ * crash the metric reader — the ledger is best-effort by construction).
+ * @param {string[]} lines
+ * @returns {{sweeps: number, merged: number, skipped: number, mergedPrs: number[]}}
+ */
+export function summarizeLedger(lines) {
+  let sweeps = 0;
+  let skipped = 0;
+  /** @type {number[]} */
+  const mergedPrs = [];
+  for (const line of lines) {
+    const obj = parseJsonLine(line);
+    if (!obj) continue;
+    sweeps += 1;
+    mergedPrs.push(...mergedPrNumbers(obj["merged"]));
+    skipped += typeof obj["skipped"] === "number" ? obj["skipped"] : 0;
+  }
+  return { sweeps, merged: mergedPrs.length, skipped, mergedPrs };
+}
+
+/**
+ * Pure: the numeric PR numbers from one ledger line's `merged` field. A
+ * malformed value (non-array, or array with non-number entries) yields only
+ * the numbers — extracted so `summarizeLedger` stays under biome's cognitive-
+ * complexity cap (the same extraction discipline `parseGateVerdict` uses).
+ * @param {unknown} merged
+ * @returns {number[]}
+ */
+function mergedPrNumbers(merged) {
+  if (!Array.isArray(merged)) return [];
+  return merged.filter((n) => typeof n === "number");
+}
+
+/**
+ * `--self-metric` reader: load the ledger from disk (NDJSON), summarise, and
+ * return the snapshot. Fail-soft — a missing ledger (gate never ran) yields
+ * the zero snapshot rather than throwing, so the operator metric command
+ * always prints a verdict (rule #6: the reader never crashes the operator).
+ * @param {string} [ledgerPath]
+ * @returns {{sweeps: number, merged: number, skipped: number, mergedPrs: number[]}}
+ */
+export function readSelfMetric(ledgerPath = LEDGER) {
+  if (!existsSync(ledgerPath)) return { sweeps: 0, merged: 0, skipped: 0, mergedPrs: [] };
+  let raw = "";
+  try {
+    raw = readFileSync(ledgerPath, "utf8");
+    // rule-6: handled-locally — an unreadable ledger (perms/race) must not crash the metric reader; fall back to the zero snapshot so `--self-metric` always prints.
+  } catch {
+    return { sweeps: 0, merged: 0, skipped: 0, mergedPrs: [] };
+  }
+  return summarizeLedger(raw.split("\n"));
+}
+
+/**
  * @typedef {object} RunGateOpts
  * @property {boolean} [dryRun]
  * @property {number} [limit]
@@ -919,7 +986,9 @@ if (isMain) {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const noReview = args.includes("--no-review");
-  if (args[0] === "land-local") {
+  if (args.includes("--self-metric")) {
+    process.stdout.write(`${JSON.stringify(readSelfMetric())}\n`);
+  } else if (args[0] === "land-local") {
     const branchName = args[1];
     const res = landLocalBranch({ branchName, dryRun, noReview });
     process.stdout.write(
