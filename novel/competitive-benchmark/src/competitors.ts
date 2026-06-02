@@ -240,15 +240,15 @@ export const COMPETITORS: readonly Competitor[] = [
   },
   {
     id: "openai-codex",
-    label: "OpenAI Codex (codex-1)",
+    label: "OpenAI Codex (GPT-5.5)",
     kind: "closed-commercial",
-    homepage: "https://openai.com/index/introducing-codex/",
+    homepage: "https://openai.com/index/introducing-gpt-5-5/",
     resultSource: {
       kind: "published",
       citation:
-        "OpenAI, 'Introducing Codex', openai.com/index/introducing-codex/, 2025-05-16 (SWE-Bench Verified pass@1 = 0.721 for codex-1; 23 instances excluded as not-runnable on internal infrastructure; 192k context, medium reasoning effort; pass@8 = 0.838 reported in the same post). Codex CLI open-source repository at github.com/openai/codex.",
-      asOf: "2025-05-16",
-      values: { "swe-bench-verified-resolve-rate": 0.721 },
+        "OpenAI, 'Introducing GPT-5.5', openai.com/index/introducing-gpt-5-5/, 2026-04-23 (GPT-5.5 is OpenAI's flagship model powering Codex as of this release; SWE-bench Verified resolve rate 0.826 per the independently-reproduced vals.ai scaffold (vals.ai/benchmarks/swebench, corroborated by interestingengineering.com at 0.827), used here over OpenAI's headline 0.887 because the corpus tracks reproducible readings; OpenAI emphasised SWE-bench Pro 0.586 for this release). Supersedes the codex-1 reading (0.721, openai.com/index/introducing-codex/, 2025-05-16). Codex CLI open-source repository at github.com/openai/codex.",
+      asOf: "2026-04-23",
+      values: { "swe-bench-verified-resolve-rate": 0.826 },
     },
   },
   {

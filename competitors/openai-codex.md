@@ -1,4 +1,4 @@
-# Competitor: OpenAI Codex (codex-1)
+# Competitor: OpenAI Codex (GPT-5.5)
 
 > OpenAI's cloud-based autonomous software-engineering agent — overlapping problem space, parallel-task execution model.
 
@@ -50,17 +50,24 @@ OpenAI's autonomous-coding offering has two surfaces:
 
 - If you're in the OpenAI ecosystem exclusively and want OpenAI's best in-house agent scaffolding
 - For task-parallelism in cloud sandboxes (codex-1 runs many tasks in parallel against fresh clones — easier to fan out without operator-machine resources)
-- Higher published SWE-Bench Verified pass@1 score (0.721 vs Minsky's no-baseline-yet)
+- Higher published SWE-bench Verified score (GPT-5.5 reproduced at 0.826 vs Minsky's no-baseline-yet; was codex-1 0.721 in 2025-05)
 - Backed by OpenAI's resources (frontier-model R&D pipeline, ChatGPT integration)
 
 ## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
 
 | Metric                              | Value | Date       | Primary source |
 | ----------------------------------- | ----- | ---------- | -------------- |
-| `swe-bench-verified-resolve-rate`   | 0.721 | 2025-05-16 | OpenAI, "Introducing Codex", openai.com/index/introducing-codex/, 2025-05-16 (codex-1, pass@1; 23 SWE-Bench Verified instances excluded as not-runnable on internal infrastructure; 192k context, medium reasoning effort; pass@8 also published at 0.838) |
+| `swe-bench-verified-resolve-rate`   | 0.826 | 2026-04-23 | OpenAI, "Introducing GPT-5.5", openai.com/index/introducing-gpt-5-5/, 2026-04-23 (GPT-5.5 is the flagship model powering Codex; SWE-bench Verified 0.826 per the independently-reproduced vals.ai scaffold, corroborated by interestingengineering.com at 0.827, used over OpenAI's headline 0.887; OpenAI emphasised SWE-bench Pro 0.586 for this release) |
 
-The corpus also tracks `pass@8 = 0.838` in the citation string but does not promote it to a separate metric — the M1.10 catalogue's `swe-bench-verified-resolve-rate` is pass@1 by convention (matching how the other competitors' readings are extracted).
+The corpus tracks the independently-reproduced SWE-bench **Verified** reading (0.826) rather than OpenAI's headline (0.887) because the M1.10 catalogue's `swe-bench-verified-resolve-rate` values reproducible numbers over vendor-self-reported ones (rule #4 — visible, not flattering). OpenAI shifted its own emphasis to SWE-bench Pro (0.586) for GPT-5.5, but the corpus continues tracking Verified for cross-competitor comparability.
+
+### Reading history
+
+| Date       | Model    | Verified | Source |
+| ---------- | -------- | -------- | ------ |
+| 2026-04-23 | GPT-5.5  | 0.826    | OpenAI, "Introducing GPT-5.5" (current reading) |
+| 2025-05-16 | codex-1  | 0.721    | OpenAI, "Introducing Codex" (pass@1; pass@8 = 0.838; 23 instances excluded as not-runnable on internal infrastructure) |
 
 ## Last reviewed
 
-2026-05-22 (added to scorecard corpus via `/competitor-research`)
+2026-06-02 (refreshed to GPT-5.5 reading via `/competitor-research`; supersedes 2026-05-22 codex-1 reading)
