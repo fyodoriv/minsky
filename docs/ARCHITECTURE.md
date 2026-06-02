@@ -124,6 +124,7 @@ Adapters are tested both **against the interface** (does the implementation sati
 | 13 | Prompt optimization | `PromptOptimizer` | DSPy (Stanford) + Promptfoo | OpenAI Evals, custom | Medium — DSPy still evolving |
 | 14 | Specification monitor | `SpecMonitor` | **Custom Claude Skill** (novel; extract as OSS) | (none yet — we may be first) | High — wholly ours |
 | 15 | Agent-to-agent protocol | `A2A` (`novel/adapters/a2a/`) | A2A v1.0.0 (Linux Foundation) via the OpenHands scaffold → google-a2a-python bridge (`novel/adapters/a2a.openhands.ts`) | AGNTCY, custom JSON-RPC transport | Medium — A2A spec stable (v1.0.0); the google-a2a-python bridge is still maturing, so the scaffold reports `yellow` until the 2026-06-01 OpenHands runtime lands |
+| 16 | Agent-to-tool protocol | `MCPAdapter` (`novel/adapters/mcp/`) | MCP v2025-11-25 (Anthropic) via the OpenHands scaffold → `@modelcontextprotocol/sdk` bridge (`novel/adapters/mcp/src/mcp.openhands.ts`) | direct OpenHands SDK tool primitives, custom JSON-RPC transport | Medium — MCP spec stable (v2025-11-25, ~100+ public servers); the `@modelcontextprotocol/sdk` bridge is pending, so the scaffold reports `yellow` until the 2026-06-01 OpenHands runtime lands. v2026-07-28 RC migration is the sibling `mcp-migration-to-2026-07-28-rc` task; version shims live below the 3-verb interface seam |
 
 ## The novel layers (what's actually ours)
 
