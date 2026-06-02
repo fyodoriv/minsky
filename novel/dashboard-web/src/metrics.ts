@@ -424,6 +424,16 @@ export const SUCCESS_METRICS: readonly SuccessMetric[] = [
  */
 export const PROPOSED_METRICS: readonly ProposedMetric[] = [
   {
+    id: "cto-audit-merge-rate",
+    label: "CTO-audit merge rate — % of daemon-audit-filed tasks merged within 30d",
+    rationale:
+      "user-story 007 § Metric declares the CTO audit's quality is the merge rate of audit-filed tasks (`cto_audit_filed_tasks_merged_within_30d`, threshold >40%) — without it the audit's quality is unmeasurable and rule #11 forbids the quality claim from being load-bearing. The aggregator collector ships in `scripts/aggregate-cto-audit-metrics.mjs`; this entry stays in PROPOSED until the daemon's daily snapshot ingests its output so the dashboard tile renders a live observation.",
+    milestone: "M1.5",
+    blockedBy: "cto-audit-merge-rate-metric",
+    formula:
+      "node scripts/aggregate-cto-audit-metrics.mjs --since=<iso> --until=<iso> | jq '.merge_rate' ⟨TBD-AFTER: daemon ingests the JSONL into .minsky/metric-snapshots⟩",
+  },
+  {
     id: "stability-10h-unattended",
     label: "Stability: successful iterations / total over 10h unattended runs",
     rationale:

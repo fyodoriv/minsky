@@ -23,6 +23,7 @@
     "agent-launcher-parity",
     "spawn-failure-rate-24h",
     "uninstall-residue-count",
+    "cto-audit-merge-rate",
     "stability-10h-unattended",
     "human-blocked-task-rate",
     "mttr-self-heal",

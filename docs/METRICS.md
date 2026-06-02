@@ -290,7 +290,17 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 ## Metrics to add
 
-_8 metrics that should exist on the dashboard but don't yet. Each row names the milestone that introduces it, the task that lands the collector, and a sketch of the future formula. Operator directive 2026-05-21 — gap is surfaced explicitly so the 10-metric set above is understood as the current state, not the steady state._
+_9 metrics that should exist on the dashboard but don't yet. Each row names the milestone that introduces it, the task that lands the collector, and a sketch of the future formula. Operator directive 2026-05-21 — gap is surfaced explicitly so the 10-metric set above is understood as the current state, not the steady state._
+
+### cto-audit-merge-rate — CTO-audit merge rate — % of daemon-audit-filed tasks merged within 30d
+
+_Milestone: M1.5_
+
+**Why it belongs:** user-story 007 § Metric declares the CTO audit's quality is the merge rate of audit-filed tasks (`cto_audit_filed_tasks_merged_within_30d`, threshold >40%) — without it the audit's quality is unmeasurable and rule #11 forbids the quality claim from being load-bearing. The aggregator collector ships in `scripts/aggregate-cto-audit-metrics.mjs`; this entry stays in PROPOSED until the daemon's daily snapshot ingests its output so the dashboard tile renders a live observation.
+
+**Blocked by:** `cto-audit-merge-rate-metric` in `TASKS.md`.
+
+**Future formula:** `node scripts/aggregate-cto-audit-metrics.mjs --since=<iso> --until=<iso> | jq '.merge_rate' ⟨TBD-AFTER: daemon ingests the JSONL into .minsky/metric-snapshots⟩`
 
 ### stability-10h-unattended — Stability: successful iterations / total over 10h unattended runs
 

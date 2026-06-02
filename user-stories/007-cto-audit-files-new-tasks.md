@@ -72,7 +72,7 @@ Per constitutional rule #7 (`vision.md` § 7).
 ## Status
 
 - **Phase**: Implemented (the `runHostCtoAudit` primitive is at `novel/cross-repo-runner/src/host-cto-audit.ts` with sibling unit tests). This story documents the operator-facing experience; the integration test `user-stories/007-cto-audit-files-new-tasks.test.ts` ships with this story and exercises the dry-run path end-to-end.
-- **Blocking**: the merge-rate metric (`cto_audit_filed_tasks_merged_within_30d`) requires the metrics dashboard's PR-cross-reference query (filed as task `cto-audit-merge-rate-metric` P1 in this PR).
+- **Blocking**: the merge-rate metric (`cto_audit_filed_tasks_merged_within_30d`) now has a runnable collector — `scripts/aggregate-cto-audit-metrics.mjs` joins TASKS.md committed history (the `**Surfaced-by**: daemon CTO audit` markers above) with merged PRs and emits `{ts, audit_filed_count, merged_within_30d_count, merge_rate}` per window (`task cto-audit-merge-rate-metric`). Verify the §-Metric ≥0.4 threshold with `node scripts/aggregate-cto-audit-metrics.mjs --since=<iso> --until=<iso> | jq -e '.merge_rate >= 0.4'`. The metric is surfaced in `docs/METRICS.md` (PROPOSED_METRICS, `cto-audit-merge-rate`); the remaining gap is the daemon ingesting the JSONL into `.minsky/metric-snapshots` so the dashboard tile renders a live observation.
 - **Theoretical anchor**: rule #17 (vision.md § 17 — proactive healing; observation IS the fix). Composed with Patterson 2002 *Recovery-Oriented Computing* — the daemon observing its own output is exactly the recovery-as-feature pattern.
 
 ## Pattern conformance
