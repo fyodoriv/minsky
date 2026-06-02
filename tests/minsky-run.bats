@@ -137,6 +137,44 @@ EOF
   [[ "$(echo "$line" | jq -r .notes)" == *"dry-run"* ]]
 }
 
+@test "each iteration emits a glanceable summary line on daemon.log (task daemon-log-lacks-iteration-detail)" {
+  # Before this task, daemon.log only showed the JSONL-write breadcrumb;
+  # the operator had to cat the experiment-store JSONL to learn the
+  # verdict. record_iteration now also emits one `iteration #N: ...` line
+  # per record so `tail -5 ~/.minsky/daemon.log` shows iteration health.
+  host="$(make_host one "$(complete_task_block)")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # The summary line is on stderr (daemon.log) and carries the five fields
+  # the task names: task, agent, verdict, duration, pr.
+  [[ "$output" == *"iteration #1: task=pick-me-first"* ]]
+  [[ "$output" == *"verdict=planned"* ]]
+  [[ "$output" == *"agent="* ]]
+  [[ "$output" == *"duration="* ]]
+  [[ "$output" == *"pr=null"* ]]
+}
+
+@test "iteration summary line count matches the JSONL record count (measurement parity)" {
+  # The task's measurement is `grep -c 'iteration #' daemon.log` equals the
+  # JSONL record count. Both are produced by record_iteration, so a 1:1
+  # ratio is structural — assert it over a multi-iteration walk.
+  make_host one "$(complete_task_block)" > /dev/null
+  make_host two "$(complete_task_block)" > /dev/null
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  summary_count="$(printf '%s\n' "$output" | grep -c 'iteration #' || true)"
+  # Pure-bash glob walk (the runner avoids `find` because it's shimmed to
+  # `fd` on some operator machines — see walk_hosts's globbing comment).
+  shopt -s nullglob
+  jsonl_count=0
+  for jf in "$HOSTS_DIR"/*/.minsky/experiment-store/cross-repo/*.jsonl; do
+    jsonl_count=$((jsonl_count + $(grep -c '"verdict"' "$jf" || true)))
+  done
+  shopt -u nullglob
+  [ "$summary_count" = "$jsonl_count" ]
+  [ "$summary_count" -ge 2 ]
+}
+
 # --- 5. No-eligible-task path ---------------------------------------------
 
 @test "empty TASKS.md produces 'aborted' verdict with no-eligible-task note" {
