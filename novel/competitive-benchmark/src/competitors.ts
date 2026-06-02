@@ -262,6 +262,19 @@ export const COMPETITORS: readonly Competitor[] = [
     },
   },
   {
+    // stale-by-vendor (corpus-refresh-augment-code): the
+    // `swe-bench-verified-resolve-rate` reading below stays pinned to its
+    // original publication ON PURPOSE. Augment has NOT published a *new
+    // SWE-bench Verified* submission (the gap exceeds the 365-day "4 vendor
+    // cycles" threshold in the refresh task's Pivot clause). Their recent
+    // benchmarking moved to a DIFFERENT split — Auggie CLI scored 51.80% on
+    // Scale AI's SWE-bench *Pro* (379/731, Claude Opus 4.5 driver), per the
+    // primary vendor post 'Auggie tops SWE-Bench Pro'. SWE-bench Pro is not
+    // (yet) a registered metric in metrics.ts, so it is recorded in the
+    // citation as evidence the vendor pivoted benchmarks rather than
+    // silently restamping the old Verified `asOf` — masking staleness with a
+    // re-stated number is worse than acknowledging it (Pivot clause + rule
+    // #4 visibility).
     id: "augment-code",
     label: "Augment Code (Augment SWE-bench agent)",
     kind: "open-source",
@@ -269,7 +282,7 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "Chen & Flaherty, '#1 open-source agent on SWE-Bench Verified by combining Claude 3.7 and O1', augmentcode.com/blog, 2025-03-31 (open-source SWE-bench Verified resolve rate 0.654 with Claude Sonnet 3.7 driver + OpenAI o1 ensembler; methodology: forked from Anthropic SWE-bench post + sequential-thinking MCP tool); reproducible open-source repo at github.com/augmentcode/augment-swebench-agent.",
+        "Chen & Flaherty, '#1 open-source agent on SWE-Bench Verified by combining Claude 3.7 and O1', augmentcode.com/blog, 2025-03-31 (open-source SWE-bench Verified resolve rate 0.654 with Claude Sonnet 3.7 driver + OpenAI o1 ensembler; methodology: forked from Anthropic SWE-bench post + sequential-thinking MCP tool); reproducible open-source repo at github.com/augmentcode/augment-swebench-agent. STALE-BY-VENDOR: no new SWE-bench Verified submission since 2025-03-31; vendor's current flagship benchmark is SWE-bench Pro — Auggie CLI 51.80% (379/731, Claude Opus 4.5), 'Auggie tops SWE-Bench Pro', augmentcode.com/blog, 2026-02-04 (different split, not yet a registered metric — see metrics.ts).",
       asOf: "2025-03-31",
       values: { "swe-bench-verified-resolve-rate": 0.654 },
     },
