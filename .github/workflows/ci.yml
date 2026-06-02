@@ -1301,6 +1301,34 @@ jobs:
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-no-singleton-experiment.test.mjs
 
+  gate-scratch-resolvable:
+    # rule #10 ratchet (`gate-scratch-resolvable-ratchet`): the local
+    # merge-gate's scratch clone must yield a module-resolvable workspace.
+    # The zero-merge regression — `prepareScratchClone` symlinked only the
+    # ROOT node_modules, but pnpm scatters a per-package symlink-farm across
+    # the workspace, so every `novel/*` import was unresolvable in the scratch
+    # and tsc/vitest failed `Cannot find module` for EVERY PR. The bug was
+    # silent because an infra-broken vet was misattributed as a per-PR
+    # gate-red. This structural check fails if the scratch-prep ever drops the
+    # real `pnpm install` (or reverts to a root-only symlink). Anchor: rule #10
+    # (deterministic enforcement / ratchet); Nygard 2018 Release It! (Stability
+    # pattern regression guard); global "every bug becomes a rule".
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - name: gate-scratch-resolvable lint
+        run: node scripts/check-gate-scratch-resolvable.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: unit tests for the linter
+        run: pnpm exec vitest run scripts/check-gate-scratch-resolvable.test.mjs
+
   brief-pr-instructions:
     # rule #10 deterministic enforcement of the `devin-spawn-no-pr-opened`
     # fix (commit 085fdd7, 2026-05-18). The spawn brief in
@@ -2299,6 +2327,7 @@ jobs:
       - metric-freshness
       - milestone-alignment
       - no-singleton-experiment
+      - gate-scratch-resolvable
       - orphan-tests
       - otel-no-pii
       - secret-scan
@@ -2391,6 +2420,7 @@ jobs:
                    "${{ needs.metric-freshness.result }}" \
                    "${{ needs.milestone-alignment.result }}" \
                    "${{ needs.no-singleton-experiment.result }}" \
+                   "${{ needs.gate-scratch-resolvable.result }}" \
                    "${{ needs.orphan-tests.result }}" \
                    "${{ needs.otel-no-pii.result }}" \
                    "${{ needs.secret-scan.result }}" \
