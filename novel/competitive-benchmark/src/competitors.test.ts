@@ -101,9 +101,10 @@ describe("competitorById", () => {
 describe("publishedValue", () => {
   it("returns the reported value for a published source", () => {
     const oh = competitorById("openhands") as Competitor;
-    // OpenHands SWE-bench Verified resolve rate per the all-hands.dev
-    // April 2025 SOTA submission (verified via SWE-bench/experiments PR #209).
-    expect(publishedValue(oh, "swe-bench-verified-resolve-rate")).toBeCloseTo(0.658);
+    // OpenHands SWE-bench Verified resolve rate per the Software Agent SDK
+    // paper (arXiv:2511.03690v2, 2026-04-22, Table 4 §5.4 — Claude Sonnet 4.5
+    // + extended thinking on the V1 SDK; supersedes the 0.658 Apr-2025 number).
+    expect(publishedValue(oh, "swe-bench-verified-resolve-rate")).toBeCloseTo(0.728);
   });
 
   it("returns the reported value for any metric the published source covers", () => {
