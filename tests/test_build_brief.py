@@ -135,6 +135,22 @@ def test_overlay_includes_5_deliverables_and_self_grade_block() -> None:
     assert "Lesson:" in out
 
 
+def test_overlay_mandates_block_removal_on_shipped_work() -> None:
+    """Shipped-work iterations must REMOVE the block, not annotate it.
+
+    Pin for brief-mandates-task-block-removal-on-shipped-work: devin was
+    observed ticking `[x]` boxes and adding a `**Status**:` line instead of
+    deleting the block, which re-picks the same task forever.
+    """
+    out = build_brief.render_system_prompt_overlay(
+        vision_md_path="v", task_id="my-task", host_repo="h", pre_commit_command="",
+    )
+    assert "ALREADY SHIPPED" in out
+    assert "REMOVE the entire" in out
+    assert "Do NOT add `[x]` annotations" in out
+    assert "Do NOT add a `**Status**:` line" in out
+
+
 def test_overlay_uses_custom_pre_commit_command_when_set() -> None:
     out = build_brief.render_system_prompt_overlay(
         vision_md_path="v", task_id="x", host_repo="h",

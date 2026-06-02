@@ -299,6 +299,7 @@ def render_system_prompt_overlay(
         "2. Ship the code change matching the task's acceptance criteria.",
         line_3,
         f"4. Remove the shipped task block (`{task_id}`) from `TASKS.md` in the SAME commit that ships the code — the runner unions `TASKS.md` + `AGENTS.md` into the task's declared scope so this cleanup never triggers scope-leak. History lives in git log; never mark the block `[x]`, delete it entirely.",
+        f"   - If you discover this task's code is ALREADY SHIPPED (its PR is open or merged), your ONLY change in this iteration is to REMOVE the entire `- [ ] …` block for `{task_id}` from `TASKS.md`. Do NOT add `[x]` annotations to its acceptance items. Do NOT add a `**Status**:` line. Do NOT 'respect the existing structure' — per the tasks.md spec, a completed task's block is deleted, not annotated; leaving it intact (even ticked) re-picks the same task on the next tick.",
         "5. Open a PR whose body carries a `Hypothesis self-grade` block:",
         "   - Predicted: <re-state the hypothesis>",
         "   - Observed: <the actual measurement output>",
