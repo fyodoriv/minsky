@@ -14,3 +14,12 @@ export {
   type ParseResult,
   parse,
 } from "./parse.js";
+
+export {
+  parseReflexionEntry,
+  type ReflexionMemoryEntry,
+  type ReflexionOutcome,
+  type ReflexionParseError,
+  type ReflexionParseErrorKind,
+  type ReflexionParseResult,
+} from "./reflexion-schema.js";
