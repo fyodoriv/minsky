@@ -4,6 +4,7 @@
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
 import {
+  buildRunanyPolicyRecords,
   buildTickLedgerLine,
   decideHeal,
   decideWorkerPausePids,
@@ -58,6 +59,59 @@ describe("buildTickLedgerLine (conductor merge-accounting)", () => {
   it("omits sweepError when none occurred", () => {
     const line = buildTickLedgerLine({ merged: [], skipped: [] }, ctx);
     expect("sweepError" in line).toBe(false);
+  });
+});
+
+// runany-permission-scoped-writes: the conductor only ever writes to its OWN
+// (home) repo, so each merged PR is a home `open-pr` write-verdict and a tick
+// that observes friction (healed daemon OR sweep error) files a minsky-self
+// improvement task (scout-and-record). `buildRunanyPolicyRecords` is the pure
+// decision (rule #10 — no I/O); the caller appends to `.minsky/runany-policy.jsonl`.
+describe("buildRunanyPolicyRecords (least-authority policy ledger)", () => {
+  const ts = "2026-06-02T00:00:00.000Z";
+
+  it("one home write-verdict per merged PR — all allowed, none foreign", () => {
+    const recs = buildRunanyPolicyRecords(
+      { merged: [{ number: 11 }, { number: 12 }] },
+      { healed: false, ts },
+    );
+    const verdicts = recs.filter((r) => r["event"] === "write-verdict");
+    expect(verdicts).toHaveLength(2);
+    for (const v of verdicts) {
+      expect(v["repoClass"]).toBe("home");
+      expect(v["action"]).toBe("open-pr");
+      expect(v["allowed"]).toBe(true);
+    }
+  });
+
+  it("files a minsky-self task when the worker daemon was healed (friction)", () => {
+    const recs = buildRunanyPolicyRecords({ merged: [] }, { healed: true, ts });
+    const filed = recs.filter((r) => r["event"] === "minsky-self-task-filed");
+    expect(filed).toHaveLength(1);
+    expect(String(filed[0]?.["taskId"])).toContain("worker-daemon-down-healed");
+  });
+
+  it("files a minsky-self task on a sweep error (friction)", () => {
+    const recs = buildRunanyPolicyRecords(
+      { merged: [] },
+      { healed: false, sweepError: "boom", ts },
+    );
+    expect(recs.filter((r) => r["event"] === "minsky-self-task-filed")).toHaveLength(1);
+  });
+
+  it("files NO minsky-self task on a clean tick (no friction)", () => {
+    const recs = buildRunanyPolicyRecords({ merged: [{ number: 7 }] }, { healed: false, ts });
+    expect(recs.filter((r) => r["event"] === "minsky-self-task-filed")).toHaveLength(0);
+  });
+
+  it("empty merged + no friction ⇒ no records", () => {
+    expect(buildRunanyPolicyRecords({ merged: [] }, { healed: false, ts })).toEqual([]);
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    const a = buildRunanyPolicyRecords({ merged: [{ number: 1 }] }, { healed: true, ts });
+    const b = buildRunanyPolicyRecords({ merged: [{ number: 1 }] }, { healed: true, ts });
+    expect(a).toEqual(b);
   });
 });
 

@@ -96,6 +96,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertWriteAllowed, classifyRepo } from "./lib/repo-policy.mjs";
 
 // Derive the repo root from this script's own location — the hardcoded
 // `/Users/cbrwizard/apps/tooling/minsky` fallback only worked for one
@@ -190,20 +191,59 @@ export function parseGateVerdict(stdout) {
 }
 
 /**
- * Pure: final merge decision for one vetted PR. Two-layer authority
- * (autonomous-opus): the deterministic `--stage=full` gate is the cheap
- * pre-filter; an optional **Opus review** is the brain — a PR only merges
- * when it is BOTH gate-green AND (when a review is supplied) Opus-approved.
- * `review` is omitted in deterministic-only mode (`--no-review`).
- * @param {{
- *   pr: PrSnapshot,
- *   verdict: {green: boolean, failedSteps: string[], sawSummary: boolean},
- *   vetError?: string,
- *   review?: {approve: boolean, reason: string},
- * }} input
+ * Pure: the least-authority repo guard for a gate merge (the Pivot's
+ * git-layer backstop in `runany-permission-scoped-writes`). The gate only
+ * ever lists the HOME repo's own PRs, so a merge IS a home code-write; this
+ * makes that invariant explicit and deterministic. When the optional
+ * head-repo identity is supplied (`headRepo` vs `homeRepo` as
+ * `owner/name` origin strings) and they classify as `foreign`, the merge is
+ * REFUSED — defense-in-depth against a fork/foreign PR ever reaching the
+ * merge call. Absent identity ⇒ home (backward-compatible: today's gate
+ * never sees a foreign PR, so the absence is the safe common case).
+ * @param {{ headRepo?: string, homeRepo?: string }} ids
+ * @returns {{ allowed: boolean, reason: string }}
+ */
+export function decidePrRepoPolicy(ids) {
+  const repoClass =
+    ids.headRepo && ids.homeRepo
+      ? classifyRepo({
+          repoRoot: ids.headRepo,
+          homeRoot: ids.homeRepo,
+          repoOrigin: ids.headRepo,
+          homeOrigin: ids.homeRepo,
+        })
+      : "home";
+  const verdict = assertWriteAllowed({ repoClass, action: "push-code" });
+  return verdict.allowed
+    ? { allowed: true, reason: "home-repo merge" }
+    : { allowed: false, reason: verdict.reason };
+}
+
+/**
+ * @typedef {object} DecideMergeInput
+ * @property {PrSnapshot} [pr]      the PR under decision (carried by callers).
+ * @property {{green: boolean, failedSteps: string[], sawSummary: boolean}} verdict
+ * @property {string} [vetError]
+ * @property {{approve: boolean, reason: string}} [review]
+ * @property {string} [headRepo]   PR head-repo `owner/name` (Pivot guard; optional).
+ * @property {string} [homeRepo]   home-repo `owner/name` (Pivot guard; optional).
+ */
+
+/**
+ * Pure: the gate's merge decision. Adds the least-authority repo guard
+ * (`decidePrRepoPolicy`) ahead of the existing vet/review layers — a PR
+ * whose head repo is foreign is refused before any merge call, the Pivot's
+ * git-layer backstop. The rest is unchanged (deterministic gate + optional
+ * Opus brain). Same input ⇒ same output (rule #10).
+ * @param {DecideMergeInput} input
  * @returns {{action: "merge" | "skip", reason: string}}
  */
 export function decideMerge(input) {
+  const repoPolicy = decidePrRepoPolicy({
+    ...(input.headRepo ? { headRepo: input.headRepo } : {}),
+    ...(input.homeRepo ? { homeRepo: input.homeRepo } : {}),
+  });
+  if (!repoPolicy.allowed) return { action: "skip", reason: repoPolicy.reason };
   if (input.vetError) return { action: "skip", reason: `vet-error: ${input.vetError}` };
   if (!input.verdict.sawSummary) {
     return { action: "skip", reason: "no gate summary (vet did not complete)" };
