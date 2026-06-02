@@ -24,9 +24,17 @@
 # 2.7.x ↔ 0.217.x mix coexists. A single grouped PR is the only safe shape for
 # clustered package families.
 #
+# Semver triage (see docs/dependency-policy.md): every group below bumps ONLY
+# `minor` + `patch`, so major bumps fall out as individual PRs. Patch/minor PRs
+# are auto-merge-eligible (the local gate merges them unattended once
+# `pre-pr-lint --stage=full` is green); major bumps are held for the operator —
+# `scripts/dependabot-triage.mjs` classifies each PR and labels majors
+# `needs-operator`. Dependabot's config can't conditionally label by bump
+# magnitude, so the label is applied by the local triage seam, not here.
+#
 # Anchor: NIST SP 800-218 SSDF PW.4 (manage third-party software security);
 # OWASP Top 10 A06:2021 (vulnerable & outdated components); Dependabot
-# grouped-updates docs § "Configuring updates" (docs.github.com).
+# grouped-updates docs § "Configuring updates" (docs.github.com); SemVer 2.0.0.
 
 version: 2
 
