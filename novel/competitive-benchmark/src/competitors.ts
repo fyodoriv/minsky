@@ -264,6 +264,19 @@ export const COMPETITORS: readonly Competitor[] = [
       values: { "swe-bench-verified-resolve-rate": 0.654 },
     },
   },
+  {
+    id: "github-copilot-coding-agent",
+    label: "GitHub Copilot coding agent",
+    kind: "closed-commercial",
+    homepage: "https://github.com/newsroom/press-releases/coding-agent-for-github-copilot",
+    resultSource: {
+      kind: "published",
+      citation:
+        "GitHub, 'Vibe coding with GitHub Copilot: Agent mode and MCP support rolling out to all VS Code users', github.blog/news-insights/product-news, 2025-04-04 ('agent mode achieves a pass rate of 56.0% on SWE-bench Verified with Claude 3.7 Sonnet'); GitHub, 'GitHub Introduces Coding Agent For GitHub Copilot', github.com/newsroom/press-releases/coding-agent-for-github-copilot, 2025-05-19 (asynchronous coding agent launch — assign a GitHub issue to Copilot and the agent pushes commits to a draft PR, tracked via agent session logs).",
+      asOf: "2025-04-04",
+      values: { "swe-bench-verified-resolve-rate": 0.56 },
+    },
+  },
   // ---- ORCHESTRATOR TIER (peers to Minsky — they compose agents) -----------
   // Per operator directive 2026-05-23 ("add actual competitors to the list,
   // not agents"). Minsky is an orchestrator: it manages the daemon lifecycle,
