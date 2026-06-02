@@ -39,14 +39,17 @@ const REPO_ROOT = resolve(HERE, "..");
 export const README_BYTE_BUDGET_TARGET = 3072;
 
 /**
- * The CURRENT enforced ceiling. Set to current size + small headroom
- * at lint introduction (2026-05-28). Future PRs that compress the
- * README drop this number; future PRs that grow it past this number
- * fail the gate.
+ * The CURRENT enforced ceiling. Ratcheted down to the TARGET (3072) by
+ * `readme-rewrite-5-min-install-guide`'s final pass, which recompressed
+ * the README from ~11058 to ~3065 bytes (deep content relocated to
+ * `docs/README-v1-detailed.md`). The ceiling now equals the target, so
+ * any future PR that regrows the README past 3 KiB fails the gate — the
+ * deterministic enforcer of the <5-min-read goal. To raise it, edit this
+ * constant with a documented reason (rule #10).
  *
  * @type {number}
  */
-export const README_BYTE_BUDGET_HARD_LIMIT = 11500;
+export const README_BYTE_BUDGET_HARD_LIMIT = 3072;
 
 /**
  * @typedef {object} CheckResult

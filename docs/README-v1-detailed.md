@@ -351,6 +351,21 @@ A Minsky operator picks an agent (Claude vs Devin vs Aider) AND gets the orchest
 
 Not the only Minsky on the internet — there's also a popular economic-modelling tool ([`highperformancecoder/minsky`](https://github.com/highperformancecoder/minsky), named after the *economist* Hyman Minsky) plus several other unrelated projects. Full disambiguation table + the prior-art lineage that informs this Minsky's architecture: [docs/prior-art-and-name-collisions.md](prior-art-and-name-collisions.md).
 
+### Where we are vs. the vision (relocated from README.md 2026-06-01)
+
+Moved here from the top-level README during the `readme-rewrite-5-min-install-guide` final pass to keep the entry point under its <3 KB / <5-min budget. Honest scorecard (the vision is the tagline; the pillars are the substrate):
+
+| Pillar | Today | Status |
+|---|---|---|
+| **24/7 daemon** | launchd / systemd KeepAlive supervisor; auto-restart; dynamic p95-watchdog | ✅ substrate ships · 🟡 [M1.1](../MILESTONES.md) stability target (90% over 10h) blocked on `spawn-failed-exit-minus-one-silent-empty-stderr` |
+| **Self-improving** | dogfood loop runs against the repo itself; MAPE-K L1 records every iteration; observer heals 4 failure modes | ✅ L1 ships · 🟡 closed-loop A/B prompt tuning (L2) is spec-only · constitutional self-revision (L3) is M3+ |
+| **Code factory** | cross-repo runner walks N hosts (3 iterations / host); rule #12 forces stability work when the queue empties | 🟡 throughput-at-scale unmeasured · M1.10 competitive scorecard ships but the throughput row is empty |
+| **Relies on OpenHands as orchestrator** | [`@minsky/agent-runtime-openhands`](../novel/adapters/agent-runtime-openhands/README.md) wraps OpenHands SDK v1.19.1; `cloud_agent: "openhands"` is the default since 2026-05-24; local models auto-detected via prefix | ✅ default agent shipped (PR #782) · ✅ live spawn verified against Ollama + `qwen3-coder:30b` (PR #786) · 🟡 cloud A/B vs. claude/devin pending |
+| **Comes up with tasks** | agents file P1–P3 tasks while iterating (rule #17 forces same-PR scout filings); `corpus-discover-quarterly` files competitor-research tasks every 90d | 🟡 agents author tasks *inside* iterations; autonomous authoring *between* ticks is the M2 gap |
+| **Best way based on science** | rule #9 pre-registered HDD enforced as a CI lint on every PR; M1.10 corpus scorecard with primary-source citations; every PR carries a `## Hypothesis self-grade` block | ✅ strongest pillar — this is the moat |
+
+**Two operator invariants recorded 2026-05-24**: (1) **Local models are the default until stable** — the runtime defaults to Ollama / LM Studio / MLX and does NOT require a cloud API key; the stance lifts when `scripts/measure-stability.mjs` reports ≥90% clean-exit fraction over a trailing 7-day window ([story 015](../user-stories/015-local-models-until-stable.md)). (2) **Launcher-agnostic feature parity** — you can install + run from any agent chat (Claude Code, Cursor, Devin, Windsurf, Codex, Aider, or a local model) and the daemon's runtime behavior is byte-identical afterwards; the chat is a doorway, not a runtime ([story 014](../user-stories/014-launcher-agnostic-feature-parity.md)). Full plans: [path-c reshape](plans/2026-05-22-path-c-openhands-reshape.md), [path-a aggressive cut](plans/2026-05-24-path-a-aggressive-cut.md).
+
 ### Where to read next (full audience-segmented map)
 
 Full map: **[docs/README.md](README.md)**. Pick by audience:
