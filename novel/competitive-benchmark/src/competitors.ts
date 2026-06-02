@@ -188,10 +188,20 @@ export const COMPETITORS: readonly Competitor[] = [
     homepage: "https://github.com/SWE-agent/SWE-agent",
     resultSource: {
       kind: "published",
+      // Refreshed from the 2024 NeurIPS GPT-4 baseline (0.125, full-split
+      // proxy) to the SWE-agent team's current flagship scaffold,
+      // mini-swe-agent. The official SWE-bench Verified leaderboard
+      // (swebench.com "Bash Only" track) carries the mini-swe-agent +
+      // Gemini 3 Pro submission dated 2026-02-26 at ~0.74 resolve rate;
+      // mini-swe-agent.com's own headline ("Gemini 3 Pro reaches 74% on
+      // SWE-bench verified with mini-swe-agent!") is the project's
+      // primary statement of the same number. This is a true Verified
+      // reading (not a full-split/Lite proxy), so the proxy caveat that
+      // qualified the 2024 entry is dropped.
       citation:
-        "Yang, Jimenez, Wettig, Lieret, Yao, Narasimhan, Press, 'SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering', NeurIPS 2024 (SWE-agent + GPT-4: SWE-bench resolve rate 0.125, reported on 2,294-instance full split — used here as the SWE-bench Verified proxy since SWE-agent's Verified-split number is comparable per the Aider leaderboard cross-reference).",
-      asOf: "2024-10-01",
-      values: { "swe-bench-verified-resolve-rate": 0.125 },
+        "SWE-bench Verified leaderboard (swebench.com, 'Bash Only' track), 'mini-swe-agent + Gemini 3 Pro', submitted 2026-02-26 (resolve rate 0.74 on the 500-instance Verified split using the SWE-agent team's minimal bash-only ReAct scaffold); primary statement at mini-swe-agent.com ('Gemini 3 Pro reaches 74% on SWE-bench verified with mini-swe-agent!'). mini-swe-agent is the SWE-agent project's current 100-line flagship scaffold; the 2024 NeurIPS SWE-agent + GPT-4 reading (full-split proxy, 0.125) it supersedes is retained in competitors/swe-agent.md for history.",
+      asOf: "2026-02-26",
+      values: { "swe-bench-verified-resolve-rate": 0.74 },
     },
   },
   {
