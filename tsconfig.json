@@ -16,6 +16,7 @@
     { "path": "./novel/experiment-record" },
     { "path": "./novel/mape-k-loop" },
     { "path": "./novel/observer/heals" },
+    { "path": "./novel/tick-loop" },
 
     { "path": "./scripts" },
     { "path": "./user-stories" }

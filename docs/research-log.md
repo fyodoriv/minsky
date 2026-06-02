@@ -556,6 +556,16 @@ Each active dependency follows the same shape:
 - **Extraction target**: Yes — published as `@minsky/spec-monitor` from day one
 - **Glossary**: see [vision.md § Glossary](./vision.md#glossary--every-term-has-a-cs-anchor) for the term-in-use → CS-source mapping (and the retired-terms list)
 
+### Finding anonymizer — `@minsky/tick-loop`
+
+- **Current**: **Custom internal package** — `novel/tick-loop/src/finding-reporter.ts` (pure `RawFinding` → `AnonymizedFinding` DTO + redaction pass + `containsPii` fail-closed re-scan + preview/issue-body renderers). Consumed by `scripts/submit-finding.mjs` for `minsky submit-finding`.
+- **Gives us**: the privacy core of remote finding submission (TASKS.md `minsky-remote-task-submission`) — strip every secret / PII / user-home-path span from a self-reported finding before it egresses to `fyodoriv/minsky`, with the guarantee unit-testable in isolation.
+- **Why we built it**: a generic redaction library (`redact-pii`, `scrubbr`) only covers the regex layer and would drift from `scripts/check-otel-no-pii.mjs`'s classifier. The redaction rule-set is deliberately co-defined with that gate so the egress boundary and the OTEL boundary agree on what a secret is (rule #2 — single seam). The `FindingType` enum (mapped to the rule-#17 proactive-heal vocabulary), the `AnonymizedFinding` egress contract, and the preview/issue-body renderers have no off-the-shelf equivalent.
+- **Replacement candidates**: `redact-pii`, `scrubbr` (rejected above); an allow-list-only projection (emit structured metadata + fixed-vocabulary finding type, drop free text) is the documented Pivot if the regex rule-set ever lets a real leak through.
+- **Risks**: regex redaction can produce false negatives — mitigated by the `containsPii` defense-in-depth re-scan that fails the submission closed before any `gh issue create`.
+- **Last reviewed**: 2026-06-02
+- **Extraction target**: internal for now; pure + dependency-free so extraction is cheap if a second consumer appears.
+
 ---
 
 ## Tools evaluated and not picked

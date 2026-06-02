@@ -25,6 +25,7 @@ export default defineConfig({
       "@minsky/notifier": r("./novel/adapters/notifier/src/index.ts"),
       "@minsky/observer-heals": r("./novel/observer/heals/src/index.ts"),
       "@minsky/ollama": r("./novel/adapters/ollama/src/index.ts"),
+      "@minsky/tick-loop": r("./novel/tick-loop/src/index.ts"),
       "@minsky/omc-tasksmd-bridge": r("./novel/bridges/omc-tasksmd/src/index.ts"),
     },
   },
