@@ -1700,6 +1700,27 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-test-file-colocation.test.mjs
 
+  skill-allowlist-coverage:
+    # Every `.claude/skills/<name>/SKILL.md` (and `.devin/skills/<name>/`)
+    # directory name must appear on scripts/glossary-allowlist.txt, so a
+    # forgotten allowlist entry fails in the same PR that adds the skill.
+    # Per AGENTS.md rule #5 + rule #10; glossary-allowlist-update-discipline.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: skill-allowlist-coverage lint
+        run: node scripts/check-skill-allowlist-coverage.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-skill-allowlist-coverage.test.mjs
+
   deprecated-md-respect:
     runs-on: ubuntu-latest
     steps:
@@ -2293,6 +2314,7 @@ jobs:
       - changelog-md-update
       - research-md-update
       - test-file-colocation
+      - skill-allowlist-coverage
       - deprecated-md-respect
       - cli-integration-test-coverage
       - omc-mode-persona-gating
@@ -2380,6 +2402,7 @@ jobs:
                    "${{ needs.changelog-md-update.result }}" \
                    "${{ needs.research-md-update.result }}" \
                    "${{ needs.test-file-colocation.result }}" \
+                   "${{ needs.skill-allowlist-coverage.result }}" \
                    "${{ needs.deprecated-md-respect.result }}" \
                    "${{ needs.cli-integration-test-coverage.result }}" \
                    "${{ needs.omc-mode-persona-gating.result }}" \

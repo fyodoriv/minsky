@@ -125,3 +125,37 @@ local-models-stability-gate-90-percent  # P1 task in TASKS.md — implements sto
 # be paired with the `--with-supervisor` opt-in path). OS-level identifier,
 # not a Minsky concept, so it has no Glossary/Pattern-index entry.
 RunAtLoad
+
+# Skill primer directory names under `.claude/skills/<name>/` (and
+# `.devin/skills/<name>/`). The anchor for each is the SKILL.md file itself —
+# every `<name>` is a coined token whose definition lives in its primer. The
+# `check-skill-allowlist-coverage` lint (full stage) asserts EVERY skill
+# directory name appears below, so a forgotten entry fails in the same PR that
+# adds the skill rather than in a later PR that cites it in vision.md (the
+# 2026-05-21 PR #696/#704 cycle that motivated `glossary-allowlist-update-
+# discipline`). When you add a `.claude/skills/<name>/SKILL.md`, add `<name>`
+# here in the same PR.
+brief-engineering
+caveman
+ci-gate-check
+cli-consolidation
+competitor-research
+diagnose
+doubt-driven-development
+experiment-validate
+grill-task
+improve-codebase-architecture
+incremental-implementation
+karpathy-disciplines
+launchd-safe-paths
+live-fire-smoke
+minsky-supervisor
+openhands-shim-knobs
+poll-merge
+reader-priority-docs
+spec-driven-development
+task-slice
+task-spec
+triage
+worktree-handoff
+zoom-out
