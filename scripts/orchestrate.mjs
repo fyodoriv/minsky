@@ -37,6 +37,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRunId } from "@minsky/tick-loop";
+import { assertWriteAllowed, buildWriteVerdictRecord } from "./lib/repo-policy.mjs";
 import { landLocalBranch, runGateSweep, setWorkerPauseSeam } from "./local-gate-merge.mjs";
 import {
   DEFAULT_HEALTHY_RESET_SEC,
@@ -57,6 +58,13 @@ const LEDGER = join(REPO, ".minsky", "orchestrate.jsonl");
 // escalating backoff AND the supervised-run deadline origin — a single
 // state surface, no second file (round-trip elimination, rule #1).
 const RESTART_STATE = join(REPO, ".minsky", "runany-restart-state.json");
+// Least-authority policy ledger (TASKS.md `runany-permission-scoped-writes`).
+// The conductor emits a `run-start` marker at boot (bounds the audit's
+// `--window=run` slice), one home `write-verdict` per merged home PR, and a
+// `minsky-self-task-filed` record whenever a tick observes minsky-on-itself
+// friction (scout-and-record). `scripts/runany-policy-audit.mjs` is the only
+// reader — its schema + thresholds are the single source of truth (rule #2).
+const POLICY_LEDGER = join(REPO, ".minsky", "runany-policy.jsonl");
 // Hard wall-clock ceiling for this run (rule #6 — stay alive, but
 // bounded). After it, the conductor stops cleanly (exit 0) instead of
 // scheduling another tick; launchd's KeepAlive/runany supervision owns
@@ -292,6 +300,62 @@ export function buildTickLedgerLine(res, ctx) {
 }
 
 /**
+ * Pure: the least-authority policy records a single tick emits, given its
+ * sweep result and whether minsky-on-itself friction was observed. The
+ * conductor only ever writes to its OWN (home) repo — every merged PR is a
+ * home `open-pr`, so each gets a home `write-verdict` (`assertWriteAllowed`
+ * always allows home, but recording it makes the audit's `foreign_*`
+ * escape-counters provably 0 over a real run, not merely absent). When a
+ * tick sees friction — worker daemon DOWN (healed) OR a sweep error — it
+ * also files a minsky-self improvement task (scout-and-record across the
+ * fleet, Acceptance (3)); `taskId` is a stable per-tick id the runtime uses
+ * when appending the TASKS.md block. No I/O — the caller appends (rule #10).
+ *
+ * @param {{merged: {number:number}[]}} res   the sweep result.
+ * @param {{healed: boolean, sweepError?: string, ts: string}} ctx
+ * @returns {Array<Record<string, unknown>>}  ledger records, in emit order.
+ */
+export function buildRunanyPolicyRecords(res, ctx) {
+  /** @type {Array<Record<string, unknown>>} */
+  const out = [];
+  for (const m of res.merged) {
+    const req = /** @type {const} */ ({
+      repoClass: "home",
+      action: "open-pr",
+      changedPaths: [`pr-${m.number}`],
+    });
+    out.push(buildWriteVerdictRecord(req, assertWriteAllowed(req), ctx.ts));
+  }
+  const friction = ctx.healed || (ctx.sweepError !== undefined && ctx.sweepError.length > 0);
+  if (friction) {
+    const reason = ctx.healed ? "worker-daemon-down-healed" : "sweep-error";
+    out.push({
+      ts: ctx.ts,
+      event: "minsky-self-task-filed",
+      taskId: `minsky-self-${reason}-${ctx.ts}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Best-effort append of the tick's policy records to
+ * `.minsky/runany-policy.jsonl`. Same fail-soft contract as the
+ * orchestrate ledger: a failed write (no `.minsky/`, EACCES) degrades to a
+ * blind metric for that tick, never an aborted loop (rule #6).
+ * @param {Array<Record<string, unknown>>} records
+ */
+function appendPolicyLedger(records) {
+  if (records.length === 0) return;
+  if (!existsSync(join(REPO, ".minsky"))) return;
+  try {
+    appendFileSync(POLICY_LEDGER, records.map((r) => `${JSON.stringify(r)}\n`).join(""));
+  } catch {
+    /* rule #6: policy ledger is best-effort, never gates the loop */
+  }
+}
+
+/**
  * One conductor tick: heal-if-needed → Opus-review-gated merge sweep →
  * ledger. Never throws (caught internally) so a bad sweep can't kill the
  * loop; the ledger line is the 10h-uptime + self-metric record. The sweep
@@ -334,6 +398,17 @@ export function tick(log, sweepFn = runGateSweep) {
       /* rule #6: ledger best-effort, never gates the loop */
     }
   }
+  // Least-authority policy ledger (runany-permission-scoped-writes): one
+  // home write-verdict per merged PR + a minsky-self task on observed
+  // friction. Best-effort, after the orchestrate ledger so a policy-ledger
+  // failure can never lose the throughput record.
+  appendPolicyLedger(
+    buildRunanyPolicyRecords(res, {
+      healed: aliveBefore === false,
+      ...(sweepError ? { sweepError } : {}),
+      ts: new Date().toISOString(),
+    }),
+  );
 }
 
 /**
@@ -425,6 +500,16 @@ if (isMain) {
   // simultaneously. Standalone `node scripts/local-gate-merge.mjs` runs leave
   // the seam at its no-op default.
   setWorkerPauseSeam(workerPauseSeam(log));
+  // Emit the policy-ledger `run-start` marker so the audit's `--window=run`
+  // slice is bounded to THIS conductor run (runany-permission-scoped-writes).
+  // A unique runId keys the slice; best-effort like every other ledger write.
+  appendPolicyLedger([
+    {
+      ts: new Date().toISOString(),
+      event: "run-start",
+      runId: `${process.pid}-${RUN_START_MS}`,
+    },
+  ]);
   const ivArg = args.find((a) => a.startsWith("--interval-ms="));
   const intervalMs = ivArg
     ? Number(ivArg.split("=")[1])

@@ -461,3 +461,66 @@ three follow-up task blocks land with it.
 [gh-54463]: https://github.com/anthropics/claude-code/issues/54463 "Team messaging fails on session restart"
 [gh-38379]: https://github.com/anthropics/claude-code/issues/38379 "--resume crashes with JSON Parse error"
 [gh-20424]: https://github.com/anthropics/claude-code/issues/20424 "CLAUDE_CODE_TASK_LIST_ID not in -p mode"
+
+## Status 2026-06-02
+
+First monthly watch-pass (task `watch-claude-native-task-standard-monthly`,
+June 2026). All four trigger conditions checked against their live sources;
+**two triggers fired** — one by literal measurement (with a disqualifying
+caveat) and one genuinely.
+
+| Trigger | Source check | Command output | Fired? |
+|---|---|---|---|
+| (1) Issue #33764 closed/resolved | `gh issue view 33764 --repo anthropics/claude-code --json state,stateReason` | `state=CLOSED stateReason=NOT_PLANNED` (closed 2026-04-09) | ⚠️ literal-yes / semantic-no |
+| (2) Docs drop "experimental" flag | `curl -sf https://code.claude.com/docs/en/agent-teams \| grep -ci experimental` | `5` (≥1 ⇒ still experimental) | ❌ no |
+| (3) Stable contract for `~/.claude/tasks/` | docs review (no announcement of a stable on-disk task contract) | none found | ❌ no |
+| (4) #20424 closed (`CLAUDE_CODE_TASK_LIST_ID` in `-p` mode) | `gh issue view 20424 --repo anthropics/claude-code --json state,stateReason` | `state=CLOSED stateReason=COMPLETED` | ✅ yes |
+
+### Reading
+
+- **Trigger 1 — fired by the literal measurement, but disqualified on the
+  merits.** The watch task's measurement is `gh issue view 33764 … --json state
+  returns closed`, and the issue is `CLOSED`. However `stateReason` is
+  `NOT_PLANNED` — Anthropic closed the session-restart-persistence bug
+  **as won't-fix**, not as resolved. The persistence wipe (§1.5 limitation #1),
+  which the original recommendation (§5) named the *hard blocker*, is therefore
+  **not fixed; it is now confirmed durable** by an upstream "not planned"
+  disposition. By the spirit of the trigger ("persistence becomes available"),
+  this is the opposite of a green light. The literal `state==closed` measurement
+  is a known false-positive shape here — recorded so the next pass and the
+  conditional-revisit reviewer don't mistake it for a fix.
+
+- **Trigger 4 — genuinely fired.** #20424 is `CLOSED / COMPLETED`. This removes
+  one of the two independent showstoppers from §5 point 2: Minsky's spawn shape
+  (`claude --print`, non-interactive `-p` mode) can now in principle read
+  `CLAUDE_CODE_TASK_LIST_ID`. This is a real reduction in the adoption-blocker
+  set — but it is the *interactive-mode single-session* task list (§1.2), which
+  has **no multi-agent coordination**; it does not address the persistence wipe
+  that gates the multi-agent Agent-Teams path Minsky would actually need.
+
+- **Triggers 2 and 3 — not fired.** Agent Teams is still flagged experimental in
+  the live docs (5 "experimental" mentions), and no stable on-disk task-store
+  contract has been announced.
+
+### Disposition
+
+Per the watch-task protocol ("if any trigger has fired, unblock
+`revisit-claude-native-task-standard-when-persistence-fixed`"), a trigger has
+fired, so the conditional-revisit task should be **unblocked** this cycle. The
+orchestrator owns the `TASKS.md` edit (workers do not touch the shared task
+file); the unblock note to apply is:
+
+> **Trigger fired 2026-06-02**: #20424 (`CLAUDE_CODE_TASK_LIST_ID` in `-p` mode)
+> closed COMPLETED, partially clearing §5 point 2. Caveat: #33764 (persistence
+> wipe) closed NOT_PLANNED — the hard blocker is now confirmed durable, not
+> resolved. Re-run the adopt/bridge/reject analysis with this nuance; the
+> recommendation is expected to **stay Option C (reject + watch)** because the
+> load-bearing persistence blocker is upstream-declined, but the owned-surface
+> delta should be re-costed now that `-p`-mode task-list reads are possible.
+
+The recommendation itself does **not** change on this pass: Option C
+(reject-adopt + reject-bridge-now) still holds, because the persistence wipe —
+the §5 point 1 hard blocker — is not only unresolved but upstream-declined.
+Watch continues monthly.
+
+**Last-evaluated**: 2026-06-02

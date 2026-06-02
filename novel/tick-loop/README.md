@@ -18,6 +18,18 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 - **UUID-from-random namespacing**: Leach, Mealling & Salz, RFC 4122 §4.4, 2005. `worker-config`'s run-id `<repo-hash>-<pid>-<rand>` is a per-run namespace prefix so dozens of concurrent `minsky` processes on one machine never collide on a string namespace (worktree / branch / launchd label / ledger); the random token is the tiebreaker even when pids recycle. The derived port is only a *hint* — a finite shared resource the OS bind loop arbitrates (`EADDRINUSE` → next free port), not a uniquely-keyed namespace. **Conformance: partial** — we don't emit a canonical 128-bit UUID (a short FNV-1a repo hash + pid + 32-bit random is enough to disambiguate same-machine runs and stays grep-friendly); full conformance would swap the prefix for `crypto.randomUUID()`, unnecessary for a same-machine namespace and costlier to scan in a ledger.
 - **Mutual exclusion via uniquely-keyed locks**: Lamport, "A New Solution of Dijkstra's Concurrent Programming Problem", CACM 1974. `deriveClaimKey(repo, task)` derives one shared O_EXCL lock path per `(repo, task)` so two processes on the same repo serialise to one task winner, while different tasks (or different repos) never cross-block. **Conformance: full** — the OS `O_EXCL` create IS the bakery-ticket; this module supplies the per-(repo,task) ticket name.
 
+### machine-budget-autoscaler
+
+- **Closed-loop feedback controller**: Åström & Murray, *Feedback Systems*, 2008; classic control theory. `computeWorkerTarget` is a discrete controller that drives the measured utilisation toward the budget set-point, ratcheting by ≤1 (no overshoot doubling) and circuit-breaking on the gridlock signature. **Conformance: partial** — it is a bang-bang/ratchet controller, not a full PID (no integral/derivative terms); the per-step ±1 ramp + halving-backoff is deliberately simpler to avoid the oscillation the Pivot clause warns against. Full PID would add windup-guarded integral action, unnecessary at this control cadence.
+- **Functional core / imperative shell**: Bernhardt, *Boundaries*, 2012. The controller and resolver are pure functions over an observed-state struct; all I/O (os/loadavg, config read, plist read) lives in `bin/tick-loop.mjs`. **Conformance: full.**
+- **Little's Law (capacity-bounded throughput)**: Little 1961. Past the saturation knee, adding workers only adds contention, so the controller measures *effective* throughput (active subprocs + PRs) rather than nominal worker count. **Conformance: full** — the knee-hold regime is the operational expression of the law.
+
+### os-throttle-detect
+
+- **Drift detector (declarative-state vs actual)**: Burgess, *Cfengine* convergent-maintenance; the gate compares the desired budget contract against the host's actual throttle surface. **Conformance: full.**
+- **Functional core / imperative shell**: Bernhardt, *Boundaries*, 2012. `detectThrottles` / `renderMirrorTasks` are pure over a gathered-evidence struct; the host probe I/O lives in `bin/tick-loop.mjs`. **Conformance: full.**
+- **Propagation-not-one-off (rule #1)**: every detected host change renders a durable task for the mirror that owns it (dotfiles for launchd/shell, agentbrew for agent rules) so minsky *pulls* the fix instead of re-applying it. **Conformance: full.**
+
 ## Failure modes & chaos verification
 
 Per constitutional rule #7 (vision.md § 7).
@@ -44,6 +56,10 @@ Per constitutional rule #7 (vision.md § 7).
 | 14 | N concurrent `minsky` runs on the SAME repo collide on a per-run namespace (worktree dir / branch / launchd label / ledger) | concurrency-collision | `graceful-degrade` — every string namespace is run-id-keyed (`deriveRunNamespace`), so N independently-derived namespaces are provably disjoint; zero collisions (the port is a finite resource excluded from the hard count — it's a hint the OS bind loop arbitrates) | `novel/tick-loop/src/worker-config.test.ts` (countNamespaceCollisions assertions) + `scripts/chaos-multitenant.test.mjs` (N=10/50 zero-collision assertions) |
 | 15 | Two processes on the same repo race to claim the same task (double-claim) | concurrency-collision | `loud-crash-supervisor-restart` boundary at the OS `O_EXCL` create — `deriveClaimKey(repo, task)` makes both processes derive the SAME lock path so the kernel grants the create to exactly one; the loser fails the create and picks the next task | `novel/tick-loop/src/worker-config.test.ts` (deriveClaimKey same-key assertions) + `scripts/chaos-multitenant.test.mjs` (zero-double-claim assertions) |
 | 16 | A run starts with a missing/empty random token, threatening a silent namespace clash with a sibling | config-error | `loud-crash-supervisor-restart` — `deriveRunId` throws on an empty `rand` rather than emit a colliding namespace (rule #6 — a programming bug crashes loud, never collides silently) | `novel/tick-loop/src/worker-config.test.ts` (empty-rand-throws assertions) |
+| 17 | Concurrency over-ramped past the saturation knee (load runaway, active subprocs collapse toward 0) | resource-exhaustion | `graceful-degrade` — `computeWorkerTarget` returns the `gridlock-backoff` regime and halves the target immediately, regardless of nominal worker count | `novel/tick-loop/src/machine-budget-autoscaler.test.ts` (gridlock backoff assertions) |
+| 18 | Garbage / out-of-range budget value from env or config | upstream-bad-input | `graceful-degrade` — `resolveMachineBudgetPct` rejects NaN/out-of-range and falls through to the next layer, then the pinned default (70) | `novel/tick-loop/src/machine-budget-autoscaler.test.ts` (resolveMachineBudgetPct fall-through assertions) |
+| 19 | OS throttle contradicts the budget (launchd `Background` QoS / `Nice` / low `ulimit` / stale `MINSKY_*` cap) makes the budget physically unreachable | misconfiguration | `circuit-break-and-notify` — `detectThrottles` flags it, `renderMirrorTasks` emits the durable mirror-repo fix; the gate `scripts/check-machine-budget.mjs` hard-fails CI on a `Background` plist | `novel/tick-loop/src/os-throttle-detect.test.ts` (throttle-detection assertions) + `scripts/check-machine-budget.test.mjs` (Background-fixture fail assertion) |
+| 20 | Non-launchd / partial host probe (Linux, missing plist) | dependency-degrade | `graceful-degrade` — absent evidence fields degrade to a clean (no-throttle) result rather than crashing the probe | `novel/tick-loop/src/os-throttle-detect.test.ts` (partial-evidence assertions) |
 
 ## Threat model
 
@@ -54,6 +70,7 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **Trust boundary**: `anonymizeFinding(raw)` is the boundary — its output is the only thing the CLI renders and submits; `containsPii` is the defense-in-depth re-scan the CLI runs before egress.
 - **STRIDE focus**: **I**nformation disclosure — the entire package exists to prevent it; `redact` strips credential/PII/path spans and `containsPii` fails-closed if redaction missed one. **T**ampering — the structured metadata (`type`, `minskyVersion`, `os`, `agent`) is typed (an enum + plain strings) so a malicious field cannot smuggle markup into the issue body beyond inert text.
 - **Performance-first carve-out** (rule #13's relief valve): none declared — redaction runs once per submission, far off any hot path.
+- **machine-budget / os-throttle inputs**: the budget value (`MINSKY_MACHINE_BUDGET_PCT`, config) and the throttle evidence (launchd plist text, `ulimit`, `MINSKY_*` env) are operator-local, not network-sourced — the trust boundary is the parser. **Tampering** focus: `resolveMachineBudgetPct` validates + clamps every value to `[floor, ceiling]` so a hostile/garbage env var can never drive concurrency above the swarm ceiling or below 1; the swarm ceiling (80) is an in-source constant a remote input cannot raise. The mirror task blocks are inert Markdown (no shell interpolation) appended by the I/O edge.
 
 ## Hypothesis-driven development (rule #9)
 
@@ -88,6 +105,22 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **Pivot threshold**: if cross-process O_EXCL flock arbitration proves unreliable on the host FS (a double-claim ever surfaces in the chaos sim or in production), fall back to a single per-machine arbiter daemon that hands out task leases (still no central orchestrator — just a lock broker). The repo+task-scoped claim key stays the lease key under either approach.
 - **Measurement**: `node scripts/chaos-multitenant.mjs --runs=10 --minutes=30 --json` returns the pre-registered object `{ collisions, corruptWorktrees, doubleClaims }`, all 0.
 - **Literature anchor**: Leach, Mealling & Salz, RFC 4122 §4.4, 2005 (UUID from random — the run-id namespace prefix); Lamport, CACM 1974 (mutual exclusion — the per-(repo,task) lock key); Basiri et al., IEEE Software 2016 (chaos steady-state hypothesis); rule #7 (chaos engineering); rule #6 (a namespace clash never crashes a sibling).
+
+### machine-budget-autoscaler
+
+- **Hypothesis**: a fixed worker count + `ProcessType=Background` either under-uses the box (idle budget) or gridlocks it (20 workers → 0 useful work at runaway load); a budget-matched effective-throughput controller with throttles removed holds utilisation at the operator's % and maximises PRs/hour, auto-finding the saturation knee per host without hand-tuning.
+- **Success threshold**: with budget=80 the fleet sustains ≈80% utilisation with effective throughput at/above the hand-tuned 10-worker baseline (PRs produced/merged per hour ≥ baseline) and never gridlocks; with budget=70 (default) it sits at ≈70%. The controller's three regimes (ramp-up, knee-hold, gridlock-backoff) are pinned green by the paired test suite.
+- **Pivot threshold**: if the closed-loop controller oscillates (concurrency hunting) in any observation window, fall back to a per-host calibrated constant table (measured knee per core-count) selected by the budget — still no `Background` throttle, still cross-repo-propagated; never revert to a single hand-edited global constant.
+- **Measurement**: `pnpm vitest run novel/tick-loop/src/machine-budget-autoscaler.test.ts` exits 0 (ramp-up steps by 1, knee holds, gridlock halves); `node scripts/check-machine-budget.mjs` exits 0 (budget contract pinned, no contradicting throttle); at runtime `node novel/tick-loop/bin/tick-loop.mjs --json` reports `{budgetPct, decision:{target,reason}}` matched against `os.loadavg()`/cores.
+- **Literature anchor**: Åström & Murray, *Feedback Systems*, 2008 (closed-loop control); Little 1961 (capacity-bounded throughput); Ries 2011 (pivot-or-persevere); Apple `launchd.plist(5)` (`ProcessType` QoS).
+
+### os-throttle-detect
+
+- **Hypothesis**: OS throttles that contradict the budget (launchd `Background` QoS, positive `Nice`, low fd `ulimit`, stale `MINSKY_*` caps) make the budget physically unreachable and regress silently; a pure detector that flags them AND renders the durable mirror-repo fix closes the "fixed it in-session, lost it next reboot" gap (rule #1 — propagate, don't hand-maintain).
+- **Success threshold**: `detectThrottles` flags each of the four throttle kinds against a non-trivial budget and stays clean for a `Standard` host; `renderMirrorTasks` produces one tasks.md-spec block per owning mirror; the gate hard-fails on a `Background` worker plist.
+- **Pivot threshold**: if `ProcessType` stops being the throttle that makes the budget unreachable (macOS removes the QoS clamp, or minsky moves workers off launchd), retire the `process-type-background` detector and replace it with one over the new throttle surface — never weaken it to a warning.
+- **Measurement**: `pnpm vitest run novel/tick-loop/src/os-throttle-detect.test.ts` exits 0; `node scripts/check-machine-budget.mjs` exits 0; `node scripts/check-machine-budget.test.mjs` (via vitest) confirms the `Background`-fixture fail path.
+- **Literature anchor**: Burgess (convergent maintenance / drift detection); Saltzer & Schroeder 1975 (fail-safe defaults — a missing probe is dormant, not a green pass); rule #1 (don't reinvent / hand-maintain).
 
 ## Usage
 
@@ -133,3 +166,38 @@ const ns = deriveRunNamespace({ repoPath, pid: process.pid, rand: cryptoRandHex(
 // the same (repo, task), so the OS `O_EXCL` create grants it to one winner.
 const lock = deriveClaimKey(repoPath, taskId); // open(lock, "wx") → EEXIST loses
 ```
+
+The `machine-budget-autoscaler` core drives worker concurrency to the operator's machine budget instead of a fixed `--spawn-additional-workers` constant. The I/O edge ([`bin/tick-loop.mjs`](bin/tick-loop.mjs)) gathers the live host state and prints the target:
+
+```ts
+import { computeWorkerTarget, resolveMachineBudgetPct } from "@minsky/tick-loop";
+
+const budgetPct = resolveMachineBudgetPct({
+  envPct: process.env.MINSKY_MACHINE_BUDGET_PCT, // override
+  configPct: cfg.machineBudgetPct, // persistent per-machine
+  swarmMode: process.env.MINSKY_SWARM_MODE === "1", // weekly-gated ≤80% ceiling
+});
+const { target, reason } = computeWorkerTarget({
+  budgetPct,
+  cores: os.cpus().length,
+  loadAvg: os.loadavg()[0],
+  recentActiveSubprocs, // measured effective work, never nominal worker count
+  recentPrRate,
+  lastTargets, // controller history → knee detection
+});
+// reason ∈ ramp-up | knee-hold | gridlock-backoff | at-budget
+```
+
+The `os-throttle-detect` core flags host throttles that make the budget unreachable and renders durable mirror-repo fixes (rule #1):
+
+```ts
+import { detectThrottles, renderMirrorTasks } from "@minsky/tick-loop";
+
+const throttles = detectThrottles({ budgetPct, processType, nice, ulimitNofile, staleMinskyCaps });
+for (const task of renderMirrorTasks(throttles)) {
+  // task.tasksMdPath = "~/apps/dotfiles/TASKS.md" | "~/apps/agentbrew/TASKS.md"
+  // append task.taskBlock there so minsky pulls the durable fix, not a one-off
+}
+```
+
+Run the edge directly: `node novel/tick-loop/bin/tick-loop.mjs --json` (or `MINSKY_MACHINE_BUDGET_PCT=80 MINSKY_SWARM_MODE=1 node … --json` for a swarm window). See [`docs/machine-budget.md`](../../docs/machine-budget.md) for the full budget + propagation runbook.

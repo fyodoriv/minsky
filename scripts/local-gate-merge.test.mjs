@@ -9,6 +9,7 @@ import {
   decideLoadShed,
   decideMerge,
   decidePreflight,
+  decidePrRepoPolicy,
   decideStaleScratch,
   gcStaleScratchDirs,
   headBranchPinnedByWorktree,
@@ -111,6 +112,50 @@ describe("decideMerge", () => {
         verdict: { green: false, failedSteps: [], sawSummary: false },
       }).action,
     ).toBe("skip");
+  });
+  it("refuses a foreign-head PR before the vet (Pivot git-layer backstop)", () => {
+    const d = decideMerge({
+      pr: pr({ number: 1 }),
+      verdict: okVerdict,
+      headRepo: "someone/other",
+      homeRepo: "fyodoriv/minsky",
+    });
+    expect(d.action).toBe("skip");
+    expect(d.reason).toContain("foreign repo");
+  });
+  it("merges a same-repo PR even when head/home identities are supplied", () => {
+    expect(
+      decideMerge({
+        pr: pr({ number: 1 }),
+        verdict: okVerdict,
+        headRepo: "fyodoriv/minsky",
+        homeRepo: "fyodoriv/minsky",
+      }).action,
+    ).toBe("merge");
+  });
+});
+
+// runany-permission-scoped-writes: the gate only ever lists the home repo's
+// own PRs, so a merge is a home code-write. `decidePrRepoPolicy` makes that
+// invariant explicit + deterministic and is the Pivot's git-layer backstop —
+// a foreign/fork head repo is refused before any merge call.
+describe("decidePrRepoPolicy (least-authority gate guard)", () => {
+  it("absent identity ⇒ home (backward-compatible common case)", () => {
+    expect(decidePrRepoPolicy({}).allowed).toBe(true);
+  });
+  it("same head/home repo ⇒ allowed", () => {
+    expect(
+      decidePrRepoPolicy({ headRepo: "fyodoriv/minsky", homeRepo: "fyodoriv/minsky" }).allowed,
+    ).toBe(true);
+  });
+  it("foreign head repo ⇒ refused with a foreign-code-push reason", () => {
+    const d = decidePrRepoPolicy({ headRepo: "someone/other", homeRepo: "fyodoriv/minsky" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toContain("code pushes are never permitted");
+  });
+  it("is pure / deterministic — same input, same output", () => {
+    const i = { headRepo: "a/b", homeRepo: "a/b" };
+    expect(decidePrRepoPolicy(i)).toEqual(decidePrRepoPolicy(i));
   });
 });
 
