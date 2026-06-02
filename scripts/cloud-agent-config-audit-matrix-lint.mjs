@@ -31,9 +31,16 @@
 // Source: parent task `add-openhands-as-pluggable-backend` § Measurement;
 // operator 2026-05-24 "complete OpenHands integration today" directive.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { AGENT_MATRIX } from "./lib/cloud-agent-config.mjs";
+import { auditAll } from "./lib/cloud-agent-matrix-audit.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..");
 
 let failures = 0;
 
@@ -126,6 +133,30 @@ for (const row of AGENT_MATRIX) {
     );
   }
 }
+
+// Dimensions 9-12 — the (cloud-agent × host-feature) drift audit
+// (TASKS.md `cloud-agent-config-and-host-feature-matrix-audit`). Runs
+// the same four audit dimensions as
+// `scripts/cloud-agent-config-audit-matrix.test.mjs` (path-schema ×
+// classification × expected-surface × no-clash) over the three live
+// surfaces — `supported-agents.json`, `AGENT_MATRIX`, and the AGENTS.md
+// § "Agent support matrix" table — so a config↔implementation↔docs
+// drift fails `pnpm pre-pr-lint` rather than waiting for the next live
+// daemon run. The standalone form lives at
+// `scripts/check-cloud-agent-matrix-drift.mjs`; folding it here keeps it
+// in the manifest step that already runs (no new CI job, no parity
+// drift). The audit logic is shared via
+// `scripts/lib/cloud-agent-matrix-audit.mjs` (rule #2 — single seam).
+const sidecar = JSON.parse(
+  readFileSync(resolve(REPO_ROOT, "scripts/lib/supported-agents.json"), "utf8"),
+).agents;
+const agentsMd = readFileSync(resolve(REPO_ROOT, "AGENTS.md"), "utf8");
+const driftFindings = auditAll({ sidecar, matrix: AGENT_MATRIX, agentsMd });
+assert(
+  "no (agent × host-feature) drift across supported-agents.json / AGENT_MATRIX / AGENTS.md",
+  driftFindings.length === 0,
+  driftFindings.map((f) => `[${f.dimension}] ${f.message}`).join("; "),
+);
 
 if (failures > 0) {
   console.error(`\n${failures} failure(s)`);
