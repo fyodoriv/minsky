@@ -93,9 +93,8 @@ otherwise                   → strategic picker by remaining budget band
 ## Decision table (first match wins)
 
 The decision is a single pure function — `decideRunAnyProvider`
-(`novel/tick-loop/src/runany-provider-decision.ts`, exported from
-`@minsky/tick-loop`). Pollack decision table (CACM 1962); first matching
-row fires:
+(`scripts/lib/runany-provider-decision.mjs`). Pollack decision table
+(CACM 1962); first matching row fires:
 
 1. **`operator-pin`** — `MINSKY_STRATEGIC_PIN_MODEL` (or explicit flag) is
    set and maps to a catalog row → that model, every iteration, regardless
@@ -115,12 +114,45 @@ row fires:
 An **empty** backend list means "no remote configured" — not "all remote
 down" — so the dynamic picker still governs (budget alone gates `local`).
 
+## Wiring into the entrypoint
+
+`bin/minsky-run.sh` resolves the next iteration's provider by calling
+`scripts/runany-resolve-model.mjs` before spawning the agent. That CLI is
+the single I/O boundary around the pure decider:
+
+1. reads the operator pin from `MINSKY_STRATEGIC_PIN_MODEL` (alias
+   `MINSKY_PIN_MODEL`);
+2. reads the budget snapshot from `~/.minsky/token-monitor.json` (the same
+   file `bin/check-budget.sh` reads — override with `MINSKY_TOKEN_SNAPSHOT`)
+   and maps it to the continuous `RemainingFractions` triple;
+3. probes every configured remote backend (`MINSKY_REMOTE_BACKENDS`, a
+   comma-separated `id=host:port` list; default `claude=api.anthropic.com:443`)
+   by TCP connect, behind a TTL cache (`scripts/lib/runany-backend-liveness.mjs`);
+4. calls `decideRunAnyProvider` and prints the chosen model (bare id by
+   default, full decision with `--json`).
+
+When the resolver returns `agent:"local"` (budget-exhausted dynamic OR
+all-remote-down), the runner flips fully to the local stack for that
+iteration — exactly as if `local_llm_enabled: true` were set in
+`~/.minsky/config.json`. An explicit `local_llm_enabled: true` in the
+config still wins (operator override), and any resolver failure degrades to
+the existing config-driven model (rule #6 — the agent always gets a model).
+
+```bash
+node scripts/runany-resolve-model.mjs            # → bare model id (the runner captures this)
+node scripts/runany-resolve-model.mjs --json     # → full decision + per-backend liveness
+node scripts/runany-resolve-model.mjs --force-probe  # bypass the TTL cache (provider-error path)
+```
+
 ## Recovery
 
-The function is pure and recomputed every iteration over the live backend
-liveness probe, so when a previously-down backend probes reachable again
-the next iteration returns a remote model automatically — no flap state is
-held here (hysteresis is the picker's job).
+The decision is recomputed every iteration over a fresh-or-cached
+multi-backend liveness probe, so when a previously-down backend probes
+reachable again the next iteration returns a remote model automatically.
+Within an iteration the liveness reads are served from a TTL cache (≥60s,
+the task Pivot) so the per-iteration probe cost stays bounded; `--force-probe`
+(or a cache miss / TTL expiry) forces a fresh read. No flap state is held in
+the decider itself — hysteresis is the picker's job.
 
 ## Measurement (pre-registered, rule #9)
 
@@ -149,7 +181,9 @@ mis-degrade.
 ## Status
 
 - **Slice 1** (shipped) — pure `decideRunAnyProvider` decision table + chaos tests.
-- **Slice 2** (this) — `@minsky/tick-loop` export + pre-registered measurement harness.
-- **Next** — wire the decider + a multi-backend liveness probe into the
-  run-anywhere entrypoint (`bin/minsky.mjs` / `scripts/orchestrate.mjs`);
-  probe-result cache (TTL ≥60s) per the task Pivot.
+- **Slice 2** (shipped) — pre-registered measurement harness
+  (`scripts/runany-model-audit.mjs`); decider + router ported to `scripts/lib/`.
+- **Slice 3** (this) — wired the decider + a multi-backend liveness probe
+  into the run-anywhere entrypoint. `scripts/runany-resolve-model.mjs` is the
+  I/O boundary called from `bin/minsky-run.sh`; liveness is cached with a
+  ≥60s TTL (`scripts/lib/runany-backend-liveness.mjs`) per the task Pivot.
