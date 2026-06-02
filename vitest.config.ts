@@ -21,6 +21,7 @@ export default defineConfig({
       "@minsky/experiment-record": r("./novel/experiment-record/src/index.ts"),
       "@minsky/handoff-spec": r("./novel/handoff-spec/src/index.ts"),
       "@minsky/mape-k-loop": r("./novel/mape-k-loop/src/index.ts"),
+      "@minsky/mcp": r("./novel/adapters/mcp/src/index.ts"),
       "@minsky/notifier": r("./novel/adapters/notifier/src/index.ts"),
       "@minsky/observer-heals": r("./novel/observer/heals/src/index.ts"),
       "@minsky/ollama": r("./novel/adapters/ollama/src/index.ts"),
