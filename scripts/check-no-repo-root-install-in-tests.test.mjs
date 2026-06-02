@@ -151,6 +151,29 @@ describe("checkNoRepoRootInstallInTests", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("does not flag incidental bootstrap-token mentions (path binding, tmpdir prefix, title, assertion)", () => {
+    // Rule A fires only on lines that READ as a spawn/exec — not on a bare
+    // path binding, a mkdtempSync prefix, a describe title, or a .toMatch
+    // assertion. Without this, the gate false-positives once a test file
+    // drops its install-mutation skipIf (the minsky-init-real-install-smoke
+    // -hermetic rewrite). The real spawn here is isolated + carries the
+    // inline marker, so the file is clean.
+    const result = checkNoRepoRootInstallInTests(
+      fakeFs({
+        "test/integration/foo.test.ts": [
+          'const MINSKY_INIT = join(REPO_ROOT, "bin", "minsky-init");',
+          'const INSTALL_SH = join(REPO_ROOT, "distribution", "install.sh");',
+          'const host = mkdtempSync(join(tmpdir(), "minsky-init-host-"));',
+          'describe("bin/minsky-init — one-command bootstrap", () => {});',
+          "expect(r.stdout).toMatch(/minsky-init/);",
+          "// repo-root-install-ok: spawns against an isolated mkdtemp checkout copy",
+          'const r = spawnSync("sh", [join(iso, "distribution", "install.sh"), host]);',
+        ].join("\n"),
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it("real production scan passes (smoke — the current post-#1028 tree)", () => {
     const result = checkNoRepoRootInstallInTests();
     expect(result.ok).toBe(true);
