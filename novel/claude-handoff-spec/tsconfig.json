@@ -1,0 +1,10 @@
+{
+  // <!-- scope: human-approved research-finding-manager-agent-delegation-pattern — package tsconfig for the delegation contract whose interface (delegation.ts) is the task's declared Touches; ships in the same commit as the interface. -->
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "composite": true
+  },
+  "include": ["src"]
+}
