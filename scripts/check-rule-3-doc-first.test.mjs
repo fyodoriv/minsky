@@ -233,4 +233,41 @@ describe("checkRule3DocFirst", () => {
     if (result.ok) return;
     expect(result.errors[0]).toContain("budget-guard");
   });
+
+  test("competitive-benchmark code + competitors/<name>.md doc → passes (corpus-refresh surface)", () => {
+    const result = checkRule3DocFirst({
+      changedFiles: [
+        { status: "M", path: "novel/competitive-benchmark/src/competitors.ts" },
+        { status: "M", path: "competitors/openhands.md" },
+      ],
+      prBody: "",
+      tasksMd: TASKS_MD_FIXTURE,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  test("competitors/<name>.md only counts for the competitive-benchmark package, not others", () => {
+    const result = checkRule3DocFirst({
+      changedFiles: [
+        { status: "M", path: "novel/budget-guard/src/foo.ts" },
+        { status: "M", path: "competitors/openhands.md" },
+      ],
+      prBody: "",
+      tasksMd: TASKS_MD_FIXTURE,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]).toContain("budget-guard");
+  });
+
+  test("competitive-benchmark code with NO doc still fails (hint names competitors/*.md)", () => {
+    const result = checkRule3DocFirst({
+      changedFiles: [{ status: "M", path: "novel/competitive-benchmark/src/competitors.ts" }],
+      prBody: "",
+      tasksMd: TASKS_MD_FIXTURE,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]).toContain("competitors/*.md");
+  });
 });
