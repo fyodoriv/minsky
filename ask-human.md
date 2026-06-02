@@ -67,4 +67,11 @@ The daemon watches this file, unblocks the asking agent the instant `PENDING` is
   Format spec is in the "How to use this file" section above.
 -->
 
-<!-- No entries yet. First wave of competitor deep-dive Qs will be appended here as the P0 `competitor-deepen-<id>` tasks complete. -->
+<!-- First competitor deep-dive Q below; appended by `competitor-add-auto-code-rover`. -->
+
+### Qa3f1c7e2
+
+ts: 2026-06-01 00:00
+q: vision-threat (NEGATIVE finding — recorded for audit trail): AutoCodeRover's AST-aware code search + spectrum-based fault localization (ISSTA 2024, arXiv:2404.05427; 46.2% SWE-bench Verified pass@1 at <$0.70/issue) is strong research, but the project went dormant after Sonar acquired the NUS spin-off (2025-02-19). Recommended decision: absorb the retrieval techniques as an optional context adapter behind `novel/adapters/` — NO vision change. Confirm you agree, or flag if you want a deeper wrap/adapter spike filed as a task.
+ctx: competitor: auto-code-rover. vision section threatened: none — the finding is technique/strategy level, not constitutional. No rewrite of `vision.md § What Minsky is` and no invalidation of any of the 17 rules is implied. what they do instead: structure-aware (AST) retrieval over classes/methods plus spectrum-based fault localization to pre-rank suspect code before the LLM patches, in a fixed retrieve-then-patch pipeline. source: Zhang/Ruan/Fan/Roychoudhury, *AutoCodeRover: Autonomous Program Improvement*, ACM ISSTA 2024 (arXiv:2404.05427); repo README github.com/AutoCodeRoverSG/auto-code-rover; Sonar acquisition press release sonarsource.com (2025-02-19). recommendation: absorb pattern (context adapter), reject wrap (dormant OSS, closed-commercial successor) — no vision change.
+answer: PENDING
