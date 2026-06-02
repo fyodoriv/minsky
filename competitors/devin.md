@@ -89,6 +89,45 @@ The current PARTIAL wrap (per-task Devin, fleet-layer Minsky) preserves all 6 mo
 
 **What gets re-evaluated periodically**: Minsky's `cloud_agent: "devin"` integration today is blocked by `spawn-failed-exit-minus-one-silent-empty-stderr` (P0 in TASKS.md). When that ships, Devin's per-task wrap will be fully functional + the comparison sharpens.
 
+## Five pivot questions
+
+> Applied per the Five Pivot Questions framework (`.claude/skills/competitor-research` § Phase 7, `--deep` mode). Question 5 is structurally N/A for Devin — it is closed-commercial, so "replacing part of Minsky with Devin" means *wrapping a paid API*, not adopting source; that question collapses into the wrap-feasibility analysis above and is reframed accordingly.
+
+### 1. How is it different from Minsky?
+
+Devin is a **cloud-hosted, vendor-managed, single-agent-with-parallel-instances** product whose Brain + Devbox both run on Cognition's servers and commit under a Cognition bot identity (`devin-ai-integration[bot]`). Minsky is an **operator-machine daemon** that wraps swappable agent backends (Devin among them), runs an unattended cross-repo fleet, and commits under the operator's own `gh` identity. The intent differs more than the surface: Cognition sells a *finished autonomous engineer* you rent per-ACU; Minsky is an *integration distribution* that connects existing tools (Devin included) into a self-improving cybernetic system you own. Cite: Cognition's product framing on <https://devin.ai> and the ACU pricing model; Minsky's `vision.md § What Minsky is` (daemon-not-framework, operator-machine identity).
+
+### 2. What lessons can it give to us?
+
+- **2.1 The headline number is benchmark-inflated — measure the real-world gap, not the leaderboard.** Devin's *launch* SWE-bench end-to-end resolve rate was 13.9% (Cognition, *Introducing Devin*, 2024-03-12); the marketed "AI software engineer" framing implied far more. The single most-cited real-world counter-reading is Answer.AI's hands-on report finding Devin completed only **3 of 20** tasks (~15%) in their evaluation (Answer.AI, *Thoughts on a Month with Devin*, 2025-01; widely discussed on Hacker News). Even the favourable 2026 third-party number — **67% PR merge rate on *defined* tasks** (Cognition's 2025 annual review, cross-referenced by AgentMarketCap 2026-04-07) — is explicitly scoped to *defined* tasks, i.e. the task-shaping is doing heavy lifting. Lesson: Minsky's scorecard must record the *methodology scope* alongside the number (it already does, via the `Primary source` column's methodology note) and must never quote a competitor's best number without the qualifier. Traces to rule #4 (everything visible — no fabricated or context-stripped readings) and rule #9 (pre-registered, falsifiable metrics, not vanity headlines). This is the canonical "marketing-vs-reality gap" of the field — OpenAI's own SWE-bench Verified work (Feb 2025) exists *because* the original SWE-bench was found to contain unsolvable/underspecified instances that inflated scores, validating the "leaderboard ≠ capability" thesis.
+- **2.2 "What makes a Devin task succeed vs fail" is the transferable pattern — pre-shape the task.** The 13.9% → 67% spread is not Devin getting 5× smarter; it is the difference between *open-ended* tasks and *defined* tasks. Devin's own Interactive Planning mode exists to convert the former into the latter before execution. Lesson for Minsky: success correlates with task pre-shaping, not raw model capability. Minsky already encodes this — `task-spec`/`task-slice` (vertical-slice decomposition + Given/When/Then acceptance scenarios, rule #3a) and the `**Touches**:` blast-radius field are the "define the task before the agent touches it" discipline. The Devin data is empirical support for keeping those gates iron: a well-shaped TASKS.md block is the single biggest lever on merge rate, dwarfing backend choice. Traces to rule #3 (test-first/spec-first) and the independent-testability gate.
+- **2.3 Per-ACU cost transparency is a metric, not just a price tag.** Devin meters work in ACUs (≈15 min of Devin work each) and surfaces cost upfront. Minsky's corpus already tracks `cost-per-merged-pr` and `mean-autonomous-merge-latency` (900s ≈ 1 ACU for Devin). Lesson: keep cost a first-class *scorecard* dimension so the operator can compare "Devin per merged PR" against "Claude-on-local per merged PR" — the cost axis is where the self-hosted moat shows up numerically. Traces to rule #4.
+
+### 3. Are any of these lessons potentially vision-changing?
+
+**No vision-changing finding.** All three lessons sit *on top of* Minsky's existing architecture and reinforce existing rules rather than threatening any of the 17. The benchmark-inflation lesson (§2.1) strengthens rule #4 and rule #9; the task-shaping lesson (§2.2) strengthens rule #3/#3a and the `**Touches**:` discipline; the cost-transparency lesson (§2.3) strengthens rule #4. None forces a rewrite of `vision.md § What Minsky is` and none invalidates a rule. The one place Devin *could* threaten the vision — if Cognition shipped a self-hostable "Devin in your VPC" Brain — is already captured in the wrap-feasibility analysis above as the explicit re-evaluation trigger, and remains hypothetical (not generally available as of this review). Because no finding is vision-changing, no `ask-human.md` Q-block is required; this negative finding is recorded here for audit per the framework's "state the negative finding so it is auditable" rule. (The orchestrator owns `ask-human.md` for this task batch; were a real vision-threat to surface, it would be filed there as a Q-block, not inline.)
+
+### 4. How can we improve our strategy based on this?
+
+- **Publish the honesty comparison.** Position Minsky's competitive page around *methodology-qualified* numbers — "Devin's 67% is on *defined* tasks; its open-ended real-world rate is ~15% (Answer.AI)" — turning the benchmark-inflation gap into a trust differentiator rather than competing on raw headline. Traces to lesson §2.1.
+- **Double down on task pre-shaping as the merge-rate lever.** Treat `task-spec`/`task-slice`/`**Touches**:` as the highest-ROI investment for merge rate, backed by Devin's 13.9%→67% defined-vs-open spread — i.e. invest in the *task surface*, not in chasing a marginally-better backend. Traces to lesson §2.2.
+- **Keep cost a measured axis, not a footnote.** Maintain `cost-per-merged-pr` + `mean-autonomous-merge-latency` as standing scorecard metrics so the self-hosted economic advantage is a number the operator can read, not a claim. Traces to lesson §2.3.
+
+### 5. Can and should we cut corners by replacing part of Minsky with this?
+
+Structurally **N/A as source-adoption** (Devin is closed-commercial — there is no source to absorb), so this question reduces to the wrap-feasibility analysis above. Restated per Minsky surface, for completeness:
+
+- **agent backend**: ALREADY-WRAPPED — Devin is a per-task `cloud_agent: "devin"` backend today. Correct shape; no further cut available.
+- **tick-loop / fleet / queue**: KEEP — delegating the fleet layer to Cognition Cloud collapses moats #1, #2, #5 (see wrap analysis). Do NOT replace.
+- **MAPE-K / self-improvement**: KEEP — Devin has no across-session experiment store; nothing to absorb.
+- **constitution-as-CI**: KEEP — Devin relies on Cognition's internal QA, not a 17-rule operator-side gate.
+- **corpus / scorecard**: KEEP + REFRESH — Devin stays a cited corpus entry; the lesson is to keep the methodology qualifier on every reading.
+- **identity / TASKS.md surface**: KEEP — operator-machine identity is moat #2; Devin's bot identity is the thing we deliberately do not adopt.
+
+**Total replace % across all surfaces: 0% replacement; 1 ALREADY-WRAPPED (the agent backend, at the correct per-task layer).** Headline for the operator: *nothing further to cut — Devin is already wrapped at the right (per-task) layer; the strategic value of this deep-dive is the honesty framing (its headline 67% is benchmark-inflated relative to the ~15% open-ended real-world rate) and the empirical confirmation that task pre-shaping, not backend choice, is the merge-rate lever.*
+
 ## Last reviewed
 
-2026-05-22; 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive — verdict: per-task wrap already shipping (correct shape), fleet-layer wrap rejected (collapses 3/6 moats).
+2026-06-02 — added `## Five pivot questions` (Five Pivot Questions framework, `--deep` mode) per task `competitor-deepen-devin`. Verdict: ALREADY-WRAPPED at the per-task layer (no further cut); 0% additional replacement; no vision-changing finding. Key framing extracted: Devin's headline 67%-PR-merge number is benchmark-inflated — scoped to *defined* tasks against a launch SWE-bench resolve rate of 13.9% and a ~15% open-ended real-world rate (Answer.AI). Lesson: task pre-shaping (rule #3a + `**Touches**:`) is the dominant merge-rate lever, not backend choice.
+
+Earlier reviews: 2026-05-22 (wrap-feasibility analysis added per rule #1 + operator directive — verdict: per-task wrap already shipping (correct shape), fleet-layer wrap rejected (collapses 3/6 moats)).
