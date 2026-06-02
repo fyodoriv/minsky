@@ -50,6 +50,11 @@ export default defineConfig({
       "novel/**/src/**/*.test.ts",
       "novel/**/test/**/*.test.ts",
       "scripts/**/*.test.mjs",
+      // Paired tests for the `bin/` bash shims (e.g. bin/minsky.test.mjs,
+      // the `minsky stop --host` per-host kill-switch test). The shims are
+      // bash, so the paired test spawns the real binary with a mocked PATH
+      // — same pattern as test/integration/bin-minsky-*.test.ts.
+      "bin/**/*.test.mjs",
       "user-stories/**/*.test.ts",
       "test/**/*.test.ts",
       "distribution/shortcuts/test/**/*.test.mjs",

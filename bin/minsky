@@ -890,11 +890,24 @@ EOF
   stop)
     if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
       cat <<'EOF'
-Usage: minsky stop
+Usage: minsky stop [--host <dir>]
 
 Thorough daemon shutdown: bootout the launchd service (prevents
 auto-restart via KeepAlive), then kill every minsky-* process and
 its agent children. Zero ghost processes after this command exits.
+
+  --host <dir>   Limit SIGTERM to the single minsky-run whose argv
+                 carries the matching `--host <dir>` (resolved via
+                 realpath so relative paths still match absolute argv).
+                 Other operators' minsky-runs on this machine are left
+                 untouched — the per-host kill switch for multi-tenant
+                 machines. The launchd bootout is SKIPPED in this mode
+                 (KeepAlive is a machine-global concern, not per-host).
+
+With no --host the global shutdown runs, preceded by a banner listing
+every host about to be stopped and a 3s grace period (Ctrl-C to abort).
+Set MINSKY_NON_INTERACTIVE=1 to skip the banner + grace period (the
+launchd unit and CI invoke `minsky stop` this way).
 
 Idempotent — safe to invoke when the daemon is already stopped.
 
@@ -903,9 +916,72 @@ of the daemon state).
 EOF
       exit 0
     fi
+
+    # ── --host <dir> filter (multi-tenant per-host kill switch) ──────
+    # When two operators (or one operator running plugin + api in
+    # parallel) co-exist on one machine, the global `minsky stop` below
+    # SIGTERMs BOTH minsky-runs. `--host <dir>` narrows the kill to the
+    # one runner whose argv carries the matching `--host`. Source:
+    # TASKS.md `minsky-stop-host-filter`; rule #6 (let-it-crash at the
+    # RIGHT boundary — the per-host kill is the operator's correct
+    # boundary; global stop crosses the wrong one). The runner pattern
+    # `cross-repo-runner/bin/minsky-run.*--host <dir>` is consumed by
+    # the paired test in bin/minsky.test.mjs via a mocked `pgrep`.
+    _stop_host=""
+    if [ "${2:-}" = "--host" ]; then
+      if [ -z "${3:-}" ]; then
+        echo "minsky stop: --host requires a directory argument" >&2
+        echo "  usage: minsky stop --host <dir>" >&2
+        exit 2
+      fi
+      # realpath so a relative `--host ./repo` still matches the runner's
+      # absolute-path argv. Falls back to the raw arg if it doesn't
+      # resolve (e.g. the dir was already removed) so the operator can
+      # still target a stale path.
+      _stop_host=$(_minsky_realpath "$3" 2>/dev/null || true)
+      [ -n "$_stop_host" ] || _stop_host="$3"
+      _stop_pattern="cross-repo-runner/bin/minsky-run.*--host $_stop_host"
+      _stop_host_pids=$(pgrep -f "$_stop_pattern" 2>/dev/null || true)
+      if [ -z "$_stop_host_pids" ]; then
+        echo "nothing to stop for host=$_stop_host (no matching minsky-run)"
+        exit 0
+      fi
+      _stop_host_killed=0
+      for _stop_pid in $_stop_host_pids; do
+        if kill -TERM "$_stop_pid" 2>/dev/null; then
+          echo "  ✅ sent SIGTERM to pid $_stop_pid (host=$_stop_host)"
+          _stop_host_killed=$((_stop_host_killed + 1))
+        fi
+      done
+      echo ""
+      echo "minsky stop --host $_stop_host: SIGTERM sent to $_stop_host_killed runner(s); other hosts untouched."
+      exit 0
+    fi
+
     # Thorough shutdown: kill ALL minsky processes + their agent children
     # + bootout the launchd service. Zero ghost processes after this.
     _killed=0
+
+    # 0. Pre-kill banner + grace period. `minsky stop` with no --host is
+    #    a machine-wide kill; on a multi-tenant box that can be
+    #    surprising. List every host about to be stopped and give the
+    #    operator a 3s window to Ctrl-C. MINSKY_NON_INTERACTIVE=1 (set by
+    #    the launchd unit + CI) skips the banner + sleep. Source: TASKS.md
+    #    `minsky-stop-host-filter` Acceptance (2) + (3).
+    if [ "${MINSKY_NON_INTERACTIVE:-0}" != "1" ]; then
+      _stop_all_hosts=$(pgrep -af "cross-repo-runner/bin/minsky-run" 2>/dev/null \
+        | grep -oE '\-\-host [^ ]+' | awk '{print $2}' | sort -u || true)
+      echo "minsky stop: about to SIGTERM EVERY minsky-run on this machine."
+      if [ -n "$_stop_all_hosts" ]; then
+        echo "  hosts affected:"
+        printf '    %s\n' $_stop_all_hosts
+        echo "  (to stop just one: minsky stop --host <dir>)"
+      else
+        echo "  (no running minsky-run detected — nothing to list)"
+      fi
+      echo "  Ctrl-C within 3s to abort..."
+      sleep 3
+    fi
 
     # 1. Bootout launchd service (prevents auto-restart via KeepAlive)
     if launchctl list 2>/dev/null | grep -q 'com.minsky.daemon'; then
