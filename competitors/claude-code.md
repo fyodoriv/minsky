@@ -7,7 +7,7 @@
 - **Pricing**: Pay-per-token via Anthropic API (Claude Sonnet / Opus pricing)
 - **Relationship**: **Integration + Competitor** — Minsky uses Claude Code as a cloud agent (`cloud_agent: "claude"`); also competes as a standalone autonomous-coding product.
 
-## What it is
+## What this is
 
 Anthropic's coding agent — runs locally (CLI or VS Code extension), reads
 your codebase, edits files, runs tests, submits PRs. Built natively on
@@ -15,6 +15,12 @@ the Claude API with first-party tooling (file ops, shell, web). Strong
 performance on agentic coding benchmarks (SWE-bench Verified, AIDev
 acceptance studies). Lowest-friction integration for teams already on
 Claude.
+
+## What this is not
+
+- **Not a daemon.** Claude Code is an interactive, per-session agent; Minsky is the unattended outer loop that drives it across a `TASKS.md` queue.
+- **Not a Minsky-internal competitor only.** Minsky integrates Claude Code as a `cloud_agent` backend (`cloud_agent: "claude"`) and also competes with it as a standalone product.
+- **Not the discipline layer.** No constitutional CI lints, no cross-repo fleet, no pre-registered-experiment gate — those are Minsky's contribution.
 
 ## Strengths
 

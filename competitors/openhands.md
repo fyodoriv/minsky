@@ -8,13 +8,19 @@
 - **Pricing**: Free (self-hosted Agent Canvas / local GUI / CLI / SDK), Cloud (free tier with Minimax model, paid tiers), Enterprise (custom, Kubernetes self-hosted Agent Control Plane).
 - **Relationship**: **Competitor** — strongest OSS autonomous coding agent; orchestrator overlap sharpened by the June 2026 Agent Canvas launch (BYO-agent + Dockerless + self-host-on-VM now match three Minsky surfaces).
 
-## What it is
+## What this is
 
 Open-source autonomous software engineering platform (formerly OpenDevin). **Request-response agent framework, not a daemon** — FastAPI backend (`openhands/app_server/app.py`) instantiates a sandbox per conversation, runs a stateless agent loop via the OpenHands Software Agent SDK (separate repo: `github.com/OpenHands/software-agent-sdk`), returns results. Each invocation is fresh with full context passed in; conversation history persists to `~/.openhands/<conversation_id>/` as JSON.
 
 **CodeAct paradigm** — the agent writes code, executes it, observes output, iterates. **15+ LLM backends** (Claude 4.5 Opus, GPT-5.x, Gemini 3.x, DeepSeek-3.2-Thinker, Qwen, Llama) via OpenAI-compatible APIs.
 
 **Post-Agent-Canvas (June 1, 2026) deployment shapes**: **Agent Canvas** (the new flagship — a single Dockerless agent-server backend that runs on a laptop, in Docker, or on a remote VM, with a visual local-agent-development UI and **bring-your-own-agent** selection across Claude Code, Codex, and the OpenHands SDK); Local GUI (legacy Docker sandbox path, still supported); Cloud SaaS (`app.all-hands.dev`); Enterprise (Kubernetes self-hosted with Agent Control Plane). CLI + SDK remain available, and the self-host-on-VM use case is now first-class rather than an Enterprise-only path. Each invocation is still **request-response and stateless between conversations** — Agent Canvas changed the install and agent-selection surface, not the per-conversation runtime loop, which remains a single-session CodeAct agent (V1 SDK, [arXiv:2511.03690](https://arxiv.org/abs/2511.03690)).
+
+## What this is not
+
+- **Not a daemon.** OpenHands is request-response and stateless between conversations; Minsky is the always-on outer loop that walks a `TASKS.md` queue unattended.
+- **Not cross-repo at operator scale.** Even post-Agent-Canvas, self-host runs one agent-server per conversation; multi-repo fleets remain Enterprise-only.
+- **Not operator-machine identity.** Self-host-on-VM provisions a GitHub token into the agent-server rather than inheriting the operator's ambient `~/.config/gh` + `~/.gitconfig` + `~/.ssh`.
 
 ## Strengths
 

@@ -4,6 +4,16 @@
 
 This directory holds one markdown research file per competitor in the M1.10 scorecard corpus. This README is the synthesised strategic view — read it to understand the LANDSCAPE; read each per-vendor file for the DETAILS.
 
+## What this is
+
+The navigational index for Minsky's competitive landscape: where Minsky sits in the orchestrator tier, the six-property moat no competitor fully matches, and a per-vendor file map. Read this first; descend into a per-vendor file only when you need that competitor's strengths, gaps, and delegate/contribute/absorb verdict.
+
+## What this is not
+
+- **Not a per-vendor analysis.** Each `competitors/<name>.md` holds one competitor's full research (strengths, gaps, wrap analysis, Five pivot questions).
+- **Not the scorecard data.** See [scorecard.md](./scorecard.md) for the generated metric snapshot from `bin/minsky competitive`.
+- **Not the product positioning.** See [README.md](../README.md) for how Minsky describes itself to operators.
+
 ## TL;DR
 
 **Minsky is an orchestrator** (peer tier: MetaGPT, AutoGen, CrewAI, LangGraph, OpenAI Agents SDK). It sits ABOVE the agents (Claude / Devin / Aider) it composes.

@@ -7,9 +7,15 @@
 - **Pricing**: Free (OSS, Apache 2.0). Model costs only.
 - **Relationship**: **Integration** — minsky uses aider as its local-model agent
 
-## What it is
+## What this is
 
 AI pair programming in your terminal. Best-in-class local model support. Works with Claude, GPT-4, Gemini, and any OpenAI-compatible local model (ollama, LM Studio, etc). Diff-based editing, git-native, minimal footprint. The gold standard for CLI-first AI coding.
+
+## What this is not
+
+- **Not an orchestrator.** Aider has no daemon, no task queue, no cross-repo loop — it is the inner-loop agent Minsky drives, not a peer to Minsky's outer loop.
+- **Not autonomous by design.** Maintainer Paul Gauthier resists fully-autonomous operation; Aider keeps a human at the wheel.
+- **Not a Minsky competitor here.** Minsky already wraps Aider as its `local_agent`; this file analyses what to absorb, not whom to beat.
 
 ## Strengths
 
