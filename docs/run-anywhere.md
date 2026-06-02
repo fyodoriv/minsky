@@ -156,6 +156,92 @@ base, the run stops within `600±30s` under `MINSKY_RUN_TIME_LIMIT=600s`, and
 zero restarts fire after the deadline. A regression in the decision core
 becomes an exit-1 gate break, not a silent mis-restart.
 
+## Permission-scoped writes (home vs foreign)
+
+<!-- scope: human-approved `runany-permission-scoped-writes` (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
+
+Operator-facing reference for the least-authority write policy a run-anywhere
+conductor applies to every repo under the tree. The rule is
+[Saltzer & Schroeder 1975](https://www.cs.virginia.edu/~evans/cs551/saltzer/)
+least privilege + fail-safe defaults (rule #13): the run may push code and
+open any PR **only** to its **home** repo; for any **foreign** repo it
+encounters, the **only** permitted write is a PR whose diff is limited to that
+repo's `TASKS.md` (findings filed as tasks.md-spec task blocks). Every code
+push or non-TASKS.md change to a foreign repo is refused and logged.
+
+### Home vs foreign
+
+A repo is **home** when its git toplevel equals the invoked (home) repo's
+toplevel, OR — when both `origin` URLs are known — their normalised origins
+match (so a separate worktree or a fresh clone of the same upstream is still
+home, not foreign). Otherwise it is **foreign**. The classification is a
+single pure function with no I/O — the caller resolves the git facts and logs
+the verdict (rule #10, no model in the gate):
+
+```text
+classifyRepo  → "home" | "foreign"     scripts/lib/repo-policy.mjs
+assertWriteAllowed → allow | refuse{code}
+```
+
+### Decision table (this IS the home × foreign × push/PR/taskmd matrix)
+
+| class   | action      | diff shape       | verdict                       |
+|---------|-------------|------------------|-------------------------------|
+| home    | push-code   | (any)            | allow                         |
+| home    | open-pr     | (any)            | allow                         |
+| foreign | push-code   | (any)            | refuse `foreign-code-push`    |
+| foreign | open-pr     | TASKS.md-only    | allow                         |
+| foreign | open-pr     | other / unknown  | refuse `foreign-nontaskmd-pr` |
+
+Fail-safe: a foreign `open-pr` with an **undetermined** diff (empty / unknown
+`changedPaths`) is refused, never allowed — an unknown diff is not assumed
+safe. `TASKS.md` matching is a strict basename check, so look-alikes
+(`TASKS.md.bak`, `MY-TASKS.md`, `TASKS.markdown`) are rejected.
+
+### Defense-in-depth at the gate (the Pivot's git-layer backstop)
+
+`scripts/local-gate-merge.mjs`'s `decideMerge` runs `decidePrRepoPolicy`
+ahead of the vet/review layers: a PR whose head repo classifies as foreign is
+refused before any `gh pr merge` call. The gate only ever lists the home
+repo's own PRs today, so absent head-repo identity is treated as home (the
+safe common case) — but the guard is the Pivot's backstop should a foreign /
+fork head ever reach the merge path.
+
+### Scout-and-record across the fleet
+
+Independently of the write policy, every conductor tick vets minsky-on-itself.
+On any observed friction — the worker daemon was found DOWN and healed, or the
+merge sweep errored — the run files a minsky-self improvement task (recorded
+as a `minsky-self-task-filed` ledger event) so a stranger session picks it up.
+
+### Implementation seam
+
+The classification + permission decision is migrated to the post-phase-7b
+home for runner logic, `scripts/lib/repo-policy.mjs` (the
+`novel/cross-repo-runner/` package the original task `**Files**` named was
+deleted in PR #883 and its logic moved to `scripts/lib/*.mjs`; this seam
+follows that convention rather than resurrecting the deleted package — rule #1). The conductor (`scripts/orchestrate.mjs`) emits the verdict ledger; the
+gate (`scripts/local-gate-merge.mjs`) carries the git-layer backstop.
+
+### Measurement (pre-registered, rule #9)
+
+The task's Success thresholds are evaluated deterministically by the audit
+harness — committed before the result is observed (Munafò et al. 2017):
+
+```bash
+node scripts/runany-policy-audit.mjs --window=run --json
+# → {"foreign_code_pushes":0,"foreign_prs_nontaskmd":0,
+#    "minsky_self_tasks_filed":N,"pass":…}
+node scripts/runany-policy-audit.mjs --window=run          # human summary
+```
+
+Exit code is `0` only when all three pre-registered thresholds hold over the
+run window (since the last `run-start` marker): zero foreign code pushes
+escaped the gate, zero foreign non-TASKS.md PRs escaped, and at least one
+minsky-self improvement task was filed when friction was observed. The escape
+counters are 0 by construction — the gate refuses every foreign code write —
+so a non-zero count is a regression that flips this exit-1.
+
 ## Per-iteration provider decision
 
 <!-- scope: human-approved `runany-dynamic-model-or-local-fallback` slices 1+2 (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
