@@ -48,6 +48,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -254,6 +255,7 @@ def render_system_prompt_overlay(
     host_repo: str,
     pre_commit_command: str,
     local_llm_mode: bool = False,
+    wait_after_pr_open: bool = False,
 ) -> str:
     """Render the constitution + deliverables overlay.
 
@@ -275,12 +277,54 @@ def render_system_prompt_overlay(
     local model can't hold a 1MB constitution document in its context
     window and ends up either ignoring the instruction or wasting
     tokens trying to load it.
+
+    `wait_after_pr_open=True` (set by bin/minsky-run.sh when the env var
+    `MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true` is exported) reverts the
+    FINAL STEP exit instruction to the legacy "run until something
+    happens" behaviour: the agent is told it MAY stay alive after
+    `gh pr create` to react to red CI. The default (False) tells the
+    agent to exit cleanly with code 0 the moment the PR URL prints,
+    because the next minsky iteration owns the CI-fix loop. Source:
+    TASKS.md `brief-instructs-exit-after-pr-open` — devin was observed
+    opening PR #614 14min into an iteration then idling to the 15min
+    SIGKILL, wasting compute; the exit-when-done instruction cuts the
+    typical-case wall-clock cost. The env var is the documented opt-out
+    for the Pivot case (operators discover CI-fix loops need the wait).
     """
     line_3 = (
         f"3. Run `{pre_commit_command}` and confirm zero errors before committing."
         if pre_commit_command
         else "3. Run the host's pre-commit hooks (if any) before committing."
     )
+
+    # The exit-after-PR instruction. Default (wait_after_pr_open=False)
+    # tells the agent to exit code 0 the instant the PR URL prints — the
+    # next minsky iteration owns the CI-fix loop, so idling here only
+    # burns compute until the spawn watchdog SIGKILLs at the timeout
+    # ceiling (the brief-instructs-exit-after-pr-open bug class). When
+    # MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true is exported, the legacy
+    # "run until something happens" behaviour returns (the documented
+    # opt-out for the Pivot case — operators who need to react to red CI
+    # within the same iteration).
+    if wait_after_pr_open:
+        exit_after_pr_lines = [
+            "After `gh pr create` succeeds, print the PR URL on its own line.",
+            "You MAY stay alive after the PR opens to watch CI and react to",
+            "red checks within this iteration (legacy mode — enabled via",
+            "MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true). Do NOT leave uncommitted",
+            "work in the working tree — minsky's scope-leak detector will",
+            "attribute it to you and verdict=scope-leak.",
+        ]
+    else:
+        exit_after_pr_lines = [
+            "After `gh pr create` succeeds, print the PR URL on its own line",
+            "then EXIT CLEANLY with exit code 0 immediately. Do NOT wait for",
+            "CI feedback or watch the checks — the NEXT minsky iteration",
+            "handles CI-fix loops. Idling here only burns compute until the",
+            "spawn watchdog SIGKILLs you at the timeout ceiling. Do NOT leave",
+            "uncommitted work in the working tree — minsky's scope-leak detector",
+            "will attribute it to you and verdict=scope-leak.",
+        ]
 
     preamble_lines = (
         []
@@ -320,9 +364,7 @@ def render_system_prompt_overlay(
         "  gh pr create --base <default-branch> --head HEAD \\",
         '    --title "<commit subject>" --body "<task body + self-grade>"',
         "",
-        "After `gh pr create` succeeds, print the PR URL on its own line then",
-        "exit. Do NOT leave uncommitted work in the working tree — minsky's",
-        "scope-leak detector will attribute it to you and verdict=scope-leak.",
+        *exit_after_pr_lines,
         "",
         "If a step fails (lint error, hook rejection, push conflict), report",
         "the error verbatim and STOP — do not silently retry or leave the",
@@ -408,6 +450,7 @@ def build_brief(
     local_llm_mode: bool = False,
     persona: str | None = None,
     prior_artifact: str = "",
+    wait_after_pr_open: bool = False,
 ) -> str:
     """Compose the full brief (task block + overlay separated by `---`).
 
@@ -422,6 +465,13 @@ def build_brief(
     the top, the constitution preamble is dropped. This is set automatically
     by bin/minsky-run.sh when `local_llm_enabled: true` in
     `~/.minsky/config.json`.
+
+    When wait_after_pr_open is True (set by bin/minsky-run.sh when the env
+    var `MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true` is exported), the FINAL STEP
+    exit instruction reverts to the legacy "run until something happens"
+    behaviour. The default (False) tells the agent to exit cleanly with code
+    0 the instant the PR URL prints — see `render_system_prompt_overlay` and
+    TASKS.md `brief-instructs-exit-after-pr-open`.
 
     When persona is set (one of `PIPELINE_PERSONAS`), the matching brief
     template from `novel/personas/<role>.md` is front-loaded before the task
@@ -452,6 +502,7 @@ def build_brief(
             host_repo=host_config.host_repo,
             pre_commit_command=host_config.pre_commit_command,
             local_llm_mode=local_llm_mode,
+            wait_after_pr_open=wait_after_pr_open,
         ),
     ])
     full = "\n".join(sections)
@@ -525,6 +576,14 @@ def main(argv: list[str]) -> int:
         print(result.reason or f"task '{task_id}' not found", file=sys.stderr)
         return 1
     host_config = load_host_config(host_dir)
+    # Env escape hatch (TASKS.md `brief-instructs-exit-after-pr-open` Pivot):
+    # MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true reverts the FINAL STEP exit
+    # instruction to the legacy "run until something happens" behaviour.
+    # Read at the CLI boundary (mirrors how bin/minsky-run.sh exports env
+    # to the build_brief.py subprocess) so the .sh shim needs no change.
+    wait_after_pr_open = os.environ.get(
+        "MINSKY_BRIEF_WAIT_AFTER_PR_OPEN", ""
+    ).strip().lower() in ("1", "true", "yes")
     try:
         brief = build_brief(
             result.task,
@@ -534,6 +593,7 @@ def main(argv: list[str]) -> int:
             local_llm_mode=local_llm_mode,
             persona=persona,
             prior_artifact=prior_artifact,
+            wait_after_pr_open=wait_after_pr_open,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)

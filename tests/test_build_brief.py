@@ -172,6 +172,78 @@ def test_overlay_includes_final_step_block() -> None:
     assert "scope-leak detector" in out
 
 
+def test_overlay_default_exits_after_pr_without_waiting_for_ci() -> None:
+    """Default overlay tells the agent to exit code 0 after `gh pr create`.
+
+    Pin for brief-instructs-exit-after-pr-open: devin idled after opening a
+    PR until the spawn watchdog SIGKILLed it, wasting compute. The brief now
+    instructs an immediate clean exit and explicitly says not to wait for CI.
+    """
+    out = build_brief.render_system_prompt_overlay(
+        vision_md_path="v", task_id="x", host_repo="h", pre_commit_command="",
+    )
+    assert "EXIT CLEANLY with exit code 0 immediately" in out
+    assert "Do NOT wait for" in out
+    assert "the NEXT minsky iteration" in out
+
+
+def test_overlay_wait_mode_reverts_to_legacy_run_until_something_happens() -> None:
+    """MINSKY_BRIEF_WAIT_AFTER_PR_OPEN escape hatch keeps the agent alive.
+
+    The Pivot opt-out (operators who need to react to red CI in the same
+    iteration) restores the legacy behaviour and drops the immediate-exit
+    instruction.
+    """
+    out = build_brief.render_system_prompt_overlay(
+        vision_md_path="v", task_id="x", host_repo="h", pre_commit_command="",
+        wait_after_pr_open=True,
+    )
+    assert "MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true" in out
+    assert "You MAY stay alive after the PR opens" in out
+    # The immediate-exit instruction must NOT appear in legacy/wait mode.
+    assert "EXIT CLEANLY with exit code 0 immediately" not in out
+
+
+def test_build_brief_passes_wait_flag_through_to_overlay() -> None:
+    """build_brief threads wait_after_pr_open down to the overlay."""
+    task = _pick_task_from_sample()
+    cfg = build_brief.HostConfig(
+        host_repo="h", branch_prefix="feat/", pre_commit_command="", default_branch="main",
+    )
+    default_brief = build_brief.build_brief(task, cfg)
+    wait_brief = build_brief.build_brief(task, cfg, wait_after_pr_open=True)
+    assert "EXIT CLEANLY with exit code 0 immediately" in default_brief
+    assert "EXIT CLEANLY with exit code 0 immediately" not in wait_brief
+    assert "You MAY stay alive after the PR opens" in wait_brief
+
+
+def test_cli_env_var_enables_wait_after_pr_open(tmp_path: Path) -> None:
+    """MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true exported to the CLI reverts to
+    legacy wait behaviour; absent (or any non-truthy value) keeps the
+    default immediate-exit instruction."""
+    (tmp_path / "TASKS.md").write_text(SAMPLE_TASKS_MD, encoding="utf-8")
+    script = str(Path(__file__).parent.parent / "scripts" / "build_brief.py")
+    base_env = {**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent / "scripts")}
+
+    wait = subprocess.run(
+        [sys.executable, script, "proj-840-slash-command-labels", str(tmp_path)],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
+        env={**base_env, "MINSKY_BRIEF_WAIT_AFTER_PR_OPEN": "true"},
+    )
+    assert wait.returncode == 0, wait.stderr
+    assert "You MAY stay alive after the PR opens" in wait.stdout
+    assert "EXIT CLEANLY with exit code 0 immediately" not in wait.stdout
+
+    default_env = {k: v for k, v in base_env.items() if k != "MINSKY_BRIEF_WAIT_AFTER_PR_OPEN"}
+    default = subprocess.run(
+        [sys.executable, script, "proj-840-slash-command-labels", str(tmp_path)],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
+        env=default_env,
+    )
+    assert default.returncode == 0, default.stderr
+    assert "EXIT CLEANLY with exit code 0 immediately" in default.stdout
+
+
 def test_overlay_includes_tool_call_discipline_block() -> None:
     """TOOL-CALL DISCIPLINE (2026-05-27 disengagement-fix regression).
 
