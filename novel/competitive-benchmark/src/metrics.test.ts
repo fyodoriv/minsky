@@ -27,21 +27,65 @@ describe("METRICS catalogue", () => {
     ]);
   });
 
-  it("includes the public-benchmark hooks (SWE-bench agent-tier, HumanEval + MATH orchestrator-tier)", () => {
+  it("includes the public-benchmark hooks (SWE-bench agent-tier, HumanEval + MATH orchestrator-tier, OpenHands Index suite)", () => {
     // SWE-bench is the agent-tier head-to-head; HumanEval is the orchestrator-
     // tier code head-to-head (MetaGPT publishes it); math-whole-test-accuracy
-    // is the orchestrator-tier math-reasoning axis added via the
-    // `corpus-add-autogen-microsoft` Pivot (AutoGen publishes MATH, not a
-    // stock-model HumanEval headline). All three live in the public-benchmark
-    // category — they cover different tiers / axes, not competing definitions.
+    // is the orchestrator-tier math-reasoning axis (AutoGen). The four added
+    // via `research-finding-multi-task-benchmark-suite` are the OpenHands Index
+    // multi-task dimensions beyond issue-resolution: greenfield (Commit0),
+    // frontend (SWE-bench Multimodal), testing (SWT-Bench), info-gathering
+    // (GAIA). All live in the public-benchmark category — different tiers /
+    // axes, not competing definitions.
     const pub = METRICS.filter((m) => m.category === "public-benchmark");
-    expect(pub).toHaveLength(3);
+    expect(pub).toHaveLength(7);
     const ids = pub.map((m) => m.id).sort();
     expect(ids).toEqual([
+      "commit0-library-resolve-rate",
+      "gaia-resolve-rate",
       "humaneval-pass-at-1",
       "math-whole-test-accuracy",
+      "swe-bench-multimodal-resolve-rate",
       "swe-bench-verified-resolve-rate",
+      "swt-bench-test-generation-rate",
     ]);
+  });
+
+  it("ships the OpenHands Index 5-task multi-benchmark suite (research-finding-multi-task-benchmark-suite)", () => {
+    // The OpenHands Index reports per-task scores across 5 dimensions; a single
+    // SWE-bench number masks where the agent fails. Each dimension is pinned to
+    // its originating public dataset so the metric is reproducible and primary-
+    // cited (rule #1 — cite the dataset, don't re-run OpenHands' harness).
+    const suite: Record<string, RegExp> = {
+      // issue-resolution → already in the catalogue pre-this-task
+      "swe-bench-verified-resolve-rate": /Jimenez/,
+      // greenfield → Commit0
+      "commit0-library-resolve-rate": /Commit0|2412\.01769/,
+      // frontend → SWE-bench Multimodal
+      "swe-bench-multimodal-resolve-rate": /Multimodal|2410\.03859/,
+      // testing → SWT-Bench
+      "swt-bench-test-generation-rate": /SWT-Bench|2406\.12952/,
+      // info-gathering → GAIA
+      "gaia-resolve-rate": /GAIA|2311\.12983/,
+    };
+    for (const [id, anchorPattern] of Object.entries(suite)) {
+      const m = metricById(id);
+      expect(m, `suite dimension ${id} must be registered`).toBeDefined();
+      expect(m?.category).toBe("public-benchmark");
+      expect(m?.direction).toBe("higher-is-better");
+      expect(m?.unit).toBe("ratio");
+      expect(m?.anchor).toMatch(anchorPattern);
+    }
+    // The measurement intent of the task: ≥5 metrics whose id names a
+    // SWE-bench-shape or GAIA dataset (the suite axes), so the corpus surfaces
+    // ≥5 per-dimension axes rather than one aggregate number.
+    const suiteShaped = METRICS.filter(
+      (m) =>
+        m.id.startsWith("swe-bench-") ||
+        m.id.startsWith("gaia-") ||
+        m.id.startsWith("swt-bench-") ||
+        m.id.startsWith("commit0-"),
+    );
+    expect(suiteShaped.length).toBeGreaterThanOrEqual(5);
   });
 
   it("has unique kebab-case ids", () => {
