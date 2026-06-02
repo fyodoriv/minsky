@@ -100,6 +100,49 @@ Re-run this analysis when ANY of these fire:
 3. **MAPE-K L2 closed-loop A/B prompt tuning starts shipping** (per `user-stories/003`) and the implementation cost exceeds 4 weeks. Then folding MAPE-K's graph state onto LangGraph's runtime becomes a defensible bypass.
 4. **OpenHands' Path C wrap fails the pivot threshold** (`add-openhands-as-pluggable-backend` Pivot: <5pp SWE-bench delta). Then LangGraph at the orchestrator layer becomes a candidate for the second-best wrap shape — re-evaluate.
 
+## Five pivot questions
+
+### 1. How is it different from Minsky?
+
+LangGraph is an **in-process workflow library**: you define a `StateGraph` in Python (the canonical surface; the JS port is partial), `compile()` it, and *run* it on an input. Minsky is an **orchestrator-tier 24/7 TypeScript daemon** that attaches to N repos, drains TASKS.md, and refuses to merge any agent's output that fails the 18-rule constitution. The defining structural difference is the *outer loop and the gate*: a LangGraph workflow runs when triggered and stops at the terminal node; Minsky never stops, picks the next task itself, and self-governs. LangGraph models *one workflow's* state transitions; Minsky models a *fleet's* task selection plus a CI merge gate. LangGraph's checkpointer is the closest thing to overlap — it persists every super-step so you can replay or time-travel — but it persists *one execution's* state per `thread_id`, not *across all prior runs on a host*, which is the MAPE-K substrate's job. The two are not peers: LangGraph is the kind of inner-loop state engine an orchestrator might embed, not an orchestrator.
+
+### 2. What lessons can it give to us?
+
+- **Checkpoint-per-super-step as the durability primitive** (LangGraph docs § "Persistence", § "Time travel") — every node transition is persisted to a checkpointer (Postgres / SQLite / Redis), so a workflow survives process restart and can replay from any prior step. Lesson: Minsky's tick-loop durability story should be *event-sourced at the iteration boundary*, which `.minsky/orchestrate.jsonl` already is — confirmation that the append-only-log bet was right, and a concrete shape (one record per super-step) to keep matching.
+- **Graph-state as the MAPE-K shape** (LangGraph models nodes = pure functions, edges = state transitions) — structurally identical to MAPE-K's Monitor → Analyze → Plan → Execute phases. Lesson: adopt the *pattern* (already done in MAPE-K's design per ARCHITECTURE.md § "Theoretical foundations") without the framework — same play as adopting OTEL without adopting a vendor.
+- **`thread_id` as the multi-tenant isolation boundary** (LangGraph docs § "Threads") — each conversation/run gets its own state namespace. Lesson: Minsky's `experiment-store/cross-repo/<host>/*.jsonl` already follows this shape (per-host == per-thread); the pattern is absorbed, not pending.
+- **LangSmith-default tracing is a cautionary tale, not a model to copy** — LangGraph's canonical observability path routes through hosted LangSmith. Lesson: a framework that makes the hosted-cloud path the *default* tracing surface puts operator-machine identity at risk; Minsky's OTEL-first, local-by-default choice (rule #4) is the deliberate inverse and must stay that way.
+
+### 3. Are any of these lessons potentially vision-changing?
+
+**No vision rewrite is forced today.** The task's Hypothesis was: *LangGraph's checkpoint + resumption primitives are the most relevant prior art for the tick-loop durability story; Q5 evaluates replace-tick-loop-with-LangGraph viability.* Examined against the pre-registered Pivot (*if LangGraph's adoption cost > the gain from replacing the tick-loop, keep the current implementation*):
+
+- **The durability lesson is already absorbed without the framework.** `.minsky/orchestrate.jsonl` is event-sourced; the checkpoint-replay pattern that LangGraph implements is the pattern Minsky already runs (Fowler 2005 event-sourcing + van der Aalst 2002 workflow nets — see § "Pattern conformance"). Absorbing the *pattern* does not require depending on the *runtime*.
+- **The maximal version of the threat does not dissolve the moat.** Even if Minsky folded MAPE-K's state onto LangGraph's checkpointer, it would gain durable replay (a simplification) but would NOT gain cross-repo task selection, the TASKS.md operator surface, operator-machine identity, the budget guard, or — most importantly — the **constitution + CI merge gate** (moats #3–#6). LangGraph is a state engine; it supplies no governance and no fleet layer.
+- **Adoption cost exceeds the gain (Pivot satisfied → keep current implementation).** The Python-vs-TypeScript split is a permanent integration tax, and the LangSmith-default tracing path threatens operator-machine identity. The gain (durable replay) is already available via event-sourcing. So the Pivot threshold — *adoption cost > replacement gain* — is **crossed**, and the directive is exactly what the Pivot pre-registered: **keep the current tick-loop implementation.** This is a negative finding (no vision-threat question filed), recorded here per this task's central-questions routing rather than by editing `ask-human.md`.
+
+### 4. How can we improve our strategy based on this?
+
+- **Keep the iteration record one-super-step-per-record** — match LangGraph's checkpoint granularity in `.minsky/orchestrate.jsonl` so a future replay/time-travel feature is free (the log is already the checkpointer). Traces to lesson §2.1.
+- **Pre-write the "fold, don't pivot" plan for MAPE-K durability** — record *now* (this file) that if MAPE-K ever needs durable replay, the answer is event-sourcing over the existing JSONL, not a LangGraph runtime dependency. Traces to lesson §2.2 + Q3. Keeps a future agent from over-reacting to a "LangGraph has checkpoints" observation.
+- **Treat LangSmith-default tracing as an explicit anti-requirement** — keep OTEL-first + local-by-default (rule #4) as a deliberate design choice the docs name, so no future integration quietly adopts a hosted-cloud default tracing path. Traces to lesson §2.4.
+- **Watch the TypeScript-port + LangSmith-decoupling triggers** — the two re-evaluation triggers below are the only conditions under which the wrap math changes; keeping them explicit is the cheap insurance. Traces to § "Trigger for re-evaluation".
+
+### 5. Can and should we cut corners by replacing part of Minsky with this?
+
+For each Minsky surface:
+
+- **tick-loop**: KEEP — LangGraph has no daemon / queue / cross-repo loop; it runs one workflow on one input and stops. The durability sub-case it tempts you with is already covered by the event-sourced `.minsky/orchestrate.jsonl`.
+- **MAPE-K**: KEEP (pattern already absorbed) — the graph-state shape inspired MAPE-K's design, but folding MAPE-K onto LangGraph's runtime imposes the Python/TS tax for a durability gain we already have. *Watch*: if MAPE-K L2 closed-loop tuning (user-stories/003) ever exceeds ~4 weeks to build, re-open the fold question.
+- **adapters / agent backend**: N/A — LangGraph is a workflow engine, not an agent runtime; the per-task multi-step workflow is dominated by OpenHands' CodeAct loop (the approved Path C wrap), so adding LangGraph as a 5th `cloud_agent` would compete with an integration that's already cheaper.
+- **sandbox**: N/A — LangGraph runs in-process; OS-level isolation stays Minsky's job.
+- **constitution / merge gate**: KEEP — LangGraph defines behaviour (the graph), not policy. The 18-rule constitutional gate (moat #3) has no analog.
+- **cross-repo fleet**: KEEP — `--hosts-dir` round-robin (moat #5) has no LangGraph equivalent; a workflow runs on one input.
+- **corpus / scorecard**: N/A — LangGraph is a benchmarked orchestrator-tier peer in `competitors/README.md`, intentionally a *competitor* record, not a dependency-candidate; it stays in the M1.10 corpus denominator.
+- **TASKS.md surface / fleet dashboard**: KEEP — operators edit markdown; LangGraph's graph DSL is a steeper learning curve for the same delivery surface, and it has no fleet dashboard.
+
+**Total replace % across all surfaces: 0% — STRUCTURAL MISMATCH.** The honest headline for the operator: *nothing in the orchestrator to replace; the one tempting sub-case (durable checkpoint replay) is already absorbed as an event-sourcing pattern over `.minsky/orchestrate.jsonl`; the Python/TS integration tax plus the LangSmith-default tracing risk make a wrap a net negative; the two re-evaluation triggers (a feature-parity TS port, a LangSmith decoupling) are the only conditions that change the math.*
+
 ## Pin / integration
 
 Not a dependency. No adapter. Graph-state pattern absorbed via MAPE-K design (pattern, not framework). Watch their checkpointer + thread_id evolution for relevant ideas to extract.
@@ -113,4 +156,6 @@ Not a dependency. No adapter. Graph-state pattern absorbed via MAPE-K design (pa
 
 ## Last reviewed
 
-2026-05-23 — initial deep-dive added per the wrap-feasibility-langgraph P2 task. Wrap-feasibility analysis: STRUCTURAL MISMATCH; graph-state pattern absorbed without wrap; no follow-up P0 task filed (the predicted PARTIAL YES refined to STRUCTURAL MISMATCH by the architectural-tax analysis).
+2026-06-02 — deepened with the `## Five pivot questions` framework per task `competitor-deepen-langgraph`. Verdict: STRUCTURAL MISMATCH (0% replace across all surfaces); the durable-checkpoint sub-case is already absorbed as event-sourcing over `.minsky/orchestrate.jsonl`, so the pre-registered Pivot (*adoption cost > replacement gain → keep current tick-loop*) is crossed and the directive is to KEEP the current implementation. Negative finding — no vision-threat question filed (recorded inline per this task's central-questions routing rather than editing `ask-human.md`). Two explicit re-evaluation triggers remain: a feature-parity LangGraph TypeScript port, and a documented LangSmith decoupling.
+
+Earlier reviews: 2026-05-23 — initial deep-dive added per the wrap-feasibility-langgraph P2 task. Wrap-feasibility analysis: STRUCTURAL MISMATCH; graph-state pattern absorbed without wrap; no follow-up P0 task filed (the predicted PARTIAL YES refined to STRUCTURAL MISMATCH by the architectural-tax analysis).
