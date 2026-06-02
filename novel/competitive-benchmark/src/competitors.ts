@@ -134,9 +134,11 @@ export function isExcludedVendor(name: string): boolean {
 
 /**
  * The comparison set. ≥4 competitors is the parent task's success bar; this
- * corpus ships 6 (5 `published` SWE-bench Verified snapshots + 1
- * `local-harness` descriptor) so the scorecard always has ≥4 even if a
- * snapshot is later pruned for staleness.
+ * corpus ships a mix of `published` SWE-bench/HumanEval/MATH snapshots plus a
+ * single `local-harness` descriptor (Agentless, the thesis-falsifier arm added
+ * by `competitor-deep-research-tier-s-2026-05`) so the scorecard always has ≥4
+ * even if a snapshot is later pruned for staleness, and so the falsifier runs
+ * head-to-head against the published readings.
  *
  * Published resolve-rates are a **dated snapshot maintained as data** — the
  * slice-(c) corpus-refresh job rewrites `values`/`asOf` from the cited
@@ -363,6 +365,31 @@ export const COMPETITORS: readonly Competitor[] = [
         "Wu, Bansal, Zhang, Wu, Li, Zhu, Wang, Saied, Awadallah, Yang, 'AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework', arXiv 2308.08155, 2023 (MATH whole-test accuracy = 69.48% with the multi-agent conversation framework vs GPT-4's 55.18%; AutoGen does not publish a headline HumanEval Pass@1 for stock models — HumanEval is run model-dependently via the AutoGenBench tool, so the MATH whole-test number is the orchestrator-tier primary reading). AutoGen was folded into Microsoft Agent Framework at MAF v1.0 (April 2026); the Wu et al. 2023 paper remains the primary citation for the AutoGen-branded benchmark numbers — see competitors/autogen.md for the post-merger redirect and the wrap-feasibility verdict.",
       asOf: "2023-08-16",
       values: { "math-whole-test-accuracy": 0.6948 },
+    },
+  },
+  // ---- THESIS FALSIFIER (a method, not a product — runs head-to-head) -------
+  // Per task `competitor-deep-research-tier-s-2026-05`: Agentless is the
+  // load-bearing reference that pressure-tests Minsky's reason for existing
+  // (does an autonomic loop + governance gate beat a fixed pipeline?). It is
+  // the ONLY corpus arm that carries a `local-harness` descriptor rather than
+  // a `published` snapshot, because it is a falsifier WE run ourselves against
+  // the shared workload — not a vendor publishing a comparable Minsky-metric
+  // number. The slice-(c) scorecard runner owns execution of `harnessId`; this
+  // leaf only names the reproducible OpenAutoCoder/Agentless SWE-bench script.
+  // Including it is mandatory regardless of any adoption verdict: a
+  // reason-for-existing that cannot be falsified is not engineering (rule #9 /
+  // Munafò et al. 2017 — pre-registration). See competitors/agentless.md
+  // § "Five pivot questions" for the full Reference / thesis-falsifier verdict.
+  {
+    id: "agentless",
+    label: "Agentless (OpenAutoCoder — fixed-pipeline thesis falsifier)",
+    kind: "open-source",
+    homepage: "https://github.com/OpenAutoCoder/Agentless",
+    resultSource: {
+      kind: "local-harness",
+      citation:
+        "Xia, Deng, Dunn, Zhang, 'Agentless: Demystifying LLM-based Software Engineering Agents', arXiv 2407.01489, 2024 (ICSE 2026; SWE-bench Lite resolve rate 27.33% at ~$0.34 average cost per issue with a GPT-4o driver — at publication the best-performing AND lowest-cost open-source entry, demonstrating a fixed localize→repair→validate pipeline rivals agent loops on bug-fix-shaped tasks). Reproducible harness scripts at github.com/OpenAutoCoder/Agentless; the slice-(c) runner invokes the harness against Minsky's M1.10 corpus head-to-head. This is the corpus's thesis-falsifier arm: it tests whether Minsky's orchestration + governance layer pays rent over a vanilla fixed pipeline, per rule #9 falsifiability.",
+      harnessId: "agentless-swebench-lite",
     },
   },
 ];
