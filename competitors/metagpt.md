@@ -66,6 +66,18 @@ Not a dependency. No adapter.
 
 MetaGPT also published `mbpp-pass-at-1 = 0.877` in the same paper, which is tracked in the citation string but not yet promoted to a separate metric in the M1.10 catalogue. Promotion path: add `mbpp-pass-at-1` if a second orchestrator-tier competitor publishes the same metric (avoid single-source metrics per rule #9 — vanity-metrics forbidden).
 
+### Stale-by-vendor (audited 2026-06-02, `corpus-refresh-metagpt` Pivot)
+
+The `humaneval-pass-at-1 = 0.859` reading carries `asOf: 2024-05-07` — the freshness gate (`scripts/check-corpus-freshness.mjs`) classifies it `very-stale` (>180 days). The `corpus-refresh-metagpt` task's **Success** path asks for a publication ≤90 days old; its **Pivot** path applies when "the vendor has not published a new number in the last 365 days". A 2026-06-02 vendor-publication audit confirms the Pivot:
+
+| Vendor publication (most recent)                | Date     | arXiv         | Refreshes the MetaGPT framework reading? |
+| ----------------------------------------------- | -------- | ------------- | ---------------------------------------- |
+| Atom of Thoughts (test-time scaling)            | Feb 2025 | 2502.12018    | No — test-time-scaling method, no MetaGPT-framework HumanEval/MBPP Pass@1 republished |
+| Self-Supervised Prompt Optimization (SPO)       | Feb 2025 | 2502.06855    | No — prompt-optimization scaffolding, not a framework coding-benchmark headline |
+| AFlow: Automating Agentic Workflow Generation   | ICLR 2025 (Jan 2025) | 2410.07869 | No — workflow-search method evaluated on HumanEval/MBPP/MATH/GSM8K/HotpotQA/DROP, not a MetaGPT-framework Pass@1 |
+
+Both of the most recent dated publications (Feb 2025) are >365 days before this audit. Per the Pivot, the `asOf` is **not** restamped: masking the staleness with a re-stated old number is worse than acknowledging it. The reading stays at its honest 2024-05-07 date, flagged `stale-by-vendor` in `novel/competitive-benchmark/src/competitors.ts`. Re-audit when FoundationAgents publishes a new absolute coding-benchmark reading for the MetaGPT framework itself (not for a workflow/prompt-optimization sub-method). The `(AWO, arXiv:2601.22037, Feb 2026)` agentic-workflow paper surfaced during the audit is **not** a FoundationAgents publication (Abuzakuk, Kermarrec et al.) and reports only relative deltas, so it does not refresh this reading.
+
 ## Should we wrap MetaGPT instead?
 
 > Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.
@@ -93,4 +105,4 @@ Minsky's job shape is **brownfield maintenance** — pick a task from an existin
 
 ## Last reviewed
 
-2026-05-23 (added to scorecard corpus via `/competitor-research` as the first orchestrator-tier competitor); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive — verdict: wrong task shape, don't wrap.
+2026-05-23 (added to scorecard corpus via `/competitor-research` as the first orchestrator-tier competitor); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive — verdict: wrong task shape, don't wrap; 2026-06-02 `corpus-refresh-metagpt` audit — vendor's last absolute coding-benchmark reading is ICLR-2024; subsequent FoundationAgents papers (Feb 2025) don't republish a framework Pass@1, so the entry is flagged `stale-by-vendor` and `asOf` is left honest per the task Pivot.
