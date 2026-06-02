@@ -9,6 +9,7 @@
     { "path": "./novel/adapters/observability" },
     { "path": "./novel/adapters/ollama" },
     { "path": "./novel/adapters/prompt-optimizer" },
+    { "path": "./novel/adapters/sandbox" },
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/adapters/types" },
     { "path": "./novel/claude-handoff-spec" },

@@ -1,0 +1,31 @@
+{
+  "name": "@minsky/sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sandbox adapter — interface (Adapter pattern, Gamma 1994) + StubSandbox test fake + DockerSandbox Strategy (preventive container isolation for Minsky's untrusted-task path; off by default).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minsky/adapter-types": "workspace:*"
+  }
+}

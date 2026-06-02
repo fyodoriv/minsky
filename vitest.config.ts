@@ -15,6 +15,7 @@ export default defineConfig({
       "@minsky/agent-runtime-openhands": r("./novel/adapters/agent-runtime-openhands/src/index.ts"),
       "@minsky/observability": r("./novel/adapters/observability/src/index.ts"),
       "@minsky/prompt-optimizer": r("./novel/adapters/prompt-optimizer/src/index.ts"),
+      "@minsky/sandbox": r("./novel/adapters/sandbox/src/index.ts"),
       "@minsky/token-monitor": r("./novel/adapters/token-monitor/src/index.ts"),
       "@minsky/competitive-benchmark": r("./novel/competitive-benchmark/src/index.ts"),
       "@minsky/dashboard-web": r("./novel/dashboard-web/src/index.ts"),
