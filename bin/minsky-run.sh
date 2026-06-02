@@ -664,6 +664,45 @@ EOF
   local model
   model="$(jq -r '.openhands.model // "claude-opus-4-7"' "$CONFIG_FILE" 2>/dev/null || echo "claude-opus-4-7")"
 
+  # ──────────────────────────────────────────────────────────────────
+  # Run-anywhere provider decision (runany-dynamic-model-or-local-fallback,
+  # Acceptance 1-4). When the operator has NOT already forced local mode
+  # via `local_llm_enabled: true` (an explicit override that wins), consult
+  # the shipped pure `decideRunAnyProvider` via `scripts/runany-resolve-
+  # model.mjs`. It returns the next iteration's agent shape ("claude" /
+  # "local") by the pin > dynamic > local decision table:
+  #   (1) operator pin (env MINSKY_STRATEGIC_PIN_MODEL) → that model verbatim;
+  #   (2) unpinned + budget headroom → highest-quality model that fits;
+  #   (3) ALL configured remote backends down/exhausted → local, ≤1 iteration.
+  # The decision is recomputed every iteration over a fresh-or-cached
+  # multi-backend liveness probe, so recovery to remote (4) is automatic.
+  #
+  # Rule #6 (stay alive): if node / the resolver fails for any reason the
+  # `|| true` leaves `$resolved_agent` empty and we fall through to the
+  # existing config-driven path — the agent always gets a model.
+  local resolved_agent=""
+  if [[ "$local_llm_enabled" != "true" ]]; then
+    local resolver_json
+    resolver_json="$(node "$script_dir/../scripts/runany-resolve-model.mjs" --json 2>/dev/null || true)"
+    if [[ -n "$resolver_json" ]]; then
+      resolved_agent="$(printf '%s' "$resolver_json" | jq -r '.agent // empty' 2>/dev/null || echo "")"
+      local resolved_model
+      resolved_model="$(printf '%s' "$resolver_json" | jq -r '.model // empty' 2>/dev/null || echo "")"
+      local resolved_kind
+      resolved_kind="$(printf '%s' "$resolver_json" | jq -r '.kind // empty' 2>/dev/null || echo "")"
+      if [[ "$resolved_agent" == "local" ]]; then
+        # Decision (2 budget-exhausted) or (3 all-remote-down): switch fully
+        # to local this iteration. Treat exactly like config `local_llm_enabled`.
+        local_llm_enabled="true"
+        echo "host=$host runany-provider=$resolved_kind → local (auto fallback)" >&2
+      elif [[ "$resolved_agent" == "claude" && -n "$resolved_model" ]]; then
+        # Decision (1 pin) or (2 dynamic-remote): use the resolved remote model.
+        model="$resolved_model"
+        echo "host=$host runany-provider=$resolved_kind model=$model" >&2
+      fi
+    fi
+  fi
+
   local extra_spawn_flags=""
   if [[ "$local_llm_enabled" == "true" ]]; then
     local local_model
