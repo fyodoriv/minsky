@@ -75,3 +75,67 @@ jobs:
           # back to main.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm exec semantic-release
+
+  # ── npm publish (`minsky-npx-install-and-run`) ────────────────────
+  # Publish the `minsky` package to npm AFTER a release has been cut, so
+  # `npx minsky` resolves the latest version. Decoupled from the
+  # semantic-release job (no `@semantic-release/npm` dependency added —
+  # rule #1, keep the dep surface small) and GATED on the `NPM_TOKEN`
+  # secret: until the operator reserves the name + adds the token (the
+  # one-time admin step the task's Risk note calls out), this job is an
+  # explicit no-op rather than a red CI failure.
+  #
+  # The publish itself is a registry write that only fires when the
+  # secret is present — CI never publishes from a fork or an unconfigured
+  # repo. `--no-git-checks` is required because the tarball is built from
+  # the checked-out main commit, not a clean tag checkout.
+  npm-publish:
+    needs: release
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip release]') && !contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Skip when NPM_TOKEN is unset
+        id: gate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "NPM_TOKEN not configured — skipping npm publish (no-op)."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.publish == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        if: steps.gate.outputs.publish == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+
+      - name: Setup Node
+        if: steps.gate.outputs.publish == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        if: steps.gate.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish to npm
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          # pnpm reads NODE_AUTH_TOKEN from the registry-url auth set up by
+          # actions/setup-node; --access=public is required for an
+          # unscoped or first-time-scoped public package.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access=public --no-git-checks
