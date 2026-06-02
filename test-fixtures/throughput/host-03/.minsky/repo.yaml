@@ -1,0 +1,12 @@
+# .minsky/repo.yaml — resolved overlay for throughput fixture host-03.
+# Pre-resolved (not templated) so the cross-repo runner can iterate this
+# fixture without a bootstrap step. Schema: templates/repo.yaml.
+host_repo: "minsky-fixtures/throughput-host-03"
+tasks_md_path: "TASKS.md"
+commit_format: "<TYPE>(<TICKET>): <DESCRIPTION>"
+pre_commit_command: ""
+branch_prefix: "feat/"
+default_branch: "main"
+ticket_format: null
+lint_substrate_overrides: {}
+host_packages_path: "."

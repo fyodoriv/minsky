@@ -45,6 +45,15 @@ desktop.ini
 # Minsky setup.sh local state — reference template lives at distribution/state.example.json
 .minsky/
 
+# Throughput benchmark fixture fleet — the seed `TASKS.md` + resolved
+# `.minsky/repo.yaml` per fixture host are tracked fixtures (NOT runtime
+# state), so they must override the `TASKS.md` (operator global ignore)
+# and `.minsky/` (above) patterns. Source: TASKS.md
+# `throughput-at-scale-benchmark`; user-stories/016-code-factory-throughput.md.
+!test-fixtures/throughput/**/TASKS.md
+!test-fixtures/throughput/**/.minsky/
+!test-fixtures/throughput/**/.minsky/**
+
 # Claire local agent-runner runtime dir (same class as `.claude/worktrees`,
 # `.minsky`). Source: `gitignore-claire-runtime-dir` (P3, surfaced 2026-05-16
 # when markdownlint failed on a `.claire/worktrees/*/pr-body.md` and blocked

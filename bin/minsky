@@ -1882,11 +1882,31 @@ EOF
     # classification, output parsing, aggregation) live in scripts/
     # minsky-benchmark.mjs and are covered by paired unit tests.
     #
+    # `--throughput` mode (rule #11 — flag on the existing command, NOT a
+    # new subcommand): walk a fleet of >=5 fixture hosts and project the
+    # observed outcomes to a 24h window — the falsifiable "code factory"
+    # throughput claim (PRs/day at scale). Routes to scripts/
+    # throughput-benchmark.mjs; the `--throughput` token is consumed here
+    # so the throughput runner sees only its own flags. Source: TASKS.md
+    # `throughput-at-scale-benchmark`; user-stories/016-code-factory-throughput.md.
+    #
     # Source: M1 milestone exit criterion §10.
     _real_bin=$(_minsky_realpath "$0")
     _repo_dir=$(dirname "$(dirname "$_real_bin")")
     shift  # consume `benchmark`, forward remaining args
-    exec node "$_repo_dir/scripts/minsky-benchmark.mjs" "$@"
+    _bench_throughput=0
+    _bench_args=()
+    for _bench_arg in "$@"; do
+      if [ "$_bench_arg" = "--throughput" ]; then
+        _bench_throughput=1
+      else
+        _bench_args+=("$_bench_arg")
+      fi
+    done
+    if [ "$_bench_throughput" -eq 1 ]; then
+      exec node "$_repo_dir/scripts/throughput-benchmark.mjs" "${_bench_args[@]}"
+    fi
+    exec node "$_repo_dir/scripts/minsky-benchmark.mjs" "${_bench_args[@]}"
     ;;
   install-daemon)
     # Install a launchd plist so minsky auto-starts on login/reboot.
