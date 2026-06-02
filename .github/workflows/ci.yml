@@ -1895,6 +1895,23 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-no-no-verify-bypass.test.mjs
 
+  bot-commit-hook-bypass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: bot-commit-hook-bypass lint
+        run: node scripts/check-bot-commit-hook-bypass.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-bot-commit-hook-bypass.test.mjs
+
   pre-push-hook-stays-fast:
     runs-on: ubuntu-latest
     steps:
@@ -2325,6 +2342,7 @@ jobs:
       - docs-frame-coherence
       - no-hardcoded-timeouts
       - no-no-verify-bypass
+      - bot-commit-hook-bypass
       - pre-push-hook-stays-fast
       - launchd-safe-paths
       - typecheck
@@ -2413,6 +2431,7 @@ jobs:
                    "${{ needs.docs-frame-coherence.result }}" \
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
+                   "${{ needs.bot-commit-hook-bypass.result }}" \
                    "${{ needs.pre-push-hook-stays-fast.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \
                    "${{ needs.typecheck.result }}" \
