@@ -1,11 +1,16 @@
 // Tests for local-gate-merge.mjs — pure decision functions + injected-seam
 // sweep. No @ts-check (matches sibling scripts/*.test.mjs convention).
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   decideLand,
   decideLoadShed,
   decideMerge,
   decidePreflight,
+  decideStaleScratch,
+  gcStaleScratchDirs,
   headBranchPinnedByWorktree,
   landLocalBranch,
   mergeArgs,
@@ -746,5 +751,160 @@ describe("withWorkerPaused (rule #6 — resume is guaranteed)", () => {
     expect(out).toBe("direct");
     expect(touched).toBe(false);
     setWorkerPauseSeam({ pause: noop, resume: noop });
+  });
+});
+
+describe("decideStaleScratch (sweep-start GC decision — rule #6 hygiene)", () => {
+  const TIMEOUT = 1500000;
+  const NOW = 10_000_000;
+  /** @param {Partial<import("./local-gate-merge.mjs").ScratchEntry> & {name:string}} e */
+  const entry = (e) => ({
+    name: e.name,
+    path: e.path ?? `/tmp/${e.name}`,
+    mtimeMs: e.mtimeMs ?? NOW,
+    ownerPid: e.ownerPid ?? null,
+  });
+  const cfg = (over = {}) => ({
+    now: NOW,
+    vetTimeoutMs: TIMEOUT,
+    isPidAlive: () => false,
+    ...over,
+  });
+
+  it("reclaims a dir older than the timeout with no live owner", () => {
+    const e = entry({ name: "minsky-gate-aaa", mtimeMs: NOW - TIMEOUT - 1, ownerPid: null });
+    expect(decideStaleScratch([e], cfg())).toEqual([e.path]);
+  });
+
+  it("keeps a young dir even with no owner (in-flight vet)", () => {
+    const e = entry({ name: "minsky-gate-bbb", mtimeMs: NOW - 1, ownerPid: null });
+    expect(decideStaleScratch([e], cfg())).toEqual([]);
+  });
+
+  it("keeps an old dir whose owner pid is still alive", () => {
+    const e = entry({ name: "minsky-gate-ccc", mtimeMs: NOW - TIMEOUT - 1, ownerPid: 4242 });
+    const isPidAlive = (/** @type {number} */ p) => p === 4242;
+    expect(decideStaleScratch([e], cfg({ isPidAlive }))).toEqual([]);
+  });
+
+  it("reclaims an old dir whose owner pid is dead", () => {
+    const e = entry({ name: "minsky-gate-ddd", mtimeMs: NOW - TIMEOUT - 1, ownerPid: 999999 });
+    expect(decideStaleScratch([e], cfg({ isPidAlive: () => false }))).toEqual([e.path]);
+  });
+
+  it("reclaims leaked minsky-land-* dirs too (land vet shares the prefix set)", () => {
+    const e = entry({ name: "minsky-land-eee", mtimeMs: NOW - TIMEOUT - 1, ownerPid: null });
+    expect(decideStaleScratch([e], cfg())).toEqual([e.path]);
+  });
+
+  it("partitions a mixed batch: only old+unowned dirs are reclaimed", () => {
+    const stale = entry({ name: "minsky-gate-old", mtimeMs: NOW - TIMEOUT - 1, ownerPid: null });
+    const young = entry({ name: "minsky-gate-young", mtimeMs: NOW - 5, ownerPid: null });
+    const live = entry({ name: "minsky-gate-live", mtimeMs: NOW - TIMEOUT - 1, ownerPid: 7 });
+    const isPidAlive = (/** @type {number} */ p) => p === 7;
+    expect(decideStaleScratch([stale, young, live], cfg({ isPidAlive }))).toEqual([stale.path]);
+  });
+});
+
+describe("gcStaleScratchDirs (integration — seeded tmpdir, real removal)", () => {
+  /** @type {string} */
+  let root;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "gc-test-root-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  /** @param {string} name @param {number|null} ownerPid */
+  const seed = (name, ownerPid) => {
+    const p = join(root, name);
+    mkdirSync(p, { recursive: true });
+    if (ownerPid !== null) writeFileSync(join(p, ".minsky-gate-owner-pid"), String(ownerPid));
+    return p;
+  };
+
+  it("removes a seeded stale dir and leaves a fresh live-owned dir untouched", () => {
+    const stale = seed("minsky-gate-stale", null);
+    const fresh = seed("minsky-gate-fresh", process.pid);
+    /** @type {string[]} */
+    const removed = [];
+    const reclaimed = gcStaleScratchDirs({
+      dir: root,
+      now: Date.now() + 2_000_000, // push "now" so the stale dir reads as old; fresh is live-owned anyway
+      vetTimeoutMs: 1_000_000,
+      isPidAlive: (/** @type {number} */ p) => p === process.pid,
+      rm: (/** @type {string} */ s) => removed.push(s),
+    });
+    expect(reclaimed).toEqual([stale]);
+    expect(removed).toEqual([stale]);
+    expect(reclaimed).not.toContain(fresh);
+  });
+
+  it("ignores non-scratch siblings under tmpdir()", () => {
+    seed("minsky-gate-leak", null);
+    seed("some-other-tool-dir", null);
+    const reclaimed = gcStaleScratchDirs({
+      dir: root,
+      now: Date.now() + 2_000_000,
+      vetTimeoutMs: 1_000_000,
+      isPidAlive: () => false,
+      rm: () => {},
+    });
+    expect(reclaimed).toEqual([join(root, "minsky-gate-leak")]);
+  });
+
+  it("actually deletes the leaked dir with the default rm (bestEffortRmScratch)", () => {
+    const leak = seed("minsky-land-default", null);
+    const reclaimed = gcStaleScratchDirs({
+      dir: root,
+      now: Date.now() + 2_000_000,
+      vetTimeoutMs: 1_000_000,
+      isPidAlive: () => false,
+    });
+    expect(reclaimed).toEqual([leak]);
+    expect(existsSync(leak)).toBe(false);
+  });
+});
+
+describe("runGateSweep wiring of the GC pass", () => {
+  /** @param {Partial<import("./local-gate-merge.mjs").PrSnapshot> & {number:number}} q */
+  const p = (q) => ({
+    number: q.number,
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    baseRefName: "main",
+    headRefName: `feat/${q.number}`,
+    title: `PR ${q.number}`,
+  });
+
+  it("runs the GC pass at sweep start (non-dry-run) and logs the reclaim count", () => {
+    let gcCalls = 0;
+    let logged = "";
+    runGateSweep({
+      snapshotFn: () => [p({ number: 1 })],
+      gcFn: () => {
+        gcCalls += 1;
+        return ["/tmp/minsky-gate-leaked"];
+      },
+      vetFn: () => ({ vetError: "skip-fast" }),
+      log: (s) => (logged += s),
+    });
+    expect(gcCalls).toBe(1);
+    expect(logged).toContain("gc reclaimed 1 stale scratch dir");
+  });
+
+  it("skips the GC pass in dry-run (read-only probe)", () => {
+    let gcCalls = 0;
+    runGateSweep({
+      dryRun: true,
+      snapshotFn: () => [p({ number: 1 })],
+      gcFn: () => {
+        gcCalls += 1;
+        return [];
+      },
+      vetFn: () => ({ vetError: "skip-fast" }),
+      log: () => {},
+    });
+    expect(gcCalls).toBe(0);
   });
 });

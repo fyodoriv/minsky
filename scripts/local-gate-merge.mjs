@@ -50,6 +50,27 @@
 // re-running `--stage=full` on main after each `mergedPrs` entry.
 // Anchor: Beyer SRE 2016 (the gate IS the release gate); rule #10 / #1.
 //
+// Sweep-start scratch GC (TASKS.md `gate-scratch-dir-gc`, companion to the
+// best-effort per-vet teardown): a SIGKILL'd / crashed / operator-killed vet
+// skips its `finally`, leaking a `minsky-gate-*` / `minsky-land-*` dir under
+// tmpdir(). Those accumulate and can make a future sibling `rmSync` throw
+// `ENOTEMPTY` against a half-gone dir. `gcStaleScratchDirs` (called at sweep
+// start, non-dry-run) reclaims a leak only when it is BOTH older than
+// `VET_TIMEOUT_MS` AND not owned by a live pid (sentinel `.minsky-gate-owner-
+// pid` written at creation; `process.kill(pid, 0)` liveness probe).
+//   Failure modes (rule #7): (1) a dir raced away mid-scan → skipped, no
+//   crash; (2) sentinel absent/garbled (pre-sentinel leak / truncated by a
+//   crash) → `ownerPid: null`, age guard alone decides; (3) the GC delete
+//   races a just-finished vet → `bestEffortRmScratch` swallows (OS reaps the
+//   tmpdir). Expected behavior: graceful-degrade — GC NEVER throws into the
+//   sweep (rule #6). Blast radius: at most the leaked scratch dirs under
+//   tmpdir(); a live vet's dir is always kept (young OR live-pid-owned).
+//   Escape hatch: `--dry-run` skips GC entirely (read-only probe); set
+//   `MINSKY_GATE_VET_TIMEOUT_MS` higher to be more conservative about
+//   reclamation. Pivot (if `pidIsAlive` proves unreliable cross-platform):
+//   drop to age-only at 2× the timeout — `decideStaleScratch` already takes
+//   the threshold as a parameter, so the change is one call-site constant.
+//
 // Usage:
 //   node scripts/local-gate-merge.mjs [--dry-run] [--no-review] [--limit=N] [--pr=N]
 //   node scripts/local-gate-merge.mjs --self-metric
@@ -62,7 +83,16 @@
 //                   (no sweep) — the pre-registered throughput measurement
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -530,6 +560,7 @@ export function withWorkerPaused(pauseWorker, fn) {
  */
 function defaultVet(pr) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-gate-"));
+  writeOwnerPid(scratch);
   const shed = decideLoadShed({
     niceness: VET_NICENESS,
     noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
@@ -566,6 +597,177 @@ function bestEffortRmScratch(scratch) {
       if (attempt === 0) execFileSync("sleep", ["1"]);
     }
   }
+}
+
+// Sentinel file written into every scratch dir at creation, recording the
+// owning vet's pid. The sweep-start GC pass reads it to tell a live vet's
+// in-flight scratch (leave it) from a leaked one (reclaim it). Hidden +
+// in-dir so `git clone --shared` never sees it (written after the clone is
+// the alternative, but the clone targets the dir itself, so a dotfile beside
+// the `.git` is harmless and the gate vet only reads tracked files).
+const OWNER_PID_FILE = ".minsky-gate-owner-pid";
+// Scratch dirs the GC pass owns. `mkdtempSync` suffixes a random tail, so a
+// prefix match (not exact) identifies a dir created by this script.
+const SCRATCH_PREFIXES = ["minsky-gate-", "minsky-land-"];
+
+/**
+ * Record the current pid in the scratch so the GC pass can tell a live
+ * vet's in-flight dir from a leaked one. Best-effort: a write failure only
+ * costs the GC pass its pid signal (it falls back to the age check), so it
+ * must never crash the vet (rule #6).
+ * @param {string} scratch
+ */
+function writeOwnerPid(scratch) {
+  try {
+    writeFileSync(join(scratch, OWNER_PID_FILE), String(process.pid), "utf8");
+    // rule-6: handled-locally — the owner-pid sentinel is a GC hint, not a correctness input; a write failure degrades GC to age-only (the documented Pivot) and must never abort the vet.
+  } catch {
+    // best-effort hint only
+  }
+}
+
+/**
+ * Probe whether `pid` is a live process. `process.kill(pid, 0)` sends no
+ * signal but throws `ESRCH` when the pid is dead and `EPERM` when it exists
+ * but is owned by another user (still alive). Fail-safe: any non-`ESRCH`
+ * error is read as "alive" so the GC pass never reclaims a dir that might
+ * still have a running owner (rule #6 — a cleanup race must never delete
+ * live state).
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return /** @type {NodeJS.ErrnoException} */ (err).code !== "ESRCH";
+  }
+}
+
+/**
+ * @typedef {object} ScratchEntry
+ * @property {string} name      basename under tmpdir() (e.g. `minsky-gate-aB3`)
+ * @property {string} path      absolute path
+ * @property {number} mtimeMs   directory mtime (ms epoch)
+ * @property {number | null} ownerPid  pid from the sentinel, or null if absent/unreadable
+ */
+
+/**
+ * Pure: decide which leaked scratch dirs to garbage-collect at sweep start.
+ * A dir is reclaimed only when it is BOTH (a) older than the vet timeout —
+ * a live vet always finishes within `VET_TIMEOUT_MS`, so an older dir is a
+ * leak — AND (b) not owned by a live pid. Either guard alone keeps a dir:
+ * a young dir (in-flight vet) and a live-owned dir (running vet whose clock
+ * the operator nudged) are both left untouched. This is the deterministic
+ * rule-#10 substrate for the sweep-start GC — same inputs ⇒ same set, no I/O.
+ *
+ * The age threshold (`vetTimeoutMs`, not 2×) tracks the Pivot's coarser
+ * fallback: when the pid signal is reliable both guards apply; the test that
+ * pins the cross-platform `pidIsAlive` behaviour is the canary for dropping
+ * to age-only.
+ * @param {ScratchEntry[]} entries
+ * @param {object} cfg
+ * @param {number} cfg.now            ms epoch (injectable for tests)
+ * @param {number} cfg.vetTimeoutMs   age threshold
+ * @param {(pid: number) => boolean} cfg.isPidAlive  liveness probe (injectable)
+ * @returns {string[]}  absolute paths to reclaim
+ */
+export function decideStaleScratch(entries, cfg) {
+  const { now, vetTimeoutMs, isPidAlive } = cfg;
+  return entries
+    .filter((e) => {
+      const olderThanTimeout = now - e.mtimeMs > vetTimeoutMs;
+      const liveOwner = e.ownerPid !== null && isPidAlive(e.ownerPid);
+      return olderThanTimeout && !liveOwner;
+    })
+    .map((e) => e.path);
+}
+
+/**
+ * Read the tmpdir(), build a {@link ScratchEntry} per `minsky-gate-*` /
+ * `minsky-land-*` dir. Pure-ish: only filesystem reads, no deletes. A dir
+ * that vanishes between readdir and stat (a sibling sweep / OS reaper) is
+ * skipped (rule #6 — a benign race must never crash the scan).
+ * @param {string} dir  tmpdir()
+ * @returns {ScratchEntry[]}
+ */
+function scanScratchDirs(dir) {
+  /** @type {ScratchEntry[]} */
+  const out = [];
+  let names;
+  try {
+    names = readdirSync(dir);
+    // rule-6: handled-locally — an unreadable tmpdir() yields no GC work; the sweep proceeds (cleanup never gates merging, rule #6).
+  } catch {
+    return out;
+  }
+  for (const name of names) {
+    if (!SCRATCH_PREFIXES.some((p) => name.startsWith(p))) continue;
+    const path = join(dir, name);
+    try {
+      const st = statSync(path);
+      if (!st.isDirectory()) continue;
+      out.push({ name, path, mtimeMs: st.mtimeMs, ownerPid: readOwnerPid(path) });
+      // rule-6: handled-locally — a dir that vanished mid-scan (sibling sweep / OS reaper) is simply absent from the GC set; skip it.
+    } catch {
+      // raced away between readdir and stat — nothing to GC
+    }
+  }
+  return out;
+}
+
+/**
+ * Read the owner-pid sentinel from a scratch dir. Returns null when the
+ * file is absent or unparseable (older leaked dirs predate the sentinel, or
+ * a crash truncated it) — null ⇒ "unknown owner", which the age guard alone
+ * then decides (rule #6 — a missing hint degrades to age-only, never crashes).
+ * @param {string} scratch
+ * @returns {number | null}
+ */
+function readOwnerPid(scratch) {
+  try {
+    const raw = readFileSync(join(scratch, OWNER_PID_FILE), "utf8").trim();
+    const pid = Number(raw);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+    // rule-6: handled-locally — absent/garbled sentinel ⇒ unknown owner (null); the age guard alone decides. Cleanup metadata read must never crash the sweep.
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sweep-start garbage collect of leaked `minsky-gate-*` / `minsky-land-*`
+ * scratch dirs under tmpdir(). Companion to `bestEffortRmScratch`'s per-vet
+ * teardown: a SIGKILL'd / crashed / operator-process-killed vet skips its
+ * `finally`, leaking a scratch dir that then (a) accumulates and (b) can
+ * make a future sibling `rmSync` throw `ENOTEMPTY` against a half-gone dir.
+ * Reclaiming the leaks at sweep START closes that durable-hygiene gap.
+ *
+ * Reuses `bestEffortRmScratch` for the actual delete so the same
+ * race-tolerant teardown (one retry, then swallow) applies — a GC delete
+ * that races a just-finished vet must never gate merging (rule #6, the dir
+ * is OS-reaped tmpdir anyway). Returns the reclaimed paths for the log line
+ * (rule #4 — the operator sees the housekeeping in `orchestrate.jsonl`).
+ * @param {object} [io]
+ * @param {string} [io.dir]                  tmpdir() (injectable for tests)
+ * @param {number} [io.now]                  ms epoch (injectable for tests)
+ * @param {number} [io.vetTimeoutMs]         age threshold
+ * @param {(pid: number) => boolean} [io.isPidAlive]  liveness probe (injectable)
+ * @param {(scratch: string) => void} [io.rm]  teardown (injectable for tests)
+ * @returns {string[]}  reclaimed absolute paths
+ */
+export function gcStaleScratchDirs(io = {}) {
+  const dir = io.dir ?? tmpdir();
+  const stale = decideStaleScratch(scanScratchDirs(dir), {
+    now: io.now ?? Date.now(),
+    vetTimeoutMs: io.vetTimeoutMs ?? VET_TIMEOUT_MS,
+    isPidAlive: io.isPidAlive ?? pidIsAlive,
+  });
+  const rm = io.rm ?? bestEffortRmScratch;
+  for (const path of stale) rm(path);
+  return stale;
 }
 
 /**
@@ -722,6 +924,7 @@ function prepareScratchCloneForBranch(scratch, branchName) {
  */
 function defaultVetLocalBranch(branchName) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-land-"));
+  writeOwnerPid(scratch);
   const shed = decideLoadShed({
     niceness: VET_NICENESS,
     noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
@@ -1020,6 +1223,7 @@ export function readSelfMetric(ledgerPath = LEDGER) {
  * @property {boolean} [noReview]  deterministic-only mode (skip the Opus brain)
  * @property {(pr: PrSnapshot) => void} [mergeFn]
  * @property {(number: number) => string | null} [prStateFn]  state oracle when mergeFn throws (default: `gh pr view --json state`)
+ * @property {() => string[]} [gcFn]  sweep-start scratch-dir GC (default: `gcStaleScratchDirs`)
  * @property {(s: string) => void} [log]
  */
 
@@ -1047,11 +1251,29 @@ function prepareSweep(opts) {
 }
 
 /**
+ * Sweep-start hygiene: reclaim leaked scratch dirs from crashed/SIGKILL'd
+ * vets before this sweep allocates its own (rule #6 — housekeeping, never
+ * gates the loop). Skipped in dry-run so a `--dry-run` probe is read-only.
+ * Extracted from `runGateSweep` to keep it under biome's cognitive-complexity
+ * cap.
+ * @param {SweepCtx} ctx
+ * @param {RunGateOpts} opts
+ */
+function runSweepStartGc(ctx, opts) {
+  if (ctx.dryRun) return;
+  const reclaimed = (opts.gcFn ?? gcStaleScratchDirs)();
+  if (reclaimed.length > 0) {
+    ctx.log(`local-gate-merge: gc reclaimed ${reclaimed.length} stale scratch dir(s)\n`);
+  }
+}
+
+/**
  * Sweep entrypoint. Pure decisions; I/O via the (injectable) seam.
  * @param {RunGateOpts} [opts]
  */
 export function runGateSweep(opts = {}) {
   const { ctx, candidates } = prepareSweep(opts);
+  runSweepStartGc(ctx, opts);
   if (candidates.length === 0) {
     ctx.log("local-gate-merge: 0 candidate PRs\n");
     return { merged: [], skipped: [] };
