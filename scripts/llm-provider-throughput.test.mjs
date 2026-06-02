@@ -161,7 +161,11 @@ describe("llm-provider-throughput / main", () => {
     const code = await main({
       argv: ["--log=/synthetic.log", "--json"],
       stdout: { write: (s) => out.push(s) },
-      stderr: { write: () => {} },
+      stderr: {
+        write: () => {
+          /* no-op */
+        },
+      },
       exists: () => true,
       readFile: () =>
         '[span] tick-loop.iteration {"iteration.index":0,"iteration.status":"completed","iteration.provider":"claude"}\n' +
@@ -183,7 +187,11 @@ describe("llm-provider-throughput / main", () => {
     await main({
       argv: ["--log=/synthetic.log"],
       stdout: { write: (s) => out.push(s) },
-      stderr: { write: () => {} },
+      stderr: {
+        write: () => {
+          /* no-op */
+        },
+      },
       exists: () => true,
       readFile: () =>
         '[span] tick-loop.iteration {"iteration.index":0,"iteration.status":"completed","iteration.provider":"claude"}\n',

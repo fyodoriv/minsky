@@ -156,7 +156,12 @@ describe("executeOrphanCloses — actions via injected seams", () => {
   test("skip decisions pass through to skipped outcome", () => {
     const out = executeOrphanCloses(
       [{ pr: 300, taskId: "task-c", action: "skip", reason: "still in TASKS.md" }],
-      { closeFn: () => {}, dryRun: false },
+      {
+        closeFn: () => {
+          /* no-op */
+        },
+        dryRun: false,
+      },
     );
     expect(out).toHaveLength(1);
     expect(out[0]?.outcome).toBe("skipped");

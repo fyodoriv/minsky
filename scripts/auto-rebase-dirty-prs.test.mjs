@@ -139,7 +139,9 @@ describe("executeDecisions — actions via injected seams", () => {
       [{ pr: 500, action: "skip", reason: "branch is not daemon-shaped" }],
       {
         rebaseFn: () => /** @type {const} */ ("rebased"),
-        closeFn: () => {},
+        closeFn: () => {
+          /* no-op */
+        },
         dryRun: false,
       },
     );
