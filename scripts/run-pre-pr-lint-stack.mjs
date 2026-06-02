@@ -321,6 +321,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "changelog-md-update",
       "research-md-update",
       "test-file-colocation",
+      "skill-allowlist-coverage",
       "typecheck",
       "user-story-security-section",
       "vision-rule-13-non-task-anchors",
@@ -951,6 +952,18 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-skill-rule-cap.mjs"],
+  },
+  {
+    // Every `.claude/skills/<name>/SKILL.md` (and `.devin/skills/<name>/`)
+    // directory name must appear on `scripts/glossary-allowlist.txt`, so a
+    // forgotten allowlist entry fails in the SAME PR that adds the skill
+    // rather than in a later PR that cites the token in vision.md (the
+    // PR #696/#704 re-add cycle). Per AGENTS.md rule #5 + rule #10;
+    // glossary-allowlist-update-discipline.
+    name: "skill-allowlist-coverage",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-skill-allowlist-coverage.mjs"],
   },
   {
     name: "user-story-security-section",
