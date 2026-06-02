@@ -3016,7 +3016,35 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
       *) [ "${_next_is_host:-}" = "1" ] && _target_host="$_a" && _next_is_host="" ;;
     esac
   done
-  [ -z "$_target_host" ] && _target_host="$(pwd)"
+
+  # Zero-arg scoping (TASKS.md `runany-zero-arg-entrypoint`): with NO explicit
+  # --host, scope the conductor to the cwd's filesystem shape. The pure
+  # resolver (scripts/runany-context.mjs) classifies cwd as a git-repo /
+  # nested-repos tree / plain-dir and emits the daemon argv:
+  #   - git-repo / plain-dir  → `--host <cwd>`      (single-host)
+  #   - nested-repos          → `--hosts-dir <cwd>` (walk every child repo)
+  # This is the only new code path — it composes the existing --host /
+  # --hosts-dir runner modes (rule #1) so `minsky` with zero args "just
+  # works" in any folder + all subfolders (operator directive 2026-05-16).
+  # The context root (cwd) is always the watch / liveness target; the daemon
+  # launch args vary by scope. Degrades to the prior single-host behaviour if
+  # the resolver is unavailable (rule #6 — a broken probe must not block the
+  # launch).
+  _launch_args=()
+  if [ -z "$_target_host" ]; then
+    _target_host="$(pwd)"
+    _runany_resolver="$MINSKY_REPO_PATH/scripts/runany-context.mjs"
+    if [ -f "$_runany_resolver" ]; then
+      # read the space-joined argv (`--host <p>` or `--hosts-dir <p>`).
+      _runany_argv="$(node "$_runany_resolver" "$_target_host" 2>/dev/null || echo "")"
+      if [ -n "$_runany_argv" ]; then
+        # shellcheck disable=SC2206 — deliberate word-split of the two-token argv.
+        _launch_args=($_runany_argv)
+      fi
+    fi
+  fi
+  # Fallback (explicit --host, or resolver unavailable): single host at cwd.
+  [ "${#_launch_args[@]}" -eq 0 ] && _launch_args=(--host "$_target_host")
 
   if _daemon_running_for_host "$_target_host"; then
     _pid=$(cat "$MINSKY_DAEMON_PID")
@@ -3029,8 +3057,8 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
 
   # No daemon running — start one, auto-install launchd persistence, attach.
   # Persistence is DEFAULT — minsky should survive reboots without extra steps.
-  echo "minsky: no daemon running for $(basename "$_target_host"). Starting..."
-  "$0" --daemon --host "$_target_host"
+  echo "minsky: no daemon running for $(basename "$_target_host"). Starting (scope: ${_launch_args[0]})..."
+  "$0" --daemon "${_launch_args[@]}"
 
   # Auto-install launchd plist if not already installed (macOS only).
   # This makes the daemon survive reboots by default. The operator
