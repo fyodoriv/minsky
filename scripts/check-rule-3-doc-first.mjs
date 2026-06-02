@@ -11,6 +11,10 @@
 // every PR that adds or modifies `novel/**/*.ts` (non-test) MUST also
 // touch one of: a `user-stories/*.md`, the affected package's
 // `README.md`, OR include a deferral marker in the PR description.
+// Package-specific surface: `novel/competitive-benchmark` code changes are
+// also satisfied by a touched `competitors/<name>.md` — those files ARE the
+// human-facing corpus docs (a corpus refresh updates the reading in
+// competitors.ts AND the narrative in competitors/<name>.md).
 //
 // Scope: only the *touched* package's README counts. A PR modifying
 // `novel/budget-guard/src/foo.ts` resolves via `novel/budget-guard/README.md`,
@@ -158,11 +162,20 @@ function collectTouchedDocs(changedFiles) {
       .filter(
         (f) =>
           f.path.startsWith("user-stories/") ||
-          (f.path.startsWith("novel/") && f.path.endsWith("README.md")),
+          (f.path.startsWith("novel/") && f.path.endsWith("README.md")) ||
+          // `competitors/<name>.md` ARE the human-facing corpus docs for the
+          // competitive-benchmark package: a corpus refresh updates the reading
+          // in `novel/competitive-benchmark/src/competitors.ts` AND the
+          // narrative + provenance in `competitors/<name>.md`. The latter IS
+          // the doc, so it satisfies the doc-first clause for that package.
+          (f.path.startsWith("competitors/") && f.path.endsWith(".md")),
       )
       .map((f) => f.path),
   );
 }
+
+/** The package whose doc surface includes `competitors/*.md`. */
+const COMPETITIVE_BENCHMARK_PKG = "novel/competitive-benchmark";
 
 /**
  * Pure function. See module header for semantics.
@@ -180,19 +193,38 @@ export function checkRule3DocFirst({ changedFiles, prBody, tasksMd }) {
 
   const touchedDocs = collectTouchedDocs(changedFiles);
   const userStoryTouched = [...touchedDocs].some((p) => p.startsWith("user-stories/"));
+  const competitorDocTouched = [...touchedDocs].some(
+    (p) => p.startsWith("competitors/") && p.endsWith(".md"),
+  );
 
-  const errors = [];
   const packages = new Set(codeFiles.map((f) => packageOf(f.path)));
-  for (const pkg of packages) {
-    const pkgReadmeTouched = touchedDocs.has(`${pkg}/README.md`);
-    if (!userStoryTouched && !pkgReadmeTouched) {
-      errors.push(
-        `rule-3 violation: ${pkg} has code changes but no doc change (touch user-stories/*.md OR ${pkg}/README.md, OR add the deferral comment to the PR body).`,
-      );
-    }
-  }
+  const errors = [...packages]
+    .map((pkg) => packageDocError(pkg, touchedDocs, userStoryTouched, competitorDocTouched))
+    .filter((e) => e !== null);
 
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+/**
+ * The doc-clause check for a single package. Returns a violation string, or
+ * null when the package's doc surface was touched.
+ *
+ * @param {string} pkg
+ * @param {Set<string>} touchedDocs
+ * @param {boolean} userStoryTouched
+ * @param {boolean} competitorDocTouched
+ * @returns {string | null}
+ */
+function packageDocError(pkg, touchedDocs, userStoryTouched, competitorDocTouched) {
+  const pkgReadmeTouched = touchedDocs.has(`${pkg}/README.md`);
+  // The competitive-benchmark package's doc surface also includes competitors/*.md.
+  const competitiveDocOk = pkg === COMPETITIVE_BENCHMARK_PKG && competitorDocTouched;
+  if (userStoryTouched || pkgReadmeTouched || competitiveDocOk) return null;
+  const docHint =
+    pkg === COMPETITIVE_BENCHMARK_PKG
+      ? `touch user-stories/*.md OR ${pkg}/README.md OR competitors/*.md`
+      : `touch user-stories/*.md OR ${pkg}/README.md`;
+  return `rule-3 violation: ${pkg} has code changes but no doc change (${docHint}, OR add the deferral comment to the PR body).`;
 }
 
 function main() {
