@@ -172,10 +172,10 @@ export const COMPETITORS: readonly Competitor[] = [
     resultSource: {
       kind: "published",
       citation:
-        "All-Hands AI, 'SOTA on SWE-bench Verified with Inference-Time Scaling and Critic Model', all-hands.dev/blog, 2025-04-15 (SWE-bench Verified resolve rate 0.658, verified via SWE-bench/experiments PR #209); All-Hands AI, 'Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)', openhands.dev/blog, 2024-10-04 (cost-per-issue 0.30 USD with Claude 3.5 Sonnet on SWE-bench Lite, used here as cost-per-merged-pr proxy); average_runtime 3600 sec from openhands-index-results/scores.json (used here as mean-autonomous-merge-latency).",
-      asOf: "2025-04-15",
+        "Wang, Rosenberg, Michelini, Smith, Tran, Nyst, Malhotra, Zhou, Chen, Brennan, Neubig (All-Hands AI), 'The OpenHands Software Agent SDK: A Composable and Extensible Foundation for Production Agents', arXiv:2511.03690v2, 2026-04-22 (Table 4 §5.4: SWE-bench Verified resolve rate 0.728 with Claude Sonnet 4.5 + extended thinking on the V1 SDK, up from V0's 0.646; supersedes the 2025-04-15 inference-time-scaling reading of 0.658); All-Hands AI, 'Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)', openhands.dev/blog, 2024-10-04 (cost-per-issue 0.30 USD with Claude 3.5 Sonnet on SWE-bench Lite, used here as cost-per-merged-pr proxy); average_runtime 3600 sec from openhands-index-results/scores.json (used here as mean-autonomous-merge-latency).",
+      asOf: "2026-04-22",
       values: {
-        "swe-bench-verified-resolve-rate": 0.658,
+        "swe-bench-verified-resolve-rate": 0.728,
         "cost-per-merged-pr": 0.3,
         "mean-autonomous-merge-latency": 3600,
       },
