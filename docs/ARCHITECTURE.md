@@ -123,6 +123,7 @@ Adapters are tested both **against the interface** (does the implementation sati
 | 12 | Observability | `Observability` | Claude Code OTEL → local Loki/Tempo/Grafana | Honeycomb, Grafana Cloud | Low |
 | 13 | Prompt optimization | `PromptOptimizer` | DSPy (Stanford) + Promptfoo | OpenAI Evals, custom | Medium — DSPy still evolving |
 | 14 | Specification monitor | `SpecMonitor` | **Custom Claude Skill** (novel; extract as OSS) | (none yet — we may be first) | High — wholly ours |
+| 15 | Agent-to-agent protocol | `A2A` (`novel/adapters/a2a/`) | A2A v1.0.0 (Linux Foundation) via the OpenHands scaffold → google-a2a-python bridge (`novel/adapters/a2a.openhands.ts`) | AGNTCY, custom JSON-RPC transport | Medium — A2A spec stable (v1.0.0); the google-a2a-python bridge is still maturing, so the scaffold reports `yellow` until the 2026-06-01 OpenHands runtime lands |
 
 ## The novel layers (what's actually ours)
 
