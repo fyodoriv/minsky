@@ -1251,6 +1251,51 @@ print(load_host_config(Path('$host')).host_repo)
 # Path: $host/.minsky/experiment-store/cross-repo/<task-id>.jsonl
 # Per-host append-only, per-task file (matches host-loop.ts writePath).
 
+# Per-iteration glanceable summary line (task daemon-log-lacks-iteration-
+# detail). Before this, daemon.log only showed the JSONL write breadcrumb,
+# so the operator had to `cat .minsky/experiment-store/cross-repo/*.jsonl`
+# to learn the verdict + duration + agent of an iteration. This emits the
+# same data the JSONL already carries as one stderr line per iteration:
+#   iteration #N: task=<id> agent=<a> verdict=<v> duration=<d> pr=<url|null>
+# Fired from record_iteration (the single sink for every iteration outcome:
+# no-task, dry-run, spawned, CTO-audit) so `grep -c 'iteration #'` in
+# daemon.log matches the JSONL record count exactly.
+#
+# `agent` is `local` when the operator runs local-LLM mode
+# (config `local_llm_enabled: true`), else the configured `cloud_agent`
+# (default `openhands` — the runtime this skeleton spawns). `duration` is
+# extracted from the `notes` field, which already embeds `<N>ms` for spawned
+# iterations; it reads `n/a` when no spawn happened (no-task / dry-run).
+# Glanceable-display anchor: Card & Mackinlay 1999 (the operator should see
+# iteration health without digging into the ledger).
+log_iteration_summary() {
+  local iter_n="$1"
+  local task_id="$2"
+  local verdict="$3"
+  local pr_url="$4"
+  local notes="$5"
+
+  local agent="openhands"
+  local local_llm
+  local_llm="$(jq -r '.local_llm_enabled // false' "$CONFIG_FILE" 2>/dev/null || echo "false")"
+  if [[ "$local_llm" == "true" ]]; then
+    agent="local"
+  else
+    agent="$(jq -r '.cloud_agent // "openhands"' "$CONFIG_FILE" 2>/dev/null || echo "openhands")"
+  fi
+
+  # Duration is already serialised into notes as `<N>ms` for spawned
+  # iterations; reuse it rather than threading a new parameter through
+  # every call site (the JSONL stays the contract, this line stays a view).
+  local duration
+  duration="$(printf '%s' "$notes" | grep -oE '[0-9]+ms' | head -1 || true)"
+  [[ -z "$duration" ]] && duration="n/a"
+
+  printf 'iteration #%s: task=%s agent=%s verdict=%s duration=%s pr=%s\n' \
+    "${iter_n:-?}" "${task_id:-_no-task}" "$agent" "$verdict" "$duration" \
+    "${pr_url:-null}" >&2
+}
+
 record_iteration() {
   local host="$1"
   local iter_n="$2"     # not in the schema; kept as a stderr breadcrumb
@@ -1302,6 +1347,10 @@ record_iteration() {
     --arg notes "$notes" \
     '{ts: $ts, experiment_id: $experiment_id, host_repo: $host_repo, branch: $branch, verdict: $verdict, pr_url: $pr_url, notes: $notes}')"
   printf '%s\n' "$out" >> "$path"
+
+  # Surface the iteration outcome on daemon.log for glanceability (task
+  # daemon-log-lacks-iteration-detail). One line per JSONL record.
+  log_iteration_summary "$iter_n" "$task_id" "$verdict" "$pr_url" "$notes"
 }
 
 # --- 7. Main ---------------------------------------------------------------
