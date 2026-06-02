@@ -510,3 +510,110 @@ def test_brief_cloud_mode_also_gets_anti_think_rule() -> None:
     cloud_brief = build_brief.build_brief(task, host_cfg, local_llm_mode=False)
     assert "EXPLICITLY FORBIDDEN" in cloud_brief
     assert "`think` tool more than ONCE" in cloud_brief
+
+
+# --- persona overlay (--persona) — M2 multi-persona pipeline ----------------
+
+
+def _host_cfg() -> "build_brief.HostConfig":
+    return build_brief.HostConfig(
+        host_repo="test/host",
+        branch_prefix="feat/",
+        pre_commit_command="",
+        default_branch="main",
+    )
+
+
+def test_pipeline_personas_are_the_five_canonical_roles() -> None:
+    """The pipeline order is the load-bearing contract: persona N consumes
+    persona N-1's artifact. It must match novel/personas/*.md and the driver."""
+    assert build_brief.PIPELINE_PERSONAS == (
+        "researcher",
+        "planner",
+        "developer",
+        "qa",
+        "reviewer",
+    )
+
+
+def test_load_persona_overlay_rejects_unknown_role() -> None:
+    """An unknown role must raise ValueError (rule #6 — never silently spawn a
+    persona whose template is missing)."""
+    import pytest
+
+    with pytest.raises(ValueError, match="unknown persona role"):
+        build_brief.load_persona_overlay("architect")
+
+
+def test_load_persona_overlay_reads_each_template() -> None:
+    """Every canonical persona has a brief template under novel/personas/."""
+    for role in build_brief.PIPELINE_PERSONAS:
+        overlay = build_brief.load_persona_overlay(role)
+        assert f"# Persona: {role}" in overlay
+
+
+def test_render_persona_overlay_without_prior_artifact() -> None:
+    overlay = build_brief.render_persona_overlay("researcher")
+    assert "# Persona: researcher" in overlay
+    # No prior artifact section when none is supplied.
+    assert "Prior persona artifact" not in overlay
+
+
+def test_render_persona_overlay_chains_prior_artifact() -> None:
+    overlay = build_brief.render_persona_overlay(
+        "planner", prior_artifact="RESEARCHER-CONTEXT-MARKER"
+    )
+    assert "# Persona: planner" in overlay
+    assert "Prior persona artifact" in overlay
+    assert "RESEARCHER-CONTEXT-MARKER" in overlay
+
+
+def test_build_brief_persona_front_loads_the_role() -> None:
+    """When --persona is set, the persona template comes FIRST so the agent
+    reads its role before the task block."""
+    task = _pick_task_from_sample()
+    brief = build_brief.build_brief(task, _host_cfg(), persona="developer")
+    # The persona overlay precedes the task block.
+    assert brief.index("# Persona: developer") < brief.index("# Task:")
+
+
+def test_build_brief_persona_includes_task_block_and_overlay() -> None:
+    """The persona path still ships the task block + the system-prompt overlay
+    (FINAL STEP + rule-9 fields are never dropped)."""
+    task = _pick_task_from_sample()
+    brief = build_brief.build_brief(task, _host_cfg(), persona="qa")
+    assert "# Persona: qa" in brief
+    assert "# Task: proj-840-slash-command-labels" in brief
+    assert "FINAL STEP" in brief
+
+
+def test_build_brief_without_persona_is_unchanged() -> None:
+    """Default behaviour (no --persona) is byte-identical to the pre-persona
+    brief — the overlay is purely additive."""
+    task = _pick_task_from_sample()
+    without = build_brief.build_brief(task, _host_cfg())
+    assert "# Persona:" not in without
+    assert without.startswith("# Task:")
+
+
+def test_build_brief_persona_cli_smoke(tmp_path: Path) -> None:
+    """End-to-end CLI: build_brief.py --persona <role> exits 0 and front-loads
+    the persona; an unknown role exits non-zero."""
+    tasks_md = tmp_path / "TASKS.md"
+    tasks_md.write_text(SAMPLE_TASKS_MD, encoding="utf-8")
+    script = Path(__file__).parent.parent / "scripts" / "build_brief.py"
+    ok = subprocess.run(
+        [sys.executable, str(script), "proj-840-slash-command-labels", str(tmp_path),
+         "--persona", "reviewer"],
+        capture_output=True, text=True, check=False,
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert "# Persona: reviewer" in ok.stdout
+
+    bad = subprocess.run(
+        [sys.executable, str(script), "proj-840-slash-command-labels", str(tmp_path),
+         "--persona", "architect"],
+        capture_output=True, text=True, check=False,
+    )
+    assert bad.returncode != 0
+    assert "unknown persona role" in bad.stderr

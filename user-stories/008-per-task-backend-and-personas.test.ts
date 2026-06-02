@@ -29,13 +29,16 @@
  * contract documented in `scripts/lib/cloud-agent-config.mjs`.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "..");
 const SPAWN_AGENT = join(REPO_ROOT, "scripts/spawn_agent.py");
 const AGENT_MATRIX_FILE = join(REPO_ROOT, "scripts/lib/cloud-agent-config.mjs");
+const PIPELINE_DRIVER = join(REPO_ROOT, "bin/minsky-multi-persona.sh");
+const BUILD_BRIEF = join(REPO_ROOT, "scripts/build_brief.py");
+const PIPELINE_PERSONAS = ["researcher", "planner", "developer", "qa", "reviewer"] as const;
 
 describe("user-story 008 — launcher-agnostic feature parity (M1.9) substrate", () => {
   test("AGENT_MATRIX is the source-of-truth contract", () => {
@@ -72,5 +75,41 @@ describe("user-story 008 — launcher-agnostic feature parity (M1.9) substrate",
     expect(binMinsky).toMatch(/claude/);
     expect(binMinsky).toMatch(/devin/);
     expect(binMinsky).toMatch(/aider/);
+  });
+});
+
+// M2 multi-persona pipeline — formerly the spec's `it.skip` case (now active,
+// shipped via the A2A adapter). The behavioural end-to-end coverage lives in
+// `test/integration/multi-persona-pipeline.test.ts`; this block pins the
+// substrate the user story claims as shipped.
+describe("user-story 008 — M2 multi-persona A2A pipeline substrate", () => {
+  test("the pipeline driver bin/minsky-multi-persona.sh exists and is executable", () => {
+    expect(existsSync(PIPELINE_DRIVER)).toBe(true);
+    const src = readFileSync(PIPELINE_DRIVER, "utf8");
+    // The driver walks the five personas via the A2A adapter (handoff substrate).
+    expect(src).toMatch(/A2AOpenHands/);
+    expect(src).toMatch(/iterations\.jsonl/);
+    expect(src).toMatch(/persona=/);
+  });
+
+  test("each persona has a brief template under novel/personas/", () => {
+    for (const role of PIPELINE_PERSONAS) {
+      const template = join(REPO_ROOT, "novel/personas", `${role}.md`);
+      expect(existsSync(template)).toBe(true);
+      expect(readFileSync(template, "utf8")).toContain(`# Persona: ${role}`);
+    }
+  });
+
+  test("build_brief.py exposes the --persona overlay (the per-persona brief seam)", () => {
+    const src = readFileSync(BUILD_BRIEF, "utf8");
+    expect(src).toMatch(/--persona/);
+    expect(src).toMatch(/PIPELINE_PERSONAS/);
+    expect(src).toMatch(/render_persona_overlay/);
+  });
+
+  test("the behavioural pipeline test exists (artifact chain + transition log)", () => {
+    expect(existsSync(join(REPO_ROOT, "test/integration/multi-persona-pipeline.test.ts"))).toBe(
+      true,
+    );
   });
 });
