@@ -16,6 +16,18 @@ Per [vision.md § "Pattern conformance index"](../../vision.md#pattern-conforman
 - **MAPE-K Plan phase (autonomic computing)**: Kephart & Chess, *The Vision of Autonomic Computing*, IEEE Computer, 2003. `audit-pass-trigger`'s `shouldTriggerAuditPass` is the Plan stage — it synthesises a new action ("run an audit pass to author tasks") from the Analyse-stage observation ("the host queue is empty"). **Conformance: full** — the Monitor/Analyse (the picker result + empty-tick counter) and the Execute (spawn the audit-pass agent) live at the daemon edge; this module is the pure Plan decision.
 - **State Machine guard (automaton transition)**: Hopcroft & Ullman, *Introduction to Automata Theory*, 1979. The empty-tick cadence is a deterministic transition guard `(consecutiveEmptyTicks - 1) % cadence === 0`. **Conformance: full.**
 
+### machine-budget-autoscaler
+
+- **Closed-loop feedback controller**: Åström & Murray, *Feedback Systems*, 2008; classic control theory. `computeWorkerTarget` is a discrete controller that drives the measured utilisation toward the budget set-point, ratcheting by ≤1 (no overshoot doubling) and circuit-breaking on the gridlock signature. **Conformance: partial** — it is a bang-bang/ratchet controller, not a full PID (no integral/derivative terms); the per-step ±1 ramp + halving-backoff is deliberately simpler to avoid the oscillation the Pivot clause warns against. Full PID would add windup-guarded integral action, unnecessary at this control cadence.
+- **Functional core / imperative shell**: Bernhardt, *Boundaries*, 2012. The controller and resolver are pure functions over an observed-state struct; all I/O (os/loadavg, config read, plist read) lives in `bin/tick-loop.mjs`. **Conformance: full.**
+- **Little's Law (capacity-bounded throughput)**: Little 1961. Past the saturation knee, adding workers only adds contention, so the controller measures *effective* throughput (active subprocs + PRs) rather than nominal worker count. **Conformance: full** — the knee-hold regime is the operational expression of the law.
+
+### os-throttle-detect
+
+- **Drift detector (declarative-state vs actual)**: Burgess, *Cfengine* convergent-maintenance; the gate compares the desired budget contract against the host's actual throttle surface. **Conformance: full.**
+- **Functional core / imperative shell**: Bernhardt, *Boundaries*, 2012. `detectThrottles` / `renderMirrorTasks` are pure over a gathered-evidence struct; the host probe I/O lives in `bin/tick-loop.mjs`. **Conformance: full.**
+- **Propagation-not-one-off (rule #1)**: every detected host change renders a durable task for the mirror that owns it (dotfiles for launchd/shell, agentbrew for agent rules) so minsky *pulls* the fix instead of re-applying it. **Conformance: full.**
+
 ## Failure modes & chaos verification
 
 Per constitutional rule #7 (vision.md § 7).
@@ -39,6 +51,10 @@ Per constitutional rule #7 (vision.md § 7).
 | 11 | Misconfigured (non-finite / non-positive) audit-pass cadence reaches the decision | config-error | `graceful-degrade` — `normalizeCadence` clamps to `DEFAULT_EMPTY_QUEUE_CADENCE`; the daemon never crashes on a bad knob (rule #6) | `novel/tick-loop/src/audit-pass-trigger.test.ts` (normalizeCadence clamp assertions) |
 | 12 | Corrupt / partially-written JSONL tick line in the audit-pass coverage store | upstream-corruption | `graceful-degrade` — `parseTickEvents` drops the bad line, never throws; coverage is computed from the good lines | `scripts/audit-pass-empty-queue-coverage.test.mjs` (drops-unparseable-lines assertions) |
 | 13 | Degenerate idle sample (no idle measurements yet) when computing the p50 | empty-sample | `graceful-degrade` — `percentile` returns `null`, never `NaN`/`Infinity`; coverage `success` is not failed for insufficient data | `scripts/audit-pass-empty-queue-coverage.test.mjs` (null-p50 vacuously-passes assertions) |
+| 14 | Concurrency over-ramped past the saturation knee (load runaway, active subprocs collapse toward 0) | resource-exhaustion | `graceful-degrade` — `computeWorkerTarget` returns the `gridlock-backoff` regime and halves the target immediately, regardless of nominal worker count | `novel/tick-loop/src/machine-budget-autoscaler.test.ts` (gridlock backoff assertions) |
+| 15 | Garbage / out-of-range budget value from env or config | upstream-bad-input | `graceful-degrade` — `resolveMachineBudgetPct` rejects NaN/out-of-range and falls through to the next layer, then the pinned default (70) | `novel/tick-loop/src/machine-budget-autoscaler.test.ts` (resolveMachineBudgetPct fall-through assertions) |
+| 16 | OS throttle contradicts the budget (launchd `Background` QoS / `Nice` / low `ulimit` / stale `MINSKY_*` cap) makes the budget physically unreachable | misconfiguration | `circuit-break-and-notify` — `detectThrottles` flags it, `renderMirrorTasks` emits the durable mirror-repo fix; the gate `scripts/check-machine-budget.mjs` hard-fails CI on a `Background` plist | `novel/tick-loop/src/os-throttle-detect.test.ts` (throttle-detection assertions) + `scripts/check-machine-budget.test.mjs` (Background-fixture fail assertion) |
+| 17 | Non-launchd / partial host probe (Linux, missing plist) | dependency-degrade | `graceful-degrade` — absent evidence fields degrade to a clean (no-throttle) result rather than crashing the probe | `novel/tick-loop/src/os-throttle-detect.test.ts` (partial-evidence assertions) |
 
 ## Threat model
 
@@ -49,6 +65,7 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **Trust boundary**: `anonymizeFinding(raw)` is the boundary — its output is the only thing the CLI renders and submits; `containsPii` is the defense-in-depth re-scan the CLI runs before egress.
 - **STRIDE focus**: **I**nformation disclosure — the entire package exists to prevent it; `redact` strips credential/PII/path spans and `containsPii` fails-closed if redaction missed one. **T**ampering — the structured metadata (`type`, `minskyVersion`, `os`, `agent`) is typed (an enum + plain strings) so a malicious field cannot smuggle markup into the issue body beyond inert text.
 - **Performance-first carve-out** (rule #13's relief valve): none declared — redaction runs once per submission, far off any hot path.
+- **machine-budget / os-throttle inputs**: the budget value (`MINSKY_MACHINE_BUDGET_PCT`, config) and the throttle evidence (launchd plist text, `ulimit`, `MINSKY_*` env) are operator-local, not network-sourced — the trust boundary is the parser. **Tampering** focus: `resolveMachineBudgetPct` validates + clamps every value to `[floor, ceiling]` so a hostile/garbage env var can never drive concurrency above the swarm ceiling or below 1; the swarm ceiling (80) is an in-source constant a remote input cannot raise. The mirror task blocks are inert Markdown (no shell interpolation) appended by the I/O edge.
 
 ## Hypothesis-driven development (rule #9)
 
@@ -75,6 +92,22 @@ Per constitutional rule #13 (vision.md § 13.8). STRIDE-shaped per Howard & LeBl
 - **Pivot threshold**: if ≥30% of audit-pass output on empty-queue ticks is feature work that rule #12 rejects, the broad audit is wrong — narrow permanently to `stability-only` (the `chooseAuditScope` path already exists; the pivot makes it the only path).
 - **Measurement**: `node scripts/audit-pass-empty-queue-coverage.mjs --window=10ticks` returns the pre-registered object `{ empty_queue_ticks, audit_pass_invocations, new_tasks_produced, idle_to_next_task_p50_minutes }`.
 - **Literature anchor**: Kephart & Chess 2003 (MAPE-K — the Plan phase synthesises new actions from Analyse observations); the operator's "comes up with tasks" vision directive; rule #12 (scope discipline); Ries 2011 + Munafò et al. 2017 (falsifiable, pre-registered metric).
+
+### machine-budget-autoscaler
+
+- **Hypothesis**: a fixed worker count + `ProcessType=Background` either under-uses the box (idle budget) or gridlocks it (20 workers → 0 useful work at runaway load); a budget-matched effective-throughput controller with throttles removed holds utilisation at the operator's % and maximises PRs/hour, auto-finding the saturation knee per host without hand-tuning.
+- **Success threshold**: with budget=80 the fleet sustains ≈80% utilisation with effective throughput at/above the hand-tuned 10-worker baseline (PRs produced/merged per hour ≥ baseline) and never gridlocks; with budget=70 (default) it sits at ≈70%. The controller's three regimes (ramp-up, knee-hold, gridlock-backoff) are pinned green by the paired test suite.
+- **Pivot threshold**: if the closed-loop controller oscillates (concurrency hunting) in any observation window, fall back to a per-host calibrated constant table (measured knee per core-count) selected by the budget — still no `Background` throttle, still cross-repo-propagated; never revert to a single hand-edited global constant.
+- **Measurement**: `pnpm vitest run novel/tick-loop/src/machine-budget-autoscaler.test.ts` exits 0 (ramp-up steps by 1, knee holds, gridlock halves); `node scripts/check-machine-budget.mjs` exits 0 (budget contract pinned, no contradicting throttle); at runtime `node novel/tick-loop/bin/tick-loop.mjs --json` reports `{budgetPct, decision:{target,reason}}` matched against `os.loadavg()`/cores.
+- **Literature anchor**: Åström & Murray, *Feedback Systems*, 2008 (closed-loop control); Little 1961 (capacity-bounded throughput); Ries 2011 (pivot-or-persevere); Apple `launchd.plist(5)` (`ProcessType` QoS).
+
+### os-throttle-detect
+
+- **Hypothesis**: OS throttles that contradict the budget (launchd `Background` QoS, positive `Nice`, low fd `ulimit`, stale `MINSKY_*` caps) make the budget physically unreachable and regress silently; a pure detector that flags them AND renders the durable mirror-repo fix closes the "fixed it in-session, lost it next reboot" gap (rule #1 — propagate, don't hand-maintain).
+- **Success threshold**: `detectThrottles` flags each of the four throttle kinds against a non-trivial budget and stays clean for a `Standard` host; `renderMirrorTasks` produces one tasks.md-spec block per owning mirror; the gate hard-fails on a `Background` worker plist.
+- **Pivot threshold**: if `ProcessType` stops being the throttle that makes the budget unreachable (macOS removes the QoS clamp, or minsky moves workers off launchd), retire the `process-type-background` detector and replace it with one over the new throttle surface — never weaken it to a warning.
+- **Measurement**: `pnpm vitest run novel/tick-loop/src/os-throttle-detect.test.ts` exits 0; `node scripts/check-machine-budget.mjs` exits 0; `node scripts/check-machine-budget.test.mjs` (via vitest) confirms the `Background`-fixture fail path.
+- **Literature anchor**: Burgess (convergent maintenance / drift detection); Saltzer & Schroeder 1975 (fail-safe defaults — a missing probe is dormant, not a green pass); rule #1 (don't reinvent / hand-maintain).
 
 ## Usage
 
@@ -104,3 +137,38 @@ logSpan({ failure_class: verdict.failureClass, reason: verdict.reason }); // vis
 // otherwise: skip the sub-step (skip-substep) or abandon this iteration
 // (fail-iteration) — the daemon process stays up either way.
 ```
+
+The `machine-budget-autoscaler` core drives worker concurrency to the operator's machine budget instead of a fixed `--spawn-additional-workers` constant. The I/O edge ([`bin/tick-loop.mjs`](bin/tick-loop.mjs)) gathers the live host state and prints the target:
+
+```ts
+import { computeWorkerTarget, resolveMachineBudgetPct } from "@minsky/tick-loop";
+
+const budgetPct = resolveMachineBudgetPct({
+  envPct: process.env.MINSKY_MACHINE_BUDGET_PCT, // override
+  configPct: cfg.machineBudgetPct, // persistent per-machine
+  swarmMode: process.env.MINSKY_SWARM_MODE === "1", // weekly-gated ≤80% ceiling
+});
+const { target, reason } = computeWorkerTarget({
+  budgetPct,
+  cores: os.cpus().length,
+  loadAvg: os.loadavg()[0],
+  recentActiveSubprocs, // measured effective work, never nominal worker count
+  recentPrRate,
+  lastTargets, // controller history → knee detection
+});
+// reason ∈ ramp-up | knee-hold | gridlock-backoff | at-budget
+```
+
+The `os-throttle-detect` core flags host throttles that make the budget unreachable and renders durable mirror-repo fixes (rule #1):
+
+```ts
+import { detectThrottles, renderMirrorTasks } from "@minsky/tick-loop";
+
+const throttles = detectThrottles({ budgetPct, processType, nice, ulimitNofile, staleMinskyCaps });
+for (const task of renderMirrorTasks(throttles)) {
+  // task.tasksMdPath = "~/apps/dotfiles/TASKS.md" | "~/apps/agentbrew/TASKS.md"
+  // append task.taskBlock there so minsky pulls the durable fix, not a one-off
+}
+```
+
+Run the edge directly: `node novel/tick-loop/bin/tick-loop.mjs --json` (or `MINSKY_MACHINE_BUDGET_PCT=80 MINSKY_SWARM_MODE=1 node … --json` for a swarm window). See [`docs/machine-budget.md`](../../docs/machine-budget.md) for the full budget + propagation runbook.

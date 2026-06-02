@@ -11,7 +11,7 @@ There are several pieces of software called "Minsky". This one — the [`fyodori
 | **Economic modelling, Steve Keen, Godley tables, stock-flow consistency** | [`highperformancecoder/minsky`](https://github.com/highperformancecoder/minsky) — system dynamics + economic modelling tool (Simulink-like graphical environment). 366★, active, ~7,851 commits, last release 2025-07. Named after the economist Hyman Minsky, NOT Marvin Minsky. | An autonomous AI coding daemon. |
 | **Multilingual conversational AI for Indian languages** | [`minsky.app`](https://minsky.app/) — NeuroBridge Tech's LLM + speech recognition platform. | An autonomous coding daemon for git repos. |
 | **A Peruvian open-source tech collective** | [`minskylab`](https://github.com/minskylab) on GitHub — 109 repos, mostly project-management and code-gen plugins (Plexo, blob, auto-rust, neocortex). | A daemon you run on your own machine. |
-| **Human-in-the-loop workflow orchestration with progressive gates** | [`edobry/minsky`](https://github.com/edobry/minsky) — architectural sibling using organizational cybernetics. 5★, early-stage. Shares the "task queue + agent + feedback loop" shape but focuses on HITL coordination, not autonomous self-improvement. *We may end up cross-citing this project's vision.md as it matures.* | This project, which targets autonomous overnight runs. |
+| **Human-in-the-loop workflow orchestration with progressive gates** | [`edobry/minsky`](https://github.com/edobry/minsky) — architectural sibling using organizational cybernetics. ~6★, active (~12,400 commits, TypeScript). Shares the "task queue + agent + feedback loop" shape but focuses on HITL coordination, not autonomous self-improvement. Its [`docs/theory-of-operation.md` § "The Five-Organ Architecture (VSM Mapping)"](https://github.com/edobry/minsky/blob/main/docs/theory-of-operation.md#the-five-organ-architecture-vsm-mapping) maps Beer's VSM Systems 1–5 onto concrete subsystems, and its [`docs/architecture.md` § "Session Model"](https://github.com/edobry/minsky/blob/main/docs/architecture.md#4-session-model) describes git-native task sessions. See [`competitors/edobry-minsky.md`](../competitors/edobry-minsky.md) for the full overlap/divergence deep-dive. | This project, which targets autonomous overnight runs. |
 | **An enterprise / government cloud platform** | [`gov.minsky.io`](https://status.gov.minsky.io/) — a private platform. No public OSS overlap. | An open-source MIT daemon. |
 
 If you actually wanted **this Minsky** — a background daemon that runs AI coding agents against `TASKS.md` in any git repo — see the main [README](../README.md).
@@ -39,6 +39,8 @@ IBM's reference architecture for self-managing systems. Four phases (Monitor →
 Stafford Beer, *Cybernetics and Management*, English Universities Press, **1959**; formalised in *Brain of the Firm*, Simon & Schuster, **1972**.
 
 Viable systems are recursive: each level contains its own monitor/analyse/plan/execute loops. The whole survives because every part survives. This project's multi-repo fleet (one daemon walking N hosts in round-robin) is VSM applied to git repos. The same daemon shape that survives a single iteration must also survive a daemon restart, a host swap, a network blip — recursion all the way down.
+
+The closest contemporary instantiation of the same VSM framing is the architectural sibling [`edobry/minsky`](https://github.com/edobry/minsky), which maps Beer's five VSM organs *explicitly* onto named subsystems (sessions, hooks, CI, context-gen, config — see its [`docs/theory-of-operation.md`](https://github.com/edobry/minsky/blob/main/docs/theory-of-operation.md#the-five-organ-architecture-vsm-mapping)) for *human-in-the-loop* coordination, where this project applies VSM *implicitly* and recursively for *autonomous* fleet operation. Same ancestor, opposite ends of the autonomy axis — the full deep-dive is in [`competitors/edobry-minsky.md`](../competitors/edobry-minsky.md).
 
 ### 4. Let-it-crash + supervision trees — the failure model
 
@@ -116,3 +118,5 @@ The competitive view of the same novel synthesis lives in [`competitors/README.m
 ## Last reviewed
 
 2026-05-22 (initial — informed by the OpenHands + CrewAI deep dive in PR #726 + the namespace + prior-art research in PR #730).
+
+2026-06-02 — deepened the `edobry/minsky` disambiguation entry with deep-links into its specific architecture sections and added a VSM-lineage cross-reference; full overlap/divergence deep-dive landed at [`competitors/edobry-minsky.md`](../competitors/edobry-minsky.md) (task `research-finding-edobry-minsky-cross-citation`).

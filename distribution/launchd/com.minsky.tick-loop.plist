@@ -19,6 +19,17 @@ Install: copy to ~/Library/LaunchAgents/ after envsubst, then:
     <key>Label</key>
     <string>com.minsky.tick-loop</string>
 
+    <!-- ProcessType=Standard is the operator-machine-budget-autoscale contract
+         (vision.md rule #15): the worker is the process the machine budget is
+         ABOUT, so it must NOT be QoS-throttled. macOS throttles CPU/IO for
+         `Background` QoS, which makes any non-trivial budget physically
+         unreachable (launchd.plist(5)). `scripts/check-machine-budget.mjs`
+         hard-fails CI if this ever drifts back to `Background`. The durable
+         host-side mirror of this change lives in the dotfiles TASKS.md
+         (rule #1 — propagate, don't hand-maintain a one-off). -->
+    <key>ProcessType</key>
+    <string>Standard</string>
+
     <key>WorkingDirectory</key>
     <string>${MINSKY_HOME}</string>
 

@@ -10,7 +10,7 @@ Over the first month, I notice the QA persona's pass rate is around 62% — too 
 
 - The MAPE-K loop observes persona-level metrics from OTEL spans (the *Monitor* phase)
 - It identifies the constraint per Goldratt TOC, single bottleneck (the *Analyze* phase)
-- It proposes prompt variants ≥2 (the *Plan* phase)
+- It proposes prompt variants ≥2 (the *Plan* phase), where each variant is seeded by the *reflection step* of Reflexion (Shinn et al. 2023) — the loop reads the recent episodic-memory entries (`state → action → outcome → reflection`, schema at [`novel/experiment-record/src/reflexion-schema.ts`](../novel/experiment-record/src/reflexion-schema.ts)) for the constrained persona and turns each verbal self-critique into a candidate prompt edit, rather than generating variants blind
 - It runs an A/B test using the `PromptOptimizer` adapter (DSPy) (the *Execute* phase)
 - It rolls out the winner only if the metric improves by ≥10% with statistical confidence (p < 0.05)
 - The change is logged to `constraints.md` with hypothesis / intervention / result (the *Knowledge* base)
@@ -75,7 +75,7 @@ Per constitutional rule #7 (`vision.md` § 7).
 - **Pattern**: MAPE-K reference architecture for autonomic computing — Kephart & Chess, "The Vision of Autonomic Computing", *IEEE Computer* 36(1) 2003 — combined with Goal-Question-Metric for the rollout decision — Basili, Caldiera, Rombach, "The Goal-Question-Metric Approach", *Encyclopedia of Software Engineering*, 1994
 - **Conformance level**: full
 - **Index row**: vision.md § "Pattern conformance index" row 43
-- **Notes**: Each phase (Monitor / Analyze / Plan / Execute) emits one OTEL span, and the Knowledge base is `constraints.md`. Cross-references the planned implementation at row 5 (`claude-mape-k-loop`); this row anchors the user-story specification, row 5 anchors the implementation contract.
+- **Notes**: Each phase (Monitor / Analyze / Plan / Execute) emits one OTEL span, and the Knowledge base is `constraints.md`. Cross-references the planned implementation at row 5 (`claude-mape-k-loop`); this row anchors the user-story specification, row 5 anchors the implementation contract. The *Plan* phase additionally instantiates Reflexion's reflection→memory→recall loop (Shinn et al. 2023): the episodic-memory schema lives at `novel/experiment-record/src/reflexion-schema.ts` and the implementation pattern is recorded in vision.md § "Pattern conformance index".
 
 ## Security & privacy
 

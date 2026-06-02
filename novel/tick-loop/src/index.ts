@@ -17,6 +17,14 @@
  *      decision + JSONL tick-event builder; the agent spawn + event append I/O
  *      live in the daemon / `bin/minsky-run.sh`, and the coverage measurement
  *      in `scripts/audit-pass-empty-queue-coverage.mjs`.
+ *   4. `machine-budget-autoscaler` — the pure controller that resolves the
+ *      operator's machine-utilisation budget and auto-scales worker
+ *      concurrency to *match* it (vision.md rule #15). The launchd / config /
+ *      env I/O lives at the edge in `bin/tick-loop.mjs`.
+ *   5. `os-throttle-detect` — the pure detector that finds OS throttles
+ *      contradicting the budget (launchd `Background` QoS, `Nice`, low
+ *      `ulimit`, stale `MINSKY_*` caps) and renders the cross-repo
+ *      propagation tasks. The host probe I/O lives at the edge.
  *
  * See `README.md` for the pattern conformance, failure modes, and threat model.
  */
@@ -56,3 +64,26 @@ export {
   PERSISTED_AUTH_FAILURE_THRESHOLD,
   RECOVERABLE_GH_STATUSES,
 } from "./gh-auth-classifier.js";
+export {
+  type AutoscaleReason,
+  type AutoscalerState,
+  type BudgetInputs,
+  computeWorkerTarget,
+  GRIDLOCK_LOAD_MULTIPLE,
+  MACHINE_BUDGET_POLICY,
+  maxWorkersForBudget,
+  resolveMachineBudgetPct,
+  type WorkerTargetDecision,
+} from "./machine-budget-autoscaler.js";
+export {
+  detectThrottles,
+  isBudgetReachable,
+  MIN_NOFILE_FOR_BUDGET,
+  type MirrorRepo,
+  type MirrorTask,
+  renderMirrorTasks,
+  type ThrottleEvidence,
+  type ThrottleFinding,
+  type ThrottleKind,
+  TRIVIAL_BUDGET_PCT,
+} from "./os-throttle-detect.js";
