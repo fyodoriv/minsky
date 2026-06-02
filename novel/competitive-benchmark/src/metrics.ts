@@ -238,6 +238,29 @@ export const METRICS: readonly MetricDefinition[] = [
     description:
       "Fraction of HumanEval tasks the orchestrator's pipeline resolves on first attempt. The orchestrator-tier counterpart to swe-bench-verified-resolve-rate — multi-agent frameworks (MetaGPT, AutoGen, CrewAI) publish this, single-agent systems (Claude Code, Devin, Aider) publish SWE-bench Verified.",
   },
+  // --- Orchestrator-tier math-reasoning hook (Hendrycks et al. MATH / AutoGen 2023) ---
+  // Added 2026-06-02 via the `corpus-add-autogen-microsoft` task's Pivot
+  // path: AutoGen (Microsoft Research, Wu et al. arXiv 2308.08155) does NOT
+  // publish a headline HumanEval Pass@1 number — its primary code/reasoning
+  // result is the MATH whole-test accuracy (69.48% overall vs GPT-4's
+  // 55.18%). HumanEval is run model-dependently via the AutoGenBench tool, so
+  // there is no AutoGen-on-stock-models HumanEval headline to cite without a
+  // `local-harness` run. The MATH number is the orchestrator-tier math-
+  // reasoning counterpart to humaneval-pass-at-1: both are public head-to-head
+  // axes a multi-agent orchestrator can publish without a per-instance harness.
+  // The Pivot's rationale (TASKS.md `corpus-add-autogen-microsoft`): adopting
+  // MATH as a sibling unlocks future per-orchestrator math-reasoning compares.
+  {
+    id: "math-whole-test-accuracy",
+    label: "MATH whole-test accuracy",
+    category: "public-benchmark",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Hendrycks, Burns, Kadavath, Arora, Basart, Tang, Song, Steinhardt, 'Measuring Mathematical Problem Solving With the MATH Dataset', NeurIPS 2021 Datasets and Benchmarks (the 12,500-problem competition-math benchmark); Wu, Bansal, Zhang, Wu, Li, Zhu, Wang, Saied, Awadallah, Yang, 'AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework', arXiv 2308.08155, 2023 (the orchestrator-tier reporting convention — AutoGen 69.48% whole-test accuracy vs GPT-4 55.18%)",
+    description:
+      "Fraction of the MATH dataset's whole-test split the orchestrator's pipeline solves. The orchestrator-tier math-reasoning counterpart to humaneval-pass-at-1 — multi-agent frameworks that target reasoning (AutoGen) publish this where a stock-model HumanEval headline is unavailable (HumanEval being model-dependent via the AutoGenBench tool).",
+  },
 ];
 
 /**

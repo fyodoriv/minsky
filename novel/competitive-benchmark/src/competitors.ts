@@ -288,6 +288,19 @@ export const COMPETITORS: readonly Competitor[] = [
       values: { "humaneval-pass-at-1": 0.859 },
     },
   },
+  {
+    id: "autogen-microsoft",
+    label: "AutoGen (Microsoft Research)",
+    kind: "open-source",
+    homepage: "https://github.com/microsoft/autogen",
+    resultSource: {
+      kind: "published",
+      citation:
+        "Wu, Bansal, Zhang, Wu, Li, Zhu, Wang, Saied, Awadallah, Yang, 'AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework', arXiv 2308.08155, 2023 (MATH whole-test accuracy = 69.48% with the multi-agent conversation framework vs GPT-4's 55.18%; AutoGen does not publish a headline HumanEval Pass@1 for stock models — HumanEval is run model-dependently via the AutoGenBench tool, so the MATH whole-test number is the orchestrator-tier primary reading). AutoGen was folded into Microsoft Agent Framework at MAF v1.0 (April 2026); the Wu et al. 2023 paper remains the primary citation for the AutoGen-branded benchmark numbers — see competitors/autogen.md for the post-merger redirect and the wrap-feasibility verdict.",
+      asOf: "2023-08-16",
+      values: { "math-whole-test-accuracy": 0.6948 },
+    },
+  },
 ];
 
 /**
