@@ -52,7 +52,14 @@ const STUCK_THRESHOLD_SECONDS = Number(process.env["WATCHDOG_STUCK_THRESHOLD_SEC
  * @returns {Promise<{ checked: number, killed: number, failed: number }>}
  */
 export async function watchdogTick(opts) {
-  const { listClaudePrintSpawns, killPid, log = () => {}, thresholdSeconds = 1800 } = opts;
+  const {
+    listClaudePrintSpawns,
+    killPid,
+    log = () => {
+      /* no-op */
+    },
+    thresholdSeconds = 1800,
+  } = opts;
   const findings = await runInvariants([
     daemonIterationRuntimeInvariant({ listClaudePrintSpawns, thresholdSeconds }),
   ]);

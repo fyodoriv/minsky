@@ -165,7 +165,9 @@ export function verify(closeN, survivor, repoRoot) {
     // rule-6: handled-locally — scratch teardown best-effort; a stale tmp dir is harmless.
     try {
       rmSync(scratch, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      /* best-effort teardown; a stale tmp dir is harmless (see finally comment above) */
+    }
   }
 }
 

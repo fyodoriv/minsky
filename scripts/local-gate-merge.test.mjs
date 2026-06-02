@@ -126,7 +126,9 @@ describe("runGateSweep (injected seam)", () => {
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
       noReview: true,
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     };
     const real = runGateSweep(base);
     expect(merged).toEqual([10]);
@@ -147,7 +149,9 @@ describe("runGateSweep (injected seam)", () => {
       mergeFn: () => {
         mergeCalls += 1;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(mergeCalls).toBe(0);
     expect(res.skipped[0]?.reason).toContain("merge-onto-main-conflict");
@@ -165,7 +169,9 @@ describe("runGateSweep (injected seam)", () => {
       // spawn real `gh`.
       prStateFn: () => "OPEN",
       noReview: true,
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(res.merged).toEqual([]);
     expect(res.skipped[0]?.reason).toContain("merge-failed");
@@ -193,7 +199,9 @@ describe("runGateSweep (injected seam)", () => {
       },
       prStateFn: () => "MERGED",
       noReview: true,
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(res.merged.map((m) => m.number)).toEqual([575]);
     expect(res.merged[0]?.reason).toContain("local-delete soft-fail");
@@ -212,7 +220,9 @@ describe("runGateSweep (injected seam)", () => {
       },
       prStateFn: () => "MERGED",
       noReview: true,
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(res.merged.map((m) => m.number)).toEqual([575]);
     expect(res.skipped).toEqual([]);
@@ -230,7 +240,9 @@ describe("runGateSweep (injected seam)", () => {
       },
       prStateFn: () => null,
       noReview: true,
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(res.merged).toEqual([]);
     expect(res.skipped[0]?.reason).toContain("merge-failed");
@@ -245,8 +257,12 @@ describe("runGateSweep (injected seam)", () => {
         seen.push(p.number);
         return { stdout: greenStdout };
       },
-      mergeFn: () => {},
-      log: () => {},
+      mergeFn: () => {
+        /* no-op */
+      },
+      log: () => {
+        /* no-op */
+      },
     });
     expect(seen).toEqual([2]);
   });
@@ -430,7 +446,9 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: () => {
         landCalls += 1;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(vetCalls).toBe(0); // the ~20-min scratch vet was elided
     expect(landCalls).toBe(0);
@@ -447,7 +465,9 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: (b) => {
         landed = b;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(res.outcome).toBe("landed");
     expect(landed).toBe("fix/keystone");
@@ -462,7 +482,9 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: () => {
         landCalls += 1;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(landCalls).toBe(0);
     expect(res.outcome).toBe("aborted");
@@ -478,7 +500,9 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: () => {
         landCalls += 1;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(landCalls).toBe(0);
     expect(res.reason).toContain("merge-onto-main-conflict");
@@ -494,7 +518,9 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: () => {
         landCalls += 1;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(landCalls).toBe(0);
     expect(res.outcome).toBe("landed");
@@ -510,7 +536,9 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: () => {
         landCalls += 1;
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(landCalls).toBe(0);
     expect(res.reason).toContain("opus-review rejected");
@@ -527,8 +555,12 @@ describe("landLocalBranch (injected seam)", () => {
         reviewCalls += 1;
         return { approve: false, reason: "should-not-run" };
       },
-      landFn: () => {},
-      log: () => {},
+      landFn: () => {
+        /* no-op */
+      },
+      log: () => {
+        /* no-op */
+      },
     });
     expect(reviewCalls).toBe(0);
     expect(res.outcome).toBe("landed");
@@ -542,14 +574,21 @@ describe("landLocalBranch (injected seam)", () => {
       landFn: () => {
         throw new Error("gh exploded");
       },
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(res.outcome).toBe("aborted");
     expect(res.reason).toContain("land-failed");
   });
 
   it("missing branch name ⇒ aborted (no-branch-name)", () => {
-    const res = landLocalBranch({ branchName: "", log: () => {} });
+    const res = landLocalBranch({
+      branchName: "",
+      log: () => {
+        /* no-op */
+      },
+    });
     expect(res.outcome).toBe("aborted");
     expect(res.reason).toBe("no-branch-name");
   });
@@ -579,7 +618,9 @@ describe("runGateSweep — two-layer authority (gate + Opus brain)", () => {
       },
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(merged).toEqual([40]);
     expect(reviewed.sort()).toEqual([40, 41]); // 42 (red) never reviewed
@@ -599,7 +640,9 @@ describe("runGateSweep — two-layer authority (gate + Opus brain)", () => {
       },
       mergeFn: (/** @type {import("./local-gate-merge.mjs").PrSnapshot} */ p) =>
         merged.push(p.number),
-      log: () => {},
+      log: () => {
+        /* no-op */
+      },
     });
     expect(reviewCalls).toBe(0);
     expect(merged).toEqual([50]);
