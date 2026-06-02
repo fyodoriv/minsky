@@ -771,6 +771,14 @@ jobs:
         run: node scripts/check-lockfile-integrity.mjs --diff-base=origin/main
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-lockfile-integrity.test.mjs
+      # Public-registry guard: pnpm-lock.yaml must resolve only from public
+      # registries. Catches a lockfile generated behind a corporate package
+      # mirror (the 2026-06-01 Artifactory leak class) that both leaks the
+      # internal host and breaks `pnpm install` off-network.
+      - name: lockfile-registry lint
+        run: node scripts/check-lockfile-registry.mjs
+      - name: unit tests for the registry linter
+        run: pnpm exec vitest run scripts/check-lockfile-registry.test.mjs
 
   user-story-security-section:
     # vision.md § 13 / TASKS.md `security-privacy-priority-substrate`
