@@ -42,7 +42,7 @@
 // Conformance: full — pure function over the diff, no LLM in the chain.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";

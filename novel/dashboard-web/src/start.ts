@@ -27,7 +27,7 @@ import { bindHostnameWarning, resolveBindHostname } from "./bind.js";
 import { controlTokenStartupHint, resolveControlToken } from "./control-auth.js";
 import type { GetValue } from "./render.js";
 import { createServer } from "./server.js";
-import { type Snapshot, openObserveGetValue, snapshotGetValue } from "./strategy.js";
+import { openObserveGetValue, type Snapshot, snapshotGetValue } from "./strategy.js";
 
 const ACTIVITY_LIMIT = 20;
 

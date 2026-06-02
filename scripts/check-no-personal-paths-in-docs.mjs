@@ -31,7 +31,7 @@
 // 2026-05-20 ("ensure no documentation of minsky shows any of my apps
 // structure or user").
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";

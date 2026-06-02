@@ -5,9 +5,9 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  RULE_9_GRANDFATHERED,
   classifyRule9Blocks,
   parseRule9Blocks,
+  RULE_9_GRANDFATHERED,
 } from "./check-rule-9-tasksmd-fields.mjs";
 
 const COMPLIANT = [

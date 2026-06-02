@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as heal from "./heal-ollama-down.js";
 import type { OllamaDownSeams } from "./heal-ollama-down.js";
+import * as heal from "./heal-ollama-down.js";
 
 function makeSeams(overrides: Partial<OllamaDownSeams> = {}): {
   seams: OllamaDownSeams;

@@ -41,7 +41,7 @@
 // research task and re-investigate. Do not patch the diff comparison
 // to ignore the divergence — that masks the disproof.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

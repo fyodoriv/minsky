@@ -59,7 +59,7 @@
 // artifacts. Same checks, just hand-curated data source. Don't lower the
 // 5-surface bar.
 
-import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -117,7 +117,7 @@ function parseMilestonesLine(line, state) {
  */
 function handleMilestoneHeader(line, state) {
   const header = line.match(/^## (M\d+)\b\s*—?\s*(.+)$/);
-  if (!header || !header[1] || !header[2]) return false;
+  if (!header?.[1] || !header[2]) return false;
   if (state.current) state.milestones.push(state.current);
   state.current = { id: header[1], title: header[2].trim(), criteria: [] };
   state.inTable = false;
@@ -192,7 +192,7 @@ function parseCriterionRow(line) {
  */
 function extractExemptReason(line) {
   const m = line.match(/<!--\s*exempt:\s*([^\n]+?)\s*-->/i);
-  if (!m || !m[1]) return null;
+  if (!m?.[1]) return null;
   const reason = m[1].trim();
   return reason.length >= 3 ? reason : null;
 }
@@ -251,7 +251,7 @@ export function parseMetricsMd(content) {
   for (const section of sections) {
     const firstLine = section.split("\n")[0] ?? "";
     const idMatch = firstLine.match(/^([a-z0-9-]+)\b/);
-    if (!idMatch || !idMatch[1]) continue;
+    if (!idMatch?.[1]) continue;
     const id = idMatch[1];
     // Look for `Milestone: M1.X` (italic _Budget: 7d · Milestone: M1.1_ pattern)
     const milestoneMatch = section.match(/Milestone:\s*(M\d+(?:\.\d+)?)/);

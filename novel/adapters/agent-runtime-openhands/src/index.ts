@@ -5,8 +5,8 @@
 // produce a spawn envelope; the daemon (`bin/minsky-run.mjs`) calls
 // `child_process.spawn(command, argv, { cwd })` with the result.
 
-export { buildOpenHandsInvocation, resolveShimPath } from "./spawner.js";
 export type {
   OpenHandsInvocation,
   OpenHandsSpawnInput,
 } from "./spawner.js";
+export { buildOpenHandsInvocation, resolveShimPath } from "./spawner.js";

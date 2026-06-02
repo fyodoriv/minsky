@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import { buildHealEvent, recordHealEvent } from "./ledger.js";
 import type { LedgerSeams } from "./ledger.js";
+import { buildHealEvent, recordHealEvent } from "./ledger.js";
 import type { HealEvent } from "./types.js";
 
 function makeSeams(initialDirs: Set<string>): {

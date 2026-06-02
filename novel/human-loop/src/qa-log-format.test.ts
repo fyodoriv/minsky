@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { type QaEntry, formatAnswer, formatQuestion, parseQaLog } from "./qa-log-format.js";
+import { formatAnswer, formatQuestion, parseQaLog, type QaEntry } from "./qa-log-format.js";
 
 const TS_1 = "2026-05-23T10:00:00Z";
 const TS_2 = "2026-05-23T10:15:00Z";

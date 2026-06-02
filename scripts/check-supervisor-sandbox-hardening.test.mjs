@@ -10,9 +10,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  checkSupervisorSandboxHardening,
   REQUIRED_DIRECTIVES,
   REQUIRED_UNIT_FILES,
-  checkSupervisorSandboxHardening,
   readUnitContents,
 } from "./check-supervisor-sandbox-hardening.mjs";
 

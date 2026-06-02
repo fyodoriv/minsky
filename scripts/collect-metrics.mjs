@@ -10,7 +10,7 @@
 //   takes an exec seam; the CLI binding is the only I/O surface.
 
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = process.cwd();

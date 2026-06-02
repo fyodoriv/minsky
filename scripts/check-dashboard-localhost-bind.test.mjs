@@ -12,9 +12,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   BIND_TS_PATH,
+  checkDashboardLocalhostBind,
   REQUIRED_BIND_DEFAULT,
   START_TS_PATH,
-  checkDashboardLocalhostBind,
 } from "./check-dashboard-localhost-bind.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

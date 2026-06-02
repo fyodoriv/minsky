@@ -50,7 +50,7 @@
 //   node scripts/check-cross-repo-pr-rate.mjs --json        # always exits 0, machine-readable for collectors
 //   node scripts/check-cross-repo-pr-rate.mjs --host-dir=<path>  # non-cwd host
 
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";

@@ -37,11 +37,10 @@
 import { Hono } from "hono";
 
 import type { ActivityEntry } from "./activity.js";
+import { createMemoryPauseState, parseControlBody, type SetPaused } from "./control.js";
 import { validateControlAuth } from "./control-auth.js";
-import { type SetPaused, parseControlBody } from "./control.js";
-import { createMemoryPauseState } from "./control.js";
 import { SUCCESS_METRICS, type SuccessMetric } from "./metrics.js";
-import { type GetValue, STUB_GET_VALUE, render } from "./render.js";
+import { type GetValue, render, STUB_GET_VALUE } from "./render.js";
 import { type PauseReasonState, type PauseState, watchEnvelope } from "./watch.js";
 
 /**

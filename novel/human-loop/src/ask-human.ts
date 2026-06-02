@@ -27,8 +27,8 @@
 // retry or fall back to the existing `**Blocked**: needs-user-approval`
 // TASKS.md path.
 
-import { promises as fs, type FSWatcher, watch as fsWatch } from "node:fs";
-import { type QaEntry, formatQuestion, parseQaLog } from "./qa-log-format.js";
+import { type FSWatcher, promises as fs, watch as fsWatch } from "node:fs";
+import { formatQuestion, parseQaLog, type QaEntry } from "./qa-log-format.js";
 
 /** Options for {@link askHuman}. */
 export interface AskHumanOpts {

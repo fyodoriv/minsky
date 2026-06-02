@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_RULE_COST, SEVERITY_THRESHOLDS, analyze, costEstimate } from "./analyze.js";
+import { analyze, costEstimate, DEFAULT_RULE_COST, SEVERITY_THRESHOLDS } from "./analyze.js";
 import type { HealthSnapshot, RuleViolationStats } from "./monitor.js";
 
 const stats = (overrides: Partial<RuleViolationStats> = {}): RuleViolationStats => ({

@@ -15,9 +15,9 @@ export * as healNetworkPartitionMidSpawn from "./heal-network-partition-mid-spaw
 export * as healOllamaDown from "./heal-ollama-down.js";
 export * as healPartialConfigWrite from "./heal-partial-config-write.js";
 export * as healStalePid from "./heal-stale-pid.js";
-export * as healWorktreeMissingNodeModules from "./heal-worktree-missing-node-modules.js";
 export * as healStaleTsbuildinfo from "./heal-stale-tsbuildinfo.js";
 export * as healStuckCommand from "./heal-stuck-command.js";
+export * as healWorktreeMissingNodeModules from "./heal-worktree-missing-node-modules.js";
 
 export type { ApplyResult, DetectResult, HealEvent, HealOutcome, VerifyResult } from "./types.js";
 

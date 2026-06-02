@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_EXPECTED_HOURS,
   checkMapeKWatchdogCadence,
+  DEFAULT_EXPECTED_HOURS,
   readMapeKConfig,
 } from "./check-mape-k-watchdog-cadence.mjs";
 

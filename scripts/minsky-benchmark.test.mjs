@@ -4,10 +4,10 @@
 
 import { describe, expect, test } from "vitest";
 import {
-  PASS_VERDICTS,
   aggregateBenchmark,
   classifyVerdict,
   formatBenchmarkSummary,
+  PASS_VERDICTS,
   parseRunnerOutput,
 } from "./minsky-benchmark.mjs";
 

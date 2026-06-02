@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_THRESHOLDS,
   computeFreshness,
+  DEFAULT_THRESHOLDS,
   extractCorpusEntries,
 } from "./check-corpus-freshness.mjs";
 

@@ -10,18 +10,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  CI_BASH_GATE_BUCKETS,
-  CI_ENV_DEPENDENT_JOBS,
-  CI_TO_MANIFEST_ALIAS,
-  STACK_MANIFEST,
   appendBodyChecks,
   buildSkippedBodyChecksWarning,
   buildStepResult,
+  CI_BASH_GATE_BUCKETS,
+  CI_ENV_DEPENDENT_JOBS,
+  CI_TO_MANIFEST_ALIAS,
   parseArgs,
   renderJson,
   resolveBodyPath,
   resolveDiffBase,
   runStack,
+  STACK_MANIFEST,
   selectSteps,
   stripGitHookEnv,
   withResolvedDiffBase,

@@ -32,7 +32,6 @@ for (let i = 0; i < args.length; i++) {
 
 const window = flags["window"] || "20-prs";
 const filter = flags["filter"] || "all";
-const json = flags["json"];
 
 console.log(`Tracking GitHub Actions failures for window: ${window}, filter: ${filter}`);
 

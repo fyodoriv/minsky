@@ -77,7 +77,7 @@
 // The companion `.github/workflows/ci.yml` `otel-no-pii` job runs this CLI
 // on every PR and is wired into the `ci` gate's `needs:` array.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";

@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as healStale from "./heal-stale-tsbuildinfo.js";
 import type { StaleTsbuildinfoSeams } from "./heal-stale-tsbuildinfo.js";
+import * as healStale from "./heal-stale-tsbuildinfo.js";
 
 function makeSeams(
   files: Record<string, string>,

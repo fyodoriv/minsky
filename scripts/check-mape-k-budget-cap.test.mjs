@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_CAP_FRACTION,
   checkMapeKBudgetCap,
+  DEFAULT_CAP_FRACTION,
   readMapeKConfig,
 } from "./check-mape-k-budget-cap.mjs";
 

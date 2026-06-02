@@ -21,7 +21,7 @@
 // Anchor: rule #10 (deterministic enforcement); Beck XP 1999 (CI as the
 // constraint enforcer); Munafò 2017 (pre-registered acceptance gate).
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

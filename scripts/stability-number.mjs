@@ -3,7 +3,7 @@
 // Usage: node scripts/stability-number.mjs [host-dir] [--json]
 // Output: "73% (22/30 successful, 7d)" or JSON.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const hostDir = process.argv[2] || process.cwd();

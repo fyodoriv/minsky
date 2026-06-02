@@ -57,7 +57,7 @@
 // keep A2 advisory in spec-monitor and close the promotion task. This is
 // recorded in EXPERIMENT.yaml's `pivot` field for the shipping PR.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

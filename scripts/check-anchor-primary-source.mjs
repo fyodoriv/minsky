@@ -52,7 +52,7 @@
 // to `warn`, the rule is judgement-bound and this lint is retired — A3
 // stays advisory in SKILL.md.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

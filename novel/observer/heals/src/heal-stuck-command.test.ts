@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as healStuck from "./heal-stuck-command.js";
 import type { StuckCommandSeams } from "./heal-stuck-command.js";
+import * as healStuck from "./heal-stuck-command.js";
 
 function makeSeams(opts: {
   pollsWithoutOutput: number;

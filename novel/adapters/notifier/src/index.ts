@@ -156,8 +156,8 @@ export class StubNotifier implements Notifier {
 // the `/ntfy` subpath (mirrors `@minsky/token-monitor`'s pattern of
 // re-exporting the Strategy from `index.ts`).
 export {
+  type FetchLike,
   NtfyNotifier,
   type NtfyNotifierOpts,
-  type FetchLike,
   PRIORITY_HEADER,
 } from "./ntfy.js";

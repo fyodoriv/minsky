@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_CALIBRATION_DRIFT_THRESHOLD,
-  type VerdictLogEntry,
   knowledge,
+  type VerdictLogEntry,
 } from "./knowledge.js";
 
 const NOW = new Date("2026-05-10T12:00:00Z");

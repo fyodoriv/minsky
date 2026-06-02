@@ -196,7 +196,6 @@ export class StubOllama implements Ollama {
   /**
    * @otel-exempt test fake — records in-memory and returns a fixed shape
    */
-  // biome-ignore lint/suspicious/useAwait: test fake — async signature is the Ollama interface contract; no await is intentional (no I/O)
   async warm(modelId: string, keepAlive = "30m"): Promise<OllamaResult> {
     this.recorded.push({ op: "warm", modelId, keepAlive });
     return { ok: true };
@@ -205,7 +204,6 @@ export class StubOllama implements Ollama {
   /**
    * @otel-exempt test fake — records in-memory and returns a fixed shape
    */
-  // biome-ignore lint/suspicious/useAwait: test fake — async signature is the Ollama interface contract; no await is intentional (no I/O)
   async unload(modelId: string): Promise<OllamaResult> {
     this.recorded.push({ op: "unload", modelId });
     return { ok: true };
@@ -214,7 +212,6 @@ export class StubOllama implements Ollama {
   /**
    * @otel-exempt test fake — records in-memory and returns the fixture
    */
-  // biome-ignore lint/suspicious/useAwait: test fake — async signature is the Ollama interface contract; no await is intentional (no I/O)
   async ps(): Promise<PsResult> {
     this.recorded.push({ op: "ps" });
     return { ok: true, models: this.psFixture };
@@ -223,7 +220,6 @@ export class StubOllama implements Ollama {
   /**
    * @otel-exempt test fake — no I/O; the green status is unconditional by design
    */
-  // biome-ignore lint/suspicious/useAwait: test fake — async signature is the Ollama interface contract; no await is intentional (no I/O)
   async selfTest(): Promise<SelfTestResult> {
     return {
       status: "green",
@@ -247,4 +243,4 @@ export class StubOllama implements Ollama {
 // Re-export the HTTP Strategy from the sibling module so consumers can
 // `import { HttpOllama } from "@minsky/ollama"` without reaching for
 // the `/http` subpath (mirrors `@minsky/notifier`'s pattern).
-export { HttpOllama, type HttpOllamaOpts, type FetchLike } from "./http.js";
+export { type FetchLike, HttpOllama, type HttpOllamaOpts } from "./http.js";

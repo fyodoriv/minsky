@@ -82,8 +82,8 @@ describe("verdict-uncommitted-progress: visibility + brief-prepend", () => {
     // commit-or-fix-or-restart.
     const src = readFileSync(RUN_SH, "utf8");
     expect(src).toMatch(/may be incomplete or broken/);
-    expect(src).toMatch(/\\\`cat\\\`.*file_editor view.*\\\`git diff\\\`/);
-    expect(src).toMatch(/commit \+ push.*OR.*\\\`git restore\\\`/);
+    expect(src).toMatch(/\\`cat\\`.*file_editor view.*\\`git diff\\`/);
+    expect(src).toMatch(/commit \+ push.*OR.*\\`git restore\\`/);
   });
 
   test("brief-prepend skips the worktree-not-yet-created case (no prior iteration)", () => {

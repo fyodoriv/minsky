@@ -11,11 +11,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
-  REQUIRED_BULLETS,
-  USER_STORY_PATHS,
   checkAllSecuritySections,
   checkSecuritySection,
   extractSecuritySection,
+  REQUIRED_BULLETS,
+  USER_STORY_PATHS,
 } from "./check-user-story-security-section.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

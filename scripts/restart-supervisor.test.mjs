@@ -5,10 +5,10 @@
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
 import {
+  backoffMsFor,
   DEFAULT_BACKOFF_SCHEDULE_SEC,
   DEFAULT_HEALTHY_RESET_SEC,
   DEFAULT_RUN_TIME_LIMIT_SEC,
-  backoffMsFor,
   decideRestart,
   decideStartupThrottle,
   parseDurationSec,

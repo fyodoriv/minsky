@@ -88,7 +88,7 @@ function classifyTask(taskId, block) {
 // Extract all M1 tasks
 /** @type {ReturnType<typeof classifyTask>[]} */
 const tasks = [];
-const taskRegex = /- \[ \] `([^`]+)`(.*?)(?=\n- \[ \] |\n## |\Z)/gs;
+const taskRegex = /- \[ \] `([^`]+)`(.*?)(?=\n- \[ \] |\n## |Z)/gs;
 /** @type {RegExpExecArray | null} */
 let match;
 // biome-ignore lint/suspicious/noAssignInExpressions: standard JS regex iteration idiom

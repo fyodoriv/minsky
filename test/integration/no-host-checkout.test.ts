@@ -96,19 +96,18 @@ function scanForViolations(relPath: string, content: string): string[] {
 }
 
 describe("no-host-checkout regression test", () => {
-  test.each(SCANNED_FILES)(
-    "%s contains no host-mutating `git checkout`/`git switch`",
-    (relPath) => {
-      const absPath = resolve(REPO_ROOT, relPath);
-      expect(existsSync(absPath), `expected ${relPath} to exist`).toBe(true);
-      const violations = scanForViolations(relPath, readFileSync(absPath, "utf8"));
+  test.each(
+    SCANNED_FILES,
+  )("%s contains no host-mutating `git checkout`/`git switch`", (relPath) => {
+    const absPath = resolve(REPO_ROOT, relPath);
+    expect(existsSync(absPath), `expected ${relPath} to exist`).toBe(true);
+    const violations = scanForViolations(relPath, readFileSync(absPath, "utf8"));
 
-      expect(
-        violations,
-        `Found host-mutating git command(s) in ${relPath}. Per the file-header comment in this test, the supervisor MUST NEVER switch host HEAD between branches — that silently auto-stashes operator work. Use \`git worktree add /tmp/<task>\` instead.\n\nViolations:\n${violations.join("\n")}`,
-      ).toEqual([]);
-    },
-  );
+    expect(
+      violations,
+      `Found host-mutating git command(s) in ${relPath}. Per the file-header comment in this test, the supervisor MUST NEVER switch host HEAD between branches — that silently auto-stashes operator work. Use \`git worktree add /tmp/<task>\` instead.\n\nViolations:\n${violations.join("\n")}`,
+    ).toEqual([]);
+  });
 
   test("regex matches the dangerous form against synthetic fixture", () => {
     // Self-test the regex shape — falsifiable per task spec.

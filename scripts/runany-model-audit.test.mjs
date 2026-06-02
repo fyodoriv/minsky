@@ -11,12 +11,12 @@ import {
   ALLDOWN_LOCAL_MIN,
   ALLDOWN_MAX_SWITCH_ITERS,
   PIN_DISPATCH_MIN,
-  SCENARIOS,
-  WEDGED_MAX,
   parseArgs,
   runScenario,
+  SCENARIOS,
   summarize,
   tierOf,
+  WEDGED_MAX,
 } from "./runany-model-audit.mjs";
 
 describe("pre-registered constants match the TASKS.md Success line", () => {

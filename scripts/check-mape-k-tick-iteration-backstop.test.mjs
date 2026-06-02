@@ -10,8 +10,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_EXPECTED_BACKSTOP,
   checkMapeKTickIterationBackstop,
+  DEFAULT_EXPECTED_BACKSTOP,
   readMapeKConfig,
 } from "./check-mape-k-tick-iteration-backstop.mjs";
 

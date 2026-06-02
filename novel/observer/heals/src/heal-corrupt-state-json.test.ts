@@ -3,8 +3,8 @@
 // Scenarios map to user-stories/007-agent-self-heals-catalogued-failures.md.
 
 import { describe, expect, test } from "vitest";
-import * as heal from "./heal-corrupt-state-json.js";
 import type { CorruptStateJsonSeams } from "./heal-corrupt-state-json.js";
+import * as heal from "./heal-corrupt-state-json.js";
 
 /**
  * Build an in-memory filesystem fixture. `files` maps path → content.

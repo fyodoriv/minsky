@@ -24,9 +24,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 ## cross-repo-pr-rate — Cross-repo iteration→PR ship-rate (30d)
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M1_
+_Budget: 1d_
 
-**Value:** 8.0% (19/238 iterations opened a PR over 30d) — verdict=BELOW ratio
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `node scripts/check-cross-repo-pr-rate.mjs --window=30d --json`
 
@@ -80,9 +80,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 ## mttr — Mean time to recovery (MTTR)
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M1.13_
+_Budget: 1d_
 
-**Value:** no OTEL backend — MTTR not measurable yet (M1 gap) seconds
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `histogram_quantile(0.95, supervisor_restart_to_claim_latency_seconds[7d])`
 
@@ -94,9 +94,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 
 ## wrist-dwell — Wrist dwell (inverted)
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M2+ (Watch surface)_
+_Budget: 1d_
 
-**Value:** no watch-surface telemetry yet (M1 gap) seconds/day
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `count(http_get_total{path="/watch.json"}[1d]) * estimated_dwell_seconds_per_request`
 
@@ -122,9 +122,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 30d · Source: `.minsky/metric-snapsho
 
 ## dep-interface-coverage — Dependency interface coverage
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M1 (substrate cohesion)_
+_Budget: 1d_
 
-**Value:** pass fraction
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `node scripts/check-rule-2-dep-coverage.mjs`
 
@@ -136,9 +136,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshot
 
 ## token-budget-honoring — Token-budget honoring
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M1 (cost discipline)_
+_Budget: 1d_
 
-**Value:** 0 budget-pause events in daemon.log errors/week
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `sum(rate(claude_code_api_errors_total{status="429"}[7d]))`
 
@@ -206,9 +206,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 ## path-a-loc-novel-tree — Path A scoreboard: LOC in novel/ (TS+TSX, excl. tests)
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M1_
+_Budget: 1d_
 
-**Value:** 9400 LOC
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `fd -e ts -e tsx --type f --exclude '*.test.*' . novel/ | xargs wc -l | tail -1 | awk '{print $1}'`
 
@@ -262,9 +262,9 @@ _Updated: 2026-05-29T00:00:00Z · Budget: 7d · Source: `.minsky/metric-snapshot
 
 ## spawn-failure-rate-24h — Spawn-failure rate (last 24h) — count of `spawn-failed` iterations
 
-_Updated: 2026-05-29T00:00:00Z · Budget: 1d · Source: `.minsky/metric-snapshots/2026-05-29.json` · Milestone: M1.1_
+_Budget: 1d_
 
-**Value:** 2 count of spawn-failures
+**Value:** (stub) — no fresh local observation (daemon not running on this host; refreshes on the next daemon metrics cycle)
 
 **How to view:** `find .minsky/experiment-store/cross-repo -name '*.jsonl' -mtime -1 -exec cat {} + | jq -s '[.[] | select(.verdict == "spawn-failed")] | length'`
 

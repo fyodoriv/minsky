@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
-  DEFAULT_EXPECTED_PCT,
   checkCadencePivotThreshold,
+  DEFAULT_EXPECTED_PCT,
   readMapeKConfig,
 } from "./check-cadence-pivot-threshold.mjs";
 
