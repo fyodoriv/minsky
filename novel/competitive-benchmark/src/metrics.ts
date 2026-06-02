@@ -82,9 +82,13 @@ export interface MetricDefinition {
 
 /**
  * The cited metric set. ≥5 shared metrics is the slice-(c) success bar;
- * this catalogue ships 11 across all three families so the scorecard never
+ * this catalogue ships 15 across all three families so the scorecard never
  * has fewer than five comparable axes against any competitor whose corpus
- * (slice (b)) reports a subset.
+ * (slice (b)) reports a subset. The 6 public-benchmark axes include the
+ * OpenHands Index multi-task suite — five dimensions (issue-resolution,
+ * greenfield, frontend, testing, info-gathering), each pinned to its
+ * originating public dataset, so a single SWE-bench headline can no longer
+ * mask a dimension where an agent fails.
  *
  * Ordering is informational (DORA → agentic → public-benchmark); consumers
  * key by `id`, never by index.
@@ -259,7 +263,72 @@ export const METRICS: readonly MetricDefinition[] = [
     anchor:
       "Hendrycks, Burns, Kadavath, Arora, Basart, Tang, Song, Steinhardt, 'Measuring Mathematical Problem Solving With the MATH Dataset', NeurIPS 2021 Datasets and Benchmarks (the 12,500-problem competition-math benchmark); Wu, Bansal, Zhang, Wu, Li, Zhu, Wang, Saied, Awadallah, Yang, 'AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework', arXiv 2308.08155, 2023 (the orchestrator-tier reporting convention — AutoGen 69.48% whole-test accuracy vs GPT-4 55.18%)",
     description:
-      "Fraction of the MATH dataset's whole-test split the orchestrator's pipeline solves. The orchestrator-tier math-reasoning counterpart to humaneval-pass-at-1 — multi-agent frameworks that target reasoning (AutoGen) publish this where a stock-model HumanEval headline is unavailable (HumanEval being model-dependent via the AutoGenBench tool).",
+      "Fraction of the MATH dataset's whole-test split the orchestrator's pipeline solves. The orchestrator-tier counterpart to humaneval-pass-at-1 — multi-agent frameworks that target reasoning (AutoGen) publish this where a stock-model HumanEval headline is unavailable (HumanEval being model-dependent via the AutoGenBench tool).",
+  },
+  // --- OpenHands Index multi-task suite (All-Hands AI, 2026) ----------------
+  // Added via task `research-finding-multi-task-benchmark-suite`. The
+  // OpenHands Index (index.openhands.dev) reports per-task scores across FIVE
+  // dimensions instead of a single SWE-bench headline; a single number masks
+  // WHERE an agent fails (Card & Mackinlay 1999 — a glanceable multi-axis
+  // surface beats one aggregate). The five dimensions, each pinned to its
+  // originating public benchmark so the metric definition is reproducible and
+  // primary-cited (the score *source* stays the slice-(b) corpus adapter):
+  //   1. issue-resolution → swe-bench-verified-resolve-rate (already above)
+  //   2. greenfield       → commit0-library-resolve-rate
+  //   3. frontend         → swe-bench-multimodal-resolve-rate
+  //   4. testing          → swt-bench-test-generation-rate
+  //   5. info-gathering   → gaia-resolve-rate
+  // Ids name the originating benchmark (Commit0, SWE-bench Multimodal,
+  // SWT-Bench, GAIA), never "the OpenHands Index", because the Index is a
+  // *reporting harness* over these public datasets — the metric is the
+  // dataset's resolve/generation rate, which any orchestrator can publish
+  // without re-running OpenHands' harness (rule #1 — don't reinvent the
+  // benchmark; cite the dataset). See `novel/competitive-benchmark/README.md`
+  // § "OpenHands Index multi-task suite" for the dimension→dataset table and
+  // `competitors/openhands.md` § "What we learn / steal" for the rationale.
+  {
+    id: "commit0-library-resolve-rate",
+    label: "Commit0 library-from-scratch resolve rate",
+    category: "public-benchmark",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Zhao, Jiang, Lee, Chiu, Cardie, Gallé, Rush, 'Commit0: Library Generation from Scratch', arXiv 2412.01769, 2024 (54 Python libraries built from an API spec + interactive unit tests — the greenfield long-horizon axis; validated by running the provided unit-test suite); adopted as the OpenHands Index 'greenfield' dimension (All-Hands AI, 'OpenHands Index Three Months Out', openhands.dev/blog/openhands-index-3-months-out, 2026-05-11)",
+    description:
+      "Fraction of Commit0's library-from-scratch tasks an agent fully implements (all interactive unit tests pass). The greenfield / long-horizon dimension of the OpenHands Index — distinct from swe-bench-verified-resolve-rate, which patches an EXISTING repo; Commit0 generates a whole library from a spec.",
+  },
+  {
+    id: "swe-bench-multimodal-resolve-rate",
+    label: "SWE-bench Multimodal resolve rate",
+    category: "public-benchmark",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Yang et al., 'SWE-bench Multimodal: Do AI Systems Generalize to Visual Software Domains?', arXiv 2410.03859, ICLR 2025 (617 task instances from 17 JavaScript front-end / data-viz / diagramming libraries, each carrying ≥1 image; top systems resolve as few as 12.2%, exposing the visual-reasoning gap); adopted as the OpenHands Index 'frontend' dimension (All-Hands AI, openhands.dev/blog/openhands-index-3-months-out, 2026-05-11)",
+    description:
+      "Fraction of SWE-bench Multimodal instances resolved — the front-end / visual-software dimension of the OpenHands Index. Unlike swe-bench-verified-resolve-rate (Python, text-only), each instance requires visual reasoning over an image in the problem statement or test.",
+  },
+  {
+    id: "swt-bench-test-generation-rate",
+    label: "SWT-Bench test-generation rate",
+    category: "public-benchmark",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Mündler, Müller, He, Vechev, 'SWT-Bench: Testing and Validating Real-World Bug-Fixes with Code Agents', arXiv 2406.12952, NeurIPS 2024 (the agent must generate a reproducing test that FAILS on the buggy code and PASSES after the golden fix — the inverse of SWE-bench's resolve task; Lite = 276 samples, Verified subset derived from SWE-bench-Verified); adopted as the OpenHands Index 'testing' dimension (All-Hands AI, openhands.dev/blog/openhands-index-3-months-out, 2026-05-11)",
+    description:
+      "Fraction of SWT-Bench issues for which an agent generates a valid reproducing test (fails pre-fix, passes post-fix). The testing dimension of the OpenHands Index — measures test-writing capability, the discipline Minsky's constitution rule #3 (test-first) forces, distinct from issue resolution.",
+  },
+  {
+    id: "gaia-resolve-rate",
+    label: "GAIA general-assistant resolve rate",
+    category: "public-benchmark",
+    unit: "ratio",
+    direction: "higher-is-better",
+    anchor:
+      "Mialon, Fourrier, Swift, Wolf, LeCun, Scialom, 'GAIA: a benchmark for General AI Assistants', arXiv 2311.12983, 2023 (466 multi-step questions requiring reasoning, multi-modality, web browsing, and tool use; humans score 92% vs 15% for GPT-4 + plugins — the info-gathering / tool-use axis); adopted as the OpenHands Index 'info gathering' dimension (All-Hands AI, openhands.dev/blog/openhands-index-3-months-out, 2026-05-11)",
+    description:
+      "Fraction of GAIA questions answered correctly — the information-gathering / tool-use dimension of the OpenHands Index. Measures web-browse + multi-tool synthesis, the orchestrator-tier skill an autonomous loop needs but a single-patch SWE-bench number never surfaces.",
   },
 ];
 

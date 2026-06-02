@@ -145,6 +145,17 @@ export function isExcludedVendor(name: string): boolean {
  *
  * No vendor here is Groq/xAI/Elon-affiliated; the {@link isExcludedVendor}
  * invariant is test-enforced over this array so a future edit cannot add one.
+ *
+ * OpenHands Index multi-task suite (task
+ * `research-finding-multi-task-benchmark-suite`): the metric catalogue now
+ * carries the five Index dimensions (issue-resolution / greenfield / frontend
+ * / testing / info-gathering), each pinned to its originating public dataset
+ * in `./metrics.ts`. A competitor's per-dimension reading is recorded in its
+ * `values` ONLY when vendor-primary and cited — today the single such reading
+ * is SWE-agent's `swe-bench-multimodal-resolve-rate: 0.12` (Yang et al. arXiv
+ * 2410.03859, the published top reading on the frontend dimension). Other
+ * dimensions stay absent (visible-not-silent, never a coerced zero) until a
+ * competitor publishes a fixed absolute number.
  */
 export const COMPETITORS: readonly Competitor[] = [
   {
@@ -199,9 +210,12 @@ export const COMPETITORS: readonly Competitor[] = [
       // reading (not a full-split/Lite proxy), so the proxy caveat that
       // qualified the 2024 entry is dropped.
       citation:
-        "SWE-bench Verified leaderboard (swebench.com, 'Bash Only' track), 'mini-swe-agent + Gemini 3 Pro', submitted 2026-02-26 (resolve rate 0.74 on the 500-instance Verified split using the SWE-agent team's minimal bash-only ReAct scaffold); primary statement at mini-swe-agent.com ('Gemini 3 Pro reaches 74% on SWE-bench verified with mini-swe-agent!'). mini-swe-agent is the SWE-agent project's current 100-line flagship scaffold; the 2024 NeurIPS SWE-agent + GPT-4 reading (full-split proxy, 0.125) it supersedes is retained in competitors/swe-agent.md for history.",
+        "SWE-bench Verified leaderboard (swebench.com, 'Bash Only' track), 'mini-swe-agent + Gemini 3 Pro', submitted 2026-02-26 (resolve rate 0.74 on the 500-instance Verified split using the SWE-agent team's minimal bash-only ReAct scaffold); primary statement at mini-swe-agent.com ('Gemini 3 Pro reaches 74% on SWE-bench verified with mini-swe-agent!'). mini-swe-agent is the SWE-agent project's current 100-line flagship scaffold; the 2024 NeurIPS SWE-agent + GPT-4 reading (full-split proxy, 0.125) it supersedes is retained in competitors/swe-agent.md for history. FRONTEND DIMENSION: SWE-agent holds the published SWE-bench Multimodal top reading (0.12 — best of all systems, vs 0.06 for the next best) per Yang et al., 'SWE-bench Multimodal: Do AI Systems Generalize to Visual Software Domains?', arXiv 2410.03859, ICLR 2025 ('SWE-agent's flexible language-agnostic features enable it to substantially outperform alternatives on SWE-bench M, resolving 12% of task instances compared to 6% for the next best system') — the only vendor-primary per-dimension OpenHands-Index-shape score in the corpus today.",
       asOf: "2026-02-26",
-      values: { "swe-bench-verified-resolve-rate": 0.74 },
+      values: {
+        "swe-bench-verified-resolve-rate": 0.74,
+        "swe-bench-multimodal-resolve-rate": 0.12,
+      },
     },
   },
   {

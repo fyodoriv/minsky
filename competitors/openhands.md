@@ -118,6 +118,31 @@ Still in flight (not part of the June 1 launch):
 | `cost-per-merged-pr`                | $0.30     | 2024-10-04 | All-Hands AI, *Evaluation of LLMs as Coding Agents on SWE-Bench (at 30x Speed!)*, openhands.dev/blog — Claude 3.5 Sonnet, prompt-caching enabled, SWE-bench Lite subset (`$0.3 per issue`). Used here as the cost-per-merged-pr proxy.                |
 | `mean-autonomous-merge-latency`     | 3600 s    | 2024-11-12 | `OpenHands/openhands-index-results/scores.json` — `average_runtime: 3600` for SWE-bench v1.8.3 with Claude Sonnet 4.5. Used here as the mean-autonomous-merge-latency proxy (per-instance wall-clock).                                                |
 
+### OpenHands Index multi-task suite adopted (2026-06-02)
+
+`research-finding-multi-task-benchmark-suite` adopted the **shape** of the
+OpenHands Index (5 per-task dimensions, not one SWE-bench headline) into
+Minsky's metric catalogue. The five dimensions are now registered metrics,
+each pinned to its originating public dataset so a reading is reproducible
+and primary-cited without re-running OpenHands' harness (rule #1):
+
+| Index dimension  | Minsky metric id                    | Dataset (primary citation)                                                  |
+| ---------------- | ----------------------------------- | --------------------------------------------------------------------------- |
+| Issue resolution | `swe-bench-verified-resolve-rate`   | Jimenez et al., SWE-bench, ICLR 2024 (already in the catalogue)             |
+| Greenfield       | `commit0-library-resolve-rate`      | Zhao et al., Commit0, arXiv 2412.01769, 2024                                |
+| Frontend         | `swe-bench-multimodal-resolve-rate` | Yang et al., SWE-bench Multimodal, arXiv 2410.03859, ICLR 2025              |
+| Testing          | `swt-bench-test-generation-rate`    | Mündler et al., SWT-Bench, arXiv 2406.12952, NeurIPS 2024                   |
+| Info gathering   | `gaia-resolve-rate`                 | Mialon et al., GAIA, arXiv 2311.12983, 2023                                 |
+
+OpenHands owns the Index harness but does not publish a single fixed
+absolute per-dimension number cleanly attributable to "OpenHands" as one
+corpus entry (the Index is a multi-model leaderboard), so OpenHands' own
+cells on the four new axes stay `undefined` (visible-not-silent). The one
+vendor-primary Index-shape reading in the corpus today is **SWE-agent's
+0.12 on SWE-bench Multimodal** (the frontend dimension; Yang et al. — top
+of all systems). See `novel/competitive-benchmark/README.md`
+§ "OpenHands Index multi-task suite".
+
 ## Should we wrap OpenHands instead?
 
 > Per rule #1 (don't reinvent), every direct competitor research must end with: *if this competitor is amazing at everything we do, why not wrap it and let it run for 24h?* Honest answer here.

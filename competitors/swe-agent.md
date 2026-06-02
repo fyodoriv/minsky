@@ -102,6 +102,15 @@ For each Minsky surface:
 | Metric                              | Value | Date       | Primary source                                                                                                                                                                                                                                  |
 | ----------------------------------- | ----- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `swe-bench-verified-resolve-rate`   | 0.74  | 2026-02-26 | SWE-bench Verified leaderboard (`swebench.com`, "Bash Only" track), _mini-swe-agent + Gemini 3 Pro_, submitted 2026-02-26 (resolve rate 0.74 on the 500-instance Verified split); primary statement at `mini-swe-agent.com`.                     |
+| `swe-bench-multimodal-resolve-rate` | 0.12  | 2024-10-04 | Yang et al., _SWE-bench Multimodal: Do AI Systems Generalize to Visual Software Domains?_, arXiv 2410.03859, ICLR 2025 — "SWE-agent's flexible language-agnostic features enable it to substantially outperform alternatives on SWE-bench M, resolving 12% of task instances compared to 6% for the next best system." The **frontend** dimension of the OpenHands Index 5-task suite (`research-finding-multi-task-benchmark-suite`); SWE-agent holds the published top reading, making it the only vendor-primary per-dimension Index-shape score in the corpus today. |
+
+This is the **frontend** axis of the OpenHands Index multi-task suite
+(issue-resolution / greenfield / frontend / testing / info-gathering — see
+`novel/competitive-benchmark/README.md` § "OpenHands Index multi-task
+suite"). SWE-bench Multimodal (617 JavaScript front-end / data-viz /
+diagramming instances, each carrying ≥1 image) exposes the visual-reasoning
+gap a text-only SWE-bench Verified number masks: even the top system clears
+only 12%.
 
 Note: this reading was refreshed (2026-06-02) from the original 2024
 NeurIPS baseline to the SWE-agent team's current flagship scaffold,

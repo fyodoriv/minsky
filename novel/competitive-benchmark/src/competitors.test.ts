@@ -131,6 +131,20 @@ describe("publishedValue", () => {
     expect(publishedValue(oh, "autonomous-merge-rate")).toBeUndefined();
   });
 
+  it("records SWE-agent's vendor-primary SWE-bench Multimodal frontend reading (research-finding-multi-task-benchmark-suite)", () => {
+    // SWE-agent holds the published top reading on SWE-bench Multimodal (0.12,
+    // best of all systems, vs 0.06 next) per Yang et al. arXiv 2410.03859 —
+    // the only vendor-primary OpenHands-Index-shape per-dimension score in the
+    // corpus today (the frontend dimension). Other suite dimensions
+    // (greenfield/testing/info-gathering) report no fixed vendor-primary
+    // number yet, so they stay undefined (visible-not-silent, never a coerced
+    // zero) until a competitor publishes one.
+    const swe = competitorById("swe-agent") as Competitor;
+    expect(publishedValue(swe, "swe-bench-multimodal-resolve-rate")).toBeCloseTo(0.12);
+    expect(publishedValue(swe, "commit0-library-resolve-rate")).toBeUndefined();
+    expect(publishedValue(swe, "gaia-resolve-rate")).toBeUndefined();
+  });
+
   it("returns undefined for a local-harness source (slice-c fills it at runtime)", () => {
     // Synthetic local-harness competitor — the production corpus has all
     // 6 competitors on `published` post-expansion, but the type's

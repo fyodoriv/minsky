@@ -25,7 +25,7 @@ Public surface:
 - `MetricCategory` — `"dora" | "agentic" | "public-benchmark"`.
 - `MetricDirection` — `"higher-is-better" | "lower-is-better"`.
 - `MetricUnit` — `"count-per-day" | "seconds" | "ratio" | "usd"`.
-- `METRICS` — the 14-metric catalogue (4 DORA keys + 7 agentic + 3 public). The 7th agentic metric `daemon-stability-pct` (added 2026-05-24 to close the `single-stability-number` P0 task) is the M1.1 reliability SLI — rolling 7-day fraction of daemon iterations that completed cleanly, with the ≥0.90 gate threshold gating the local-models-default stance from `user-stories/015-local-models-until-stable.md`. No public competitor publishes this metric (it's structurally only meaningful for an autonomous orchestrator running a 24/7 self-iterating loop). The 3 public-benchmark metrics are `swe-bench-verified-resolve-rate` (agent tier), `humaneval-pass-at-1` (orchestrator code tier), and `math-whole-test-accuracy` (orchestrator math-reasoning tier — added via `corpus-add-autogen-microsoft` for AutoGen, which publishes MATH but no stock-model HumanEval headline).
+- `METRICS` — the 15-metric catalogue (4 DORA keys + 7 agentic + 6 public). The 7th agentic metric `daemon-stability-pct` (added 2026-05-24 to close the `single-stability-number` P0 task) is the M1.1 reliability SLI — rolling 7-day fraction of daemon iterations that completed cleanly, with the ≥0.90 gate threshold gating the local-models-default stance from `user-stories/015-local-models-until-stable.md`. No public competitor publishes this metric (it's structurally only meaningful for an autonomous orchestrator running a 24/7 self-iterating loop). The 6 public-benchmark metrics are `swe-bench-verified-resolve-rate` (agent tier), `humaneval-pass-at-1` (orchestrator code tier), `math-whole-test-accuracy` (orchestrator math-reasoning tier — added via `corpus-add-autogen-microsoft` for AutoGen, which publishes MATH but no stock-model HumanEval headline), plus the four OpenHands Index multi-task dimensions added via `research-finding-multi-task-benchmark-suite`: `commit0-library-resolve-rate` (greenfield), `swe-bench-multimodal-resolve-rate` (frontend), `swt-bench-test-generation-rate` (testing), and `gaia-resolve-rate` (info-gathering) — see the [OpenHands Index multi-task suite](#openhands-index-multi-task-suite) section below.
 - `metricById(id)` — catalogue lookup.
 - `compareValues(metric, a, b)` — direction-aware rank: `1` = `a` better, `-1` = `b` better, `0` = tie.
 - `computeDelta(metric, minskyValue, competitorValue)` — direction-normalised delta; positive = Minsky ahead.
@@ -83,6 +83,7 @@ pinned in each `competitors/<id>.md` research file:
 | Metric                              | Tier         | Competitors with readings                                                                  |
 | ----------------------------------- | ------------ | ------------------------------------------------------------------------------------------ |
 | `swe-bench-verified-resolve-rate`   | agent        | 7 (Claude Code, OpenHands, Aider, SWE-agent, Devin, OpenAI Codex, Augment Code)            |
+| `swe-bench-multimodal-resolve-rate` | agent        | 1 (SWE-agent — top reading 0.12, vs 0.06 next; Yang et al. arXiv 2410.03859, ICLR 2025)    |
 | `autonomous-merge-rate`             | agent        | 3 (Devin, Claude Code, Cursor)                                                             |
 | `human-intervention-rate`           | agent        | 2 (Devin, Claude Code)                                                                     |
 | `mean-autonomous-merge-latency`     | agent        | 2 (OpenHands, Devin)                                                                       |
@@ -90,9 +91,18 @@ pinned in each `competitors/<id>.md` research file:
 | `humaneval-pass-at-1`               | orchestrator | 1 (MetaGPT — primary citation: arXiv 2308.00352, ICLR 2024 Oral)                           |
 | `math-whole-test-accuracy`          | orchestrator | 1 (AutoGen — primary citation: Wu et al., arXiv 2308.08155, 2023; 69.48% vs GPT-4 55.18%)  |
 
-Total: **7 metrics × 10 competitors** — shape gate MET (M1.10 requires
-≥4 × ≥5; current density: 7×5 on the agent SWE-bench axis + 1×1 on the
-orchestrator HumanEval axis + 1×1 on the orchestrator MATH axis). Slice
+`commit0-library-resolve-rate`, `swt-bench-test-generation-rate`, and
+`gaia-resolve-rate` are **registered metric definitions with no
+vendor-primary reading yet** — no competitor has published a fixed
+absolute number against those datasets that is cleanly attributable to a
+single corpus entry, so their cells stay `undefined` (visible-not-silent,
+never a coerced zero) until one does. The metric definition ships now so
+the axis is visible the moment a reading lands.
+
+Total: **8 metrics × 10 competitors** — shape gate MET (M1.10 requires
+≥4 × ≥5; current density: 7×5 on the agent SWE-bench axis + 1 on the
+frontend SWE-bench-Multimodal axis + 1×1 on the orchestrator HumanEval
+axis + 1×1 on the orchestrator MATH axis). Slice
 (d) is the `**Competitive-goal**:`
 field + `scripts/check-competitive-goal.mjs` lint that enforces every
 P0/P1 task block names which scorecard metric it moves; the lint ships
@@ -102,6 +112,47 @@ Discovery and refresh of the corpus are automated:
 
 - **Per-vendor freshness loop** (PR #719) — `scripts/check-corpus-freshness.mjs` + `scripts/auto-file-corpus-refresh-tasks.mjs` + weekly launchd / systemd fires. When any `asOf` reading goes >180 days stale, the runner files a `corpus-refresh-<id>` task that the tick-loop's `/next-task` picks up and the `/competitor-research <url> --refresh` skill clears.
 - **Quarterly LIST discovery** — `corpus-discover-quarterly` recurring task in `TASKS.md` drives the operator to scan for NEW vendors and invoke `/competitor-research` for each candidate. PR #720 (the first run): lifted in OpenAI Codex + Augment Code at the agent tier. PR #722 (this PR) — lifted in MetaGPT at the orchestrator tier + filed P2 follow-ups for AutoGen, CrewAI, LangGraph, OpenAI Agents SDK.
+
+## OpenHands Index multi-task suite
+
+Added 2026-06-02 via `research-finding-multi-task-benchmark-suite`. The
+OpenHands Index ([index.openhands.dev](https://index.openhands.dev),
+All-Hands AI, *OpenHands Index Three Months Out*,
+[openhands.dev/blog/openhands-index-3-months-out](https://openhands.dev/blog/openhands-index-3-months-out),
+2026-05-11) reports per-task scores across **five dimensions** instead of
+a single SWE-bench headline. A single resolve-rate number masks *where* an
+agent fails; five per-dimension axes surface it (Card & Mackinlay 1999 — a
+glanceable multi-axis display beats one aggregate; rule #4 — visible).
+
+Minsky adopts the **suite shape**, not the harness: each dimension is a
+metric pinned to its originating public dataset, so a reading is
+reproducible and primary-cited without re-running OpenHands' harness
+(rule #1 — cite the dataset, don't reinvent the benchmark).
+
+| OpenHands Index dimension | Minsky metric id                    | Originating dataset (primary citation)                                                                                  |
+| ------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Issue resolution          | `swe-bench-verified-resolve-rate`   | Jimenez et al., *SWE-bench*, ICLR 2024 (already in the catalogue — patches an existing Python repo)                      |
+| Greenfield                | `commit0-library-resolve-rate`      | Zhao, Jiang, Lee, Chiu, Cardie, Gallé, Rush, *Commit0: Library Generation from Scratch*, arXiv 2412.01769, 2024         |
+| Frontend                  | `swe-bench-multimodal-resolve-rate` | Yang et al., *SWE-bench Multimodal*, arXiv 2410.03859, ICLR 2025 (617 JS instances w/ images; SWE-agent tops at 0.12)    |
+| Testing                   | `swt-bench-test-generation-rate`    | Mündler, Müller, He, Vechev, *SWT-Bench*, arXiv 2406.12952, NeurIPS 2024 (generate a reproducing test, not the fix)      |
+| Info gathering            | `gaia-resolve-rate`                 | Mialon, Fourrier, Swift, Wolf, LeCun, Scialom, *GAIA*, arXiv 2311.12983, 2023 (466 multi-step tool-use questions)        |
+
+Why these axes matter for an orchestrator: the **testing** dimension
+(SWT-Bench) measures the exact discipline Minsky's constitution rule #3
+(test-first) forces, so it is the dimension where Minsky's gate stack
+should show an orchestrator-tier delta the bare agent's SWE-bench number
+never surfaces. The **info-gathering** dimension (GAIA) measures the
+web-browse + multi-tool synthesis an autonomous loop needs but a
+single-patch resolve-rate ignores.
+
+**Measurement note** — the parent task pre-registered
+`bin/minsky competitive --json | jq '.metrics | length'`, but the
+executable `bin/minsky competitive` CLI was deleted in the 2026-05-28
+Path-A Phase 10 cut (this package is now a data-only leaf). The corpus is
+the source of truth; the suite is verified instead by
+`pnpm vitest run novel/competitive-benchmark/` (the test
+"ships the OpenHands Index 5-task multi-benchmark suite" asserts all five
+dimensions are registered with their originating-dataset anchors).
 
 ## Pattern conformance
 
@@ -185,7 +236,7 @@ absent. The remaining surface is the type boundary — enforced by
 - **Measurement**: `pnpm vitest run novel/competitive-benchmark/` exits 0
   with the catalogue/corpus/branch assertions green;
   `node -e "import('@minsky/competitive-benchmark').then(m=>console.log(m.METRICS.length, m.COMPETITORS.length))"`
-  prints `14 10`.
+  prints `15 10`.
 - **Literature anchor**: Basili, Caldiera, Rombach, *GQM*, 1994 (derive the
   metric from the goal); Forsgren, Humble, Kim, *Accelerate*, 2018 (DORA —
   outcome not vanity); Jimenez et al., *SWE-bench*, *ICLR* 2024 (public
