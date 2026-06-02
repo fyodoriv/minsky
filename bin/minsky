@@ -3038,7 +3038,8 @@ if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" !=
       # read the space-joined argv (`--host <p>` or `--hosts-dir <p>`).
       _runany_argv="$(node "$_runany_resolver" "$_target_host" 2>/dev/null || echo "")"
       if [ -n "$_runany_argv" ]; then
-        # shellcheck disable=SC2206 — deliberate word-split of the two-token argv.
+        # Deliberate word-split of the two-token argv (`--host <p>` etc.).
+        # shellcheck disable=SC2206
         _launch_args=($_runany_argv)
       fi
     fi
