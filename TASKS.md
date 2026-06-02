@@ -763,18 +763,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: `bin/minsky competitive` no longer in CLI help; `competitors/scorecard.md` matches the format Path C's M1.10 scorecard committed.
   - **Risk**: low. Static markdown is a strict subset of the executable scorecard.
 
-- [ ] `competitor-add-auto-code-rover` — research AutoCodeRover (AutoCodeRoverSG/auto-code-rover, 3.1k★, STALE April 2025); produce `competitors/auto-code-rover.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-auto-code-rover
-  - **Touches**: competitors/auto-code-rover.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
-  - **Milestone**: M1
-  - **Hypothesis**: AutoCodeRover's ISSTA-2024 paper (46.2% SWE-bench Verified at <$0.70/issue) is high-quality research but the project is stale. Q2 should extract the AST-aware fault-localization technique for Minsky's adapter layer.
-  - **Success**: `competitors/auto-code-rover.md` with Post-mortem + Five Pivot Questions sections.
-  - **Pivot**: stale; extract the technical lessons.
-  - **Measurement**: `test -f competitors/auto-code-rover.md && grep -c '^## Post-mortem' competitors/auto-code-rover.md` ≥ 1.
-  - **Anchor**: rule #1; AutoCodeRover paper arXiv:2404.05427 ISSTA 2024 (Zhang et al.); `https://github.com/AutoCodeRoverSG/auto-code-rover`.
-
 - [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-pr-agent
   - **Touches**: competitors/pr-agent.md, ask-human.md
