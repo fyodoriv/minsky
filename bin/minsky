@@ -784,6 +784,36 @@ case "${1:-}" in
     echo "For the transform orchestrator:  minsky --transform --help"
     exit 0
     ;;
+  --version|-V|version)
+    # `minsky --version` — print the package version and exit, with ZERO
+    # side-effects (no daemon start, no config write, no repo resolution).
+    # This is the script-friendly probe mode (`minsky-npx-install-and-run`
+    # Success criterion §3): `npx minsky --version` must print the
+    # published version so CI / wrapper scripts can detect the install
+    # without triggering the start-or-attach flow.
+    #
+    # Source-of-truth: the `version` field of the package's own
+    # `package.json`, located relative to THIS script (so the version is
+    # correct whether minsky runs from a git clone or an npm-installed
+    # tarball — the `bin/minsky` shim sits at `<pkg-root>/bin/minsky`).
+    # Rule #6: if the version can't be read, fall back to "unknown"
+    # rather than crash — a probe must never be the thing that breaks.
+    _ver_pkg="$(dirname "$(_minsky_realpath "$0")")/../package.json"
+    if [ -f "$_ver_pkg" ]; then
+      MINSKY_VER_PKG="$_ver_pkg" node --input-type=module -e "
+import { readFileSync } from 'node:fs';
+try {
+  const p = JSON.parse(readFileSync(process.env.MINSKY_VER_PKG, 'utf8'));
+  process.stdout.write((p.version ?? 'unknown') + '\n');
+} catch {
+  process.stdout.write('unknown\n');
+}
+" 2>/dev/null || echo "unknown"
+    else
+      echo "unknown"
+    fi
+    exit 0
+    ;;
   status)
     if [ "${2:-}" = "--help" ] || [ "${2:-}" = "-h" ]; then
       cat <<'EOF'
@@ -2989,6 +3019,48 @@ _daemon_running_for_host() {
 # consumed --transform / --bash-runner from $@, so we read the
 # USE_TRANSFORM / USE_BASH_RUNNER vars set there.)
 if [ "$USE_TRANSFORM" != "1" ] && [ "$USE_BASH_RUNNER" != "1" ] && [ "${1:-}" != "--daemon" ] && [ "${1:-}" != "status" ] && [ "${1:-}" != "stop" ] && [ "${1:-}" != "logs" ] && [ "${1:-}" != "watch" ] && [ "${1:-}" != "doctor" ]; then
+  # Step 0: npx-install bootstrap (`minsky-npx-install-and-run`).
+  # When the literal first interaction is `npx minsky` (no subcommand,
+  # no prior install), the operator has NO `~/.minsky/config.json` yet —
+  # the smart-attach block below would start a daemon against an
+  # un-init'd machine. Instead, when ALL THREE of the following hold:
+  #   (i)   this is an npx invocation (npm sets `npm_lifecycle_event`
+  #         and `npm_config_user_agent` for `npx <pkg>` spawns), AND
+  #   (ii)  no `~/.minsky/config.json` exists (truly fresh machine), AND
+  #   (iii) an interactive TTY is attached (so init's prompts make sense
+  #         and we don't clobber a scripted/CI run),
+  # we prepend the `init` flow against the cwd, THEN fall through to the
+  # normal start-or-attach behaviour. The result: a fresh operator types
+  # ONE shell line (`npx minsky`) and lands in a live iteration.
+  #
+  # Escape hatch: MINSKY_SKIP_NPX_INIT=1 forces the legacy
+  # start-or-attach path even under npx (for non-interactive npx runs in
+  # CI that bring their own config). Rule #11: the bootstrap is the
+  # DEFAULT for the npx path, with a documented opt-out.
+  #
+  # `npx minsky --version` never reaches here — it short-circuits in the
+  # early `--version` case (no subcommand-stripping side-effects).
+  _is_npx=0
+  if [ -n "${npm_lifecycle_event:-}" ] || [ -n "${npm_config_user_agent:-}" ]; then
+    _is_npx=1
+  fi
+  if [ "$_is_npx" = "1" ] \
+    && [ "${MINSKY_SKIP_NPX_INIT:-0}" != "1" ] \
+    && [ ! -f "$MINSKY_STATE_DIR/config.json" ] \
+    && [ -t 0 ] && [ -t 1 ]; then
+    echo "minsky: first run via npx — no config found, bootstrapping for $(basename "$(pwd)")..."
+    # `init` against cwd writes ~/.minsky/config.json. It refuses if cwd
+    # is not a git repo (exit 2) — surface that to the operator instead
+    # of silently starting a daemon against a non-repo.
+    if ! "$0" init "$(pwd)"; then
+      echo "minsky: bootstrap could not initialize this folder." >&2
+      echo "  hint: cd into a git repo first, then re-run \`npx minsky\`." >&2
+      exit 2
+    fi
+    echo ""
+    # Fall through to the start-or-attach block below — config now exists.
+  fi
+
   # Step 1: doctor preamble. Run the existing `doctor` check; on
   # critical fail, print + exit. Operator gets actionable hints.
   # Skipped when MINSKY_SKIP_DOCTOR=1 (escape hatch for known-degraded

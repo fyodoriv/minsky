@@ -20,10 +20,10 @@ It runs from Claude Code, Devin, or **local models** — same core behavior, no 
 ## Install
 
 ```bash
-git clone https://github.com/fyodoriv/minsky.git && cd minsky && pnpm install && ./bin/minsky
+cd /any/git/repo && npx -y minsky
 ```
 
-One-command **install** is also gated behind `npx -y minsky init` (release-candidate). **Clean uninstall**: `minsky uninstall --force`. Full runbook: [INSTALL.md](./INSTALL.md).
+`npx minsky` installs + bootstraps `~/.minsky/config.json` + starts an iteration. **Uninstall**: `minsky uninstall --force`. Runbook: [INSTALL.md](./INSTALL.md). Contributors: `git clone` + `pnpm install` + `./bin/minsky`.
 
 ## Run
 
