@@ -653,6 +653,8 @@ export function daemonPrLintPassRateInvariant(opts) {
  * @typedef {object} GitConfigParseableInvariantOpts
  * @property {() => Promise<{ ok: boolean, durationMs: number, stderr?: string }>} probeGitStatus - runs `git status` (or equiv) under a tight timeout
  * @property {() => Promise<readonly { line: number, marker: string }[]>} scanGitConfigForConflicts - probes ~/.gitconfig for merge-conflict markers
+ * @property {() => Promise<boolean>} [probeGitBare] - reads `git config core.bare`; resolves true when set to `true`. Optional so existing callers/tests stay valid.
+ * @property {() => Promise<number>} [probeGitWorktreeCount] - counts entries under `.git/worktrees/`; >0 means a working tree coexists with a bare flag. Optional.
  * @property {number} [timeoutMs] - declare broken if git status takes longer than this (default 5000)
  */
 
@@ -675,7 +677,13 @@ export function daemonPrLintPassRateInvariant(opts) {
  * @returns {Invariant}
  */
 export function gitConfigParseableInvariant(opts) {
-  const { probeGitStatus, scanGitConfigForConflicts, timeoutMs = 5000 } = opts;
+  const {
+    probeGitStatus,
+    scanGitConfigForConflicts,
+    probeGitBare,
+    probeGitWorktreeCount,
+    timeoutMs = 5000,
+  } = opts;
   /** @type {Invariant} */
   const fn = async () => {
     const result = await probeGitStatus();
@@ -687,6 +695,34 @@ export function gitConfigParseableInvariant(opts) {
       markers.length > 0
         ? ` Conflict markers in ~/.gitconfig: ${markers.map((m) => `line ${m.line} (${m.marker})`).join(", ")}.`
         : "";
+
+    // Bare-misset detection (task minsky-repo-git-config-bare-misset): when
+    // `git status` fails with `fatal: this operation must be run in a work
+    // tree` the historic fix was a blind `rm .git/index.lock` — but the index
+    // isn't locked. The mechanically-diagnostic combination is `core.bare =
+    // true` AND >=1 entry under `.git/worktrees/` (a working tree coexisting
+    // with the bare flag). When both hold, the correct one-line fix is
+    // `git config core.bare false`, not the index-lock dance. We only probe
+    // these signals on the work-tree-error path so a parse-error / conflict-
+    // marker failure keeps its existing, more-specific fix.
+    const isWorkTreeError =
+      !result.ok && /must be run in a work tree/i.test(result.stderr ?? "");
+    if (markers.length === 0 && isWorkTreeError && probeGitBare && probeGitWorktreeCount) {
+      const bare = await probeGitBare();
+      const worktreeCount = bare ? await probeGitWorktreeCount() : 0;
+      if (bare && worktreeCount > 0) {
+        return {
+          id: "git-config-parseable",
+          ok: false,
+          evidence: `git status failed: ${result.stderr ?? "unknown error"}. Diagnosed: \`core.bare = true\` with ${worktreeCount} active worktree(s) under .git/worktrees/ — a working tree coexists with the bare flag, so git refuses every work-tree op.`,
+          suggestedTaskTitle:
+            "git config core.bare is true but a working tree exists — flip it back",
+          suggestedFix:
+            "core.bare is set true on a repo that has a working tree (active .git/worktrees/ entries). The index lock is NOT the issue. Fix: `git config core.bare false`. Then verify: `git status` succeeds.",
+        };
+      }
+    }
+
     const evidence = result.ok
       ? `git status took ${result.durationMs}ms (>${timeoutMs}ms threshold).${markerEvidence}`
       : `git status failed (exit non-zero or timeout): ${result.stderr ?? "unknown error"}.${markerEvidence}`;
@@ -1848,6 +1884,30 @@ export function defaultInvariants() {
     }
   };
 
+  /** @type {() => Promise<boolean>} - reads core.bare on the repo under diagnosis */
+  const probeGitBare = async () => {
+    try {
+      const { stdout } = await execFileAsync("git", ["config", "--get", "core.bare"], {
+        timeout: 5_000,
+        cwd: repoRoot,
+      });
+      return stdout.trim() === "true";
+    } catch {
+      // core.bare unset (git config exits 1) means not bare.
+      return false;
+    }
+  };
+
+  /** @type {() => Promise<number>} - counts entries under .git/worktrees/ */
+  const probeGitWorktreeCount = async () => {
+    try {
+      const entries = await readdir(join(repoRoot, ".git", "worktrees"));
+      return entries.length;
+    } catch {
+      return 0;
+    }
+  };
+
   return [
     tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan }),
     claudeBinaryReachableInvariant({ probe: spawnVersionProbe }),
@@ -1858,7 +1918,12 @@ export function defaultInvariants() {
     daemonTaskIdStalenessInvariant({ inFlightTaskIds, tasksMdContent }),
     daemonIterationRuntimeInvariant({ listClaudePrintSpawns: listClaudePrintSpawnsViaPgrep }),
     daemonPrLintPassRateInvariant({ recentDaemonPrs }),
-    gitConfigParseableInvariant({ probeGitStatus, scanGitConfigForConflicts }),
+    gitConfigParseableInvariant({
+      probeGitStatus,
+      scanGitConfigForConflicts,
+      probeGitBare,
+      probeGitWorktreeCount,
+    }),
     daemonPrStuckDirtyInvariant({ openDaemonPrs: openDaemonPrsForDirty }),
     daemonPrThrashInvariant({ openDaemonPrs: openDaemonPrsForThrash }),
     daemonSpawnFailureRateInvariant({
