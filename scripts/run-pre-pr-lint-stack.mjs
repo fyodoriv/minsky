@@ -306,6 +306,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "metric-freshness",
       "milestone-alignment",
       "no-singleton-experiment",
+      "gate-scratch-resolvable",
       "orphan-tests",
       "otel-no-pii",
       "pivot-success-margin",
@@ -667,6 +668,19 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["full"],
     cmd: "node",
     args: ["scripts/check-no-singleton-experiment.mjs"],
+  },
+  {
+    // rule #10 ratchet (`gate-scratch-resolvable-ratchet`): the local
+    // merge-gate's scratch clone must yield a module-resolvable workspace.
+    // The zero-merge regression (root-only `node_modules` symlink instead
+    // of a real `pnpm install`) was silent because an infra-broken vet was
+    // misattributed as a per-PR gate-red. This structural check fails at PR
+    // time if the scratch-prep drops the real install — full stage because
+    // it's a pure sub-second source-shape assertion, not a per-PR diff.
+    name: "gate-scratch-resolvable",
+    stages: ["full"],
+    cmd: "node",
+    args: ["scripts/check-gate-scratch-resolvable.mjs"],
   },
   {
     // rule #10 deterministic enforcement of the devin-spawn-no-pr-opened
