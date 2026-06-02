@@ -220,8 +220,7 @@ The classification + permission decision is migrated to the post-phase-7b
 home for runner logic, `scripts/lib/repo-policy.mjs` (the
 `novel/cross-repo-runner/` package the original task `**Files**` named was
 deleted in PR #883 and its logic moved to `scripts/lib/*.mjs`; this seam
-follows that convention rather than resurrecting the deleted package — rule
-#1). The conductor (`scripts/orchestrate.mjs`) emits the verdict ledger; the
+follows that convention rather than resurrecting the deleted package — rule #1). The conductor (`scripts/orchestrate.mjs`) emits the verdict ledger; the
 gate (`scripts/local-gate-merge.mjs`) carries the git-layer backstop.
 
 ### Measurement (pre-registered, rule #9)
