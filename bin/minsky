@@ -160,6 +160,25 @@ _minsky_config_value() {
   ' "$_cfg" 2>/dev/null
 }
 
+_minsky_count_bootstrapped_siblings() {
+  # Count the bootstrapped host repos that live directly under `$1`
+  # (a parent directory). A host is "bootstrapped" iff it carries the
+  # `.minsky/repo.yaml` sidecar that `bin/minsky-bootstrap.sh` writes —
+  # the same marker `bin/minsky-run.sh`'s scan mode and Invariant 6 use.
+  # Prints the integer count to stdout (0 when the parent is missing or
+  # has no bootstrapped children). Used by `install-daemon` (to decide
+  # `--host` vs `--hosts-dir`) and by `doctor` (to warn on the
+  # single-host-plist-with-many-hosts misconfig). Pure read-only glob —
+  # no JSON parser, portable everywhere `fd`/`find` are shimmed.
+  local _parent="$1"
+  [ -n "$_parent" ] && [ -d "$_parent" ] || { printf '0'; return 0; }
+  local _count=0 _d
+  for _d in "$_parent"/*/; do
+    [ -f "${_d}.minsky/repo.yaml" ] && _count=$((_count + 1))
+  done
+  printf '%s' "$_count"
+}
+
 # ── Bash-skeleton probe set (shared by `doctor` and the deprecated
 #    `bash-doctor` alias) ──────────────────────────────────────────────
 #
@@ -1526,8 +1545,10 @@ Usage: minsky doctor [--quiet]
 
 Health probe for this host machine. Prints PASS / WARN / FAIL for
 each of: node 20+, git, gh CLI, pnpm, repo `.minsky/` directory,
-~/.minsky/ state, launchd / systemd-user supervisor wiring, OpenHands
-SDK installation, and any other invariant the supervisor needs.
+~/.minsky/ state, launchd / systemd-user supervisor wiring, multi-host
+plist coverage (warns when the daemon plist targets a single `--host`
+but ≥2 bootstrapped hosts exist under its parent), OpenHands SDK
+installation, and any other invariant the supervisor needs.
 
 Flags:
   --quiet   Only print FAIL lines + exit non-zero on any failure.
@@ -1549,6 +1570,8 @@ EOF
     #   PASS  daemon     — daemon running (optional but informative)
     #   WARN  agents     — at least one of devin/claude/aider on PATH
     #   PASS  host       — default_host (if configured) is a git repo
+    #   WARN  multi-host — daemon plist targets a single --host but ≥2
+    #                      bootstrapped hosts exist under its parent
     #
     # Exit codes:
     #   0 — all critical checks (node, git) pass
@@ -1651,6 +1674,32 @@ EOF
         _doctor_print PASS "host" "$_host (valid git repo)"
       else
         _doctor_print WARN "host" "$_host is not a git repo"
+      fi
+    fi
+
+    # OPTIONAL — multi-host plist coverage
+    # (TASKS.md minsky-daemon-plist-multi-host)
+    #
+    # The auto-generated launchd plist walks EVERY bootstrapped host
+    # under the parent of default_host via `--hosts-dir`. But an older
+    # plist (installed before the multi-host emit, or hand-edited) may
+    # still target a single repo with `--host`. When that single-host
+    # plist coexists with ≥2 bootstrapped siblings, the extra host(s)
+    # are silently never visited — the exact 2026-05-20 audit bug
+    # (agentbrew bootstrapped since 2026-05-19, zero iterations against
+    # it). Warn with the one-command fix so the operator never has to
+    # reverse-engineer the launchd args. Read-only: `grep` over the
+    # plist, glob over the parent dir; never mutates state.
+    if [ -n "${_host:-}" ]; then
+      _mh_plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+      _mh_parent=$(dirname "$_host")
+      _mh_siblings=$(_minsky_count_bootstrapped_siblings "$_mh_parent")
+      if [ -f "$_mh_plist" ] && [ "$_mh_siblings" -ge 2 ] 2>/dev/null; then
+        if grep -q -- "--hosts-dir" "$_mh_plist" 2>/dev/null; then
+          _doctor_print PASS "multi-host" "plist walks all $_mh_siblings bootstrapped hosts under $_mh_parent"
+        elif grep -q -- "--host" "$_mh_plist" 2>/dev/null; then
+          _doctor_print WARN "multi-host" "$_mh_siblings bootstrapped hosts under $_mh_parent but plist targets only one (--host) — re-run \`minsky install-daemon\` to walk all"
+        fi
       fi
     fi
 
@@ -1842,14 +1891,34 @@ EOF
   install-daemon)
     # Install a launchd plist so minsky auto-starts on login/reboot.
     # Reads default_host from ~/.minsky/config.json.
+    #
+    # `--print` / `--dry-run`: write the plist to its destination but
+    # SKIP the `launchctl bootout`/`bootstrap` reload — lets the operator
+    # (and the paired bats tests) preview the generated ProgramArguments
+    # without disturbing a running daemon. The positional default_host
+    # arg ($2) still works when --print is the *second* token, so the
+    # flag is parsed out of all args, not assumed positional.
     _real_bin=$(_minsky_realpath "$0")
+    _id_dry_run=0
+    _id_positional_host=""
+    for _id_a in "${@:2}"; do
+      case "$_id_a" in
+        --print|--dry-run) _id_dry_run=1 ;;
+        --*) ;;  # ignore unknown flags (forward-compat)
+        *) [ -z "$_id_positional_host" ] && _id_positional_host="$_id_a" ;;
+      esac
+    done
     _default_host=$(_minsky_config_value "default_host")
     if [ -z "$_default_host" ]; then
-      _default_host="${2:-$(pwd)}"
+      _default_host="${_id_positional_host:-$(pwd)}"
       echo "No default_host in ~/.minsky/config.json — using: $_default_host"
     fi
 
     _plist="$HOME/Library/LaunchAgents/com.minsky.daemon.plist"
+    # Ensure ~/Library/LaunchAgents exists (fresh machines + --print runs
+    # against a clean HOME may not have it yet) so the later `mv` of the
+    # generated plist never fails on a missing directory.
+    mkdir -p "$(dirname "$_plist")"
     # Resolve the node binary and runner script — launchd runs the node
     # process DIRECTLY (foreground), not via --daemon which backgrounds.
     _repo_dir=$(dirname "$(dirname "$_real_bin")")
@@ -1896,20 +1965,50 @@ EOF
       fi
       # ProgramArguments for the bash variant: invoke bash directly so
       # launchd sees the bash PID and KeepAlive=true reaches it. The
-      # bash runner takes --hosts-dir; we pass the host's parent so
-      # the walker finds exactly one host (matches run-daemon.sh's
-      # single-host adaptation).
+      # bash runner takes --hosts-dir <parent>; the walker then visits
+      # EVERY bootstrapped host repo under that parent in round-robin —
+      # which is exactly the multi-host behavior TASKS.md
+      # minsky-daemon-plist-multi-host wants (a second bootstrapped
+      # sibling like agentbrew is no longer silently skipped). The
+      # `MINSKY_MULTI_HOST=0` escape hatch falls back to the explicit
+      # single-host `--host` form for operators who only want one repo
+      # walked (the task's Pivot path).
       _bash_hosts_parent=$(dirname "$_default_host")
-      _program_args="    <string>/bin/bash</string>
+      if [ "${MINSKY_MULTI_HOST:-1}" = "0" ]; then
+        _program_args="    <string>/bin/bash</string>
+    <string>$_bash_runner</string>
+    <string>--host</string>
+    <string>$_default_host</string>"
+      else
+        _program_args="    <string>/bin/bash</string>
     <string>$_bash_runner</string>
     <string>--hosts-dir</string>
     <string>$_bash_hosts_parent</string>"
+      fi
     else
-      _program_args="    <string>$_node_bin</string>
+      # Multi-host auto-detect (TASKS.md minsky-daemon-plist-multi-host):
+      # when ≥2 bootstrapped hosts (`.minsky/repo.yaml`) live under the
+      # parent of default_host, walk all of them via `--hosts-dir` so a
+      # second bootstrapped sibling (e.g. agentbrew alongside minsky) is
+      # never silently skipped. Single-host operators (0 or 1 sibling)
+      # keep the explicit `--host` form. `MINSKY_MULTI_HOST=0` forces the
+      # single-host form (the task's Pivot escape hatch for the window
+      # where multi-host might expose latent walker bugs).
+      _node_hosts_parent=$(dirname "$_default_host")
+      _node_sibling_count=$(_minsky_count_bootstrapped_siblings "$_node_hosts_parent")
+      if [ "${MINSKY_MULTI_HOST:-1}" != "0" ] && [ "$_node_sibling_count" -ge 2 ] 2>/dev/null; then
+        _program_args="    <string>$_node_bin</string>
+    <string>$_runner</string>
+    <string>--hosts-dir</string>
+    <string>$_node_hosts_parent</string>
+    <string>--loop</string>"
+      else
+        _program_args="    <string>$_node_bin</string>
     <string>$_runner</string>
     <string>--host</string>
     <string>$_default_host</string>
     <string>--loop</string>"
+      fi
     fi
     # Propagate agent-auth env vars from the operator's current shell
     # so the daemon child inherits them via launchd's `EnvironmentVariables`.
@@ -1998,6 +2097,13 @@ PLIST_EOF
       exit 0
     fi
     mv "$_plist_tmp" "$_plist"
+
+    if [ "$_id_dry_run" = "1" ]; then
+      echo "✅ Wrote com.minsky.daemon plist (dry-run: launchctl reload skipped)"
+      echo "   plist: $_plist"
+      echo "   host: $_default_host"
+      exit 0
+    fi
 
     launchctl bootout "gui/$(id -u)/com.minsky.daemon" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$_plist"

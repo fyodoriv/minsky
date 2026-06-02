@@ -115,6 +115,12 @@ Two ways:
 1. **One host at a time, swap per-invocation**: `minsky --host /path/to/other-repo` overrides `default_host`.
 2. **Multi-host fleet mode**: `minsky --hosts-dir <parent>` walks every git repo under `<parent>` in round-robin (3 iterations per host per pass). Useful when you want one daemon running across several projects.
 
+### Auto-start plist picks multi-host automatically
+
+`minsky install-daemon` (the launchd auto-start agent at `~/Library/LaunchAgents/com.minsky.daemon.plist`) inspects the parent directory of `default_host`. When **≥2 bootstrapped hosts** (each carrying a `.minsky/repo.yaml` sidecar) live under that parent, the generated plist uses `--hosts-dir <parent>` so the daemon visits all of them — a second bootstrapped sibling (e.g. `agentbrew` next to `minsky`) is never silently skipped. With 0 or 1 bootstrapped sibling it keeps the explicit single-host form. Set `MINSKY_MULTI_HOST=0` before `install-daemon` to force single-host even when more exist (escape hatch). Preview the generated plist without reloading launchd via `minsky install-daemon --print`.
+
+`minsky doctor` surfaces the mismatch: if a live plist still targets a single `--host` while ≥2 bootstrapped hosts exist under its parent, it prints `WARN multi-host` with the one-command fix (`minsky install-daemon`).
+
 ## Edge cases
 
 - **No config file.** `minsky` runs with built-in defaults (claude / claude-opus-4-7-max / cwd as host). Edit `~/.minsky/config.json` to customize.
