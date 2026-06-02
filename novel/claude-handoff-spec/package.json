@@ -1,0 +1,30 @@
+{
+  "//scope": "<!-- scope: human-approved research-finding-manager-agent-delegation-pattern — package manifest for the delegation contract whose interface (delegation.ts) is the task's declared Touches; ships in the same commit as the interface. -->",
+  "name": "@minsky/claude-handoff-spec",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Delegation contract types for Minsky's M2 multi-persona pipeline handoff. Manager-agent shape (CrewAI hierarchical process) baseline + sub-agent shape (OpenHands) reserved as second iteration. Informed by research/delegation-patterns-comparison.md.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./delegation": {
+      "import": "./dist/delegation.js",
+      "types": "./dist/delegation.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
