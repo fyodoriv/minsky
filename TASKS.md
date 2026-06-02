@@ -74,6 +74,35 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- fields update to cite novel/adapters/a2a.ts when their slices ship.   -->
 <!-- ===================================================================== -->
 
+- [ ] `ban-test-real-install-against-repo-root` — add a CI lint that fails when a test file can trigger a real `pnpm install` / `npm ci` against the repo root (or invokes `bin/minsky-init` without `--skip-install`) while the shared vitest pool is live. On 2026-06-02 `test/integration/minsky-init.test.ts` did exactly this — `bin/minsky-init` runs `cd $MINSKY_ROOT && pnpm install`, which relinked `node_modules/.pnpm` mid-run and killed live tinypool workers ("Worker exited unexpectedly / Cannot find module .../tinypool/dist/entry/process.js"), turning the whole `test` job red on every main commit until #1028 gated the offending test. The fix was manual; this gate makes the class non-recurring.
+  - **ID**: ban-test-real-install-against-repo-root
+  - **Tags**: p0, milestone-m1, stability, regression-catching, ci-gate, anti-flake, rule-10-ratchet
+  - **Milestone**: M1
+  - **Hypothesis**: a static lint that scans `**/*.test.{ts,mjs}` for the bad pattern (a spawn of `bin/minsky-init` / `distribution/install.sh` WITHOUT `--skip-install`, or a literal `pnpm install` / `npm ci` whose cwd is the repo root) drops recurrences of the "tinypool worker exited" CI-failure class from 1 (this incident) to 0, because the only way to corrupt the shared `node_modules` mid-run is a repo-root install and the gate forbids it at author time.
+  - **Success**: the gate ships with a paired test, exits 0 on the current tree (post-#1028), and exits 1 against a fixture test that spawns `bin/minsky-init <host>` with no `--skip-install`.
+  - **Pivot**: if the gate produces >1 false positive/week on legitimate isolated-checkout installs, narrow the heuristic to repo-root-cwd installs only; abandon the static approach if no clean signal distinguishes repo-root from isolated-tmp installs and replace with a runtime node_modules-integrity assertion in test setup.
+  - **Measurement**: `node scripts/check-no-repo-root-install-in-tests.mjs` exits 0 on the clean tree; `pnpm exec vitest run scripts/check-no-repo-root-install-in-tests.test.mjs` exits 0 (the test pins both the clean-pass and the fixture-fail arms).
+  - **Anchor**: Fowler 2011 "Eradicating Non-Determinism in Tests" (a test that mutates shared state under the runner is non-deterministic by construction); this repo's rule #10 (every load-bearing CI failure becomes a ratcheted gate).
+  - **Details**: One slice. Write `scripts/check-no-repo-root-install-in-tests.mjs` (walks the test globs, regex-matches the bad spawn/install patterns, prints file:line + the safe alternative `--skip-install` / isolated-checkout) + its paired `.test.mjs` with a clean fixture and a bad fixture. Wire into `.github/workflows/ci.yml` as a new `hygiene`-adjacent job and into the pre-pr-lint stack manifest.
+  - **Files**: `scripts/check-no-repo-root-install-in-tests.mjs` (new), `scripts/check-no-repo-root-install-in-tests.test.mjs` (new), `.github/workflows/ci.yml` (add job), `scripts/run-pre-pr-lint-stack.mjs` (register).
+  - **Touches**: `scripts/check-no-repo-root-install-in-tests.mjs`, `scripts/check-no-repo-root-install-in-tests.test.mjs`
+  - **Acceptance**: (1) gate exists with paired test. (2) exits 0 on clean tree, 1 on the bad fixture. (3) wired into ci.yml + the pre-pr-lint stack (drift test stays green). (4) `pnpm pre-pr-lint --stage=fast` exits 0.
+
+- [ ] `minsky-init-real-install-smoke-hermetic` — make the gated real-`pnpm install` smoke in `test/integration/minsky-init.test.ts` run against an ISOLATED checkout copy so the real-install bootstrap path is CI-covered without mutating the shared `node_modules`, then remove the `MINSKY_RUN_INSTALL_MUTATION_TEST` opt-in gate added by #1028. Today that test is skipped in CI (it corrupts the shared tree), so the install.sh → minsky-init → real-`pnpm install` → config path has zero CI coverage.
+  - **ID**: minsky-init-real-install-smoke-hermetic
+  - **Tags**: p1, milestone-m1, stability, test-coverage, integration-test
+  - **Milestone**: M1
+  - **Hypothesis**: copying the repo tree (excluding `node_modules` + `.git`) into a tmpdir and pointing `distribution/install.sh` at it (or using install.sh's clone path against a local `file://` remote) lets the real-install path run hermetically; restoring CI coverage of that path raises minsky-init integration coverage from the current 7/8 CI-run cases to 8/8 without re-introducing the tinypool-corruption failure.
+  - **Success**: the real-install smoke runs in CI (no opt-in env), asserts config written + exit ∈ {0,1}, completes in <90s, and the shared repo `node_modules` is provably untouched (a before/after `tinypool/dist/entry/process.js` stat is identical).
+  - **Pivot**: if a full tree copy is too slow (>90s) in CI, fall back to install.sh's `git clone --depth 1 file://$REPO_ROOT` path which installs into `~/.minsky-src`, never the shared tree; abandon hermetic real-install coverage only if both copy and clone exceed the CI time budget, keeping the #1028 opt-in gate.
+  - **Measurement**: `MINSKY_RUN_INTEGRATION=1 pnpm exec vitest run test/integration/minsky-init.test.ts` exits 0 with 8 run cases (0 skipped) AND `pnpm test:coverage` under `CI=true` stays green (no tinypool worker death).
+  - **Anchor**: Meszaros 2007 *xUnit Test Patterns* § "Fresh Fixture" (a test owns and isolates its fixture; never mutates shared state); Forsgren/Humble/Kim *Accelerate* 2018 (install IS the first lead-time metric, so the install path must stay covered).
+  - **Details**: One slice. In the install.sh fallback describe block, replace the repo-root real-install with an isolated-checkout variant (cp/rsync the tree sans `node_modules`/`.git` to a `mkdtempSync` dir, or clone `file://$REPO_ROOT` via install.sh's own clone path), assert config written + node_modules untouched, then drop the `RUN_INSTALL_MUTATION` skip.
+  - **Files**: `test/integration/minsky-init.test.ts` (rewrite the real-install case + remove the opt-in gate).
+  - **Touches**: `test/integration/minsky-init.test.ts`
+  - **Acceptance**: (1) the real-install smoke runs in CI without an opt-in env. (2) it asserts the shared `node_modules` is untouched. (3) `CI=true pnpm test:coverage` stays green. (4) the `MINSKY_RUN_INSTALL_MUTATION_TEST` gate is removed. (5) `pnpm pre-pr-lint --stage=fast` exits 0.
+  - **Blocked by**: ban-test-real-install-against-repo-root
+
 - [ ] `mcp-migration-to-2026-07-28-rc` — migrate Minsky's MCP adapter to the v2026-07-28 RC protocol revision before the breaking-change deadline. v2026-07-28 removes the `initialize` handshake and moves MCP to stateless semantics; without the migration, Minsky's MCP adapter breaks against any post-July-28 MCP server.
   - **ID**: mcp-migration-to-2026-07-28-rc
   - **Tags**: p1, milestone-m1, mcp, protocol-migration, time-bounded-deadline-2026-07-28, operator-directive-2026-05-28
