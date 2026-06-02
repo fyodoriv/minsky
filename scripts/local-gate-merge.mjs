@@ -50,6 +50,24 @@
 // re-running `--stage=full` on main after each `mergedPrs` entry.
 // Anchor: Beyer SRE 2016 (the gate IS the release gate); rule #10 / #1.
 //
+// Timeout circuit-breaker (Nygard 2018 *Release It!* — Circuit Breaker;
+// `circuit-break-and-notify` failure-mode response per vision.md § 7): a PR
+// that genuinely vet-*times-out* (a slow/hung test, e.g. #580) would otherwise
+// burn one full `MINSKY_GATE_VET_TIMEOUT_MS` (~25 min) slot on EVERY tick
+// forever and, with a bounded `--limit`, perpetually starve the sweep so it
+// never reaches a mergeable PR. The breaker records per-PR-head timeout strikes
+// (keyed by PR number + head SHA, persisted to
+// `.minsky/gate-timeout-strikes.json`) and PRE-SKIPS a PR with
+// ≥`MINSKY_GATE_TIMEOUT_STRIKES` strikes (default 2) for
+// `MINSKY_GATE_TIMEOUT_COOLDOWN_MS` (default 6h), logging
+// `timeout-circuit-open` — 0 vet slots consumed until the cooldown elapses
+// (half-open re-vet) OR the PR's head SHA changes (a new push clears strikes).
+// Non-timeout skips (conflict / red gate / infra error) NEVER accrue strikes.
+// Blast radius: at most one pathological PR's worth of stale strikes; escape
+// hatch: `rm .minsky/gate-timeout-strikes.json` (or push a new head) re-closes
+// the breaker. Pure decisions (`decideTimeoutCircuit`, `recordTimeoutStrike`,
+// `partitionByCircuit`) over an injectable store seam (rule #2 / #10).
+//
 // Usage:
 //   node scripts/local-gate-merge.mjs [--dry-run] [--no-review] [--limit=N] [--pr=N]
 //   node scripts/local-gate-merge.mjs --self-metric
@@ -62,7 +80,14 @@
 //                   (no sweep) — the pre-registered throughput measurement
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,6 +117,17 @@ const VET_TIMEOUT_MS = Number(process.env["MINSKY_GATE_VET_TIMEOUT_MS"] ?? 15000
 // Default 10 (de-prioritise vs. interactive); env-tunable. 0 disables the
 // nice wrapper (the documented opt-out for debugging, rule #16).
 const VET_NICENESS = Number(process.env["MINSKY_GATE_VET_NICENESS"] ?? 10);
+// Timeout circuit-breaker (Nygard 2018 *Release It!* — Circuit Breaker). A PR
+// that genuinely vet-*times-out* (a slow/hung test, e.g. #580) still burns one
+// full `VET_TIMEOUT_MS` (~25 min) slot on EVERY tick forever and, with a
+// bounded `limit`, can perpetually starve the sweep so it never reaches a
+// mergeable PR. We record per-PR-head timeout strikes (keyed by PR number +
+// head SHA so a new push clears them) and pre-skip a PR with ≥N strikes for a
+// cooldown window — one pathological PR can no longer indefinitely consume the
+// bounded sweep. Env-tunable; defaults: open after 2 strikes, 6h cooldown.
+const TIMEOUT_STRIKE_THRESHOLD = Number(process.env["MINSKY_GATE_TIMEOUT_STRIKES"] ?? 2);
+const TIMEOUT_COOLDOWN_MS = Number(process.env["MINSKY_GATE_TIMEOUT_COOLDOWN_MS"] ?? 21600000);
+const STRIKES = join(REPO, ".minsky", "gate-timeout-strikes.json");
 
 /**
  * @typedef {object} PrSnapshot
@@ -101,6 +137,15 @@ const VET_NICENESS = Number(process.env["MINSKY_GATE_VET_NICENESS"] ?? 10);
  * @property {string} baseRefName
  * @property {string} headRefName
  * @property {string} title
+ * @property {string} [headRefOid]   the PR head commit SHA — keys the timeout
+ *   circuit-breaker so a new push (new SHA) clears prior strikes
+ */
+
+/**
+ * @typedef {object} TimeoutStrike
+ * @property {string} headOid  the PR head SHA the strikes accrued against
+ * @property {number} count    how many vet-timeouts seen for this head
+ * @property {string} lastTs   ISO timestamp of the most recent strike
  */
 
 /**
@@ -115,6 +160,78 @@ export function pickGateCandidates(prs, defaultBranch = "main") {
   return prs.filter(
     (pr) => !pr.isDraft && pr.mergeable !== "CONFLICTING" && pr.baseRefName === defaultBranch,
   );
+}
+
+/**
+ * Pure: is a vet result a genuine *timeout* (vs a conflict / red gate / infra
+ * error)? `vetErrorToResult` stamps timeouts with the `vet-timeout` prefix; ONLY
+ * those accrue circuit-breaker strikes — a textual conflict or a red gate must
+ * NEVER open the breaker (the task's "non-timeout skips never accrue strikes"
+ * acceptance). Same input ⇒ same output (rule #10).
+ * @param {{stdout: string} | {vetError: string}} vetRes
+ * @returns {boolean}
+ */
+export function isTimeoutVet(vetRes) {
+  return "vetError" in vetRes && vetRes.vetError.startsWith("vet-timeout");
+}
+
+/**
+ * Pure: should this PR be pre-skipped because its timeout circuit is OPEN? The
+ * breaker opens when the PR's CURRENT head has ≥`threshold` recent strikes AND
+ * the most-recent strike is still inside the cooldown window. A new push (the
+ * store entry's `headOid` no longer matches the live `headRefOid`) is treated
+ * as zero strikes — the new code deserves a fresh vet (the task's "cleared on
+ * new head SHA"). A strike older than the cooldown is also forgiven — the
+ * breaker is half-open, so the PR gets one more vet. No I/O; the caller loads
+ * the store (rule #2 seam) and supplies `now` (rule #10 determinism).
+ * @param {Record<string, TimeoutStrike>} store  keyed by `String(pr.number)`
+ * @param {PrSnapshot} pr
+ * @param {{ now: number, threshold?: number, cooldownMs?: number }} cfg
+ * @returns {{ open: boolean, reason: string }}
+ */
+export function decideTimeoutCircuit(store, pr, cfg) {
+  const threshold = Number.isFinite(cfg.threshold)
+    ? Number(cfg.threshold)
+    : TIMEOUT_STRIKE_THRESHOLD;
+  const cooldownMs = Number.isFinite(cfg.cooldownMs) ? Number(cfg.cooldownMs) : TIMEOUT_COOLDOWN_MS;
+  const rec = store[String(pr.number)];
+  // No record, or strikes accrued against a stale head (a new push happened) ⇒
+  // closed: the PR's current code has never timed out. Fail-closed on a missing
+  // live SHA too (we can't prove the strikes are still relevant — re-vet).
+  if (!rec || !pr.headRefOid || rec.headOid !== pr.headRefOid) {
+    return { open: false, reason: "circuit-closed: no recent strikes for this head" };
+  }
+  if (rec.count < threshold) {
+    return { open: false, reason: `circuit-closed: ${rec.count}/${threshold} strikes` };
+  }
+  const ageMs = cfg.now - Date.parse(rec.lastTs);
+  if (!Number.isFinite(ageMs) || ageMs >= cooldownMs) {
+    return { open: false, reason: "circuit-half-open: cooldown elapsed, re-vetting" };
+  }
+  const mins = Math.ceil((cooldownMs - ageMs) / 60000);
+  return {
+    open: true,
+    reason: `timeout-circuit-open: ${rec.count} strikes on head ${pr.headRefOid.slice(0, 7)}; cooldown ~${mins}m remaining`,
+  };
+}
+
+/**
+ * Pure: fold one new timeout strike into the store, keyed by PR number + head
+ * SHA. A strike against a NEW head (different `headRefOid`) resets the count to
+ * 1 — prior strikes belonged to code that has since been pushed over (the
+ * task's "cleared on new head SHA"). A strike against the same head increments.
+ * Returns a NEW store object (no mutation) so the caller controls persistence.
+ * @param {Record<string, TimeoutStrike>} store
+ * @param {PrSnapshot} pr
+ * @param {string} nowTs  ISO timestamp of this strike
+ * @returns {Record<string, TimeoutStrike>}
+ */
+export function recordTimeoutStrike(store, pr, nowTs) {
+  const headOid = pr.headRefOid ?? "";
+  const key = String(pr.number);
+  const prev = store[key];
+  const count = prev && prev.headOid === headOid ? prev.count + 1 : 1;
+  return { ...store, [key]: { headOid, count, lastTs: nowTs } };
 }
 
 /**
@@ -322,7 +439,7 @@ function defaultSnapshot() {
       "--limit",
       "50",
       "--json",
-      "number,isDraft,mergeable,baseRefName,headRefName,title",
+      "number,isDraft,mergeable,baseRefName,headRefName,headRefOid,title",
     ],
     { cwd: REPO, encoding: "utf8" },
   );
@@ -848,22 +965,26 @@ function defaultReview(pr) {
  * @param {PrSnapshot} pr
  * @param {(pr: PrSnapshot) => {stdout: string} | {vetError: string}} vetFn
  * @param {((pr: PrSnapshot) => {approve: boolean, reason: string}) | undefined} reviewFn
- * @returns {{action: "merge" | "skip", reason: string}}
+ * @returns {{decision: {action: "merge" | "skip", reason: string}, timedOut: boolean}}
  */
 function vetAndDecide(pr, vetFn, reviewFn) {
   const vetRes = vetFn(pr);
   if ("vetError" in vetRes) {
-    return decideMerge({
-      pr,
-      verdict: { green: false, failedSteps: [], sawSummary: false },
-      vetError: vetRes.vetError,
-    });
+    return {
+      decision: decideMerge({
+        pr,
+        verdict: { green: false, failedSteps: [], sawSummary: false },
+        vetError: vetRes.vetError,
+      }),
+      timedOut: isTimeoutVet(vetRes),
+    };
   }
   const verdict = parseGateVerdict(vetRes.stdout);
-  if (verdict.green && reviewFn) {
-    return decideMerge({ pr, verdict, review: reviewFn(pr) });
-  }
-  return decideMerge({ pr, verdict });
+  const decision =
+    verdict.green && reviewFn
+      ? decideMerge({ pr, verdict, review: reviewFn(pr) })
+      : decideMerge({ pr, verdict });
+  return { decision, timedOut: false };
 }
 
 /**
@@ -872,6 +993,8 @@ function vetAndDecide(pr, vetFn, reviewFn) {
  * @property {((pr: PrSnapshot) => {approve: boolean, reason: string}) | undefined} reviewFn
  * @property {(pr: PrSnapshot) => void} mergeFn
  * @property {(number: number) => string | null} prStateFn
+ * @property {(pr: PrSnapshot) => void} recordTimeoutFn  accrue + persist one
+ *   circuit-breaker strike when a vet times out (the only path that accrues)
  * @property {boolean} dryRun
  * @property {(s: string) => void} log
  */
@@ -895,7 +1018,14 @@ function vetAndDecide(pr, vetFn, reviewFn) {
  */
 function processOnePr(pr, ctx) {
   ctx.log(`  vetting #${pr.number} (${pr.title.slice(0, 60)})…\n`);
-  const decision = vetAndDecide(pr, ctx.vetFn, ctx.reviewFn);
+  const { decision, timedOut } = vetAndDecide(pr, ctx.vetFn, ctx.reviewFn);
+  // Circuit-breaker accrual: ONLY a genuine vet-timeout opens the breaker. A
+  // textual conflict / red gate / infra error is a normal skip and must never
+  // accrue a strike (the task's "non-timeout skips never accrue strikes").
+  if (timedOut) {
+    ctx.recordTimeoutFn(pr);
+    ctx.log(`  #${pr.number}: timeout strike recorded (circuit-breaker)\n`);
+  }
   if (decision.action !== "merge") {
     ctx.log(`  #${pr.number}: SKIP — ${decision.reason}\n`);
     return { outcome: "skipped", number: pr.number, reason: decision.reason };
@@ -929,6 +1059,43 @@ function processOnePr(pr, ctx) {
     }
     ctx.log(`  #${pr.number}: merge call failed: ${m.slice(0, 160)}\n`);
     return { outcome: "skipped", number: pr.number, reason: `merge-failed: ${m.slice(0, 120)}` };
+  }
+}
+
+/**
+ * Load the timeout-strike store from `.minsky/gate-timeout-strikes.json`.
+ * Fail-soft — a missing/corrupt store yields `{}` so the breaker degrades to
+ * "closed" (never over-skips on a read error: a corrupt strike file must not
+ * wedge an otherwise-mergeable PR — rule #6, circuit-break-and-notify degrades
+ * to graceful-degrade on its own state-store failure).
+ * @param {string} [path]
+ * @returns {Record<string, TimeoutStrike>}
+ */
+function loadStrikes(path = STRIKES) {
+  if (!existsSync(path)) return {};
+  try {
+    const obj = JSON.parse(readFileSync(path, "utf8"));
+    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
+    // rule-6: handled-locally — a corrupt/unreadable strike store degrades to {} (breaker closed) so it can never over-skip a mergeable PR on its own state error.
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Persist the timeout-strike store. Best-effort — a write failure is swallowed
+ * (the breaker simply forgets this strike and re-vets next tick; the worst case
+ * is one extra timeout, never a wedged sweep — rule #6).
+ * @param {Record<string, TimeoutStrike>} store
+ * @param {string} [path]
+ */
+function saveStrikes(store, path = STRIKES) {
+  if (!existsSync(join(REPO, ".minsky"))) return;
+  try {
+    writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`);
+    // rule-6: handled-locally — strike persistence is best-effort; a failed write costs at most one extra timeout next tick, never gates the sweep.
+  } catch {
+    /* breaker forgets this strike; re-vets next tick */
   }
 }
 
@@ -1020,30 +1187,87 @@ export function readSelfMetric(ledgerPath = LEDGER) {
  * @property {boolean} [noReview]  deterministic-only mode (skip the Opus brain)
  * @property {(pr: PrSnapshot) => void} [mergeFn]
  * @property {(number: number) => string | null} [prStateFn]  state oracle when mergeFn throws (default: `gh pr view --json state`)
+ * @property {() => Record<string, TimeoutStrike>} [loadStrikesFn]  load the timeout-circuit store (default: `.minsky/gate-timeout-strikes.json`)
+ * @property {(store: Record<string, TimeoutStrike>) => void} [saveStrikesFn]  persist the store
+ * @property {number} [now]  injected clock (ms) for the circuit cooldown (default: `Date.now()`)
  * @property {(s: string) => void} [log]
  */
+
+/**
+ * Pure: split candidates into the ones whose timeout circuit is OPEN (pre-skip,
+ * 0 vet slots) and the ones to actually vet. Done BEFORE the `limit` slice so a
+ * pathological timed-out PR can never consume a bounded sweep slot — the
+ * starvation this task closes. Returns both so the caller can log each open
+ * circuit (observability — rule #4) without re-deciding.
+ * @param {PrSnapshot[]} candidates
+ * @param {Record<string, TimeoutStrike>} store
+ * @param {number} now
+ * @returns {{ toVet: PrSnapshot[], preSkipped: {pr: PrSnapshot, reason: string}[] }}
+ */
+export function partitionByCircuit(candidates, store, now) {
+  /** @type {PrSnapshot[]} */
+  const toVet = [];
+  /** @type {{pr: PrSnapshot, reason: string}[]} */
+  const preSkipped = [];
+  for (const pr of candidates) {
+    const c = decideTimeoutCircuit(store, pr, { now });
+    if (c.open) preSkipped.push({ pr, reason: c.reason });
+    else toVet.push(pr);
+  }
+  return { toVet, preSkipped };
+}
+
+/**
+ * Build the I/O seam context (production defaults; tests inject fakes).
+ * Extracted from `prepareSweep` so it stays under biome's cognitive-complexity
+ * cap (same extraction discipline the rest of this file uses).
+ * @param {RunGateOpts} opts
+ * @param {(s: string) => void} log
+ * @param {number} now  injected clock (ms) for the strike timestamp
+ * @returns {SweepCtx}
+ */
+function buildSweepCtx(opts, log, now) {
+  const loadStrikesFn = opts.loadStrikesFn ?? loadStrikes;
+  const saveStrikesFn = opts.saveStrikesFn ?? saveStrikes;
+  return {
+    vetFn: opts.vetFn ?? defaultVet,
+    reviewFn: opts.noReview ? undefined : (opts.reviewFn ?? defaultReview),
+    mergeFn: opts.mergeFn ?? defaultMerge,
+    prStateFn: opts.prStateFn ?? defaultPrState,
+    // Accrue + persist one strike per timed-out vet (load-modify-save so
+    // concurrent ticks each see the prior count; the JSON store is small).
+    recordTimeoutFn: (pr) =>
+      saveStrikesFn(recordTimeoutStrike(loadStrikesFn(), pr, new Date(now).toISOString())),
+    dryRun: opts.dryRun === true,
+    log,
+  };
+}
 
 /**
  * Resolve I/O defaults + select the candidate PRs. Extracted so
  * `runGateSweep` stays under biome's cognitive-complexity cap.
  * @param {RunGateOpts} opts
- * @returns {{ctx: SweepCtx, candidates: PrSnapshot[]}}
+ * @returns {{ctx: SweepCtx, candidates: PrSnapshot[], preSkipped: {pr: PrSnapshot, reason: string}[]}}
  */
 function prepareSweep(opts) {
-  /** @type {SweepCtx} */
-  const ctx = {
-    vetFn: opts.vetFn ?? defaultVet,
-    reviewFn: opts.noReview ? undefined : (opts.reviewFn ?? defaultReview),
-    mergeFn: opts.mergeFn ?? defaultMerge,
-    prStateFn: opts.prStateFn ?? defaultPrState,
-    dryRun: opts.dryRun === true,
-    log: opts.log ?? ((s) => process.stdout.write(s)),
-  };
+  const log = opts.log ?? ((s) => process.stdout.write(s));
+  const now = opts.now ?? Date.now();
+  const ctx = buildSweepCtx(opts, log, now);
   let candidates = pickGateCandidates((opts.snapshotFn ?? defaultSnapshot)());
   if (opts.onlyPr !== undefined) {
     candidates = candidates.filter((p) => p.number === opts.onlyPr);
   }
-  return { ctx, candidates: candidates.slice(0, opts.limit ?? 5) };
+  // Pre-skip timeout-circuit-open PRs BEFORE the limit slice so they never
+  // consume a bounded sweep slot (the candidate-starvation fix).
+  const { toVet, preSkipped } = partitionByCircuit(
+    candidates,
+    (opts.loadStrikesFn ?? loadStrikes)(),
+    now,
+  );
+  for (const s of preSkipped) {
+    log(`  #${s.pr.number}: PRE-SKIP — ${s.reason}\n`);
+  }
+  return { ctx, candidates: toVet.slice(0, opts.limit ?? 5), preSkipped };
 }
 
 /**
@@ -1051,17 +1275,23 @@ function prepareSweep(opts) {
  * @param {RunGateOpts} [opts]
  */
 export function runGateSweep(opts = {}) {
-  const { ctx, candidates } = prepareSweep(opts);
+  const { ctx, candidates, preSkipped } = prepareSweep(opts);
+  // Circuit-open PRs consumed 0 vet slots but are still reported as skipped so
+  // the sweep accounting / ledger reflects them (observability — rule #4).
+  const skipped = preSkipped.map((s) => ({ number: s.pr.number, reason: s.reason }));
   if (candidates.length === 0) {
-    ctx.log("local-gate-merge: 0 candidate PRs\n");
-    return { merged: [], skipped: [] };
+    ctx.log(
+      preSkipped.length > 0
+        ? `local-gate-merge: 0 candidate PRs to vet (${preSkipped.length} pre-skipped: timeout-circuit-open)\n`
+        : "local-gate-merge: 0 candidate PRs\n",
+    );
+    return { merged: [], skipped };
   }
   ctx.log(
     `local-gate-merge: ${candidates.length} candidate PR(s)${ctx.dryRun ? " (dry-run)" : ""}\n`,
   );
 
   const merged = [];
-  const skipped = [];
   for (const pr of candidates) {
     const r = processOnePr(pr, ctx);
     if (r.outcome === "merged") merged.push({ number: r.number, reason: r.reason });

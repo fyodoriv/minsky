@@ -6,12 +6,16 @@ import {
   decideLoadShed,
   decideMerge,
   decidePreflight,
+  decideTimeoutCircuit,
   headBranchPinnedByWorktree,
+  isTimeoutVet,
   landLocalBranch,
   mergeArgs,
   parseGateVerdict,
   parseReview,
+  partitionByCircuit,
   pickGateCandidates,
+  recordTimeoutStrike,
   runGateSweep,
   setWorkerPauseSeam,
   summarizeLedger,
@@ -25,6 +29,7 @@ const pr = (p) => ({
   mergeable: p.mergeable ?? "MERGEABLE",
   baseRefName: p.baseRefName ?? "main",
   headRefName: p.headRefName ?? `feat/${p.number}`,
+  headRefOid: p.headRefOid ?? `sha-${p.number}`,
   title: p.title ?? `PR ${p.number}`,
 });
 
@@ -789,5 +794,191 @@ describe("withWorkerPaused (rule #6 — resume is guaranteed)", () => {
     expect(out).toBe("direct");
     expect(touched).toBe(false);
     setWorkerPauseSeam({ pause: noop, resume: noop });
+  });
+});
+
+describe("isTimeoutVet (only genuine timeouts arm the breaker)", () => {
+  it("true for a vet-timeout vetError", () => {
+    expect(isTimeoutVet({ vetError: "vet-timeout (>1500000ms — bounded …)" })).toBe(true);
+  });
+  it("false for a conflict / infra vetError (never accrues a strike)", () => {
+    expect(isTimeoutVet({ vetError: "merge-onto-main-conflict" })).toBe(false);
+    expect(isTimeoutVet({ vetError: "scratch-install-failed: x" })).toBe(false);
+  });
+  it("false for a completed vet (stdout present)", () => {
+    expect(isTimeoutVet({ stdout: "{}" })).toBe(false);
+  });
+});
+
+describe("recordTimeoutStrike (per-PR-head strike accrual)", () => {
+  it("first strike for a head ⇒ count 1", () => {
+    const s = recordTimeoutStrike(
+      {},
+      pr({ number: 580, headRefOid: "aaa" }),
+      "2026-06-02T00:00:00Z",
+    );
+    expect(s["580"]).toEqual({ headOid: "aaa", count: 1, lastTs: "2026-06-02T00:00:00Z" });
+  });
+  it("same head increments", () => {
+    const s0 = { 580: { headOid: "aaa", count: 1, lastTs: "t0" } };
+    const s1 = recordTimeoutStrike(s0, pr({ number: 580, headRefOid: "aaa" }), "t1");
+    expect(s1["580"]).toEqual({ headOid: "aaa", count: 2, lastTs: "t1" });
+  });
+  it("new head SHA resets the count to 1 (cleared on new push)", () => {
+    const s0 = { 580: { headOid: "aaa", count: 5, lastTs: "t0" } };
+    const s1 = recordTimeoutStrike(s0, pr({ number: 580, headRefOid: "bbb" }), "t1");
+    expect(s1["580"]).toEqual({ headOid: "bbb", count: 1, lastTs: "t1" });
+  });
+  it("does not mutate the input store", () => {
+    /** @type {Record<string, any>} */
+    const s0 = {};
+    recordTimeoutStrike(s0, pr({ number: 1, headRefOid: "x" }), "t");
+    expect(s0).toEqual({});
+  });
+});
+
+describe("decideTimeoutCircuit (open/closed/half-open decision)", () => {
+  const now = Date.parse("2026-06-02T12:00:00Z");
+  const ago = (/** @type {number} */ mins) => new Date(now - mins * 60000).toISOString();
+
+  it("closed when no record exists for the PR", () => {
+    expect(decideTimeoutCircuit({}, pr({ number: 1 }), { now }).open).toBe(false);
+  });
+  it("closed below the strike threshold", () => {
+    const store = { 1: { headOid: "sha-1", count: 1, lastTs: ago(1) } };
+    expect(decideTimeoutCircuit(store, pr({ number: 1 }), { now }).open).toBe(false);
+  });
+  it("OPEN at/over threshold within the cooldown window", () => {
+    const store = { 1: { headOid: "sha-1", count: 2, lastTs: ago(10) } };
+    const d = decideTimeoutCircuit(store, pr({ number: 1 }), { now });
+    expect(d.open).toBe(true);
+    expect(d.reason).toContain("timeout-circuit-open");
+  });
+  it("half-open (closed) once the cooldown has elapsed — re-vets", () => {
+    const store = { 1: { headOid: "sha-1", count: 9, lastTs: ago(7 * 60) } };
+    const d = decideTimeoutCircuit(store, pr({ number: 1 }), { now });
+    expect(d.open).toBe(false);
+    expect(d.reason).toContain("cooldown elapsed");
+  });
+  it("closed when strikes belong to a stale head (a new push happened)", () => {
+    const store = { 1: { headOid: "OLD", count: 9, lastTs: ago(1) } };
+    expect(decideTimeoutCircuit(store, pr({ number: 1, headRefOid: "NEW" }), { now }).open).toBe(
+      false,
+    );
+  });
+  it("closed (fail-safe) when the live head SHA is unknown", () => {
+    const store = { 1: { headOid: "sha-1", count: 9, lastTs: ago(1) } };
+    const noOid = { ...pr({ number: 1 }), headRefOid: undefined };
+    expect(decideTimeoutCircuit(store, /** @type {any} */ (noOid), { now }).open).toBe(false);
+  });
+  it("honours injected threshold / cooldown overrides (rule #10 determinism)", () => {
+    const store = { 1: { headOid: "sha-1", count: 1, lastTs: ago(1) } };
+    expect(decideTimeoutCircuit(store, pr({ number: 1 }), { now, threshold: 1 }).open).toBe(true);
+  });
+});
+
+describe("partitionByCircuit (pre-skip before the limit slice)", () => {
+  const now = Date.parse("2026-06-02T12:00:00Z");
+  it("splits open-circuit PRs out of the vet set", () => {
+    const store = {
+      11: { headOid: "sha-11", count: 3, lastTs: new Date(now - 60000).toISOString() },
+    };
+    const { toVet, preSkipped } = partitionByCircuit(
+      [pr({ number: 10 }), pr({ number: 11 }), pr({ number: 12 })],
+      store,
+      now,
+    );
+    expect(toVet.map((p) => p.number)).toEqual([10, 12]);
+    expect(preSkipped.map((s) => s.pr.number)).toEqual([11]);
+  });
+});
+
+describe("runGateSweep — timeout circuit-breaker (accrue / skip / clear)", () => {
+  const greenStdout = JSON.stringify({ summary: true, allPass: true, stepCount: 1 });
+  const now = Date.parse("2026-06-02T12:00:00Z");
+
+  it("accrues a strike on a vet-timeout; never on a conflict skip", () => {
+    /** @type {Record<string, any>} */
+    let store = {};
+    const sweep = (/** @type {string} */ vetError, /** @type {number} */ n) =>
+      runGateSweep({
+        snapshotFn: () => [pr({ number: n, headRefOid: `sha-${n}` })],
+        vetFn: () => ({ vetError }),
+        mergeFn: () => {
+          /* never */
+        },
+        noReview: true,
+        now,
+        loadStrikesFn: () => store,
+        saveStrikesFn: (s) => {
+          store = s;
+        },
+        log: () => {
+          /* no-op */
+        },
+      });
+    sweep("vet-timeout (>1500000ms)", 70);
+    expect(store["70"]?.count).toBe(1);
+    sweep("merge-onto-main-conflict", 71);
+    expect(store["71"]).toBeUndefined(); // non-timeout never accrues
+  });
+
+  it("pre-skips an open-circuit PR (0 vet slots) so the green PR is reached", () => {
+    let vetCalls = 0;
+    const merged = /** @type {number[]} */ ([]);
+    const store = {
+      80: { headOid: "sha-80", count: 2, lastTs: new Date(now - 60000).toISOString() },
+    };
+    const res = runGateSweep({
+      // limit=1 reproduces the starvation: without the breaker, #80 would
+      // consume the only slot every tick and #81 would never be reached.
+      limit: 1,
+      snapshotFn: () => [pr({ number: 80, headRefOid: "sha-80" }), pr({ number: 81 })],
+      vetFn: (p) => {
+        vetCalls += 1;
+        return p.number === 81 ? { stdout: greenStdout } : { vetError: "vet-timeout (>x)" };
+      },
+      mergeFn: (p) => merged.push(p.number),
+      noReview: true,
+      now,
+      loadStrikesFn: () => store,
+      saveStrikesFn: () => {
+        /* no-op */
+      },
+      log: () => {
+        /* no-op */
+      },
+    });
+    expect(vetCalls).toBe(1); // only #81 vetted; #80 pre-skipped
+    expect(merged).toEqual([81]);
+    expect(res.skipped.map((s) => s.number)).toContain(80);
+    expect(res.skipped.find((s) => s.number === 80)?.reason).toContain("timeout-circuit-open");
+  });
+
+  it("clears the circuit when the PR's head SHA changes (new push ⇒ re-vet)", () => {
+    let vetCalls = 0;
+    const store = {
+      90: { headOid: "OLD-sha", count: 5, lastTs: new Date(now - 60000).toISOString() },
+    };
+    runGateSweep({
+      snapshotFn: () => [pr({ number: 90, headRefOid: "NEW-sha" })],
+      vetFn: () => {
+        vetCalls += 1;
+        return { stdout: greenStdout };
+      },
+      mergeFn: () => {
+        /* no-op */
+      },
+      noReview: true,
+      now,
+      loadStrikesFn: () => store,
+      saveStrikesFn: () => {
+        /* no-op */
+      },
+      log: () => {
+        /* no-op */
+      },
+    });
+    expect(vetCalls).toBe(1); // stale-head strikes ignored ⇒ re-vetted
   });
 });
