@@ -1,0 +1,12 @@
+[devin] Reading INSTALL.md — agent-mediated install runbook.
+[devin] Step 0: confirmed doorway-not-runtime invariant. No launcher-specific config written.
+[devin] Step 1: node --version → v22.3.0 (ok), pnpm --version → 9.6.0 (ok)
+[devin] Step 2: git clone https://github.com/fyodoriv/minsky.git → done
+[devin] Step 3: pnpm install → prepare hook built dist/ for every workspace
+[devin] Step 4: wrote ~/.minsky/config.json (cloud_agent=openhands, local model)
+[devin] Step 5: pausing for the one human prompt.
+[devin] asking user: Minsky can submit anonymized runtime logs — iteration counts, error verdicts, and p95 timings — to help catch regressions and improve the daemon. No code content, no task content, and no personally identifying information is ever sent; the host path is SHA-256-hashed with a per-machine salt before submission. Do you agree to submit these anonymized telemetry events? (yes / no — default: no if you don't answer)
+[devin] operator answered: no
+[devin] Step 5: MINSKY_AGENT=devin bin/minsky consent --no → wrote telemetry-consent.json
+[devin] Step 6: bin/minsky daemon start --hosts-dir .. → daemon PID 48227
+[devin] Install complete. Out of the picture; daemon runs independently.

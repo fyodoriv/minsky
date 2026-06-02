@@ -13,16 +13,38 @@
 // aggregate logic, threshold semantics) without spending API budget on
 // real agent invocations.
 //
-// Live mode (`--live` flag) is explicitly out-of-scope for v1 — the
-// parent task's Pivot calls it out. Filed as a follow-up: `measure-agent-install-live-mode`.
+// Live mode (`--live` flag) spawns the named real agent against a fresh
+// tmp git repo seeded with INSTALL.md, captures its stdout transcript,
+// and parses the operator-prompt count via a per-provider parser module
+// (`scripts/measure-agent-install/parsers/<provider>.mjs`). When the
+// provider's CLI is not on PATH, the run skips gracefully (so `--live`
+// is safe to invoke without every agent installed). Live mode is NOT
+// wired into CI — the parent task's Pivot keeps it operator-side.
 //
-// Source: P1 `measure-agent-install-harness`; parent P0 `agent-mediated-install` slice (3).
+// Source: P1 `measure-agent-install-harness`; parent P0 `agent-mediated-install` slice (3);
+// live-mode follow-up `measure-agent-install-live-mode`.
 // Rule #9: this script IS the Measurement field of the parent task.
 // Rule #1: emits the same JSON shape that parent task acceptance #1 asserts.
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import * as claudeCodeParser from "./measure-agent-install/parsers/claude-code.mjs";
+import * as cursorParser from "./measure-agent-install/parsers/cursor.mjs";
+import * as devinParser from "./measure-agent-install/parsers/devin.mjs";
+
+// Per-provider parser registry. Adding a 4th provider is a one-file
+// addition (parent task Acceptance #6): write the parser module, add one
+// row here. The harness logic stays untouched.
+/** @type {Record<string, { PROVIDER: string, BINARY: string, parsePromptCount: (t: string) => number }>} */
+export const PROVIDER_PARSERS = {
+  "claude-code": claudeCodeParser,
+  devin: devinParser,
+  cursor: cursorParser,
+};
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
@@ -218,21 +240,152 @@ export function mockReading({ provider, runIndex, thresholdSeconds, thresholdPro
 }
 
 /**
- * @param {{ provider: string, runIndex: number, live: boolean }} input
+ * Resolve a CLI binary on PATH. Returns true iff the binary is invokable.
+ * Used so live mode skips gracefully when an agent isn't installed
+ * (parent task Risk (c)).
+ *
+ * @param {string} binary
+ * @returns {boolean}
+ */
+function binaryOnPath(binary) {
+  const which = spawnSync(process.platform === "win32" ? "where" : "command", ["-v", binary], {
+    encoding: "utf8",
+    shell: true,
+  });
+  return which.status === 0 && typeof which.stdout === "string" && which.stdout.trim().length > 0;
+}
+
+/**
+ * Spawn a real agent against a fresh tmp git repo seeded with INSTALL.md,
+ * returning the captured stdout transcript. The agent is fed the install
+ * brief via stdin. Side-effecting (spawn + tmp dir); kept separate from
+ * the pure verdict logic (`liveVerdict`) so the latter is fixture-testable
+ * without an agent on PATH.
+ *
+ * @param {{ binary: string, installMdPath: string }} input
+ * @returns {{ transcript: string, durationSeconds: number }}
+ */
+function captureTranscript({ binary, installMdPath }) {
+  const workdir = mkdtempSync(join(tmpdir(), "measure-agent-live-"));
+  try {
+    // Fresh git repo + a copy of the runbook so the agent has a realistic
+    // target to install into.
+    spawnSync("git", ["init", "-q"], { cwd: workdir });
+    const installMd = spawnSync("cat", [installMdPath], { encoding: "utf8" });
+    writeFileSync(join(workdir, "INSTALL.md"), installMd.stdout ?? "");
+    const brief = `Read INSTALL.md in this directory and install minsky for this folder. Ask me a question ONLY at the explicit Step-5 consent prompt; every other step is yours to execute autonomously. When you reach the consent prompt, ask it verbatim, then assume the answer is "no".`;
+    const start = process.hrtime.bigint();
+    const proc = spawnSync(binary, [], {
+      cwd: workdir,
+      input: brief,
+      encoding: "utf8",
+      timeout: 10 * 60 * 1000,
+    });
+    const end = process.hrtime.bigint();
+    const transcript = `${proc.stdout ?? ""}\n${proc.stderr ?? ""}`;
+    return { transcript, durationSeconds: Number(end - start) / 1e9 };
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Pure: turn a captured (durationSeconds, transcript) pair into a
+ * RunReading by parsing the prompt count with the provider's parser and
+ * applying the thresholds. No I/O — fixture-testable against committed
+ * transcripts (parent task Acceptance: each parser fixture-tested).
+ *
+ * @param {{
+ *   provider: string,
+ *   runIndex: number,
+ *   durationSeconds: number,
+ *   transcript: string,
+ *   thresholdSeconds: number,
+ *   thresholdPrompts: number,
+ * }} input
  * @returns {RunReading}
  */
-function liveReadingPlaceholder({ provider, runIndex }) {
-  // Live mode is out-of-scope for v1 per parent task Pivot. Emit a
-  // skipped reading with a clear reason so the operator (and `--live`
-  // users) see exactly what's missing.
+export function liveVerdict({
+  provider,
+  runIndex,
+  durationSeconds,
+  transcript,
+  thresholdSeconds,
+  thresholdPrompts,
+}) {
+  const parser = PROVIDER_PARSERS[provider];
+  if (!parser) {
+    return {
+      provider,
+      run_index: runIndex,
+      duration_seconds: -1,
+      prompt_count: -1,
+      verdict: "skipped",
+      reason: `no parser registered for provider "${provider}"`,
+    };
+  }
+  const promptCount = parser.parsePromptCount(transcript);
+  const duration = Math.round(durationSeconds * 100) / 100;
+  const durationOk = duration <= thresholdSeconds;
+  const promptsOk = promptCount <= thresholdPrompts;
   return {
     provider,
     run_index: runIndex,
-    duration_seconds: -1,
-    prompt_count: -1,
-    verdict: "skipped",
-    reason: `live mode not implemented in v1 — file follow-up "measure-agent-install-live-mode" P2 task`,
+    duration_seconds: duration,
+    prompt_count: promptCount,
+    verdict: durationOk && promptsOk ? "pass" : "fail",
   };
+}
+
+/**
+ * Live reading: spawn the real agent, capture its transcript, score it.
+ * Skips gracefully (with a reason) when the provider has no parser or the
+ * CLI is not on PATH — so `--live` is safe to run without every agent
+ * installed (parent task Risk (c)).
+ *
+ * @param {{
+ *   provider: string,
+ *   runIndex: number,
+ *   thresholdSeconds: number,
+ *   thresholdPrompts: number,
+ *   installMdPath?: string,
+ * }} input
+ * @returns {RunReading}
+ */
+function liveReading({ provider, runIndex, thresholdSeconds, thresholdPrompts, installMdPath }) {
+  const parser = PROVIDER_PARSERS[provider];
+  if (!parser) {
+    return {
+      provider,
+      run_index: runIndex,
+      duration_seconds: -1,
+      prompt_count: -1,
+      verdict: "skipped",
+      reason: `no parser registered for provider "${provider}"`,
+    };
+  }
+  if (!binaryOnPath(parser.BINARY)) {
+    return {
+      provider,
+      run_index: runIndex,
+      duration_seconds: -1,
+      prompt_count: -1,
+      verdict: "skipped",
+      reason: `agent CLI "${parser.BINARY}" not on PATH — install it to run --live for ${provider}`,
+    };
+  }
+  const { transcript, durationSeconds } = captureTranscript({
+    binary: parser.BINARY,
+    installMdPath: installMdPath ?? resolve(REPO_ROOT, "INSTALL.md"),
+  });
+  return liveVerdict({
+    provider,
+    runIndex,
+    durationSeconds,
+    transcript,
+    thresholdSeconds,
+    thresholdPrompts,
+  });
 }
 
 /**
@@ -288,7 +441,7 @@ export function buildReport({
 
 /**
  * Default reading dispatcher: routes to mock for `mock` provider, to
- * live placeholder otherwise. Live mode itself is gated behind --live;
+ * live invocation otherwise. Live mode itself is gated behind --live;
  * without it, real-provider names are reported as skipped (so a stray
  * `--providers=claude-code` in CI without `--live` doesn't fail the
  * harness — it produces a clean skipped reading).
@@ -301,7 +454,7 @@ function defaultReadingFn({ provider, runIndex, thresholdSeconds, thresholdPromp
     return mockReading({ provider, runIndex, thresholdSeconds, thresholdPrompts });
   }
   if (live) {
-    return liveReadingPlaceholder({ provider, runIndex, live });
+    return liveReading({ provider, runIndex, thresholdSeconds, thresholdPrompts });
   }
   return {
     provider,

@@ -2,31 +2,45 @@
 // closes parent P0 `agent-mediated-install`'s Success #1 criterion.
 //
 // Hypothesis (rule #9): the harness is pure modulo (Date.now,
-// readingFn), so the pure `buildReport()` function can be exercised
-// fully with deterministic inputs. Mock-mode is the CI gate; live mode
-// is deliberately stubbed (skipped readings) until a separate P2 task
-// wires real-agent invocation.
+// readingFn), so the pure `buildReport()` and `liveVerdict()` functions
+// can be exercised fully with deterministic inputs. Mock-mode is the CI
+// gate; live mode spawns a real agent (operator-side only) but its
+// scoring is the pure `liveVerdict()` fixture-tested against committed
+// transcripts, and `liveReading` skips gracefully when the CLI is absent.
 //
 // Success: ≥10 test cases covering args parsing, threshold semantics,
-// aggregate verdict logic, mock-vs-live dispatch, JSON shape.
-// Pivot: if a future change adds real-agent invocation, the test list
-// grows but the existing tests must stay passing (mock determinism is
-// a load-bearing CI invariant).
+// aggregate verdict logic, mock-vs-live dispatch, JSON shape, per-provider
+// prompt-count parsing, and the binary-absent graceful-skip path.
+// Pivot: live invocation stays out of CI (cost) — the mock path and the
+// fixture-replayed liveVerdict path are the load-bearing CI invariants.
 // Measurement: this test file.
 // Anchor: rule #9 (pre-registered metrics); rule #11 (no flaky
 // metrics — mock determinism is the anti-flake guarantee).
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-
-import { buildReport, mockReading } from "./measure-agent-install.mjs";
+import * as claudeCodeParser from "./measure-agent-install/parsers/claude-code.mjs";
+import * as cursorParser from "./measure-agent-install/parsers/cursor.mjs";
+import * as devinParser from "./measure-agent-install/parsers/devin.mjs";
+import {
+  buildReport,
+  liveVerdict,
+  mockReading,
+  PROVIDER_PARSERS,
+} from "./measure-agent-install.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HARNESS_PATH = resolve(HERE, "measure-agent-install.mjs");
+const FIXTURES = resolve(HERE, "..", "test", "fixtures", "agent-install");
+
+/** @param {string} provider */
+function readFixture(provider) {
+  return readFileSync(join(FIXTURES, provider, "run-1.transcript.txt"), "utf8");
+}
 
 describe("measure-agent-install.mjs — buildReport (pure function)", () => {
   test("mock provider with 3 runs and default thresholds: all pass, aggregate=pass", () => {
@@ -85,17 +99,28 @@ describe("measure-agent-install.mjs — buildReport (pure function)", () => {
     expect(r.runs[0]?.reason).toMatch(/requires --live/);
   });
 
-  test("real provider WITH --live: emits skipped readings (v1 stub) with not-implemented reason", () => {
+  test("real provider WITH --live but CLI absent: skips gracefully with 'not on PATH' reason", () => {
+    // Inject a readingFn that mimics liveReading's binary-absent branch so
+    // the test never spawns a real agent (and stays deterministic even if
+    // `claude` happens to be installed on the CI/dev host).
     const r = buildReport({
       providers: ["claude-code"],
       runsPerProvider: 2,
       thresholdSeconds: 90,
       thresholdPrompts: 1,
       live: true,
+      readingFn: ({ provider, runIndex }) => ({
+        provider,
+        run_index: runIndex,
+        duration_seconds: -1,
+        prompt_count: -1,
+        verdict: "skipped",
+        reason: `agent CLI "claude" not on PATH — install it to run --live for ${provider}`,
+      }),
     });
     expect(r.totals.skipped).toBe(2);
     expect(r.aggregate_verdict).toBe("fail");
-    expect(r.runs[0]?.reason).toMatch(/live mode not implemented/);
+    expect(r.runs[0]?.reason).toMatch(/not on PATH/);
   });
 
   test("mock + real (no --live): mock passes, real skips → aggregate fails", () => {
@@ -250,5 +275,125 @@ describe("measure-agent-install.mjs — CLI integration", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("--providers=cursor --live with CLI absent: exits 1, run skipped, no spawn", () => {
+    // PATH points at a scratch dir containing only a symlink to the real
+    // `node` binary — so the harness itself launches, but the agent CLI
+    // (`cursor-agent`) is NOT resolvable and the run skips gracefully
+    // rather than spawning anything. `git`/`cat` are also absent, proving
+    // no transcript capture is attempted on the skip path.
+    const dir = mkdtempSync(join(tmpdir(), "measure-agent-nopath-"));
+    try {
+      symlinkSync(process.execPath, join(dir, "node"));
+      const r = runCli(["--providers=cursor", "--runs-per-provider=1", "--live"], {
+        env: { ...process.env, PATH: dir },
+      });
+      expect(r.status).toBe(1);
+      const report = JSON.parse(r.stdout);
+      expect(report.runs[0].verdict).toBe("skipped");
+      expect(report.runs[0].reason).toMatch(/not on PATH/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("per-provider parsers — fixture-tested prompt counting", () => {
+  test("registry maps each known provider to its parser module", () => {
+    expect(PROVIDER_PARSERS["claude-code"]).toBe(claudeCodeParser);
+    expect(PROVIDER_PARSERS["devin"]).toBe(devinParser);
+    expect(PROVIDER_PARSERS["cursor"]).toBe(cursorParser);
+    for (const [name, parser] of Object.entries(PROVIDER_PARSERS)) {
+      expect(parser.PROVIDER).toBe(name);
+      expect(typeof parser.BINARY).toBe("string");
+      expect(parser.BINARY.length).toBeGreaterThan(0);
+      expect(typeof parser.parsePromptCount).toBe("function");
+    }
+  });
+
+  test("claude-code: conforming transcript has exactly 1 operator prompt", () => {
+    expect(claudeCodeParser.parsePromptCount(readFixture("claude-code"))).toBe(1);
+  });
+
+  test("devin: conforming transcript has exactly 1 operator prompt", () => {
+    expect(devinParser.parsePromptCount(readFixture("devin"))).toBe(1);
+  });
+
+  test("cursor: conforming transcript has exactly 1 operator prompt", () => {
+    expect(cursorParser.parsePromptCount(readFixture("cursor"))).toBe(1);
+  });
+
+  test("empty / non-string transcript → 0 prompts (no crash)", () => {
+    for (const parser of [claudeCodeParser, devinParser, cursorParser]) {
+      expect(parser.parsePromptCount("")).toBe(0);
+      // @ts-expect-error — exercising the defensive non-string guard
+      expect(parser.parsePromptCount(undefined)).toBe(0);
+    }
+  });
+
+  test("claude-code: two AskUserQuestion blocks → 2 prompts (over-prompt detected)", () => {
+    const t = "[AskUserQuestion]\nfirst\n[AskUserQuestion]\nsecond\n";
+    expect(claudeCodeParser.parsePromptCount(t)).toBe(2);
+  });
+
+  test("devin: falls back to verbatim consent text when no primary marker", () => {
+    const t = "[devin] Do you agree to submit these anonymized telemetry events?\n";
+    expect(devinParser.parsePromptCount(t)).toBe(1);
+  });
+});
+
+describe("liveVerdict — pure scoring of a captured transcript", () => {
+  test("conforming claude-code transcript under thresholds → pass with measured prompt_count", () => {
+    const v = liveVerdict({
+      provider: "claude-code",
+      runIndex: 1,
+      durationSeconds: 42.5,
+      transcript: readFixture("claude-code"),
+      thresholdSeconds: 90,
+      thresholdPrompts: 1,
+    });
+    expect(v.verdict).toBe("pass");
+    expect(v.prompt_count).toBe(1);
+    expect(v.duration_seconds).toBe(42.5);
+    expect(v.provider).toBe("claude-code");
+  });
+
+  test("over-duration → fail even with a conforming prompt count", () => {
+    const v = liveVerdict({
+      provider: "cursor",
+      runIndex: 1,
+      durationSeconds: 120,
+      transcript: readFixture("cursor"),
+      thresholdSeconds: 90,
+      thresholdPrompts: 1,
+    });
+    expect(v.verdict).toBe("fail");
+  });
+
+  test("over-prompt (2 prompts vs threshold 1) → fail", () => {
+    const v = liveVerdict({
+      provider: "claude-code",
+      runIndex: 1,
+      durationSeconds: 10,
+      transcript: "[AskUserQuestion]\na\n[AskUserQuestion]\nb\n",
+      thresholdSeconds: 90,
+      thresholdPrompts: 1,
+    });
+    expect(v.verdict).toBe("fail");
+    expect(v.prompt_count).toBe(2);
+  });
+
+  test("unregistered provider → skipped with a reason (never throws)", () => {
+    const v = liveVerdict({
+      provider: "not-a-provider",
+      runIndex: 1,
+      durationSeconds: 10,
+      transcript: "anything",
+      thresholdSeconds: 90,
+      thresholdPrompts: 1,
+    });
+    expect(v.verdict).toBe("skipped");
+    expect(v.reason).toMatch(/no parser registered/);
   });
 });
