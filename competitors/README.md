@@ -13,10 +13,10 @@ This directory holds one markdown research file per competitor in the M1.10 scor
 | # | Property | What it means | Who else has it |
 |---|---|---|---|
 | 1 | **Daemon, not framework** | Operator attaches and walks away. Not a Python library / SDK / Flow you wrap your code in. | None — every orchestrator competitor is a framework |
-| 2 | **Operator-machine identity** | Runs as the operator's user with the operator's `~/.ssh`, `~/.gitconfig`, `~/.config/gh/`. Commits land as the operator. No cloud sandbox, no fresh clone. | None — Devin (Cognition Cloud + Devbox), CrewAI (Enterprise platform), AutoGen (whatever Python container), all run with separate identity |
+| 2 | **Operator-machine identity** | Runs as the operator's user with the operator's `~/.ssh`, `~/.gitconfig`, `~/.config/gh/`. Commits land as the operator. No cloud sandbox, no fresh clone. | None — Devin (Cognition Cloud + Devbox), CrewAI (Enterprise platform), AutoGen (whatever Python container) all run with separate identity. **OpenHands Agent Canvas (June 1, 2026) converged but did NOT match**: Dockerless self-host-on-VM still provisions a GitHub token *into* the managed agent-server rather than inheriting the operator's ambient `~/.config/gh` + `~/.gitconfig` + `~/.ssh` directly (per `competitors/openhands.md` weakness #6). |
 | 3 | **Constitution + deterministic enforcement** | 17 non-negotiable rules, each enforced by a CI lint. Not "best practices in docs" — `pnpm pre-pr-lint --stage=full` runs 53 checks. | None |
 | 4 | **MAPE-K self-improvement (substrate today, full loop forthcoming)** | The substrate ships: experiment-store + observer + spec monitor + task-filing audit (the daemon files tasks against its own weak spots). Closed-loop prompt A/B tuning is spec-only — `user-stories/003-mape-k-improves-prompts.md` status: Specification. CrewAI/AutoGen/MetaGPT have neither substrate nor closed loop; the substrate alone is already differentiated. | None (substrate); none plan a closed loop |
-| 5 | **Cross-repo fleet at operator scale** | Walks N hosts in round-robin on one machine. | None — CrewAI Flow = one workflow, LangGraph thread = one conversation, Devin session = one task |
+| 5 | **Cross-repo fleet at operator scale** | Walks N hosts in round-robin on one machine. | None — CrewAI Flow = one workflow, LangGraph thread = one conversation, Devin session = one task. **OpenHands Agent Canvas (June 1, 2026) still one-repo-at-a-time**: the Dockerless self-host-on-VM mode runs one agent-server per conversation; cross-repo workflows remain Enterprise-Automations-only (Agent Control Plane license). |
 | 6 | **TASKS.md as operator surface** | Plain markdown file. No dashboard, no API, no DSL. | None |
 
 **Minsky's honest gaps** vs competitors — things we DON'T do, by design or because we haven't shipped yet:
@@ -124,5 +124,5 @@ The validator's published-primary rule (rule #4 — visible, no fabricated readi
 - [user-stories/012-operator-machine-identity-moat.md](../user-stories/012-operator-machine-identity-moat.md) — the moat-1 user story
 - [user-stories/013-daemon-not-framework-moat.md](../user-stories/013-daemon-not-framework-moat.md) — the moat-2 user story
 - [`.claude/skills/competitor-research/SKILL.md`](../.claude/skills/competitor-research/SKILL.md) — the workflow that lifts new URLs into this corpus
-- Sheremetyev, F., _Git Wasn't Designed for Agents_, Medium, 2026-05 (the operator-machine-identity vs cloud-sandbox architectural distinction)
-- Cognition Labs, _Devin Enterprise Deployment Overview_, docs.devin.ai, 2026 (the Brain + Devbox architectural contrast — Devin's stateless cloud Brain is the deliberate inverse of Minsky's operator-machine daemon)
+- Sheremetyev, F., *Git Wasn't Designed for Agents*, Medium, 2026-05 (the operator-machine-identity vs cloud-sandbox architectural distinction)
+- Cognition Labs, *Devin Enterprise Deployment Overview*, docs.devin.ai, 2026 (the Brain + Devbox architectural contrast — Devin's stateless cloud Brain is the deliberate inverse of Minsky's operator-machine daemon)
