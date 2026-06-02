@@ -1265,6 +1265,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: orphan-tests lint
         run: node scripts/check-orphan-tests.mjs
+      - name: orphan-tests pivot tracker
+        # rule #9 pivot threshold made mechanical: reads the embedded
+        # false-positive ledger and fails (PIVOT) once >2 false positives
+        # accumulate in a rolling 5-PR window — the regex→tsc abandon
+        # line for task `tui-src-vs-test-api-drift-pivot-tracker`. Green
+        # ("PERSEVERE") while the ledger stays at-or-below the threshold.
+        run: node scripts/check-orphan-tests.mjs --check-pivot
       - name: unit tests for the linter
         run: pnpm exec vitest run scripts/check-orphan-tests.test.mjs
 

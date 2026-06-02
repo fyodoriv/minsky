@@ -20,13 +20,21 @@
 //   enough for ESM import/export tokens, no AST needed); Beck 2002
 //   *Test-Driven Development*, Ch. 26 (one bug, one test — observed
 //   regression, mechanical detector).
-// Pivot (rule #9): if this lint produces >2 false positives per PR
-//   over a rolling 5-PR window, switch to a tsc-based detector
-//   (separate `tsconfig.test.json` per package, run `tsc --noEmit`
-//   over the test files). Tracked at `tui-src-vs-test-api-drift`.
+// Pivot (rule #9): if this lint produces >2 false positives over a
+//   rolling 5-PR window, switch to a tsc-based detector (separate
+//   `tsconfig.test.json` per package, run `tsc --noEmit` over the test
+//   files). The pivot threshold is no longer prose-only: `node
+//   scripts/check-orphan-tests.mjs --check-pivot` reads the embedded
+//   false-positive ledger (`FALSE_POSITIVE_LEDGER` below) and asserts,
+//   deterministically (rule #10), whether the threshold has been
+//   crossed. While the rolling-window false-positive count stays ≤2 the
+//   tracker exits 0 ("persevere"); once it exceeds 2 the tracker exits 1
+//   ("PIVOT") and prints the tsc-detector migration steps. Tracked at
+//   `tui-src-vs-test-api-drift-pivot-tracker`.
 // Conformance: full — pure pipeline of regex-extract + set-difference
-//   over injected file bodies, with a thin CLI wrapper at the bottom
-//   that walks the filesystem and feeds the pure function.
+//   over injected file bodies, plus a pure pivot-decision function over
+//   the injected ledger, with a thin CLI wrapper at the bottom that
+//   walks the filesystem / reads the ledger and feeds the pure functions.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -248,6 +256,101 @@ export function checkOrphans({ testBody, resolveSource, resolveReexport, crossDi
 }
 
 // ---------------------------------------------------------------------------
+// Pivot tracker (rule #9 pre-registered pivot threshold + rule #10
+// deterministic enforcement). Makes the "regex-vs-tsc" pivot mechanical.
+// ---------------------------------------------------------------------------
+
+/**
+ * Rolling window (in PRs) over which false positives are counted.
+ * Anchored to the task `tui-src-vs-test-api-drift-pivot-tracker`'s
+ * Pivot line: ">2 false positives over a 5-PR window → switch to tsc".
+ */
+export const PIVOT_WINDOW_PRS = 5;
+
+/**
+ * Pivot fires when the false-positive count over the most-recent
+ * `PIVOT_WINDOW_PRS` window exceeds this. ">2" means strictly greater
+ * than 2, i.e. the third false positive in the window trips it.
+ */
+export const PIVOT_FALSE_POSITIVE_THRESHOLD = 2;
+
+/**
+ * @typedef {{
+ *   pr: number,            // PR number that triggered the orphan-tests job to go red
+ *   classification: "false-positive" | "true-positive",
+ *   note: string,          // one-line reason (cited evidence)
+ * }} FalsePositiveObservation
+ */
+
+/**
+ * The checked-in false-positive observation ledger. Each entry records a
+ * PR on which the `orphan-tests` CI job went red, classified true-vs-
+ * false against the actual orphan-symbol report (the task's Measurement
+ * line). The tracker counts only `false-positive` entries inside the
+ * rolling window.
+ *
+ * Seeded empty: as of 2026-06-02 the `orphan-tests` job was green on 40+
+ * consecutive CI runs (measured via `gh run view <id> --json jobs`), so
+ * the regex detector has produced ZERO false positives since it shipped
+ * in PR #713. The regex approach is being persevered with, exactly as
+ * rule #9 prescribes — pivot only when the threshold is crossed, never
+ * pre-emptively. When a future orphan-tests red is triaged as a false
+ * positive, append a `{ pr, classification: "false-positive", note }`
+ * row here in the SAME PR that diagnoses it (the task's "file an
+ * immediate diagnostic task" step), and this tracker will fire the pivot
+ * once three accumulate inside any 5-PR window.
+ *
+ * @type {FalsePositiveObservation[]}
+ */
+export const FALSE_POSITIVE_LEDGER = [];
+
+/**
+ * Pure pivot-decision function. Given the false-positive ledger, decides
+ * whether the regex detector should be persevered with or the tsc-based
+ * detector pivot should fire. The window is interpreted over the SORTED-
+ * ascending tail of distinct PR numbers that appear in the ledger: the
+ * count is the number of `false-positive` rows whose PR sits in the most-
+ * recent `windowSize` PRs of the ledger (an empty ledger ⇒ 0 ⇒
+ * persevere). Threshold is strictly-greater-than (`>`), matching the
+ * task's ">2" wording.
+ *
+ * @param {object} input
+ * @param {FalsePositiveObservation[]} input.ledger
+ * @param {number} [input.windowSize]
+ * @param {number} [input.threshold]
+ * @returns {{
+ *   decision: "persevere" | "pivot",
+ *   falsePositivesInWindow: number,
+ *   windowSize: number,
+ *   threshold: number,
+ *   windowPrs: number[],
+ * }}
+ */
+export function evaluateFalsePositivePivot({
+  ledger,
+  windowSize = PIVOT_WINDOW_PRS,
+  threshold = PIVOT_FALSE_POSITIVE_THRESHOLD,
+}) {
+  // Distinct PR numbers in the ledger, ascending. The rolling window is
+  // the most-recent `windowSize` of these — counting PRs, not rows, so a
+  // PR with two false-positive rows still consumes one window slot but
+  // contributes two to the count.
+  const distinctPrs = [...new Set(ledger.map((o) => o.pr))].sort((a, b) => a - b);
+  const windowPrs = distinctPrs.slice(-windowSize);
+  const windowPrSet = new Set(windowPrs);
+  const falsePositivesInWindow = ledger.filter(
+    (o) => o.classification === "false-positive" && windowPrSet.has(o.pr),
+  ).length;
+  return {
+    decision: falsePositivesInWindow > threshold ? "pivot" : "persevere",
+    falsePositivesInWindow,
+    windowSize,
+    threshold,
+    windowPrs,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI binding (filesystem I/O).
 // ---------------------------------------------------------------------------
 
@@ -365,7 +468,42 @@ export function runCheck() {
   return { violations };
 }
 
+/**
+ * Pivot-tracker CLI mode (`--check-pivot`). Reads the embedded false-
+ * positive ledger and prints the persevere/pivot decision. Exit 0 while
+ * the rolling-window false-positive count stays at-or-below the
+ * threshold; exit 1 (with the tsc-detector migration steps) once it is
+ * exceeded.
+ *
+ * @returns {never}
+ */
+function runPivotTracker() {
+  const verdict = evaluateFalsePositivePivot({ ledger: FALSE_POSITIVE_LEDGER });
+  const windowDesc =
+    verdict.windowPrs.length > 0
+      ? `last ${verdict.windowSize}-PR window [${verdict.windowPrs.join(", ")}]`
+      : `${verdict.windowSize}-PR window (ledger empty — no orphan-tests false positives recorded)`;
+  if (verdict.decision === "persevere") {
+    process.stdout.write(
+      `orphan-tests pivot-tracker: PERSEVERE — ${verdict.falsePositivesInWindow} false positive(s) in the ${windowDesc}; threshold is >${verdict.threshold}. Regex detector stays.\n`,
+    );
+    process.exit(0);
+  }
+  process.stderr.write(
+    `orphan-tests pivot-tracker: PIVOT — ${verdict.falsePositivesInWindow} false positive(s) in the ${windowDesc} exceeds the >${verdict.threshold} threshold.\n` +
+      "Per rule #9, abandon the regex approach and ship the tsc-based detector:\n" +
+      "  1. Add a `tsconfig.test.json` to every `novel/*` package with a `test/` dir,\n" +
+      "     extending the package tsconfig and adding `test` to `include`.\n" +
+      "  2. Replace the regex extract/export pass in `checkOrphans` with a\n" +
+      "     `tsc --noEmit -p novel/<pkg>/tsconfig.test.json` invocation per package.\n" +
+      "  3. Rewire the `orphan-tests` CI job + the pre-pr-lint `orphan-tests` step.\n" +
+      "  4. Update the paired tests in `scripts/check-orphan-tests.test.mjs`.\n",
+  );
+  process.exit(1);
+}
+
 function main() {
+  if (process.argv.includes("--check-pivot")) runPivotTracker();
   const { violations } = runCheck();
   if (violations.length === 0) {
     process.stdout.write(

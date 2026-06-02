@@ -5,7 +5,15 @@
 
 import { describe, expect, test } from "vitest";
 
-import { checkOrphans, extractNamedExports, extractNamedImports } from "./check-orphan-tests.mjs";
+import {
+  checkOrphans,
+  evaluateFalsePositivePivot,
+  extractNamedExports,
+  extractNamedImports,
+  FALSE_POSITIVE_LEDGER,
+  PIVOT_FALSE_POSITIVE_THRESHOLD,
+  PIVOT_WINDOW_PRS,
+} from "./check-orphan-tests.mjs";
 
 describe("extractNamedImports", () => {
   test("(a) two named imports from one specifier", () => {
@@ -284,5 +292,92 @@ describe("regression — fictional but plausible orphan-test cases", () => {
     expect(result.violations).toEqual([
       { symbol: "wrongName", fromSpec: "../src/x.js", resolved: "../src/x.js" },
     ]);
+  });
+});
+
+describe("evaluateFalsePositivePivot (regex-vs-tsc pivot tracker)", () => {
+  /**
+   * @param {number} pr
+   * @param {string} [note]
+   * @returns {import("./check-orphan-tests.mjs").FalsePositiveObservation}
+   */
+  const fp = (pr, note = "fp") => ({ pr, classification: "false-positive", note });
+  /**
+   * @param {number} pr
+   * @param {string} [note]
+   * @returns {import("./check-orphan-tests.mjs").FalsePositiveObservation}
+   */
+  const tp = (pr, note = "real orphan") => ({ pr, classification: "true-positive", note });
+
+  test("(a) empty ledger → persevere with 0 false positives", () => {
+    const v = evaluateFalsePositivePivot({ ledger: [] });
+    expect(v.decision).toBe("persevere");
+    expect(v.falsePositivesInWindow).toBe(0);
+    expect(v.windowPrs).toEqual([]);
+  });
+
+  test("(b) exactly the threshold (2 false positives) → still persevere (>2 is strict)", () => {
+    const v = evaluateFalsePositivePivot({ ledger: [fp(10), fp(11)] });
+    expect(v.decision).toBe("persevere");
+    expect(v.falsePositivesInWindow).toBe(2);
+  });
+
+  test("(c) third false positive in the window → pivot", () => {
+    const v = evaluateFalsePositivePivot({ ledger: [fp(10), fp(11), fp(12)] });
+    expect(v.decision).toBe("pivot");
+    expect(v.falsePositivesInWindow).toBe(3);
+  });
+
+  test("(d) true positives never count toward the pivot", () => {
+    const v = evaluateFalsePositivePivot({ ledger: [tp(10), tp(11), tp(12), fp(13), fp(14)] });
+    expect(v.decision).toBe("persevere");
+    expect(v.falsePositivesInWindow).toBe(2);
+  });
+
+  test("(e) false positives outside the rolling window fall off", () => {
+    // PRs 1,2,3 are false positives but the window is the last 5 distinct
+    // PRs [3,4,5,6,7] → only PR 3's fp is in window.
+    const v = evaluateFalsePositivePivot({
+      ledger: [fp(1), fp(2), fp(3), tp(4), tp(5), tp(6), tp(7)],
+    });
+    expect(v.windowPrs).toEqual([3, 4, 5, 6, 7]);
+    expect(v.falsePositivesInWindow).toBe(1);
+    expect(v.decision).toBe("persevere");
+  });
+
+  test("(f) two false-positive rows on the SAME PR count twice but consume one window slot", () => {
+    const v = evaluateFalsePositivePivot({ ledger: [fp(20, "a"), fp(20, "b"), fp(21)] });
+    expect(v.windowPrs).toEqual([20, 21]);
+    expect(v.falsePositivesInWindow).toBe(3);
+    expect(v.decision).toBe("pivot");
+  });
+
+  test("(g) out-of-order ledger is normalized to ascending PR order", () => {
+    const v = evaluateFalsePositivePivot({ ledger: [fp(30), fp(12), fp(25)] });
+    expect(v.windowPrs).toEqual([12, 25, 30]);
+    expect(v.falsePositivesInWindow).toBe(3);
+    expect(v.decision).toBe("pivot");
+  });
+
+  test("(h) custom windowSize/threshold are honored", () => {
+    const v = evaluateFalsePositivePivot({
+      ledger: [fp(1), fp(2)],
+      windowSize: 2,
+      threshold: 1,
+    });
+    expect(v.decision).toBe("pivot");
+    expect(v.falsePositivesInWindow).toBe(2);
+  });
+
+  test("(i) shipped ledger is empty → tracker reports persevere (regex perseveres)", () => {
+    // Pins the current empirical reality: 0 false positives since PR #713.
+    expect(FALSE_POSITIVE_LEDGER).toEqual([]);
+    const v = evaluateFalsePositivePivot({ ledger: FALSE_POSITIVE_LEDGER });
+    expect(v.decision).toBe("persevere");
+  });
+
+  test("(j) constants match the task's pre-registered pivot threshold", () => {
+    expect(PIVOT_WINDOW_PRS).toBe(5);
+    expect(PIVOT_FALSE_POSITIVE_THRESHOLD).toBe(2);
   });
 });
