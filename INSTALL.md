@@ -44,6 +44,20 @@ Two invariants you, the installing agent, must honor:
 
 Minsky is a background daemon that runs AI coding agents against tasks in any git repo. It picks the highest-priority task with complete rule-9 fields from `TASKS.md`, spawns an AI agent to work on it, opens a PR, records the iteration, then picks the next task. By default it runs until the operator stops it.
 
+## `minsky init` vs `minsky-init` — two install surfaces, on purpose
+
+There are two `init` entry points and they do **different** jobs. This is deliberate, not a bug — pick by what you already have on the machine.
+
+| Surface | What it does | When to use |
+| --- | --- | --- |
+| `minsky init [repo]` (subcommand, no hyphen) | **Config-only.** Writes `~/.minsky/config.json` with `default_host` set, preserving existing keys. No toolchain check, no `pnpm install`, no doctor. Exits fast. | The repo is already cloned and `pnpm install` already ran (the most common case once minsky is installed). Also the building block the two other surfaces delegate to — single source of truth for the config write. |
+| `bin/minsky-init [repo]` (script, hyphen) | **Full bootstrap.** Verifies Node ≥20 + pnpm (enables it via corepack if missing), runs `pnpm install` (builds `dist/` + installs git hooks), then calls `minsky init` to write the config, then runs `minsky doctor` and prints the one-line start command. | A freshly-cloned checkout, or a machine where you're not sure `pnpm install` has run. This is the one-command path that takes you from clone to a doctor-GREEN daemon-ready state. |
+| `npx -y minsky init` | Resolves to `bin/minsky init` (the config-only subcommand) from the published tarball. It does **not** run `pnpm install` — the tarball is already installed by `npx`, but `dist/` is built by the package's own `prepare`/`postinstall`, not by `init`. | Scripted / one-liner config write against an npm-installed minsky. If `dist/` is missing afterwards, run `bin/minsky-init --skip-install` (config + doctor) or `bin/minsky-init` (full) to finish the bootstrap. |
+
+**Rule of thumb**: on a fresh checkout run `bin/minsky-init` (hyphen) once; after that, `minsky init` (no hyphen) is all you need to re-point at a different repo. They are NOT interchangeable — `minsky init` will not build `dist/` for you, and `minsky-init` is heavier than you want for a quick re-point.
+
+**Why not unify them?** `bin/minsky init` is contract-pinned to a config-only write (`test/integration/npx-init-tarball.test.ts` asserts `npx minsky init` writes config and nothing else, so `npx`-based wrappers stay fast and side-effect-free). Making it run `pnpm install` + doctor would break that contract and make every scripted config write pay the full-install cost. The split keeps the cheap path cheap; `bin/minsky-init` is the explicit "do everything" verb layered on top.
+
 ## Step 1 — verify prerequisites
 
 Run each line and check the output:
