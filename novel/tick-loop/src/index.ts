@@ -17,6 +17,15 @@
  *      decision + JSONL tick-event builder; the agent spawn + event append I/O
  *      live in the daemon / `bin/minsky-run.sh`, and the coverage measurement
  *      in `scripts/audit-pass-empty-queue-coverage.mjs`.
+ *   4. `worker-config` — the per-run namespace derivation that lets dozens of
+ *      concurrent `minsky` processes on one machine never collide. Every
+ *      mutable namespace (worktree dir, lock file, branch, launchd label,
+ *      ledger path, port) is keyed by a single run-id `<repo-hash>-<pid>-<rand>`
+ *      and task arbitration uses a repo+task-scoped claim key. Pure derivation;
+ *      the mkdir / O_EXCL / git / launchctl I/O lives in
+ *      `scripts/orchestrate.mjs` + the bash runner. Chaos measurement in
+ *      `scripts/chaos-multitenant.mjs` (rule #7). Rule #6 (a namespace clash
+ *      must never crash a sibling run).
  *
  * See `README.md` for the pattern conformance, failure modes, and threat model.
  */
@@ -56,3 +65,17 @@ export {
   PERSISTED_AUTH_FAILURE_THRESHOLD,
   RECOVERABLE_GH_STATUSES,
 } from "./gh-auth-classifier.js";
+export {
+  countDuplicates,
+  countNamespaceCollisions,
+  DEFAULT_BASE_PORT,
+  DEFAULT_PORT_SPAN,
+  deriveClaimKey,
+  deriveRunId,
+  deriveRunNamespace,
+  fnv1a32,
+  normalizeRepoPath,
+  type RunNamespace,
+  type RunNamespaceInput,
+  repoHash,
+} from "./worker-config.js";

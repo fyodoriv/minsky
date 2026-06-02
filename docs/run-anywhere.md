@@ -156,6 +156,75 @@ base, the run stops within `600±30s` under `MINSKY_RUN_TIME_LIMIT=600s`, and
 zero restarts fire after the deadline. A regression in the decision core
 becomes an exit-1 gate break, not a silent mis-restart.
 
+## Multi-tenant: dozens of concurrent runs, zero conflicts
+
+<!-- scope: human-approved `runany-multitenant-no-conflict` (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
+
+Run-anywhere means several `minsky` processes can run on one machine at the
+same time — on different repos, or even the **same** repo (an operator
+debugging a run while the supervised daemon keeps ticking, two ad-hoc
+`minsky run` invocations, a swarm). None of them may clobber another's
+worktree, branch, lock, launchd label, ledger, or port.
+
+### Run-id keys every mutable namespace
+
+Each run derives a single unique **run-id** at boot:
+
+```text
+<repo-hash>-<pid>-<rand>
+   │            │      └── a random hex token — the tiebreaker when two
+   │            │          same-repo runs share a recycled pid (RFC 4122 §4.4)
+   │            └───────── the OS process id of this run
+   └────────────────────── 8-char FNV-1a hash of the repo root (same repo →
+                            same prefix, so an operator can grep all its runs)
+```
+
+Every per-run mutable namespace is derived **from that one run-id** by
+`deriveRunNamespace` (`novel/tick-loop/src/worker-config.ts`), so adding a new
+namespace can never be keyed in one place and forgotten in another:
+
+| Namespace | Derived value |
+|---|---|
+| Worktree dir | `.minsky/worktrees/<run-id>` |
+| Lock file | `.minsky/locks/run-<run-id>.lock` |
+| Branch | `minsky/run-<run-id>` |
+| launchd label | `com.minsky.run.<run-id>` |
+| Ledger | `.minsky/ledger/<run-id>.jsonl` |
+| Port (hint) | `basePort + hash(run-id) % portSpan` — a *starting hint* only; ports are a finite shared resource, so the OS bind loop (`EADDRINUSE` → next free port) is the real arbiter, not the hash |
+
+`scripts/orchestrate.mjs` derives `RUN_ID` once at boot (override with
+`MINSKY_RUN_ID`) and stamps it onto every `orchestrate.jsonl` heartbeat line,
+so concurrent conductors on the same repo are distinguishable in the shared
+ledger.
+
+### Task arbitration is repo+task-scoped
+
+Two processes on the same repo must never both claim the same task.
+`deriveClaimKey(repo, task)` makes both processes derive the **same** lock path
+for the same `(repo, task)`, so the kernel's `O_EXCL` create grants it to
+exactly one winner; the loser fails the create and picks the next task.
+Different tasks (or different repos) derive different keys, so they never
+cross-block. This is the cross-process extension of the existing claim — the
+gate's `git clone --shared` scratch is already per-`mkdtemp` (safe).
+
+### Measurement (pre-registered, rule #9)
+
+A pure discrete-event simulation drives the same `deriveRunNamespace` +
+`deriveClaimKey` cores the production boot uses (no real process spawn — a
+real race would be flaky and machine-dependent; the decision under test is
+pure):
+
+```bash
+node scripts/chaos-multitenant.mjs --runs=10 --minutes=30 --json
+# → {"collisions":0,"corruptWorktrees":0,"doubleClaims":0}
+node scripts/chaos-multitenant.mjs          # human summary
+```
+
+Exit code is `0` only when all three observables are `0`: N concurrent
+same-repo runs collide on no namespace dimension, no worktree corrupts, and no
+task is double-claimed. A regression in the derivation core becomes an exit-1
+gate break, not a silent collision in production.
+
 ## Per-iteration provider decision
 
 <!-- scope: human-approved `runany-dynamic-model-or-local-fallback` slices 1+2 (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
