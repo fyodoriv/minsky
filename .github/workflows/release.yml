@@ -71,8 +71,13 @@ jobs:
         env:
           # GITHUB_TOKEN: built-in token with contents:write + pull-requests:write
           # per the permissions block above. semantic-release uses this to
-          # create the tag, the release, and to commit the bumped CHANGELOG.md
-          # back to main.
+          # create the git tag and the GitHub Release only. It does NOT commit
+          # CHANGELOG.md back to main — the @semantic-release/git +
+          # @semantic-release/changelog plugins were removed in PR #703 because
+          # the built-in token can't bypass main's branch protection. The
+          # GitHub Release is the release-notes artifact; no PAT is provisioned.
+          # See docs/release.md for the durable decision
+          # (release-pat-vs-github-releases-decision).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm exec semantic-release
 
