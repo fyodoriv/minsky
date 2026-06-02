@@ -1,7 +1,7 @@
 // Pins the stage-0 auto-commit backstop in bin/minsky-run.sh.
 //
-// History: 2026-05-28 monitoring round caught 14+ iterations on
-// `a2a-adapter-foundation` (between 17:06 and 18:01) leaving the SAME
+// History: 2026-05-28 monitoring round caught 14+ iterations on the
+// A2A adapter foundation task (between 17:06 and 18:01) leaving the SAME
 // `novel/adapters/a2a.ts` file uncommitted in the worktree. The brief-
 // prepend from PR #985 surfaced the prior work to each new iteration,
 // but qwen3-coder:30b reliably failed to commit it — agent spent its
