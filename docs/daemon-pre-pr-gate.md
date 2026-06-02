@@ -92,6 +92,7 @@ The full stage adds the slow lints — vitest, the remaining diff-relative check
 - `rule-5-glossary-discipline` — every glossary term in vision.md has exactly one definition.
 - `pattern-index` — every artefact maps to a row in vision.md's "Pattern conformance index" (rule #8).
 - `no-singleton-experiment` — every `experiments/*.yaml` resolves to ≥2 deployed instances (no singletons).
+- `gate-scratch-resolvable` — `scripts/local-gate-merge.mjs` must build a module-resolvable scratch: a real `pnpm install --frozen-lockfile` (not a root-only `node_modules` symlink), with both scratch-prep paths (`prepareScratchClone`, `prepareScratchCloneForBranch`) routing through the shared `installScratchDeps` seam. Structural ratchet so the zero-merge regression (every PR vetted against an unresolvable scratch → all skipped → 0 merges) cannot recur silently (rule #10; `gate-scratch-resolvable-ratchet`).
 - `lockfile-integrity` — diffs `pnpm-lock.yaml` against `origin/main` and rejects same-`name@version` entries whose integrity hash changed (rule #13.5 — security & privacy minimum-bar item #5; the empirical fingerprint of the 2025 chalk/debug supply-chain incident).
 - `otel-no-pii` — full-scan of `novel/**/*.ts` rejects PII-shaped span attributes (rule #13.2 — security & privacy minimum-bar item #2).
 - `secret-scan` — full-scan of every tracked file rejects credential shapes (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`, `AIza…`, PEM headers); rule #13.1 — security & privacy minimum-bar item #1.
