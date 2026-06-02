@@ -823,6 +823,104 @@ describe("gitConfigParseableInvariant", () => {
     expect(result.suggestedFix).toContain("no conflict markers found");
     expect(result.suggestedFix).toContain("rm .git/index.lock");
   });
+
+  // Bare-misset detection (task minsky-repo-git-config-bare-misset). The bug:
+  // `core.bare = true` on a repo that has a working tree (active
+  // .git/worktrees/ entries) makes every `git status` fail with
+  // `fatal: this operation must be run in a work tree`. The historic fix
+  // proposed `rm .git/index.lock` — wrong (the index isn't locked). The
+  // correct one-line fix is `git config core.bare false`.
+  describe("bare-misset detection", () => {
+    const workTreeError = async () => ({
+      ok: false,
+      durationMs: 50,
+      stderr: "fatal: this operation must be run in a work tree",
+    });
+    const noMarkers = async () => [];
+
+    it("proposes `git config core.bare false` when bare=true AND worktrees exist (the bug case)", async () => {
+      const result = await gitConfigParseableInvariant({
+        probeGitStatus: workTreeError,
+        scanGitConfigForConflicts: noMarkers,
+        probeGitBare: async () => true,
+        probeGitWorktreeCount: async () => 4,
+      })();
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      expect(result.id).toBe("git-config-parseable");
+      expect(result.suggestedFix).toContain("git config core.bare false");
+      // It must NOT misdirect to the index-lock fix.
+      expect(result.suggestedFix).not.toContain("rm .git/index.lock");
+      expect(result.evidence).toContain("core.bare = true");
+      expect(result.evidence).toContain("4 active worktree");
+    });
+
+    it("does NOT flag bare-misset when bare=false (no false positive)", async () => {
+      const result = await gitConfigParseableInvariant({
+        probeGitStatus: workTreeError,
+        scanGitConfigForConflicts: noMarkers,
+        probeGitBare: async () => false,
+        probeGitWorktreeCount: async () => 4,
+      })();
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      // Falls back to the generic index-lock guidance, not the bare flip.
+      expect(result.suggestedFix).not.toContain("git config core.bare false");
+      expect(result.suggestedFix).toContain("rm .git/index.lock");
+    });
+
+    it("does NOT flag bare-misset for a true bare repo (bare=true, zero worktrees)", async () => {
+      const result = await gitConfigParseableInvariant({
+        probeGitStatus: workTreeError,
+        scanGitConfigForConflicts: noMarkers,
+        probeGitBare: async () => true,
+        probeGitWorktreeCount: async () => 0,
+      })();
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      // A genuine bare repo with no working tree is a different problem — the
+      // bare flip would be wrong, so keep the generic fix.
+      expect(result.suggestedFix).not.toContain("git config core.bare false");
+      expect(result.suggestedFix).toContain("rm .git/index.lock");
+    });
+
+    it("does NOT flag bare-misset when the failure is not a work-tree error", async () => {
+      const result = await gitConfigParseableInvariant({
+        probeGitStatus: async () => ({ ok: false, durationMs: 80, stderr: "ENOENT" }),
+        scanGitConfigForConflicts: noMarkers,
+        probeGitBare: async () => true,
+        probeGitWorktreeCount: async () => 4,
+      })();
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      // Different stderr → the bare probes must not hijack the diagnosis.
+      expect(result.suggestedFix).not.toContain("git config core.bare false");
+      expect(result.suggestedFix).toContain("rm .git/index.lock");
+    });
+
+    it("conflict markers take precedence over bare-misset (more-specific fix wins)", async () => {
+      const result = await gitConfigParseableInvariant({
+        probeGitStatus: workTreeError,
+        scanGitConfigForConflicts: async () => [{ line: 100, marker: "<<<<<<<" }],
+        probeGitBare: async () => true,
+        probeGitWorktreeCount: async () => 4,
+      })();
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      expect(result.suggestedFix).toContain("Resolve the conflict markers");
+      expect(result.suggestedFix).not.toContain("git config core.bare false");
+    });
+
+    it("stays backward-compatible when bare probes are omitted (work-tree error, old callers)", async () => {
+      const result = await gitConfigParseableInvariant({
+        probeGitStatus: workTreeError,
+        scanGitConfigForConflicts: noMarkers,
+      })();
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      expect(result.suggestedFix).toContain("rm .git/index.lock");
+    });
+  });
 });
 
 describe("daemonPrStuckDirtyInvariant", () => {
