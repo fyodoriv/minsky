@@ -207,6 +207,23 @@ describe("STACK_MANIFEST", () => {
     expect(step?.stages).toContain("full");
   });
 
+  // Pin for `pre-pr-lint-stack-vitest-hangs-vs-standalone`: the `vitest` step
+  // must carry a per-test timeout AND `--bail=1`. Bare `pnpm test` (`vitest
+  // run` with no `--testTimeout`, no `--bail`) hung the lint stack >10 min on
+  // a single blocking test; the standalone-green invocation that completed in
+  // 33s was `vitest run --testTimeout=15000 --bail=1`. Reverting to unbounded
+  // `["test"]` re-opens the hang — a gate that can't terminate isn't a gate
+  // (vision.md rule #10).
+  test("`vitest` step is bounded: per-test timeout + --bail (can't hang indefinitely)", () => {
+    const step = STACK_MANIFEST.find((s) => s.name === "vitest");
+    expect(step).toBeDefined();
+    expect(step?.args).toContain("--testTimeout=15000");
+    expect(step?.args).toContain("--bail=1");
+    expect(step?.args).toContain("run");
+    // Regression guard: the old unbounded form was exactly ["test"].
+    expect(step?.args).not.toEqual(["test"]);
+  });
+
   // The "gate is effective" demo from the task's Success criterion: a fixture
   // that lowers the threshold to a value the repo doesn't meet exits
   // non-zero. Proves the gate's exit code is wired to the alignment count,
