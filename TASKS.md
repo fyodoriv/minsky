@@ -78,6 +78,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: ban-test-real-install-against-repo-root
   - **Tags**: p0, milestone-m1, stability, regression-catching, ci-gate, anti-flake, rule-10-ratchet
   - **Milestone**: M1
+  - **Competitive-goal**: drives `ci-green-rate` (fraction of main commits whose `ci` workflow is green) back toward 1.0 — the repo-root-install-in-test class held it at 0 for hours on 2026-06-02; this gate makes that class non-recurring.
   - **Hypothesis**: a static lint that scans `**/*.test.{ts,mjs}` for the bad pattern (a spawn of `bin/minsky-init` / `distribution/install.sh` WITHOUT `--skip-install`, or a literal `pnpm install` / `npm ci` whose cwd is the repo root) drops recurrences of the "tinypool worker exited" CI-failure class from 1 (this incident) to 0, because the only way to corrupt the shared `node_modules` mid-run is a repo-root install and the gate forbids it at author time.
   - **Success**: the gate ships with a paired test, exits 0 on the current tree (post-#1028), and exits 1 against a fixture test that spawns `bin/minsky-init <host>` with no `--skip-install`.
   - **Pivot**: if the gate produces >1 false positive/week on legitimate isolated-checkout installs, narrow the heuristic to repo-root-cwd installs only; abandon the static approach if no clean signal distinguishes repo-root from isolated-tmp installs and replace with a runtime node_modules-integrity assertion in test setup.
@@ -92,6 +93,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **ID**: minsky-init-real-install-smoke-hermetic
   - **Tags**: p1, milestone-m1, stability, test-coverage, integration-test
   - **Milestone**: M1
+  - **Competitive-goal**: protects `time-to-first-iteration` (install IS the operator's first lead-time metric) by restoring CI coverage of the real-install bootstrap path that #1028 had to skip.
   - **Hypothesis**: copying the repo tree (excluding `node_modules` + `.git`) into a tmpdir and pointing `distribution/install.sh` at it (or using install.sh's clone path against a local `file://` remote) lets the real-install path run hermetically; restoring CI coverage of that path raises minsky-init integration coverage from the current 7/8 CI-run cases to 8/8 without re-introducing the tinypool-corruption failure.
   - **Success**: the real-install smoke runs in CI (no opt-in env), asserts config written + exit ∈ {0,1}, completes in <90s, and the shared repo `node_modules` is provably untouched (a before/after `tinypool/dist/entry/process.js` stat is identical).
   - **Pivot**: if a full tree copy is too slow (>90s) in CI, fall back to install.sh's `git clone --depth 1 file://$REPO_ROOT` path which installs into `~/.minsky-src`, never the shared tree; abandon hermetic real-install coverage only if both copy and clone exceed the CI time budget, keeping the #1028 opt-in gate.
@@ -102,6 +104,21 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Touches**: `test/integration/minsky-init.test.ts`
   - **Acceptance**: (1) the real-install smoke runs in CI without an opt-in env. (2) it asserts the shared `node_modules` is untouched. (3) `CI=true pnpm test:coverage` stays green. (4) the `MINSKY_RUN_INSTALL_MUTATION_TEST` gate is removed. (5) `pnpm pre-pr-lint --stage=fast` exits 0.
   - **Blocked by**: ban-test-real-install-against-repo-root
+
+- [ ] `upgrade-vitest-4-resolve-ui-advisory` — upgrade vitest (+ `@vitest/coverage-v8`) from 2.1.9 to ≥4.1.0 to clear the critical advisory GHSA-5xrq-8626-4rwp (Vitest UI server arbitrary-file serve), then remove the `pnpm.auditConfig.ignoreGhsas` exception added by #1028. The exception is safe today (CI runs headless `vitest run --coverage`, never `vitest --ui`, so the UI server never listens) but a deferred critical advisory must be tracked and retired, not left ignored.
+  - **ID**: upgrade-vitest-4-resolve-ui-advisory
+  - **Tags**: p1, milestone-m1, stability, security, dependency-upgrade, deferred-advisory
+  - **Milestone**: M1
+  - **Competitive-goal**: drives `audit-clean-rate` (fraction of `pnpm audit --audit-level=high` runs that pass with zero ignore-list entries) back to 1.0 — an ignore-list entry is technical debt that masks the next real advisory in the same package.
+  - **Hypothesis**: bumping vitest 2.x → 4.x is a contained dev-dependency upgrade (the test API used here — `describe`/`test`/`expect`/`vi`/`skipIf`/`it.fails` — is stable across 2→4); after the bump `pnpm audit --audit-level=high` exits 0 with the ignore-list removed and the full 3400-test suite stays green, with tinypool ≥1.1 compat preserved.
+  - **Success**: vitest + @vitest/coverage-v8 at ≥4.1.0, `pnpm.auditConfig.ignoreGhsas` removed, `pnpm audit --audit-level=high` exits 0, `CI=true pnpm test:coverage` green (3400+ tests, coverage thresholds held).
+  - **Pivot**: if vitest 4.x changes the coverage provider or worker-pool API enough to break >20 test files, pin to the latest 3.x that clears the advisory instead; abandon the major bump (keep the documented ignore + re-evaluate next quarter) only if 4.x and 3.x both force a coverage-config rewrite >1 day.
+  - **Measurement**: `pnpm audit --audit-level=high` exits 0 after removing the ignore-list; `node -e "console.log(require('vitest/package.json').version)"` prints ≥4.1.0; `CI=true pnpm test:coverage` exits 0.
+  - **Anchor**: GHSA-5xrq-8626-4rwp (the advisory being retired); OWASP A06:2021 "Vulnerable and Outdated Components" (track-and-retire deferred advisories, never permanently ignore).
+  - **Details**: One slice. Bump `vitest` + `@vitest/coverage-v8` to ≥4.1.0 in package.json, `pnpm install`, fix any 2→4 API/coverage-config breakage, run `CI=true pnpm test:coverage`, then delete the `ignoreGhsas` block.
+  - **Files**: `package.json` (vitest deps + remove ignoreGhsas), `pnpm-lock.yaml` (regenerated), `vitest.config.ts` (only if 4.x needs a coverage-config change).
+  - **Touches**: `package.json`, `pnpm-lock.yaml`, `vitest.config.ts`
+  - **Acceptance**: (1) vitest ≥4.1.0. (2) `ignoreGhsas` removed. (3) `pnpm audit --audit-level=high` exits 0. (4) `CI=true pnpm test:coverage` green. (5) `pnpm pre-pr-lint --stage=fast` exits 0.
 
 - [ ] `mcp-migration-to-2026-07-28-rc` — migrate Minsky's MCP adapter to the v2026-07-28 RC protocol revision before the breaking-change deadline. v2026-07-28 removes the `initialize` handshake and moves MCP to stateless semantics; without the migration, Minsky's MCP adapter breaks against any post-July-28 MCP server.
   - **ID**: mcp-migration-to-2026-07-28-rc
