@@ -93,16 +93,67 @@ export function decideHeal(workerAlive) {
   return workerAlive ? "ok" : "heal";
 }
 
-/** @returns {boolean} */
-function workerDaemonAlive() {
+/**
+ * Pure: given the stdout of `launchctl print gui/<uid>/<label>`, decide
+ * whether the launchd-supervised worker daemon is running. Detect liveness
+ * by the supervisor's own truth — the top-level `state = running` line —
+ * NOT by an argv-substring grep (`pgrep -f 'tick-loop.mjs --worker-id=0'`)
+ * which silently breaks the moment the arg-shape changes. Concretely:
+ * scaling to N workers via `--spawn-additional-workers=3` rewrites the root
+ * proc's argv (no `--worker-id=0` substring) and spawns children labelled
+ * `--worker-id=1/2/3`, so the old grep only matched a STRAY pre-reload proc
+ * by coincidence; when that stray exits the grep flips false and the
+ * conductor kickstarts the healthy 4-worker daemon every tick, SIGKILLing
+ * in-flight Opus iterations. `launchctl print` reports the supervisor's
+ * actual job state independent of how the worker fans out its argv (rule #6
+ * — the supervisor owns restart; detect via the supervisor, not a brittle
+ * process heuristic — and rule #10 — same input ⇒ same output, no I/O here).
+ *
+ * `launchctl print` nests sub-job `state = active` lines under the service;
+ * the daemon's own liveness is the FIRST top-level (single-tab-indented)
+ * `state = running`. We anchor on that to avoid a nested `state = active`
+ * sub-job spuriously reading as alive when the top-level job is stopped.
+ * @param {string} printOut stdout from `launchctl print`
+ * @returns {boolean} true iff the top-level job `state = running`
+ */
+export function parseLaunchctlRunning(printOut) {
+  if (typeof printOut !== "string" || printOut.length === 0) return false;
+  for (const line of printOut.split("\n")) {
+    // Top-level fields are single-tab-indented; sub-jobs are deeper. Match
+    // exactly `\tstate = running` so a nested `\t\tstate = active` can't pass.
+    if (/^\tstate\s*=\s*running\b/.test(line)) return true;
+  }
+  return false;
+}
+
+/**
+ * Probe launchd for the worker daemon's job state. The `launchctl print`
+ * invocation is injected (`probe`) so the liveness decision is unit-testable
+ * without a loaded launchd service (rule #2 — pure decision over a seam).
+ * Default probe shells out to read-only `launchctl print gui/<uid>/<label>`.
+ * On any failure (service not loaded ⇒ non-zero exit, no uid, parse miss)
+ * the daemon is treated as DOWN — the conservative heal-eligible state.
+ * @param {() => string} [probe] returns `launchctl print` stdout
+ * @returns {boolean}
+ */
+function workerDaemonAlive(probe = defaultLaunchctlProbe) {
   try {
-    const out = execFileSync("pgrep", ["-f", "tick-loop.mjs --worker-id=0"], {
-      encoding: "utf8",
-    });
-    return out.trim().length > 0;
+    return parseLaunchctlRunning(probe());
   } catch {
     return false;
   }
+}
+
+/**
+ * Default liveness probe: read-only `launchctl print gui/<uid>/<label>`.
+ * Read-only launchctl is always allowed (see check-supervisor-explicit-start).
+ * @returns {string}
+ */
+function defaultLaunchctlProbe() {
+  const uid = typeof process.getuid === "function" ? process.getuid() : "";
+  return execFileSync("launchctl", ["print", `gui/${uid}/${WORKER_LABEL}`], {
+    encoding: "utf8",
+  });
 }
 
 /** @param {(s: string) => void} log */

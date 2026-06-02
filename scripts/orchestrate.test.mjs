@@ -3,7 +3,12 @@
 // (pgrep / launchctl / runGateSweep) is validated by the `--once` run.
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
-import { buildTickLedgerLine, decideHeal, decideWorkerPausePids } from "./orchestrate.mjs";
+import {
+  buildTickLedgerLine,
+  decideHeal,
+  decideWorkerPausePids,
+  parseLaunchctlRunning,
+} from "./orchestrate.mjs";
 
 describe("decideHeal (conductor self-heal decision)", () => {
   it("worker alive ⇒ ok (no heal)", () => {
@@ -53,6 +58,70 @@ describe("buildTickLedgerLine (conductor merge-accounting)", () => {
   it("omits sweepError when none occurred", () => {
     const line = buildTickLedgerLine({ merged: [], skipped: [] }, ctx);
     expect("sweepError" in line).toBe(false);
+  });
+});
+
+// Regression tests for `worker-liveness-detect-by-label-not-argv` (TASKS.md):
+// liveness is the launchd supervisor's truth (`state = running`), not an
+// argv-substring grep that breaks when the worker fans out via
+// `--spawn-additional-workers=N`. `parseLaunchctlRunning` is the pure seam
+// `workerDaemonAlive` feeds; `decideHeal` consumes its boolean.
+describe("parseLaunchctlRunning (launchd-label liveness, not argv grep)", () => {
+  // Verbatim shape of `launchctl print gui/<uid>/<label>` for a running job.
+  const RUNNING = ["com.minsky.opus-sonnet-run = {", "\tstate = running", "\tpid = 4242", "}"].join(
+    "\n",
+  );
+
+  it("alive when the top-level job state = running", () => {
+    expect(parseLaunchctlRunning(RUNNING)).toBe(true);
+  });
+
+  it("alive regardless of worker argv shape (--spawn-additional-workers=N)", () => {
+    // The whole point: the worker's argv no longer contains `--worker-id=0`,
+    // yet launchd still reports the job running. The old pgrep would miss it.
+    const noWorkerId0 = [
+      "com.minsky.opus-sonnet-run = {",
+      "\tstate = running",
+      "\targuments = { tick-loop.mjs --spawn-additional-workers=3 }",
+      "}",
+    ].join("\n");
+    expect(parseLaunchctlRunning(noWorkerId0)).toBe(true);
+  });
+
+  it("down when the job is not running (state = waiting)", () => {
+    const waiting = ["com.minsky.opus-sonnet-run = {", "\tstate = waiting", "}"].join("\n");
+    expect(parseLaunchctlRunning(waiting)).toBe(false);
+  });
+
+  it("down when launchctl reports the service is not loaded (empty/error)", () => {
+    expect(parseLaunchctlRunning("")).toBe(false);
+    expect(
+      parseLaunchctlRunning('Could not find service "com.minsky.opus-sonnet-run" in domain'),
+    ).toBe(false);
+  });
+
+  it("a nested sub-job `state = active` alone does NOT read as alive", () => {
+    // launchctl nests endpoint sub-jobs deeper-indented; only the top-level
+    // (single-tab) `state = running` is the daemon's own liveness.
+    const nestedOnly = [
+      "com.minsky.opus-sonnet-run = {",
+      "\tstate = waiting",
+      "\tendpoints = {",
+      "\t\tstate = active",
+      "\t}",
+      "}",
+    ].join("\n");
+    expect(parseLaunchctlRunning(nestedOnly)).toBe(false);
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    expect(parseLaunchctlRunning(RUNNING)).toBe(parseLaunchctlRunning(RUNNING));
+    expect(parseLaunchctlRunning("")).toBe(parseLaunchctlRunning(""));
+  });
+
+  it("feeds decideHeal correctly: running ⇒ ok, not-loaded ⇒ heal", () => {
+    expect(decideHeal(parseLaunchctlRunning(RUNNING))).toBe("ok");
+    expect(decideHeal(parseLaunchctlRunning(""))).toBe("heal");
   });
 });
 
