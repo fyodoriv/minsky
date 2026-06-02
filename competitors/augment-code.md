@@ -12,7 +12,7 @@
 Two distinct surfaces:
 
 - **`augmentcode/augment-swebench-agent`** — a standalone agent scaffolding (Python, 99.4% by language) that runs against SWE-bench Verified. Achieved **65.4% resolve rate on SWE-bench Verified** with Claude Sonnet 3.7 as the core driver + OpenAI o1 as the ensembler (published 2025-03-31). Forked from Anthropic's own SWE-bench blog post architecture; the main delta vs Anthropic's published approach was using Anthropic's sequential-thinking MCP tool to fill in the "planning" gap left out of Anthropic's post + o1 ensembling.
-- **Augment Code (commercial)** — IDE product with retrieval-aware context engine, available in VS Code, JetBrains, Neovim. Different surface; the OSS agent above is the public benchmark artifact.
+- **Augment Code (commercial)** — IDE product with retrieval-aware context engine, available in VS Code, JetBrains, Neovim. Different surface; the OSS agent above is the public benchmark artifact. The commercial product line later shipped the **Auggie CLI** agent, whose SWE-bench Pro number (51.80%, 2026-02-04) is the vendor's current flagship benchmark reading (see Scorecard readings below) — but on a different split than the Verified number the corpus tracks.
 
 ## Strengths
 
@@ -55,8 +55,10 @@ Two distinct surfaces:
 
 | Metric                              | Value | Date       | Primary source |
 | ----------------------------------- | ----- | ---------- | -------------- |
-| `swe-bench-verified-resolve-rate`   | 0.654 | 2025-03-31 | Chen & Flaherty, "#1 open-source agent on SWE-Bench Verified by combining Claude 3.7 and O1", augmentcode.com/blog, 2025-03-31 (Claude Sonnet 3.7 driver + o1 ensembler; methodology forked from Anthropic SWE-bench post + sequential-thinking MCP; reproducible at github.com/augmentcode/augment-swebench-agent) |
+| `swe-bench-verified-resolve-rate`   | 0.654 | 2025-03-31 | Chen & Flaherty, "#1 open-source agent on SWE-Bench Verified by combining Claude 3.7 and O1", augmentcode.com/blog, 2025-03-31 (Claude Sonnet 3.7 driver + o1 ensembler; methodology forked from Anthropic SWE-bench post + sequential-thinking MCP; reproducible at github.com/augmentcode/augment-swebench-agent) — **stale-by-vendor**: still Augment's last SWE-bench *Verified* submission |
+
+**Why the Verified reading is not re-dated** (`corpus-refresh-augment-code` Pivot path): Augment has not published a new SWE-bench *Verified* number since 2025-03-31, so the scorecard's Verified cell stays pinned to that publication rather than masking the staleness with a re-stamped date. The vendor's benchmarking attention has since moved to a **different split**: Auggie CLI scored **51.80% on Scale AI's SWE-bench Pro** (379 of 731 problems, Claude Opus 4.5 driver), per the primary vendor post ["Auggie tops SWE-Bench Pro"](https://www.augmentcode.com/blog/auggie-tops-swe-bench-pro) (augmentcode.com/blog, 2026-02-04). SWE-bench Pro is not yet a registered metric in `novel/competitive-benchmark/src/metrics.ts`, so it is captured here and in the `competitors.ts` citation as evidence-of-pivot rather than added as a new `values` reading — adding the metric would be a separate scope. The 51.80% beat Cursor (50.21%), Claude Code (49.75%), and OpenAI Codex (46.47%), all running the same Claude Opus 4.5 model; the gap is attributed to Augment's semantic Context Engine.
 
 ## Last reviewed
 
-2026-05-22 (added to scorecard corpus via `/competitor-research`)
+2026-06-02 (refreshed via `corpus-refresh-augment-code`: Verified reading held stale-by-vendor; SWE-bench Pro 51.80% recorded as evidence-of-pivot)
