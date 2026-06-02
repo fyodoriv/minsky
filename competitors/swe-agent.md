@@ -50,17 +50,29 @@ Research agent from Princeton NLP. Pioneered the Agent-Computer Interface (ACI) 
 
 ## Scorecard readings (per `novel/competitive-benchmark/src/competitors.ts`)
 
-| Metric                              | Value | Date       | Primary source                                                                                                                                                                                                                          |
-| ----------------------------------- | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `swe-bench-verified-resolve-rate`   | 0.125 | 2024-10-01 | Yang, Jimenez, Wettig, Lieret, Yao, Narasimhan, Press, *SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering*, NeurIPS 2024 (SWE-agent + GPT-4 SWE-bench resolve rate 0.125 on the 2,294-instance full split).     |
+| Metric                              | Value | Date       | Primary source                                                                                                                                                                                                                                  |
+| ----------------------------------- | ----- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swe-bench-verified-resolve-rate`   | 0.74  | 2026-02-26 | SWE-bench Verified leaderboard (`swebench.com`, "Bash Only" track), *mini-swe-agent + Gemini 3 Pro*, submitted 2026-02-26 (resolve rate 0.74 on the 500-instance Verified split); primary statement at `mini-swe-agent.com`.                     |
 
-Note: SWE-agent's published numbers are from the original NeurIPS paper
-on the full SWE-bench split, not the Verified split specifically. The
-Verified-split number is comparable per the Aider leaderboard cross-
-reference (`aider.chat/2024/06/02/main-swe-bench.html` lists SWE-agent +
-GPT-4 at 12.5% on the 2,294-instance bench). If SWE-agent publishes a
-Verified-only number, replace this reading and update the citation.
+Note: this reading was refreshed (2026-06-02) from the original 2024
+NeurIPS baseline to the SWE-agent team's current flagship scaffold,
+**mini-swe-agent** — a ~100-line minimal bash-only ReAct agent. The
+project's documented headline is "Gemini 3 Pro reaches 74% on SWE-bench
+verified with mini-swe-agent!" (`mini-swe-agent.com`), and the same run
+appears as a dated submission (2026-02-26) on the official SWE-bench
+Verified "Bash Only" leaderboard at `swebench.com`. Unlike the prior
+entry, this is a true **Verified-split** number, so the previous
+full-split/Lite proxy caveat no longer applies.
+
+Superseded reading (history): SWE-agent + GPT-4, resolve rate 0.125 on
+the 2,294-instance full SWE-bench split — Yang, Jimenez, Wettig, Lieret,
+Yao, Narasimhan, Press, *SWE-agent: Agent-Computer Interfaces Enable
+Automated Software Engineering*, NeurIPS 2024. That figure was carried
+as a Verified proxy (cross-referenced against the Aider leaderboard,
+`aider.chat/2024/06/02/main-swe-bench.html`, which listed SWE-agent +
+GPT-4 at 12.5%) until the project shipped mini-swe-agent and a
+Verified-split number became available.
 
 ## Last reviewed
 
-2026-05-22
+2026-06-02

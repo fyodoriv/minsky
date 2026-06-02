@@ -33,7 +33,7 @@ the executable CLI surface per Path-A § Phase 10 (`docs/plans/2026-05-24-path-a
 | Human intervention rate | MetaGPT (Foundation Agents — ICLR 2024) | 0 | — | — |
 | SWE-bench Verified resolve rate | Claude Code | — | 0.490 | — |
 | SWE-bench Verified resolve rate | OpenHands (All-Hands AI) | — | 0.658 | — |
-| SWE-bench Verified resolve rate | SWE-agent (Princeton NLP) | — | 0.125 | — |
+| SWE-bench Verified resolve rate | SWE-agent (Princeton NLP) | — | 0.740 | — |
 | SWE-bench Verified resolve rate | Aider | — | 0.263 | — |
 | SWE-bench Verified resolve rate | Devin (Cognition Labs) | — | 0.139 | — |
 | SWE-bench Verified resolve rate | OpenAI Codex (codex-1) | — | 0.721 | — |
@@ -48,7 +48,7 @@ Generated at 2026-05-28.
 |---|---|---|---|
 | Claude Code | 2026-02-09 | 108 | stale |
 | OpenHands (All-Hands AI) | 2025-04-15 | 408 | very-stale |
-| SWE-agent (Princeton NLP) | 2024-10-01 | 604 | very-stale |
+| SWE-agent (Princeton NLP) | 2026-02-26 | 96 | stale |
 | Aider | 2024-05-22 | 736 | very-stale |
 | Devin (Cognition Labs) | 2026-04-07 | 51 | fresh |
 | Cursor agent | 2026-02-09 | 108 | stale |
