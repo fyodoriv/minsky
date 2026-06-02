@@ -42,6 +42,44 @@ const FIELD_RES = {
 
 const MIN_VALUE_LEN = 3;
 
+// The rule-#9 task-pre-registration form (Hypothesis / Success / Pivot /
+// Measurement / Anchor). Agents bypassing .github/PULL_REQUEST_TEMPLATE.md
+// via `gh pr create --body-file …` tend to write this form by reflex — the
+// gate wants the PR-template form (Predicted / Observed / Match / Lesson).
+// Detected as their own list bullets (`- **Hypothesis**:`) — per the task's
+// Pivot, NOT as embedded prose — to avoid firing on a quoted "Hypothesis:".
+const ALT_FORM_FIELD_RES = {
+  Hypothesis: /^[ \t]*[-*•][ \t]*(?:\*\*)?hypothesis(?:\*\*)?[ \t]*[:-]/im,
+  Success: /^[ \t]*[-*•][ \t]*(?:\*\*)?success(?:\*\*)?[ \t]*[:-]/im,
+  Pivot: /^[ \t]*[-*•][ \t]*(?:\*\*)?pivot(?:\*\*)?[ \t]*[:-]/im,
+  Measurement: /^[ \t]*[-*•][ \t]*(?:\*\*)?measurement(?:\*\*)?[ \t]*[:-]/im,
+  Anchor: /^[ \t]*[-*•][ \t]*(?:\*\*)?anchor(?:\*\*)?[ \t]*[:-]/im,
+};
+
+// ≥3 of the 5 task-pre-reg fields present ⇒ the author used the wrong form.
+const ALT_FORM_MIN_FIELDS = 3;
+
+const ALT_FORM_POINTER =
+  "looks like you used the rule-#9 task-pre-registration form " +
+  "(Hypothesis / Success / Pivot / Measurement / Anchor); the PR-self-grade gate " +
+  "wants the simpler 4-field PR-template form (Predicted / Observed / Match / Lesson) " +
+  "per .github/PULL_REQUEST_TEMPLATE.md.";
+
+/**
+ * Detect the rule-#9 task-pre-registration form in a PR body. Returns true
+ * when ≥3 of the 5 field markers appear as their own list bullets.
+ *
+ * @param {string} body
+ * @returns {boolean}
+ */
+export function isAlternativeForm(body) {
+  let count = 0;
+  for (const re of Object.values(ALT_FORM_FIELD_RES)) {
+    if (re.test(body)) count += 1;
+  }
+  return count >= ALT_FORM_MIN_FIELDS;
+}
+
 /**
  * @typedef {{ ok: true } | { ok: false, errors: string[] }} CheckResult
  */
@@ -93,6 +131,13 @@ export function checkPrSelfGrade(body) {
   for (const [name, re] of Object.entries(FIELD_RES)) {
     const err = checkField(name, re, body);
     if (err !== null) errors.push(err);
+  }
+  // When the author used the task-pre-reg form AND a required PR-template
+  // field is missing, lead with a pointer to the right form so they can
+  // self-correct without re-reading the template. Additive — only changes
+  // the error wording, never the pass/fail decision.
+  if (errors.length > 0 && isAlternativeForm(body)) {
+    errors.unshift(ALT_FORM_POINTER);
   }
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
