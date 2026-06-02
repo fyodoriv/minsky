@@ -316,6 +316,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "docs-frame-coherence",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
+      "pre-push-hook-stays-fast",
       "launchd-safe-paths",
       "changelog-md-update",
       "research-md-update",
@@ -796,6 +797,19 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-no-verify-bypass.mjs"],
+  },
+  {
+    // rule #10 deterministic lint: lefthook's pre-push step must keep
+    // `--stage=fast` so `git push` stays ≤~10s. The `--stage=full` stack
+    // (vitest, ~35s) runs in scripts/local-gate-merge.mjs before merge, so
+    // pre-push only needs the fast subset. A future PR that reverts
+    // lefthook.yml to `--stage=full` is blocked here. Pure regex/YAML parse
+    // over lefthook.yml — fast-stage budget unaffected. Anchor: TASKS.md
+    // `pre-push-hook-stays-fast`; vision.md rule #10; Forsgren-Humble-Kim 2018.
+    name: "pre-push-hook-stays-fast",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-pre-push-hook-fast.mjs"],
   },
   {
     name: "launchd-safe-paths",

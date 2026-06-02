@@ -1874,6 +1874,23 @@ jobs:
       - name: unit tests
         run: pnpm exec vitest run scripts/check-no-no-verify-bypass.test.mjs
 
+  pre-push-hook-stays-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: pre-push-hook-stays-fast lint
+        run: node scripts/check-pre-push-hook-fast.mjs
+      - name: unit tests
+        run: pnpm exec vitest run scripts/check-pre-push-hook-fast.test.mjs
+
   launchd-safe-paths:
     runs-on: ubuntu-latest
     steps:
@@ -2286,6 +2303,7 @@ jobs:
       - docs-frame-coherence
       - no-hardcoded-timeouts
       - no-no-verify-bypass
+      - pre-push-hook-stays-fast
       - launchd-safe-paths
       - typecheck
       - user-story-security-section
@@ -2372,6 +2390,7 @@ jobs:
                    "${{ needs.docs-frame-coherence.result }}" \
                    "${{ needs.no-hardcoded-timeouts.result }}" \
                    "${{ needs.no-no-verify-bypass.result }}" \
+                   "${{ needs.pre-push-hook-stays-fast.result }}" \
                    "${{ needs.launchd-safe-paths.result }}" \
                    "${{ needs.typecheck.result }}" \
                    "${{ needs.user-story-security-section.result }}" \
