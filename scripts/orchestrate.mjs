@@ -36,6 +36,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deriveRunId } from "@minsky/tick-loop";
 import { assertWriteAllowed, buildWriteVerdictRecord } from "./lib/repo-policy.mjs";
 import { landLocalBranch, runGateSweep, setWorkerPauseSeam } from "./local-gate-merge.mjs";
 import {
@@ -89,6 +90,30 @@ const HEALTHY_RESET_MS =
 // sweep (keystone "run reliably for 10h"). Env-tunable.
 const SWEEP_LIMIT = Number(process.env["MINSKY_ORCH_LIMIT"] ?? 2);
 const WORKER_LABEL = "com.minsky.opus-sonnet-run";
+// Per-process run-id so dozens of concurrent conductors on the SAME repo
+// (multi-tenant — TASKS.md `runany-multitenant-no-conflict`) are
+// distinguishable in the shared `orchestrate.jsonl` ledger and so any per-run
+// mutable namespace (worktree, branch, lock) the conductor or its children
+// derive is keyed `<repo-hash>-<pid>-<rand>` and never collides. `MINSKY_RUN_ID`
+// is the operator/escape-hatch override; otherwise it's derived from
+// (repo, pid, crypto-rand). The derivation core lives in
+// `novel/tick-loop/src/worker-config.ts` (pure, unit-tested + chaos-tested).
+const RUN_ID =
+  process.env["MINSKY_RUN_ID"] ??
+  deriveRunId({ repoPath: REPO, pid: process.pid, rand: randomRunToken() });
+
+/**
+ * A short random hex token for the run-id's tiebreaker. `Math.random` is
+ * sufficient here — the token only needs to disambiguate two same-pid runs on
+ * one machine, not resist an adversary (rule #1 — no crypto dep for a
+ * non-crypto need; the repo-hash + pid already carry most of the entropy).
+ * @returns {string}
+ */
+function randomRunToken() {
+  return Math.floor(Math.random() * 0xffffffff)
+    .toString(16)
+    .padStart(8, "0");
+}
 
 /**
  * Pure: given whether the Sonnet worker daemon process is alive, decide
@@ -257,8 +282,8 @@ function workerPauseSeam(log) {
  * TASKS.md `local-gate-merge-false-negative-on-worktree-bound-branch-delete`
  * acceptance for `orchestrate.mjs`.
  * @param {{merged: {number:number}[], skipped: {number:number}[]}} res
- * @param {{ts: string, workerAlive: boolean, healed: boolean, sweepError?: string}} ctx
- * @returns {{ts: string, workerAlive: boolean, healed: boolean, merged: number[], skipped: number, sweepError?: string}}
+ * @param {{ts: string, workerAlive: boolean, healed: boolean, sweepError?: string, runId?: string}} ctx
+ * @returns {{ts: string, workerAlive: boolean, healed: boolean, merged: number[], skipped: number, sweepError?: string, runId?: string}}
  */
 export function buildTickLedgerLine(res, ctx) {
   return {
@@ -267,6 +292,9 @@ export function buildTickLedgerLine(res, ctx) {
     healed: ctx.healed,
     merged: res.merged.map((m) => m.number),
     skipped: res.skipped.length,
+    // Per-run id so concurrent conductors on the same repo (multi-tenant) are
+    // distinguishable in the shared ledger — `runany-multitenant-no-conflict`.
+    ...(ctx.runId ? { runId: ctx.runId } : {}),
     ...(ctx.sweepError ? { sweepError: ctx.sweepError } : {}),
   };
 }
@@ -361,6 +389,7 @@ export function tick(log, sweepFn = runGateSweep) {
             ts: new Date().toISOString(),
             workerAlive: workerDaemonAlive(),
             healed: aliveBefore === false,
+            runId: RUN_ID,
             ...(sweepError ? { sweepError } : {}),
           }),
         )}\n`,

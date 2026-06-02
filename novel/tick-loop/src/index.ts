@@ -17,11 +17,20 @@
  *      decision + JSONL tick-event builder; the agent spawn + event append I/O
  *      live in the daemon / `bin/minsky-run.sh`, and the coverage measurement
  *      in `scripts/audit-pass-empty-queue-coverage.mjs`.
- *   4. `machine-budget-autoscaler` — the pure controller that resolves the
+ *   4. `worker-config` — the per-run namespace derivation that lets dozens of
+ *      concurrent `minsky` processes on one machine never collide. Every
+ *      mutable namespace (worktree dir, lock file, branch, launchd label,
+ *      ledger path, port) is keyed by a single run-id `<repo-hash>-<pid>-<rand>`
+ *      and task arbitration uses a repo+task-scoped claim key. Pure derivation;
+ *      the mkdir / O_EXCL / git / launchctl I/O lives in
+ *      `scripts/orchestrate.mjs` + the bash runner. Chaos measurement in
+ *      `scripts/chaos-multitenant.mjs` (rule #7). Rule #6 (a namespace clash
+ *      must never crash a sibling run).
+ *   5. `machine-budget-autoscaler` — the pure controller that resolves the
  *      operator's machine-utilisation budget and auto-scales worker
  *      concurrency to *match* it (vision.md rule #15). The launchd / config /
  *      env I/O lives at the edge in `bin/tick-loop.mjs`.
- *   5. `os-throttle-detect` — the pure detector that finds OS throttles
+ *   6. `os-throttle-detect` — the pure detector that finds OS throttles
  *      contradicting the budget (launchd `Background` QoS, `Nice`, low
  *      `ulimit`, stale `MINSKY_*` caps) and renders the cross-repo
  *      propagation tasks. The host probe I/O lives at the edge.
@@ -87,3 +96,17 @@ export {
   type ThrottleKind,
   TRIVIAL_BUDGET_PCT,
 } from "./os-throttle-detect.js";
+export {
+  countDuplicates,
+  countNamespaceCollisions,
+  DEFAULT_BASE_PORT,
+  DEFAULT_PORT_SPAN,
+  deriveClaimKey,
+  deriveRunId,
+  deriveRunNamespace,
+  fnv1a32,
+  normalizeRepoPath,
+  type RunNamespace,
+  type RunNamespaceInput,
+  repoHash,
+} from "./worker-config.js";
