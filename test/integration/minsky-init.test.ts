@@ -42,6 +42,18 @@ const RUN_INTEGRATION =
   process.env["CI"] === "true" ||
   process.env["VITEST_INTEGRATION"] === "1";
 
+// The real-`pnpm install` bootstrap path mutates the SHARED minsky checkout's
+// node_modules (bin/minsky-init runs `pnpm install` in $MINSKY_ROOT, the repo
+// root). Running it inside the vitest worker pool relinks node_modules/.pnpm
+// mid-run and kills live tinypool workers — "Worker exited unexpectedly /
+// Cannot find module .../tinypool/dist/entry/process.js" (CI `test` job went
+// red 2026-06-02 the moment this file landed; reproduced only with CI=true,
+// which un-skips RUN_INTEGRATION). The `--skip-install` test above already
+// pins config-writing; this one only adds a real-install smoke and must run
+// in an ISOLATED checkout, never the shared CI suite. Opt-in:
+//   MINSKY_RUN_INSTALL_MUTATION_TEST=1 pnpm vitest run test/integration/minsky-init.test.ts
+const RUN_INSTALL_MUTATION = process.env["MINSKY_RUN_INSTALL_MUTATION_TEST"] === "1";
+
 /**
  * Build a fresh tmp git host with one commit (minsky-init refuses
  * non-repos). Returns the absolute host dir.
@@ -176,27 +188,30 @@ describe.skipIf(!RUN_INTEGRATION)("distribution/install.sh — curl-pipe-sh fall
     expect(existsSync(join(home, ".minsky-src"))).toBe(false);
   });
 
-  test("from a local checkout: bootstraps a real git host (config written)", () => {
-    const host = makeGitHost();
-    const { home, stateDir } = makeIsolatedHome();
-    const env: Record<string, string> = {
-      PATH: process.env["PATH"] ?? "/usr/bin:/bin",
-      HOME: home,
-      MINSKY_STATE_DIR: stateDir,
-      CI: "true",
-      // install.sh execs `minsky-init <target>` with no flags, so the
-      // bootstrap runs the real `pnpm install` step (idempotent — deps are
-      // already present in the dev checkout, so it's a fast no-op resolve).
-      // Guard with a generous timeout for the install step regardless.
-    };
-    const r = spawnSync("sh", [INSTALL_SH, host], {
-      encoding: "utf8",
-      env,
-      timeout: 180_000,
-    });
-    // Bootstrap may end GREEN (0) or doctor-soft-RED (1) depending on the
-    // host's optional CLIs; either way the config must be written.
-    expect([0, 1]).toContain(r.status);
-    expect(existsSync(join(stateDir, "config.json"))).toBe(true);
-  });
+  test.skipIf(!RUN_INSTALL_MUTATION)(
+    "from a local checkout: bootstraps a real git host (config written)",
+    () => {
+      const host = makeGitHost();
+      const { home, stateDir } = makeIsolatedHome();
+      const env: Record<string, string> = {
+        PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+        HOME: home,
+        MINSKY_STATE_DIR: stateDir,
+        CI: "true",
+        // install.sh execs `minsky-init <target>` with no flags, so the
+        // bootstrap runs the real `pnpm install` step (idempotent — deps are
+        // already present in the dev checkout, so it's a fast no-op resolve).
+        // Guard with a generous timeout for the install step regardless.
+      };
+      const r = spawnSync("sh", [INSTALL_SH, host], {
+        encoding: "utf8",
+        env,
+        timeout: 180_000,
+      });
+      // Bootstrap may end GREEN (0) or doctor-soft-RED (1) depending on the
+      // host's optional CLIs; either way the config must be written.
+      expect([0, 1]).toContain(r.status);
+      expect(existsSync(join(stateDir, "config.json"))).toBe(true);
+    },
+  );
 });
