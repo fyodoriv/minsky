@@ -140,6 +140,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `no-useful-work-class-operator-decision` — qwen3-coder:30b on OpenHands SDK reliably engages with the brief (reads it, runs one tool call) but emits prose-only replies after the first turn, triggering the SDK's conversation-end signal with files_changed=0. The brief-reorder PR #978 reduced the failure surface (input tokens 90K→70K, iteration time 130s→79s) but the residual is a MODEL TOOL-CALLING RELIABILITY limit, not a brief-structure issue. Closing the class requires an operator choice between three paths.
   - **ID**: no-useful-work-class-operator-decision
+  - **Blocked**: needs-operator — Operator-owned decision (A/B/C); needs live daemon data + 24h post-choice window, absent.
   - **Tags**: p0, milestone-m1, stability, local-llm, model-choice, agent-framework, operator-decision-required, observed-2026-05-28
   - **Milestone**: M1
   - **Competitive-goal**: drives `local-models-default-clean-exit-fraction` (M1.5 stability target, user-story 015) toward ≥60% — currently ~20% (operator observed 5/5 last iterations no-progress). Without this, the M1.1 stability gate cannot lift and `cloud_agent: "openhands"` stays the default forever, defeating user-story 015's "local models until we're super stable" stance.
@@ -232,6 +233,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `agent-mediated-install` — any AI coding agent (Claude Code / Cursor / Windsurf / Devin / Codex / Ollama-via-aider) can install minsky for the operator's current folder in ≤60s with a single human prompt (telemetry consent), via a canonical `INSTALL.md` runbook colocated in the repo root
   - **ID**: agent-mediated-install
+  - **Blocked**: needs-operator — Closing needs live 9-run real-agent matrix (claude/devin/cursor); deferred P2 + creds absent
   - **Tags**: p0, milestone-m1, install, dx, agent-ux, telemetry, operator-directive, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-20 — "user is working in claude/devin/windsurf/ollama/cursor, asks their agent to install minsky and get it running for current folder. Agent should find minsky repo, read its instructions, quickly do that, asking questions only where absolutely necessary, including agreement to submit anonymized runtime logs. Save answers + submit them to minsky's DB of which projects agreed and at what time. Then run minsky or tell user installation is complete. This installation path should be preferred and recommended above other info." Existing `minsky-init-one-command-bootstrap` (P0 — npx/curl) and `minsky-npx-install-and-run` (P1 — one shell line) remain alternative paths for users without an agent handy; this task makes the agent-mediated path the *canonical* one.
@@ -329,6 +331,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `minsky-remote-task-submission` — findings from any machine running minsky can be submitted as tasks to the minsky repo itself (with user approval + anonymized data preview)
   - **ID**: minsky-remote-task-submission
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p0, milestone-m1, telemetry, community, growth
   - **Milestone**: M1
   - **Competitive-goal**: creates a feedback loop where every minsky installation improves minsky itself — no competitor has this. Devin is closed-source; OpenHands has GitHub issues but no automated submission from running instances.
@@ -343,6 +346,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `fleet-stability-centralized-reporting` — every machine running minsky reports iteration outcomes to a shared ledger so stability is measured across the fleet
   - **ID**: fleet-stability-centralized-reporting
+  - **Blocked**: needs-operator — Already shipped on main (PR #673); no code left. Orchestrator should remove stale TASKS.md block.
   - **Tags**: p0, milestone-m1, observability, metrics, fleet
   - **Milestone**: M1
   - **Competitive-goal**: centralized stability measurement is the foundation for the `self-metrics-competitive-benchmark` scorecard — without it, stability is anecdotal per-machine, not a measured fleet metric.
@@ -357,6 +361,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `interactive-model-cost-picker` — on first run (or when no `~/.minsky/config.json` exists), minsky asks the user to choose a brain+workers cost tier with clear $/hr expectations; the choice is saved to config and never asked again
   - **ID**: interactive-model-cost-picker
+  - **Blocked**: needs-operator — Target package novel/tick-loop/ (all Touches files) deleted in PR #888; needs redesign
   - **Tags**: p0, milestone-m1, ux, onboarding, cost, models
   - **Milestone**: M1
   - **Competitive-goal**: no competitor shows you the cost before you start — Devin charges $500/mo flat, OpenHands/SWE-agent don't estimate, Aider shows token counts post-hoc. Upfront cost transparency is a trust differentiator.
@@ -379,6 +384,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `fleet-log-aggregation` — every machine running minsky ships iteration logs to a shared surface so the operator sees all machines' health in one place
   - **ID**: fleet-log-aggregation
+  - **Blocked**: needs-operator — Required novel/tick-loop package deleted; rebuilding it needs forbidden vision.md pattern-index row
   - **Tags**: p0, milestone-m1, observability, fleet, logs
   - **Milestone**: M1
   - **Competitive-goal**: Devin has a cloud dashboard; no self-hosted competitor offers fleet-wide observability. This is minsky's "enterprise-lite" differentiator for M1.
@@ -393,6 +399,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `minsky-on-minsky-as-regular-host` — minsky's own repo is a regular host destination (not special-cased), including remote task submission from other machines; full dogfood parity
   - **ID**: minsky-on-minsky-as-regular-host
+  - **Blocked**: needs-operator — Premise false: novel/tick-loop/ package and minsky.mjs edit target do not exist in repo
   - **Tags**: p0, milestone-m1, dogfood, cross-repo, self-hosting, experiment
   - **Milestone**: M1
   - **Competitive-goal**: "we use our own product, on itself, the same way you would use it on your repo" is the strongest possible credibility signal. No competitor does this (Devin doesn't run Devin on Devin's codebase as a regular host).
@@ -411,6 +418,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `self-metrics-bootstrap-priority` — slice (e) of M1.10: when `minsky` is bootstrapped on a NEW host, the first 1-2 iterations prioritize establishing/refreshing the competitive scorecard baseline before other task work
   - **ID**: self-metrics-bootstrap-priority
+  - **Blocked**: needs-operator — Touched packages (tick-loop, cross-repo-runner) and minsky-competitive scorecard CLI absent in repo
   - **Tags**: p2, milestone-m1, m1-10, bootstrap, tick-loop, rule-9
   - **Milestone**: M1
   - **Competitive-goal**: "minsky always knows where it stands vs competitors first" — without this, a new bootstrap can ship a feature task before the baseline is measured, and the per-machine delta is unmeasurable.
@@ -426,6 +434,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `runtime-token-limit-auto-pivot-local-and-back` — on ANY token/usage-limit hit during a live run, the whole worker fleet auto-switches to local models, keeps iterating, and auto-switches back to remote when tokens return — bidirectional, mid-run, zero operator action
   - **ID**: runtime-token-limit-auto-pivot-local-and-back
+  - **Blocked**: needs-operator — Composes daemon/fleet substrates (bin/tick-loop.mjs, spawn-strategy, hard-limit classifier) absent from checkout
   - **Tags**: p0, operator-directive, reliability, local-llm, failover, stay-alive, rule-1, rule-6, rule-9
   - **Milestone**: M1
   - **Touches**: `novel/tick-loop/src/**`, `novel/tick-loop/bin/tick-loop.mjs`, `novel/tick-loop/README.md`, `scripts/orchestrate.mjs`, `docs/local-llm-fallback.md`
@@ -442,6 +451,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `runany-zero-arg-entrypoint` — `minsky` with NO args, run in any folder, starts the orchestrator scoped to that folder + all subfolders (no params ever required)
   - **ID**: runany-zero-arg-entrypoint
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p0, operator-directive, runany, cli, orchestrator
   - **Milestone**: M1
   - **Touches**: `bin/minsky`, `novel/cross-repo-runner/**`, `scripts/orchestrate.mjs`, `novel/tick-loop/bin/minsky.mjs`
@@ -697,6 +707,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `cloud-agent-spawn-argv-regression-matrix` — every cloud agent (claude, devin, aider, future-N) declares its required argv contract in a single fixture file; a parameterized test matrix asserts that spawning each agent without any required flag yields a recognizable failure mode, AND that spawning each agent WITH the contract argv succeeds — same `it.each(MATRIX)` shape that agentbrew PR #1021 used for its (agent × format × env-var) crash-class regression
   - **ID**: cloud-agent-spawn-argv-regression-matrix
+  - **Blocked**: needs-operator — Target package novel/cross-repo-runner/ was deliberately deleted (PR #883); all task files target it
   - **Tags**: p0, milestone-m1, rule-3a, rule-3b, rule-9, rule-17, test, spawn, regression-suite, agentbrew-parallel
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-21 cross-repo session. The agentbrew session shipped a (15-agent × per-feature × per-env-var) regression matrix that catches the equivalent Devin-import-crash class in 92 + 79 + 43 fixture-driven tests across PRs #1021 / #1022 / #1023 plus a slow-tier real-Devin CI workflow. Minsky has the same crash-class shape — `spawn-failed exit=-1 stderr empty` is the live P0 above — but no parameterized regression matrix. Today, fixing devin's spawn-failed verdict relies on operator memory of "did I propagate `--permission-mode dangerous`?"; tomorrow, adding a 4th cloud agent means manually replicating that memory. This task encodes the contract per-agent in a fixture so the regression class stays shut as the spawn surface grows.
@@ -713,6 +724,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `cloud-agent-iteration-record-parity-matrix` — for each cloud agent in `CLOUD_AGENT_MATRIX` (depends on `cloud-agent-spawn-argv-regression-matrix`), the iteration record schema (`.minsky/experiment-store/cross-repo/*.jsonl`) produced by a successful spawn is structurally identical across agents — same fields, same types, same verdict vocabulary; a parameterized parity matrix asserts this property so swapping the default cloud agent from claude to devin (or to a future agent) doesn't silently change downstream metric pipelines (stability, ship-rate, walker-drains)
   - **ID**: cloud-agent-iteration-record-parity-matrix
+  - **Blocked**: needs-operator — Depends on unimplemented spawn-argv-matrix; CLOUD_AGENT_MATRIX, simulateAgentSpawn, novel/cross-repo-runner/ all absent.
   - **Tags**: p0, milestone-m1, rule-3a, rule-4, rule-9, test, regression-suite, agentbrew-parallel
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-21 cross-repo session. Same trigger as `cloud-agent-spawn-argv-regression-matrix` — the agentbrew (agent × CRUD) parity matrix in PR #1022 proved that the same input passing through different agents/adapters produces structurally identical output. Minsky has the same property requirement on iteration records: every `pnpm stability-number`, every `check-cross-repo-pr-rate.mjs`, every metric collector consumes the `*.jsonl` schema. If a future "devin produces `verdict: pr-opened`, claude produces `verdict: PR_OPENED`" drift lands, the metric pipeline silently misclassifies — and the existing tests don't catch it because they're per-agent, not cross-agent.
@@ -727,27 +739,10 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: GIVEN the schema file exports `verdictValues`, WHEN every consumer in the Files section imports it, THEN `rg "verdict\s*===\s*[\"'][a-z_-]+[\"']" scripts/ novel/cross-repo-runner/src/` returns ≤1 hit. GIVEN the parity matrix file runs, WHEN every agent's iteration record is captured against the canonical brief, THEN the byte-stable diff between any two agents' records (modulo agent-name and timestamps) is empty. GIVEN one agent's adapter is hand-modified to produce `verdict: PR_OPEN` instead of `pr-open`, WHEN the parity matrix re-runs, THEN ≥1 test fails with a message naming both the drifted agent and the reference agent. GIVEN a new cloud agent is added to `CLOUD_AGENT_MATRIX`, WHEN the parity matrix re-runs, THEN the new agent's records are compared against the reference agent automatically with no test code changes.
   - **Risk**: medium. (a) The reference-agent choice (claude is the proposed reference) bakes in a single agent's quirks — mitigated by reviewing the schema file with the assumption "if we delete claude tomorrow, does the schema still describe reality?". (b) Migrating consumers in lockstep is a coordinated multi-file change — mitigated by landing the schema file first as an additive change, then migrating consumers one at a time. (c) The matrix's "byte-stable modulo agent-name and timestamps" comparison can be brittle when fields have non-deterministic ordering — mitigated by serialising records through a stable JSON canonicalizer (sorted keys) before diffing.
 
-- [ ] `cloud-agent-config-and-host-feature-matrix-audit` — per-`~/.minsky/config.json`-agent × per-cross-repo-runner-feature configuration matrix audit that catches drift between the documented config schema, what the runner ACTUALLY supports, and what the slow-tier real-spawn pipeline can exercise; sibling to agentbrew PR #1023 which applied the same audit pattern to the (agent × non-MCP-sync-surface) matrix
-  - **ID**: cloud-agent-config-and-host-feature-matrix-audit
-  - **Tags**: p0, milestone-m1, rule-3, rule-8, rule-9, test, regression-suite, agentbrew-parallel
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-21 cross-repo session. The agentbrew (agent × per-feature) matrix in PR #1023 caught 4 categories of configuration drift (path-schema, carve-out vs delegated classification, expected-surface presence, path-clash). Minsky has the same drift class: `~/.minsky/config.json` declares `cloud_agent: "devin"` but `novel/cross-repo-runner/src/agent-launcher.ts` is what actually implements per-agent spawn args; today these can drift silently. AGENTS.md § "Per-machine agent config" documents the schema but isn't enforced. Adding a 4th cloud agent today requires editing config.json, the launcher, MILESTONES.md, and any number of docs — and getting any one of those wrong silently breaks `--local` or the cloud-agent fallback.
-  - **Hypothesis**: applying the agentbrew (agent × per-feature) audit pattern from PR #1023 — a single parameterized test file that loops over every (agent, feature) pair in a fixture matrix and asserts (a) path schema well-formedness, (b) classification consistency between schema and implementation, (c) expected-surface presence, (d) no-clash between agents — to minsky's cloud-agent surface will catch every category of config-implementation drift in a single CI run, reducing time-to-detect from "next 10h daemon run" to "next CI run".
-  - **Success**: (1) `pnpm vitest run novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts` produces ≥20 parameterized passing tests across 4 audit dimensions (path-schema × classification × expected-surface × no-clash) × 3 agents; (2) deliberately removing `aider` from `CLOUD_AGENT_MATRIX` but leaving it in `~/.minsky/config.json`'s schema docs causes ≥1 expected-surface test to fail with a message naming `aider`; (3) deliberately adding a 4th agent to `CLOUD_AGENT_MATRIX` but failing to add a matching row to AGENTS.md § "Agent support matrix" causes ≥1 classification test to fail; (4) zero hardcoded agent names appear outside the matrix file in either AGENTS.md or `agent-launcher.ts` (grep returns only the matrix's own definitions).
-  - **Pivot**: if the AGENTS.md parser (which needs to extract the "Agent support matrix" table) proves too brittle to maintain — e.g., minor markdown formatting changes break the parser monthly — pivot to a JSON-sidecar at `novel/cross-repo-runner/src/supported-agents.json` that's the canonical source AND auto-renders the AGENTS.md table via a script. Threshold: ≥2 parser-broke incidents in the first month ⇒ pivot.
-  - **Measurement**: `pnpm vitest run novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts --reporter=verbose 2>&1 | grep -c '✓'` ≥ 20 on green; `rg -n '"(claude|devin|aider)"' bin/minsky novel/cross-repo-runner/src/ AGENTS.md INSTALL.md MILESTONES.md | rg -v 'cloud-agent-matrix\.(ts|json)' | wc -l` ≤ 5 (the only remaining hits should be in docs that legitimately mention the agents by name in user-facing text, not in code).
-  - **Anchor**: Parnas *On the Criteria to Be Used in Decomposing Systems into Modules*, CACM 15(12), 1972 — the canonical source for "secret a configuration decision behind one module so consumers can't drift past it"; this task makes `CLOUD_AGENT_MATRIX` that module. Wynne & Hellesøy *The Cucumber Book* (2012) Ch. 1 — same example-table-driven assertions as the previous two tasks in this trio. Composes with rule #3 (test-first — the audit IS the test before implementation drifts); rule #8 (pattern conformance — every supported agent must appear in the conformance index, which this matrix becomes the executable form of). Direct sibling: agentbrew PR #1023 — same 4-dimension audit pattern (path-schema × carve-out-vs-delegated × expected-surface × no-clash) over 50+ agents, 43 passing tests catching the same drift class.
-  - **Details**: (a) `novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts`: 4 describe blocks. (b) Block 1 "Path/argv schema": for each agent in `CLOUD_AGENT_MATRIX`, assert `requiredArgv` array is non-empty, every entry starts with `--`, no duplicates. (c) Block 2 "Carve-out classification": parse `AGENTS.md` § "Agent support matrix" table, assert every agent in the matrix appears in the table AND every table row corresponds to a `CLOUD_AGENT_MATRIX` entry (no orphans either direction). (d) Block 3 "Expected-surface drift guard": for each agent, pin the documented surfaces (`local_agent` only / `cloud_agent` only / both) and assert it matches `CLOUD_AGENT_MATRIX[row].supports`. (e) Block 4 "No-clash": no two distinct agents share the same `requiredArgv` set verbatim (catches accidental copy-paste in the fixture). (f) Add a `scripts/check-cloud-agent-matrix-drift.mjs` lint that runs the same assertions outside vitest so `pnpm pre-pr-lint --stage=full` can include it.
-  - **Files**: `novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts` (new); `scripts/check-cloud-agent-matrix-drift.mjs` (new lint); `package.json` (wire the lint into `pre-pr-lint`); optional `novel/cross-repo-runner/src/supported-agents.json` if pivot path triggers; AGENTS.md (no edit on green path — table parser is read-only).
-  - **Touches**: novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts, scripts/check-cloud-agent-matrix-drift.mjs, package.json, novel/cross-repo-runner/src/supported-agents.json
-  - **Acceptance**: GIVEN the audit matrix file exists, WHEN `pnpm vitest run novel/cross-repo-runner/test/cloud-agent-config-audit-matrix.test.ts` runs, THEN ≥20 parameterized tests pass across the 4 audit dimensions. GIVEN a developer adds a 4th cloud agent to `CLOUD_AGENT_MATRIX` without updating AGENTS.md § "Agent support matrix", WHEN the audit matrix re-runs, THEN ≥1 classification test fails with a message naming the missing AGENTS.md row. GIVEN a developer adds a 4th cloud agent row to AGENTS.md without updating `CLOUD_AGENT_MATRIX`, WHEN the audit matrix re-runs, THEN ≥1 classification test fails with a message naming the orphan AGENTS.md row. GIVEN two agents in `CLOUD_AGENT_MATRIX` are given the same `requiredArgv` set by mistake, WHEN the audit matrix re-runs, THEN ≥1 no-clash test fails with a message naming both agents.
-  - **Risk**: low. (a) AGENTS.md table parser brittleness — mitigated by tight regex + a paired test that pins the table format. (b) The audit catches valid drift that operators haven't fixed yet (existing agents that don't have a matrix row) — mitigated by an explicit ALLOWLIST in the audit file for grandfathered cases, identical to the `SHARED_PATH_ALLOWLIST` pattern in agentbrew PR #1023. (c) Adding the 4th audit dimension (no-clash) on top of agentbrew's 3 — this is a Minsky-specific addition that catches the copy-paste failure mode unique to argv contracts (where 2 agents could plausibly share `["--print"]` if not careful).
-
-<!-- 2026-05-24 OPERATOR DIRECTIVE — Path A aggressive cut. Operator was offered Path A (~5-10K LOC final) vs continuing Path C (~30K LOC final) and answered "2" (more aggressive). The 4-stream landscape research + brutal-honest moat audit confirmed 2 of 6 claimed moats are genuinely unique; the other 4 are partial. Path A's 7 deletion phases extend Path C's existing plan. Plan doc: `docs/plans/2026-05-24-path-a-aggressive-cut.md`. -->
-
 - [ ] `path-a-phase-9-small-package-sweep-delete` — delete `novel/budget-guard/` + `novel/adapters/prompt-optimizer/` (the 2 remaining packages of the original 5; the other 3 — handoff-spec, tui, bridges/omc-tasksmd — were deleted in earlier slices). Replacements: 50-line `bin/check-budget.sh` shell, spec-only-in-mape-k-loop for prompt-optimizer.
   - **Status**: 3-of-5 done. `handoff-spec` + `bridges/omc-tasksmd` deleted in Phase 9 partial PR (this PR); `tui` source deleted in #794. Remaining: `budget-guard` (5 external importers, needs the shell replacement first) + `adapters/prompt-optimizer` (14 external importers, needs spec-only refactor).
   - **ID**: path-a-phase-9-small-package-sweep-delete
+  - **Blocked**: needs-operator — Remaining prompt-optimizer is live mape-k-loop dep; deletion trips pivot, needs human re-scope
   - **Tags**: p0, milestone-m1, rule-1, path-a, aggressive-cut, observed-2026-05-24, blocked-on-phase-8
   - **Milestone**: M1
   - **Competitive-goal**: shrinks Minsky LOC by ~3.7K (5 small packages). Indirectly improves `cost-per-merged-pr` (scorecard metric) — fewer files in the workspace means lower agent context cost per iteration.
@@ -782,6 +777,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask-human.md`
   - **ID**: competitor-add-pr-agent
+  - **Blocked**: needs-operator — doc implemented (competitors/pr-agent.md) but hit ask-human.md/TASKS.md merge friction; land manually from branch
   - **Touches**: competitors/pr-agent.md, ask-human.md
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
@@ -792,176 +788,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/pr-agent.md && grep -c '^## Five pivot questions' competitors/pr-agent.md` ≥ 1.
   - **Anchor**: rule #1; `https://github.com/qodo-ai/pr-agent`.
 
-- [ ] `competitor-deepen-cursor-agent` — apply Five Pivot Questions framework to Cursor Background Agents (commercial); deepen `competitors/cursor-agent.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-cursor-agent
-  - **Touches**: competitors/cursor-agent.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Cursor Background Agents (up to 8 parallel, Slack/Linear/GitHub triggers, $20/mo with usage) is the highest-volume mainstream competitor in the "async on a repo" axis. Q3 may force a Minsky vision-change if Cursor's commercial trajectory makes M5 (managed product) infeasible for an OSS-led player.
-  - **Success**: `competitors/cursor-agent.md § Five pivot questions` populated with Cursor pricing + parallel-agent UX comparison.
-  - **Pivot**: if Cursor's enterprise tier kills the M5 business case, file vision-threat.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/cursor-agent.md` ≥ 1.
-  - **Anchor**: rule #1; Cursor docs at `cursor.com`; the Cursor 0.50 background-agents launch post.
-
-- [ ] `competitor-add-autogpt` — research AutoGPT (Significant-Gravitas/AutoGPT, 184.5k★, alive); produce `competitors/autogpt.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-autogpt
-  - **Touches**: competitors/autogpt.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: AutoGPT is the most-starred autonomous-agent OSS by 2.5× — Q2 should extract why it grew so big and why its actual capability lags the star count. Q3 may surface a vision-threat from AutoGPT's "platform for continuous agents" pivot.
-  - **Success**: `competitors/autogpt.md` created with full template + Five Pivot Questions section + Post-mortem-light on the original AutoGPT vs the current platform.
-  - **Pivot**: if AutoGPT's autonomy claims are mostly vaporware (the established consensus), the doc records that finding and Minsky's positioning doesn't change.
-  - **Measurement**: `test -f competitors/autogpt.md && grep -c '^## Five pivot questions' competitors/autogpt.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/Significant-Gravitas/AutoGPT`; AutoGPT 2026 platform docs.
-
-- [ ] `competitor-add-open-interpreter` — research Open Interpreter (openinterpreter/open-interpreter, 63.6k★, semi-stale Feb 2026); produce `competitors/open-interpreter.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-open-interpreter
-  - **Touches**: competitors/open-interpreter.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
-  - **Milestone**: M1
-  - **Hypothesis**: Open Interpreter's `loop=True` mode + Skidudeaa's multi-agent fork (Scout + Surgeon + Validator) is the closest "natural language interface for computers" framing. Q2 should extract the adaptive-autonomy mode pattern.
-  - **Success**: `competitors/open-interpreter.md` created.
-  - **Pivot**: if upstream is dead (no commits ≥180d at execution time), run `--post-mortem` mode.
-  - **Measurement**: `gh api repos/openinterpreter/open-interpreter --jq .pushed_at`; days since > 180 ⇒ post-mortem mode.
-  - **Anchor**: rule #1; `https://github.com/openinterpreter/open-interpreter`.
-
-- [ ] `competitor-add-continue-dev` — research Continue.dev (continuedev/continue, 33.4k★, alive); produce `competitors/continue-dev.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-continue-dev
-  - **Touches**: competitors/continue-dev.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Continue.dev's Cloud Agents (async, event-driven) + Mission Control dashboard is the closest competitor on the dashboard axis. Q5 should grade whether Continue's open-source plumbing can replace Minsky's CLI dashboard layer.
-  - **Success**: `competitors/continue-dev.md` created.
-  - **Pivot**: if Continue.dev's stack covers ≥40% of Minsky's M2 single-task-delivery surface, file vision-threat.
-  - **Measurement**: `test -f competitors/continue-dev.md && grep -c '^## Five pivot questions' competitors/continue-dev.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/continuedev/continue`; continue.dev docs.
-
-- [ ] `competitor-deepen-ralph-wiggum-official` — apply Five Pivot Questions framework to Anthropic's official Ralph Wiggum plugin (in-tree dependency); deepen `competitors/ralph-wiggum-official.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-ralph-wiggum-official
-  - **Touches**: competitors/ralph-wiggum-official.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency
-  - **Milestone**: M1
-  - **Hypothesis**: Ralph Wiggum is adopted as Minsky's InnerLoop primitive. Q5 should be all-KEEP (no replace candidate). Q2 may surface refinements from Anthropic's official-plugin form vs Geoffrey Huntley's original.
-  - **Success**: `competitors/ralph-wiggum-official.md § Five pivot questions` populated.
-  - **Pivot**: trivial — this is an in-tree Anthropic plugin; no replace.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/ralph-wiggum-official.md` ≥ 1.
-  - **Anchor**: rule #1; Anthropic's claude-code/plugins/ralph-wiggum directory; Geoffrey Huntley's "Ralph technique" blog post.
-
-- [ ] `competitor-deepen-codex-cli` — apply Five Pivot Questions framework to OpenAI Codex CLI (openai/codex, 85.2k★, alive); deepen `competitors/codex-cli.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-codex-cli
-  - **Touches**: competitors/codex-cli.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Codex CLI's growth to 85k★ in <1y signals OpenAI is the default "background coding agent" in the bottom-half of the funnel. Q5 should grade whether Minsky's tick-loop survives if `codex --background` is a one-flag default in Cursor / Copilot / Replit.
-  - **Success**: `competitors/codex-cli.md § Five pivot questions` populated with Codex's published SWE-bench numbers + ChatGPT-cloud integration model.
-  - **Pivot**: if Codex's cloud variant covers Minsky's whole M5 ("managed product") vision, file vision-threat.
-  - **Measurement**: `gh api repos/openai/codex --jq .stargazers_count` ≥ 80000; `grep -c '^## Five pivot questions' competitors/codex-cli.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/openai/codex`; OpenAI Codex announcement post.
-
-- [ ] `competitor-deepen-openhands` — apply Five Pivot Questions framework to OpenHands (OpenHands/OpenHands, 74.7k★, alive, in-progress dependency adoption); deepen `competitors/openhands.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-openhands
-  - **Touches**: competitors/openhands.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-in-progress
-  - **Milestone**: M1
-  - **Hypothesis**: OpenHands is already in-progress adoption (35-50% Minsky surface coverage per 2026-05-22 reassessment). Q5 should formalize the surface-by-surface KEEP/REPLACE/AUGMENT decisions. Q3 may surface vision-threats from OpenHands V1's SDK reference architecture (arXiv:2511.03690) — does Minsky's tick-loop reference architecture survive that paper?
-  - **Success**: `competitors/openhands.md § Five pivot questions` populated; concrete Minsky-surface-coverage table updated to V1 baseline.
-  - **Pivot**: if OpenHands V1 SDK fully subsumes Minsky's MAPE-K + adapter layer, file vision-threat for a "thinner Minsky" pivot.
-  - **Measurement**: `gh api repos/OpenHands/OpenHands --jq .stargazers_count` ≥ 70000; `grep -c '^## Five pivot questions' competitors/openhands.md` ≥ 1.
-  - **Anchor**: rule #1; OpenHands V1 paper arXiv:2511.03690; OpenHands Cloud blog post 2025-11-12.
-
-- [ ] `competitor-add-factory` — research Factory.ai's OSS facade (Factory-AI/factory, 906★, commercial-with-OSS-CLI); produce `competitors/factory.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-factory
-  - **Touches**: competitors/factory.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, commercial
-  - **Milestone**: M1
-  - **Hypothesis**: Factory.ai (commercial, GA Oct 2025, #1 Terminal-Bench at 58.8%, org-level memory across sessions) is the strongest commercial competitor on the "Droid fleet" axis. The OSS CLI facade is a small entry point — the real product is closed. Q5 should grade what Minsky can credibly do against a $50M-Series-B-funded competitor with org-level memory and 6 SDLC Droids.
-  - **Success**: `competitors/factory.md` created; explicit "Minsky vs Factory" positioning section.
-  - **Pivot**: if Factory's offering is shown to make Minsky's commercial M5 vision infeasible, file vision-threat.
-  - **Measurement**: `test -f competitors/factory.md && grep -c '^## Five pivot questions' competitors/factory.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/factory-ai/factory`; Factory's "Code Droid: A Technical Report" (factory.ai/news/code-droid-technical-report); Factory GA announcement.
-
-- [ ] `competitor-add-smol-developer` — research Smol Developer (smol-ai/developer, 12.2k★, DEAD since April 2024); produce `competitors/smol-developer.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-smol-developer
-  - **Touches**: competitors/smol-developer.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
-  - **Milestone**: M1
-  - **Hypothesis**: Smol-Developer's one-shot-codebase-generation thesis was killed by "field moved to more capable agents". The post-mortem should identify what makes that pivot inevitable for one-shot projects — a guardrail Minsky's incremental-improvement thesis should formalize.
-  - **Success**: `competitors/smol-developer.md` with Post-mortem + Five Pivot Questions sections.
-  - **Pivot**: archived; lesson-extraction only.
-  - **Measurement**: `test -f competitors/smol-developer.md && grep -c '^## Post-mortem' competitors/smol-developer.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/smol-ai/developer`.
-
-- [ ] `competitor-add-gpt-engineer` — research GPT-Engineer (AntonOsika/gpt-engineer, 55.2k★, ARCHIVED 2025-05); produce `competitors/gpt-engineer.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-gpt-engineer
-  - **Touches**: competitors/gpt-engineer.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
-  - **Milestone**: M1
-  - **Hypothesis**: GPT-Engineer was the most-anticipated 2023 OSS coding agent, then archived May 2025 after the team pivoted to Lovable.dev. Post-mortem should identify the architectural-dead-end vs business-model-failure root cause. Q3 may surface Minsky guardrails against the same death pattern.
-  - **Success**: `competitors/gpt-engineer.md` with `## Post-mortem: why it died` section (≥3 sources) + `## Five pivot questions` section.
-  - **Pivot**: the project is already dead — no pivot beyond extracting the lesson.
-  - **Measurement**: `test -f competitors/gpt-engineer.md && grep -c '^## Post-mortem' competitors/gpt-engineer.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/AntonOsika/gpt-engineer` (archived); Lovable.dev announcement post.
-
-- [ ] `competitor-add-continuous-claude` — research Continuous Claude (AnandChowdhary/continuous-claude, 1.3k★, alive); produce `competitors/continuous-claude.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-continuous-claude
-  - **Touches**: competitors/continuous-claude.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, ralph-loop
-  - **Milestone**: M1
-  - **Hypothesis**: continuous-claude is the simplest Ralph-loop-with-PRs implementation. Q5 should grade whether Minsky's tick-loop adds enough over a 200-line continuous-claude wrapper to justify its complexity. This may be a small vision-threat: if a 200-line wrapper gets 80% of Minsky's value, the moat is the rule #9 + MAPE-K + rule-1 discipline, not the loop itself.
-  - **Success**: `competitors/continuous-claude.md` created; concrete "what does Minsky add over continuous-claude" answer.
-  - **Pivot**: if continuous-claude covers ≥70% of Minsky's tick-loop surface, file vision-threat asking whether Minsky should pivot to "discipline-as-a-product" framing.
-  - **Measurement**: `test -f competitors/continuous-claude.md && grep -c '^## Five pivot questions' competitors/continuous-claude.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/AnandChowdhary/continuous-claude`; the Ralph-loop blog post that inspired it (Geoffrey Huntley).
-
-- [ ] `competitor-deepen-goose` — apply Five Pivot Questions framework to Goose (aaif-goose/goose, 45.8k★, alive, AAIF/Linux Foundation); deepen `competitors/goose.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-goose
-  - **Touches**: competitors/goose.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Goose's move from Block/Square to AAIF (Linux Foundation) is a strategic signal — Q3 should evaluate whether Minsky should similarly seek a foundation home. The Goosetown multi-agent sibling project may overlap with Minsky's tick-loop.
-  - **Success**: `competitors/goose.md § Five pivot questions` populated; explicit AAIF-home pros/cons analysis.
-  - **Pivot**: if Goose's foundation model + MCP support fully covers Minsky's adapter layer, file vision-threat.
-  - **Measurement**: `gh api repos/aaif-goose/goose --jq .stargazers_count` ≥ 40000; `grep -c '^## Five pivot questions' competitors/goose.md` ≥ 1.
-  - **Anchor**: rule #1; AAIF announcement post; `https://github.com/aaif-goose/goose`.
-
-- [ ] `competitor-deepen-langgraph` — apply Five Pivot Questions framework to LangGraph (langchain-ai/langgraph, 32.8k★, alive, framework); deepen `competitors/langgraph.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-langgraph
-  - **Touches**: competitors/langgraph.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: LangGraph's checkpoint + resumption primitives are the most relevant prior art for Minsky's tick-loop durability story. Q2 should extract the checkpoint pattern. Q5 evaluates replace-tick-loop-with-LangGraph viability.
-  - **Success**: `competitors/langgraph.md § Five pivot questions` populated; concrete answer on LangGraph-as-tick-loop-substrate viability.
-  - **Pivot**: if LangGraph's adoption cost > the gain from replacing tick-loop, keep current implementation.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/langgraph.md` ≥ 1.
-  - **Anchor**: rule #1; LangGraph docs; `https://github.com/langchain-ai/langgraph`.
-
-- [ ] `competitor-deepen-omc` — apply Five Pivot Questions framework to Oh My Claude Code (Yeachan-Heo/oh-my-claudecode, 31.3k★, alive, dependency under reassessment); deepen `competitors/omc.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-omc
-  - **Touches**: competitors/omc.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, dependency-reassess
-  - **Milestone**: M1
-  - **Hypothesis**: OMC is already classified as a dependency under reassessment (2026-05-22) given OpenHands' native persona stack covers most of OMC's surface. Q5 should close that reassessment with a concrete keep / deprecate / consolidate decision.
-  - **Success**: `competitors/omc.md § Five pivot questions` populated; the 2026-05-22 reassessment flag is replaced with a concrete decision (keep + scope-shrink, OR deprecate + migrate).
-  - **Pivot**: if OMC's remaining unique value (cross-model routing + architect verification) is also covered by OpenHands skills, deprecate.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/omc.md` ≥ 1; `grep -c '2026-05-22 reassessment flag added' competitors/omc.md` after this task should be replaced with a `2026-05-XX reassessment closed` marker.
-  - **Anchor**: rule #1; `https://github.com/Yeachan-Heo/oh-my-claudecode`; `docs/visions/2026-05-22-openhands-fulfillment.md`.
-
 - [ ] `devin-per-worker-isolation-primitive` — claude has `--worktree <name>` which auto-creates an isolated git worktree per session; devin has no equivalent today. When the daemon scales to ≥2 workers (`MINSKY_AUTO_SCALE_WORKERS=1`, max 5) and cloud_agent=devin, all workers iterate against the shared main checkout — concurrent commits could collide
   - **ID**: devin-per-worker-isolation-primitive
+  - **Blocked**: needs-operator — Target tick-loop.mjs deleted (phase-11b); worktree isolation already agent-agnostic in bin/minsky-run.sh
   - **Competitive-goal**: drives `agent-parity-coverage` toward 1.00 (M1.9) — Claude Code ships `--worktree`; Devin doesn't. Minsky's own worktree primitive on top makes M1.9 (works from Claude, Devin, local) verifiable end-to-end with the same parallel-iteration semantics regardless of CLI backend.
   - **Tags**: p2, milestone-m1, m1-1, devin-support, parallel-workers, observed-2026-05-26
   - **Milestone**: M1
@@ -976,20 +805,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Touches**: novel/tick-loop/bin/tick-loop.mjs, novel/tick-loop/test/devin-worktree-isolation.test.mjs
   - **Acceptance**: (1) Test passes; (2) Live-fire: `MINSKY_AUTO_SCALE_WORKERS=1`, observe 2 concurrent workers spawning devin with distinct cwds (visible in spawn span); (3) After 5 iterations, `git worktree list` shows only the main checkout (no leftover daemon-N-<task> worktrees).
 
-- [ ] `competitor-deepen-swe-agent` — apply Five Pivot Questions framework to SWE-agent (SWE-agent/SWE-agent, 19.3k★, alive, NeurIPS 2024); deepen `competitors/swe-agent.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-swe-agent
-  - **Touches**: competitors/swe-agent.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper
-  - **Milestone**: M1
-  - **Hypothesis**: SWE-agent's NeurIPS-2024 ACI thesis is the reference research scaffold. Q2 should extract concrete ACI design principles for Minsky's adapter layer. Mini-SWE-agent at 65% SWE-bench Verified in 100 lines is the canonical "minimal scaffold" Q5 evaluates against Minsky's surface.
-  - **Success**: `competitors/swe-agent.md § Five pivot questions` populated with ACI-design lessons.
-  - **Pivot**: if mini-SWE-agent's 100-line scaffold + a good model achieves what Minsky tick-loop does, that's a vision-threat.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/swe-agent.md` ≥ 1.
-  - **Anchor**: rule #1; SWE-agent paper arXiv:2405.15793 NeurIPS 2024 (Yang et al.); mini-SWE-agent leaderboard post (2025-07).
-
 - [ ] `watchdog-timeout-kills-productive-devin` — the 900s (15min) watchdog SIGKILLs devin mid-work; devin iterations take 5-6min when productive but the watchdog fires on slow iterations, wasting the entire iteration
   - **ID**: watchdog-timeout-kills-productive-devin
+  - **Blocked**: needs-operator — Already fixed by dynamic_timeout.py (20min floor); target .mjs files no longer exist
   - **Tags**: p0, milestone-m1, devin, watchdog, reliability
   - **Milestone**: M1
   - **Competitive-goal**: a killed productive iteration wastes 15min of devin time with zero output — directly regresses cost-per-PR and stability.
@@ -1003,56 +821,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `jq 'select(.verdict=="spawn-failed") | .notes' .minsky/experiment-store/cross-repo/*.jsonl | grep -c '900'` → 0 (was: 1).
   - **Anchor**: 2026-05-18 live daemon (900014ms spawn-failed). Existing P2 `worker-watchdog-scale-by-pinned-model-latency`.
 
-- [ ] `competitor-deepen-microsoft-agent-framework` — apply Five Pivot Questions framework to Microsoft Agent Framework (microsoft/agent-framework, 10.7k★, alive); deepen `competitors/microsoft-agent-framework.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-microsoft-agent-framework
-  - **Touches**: competitors/microsoft-agent-framework.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Microsoft's Agent Framework (evolution of AutoGen + Magentic-One) is the enterprise-backed orchestrator competitor. Q5 should grade replace-tick-loop-with-Magentic-One; Q3 should answer whether Microsoft's roadmap forces Minsky to either commit to a specific runtime or stay runtime-agnostic.
-  - **Success**: `competitors/microsoft-agent-framework.md § Five pivot questions` populated; concrete comparison to AutoGen + Magentic-One.
-  - **Pivot**: if Magentic-One's Orchestrator covers Minsky's MAPE-K layer, file vision-threat for the MAPE-K module home (build it on Magentic-One vs build it ourselves).
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/microsoft-agent-framework.md` ≥ 1.
-  - **Anchor**: rule #1; Microsoft's Magentic-One MSR-TR-2024-47; `https://github.com/microsoft/agent-framework`.
-
-- [ ] `competitor-add-babyagi` — research BabyAGI (yoheinakajima/babyagi, 22.3k★, mostly-archived); produce `competitors/babyagi.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-babyagi
-  - **Touches**: competitors/babyagi.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-stale
-  - **Milestone**: M1
-  - **Hypothesis**: BabyAGI's task-planning + execution-loop framing was hugely viral mid-2023 but the original is archived. The post-mortem should identify "demo viral ≠ production viable" as the root cause. Q3 unlikely vision-changing.
-  - **Success**: `competitors/babyagi.md` with Post-mortem + Five Pivot Questions sections.
-  - **Pivot**: archived; lesson-extraction only.
-  - **Measurement**: `test -f competitors/babyagi.md && grep -c '^## Post-mortem' competitors/babyagi.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/yoheinakajima/babyagi`.
-
-- [ ] `competitor-add-pydantic-ai` — research Pydantic-AI (pydantic/pydantic-ai, 17.3k★, alive); produce `competitors/pydantic-ai.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-pydantic-ai
-  - **Touches**: competitors/pydantic-ai.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Pydantic-AI's durable-execution + type-safe framework + Sequoia/Partech backing is a credible enterprise-Python alternative to LangChain. Q5 framework-vs-product framing.
-  - **Success**: `competitors/pydantic-ai.md` created.
-  - **Pivot**: framework, mostly N/A on Minsky product surfaces.
-  - **Measurement**: `test -f competitors/pydantic-ai.md && grep -c '^## Five pivot questions' competitors/pydantic-ai.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/pydantic/pydantic-ai`; Pydantic-AI docs.
-
-- [ ] `competitor-add-roo-code` — research Roo Code (RooCodeInc/Roo-Code, 24.1k★, ARCHIVED); produce `competitors/roo-code.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-roo-code
-  - **Touches**: competitors/roo-code.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
-  - **Milestone**: M1
-  - **Hypothesis**: Roo Code (Cline fork with "Adaptive Autonomy" + custom modes) is archived as of 2026-05-15 despite 24k★ — the post-mortem should answer what killed a fork-with-momentum. Possibly: forks struggle when upstream (Cline) closes the differentiation gap.
-  - **Success**: `competitors/roo-code.md` with Post-mortem + Five Pivot Questions sections.
-  - **Pivot**: archived already; extract lesson and move on.
-  - **Measurement**: `test -f competitors/roo-code.md && grep -c '^## Post-mortem' competitors/roo-code.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/RooCodeInc/Roo-Code` (archived).
-
 - [ ] `minsky-config-json-support-local-llm-pref` — `~/.minsky/config.json` supports `cloud_agent` + `cloud_agent_model` as documented persistent keys, but NOT `local_llm_enabled`, `strategic_router_enabled`, or `cloud_agent_fallback`. So an operator who wants "use devin, fall back to local" has to add `MINSKY_LOCAL_LLM=1` to the rendered launchd plist, which gets wiped on the next `pnpm minsky:setup` regeneration. Per-machine preferences should live in ONE place
   - **ID**: minsky-config-json-support-local-llm-pref
+  - **Blocked**: needs-operator — Stale: local_llm_enabled already wired in bin/minsky-run.sh; named Node runner files deleted in Path A cut
   - **Competitive-goal**: drives `unattended-iteration-rate` toward 0.95 — competitor agents' per-machine config (Aider .aiderconfig, Cline settings.json) lives in one file. Minsky splitting cloud_agent (config.json) vs local_llm (rendered plist env) is a UX regression vs the field; closing it removes a friction point operators see in head-to-head trials.
   - **Tags**: p1, milestone-m1, m1-1, config-as-code, rule-2, persistence, observed-2026-05-26
   - **Milestone**: M1
@@ -1067,44 +838,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Touches**: novel/cross-repo-runner/bin/minsky-run.mjs, novel/tick-loop/bin/tick-loop.mjs, docs/example-config.json, README.md
   - **Acceptance**: (1) Operator writes `{local_llm_enabled: true}` to config.json, restarts daemon, sees the local-llm-wired log line; (2) Existing operators with no config.json continue working unchanged; (3) `MINSKY_LOCAL_LLM=0` env still overrides `local_llm_enabled: true` (env wins).
 
-- [ ] `competitor-deepen-metagpt` — apply Five Pivot Questions framework to MetaGPT (FoundationAgents/MetaGPT, 68.3k★, stale Jan 2026); deepen `competitors/metagpt.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-metagpt
-  - **Touches**: competitors/metagpt.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, status-stale
-  - **Milestone**: M1
-  - **Hypothesis**: MetaGPT's "multi-agent software company" framing + AFlow MCTS-workflow-generation may seed Minsky's research-agenda layer, but the project's 4-month stale signal suggests the framing under-delivered. Q3 unlikely vision-changing.
-  - **Success**: `competitors/metagpt.md § Five pivot questions` populated; post-mortem-lite section (last commit, why activity slowed) if stale ≥ 180 days.
-  - **Pivot**: if MetaGPT becomes archived between filing and execution, run the full `--post-mortem` mode of the skill.
-  - **Measurement**: `gh api repos/FoundationAgents/MetaGPT --jq .pushed_at` returns ISO date — compute days since; if > 180, flag for post-mortem treatment.
-  - **Anchor**: rule #1; MetaGPT paper arXiv:2308.00352; `https://github.com/FoundationAgents/MetaGPT`.
-
-- [ ] `competitor-deepen-composio-ao` — apply Five Pivot Questions framework to Composio Agent Orchestrator (ComposioHQ/composio, 28.4k★, alive); deepen `competitors/composio-ao.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-composio-ao
-  - **Touches**: competitors/composio-ao.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Composio's Feb 2026 "Agent Orchestrator" (30 parallel agents, autonomous CI-fix + merge-conflict resolution) is the closest competitor to Minsky's tick-loop in the "parallel-worker pool" axis. Q5 should grade replace vs augment.
-  - **Success**: `competitors/composio-ao.md § Five pivot questions` populated; concrete comparison of Composio's orchestration model vs Minsky's tick-loop.
-  - **Pivot**: if Composio Orchestrator covers ≥50% of cross-repo-runner surface, downgrade cross-repo-runner roadmap.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/composio-ao.md` ≥ 1.
-  - **Anchor**: rule #1; Composio Orchestrator announcement (Feb 2026); `https://github.com/ComposioHQ/composio`.
-
-- [ ] `competitor-add-devika` — research Devika (stitionai/devika, 19.5k★, semi-stale Sep 2025); produce `competitors/devika.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-devika
-  - **Touches**: competitors/devika.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24, status-stale
-  - **Milestone**: M1
-  - **Hypothesis**: Devika was the first OSS "Devin alternative". The deep-dive should evaluate whether the project succeeded as a research vehicle or as a product, and what Minsky inherits or avoids from the Devika lineage.
-  - **Success**: `competitors/devika.md` created; if stale at execution time, run `--post-mortem` mode.
-  - **Pivot**: if execution finds Devika archived, run post-mortem.
-  - **Measurement**: `gh api repos/stitionai/devika --jq .pushed_at`; days since > 180 ⇒ post-mortem.
-  - **Anchor**: rule #1; `https://github.com/stitionai/devika`.
-
 - [ ] `competitor-deepen-cline` — apply Five Pivot Questions framework to Cline (cline/cline, 62.3k★, alive); deepen `competitors/cline.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-cline
+  - **Blocked**: needs-operator — Already done on main (PR #1088): cline.md Five Pivot Questions populated; no diff to commit.
   - **Touches**: competitors/cline.md,ask-human.md
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
   - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
@@ -1115,46 +851,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c '^## Five pivot questions' competitors/cline.md` ≥ 1; `gh api repos/cline/cline --jq .stargazers_count` ≥ 55000.
   - **Anchor**: rule #1; Cline repo; the `--yolo` flag documentation in their CLI docs.
 
-- [ ] `competitor-add-refact-ai` — research Refact.ai (smallcloudai/refact, 3.5k★, alive); produce `competitors/refact-ai.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-refact-ai
-  - **Touches**: competitors/refact-ai.md,ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Refact.ai's local-first Rust engine + agent mode + claimed SWE-bench Verified leadership (unverified) is a niche enterprise offering. Q2 may extract the local-first deployment pattern; Q3 unlikely vision-changing.
-  - **Success**: `competitors/refact-ai.md` created.
-  - **Pivot**: niche; mostly N/A on Minsky surfaces.
-  - **Measurement**: `test -f competitors/refact-ai.md && grep -c '^## Five pivot questions' competitors/refact-ai.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/smallcloudai/refact`; refact.ai docs.
-
-- [ ] `competitor-deepen-agentless` — apply Five Pivot Questions framework to Agentless (OpenAutoCoder/Agentless, 2.0k★, FSE 2025, semi-stale); deepen `competitors/agentless.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-agentless
-  - **Touches**: competitors/agentless.md,ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24, research-paper, contrarian
-  - **Milestone**: M1
-  - **Hypothesis**: Agentless's FSE-2025 thesis ("do you even need an agent?" 32% SWE-bench Lite at $0.70/issue) is the strongest contrarian voice. Q3 may force a vision-threat: if Agentless's three-phase non-agent approach is the rational frontier, what does Minsky's tick-loop add? Q5 should grade whether Minsky can adopt Agentless as a baseline.
-  - **Success**: `competitors/agentless.md § Five pivot questions` populated; explicit "what would Minsky's loop need to add over Agentless to justify itself" framing.
-  - **Pivot**: if Agentless's approach + a frontier model beats Minsky-on-tick-loop on a cost-adjusted SWE-bench score, Minsky's autonomy moat shrinks.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/agentless.md` ≥ 1.
-  - **Anchor**: rule #1; Agentless paper arXiv:2407.01489 FSE 2025 (Xia et al.); `https://github.com/OpenAutoCoder/Agentless`.
-
-<!-- ── 17 net-new adds for ≥500-star OSS not yet documented ── -->
-
-- [ ] `competitor-deepen-crewai` — apply Five Pivot Questions framework to CrewAI (crewAIInc/crewAI, 52.1k★, alive); deepen `competitors/crewai.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-crewai
-  - **Touches**: competitors/crewai.md,ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: CrewAI is a framework, not an end-user agent — Q5 should mostly grade N/A on Minsky surfaces, but the Crews/Flows pattern may seed Minsky's persona model. Q3 unlikely vision-changing.
-  - **Success**: `competitors/crewai.md § Five pivot questions` populated; explicit "framework vs Minsky's product" framing.
-  - **Pivot**: trivial — CrewAI is a framework. If Q5 is all N/A, the doc stays as it is.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/crewai.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/crewAIInc/crewAI`; CrewAI docs.
-
 - [ ] `competitor-deep-dive-wave-2026-05-24` — umbrella task tracking the 35-competitor deep-research wave (Five Pivot Questions framework applied to every existing `competitors/<id>.md` + every new ≥500-star OSS autonomous-coding agent); decision-relevant findings route to `ask-human.md`
   - **ID**: competitor-deep-dive-wave-2026-05-24
+  - **Blocked**: needs-operator — Umbrella tracking 35 sub-tasks + multi-day external research; requires forbidden ask-human.md/vision.md edits
   - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (M1.10) — the umbrella wave hits every Tier-S/A entry in one pass so the corpus-refresh-check supervisor stops auto-filing single-competitor tasks; replaces drip-fed maintenance with a one-shot scorecard refresh.
   - **Tags**: p0, milestone-m1, rule-1, competitive, umbrella, operator-directive, observed-2026-05-24
   - **Milestone**: M1
@@ -1172,32 +871,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- ── 17 deepens for competitors with existing competitors/<id>.md ── -->
 
-- [ ] `competitor-deepen-devin` — apply Five Pivot Questions framework to Devin (Cognition Labs, commercial, in corpus); deepen `competitors/devin.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-devin
-  - **Touches**: competitors/devin.md,ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Devin's 48.2% SWE-bench Verified (vs 68.3% Full, a 29% gap suggesting easy-task overfitting) + Answer.AI's 15% real-world success-rate data is the canonical "marketing-vs-reality gap" in the field. Q2 should extract the "what makes a Devin task succeed vs fail" pattern. Q5 is N/A — Devin is closed-commercial.
-  - **Success**: `competitors/devin.md § Five pivot questions` populated; explicit "Devin's headline number is benchmark-inflated" framing with citations.
-  - **Pivot**: Devin's API is closed; we can't adopt anything from it directly. If the deep-dive surfaces no transferable lesson, demote to honest-comparison reference.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/devin.md` ≥ 1.
-  - **Anchor**: rule #1; Cognition's 2025 annual review; Answer.AI HN post on Devin real-world success rate; OpenAI's SWE-bench Verified Feb 2025 retraction post.
-
-- [ ] `competitor-add-plandex` — research Plandex (plandex-ai/plandex, 15.4k★, alive); produce `competitors/plandex.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-plandex
-  - **Touches**: competitors/plandex.md,ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Plandex's "full auto mode" + persistent plan state + 2M-effective-context targeting large projects is the closest OSS competitor to Minsky's tick-loop in the "unattended long-running" axis. Q3 may surface vision-threat: Plandex's PR pipeline + auto-debug loop overlaps significantly with Minsky's cross-repo-runner.
-  - **Success**: `competitors/plandex.md` created; concrete surface-coverage table.
-  - **Pivot**: if Plandex's cross-repo-runner equivalent matches Minsky's, file vision-threat.
-  - **Measurement**: `test -f competitors/plandex.md && grep -c '^## Five pivot questions' competitors/plandex.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/plandex-ai/plandex`; plandex.ai docs.
-
 - [ ] `minsky-repo-git-config-bare-misset` — `.git/config` on the operator's minsky checkout has `bare = true`, but the directory contains a working tree with active worktrees (`.git/worktrees/daemon-0-*`, `fix-ci-main`, `fleet-stability`, `minsky-bench`). Every `git status` from the main checkout fails with `fatal: this operation must be run in a work tree`. Daemon self-diagnose flagged it under `git-config-parseable` but proposed the wrong fix (`rm .git/index.lock` — index lock is not the issue). Real fix: one-line `bare = false`. The self-diagnose handler should detect `bare = true` AND working files coexisting, propose the correct fix
   - **ID**: minsky-repo-git-config-bare-misset
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Competitive-goal**: drives `mttr-self-heal` p95 toward <5min (M1.13) — competitors' self-diagnose surfaces (Devin's `diagnose`, Cursor's health-check) don't propose actionable fixes for unusual git states; Minsky's self-diagnose that flags `bare=true with worktrees` AND proposes `git config core.bare false` is a measurable diagnose-vs-suggest quality win.
   - **Tags**: p1, milestone-m1, m1-1, observed-2026-05-26, self-diagnose-misdirection
   - **Milestone**: M1
@@ -1211,54 +887,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `novel/cross-repo-runner/src/daemon.ts` (extend self-diagnose handler — locate via `grep -n git-config-parseable`), `novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` (new — paired tests with fixture worktrees), `~/.minsky/daemon.log` (verify after rollout — new suggestedFix string visible).
   - **Touches**: novel/cross-repo-runner/src/daemon.ts,novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs
   - **Acceptance**: (1) `pnpm vitest run novel/cross-repo-runner/test/self-diagnose-bare-misset.test.mjs` passes; (2) `pnpm typecheck` clean; (3) Operator runs `cat <minsky-repo>/.git/config | grep bare` → sees `bare = true` (today's state); runs `git config core.bare false`; runs `git status` → works; the next iteration's self-diagnose drops the finding (no longer fires); (4) When run against a fresh bare-misset fixture, the daemon's self-diagnose emits a suggestedFix containing `git config core.bare false`.
-
-- [ ] `competitor-add-smolagents` — research Hugging Face smolagents (huggingface/smolagents, 27.5k★, alive); produce `competitors/smolagents.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-smolagents
-  - **Touches**: competitors/smolagents.md,ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: smolagents' "agents that think in code" + 1000-line core is the minimal-agent thesis. Q2 should extract the CodeAct-pattern integration. Q5 evaluates whether smolagents-as-substrate is viable.
-  - **Success**: `competitors/smolagents.md` created.
-  - **Pivot**: framework-vs-product framing; mostly N/A on Minsky surfaces.
-  - **Measurement**: `test -f competitors/smolagents.md && grep -c '^## Five pivot questions' competitors/smolagents.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/huggingface/smolagents`; Hugging Face smolagents blog.
-
-- [ ] `competitor-deepen-aider` — apply Five Pivot Questions framework to Aider (Aider-AI/aider, 45.2k★, alive); deepen `competitors/aider.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-aider
-  - **Touches**: competitors/aider.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Aider's "explicitly NOT autonomous" stance (Paul Gauthier publicly rejects too much agentic behavior) is itself a strategic signal: the most-used CLI coding agent's maintainer believes the autonomy framing is wrong. Q3 may be vision-changing for Minsky's autonomy claims. Q5 should affirm KEEP for Aider's adoption as Minsky's local_agent — that surface is already settled.
-  - **Success**: `competitors/aider.md § Five pivot questions` populated with primary-source citations (Aider blog, Paul's HN comments, repo issues); ≥1 lesson identified for absorbing (e.g. their diff-format prompt, repo-map context window strategy).
-  - **Pivot**: if Aider's surface overlap with Minsky drops to <30% after the deep-dive (it's already classified as Integration not Competitor), demote to "single-dependency reference" P3 maintenance.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/aider.md` ≥ 1; `gh api repos/Aider-AI/aider --jq .stargazers_count` ≥ 40000 (sanity check the project is still where research said).
-  - **Anchor**: rule #1; Aider repo `https://github.com/Aider-AI/aider`; aider.chat docs.
-
-- [ ] `competitor-deepen-claude-agent-sdk` — apply Five Pivot Questions framework to Anthropic Claude Agent SDK; deepen `competitors/claude-agent-sdk.md` and emit any vision-threats to `ask-human.md`
-  - **ID**: competitor-deepen-claude-agent-sdk
-  - **Touches**: competitors/claude-agent-sdk.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, deepen-existing, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: Anthropic's first-party Agent SDK + Claude Code background-task primitives may reframe what Minsky uniquely provides; in particular, if Anthropic ships durable background-session APIs, Minsky's tick-loop becomes a thinner wrapper.
-  - **Success**: `competitors/claude-agent-sdk.md § Five pivot questions` populated; Q3 explicitly answers whether Anthropic's roadmap forces a Minsky vision rewrite.
-  - **Pivot**: if SDK roadmap obviates ≥40% of Minsky's tick-loop surface, file vision-threat Q.
-  - **Measurement**: `grep -c '^## Five pivot questions' competitors/claude-agent-sdk.md` ≥ 1.
-  - **Anchor**: rule #1; Anthropic docs at `docs.anthropic.com` / Claude Code docs.
-
-- [ ] `competitor-add-sweep` — research Sweep AI (sweepai/sweep, 7.7k★, DEAD as GitHub App, pivoted to JetBrains); produce `competitors/sweep.md` with `--post-mortem` analysis + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-sweep
-  - **Touches**: competitors/sweep.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, post-mortem, observed-2026-05-24, status-dead
-  - **Milestone**: M1
-  - **Hypothesis**: Sweep's failure as a GitHub App (issue → PR autonomously) is the canonical "stateless GitHub App can't sustain autonomous PR generation" lesson. The post-mortem should formalize that as a Minsky guardrail: never depend on a stateless webhook architecture for sustained autonomy.
-  - **Success**: `competitors/sweep.md` with Post-mortem + Five Pivot Questions sections; ≥1 Minsky guardrail named.
-  - **Pivot**: extract guardrail; project is dead.
-  - **Measurement**: `test -f competitors/sweep.md && grep -c '^## Post-mortem' competitors/sweep.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/sweepai/sweep`; sweep.dev pivot announcement.
 
 ## P1
 
@@ -1335,24 +963,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `agentbrew catalog list | grep -c minsky-discipline-pack` ≥ 1 after the catalog PR merges.
   - **Anchor**: rule #1; `docs/plans/2026-05-24-path-a-aggressive-cut.md` § Phase 13.
 
-- [ ] `launcher-agnostic-feature-parity-chaos-test` — chaos test asserts that two Minsky installs on the same OS, same fixture repo, same model, driven through `INSTALL.md` by two different launcher agents (fake-claude, fake-cursor) produce byte-identical runtime behavior; the only permitted delta is the `agent` string in `~/.minsky/telemetry-consent.json`
-  - **ID**: launcher-agnostic-feature-parity-chaos-test
-  - **Tags**: p1, milestone-m1, chaos-test, invariant, story-014, operator-directive, observed-2026-05-24
-  - **Milestone**: M1
-  - **Competitive-goal**: protects moats #1 (daemon-not-framework) and #2 (operator-machine-identity) from `competitors/README.md` — no other orchestrator-tier competitor (CrewAI, AutoGen, LangGraph, MetaGPT, Devin) advertises launcher-agnostic feature parity because they bundle launcher and runtime (Devin = Cognition's CLI + Devbox; CrewAI Enterprise = platform; LangGraph = framework). Minsky's launcher-agnostic install is the only way to honor moats #1+#2 simultaneously; this chaos test catches future PRs that would silently erode either moat. Drives `launcher-agnostic-runtime-divergence-count` toward 0 (iron).
-  - **Surfaced-by**: operator 2026-05-24 — "it's crucial to be able to run minsky fully from any agent chat including with claude, and it must have same features no matter where from minsky was called. Ensure this is recorded with user stories, add tasks if needed." User-story 014 (`launcher-agnostic-feature-parity.md`) records the invariant; this task implements the regression test that catches future violations.
-  - **Hypothesis**: today the daemon's runtime behavior is *believed* to be launcher-agnostic but not *verified* — there's no CI gate that catches a future PR adding `if (process.env.CLAUDE_CODE) { ... }` to runtime code. A chaos test that runs INSTALL.md from two stubbed launchers against the same fixture and diffs the resulting snapshots (config.json, subcommand set, OpenHands envelope, iteration-log shape) catches launcher-coupling regressions in CI. Falsifiable: post-fix, deliberately inject a launcher branch into `novel/cross-repo-runner/bin/minsky-run.mjs` and confirm the test fails; remove the injection and confirm it passes.
-  - **Success**: `pnpm vitest run test/chaos/launcher-agnostic-feature-parity.test.ts` exits 0 on main; deliberate injection of any of {`process.env.CLAUDE_CODE`, `process.env.CURSOR`, `process.env.DEVIN_AGENT`, `process.env.MINSKY_LAUNCHER`} into runtime branching makes the test fail with a per-field diff naming the divergent field. CI gate wires the test into `pnpm pre-pr-lint --stage=full`.
-  - **Pivot**: if the chaos test fixture grows beyond 500 LOC OR the two-launcher stub framework requires >1d of maintenance per quarter, simplify to a static-analysis lint (`scripts/check-launcher-agnostic-parity.mjs`) that greps for the forbidden env-var patterns instead of running the full install both ways. Document the simplification in `docs/validated-learnings.md` so future agents understand why we dropped from chaos test to lint.
-  - **Measurement**: `pnpm vitest run test/chaos/launcher-agnostic-feature-parity.test.ts -- --reporter=verbose 2>&1 | grep -E "PASS|FAIL"` reports `PASS` on main and `FAIL` on the deliberate-injection regression branch.
-  - **Anchor**: user-story 014 § Failure modes table (this task is the primary chaos test row); rule #9 (pre-registered HDD); Nygard, M. — *Release It!*, 2nd ed. (Pragmatic Bookshelf 2018) — "test the seams between subsystems with chaos faults" applied to the launcher-runtime seam.
-  - **Details**: Vertical slice in 4 sub-deliverables. (1) **Two fake launchers** — `test/fixtures/launchers/fake-claude.mjs` and `test/fixtures/launchers/fake-cursor.mjs`, each is a Node script that simulates "an agent following INSTALL.md" — sets env vars characteristic of that launcher (`CLAUDE_CODE=1` for fake-claude, `CURSOR=1` for fake-cursor), then exec's the install steps. (2) **Fixture repo + install runner** — `test/chaos/launcher-agnostic-feature-parity.test.ts` creates a temp repo, runs each launcher against it, snapshots `~/.minsky/config.json` + `bin/minsky --help` output + the OpenHands spawn envelope (mock-mode) + `.minsky/state.json`. (3) **Diff + allowlist** — diffs the two snapshot trees; the only permitted delta is `telemetry_consent.agent`. Any other delta fails the test with a per-field diff in the assertion. (4) **CI gate** — wire into `pnpm pre-pr-lint --stage=full` via the manifest. Add the new test path to `pre-pr-lint.manifest.json`.
-  - **Files**: `test/chaos/launcher-agnostic-feature-parity.test.ts` (new), `test/fixtures/launchers/fake-claude.mjs` (new), `test/fixtures/launchers/fake-cursor.mjs` (new), `scripts/snapshot-minsky-install.mjs` (new — pure snapshotter), `pre-pr-lint.manifest.json` (extend full stage), `user-stories/014-launcher-agnostic-feature-parity.md` (cross-reference once the test ships).
-  - **Touches**: `test/chaos/`, `test/fixtures/launchers/`, `scripts/snapshot-minsky-install.mjs`, `pre-pr-lint.manifest.json`, `user-stories/014-launcher-agnostic-feature-parity.md`.
-  - **Acceptance**: (1) `pnpm vitest run test/chaos/launcher-agnostic-feature-parity.test.ts` exits 0 on a clean main. (2) Deliberate injection of `if (process.env.CLAUDE_CODE) { config.cloud_agent = "claude"; }` into `novel/cross-repo-runner/bin/minsky-run.mjs` causes the test to fail with an assertion naming `config.cloud_agent` as the divergent field. (3) The test runs in ≤30s wall-clock (fast enough for the full pre-pr-lint stage). (4) `pnpm pre-pr-lint --stage=full` includes the chaos test as a load-bearing gate.
-  - **Risk**: low. (a) Fake-launcher stubs may not perfectly simulate real launcher behavior — mitigated by keeping the stubs minimal (just env-var setting + exec'ing install steps); the test's value is in catching env-var-driven branches, not in reproducing every real-agent quirk. (b) The snapshot allowlist (only `telemetry_consent.agent` is permitted to differ) may need extension if a future PR legitimately adds a launcher-recorded field; mitigation: extend the allowlist with a comment justifying the new field.
-  - **Note**: This task closes story-014's chaos-test row in the failure-modes table. When it ships, update the row from "filed" to "shipped" and add the test path to the table's "Chaos test" column.
-
 - [ ] `lint-stack-audit-post-openhands-wrap` — audit + delete lint stages redundant with OpenHands' output; target 53 → 20 stages
   - **ID**: lint-stack-audit-post-openhands-wrap
   - **Tags**: p1, strategic, reshape, observed-2026-05-22, codebase-reduction, external-dep-needed
@@ -1383,6 +993,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `readme-honest-3-developer-user-test` — MILESTONES.md M1.11 requires that 3 developers who've never seen Minsky can install and run it from clone to first iteration in <5min reading time, using only the README. No formal user test has been conducted yet — the criterion is currently `🟡 partial` based on README length alone.
   - **ID**: readme-honest-3-developer-user-test
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p1, milestone-m1, m1-11, ux, install, user-test, readme, observed-2026-05-22
   - **Milestone**: M1
   - **Hypothesis**: README in <130 lines that follows the "agent-mediated install" or "manual clone + pnpm install + ./bin/minsky" path is *sufficient* for a developer to get from `git clone` to first iteration in <5min. Falsifiable: the test will surface friction points (missing prereqs, ambiguous instructions, undocumented dependencies, opinionated AI-agent assumptions) within the first 3 user runs.
@@ -1412,6 +1023,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `motivation-bullet-test-coverage-completion` — every motivation bullet in the README's "Why Minsky?" section has a sibling integration test file that drives the claimed behaviour end-to-end against fixture data; 4 stories shipped without tests in this PR (007, 008, 009, 010) need their `.test.ts` files
   - **ID**: motivation-bullet-test-coverage-completion
+  - **Blocked**: needs-operator — Target impls (cross-repo-runner/host-cto-audit, tick-loop/selectBackend) deleted in phase-11b; stories stale, 004/008 tests already exist
   - **Tags**: p1, milestone-m1, tests, user-stories, observability, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-20 reviewing the "Why Minsky?" section — "ensure each of those points is a user story with full integration/runtime test suite". Audit revealed 4 motivation bullets had stories landing in this PR but no sibling test files. The stories specify the test contract (`## Integration test` section with Setup/Action/Assert per story); this task writes the actual `.test.ts` files.
@@ -1427,24 +1039,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: low. The implementations for 004/007/008/009 exist; tests just exercise them. 010's test is `describe.skipIf` until the P0 ships. The risk is mostly fixture authoring time + occasional Assert-revision iteration with the story author.
   - **Note**: composes with P0 `minsky-human-comm-via-file` (the implementation for story 010's tests to activate against), the M2 multi-persona pipeline (story 008's skipped pipeline test activates then), and the existing rule-9 / rule-3-doc-first gates (every new test file ships with its story already documented).
 
-- [ ] `cto-audit-merge-rate-metric` — the CTO-audit user story 007 declares a secondary metric `cto_audit_filed_tasks_merged_within_30d` (the merge rate of audit-filed tasks) but no aggregator exists today; this task ships the metric so the story's quality threshold (≥40% merge rate) is verifiable
-  - **ID**: cto-audit-merge-rate-metric
-  - **Tags**: p1, milestone-m1, observability, metrics, user-stories
-  - **Milestone**: M1
-  - **Surfaced-by**: operator 2026-05-20 — drafting user-story 007 surfaced the secondary metric. Without it, the audit's quality is unmeasurable; without measurement, rule #11 forbids the quality claim from being load-bearing.
-  - **Hypothesis**: a per-week aggregator that joins TASKS.md `**Surfaced-by**: daemon CTO audit` entries with `gh pr list --search "<task-id> in:title"` (merged status + closedAt) computes `cto_audit_filed_tasks_merged_within_30d` as a percentage. Storing as `metric-snapshots/cto-audit-merge-rate.jsonl` lets the dashboard chart trend.
-  - **Success**: weekly aggregator emits `{ts, audit_filed_count, merged_within_30d_count, merge_rate}` per host; the dashboard's CTO-audit tile renders the merge rate; rule #11 flake-detection lint doesn't trip on this metric (i.e., the metric is deterministic given the same inputs).
-  - **Pivot**: if the merge-rate metric proves noisy (varies >20% week-over-week with no underlying change), drop to a 90-day rolling window or use a quarter as the unit. Threshold: 4 consecutive weeks with rolling-week stddev >20% of mean.
-  - **Measurement**: `node scripts/aggregate-cto-audit-metrics.mjs --since=2026-05-01 --until=2026-05-31 | jq -e '.merge_rate >= 0.4'` — exits 0 only when the merge-rate hits the user-story-007 threshold.
-  - **Anchor**: rule #11 (vision.md § 11 — no flaky metric is load-bearing; metrics must be deterministic) composed with rule #4 (vision.md § 4 — everything measurable, everything visible).
-  - **Details**: `scripts/aggregate-cto-audit-metrics.mjs` (new) — reads TASKS.md committed history (`git log --all -- TASKS.md`), greps for `**Surfaced-by**: daemon CTO audit`, joins with `gh pr list --json number,title,state,mergedAt` matching task IDs by title, computes merge rate over 30-day windows. Output is a JSONL stream consumed by the dashboard's `metric-snapshots` ingestion.
-  - **Files**: `scripts/aggregate-cto-audit-metrics.mjs` (new), `scripts/aggregate-cto-audit-metrics.test.mjs` (new — paired test with synthetic git+gh fixtures), `METRICS.md` (add a section).
-  - **Touches**: scripts/aggregate-cto-audit-metrics*, METRICS.md
-  - **Acceptance**: Measurement command runs; the script's tests pass; the dashboard renders the tile.
-  - **Risk**: low. Pure aggregation over data sources that already exist (git history + gh CLI).
-
 - [ ] `multi-persona-pipeline-handoff-spec` — finalise `novel/handoff-spec/` (the JSON schema + validator + writer + reader for persona handoff files) so the M2 multi-persona pipeline can spawn researcher → planner → developer → QA → reviewer on a single task; user-story 008's `it.skip` cases activate when this ships
   - **ID**: multi-persona-pipeline-handoff-spec
+  - **Blocked**: needs-operator — Obsolete: handoff-spec deleted (PR #806), superseded by shipped A2A pipeline; re-adding violates rule #1
   - **Tags**: p1, milestone-m2, multi-persona, novel-package, handoffs
   - **Milestone**: M2
   - **Surfaced-by**: operator 2026-05-20 — drafting user-story 008 surfaced the M2 path's first missing piece. The story documents the experience; this task ships the substrate.
@@ -1462,6 +1059,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `claude-agents-deep-integration` — minsky's persona library (researcher, manager, developer, qa-engineer, reviewer, alternatives-analyst, indie-hacker, growth-hacker, strategist, agent-improver, user, pipeline-runner) is exposed as Claude Code sub-agents under `.claude/agents/*.md` so the operator can invoke them via `/agents` AND the M2 multi-persona pipeline executes through Claude's native sub-agent surface instead of shelling out to a separate CLI subprocess per persona
   - **ID**: claude-agents-deep-integration
+  - **Blocked**: needs-operator — Spec inputs absent (orchestrator skills, persona-spawner adapter); success needs live /agents session test
   - **Tags**: p1, milestone-m2, integration, claude, personas, handoffs, observed-2026-05-20
   - **Milestone**: M2
   - **Surfaced-by**: operator 2026-05-20 — "Let's ensure that deep integration with claude's /agents command is P1 task". Today minsky ships personas as `.claude/skills/orchestrator-*` markdown (operator-facing skills the human can read) AND as `subagent_*` profiles in the global agentbrew (the `subagent_explore` / `subagent_general` profiles I use via `run_subagent`). Neither is the Claude Code `.claude/agents/*.md` sub-agent format — so the operator cannot type `/agents` in their Claude session and see minsky's persona library. The personas exist conceptually in three formats but none are the canonical one Claude Code reads.
@@ -1479,6 +1077,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `minsky-npx-install-and-run` — `npx minsky` (no subcommand, no prior install) should both INSTALL minsky on the machine AND start a daemon iteration in a single command, so a new operator's literal first interaction is one shell line
   - **ID**: minsky-npx-install-and-run
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p1, milestone-m1, ux, install, distribution, operator-directive, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-20 reviewing README — "Add a P1 task to make it install+runnable with a super simple command eg with npx". Today the install path is `git clone + cd + pnpm install + minsky`. The existing P0 `minsky-init-one-command-bootstrap` covers `npx minsky init` (sets up the sidecar) but leaves the operator to run `minsky` separately as a second command. The simpler operator-mental-model is: type ONE line in your shell, get a running iteration.
@@ -1496,6 +1095,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `pre-push-hook-stays-fast` — the lefthook `pre-push` step must stay under ~10s wall-clock; today the fix landed (`--stage=fast`), the policy needs a deterministic CI lint so a future PR can't silently regress
   - **ID**: pre-push-hook-stays-fast
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p1, milestone-m1, rule-10, rule-11, dx, ci, feedback-loop, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-20 — "Hmm why did pre push take so long? I expected push to happen in like a second". `pre-push` ran `pnpm pre-pr-lint --stage=full` which invokes vitest (~35s for the 3,135-test suite); total wall-clock ~40s. Fixed in the same PR by switching to `--stage=fast` (~5-7s). Without a CI lint guarding the fast-stage choice, the next PR that touches `lefthook.yml` could silently revert and re-introduce the 35s tax on every developer push.
@@ -1515,6 +1115,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `graphql-repo-slug-mismatch-non-fatal` — `GraphQL: Could not resolve to a Repository` errors appear for repos that exist (`fyodoriv/minsky`) because the gh token context doesn't match; cosmetic but noisy — 5 errors per walk
   - **ID**: graphql-repo-slug-mismatch-non-fatal
+  - **Blocked**: needs-operator — Target novel/cross-repo-runner deleted (PR #883); fix already present in bin/minsky-run.sh — task obsolete
   - **Tags**: p1, milestone-m1, reliability, observability, gh-auth
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-18 live daemon: 5 GraphQL errors across walks for `fyodoriv/minsky` and `fyodoriv/mirror-setup` — both repos exist (verified via `gh api graphql` from interactive shell). The launchd process resolves a different gh credential than the interactive shell (same root cause as existing P1 `orchestrator-gh-graphql-401-token-source-divergence`).
@@ -1529,6 +1130,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `daemon-log-lacks-iteration-detail` — daemon.log shows experiment-file writes but not the iteration verdict, duration, task picked, or agent used; diagnosing spawn-failed requires reading the jsonl experiment store separately
   - **ID**: daemon-log-lacks-iteration-detail
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p1, milestone-m1, observability, logs, ux
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-18 live daemon: to determine that devin ran for 5.6min and produced a `validated` verdict, the operator had to `cat .minsky/experiment-store/cross-repo/*.jsonl` — the daemon.log only shows `✓ wrote experiment` and `✓ appended iteration record`, not the verdict or duration.
@@ -1544,6 +1146,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 <!-- Moved from P0 2026-05-18: M2 tasks deprioritized until M1 ships (see MILESTONES.md). -->
 - [ ] `native-agent-teams-with-tiered-adapter` — minsky drives Claude Code's native "agent teams" (lead + independent teammates + shared task list + mailbox + hooks) as its multi-worker backend when available, behind a capability-tiered agent adapter that still supports non-native agents (Devin, etc.) via the existing process-fan-out — native always preferred
   - **ID**: native-agent-teams-with-tiered-adapter
+  - **Blocked**: needs-operator — Multi-slice P0 composing absent substrate; needs live experimental Claude Code agent-teams + integration harness.
   - **Tags**: p0, operator-directive, orchestrator, agent-teams, claude-code, adapter, rule-1, rule-2, rule-9
   - **Milestone**: M2
   - **Touches**: `novel/tick-loop/src/**`, `novel/tick-loop/bin/tick-loop.mjs`, `novel/tick-loop/README.md`, `scripts/orchestrate.mjs`, `docs/agent-teams-integration.md`
@@ -1815,38 +1418,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c 'api.github.com/graphql' .minsky/orchestrate.jsonl` over a fixed window before/after → trends to 0 for the fixed credential; autonomous merges resume in `.minsky/orchestrate.jsonl` `merged:[…]`; injected-bad-credential test asserts the divergence span within 2 ticks.
   - **Anchor**: live Opus-on-Opus run 2026-05-17 (orchestrate.jsonl 05:13:14Z & 05:34:20Z GraphQL-401 sweepErrors; interactive gh + `gh api graphql` succeed; plist has no GITHUB_TOKEN; `gh auth status` env-vs-keyring divergence); GitHub docs (GraphQL requires auth; REST/GraphQL separate surfaces); vision.md rule #6 (let-it-crash at the right boundary — here the right boundary is "surface the auth divergence loudly", not "silently skip every merge forever"); rule #7 (graceful-degrade — already correct for *transient*, insufficient for *persistent*); rule #9 (pre-registered HDD).
 
-- [ ] `tick-loop-transient-gh-401-must-not-crash-daemon` — a transient GitHub `401 Unauthorized` inside a tick-loop iteration crashes the whole Sonnet worker daemon (exit 1) instead of being handled
-  - **ID**: tick-loop-transient-gh-401-must-not-crash-daemon
-  - **Tags**: p1, reliability, daemon, stay-alive, rule-6
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-16 autonomous-opus heal pass — `com.minsky.opus-sonnet-run` `last exit code = 1`, `runs = 2`; `.minsky/opus-sonnet-run.err.log` shows `non-200 OK status code: 401 Unauthorized body: {"message":"Requires authentication"}` from a `gh`/GitHub API call (file-collision check / PR op). launchd KeepAlive auto-recovered it (supervision worked), but a recurring transient 401 would erode the 10h-reliability target.
-  - **Details**: a single transient GitHub auth blip (token refresh window, keychain momentarily unavailable, rate-limit-adjacent 401) in any per-iteration `gh`/`gh api` call must NOT propagate to process exit. Per rule #6 (stay alive): classify GitHub 401/403/429 as transient → skip that sub-step (e.g., the touches-collision fetch already documents "Set MINSKY_TOUCHES_GLOB_CHECK=0 … the claim layer stands alone") and continue the iteration, or fail just the iteration (not the daemon) with a `failure_class:"gh-transient-auth"` span. Never `process.exit(1)` on a recoverable GitHub status.
-  - **Files**: the `gh pr list`/`gh api` call sites in `novel/tick-loop/**` (file-collision check, PR harvest), their error classification.
-  - **Touches**: novel/tick-loop/**
-  - **Hypothesis**: today a transient GitHub 401 ⇒ daemon exit 1 (observed: 1 crash / 2 runs in the first hour). After the fix, a 401/403/429 in a per-iteration gh call ⇒ that sub-step is skipped + a `gh-transient-auth` span emitted, daemon stays up; the daemon-crash count (`launchctl print … | grep 'last exit code = 1'`) over a rolling 10h window drops from ≥1 to 0.
-  - **Success**: 0 daemon crashes attributable to a recoverable GitHub status over a rolling 10h window (≥1 transient 401 occurred and was absorbed).
-  - **Pivot**: if classification proves brittle (GitHub returns 401 for genuinely-fatal de-auth), keep the crash for *persisted* auth failure (≥3 consecutive 401 across iterations) but absorb single/transient ones.
-  - **Measurement**: `launchctl print gui/$(id -u)/com.minsky.opus-sonnet-run | grep -E 'runs|last exit code'` (runs should grow ~only with intentional restarts, not 401s) AND `grep -c '"failure_class":"gh-transient-auth"' .minsky/opus-sonnet-run.*.log` shows absorbed events with the daemon still up.
-  - **Anchor**: Armstrong 2007 / rule #6 (let-it-crash is for *unexpected* faults; a known-recoverable remote status is handled-locally, not a crash); Beyer SRE 2016 (retry/skip budget for transient dependency errors).
-  - **Acceptance**: (1) per-iteration gh call sites classify 401/403/429 as transient and skip-or-fail-iteration, never exit the process; (2) a `gh-transient-auth` failure-class span is emitted; (3) measurement shows 0 recoverable-status daemon crashes over a 10h window.
-
-- [ ] `trusted-local-merge-gate` — deterministic local merge authority for the autonomous orchestrator (GitHub Actions is disabled / $10-mo cap; no PR can reach mergeStateStatus=CLEAN so `auto-merge-clean-prs.mjs` drains nothing)
-  - **ID**: trusted-local-merge-gate
-  - **Tags**: p1, operator-directive, autonomous-opus, ci-replacement, rule-10
-  - **Milestone**: M1
-  - **Touches**: `scripts/local-gate-merge.mjs`, `scripts/local-gate-merge.test.mjs`
-  - **Status**: shipped
-  - **Surfaced-by**: 2026-05-16 operator "build the best autonomous opus … find a different solution instead of github actions; $10/mo total". Actions disabled since 2026-05-12 ⇒ branch-protection `ci` never runs ⇒ every PR is BLOCKED ⇒ the existing CLEAN-gated auto-merge is dead.
-  - **Details**: `scripts/local-gate-merge.mjs` (shipped) — pure decision seam (`pickGateCandidates` / `parseGateVerdict` / `decideMerge`) + injected I/O (`snapshotFn`/`vetFn`/`mergeFn`), mirroring `auto-merge-clean-prs.mjs` (rule #1: composes `run-pre-pr-lint-stack` + `gh`, no new gate logic; rule #10: same input ⇒ same output, no model in the merge decision). For each open non-draft, non-CONFLICTING, base=main PR: isolated `git clone --shared` scratch (never an in-repo worktree — that flips `core.bare`), merge PR head onto `origin/main`, run `run-pre-pr-lint-stack --stage=full --json`; green ⇒ `gh pr merge --squash --admin`. 13 paired tests green. Follow-up (this task's open work): wire it into the autonomous orchestrator loop (Phase 1 `claude-orchestrator-local-worker-fanout`) + a `--self-metric` reader over `.minsky/local-gate-merge.jsonl`.
-  - **Hypothesis**: a gate-green admin-merged PR does not regress `origin/main` — post-merge, a fresh `run-pre-pr-lint-stack --stage=full` on main stays green. Today (Actions off) 0 PRs auto-merge; post-gate the orchestrator merges every full-gate-green PR with a false-green rate of 0.
-  - **Success**: 0 post-merge `origin/main` regressions over ≥10 gate-merged PRs (false-green rate 0).
-  - **Pivot**: if ≥1 regression in the window, add an auto-revert-on-red post-merge re-vet OR fall back to label-gated (`minsky-auto-merge` required) — do not loosen the gate.
-  - **Measurement**: `node -e "const l=require('node:fs').readFileSync(process.env.MINSKY_HOME+'/.minsky/local-gate-merge.jsonl','utf8').trim().split('\n').filter(Boolean).map(JSON.parse);const m=l.flatMap(x=>x.merged);console.log(JSON.stringify({sweeps:l.length,merged:m.length}))"` for throughput; regression count = sweeps where a subsequent `--stage=full` on main went red attributable to a gate-merge.
-  - **Anchor**: Beyer et al. *SRE* 2016 Ch. 6 (the gate IS the release gate; visible-not-silent — the `.jsonl` ledger); rule #10 (deterministic enforcement, no model in the merge path); rule #1 (composes existing `run-pre-pr-lint-stack` + `gh`).
-  - **Acceptance**: (1) `scripts/local-gate-merge.mjs` + paired tests shipped [done]; (2) wired into the Phase-1 orchestrator as its merge authority; (3) `--self-metric` reads the ledger; (4) measurement shows false-green rate 0 over ≥10 merges.
-
 - [ ] `budget-guard-correctness` — Minsky's budget model is factually wrong and silently degrades off Claude on bad estimates; operator (2026-05-16): "this is critical … fivehour limit is completely wrong … there is no monthly limit in Claude … when it reaches limit, it must tell to validate it"
   - **ID**: budget-guard-correctness
+  - **Blocked**: needs-operator — Target substrate (tick-loop daemon, minsky.mjs, budget-guard) deleted in phase-11b; task stale
   - **Tags**: p1, operator-directive, budget-guard, strategic-router, correctness
   - **Milestone**: M1
   - **Touches**: `novel/tick-loop/src/strategic-model-router.ts`, `novel/tick-loop/src/model-catalog.ts`, `novel/tick-loop/bin/minsky.mjs`, `novel/budget-guard/**`
@@ -2139,6 +1713,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `devin-worker-auto-exit-after-pr-create` — devin headless worker doesn't exit voluntarily after `gh pr create` succeeds, burning the full spawn timeout on every iteration that completes its brief
 
   - **ID**: devin-worker-auto-exit-after-pr-create
+  - **Blocked**: needs-operator — stale premise: all 5 Touches files + cross-repo-runner TS package gone; spawn refactored to bash/python
   - **Tags**: p1, devin-worker, headless, watchdog, observed-in-fleet
   - **Milestone**: M1
   - **Touches**: `novel/cross-repo-runner/bin/minsky-run.mjs`, `novel/tick-loop/src/llm-invocation.ts`, `novel/tick-loop/src/llm-invocation.test.ts`, `novel/cross-repo-runner/src/runner.ts`, `novel/cross-repo-runner/src/runner.test.ts`
@@ -2156,6 +1731,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `runner-records-validated-when-pr-opened-despite-nonzero-exit` — `runLive` should treat a non-zero spawn exit as `validated` (not `spawn-failed`) when the spawn's stdoutTail contains an extracted PR URL
 
   - **ID**: runner-records-validated-when-pr-opened-despite-nonzero-exit
+  - **Blocked**: needs-operator — Target runner.ts/runLive deleted in phase-7b shell rewrite; Touches files don't exist
   - **Tags**: p1, runner, verdict, observed-in-fleet
   - **Milestone**: M1
   - **Touches**: `novel/cross-repo-runner/src/runner.ts`, `novel/cross-repo-runner/src/runner.test.ts`
@@ -2170,25 +1746,10 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Risk**: low. The change is narrow — one decision point in `runLive`, three paired tests. Existing `validated`/`spawn-failed` semantics for the no-PR case are preserved. Failure mode is the false-validated case in the Pivot threshold, mitigated by the tightened extractor.
   - **Surfaced-by**: 2026-05-16 managed-host-a run, iteration records at `~/apps/managed-host/managed-host-a/.minsky/experiment-store/cross-repo/parameterize-auth-posture-probe.jsonl` (verdict=spawn-failed but PR #287 was opened+merged), `split-api-config-example.jsonl` (similar), `ship-example-eslint-preset.jsonl` (similar).
 
-- [ ] `brief-mandates-task-block-removal-on-shipped-work` — sharpen the spawn brief so devin REMOVES the task block (per tasks.md spec) instead of annotating it with `[x]` ticks
-
-  - **ID**: brief-mandates-task-block-removal-on-shipped-work
-  - **Tags**: cross-repo-runner, spawn-plan, brief, p1, rework-prevention, surfaced-by-managed-host-b-monitoring
-  - **Milestone**: M1
-  - **Detected-by**: devin-session-2026-05-16-monitoring
-  - **Detected-at**: 2026-05-16T22:30Z
-  - **Hypothesis**: The tasks.md spec mandates removing a completed task's entire block (history lives in git log). Minsky's spawn brief in `novel/cross-repo-runner/src/spawn-plan.ts` says "Cut a branch / ship the code / open a PR" but doesn't explicitly say "if work is already shipped, REMOVE the block". Devin instead "respects existing structure" — ticks `[x]` boxes on acceptance items, adds a `**Status**:` line, leaves the `- [ ]` block intact. The picker then re-picks the SAME task on the next iteration. Adding an explicit clause in `renderSystemPromptOverlay` — "If you discover this task's code is ALREADY SHIPPED (PR open or merged), your ONLY change in this iteration is to REMOVE the entire `- [ ] …` block from TASKS.md. Do NOT add `[x]` annotations. Do NOT add a `**Status**:` line." — closes the loophole.
-  - **Success**: After updating the brief, sample 10 successive iterations on tasks where devin discovers shipped work. ≥ 9/10 produce a single-file `git diff` that DELETES the task block (not adds annotations). `grep -c '\\[x\\]' TASKS.md` stays flat or decreases across the 10 iterations (never grows). New regression test in `novel/cross-repo-runner/src/spawn-plan.test.ts` asserts the brief text contains the literal "REMOVE the entire" instruction.
-  - **Pivot**: If devin can't reliably distinguish "work shipped" from "work in progress" (e.g., the PR is open but CI is red, or the merge is half-rebased), fall back to a dedicated `--remove-task <id>` CLI flag the operator runs manually to close out validated tasks — cedes the auto-cleanup to a human gate but eliminates the rework loop. Less elegant but more predictable.
-  - **Measurement**: After the brief update, count `git log feat/* --oneline | grep -c "remove.*task block\|closes "` over a 24h window. Target ≥ 1/iteration where shipped-work was discovered. Conversely, `grep -c '\\[x\\]' TASKS.md` should not grow on shipped-work iterations.
-  - **Anchor**: tasks.md spec at <https://github.com/tasksmd/tasks.md/blob/main/spec.md> §"Removing tasks" — "Completed tasks are removed entirely. History lives in git log per the tasks.md spec." (Already referenced in the host's CLAUDE.md / global rules; the brief should reinforce.)
-  - **Why**: Observed cost on managed-host-b host 2026-05-16: 9 iter records across 2 tasks (`add-releases-cache-findall`: 4 records on already-shipped PR #603; `lma-middleware-canonical`: 5 records on already-shipped PR #614) that should have been 1 record each. ~30-60 min of devin compute wasted on rework.
-  - **Files**: `novel/cross-repo-runner/src/spawn-plan.ts` (the `renderSystemPromptOverlay` function, around line 93-110), `novel/cross-repo-runner/src/spawn-plan.test.ts` (assert the new clause).
-  - **Touches**: novel/cross-repo-runner/src/spawn-plan.ts, novel/cross-repo-runner/src/spawn-plan.test.ts
-
 - [ ] `host-loop-spawn-failed-retry-budget` — wrap spawn-failed verdict in a configurable retry budget so a single bad iteration doesn't halt 8h+ autonomous runs
 
   - **ID**: host-loop-spawn-failed-retry-budget
+  - **Blocked**: needs-operator — All Touches files deleted in PR #883 (novel/cross-repo-runner/ removed); no host-loop spawn-failed site exists.
   - **Tags**: cross-repo-runner, host-loop, robustness, p1, observability, surfaced-by-managed-host-b-monitoring
   - **Milestone**: M1
   - **Detected-by**: devin-session-2026-05-16-monitoring (observed in managed-host-b host)
@@ -2205,6 +1766,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `spawn-strategy-pre-sigkill-stash` — auto-stash worker WIP before the SIGKILL watchdog fires so devin's uncommitted implementation isn't lost on timeout
 
   - **ID**: spawn-strategy-pre-sigkill-stash
+  - **Blocked**: needs-operator — Target spawn-strategy.ts + test deleted by PR #888 (phase-11b tick-loop removal); no SIGKILL site exists
   - **Tags**: cross-repo-runner, tick-loop, spawn-strategy, data-loss, p1, surfaced-by-managed-host-b-monitoring
   - **Milestone**: M1
   - **Detected-by**: devin-session-2026-05-16-monitoring
@@ -2220,6 +1782,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `minsky-daemon-plist-multi-host` — launchd daemon targets only `<minsky-repo>` with `--host`, so other bootstrapped hosts (agentbrew, future hosts) are silently never visited even after they ship `.minsky/repo.yaml`
   - **ID**: minsky-daemon-plist-multi-host
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p1, daemon, launchd, multi-host, agentbrew, scout
   - **Surfaced-by**: 2026-05-20 audit — `~/Library/LaunchAgents/com.minsky.daemon.plist` invokes `minsky-run.mjs --host $MINSKY_REPO --loop`. `<repos-parent>/agentbrew/.minsky/repo.yaml` has existed since 2026-05-19 13:14 but `~/.minsky/daemon.log` shows zero iterations against agentbrew — every loop is `host=fyodoriv/minsky`. `cwd-detect.ts` already correctly enumerates both hosts under `<repos-parent>/` when given `--hosts-dir`. Today the plist + the `install-daemon` codegen still emit the single-host form, so even a re-install reproduces the bug.
   - **Details**: change the launchd plist (and the `minsky install-daemon` codegen that writes it) to emit `--hosts-dir <user-home>/apps/tooling` instead of `--host <single>`. Add a runtime invariant or doctor check that warns when the live plist's args include `--host` but the configured `default_host`'s parent directory has ≥2 bootstrapped subdirs (the common misconfig). Don't regress the explicit single-host path — keep `--host` available for operators who only want to walk one repo, but make the auto-generated plist multi-host whenever ≥2 bootstrapped hosts exist under the parent of `default_host`.
@@ -2236,6 +1799,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `daemon-daily-metrics-render-not-firing` — `pnpm metrics:render` is supposed to auto-fire once per day from the daemon, but didn't on 2026-05-22; 4 `Budget: 1d` sections of METRICS.md went stale and broke `scripts/check-metric-freshness.test.mjs` until manually re-rendered in PR #712.
   - **ID**: daemon-daily-metrics-render-not-firing
+  - **Blocked**: needs-operator — Touched files (TS tick-loop daemon) deleted in phase-11b #888; fix belongs in bash skeleton/cron now
   - **Tags**: p1, daemon, observability, metrics, rule-17, observed-2026-05-22
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-21 PM PR-drain — `pnpm pre-pr-lint --stage=full` failed on PR #712's docs-only change because METRICS.md still pointed to 2026-05-21 snapshots. The daemon's intended daily fire-and-commit wire-in didn't execute on 2026-05-22 (or executed but failed silently). Operator workaround was to run `pnpm metrics:render` manually inside the docs PR — the failure was caught because the docs PR also touched the same lint stack, but a code-only PR would have hit the same stale-METRICS.md error with no clear path to fix.
@@ -2246,39 +1810,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Anchor**: rule #17 (proactive healing — observation IS the fix; this PR observed and filed); rule #4 (everything measurable, everything visible — stale-metrics is the canonical "data going dark" failure); novel/tick-loop/src/metrics-render-runner.ts (existing daily-fire substrate that needs the wire-in fix).
   - **Files**: `novel/tick-loop/src/metrics-render-runner.ts`, `novel/tick-loop/src/metrics-render-cli-wiring.ts`, `novel/tick-loop/bin/tick-loop.mjs` (the daemon's tick-loop where the daily-fire is dispatched), `scripts/check-metric-freshness.test.mjs` (asserts the failure mode).
   - **Touches**: novel/tick-loop/src/metrics-render-runner.ts, novel/tick-loop/src/metrics-render-cli-wiring.ts, novel/tick-loop/bin/tick-loop.mjs, scripts/check-metric-freshness.test.mjs
-
-- [ ] `measure-agent-install-live-mode` — wire `--live` mode into `scripts/measure-agent-install.mjs` so the parent P0 acceptance #1 graduates from mock-CI to real-agent verification
-  - **ID**: measure-agent-install-live-mode
-  - **Tags**: p2, milestone-m1, install, measurement, live-mode, follow-up-of-measure-agent-install-harness, observed-2026-05-23
-  - **Milestone**: M1
-  - **Competitive-goal**: graduates parent P0 `agent-mediated-install` acceptance #1 from "operator-verified manually" to "CI-verified end-to-end" by adding a real-agent provider matrix. Without this, the parent P0 cannot fully close — the harness machinery is in place (PR #748), the threshold semantics are deterministic, but the 9-run real-agent matrix is operator-only. Closes the credibility gap vs Cursor Agent / OpenHands / Devin (each publishes install-latency numbers under real-agent loads).
-  - **Surfaced-by**: 2026-05-23 PR #748 shipped slice (3) of parent `agent-mediated-install` in mock-mode-only form. Real-agent invocation is gated behind the `--live` flag and currently returns skipped readings with a "live mode not implemented in v1" reason. This task wires the actual agent spawn, transcript capture, and prompt-count parser per provider (claude-code, devin, cursor — one isolated parser module per provider).
-  - **Hypothesis**: extending `scripts/measure-agent-install.mjs` with per-provider spawn + parse modules (~50 LOC each for claude-code / devin / cursor, gated behind `--live`) closes the real-agent gap. The mock-mode path stays intact as the CI regression gate; the `--live` path is operator-side ground-truth recorded in `.minsky/measurements/<date>.json`.
-  - **Success**: (1) `node scripts/measure-agent-install.mjs --providers=claude-code --runs-per-provider=1 --live` against a real claude-code installation produces a non-skipped reading with measured `duration_seconds` and `prompt_count` values. (2) The harness is unchanged in mock mode (existing 14 tests continue passing). (3) `.minsky/measurements/<date>.json` is the operator-side committable record format. (4) At least one provider × runs-per-provider matrix is recorded in `.minsky/measurements/` to demonstrate the contract works end-to-end (operator-side smoke).
-  - **Pivot**: if real-agent invocation in CI proves infeasible at >$5/run or >5min p95, keep `--live` operator-only and do NOT wire it into CI. Threshold: if the first attempt to wire claude-code into CI takes >2 days or any single invocation costs >$5, pivot to operator-side-only and document in INSTALL.md.
-  - **Measurement**: `node scripts/measure-agent-install.mjs --providers=claude-code --runs-per-provider=1 --live --out=/tmp/live-smoke.json && jq -e '.runs[0].verdict != "skipped"' /tmp/live-smoke.json` exits 0 against a real claude-code installation.
-  - **Anchor**: Goodhart 1975 (the deliberately-adversarial measurement threshold is the contract); RFC 8615 (conventional-path discoverability — `.minsky/measurements/` is the canonical path for run records); parent task's Pivot field (operator-only `--live` is the explicitly-allowed pivot path).
-  - **Details**: (a) Add per-provider parser modules at `scripts/measure-agent-install/parsers/{claude-code,devin,cursor}.mjs` (~40 LOC each). (b) Wire `--live` mode in `measure-agent-install.mjs` to spawn the named agent against a fresh tmp git repo + INSTALL.md, capture stdout, parse for prompt count (per-provider regex), and record duration via `process.hrtime.bigint()`. (c) Each parser is fixture-tested against a captured transcript at `test/fixtures/agent-install/<provider>/run-1.transcript.txt`. (d) Update INSTALL.md Status block to call out the live-mode capability when shipped.
-  - **Files**: `scripts/measure-agent-install.mjs` (extend `defaultReadingFn`), `scripts/measure-agent-install/parsers/{claude-code,devin,cursor}.mjs` (new), `test/fixtures/agent-install/**` (new), `scripts/measure-agent-install.test.mjs` (extend), `INSTALL.md` (Status block update), parent `agent-mediated-install` task Note field (mark slice (3) live-mode shipped).
-  - **Touches**: `scripts/measure-agent-install.mjs`, `scripts/measure-agent-install/parsers/`, `test/fixtures/agent-install/`, `INSTALL.md`, `TASKS.md`
-  - **Acceptance**: (1)-(4) of Success above. (5) `pnpm pre-pr-lint --stage=full` continues passing (mock-mode CI gate stays green). (6) Per-provider parser modules are isolated single-purpose files (adding a 4th provider is a one-file addition). (7) The parent P0 `agent-mediated-install` task closes when this ships AND the 9-run cross-provider matrix has at least one passing snapshot in `.minsky/measurements/`.
-  - **Risk**: medium. (a) Agent CLI transcripts evolve — parsers may break on version bumps. Mitigation: fixture-test the parsers. (b) Cost / API budget for real-agent invocations. Mitigation: pivot to operator-only `--live` if CI cost exceeds the threshold. (c) Provider availability — some agents may not be installed on the operator's machine. Mitigation: each provider's `--live` path skips gracefully with a "agent not on PATH" reason if the CLI isn't installed.
-
-- [ ] `local-gate-merge-false-negative-on-worktree-bound-branch-delete` — `gh pr merge --delete-branch` exits non-zero on its post-merge LOCAL branch-delete (branch is bound to a `.claude/worktrees/` worktree) even though the remote squash-merge succeeded; the gate reads that non-zero exit as "merge failed", so every worker PR that actually merges is mis-recorded as failed
-  - **ID**: local-gate-merge-false-negative-on-worktree-bound-branch-delete
-  - **Tags**: p1, reliability, orchestrator, gate, merge-accounting, rule-6, self-metrics
-  - **Milestone**: M1
-  - **Competitive-goal**: this bug makes the autonomous-merge-rate (DORA deployment-frequency) on the `self-metrics-competitive-benchmark` scorecard read **0 even while merges are succeeding** — the single most load-bearing scorecard metric is structurally understated until this is fixed; it also masks the real effect of fixing [[orchestrator-gh-graphql-401-token-source-divergence]] (resolving the auth P1 yields merges that this bug still records as failures).
-  - **Surfaced-by**: 2026-05-17 ~06:11Z live supervision — manual `node scripts/local-gate-merge.mjs --limit=5` vetted #575 (docs, MERGEABLE), called `gh pr merge 575 --squash --admin --delete-branch`, and logged `#575: merge call failed: Command failed: …` + `local-gate-merge: done — merged=0 skipped=1`. Ground truth: `gh pr view 575` → `state=MERGED mergedAt=2026-05-17T06:11:28Z`. The remote squash-merge SUCCEEDED; the command exited non-zero solely on the post-merge step `failed to delete local branch worktree-daemon-0-minsky-claude-exhaustion-persisted-state: cannot delete branch '…' used by worktree at '$MINSKY_REPO/.claude/worktrees/daemon-0-minsky-claude-exhaustion-persisted-state'`. A re-run prints `! Pull request fyodoriv/minsky#575 was already merged` and STILL exits non-zero on the same local-delete.
-  - **Details**: every worker-produced PR's head branch is, by construction, the HEAD of a live `.claude/worktrees/<branch>` worktree (the worker's own checkout). `git branch -d` (what `gh pr merge --delete-branch` runs locally after the remote merge) can never delete a worktree-bound branch, so `gh pr merge --delete-branch` will ALWAYS exit non-zero for worker PRs even on a fully successful merge. `scripts/local-gate-merge.mjs` (and the same merge-result interpretation in `scripts/orchestrate.mjs`'s conductor path) treats any non-zero `gh pr merge` exit as merge-failed → records `merged=0`, increments `skipped`, and the conductor may re-vet/retry/skip an already-merged PR on subsequent ticks. This is structural and 100%-reproducible, not a flake. Fix: the merge-success oracle must be `gh pr view <n> --json state` == `MERGED` (or `gh pr merge` stdout containing `was already merged` / a success line), NOT the `gh pr merge` process exit code; the local branch-delete failure must be downgraded to a non-fatal warning. Additionally clean the leaked worktree (`git worktree remove --force .claude/worktrees/<branch>` then delete the branch) OR stop passing local `--delete-branch` and rely on remote branch deletion only (stale local worktrees are a secondary disk/branch-clutter bug — file a P3 follow-up if scoped out here). Apply the identical parsing fix in both `local-gate-merge.mjs` and `orchestrate.mjs` so the autonomous path and the manual path agree.
-  - **Files**: `scripts/local-gate-merge.mjs` (merge-result interpretation: state-oracle not exit-code; downgrade local-delete error to warning; optional worktree cleanup), `scripts/orchestrate.mjs` (same merge-result parsing in the conductor merge step + `.minsky/orchestrate.jsonl` `merged:[]` accounting), paired tests with an injected gh-exec seam returning the exact shape "remote merge ok, stderr `cannot delete branch … used by worktree`, exit≠0" and asserting the PR is counted MERGED
-  - **Touches**: scripts/local-gate-merge.mjs, scripts/orchestrate.mjs
-  - **Acceptance**: given a gh-exec seam that simulates a successful remote merge followed by a non-zero exit whose stderr is the worktree-bound local-delete error, `local-gate-merge.mjs` and `orchestrate.mjs` both count the PR as MERGED (merged=1, skipped=0) and emit no false "merge call failed"; a genuinely-failed merge (remote mutation error, PR still OPEN) is still counted as failed; `.minsky/orchestrate.jsonl` `merged:[]` includes the PR number on the tick it merged.
-  - **Hypothesis**: today the autonomous/manual merge accounting has a ~100% false-negative rate for worker PRs (every worktree-bound-branch merge is recorded as failed); with the state-oracle fix, recorded merge-rate converges to the true merge-rate, so the `self-metrics-competitive-benchmark` deployment-frequency stops reading 0-while-merging and the conductor stops re-processing already-merged PRs.
-  - **Success**: post-fix, for ≥3 consecutive worker PRs that reach GitHub `state=MERGED`, the gate/conductor records each as merged (0 false "merge call failed"); a forced true-failure (PR left OPEN) is still recorded failed (no false positives introduced).
-  - **Pivot**: if reliably distinguishing "remote merged, local-delete failed" from "remote merge failed" via stdout/stderr parsing proves brittle across gh versions, drop `--delete-branch` entirely (remote-only deletion via a follow-up `gh api -X DELETE` or leave the remote branch and reap it separately) and make `gh pr view --json state,mergedAt` the sole merge oracle — never infer merge outcome from the `gh pr merge` exit code at all.
-  - **Measurement**: before/after, run the gate over a window of N worker PRs that GitHub confirms `state=MERGED`; metric = recorded-merged / actually-merged (today ≈ 0/N, target = N/N); plus an injected-seam unit test asserting the merged count for the worktree-bound-delete shape.
-  - **Anchor**: live Opus-on-Opus run 2026-05-17 ~06:11Z (#575 GitHub `state=MERGED mergedAt=2026-05-17T06:11:28Z` while `local-gate-merge` logged `merged=0 skipped=1` + `merge call failed`; re-run prints `was already merged` yet still exits non-zero on the worktree-bound local-delete); `git-branch(1)` (a branch checked out in a worktree cannot be deleted); vision.md rule #6 (fail at the right boundary — a successful merge must not be reported as a failure); rule #9 (pre-registered HDD). Cross-link [[orchestrator-gh-graphql-401-token-source-divergence]] (auth P1: merge never happens — orthogonal root cause, same requirement-6 surface; fixing that one is only observable once THIS one stops eating the resulting merges) and [[worker-liveness-detect-by-label-not-argv]] (sibling argv/worktree-shape fragility class).
 
 - [ ] `reintegrate-preserved-pr-backlog-2026-05-21` — 32 PRs (28 CONFLICTING + 4 gate-red) from the autonomous-daemon backlog were closed during the 2026-05-21 drain after their semantic conflicts or substantive code-fixes couldn't be auto-resolved in the drain window; each PR's diff is preserved on GitHub (closed PR diffs are retained indefinitely by GitHub — `gh pr diff <N>` works on closed PRs); this umbrella task tracks reintegration of any preserved work that's worth reviving
   - **ID**: reintegrate-preserved-pr-backlog-2026-05-21
@@ -2313,6 +1844,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `metrics-render-finite-number-validation-bug` — `pnpm metrics:render` fails with `metric "loop-uptime" value must be a finite number` against today's snapshot at `.minsky/metric-snapshots/<date>.json`, blocking the daily refresh of `METRICS.md`; this caused the 2026-05-21 `check-metric-freshness` failure that took main red for ~24h and stalled the auto-merge gate (every PR's vet failed `vitest` on `metric-freshness` until the operator manually bumped the stale `_Updated` timestamps)
   - **ID**: metrics-render-finite-number-validation-bug
+  - **Blocked**: needs-operator — Fix already landed on main (validator accepts strings, tests present, gate green); only TASKS.md closure remains.
   - **Tags**: p1, milestone-m1, observability, daemon, bug, observed-2026-05-21, rule-17, blocker
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-21 PR-drain session — discovered when the parallel auto-merge drain showed every PR failing on `gate red: vitest,metric-freshness`. Root cause: the daily metrics-render daemon step (`maybeRunMetricsRender` in `novel/tick-loop/src/daemon.ts`) silently failed to update `METRICS.md` because `scripts/metrics-render.mjs` errors on the snapshot `loop-uptime` field (`metric-snapshot-store.mjs:114 validateMetricEntry → must be a finite number`). The snapshot generator (`scripts/collect-metrics.mjs`) emits values for `loop-uptime` that aren't finite numbers (likely a percent-as-string like `"53.3%"` instead of a numeric `0.533`).
@@ -2330,6 +1862,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `investigate-claude-native-task-standard` — research Claude Code's native task standard/format (the agent-teams shared task list + interactive-mode task list) and produce a decision doc: adopt it natively, bridge to it, or reject — quantifying how much of minsky's bespoke TASKS.md tooling could be deleted (rule #14 in action)
   - **ID**: investigate-claude-native-task-standard
+  - **Blocked**: needs-operator — Deliverable doc already merged on main (PR #757); only TASKS.md block removal remains — orchestrator-owned.
   - **Tags**: p0, operator-directive, research, agent-teams, tasks-md, rule-1, rule-9, rule-14, replace-or-relocate
   - **Milestone**: M2
   - **Touches**: `docs/research/claude-native-task-standard.md`, `TASKS.md`, `vision.md`
@@ -2347,6 +1880,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-refresh-openhands` — refresh the published readings for `openhands` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-04-15, 406 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
   - **ID**: corpus-refresh-openhands
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
   - **Milestone**: M1
   - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at `fresh` (≤90 days). A reading at 406 days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs openhands" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.
@@ -2358,21 +1892,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `node scripts/check-corpus-freshness.mjs --json | jq '[.entries[] | select(.id == "openhands") | .status] | first'` returns `"fresh"` after the refresh; baseline today is `"very-stale"`.
   - **Anchor**: rule #4 (visible — staleness is now a measured signal); rule #6 (stay alive — the scorecard's claims age out silently without this loop); Beyer SRE 2016 (data-freshness as an SLI); operator directive 2026-05-22 (mechanism for keeping competitors + readings updated).
 
-- [ ] `corpus-refresh-swe-agent` — refresh the published readings for `swe-agent` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2024-10-01, 602 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
-  - **ID**: corpus-refresh-swe-agent
-  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
-  - **Milestone**: M1
-  - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at `fresh` (≤90 days). A reading at 602 days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs swe-agent" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.
-  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (the `swe-agent` entry), `competitors/swe-agent.md` (Scorecard readings table), optional `competitors.test.ts` if a value moves significantly.
-  - **Details**: invoke `/competitor-research <url>` with the vendor's primary publication URL for `swe-agent`. The skill walks the 6 phases (identify → research → draft → validate → verify → file follow-ups). The draft validator (`scripts/competitor-research-validate.mjs --refresh --draft <path>`) accepts the existing id with `--refresh`. After the skill lands the PR, this auto-filed task can be removed from TASKS.md (per tasks.md spec — history lives in git log).
-  - **Hypothesis**: refreshing `swe-agent` to a publication ≤90 days old keeps the M1.10 scorecard's deltas signal-bearing rather than vanity. After this task lands, `node scripts/check-corpus-freshness.mjs --json | jq '.entries[] | select(.id == "swe-agent") | .status'` returns `"fresh"`.
-  - **Success**: `competitors.ts`'s `swe-agent` entry has `asOf` within the last 90 days; `competitors/swe-agent.md` Scorecard readings table matches; `pnpm --filter @minsky/competitive-benchmark test` green; `bin/minsky competitive` still exits 0.
-  - **Pivot**: if the vendor has not published a new number in the last 365 days (4+ vendor cycles), mark the entry as "stale-by-vendor" in a comment in `competitors.ts` and do NOT refresh `asOf` — masking the staleness with a re-stated old number is worse than acknowledging it.
-  - **Measurement**: `node scripts/check-corpus-freshness.mjs --json | jq '[.entries[] | select(.id == "swe-agent") | .status] | first'` returns `"fresh"` after the refresh; baseline today is `"very-stale"`.
-  - **Anchor**: rule #4 (visible — staleness is now a measured signal); rule #6 (stay alive — the scorecard's claims age out silently without this loop); Beyer SRE 2016 (data-freshness as an SLI); operator directive 2026-05-22 (mechanism for keeping competitors + readings updated).
-
 - [ ] `corpus-refresh-aider` — refresh the published readings for `aider` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2024-05-22, 734 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
   - **ID**: corpus-refresh-aider
+  - **Blocked**: needs-operator — No Aider primary source <=90 days old; freshest is Nov-2025 leaderboard (194d, very-stale)
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
   - **Milestone**: M1
   - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at `fresh` (≤90 days). A reading at 734 days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs aider" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.
@@ -2382,45 +1904,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Success**: `competitors.ts`'s `aider` entry has `asOf` within the last 90 days; `competitors/aider.md` Scorecard readings table matches; `pnpm --filter @minsky/competitive-benchmark test` green; `bin/minsky competitive` still exits 0.
   - **Pivot**: if the vendor has not published a new number in the last 365 days (4+ vendor cycles), mark the entry as "stale-by-vendor" in a comment in `competitors.ts` and do NOT refresh `asOf` — masking the staleness with a re-stated old number is worse than acknowledging it.
   - **Measurement**: `node scripts/check-corpus-freshness.mjs --json | jq '[.entries[] | select(.id == "aider") | .status] | first'` returns `"fresh"` after the refresh; baseline today is `"very-stale"`.
-  - **Anchor**: rule #4 (visible — staleness is now a measured signal); rule #6 (stay alive — the scorecard's claims age out silently without this loop); Beyer SRE 2016 (data-freshness as an SLI); operator directive 2026-05-22 (mechanism for keeping competitors + readings updated).
-
-- [ ] `corpus-refresh-openai-codex` — refresh the published readings for `openai-codex` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-05-16, 375 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
-  - **ID**: corpus-refresh-openai-codex
-  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
-  - **Milestone**: M1
-  - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at `fresh` (≤90 days). A reading at 375 days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs openai-codex" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.
-  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (the `openai-codex` entry), `competitors/openai-codex.md` (Scorecard readings table), optional `competitors.test.ts` if a value moves significantly.
-  - **Details**: invoke `/competitor-research <url>` with the vendor's primary publication URL for `openai-codex`. The skill walks the 6 phases (identify → research → draft → validate → verify → file follow-ups). The draft validator (`scripts/competitor-research-validate.mjs --refresh --draft <path>`) accepts the existing id with `--refresh`. After the skill lands the PR, this auto-filed task can be removed from TASKS.md (per tasks.md spec — history lives in git log).
-  - **Hypothesis**: refreshing `openai-codex` to a publication ≤90 days old keeps the M1.10 scorecard's deltas signal-bearing rather than vanity. After this task lands, `node scripts/check-corpus-freshness.mjs --json | jq '.entries[] | select(.id == "openai-codex") | .status'` returns `"fresh"`.
-  - **Success**: `competitors.ts`'s `openai-codex` entry has `asOf` within the last 90 days; `competitors/openai-codex.md` Scorecard readings table matches; `pnpm --filter @minsky/competitive-benchmark test` green; `bin/minsky competitive` still exits 0.
-  - **Pivot**: if the vendor has not published a new number in the last 365 days (4+ vendor cycles), mark the entry as "stale-by-vendor" in a comment in `competitors.ts` and do NOT refresh `asOf` — masking the staleness with a re-stated old number is worse than acknowledging it.
-  - **Measurement**: `node scripts/check-corpus-freshness.mjs --json | jq '[.entries[] | select(.id == "openai-codex") | .status] | first'` returns `"fresh"` after the refresh; baseline today is `"very-stale"`.
-  - **Anchor**: rule #4 (visible — staleness is now a measured signal); rule #6 (stay alive — the scorecard's claims age out silently without this loop); Beyer SRE 2016 (data-freshness as an SLI); operator directive 2026-05-22 (mechanism for keeping competitors + readings updated).
-
-- [ ] `corpus-refresh-augment-code` — refresh the published readings for `augment-code` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2025-03-31, 421 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
-  - **ID**: corpus-refresh-augment-code
-  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
-  - **Milestone**: M1
-  - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at `fresh` (≤90 days). A reading at 421 days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs augment-code" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.
-  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (the `augment-code` entry), `competitors/augment-code.md` (Scorecard readings table), optional `competitors.test.ts` if a value moves significantly.
-  - **Details**: invoke `/competitor-research <url>` with the vendor's primary publication URL for `augment-code`. The skill walks the 6 phases (identify → research → draft → validate → verify → file follow-ups). The draft validator (`scripts/competitor-research-validate.mjs --refresh --draft <path>`) accepts the existing id with `--refresh`. After the skill lands the PR, this auto-filed task can be removed from TASKS.md (per tasks.md spec — history lives in git log).
-  - **Hypothesis**: refreshing `augment-code` to a publication ≤90 days old keeps the M1.10 scorecard's deltas signal-bearing rather than vanity. After this task lands, `node scripts/check-corpus-freshness.mjs --json | jq '.entries[] | select(.id == "augment-code") | .status'` returns `"fresh"`.
-  - **Success**: `competitors.ts`'s `augment-code` entry has `asOf` within the last 90 days; `competitors/augment-code.md` Scorecard readings table matches; `pnpm --filter @minsky/competitive-benchmark test` green; `bin/minsky competitive` still exits 0.
-  - **Pivot**: if the vendor has not published a new number in the last 365 days (4+ vendor cycles), mark the entry as "stale-by-vendor" in a comment in `competitors.ts` and do NOT refresh `asOf` — masking the staleness with a re-stated old number is worse than acknowledging it.
-  - **Measurement**: `node scripts/check-corpus-freshness.mjs --json | jq '[.entries[] | select(.id == "augment-code") | .status] | first'` returns `"fresh"` after the refresh; baseline today is `"very-stale"`.
-  - **Anchor**: rule #4 (visible — staleness is now a measured signal); rule #6 (stay alive — the scorecard's claims age out silently without this loop); Beyer SRE 2016 (data-freshness as an SLI); operator directive 2026-05-22 (mechanism for keeping competitors + readings updated).
-
-- [ ] `corpus-refresh-metagpt` — refresh the published readings for `metagpt` in `novel/competitive-benchmark/src/competitors.ts` (asOf 2024-05-07, 749 days stale; auto-filed by `scripts/auto-file-corpus-refresh-tasks.mjs`)
-  - **ID**: corpus-refresh-metagpt
-  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-refresh, auto-filed
-  - **Milestone**: M1
-  - **Competitive-goal**: keeps the M1.10 scorecard's per-competitor cell density at `fresh` (≤90 days). A reading at 749 days is the freshness gate's "very-stale" bucket; without this refresh the operator's "Minsky vs metagpt" delta is comparing against a multi-quarter-old snapshot, which loses signal as the vendor publishes new numbers.
-  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (the `metagpt` entry), `competitors/metagpt.md` (Scorecard readings table), optional `competitors.test.ts` if a value moves significantly.
-  - **Details**: invoke `/competitor-research <url>` with the vendor's primary publication URL for `metagpt`. The skill walks the 6 phases (identify → research → draft → validate → verify → file follow-ups). The draft validator (`scripts/competitor-research-validate.mjs --refresh --draft <path>`) accepts the existing id with `--refresh`. After the skill lands the PR, this auto-filed task can be removed from TASKS.md (per tasks.md spec — history lives in git log).
-  - **Hypothesis**: refreshing `metagpt` to a publication ≤90 days old keeps the M1.10 scorecard's deltas signal-bearing rather than vanity. After this task lands, `node scripts/check-corpus-freshness.mjs --json | jq '.entries[] | select(.id == "metagpt") | .status'` returns `"fresh"`.
-  - **Success**: `competitors.ts`'s `metagpt` entry has `asOf` within the last 90 days; `competitors/metagpt.md` Scorecard readings table matches; `pnpm --filter @minsky/competitive-benchmark test` green; `bin/minsky competitive` still exits 0.
-  - **Pivot**: if the vendor has not published a new number in the last 365 days (4+ vendor cycles), mark the entry as "stale-by-vendor" in a comment in `competitors.ts` and do NOT refresh `asOf` — masking the staleness with a re-stated old number is worse than acknowledging it.
-  - **Measurement**: `node scripts/check-corpus-freshness.mjs --json | jq '[.entries[] | select(.id == "metagpt") | .status] | first'` returns `"fresh"` after the refresh; baseline today is `"very-stale"`.
   - **Anchor**: rule #4 (visible — staleness is now a measured signal); rule #6 (stay alive — the scorecard's claims age out silently without this loop); Beyer SRE 2016 (data-freshness as an SLI); operator directive 2026-05-22 (mechanism for keeping competitors + readings updated).
 
 - [ ] `agentbrew-sync-missing-private-skill-to-openhands` — agentbrew syncs ~200 skills to `~/.openhands/skills/` for OpenHands SDK to load at agent boot, but a private skill is missing — it lives in `~/.claude/plugins/marketplaces/an-internal-plugin-registry/code-secure-plugin/skills/code-secure-skill/` but never gets propagated. The `~/.agents/agents/security-reviewer.md` (and `~/.claude/agents/security-reviewer.md`) reference `skills: [code-secure-skill]`; OpenHands SDK's `register_file_agents` crashes with `ValueError: Skill 'code-secure-skill' not found` whenever Conversation.run() is called. Today this is worked around by a manual stub at `~/.openhands/skills/code-secure-skill/SKILL.md`; agentbrew should sync the canonical file directly
@@ -2439,6 +1922,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `openhands-vs-claude-m110-corpus-live-ab` — close M1.14 by running `bin/minsky competitive --backend openhands` against the M1.10 corpus and publishing the delta vs. `--backend claude`. Today the substrate ships (PR #782) and openhands is the default, but no live A/B run has compared the OpenHands-via-shim path to the legacy Claude Code direct CLI path on the same task corpus
   - **ID**: openhands-vs-claude-m110-corpus-live-ab
+  - **Blocked**: needs-operator — Needs live OpenHands+Claude A/B run; openhands runtime uninstalled, no creds, scorecard runner deleted
   - **Tags**: p2, m1, m1-14, openhands, competitive-benchmark, live-ab, observed-2026-05-24
   - **Milestone**: M1
   - **Competitive-goal**: closes M1.14 — "OpenHands as the canonical agent runtime ... `bin/minsky competitive --backend openhands` produces a comparable scorecard against `--backend claude` on the M1.10 corpus". Today the openhands default is unbenchmarked vs. the legacy default; without numbers the operator can't prove the wrap is at parity or better. After this lands, the scorecard answers the falsifiable question "is the OpenHands-via-Claude-SDK path actually better than the bare Claude-Code-CLI path on real Minsky tasks?"
@@ -2493,6 +1977,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `throughput-at-scale-benchmark` — the "code factory" pillar of the 2026-05-22 vision is unmeasured today; the cross-repo runner walks N hosts at 3 iterations/host but we don't have a benchmark that exercises `--hosts-dir` against ≥5 fixture repos and measures PRs/day, iterations/day, or merge-rate at scale. Add a fixture-host stress benchmark to `bin/minsky competitive` so the throughput claim is falsifiable
   - **ID**: throughput-at-scale-benchmark
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, m1, throughput, code-factory-pillar, competitive-benchmark, scale
   - **Milestone**: M1
   - **Competitive-goal**: closes the operator's "code factory" pillar (2026-05-22 vision directive). Today this pillar scores 🟡 — the mechanism (cross-repo runner) ships but throughput-at-scale is unmeasured; the M1.10 scorecard reports per-competitor SWE-bench numbers but has no minsky-throughput row. After this lands, `bin/minsky competitive --throughput` reports PRs/day on a ≥5-repo fixture-host fleet over a 24h window, which is a falsifiable claim worth publishing.
@@ -2507,6 +1992,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `vision-md-line-width-chunking` — chunk `vision.md` so no line exceeds 1000 chars; current state has 89 lines >1000 chars (max 14107) which crushes any context window that loads the file whole
   - **ID**: vision-md-line-width-chunking
+  - **Blocked**: needs-operator — Long lines are pattern-index table rows; can't break cells without violating no-semantic-change criterion.
   - **Tags**: p2, scout, docs, vision-md, line-width, context-window, rule-15
   - **Hypothesis**: replacing the 89 ultra-wide single-paragraph constitutional clauses with paragraph-broken equivalents reduces total file size and lets agents load `vision.md` into a smaller context-window budget while preserving 100% of the content. Falsifiable: a diff that adds only paragraph breaks (no semantic edits) should round-trip through a markdown parser with identical AST nodes except for paragraph splits.
   - **Success**: `awk '{ if(length > 1000) c++ } END { print c+0 }' vision.md` returns `0`; total byte size drops to ≤ 500 KB (currently 1.2 MB); a markdown parse comparison confirms semantic equivalence.
@@ -2532,21 +2018,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c "^### Revisit" docs/research/claude-native-task-standard.md` rises by exactly 1 per revisit invocation; the appended section contains the recosted Option A / Option B LOC deltas vs the prior baseline; if recommendation = adopt/bridge, `grep "native-agent-teams-with-tiered-adapter\|adopt-claude-native-task-standard" TASKS.md` returns at least one P1 implementation task.
   - **Anchor**: `docs/research/claude-native-task-standard.md` § 6.2 (this task's filing record); vision.md rule #14 (delegate / adopt-native / shrink — the bar this watch task re-runs); vision.md rule #6 (let-it-crash — the rule that disqualifies the experimental dependency today); GitHub issue #33764 (the trigger condition for unblock); operator directive 2026-05-17 ("claude has a standard for tasks — investigate it" — the original directive this watch loop continues).
 
-- [ ] `monitor-openhands-agent-canvas-launch` — track OpenHands' Agent Canvas Initiative launch (June 1, 2026) and reassess Minsky's bring-your-own-agent positioning
-  - **ID**: monitor-openhands-agent-canvas-launch
-  - **Tags**: p2, competitive, market-watch, orchestrator-tier, observed-2026-05-22
-  - **Milestone**: M1
-  - **Competitive-goal**: OpenHands' Agent Canvas Initiative (announced 2026-05-11, GitHub issue #14374) launches 2026-06-01 with three changes that structurally overlap Minsky's positioning: (a) Dockerless installation — removes the "Docker required" weakness in `competitors/openhands.md`; (b) bring-your-own-agent (Claude Code, Codex, OpenHands SDK) — structurally identical to Minsky's per-machine `~/.minsky/config.json` agent selection; (c) self-hosting on VMs as first-class — narrows the operator-machine-identity moat. If Agent Canvas ships clean, OpenHands becomes a stronger orchestrator-tier competitor and the README's "How Minsky compares" table needs a refresh.
-  - **Touches**: `competitors/openhands.md` (refresh § "What it is" + § "Strengths" + § "Weaknesses" with post-launch architecture), `README.md` § "How Minsky compares" (update the row "Where it runs" + "Credentials" if Agent Canvas's BYO-agent model changes the identity boundary), `competitors/README.md` (refresh moat #2 + moat #5 wording if needed).
-  - **Details**: 2026-05-22 OpenHands deep-dive surfaced the Agent Canvas Initiative. Trigger: 2026-06-01 (launch date). Do: (a) read the announcement post on openhands.dev/blog when it lands; (b) install the Agent Canvas alpha (github.com/OpenHands/agent-canvas) and run it on a test repo; (c) compare its credential / identity / sandbox model to Minsky's; (d) refresh `competitors/openhands.md` + the README comparison table; (e) if Agent Canvas materially overlaps Minsky's moats, file a follow-up task to sharpen Minsky's differentiation (e.g., emphasize the daemon-survives-terminal-close vs Canvas's request-response shape; emphasize constitution + MAPE-K vs Canvas's LLM-advisory).
-  - **Hypothesis**: Agent Canvas's BYO-agent + Dockerless + self-host-on-VM changes are structurally similar to Minsky's per-machine agent config + no-Docker-needed + daemon-on-operator-machine. If Canvas adopts ALL THREE cleanly, the operator-machine-identity moat narrows from "unique" to "shared with the OpenHands fork". Minsky's remaining distinctive moats become: constitution + deterministic CI, MAPE-K self-improvement, cross-repo fleet, TASKS.md surface — still a 4-moat differentiation, but the headline "daemon-not-framework" framing weakens because Canvas is daemon-like in its self-hosted-on-VM mode.
-  - **Success**: Within 14 days of 2026-06-01, `competitors/openhands.md` + `README.md` § "How Minsky compares" are refreshed with the post-launch architecture. The moats table in `competitors/README.md` reflects which moats survived intact, which narrowed, which were absorbed (per the vision.md delegate-contribute-absorb framework).
-  - **Pivot**: If Agent Canvas absorbs 3+ Minsky moats cleanly (daemon, BYO-agent, operator-identity all match), and OpenHands has 70K+ stars + $18.8M funding + better SWE-bench, the moat differentiation falls below the 3-moat threshold required to claim "distinctive". At that point, Minsky should either pivot toward what Canvas CAN'T do (most likely: constitution + MAPE-K self-improvement + cross-repo fleet), or contribute its TASKS.md surface back to Canvas as a plugin / community pattern.
-  - **Measurement**: `git log --since="2026-06-01" --until="2026-06-14" -- competitors/openhands.md | grep -c "^commit"` — exit non-zero if zero commits land in the 14-day window post-launch.
-  - **Anchor**: rule #1 (don't reinvent — Canvas may absorb Minsky's shape; we need to know fast); vision.md § "Delegate → contribute → absorb" framework; competitors/openhands.md § Roadmap; All-Hands AI, *OpenHands Index Three Months Out*, openhands.dev/blog/openhands-index-3-months-out, 2026-05-11 (Agent Canvas Initiative announcement); GitHub OpenHands/OpenHands issue #14374, 2026-05-11.
-
 - [ ] `benchmark-minsky-via-claude-on-humaneval` — run HumanEval Pass@1 on Minsky-via-Claude and publish the score as the agent-tier comparison baseline for the M1.10 corpus
   - **ID**: benchmark-minsky-via-claude-on-humaneval
+  - **Blocked**: needs-operator — Needs live Claude API + human-eval execution to measure real pass@1; fabrication banned by rule #4/#9
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, gap-closing, orchestrator-tier, observed-2026-05-23
   - **Milestone**: M1
   - **Competitive-goal**: closes the "no headline benchmark number" gap surfaced by competitors/README.md § Honest gaps. MetaGPT publishes HumanEval Pass@1 = 0.859 (ICLR 2024); Minsky has no equivalent number. Adding one lets the M1.10 scorecard compare Minsky-via-Claude's HumanEval score to MetaGPT, and quantifies whether the orchestrator-tier delta (24/7 daemon + MAPE-K + constitution) helps OR hurts versus a fixed-pipeline orchestrator.
@@ -2560,6 +2034,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `gaia-benchmark-evaluation-substrate` — add `bin/minsky benchmark gaia` to compare to AutoGen's claimed GAIA SOTA + close the orchestrator-tier GAIA gap
   - **ID**: gaia-benchmark-evaluation-substrate
+  - **Blocked**: needs-operator — Needs gated GAIA dataset + HF token + live Claude API; real score unmeasurable, faking violates rules #4/#9
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, gap-closing, orchestrator-tier, observed-2026-05-23
   - **Milestone**: M1
   - **Competitive-goal**: AutoGen claims GAIA SOTA as of March 2024 (Microsoft TRANSPARENCY_FAQS.md). The 2025 HAL leaderboard shows Claude Sonnet 4.5 at 74.55%; Claude Opus 4.7 High at 70.91%. Minsky-via-Claude on GAIA would close the orchestrator-tier GAIA gap. Adding a `gaia-benchmark-score` metric to the catalogue unlocks comparison.
@@ -2600,6 +2075,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-add-autogen-microsoft` — add Microsoft AutoGen to the orchestrator-tier corpus once a primary-cited HumanEval, MBPP, or GAIA number is available
   - **ID**: corpus-add-autogen-microsoft
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, observed-2026-05-23
   - **Milestone**: M1
   - **Competitive-goal**: covers Microsoft's enterprise multi-agent orchestration framework (AutoGen, github.com/microsoft/autogen, very large adoption per Microsoft Research). The Wu et al. 2023 paper (arXiv 2308.08155) reports MATH 69.48% and ALFWorld 77% as primary numbers, but the M1.10 catalogue's orchestrator-tier metric is `humaneval-pass-at-1`. Microsoft's TRANSPARENCY_FAQS.md claims "SOTA results on GAIA as of March 1, 2024" without an exact percentage; the Magentic-One follow-up paper has specific GAIA numbers but is a SEPARATE system built on top of AutoGen.
@@ -2613,6 +2089,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-add-crewai` — add CrewAI to the orchestrator-tier corpus once CrewAI publishes a vendor-primary HumanEval / MBPP / SWE-bench number
   - **ID**: corpus-add-crewai
+  - **Blocked**: needs-operator — blocked-on-vendor: CrewAI has no primary-cited catalogue metric; rule #4 forbids proxy/third-party numbers
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, blocked-on-vendor, observed-2026-05-23
   - **Milestone**: M1
   - **Competitive-goal**: covers the largest open-source multi-agent orchestration framework by adoption (40k+ GitHub stars; CrewAI claims 1.4B+ agentic executions, 60% of Fortune 500 per crewai.com/blog OSS v1.0 launch). Currently the corpus's orchestrator tier has only MetaGPT — adding CrewAI broadens the orchestrator axis.
@@ -2626,6 +2103,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-add-langgraph` — add LangGraph (LangChain) to the orchestrator-tier corpus once LangChain publishes a vendor-primary orchestrator-tier metric
   - **ID**: corpus-add-langgraph
+  - **Blocked**: needs-operator — No LangChain-primary LangGraph benchmark exists; adding third-party number violates corpus invariant.
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, blocked-on-vendor, observed-2026-05-23
   - **Milestone**: M1
   - **Competitive-goal**: covers LangChain's graph-based orchestration framework — the most cited closed-loop alternative to CrewAI per third-party comparisons (62% complex-task success vs CrewAI's 54%, AImultiple 2026; 100% tool-execution success rate per AImultiple's agentic-analytics study). Substantial adoption in production agent stacks.
@@ -2639,6 +2117,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-add-openai-agents-sdk` — add OpenAI Agents SDK (Swarm's production successor) to the orchestrator-tier corpus once OpenAI publishes a vendor-primary orchestrator-tier metric
   - **ID**: corpus-add-openai-agents-sdk
+  - **Blocked**: needs-operator — Blocked on vendor: OpenAI has published no primary Agents SDK benchmark; rule #4 forbids fabricated/third-party numbers.
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, orchestrator-tier, blocked-on-vendor, observed-2026-05-23
   - **Milestone**: M1
   - **Competitive-goal**: covers OpenAI's production multi-agent orchestration framework (openai-agents-python, openai-agents-typescript). Released March 2026 as the successor to Swarm; v0.17.1 in May 2026; 26k+ GitHub stars, 4k forks. Strong distribution signal even without a published benchmark.
@@ -2650,34 +2129,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: same as Success.
   - **Anchor**: rule #4 (visible — published primary citations only); rule #6 (stay alive); operator directive 2026-05-23; Respan, "OpenAI Agents SDK vs Swarm: Migration Guide (2026)", respan.ai/articles/openai-agents-sdk-vs-swarm, 2026 (third-party migration documentation); OpenAI Swarm GitHub README (the deprecation notice that points at the Agents SDK).
 
-- [ ] `biome-1-to-2-upgrade` — upgrade biome 1.9.4 → 2.x to unlock type-aware nursery rules (`noFloatingPromises`, `noMisusedPromises`, `useAwaitThenable`, `noUnnecessaryConditions`, `useExhaustiveSwitchCases`) and per-domain rule packs
-  - **ID**: biome-1-to-2-upgrade
-  - **Tags**: p2, lint, lint-hardening, biome, observed-2026-05-23
-  - **Milestone**: M1
-  - **Competitive-goal**: keeps Minsky's lint stack at parity with the 2026 industry-standard TypeScript stack (pocketarc.com/typescript, "Hardcore TypeScript + Biome + ESLint" 2026 — the type-aware nursery rules are the highest-ROI bug catchers shipped in biome 2.x; without them Minsky relies on tsc + biome 1.9.4's recommended set, which doesn't catch unhandled promises or async-without-await type-aware violations).
-  - **Touches**: `biome.json` (migrate to biome 2.x config format — top-level `$schema` URL update, `linter.domains` block for `types: "all"` / `project: "all"`, possible reorganization of rule overrides), `package.json` (bump `@biomejs/biome` to `^2.x`), all `// biome-ignore lint/...` comments may need to be re-verified.
-  - **Details**: biome 2.x is breaking vs 1.x — the config schema changed enough that the existing `biome.json` won't validate against the 2.x schema. The migration path: (a) `pnpm dlx @biomejs/biome migrate --write` to auto-migrate biome.json; (b) explicitly opt into the nursery `types` and `project` domains (`linter.domains: { types: "all", project: "all" }`) to enable type-aware rules; (c) re-run `pnpm exec biome ci .` and triage the new findings — expect 50-200 new violations on `noFloatingPromises` alone; (d) lower-severity-prone rules (e.g., `useExhaustiveSwitchCases`) start at WARN per the rule-#10 ratchet. Pivot threshold: if the post-migration violation count exceeds 1000, defer to a multi-PR drain.
-  - **Hypothesis**: biome 2.x catches ≥5 floating-promise bugs the 1.9.4 substrate misses today. Real-world data: every `// TODO: unhandled async` comment in the codebase OR every existing `useAwait`-warned function (currently 155) is a candidate for type-aware promise tracking.
-  - **Success**: `pnpm exec biome --version` returns `Version: 2.x.y`; `pnpm exec biome ci .` exits 0 (with all new rules either passing or explicitly at WARN per the ratchet); the upgrade ships in one PR with a 1-day-old vitest run as the rollback signal.
-  - **Pivot**: if the migration produces >1000 new errors that can't be auto-fixed, split into multiple PRs (one per rule family). If the type-aware rules slow `pnpm pre-pr-lint --stage=fast` past the 2-minute target, move the type-aware subset to `--stage=full` only (CI runs it, daemon doesn't).
-  - **Measurement**: `pnpm exec biome --version | grep -E "^Version: 2"` exits 0 AND `pnpm exec biome ci .` exits 0 with ≥1 enabled rule from the nursery `types` domain visible in `biome.json` after migration.
-  - **Anchor**: rule #1 (don't reinvent — biome is the established lint engine; we move forward with its versions, not fork or stay stuck); rule #10 (deterministic enforcement — the 2.x type-aware rules expand the lint surface, exactly what rule #10 wants); operator directive 2026-05-23 ("install all those recommendations to minsky"); Code With Seb, "Advanced Linting & Type Safety: The Strictest ESLint + TypeScript + Prettier Setup in 2026", codewithseb.com, 2026 (the 2026 stack baseline); PocketArC, "Hardcore TypeScript + Biome + ESLint: Maximum-strictness static analysis", pocketarc.com/typescript, 2026 (biome 2.x type-aware nursery rule recommendation list).
-
-- [ ] `lint-warnings-drain-to-zero` — drain the 199 biome warnings (155 `useAwait` + 38 `noEmptyBlockStatements` + 6 misc) introduced by the lint-hardening PR to zero (or to a documented-exemption set of ≤5)
-  - **ID**: lint-warnings-drain-to-zero
-  - **Tags**: p2, lint, lint-hardening, biome, warnings-drain, observed-2026-05-23
-  - **Milestone**: M1
-  - **Competitive-goal**: rule #10's ratchet — every new rule should converge to zero violations within 60 days of its introduction, otherwise it's training the operator (and the agent) to ignore lint output. The 199 warnings currently land at WARN; this task is the explicit drain trajectory.
-  - **Touches**: ~50-100 files across `novel/**/*.test.ts`, `novel/**/*.ts`, `scripts/**/*.mjs` — wherever the 155 `useAwait` and 38 `noEmptyBlockStatements` violations live. No biome.json change in this task (that's `biome-1-to-2-upgrade`'s job).
-  - **Details**: the 2026-05-23 lint-hardening PR (this set of changes) added 13 new biome rules. Most code is clean; 199 warnings remain spread across the corpus. The drain strategy: (a) `useAwait` violations are usually `async` annotations on functions that don't actually need them (mocks, test fixtures, simple thunks) — most can be fixed by removing `async` OR by adding `await new Promise(r => setImmediate(r))` for the small subset that legitimately need to be async without an awaitable call site (yields the event loop). (b) `noEmptyBlockStatements` violations are mostly intentional no-op stream impls (`new Readable({ read() {} })`) and abstract method placeholders — these should get a `// biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op for Readable contract` comment. (c) Track the drain in this task's body: target is 199 → 0 (or ≤5 with documented exemptions per rule-#10 ratchet) within 60 days.
-  - **Hypothesis**: the 199-warning corpus drains to ≤5 in 60 days (by 2026-07-22) under the existing tick-loop. If it doesn't, the rules were too noisy and at least some should be removed from `biome.json` (the alternative pivot).
-  - **Success**: `pnpm exec biome ci . 2>&1 | grep -oE "Found [0-9]+ warnings\." | head -1` reports ≤5 warnings.
-  - **Pivot**: if 60 days pass with the warning count >50, demote the noisiest rule family (`useAwait` if it's still dominating) to advisory-only by removing it from `biome.json`. A permanent-warn rule is worse than no rule — it trains the operator to ignore the lint output, which is rule #4's exact failure mode.
-  - **Measurement**: `pnpm exec biome ci . 2>&1 | grep -E "^Found .* warnings\." | grep -oE "[0-9]+" | head -1` ≤ `5` after 60 days.
-  - **Anchor**: rule #4 (visible — warning count is a tracked metric, not a noisy fixed cost); rule #10 (deterministic enforcement — every rule is a load-bearing gate, not advisory permanent warnings); operator directive 2026-05-23; vision.md row 96 (the substrate this task drains).
-
 - [ ] `corpus-add-github-copilot-coding-agent` — add GitHub Copilot Coding Agent (Microsoft) to the M1.10 corpus with a Microsoft-primary or AIDev-paper citation
   - **ID**: corpus-add-github-copilot-coding-agent
+  - **Blocked**: needs-operator — PR #1062 closed as duplicate of #1058 (already in corpus); reconcile AIDev-paper reading 0.68 if preferred
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, observed-2026-05-22
   - **Milestone**: M1
   - **Competitive-goal**: thickens the M1.10 scorecard's per-competitor cell density with one of the largest deployed autonomous-coding agents by user count (4.7M paid subscribers per skillpack.co secondary); without it the scorecard's competitor set systematically undersamples the GitHub-default enterprise path.
@@ -2691,6 +2145,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-add-goose-block` — add Goose (Block) to the M1.10 corpus once Block publishes an official SWE-bench Verified resolve rate
   - **ID**: corpus-add-goose-block
+  - **Blocked**: needs-operator — Block published no primary SWE-bench number; task forbids third-party figure
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, blocked-on-vendor, observed-2026-05-22
   - **Milestone**: M1
   - **Competitive-goal**: covers the open-source / local-first autonomous-coding agent space (37,400+ GitHub stars per aiforautomation.io, the AAIF-governed alternative to Claude Code) which Minsky currently leaves uncovered in the corpus.
@@ -2704,6 +2159,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `corpus-add-factory-droid` — add Factory Code Droid to the M1.10 corpus once Factory publishes a SWE-bench Verified number (currently only Full + Lite are published)
   - **ID**: corpus-add-factory-droid
+  - **Blocked**: needs-operator — Factory publishes no primary-source SWE-bench Verified number; task's Pivot forbids Lite/third-party proxy.
   - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-add, blocked-on-vendor, observed-2026-05-22
   - **Milestone**: M1
   - **Competitive-goal**: covers the enterprise CI/CD-integrated autonomous-coding agent space (Factory.ai's Code Droid product); thickens the closed-commercial competitor set without padding via synthetic metrics.
@@ -2715,34 +2171,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: same as Success.
   - **Anchor**: rule #4 (visible — no proxying Verified rates from non-Verified runs without an explicit aider-style precedent caveat); operator directive 2026-05-22; Factory AI, "Code Droid: A Technical Report", factory.ai/news/code-droid-technical-report, 2024-06 (current published readings; awaiting Verified-split update).
 
-- [ ] `corpus-discover-quarterly` — quarterly: scan the autonomous-coding-agent landscape for NEW competitors that should be added to the M1.10 scorecard corpus, and surface them as `/competitor-research <url>` candidates
-  - **ID**: corpus-discover-quarterly
-  - **Tags**: p2, milestone-m1, m1-10, metrics, competitive, corpus-discovery, recurring
-  - **Milestone**: M1
-  - **Competitive-goal**: keeps the M1.10 corpus COMPETITOR LIST current (the freshness loop handles the per-vendor readings; this task handles whether the right set of vendors is in the corpus at all). A list frozen at 6 vendors loses signal as new autonomous-coding agents launch (e.g., GitHub Copilot coding agent, OpenAI Codex, MetaGPT v2, etc.).
-  - **Touches**: `novel/competitive-benchmark/src/competitors.ts` (additions only), `competitors/<new-id>.md` (one per added vendor), and the `/competitor-research` skill (no edits — just invoked).
-  - **Details**: every quarter the operator (or the tick-loop's `/next-task` picks this up after the 90-day mark) runs a discovery sweep: (a) `gh search repos "autonomous coding agent" --sort=updated --limit=20` and the equivalent for `WebSearch` against news + Hacker News; (b) filter out anything already in `COMPETITORS` (via `bin/minsky competitive --json | jq '.competitors[].id'`); (c) filter against `EXCLUDED_VENDOR_SUBSTRINGS` (no Groq/xAI/Elon-affiliated); (d) for each surviving candidate, invoke `/competitor-research <vendor-url>` to add it. Acceptance: ≥1 new competitor evaluated per quarter (added OR explicitly rejected with a note in the research file).
-  - **Hypothesis**: today the corpus is 6 vendors. After 4 quarters of running this task, the corpus is ≥9 vendors (≥1 addition per quarter on average; rejections don't grow the corpus but DO produce a research file documenting the why).
-  - **Success**: `bin/minsky competitive --json | jq '.competitors | length'` increases by ≥1 each quarter, OR a new `competitors/<id>.md` research file documents an explicit rejection (with vendor name + why-not).
-  - **Pivot**: if the autonomous-coding landscape consolidates such that 2 consecutive quarters yield 0 net-new credible vendors, switch this task from quarterly to semi-annual cadence. Don't pad the corpus with marginal players just to hit the quarterly addition target — vanity adds dilute the comparison signal (rule #9 — vanity metrics forbidden).
-  - **Measurement**: `bin/minsky competitive --json | jq '.competitors | length'` ≥ `7` after Q3 2026, ≥ `8` after Q4 2026, ≥ `9` after Q1 2027 (assumes ≥1 addition per quarter starting Q3 2026 when this task ships).
-  - **Anchor**: rule #4 (visible — the corpus's coverage IS a measurable scoreboard metric); rule #6 (stay alive — without periodic discovery, the corpus snapshots the autonomous-coding market at a single point and stops being useful as the market evolves); operator directive 2026-05-22 ("add a mechanism so that minsky keeps competitors list updated and competitors there too" — this task is the LIST half; the `corpus-refresh-*` auto-filed tasks are the READINGS half); Doerr 2018 *Measure What Matters* (OKR — set the cadence target explicitly so progress is measurable, not aspirational).
-
-- [ ] `tui-src-vs-test-api-drift-pivot-tracker` — track the orphan-tests detector's false-positive rate over the next 5 PRs; if >2 false positives accumulate, switch from regex-based detection to a tsc-based detector (per-package `tsconfig.test.json` + `tsc --noEmit` over `test/`).
-  - **ID**: tui-src-vs-test-api-drift-pivot-tracker
-  - **Tags**: p2, lint, rule-10, pivot-tracker, observed-2026-05-21
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-21 PM PR-drain — PR #713 shipped `scripts/check-orphan-tests.mjs`, a regex-based lint that catches the test/ vs src/ API drift class (the PR #639 → #705 regression). The lint declares a pivot threshold in its top-of-file comment: ">2 false positives over a 5-PR window → switch to tsc-based". This task is the tracker so the threshold is actually monitored.
-  - **Hypothesis**: regex-based ESM import/export parsing is sufficient for the orphan-test class; the source-of-drift surface is small (named runtime imports from a parallel directory) and TypeScript's edge cases (default imports, namespace imports, dynamic imports) are out of scope for this lint.
-  - **Success**: 5 consecutive PRs land with the `orphan-tests` CI job either green or red-for-a-real-orphan, no false positives.
-  - **Pivot**: if any single PR triggers a false positive, file an immediate diagnostic task. If 3 false positives across <5 PRs, abandon the regex approach and ship the tsc-based detector (separate `tsconfig.test.json` per `novel/*` package that has a `test/` dir, run `tsc --noEmit` over the test files in `check-orphan-tests.mjs`).
-  - **Measurement**: `gh run list --workflow=ci --json conclusion,databaseId --jq '[.[] | select(.conclusion == "FAILURE")] | length'` over the next 5 PRs touching `novel/**/test/`. Cross-reference any failure against the actual orphan-symbol report to classify true-vs-false positive.
-  - **Anchor**: rule #9 (pre-registered pivot threshold — the lint declared its own pivot in its top-of-file Pivot comment); rule #10 (deterministic enforcement — every rule is mechanically checked); novel/tui scaffolding from PR #639 is the source of the original regression.
-  - **Files**: `scripts/check-orphan-tests.mjs` (the lint to pivot from), `scripts/check-orphan-tests.test.mjs` (new test cases for the tsc-based detector), `novel/*/tsconfig.test.json` (new per-package configs if pivot fires), `.github/workflows/ci.yml` (rewire the orphan-tests job).
-  - **Touches**: scripts/check-orphan-tests.mjs, scripts/check-orphan-tests.test.mjs, novel/*/tsconfig.test.json, .github/workflows/ci.yml
-
 - [ ] `pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence` — `pnpm pre-pr-lint` runs `biome ci --changed --since=origin/main` (diff-scoped), but the CI `biome` workflow job runs `biome ci .` (whole-tree). Formatting drift in unchanged files survives the local gate and explodes in CI 5 minutes later.
   - **ID**: pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, lint, biome, pre-pr-lint, ci-divergence, observed-2026-05-21
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-21 PM CI-stabilization sweep — PR #704 had to ship three pre-existing biome violations (in `scripts/heal-mttr-report.mjs`, `.releaserc.json`, `novel/tui/src/index.ts`) that the local diff-scoped gate didn't see because the files weren't in the PR's diff. Each CI failure required a separate fix PR (#705, #706, #707).
@@ -2754,62 +2185,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Files**: `scripts/run-pre-pr-lint-stack.mjs` (the biome step args), `lefthook.yml` (pre-push hook reuse), `.github/workflows/ci.yml` (the biome job that exposes the whole-tree gap).
   - **Touches**: scripts/run-pre-pr-lint-stack.mjs, lefthook.yml, .github/workflows/ci.yml
 
-- [ ] `lefthook-bot-commit-bypass-discipline` — the experiment workflow's bot-commit step ran the local `check-toolchain` hook inside a linux/x64 CI runner; the hook expected darwin-arm64 optional deps. PR #710 worked around by setting `git config core.hooksPath /dev/null` in the bot's commit step; the right answer is a documented bypass discipline so future bot commits don't recurringly trip this class.
-  - **ID**: lefthook-bot-commit-bypass-discipline
-  - **Tags**: p2, ci, lefthook, bot-commit, observed-2026-05-21
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-21 PM CI-stabilization — the experiment workflow's `experiment-store` bot commit ran on a fresh linux/x64 runner and tripped lefthook's pre-commit `check-toolchain` hook (which expected the macOS darwin-arm64 optionalDependency). PR #710 fixed by adding `git config core.hooksPath /dev/null` to the bot's commit step, but the fix is local to one workflow.
-  - **Hypothesis**: every workflow that bots-commit-back-to-repo (currently: experiment-tracker, fresh-clone, lighthouse) needs the same hook-bypass; a documented pattern + a CI lint that catches workflows missing the bypass would prevent recurrence.
-  - **Success**: a deterministic check (new `scripts/check-bot-commit-hook-bypass.mjs`) scans every `.github/workflows/*.yml` for steps that `git commit` AND don't have either `core.hooksPath=/dev/null` set OR `--no-verify` on the commit; the lint fails the CI if any workflow is missing the bypass.
-  - **Pivot**: if the bypass discipline is itself error-prone (operator forgets it), move the bot-commit class to a single shared composite action in `.github/actions/bot-commit/action.yml` that always sets `core.hooksPath=/dev/null` + always runs from a darwin-arm64-clean env.
-  - **Measurement**: `grep -rE "git commit" .github/workflows/ | grep -v "core.hooksPath=/dev/null\|--no-verify"` should produce 0 lines.
-  - **Anchor**: rule #10 (deterministic enforcement); rule #11 (no flaky gates); 2026-05-21 PR #710.
-  - **Files**: `scripts/check-bot-commit-hook-bypass.mjs` (new lint), `scripts/check-bot-commit-hook-bypass.test.mjs` (new), `.github/workflows/*.yml` (audit + add the bypass where missing).
-  - **Touches**: scripts/check-bot-commit-hook-bypass.mjs, scripts/check-bot-commit-hook-bypass.test.mjs, .github/workflows/*.yml
-
-- [ ] `glossary-allowlist-update-discipline` — adding a new skill primer in `.claude/skills/<name>/SKILL.md` requires a matching entry in `scripts/glossary-allowlist.txt` in the same PR (rule #5). The rule isn't enforced — a forgotten allowlist entry isn't caught until a later PR cites the skill in `vision.md`.
-  - **ID**: glossary-allowlist-update-discipline
-  - **Tags**: p2, lint, rule-5, glossary, observed-2026-05-21
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-21 — PR #696 added `.claude/skills/pr-merge-no-shortcuts/SKILL.md` and cited it in `vision.md` § 18. The `pr-merge-no-shortcuts` token wasn't added to the allowlist. A subsequent merge dropped the entry; #704 had to re-add it. The cycle of "skill primer ships → allowlist entry forgotten → later PR's rule-5 check fails → re-add" happens every time.
-  - **Hypothesis**: a deterministic check that asserts every `.claude/skills/<name>/SKILL.md` (or `.devin/skills/<name>/SKILL.md`) directory name appears in `scripts/glossary-allowlist.txt` would prevent the recurrence. The check runs in fast-stage in 50ms.
-  - **Success**: a lint `scripts/check-skill-allowlist-coverage.mjs` exists; it's red until every skill directory under `.claude/skills/` (or `.devin/skills/`) has its name on the allowlist. After the fix, 0 skill primers can be added without the allowlist entry.
-  - **Pivot**: if maintaining the allowlist by hand becomes its own toil, move skill names to a derived list — `node scripts/derive-skill-list.mjs` generates the allowlist subset, committed via lefthook post-commit.
-  - **Measurement**: `find .claude/skills .devin/skills -maxdepth 2 -name SKILL.md -exec dirname {} \; | xargs -n1 basename | sort -u > /tmp/actual; grep -oP '^[a-z][a-z0-9-]+$' scripts/glossary-allowlist.txt | sort -u > /tmp/allowed; diff /tmp/actual /tmp/allowed` — should produce 0 lines (every skill directory has its name on the allowlist).
-  - **Anchor**: rule #5 (theoretical grounding — every term has a CS anchor; skill names are terms); rule #10 (deterministic enforcement); 2026-05-21 PR #696/#704 cycle.
-  - **Files**: `scripts/check-skill-allowlist-coverage.mjs` (new), `scripts/check-skill-allowlist-coverage.test.mjs` (new), `scripts/glossary-allowlist.txt` (the allowlist that the lint checks), `scripts/run-pre-pr-lint-stack.mjs` (wire-in).
-  - **Touches**: scripts/check-skill-allowlist-coverage*,scripts/glossary-allowlist.txt,scripts/run-pre-pr-lint-stack.mjs
-
-- [ ] `release-pat-vs-github-releases-decision` — `@semantic-release/git` was removed from `.releaserc.json` plugins (PR #703) because branch protection blocks the bot's auto-commit to main. The current path uses GitHub Releases only (CHANGELOG.md becomes a frozen artifact). Operator needs to confirm this is the durable choice OR provision a PAT with `admin:write_repo` so the git-commit-back plugin can be re-enabled.
-  - **ID**: release-pat-vs-github-releases-decision
-  - **Tags**: p2, release, operator-decision, observed-2026-05-21
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-21 PM CI-stabilization — PR #703 removed `@semantic-release/git` from the release plugins because the built-in `GITHUB_TOKEN` couldn't bypass branch protection. The release workflow now ships GitHub Releases only; CHANGELOG.md hasn't been updated since.
-  - **Hypothesis**: the operator's actual preference (`"set up github releases for this"`) is the durable path — CHANGELOG.md is a developer-facing artifact and GitHub Releases is the user-facing one. Confirming this lets us delete the unused changelog plugin too. The alternative (PAT) adds credential surface for marginal benefit.
-  - **Success**: operator confirms the path; if "stay GitHub-Releases", delete the unused `@semantic-release/changelog` plugin from `.releaserc.json` and update the docs that mention CHANGELOG.md. If "use PAT", provision the secret + re-add the git plugin + update the workflow.
-  - **Pivot**: not applicable — this is an operator decision, not a hypothesis.
-  - **Measurement**: `cat .releaserc.json | jq '.plugins | length'` matches the decided plugin count; `gh release list --limit 5` shows recent releases; `grep -rl CHANGELOG.md docs/ README.md` returns 0 lines after the docs cleanup.
-  - **Anchor**: rule #2 (deps through interfaces — semantic-release plugin choice is a versioning-policy adapter); 2026-05-21 PR #703; operator directive "set up github releases for this".
-  - **Files**: `.releaserc.json` (the plugin list), `README.md` (any CHANGELOG.md references), `docs/release.md` (if it exists), `.github/workflows/release.yml` (the workflow if PAT path chosen).
-  - **Touches**: .releaserc.json,README.md,docs/release.md,.github/workflows/release.yml
-
-- [ ] `squash-merge-file-list-verifier` — observed 2026-05-21: PR #704's source commit had `.releaserc.json` in its `--stat`, but the squash-merge commit on main did NOT include it. The file appeared identical to base after some intermediate state. Need a lint that catches when a squash-merge drops files from the PR's diff.
-  - **ID**: squash-merge-file-list-verifier
-  - **Tags**: p2, gh, merge-verification, observed-2026-05-21
-  - **Milestone**: M1
-  - **Surfaced-by**: 2026-05-21 PM PR-drain — PR #704 was supposed to land a fix to `.releaserc.json`'s biome-formatted shape. The PR's commit DID include the change, but the squash-merge commit on main didn't. Result: PR #706 had to re-ship the same `.releaserc.json` fix. The squash-merge dropped the file silently because GitHub's squash-merge re-merges parallel main churn into the squashed body.
-  - **Hypothesis**: after every squash-merge, a verifier can compare the PR's source-commit file list (from `gh pr view <N> --json files`) against the resulting squash-merge commit's `git show <sha> --name-only`. Any file in the PR's diff that's NOT in the squash-commit is a drop. The verifier can post a comment on the PR (or open a follow-up PR) flagging the drop.
-  - **Success**: the verifier runs on every push to main, checks the last 5 squash-merges, and posts a PR comment if any file was dropped. After landing, 0 silent file drops across 20 consecutive squash-merges.
-  - **Pivot**: if GitHub's squash-merge behavior is the root cause and not fixable client-side, move to merge-commits-only with `--ff-only` rebase requirement, accepting the linear-history loss.
-  - **Measurement**: `gh pr view <N> --json files --jq '.files[].path' | sort > /tmp/pr-files; git show <merge-sha> --name-only --format= | sort > /tmp/squash-files; diff /tmp/pr-files /tmp/squash-files` — files in PR but not in squash = drop.
-  - **Anchor**: rule #17 (proactive healing — observation IS the fix); rule #10 (deterministic enforcement — every dropped file is mechanically detectable); 2026-05-21 PR #704 → #706 ghost-fix-class.
-  - **Files**: `scripts/verify-squash-merge-completeness.mjs` (new), `scripts/verify-squash-merge-completeness.test.mjs` (new), `.github/workflows/squash-merge-verifier.yml` (new workflow that runs on every push to main), `vision.md` § 18 (cross-link: this is the deterministic gate that prevents the "merge dropped my file" subclass of rule-18).
-  - **Touches**: scripts/verify-squash-merge-completeness*,.github/workflows/squash-merge-verifier.yml,vision.md
-
-<!-- 9-hour monitoring window 2026-05-06 22:00 → 2026-05-07 ~07:30 surfaced these P2 ergonomics findings — improvements but not on the critical path. -->
-
 - [ ] `pre-pr-lint-stack-vitest-hangs-vs-standalone` — `pnpm pre-pr-lint --stage=full` hangs in its `vitest` subprocess (10+ minutes, no output) while `npx vitest run` standalone completes in 33s with 3507/3518 passing
   - **ID**: pre-pr-lint-stack-vitest-hangs-vs-standalone
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, infra, pre-pr-lint, vitest, observed-2026-05-20
   - **Milestone**: M1
   - **Surfaced-by**: 2026-05-20 verify cycle for `agents-can-self-heal-minsky-m1-13` (PR opening from `plan/agents-self-heal-minsky`). Standalone `npx vitest run --testTimeout=15000 --bail=1 --reporter=verbose` completed in 33.56s with `3507 passed | 2 skipped | 9 todo (3518)`. The same vitest invoked by `scripts/run-pre-pr-lint-stack.mjs`'s `vitest` step (via `pnpm test`) hung for >10 min in two separate runs; killing the process and re-running standalone reproduced the green result. All other 45 gates in the lint stack ran <2.5s.
@@ -3019,6 +2397,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `gate-host-load-shed` — shed concurrent host load during a merge-gate vet so vitest stops flaking under 2-3x oversubscription
   - **ID**: gate-host-load-shed
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: gate, reliability, performance, orchestrator
   - **Milestone**: M1
   - **Competitive-goal**: raises minsky's autonomous-merge-rate + lowers change-fail-rate (DORA) on the `self-metrics-competitive-benchmark` scorecard by removing the last spurious-skip cause.
@@ -3034,6 +2413,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `worker-watchdog-scale-by-pinned-model-latency` — the 900s per-iteration watchdog default guarantees 100% iteration failure for Opus-pinned workers under host oversubscription; scale it by the pinned model's latency class
   - **ID**: worker-watchdog-scale-by-pinned-model-latency
+  - **Blocked**: needs-operator — Target files novel/tick-loop/bin/tick-loop.mjs + src/daemon.ts deleted in PR #888 (phase-11b); watchdog default gone
   - **Tags**: tick-loop, daemon, reliability, throughput, healing
   - **Milestone**: M1
   - **Competitive-goal**: directly raises minsky's autonomous-merge-rate (DORA deployment-frequency) on the `self-metrics-competitive-benchmark` scorecard — a worker that never finishes an iteration produces zero PRs, so the merge pipeline starves regardless of gate health.
@@ -3051,6 +2431,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `worker-liveness-detect-by-label-not-argv` — `workerDaemonAlive()` greps `tick-loop.mjs --worker-id=0`; with `--spawn-additional-workers=N` the root argv has no `--worker-id=0`, so liveness detection is fragile/coincidental
   - **ID**: worker-liveness-detect-by-label-not-argv
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: orchestrator, healing, detection, reliability, rule-6
   - **Milestone**: M1
   - **Competitive-goal**: a correct worker-liveness signal prevents spurious daemon kickstarts (avoids interrupting in-flight Opus iterations) → higher effective worker throughput on the `self-metrics-competitive-benchmark` scorecard.
@@ -3064,38 +2445,9 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `grep -c 'healed.*true\|kickstarted com.minsky.opus-sonnet-run' .minsky/orchestrate.out.log` over a window with the daemon healthy → 0; ledger `healed:false` stays consistent after killing the stray proc.
   - **Anchor**: vision.md rule #6 (supervisor owns restart — detect via the supervisor, not a brittle process-argv heuristic); Nygard 2018 *Release It!* (health checks must reflect real liveness, not a proxy that drifts).
 
-- [ ] `gate-merge-delete-branch-vs-worktree-pin` — `gh pr merge --delete-branch` errors when a daemon worktree pins the PR head branch; the server-side merge succeeds but the gate mis-records it as a failed merge
-  - **ID**: gate-merge-delete-branch-vs-worktree-pin
-  - **Tags**: gate, merge, worktree, reliability, false-negative
-  - **Milestone**: M1
-  - **Competitive-goal**: removes a false-negative in the merge path → cleaner autonomous-merge-rate signal + lower MTTR on the `self-metrics-competitive-benchmark` scorecard.
-  - **Details**: 2026-05-17 gate sweep on #580 logged `#580: merge call failed: Command failed: gh pr merge 580 --squash --admin --delete-branch — failed to delete local branch worktree-daemon-0-minsky-cli-context-aware-ux`. But `gh pr view 580` shows `state=MERGED merged=2026-05-17T02:18:33Z` — the server-side squash merge SUCCEEDED; only the post-merge LOCAL `git branch -d` failed because a parallel worker daemon worktree had that branch checked out (worktree pins the ref). `gh pr merge` does server-merge first, then local cleanup; the cleanup error makes `execFileSync` throw, so `processOnePr` records `merge-failed` for an already-merged PR. Harm: (a) the conductor may re-vet/re-attempt an already-merged PR (wasted bounded sweep slot), (b) the `merged[]` ledger undercounts real merges (corrupts the competitive scorecard's autonomous-merge-rate). Fix: in `defaultMerge`, detect "already merged" (treat as success — re-query `gh pr view --json state` on merge-call failure; MERGED ⇒ success), and/or pass merge without `--delete-branch` when the head branch is held by a worktree (`git worktree list --porcelain` check), leaving branch cleanup to a separate best-effort step (rule #6).
-  - **Files**: `scripts/local-gate-merge.mjs` (`defaultMerge` + `processOnePr` post-merge state re-check), paired test in `scripts/local-gate-merge.test.mjs`
-  - **Touches**: scripts/local-gate-merge*
-  - **Acceptance**: a PR whose head branch is worktree-pinned still records `merged` (not `merge-failed`) when GitHub reports `state=MERGED`; a genuinely failed merge still records `merge-failed`; paired tests cover both via injected `mergeFn`/state-probe.
-  - **Hypothesis**: ledger `merged[]` count matches GitHub's actual merged-PR count over a window (currently undercounts by the worktree-pinned cases); 0 re-attempts of already-merged PRs.
-  - **Success**: in a fixture where `mergeFn` throws a delete-branch error but the PR is server-MERGED, `processOnePr` returns `merged`; scorecard autonomous-merge-rate stops undercounting.
-  - **Pivot**: if post-merge state re-query is rate-limit-costly, drop `--delete-branch` entirely from the gate merge and reap merged branches in a periodic GC pass.
-  - **Measurement**: diff `grep -c '"merged":\[[0-9]' .minsky/orchestrate.jsonl`-derived count vs `gh pr list --state merged --search 'merged:>=<window>'` count → equal after fix.
-  - **Anchor**: vision.md rule #6 (cleanup best-effort, never gates the result) + rule #10; the merge is the result, branch deletion is incidental cleanup.
-
-- [ ] `gate-scratch-dir-gc` — sweep-start garbage-collect of stale `minsky-gate-*` scratch dirs, companion to the best-effort teardown
-  - **ID**: gate-scratch-dir-gc
-  - **Tags**: gate, hygiene, rule-6, reliability
-  - **Milestone**: M1
-  - **Competitive-goal**: lowers minsky's change-fail-rate / MTTR (DORA) by removing a class of sweep-aborting infra error → improves the autonomous-merge-rate metric on the competitive scorecard (`self-metrics-competitive-benchmark`).
-  - **Details**: 2026-05-17 the orchestrator tick logged `sweepError: ENOTEMPTY` from `defaultVet`'s `finally` `rmSync` racing a SIGKILL'd vet's draining children; the throw escaped the finally and aborted the whole sweep (0 merges). Fixed in the same PR by `bestEffortRmScratch` (one retry, then swallow — rule #6, tmpdir is OS-reaped). This companion adds the durable hygiene half: at sweep START, GC any `minsky-gate-*` dir under `tmpdir()` older than the vet timeout AND not owned by a live vet pid, so leaked scratch dirs (from crashes/SIGKILL/operator process-kills) cannot accumulate and cannot cause a future ENOTEMPTY against a half-gone sibling.
-  - **Files**: `scripts/local-gate-merge.mjs` (sweep-start GC pass + paired test in `scripts/local-gate-merge.test.mjs`)
-  - **Touches**: scripts/local-gate-merge*
-  - **Acceptance**: given seeded stale `minsky-gate-XXX` dirs (mtime > timeout, no live owner), a sweep start removes them; a fresh dir owned by a running vet is left untouched; paired unit test proves both.
-  - **Hypothesis**: with start-GC + best-effort teardown, `sweepError`-aborted ticks from scratch-dir races drop to ~0; autonomous-merge throughput per 10h run rises.
-  - **Success**: zero `ENOTEMPTY`/`sweepError` scratch entries in `.minsky/orchestrate.jsonl` across a 10h run after deploy (was: ≥1 in the first hour).
-  - **Pivot**: if mtime+pid ownership detection is unreliable cross-platform, GC only dirs older than 2× vet-timeout (coarser but safe) and accept slower reclamation.
-  - **Measurement**: `grep -c ENOTEMPTY .minsky/orchestrate.jsonl` before/after over equal windows → after = 0.
-  - **Anchor**: vision.md rule #6 (cleanup best-effort, never gates the loop); Nygard 2018 *Release It!* (housekeeping / resource leak prevention).
-
 - [ ] `gate-vet-timeout-circuit-breaker` — a PR that vet-times-out should be skipped for a cooldown instead of re-consuming a bounded sweep slot every tick
   - **ID**: gate-vet-timeout-circuit-breaker
+  - **Blocked**: needs-operator — PR #1085 closed (branch kept): additive conflict with #1081 in local-gate-merge.mjs prepareSweep — needs careful operator union-rebase
   - **Tags**: gate, orchestrator, reliability, candidate-starvation
   - **Milestone**: M1
   - **Details**: Companion to the mergeability pre-resolution fix (this PR makes `defaultSnapshot` resolve TRUE mergeability via `gh pr view` so `pickGateCandidates` actually drops CONFLICTING PRs before the `limit` slice — previously `gh pr list` returned `UNKNOWN`, conflicts slipped to the 25-min scratch vet, and with `limit=2` the conductor perpetually re-vetted #577/#580 and never reached a mergeable PR: the merge-rate-0 starvation). Conflicts are now cheap-skipped, but a PR that genuinely vet-*times-out* (e.g. #580, a slow/hung test) still burns one full `MINSKY_GATE_VET_TIMEOUT_MS` (~25 min) slot on EVERY tick forever. Add a circuit-breaker: record per-PR-head timeout strikes (e.g. `.minsky/gate-timeout-strikes.json`, keyed by PR number + head SHA so a new push clears it) and skip a PR with ≥N recent strikes for a cooldown window, so one pathological PR cannot indefinitely consume the bounded sweep.
@@ -3206,26 +2558,10 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 <!-- Replace-or-relocate research backfill (operator directive 2026-05-05) — vision.md rule #1 now requires this for every feature. Each block below evaluates one shipped novel/* module against (a) does an existing tool replace it? and (b) should it be relocated to agentbrew, dotfiles, or tasks.md? Output: <module>/REPLACE_OR_RELOCATE.md with a single Decision: line. Tasks intentionally tight — these are research, not engineering. -->
 
-- [ ] `brief-instructs-exit-after-pr-open` — brief should tell devin to exit cleanly (`process.exit(0)`) immediately after `gh pr create` succeeds, instead of running to 15-min timeout
-
-  - **ID**: brief-instructs-exit-after-pr-open
-  - **Tags**: cross-repo-runner, spawn-plan, brief, cost, p2, surfaced-by-managed-host-b-monitoring
-  - **Milestone**: M1
-  - **Detected-by**: devin-session-2026-05-16-monitoring
-  - **Detected-at**: 2026-05-16T22:30Z
-  - **Hypothesis**: The devin worker spawned by `ProcessSpawnStrategy` doesn't reliably exit when its iteration's work is complete (PR opened, tests passed). Observed: `lma-middleware-canonical-header-overhaul` spawn at 16:15Z opened PR #614 at 16:29Z (14 min into the iteration) then ran to the 15-min `MINSKY_LIVE_SPAWN_TIMEOUT_MS` SIGKILL — wasted 1 min of compute. `example-merge-task` opened PR #616 then continued for ~3 more minutes before SIGKILL — wasted 3 min. Adding a "Exit cleanly with exit code 0 immediately after `gh pr create` succeeds — do NOT wait for CI feedback (the next iteration handles CI-fix loops)" clause to the brief in `novel/cross-repo-runner/src/spawn-plan.ts` cuts the wall-clock cost of each iteration by ~10-30%.
-  - **Success**: After updating the brief, sample 5 successive validated iterations. Wall-clock duration distribution shifts: today's median ≈ 12-15 min; target post-fix median ≤ 8 min (PR-open cadence). Verified by `cat .minsky/experiment-store/cross-repo/*.jsonl | jq '.notes' | grep -oE '[0-9]+ms' | sort -n | head -10 | awk '{sum+=$1} END {print sum/NR}'`.
-  - **Pivot**: If devin exits before PR CI feedback is available (preventing immediate-react-to-red-CI), restore the previous "wait until something happens" behaviour AND reduce `MINSKY_LIVE_SPAWN_TIMEOUT_MS` default to 8 min — accepting that some long iterations get killed but cheap ones don't waste budget. (Trades worst-case for typical-case.)
-  - **Measurement**: After brief update, `for f in .minsky/experiment-store/cross-repo/*.jsonl; do tail -1 $f | jq -r '.notes' | grep -oE '[0-9]+ms' | head -1; done | sort -n | awk '{print $1/1000}'` — median should drop from ~720s to ≤ 480s.
-  - **Pivot escape hatch**: `MINSKY_BRIEF_WAIT_AFTER_PR_OPEN=true` env reverts to the legacy "run to timeout" behavior in case operators discover CI-fix loops need the wait.
-  - **Anchor**: Ousterhout, *A Philosophy of Software Design*, 2nd ed., Ch. 12 §"Pull Complexity Downwards" — the cheap-iteration case shouldn't pay for the worst-case ceiling. Adapt the brief so exit-when-done is explicit; let timeout be the last-resort kill switch, not the typical exit path.
-  - **Why**: At ~$1-2/min for headless agent compute (rough), an extra 1-3 min per iteration × 10-20 iterations / 8h = 10-60 wasted minutes per window. The hypothesis is testable from existing iter records (already have wall-clock numbers).
-  - **Files**: `novel/cross-repo-runner/src/spawn-plan.ts` (the `renderSystemPromptOverlay` brief composer), `novel/cross-repo-runner/src/spawn-plan.test.ts` (assert the new clause + env-escape behaviour).
-  - **Touches**: novel/cross-repo-runner/src/spawn-plan*
-
 - [ ] `docs-operator-troubleshooting-prompt-too-long` — add a troubleshooting doc covering the `claude --print` prompt-too-long failure on heavy `~/.claude/` setups
 
   - **ID**: docs-operator-troubleshooting-prompt-too-long
+  - **Blocked**: needs-operator — README byte-budget gate (3072B ceiling, 22B free) blocks required operator-troubleshooting link
   - **Tags**: documentation, operator-experience, claude-code, p2, surfaced-by-managed-host-b-monitoring
   - **Milestone**: M1
   - **Detected-by**: devin-session-2026-05-16-monitoring
@@ -3242,6 +2578,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `host-loop-operator-branch-pin-with-auto-stash` — minsky-run should checkout MINSKY_OPERATOR_BRANCH (with auto-stash) before each picker invocation so the operator's curated task queue is always visible
 
   - **ID**: host-loop-operator-branch-pin-with-auto-stash
+  - **Blocked**: needs-operator — Target package novel/cross-repo-runner/ deleted in Path A; all Touches files gone, needs re-scope
   - **Tags**: cross-repo-runner, host-loop, branch-strategy, p2, surfaced-by-managed-host-a-monitoring
   - **Milestone**: M1
   - **Detected-by**: devin-session-2026-05-16-monitoring
@@ -3258,6 +2595,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `runner-scope-leak-soft-mode` — relax scope-leak verdict from "kills iteration" to "warns + continues" because devin's natural fix scope is broader than the task's **Files**: declaration
 
   - **ID**: runner-scope-leak-soft-mode
+  - **Blocked**: needs-operator — novel/cross-repo-runner deleted (PR #883); soft scope-leak already the permanent default per DEPRECATED.md
   - **Tags**: cross-repo-runner, runner, verdict-tuning, p2, surfaced-by-managed-host-a-monitoring
   - **Milestone**: M1
   - **Detected-by**: devin-session-2026-05-16-monitoring
@@ -3274,6 +2612,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `parse-files-field-multi-line-nested` — `parseFilesField` should accept the multi-line nested-bullet form, not just inline `**Files**: <globs>`
 
   - **ID**: parse-files-field-multi-line-nested
+  - **Blocked**: needs-operator — Target runner.ts/parseFilesField deleted in PR #883 (phase-7b cross-repo-runner removal); task obsolete
   - **Tags**: p2, parser, scope-leak, observed-in-fleet
   - **Milestone**: M1
   - **Touches**: `novel/cross-repo-runner/src/runner.ts`, `novel/cross-repo-runner/src/runner.test.ts`
@@ -3291,6 +2630,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `minsky-stop-host-filter` — `minsky stop` should accept `--host <dir>` to limit SIGTERM to a single host instead of every minsky-run on the machine
 
   - **ID**: minsky-stop-host-filter
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, cli, multi-tenant-safety, observed-in-fleet
   - **Milestone**: M1
   - **Touches**: `bin/minsky` (the bash shim), `bin/minsky.test.mjs` (new — first paired test for the shim)
@@ -3308,6 +2648,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `competitor-deep-research-tier-s-2026-05` — deep-research the 4 Tier-S competitor stubs in `competitors/` (Agentless, Claude Agent SDK, Goose, Cline) under the sharpened identity *"OpenHands that improves itself + follows hard rules and principles"*; each must resolve to a concrete Dependency / Competitor / Reference verdict with cited sources
   - **ID**: competitor-deep-research-tier-s-2026-05
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p2, competitive-research, dependency-decision, rule-1, rule-9, observed-2026-05-22, vision-fulfillment
   - **Milestone**: M1
   - **Surfaced-by**: operator 2026-05-22 conversation about competitor research priorities. Produced 5 STUB files in `competitors/`; the operator then sharpened the surviving-minsky identity (no task-level persona pipeline; two axes only: self-improvement loop + hard rules and principles), which demoted LangGraph from Tier-S (no concrete use case post-OpenHands-adoption); the active backlog is the 4 remaining stubs. OpenHands flipped from Competitor → Dependency same day as the precedent.
@@ -3325,6 +2666,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `docs-frame-restore-across-allowlist` — restore the 3-beat reader-orientation doc frame (tagline / `## What this is` / `## What this is not`) across the 15 docs that have drifted since PR #685 originally applied it. The `docs-frame-coherence` lint shipped 2026-05-28 with a SHRUNKEN live allowlist (`AGENTS.md`, `INSTALL.md`, `docs/PRACTICES.md`) because the originally-targeted 18 docs no longer all conform: `README.md` was rewritten in PR #948 (5-min-install-guide cut); `MILESTONES.md` and `vision.md` never had the frame; all 16 `competitors/*.md` lack the frame; `ARCHITECTURE.md`, `DEPRECATED.md`, `research.md` were retired during Path-A. Re-apply the frame and lift each restored doc into the live allowlist.
   - **ID**: docs-frame-restore-across-allowlist
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p3, docs, scout-finding, observed-2026-05-28
   - **Milestone**: M1
   - **Touches**: `README.md`, `MILESTONES.md`, `vision.md`, `competitors/*.md` (16 files), `scripts/check-docs-frame-coherence.mjs` (extend `DOCS_FRAME_ALLOWLIST` as docs restore)
@@ -3364,6 +2706,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `metric-freshness-expected-should-read-from-success-metrics` — `.github/workflows/ci.yml`'s `metric-freshness` job hard-codes the `--expected` list of metric IDs inline (14 IDs as a single comma-separated string on the `node scripts/check-metric-freshness.mjs --expected ...` line). When a PR adds a new entry to `SUCCESS_METRICS` in `novel/dashboard-web/src/metrics.ts`, the metric-freshness gate fails CI with "unexpected metric `<id>` rendered — not present in `SUCCESS_METRICS` (drift)" until the operator ALSO edits the ci.yml line. Scout found while landing PR #873 — Path A LOC scoreboard added 3 IDs and the gate fired
   - **ID**: metric-freshness-expected-should-read-from-success-metrics
+  - **Blocked**: needs-operator — PR #1089 closed: edits deprecated novel/dashboard-web; re-scope to replacement module per DEPRECATED.md
   - **Tags**: p3, scout-finding, ci, drift-protection, observed-2026-05-25
   - **Milestone**: M1
   - **Competitive-goal**: closes the operator-burden cost of "adding a metric to SUCCESS_METRICS" — today it's a 3-file change (metrics.ts + dashboard-metric-ids.json + ci.yml --expected list). The dashboard-metric-ids drift gate catches the JSON; the metric-freshness gate catches the ci.yml. Both should be reading SUCCESS_METRICS directly so adding a metric is a 1-file change (with the drift-protection tests verifying everywhere it's read from).
@@ -3377,22 +2720,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Touches**: `scripts/check-metric-freshness.mjs`, `scripts/check-metric-freshness.test.mjs`, `.github/workflows/ci.yml`, `novel/dashboard-web/src/metrics.ts`.
   - **Acceptance**: (1) Default invocation reads from `dist/metrics.js`. (2) Existing `--expected` flag still works (no breaking change). (3) Paired test covers the default-from-source path. (4) `ci.yml` job line is `node scripts/check-metric-freshness.mjs` (no extra flag). (5) Next SUCCESS_METRICS addition (e.g. M2 metric onboarding) requires zero ci.yml edits.
   - **Risk**: low. Additive default — explicit `--expected` flag still wins. The `dist/metrics.js` import is already exercised by `scripts/metrics-render.mjs` so the path is proven.
-
-- [ ] `pr-body-self-grade-shape-lint` — `.github/PULL_REQUEST_TEMPLATE.md` ALREADY has the correct `## Hypothesis self-grade` block shape (Predicted/Observed/Match/Lesson with placeholder cells). The bug is that agents bypassing the template via `gh pr create --body-file <foo>` (the common script-driven path) tend to write the rule-#9 task-pre-registration form (Hypothesis/Success/Pivot/Measurement/Anchor) by reflex — which `pr-self-grade` rejects. Solution: extend `scripts/check-pr-self-grade.mjs` to detect the alternative 5-field form and emit a helpful pointer in the error message rather than the generic "missing Predicted" message. The agent then sees "you wrote the task-pre-reg form; use the PR-template form (Predicted/Observed/Match/Lesson)" and can self-correct without re-reading the template
-  - **ID**: pr-body-self-grade-shape-lint
-  - **Tags**: p3, scout-finding, ci, pr-template, observed-2026-05-25
-  - **Milestone**: M1
-  - **Competitive-goal**: closes the operator-feedback-loop tightening cost: every "PR body needs Predicted/Observed/Match/Lesson but I wrote Hypothesis/Success/Pivot/Measurement/Anchor" round-trip burns ~3 minutes of fixup time per PR. Across a 24h marathon (10 PRs at this rate) that's 30 min of preventable churn. The fix is a clearer lint message, not a template edit (template is already correct).
-  - **Hypothesis**: extending `scripts/check-pr-self-grade.mjs` to detect `Hypothesis:` / `Success:` / `Pivot:` / `Measurement:` / `Anchor:` field names (the task-pre-reg form) and emit a clear error like "you wrote the task-pre-registration form; the PR-self-grade gate wants the PR-template form (Predicted/Observed/Match/Lesson). See .github/PULL_REQUEST_TEMPLATE.md" makes the failure self-explanatory. Pre-registration: post-fix, the next 5 agent-authored PRs that ship with the wrong form pass on the SECOND push (not the third) because the error message is direct enough to fix without reading the template source.
-  - **Success**: (1) `scripts/check-pr-self-grade.mjs` detects the 5-field task-pre-reg form when ≥3 of the 5 field names appear in the body. (2) When detected, the error message names the alternative form AND points at the PR template. (3) Paired tests in `scripts/check-pr-self-grade.test.mjs` cover both the detection case and the existing missing-field cases. (4) The next 5 agent-authored PRs that originally would have shipped the wrong shape get a clearer error.
-  - **Pivot**: if the 5-field detection produces ≥1 false positive (a PR body legitimately uses "Hypothesis:" in a non-task context, e.g. in a commit message quote), tighten the heuristic to require the cells appear as their own `- **Hypothesis**:` list bullets, not embedded prose.
-  - **Measurement**: count of PRs in the last 14 days where `pr-self-grade` failed on the first push (today: ≥2 — #869, #870). Goal: 0 unique failure-causes within 2 weeks of the lint update landing. Tracked via `gh pr list --limit 50 --json number,title,statusCheckRollup | jq '[.[] | select(.statusCheckRollup[]? | select(.name == "pr-self-grade" and .conclusion == "FAILURE"))] | length'`.
-  - **Anchor**: 2026-05-25 PR #870 (this PR) + PR #869 — both hit the same self-grade rewrite. Operator practice: AGENTS.md § "Orchestrator discipline" rule (2). The PR template at `.github/PULL_REQUEST_TEMPLATE.md` lines 28-33 already encodes the correct shape; the gap is in the LINT error message, not the template.
-  - **Details**: (a) Read `scripts/check-pr-self-grade.mjs` lines 35-42 for the current regex shape. (b) Add a `checkAlternativeForm(body)` helper that scans for ≥3 of `Hypothesis:`, `Success:`, `Pivot:`, `Measurement:`, `Anchor:` as field markers. (c) When detected AND any of the required fields are missing, prepend the error list with a special pointer: "looks like you used the rule-#9 task-pre-registration form; the PR-self-grade gate wants the simpler 4-field form per .github/PULL_REQUEST_TEMPLATE.md". (d) Add a paired test in `scripts/check-pr-self-grade.test.mjs` that uses a fixture body with the alternative form and asserts the pointer appears in the error output.
-  - **Files**: `scripts/check-pr-self-grade.mjs` (add detection + pointer), `scripts/check-pr-self-grade.test.mjs` (paired test for the detection case).
-  - **Touches**: `scripts/check-pr-self-grade.mjs`, `scripts/check-pr-self-grade.test.mjs`.
-  - **Acceptance**: (1) Test for the alternative-form pointer exists and passes. (2) Running the script against a body with `Hypothesis:` / `Success:` / `Pivot:` (no `Predicted:`) emits the pointer text. (3) Existing tests still pass.
-  - **Risk**: low. Additive — only changes the error message wording when detection fires. Doesn't change the pass/fail decision.
 
 - [ ] `ci-yml-add-edited-trigger-type` — `.github/workflows/ci.yml` declares `on: pull_request:` without explicit `types:`, so the default set (`opened, synchronize, reopened`) misses `edited`; PR-body-only fixes (e.g., reformatting the `## Hypothesis self-grade` block to match `scripts/check-pr-self-grade.mjs`'s `Predicted / Observed / Match / Lesson` schema, or fixing `pr-vision-trace`'s `**Vision goal**:` label) don't re-trigger `pr-self-grade` / `ci` jobs, forcing the agent to push an empty commit to force `synchronize`. `pr-vision-trace.yml` already lists `types: [opened, edited, synchronize, ready_for_review, reopened]` — apply the same explicit type list to `ci.yml` so body lints close the feedback loop without an empty-commit hack.
   - **ID**: ci-yml-add-edited-trigger-type
@@ -3437,6 +2764,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `verify-spawn-failed-exit-minus-one-substrate-resolves` — confirm the env-propagation + signal-capture substrate (PRs #666, #694) eliminates `verdict=spawn-failed exit=-1 stderr=(empty)` from cross-repo-runner spawns
   - **ID**: verify-spawn-failed-exit-minus-one-substrate-resolves
+  - **Blocked**: needs-operator — Needs ≥1h live daemon data (daemon.log, experiment-store, plist); absent in worktree
   - **Tags**: p3, longitudinal-verification, spawn, devin, observed-2026-05-23, follow-up
   - **Milestone**: M1
   - **Competitive-goal**: closes the runtime-verification half of `spawn-failed-exit-minus-one-silent-empty-stderr` (P0, resolved by substrate). The code-level fixes shipped via PR #666 (env propagation for DEVIN_*/CLAUDE_*/OPENAI_*/ANTHROPIC_* in the launchd plist generator) + PR #694 (`spawn-error-capture.test.ts` seam test asserting signal/stderr/stdout capture through `ProcessSpawnStrategy` → `runLive` → `LiveSpawnOutcome`). Hypothesis (a) from the parent task was the most likely cause and the code-level fix is in `bin/minsky:622-664`. This task confirms the fix is effective in production by collecting the longitudinal runtime data the parent task's Acceptance #1 + #2 require.
@@ -3450,6 +2778,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `verify-watchdog-substrate-eliminates-900s-spawn-failures` — confirm the dynamic-timeouts substrate (commit `2d2c15b`, 2026-05-18) eliminates the 900s watchdog kill class from cross-repo-runner spawns
   - **ID**: verify-watchdog-substrate-eliminates-900s-spawn-failures
+  - **Blocked**: needs-operator — Needs live fleet data; .minsky/experiment-store/cross-repo/*.jsonl absent (≥10 iters/≥3 hosts)
   - **Tags**: p3, longitudinal-verification, watchdog, dynamic-timeouts, observed-2026-05-23, follow-up
   - **Milestone**: M1
   - **Competitive-goal**: closes the runtime-verification half of `watchdog-timeout-kills-productive-devin` (P0, resolved by infrastructure that landed the same day as the original observation). The code-level fix exists (dynamic-timeouts default 20min > observed 15min kill, max 45min, p95×1.5 scaling); operator-side runtime data confirms zero 900s spawn-failures over 10 consecutive iterations.
@@ -3463,6 +2792,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `wire-duplicate-detector-longitudinal-verification` — verify the wired-in `decideDuplicate` detector eliminates duplicate close-out PRs over 100 live daemon iterations
   - **ID**: wire-duplicate-detector-longitudinal-verification
+  - **Blocked**: needs-operator — Read-only verification needs live daemon data (100 iters/3 hosts) + ~/.minsky/daemon.log, absent here.
   - **Tags**: p3, longitudinal-verification, daemon, observed-2026-05-23, follow-up
   - **Milestone**: M1
   - **Competitive-goal**: closes the residual runtime verification for `wire-duplicate-pr-detector-into-cross-repo-runner` (P0, shipped). The code wiring landed without operator-side daemon-runtime data; this task collects that data to confirm the hypothesis ("zero duplicate close-out PRs in the next 100 daemon iterations") is borne out in production. If duplicates STILL occur post-wire, the pivot path (per-iteration gh-result caching, or a `~/.minsky/recently-merged.jsonl` fallback) gets surfaced.
@@ -3528,6 +2858,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `research-finding-multi-task-benchmark-suite` — adopt OpenHands Index's 5-task multi-benchmark suite shape; expand Minsky's corpus beyond `humaneval-pass-at-1`
   - **ID**: research-finding-multi-task-benchmark-suite
+  - **Blocked**: needs-operator — DELIVERED (merged); block retained — test files freeform-cite this id (check-task-block-citations gate). Operator: convert those citations to self-doc headers OR drop them, then delete this block.
   - **Tags**: p3, research-followup, observed-2026-05-22, openhands-deep-dive, m1-10
   - **Milestone**: M1
   - **Competitive-goal**: closes the "single-number headline benchmark" framing weakness. OpenHands' Index reports per-task scores across 5 dimensions (issue resolution, greenfield, frontend, testing, info gathering); a single SWE-bench number masks where the agent fails. Minsky's corpus has 1 vendor-primary metric (`humaneval-pass-at-1`); adding 4 more makes the orchestrator-tier delta visible per-dimension.
@@ -3606,6 +2937,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 
 - [ ] `migrate-rule-9-lint-to-upstream` — once `@tasks-md/lint@0.8.0` (with `--require-prereg`) is published on npm, replace the local `scripts/check-rule-9-tasksmd-fields.mjs` with `npx -y @tasks-md/lint --require-prereg --prereg-allowlist=.prereg-allowlist TASKS.md`. The allowlist file is already in place (PR #690); the script reads from it. Blocked on the tasks.md v0.8.0 npm publish workflow succeeding (see `tasks-md-trusted-publishing-setup`).
   - **ID**: migrate-rule-9-lint-to-upstream
+  - **Blocked**: needs-operator — @tasks-md/lint@0.8.0 with --require-prereg unpublished on npm (latest 0.7.0); gated on operator-only npm Trusted Publisher setup.
   - **Tags**: p3, cleanup, lint, upstream, tasks-md
   - **Milestone**: M1
   - **Touches**: scripts/check-rule-9-tasksmd-fields.mjs, scripts/check-rule-9-tasksmd-fields.test.mjs, scripts/run-pre-pr-lint-stack.mjs, .github/workflows/ci.yml, lefthook.yml, setup.sh
@@ -3802,6 +3134,7 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
 - [ ] `host-loop-soft-failure-continue-mode` — autonomous loop should keep iterating on `spawn-failed` instead of halting, so a single bad iteration doesn't end an N-hour fleet run
 
   - **ID**: host-loop-soft-failure-continue-mode
+  - **Blocked**: needs-operator — All 3 target files deleted by Path A Phase 7+11; runHostLoop no longer exists, task needs re-scoping
   - **Tags**: p3, host-loop, autonomous-fleet, observed-in-fleet
   - **Milestone**: M1
   - **Touches**: `novel/cross-repo-runner/src/host-loop.ts`, `novel/cross-repo-runner/src/host-loop.test.ts`, `novel/cross-repo-runner/bin/minsky-run.mjs`
