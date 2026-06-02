@@ -104,12 +104,12 @@
   "optionalDependencies": {
     "@biomejs/cli-darwin-arm64": "2.4.15",
     "@biomejs/cli-darwin-x64": "2.4.15",
-    "@biomejs/cli-linux-arm64": "1.9.4",
+    "@biomejs/cli-linux-arm64": "2.4.15",
     "@biomejs/cli-linux-arm64-musl": "2.4.15",
-    "@biomejs/cli-linux-x64": "1.9.4",
+    "@biomejs/cli-linux-x64": "2.4.15",
     "@biomejs/cli-linux-x64-musl": "2.4.15",
     "@biomejs/cli-win32-arm64": "2.4.15",
-    "@biomejs/cli-win32-x64": "1.9.4"
+    "@biomejs/cli-win32-x64": "2.4.15"
   },
   "pnpm": {
     "overrides": {
