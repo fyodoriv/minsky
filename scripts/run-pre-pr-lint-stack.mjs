@@ -316,6 +316,7 @@ export const CI_BASH_GATE_BUCKETS = Object.freeze({
       "docs-frame-coherence",
       "no-hardcoded-timeouts",
       "no-no-verify-bypass",
+      "bot-commit-hook-bypass",
       "pre-push-hook-stays-fast",
       "launchd-safe-paths",
       "changelog-md-update",
@@ -797,6 +798,18 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["fast", "full"],
     cmd: "node",
     args: ["scripts/check-no-no-verify-bypass.mjs"],
+  },
+  {
+    // Every `.github/workflows/*.yml` step that runs `git commit` must
+    // disable lefthook (`git config core.hooksPath /dev/null` inline, or
+    // `LEFTHOOK: "0"` env on an action step) — the local-dev pre-commit
+    // hooks assume darwin-arm64 and hard-fail a bot commit on a linux/x64
+    // runner. Per TASKS.md `lefthook-bot-commit-bypass-discipline`; PR #710
+    // (the original local fix); vision.md rule #10.
+    name: "bot-commit-hook-bypass",
+    stages: ["fast", "full"],
+    cmd: "node",
+    args: ["scripts/check-bot-commit-hook-bypass.mjs"],
   },
   {
     // rule #10 deterministic lint: lefthook's pre-push step must keep

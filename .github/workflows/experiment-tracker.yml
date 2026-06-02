@@ -86,6 +86,15 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Disable the local lefthook pre-commit hooks for this bot commit.
+          # The `check-toolchain` hook probes for the darwin-arm64 biome
+          # optionalDependency, which isn't resolved on a linux/x64 CI runner,
+          # so it hard-fails an otherwise-clean paths-restricted bot commit.
+          # Mirrors the experiment.yml recorder; enforced repo-wide by
+          # scripts/check-bot-commit-hook-bypass.mjs (TASKS.md
+          # `lefthook-bot-commit-bypass-discipline`). NOT --no-verify, which
+          # is independently banned (check-no-no-verify-bypass.mjs).
+          git config core.hooksPath /dev/null
           git add experiment-store/ validated-learnings.md TASKS.md
           git commit -m "chore(experiment-tracker): record replay verdicts $(date -u +%Y-%m-%d) [skip ci]"
           git push origin HEAD:main

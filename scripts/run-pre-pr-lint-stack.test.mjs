@@ -108,6 +108,7 @@ describe("STACK_MANIFEST", () => {
         "adapter-conventions",
         "agents-md-coherence",
         "biome",
+        "bot-commit-hook-bypass",
         "brief-pr-instructions",
         "changelog-md-update",
         "check-task-block-citations",

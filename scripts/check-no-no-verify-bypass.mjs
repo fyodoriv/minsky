@@ -61,6 +61,12 @@ export const ALLOWLIST = Object.freeze([
   /^\.claude\/hooks\/block-dangerous-bash\.sh$/, // the hook itself catches the pattern
   /^scripts\/check-no-no-verify-bypass\.mjs$/, // this lint
   /^scripts\/check-no-no-verify-bypass\.test\.mjs$/, // its tests
+  // The bot-commit-hook-bypass lint + test necessarily MENTION the banned
+  // patterns (core.hooksPath, --no-verify) to document why they're rejected
+  // as workflow bypasses and to assert --no-verify is NOT accepted. Same
+  // self-reference carve-out as this lint's own files above.
+  /^scripts\/check-bot-commit-hook-bypass\.mjs$/,
+  /^scripts\/check-bot-commit-hook-bypass\.test\.mjs$/,
   /^scripts\/check-toolchain\.mjs$/, // documents the rule in its error-message text
   /^AGENTS\.md$/, // documentation
   /^TASKS\.md$/, // task descriptions discuss the rule
