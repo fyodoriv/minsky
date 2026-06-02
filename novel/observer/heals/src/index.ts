@@ -10,6 +10,7 @@
 
 export * as healAgentRateLimited from "./heal-agent-rate-limited.js";
 export * as healBriefTooLongForContextWindow from "./heal-brief-too-long-for-context-window.js";
+export * as healClaudeAccountRateLimit from "./heal-claude-account-rate-limit.js";
 export * as healCorruptStateJson from "./heal-corrupt-state-json.js";
 export * as healNetworkPartitionMidSpawn from "./heal-network-partition-mid-spawn.js";
 export * as healOllamaDown from "./heal-ollama-down.js";
@@ -64,6 +65,11 @@ export const automatedHealCatalogue = [
     id: "brief-too-long-for-context-window",
     signal: "brief-too-long-for-context-window",
     helperModule: "heal-brief-too-long-for-context-window",
+  },
+  {
+    id: "claude-account-rate-limit",
+    signal: "claude-account-rate-limit",
+    helperModule: "heal-claude-account-rate-limit",
   },
 ] as const;
 

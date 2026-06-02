@@ -319,6 +319,48 @@ Per AGENTS.md rule #3 ("Acceptance-scenario gate"): every test file references o
 - **When** `apply()` runs
 - **Then** the throw propagates to the caller — let-it-crash at the I/O boundary
 
+### Scenario: heal-claude-account-rate-limit detects the account-exhaustion signal
+
+- **Given** worker stderr `"You've hit your limit · resets May 31 at 8pm (America/Toronto)"` (the message `claude --print` prints on exit 1 when the operator's weekly Claude window is exhausted)
+- **When** `heal-claude-account-rate-limit.detect({ stderr, nowMs, sleepMsFn, alreadyPaused, notifyFn })` runs
+- **Then** it returns `{ present: true, signal: "claude-account-rate-limit", evidence: { resetAt, resetClause, parsedFromFallback, stderrPreview } }`
+- **And** `evidence.resetAt` is a future epoch-ms timestamp parsed from the reset clause
+
+### Scenario: heal-claude-account-rate-limit pauses until the parsed reset and notifies once
+
+- **Given** a detected account-exhaustion signal with reset clause `"in 2 hours"` AND `alreadyPaused=false`
+- **When** `apply()` runs
+- **Then** `notifyFn` is called exactly once with a message containing `"Claude account exhausted"`
+- **And** `sleepMsFn` is called with `2 hours` (the parsed pause, since it exceeds the 5-min floor)
+- **And** `apply` returns `{ applied: true, notes: <contains "budget-paused-claude"> }`
+
+### Scenario: heal-claude-account-rate-limit floors the pause when the reset is unparseable or in the past
+
+- **Given** a detected signal whose reset clause is absent OR resolves to a past/zero epoch (clock skew)
+- **When** `apply()` runs
+- **Then** `sleepMsFn` is called with `DEFAULT_PAUSE_FLOOR_MS` (5 min) — the daemon idles instead of busy-looping every tick
+
+### Scenario: heal-claude-account-rate-limit is edge-triggered — re-applying while paused does NOT re-notify
+
+- **Given** a detected signal AND `alreadyPaused=true` (the supervisor already transitioned to budget-paused-claude this window)
+- **When** `apply()` runs
+- **Then** `notifyFn` is NOT called (exactly one push per exhaustion transition)
+- **And** `sleepMsFn` is still called (the daemon keeps idling until the reset wall passes)
+- **And** `apply` returns `{ applied: true, notes: <contains "already paused"> }`
+
+### Scenario: heal-claude-account-rate-limit does NOT collide with heal-agent-rate-limited's transient 429
+
+- **Given** stderr `"429 Too Many Requests — rate limit exceeded"` (the transient per-minute case)
+- **When** `heal-claude-account-rate-limit.detect()` runs
+- **Then** it returns `{ present: false }` — the transient 429 belongs to `heal-agent-rate-limited` (30/60/120s backoff), NOT the account-level weekly-window heal
+- **And** conversely, `heal-agent-rate-limited.detect()` returns `{ present: false }` on `"You've hit your limit · resets …"`
+
+### Scenario: heal-claude-account-rate-limit notifyFn throw propagates (rule #6)
+
+- **Given** a detected account-exhaustion signal AND `notifyFn` throws `Error("ntfy push failed")`
+- **When** `apply()` runs
+- **Then** the throw propagates to the caller — let-it-crash at the I/O boundary
+
 ### Scenario: heal-ledger appends an event entry with all required fields
 
 - **Given** an empty `<host>/.minsky/heal-events.jsonl`

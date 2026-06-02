@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import * as healAgentRateLimited from "../../src/heal-agent-rate-limited.js";
 import * as healBriefTooLongForContextWindow from "../../src/heal-brief-too-long-for-context-window.js";
+import * as healClaudeAccountRateLimit from "../../src/heal-claude-account-rate-limit.js";
 import * as healCorruptStateJson from "../../src/heal-corrupt-state-json.js";
 import * as healNetworkPartitionMidSpawn from "../../src/heal-network-partition-mid-spawn.js";
 import * as healOllamaDown from "../../src/heal-ollama-down.js";
@@ -320,6 +321,37 @@ const CHAOS_CASES: ChaosCase[] = [
     },
   },
   {
+    id: "claude-account-rate-limit",
+    signal: "claude-account-rate-limit",
+    run: async () => {
+      // No fs side-effect — the heal is pure (stderr-regex + parse + sleep
+      // + notify). Inject a no-op sleep + recorder notify so the chaos test
+      // stays hermetic + fast despite the "pause until reset" semantics.
+      const notifications: string[] = [];
+      const seams: healClaudeAccountRateLimit.ClaudeAccountRateLimitSeams = {
+        stderr: "You've hit your limit · resets May 31 at 8pm (America/Toronto)",
+        nowMs: Date.now(),
+        sleepMsFn: async () => {
+          await Promise.resolve();
+        },
+        alreadyPaused: false,
+        notifyFn: (m) => {
+          notifications.push(m);
+        },
+      };
+      const start = Date.now();
+      const detected = healClaudeAccountRateLimit.detect(seams);
+      await healClaudeAccountRateLimit.apply(seams);
+      const verified = healClaudeAccountRateLimit.verify(seams);
+      const durationMs = Date.now() - start;
+      return {
+        detected: detected.present,
+        healed: verified.healed,
+        durationMs,
+      };
+    },
+  },
+  {
     id: "stuck-command",
     signal: "stuck-command",
     run: async () => {
@@ -381,6 +413,7 @@ describe("heal-catalogue chaos: each automated heal completes within 5 min", () 
     expect(ids).toEqual([
       "agent-rate-limited",
       "brief-too-long-for-context-window",
+      "claude-account-rate-limit",
       "corrupt-state-json",
       "missing-node-modules",
       "network-partition-mid-spawn",
