@@ -19,6 +19,11 @@ hermetically without mocking globals.
   hook fails because pnpm install hasn't run yet
 - **`heal-stale-tsbuildinfo.ts`** — `.tsbuildinfo` from prior node major
 - **`heal-stuck-command.ts`** — shell polled ≥3 times with no output
+- **`heal-claude-account-rate-limit.ts`** — `claude --print` exits 1 with
+  `You've hit your limit · resets <date>` (account-level weekly-window
+  exhaustion, distinct from the transient-429 `heal-agent-rate-limited`):
+  parse the reset time, notify the operator once (edge-triggered), pause
+  until the reset wall instead of busy-looping every tick
 
 ## Substrate
 
@@ -56,3 +61,4 @@ Per constitutional rule #7. Each automated heal helper has a corresponding chaos
 | 2 | `heal-worktree-missing-node-modules.apply()` pnpm install fails | Stub `execFn` returns non-zero exit | `verify()` returns `{ healed: false, residualSignal: "pnpm-install-failed" }`; outcome="verified-failed" | `novel/observer/heals/src/heal-worktree-missing-node-modules.test.ts` — `"apply returns applied:false when pnpm install exits non-zero"` test injects failing stub and asserts no throw |
 | 3 | `heal-stale-tsbuildinfo.apply()` permission denied | Mock fs `unlinkSync` throws EACCES | `verify()` returns `{ healed: false, residualSignal: "permission-denied" }`; daemon not crashed | `novel/observer/heals/src/heal-stale-tsbuildinfo.test.ts` — `"detect skips paths in the listFn snapshot that no longer exist"` regression test asserts helper returns gracefully on missing files (the EACCES variant pattern) |
 | 4 | `heal-stuck-command.apply()` races process exit | Process exits naturally just before SIGKILL | `apply()` returns `{ applied: false }` (already gone); `verify()` returns `{ healed: true }` | `novel/observer/heals/src/heal-stuck-command.test.ts` — `"apply is no-op if process already exited (race)"` test asserts no error; chaos-level coverage at `novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts` |
+| 5 | `heal-claude-account-rate-limit` Anthropic changes the exhaustion wording | The strict regex misses the new message string | The loose fallback probe (`limit … resets`) still matches → daemon pauses (never busy-loops); `evidence.parsedFromFallback=true` flags the drift for the operator | `novel/observer/heals/src/heal-claude-account-rate-limit.test.ts` — `"detect falls back to the loose probe on wording drift"` test asserts detection survives wording drift; chaos-level coverage at `novel/observer/heals/test/chaos/heal-catalogue-mttr.test.ts` |
