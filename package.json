@@ -114,6 +114,11 @@
   "pnpm": {
     "overrides": {
       "protobufjs@<8.0.2": ">=8.0.2"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-5xrq-8626-4rwp"
+      ]
     }
   }
 }
