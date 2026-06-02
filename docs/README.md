@@ -82,7 +82,8 @@ For the **moats as user stories** with chaos coverage + pre-registered umbrella 
 |---|---|
 | [docs/edge-cases.md](edge-cases.md) | What happens when the queue is empty, runtime limits hit, agents crash, etc. |
 | [docs/auto-merge.md](auto-merge.md) | Periodic gate-and-merge for daemon PRs (ON for Minsky itself, OFF for other repos). |
-| [docs/dependabot.md](dependabot.md) | Dependency-update policy + local merge gate. |
+| [docs/dependabot.md](dependabot.md) | Dependabot mechanics — schedule, grouping, local merge gate. |
+| [docs/dependency-policy.md](dependency-policy.md) | Semver triage — which bumps auto-merge, which need the operator. |
 | [docs/local-llm-fallback.md](local-llm-fallback.md) | What happens when the cloud quota runs out. |
 | [docs/daemon-pre-pr-gate.md](daemon-pre-pr-gate.md) | The 53-step pre-PR lint stack the daemon runs before pushing. |
 | [docs/cross-repo-portability.md](cross-repo-portability.md) | Running Minsky across multiple repos. |

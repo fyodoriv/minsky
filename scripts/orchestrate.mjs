@@ -36,7 +36,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { landLocalBranch, runGateSweep } from "./local-gate-merge.mjs";
+import { landLocalBranch, runGateSweep, setWorkerPauseSeam } from "./local-gate-merge.mjs";
 import {
   DEFAULT_HEALTHY_RESET_SEC,
   DEFAULT_RUN_TIME_LIMIT_SEC,
@@ -168,6 +168,71 @@ function healWorkerDaemon(log) {
     const m = err instanceof Error ? err.message : String(err);
     log(`orchestrate: heal failed (continuing): ${m.slice(0, 140)}\n`);
   }
+}
+
+/**
+ * Pure: parse `pgrep -f tick-loop.mjs` stdout into the worker-daemon pids the
+ * conductor should SIGSTOP for the duration of a gate vet (load-shed lever #2,
+ * `gate-host-load-shed`). The conductor's OWN pid is excluded so a load-shed
+ * pause can never freeze the conductor itself. Same input ⇒ same output (rule
+ * #10); no I/O here — the caller supplies the raw `pgrep` text + self pid.
+ * @param {string} pgrepOut  newline-separated pids from `pgrep -f tick-loop.mjs`
+ * @param {number} selfPid   the conductor's own pid (never paused)
+ * @returns {number[]}
+ */
+export function decideWorkerPausePids(pgrepOut, selfPid) {
+  return pgrepOut
+    .split("\n")
+    .map((l) => Number(l.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0 && n !== selfPid);
+}
+
+/**
+ * Production worker-pause/resume seam (load-shed lever #2). SIGSTOP every live
+ * worker-daemon iteration process for the duration of a gate vet so the
+ * conductor's scratch `vitest` never competes with a worker-tick `vitest`
+ * under host oversubscription (the 2026-05-17 spurious `gate red: vitest`
+ * cause). Resume is guaranteed by `local-gate-merge.mjs`'s `withWorkerPaused`
+ * `finally` — but a missed SIGCONT would freeze a worker, so resume swallows
+ * nothing silently here: it logs. Best-effort throughout (rule #6): a failed
+ * signal degrades to an unshed vet, never an aborted sweep.
+ * @param {(s: string) => void} log
+ * @returns {{ pause: () => void, resume: () => void }}
+ */
+function workerPauseSeam(log) {
+  let pausedPids = /** @type {number[]} */ ([]);
+  const pgrep = () => {
+    try {
+      return execFileSync("pgrep", ["-f", "tick-loop.mjs"], { encoding: "utf8" });
+      // rule-6: handled-locally — no worker procs (or pgrep absent) ⇒ nothing to pause; the vet runs unshed.
+    } catch {
+      return "";
+    }
+  };
+  const signal = (/** @type {number[]} */ pids, /** @type {"-STOP" | "-CONT"} */ sig) => {
+    for (const pid of pids) {
+      try {
+        execFileSync("kill", [sig, String(pid)], { encoding: "utf8" });
+        // rule-6: handled-locally — a worker that exited between pgrep and kill is a no-op, not a failure; the per-pid catch keeps one dead pid from blocking the rest.
+      } catch {
+        /* pid already gone or not ours — skip it */
+      }
+    }
+  };
+  return {
+    pause: () => {
+      pausedPids = decideWorkerPausePids(pgrep(), process.pid);
+      if (pausedPids.length === 0) return;
+      signal(pausedPids, "-STOP");
+      log(`orchestrate: load-shed — SIGSTOP worker pids [${pausedPids.join(",")}] for gate vet\n`);
+    },
+    resume: () => {
+      if (pausedPids.length === 0) return;
+      signal(pausedPids, "-CONT");
+      log(`orchestrate: load-shed — SIGCONT worker pids [${pausedPids.join(",")}]\n`);
+      pausedPids = [];
+    },
+  };
 }
 
 /**
@@ -325,6 +390,12 @@ if (isMain) {
     log(`orchestrate: land-local ${args[1] ?? "(none)"} — ${res.outcome} (${res.reason})\n`);
     process.exit(res.outcome === "landed" ? 0 : 1);
   }
+  // Wire the load-shed worker-pause seam into the gate (gate-host-load-shed):
+  // every sweep vet launched from a conductor tick SIGSTOPs the worker daemon
+  // for the vet's duration so gate-vet and worker-tick never run vitest
+  // simultaneously. Standalone `node scripts/local-gate-merge.mjs` runs leave
+  // the seam at its no-op default.
+  setWorkerPauseSeam(workerPauseSeam(log));
   const ivArg = args.find((a) => a.startsWith("--interval-ms="));
   const intervalMs = ivArg
     ? Number(ivArg.split("=")[1])

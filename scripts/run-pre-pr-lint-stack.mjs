@@ -569,10 +569,30 @@ export const STACK_MANIFEST = Object.freeze([
   },
   // ---- full stage ----------------------------------------------------------
   {
+    // Bounded vitest invocation — NOT bare `pnpm test`. Root cause of TASKS.md
+    // `pre-pr-lint-stack-vitest-hangs-vs-standalone`: `pnpm test` is
+    // `vitest run` with NO per-test timeout and NO `--bail`, so a single test
+    // that blocks indefinitely (an unresolved async, a worker that never
+    // returns) hangs the whole suite forever with no escape — the lint stack
+    // sat >10 min in two separate runs. vitest's `retry: 2` (vitest.config.ts)
+    // compounds it: a hanging test is retried, tripling the dead time. The
+    // standalone invocation that completed green in 33.56s
+    // (`3507 passed | 2 skipped | 9 todo`) was
+    // `vitest run --testTimeout=15000 --bail=1` — the per-test timeout converts
+    // an indefinite block into a deterministic 15s-per-test failure, and
+    // `--bail=1` surfaces the first failure instead of letting retries multiply
+    // dead time. We invoke `vitest run` directly (not the `test` package.json
+    // script) so the lint stack's gate is self-contained and can't be detached
+    // from these bounds by an unrelated edit to the `test` script. CI's
+    // `test` job still runs `pnpm test:coverage` unbounded — coverage needs the
+    // full suite, and CI has its own job-level timeout. `--reporter=basic`
+    // keeps the gate's captured output compact. Per the task's Success
+    // threshold: `pnpm pre-pr-lint --stage=full` now terminates (pass or fail)
+    // — a gate that can't terminate isn't a gate (vision.md rule #10).
     name: "vitest",
     stages: ["full"],
     cmd: "pnpm",
-    args: ["test"],
+    args: ["exec", "vitest", "run", "--testTimeout=15000", "--bail=1", "--reporter=basic"],
   },
   {
     // Dead-code + unused-exports + unused-dependencies detector. Config at

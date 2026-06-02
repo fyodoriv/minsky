@@ -24,6 +24,20 @@
 // merge decision). Composes `run-pre-pr-lint-stack` + `gh` rather than
 // reinventing a gate (rule #1).
 //
+// Worktree-pinned head branches (proactive arm — TASKS.md `gate-merge-
+// delete-branch-vs-worktree-pin`): the parallel-worker swarm checks branches
+// out in `.claude/worktrees/`, which PINS the head ref. `gh pr merge
+// --delete-branch` would server-merge fine but then throw on the local
+// `git branch -d`, making the gate mis-record an already-merged PR as
+// `merge-failed` (the #580 false-negative). `defaultMerge` now detects the
+// pin via `git worktree list --porcelain` (pure `headBranchPinnedByWorktree`
+// + pure `mergeArgs`) and DROPS `--delete-branch` for a pinned head, leaving
+// the incidental branch cleanup to the worktree teardown — cleanup never
+// gates the merge result (rule #6). This is the proactive complement to the
+// post-hoc state-oracle recovery in `processOnePr` (`prStateFn` re-queries
+// `gh pr view --json state`; MERGED ⇒ success): prevention first, recovery
+// as the backstop.
+//
 // rule #9 (pre-registered): a gate-green admin-merged PR must not regress
 // `origin/main` — post-merge, a fresh `--stage=full` run on main stays green.
 // Success: 0 post-merge main regressions over ≥10 gate-merged PRs. Pivot: if
@@ -67,6 +81,17 @@ const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
 // (the keystone "run reliably for 10h" guarantee). Generous default
 // (25 min) tolerates a slow-but-finishing vet; env-tunable.
 const VET_TIMEOUT_MS = Number(process.env["MINSKY_GATE_VET_TIMEOUT_MS"] ?? 1500000);
+// Load-shed niceness applied to the scratch `--stage=full` vet (the
+// `vitest`-heavy step). The host runs the orchestrator + worker daemon +
+// other tenants concurrently at load ~14-26 on 10 cores (2026-05-17); a
+// timing-sensitive test flaked under that contention and produced a spurious
+// `gate red: vitest` SKIP of a clean MERGEABLE PR. `retry: 2` masks the
+// symptom; running the vet at a lower scheduler priority (and pausing the
+// worker daemon for the vet's duration — see `orchestrate.mjs`) removes the
+// cause (Nygard 2018 *Release It!* — resource contention / bulkhead).
+// Default 10 (de-prioritise vs. interactive); env-tunable. 0 disables the
+// nice wrapper (the documented opt-out for debugging, rule #16).
+const VET_NICENESS = Number(process.env["MINSKY_GATE_VET_NICENESS"] ?? 10);
 
 /**
  * @typedef {object} PrSnapshot
@@ -164,6 +189,40 @@ export function decideMerge(input) {
   }
   const brain = input.review ? ` + opus-approved (${input.review.reason})` : "";
   return { action: "merge", reason: `gate green on PR-merged-onto-main${brain}` };
+}
+
+/**
+ * Pure: decide how to shed competing host load for one scratch vet. The vet's
+ * `vitest` step is timing-sensitive; under 2-3x host oversubscription it flakes
+ * and produces a spurious `gate red: vitest` SKIP of a clean PR (2026-05-17).
+ * Two cooperative levers, both default-on (rule #16), both disable-able for
+ * debugging:
+ *   - `niceness`  — run the vet at a lower scheduler priority so the
+ *                   orchestrator/other tenants don't starve it of CPU
+ *                   (`MINSKY_GATE_VET_NICENESS`, 0 ⇒ no nice wrapper).
+ *   - `pauseWorker` — ask the caller's `pauseWorkerFn`/`resumeWorkerFn` seam to
+ *                   SIGSTOP the worker daemon's active iteration for the vet's
+ *                   duration so gate-vet and worker-tick never run vitest
+ *                   simultaneously (`MINSKY_GATE_NO_WORKER_PAUSE=1` ⇒ off).
+ * Same input ⇒ same output (rule #10); no I/O here — the levers are applied by
+ * the injectable seam in `defaultVet`.
+ * @param {{ niceness?: number, noWorkerPause?: string | undefined }} [env]
+ * @returns {{ niceness: number, pauseWorker: boolean, reason: string }}
+ */
+export function decideLoadShed(env = {}) {
+  const niceness =
+    Number.isFinite(env.niceness) && /** @type {number} */ (env.niceness) > 0
+      ? Math.min(20, Math.trunc(/** @type {number} */ (env.niceness)))
+      : 0;
+  const pauseWorker = env.noWorkerPause !== "1";
+  const parts = [];
+  if (niceness > 0) parts.push(`nice +${niceness}`);
+  if (pauseWorker) parts.push("pause-worker");
+  return {
+    niceness,
+    pauseWorker,
+    reason: parts.length > 0 ? `load-shed: ${parts.join(" + ")}` : "load-shed: off",
+  };
 }
 
 // ---- land-local: the gate-merge mechanism applied to a LOCAL branch ------
@@ -378,28 +437,107 @@ function vetErrorToResult(err) {
 }
 
 /**
+ * Run the scratch `--stage=full` gate, de-prioritised by `nice` when
+ * `niceness > 0` (load-shed lever #1). `nice` exists on macOS + Linux + every
+ * POSIX host; if it is somehow missing the call throws ENOENT and the caller's
+ * `vetErrorToResult` records a typed vetError (never a silent gate-red — rule
+ * #6). `niceness === 0` runs `node` directly (the debugging opt-out). Shared
+ * by the PR vet and the local-branch vet (rule #1 — one seam).
+ * @param {string} scratch
+ * @param {number} niceness
+ * @returns {string} the gate's --json stdout
+ */
+function runVetNiced(scratch, niceness) {
+  const gateArgs = ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"];
+  const exec = (/** @type {string} */ cmd, /** @type {string[]} */ args) =>
+    execFileSync(cmd, args, {
+      cwd: scratch,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: VET_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+  return niceness > 0
+    ? exec("nice", ["-n", String(niceness), "node", ...gateArgs])
+    : exec("node", gateArgs);
+}
+
+// Worker-pause seam (load-shed lever #2). Production wires these from
+// `orchestrate.mjs` (SIGSTOP/SIGCONT the worker daemon's active iteration)
+// via `setWorkerPauseSeam`; tests inject fakes. Default no-ops so the gate
+// runs standalone (`node scripts/local-gate-merge.mjs`) without a conductor.
+/** @type {() => void} */
+let workerPauseFn = () => undefined;
+/** @type {() => void} */
+let workerResumeFn = () => undefined;
+
+/**
+ * Install the production worker-pause/resume seam. Called by the conductor
+ * (`orchestrate.mjs`) so a gate vet launched from a tick pauses the worker
+ * daemon for the vet's duration; left as no-ops for standalone CLI runs.
+ * @param {{ pause: () => void, resume: () => void }} seam
+ */
+export function setWorkerPauseSeam(seam) {
+  workerPauseFn = seam.pause;
+  workerResumeFn = seam.resume;
+}
+
+/**
+ * Run `fn` with the worker daemon paused, guaranteeing resume in a `finally`
+ * even if `fn` throws or the process is interrupted mid-vet (rule #6 — a
+ * load-shed pause must NEVER leave the worker SIGSTOP'd; that would convert a
+ * flake-fix into a worker outage). A pause-call failure is swallowed (the vet
+ * still runs, just unshed — degrade gracefully, never gate the merge on a
+ * best-effort optimisation).
+ * @template T
+ * @param {boolean} pauseWorker
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withWorkerPaused(pauseWorker, fn) {
+  if (!pauseWorker) return fn();
+  let paused = false;
+  try {
+    workerPauseFn();
+    paused = true;
+    // rule-6: handled-locally — pausing is best-effort load-shed; a failed SIGSTOP must not block the vet.
+  } catch {
+    paused = false;
+  }
+  try {
+    return fn();
+  } finally {
+    if (paused) {
+      try {
+        workerResumeFn();
+        // rule-6: handled-locally — resume must always be attempted; a failed SIGCONT is logged by the seam, never thrown, so the finally cannot mask the vet result.
+      } catch {
+        /* the seam logs; never leave the worker stopped silently */
+      }
+    }
+  }
+}
+
+/**
  * Default vet: isolated `git clone --shared` scratch dir (NEVER an in-repo
  * worktree — that flips core.bare on the live repo), PR merged onto
- * origin/main, full gate with --json.
+ * origin/main, full gate with --json. The gate runs load-shed (rule #6,
+ * Nygard 2018 bulkhead): the worker daemon is paused for the vet's duration
+ * and the vet itself is `nice`-de-prioritised so a timing-sensitive `vitest`
+ * cannot flake under host oversubscription (`decideLoadShed`).
  * @param {PrSnapshot} pr
  * @returns {{stdout: string} | {vetError: string}}
  */
 function defaultVet(pr) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-gate-"));
+  const shed = decideLoadShed({
+    niceness: VET_NICENESS,
+    noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
+  });
   try {
     const prep = prepareScratchClone(scratch, pr);
     if (prep) return prep;
-    const stdout = execFileSync(
-      "node",
-      ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"],
-      {
-        cwd: scratch,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: VET_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-      },
-    );
+    const stdout = withWorkerPaused(shed.pauseWorker, () => runVetNiced(scratch, shed.niceness));
     return { stdout };
   } catch (err) {
     return vetErrorToResult(err);
@@ -430,12 +568,58 @@ function bestEffortRmScratch(scratch) {
   }
 }
 
-/** @param {PrSnapshot} pr */
-function defaultMerge(pr) {
-  execFileSync("gh", ["pr", "merge", String(pr.number), "--squash", "--admin", "--delete-branch"], {
-    cwd: REPO,
-    encoding: "utf8",
-  });
+/**
+ * `git worktree list --porcelain` stdout, or `""` on probe error. Fail-open
+ * to `""` so a probe failure is read as "no pin" — `defaultMerge` then keeps
+ * `--delete-branch` and the post-hoc state oracle in `processOnePr` is still
+ * the backstop if a pin existed after all (rule #6: an infra hiccup must
+ * never make the merge over-cautious AND it must never silently swallow a
+ * real failure).
+ * @returns {string}
+ */
+function defaultWorktrees() {
+  try {
+    return execFileSync("git", ["-C", REPO, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+    });
+    // rule-6: handled-locally — a worktree-list probe failure (git error/none) is read as "no pin"; `--delete-branch` stays and the state oracle backstops.
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Pure: the `gh pr merge` argv for one PR. `--delete-branch` is appended
+ * only when the head branch is NOT worktree-pinned — a pinned branch's
+ * local `git branch -d` would throw on already-merged-but-pinned refs, so
+ * we leave its cleanup to the worktree teardown (rule #6). Extracted from
+ * `defaultMerge` so the pin → argv decision is exercisable without spawning
+ * `gh` (rule #2 / rule #10 — same input ⇒ same argv).
+ * @param {PrSnapshot} pr
+ * @param {boolean} pinned
+ * @returns {string[]}
+ */
+export function mergeArgs(pr, pinned) {
+  const args = ["pr", "merge", String(pr.number), "--squash", "--admin"];
+  if (!pinned) args.push("--delete-branch");
+  return args;
+}
+
+/**
+ * Squash-admin-merge one PR. When the PR head branch is checked out in a
+ * `git worktree` (the parallel-worker swarm provisions `.claude/worktrees/`
+ * checkouts), the head ref is PINNED — `gh pr merge --delete-branch` would
+ * server-merge fine but then throw on the local `git branch -d`. So we
+ * detect the pin first and drop `--delete-branch` in that case, leaving the
+ * incidental branch cleanup to be reaped when the worktree is torn down
+ * (rule #6: cleanup never gates the merge result). Non-pinned branches keep
+ * `--delete-branch` (the common path). `worktreesFn` is injected for tests.
+ * @param {PrSnapshot} pr
+ * @param {() => string} [worktreesFn]
+ */
+function defaultMerge(pr, worktreesFn = defaultWorktrees) {
+  const pinned = headBranchPinnedByWorktree(worktreesFn(), pr.headRefName);
+  execFileSync("gh", mergeArgs(pr, pinned), { cwd: REPO, encoding: "utf8" });
 }
 
 /**
@@ -538,20 +722,14 @@ function prepareScratchCloneForBranch(scratch, branchName) {
  */
 function defaultVetLocalBranch(branchName) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-land-"));
+  const shed = decideLoadShed({
+    niceness: VET_NICENESS,
+    noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
+  });
   try {
     const prep = prepareScratchCloneForBranch(scratch, branchName);
     if (prep) return prep;
-    const stdout = execFileSync(
-      "node",
-      ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"],
-      {
-        cwd: scratch,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: VET_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-      },
-    );
+    const stdout = withWorkerPaused(shed.pauseWorker, () => runVetNiced(scratch, shed.niceness));
     return { stdout };
   } catch (err) {
     return vetErrorToResult(err);
@@ -581,6 +759,34 @@ function defaultLandBranch(branchName) {
     cwd: REPO,
     encoding: "utf8",
   });
+}
+
+/**
+ * Pure: is `headRefName` checked out in some `git worktree`? Parses the
+ * stanza-per-worktree `git worktree list --porcelain` output — each stanza
+ * is blank-line separated and carries a `branch refs/heads/<name>` line
+ * when (and only when) that worktree holds a branch (a detached/bare
+ * worktree carries `detached`/`bare` instead). A branch held by a worktree
+ * pins its ref, so a post-merge `git branch -d <name>` (which `gh pr merge
+ * --delete-branch` runs locally) FAILS with
+ * `cannot delete branch '…' used by worktree at '…'` — the canonical
+ * #580 false-negative (TASKS.md `gate-merge-delete-branch-vs-worktree-
+ * pin`). Detecting the pin BEFORE the merge lets `defaultMerge` drop
+ * `--delete-branch`, so the merge never throws on incidental cleanup
+ * (rule #6: cleanup is best-effort, never gates the result) and the
+ * conductor records `merged` directly — the proactive complement to the
+ * post-hoc state-oracle recovery in `processOnePr`.
+ * @param {string} porcelain  `git worktree list --porcelain` stdout
+ * @param {string} headRefName  the PR head branch name (no `refs/heads/`)
+ * @returns {boolean}
+ */
+export function headBranchPinnedByWorktree(porcelain, headRefName) {
+  if (!headRefName) return false;
+  const target = `refs/heads/${headRefName}`;
+  for (const line of porcelain.split("\n")) {
+    if (line.trim() === `branch ${target}`) return true;
+  }
+  return false;
 }
 
 /**

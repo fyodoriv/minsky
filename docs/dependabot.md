@@ -1,6 +1,6 @@
 # Dependabot
 
-Minsky uses Dependabot for automated dependency updates. Config: [`.github/dependabot.yml`](../.github/dependabot.yml).
+Minsky uses Dependabot for automated dependency updates. Config: [`.github/dependabot.yml`](../.github/dependabot.yml). This file covers the *mechanics* (schedule, grouping, merge gate); the *decision* layer — which bumps auto-merge vs need the operator — lives in [`docs/dependency-policy.md`](dependency-policy.md).
 
 ## Schedule
 
