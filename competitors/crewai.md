@@ -153,6 +153,42 @@ Based on releases (v1.13.0, v1.14.5) + recent blog posts:
 
 The pivot scenario that would change this answer: if CrewAI publishes a coding-specific variant (`crewai-code` or similar) with first-class git workflow + test runner + PR-shaped output, OR if their A2A protocol becomes the industry-standard agent-handoff format and Minsky benefits from speaking A2A natively. Either would re-open this analysis.
 
+## Five pivot questions
+
+### 1. How is it different from Minsky?
+
+CrewAI is a **general-purpose, stateless-per-run Python framework** for composing role-playing agents into Crews/Flows; Minsky is a **coding-specific, 24/7 daemon** that walks a fleet of existing repos and ships PR-shaped changes under a constitution. The intents are orthogonal: CrewAI's value is letting an application developer wire role/goal/backstory agents into a workflow that runs when called (`crew.kickoff(inputs)`); Minsky's value is that the operator attaches a fleet and walks away while the loop self-improves indefinitely. CrewAI has no "watch a TASKS.md queue forever" mode, no git-native PR output (code execution is deprecated; GitHub integration is AMP-only and API-level), and no closed-loop self-tuning — its "reasoning agents" reflect once per task and are static thereafter. They sit at adjacent tiers: CrewAI is an orchestrator-tier *framework* (a library an app is built with); Minsky is an orchestrator-tier *product* (a daemon you run).
+
+### 2. What lessons can it give to us?
+
+- **2.1 Hierarchical, LLM-analyzed memory is a real architecture, not a nicety.** `unified_memory.py`'s scoped recall (short-term / long-term / entity / contextual, with adaptive-depth scoring) is more sophisticated than Minsky's git + TASKS.md + experiment-store substrate. Worth evaluating as a design pattern for `claude-handoff-spec` (per-task short-term vs project-wide long-term). Traces to rule #1 (steal the pattern) + the M2 handoff work.
+- **2.2 Event-driven state machines (Flows) map cleanly to phased control loops.** CrewAI positions Flows (`@start` / `@listen` / `@router` + explicit Pydantic state) as the *production* architecture, with autonomous Crews embedded as units of work. Minsky's cross-repo-runner is procedural; a Flows-style state machine might express MAPE-K phases (Monitor → Analyze → Plan → Execute) more legibly. Traces to rule #5 (named patterns) + rule #8 (pattern conformance).
+- **2.3 Manager-agent delegation is a proven production shape.** Automatic-or-custom manager agents that delegate + validate (PwC, DocuSign) is a battle-tested pattern Minsky has no built-in for (OMC handles persona routing). Traces to rule #1.
+
+### 3. Are any of these lessons potentially vision-changing?
+
+**No vision-changing finding.** All three lessons are *engineering-discipline / borrowable-pattern* level — none challenges `vision.md § What Minsky is` or any of the 17 rules, and none threatens the 6 moats. CrewAI is general-purpose orchestration with deprecated code execution and AMP-only, API-level GitHub access; it does not subsume Minsky's coding-specific daemon loop, constitutional gate, operator-machine identity, or cross-repo fleet. The framework-vs-product framing the task pre-registered resolves cleanly to "Minsky is the product/daemon; CrewAI is a framework whose best ideas (hierarchical memory, Flows, manager-agent delegation) are portable as patterns Minsky can STEAL without wrapping." A negative (no-vision-change) finding is the expected output of the deep-research convention for a different-tier general-purpose framework; the orchestrator records operator questions centrally (this task does not edit `ask-human.md`). The one scenario that would re-open this is pre-registered in the wrap analysis below: a coding-specific CrewAI variant with first-class git/test/PR output, or A2A becoming the industry-standard handoff protocol.
+
+### 4. How can we improve our strategy based on this?
+
+- **Evaluate hierarchical memory for the handoff spec, don't rebuild it blind** — keep the `research-finding-hierarchical-memory-architecture` task alive and scope a concrete experiment for `claude-handoff-spec` M2 (short-term per-task vs long-term project-wide scopes). Borrow the architecture as a pattern, not the framework. Traces to lesson §2.1 + rule #1.
+- **Consider a Flows-style state-machine framing for MAPE-K phases** — when the procedural cross-repo-runner is next refactored, evaluate expressing the Monitor/Analyze/Plan/Execute phases as explicit state transitions (legibility + resumability) rather than straight-line procedure. Traces to lesson §2.2 + rules #5/#8.
+- **Note manager-agent delegation as a future OMC routing shape** — if Minsky ever needs intra-task delegation, CrewAI's automatic/custom manager pattern is the proven reference to copy rather than invent. Traces to lesson §2.3 + rule #1.
+
+### 5. Can and should we cut corners by replacing part of Minsky with this?
+
+For each Minsky surface:
+
+- **tick-loop**: KEEP — CrewAI is stateless per `kickoff()` with no 24/7 cross-repo daemon, no TASKS.md-style durable queue. Nothing to replace.
+- **MAPE-K**: KEEP — "reasoning agents" reflect once per task; there is no online observe-tune loop over a running fleet. Flows is borrowable as a *framing* (lesson §2.2), not a replacement for the MAPE-K substrate.
+- **adapters / agent backend**: DO-NOT-WRAP — CrewAI is a Python framework, not a spawnable headless coding-CLI backend; code execution is deprecated. Wrapping it means still building the git workflow + test runner + PR output ourselves (see `## Should we wrap CrewAI instead?`). OpenHands remains the runtime wrap target.
+- **memory / handoff substrate**: EVALUATE-TO-ABSORB — `unified_memory.py`'s hierarchical scopes are the one genuinely-better component; absorb as a pattern for `claude-handoff-spec`, not by swapping in the framework.
+- **constitution-as-CI / lint stack**: KEEP — CrewAI's guardrails are optional + advisory; this gate is what lets Minsky run unattended.
+- **corpus / scorecard**: KEEP (do NOT add) — CrewAI has published no vendor-primary HumanEval/MBPP/SWE-bench score; the PwC 10%→70% case measures orchestration, not agent capability. Adding a fabricated/adoption-proxy reading would violate rule #4 (this keeps `corpus-add-crewai` blocked, as documented above).
+- **dashboard / TASKS.md surface / identity / fleet**: KEEP — operator surface is Python + AMP web UI with a SaaS credential vault; none matches Minsky's version-controlled markdown queue + direct operator-machine identity.
+
+**Total replace % across all surfaces: 0% replacement; 1 DO-NOT-WRAP (the agent backend — CrewAI is a framework, not a headless coding CLI) + 1 EVALUATE-TO-ABSORB (hierarchical memory as a handoff-spec pattern).** Headline for the operator: *nothing in Minsky to replace; CrewAI is an adjacent-tier general-purpose framework whose best ideas (hierarchical memory, Flows, manager-agent delegation) Minsky steals as patterns rather than wrapping. The wrap doesn't pay off because CrewAI doesn't replace the LLM-as-coding-agent piece, and its 6-moat-after-wrap is the same 6 moats as today.*
+
 ## Last reviewed
 
-2026-05-22 (deep-dive refresh — CrewAI AMP production architecture, 2B execution milestone, $18M funding, Flows / Crews distinction, coding-fit assessment, vendor-benchmark gating for `corpus-add-crewai`); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive.
+2026-05-22 (deep-dive refresh — CrewAI AMP production architecture, 2B execution milestone, $18M funding, Flows / Crews distinction, coding-fit assessment, vendor-benchmark gating for `corpus-add-crewai`); 2026-05-22 wrap-feasibility analysis added per rule #1 + operator directive; 2026-06-02 (`competitor-deepen-crewai`) — added `## Five pivot questions` (Five Pivot Questions framework): verdict 0% replace, DO-NOT-WRAP the agent backend (framework, not a headless coding CLI), EVALUATE-TO-ABSORB hierarchical memory for `claude-handoff-spec`; no vision change (negative finding; orchestrator records operator questions centrally — this task does not edit `ask-human.md`).
