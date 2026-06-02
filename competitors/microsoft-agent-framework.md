@@ -92,6 +92,49 @@ Re-run this analysis when ANY of these fire:
 3. **MAPE-K substrate ships closed-loop A/B prompt tuning (L2 from `user-stories/003`)** and Minsky's autonomic layer becomes structurally similar to MAF's graph-workflow checkpointing. Re-evaluate whether folding MAPE-K onto MAF's graph runtime is cheaper than maintaining our own.
 4. **A 5th cloud agent is added to `~/.minsky/config.json` via the MAF SDK** — at that point, the wrap-feasibility math changes because the per-machine matrix expands.
 
+## Five pivot questions
+
+### 1. How is it different from Minsky?
+
+MAF is a **cross-language framework you embed in an application** — `agent-framework-core` + the foundry/anthropic subpackages owned by a .NET or Python host process that runs the graph workflow in-process. Minsky is an **orchestrator-tier 24/7 TypeScript daemon** that attaches to N repos, drains TASKS.md, spawns a short-lived per-task agent process per iteration, and refuses to merge any agent's output that fails the 18-rule constitution. The defining structural difference is the *outer loop, the fleet, and the gate*: MAF's graph workflow runs when triggered and stops at the terminal node; Minsky never stops, walks `--hosts-dir` in round-robin, picks the next task itself, and self-governs. MAF (via the former MagenticOne) models *one workflow's* multi-agent plan with a critic + verifier; Minsky models a *fleet's* task selection plus a CI merge gate. The closest overlap is MAF's checkpoint-based time-travel debugging — but that persists *one execution's* state, not *across all prior runs on a host*, which is the MAPE-K substrate's job. The two are not peers: MAF is the kind of in-process workflow engine an orchestrator might embed, not an orchestrator.
+
+### 2. What lessons can it give to us?
+
+- **OTEL as a first-class concern, not a bolt-on** (MAF ships built-in distributed tracing + structured event log) — confirms Minsky's `novel/adapters/observability/` bet (rule #4, pattern-conformance row 24). Lesson: match MAF's OTEL span schema where cross-system compatibility is cheap, so a future bridge to a MAF-hosted agent emits comparable traces.
+- **Checkpoint-based time-travel debugging** (MAF persists graph state per super-step for replay) — structurally the same durability primitive LangGraph exposes. Lesson: Minsky's `.minsky/orchestrate.jsonl` is already event-sourced at the iteration boundary, so the replay capability is latent and free; keep matching the one-record-per-super-step granularity.
+- **Graph-based declarative workflow expression** (formerly AutoGen GraphFlow, now MAF graph workflows) — declarative DAGs as an alternative to imperative orchestration. Lesson: note the *pattern* for the future `claude-handoff-spec` substrate design without adopting the runtime — same play as adopting OTEL without adopting a vendor.
+- **Microsoft folding AutoGen + Semantic Kernel into one framework is a cautionary tale about framework gravity** — once you embed MAF, the operator surface becomes .NET attributes / workflow YAML, not markdown. Lesson: a framework that wants to own the agent loop in-process puts operator-machine identity and the TASKS.md surface at risk; Minsky's daemon-not-framework choice (moat #1) is the deliberate inverse and must stay that way.
+
+### 3. Are any of these lessons potentially vision-changing?
+
+**No vision rewrite is forced today.** The task's Hypothesis was: *MAF (evolution of AutoGen + Magentic-One) is the enterprise-backed orchestrator competitor; Q5 should grade replace-tick-loop-with-Magentic-One, and Q3 should answer whether Microsoft's roadmap forces Minsky to commit to a specific runtime or stay runtime-agnostic.* Examined against the pre-registered Pivot (*if Magentic-One's Orchestrator covers Minsky's MAPE-K layer, file a vision-threat for the MAPE-K module home*):
+
+- **Magentic-One's Orchestrator does NOT cover the MAPE-K layer.** MAF's multi-agent planning (former MagenticOne) is a *per-execution* critic-plus-verifier over one workflow's sub-agents; MAPE-K's Monitor → Analyze → Plan → Execute loop runs *across all prior iterations on a host* (the experiment-store + observer + spec-monitor). The pre-registered Pivot trigger — "covers Minsky's MAPE-K layer" — is **not met**, so the directive is exactly what the Pivot pre-registered's inverse implies: **build MAPE-K ourselves, do not fold it onto Magentic-One.**
+- **The runtime-commitment question (Q3) resolves to: stay runtime-agnostic.** Microsoft's roadmap (v1.0 graph workflows, checkpointing, A2A bridge) is an *in-process .NET/Python* commitment. Adopting it would force Minsky off the TypeScript substrate it shares with tasks.md + agentbrew, and off the Claude Code Max economy onto API billing — two constitutional violations. The honest answer: Microsoft's roadmap does NOT force Minsky to commit to a runtime; it reinforces the runtime-agnostic daemon shell that spawns whatever agent the operator configures.
+- **The maximal version of the threat does not dissolve the moat.** Even a full MAF wrap leaves only 2 of 6 moats standing (per § "Should we wrap" table) — and the strongest sub-case (agent-tier orchestration) is already dominated by OpenHands per the Path C plan. This is a negative finding (no vision-threat question filed), recorded here per this task's central-questions routing rather than by editing `ask-human.md`.
+
+### 4. How can we improve our strategy based on this?
+
+- **Pin the OTEL span-schema compatibility note** — keep matching MAF's OTEL conventions in `novel/adapters/observability/` where cheap, so a future bridge to a MAF-hosted agent is a thin adapter, not a rewrite. Traces to lesson §2.1.
+- **Keep the iteration record one-super-step-per-record** in `.minsky/orchestrate.jsonl` so MAF-style checkpoint replay/time-travel stays free if ever needed. Traces to lesson §2.2.
+- **Treat "embed a framework that owns the agent loop" as an explicit anti-requirement** — the daemon-not-framework moat (#1) and the operator-edits-markdown surface (#6) are the two assets a MAF wrap would dissolve; name them as deliberate design choices so no future integration quietly adopts an in-process-framework shape. Traces to lesson §2.4 + Q3.
+- **Watch the four re-evaluation triggers below** — they are the only conditions under which the wrap math changes; keeping them explicit is the cheap insurance. Traces to § "Trigger for re-evaluation".
+
+### 5. Can and should we cut corners by replacing part of Minsky with this?
+
+For each Minsky surface:
+
+- **tick-loop**: KEEP — MAF has no daemon / queue / cross-repo round-robin; its graph workflow runs one execution and stops. The durability sub-case it tempts you with (checkpoint replay) is already covered by the event-sourced `.minsky/orchestrate.jsonl`.
+- **MAPE-K**: KEEP (build ourselves) — Magentic-One's per-execution critic+verifier is not the across-runs autonomic loop; folding MAPE-K onto MAF's graph runtime imposes the .NET/Python tax and orphans the experiment-store + observer + spec-monitor layer. The pre-registered Pivot trigger ("covers MAPE-K") is not met.
+- **adapters / agent backend**: N/A — MAF's agent-tier orchestration (former MagenticOne) is dominated by OpenHands' DelegateTool + TaskToolSet + AgentDefinition per the [Path C plan](../docs/plans/2026-05-22-path-c-openhands-reshape.md); adding MAF as a 5th `cloud_agent` would compete with an integration that's already cheaper.
+- **sandbox**: N/A — MAF runs in-process; OS-level isolation stays Minsky's job.
+- **constitution / merge gate**: KEEP — MAF defines workflow behaviour, not policy. The 18-rule constitutional gate (moat #3) has no analog; MAF's cost controls + audit logging are compliance features, not PR-merge governance.
+- **cross-repo fleet**: KEEP — `--hosts-dir` round-robin (moat #5) has no MAF equivalent; a graph workflow runs on one input.
+- **corpus / scorecard**: N/A — MAF is a benchmarked orchestrator-tier peer in `competitors/README.md`, intentionally a *competitor* record (it subsumes the retired AutoGen entry), not a dependency-candidate; it stays in the M1.10 corpus denominator.
+- **TASKS.md surface / fleet dashboard**: KEEP — operators edit markdown; MAF expects workflow YAML / .NET attributes, a steeper learning curve for the same delivery surface, and it has no fleet dashboard.
+
+**Total replace % across all surfaces: 0% — STRUCTURAL MISMATCH.** The honest headline for the operator: *nothing in the orchestrator to replace; the two tempting sub-cases (checkpoint replay, Magentic-One multi-agent planning) are already absorbed — replay as event-sourcing over `.minsky/orchestrate.jsonl`, planning as the approved OpenHands Path C wrap; the .NET/Python stack tax plus the API-billing economy mismatch make a wrap a net negative (2/6 moats); the four re-evaluation triggers below are the only conditions that change the math.*
+
 ## Pin / integration
 
 Not a dependency. No adapter. Watch their OTEL span schemas for compatibility.
@@ -105,6 +148,6 @@ Not a dependency. No adapter. Watch their OTEL span schemas for compatibility.
 
 ## Last reviewed
 
-2026-05-23 — wrap-feasibility analysis added per rule #1 + the Phase 7 discipline encoded in `.claude/skills/competitor-research/SKILL.md`. AutoGen brand retired (Microsoft folded it into MAF v1.0, April 2026); MAF subsumes the AutoGen primitives and is the canonical entity for wrap analysis going forward. Verdict: STRUCTURAL MISMATCH (orchestrator-tier wrap fails moat threshold 2/6; agent-tier sub-case dominated by OpenHands per the Path C plan).
+2026-06-02 — deepened with the `## Five pivot questions` framework per task `competitor-deepen-microsoft-agent-framework`. Verdict: STRUCTURAL MISMATCH (0% replace across all surfaces). The pre-registered Pivot trigger (*Magentic-One's Orchestrator covers Minsky's MAPE-K layer → file a vision-threat for the MAPE-K module home*) is **not met** — Magentic-One is a per-execution critic+verifier, not the across-runs autonomic loop — so the directive is to **build MAPE-K ourselves**, not fold it onto Magentic-One. Q3 (runtime-commitment) resolves to **stay runtime-agnostic**: Microsoft's in-process .NET/Python roadmap does not force a runtime commitment; it reinforces the daemon-shell-spawns-any-agent shape. Negative finding — no vision-threat question filed (recorded inline per this task's central-questions routing rather than editing `ask-human.md`). The four re-evaluation triggers above remain the only conditions that change the wrap math.
 
-Earlier reviews: 2026-05-03 (initial deep-dive — strengths, gaps, what we extract, why we don't use it).
+Earlier reviews: 2026-05-23 — wrap-feasibility analysis added per rule #1 + the Phase 7 discipline encoded in `.claude/skills/competitor-research/SKILL.md`. AutoGen brand retired (Microsoft folded it into MAF v1.0, April 2026); MAF subsumes the AutoGen primitives and is the canonical entity for wrap analysis going forward. Verdict: STRUCTURAL MISMATCH (orchestrator-tier wrap fails moat threshold 2/6; agent-tier sub-case dominated by OpenHands per the Path C plan). 2026-05-03 — initial deep-dive (strengths, gaps, what we extract, why we don't use it).
