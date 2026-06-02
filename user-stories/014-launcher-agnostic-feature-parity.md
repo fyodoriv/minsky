@@ -41,11 +41,11 @@ The runtime invariant is: **whatever the agent-chat door looked like, the room b
 - **Name**: `launcher-agnostic-runtime-divergence-count`
 - **Definition**: Count of distinct runtime-observable deltas (iteration-log shape, picker decision under identical input, OpenHands envelope fields, pre-pr-lint stage list, `~/.minsky/` layout) between two Minsky installs on the same OS+repo+task driven by two different launcher agents.
 - **Threshold**: `0` (iron) — any non-zero count is a violation. The only permitted delta is the `agent` string in the telemetry-consent record (which records *who turned the doorknob*, not *who lives in the room*).
-- **Source**: `scripts/check-launcher-agnostic-parity.mjs` (P1 task — see TASKS.md `launcher-agnostic-feature-parity-chaos-test`). Diffs two Minsky installs driven by two stubbed launchers against the same fixture repo and exits 1 on any non-allowlisted delta.
+- **Source**: `test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — closes TASKS.md `launcher-agnostic-feature-parity-chaos-test`). The chaos test installs Minsky twice through the same INSTALL.md steps driven by two stubbed launchers (`test/fixtures/launchers/fake-claude.mjs`, `fake-cursor.mjs`) against the same fixture repo, builds normalized snapshots via `scripts/snapshot-minsky-install.mjs` (config.json + telemetry-consent.json + `minsky --help` subcommand set + the OpenHands spawn envelope built purely from config), and fails on any delta other than the allowlisted `telemetryConsent.agent`. A `scripts/check-launcher-agnostic-parity.mjs` static-analysis lint is the named P1 follow-up (Pivot path) if the chaos fixture ever grows past 500 LOC.
 
 ## Integration test
 
-`test/chaos/launcher-agnostic-feature-parity.test.ts` (filed as P1 task `launcher-agnostic-feature-parity-chaos-test`):
+`test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — closes P1 task `launcher-agnostic-feature-parity-chaos-test`):
 
 1. Create a temp fixture repo with `TASKS.md` containing one P3 trivial task.
 2. Stub two "launcher agents" — `fake-claude` and `fake-cursor` — that each invoke the canonical `INSTALL.md` runbook against the fixture in mock mode. Both run on the same OS, same Node, same pnpm, same git, same model (`ollama_chat/qwen3-coder:30b`).
@@ -65,7 +65,7 @@ The runtime invariant is: **whatever the agent-chat door looked like, the room b
 
 | Failure mode | Trigger / fault axis | Expected behavior | Chaos test |
 |---|---|---|---|
-| Launcher injects `.claude/` or `.cursor/` config that the runtime accidentally reads | Operator installs from Claude Code, daemon then reads `.claude/skills/*` for the OpenHands agent runtime | `circuit-break-and-notify` — `launcher-agnostic` invariant in `minsky doctor` fires; daemon refuses to spawn until the leak is closed | `test/chaos/launcher-agnostic-feature-parity.test.ts` (this story's primary test) |
+| Launcher injects `.claude/` or `.cursor/` config that the runtime accidentally reads | Operator installs from Claude Code, daemon then reads `.claude/skills/*` for the OpenHands agent runtime | `circuit-break-and-notify` — `launcher-agnostic` invariant in `minsky doctor` fires; daemon refuses to spawn until the leak is closed | `test/chaos/launcher-agnostic-feature-parity.test.ts` (**shipped** — this story's primary test) |
 | Two installs differ in `~/.minsky/config.json` defaults across launchers | INSTALL.md was patched per-launcher and accidentally writes different defaults | `loud-crash-supervisor-restart` — the parity diff in the chaos test fails CI; PR cannot land | same test, snapshot-diff path |
 | OpenHands env-var contract leaks launcher identity | An iteration env spawned by the daemon contains `MINSKY_LAUNCHER=claude-code` | `circuit-break-and-notify` — `minsky doctor` detects the env leak; iteration fails fast with a one-line diagnostic | `test/chaos/openhands-env-no-launcher-leak.test.ts` (sub-slice of the chaos test task) |
 | Telemetry-consent record reuses a field for runtime branching | A future PR adds `if (consent.agent === "claude-code") { ... }` to runtime code | `circuit-break-and-notify` — the parity chaos test catches the divergence in step (4) and rejects | same test |
