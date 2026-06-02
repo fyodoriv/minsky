@@ -68,6 +68,94 @@ minsky stop     → SIGTERM both conductor and workers
 The conductor uses a self-scheduling `setTimeout` loop (never `while(true)`)
 so `minsky stop` always finds a clean shutdown point.
 
+## Self-restart with bounded wall-clock ceiling
+
+<!-- scope: human-approved `runany-self-restart-bounded-timelimit` (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
+
+Operator-facing reference for how a zero-arg run survives crashes — and how
+it stops. The run auto-restarts on any crash with an escalating, capped
+backoff that resets after a sustained-healthy window, and stops cleanly once
+a hard wall-clock ceiling is reached (rule #6 — stay alive, but bounded). No
+zombie, no infinite restart past the deadline.
+
+### Two-layer supervisor (compose, don't duplicate — rule #1)
+
+Restart is split across the OS supervisor and the conductor's own boot gate.
+launchd alone cannot escalate a backoff (`ThrottleInterval` is a single flat
+number), so the escalation lives with the thing being retried (Beyer SRE 2016
+— the retry budget belongs to the retried process, not the supervisor):
+
+| Layer | Owns | Where |
+|-------|------|-------|
+| launchd `KeepAlive{SuccessfulExit:false}` | respawn on **non-zero** exit only (OTP "transient", Armstrong 2007) | `distribution/launchd/com.minsky.runany.plist` |
+| launchd `ThrottleInterval` | flat minimum gap between respawns (5s floor) | same plist |
+| Conductor in-process boot gate | the escalating, capped, reset-on-health backoff + the supervised-run deadline origin | `decideStartupThrottle` in `scripts/restart-supervisor.mjs`, wired in `scripts/orchestrate.mjs` |
+| Conductor in-process deadline guard | clean stop (exit 0) at the wall-clock ceiling | `scripts/orchestrate.mjs` `schedule()` |
+
+A clean exit 0 at the deadline is a **true terminal stop**: launchd's
+`SuccessfulExit:false` policy does not respawn a zero exit, so the run ends.
+
+### Backoff ladder
+
+The default escalating, capped ladder is `[5s, 30s, 300s]` — the last entry
+is the cap, so every further consecutive restart waits 300s. It composes the
+existing tick-loop `tick-loop-backoff-schedule` anchor rather than introducing
+a second drifting schedule. After the conductor stays continuously healthy for
+the reset window (default 20m), the next crash is treated as fresh and the
+ladder restarts at base — a recovered run is not penalised forever for a
+long-past crash-loop. The ladder + origin are read from a single persisted
+state file (`.minsky/runany-restart-state.json`) at boot; an absent or corrupt
+file degrades to a clean first-run (rule #7), never a throw that would defeat
+the supervisor.
+
+### The deadline is bounded across restarts
+
+The ceiling is measured against the **supervised-run origin** (persisted across
+launchd respawns), not the current process life — otherwise a crash-loop would
+earn a fresh ceiling on every respawn and the deadline would never bite. The
+one exception is a sustained-health reset, which earns a fresh wall-clock budget
+along with a fresh backoff ladder (documented tradeoff — keeps a long-lived run
+that crashes once at hour 9 from being killed by that 9-hours-ago crash).
+
+### Operator knobs (all `<n>s|m|h`; a typo'd value falls back to the default — rule #7)
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `MINSKY_RUN_TIME_LIMIT` | `10h` | hard wall-clock ceiling; conductor exits 0 at/after it and is not respawned |
+| `MINSKY_HEALTHY_RESET` | `20m` | sustained-healthy window that resets the backoff ladder to base |
+| `MINSKY_NO_STARTUP_BACKOFF` | unset | `=1` skips the boot sleep (state tracking still runs); for tests/CI and fast operator runs that must not block on a 300s backoff |
+
+### Why the plist is named `.plist`, not `.plist.tmpl`
+
+`com.minsky.runany.plist` carries the `${MINSKY_HOME}` envsubst placeholder
+like every other `com.minsky.*.plist` unit, so it is a template in spirit. It
+keeps the bare `.plist` suffix (not `.plist.tmpl`) because `setup.sh`'s Darwin
+`*.plist` glob renders and bootstraps it; a `.tmpl` suffix would make the unit
+inert and the supervisor would never start. The unit file's own header comment
+pins this decision.
+
+### Measurement (pre-registered, rule #9)
+
+The task's Success threshold is evaluated deterministically by a chaos
+harness — committed before the result is observed (Munafò et al. 2017,
+Basiri et al. 2016 steady-state hypothesis). The harness is a pure
+discrete-event simulation over a virtual clock (no real spawn/kill — that
+would be flaky and machine-dependent), driving the same pure `decideRestart`
+core the production boot gate uses:
+
+```bash
+node scripts/chaos-restart-schedule.mjs --json
+# → {"schedule_followed":true,"reset_on_health":true,
+#    "stopped_at_limit":true,"restarts_after_limit":0}
+node scripts/chaos-restart-schedule.mjs          # human summary
+```
+
+Exit code is `0` only when all four observables hold: the backoff intervals
+follow the escalating ladder, a sustained-healthy window resets the ladder to
+base, the run stops within `600±30s` under `MINSKY_RUN_TIME_LIMIT=600s`, and
+zero restarts fire after the deadline. A regression in the decision core
+becomes an exit-1 gate break, not a silent mis-restart.
+
 ## Per-iteration provider decision
 
 <!-- scope: human-approved `runany-dynamic-model-or-local-fallback` slices 1+2 (P0 operator 2026-05-16 directive; this file is the operator-facing reference the task's Files list calls for). -->
