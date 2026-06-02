@@ -67,4 +67,9 @@ The daemon watches this file, unblocks the asking agent the instant `PENDING` is
   Format spec is in the "How to use this file" section above.
 -->
 
-<!-- No entries yet. First wave of competitor deep-dive Qs will be appended here as the P0 `competitor-deepen-<id>` tasks complete. -->
+### Qpragent1
+
+ts: 2026-06-01 23:30
+q: no vision-threat — FYI / audit entry, no decision required. Competitor research for Qodo PR-Agent (`competitor-add-pr-agent`, P0) found a clean CATEGORY MISMATCH: PR-Agent is a per-PR event-driven reviewer, not a repo supervisor. All six Minsky moats survive a hypothetical wrap (6/6). The only extractable value is the PR-review prompt strategy + PR-Compression technique, filed as P3 `extract-pr-agent-review-prompt-pattern`. No `vision.md` section is threatened.
+ctx: competitor: pr-agent. vision section threatened: none. what they do instead: PR-Agent reacts to an existing PR via webhook and posts a structured review/improve comment; it owns one node of Minsky's loop (the review), not the loop itself. source: `competitors/pr-agent.md` § Five pivot questions; <https://github.com/qodo-ai/pr-agent>. recommendation: reject as off-strategy (different category) — extract the review-prompt pattern only; no pivot, no absorb of the runtime.
+answer: PENDING

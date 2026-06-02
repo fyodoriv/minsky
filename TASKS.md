@@ -775,18 +775,6 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Measurement**: `test -f competitors/auto-code-rover.md && grep -c '^## Post-mortem' competitors/auto-code-rover.md` ≥ 1.
   - **Anchor**: rule #1; AutoCodeRover paper arXiv:2404.05427 ISSTA 2024 (Zhang et al.); `https://github.com/AutoCodeRoverSG/auto-code-rover`.
 
-- [ ] `competitor-add-pr-agent` — research Qodo PR-Agent (qodo-ai/pr-agent, 11.3k★, alive); produce `competitors/pr-agent.md` + emit vision-threats to `ask-human.md`
-  - **ID**: competitor-add-pr-agent
-  - **Touches**: competitors/pr-agent.md, ask-human.md
-  - **Competitive-goal**: drives `published-readings-corpus-coverage` toward 100% (MILESTONES.md M1.10) — this competitor entry is required for the weekly competitive scorecard's denominator; without it the auto-filed `corpus-refresh-*` task family keeps surfacing.
-  - **Tags**: p0, milestone-m1, rule-1, competitive, deep-research, add-new, observed-2026-05-24
-  - **Milestone**: M1
-  - **Hypothesis**: PR-Agent is an event-driven PR review/fix bot — fundamentally a different category from Minsky's repo-supervisor. Q5 mostly N/A; Q2 may extract the PR-review-prompt strategy.
-  - **Success**: `competitors/pr-agent.md` created.
-  - **Pivot**: trivial — different category.
-  - **Measurement**: `test -f competitors/pr-agent.md && grep -c '^## Five pivot questions' competitors/pr-agent.md` ≥ 1.
-  - **Anchor**: rule #1; `https://github.com/qodo-ai/pr-agent`.
-
 - [ ] `competitor-deepen-cursor-agent` — apply Five Pivot Questions framework to Cursor Background Agents (commercial); deepen `competitors/cursor-agent.md` and emit any vision-threats to `ask-human.md`
   - **ID**: competitor-deepen-cursor-agent
   - **Touches**: competitors/cursor-agent.md, ask-human.md
@@ -3333,6 +3321,18 @@ Each task is a checkbox line + indented metadata fields. Metadata fields agents 
   - **Acceptance**: (1) measurement command returns `0`; (2) `competitors/README.md` Deep-research backlog table is updated to show each entry as moved-to-adopted, moved-to-competitor, or marked-not-applicable with reason; (3) Agentless row exists in `novel/competitive-benchmark/src/competitors.ts`; (4) a fresh reviewer reading each of the 4 final entries cold reaches the same Relationship verdict; (5) all literature citations resolve to real, primary sources (rule #5 anchor-primary-source lint passes).
 
 ## P3
+
+- [ ] `extract-pr-agent-review-prompt-pattern` — add a prompt-only PR self-review pass (modelled on Qodo PR-Agent's `/review` + `/improve` structure and its PR-Compression technique) that a Minsky agent runs on its own diff BEFORE `gh pr create`, so over-budget or sloppy diffs are caught by the agent itself rather than at human review time
+  - **ID**: extract-pr-agent-review-prompt-pattern
+  - **Tags**: p3, competitive, rule-1, prompt-strategy, scout-finding, observed-2026-06-01
+  - **Milestone**: M1
+  - **Touches**: <none>
+  - **Surfaced-by**: `competitor-add-pr-agent` research (2026-06-01) — `competitors/pr-agent.md` § "What we extract or learn". PR-Agent's review prompts (effort estimate → security → ranked de-duplicated suggestions) and its prioritise-by-change-density PR-Compression strategy are the only extractable value from PR-Agent; the runtime is rejected (category mismatch). Extracting the PATTERN (not the framework) honours rule #1.
+  - **Hypothesis**: a structured self-review pass on the agent's own diff before opening the PR raises the autonomous-merge rate (fewer human-requested-changes round-trips) without adding a framework dependency. The pass is prompt-only, reusing PR-Agent's published review structure + PR-Compression for large diffs.
+  - **Success**: a documented self-review prompt/step exists and is referenced from the agent brief; large diffs are compressed before review per PR-Compression.
+  - **Pivot**: if the self-review pass adds latency without measurably reducing human-change-requests over a sample of ≥10 PRs, drop it — the existing `Hypothesis self-grade` block already covers minimal self-reflection.
+  - **Measurement**: human-requested-change rate on daemon PRs before vs after the self-review pass (sample ≥10 PRs each side); target a non-zero reduction.
+  - **Anchor**: rule #1 (extract the pattern, not the framework); `competitors/pr-agent.md` § Five pivot questions; <https://github.com/qodo-ai/pr-agent> (PR-Compression + `/review` prompt strategy).
 
 - [ ] `docs-frame-restore-across-allowlist` — restore the 3-beat reader-orientation doc frame (tagline / `## What this is` / `## What this is not`) across the 15 docs that have drifted since PR #685 originally applied it. The `docs-frame-coherence` lint shipped 2026-05-28 with a SHRUNKEN live allowlist (`AGENTS.md`, `INSTALL.md`, `docs/PRACTICES.md`) because the originally-targeted 18 docs no longer all conform: `README.md` was rewritten in PR #948 (5-min-install-guide cut); `MILESTONES.md` and `vision.md` never had the frame; all 16 `competitors/*.md` lack the frame; `ARCHITECTURE.md`, `DEPRECATED.md`, `research.md` were retired during Path-A. Re-apply the frame and lift each restored doc into the live allowlist.
   - **ID**: docs-frame-restore-across-allowlist
