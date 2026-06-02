@@ -67,6 +67,17 @@ const LEDGER = join(REPO, ".minsky", "local-gate-merge.jsonl");
 // (the keystone "run reliably for 10h" guarantee). Generous default
 // (25 min) tolerates a slow-but-finishing vet; env-tunable.
 const VET_TIMEOUT_MS = Number(process.env["MINSKY_GATE_VET_TIMEOUT_MS"] ?? 1500000);
+// Load-shed niceness applied to the scratch `--stage=full` vet (the
+// `vitest`-heavy step). The host runs the orchestrator + worker daemon +
+// other tenants concurrently at load ~14-26 on 10 cores (2026-05-17); a
+// timing-sensitive test flaked under that contention and produced a spurious
+// `gate red: vitest` SKIP of a clean MERGEABLE PR. `retry: 2` masks the
+// symptom; running the vet at a lower scheduler priority (and pausing the
+// worker daemon for the vet's duration — see `orchestrate.mjs`) removes the
+// cause (Nygard 2018 *Release It!* — resource contention / bulkhead).
+// Default 10 (de-prioritise vs. interactive); env-tunable. 0 disables the
+// nice wrapper (the documented opt-out for debugging, rule #16).
+const VET_NICENESS = Number(process.env["MINSKY_GATE_VET_NICENESS"] ?? 10);
 
 /**
  * @typedef {object} PrSnapshot
@@ -164,6 +175,40 @@ export function decideMerge(input) {
   }
   const brain = input.review ? ` + opus-approved (${input.review.reason})` : "";
   return { action: "merge", reason: `gate green on PR-merged-onto-main${brain}` };
+}
+
+/**
+ * Pure: decide how to shed competing host load for one scratch vet. The vet's
+ * `vitest` step is timing-sensitive; under 2-3x host oversubscription it flakes
+ * and produces a spurious `gate red: vitest` SKIP of a clean PR (2026-05-17).
+ * Two cooperative levers, both default-on (rule #16), both disable-able for
+ * debugging:
+ *   - `niceness`  — run the vet at a lower scheduler priority so the
+ *                   orchestrator/other tenants don't starve it of CPU
+ *                   (`MINSKY_GATE_VET_NICENESS`, 0 ⇒ no nice wrapper).
+ *   - `pauseWorker` — ask the caller's `pauseWorkerFn`/`resumeWorkerFn` seam to
+ *                   SIGSTOP the worker daemon's active iteration for the vet's
+ *                   duration so gate-vet and worker-tick never run vitest
+ *                   simultaneously (`MINSKY_GATE_NO_WORKER_PAUSE=1` ⇒ off).
+ * Same input ⇒ same output (rule #10); no I/O here — the levers are applied by
+ * the injectable seam in `defaultVet`.
+ * @param {{ niceness?: number, noWorkerPause?: string | undefined }} [env]
+ * @returns {{ niceness: number, pauseWorker: boolean, reason: string }}
+ */
+export function decideLoadShed(env = {}) {
+  const niceness =
+    Number.isFinite(env.niceness) && /** @type {number} */ (env.niceness) > 0
+      ? Math.min(20, Math.trunc(/** @type {number} */ (env.niceness)))
+      : 0;
+  const pauseWorker = env.noWorkerPause !== "1";
+  const parts = [];
+  if (niceness > 0) parts.push(`nice +${niceness}`);
+  if (pauseWorker) parts.push("pause-worker");
+  return {
+    niceness,
+    pauseWorker,
+    reason: parts.length > 0 ? `load-shed: ${parts.join(" + ")}` : "load-shed: off",
+  };
 }
 
 // ---- land-local: the gate-merge mechanism applied to a LOCAL branch ------
@@ -378,28 +423,107 @@ function vetErrorToResult(err) {
 }
 
 /**
+ * Run the scratch `--stage=full` gate, de-prioritised by `nice` when
+ * `niceness > 0` (load-shed lever #1). `nice` exists on macOS + Linux + every
+ * POSIX host; if it is somehow missing the call throws ENOENT and the caller's
+ * `vetErrorToResult` records a typed vetError (never a silent gate-red — rule
+ * #6). `niceness === 0` runs `node` directly (the debugging opt-out). Shared
+ * by the PR vet and the local-branch vet (rule #1 — one seam).
+ * @param {string} scratch
+ * @param {number} niceness
+ * @returns {string} the gate's --json stdout
+ */
+function runVetNiced(scratch, niceness) {
+  const gateArgs = ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"];
+  const exec = (/** @type {string} */ cmd, /** @type {string[]} */ args) =>
+    execFileSync(cmd, args, {
+      cwd: scratch,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: VET_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+  return niceness > 0
+    ? exec("nice", ["-n", String(niceness), "node", ...gateArgs])
+    : exec("node", gateArgs);
+}
+
+// Worker-pause seam (load-shed lever #2). Production wires these from
+// `orchestrate.mjs` (SIGSTOP/SIGCONT the worker daemon's active iteration)
+// via `setWorkerPauseSeam`; tests inject fakes. Default no-ops so the gate
+// runs standalone (`node scripts/local-gate-merge.mjs`) without a conductor.
+/** @type {() => void} */
+let workerPauseFn = () => undefined;
+/** @type {() => void} */
+let workerResumeFn = () => undefined;
+
+/**
+ * Install the production worker-pause/resume seam. Called by the conductor
+ * (`orchestrate.mjs`) so a gate vet launched from a tick pauses the worker
+ * daemon for the vet's duration; left as no-ops for standalone CLI runs.
+ * @param {{ pause: () => void, resume: () => void }} seam
+ */
+export function setWorkerPauseSeam(seam) {
+  workerPauseFn = seam.pause;
+  workerResumeFn = seam.resume;
+}
+
+/**
+ * Run `fn` with the worker daemon paused, guaranteeing resume in a `finally`
+ * even if `fn` throws or the process is interrupted mid-vet (rule #6 — a
+ * load-shed pause must NEVER leave the worker SIGSTOP'd; that would convert a
+ * flake-fix into a worker outage). A pause-call failure is swallowed (the vet
+ * still runs, just unshed — degrade gracefully, never gate the merge on a
+ * best-effort optimisation).
+ * @template T
+ * @param {boolean} pauseWorker
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withWorkerPaused(pauseWorker, fn) {
+  if (!pauseWorker) return fn();
+  let paused = false;
+  try {
+    workerPauseFn();
+    paused = true;
+    // rule-6: handled-locally — pausing is best-effort load-shed; a failed SIGSTOP must not block the vet.
+  } catch {
+    paused = false;
+  }
+  try {
+    return fn();
+  } finally {
+    if (paused) {
+      try {
+        workerResumeFn();
+        // rule-6: handled-locally — resume must always be attempted; a failed SIGCONT is logged by the seam, never thrown, so the finally cannot mask the vet result.
+      } catch {
+        /* the seam logs; never leave the worker stopped silently */
+      }
+    }
+  }
+}
+
+/**
  * Default vet: isolated `git clone --shared` scratch dir (NEVER an in-repo
  * worktree — that flips core.bare on the live repo), PR merged onto
- * origin/main, full gate with --json.
+ * origin/main, full gate with --json. The gate runs load-shed (rule #6,
+ * Nygard 2018 bulkhead): the worker daemon is paused for the vet's duration
+ * and the vet itself is `nice`-de-prioritised so a timing-sensitive `vitest`
+ * cannot flake under host oversubscription (`decideLoadShed`).
  * @param {PrSnapshot} pr
  * @returns {{stdout: string} | {vetError: string}}
  */
 function defaultVet(pr) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-gate-"));
+  const shed = decideLoadShed({
+    niceness: VET_NICENESS,
+    noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
+  });
   try {
     const prep = prepareScratchClone(scratch, pr);
     if (prep) return prep;
-    const stdout = execFileSync(
-      "node",
-      ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"],
-      {
-        cwd: scratch,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: VET_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-      },
-    );
+    const stdout = withWorkerPaused(shed.pauseWorker, () => runVetNiced(scratch, shed.niceness));
     return { stdout };
   } catch (err) {
     return vetErrorToResult(err);
@@ -538,20 +662,14 @@ function prepareScratchCloneForBranch(scratch, branchName) {
  */
 function defaultVetLocalBranch(branchName) {
   const scratch = mkdtempSync(join(tmpdir(), "minsky-land-"));
+  const shed = decideLoadShed({
+    niceness: VET_NICENESS,
+    noWorkerPause: process.env["MINSKY_GATE_NO_WORKER_PAUSE"],
+  });
   try {
     const prep = prepareScratchCloneForBranch(scratch, branchName);
     if (prep) return prep;
-    const stdout = execFileSync(
-      "node",
-      ["scripts/run-pre-pr-lint-stack.mjs", "--stage=full", "--json"],
-      {
-        cwd: scratch,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: VET_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-      },
-    );
+    const stdout = withWorkerPaused(shed.pauseWorker, () => runVetNiced(scratch, shed.niceness));
     return { stdout };
   } catch (err) {
     return vetErrorToResult(err);

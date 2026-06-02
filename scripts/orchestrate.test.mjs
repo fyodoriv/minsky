@@ -3,7 +3,7 @@
 // (pgrep / launchctl / runGateSweep) is validated by the `--once` run.
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
 import { describe, expect, it } from "vitest";
-import { buildTickLedgerLine, decideHeal } from "./orchestrate.mjs";
+import { buildTickLedgerLine, decideHeal, decideWorkerPausePids } from "./orchestrate.mjs";
 
 describe("decideHeal (conductor self-heal decision)", () => {
   it("worker alive ⇒ ok (no heal)", () => {
@@ -53,5 +53,34 @@ describe("buildTickLedgerLine (conductor merge-accounting)", () => {
   it("omits sweepError when none occurred", () => {
     const line = buildTickLedgerLine({ merged: [], skipped: [] }, ctx);
     expect("sweepError" in line).toBe(false);
+  });
+});
+
+// gate-host-load-shed: the conductor SIGSTOPs the worker daemon's iteration
+// processes for the duration of a gate vet so gate-vet and worker-tick never
+// run vitest simultaneously under host oversubscription. `decideWorkerPausePids`
+// is the pure pid-selection (rule #10 — no I/O); it MUST exclude the conductor's
+// own pid so a load-shed pause can never freeze the conductor.
+describe("decideWorkerPausePids (load-shed pid selection)", () => {
+  it("parses pgrep output into integer pids", () => {
+    expect(decideWorkerPausePids("4101\n4102\n4103\n", 9999)).toEqual([4101, 4102, 4103]);
+  });
+
+  it("excludes the conductor's own pid (never freeze self)", () => {
+    expect(decideWorkerPausePids("4101\n5000\n4103\n", 5000)).toEqual([4101, 4103]);
+  });
+
+  it("drops blank lines, non-numeric, and non-positive entries", () => {
+    expect(decideWorkerPausePids("4101\n\n  \nnotapid\n0\n-7\n4102\n", 1)).toEqual([4101, 4102]);
+  });
+
+  it("empty pgrep output ⇒ nothing to pause", () => {
+    expect(decideWorkerPausePids("", 1)).toEqual([]);
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    expect(decideWorkerPausePids("4101\n4102\n", 1)).toEqual(
+      decideWorkerPausePids("4101\n4102\n", 1),
+    );
   });
 });
