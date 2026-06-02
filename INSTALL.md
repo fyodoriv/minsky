@@ -17,7 +17,13 @@ The canonical install runbook for Minsky. **Audience**: an AI coding agent (Clau
 - [docs/uninstall.md](docs/uninstall.md) — clean removal when you're done
 - [README.md](README.md) for context on what you just installed
 
-**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists (Step 5 is a single CLI call) and the measurement harness `scripts/measure-agent-install.mjs` is wired into `pre-pr-lint --stage=full` (so the harness machinery is CI-gated). The remaining gap to fully close the parent `agent-mediated-install` P0 is live-mode for real-agent invocation against claude-code / devin / cursor — tracked as P2 `measure-agent-install-live-mode`. Until it ships, the 9-run success criterion is operator-verified end-to-end; the CI gate enforces threshold semantics and harness shape via mock mode.
+**Status.** The end-to-end flow below works today. The `minsky consent --yes / --no` subcommand exists (Step 5 is a single CLI call) and the measurement harness `scripts/measure-agent-install.mjs` is wired into `pre-pr-lint --stage=full` (so the harness machinery is CI-gated via mock mode). The harness now also has a `--live` mode that spawns a real agent against a fresh tmp git repo seeded with this runbook, captures its transcript, and parses the operator-prompt count via a per-provider module under `scripts/measure-agent-install/parsers/` (one isolated file per provider: claude-code / devin / cursor). Live mode is operator-side only — it is NOT wired into CI (the parent task's Pivot keeps real-agent invocation off the cost-bearing CI path), and it skips gracefully when the named agent CLI is not on PATH. Run an operator-side smoke like:
+
+```bash
+node scripts/measure-agent-install.mjs --providers=claude-code --runs-per-provider=1 --live --out=.minsky/measurements/$(date -u +%Y-%m-%d).json
+```
+
+The record lands in `.minsky/measurements/<date>.json` (the canonical run-record path, gitignored runtime state). The CI gate enforces threshold semantics and harness shape via mock mode; the `--live` matrix is the operator-side ground-truth that fully closes the parent `agent-mediated-install` P0's 9-run criterion.
 
 ## Step 0 — what "install" means (read first)
 
