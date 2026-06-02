@@ -96,6 +96,17 @@ describe("competitorById", () => {
   it("returns undefined for an unknown id", () => {
     expect(competitorById("not-a-competitor")).toBeUndefined();
   });
+
+  it("resolves autogen-microsoft with its MATH whole-test reading (corpus-add-autogen-microsoft)", () => {
+    // Added via the `corpus-add-autogen-microsoft` Pivot: AutoGen's primary
+    // orchestrator-tier number is MATH whole-test accuracy (Wu et al. arXiv
+    // 2308.08155), not a stock-model HumanEval headline.
+    const autogen = competitorById("autogen-microsoft") as Competitor;
+    expect(autogen.kind).toBe("open-source");
+    expect(autogen.resultSource.kind).toBe("published");
+    expect(publishedValue(autogen, "math-whole-test-accuracy")).toBeCloseTo(0.6948);
+    expect(publishedValue(autogen, "humaneval-pass-at-1")).toBeUndefined();
+  });
 });
 
 describe("publishedValue", () => {

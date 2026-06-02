@@ -25,14 +25,14 @@ Public surface:
 - `MetricCategory` — `"dora" | "agentic" | "public-benchmark"`.
 - `MetricDirection` — `"higher-is-better" | "lower-is-better"`.
 - `MetricUnit` — `"count-per-day" | "seconds" | "ratio" | "usd"`.
-- `METRICS` — the 13-metric catalogue (4 DORA keys + 7 agentic + 2 public). The 7th agentic metric `daemon-stability-pct` (added 2026-05-24 to close the `single-stability-number` P0 task) is the M1.1 reliability SLI — rolling 7-day fraction of daemon iterations that completed cleanly, with the ≥0.90 gate threshold gating the local-models-default stance from `user-stories/015-local-models-until-stable.md`. No public competitor publishes this metric (it's structurally only meaningful for an autonomous orchestrator running a 24/7 self-iterating loop).
+- `METRICS` — the 14-metric catalogue (4 DORA keys + 7 agentic + 3 public). The 7th agentic metric `daemon-stability-pct` (added 2026-05-24 to close the `single-stability-number` P0 task) is the M1.1 reliability SLI — rolling 7-day fraction of daemon iterations that completed cleanly, with the ≥0.90 gate threshold gating the local-models-default stance from `user-stories/015-local-models-until-stable.md`. No public competitor publishes this metric (it's structurally only meaningful for an autonomous orchestrator running a 24/7 self-iterating loop). The 3 public-benchmark metrics are `swe-bench-verified-resolve-rate` (agent tier), `humaneval-pass-at-1` (orchestrator code tier), and `math-whole-test-accuracy` (orchestrator math-reasoning tier — added via `corpus-add-autogen-microsoft` for AutoGen, which publishes MATH but no stock-model HumanEval headline).
 - `metricById(id)` — catalogue lookup.
 - `compareValues(metric, a, b)` — direction-aware rank: `1` = `a` better, `-1` = `b` better, `0` = tie.
 - `computeDelta(metric, minskyValue, competitorValue)` — direction-normalised delta; positive = Minsky ahead.
 - `Competitor` — `{ id, label, kind, homepage, resultSource }`; a competitor is data, not code.
 - `CompetitorKind` — `"closed-commercial" | "open-source"`.
 - `ResultSource` — `published` (dated cited snapshot, `values` keyed by metric id) | `local-harness` (descriptor the slice-c runner executes).
-- `COMPETITORS` — the 6-system corpus (Claude Code, OpenHands, SWE-agent, Aider, Devin, Cursor agent).
+- `COMPETITORS` — the 10-system corpus: 8 agent-tier (Claude Code, OpenHands, SWE-agent, Aider, Devin, Cursor agent, OpenAI Codex, Augment Code) + 2 orchestrator-tier (MetaGPT, AutoGen).
 - `competitorById(id)` — corpus lookup.
 - `publishedValue(competitor, metricId)` — reported value, or `undefined` (visible-not-silent, never a coerced zero).
 - `EXCLUDED_VENDOR_SUBSTRINGS` / `isExcludedVendor(name)` — operator vendor-exclusion guard (no Groq/xAI/Elon-affiliated entrants), test-enforced over the corpus.
@@ -70,14 +70,14 @@ accumulate as Minsky iterates.
 
 The corpus deliberately tracks two tiers of competitors:
 
-- **Orchestrator tier** (Minsky's peer tier) — systems that compose agents into a long-horizon autonomous-coding pipeline. They manage daemon lifecycle, task queues, agent fleet, observability, supervisor restart discipline. Published metrics tend to be `humaneval-pass-at-1` (the multi-agent code-generation benchmark) or `mbpp-pass-at-1`. Current entries: **MetaGPT** (the canonical reference). Follow-up adds: AutoGen, CrewAI, LangGraph, OpenAI Agents SDK — each blocked on a vendor-primary HumanEval / MBPP / GAIA citation.
+- **Orchestrator tier** (Minsky's peer tier) — systems that compose agents into a long-horizon autonomous-coding pipeline. They manage daemon lifecycle, task queues, agent fleet, observability, supervisor restart discipline. Published metrics tend to be `humaneval-pass-at-1` (the multi-agent code-generation benchmark), `mbpp-pass-at-1`, or `math-whole-test-accuracy` (the math-reasoning axis). Current entries: **MetaGPT** (canonical, HumanEval Pass@1) and **AutoGen** (Microsoft Research, MATH whole-test accuracy — added via `corpus-add-autogen-microsoft` since AutoGen publishes MATH but no stock-model HumanEval headline). Follow-up adds: CrewAI, LangGraph, OpenAI Agents SDK — each blocked on a vendor-primary HumanEval / MBPP / GAIA citation.
 - **Agent tier** (Minsky composes these) — single-task systems that take an issue and return a patch. Published metrics tend to be `swe-bench-verified-resolve-rate`. Current entries: **Claude Code, OpenHands, SWE-agent, Aider, Devin, Cursor agent, OpenAI Codex, Augment Code**. Minsky-via-Claude inherits Claude Code's SWE-bench score plus the orchestrator-tier delta (long-horizon retention, MAPE-K-driven prompt evolution, cross-repo multiplexing).
 
 Why both tiers in one corpus: a Minsky operator picks an agent (Claude vs Devin vs Aider) AND benefits from the orchestrator layer. The scorecard compares both axes — Minsky should outperform other orchestrators on orchestrator-tier metrics AND not regress vs the bare agent on the agent-tier baseline.
 
 ### Current corpus (as of 2026-05-23)
 
-All 9 competitors carry ≥1 metric reading, with primary citations
+All 10 competitors carry ≥1 metric reading, with primary citations
 pinned in each `competitors/<id>.md` research file:
 
 | Metric                              | Tier         | Competitors with readings                                                                  |
@@ -88,10 +88,12 @@ pinned in each `competitors/<id>.md` research file:
 | `mean-autonomous-merge-latency`     | agent        | 2 (OpenHands, Devin)                                                                       |
 | `cost-per-merged-pr`                | agent        | 1 (OpenHands)                                                                              |
 | `humaneval-pass-at-1`               | orchestrator | 1 (MetaGPT — primary citation: arXiv 2308.00352, ICLR 2024 Oral)                           |
+| `math-whole-test-accuracy`          | orchestrator | 1 (AutoGen — primary citation: Wu et al., arXiv 2308.08155, 2023; 69.48% vs GPT-4 55.18%)  |
 
-Total: **6 metrics × 9 competitors** — shape gate MET (M1.10 requires
+Total: **7 metrics × 10 competitors** — shape gate MET (M1.10 requires
 ≥4 × ≥5; current density: 7×5 on the agent SWE-bench axis + 1×1 on the
-orchestrator HumanEval axis). Slice (d) is the `**Competitive-goal**:`
+orchestrator HumanEval axis + 1×1 on the orchestrator MATH axis). Slice
+(d) is the `**Competitive-goal**:`
 field + `scripts/check-competitive-goal.mjs` lint that enforces every
 P0/P1 task block names which scorecard metric it moves; the lint ships
 with 81 grandfathered ids draining over time.
@@ -183,7 +185,7 @@ absent. The remaining surface is the type boundary — enforced by
 - **Measurement**: `pnpm vitest run novel/competitive-benchmark/` exits 0
   with the catalogue/corpus/branch assertions green;
   `node -e "import('@minsky/competitive-benchmark').then(m=>console.log(m.METRICS.length, m.COMPETITORS.length))"`
-  prints `11 6`.
+  prints `14 10`.
 - **Literature anchor**: Basili, Caldiera, Rombach, *GQM*, 1994 (derive the
   metric from the goal); Forsgren, Humble, Kim, *Accelerate*, 2018 (DORA —
   outcome not vanity); Jimenez et al., *SWE-bench*, *ICLR* 2024 (public

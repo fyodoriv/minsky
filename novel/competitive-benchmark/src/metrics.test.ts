@@ -27,16 +27,21 @@ describe("METRICS catalogue", () => {
     ]);
   });
 
-  it("includes both public-benchmark hooks (SWE-bench for agents, HumanEval for orchestrators)", () => {
-    // 2026-05-23: corpus widened to orchestrator-tier competitors per operator
-    // directive. SWE-bench is the agent-tier head-to-head; HumanEval is the
-    // orchestrator-tier head-to-head (MetaGPT/AutoGen/CrewAI/LangGraph publish
-    // it). Both metrics live in the public-benchmark category — they don't
-    // compete with each other, they cover different tiers.
+  it("includes the public-benchmark hooks (SWE-bench agent-tier, HumanEval + MATH orchestrator-tier)", () => {
+    // SWE-bench is the agent-tier head-to-head; HumanEval is the orchestrator-
+    // tier code head-to-head (MetaGPT publishes it); math-whole-test-accuracy
+    // is the orchestrator-tier math-reasoning axis added via the
+    // `corpus-add-autogen-microsoft` Pivot (AutoGen publishes MATH, not a
+    // stock-model HumanEval headline). All three live in the public-benchmark
+    // category — they cover different tiers / axes, not competing definitions.
     const pub = METRICS.filter((m) => m.category === "public-benchmark");
-    expect(pub).toHaveLength(2);
+    expect(pub).toHaveLength(3);
     const ids = pub.map((m) => m.id).sort();
-    expect(ids).toEqual(["humaneval-pass-at-1", "swe-bench-verified-resolve-rate"]);
+    expect(ids).toEqual([
+      "humaneval-pass-at-1",
+      "math-whole-test-accuracy",
+      "swe-bench-verified-resolve-rate",
+    ]);
   });
 
   it("has unique kebab-case ids", () => {
