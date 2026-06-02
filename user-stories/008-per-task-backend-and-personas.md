@@ -29,13 +29,29 @@ The selection happens automatically; I never edit per-task agent assignments. Th
 - Operator can override via task-level `**Backend**: claude` field; the override wins over the heuristic
 - Per-task cost is tracked; cumulative cost-per-day stays under `MINSKY_BUDGET_TOKENS`
 
-**M2 milestone (per-task multi-persona pipelines):**
+**M2 milestone (per-task multi-persona pipelines) — shipped via A2A:**
 
-- A task tagged `pipeline` OR `decomposition-required` (sized XL by the task picker) spawns a multi-persona chain (researcher → planner → developer → QA → reviewer)
-- Each persona writes its output to `.minsky/handoffs/<task-id>/<persona>-<iso-ts>.md` for the next persona to read
-- The reviewer persona is responsible for the final PR description; QA writes tests; developer writes code; planner writes the decomposition; researcher writes the context brief
-- Failure in any persona halts the pipeline and files a `pipeline-failed-<task-id>-<persona>` task with the failure context
-- Per-persona budget cap is enforced (default: 5 min per non-developer persona, 30 min for developer)
+The handoff substrate is **A2A's Task lifecycle**, not a bespoke JSON schema. The
+driver `bin/minsky-multi-persona.sh` walks the five personas via the A2A adapter
+(`@minsky/a2a` → `A2AOpenHands.sendMessage`); each transition's A2A task ID + the
+persona role are logged to `.minsky/iterations.jsonl`. The per-persona handoff
+payload (a Minsky-side envelope referenced by the A2A message — rule #11 "absorb")
+lives at `.minsky/handoffs/<task-id>/<persona>.md`. See
+[`novel/personas/README.md`](../novel/personas/README.md) for the full A2A mapping.
+
+- `bin/minsky-multi-persona.sh <task-id> <host>` spawns a multi-persona chain
+  (researcher → planner → developer → QA → reviewer) on one task
+- Each persona writes its artifact to `.minsky/handoffs/<task-id>/<persona>.md`;
+  the next persona's brief is built with
+  `scripts/build_brief.py --persona <role> --prior-artifact <path>`, forming the
+  researcher → … → reviewer artifact chain
+- The reviewer persona is responsible for the final PR description; QA writes
+  tests; developer writes code; planner writes the decomposition; researcher
+  writes the context brief
+- Failure in any persona halts the pipeline loudly (rule #6) — the driver exits
+  non-zero rather than feeding the next persona a brief built on a gap
+- Per-persona budget cap is enforced (default: 5 min per non-developer persona,
+  30 min for developer)
 
 ## Metric
 
@@ -59,7 +75,7 @@ The selection happens automatically; I never edit per-task agent assignments. Th
     - 1 `lint` task → expect `local-ollama` (or `claude-sonnet` when local unhealthy)
     - 1 default-tag task → expect `claude-sonnet`
     - 1 task with explicit `**Backend**: devin` override on a docs-tagged task → expect `devin` (override wins)
-    - 1 XL task tagged `pipeline` → expect multi-persona pipeline (M2 — test marked `it.skip` until milestone ships)
+    - 1 task tagged `pipeline` → drives the 5-persona A2A pipeline (M2 — shipped; covered by `test/integration/multi-persona-pipeline.test.ts`, which runs `bin/minsky-multi-persona.sh` against a fixture task and asserts the artifact chain + transition log)
   - `selectBackend(task)` from `llm-provider-selector` is the system under test
   - `claudeProbeOk()` and `ollamaHealthOk()` mocked to known states
 - **Action**: for each task in the fixture, call `selectBackend(task, { ollamaHealthy: true })` then `selectBackend(task, { ollamaHealthy: false })`
@@ -67,7 +83,7 @@ The selection happens automatically; I never edit per-task agent assignments. Th
   - Each task produces the expected backend choice with healthy local
   - The lint task falls back to `claude-sonnet` when `ollamaHealthy: false`
   - The override task returns `devin` regardless of tags or local health
-  - The pipeline test stays `it.skip` until M2 ships
+  - The pipeline test is **active** (M2 shipped): `test/integration/multi-persona-pipeline.test.ts` asserts the 5-persona chain runs in order, every transition is logged with `persona=<role>`, and persona N's artifact reaches persona N+1
   - Every choice includes a non-empty `rationale` string ("matched tag: docs", "touches 4 packages > 3", "explicit operator override", "local unhealthy, falling back to claude-sonnet")
 
 ## Proof
@@ -92,15 +108,15 @@ Per constitutional rule #7 (`vision.md` § 7).
 | 3 | Local Ollama unhealthy when a lint task arrives | dependency upstream-error | `graceful-degrade` — fall back to claude-sonnet with rationale logged | Mock `ollamaHealthOk()=false`; assert backend=claude-sonnet, rationale="local unhealthy, falling back" |
 | 4 | Devin auth fails when a refactor task is selected | dependency upstream-error | `circuit-break-and-notify` — fall back to claude-sonnet for one iteration, notify operator | Mock devin spawn returning exit=-1 with auth error in stderr; assert iteration retries with claude-sonnet next pass, single ntfy push at level=warn |
 | 5 | `MINSKY_BUDGET_TOKENS` would be exceeded by the selected backend's cost estimate | dependency upstream-error | `graceful-degrade` — downgrade to local or smaller model | Mock cumulative cost near budget; assert selector downgrades devin→claude-sonnet→local |
-| 6 | Multi-persona pipeline starts but researcher persona crashes (M2) | upstream-malformed | `loud-crash-supervisor-restart` — file `pipeline-failed-<task>-researcher` | Skip until M2 |
-| 7 | Multi-persona pipeline handoff file is malformed (planner produces garbage) (M2) | upstream-malformed | `circuit-break-and-notify` — fail at the handoff-spec validator | Skip until M2 |
+| 6 | Multi-persona pipeline starts but a persona crashes (M2) | upstream-malformed | `loud-crash-supervisor-restart` — driver halts the pipeline non-zero | `test/integration/multi-persona-pipeline.test.ts` chaos #2 (missing task halts loudly, no partial run) |
+| 7 | Multi-persona pipeline handoff artifact missing for the next persona (M2) | upstream-malformed | `loud-crash-supervisor-restart` — driver halts at the gap | `test/integration/multi-persona-pipeline.test.ts` (artifact-chain test asserts the chain is contiguous); `novel/personas/README.md` chaos table #2 |
 | 8 | Two iterations select the same task simultaneously (multi-host concurrency) | concurrency | `graceful-degrade` — per-host lease | Spawn 2 hosts targeting the same task; assert only one acquires the lease via `tasks-mcp`-style semantics |
 | 9 | Selector regex catastrophic backtracking on a pathological tag string | dependency upstream-error | `loud-crash-supervisor-restart` — fail closed | Fixture with a tag string of 10 KB; assert selector caps input and exits with a clean error |
 
 ## Status
 
-- **Phase**: Per-task selection — Implemented (`novel/tick-loop/src/llm-provider-selector.ts` ships the rule table; the daemon log records the choice). Multi-persona pipelines — M2 milestone, not started. This story is the spec for both states.
-- **Blocking**: the M2 multi-persona pipeline is blocked on the `handoff-spec` package being finalised (`novel/handoff-spec/` exists as a sketch; needs schema + validator + writer). Tracked as `multi-persona-pipeline-handoff-spec` P1 (this PR files it). The story's `it.skip` test cases activate when handoff-spec is shipped.
+- **Phase**: Per-task selection — Implemented (`novel/tick-loop/src/llm-provider-selector.ts` ships the rule table; the daemon log records the choice). Multi-persona pipelines — **Implemented** via the A2A adapter (`bin/minsky-multi-persona.sh` + `novel/personas/*.md` + `scripts/build_brief.py --persona`). This story is the spec for both states.
+- **Handoff substrate**: A2A's Task lifecycle (`@minsky/a2a`), not a bespoke JSON schema. The superseded `multi-persona-pipeline-handoff-spec` design (a custom validator/writer at `novel/handoff-spec/`) is obsoleted — the per-persona payload at `.minsky/handoffs/<task-id>/<persona>.md` is a Minsky-side envelope the A2A message references by URI (rule #11 "absorb"). The pipeline test cases are active in `test/integration/multi-persona-pipeline.test.ts`.
 - **Theoretical anchor**: Society of Mind (Minsky 1986 — many specialists, none intelligent alone; here the specialists are LLM backends). Per-task routing is the operationalisation. Multi-persona pipelines on a single task are the deep version (planned).
 
 ## Pattern conformance

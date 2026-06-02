@@ -14,6 +14,14 @@ config — see `tests/test_build_brief.py` for the fixture pin.
 
 CLI:
     python3 scripts/build_brief.py <task-id> <host-dir> [--vision-md <path>] [--max-tokens <N>]
+        [--persona <role>] [--prior-artifact <path>]
+
+`--persona <role>` front-loads the matching brief template from
+`novel/personas/<role>.md` (one of researcher/planner/developer/qa/reviewer)
+so the spawned persona reads its role before the task. `--prior-artifact
+<path>` appends the previous persona's handoff payload under the overlay,
+forming the researcher → … → reviewer artifact chain. Both are used by the
+M2 multi-persona pipeline driver (`bin/minsky-multi-persona.sh`).
 
 Prints the brief to stdout. Reads:
     <host-dir>/TASKS.md             — picks up the task block (must exist)
@@ -51,6 +59,56 @@ import pick_task  # noqa: E402  pylint: disable=wrong-import-position
 
 DEFAULT_VISION_MD_PATH = ".minsky/vision.md"
 DEFAULT_BRANCH_PREFIX = "feat/"
+
+# The five personas of the M2 multi-persona A2A pipeline, in pipeline order.
+# Each maps to a brief template at `novel/personas/<role>.md`. The order is the
+# load-bearing contract: persona N consumes persona N-1's handoff artifact.
+# Source: user-stories/008-per-task-backend-and-personas.md § "M2 milestone";
+# competitors/metagpt.md § "SOP pattern" (the researcher→…→reviewer SOP);
+# novel/personas/README.md (the A2A-mapping doc).
+PIPELINE_PERSONAS = ("researcher", "planner", "developer", "qa", "reviewer")
+
+# `novel/personas/` relative to the repo root that ships `build_brief.py`. The
+# persona templates live alongside the source-of-truth pipeline driver, not in
+# the host repo (the host repo gets the rendered brief, never the templates).
+PERSONAS_DIR = Path(__file__).resolve().parent.parent / "novel" / "personas"
+
+
+def load_persona_overlay(role: str, personas_dir: Path = PERSONAS_DIR) -> str:
+    """Return the persona brief template for `role`.
+
+    Reads `novel/personas/<role>.md`. Raises ValueError for an unknown role so
+    the pipeline driver fails LOUDLY (rule #6 — never silently spawn a persona
+    whose template is missing). `role` must be one of `PIPELINE_PERSONAS`.
+    """
+    if role not in PIPELINE_PERSONAS:
+        valid = ", ".join(PIPELINE_PERSONAS)
+        raise ValueError(f"unknown persona role '{role}'; valid roles: {valid}")
+    template = personas_dir / f"{role}.md"
+    if not template.is_file():
+        raise ValueError(f"persona template not found at {template}")
+    return template.read_text(encoding="utf-8").rstrip("\n")
+
+
+def render_persona_overlay(role: str, prior_artifact: str = "") -> str:
+    """Render the persona section that front-loads the brief.
+
+    The persona template comes first so the spawned agent reads its role before
+    the task. When `prior_artifact` is non-empty (the previous persona's handoff
+    payload), it is appended under an explicit heading — this is the artifact
+    chain (researcher → planner → … → reviewer) that makes persona N+1 build on
+    persona N's output rather than re-deriving context.
+    """
+    overlay = load_persona_overlay(role)
+    if not prior_artifact.strip():
+        return overlay
+    return "\n".join([
+        overlay,
+        "",
+        "## Prior persona artifact (your input — build on this, do not re-derive)",
+        "",
+        prior_artifact.rstrip("\n"),
+    ])
 
 
 class HostConfig(NamedTuple):
@@ -347,6 +405,8 @@ def build_brief(
     vision_md_path: str = DEFAULT_VISION_MD_PATH,
     max_tokens: int = 0,
     local_llm_mode: bool = False,
+    persona: str | None = None,
+    prior_artifact: str = "",
 ) -> str:
     """Compose the full brief (task block + overlay separated by `---`).
 
@@ -361,10 +421,26 @@ def build_brief(
     the top, the constitution preamble is dropped. This is set automatically
     by bin/minsky-run.sh when `local_llm_enabled: true` in
     `~/.minsky/config.json`.
+
+    When persona is set (one of `PIPELINE_PERSONAS`), the matching brief
+    template from `novel/personas/<role>.md` is front-loaded before the task
+    block — the spawned persona reads its role before the task. `prior_artifact`
+    (the previous persona's handoff payload) is appended under the persona
+    overlay to form the researcher → … → reviewer artifact chain. This is the
+    `--persona` overlay path the M2 multi-persona pipeline driver
+    (`bin/minsky-multi-persona.sh`) uses for each persona transition.
     """
     assert task.id is not None, "build_brief called with task lacking an ID"
     branch_name = f"{host_config.branch_prefix}{task.id}"
-    full = "\n".join([
+    sections: list[str] = []
+    if persona is not None:
+        sections.extend([
+            render_persona_overlay(persona, prior_artifact),
+            "",
+            "---",
+            "",
+        ])
+    sections.extend([
         render_brief(task, host_config.host_repo, branch_name),
         "",
         "---",
@@ -377,6 +453,7 @@ def build_brief(
             local_llm_mode=local_llm_mode,
         ),
     ])
+    full = "\n".join(sections)
     return clamp_brief_to_tokens(full, max_tokens)
 
 
@@ -384,7 +461,8 @@ def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(
             "usage: build_brief.py <task-id> <host-dir> "
-            "[--vision-md <path>] [--max-tokens <N>] [--local-llm-mode]",
+            "[--vision-md <path>] [--max-tokens <N>] [--local-llm-mode] "
+            "[--persona <role>] [--prior-artifact <path>]",
             file=sys.stderr,
         )
         return 2
@@ -393,6 +471,8 @@ def main(argv: list[str]) -> int:
     vision_md_path = DEFAULT_VISION_MD_PATH
     max_tokens = 0
     local_llm_mode = False
+    persona: str | None = None
+    prior_artifact_path: Path | None = None
     i = 3
     while i < len(argv):
         if argv[i] == "--vision-md" and i + 1 < len(argv):
@@ -412,12 +492,28 @@ def main(argv: list[str]) -> int:
                 print(f"--max-tokens=N expects an integer, got: {argv[i]}", file=sys.stderr)
                 return 2
             i += 1
+        elif argv[i] == "--persona" and i + 1 < len(argv):
+            persona = argv[i + 1]
+            i += 2
+        elif argv[i].startswith("--persona="):
+            persona = argv[i].split("=", 1)[1]
+            i += 1
+        elif argv[i] == "--prior-artifact" and i + 1 < len(argv):
+            prior_artifact_path = Path(argv[i + 1])
+            i += 2
+        elif argv[i].startswith("--prior-artifact="):
+            prior_artifact_path = Path(argv[i].split("=", 1)[1])
+            i += 1
         elif argv[i] == "--local-llm-mode":
             local_llm_mode = True
             i += 1
         else:
             print(f"unknown arg: {argv[i]}", file=sys.stderr)
             return 2
+
+    prior_artifact = ""
+    if prior_artifact_path is not None and prior_artifact_path.is_file():
+        prior_artifact = prior_artifact_path.read_text(encoding="utf-8")
 
     tasks_md = host_dir / "TASKS.md"
     if not tasks_md.is_file():
@@ -435,6 +531,8 @@ def main(argv: list[str]) -> int:
             vision_md_path,
             max_tokens,
             local_llm_mode=local_llm_mode,
+            persona=persona,
+            prior_artifact=prior_artifact,
         )
     except ValueError as e:
         print(str(e), file=sys.stderr)
