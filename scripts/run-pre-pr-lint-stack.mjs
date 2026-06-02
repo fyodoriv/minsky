@@ -212,7 +212,39 @@ export const CI_ENV_DEPENDENT_JOBS = Object.freeze(
 export const CI_TO_MANIFEST_ALIAS = Object.freeze({
   test: "vitest", // `pnpm test:coverage` ↔ manifest's `vitest` step
   "glossary-discipline": "rule-5-glossary-discipline", // job named for the rule's effect; manifest names it for the rule number
+  // CI's `biome` job runs whole-tree (`pnpm biome ci .`). The manifest's
+  // whole-tree equivalent is `biome-whole-tree` (full stage); the manifest's
+  // `biome` step is the diff-scoped fast-feedback variant (LOCAL_ONLY_MANIFEST_
+  // STEPS) that has no CI counterpart. Mapping CI's whole-tree `biome` to the
+  // whole-tree manifest step is the semantically-correct parity. Source:
+  // TASKS.md `pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence`.
+  biome: "biome-whole-tree",
 });
+
+/**
+ * Manifest step names that are deliberately LOCAL-ONLY — they exist to give the
+ * operator faster feedback than the CI job they mirror, and therefore have no
+ * 1:1 entry in `.github/workflows/ci.yml`'s `needs:` aggregator. The
+ * manifest-vs-CI bidirectional parity test (`run-pre-pr-lint-stack.test.mjs` §
+ * "manifest's full stage covers every offline-reproducible CI lint job")
+ * excludes these from its `extraInManifest` check — they are not "stray"
+ * manifest entries claiming to gate a non-existent CI job, they are a
+ * documented speed optimization layered on top of the CI-equivalent step.
+ *
+ * Currently a single entry: the diff-scoped `biome` step. CI runs `biome ci .`
+ * whole-tree (mapped to the `biome-whole-tree` manifest step via
+ * `CI_TO_MANIFEST_ALIAS`); the manifest ALSO carries a diff-scoped `biome` step
+ * (`biome ci --changed --since=<base>`) so the daemon's fast gate and the
+ * lefthook pre-push hook lint only the branch's changed files in ~1s instead of
+ * paying the whole-tree cost on every push. Both run in the full stage, so a
+ * pre-push `--stage=full` catches whole-tree formatting drift that the
+ * diff-scoped step alone would miss (the exact "passes locally / fails CI"
+ * footgun this set documents away). Source: TASKS.md
+ * `pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence`.
+ *
+ * @type {ReadonlySet<string>}
+ */
+export const LOCAL_ONLY_MANIFEST_STEPS = Object.freeze(new Set(["biome"]));
 
 /**
  * The `ci:` aggregator's bash `gate` step partitions `needs:` across three
@@ -368,6 +400,28 @@ export const STACK_MANIFEST = Object.freeze([
     stages: ["stop-gate", "fast", "full"],
     cmd: "pnpm",
     args: ["biome", "ci", "--changed", "--since=origin/main", "--no-errors-on-unmatched", "."],
+  },
+  {
+    // Whole-tree biome — the EXACT command CI's `biome` job runs (`pnpm biome
+    // ci .`). The diff-scoped `biome` step above (LOCAL_ONLY_MANIFEST_STEPS)
+    // gives the daemon's fast gate + lefthook pre-push ~1s feedback on the
+    // branch's changed files, but it is by construction a DIFFERENT gate from
+    // CI's whole-tree job: formatting/lint drift in files this branch didn't
+    // touch (inherited committed-main debt, a concurrent swarm edit) survives
+    // the diff-scoped gate and only explodes in CI ~5 min after `gh pr create`.
+    // This full-only step closes that divergence — `pnpm pre-pr-lint
+    // --stage=full` (the operator's pre-push gate per lefthook.yml) now runs
+    // the identical whole-tree pass locally, so a locally-`--stage=full`-green
+    // PR cannot fail CI's `biome` job for an unrelated whole-tree violation.
+    // FULL stage only: the fast stage stays diff-scoped (≤2 min budget). Source:
+    // TASKS.md `pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence`
+    // (Hypothesis path b — keep diff-scoped local, add whole-tree to `full`);
+    // vision.md rule #10 (deterministic enforcement — gates that disagree are
+    // non-deterministic), rule #11 (no flaky gates).
+    name: "biome-whole-tree",
+    stages: ["full"],
+    cmd: "pnpm",
+    args: ["biome", "ci", "."],
   },
   {
     name: "typecheck",
