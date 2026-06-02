@@ -362,7 +362,7 @@ function parseArgs(argv) {
  *
  * @returns {Promise<string[]>}
  */
-async function loadSuccessMetricIds() {
+export async function loadSuccessMetricIds() {
   const { fileURLToPath } = await import("node:url");
   const { resolve: resolvePath } = await import("node:path");
   const scriptDir = fileURLToPath(new URL(".", import.meta.url));

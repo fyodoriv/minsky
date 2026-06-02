@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { checkMetricFreshness } from "./check-metric-freshness.mjs";
+import { checkMetricFreshness, loadSuccessMetricIds } from "./check-metric-freshness.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 4, 5, 12, 0, 0);
@@ -265,6 +265,29 @@ describe("checkMetricFreshness — current METRICS.md", () => {
       markdown: md,
       nowMs: Date.now(),
       expectedIds,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("loadSuccessMetricIds — default-from-source path", () => {
+  test("returns the live SUCCESS_METRICS ids (no hard-coded --expected list)", async () => {
+    const { SUCCESS_METRICS } = await import("../novel/dashboard-web/dist/metrics.js");
+    const expected = SUCCESS_METRICS.map((m) => m.id);
+    const loaded = await loadSuccessMetricIds();
+    expect(loaded).toEqual(expected);
+  });
+
+  test("the loaded ids verify clean against the current METRICS.md", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { dirname, resolve } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = dirname(fileURLToPath(import.meta.url));
+    const md = await readFile(resolve(here, "..", "docs/METRICS.md"), "utf8");
+    const result = checkMetricFreshness({
+      markdown: md,
+      nowMs: Date.now(),
+      expectedIds: await loadSuccessMetricIds(),
     });
     expect(result.ok).toBe(true);
   });

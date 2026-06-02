@@ -109,6 +109,16 @@ export interface ProposedMetric {
  * The 10 vision.md success criteria. Order matches the table at
  * `vision.md` § "Success criteria" rows 1-10. Ids are kebab-case and
  * stable across label rewrites of the parent vision.md row.
+ *
+ * Single source of truth for the metric-id list. When you add a metric
+ * here, the three consumers below read it directly — no parallel list to
+ * keep in sync:
+ *   - `scripts/metrics-render.mjs` — renders `docs/METRICS.md` from this array.
+ *   - `scripts/check-metric-freshness.mjs --expected-from-success-metrics`
+ *     — the CI + pre-pr-lint freshness/drift gate imports these ids.
+ *   - `distribution/shortcuts/test/dashboard-metric-ids.json` (drift-gated
+ *     by `dashboard-metric-ids-sync.test.mjs`) — mirrors the ids for the
+ *     shortcuts/web tile.
  */
 export const SUCCESS_METRICS: readonly SuccessMetric[] = [
   {
