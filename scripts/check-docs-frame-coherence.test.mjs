@@ -167,4 +167,11 @@ describe("live allowlist (sanity)", () => {
       expect(entry.length).toBeGreaterThan(0);
     }
   });
+
+  it("restores the frame across ≥10 docs (docs-frame-restore-across-allowlist)", () => {
+    expect(DOCS_FRAME_ALLOWLIST.length).toBeGreaterThanOrEqual(10);
+    for (const restored of ["vision.md", "competitors/README.md"]) {
+      expect(DOCS_FRAME_ALLOWLIST).toContain(restored);
+    }
+  });
 });

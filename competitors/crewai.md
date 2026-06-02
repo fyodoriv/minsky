@@ -6,7 +6,7 @@
 - **Status**: Active OSS v1.0 GA (2025); CrewAI AMP enterprise platform; $18M total funding (Series A $12.5M Insight Partners, Oct 2024); 48k GitHub stars.
 - **Relationship**: **Competitor — orchestrator-tier peer**. General-purpose multi-agent orchestration vs Minsky's coding-specific daemon.
 
-## What it is
+## What this is
 
 Open-source **Python framework** (not a daemon) for orchestrating role-playing autonomous AI agents — built from scratch, independent of LangChain (per `lib/crewai/src/crewai/`). Three primary layers:
 
@@ -15,6 +15,12 @@ Open-source **Python framework** (not a daemon) for orchestrating role-playing a
 - **Flows** (`lib/crewai/src/crewai/flow/flow.py`) — event-driven state machines positioned as the **production architecture** (CrewAI README, 2025). Use `@start` / `@listen` / `@router` decorators to define steps, with explicit Pydantic state. Flows can embed Crews as units of work. Persistence via SQLite by default; AMP replaces with distributed stores.
 
 **Memory** is the substrate, not message-passing. The unified memory system (`lib/crewai/src/crewai/memory/unified_memory.py`) is hierarchical (scopes like `/project/alpha` or `/agent/researcher/findings`), LLM-analyzed for automatic scope inference, supports adaptive-depth recall with semantic + recency + importance scoring.
+
+## What this is not
+
+- **Not a daemon.** CrewAI is a Python framework you wrap your code in; each `kickoff()` is a fresh run. Minsky is an always-on daemon you attach and walk away from.
+- **Not coding-specific.** CrewAI is general-purpose multi-agent orchestration; Minsky is built solely for the autonomous-coding outer loop.
+- **Not a head-to-head competitor.** This file is adjacent-tier analysis — what to learn from the dominant orchestrator framework, not whom to beat turn-for-turn.
 
 ## Strengths
 

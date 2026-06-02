@@ -7,9 +7,15 @@
 - **Pricing**: Pro $20/mo, Max $200/mo, Teams $80/mo/seat, Enterprise custom
 - **Relationship**: **Integration** — minsky uses Devin CLI as a cloud agent (`cloud_agent: "devin"`)
 
-## What it is
+## What this is
 
 Cloud-hosted autonomous software engineer. Runs in Cognition's cloud — full IDE, terminal, browser. Parallel agents (up to 10 concurrent sessions on Pro). Interactive Planning mode. Slack/Linear/Jira integrations. Devin Review for PR review. DeepWiki for repo understanding.
+
+## What this is not
+
+- **Not operator-machine identity.** Devin runs in Cognition's cloud (Devbox), with its own identity; Minsky runs as the operator's user and commits land as the operator.
+- **Not a free-standing orchestrator for Minsky.** Minsky integrates Devin as a `cloud_agent` backend (`cloud_agent: "devin"`), driving it from the tick-loop rather than competing turn-for-turn.
+- **Not the discipline layer.** Devin has no `TASKS.md` queue, no constitutional CI lints, and no pre-registered-experiment harness — the surface Minsky adds.
 
 ## Strengths
 

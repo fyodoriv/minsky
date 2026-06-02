@@ -7,9 +7,15 @@
 - **Status**: Brand retired — folded into [Microsoft Agent Framework](microsoft-agent-framework.md) at MAF v1.0 (April 2026); the AutoGen primitives (graph workflows, multi-agent planning, declarative pipelines) live on as MAF features.
 - **Relationship**: **Competitor** — orchestrator-tier peer (composes agents), wrong stack and enterprise framing
 
-## What it is
+## What this is
 
 A framework that builds LLM applications as conversations between multiple configurable agents (assistant agents, user-proxy agents, group-chat managers). The agents converse, delegate, and use tools to accomplish a task. AutoGen's headline result is on multi-agent math reasoning: a conversation between a verifier-style assistant and an executor solves harder problems than a single GPT-4 call.
+
+## What this is not
+
+- **Not a daemon.** AutoGen is a conversation framework you build applications in; Minsky is an always-on daemon that drives agents on a queue.
+- **Not coding-specific.** AutoGen targets general multi-agent LLM applications; Minsky is solely the autonomous-coding outer loop.
+- **Not a live product.** The AutoGen brand is retired into [Microsoft Agent Framework](microsoft-agent-framework.md); this file is kept for the AutoGen-branded benchmark citations.
 
 ## Strengths
 

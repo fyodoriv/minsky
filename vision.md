@@ -12,6 +12,17 @@ goals: []
 
 > A society of minds. Building yours.
 
+## What this is
+
+The Minsky constitution — the 18 non-negotiable rules every change must honour, plus the theoretical foundations and the pattern-conformance index that maps every artifact to a named, published pattern. This file is the behavioural specification: when code and constitution disagree, the constitution wins until amended.
+
+## What this is not
+
+- **Not a quickstart.** See [README.md](./README.md) for what Minsky does and [INSTALL.md](./INSTALL.md) for first-time setup.
+- **Not the roadmap.** See [MILESTONES.md](./MILESTONES.md) for ship-gates and exit criteria.
+- **Not the operational runbook.** See [AGENTS.md](./AGENTS.md) for how to claim and work a task.
+- **Not a freely-edited doc.** Only the MAPE-K loop's specification-monitor process amends the behavioural spec; working tasks reference the rules but do not redefine them.
+
 ## 30-second TL;DR
 
 Minsky is a **discipline pack** for OpenHands — a small bash-and-markdown layer (~5–10K LOC after the 2026-05 Path-A aggressive cut, down from ~70K LOC of TypeScript at peak) that you attach to any git repo, and it makes that repo follow Minsky's discipline: strict lint, strict tests, observability, chaos engineering, hypothesis-driven development, pattern-conformance. It is **not** a framework. The agent layer is OpenHands. The discipline pack composes existing tools through versioned adapters and adds only what nobody else is building — constitutional rules, deterministic CI lints, the MAPE-K observation loop, and the 18-rule pre-PR gate.
