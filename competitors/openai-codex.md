@@ -61,6 +61,8 @@ OpenAI's autonomous-coding offering has two surfaces:
 
 The corpus also tracks `pass@8 = 0.838` in the citation string but does not promote it to a separate metric — the M1.10 catalogue's `swe-bench-verified-resolve-rate` is pass@1 by convention (matching how the other competitors' readings are extracted).
 
+The Pinna et al. AIDev study (arXiv 2602.08915) that supplies the [`github-copilot-coding-agent.md`](github-copilot-coding-agent.md), [`cursor-agent.md`](cursor-agent.md), and [`claude-code.md`](claude-code.md) PR-acceptance readings also measured Codex at 0.779 overall acceptance over 2,002 PRs (Table 1). The corpus keeps Codex's `swe-bench-verified-resolve-rate` (0.721, OpenAI-primary) rather than promoting the AIDev acceptance proxy, because OpenAI publishes a Verified number directly; Copilot has no such primary number, so its entry keys on the AIDev acceptance rate instead.
+
 ## Last reviewed
 
 2026-05-22 (added to scorecard corpus via `/competitor-research`)

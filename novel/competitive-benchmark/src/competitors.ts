@@ -134,9 +134,10 @@ export function isExcludedVendor(name: string): boolean {
 
 /**
  * The comparison set. ≥4 competitors is the parent task's success bar; this
- * corpus ships 6 (5 `published` SWE-bench Verified snapshots + 1
- * `local-harness` descriptor) so the scorecard always has ≥4 even if a
- * snapshot is later pruned for staleness.
+ * corpus ships 10 `published` snapshots so the scorecard always has ≥4 even
+ * if a snapshot is later pruned for staleness. The `local-harness`
+ * `ResultSource` arm is retained in the type for the slice-(c) runner's
+ * future reproducible-harness path, exercised today only by the unit test.
  *
  * Published resolve-rates are a **dated snapshot maintained as data** — the
  * slice-(c) corpus-refresh job rewrites `values`/`asOf` from the cited
@@ -246,6 +247,23 @@ export const COMPETITORS: readonly Competitor[] = [
         "Pinna, Gong, Williams, Sarro, 'Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance', arXiv 2602.08915, 2026-02-09 (AIDev dataset — Cursor leads fix-task acceptance 0.804, used here as autonomous-merge-rate proxy for the fix-task subset).",
       asOf: "2026-02-09",
       values: { "autonomous-merge-rate": 0.804 },
+    },
+  },
+  {
+    id: "github-copilot-coding-agent",
+    label: "GitHub Copilot coding agent (Microsoft)",
+    kind: "closed-commercial",
+    homepage:
+      "https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/",
+    resultSource: {
+      kind: "published",
+      citation:
+        "Pinna, Gong, Williams, Sarro, 'Comparing AI Coding Agents: A Task-Stratified Analysis of Pull Request Acceptance', arXiv 2602.08915, 2026-02-09 (MSR'26 Mining Challenge track; Table 1 — AIDev dataset overall PR acceptance rate 0.680 for GitHub Copilot over 2,194 PRs, used here as autonomous-merge-rate proxy; the inverse 0.320 reported as human-intervention-rate for the same set). The same paper supplies the claude-code (0.726 features) and cursor-agent (0.804 fix) readings already in the corpus. GitHub's launch post ('GitHub Copilot: Meet the new coding agent', github.blog, 2025-05-19) carries no SWE-bench Verified number, so no `swe-bench-verified-resolve-rate` reading is asserted (rule #4 — no fabricated numbers).",
+      asOf: "2026-02-09",
+      values: {
+        "autonomous-merge-rate": 0.68,
+        "human-intervention-rate": 0.32,
+      },
     },
   },
   {

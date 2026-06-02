@@ -42,7 +42,7 @@ Five frameworks dominate the orchestrator tier:
 | **LangGraph** (LangChain) | Graph-based state machine | Third-party 62% complex-task success; 100% tool execution success | Time-travel debugging via checkpoints; durable execution; thread_id model | Framework, not daemon; you build the graph |
 | **OpenAI Agents SDK** | Handoffs + guardrails + tracing | Production-ready March 2026; 26k+ stars (no headline benchmark yet) | OpenAI ecosystem distribution; production-grade tracing | Framework, not daemon; model-locked to OpenAI; no MAPE-K self-improvement |
 
-The agent tier (Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, OpenAI Codex, Augment Code) sits BELOW the orchestrator tier — orchestrators compose them. Minsky-via-Claude inherits Claude Code's SWE-bench score; Minsky-via-Devin inherits Devin's PR merge rate. The orchestrator-tier delta is what Minsky's MAPE-K loop + 24/7 daemon + constitution adds on top.
+The agent tier (Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, OpenAI Codex, GitHub Copilot coding agent, Augment Code) sits BELOW the orchestrator tier — orchestrators compose them. Minsky-via-Claude inherits Claude Code's SWE-bench score; Minsky-via-Devin inherits Devin's PR merge rate. The orchestrator-tier delta is what Minsky's MAPE-K loop + 24/7 daemon + constitution adds on top.
 
 ## Architectural patterns we adopt or reject
 
@@ -63,11 +63,11 @@ The agent tier (Claude Code, Devin, Aider, OpenHands, SWE-agent, Cursor agent, O
 
 The M1.10 scorecard at `novel/competitive-benchmark/` measures Minsky against this set on shared metrics. Read [`novel/competitive-benchmark/README.md`](../novel/competitive-benchmark/README.md) for the metric catalogue + grid shape.
 
-Current corpus state (as of 2026-05-23):
+Current corpus state (as of 2026-06-02):
 
-- **9 competitors** (8 agent-tier + 1 orchestrator-tier — MetaGPT)
-- **12 metrics** (DORA 4 + agentic 6 + public-benchmark 2: SWE-bench Verified + HumanEval Pass@1)
-- **Grid**: 108 cells (12 × 9)
+- **10 competitors** (9 agent-tier + 1 orchestrator-tier — MetaGPT)
+- **13 metrics** (DORA 4 + agentic 7 + public-benchmark 2: SWE-bench Verified + HumanEval Pass@1)
+- **Grid**: 130 cells (13 × 10)
 - **Self-refreshing**: weekly `corpus-refresh-check` + quarterly `corpus-discover-quarterly` (PR #719); `/competitor-research <url>` skill is the on-ramp for new vendors (PR #718)
 
 ## Per-vendor research files

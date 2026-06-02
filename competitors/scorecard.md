@@ -9,8 +9,14 @@ the executable CLI surface per Path-A § Phase 10 (`docs/plans/2026-05-24-path-a
 - **Cells**: 117
 - **Comparisons (live delta)**: 2
 - **M1.10 acceptance**: met
-- **Competitors with data**: 9
+- **Competitors with data**: 10
 - **Metrics with comparison**: 6
+
+> Note: the cell/comparison aggregate counts above are a stale generator
+> snapshot (the `render-scorecard-md.mjs` generator was removed in the
+> Path-A cut). The authoritative corpus is
+> `novel/competitive-benchmark/src/competitors.ts`; the tables below are
+> updated by hand when a competitor is added.
 
 ## Live comparisons (cells with `competitorValue` and/or `minskyValue`)
 
@@ -19,6 +25,7 @@ the executable CLI surface per Path-A § Phase 10 (`docs/plans/2026-05-24-path-a
 | Autonomous merge rate | Claude Code | — | 0.726 | — |
 | Autonomous merge rate | Devin (Cognition Labs) | — | 0.670 | — |
 | Autonomous merge rate | Cursor agent | — | 0.804 | — |
+| Autonomous merge rate | GitHub Copilot coding agent (Microsoft) | — | 0.680 | — |
 | Mean autonomous-merge latency | OpenHands (All-Hands AI) | — | 3600 | — |
 | Mean autonomous-merge latency | Devin (Cognition Labs) | — | 900 | — |
 | Cost per merged PR | OpenHands (All-Hands AI) | — | 0.300 | — |
@@ -31,6 +38,7 @@ the executable CLI surface per Path-A § Phase 10 (`docs/plans/2026-05-24-path-a
 | Human intervention rate | OpenAI Codex (codex-1) | 0 | — | — |
 | Human intervention rate | Augment Code (Augment SWE-bench agent) | 0 | — | — |
 | Human intervention rate | MetaGPT (Foundation Agents — ICLR 2024) | 0 | — | — |
+| Human intervention rate | GitHub Copilot coding agent (Microsoft) | 0 | 0.320 | 0.320 |
 | SWE-bench Verified resolve rate | Claude Code | — | 0.490 | — |
 | SWE-bench Verified resolve rate | OpenHands (All-Hands AI) | — | 0.658 | — |
 | SWE-bench Verified resolve rate | SWE-agent (Princeton NLP) | — | 0.740 | — |
@@ -52,6 +60,7 @@ Generated at 2026-05-28.
 | Aider | 2024-05-22 | 736 | very-stale |
 | Devin (Cognition Labs) | 2026-04-07 | 51 | fresh |
 | Cursor agent | 2026-02-09 | 108 | stale |
+| GitHub Copilot coding agent (Microsoft) | 2026-02-09 | 108 | stale |
 | OpenAI Codex (codex-1) | 2025-05-16 | 377 | very-stale |
 | Augment Code (Augment SWE-bench agent) | 2025-03-31 | 423 | very-stale |
 | MetaGPT (Foundation Agents — ICLR 2024) | 2024-05-07 | 751 | very-stale |
@@ -84,6 +93,7 @@ Generated at 2026-05-28.
 | `aider` | Aider | open-source |
 | `devin` | Devin (Cognition Labs) | closed-commercial |
 | `cursor-agent` | Cursor agent | closed-commercial |
+| `github-copilot-coding-agent` | GitHub Copilot coding agent (Microsoft) | closed-commercial |
 | `openai-codex` | OpenAI Codex (codex-1) | closed-commercial |
 | `augment-code` | Augment Code (Augment SWE-bench agent) | open-source |
 | `metagpt` | MetaGPT (Foundation Agents — ICLR 2024) | open-source |

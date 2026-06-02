@@ -16,6 +16,21 @@ describe("COMPETITORS corpus", () => {
     expect(COMPETITORS.length).toBeGreaterThanOrEqual(4);
   });
 
+  it("includes github-copilot-coding-agent with the AIDev-paper PR-acceptance proxy reading", () => {
+    const copilot = competitorById("github-copilot-coding-agent") as Competitor;
+    expect(copilot).toBeDefined();
+    expect(copilot.kind).toBe("closed-commercial");
+    // Overall PR acceptance rate (0.680) from the AIDev paper Table 1
+    // (arXiv 2602.08915) as autonomous-merge-rate proxy; inverse 0.320 as
+    // human-intervention-rate — same extraction shape as claude-code/devin.
+    expect(publishedValue(copilot, "autonomous-merge-rate")).toBeCloseTo(0.68);
+    expect(publishedValue(copilot, "human-intervention-rate")).toBeCloseTo(0.32);
+    // No SWE-bench Verified primary number exists for Copilot — the corpus
+    // must NOT assert one (rule #4 — no fabricated readings).
+    expect(publishedValue(copilot, "swe-bench-verified-resolve-rate")).toBeUndefined();
+    expect(copilot.resultSource.citation).toMatch(/2602\.08915/);
+  });
+
   it("has unique kebab-case ids", () => {
     const ids = COMPETITORS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
