@@ -120,12 +120,44 @@ function healWorkerDaemon(log) {
 }
 
 /**
+ * Pure: build the conductor's `.minsky/orchestrate.jsonl` ledger line from a
+ * sweep result. Extracted so the merge-accounting is unit-testable without
+ * filesystem I/O (rule #2 — pure decision over a seam, rule #10 — same input
+ * ⇒ same output). The sweep result is whatever `runGateSweep` returns; its
+ * `merged[]` already counts a worktree-bound-delete soft-fail as MERGED (the
+ * remote squash-merge succeeded even though the post-merge local `git branch
+ * -d` failed — `local-gate-merge.mjs`'s `processOnePr` consults the `gh pr
+ * view --json state` oracle, never the `gh pr merge` exit code). This helper
+ * carries that count straight into the conductor's `merged:[]` so the
+ * autonomous path's accounting agrees with the manual path's — closing the
+ * TASKS.md `local-gate-merge-false-negative-on-worktree-bound-branch-delete`
+ * acceptance for `orchestrate.mjs`.
+ * @param {{merged: {number:number}[], skipped: {number:number}[]}} res
+ * @param {{ts: string, workerAlive: boolean, healed: boolean, sweepError?: string}} ctx
+ * @returns {{ts: string, workerAlive: boolean, healed: boolean, merged: number[], skipped: number, sweepError?: string}}
+ */
+export function buildTickLedgerLine(res, ctx) {
+  return {
+    ts: ctx.ts,
+    workerAlive: ctx.workerAlive,
+    healed: ctx.healed,
+    merged: res.merged.map((m) => m.number),
+    skipped: res.skipped.length,
+    ...(ctx.sweepError ? { sweepError: ctx.sweepError } : {}),
+  };
+}
+
+/**
  * One conductor tick: heal-if-needed → Opus-review-gated merge sweep →
  * ledger. Never throws (caught internally) so a bad sweep can't kill the
- * loop; the ledger line is the 10h-uptime + self-metric record.
+ * loop; the ledger line is the 10h-uptime + self-metric record. The sweep
+ * is injected (`sweepFn`, default `runGateSweep`) so the merge-accounting
+ * path — including the worktree-bound-delete soft-fail counted as MERGED —
+ * is testable without spawning `gh` (rule #2).
  * @param {(s: string) => void} log
+ * @param {(opts: {limit: number, log: (s: string) => void}) => {merged: {number:number}[], skipped: {number:number}[]}} [sweepFn]
  */
-export function tick(log) {
+export function tick(log, sweepFn = runGateSweep) {
   const aliveBefore = workerDaemonAlive();
   if (decideHeal(aliveBefore) === "heal") {
     log("orchestrate: Sonnet worker daemon DOWN — healing\n");
@@ -135,7 +167,7 @@ export function tick(log) {
   let res = { merged: [], skipped: [] };
   let sweepError = "";
   try {
-    res = runGateSweep({ limit: SWEEP_LIMIT, log });
+    res = sweepFn({ limit: SWEEP_LIMIT, log });
   } catch (err) {
     sweepError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
     log(`orchestrate: sweep error (continuing): ${sweepError}\n`);
@@ -144,14 +176,14 @@ export function tick(log) {
     try {
       appendFileSync(
         LEDGER,
-        `${JSON.stringify({
-          ts: new Date().toISOString(),
-          workerAlive: workerDaemonAlive(),
-          healed: aliveBefore === false,
-          merged: res.merged.map((m) => m.number),
-          skipped: res.skipped.length,
-          ...(sweepError ? { sweepError } : {}),
-        })}\n`,
+        `${JSON.stringify(
+          buildTickLedgerLine(res, {
+            ts: new Date().toISOString(),
+            workerAlive: workerDaemonAlive(),
+            healed: aliveBefore === false,
+            ...(sweepError ? { sweepError } : {}),
+          }),
+        )}\n`,
       );
     } catch {
       /* rule #6: ledger best-effort, never gates the loop */
