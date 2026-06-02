@@ -16,6 +16,7 @@ import {
   CI_BASH_GATE_BUCKETS,
   CI_ENV_DEPENDENT_JOBS,
   CI_TO_MANIFEST_ALIAS,
+  LOCAL_ONLY_MANIFEST_STEPS,
   parseArgs,
   renderJson,
   resolveBodyPath,
@@ -156,6 +157,35 @@ describe("STACK_MANIFEST", () => {
 
   test("full strictly extends fast (the slow lints exist in full only)", () => {
     expect(selectSteps("full").length).toBeGreaterThan(selectSteps("fast").length);
+  });
+
+  // Pin for `pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence`: the
+  // full stage must run the whole-tree biome pass (`pnpm biome ci .`) so a
+  // locally-`--stage=full`-green PR can't fail CI's whole-tree `biome` job.
+  test("`biome-whole-tree` runs CI's exact whole-tree command in the full stage only", () => {
+    const step = STACK_MANIFEST.find((s) => s.name === "biome-whole-tree");
+    expect(step).toBeDefined();
+    expect(step?.cmd).toBe("pnpm");
+    expect(step?.args).toEqual(["biome", "ci", "."]);
+    expect(step?.stages).toEqual(["full"]);
+  });
+
+  test("the diff-scoped `biome` step is local-only and never diverges from whole-tree at full stage", () => {
+    const diffScoped = STACK_MANIFEST.find((s) => s.name === "biome");
+    // diff-scoped: changed files vs the base, NOT whole-tree.
+    expect(diffScoped?.args).toContain("--changed");
+    expect(diffScoped?.args).toContain("--since=origin/main");
+    expect(LOCAL_ONLY_MANIFEST_STEPS.has("biome")).toBe(true);
+    // Both biome variants run at full stage, so a `--stage=full` push pays the
+    // whole-tree pass; the diff-scoped one stays in fast for the ≤2 min budget.
+    const fullNames = new Set(selectSteps("full").map((s) => s.name));
+    expect(fullNames.has("biome")).toBe(true);
+    expect(fullNames.has("biome-whole-tree")).toBe(true);
+  });
+
+  test("LOCAL_ONLY_MANIFEST_STEPS entries are real manifest step names (no dangling exclusion)", () => {
+    const manifestNames = new Set(STACK_MANIFEST.map((s) => s.name));
+    for (const n of LOCAL_ONLY_MANIFEST_STEPS) expect(manifestNames.has(n)).toBe(true);
   });
 
   // Slice (c) of `milestone-alignment-gate-enforcement` — pin the alignment
@@ -691,7 +721,16 @@ describe("ci.yml drift-protection", () => {
     const expectedManifestNames = new Set(
       ciNeeds.filter((n) => !CI_ENV_DEPENDENT_KEYS.has(n)).map((n) => CI_TO_MANIFEST_ALIAS[n] ?? n),
     );
-    const actualManifestNames = new Set(selectSteps("full").map((s) => s.name));
+    // LOCAL_ONLY_MANIFEST_STEPS (currently the diff-scoped `biome` step) are
+    // deliberate local-only speed optimizations layered on top of the
+    // CI-equivalent step — they have no 1:1 CI `needs:` job by design, so they
+    // are not "stray" entries. Exclude them from the bidirectional check. See
+    // the constant's JSDoc in run-pre-pr-lint-stack.mjs.
+    const actualManifestNames = new Set(
+      selectSteps("full")
+        .map((s) => s.name)
+        .filter((n) => !LOCAL_ONLY_MANIFEST_STEPS.has(n)),
+    );
 
     // Bidirectional set equality: a missing CI job means the daemon's gate
     // doesn't cover it locally; a stray manifest entry means the manifest

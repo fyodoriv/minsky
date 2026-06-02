@@ -72,6 +72,15 @@ pre-push:
       # — the only reason to ALSO run `--stage=full` on pre-push was paranoia,
       # and it cost ~35s × every-push-by-every-developer in friction.
       #
+      # Note (`pre-pr-lint-biome-diff-scoped-vs-ci-whole-tree-divergence`): the
+      # fast-stage `biome` step is DIFF-SCOPED (changed files only). The
+      # WHOLE-TREE biome pass that CI's `biome` job runs (`pnpm biome ci .`,
+      # the `biome-whole-tree` manifest step) is full-stage only — so it runs
+      # in `scripts/local-gate-merge.mjs` before merge and in the operator's
+      # `pnpm pre-pr-lint --stage=full` before push, NOT here. Pre-push stays
+      # diff-scoped-fast on purpose; whole-tree formatting drift in untouched
+      # files is caught at full stage, never silently shipped to a CI surprise.
+      #
       # Policy enforced by P1 `pre-push-hook-stays-fast` (vision.md rule #10
       # deterministic enforcement): any future PR that puts `--stage=full`
       # back into pre-push must justify in the PR body why a 40s pre-push is
