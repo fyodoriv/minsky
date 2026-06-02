@@ -184,6 +184,8 @@ importers:
 
   novel/adapters/types: {}
 
+  novel/claude-handoff-spec: {}
+
   novel/competitive-benchmark: {}
 
   novel/dashboard-web:

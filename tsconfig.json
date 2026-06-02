@@ -12,6 +12,7 @@
     { "path": "./novel/adapters/sandbox" },
     { "path": "./novel/adapters/token-monitor" },
     { "path": "./novel/adapters/types" },
+    { "path": "./novel/claude-handoff-spec" },
     { "path": "./novel/competitive-benchmark" },
     { "path": "./novel/dashboard-web" },
     { "path": "./novel/experiment-record" },
