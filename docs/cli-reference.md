@@ -52,6 +52,7 @@ Every `minsky` subcommand, every flag. See [`bin/minsky`](../bin/minsky) for the
 | `MINSKY_BUDGET_TOKENS` | Per-iteration token budget cap. |
 | `MINSKY_CTO_AUDIT` | `on` (default) / `off` — toggles the post-iteration CTO audit. |
 | `MINSKY_SCOPE_LEAK_MODE` | `soft` (default; deprecated alternative `hard` halts daemon — see `DEPRECATED.md`). |
+| `MINSKY_BRIEF_WAIT_AFTER_PR_OPEN` | `1`/`true` reverts the spawn brief's FINAL STEP to the legacy "stay alive after `gh pr create` to watch CI" behaviour. Default (unset) tells the worker to exit cleanly with code 0 the instant the PR URL prints — the next iteration owns the CI-fix loop. Escape hatch for the cadence-tuning Pivot. |
 | `MINSKY_NO_AUTO_INSTALL` | `1` to skip the post-merge auto-install hook for one pull. |
 | `MINSKY_NON_INTERACTIVE` | `1` for CI / scripted use (no TTY prompts). |
 | `MINSKY_TELEMETRY_ENDPOINT` | Optional HTTPS endpoint for anonymized telemetry submission (see `INSTALL.md` step 5). |
