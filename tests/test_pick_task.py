@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import pick_task  # noqa: E402  pylint: disable=wrong-import-position
 
+REPO_ROOT = Path(__file__).parent.parent
+LIVE_TASKS_MD = REPO_ROOT / "TASKS.md"
+
 # --- Fixture lifted verbatim from task-finder.test.ts ---------------------
 
 SAMPLE_TASKS_MD = """# Tasks
@@ -211,6 +214,80 @@ def test_is_rule_9_compliant_false_when_anchor_missing() -> None:
     tasks = pick_task.parse_tasks_md(INCOMPLETE_RULE_9_TASKS_MD)
     missing = next(t for t in tasks if t.id == "missing-anchor-task")
     assert not pick_task.is_rule_9_compliant(missing)
+
+
+# --- Success-alias parity tests ------------------------------------------
+# `**Verification**`/`**Acceptance**` populate `success` when no explicit
+# `**Success**` is present, mirroring `check-rule-9-tasksmd-fields.mjs` which
+# already treats Success and Acceptance as equivalent. An explicit Success
+# always wins; among aliases first-match wins.
+
+
+def _alias_block(alias_line: str, *, extra: str = "") -> str:
+    return f"""## P0
+
+- [ ] Alias task
+  - **ID**: alias-task
+  - **Tags**: p0
+  - **Hypothesis**: x causes y by z
+{alias_line}
+  - **Pivot**: <0.5
+  - **Measurement**: pytest
+  - **Anchor**: rule #9{extra}
+"""
+
+
+def test_acceptance_alias_populates_success_and_is_rule_9_compliant() -> None:
+    tasks = pick_task.parse_tasks_md(_alias_block("  - **Acceptance**: tests pass"))
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t.success == "tests pass"
+    assert pick_task.is_rule_9_compliant(t)
+
+
+def test_verification_alias_populates_success_and_is_rule_9_compliant() -> None:
+    tasks = pick_task.parse_tasks_md(_alias_block("  - **Verification**: smoke passes"))
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t.success == "smoke passes"
+    assert pick_task.is_rule_9_compliant(t)
+
+
+def test_explicit_success_wins_over_later_verification_alias() -> None:
+    tasks = pick_task.parse_tasks_md(
+        _alias_block("  - **Success**: real success\n  - **Verification**: alias loses")
+    )
+    assert tasks[0].success == "real success"
+
+
+def test_explicit_success_wins_over_earlier_verification_alias() -> None:
+    # Alias appears BEFORE the explicit Success — Success still wins.
+    tasks = pick_task.parse_tasks_md(
+        _alias_block("  - **Verification**: alias loses\n  - **Success**: real success")
+    )
+    assert tasks[0].success == "real success"
+
+
+def test_first_alias_wins_when_verification_precedes_acceptance() -> None:
+    tasks = pick_task.parse_tasks_md(
+        _alias_block("  - **Verification**: V wins\n  - **Acceptance**: A loses")
+    )
+    assert tasks[0].success == "V wins"
+
+
+def test_acceptance_alias_supports_multiline_continuation() -> None:
+    md = _alias_block("  - **Acceptance**: first line\n    continued line")
+    t = pick_task.parse_tasks_md(md)[0]
+    assert t.success is not None
+    assert "first line" in t.success
+    assert "continued line" in t.success
+
+
+def test_acceptance_only_task_is_picked_by_pick_host_task() -> None:
+    # End-to-end: an Acceptance-only block is now eligible for picking.
+    chosen = pick_task.pick_host_task(_alias_block("  - **Acceptance**: tests pass"))
+    assert chosen is not None
+    assert chosen.id == "alias-task"
 
 
 # --- isNotBlocked parity tests -------------------------------------------
@@ -824,6 +901,35 @@ class TestTaskSourcePort:
         )
         assert chosen is not None
         assert chosen.id == "low-priority-task"
+
+
+class TestLiveTasksMdRealWorldFixture:
+    """REAL-WORLD FIXTURE: parse minsky's own live TASKS.md, not a synthetic literal.
+
+    The SAMPLE_*_TASKS_MD literals above are convenient hand-written shapes that
+    drift from the real file (Fake Fixture smell, Meszaros 2007 — PR #494 shipped
+    exactly this bug). These cases feed the picker the actual TASKS.md the daemon
+    reads, so a real format change (a new metadata field, an indent shift) fails
+    here instead of passing green against synthetic-only input.
+    """
+
+    def test_live_tasks_md_exists(self) -> None:
+        assert LIVE_TASKS_MD.is_file()
+
+    def test_parses_many_tasks_from_live_file(self) -> None:
+        content = LIVE_TASKS_MD.read_text(encoding="utf-8")
+        tasks = pick_task.parse_tasks_md(content)
+        # The live queue is large; a parser that silently skips real input would
+        # return a near-empty list (the PR #494 failure shape).
+        assert len(tasks) >= 10
+        # Every parsed task carries an ID (the checkbox+ID contract holds live).
+        assert all(t.id is not None for t in tasks)
+
+    def test_picks_a_rule_9_compliant_task_from_live_file(self) -> None:
+        content = LIVE_TASKS_MD.read_text(encoding="utf-8")
+        chosen = pick_task.pick_host_task(content)
+        assert chosen is not None
+        assert pick_task.is_rule_9_compliant(chosen)
 
 
 def _build_tasks_md_with_one_task(task_id: str) -> str:

@@ -229,6 +229,79 @@ export function claudeBinaryReachableInvariant(opts) {
 }
 
 /**
+ * @typedef {object} OpenhandsBootInvariantOpts
+ * @property {() => Promise<boolean>} openhandsOnPath — true iff the
+ *   canonical `openhands` CLI is reachable from the supervisor PATH
+ *   (production: `shutil.which("openhands")` ⇒ `which openhands`).
+ * @property {() => Promise<boolean>} shimResolvable — true iff the SDK
+ *   shim (`novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py`)
+ *   exists and is runnable as the fallback backend. Either backend
+ *   present ⇒ iterations can spawn; both absent ⇒ every iteration no-ops.
+ */
+
+/**
+ * Boot invariant: the openhands runtime must be resolvable — EITHER the
+ * canonical `openhands` CLI is on PATH, OR the SDK shim file is present
+ * as the fallback. The live runner (`bin/minsky-run.sh` → `scripts/
+ * spawn_agent.py`) spawns `openhands solve --task-file …` per iteration;
+ * `spawn_agent.py::resolve_agent_argv` first probes `shutil.which("openhands")`
+ * and falls back to the shim. When NEITHER backend is found the dispatcher
+ * exits 127 and the iteration produces zero work — silently, because no
+ * existing invariant probed the spawn backend. Every subsequent iteration
+ * repeats the no-op until the operator notices.
+ *
+ * This mirrors {@link claudeBinaryReachableInvariant} (the same "agent
+ * binary missing → every iteration ENOENT-crashes" failure class) but for
+ * the openhands backend that became the canonical default. It catches the
+ * regression at the next supervisor boot — one task block instead of a run
+ * of `verdict: "no-progress"` iterations that `daemon-no-progress-rate`
+ * only detects AFTER ≥3 of them have already burned.
+ *
+ * Strategy seam: both probes are injected so tests can simulate the four
+ * backend-availability combinations without touching PATH or the disk.
+ *
+ * @param {OpenhandsBootInvariantOpts} opts
+ * @returns {Invariant}
+ */
+export function openhandsImportableAtBootInvariant(opts) {
+  const { openhandsOnPath, shimResolvable } = opts;
+  /** @type {Invariant} */
+  const fn = async () => {
+    const id = "openhands-importable-at-boot";
+    const [onPath, shim] = await Promise.all([openhandsOnPath(), shimResolvable()]);
+    if (onPath || shim) return { id, ok: true };
+    return {
+      id,
+      ok: false,
+      // Operator-action: the daemon cannot install its own spawn backend.
+      actor: "operator",
+      evidence:
+        "neither the `openhands` CLI is on the supervisor PATH nor is the SDK shim " +
+        "(novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py) resolvable; " +
+        "`scripts/spawn_agent.py` exits 127 and every iteration no-ops silently.",
+      suggestedTaskTitle:
+        "supervisor cannot resolve any openhands backend — every iteration spawn-fails (exit 127)",
+      suggestedFix:
+        "The live runner spawns `openhands solve` (or the SDK shim fallback) per iteration; " +
+        "with neither backend present, `scripts/spawn_agent.py` exits 127 and the iteration " +
+        "produces zero work — no error surfaces because the dispatcher's 127 looks like a clean " +
+        "exit to the supervisor. Fix one of: (a) install the canonical CLI so `which openhands` " +
+        "resolves (https://docs.openhands.dev), and ensure its directory is on the launchd / " +
+        "systemd-user PATH the same way `distribution/systemd/run-tick-loop.sh` extends it for " +
+        "`claude`; or (b) restore the SDK shim at " +
+        "`novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py` (it may have been " +
+        "deleted or made non-executable). Verify: `which openhands || ls -l " +
+        "novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py`. Pivot if this " +
+        "false-positives ≥1/week during transient boot states (e.g. PATH not yet warmed): add a " +
+        "`consecutiveFailures: 2` retry gate before surfacing rather than retiring the invariant.",
+    };
+  };
+  /** @type {Invariant & { invariantId?: string }} */ (fn).invariantId =
+    "openhands-importable-at-boot";
+  return fn;
+}
+
+/**
  * @typedef {object} DaemonIteration
  * @property {string} taskId
  * @property {boolean} committed — true if the iteration produced a git commit
@@ -1063,6 +1136,55 @@ async function spawnVersionProbe(name) {
 }
 
 /**
+ * Production probe for `openhandsImportableAtBootInvariant` (PATH arm):
+ * resolves true iff `openhands` is reachable from the supervisor PATH.
+ * Mirrors `spawn_agent.py::shutil.which("openhands")` — uses `which`
+ * (no `--version` spawn, since the canonical CLI may not implement it
+ * yet pre-June-1). Returns false on any failure (rule #7 graceful-
+ * degrade — an unreachable `which` collapses to "not on PATH", which the
+ * shim arm can still rescue).
+ *
+ * @returns {Promise<boolean>}
+ */
+async function openhandsOnPathProbe() {
+  try {
+    await execFileAsync("which", ["openhands"], { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Production probe for `openhandsImportableAtBootInvariant` (shim arm):
+ * resolves true iff the SDK shim file
+ * (`novel/adapters/agent-runtime-openhands/bin/minsky-openhands-spawn.py`,
+ * the same `DEFAULT_SHIM_PATH` `spawn_agent.py` falls back to) exists.
+ * The dispatcher invokes it via `python3`, so presence — not the
+ * executable bit — is the resolvability signal. Returns false when the
+ * file is absent or `stat` fails.
+ *
+ * @param {string} repoRoot
+ * @returns {Promise<boolean>}
+ */
+async function openhandsShimResolvableProbe(repoRoot) {
+  const shimPath = join(
+    repoRoot,
+    "novel",
+    "adapters",
+    "agent-runtime-openhands",
+    "bin",
+    "minsky-openhands-spawn.py",
+  );
+  try {
+    const stats = await stat(shimPath);
+    return stats.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Production probe for `claudePrintTimeoutFrequencyInvariant`: counts
  * `claude-print-timeout` substring occurrences across all worker log
  * files (`.minsky/workers/*.log`) whose mtime is within the last 7d.
@@ -1356,10 +1478,12 @@ export function stripBranchSuffixes(branch) {
  * Returns `[]` when the log file is absent (fresh checkout, supervisor
  * never ran).
  *
- * Conventions: each iteration emits a JSON line with `evt:"iteration"`,
- * `taskId`, and `committedSha` fields when the OTEL adapter is
- * enabled; `committed` is true iff `committedSha` is a non-empty
- * string. Lines that don't parse are silently skipped.
+ * Conventions: each iteration emits the live span line
+ * `[span] tick-loop.iteration {"iteration.index":N,"iteration.status":...,"task.id":...,"iteration.reason":...}`
+ * — the exact shape `scripts/llm-provider-throughput.mjs` already
+ * consumes. `committed` is
+ * derived from `iteration.status === "completed"`. Lines that don't carry
+ * the span prefix or don't parse are silently skipped.
  *
  * @param {string} logPath
  * @returns {Promise<readonly DaemonIteration[]>}
@@ -1386,22 +1510,42 @@ async function readIterationsFromLog(logPath) {
 }
 
 /**
+ * Live tick-loop span prefix. Mirrors `SPAN_PREFIX` in
+ * `scripts/llm-provider-throughput.mjs`
+ * — the single source of truth for the emitter's stdout shape.
+ */
+const ITERATION_SPAN_PREFIX = "[span] tick-loop.iteration ";
+
+/**
+ * Parse one supervisor log line into a `DaemonIteration`, or `null` when the
+ * line isn't a live `tick-loop.iteration` span. Reads the same fields
+ * `activity.ts::parseSpan` consumes — `iteration.index`, `iteration.status`,
+ * `task.id`, `iteration.reason` — and derives `committed` from
+ * `iteration.status === "completed"`. Malformed JSON / non-span lines yield
+ * `null` rather than throwing (rule #7 graceful-degrade for upstream input).
+ *
  * @param {string} line
  * @returns {DaemonIteration | null}
  */
 export function parseIterationLogLine(line) {
-  if (!line) return null;
+  if (!line?.startsWith(ITERATION_SPAN_PREFIX)) return null;
+  const json = line.slice(ITERATION_SPAN_PREFIX.length).trim();
+  if (json === "") return null;
+  let obj;
   try {
-    const obj = JSON.parse(line);
-    if (obj?.evt !== "iteration" || typeof obj?.taskId !== "string") return null;
-    return {
-      taskId: obj.taskId,
-      committed: typeof obj.committedSha === "string" && obj.committedSha.length > 0,
-      timestamp: typeof obj.ts === "string" ? obj.ts : "",
-    };
+    obj = JSON.parse(json);
   } catch {
     return null;
   }
+  if (obj === null || typeof obj !== "object") return null;
+  const status = obj["iteration.status"];
+  const taskId = obj["task.id"];
+  if (typeof status !== "string" || typeof taskId !== "string") return null;
+  return {
+    taskId,
+    committed: status === "completed",
+    timestamp: "",
+  };
 }
 
 /**
@@ -1992,6 +2136,10 @@ export function defaultInvariants() {
   return [
     tokenMonitorNotAllPeggedInvariant({ snapshotPerPlan }),
     claudeBinaryReachableInvariant({ probe: spawnVersionProbe }),
+    openhandsImportableAtBootInvariant({
+      openhandsOnPath: openhandsOnPathProbe,
+      shimResolvable: () => openhandsShimResolvableProbe(repoRoot),
+    }),
     daemonNoopIterationRateInvariant({ recentIterations }),
     daemonPrStuckOnCiInvariant({ daemonPrs }),
     daemonShippedRatioInvariant({ rollingStats }),

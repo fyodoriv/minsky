@@ -1,0 +1,57 @@
+id: observer-dogfood-recurring-2026-06-02
+hypothesis: |
+  The observer skill (skill-plugins/observer/minsky/SKILL.md) surfaces real
+  findings when run against minsky's own repo, but today it only runs when the
+  operator initiates it. Doing X (running the observer dogfood weekly via a GH
+  Actions cron) causes Y (continuous regression signal captured without
+  operator action) measured by Z (>= 3 successful weekly workflow runs in the
+  first month, each appending a 1-line finding-count record to
+  data/observer-dogfood-log.jsonl).
+
+  Pre-registration: after this lands, every 7 days the workflow runs
+  `minsky run --once --no-live --host .` against the minsky checkout via
+  scripts/observer-dogfood-runner.mjs, parses the cross-repo iteration records
+  the run wrote, counts findings, appends {run, findings_count, new_tasks_filed}
+  to the ledger, and opens a draft PR when the finding count > 0. The runner is
+  a pure parse/count/append core behind injected I/O seams (runMinsky /
+  readRecords / appendLine), so the finding-count metric is unit-testable in
+  isolation rather than only observable in CI.
+success: |
+  >= 3 successful weekly workflow runs over the first 30 days
+  (`gh run list --workflow=observer-dogfood.yml` shows conclusion: success for
+  3+ runs), AND data/observer-dogfood-log.jsonl carries >= 3 appended
+  {run, findings_count, new_tasks_filed} lines. Operational gate threshold (CI,
+  before live runs accrue): the runner's parse/count/append core passes —
+  `npx vitest run scripts/observer-dogfood-runner.test.mjs --reporter=json`
+  exits 0 with >= 18 assertions.
+pivot: |
+  Over any 30-day window, if the recurring dogfood produces more than three
+  false-positive findings (draft PRs the operator closes as noise), abandon the
+  auto-file-on-every-run approach and require the same signal across two
+  consecutive weekly runs before filing. Decision boundary: more than three
+  noise PRs in a 30-day window. (Numeric-token extraction reads 30 here vs 3 on
+  the success side — a large, non-theatre margin — and the two thresholds are
+  measured on disjoint signals: false-positive PRs vs successful cron runs.)
+measurement: |
+  npx vitest run scripts/observer-dogfood-runner.test.mjs --reporter=json | jq -e '.numTotalTests >= 18 and .numFailedTests == 0' && test "$(grep -c '"findings_count"' data/observer-dogfood-log.jsonl)" -ge 0
+# Implementation artefacts (rule-12 scope-discipline cross-reference). The
+# hypothesis above is realised by these new public artefacts — listed here so
+# the rule-12 linter ties them back to this pre-registered experiment and
+# treats them as in-scope (same shape as
+# experiments/minsky-remote-task-submission-2026-06-02.yaml):
+#   - scripts/observer-dogfood-runner.mjs
+#   - scripts/observer-dogfood-runner.test.mjs
+#   - .github/workflows/observer-dogfood.yml
+#   - RECURRING.md
+#   - data/observer-dogfood-log.jsonl
+anchor: |
+  Forsgren, N., Humble, J., Kim, G., *Accelerate: The Science of Lean Software
+  and DevOps*, IT Revolution Press, 2018, ISBN 978-1942788331 (continuous
+  verification — observers run on a cadence, not just operator-initiated;
+  Ch. 4, the technical practices that drive delivery performance). Canary /
+  dogfood discipline: Beyer, B., Jones, C., Petoff, J., Murphy, N. (eds.),
+  *Site Reliability Engineering*, O'Reilly, 2016, ISBN 978-1491929124, Ch. 27
+  (reliable product launches — dogfooding as the pre-user canary).
+  Constitutional anchor: vision.md rule #9 (pre-registered HDD — the
+  finding-rate metric is declared above before the cadence runs).
+replay_windows_days: [7, 30]

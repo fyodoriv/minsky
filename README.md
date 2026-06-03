@@ -23,7 +23,7 @@ It runs from Claude Code, Devin, or **local models** — same core behavior, no 
 cd /any/git/repo && npx -y minsky
 ```
 
-`npx minsky` installs + bootstraps `~/.minsky/config.json` + starts an iteration. **Uninstall**: `minsky uninstall --force`. Runbook: [INSTALL.md](./INSTALL.md). Contributors: `git clone` + `pnpm install` + `./bin/minsky`.
+`npx minsky` installs + bootstraps `~/.minsky/config.json` + starts an iteration. **Uninstall**: `minsky uninstall --force`. Runbook: [INSTALL.md](./INSTALL.md). Contributors: `git clone` + `pnpm install` (builds dist, no build) + `bin/minsky`.
 
 ## Run
 

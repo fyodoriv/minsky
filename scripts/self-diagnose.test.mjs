@@ -30,6 +30,7 @@ import {
   localServerConcurrencyMismatchInvariant,
   mapGhPrListToCiSnapshots,
   modelCatalogInvariantsHoldInvariant,
+  openhandsImportableAtBootInvariant,
   parseEtime,
   parseIterationLogLine,
   runInvariants,
@@ -135,6 +136,52 @@ describe("claudeBinaryReachableInvariant", () => {
     expect(result.evidence).toContain("ENOENT");
     expect(result.suggestedFix).toContain("launchd");
     expect(result.suggestedFix).toContain("run-tick-loop.sh");
+  });
+});
+
+describe("openhandsImportableAtBootInvariant", () => {
+  it("passes when the canonical openhands CLI is on PATH", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => true,
+      shimResolvable: async () => false,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when only the SDK shim is resolvable (fallback backend)", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => false,
+      shimResolvable: async () => true,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails with an operator-action P0 finding when neither backend resolves", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => false,
+      shimResolvable: async () => false,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("openhands-importable-at-boot");
+    expect(result.actor).toBe("operator");
+    expect(result.evidence).toContain("127");
+    expect(result.suggestedFix).toContain("openhands");
+    expect(result.suggestedFix).toContain("minsky-openhands-spawn.py");
+  });
+
+  it("renders a self-contained P0 task block via findingsToTasksMd (writer round-trip)", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => false,
+      shimResolvable: async () => false,
+    })();
+    if (result.ok) throw new Error("unreachable");
+    const block = findingsToTasksMd([result], "2026-06-02T12:00:00.000Z");
+    expect(block).toContain("self-diagnose-openhands-importable-at-boot-2026-06-02");
+    expect(block).toContain("**Tags**: p0, self-detected, openhands-importable-at-boot");
+    expect(block).toContain("**Measurement**:");
+    expect(block).toContain("**Pivot**:");
+    expect(block).toContain("**Anchor**:");
   });
 });
 
@@ -1338,24 +1385,72 @@ describe("findConflictMarkers", () => {
 });
 
 describe("parseIterationLogLine", () => {
+  /** @param {Record<string, unknown>} fields */
+  const span = (fields) => `[span] tick-loop.iteration ${JSON.stringify(fields)}`;
+
   it("returns null on empty line", () => {
     expect(parseIterationLogLine("")).toBeNull();
   });
-  it("returns null on non-JSON line", () => {
-    expect(parseIterationLogLine("not json at all")).toBeNull();
+  it("returns null on a non-span line", () => {
+    expect(parseIterationLogLine("not a span at all")).toBeNull();
   });
-  it("returns null on JSON missing the iteration evt", () => {
-    expect(parseIterationLogLine('{"evt":"other","taskId":"x"}')).toBeNull();
+  it("returns null on the dead evt:iteration shape", () => {
+    expect(
+      parseIterationLogLine('{"evt":"iteration","taskId":"x","committedSha":"abc"}'),
+    ).toBeNull();
   });
-  it("parses a committed iteration line", () => {
+  it("returns null on a span line with malformed JSON", () => {
+    expect(parseIterationLogLine("[span] tick-loop.iteration {not json")).toBeNull();
+  });
+  it("returns null on a span line missing task.id", () => {
+    expect(
+      parseIterationLogLine(span({ "iteration.index": 1, "iteration.status": "completed" })),
+    ).toBeNull();
+  });
+  it("parses a completed iteration span as committed", () => {
     const result = parseIterationLogLine(
-      '{"evt":"iteration","taskId":"foo","committedSha":"abc123","ts":"2026-05-06T00:00:00Z"}',
+      span({
+        "iteration.index": 7,
+        "iteration.status": "completed",
+        "task.id": "foo",
+        "iteration.reason": "shipped PR #1",
+      }),
     );
-    expect(result).toEqual({ taskId: "foo", committed: true, timestamp: "2026-05-06T00:00:00Z" });
+    expect(result).toEqual({ taskId: "foo", committed: true, timestamp: "" });
   });
-  it("parses a non-committed iteration line", () => {
-    const result = parseIterationLogLine('{"evt":"iteration","taskId":"foo"}');
+  it("parses a non-completed iteration span as not-committed", () => {
+    const result = parseIterationLogLine(
+      span({ "iteration.index": 8, "iteration.status": "noop", "task.id": "foo" }),
+    );
     expect(result).toEqual({ taskId: "foo", committed: false, timestamp: "" });
+  });
+
+  it("feeds the noop invariant: ≥4 consecutive non-completed [span] tick-loop.iteration lines on one task.id fire it", async () => {
+    const lines = [
+      span({ "iteration.index": 1, "iteration.status": "completed", "task.id": "other" }),
+      span({ "iteration.index": 2, "iteration.status": "noop", "task.id": "stuck-task" }),
+      span({ "iteration.index": 3, "iteration.status": "failed", "task.id": "stuck-task" }),
+      span({ "iteration.index": 4, "iteration.status": "noop", "task.id": "stuck-task" }),
+      span({ "iteration.index": 5, "iteration.status": "noop", "task.id": "stuck-task" }),
+    ];
+    const recentIterations = async () =>
+      lines.map(parseIterationLogLine).filter((iter) => iter !== null);
+    const result = await daemonNoopIterationRateInvariant({ recentIterations, threshold: 4 })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.evidence).toContain("stuck-task");
+  });
+
+  it("feeds the noop invariant: a healthy log of completed spans returns 0 findings", async () => {
+    const lines = [
+      span({ "iteration.index": 1, "iteration.status": "completed", "task.id": "a" }),
+      span({ "iteration.index": 2, "iteration.status": "completed", "task.id": "b" }),
+      span({ "iteration.index": 3, "iteration.status": "completed", "task.id": "c" }),
+    ];
+    const recentIterations = async () =>
+      lines.map(parseIterationLogLine).filter((iter) => iter !== null);
+    const result = await daemonNoopIterationRateInvariant({ recentIterations, threshold: 4 })();
+    expect(result.ok).toBe(true);
   });
 });
 
