@@ -107,9 +107,12 @@ Each record is `{ ts, runId, taskId, class, message, stack?, exitCode?, duration
 secret-redacted. `class` ∈ spawn-failed / lint-failed / timeout / gate-failed /
 crash / unknown.
 
-**To turn on hosted Sentry** (the chosen default): create a project, then
-`pnpm add -w @sentry/node` and export `SENTRY_DSN=<dsn>` for the daemon. With no
-DSN the file strategy is used — no setup required.
+**To turn on hosted Sentry** (the chosen default): `@sentry/node` ships as an
+**optional dependency**, so no install step — just set `SENTRY_DSN` in the
+daemon's environment. We keep the DSN in a gitignored `.env` at the repo root;
+load it at run launch (`set -a; . ./.env; set +a`) or via `node --env-file=.env`.
+With no DSN the file strategy is used — no setup required, no `@sentry/node`
+fetch failure is fatal (it's optional + graceful-degrade).
 
 ## Minsky vs competitors
 

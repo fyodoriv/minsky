@@ -110,7 +110,8 @@
     "@biomejs/cli-linux-x64": "2.4.15",
     "@biomejs/cli-linux-x64-musl": "2.4.15",
     "@biomejs/cli-win32-arm64": "2.4.15",
-    "@biomejs/cli-win32-x64": "2.4.15"
+    "@biomejs/cli-win32-x64": "2.4.15",
+    "@sentry/node": "10.56.0"
   },
   "pnpm": {
     "overrides": {
