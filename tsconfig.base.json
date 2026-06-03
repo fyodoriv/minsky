@@ -4,6 +4,12 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2023"],
+    // vitest 4 changed its type-export structure: its ambient type chunks land
+    // in the program's default `@types` scope and suppress tsc's automatic
+    // inclusion of `@types/node`, so node globals (URL, Response, node:fs, …)
+    // stop resolving. Pinning `types: ["node"]` restores them. Matches the
+    // existing `types: ["node"]` in scripts/, user-stories/, dashboard-web/.
+    "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,

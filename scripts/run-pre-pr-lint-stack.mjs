@@ -586,14 +586,16 @@ export const STACK_MANIFEST = Object.freeze([
     // script) so the lint stack's gate is self-contained and can't be detached
     // from these bounds by an unrelated edit to the `test` script. CI's
     // `test` job still runs `pnpm test:coverage` unbounded — coverage needs the
-    // full suite, and CI has its own job-level timeout. `--reporter=basic`
-    // keeps the gate's captured output compact. Per the task's Success
-    // threshold: `pnpm pre-pr-lint --stage=full` now terminates (pass or fail)
-    // — a gate that can't terminate isn't a gate (vision.md rule #10).
+    // full suite, and CI has its own job-level timeout. `--reporter=dot`
+    // keeps the gate's captured output compact (vitest 4 removed the `basic`
+    // reporter this gate previously used; `dot` is its compact replacement).
+    // Per the task's Success threshold: `pnpm pre-pr-lint --stage=full` now
+    // terminates (pass or fail) — a gate that can't terminate isn't a gate
+    // (vision.md rule #10).
     name: "vitest",
     stages: ["full"],
     cmd: "pnpm",
-    args: ["exec", "vitest", "run", "--testTimeout=15000", "--bail=1", "--reporter=basic"],
+    args: ["exec", "vitest", "run", "--testTimeout=15000", "--bail=1", "--reporter=dot"],
   },
   {
     // Dead-code + unused-exports + unused-dependencies detector. Config at
