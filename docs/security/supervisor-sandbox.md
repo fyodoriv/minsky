@@ -27,6 +27,10 @@ The resolver and the operator-visible env-var slot are already wired. **No actua
 | Boot banner | `[tick-loop] sandbox mode: <mode> (...)` line at supervisor start | `bin/tick-loop.mjs` (PR #335) |
 | Unit-file slot | Commented `MINSKY_SANDBOX=off` opt-in in both supervisor templates, citing `vision.md § 13.3` so the operator finds the spec without grep | `distribution/systemd/minsky-tick-loop.service` + `distribution/launchd/com.minsky.tick-loop.plist` (PR #336) |
 | Drift gate | `sandbox-env-declared` lint pins resolver-source ↔ unit-file declarations against rename / drop | `scripts/check-sandbox-env-declared.mjs` |
+| macOS profile | `(version 1) (deny default)` SBPL profile applied to the tick-loop supervisor + every child it spawns | `distribution/launchd/com.minsky.tick-loop.sb` (`supervisor-sandbox-syscall-restriction`) |
+| macOS wrap | `ProgramArguments` → `/usr/bin/sandbox-exec -D MINSKY_HOME=… -D HOME=… -f <profile> /bin/bash run-tick-loop.sh` | `distribution/launchd/com.minsky.tick-loop.plist` |
+| macOS drift gate | `supervisor-sandbox-hardening` lint asserts the `.sb` profile exists, opens with `(deny default)`, and is referenced by the plist | `scripts/check-supervisor-sandbox-hardening.mjs` (+ `.test.mjs`) |
+| macOS chaos test | a read of `~/.ssh/known_hosts` under the profile returns `EPERM`; an allow-listed repo read succeeds | `scripts/chaos-sandbox-disallowed-read.mjs` (+ `.test.mjs`) |
 
 `MINSKY_SANDBOX` accepts three modes; everything else falls back to `'off'` with a stderr warning (fail-safe defaults — Saltzer & Schroeder 1975):
 
@@ -38,6 +42,46 @@ The resolver and the operator-visible env-var slot are already wired. **No actua
 | any other value | falls back to `'off'`; `sandboxModeWarning` emits stderr WARNING | not consulted (mode is `'off'`) |
 
 The substrate is deliberately a pure function of `process.env` so unit tests pin every transition without spawning a process; the I/O boundary (the wrapper script + the launchd `ProgramArguments` + the systemd `[Service]` block) lands in subsequent slices.
+
+## macOS allow-list (`com.minsky.tick-loop.sb`)
+
+The shipped SBPL profile opens with `(deny default)` — fail-safe defaults
+(Saltzer & Schroeder 1975). It imports Apple's `bsd.sb` base profile (so dyld
+and the system frameworks load) and then carves out exactly the surface the
+supervisor needs. Anything not listed below fails with `EPERM`.
+
+| Operation | Allowed | Why |
+| --- | --- | --- |
+| `process-fork` / `process-exec` / `signal` | yes | the supervisor spawns `claude --print` / `node` / `git` / `pnpm` / `gh` per iteration; the binary allow-list is enforced at the `run-tick-loop.sh` PATH boundary |
+| `file-read*` system prefixes | `/usr`, `/bin`, `/sbin`, `/opt/homebrew`, `/Library`, `/System`, `/private/etc`, `/dev/null`, `/dev/urandom` | read tool binaries + their dylibs (none writable) |
+| `file-read* file-write*` repo | `${MINSKY_HOME}` subtree | git operations, log writes, the agent's tracked-file edits |
+| `file-read*` operator caches | `~/.claude` (token-monitor JSONLs), `~/.gitconfig`, `~/.config/git`, node version managers (`~/.local/share/fnm`, `~/.nvm`, `~/.asdf`) | resolve git/node config without false `EPERM` |
+| `file-read* file-write*` state + temp | `~/.minsky`, `/private/tmp`, `/private/var/folders` (the per-user `TMPDIR`) | per-machine config + experiment store + PID file; subprocess scratch |
+| `network-bind` / `network-inbound` | `localhost:*` only | the dashboard's loopback listen socket |
+| `network-outbound` | yes | `claude --print` HTTPS to the Anthropic API + the local OTEL endpoint (the API host is not statically known; DNS resolution itself needs outbound) |
+| `mach-lookup` | `notification_center`, `opendirectoryd.libinfo`, `configd`, `dnssd.service`, `cfprefsd.*` | DNS resolution + libuv prefs the runtime needs |
+
+**Explicitly denied** (the trust boundary): `~/.ssh`, `~/.aws`, `~/.gnupg`,
+`~/Documents`, `~/Desktop`, and every other `$HOME` path not listed above.
+`~/.ssh` is denied by design — git over HTTPS uses `~/.minsky` creds; ssh-based
+remotes are outside the supervisor's stated trust boundary. `scripts/chaos-sandbox-disallowed-read.mjs`
+pins this denial (`~/.ssh/known_hosts` → `EPERM`).
+
+**Extending the allow-list**: when an operator hits a legitimate `EPERM` (a new
+tool dir the supervisor needs), add the narrowest `(allow file-read* (subpath …))`
+line with a TASKS-id justification on the same PR. Pivot threshold (per the task
+block): >3 false-positive `EPERM` per week sustained means the constraint set is
+too tight — relax that specific path; never disable the sandbox.
+
+### Escape hatch — `MINSKY_SANDBOX=off`
+
+To disable the sandbox in ~30 seconds (e.g., debugging a false `EPERM`), revert
+the plist's `ProgramArguments` to invoke `/bin/bash <run-tick-loop.sh>` directly
+(dropping the `sandbox-exec -f …` wrap) and `launchctl bootout` + re-bootstrap.
+`MINSKY_SANDBOX=off` is the documented operator intent (Beyer SRE 2016 Ch. 17 —
+the escape hatch is part of postmortem-culture discipline; a downed supervisor
+is worse than an un-sandboxed one for a short debugging window). The default —
+the shipped plist with the `sandbox-exec` wrap — is `enforce`.
 
 ## Staged rollout (per the parent task block)
 
@@ -51,12 +95,12 @@ The escape hatch is `MINSKY_SANDBOX=off` (or unset). Documented per Beyer SRE Ch
 
 ## Pending slices
 
-Slices 4+ wire the resolver into the actual I/O boundary. Each is a separate PR per the staged-rollout discipline:
+The macOS slices (5 + 6) have **shipped** (`supervisor-sandbox-syscall-restriction`); the Linux slice (4) and the formal extension protocol (7) remain. Each is a separate PR per the staged-rollout discipline:
 
-- **Slice 4** (Linux): extend `distribution/systemd/minsky-tick-loop.service` with `ProtectHome=read-only` (+ `ReadWritePaths=${MINSKY_HOME}` for the repo), `ProtectSystem=strict`, `PrivateTmp=true`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `SystemCallFilter=@system-service`, `NoNewPrivileges=true`. Gated by the resolver: when `MINSKY_SANDBOX=off`, the wrapper drops the hardening drop-in.
-- **Slice 5** (macOS): write `distribution/launchd/com.minsky.tick-loop.sb` (TrustedBSD MAC profile — `(version 1) (deny default) (allow ...)` syntax). The launchd plist's `ProgramArguments` becomes `/usr/bin/sandbox-exec -f <profile> <run-tick-loop.sh>`.
-- **Slice 6** (chaos test): `scripts/chaos/sandbox-attempts-disallowed-read.mjs` spawns a child inside the supervisor's wrapper that tries to read `~/.ssh/known_hosts`; expects `EPERM` when `MINSKY_SANDBOX=enforce`. Matches the rule #7 graceful-degrade chaos table — every disallowed path attempt is itself a chaos fixture.
-- **Slice 7** (allow-list extension protocol): when an operator hits a legitimate `EPERM` (e.g., a new tool the supervisor needs to invoke), the path is added to the allow-list with a TASKS-id justification on the same PR. Pivot threshold per the task block: >3 false-positive `EPERM` per week sustained means the constraint set is too tight; relax that specific path, do not disable the sandbox.
+- **Slice 4** (Linux, pending): extend `distribution/systemd/minsky-tick-loop.service` with `ProtectHome=read-only` (+ `ReadWritePaths=${MINSKY_HOME}` for the repo), `ProtectSystem=strict`, `PrivateTmp=true`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `SystemCallFilter=@system-service`, `NoNewPrivileges=true`. Gated by the resolver: when `MINSKY_SANDBOX=off`, the wrapper drops the hardening drop-in.
+- **Slice 5** (macOS, **shipped**): `distribution/launchd/com.minsky.tick-loop.sb` is a TrustedBSD MAC profile — `(version 1) (deny default) (allow ...)` syntax — applied via the plist's `ProgramArguments` (`/usr/bin/sandbox-exec -D MINSKY_HOME=… -D HOME=… -f <profile> /bin/bash <run-tick-loop.sh>`). The allow-list is documented above; `scripts/check-supervisor-sandbox-hardening.mjs` pins the profile ↔ plist cohesion.
+- **Slice 6** (chaos test, **shipped**): `scripts/chaos-sandbox-disallowed-read.mjs` runs a child under the profile that reads `~/.ssh/known_hosts` and asserts `EPERM` (nonzero exit), with an allow-listed repo read as the positive control. On non-macOS hosts (or when `sandbox-exec` / `~/.ssh` is absent) it reports `skipped:true` and exits 0 — graceful degrade (rule #7), never a silent skip. Matches the rule #7 chaos table — every disallowed path attempt is itself a chaos fixture.
+- **Slice 7** (allow-list extension protocol, pending): formalise the TASKS-id-justified allow-list extension flow (the mechanism is documented in § "Extending the allow-list" above; slice 7 wires the deterministic check). Pivot threshold per the task block: >3 false-positive `EPERM` per week sustained means the constraint set is too tight; relax that specific path, do not disable the sandbox.
 
 The macOS `sandbox-exec` API has been deprecated since macOS 14 — Apple still ships and supports it, but the pivot path is documented: when the API is removed, swap to a wrapper based on `seatbelt` (the underlying mechanism, still exposed via private API) or run the supervisor inside a container with `--security-opt=apparmor=...`. The Linux systemd config is unaffected by the macOS pivot.
 
@@ -74,9 +118,15 @@ While the substrate is inert (today):
 - **Drift gate**: `node scripts/check-sandbox-env-declared.mjs` — passes when the resolver source declares `SANDBOX_MODE_ENV = "MINSKY_SANDBOX"` and both unit-file templates carry the env-var token + a `vision.md § 13.3` (or `rule #13.3`) citation.
 - **Boot banner**: start the supervisor and `head -5 .minsky/tick-loop.out.log` — the first lines include `[tick-loop] sandbox mode: <resolved> (MINSKY_SANDBOX env, substrate-inert until profile wires in slice 3+)`. A typo (`MINSKY_SANDBOX=enforcde`) appends a `WARNING` line in the same banner.
 
-When slices 4–6 land, the verification surface extends:
+macOS slice (shipped today) — these run green on a macOS host:
 
-- `sandbox-exec -f distribution/launchd/com.minsky.tick-loop.sb /bin/cat ~/.ssh/known_hosts; echo $?` returns non-zero (macOS).
+- **Profile denies the disallowed read, permits the allowed one** (the task block's Measurement):
+  `sandbox-exec -D MINSKY_HOME="$PWD" -D HOME="$HOME" -f distribution/launchd/com.minsky.tick-loop.sb /bin/cat ~/.ssh/known_hosts; echo $?` returns non-zero, while the same invocation against `README.md` returns 0.
+- **Chaos test**: `node scripts/chaos-sandbox-disallowed-read.mjs --json` prints `{"disallowed_read_denied":true,"allowed_read_permitted":true,"skipped":false,"ok":true}` on macOS (and `skipped:true, ok:true` on Linux). `pnpm exec vitest run scripts/chaos-sandbox-disallowed-read.test.mjs` exercises the pure decision core on every platform.
+- **Drift gate**: `node scripts/check-supervisor-sandbox-hardening.mjs` asserts the `.sb` profile opens with `(deny default)` and is wired into the plist's `ProgramArguments`.
+
+When the Linux slice (4) lands, the verification surface extends:
+
 - `systemd-run --user --uid=$(id -u) --slice=minsky-test --property=ProtectHome=read-only /bin/cat /home/$(whoami)/.ssh/known_hosts` returns non-zero (Linux).
 - `tail .minsky/tick-loop.out.log | grep -c '"iteration.status":"completed"'` ≥ 1 within 30 minutes after restart with `MINSKY_SANDBOX=enforce` (regression: existing dogfood iterations still complete).
 

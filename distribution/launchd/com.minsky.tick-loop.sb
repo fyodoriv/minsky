@@ -1,0 +1,134 @@
+;; com.minsky.tick-loop.sb — macOS sandbox-exec (SBPL) profile for the
+;; Minsky tick-loop supervisor.
+;;
+;; Why this file exists: the launchd LaunchAgent (com.minsky.tick-loop.plist)
+;; runs the supervisor as the operator's full UID. Without a sandbox the
+;; supervisor — and every `claude --print` / `node` / `git` child it spawns —
+;; can read every file in $HOME (`~/.ssh`, `~/.aws`, `~/Documents`), bind any
+;; socket, and exec any binary. A single regression in the prompt-assembly or
+;; the agent's generated code could exfiltrate a private key. This profile
+;; cuts the blast radius down to the supervisor's stated trust boundary:
+;; read+write the repo, read the Claude session JSONLs + ~/.minsky state,
+;; exec a fixed set of tool binaries, talk to localhost + HTTPS. Everything
+;; else fails with EPERM — loud, not silent (vision.md rule #6).
+;;
+;; Pattern: principle of least privilege (Saltzer & Schroeder, "The Protection
+;; of Information in Computer Systems", Proc. IEEE 63(9), 1975) implemented on
+;; the TrustedBSD MAC framework (McKusick & Watson, USENIX ATC 2001) that
+;; Apple's sandbox-exec(1) exposes via SBPL. `(deny default)` is fail-safe-
+;; defaults: anything not explicitly allowed is denied.
+;;
+;; Applied by: the tick-loop launchd plist (com.minsky.tick-loop.plist) —
+;;   ProgramArguments → /usr/bin/sandbox-exec -f <this profile> <run-tick-loop.sh>
+;; Pinned by: scripts/check-supervisor-sandbox-hardening.mjs (asserts this
+;;   file exists, opens with `(deny default)`, and is referenced by the plist).
+;; Chaos-tested by: scripts/chaos-sandbox-disallowed-read.mjs (asserts a read
+;;   of ~/.ssh/known_hosts under this profile returns nonzero / EPERM).
+;; Operator guide + escape hatch (MINSKY_SANDBOX=off): docs/security/supervisor-sandbox.md
+;;
+;; sandbox-exec(1) has been formally deprecated since macOS 14, but Apple still
+;; ships and honors it; the pivot path (seatbelt private API / container) is
+;; documented in docs/security/supervisor-sandbox.md § "Pending slices".
+
+(version 1)
+
+;; Fail-safe default: deny every operation. Each (allow ...) below carves out
+;; exactly the surface the supervisor needs — nothing wider.
+(deny default)
+
+;; Import Apple's base profile so the dynamic linker, the system frameworks,
+;; and the standard C library can load. Without this even /bin/cat fails to
+;; start because dyld cannot map the shared cache. bsd.sb is the documented
+;; foundation profile every third-party sandbox profile builds on.
+(import "bsd.sb")
+
+;; --- Process model -----------------------------------------------------------
+;; The supervisor forks a `claude --print` (and node / git / pnpm / gh)
+;; subprocess per iteration. Allow fork + exec; the binary allow-list is
+;; enforced by run-tick-loop.sh's PATH resolution, not the kernel (SBPL has
+;; no per-path exec allow-list that survives PATH search reliably).
+(allow process-fork)
+(allow process-exec)
+(allow signal (target children))
+
+;; --- Filesystem: read-only system surface ------------------------------------
+;; Tool binaries and their dylibs live under these prefixes. Reading them is
+;; required to exec node / git / claude; none are writable.
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/opt/homebrew")
+  (subpath "/Library")
+  (subpath "/System")
+  (subpath "/private/etc")
+  (subpath "/private/var/db/timezone")
+  (literal "/dev/null")
+  (literal "/dev/random")
+  (literal "/dev/urandom"))
+
+;; --- Filesystem: the repo (read + write) -------------------------------------
+;; The supervisor performs git operations, writes logs under .minsky/, and the
+;; agent edits tracked files. MINSKY_HOME is substituted by the installer's
+;; envsubst (minsky init / minsky update) into the absolute repo path before
+;; this profile is installed.
+(allow file-read* file-write*
+  (subpath (param "MINSKY_HOME")))
+
+;; --- Filesystem: operator caches the supervisor legitimately reads -----------
+;; ~/.claude/projects holds the token-monitor JSONLs the daemon parses.
+;; ~/.minsky holds per-machine config + experiment store + PID file (the PID
+;; file + daemon.log are writable; the rest is read-mostly but we grant write
+;; to the whole subtree to avoid false EPERM on lock files).
+(allow file-read*
+  (subpath (string-append (param "HOME") "/.claude")))
+(allow file-read* file-write*
+  (subpath (string-append (param "HOME") "/.minsky")))
+
+;; Read-only access to the operator's git identity + node version managers so
+;; child git/node resolve config without tripping EPERM. NOT ~/.ssh — git over
+;; https uses ~/.minsky creds, and ssh-based remotes are out of the supervisor's
+;; trust boundary by design (the chaos test pins the ~/.ssh denial).
+(allow file-read*
+  (literal (string-append (param "HOME") "/.gitconfig"))
+  (subpath (string-append (param "HOME") "/.config/git"))
+  (subpath (string-append (param "HOME") "/.local/share/fnm"))
+  (subpath (string-append (param "HOME") "/.nvm"))
+  (subpath (string-append (param "HOME") "/.asdf")))
+
+;; Per-unit temp dir. PrivateTmp's macOS analogue — allow the standard temp
+;; locations so subprocess scratch files work; combined with the (deny default)
+;; on $HOME this keeps scratch out of the operator's Documents/Desktop. The
+;; per-user TMPDIR launchd assigns lives under /private/var/folders, so the two
+;; subpaths below cover it without needing TMPDIR as a profile param (which the
+;; installer's envsubst whitelist — `${MINSKY_HOME} ${HOME}` — would not expand).
+(allow file-read* file-write*
+  (subpath "/private/tmp")
+  (subpath "/private/var/folders"))
+
+;; --- Process info / sysctl ---------------------------------------------------
+;; node + git read process limits, CPU count, and hostname at startup.
+(allow sysctl-read)
+(allow process-info* (target self))
+(allow process-info* (target children))
+
+;; --- Network: localhost + outbound HTTPS -------------------------------------
+;; The dashboard binds a loopback port; `claude --print` makes HTTPS calls to
+;; the Anthropic API; OTEL spans flow to the local OpenObserve endpoint.
+;; Inbound is restricted to loopback; outbound is allowed (the API host is not
+;; statically known and DNS resolution itself needs network-outbound).
+(allow network-bind (local ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
+(allow network-outbound)
+(allow system-socket)
+
+;; --- Mach lookups the runtime needs ------------------------------------------
+;; bsd.sb grants most; these named services are required for DNS resolution
+;; (mDNSResponder) and node's libuv (notifyd, cfprefsd).
+(allow mach-lookup
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.SystemConfiguration.configd")
+  (global-name "com.apple.dnssd.service")
+  (global-name "com.apple.cfprefsd.daemon")
+  (global-name "com.apple.cfprefsd.agent"))

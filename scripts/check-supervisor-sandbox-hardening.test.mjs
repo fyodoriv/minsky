@@ -10,15 +10,30 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
+  checkMacosSandboxProfile,
   checkSupervisorSandboxHardening,
+  MACOS_SANDBOX_PROFILE,
+  MACOS_TICK_LOOP_PLIST,
   REQUIRED_DIRECTIVES,
   REQUIRED_UNIT_FILES,
   readUnitContents,
+  SBPL_DENY_DEFAULT,
 } from "./check-supervisor-sandbox-hardening.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 const SYSTEMD_DIR = resolve(REPO_ROOT, "distribution", "systemd");
+const LAUNCHD_DIR = resolve(REPO_ROOT, "distribution", "launchd");
+
+const GOOD_PROFILE = `(version 1)\n${SBPL_DENY_DEFAULT}\n(allow process-fork)\n`;
+const GOOD_PLIST = [
+  "<array>",
+  "  <string>/usr/bin/sandbox-exec</string>",
+  "  <string>-f</string>",
+  `  <string>\${MINSKY_HOME}/distribution/launchd/${MACOS_SANDBOX_PROFILE}</string>`,
+  "  <string>/bin/bash</string>",
+  "</array>",
+].join("\n");
 
 /**
  * Fabricates a unit-file body that contains every directive in the
@@ -154,5 +169,83 @@ describe("real unit files under distribution/systemd/", () => {
       const body = readFileSync(resolve(SYSTEMD_DIR, unit), "utf8");
       expect(body.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("checkMacosSandboxProfile (pure)", () => {
+  test("deny-default profile + plist that wraps it via sandbox-exec → ok", () => {
+    const result = checkMacosSandboxProfile({ profileBody: GOOD_PROFILE, plistBody: GOOD_PLIST });
+    expect(result.ok).toBe(true);
+  });
+
+  test("missing profile body → fail naming the absent profile", () => {
+    const result = checkMacosSandboxProfile({ profileBody: undefined, plistBody: GOOD_PLIST });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problems.some((p) => p.includes("missing or empty"))).toBe(true);
+    }
+  });
+
+  test("allow-default profile (no `(deny default)`) → fail (fail-safe defaults)", () => {
+    const allowDefault = "(version 1)\n(allow default)\n";
+    const result = checkMacosSandboxProfile({ profileBody: allowDefault, plistBody: GOOD_PLIST });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problems.some((p) => p.includes(SBPL_DENY_DEFAULT))).toBe(true);
+    }
+  });
+
+  test("plist that does not invoke sandbox-exec → fail", () => {
+    const barePlist = [
+      "<array>",
+      "  <string>/bin/bash</string>",
+      `  <string>\${MINSKY_HOME}/distribution/launchd/${MACOS_SANDBOX_PROFILE}</string>`,
+      "</array>",
+    ].join("\n");
+    const result = checkMacosSandboxProfile({ profileBody: GOOD_PROFILE, plistBody: barePlist });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problems.some((p) => p.includes("sandbox-exec"))).toBe(true);
+    }
+  });
+
+  test("plist invokes sandbox-exec but references a different profile → fail", () => {
+    const wrongRef = [
+      "<array>",
+      "  <string>/usr/bin/sandbox-exec</string>",
+      "  <string>-f</string>",
+      `  <string>\${MINSKY_HOME}/distribution/launchd/com.minsky.OTHER.sb</string>`,
+      "  <string>/bin/bash</string>",
+      "</array>",
+    ].join("\n");
+    const result = checkMacosSandboxProfile({ profileBody: GOOD_PROFILE, plistBody: wrongRef });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.problems.some((p) => p.includes("does not reference"))).toBe(true);
+    }
+  });
+
+  test("exported constants name the macOS slice's files", () => {
+    expect(MACOS_SANDBOX_PROFILE).toBe("com.minsky.tick-loop.sb");
+    expect(MACOS_TICK_LOOP_PLIST).toBe("com.minsky.tick-loop.plist");
+    expect(SBPL_DENY_DEFAULT).toBe("(deny default)");
+  });
+});
+
+describe("real macOS sandbox slice under distribution/launchd/", () => {
+  test("shipped .sb profile + plist pass the macOS gate", () => {
+    const profileBody = readFileSync(resolve(LAUNCHD_DIR, MACOS_SANDBOX_PROFILE), "utf8");
+    const plistBody = readFileSync(resolve(LAUNCHD_DIR, MACOS_TICK_LOOP_PLIST), "utf8");
+    const result = checkMacosSandboxProfile({ profileBody, plistBody });
+    if (!result.ok) {
+      throw new Error(`shipped macOS sandbox slice fails the gate: ${result.problems.join("; ")}`);
+    }
+    expect(result.ok).toBe(true);
+  });
+
+  test("shipped .sb profile opens with the SBPL version + deny-default header", () => {
+    const profileBody = readFileSync(resolve(LAUNCHD_DIR, MACOS_SANDBOX_PROFILE), "utf8");
+    expect(profileBody).toContain("(version 1)");
+    expect(profileBody).toContain(SBPL_DENY_DEFAULT);
   });
 });
