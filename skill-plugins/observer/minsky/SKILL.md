@@ -369,6 +369,22 @@ minsky stop   # SIGTERM every running minsky-run on this host
 `minsky stop` is idempotent (`nothing to stop` + exit 0 if nothing is
 running). Follow up with `minsky status` to confirm.
 
+## Recurring cadence (observer-on-self runs without an operator)
+
+This skill is the **operator-initiated** observer. There is also a **weekly**
+observer-on-self dogfood that runs without operator action: the GH Actions cron
+`.github/workflows/observer-dogfood.yml` invokes
+`scripts/observer-dogfood-runner.mjs`, which runs a single bounded
+`minsky run --once --no-live --host .` against minsky's own checkout, counts
+findings from the same cross-repo experiment-store records this skill's monitor
+loop tails (§2), appends a `{run, findings_count, new_tasks_filed}` line to
+`data/observer-dogfood-log.jsonl`, and opens a draft PR when findings > 0. The
+cadence, ledger schema, and pre-registration live in `RECURRING.md` §
+`observer-dogfood` and `experiments/observer-dogfood-recurring-2026-06-02.yaml`.
+Continuous verification (Forsgren-Humble-Kim 2018) beats operator-initiated-only
+runs — the cadence catches a regression before a user does (Beyer et al. 2016,
+Ch. 27 — dogfooding as the pre-user canary).
+
 ## Checklist for the observer
 
 Before considering the observing job done:
