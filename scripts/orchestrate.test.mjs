@@ -2,12 +2,17 @@
 // (rule #10 — no I/O in the decision) is `decideHeal`; the I/O wiring
 // (pgrep / launchctl / runGateSweep) is validated by the `--once` run.
 // No @ts-check (matches sibling scripts/*.test.mjs convention).
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  acquireTaskClaim,
   buildProviderModeTransition,
   buildRunanyPolicyRecords,
   buildTickLedgerLine,
   decideHeal,
+  decidePreSpawnClaim,
   decideWorkerPausePids,
   parseLaunchctlRunning,
 } from "./orchestrate.mjs";
@@ -44,6 +49,63 @@ describe("buildProviderModeTransition (runtime token-limit auto-pivot ledger)", 
     expect("model" in r).toBe(false);
     expect("runId" in r).toBe(false);
     expect(typeof r["ts"]).toBe("string");
+  });
+});
+
+// daemon-parallel-worktree-launch slice (a): the pre-spawn claim gate refuses
+// to assign an already-claimed task. `decidePreSpawnClaim` is the pure decision
+// (rule #10 — no I/O); `acquireTaskClaim` is the O_EXCL arbiter at the edge.
+describe("decidePreSpawnClaim (pre-spawn claim gate)", () => {
+  it("proceeds for an unclaimed task", () => {
+    expect(decidePreSpawnClaim("task-a", [])).toEqual({ proceed: true, taskId: "task-a" });
+  });
+
+  it("refuses a task already claimed by a sibling worker", () => {
+    const d = decidePreSpawnClaim("task-a", ["task-a", "task-b"]);
+    expect(d.proceed).toBe(false);
+    expect("reason" in d && d.reason).toContain("already claimed");
+  });
+
+  it("refuses when there is no eligible task (queue drained)", () => {
+    expect(decidePreSpawnClaim("", []).proceed).toBe(false);
+    expect(decidePreSpawnClaim(undefined, []).proceed).toBe(false);
+  });
+
+  it("trims whitespace around the task id", () => {
+    expect(decidePreSpawnClaim("  task-a  ", [])).toEqual({ proceed: true, taskId: "task-a" });
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    expect(decidePreSpawnClaim("t", ["x"])).toEqual(decidePreSpawnClaim("t", ["x"]));
+  });
+});
+
+describe("acquireTaskClaim (O_EXCL claim arbitration)", () => {
+  /** @type {string} */
+  let repo;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "minsky-claim-"));
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("grants the claim to the first caller and refuses the second (same repo+task)", () => {
+    const first = acquireTaskClaim(repo, "task-a");
+    expect(first).not.toBeNull();
+    const second = acquireTaskClaim(repo, "task-a");
+    expect(second).toBeNull();
+  });
+
+  it("grants disjoint claims for different tasks in the same repo (no cross-block)", () => {
+    expect(acquireTaskClaim(repo, "task-a")).not.toBeNull();
+    expect(acquireTaskClaim(repo, "task-b")).not.toBeNull();
+  });
+
+  it("writes a lock file under the run namespace lock dir", () => {
+    const lock = acquireTaskClaim(repo, "task-a", 12_345);
+    expect(lock).toContain(".minsky/locks/");
+    expect(lock?.endsWith(".lock")).toBe(true);
   });
 });
 

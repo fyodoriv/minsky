@@ -101,6 +101,7 @@ export {
   countNamespaceCollisions,
   DEFAULT_BASE_PORT,
   DEFAULT_PORT_SPAN,
+  decideStaleClaimEviction,
   deriveClaimKey,
   deriveRunId,
   deriveRunNamespace,
@@ -109,4 +110,5 @@ export {
   type RunNamespace,
   type RunNamespaceInput,
   repoHash,
+  type TaskClaim,
 } from "./worker-config.js";

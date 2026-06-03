@@ -23,7 +23,17 @@ CLI:
         [--open-pr-branches=<comma-separated-branch-names>]
         [--branch-prefix=feat/]
         [--skip-task-ids=<comma-separated-task-ids>]
+        [--claimed-task-ids=<comma-separated-task-ids>]
         [--find=<task-id-or-title-substring>]
+
+`--claimed-task-ids=<csv>` is the parallel-worker claim-aware skip
+(daemon-parallel-worktree-launch slice (a)): when `bin/minsky-run.sh
+--workers-total N` fans out N workers on one repo, each worker passes the
+set of tasks ALREADY claimed by its siblings (the live O_EXCL claim locks
+under the run namespace), so the picker hands each worker a DIFFERENT task
+instead of all N converging on the same top-priority block. It is filtered
+identically to `--skip-task-ids` but named for the claim semantics so the
+caller's intent is legible; both sets union into the skip filter.
 
 Default mode (no --find): prints the top-priority pickable task ID on
 stdout, or empty if none. Exit codes: 0 on success (whether or not a
@@ -613,6 +623,7 @@ def main(argv: list[str]) -> int:
     branch_prefix = "feat/"
     open_pr_branches: list[str] = []
     skip_task_ids: list[str] = []
+    claimed_task_ids: list[str] = []
     all_prs: list[dict] | None = None
     find_query: str | None = None
     for arg in argv[2:]:
@@ -622,6 +633,11 @@ def main(argv: list[str]) -> int:
             open_pr_branches = [s for s in arg.split("=", 1)[1].split(",") if s]
         elif arg.startswith("--skip-task-ids="):
             skip_task_ids = [s for s in arg.split("=", 1)[1].split(",") if s]
+        elif arg.startswith("--claimed-task-ids="):
+            # Parallel-worker claim-aware skip (daemon-parallel-worktree-launch
+            # slice (a)): siblings' already-claimed tasks. Unioned into the skip
+            # filter so each fanned-out worker is handed a different task.
+            claimed_task_ids = [s for s in arg.split("=", 1)[1].split(",") if s]
         elif arg.startswith("--all-prs-json="):
             # Path to a JSON file containing the output of
             # `gh pr list --state all --json number,title,state,closedAt`.
@@ -669,7 +685,10 @@ def main(argv: list[str]) -> int:
         source,
         open_pr_branches=open_pr_branches,
         branch_prefix=branch_prefix,
-        skip_task_ids=skip_task_ids,
+        # Union the explicit skip set with the claim-aware skip set — both are
+        # "do not pick these ids" with different provenance (operator skip vs
+        # sibling-worker claim). One filter, two sources (slice (a)).
+        skip_task_ids=[*skip_task_ids, *claimed_task_ids],
         all_prs=all_prs,
     )
     if chosen is not None and chosen.id is not None:

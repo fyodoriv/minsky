@@ -4,12 +4,14 @@ import {
   countNamespaceCollisions,
   DEFAULT_BASE_PORT,
   DEFAULT_PORT_SPAN,
+  decideStaleClaimEviction,
   deriveClaimKey,
   deriveRunId,
   deriveRunNamespace,
   fnv1a32,
   normalizeRepoPath,
   repoHash,
+  type TaskClaim,
 } from "./worker-config.js";
 
 describe("fnv1a32", () => {
@@ -129,6 +131,58 @@ describe("deriveClaimKey (repo+task scoped)", () => {
 
   it("rejects an empty task id", () => {
     expect(() => deriveClaimKey("/r", "")).toThrow();
+  });
+});
+
+describe("decideStaleClaimEviction (orphaned-lock pruning)", () => {
+  const claim = (claimKey: string, claimedAtMs: number): TaskClaim => ({ claimKey, claimedAtMs });
+
+  it("evicts a claim older than the TTL", () => {
+    const now = 100_000;
+    const { evict, keep } = decideStaleClaimEviction([claim("a", 0)], 60_000, now);
+    expect(evict.map((c) => c.claimKey)).toEqual(["a"]);
+    expect(keep).toEqual([]);
+  });
+
+  it("keeps a claim younger than the TTL", () => {
+    const now = 100_000;
+    const { evict, keep } = decideStaleClaimEviction([claim("a", 70_000)], 60_000, now);
+    expect(evict).toEqual([]);
+    expect(keep.map((c) => c.claimKey)).toEqual(["a"]);
+  });
+
+  it("partitions a mixed set (disjoint, covers the input)", () => {
+    const now = 100_000;
+    const claims = [claim("stale", 0), claim("fresh", 90_000), claim("edge", 39_999)];
+    const { evict, keep } = decideStaleClaimEviction(claims, 60_000, now);
+    expect(evict.map((c) => c.claimKey)).toEqual(["stale", "edge"]);
+    expect(keep.map((c) => c.claimKey)).toEqual(["fresh"]);
+    expect(evict.length + keep.length).toBe(claims.length);
+  });
+
+  it("treats an exactly-TTL-aged claim as still fresh (age must EXCEED ttl)", () => {
+    const now = 60_000;
+    const { evict, keep } = decideStaleClaimEviction([claim("a", 0)], 60_000, now);
+    expect(evict).toEqual([]);
+    expect(keep.map((c) => c.claimKey)).toEqual(["a"]);
+  });
+
+  it("never evicts on a backwards clock (future-stamped claim → kept)", () => {
+    const now = 50_000;
+    const { evict, keep } = decideStaleClaimEviction([claim("future", 90_000)], 60_000, now);
+    expect(evict).toEqual([]);
+    expect(keep.map((c) => c.claimKey)).toEqual(["future"]);
+  });
+
+  it("empty input ⇒ empty partition", () => {
+    expect(decideStaleClaimEviction([], 60_000, 1)).toEqual({ evict: [], keep: [] });
+  });
+
+  it("is pure / deterministic — same input, same output", () => {
+    const claims = [claim("a", 0), claim("b", 90_000)];
+    expect(decideStaleClaimEviction(claims, 60_000, 100_000)).toEqual(
+      decideStaleClaimEviction(claims, 60_000, 100_000),
+    );
   });
 });
 

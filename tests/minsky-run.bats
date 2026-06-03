@@ -97,6 +97,45 @@ EOF
   [ "$status" -eq 2 ]
 }
 
+# --- 1b. Parallel-worker fanout flags (daemon-parallel-worktree-launch) -----
+
+@test "--help documents the --workers-total / --worker-id fanout flags" {
+  run "$MINSKY_RUN" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--workers-total"* ]]
+  [[ "$output" == *"--worker-id"* ]]
+}
+
+@test "--workers-total 0 is rejected (must be positive)" {
+  run "$MINSKY_RUN" --workers-total 0 --hosts-dir "$HOSTS_DIR" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"INVARIANT FAIL"* ]]
+  [[ "$output" == *"workers-total"* ]]
+}
+
+@test "--worker-id out of range for --workers-total is rejected" {
+  run "$MINSKY_RUN" --workers-total 3 --worker-id 3 --hosts-dir "$HOSTS_DIR" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"out of range"* ]]
+}
+
+@test "default single-process walk (workers-total 1) needs no fanout flags" {
+  host="$(make_host solo "$(complete_task_block)")"
+  run "$MINSKY_RUN" --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  # No fanout banner in single-process mode.
+  [[ "$output" != *"worker fanout"* ]]
+}
+
+@test "fanout mode (workers-total 3, worker-id 0) logs the run-id banner" {
+  host="$(make_host fan "$(complete_task_block)")"
+  run "$MINSKY_RUN" --workers-total 3 --worker-id 0 \
+    --hosts-dir "$HOSTS_DIR" --dry-run --iterations-per-host 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"worker fanout"* ]]
+  [[ "$output" == *"worker 0/3"* ]]
+}
+
 # --- 2. --hosts-dir validation --------------------------------------------
 
 @test "missing --hosts-dir fails the invariant" {
@@ -173,6 +212,39 @@ EOF
   shopt -u nullglob
   [ "$summary_count" = "$jsonl_count" ]
   [ "$summary_count" -ge 2 ]
+}
+
+# --- 4c. Pre-spawn claim gate refuses an already-claimed task -------------
+# daemon-parallel-worktree-launch Acceptance (2): the pre-spawn claim gate
+# refuses an already-claimed task. We pre-acquire the repo+task claim via the
+# orchestrate CLI (same deriveClaimKey lock the runner uses), then run a
+# non-dry-run fanout worker — it must record "aborted" with the already-claimed
+# note and NEVER reach the spawn (so no agent runs, no env deps needed).
+
+@test "fanout worker skips a task already claimed by a sibling (Acceptance 2)" {
+  host="$(make_host claimed "$(complete_task_block)")"
+  # A sibling worker already holds the claim: acquire it first via the same
+  # O_EXCL path the runner's pre-spawn-claim gate uses.
+  run node "$REPO_ROOT/scripts/orchestrate.mjs" pre-spawn-claim \
+    --task=pick-me-first "--repo=$host"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GRANTED"* ]]
+  # A fake `openhands` on PATH so the openhands-importable invariant passes —
+  # the claim gate fires BEFORE the spawn, so the fake is never invoked; it's
+  # only here to clear the pre-walk invariant on machines without openhands.
+  shim_dir="$TMPDIR_TEST/shim"
+  mkdir -p "$shim_dir"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$shim_dir/openhands"
+  chmod +x "$shim_dir/openhands"
+  # Now THIS worker (id 1 of 3) tries the same task → must be refused.
+  PATH="$shim_dir:$PATH" run "$MINSKY_RUN" --workers-total 3 --worker-id 1 \
+    --hosts-dir "$HOSTS_DIR" --iterations-per-host 1
+  [[ "$output" == *"already claimed by sibling"* ]]
+  jsonl="$host/.minsky/experiment-store/cross-repo/pick-me-first.jsonl"
+  [ -f "$jsonl" ]
+  line="$(head -1 "$jsonl")"
+  [ "$(echo "$line" | jq -r .verdict)" = "aborted" ]
+  [[ "$(echo "$line" | jq -r .notes)" == *"already claimed by a sibling"* ]]
 }
 
 # --- 5. No-eligible-task path ---------------------------------------------

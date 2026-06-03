@@ -372,6 +372,48 @@ def test_pick_host_task_returns_none_when_no_eligible_tasks() -> None:
     assert chosen is None
 
 
+# --- Parallel-worker claim-aware skip (daemon-parallel-worktree-launch) ----
+# slice (a): `--claimed-task-ids` is the set of tasks already claimed by
+# sibling workers in the N-worker fanout; the picker must hand the next
+# worker a DIFFERENT task instead of all N converging on the same top block.
+
+
+def test_main_claimed_task_ids_skips_sibling_claimed_task(tmp_path, capsys) -> None:
+    md = tmp_path / "TASKS.md"
+    md.write_text(P0_BEFORE_P1_TASKS_MD, encoding="utf-8")
+    rc = pick_task.main(
+        ["pick_task.py", str(md), "--claimed-task-ids=high-priority-task"]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    # The sibling already holds high-priority-task → this worker gets the next.
+    assert out == "low-priority-task"
+
+
+def test_main_claimed_unions_with_skip_task_ids(tmp_path, capsys) -> None:
+    md = tmp_path / "TASKS.md"
+    md.write_text(P0_BEFORE_P1_TASKS_MD, encoding="utf-8")
+    # Both the top P0 (skip) and the only P1 (claimed) are filtered → empty.
+    rc = pick_task.main(
+        [
+            "pick_task.py",
+            str(md),
+            "--skip-task-ids=high-priority-task",
+            "--claimed-task-ids=low-priority-task",
+        ]
+    )
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_main_no_claimed_ids_picks_top_task(tmp_path, capsys) -> None:
+    md = tmp_path / "TASKS.md"
+    md.write_text(P0_BEFORE_P1_TASKS_MD, encoding="utf-8")
+    rc = pick_task.main(["pick_task.py", str(md)])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "high-priority-task"
+
+
 # --- Tag/section priority-discipline tests -------------------------------
 # Regression for `daemon-priority-discipline-picktask-bug`: a `p1`-tagged
 # block physically placed in `## P0` was returned ahead of every genuine

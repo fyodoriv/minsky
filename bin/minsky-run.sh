@@ -128,6 +128,19 @@ TICK_INTERVAL_MS=0
 # never exits on its own. See § "Iteration loop" at the bottom of this
 # file for the full rationale + literature anchor.
 LOOP_FOREVER=0
+# Parallel-worker fanout (daemon-parallel-worktree-launch slice (b)):
+# `--workers-total N` declares how many workers the host walker is fanning out
+# on this repo; `--worker-id K` (0-based, 0 ≤ K < N) is THIS worker's index.
+# Together they give each worker a DISJOINT run namespace (the run-id carries
+# the worker index, so the worktree / lock / branch derived from it never
+# collide) and key the pre-spawn claim gate so two workers never grab the same
+# task. Default N=1 / K=0 is the historical single-process walk — no namespace
+# suffix, no claim gate — so every existing invocation is byte-for-byte
+# unchanged. Source: TASKS.md `daemon-parallel-worktree-launch`; the run-id
+# derivation lives in novel/tick-loop/src/worker-config.ts; the claim gate in
+# scripts/orchestrate.mjs (`pre-spawn-claim`).
+WORKERS_TOTAL=1
+WORKER_ID=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -139,12 +152,16 @@ while [[ $# -gt 0 ]]; do
     --iterations-per-host) ITERATIONS_PER_HOST="$2"; shift 2 ;;
     --tick-interval-ms) TICK_INTERVAL_MS="$2"; shift 2 ;;
     --tick-interval-ms=*) TICK_INTERVAL_MS="${1#*=}"; shift ;;
+    --workers-total) WORKERS_TOTAL="$2"; shift 2 ;;
+    --workers-total=*) WORKERS_TOTAL="${1#*=}"; shift ;;
+    --worker-id) WORKER_ID="$2"; shift 2 ;;
+    --worker-id=*) WORKER_ID="${1#*=}"; shift ;;
     --loop) LOOP_FOREVER=1; shift ;;
     --help|-h)
       cat <<'EOF'
 Usage: minsky-run [--hosts-dir <parent> | --host <repo>] [--dry-run] [--self-check]
                   [--max-iterations N] [--iterations-per-host N]
-                  [--tick-interval-ms N]
+                  [--tick-interval-ms N] [--workers-total N] [--worker-id K]
 
 Walks N host repos under <parent> in round-robin (--hosts-dir mode), OR
 iterates exactly ONE host (--host mode). For each host, picks the top-
@@ -165,6 +182,11 @@ Flags:
   --tick-interval-ms N      Sleep N/1000 seconds between iteration batches
                             (default 0 = no sleep; legacy TS daemon used
                             300000 = 5 min)
+  --workers-total N         Fan out N parallel workers on this repo, each with
+                            a disjoint run namespace + claim-arbitrated task
+                            (default 1 = single-process walk)
+  --worker-id K             This worker's 0-based index (0 ≤ K < N); the host
+                            walker sets it per spawned worker (default 0)
 
 Environment:
   MINSKY_CONFIG             Override config path (default ~/.minsky/config.json)
@@ -189,6 +211,47 @@ if [[ -n "$SINGLE_HOST" ]]; then
     echo "INVARIANT FAIL: --host $SINGLE_HOST is not a directory" >&2
     exit 1
   fi
+fi
+
+# --- Parallel-worker fanout validation (daemon-parallel-worktree-launch) -----
+# Validate --workers-total / --worker-id and derive THIS worker's run-id so the
+# namespace it derives (worktree / lock / branch) is disjoint from its siblings'.
+# A bad value is a usage error (exit 2), not a silent default — a typo'd
+# `--worker-id 5` on a 3-worker fanout must surface, never quietly collide.
+if [[ ! "$WORKERS_TOTAL" =~ ^[0-9]+$ ]] || [[ "$WORKERS_TOTAL" -lt 1 ]]; then
+  echo "INVARIANT FAIL: --workers-total must be a positive integer (got: $WORKERS_TOTAL)" >&2
+  exit 2
+fi
+if [[ ! "$WORKER_ID" =~ ^[0-9]+$ ]]; then
+  echo "INVARIANT FAIL: --worker-id must be a non-negative integer (got: $WORKER_ID)" >&2
+  exit 2
+fi
+if [[ "$WORKER_ID" -ge "$WORKERS_TOTAL" ]]; then
+  echo "INVARIANT FAIL: --worker-id $WORKER_ID out of range for --workers-total $WORKERS_TOTAL (need 0 ≤ id < total)" >&2
+  exit 2
+fi
+
+# Per-worker run-id. In single-process mode (the default, WORKERS_TOTAL=1) this
+# is left empty so the run is byte-for-byte the historical walk — no namespace
+# suffix, no claim gate. In fanout mode each worker's run-id carries its index
+# so every per-run mutable namespace `deriveRunNamespace` produces is disjoint
+# (worktree / lock / branch / launchd label / ledger). MINSKY_RUN_ID is the
+# operator escape hatch (matches scripts/orchestrate.mjs); when set it wins.
+WORKER_RUN_ID=""
+if [[ "$WORKERS_TOTAL" -gt 1 ]]; then
+  if [[ -n "${MINSKY_RUN_ID:-}" ]]; then
+    WORKER_RUN_ID="${MINSKY_RUN_ID}"
+  else
+    # Deterministic per-worker token: pid (the walker's) + worker index + a
+    # short random tiebreaker, mirroring worker-config.ts's
+    # `<repo-hash>-<pid>-<rand>` shape. The walker derives the repo-hash side;
+    # here the index keeps siblings disjoint even when they share the pid base.
+    WORKER_RUN_ID="w${WORKER_ID}of${WORKERS_TOTAL}-$$-$(printf '%x' "$((RANDOM * RANDOM))")"
+  fi
+  export MINSKY_RUN_ID="$WORKER_RUN_ID"
+  export MINSKY_WORKER_ID="$WORKER_ID"
+  export MINSKY_WORKERS_TOTAL="$WORKERS_TOTAL"
+  echo "minsky-run: worker fanout — worker $WORKER_ID/$WORKERS_TOTAL run-id=$WORKER_RUN_ID" >&2
 fi
 
 # --- 2. Runtime invariants (Phase 8 fold-in target) -------------------------
@@ -648,6 +711,26 @@ iterate_host() {
     # to the next host instead of burning N round-robin slots emitting
     # repeated "aborted" records (matches host-walker.ts).
     return 1
+  fi
+
+  # Pre-spawn claim gate (daemon-parallel-worktree-launch slice (a)). In fanout
+  # mode (WORKERS_TOTAL > 1) two workers can pick the same top-priority task in
+  # the same instant (the picker's claim-aware skip is a soft pre-check; this
+  # is the hard arbiter). Acquire the repo+task-scoped O_EXCL lock under the
+  # run namespace via `orchestrate.mjs pre-spawn-claim`; if a sibling already
+  # holds it, RECORD an aborted iteration and skip this task (return 1 → the
+  # walker moves on) rather than two workers both spawning on it. Single-process
+  # mode (the default) skips the gate entirely — no behavior change. Dry-run
+  # skips the gate too: a dry run must not mutate on-disk claim state (it plans
+  # only — the real run downstream does the actual O_EXCL acquisition).
+  if [[ "$WORKERS_TOTAL" -gt 1 && "$DRY_RUN" != "1" ]]; then
+    if ! node "$(dirname "${BASH_SOURCE[0]}")/../scripts/orchestrate.mjs" pre-spawn-claim \
+         "--task=${task_id}" "--repo=${host}" >&2; then
+      record_iteration "$host" "$iter_n" "$task_id" "" "aborted" "" \
+        "task already claimed by a sibling worker (pre-spawn claim gate)" "$gh_host"
+      echo "host=$host worker=$WORKER_ID task=$task_id already claimed by sibling — skipping" >&2
+      return 1
+    fi
   fi
 
   local branch="feat/${task_id}"

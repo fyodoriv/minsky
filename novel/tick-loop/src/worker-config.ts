@@ -187,6 +187,61 @@ export function deriveClaimKey(repoPath: string, taskId: string): string {
 }
 
 /**
+ * A single in-flight task claim, as it lives on disk: the `deriveClaimKey`
+ * lock path plus the epoch-ms the claim was acquired. The on-disk O_EXCL lock
+ * file's mtime is the real `claimedAtMs`; this struct is the pure projection
+ * the eviction decision operates over (the I/O — `readdir` + `stat` the lock
+ * dir, `unlink` the evicted ones — lives at the edge in the conductor).
+ */
+export interface TaskClaim {
+  /** The `deriveClaimKey`-derived lock path that represents this claim. */
+  readonly claimKey: string;
+  /** Epoch milliseconds when the claim's O_EXCL lock file was created. */
+  readonly claimedAtMs: number;
+}
+
+/**
+ * Pure stale-claim eviction decision (slice (d) of
+ * `daemon-parallel-worktree-launch`: "prune stale worktrees/locks older than
+ * the iteration TTL every conductor tick"). A claim whose age
+ * (`nowMs - claimedAtMs`) exceeds `ttlMs` is stale — its owning run almost
+ * certainly died mid-iteration (process death, OOM-kill, watchdog SIGKILL),
+ * leaving an orphaned O_EXCL lock that would otherwise wedge the `(repo, task)`
+ * forever (no sibling could ever win the claim). Evicting it returns the task
+ * to the pickable pool — the liveness half of Lamport's mutual exclusion: a
+ * crashed ticket-holder must not block the bakery indefinitely.
+ *
+ * Decision only (rule #10 — same input ⇒ same output, no I/O): the caller
+ * `readdir`s the lock dir, `stat`s each lock for its mtime to build the
+ * `claims` list, then `unlink`s exactly the `evict[]` paths this returns. A
+ * negative-age claim (clock skew — a claim stamped in the future) is treated
+ * as fresh, never evicted, so a misbehaving clock can never mass-evict live
+ * claims (rule #6 — a clock fault degrades to keeping claims, the safe side).
+ *
+ * @otel-exempt pure eviction decision — the unlink I/O at the call site carries the span
+ * @param claims the in-flight claims (claimKey + claimedAtMs each)
+ * @param ttlMs the iteration TTL in ms; claims older than this are stale
+ * @param nowMs current epoch ms (injected so the decision stays pure/testable)
+ * @returns the partition: `{ evict, keep }` claim arrays (disjoint, cover input)
+ */
+export function decideStaleClaimEviction(
+  claims: readonly TaskClaim[],
+  ttlMs: number,
+  nowMs: number,
+): { evict: TaskClaim[]; keep: TaskClaim[] } {
+  const evict: TaskClaim[] = [];
+  const keep: TaskClaim[] = [];
+  for (const claim of claims) {
+    const age = nowMs - claim.claimedAtMs;
+    // age > ttlMs ⇒ stale. A non-positive age (now ≤ claimedAt, i.e. clock
+    // skew) keeps the claim — never evict on a backwards clock.
+    if (age > ttlMs && age > 0) evict.push(claim);
+    else keep.push(claim);
+  }
+  return { evict, keep };
+}
+
+/**
  * Pure collision detector over a set of derived namespaces. Returns the count
  * of cross-run collisions for each mutable namespace dimension. The chaos test
  * feeds it N independently-derived namespaces and asserts every count is 0 —

@@ -33,10 +33,18 @@
 //                     (TASKS.md orchestrator-must-land-local-vetted-branches).
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deriveRunId } from "@minsky/tick-loop";
+import { deriveClaimKey, deriveRunId } from "@minsky/tick-loop";
 import { assertWriteAllowed, buildWriteVerdictRecord } from "./lib/repo-policy.mjs";
 import { landLocalBranch, runGateSweep, setWorkerPauseSeam } from "./local-gate-merge.mjs";
 import {
@@ -370,6 +378,91 @@ export function buildProviderModeTransition(ctx) {
 }
 
 /**
+ * Pure pre-spawn claim-arbitration decision (slice (a) of
+ * `daemon-parallel-worktree-launch`: "refuse to assign an already-claimed
+ * task"). Given the candidate task a worker wants and the set of task-ids
+ * already claimed by sibling workers in this run namespace, decide whether the
+ * worker may proceed. This is the SECOND line of defense, before the O_EXCL
+ * lock acquisition (`acquireTaskClaim`): the picker has already skipped
+ * claimed tasks, but two workers can pick the same top-priority task in the
+ * same instant (TOCTOU). The O_EXCL create breaks that tie at the OS level;
+ * this pure function is the testable decision the CLI wraps.
+ *
+ * Returns `{ proceed: true, taskId }` when the task is unclaimed, or
+ * `{ proceed: false, reason }` when it's already in `claimedTaskIds`. An empty
+ * / undefined `taskId` refuses (nothing to claim) — a worker with no eligible
+ * task must not spawn (the queue is drained).
+ *
+ * @param {string | undefined} taskId  the task the worker wants to claim
+ * @param {Iterable<string>} claimedTaskIds  task-ids already claimed this run
+ * @returns {{ proceed: true, taskId: string } | { proceed: false, reason: string }}
+ */
+export function decidePreSpawnClaim(taskId, claimedTaskIds) {
+  const id = typeof taskId === "string" ? taskId.trim() : "";
+  if (id.length === 0) {
+    return { proceed: false, reason: "no eligible task to claim (queue drained)" };
+  }
+  const claimed = new Set(claimedTaskIds);
+  if (claimed.has(id)) {
+    return { proceed: false, reason: `task already claimed by a sibling worker: ${id}` };
+  }
+  return { proceed: true, taskId: id };
+}
+
+/**
+ * I/O edge for the pre-spawn claim: try to acquire the repo+task-scoped O_EXCL
+ * lock for `taskId` under `repoPath`. The lock PATH is `deriveClaimKey(repo,
+ * task)` (pure, from `@minsky/tick-loop`) so every process on the same repo
+ * asking for the same task targets the SAME file — the OS `O_EXCL` create then
+ * grants it to exactly one winner (Lamport 1974, the bakery ticket). Returns
+ * the acquired lock path on success, or null when the lock already exists (a
+ * sibling already holds the claim). Mirrors slice (a)'s "deriveClaimKey-keyed
+ * O_EXCL lock files under the run namespace".
+ *
+ * Best-effort on the mkdir/write of the lock body (rule #6 — a failed body
+ * write after a successful O_EXCL create still means WE hold the claim); only
+ * the O_EXCL create itself is the arbiter. An `EEXIST` is the expected
+ * lost-the-race path, not an error.
+ *
+ * @param {string} repoPath  absolute repo root
+ * @param {string} taskId    the task being claimed
+ * @param {number} [nowMs]   claim timestamp (epoch ms); injected for tests
+ * @returns {string | null}  the absolute lock path if we won, else null
+ */
+export function acquireTaskClaim(repoPath, taskId, nowMs = Date.now()) {
+  const lockRel = deriveClaimKey(repoPath, taskId);
+  const lockAbs = join(repoPath, lockRel);
+  try {
+    mkdirSync(dirname(lockAbs), { recursive: true });
+  } catch {
+    /* rule #6: a pre-existing lock dir is fine; O_EXCL below is the arbiter */
+  }
+  let fd;
+  try {
+    // "wx" === O_CREAT | O_EXCL | O_WRONLY — fails with EEXIST if it exists.
+    fd = openSync(lockAbs, "wx");
+  } catch (err) {
+    // EEXIST is the expected "a sibling already claimed it" path. Any other
+    // errno (EACCES, ENOSPC) also means we did NOT acquire — return null and
+    // let the caller skip this task rather than crash the run (rule #6).
+    void err;
+    return null;
+  }
+  try {
+    writeFileSync(fd, `${JSON.stringify({ taskId, pid: process.pid, claimedAtMs: nowMs })}\n`);
+  } catch {
+    /* rule #6: the O_EXCL create already established the claim; body is metadata */
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* already closed / invalid fd — nothing to do */
+    }
+  }
+  return lockAbs;
+}
+
+/**
  * Best-effort append of a single record to `.minsky/orchestrate.jsonl`. Same
  * fail-soft contract as the tick ledger: a missing `.minsky/` or a write
  * error degrades to a blind metric for that transition, never crashes the
@@ -541,6 +634,37 @@ if (isMain) {
     });
     log(`orchestrate: land-local ${args[1] ?? "(none)"} — ${res.outcome} (${res.reason})\n`);
     process.exit(res.outcome === "landed" ? 0 : 1);
+  }
+  if (args[0] === "pre-spawn-claim") {
+    // Pre-spawn task-claim gate (slice (a) of daemon-parallel-worktree-launch).
+    // The bash runner shells out here BEFORE spawning a worker: given the
+    // task the picker chose (`--task=<id>`), try to acquire the repo+task-
+    // scoped O_EXCL lock under the run namespace. Exit 0 + print the lock path
+    // when WE won the claim (the worker may spawn); exit 1 when a sibling
+    // already holds it (the worker skips this task and re-picks). The decision
+    // is pure (`decidePreSpawnClaim`); the O_EXCL acquisition is `acquireTaskClaim`.
+    const flag = (/** @type {string} */ name, /** @type {string} */ dflt) => {
+      const a = args.find((x) => x.startsWith(`--${name}=`));
+      return a ? a.slice(name.length + 3) : dflt;
+    };
+    const taskId = flag("task", "");
+    // `--claimed=a,b,c` is the sibling-claimed set the picker already knows
+    // about (the cheap pre-check before the OS lock). Empty by default.
+    const claimedCsv = flag("claimed", "");
+    const claimed = claimedCsv.split(",").filter((s) => s.length > 0);
+    const repoArg = flag("repo", REPO);
+    const decision = decidePreSpawnClaim(taskId, claimed);
+    if (!decision.proceed) {
+      log(`orchestrate: pre-spawn-claim REFUSED — ${decision.reason}\n`);
+      process.exit(1);
+    }
+    const lockPath = acquireTaskClaim(repoArg, decision.taskId);
+    if (lockPath === null) {
+      log(`orchestrate: pre-spawn-claim REFUSED — O_EXCL lost to a sibling: ${decision.taskId}\n`);
+      process.exit(1);
+    }
+    log(`orchestrate: pre-spawn-claim GRANTED ${decision.taskId} (lock=${lockPath})\n`);
+    process.exit(0);
   }
   if (args[0] === "record-mode-transition") {
     // The bash runner shells out here on every provider-mode flip so the
