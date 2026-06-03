@@ -1025,11 +1025,20 @@ EOF
   fi
 
   # Dynamic watchdog — p95×1.5 of recent successful iterations, with a
-  # conservative 1200s (20min) fallback when history is thin. Mirrors the
+  # model-class-aware cold-start floor when history is thin. Mirrors the
   # TS `dynamic-timeouts.ts` algorithm (rule #1 — port, don't reinvent).
   # Exit code 124 means the watchdog fired (matches GNU `timeout(1)`).
+  #
+  # `--model "$model"` (worker-watchdog-scale-by-pinned-model-latency):
+  # by this point `$model` is fully resolved (config default, runany
+  # dynamic re-pick, recover-flip-back pin, or local model). On a fresh
+  # host with <5 samples the picker selects the cold-start floor from the
+  # resolved model class (slow-remote Opus > fast-remote > local=DEFAULT)
+  # instead of the single flat 20-min default that SIGKILLs a slow remote
+  # model before its first heavy iteration can edit. Once ≥5 samples
+  # exist the p95×1.5 path takes over and `--model` is irrelevant.
   local watchdog_s
-  watchdog_s="$(python3 "$script_dir/../scripts/dynamic_timeout.py" "$host")"
+  watchdog_s="$(python3 "$script_dir/../scripts/dynamic_timeout.py" "$host" --model "$model")"
   local start_ms
   start_ms="$(python3 -c 'import time; print(int(time.time() * 1000))')"
 

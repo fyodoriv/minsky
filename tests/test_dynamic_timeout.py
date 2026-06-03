@@ -88,6 +88,146 @@ def test_includes_scope_leak_in_successful_pool() -> None:
     assert dynamic_timeout.compute_watchdog_seconds(timings) == 540
 
 
+# --- model-aware cold-start floor ----------------------------------------
+# worker-watchdog-scale-by-pinned-model-latency
+
+
+def test_no_model_reproduces_flat_default() -> None:
+    # Parity: model=None (the original signature) must return the legacy
+    # flat default on the thin-history path — byte-identical pre-model.
+    assert dynamic_timeout.compute_watchdog_seconds([]) == dynamic_timeout.DEFAULT_WATCHDOG_S
+    assert dynamic_timeout.compute_watchdog_seconds([], model=None) == dynamic_timeout.DEFAULT_WATCHDOG_S
+
+
+def test_thin_history_floor_is_model_class_ordered() -> None:
+    # The Success criterion: a slow remote (Opus) floor is strictly
+    # greater than a local floor, both clamped to [120, 2700].
+    opus = dynamic_timeout.compute_watchdog_seconds([], model="claude-opus-4-7")
+    local = dynamic_timeout.compute_watchdog_seconds([], model="ollama_chat/qwen3-coder:30b")
+    assert opus > local
+    assert 120 <= local <= 2700
+    assert 120 <= opus <= 2700
+
+
+def test_fast_remote_floor_between_slow_and_local() -> None:
+    opus = dynamic_timeout.compute_watchdog_seconds([], model="claude-opus-4-7")
+    sonnet = dynamic_timeout.compute_watchdog_seconds([], model="claude-sonnet-4-5")
+    local = dynamic_timeout.compute_watchdog_seconds([], model="ollama_chat/qwen3-coder:30b")
+    assert opus > sonnet > local
+
+
+def test_local_floor_equals_legacy_default() -> None:
+    # Local models keep the historical 20-min default (LOCAL = DEFAULT).
+    assert (
+        dynamic_timeout.compute_watchdog_seconds([], model="ollama_chat/qwen3-coder:30b")
+        == dynamic_timeout.DEFAULT_WATCHDOG_S
+    )
+
+
+def test_unknown_remote_model_defaults_to_fast_remote() -> None:
+    # An unrecognized remote model is treated as fast-remote, not local.
+    floor = dynamic_timeout.compute_watchdog_seconds([], model="gpt-4o")
+    assert floor == dynamic_timeout.FAST_REMOTE_COLD_START_S
+
+
+def test_all_cold_start_floors_are_clamped() -> None:
+    for floor in (
+        dynamic_timeout.SLOW_REMOTE_COLD_START_S,
+        dynamic_timeout.FAST_REMOTE_COLD_START_S,
+        dynamic_timeout.LOCAL_COLD_START_S,
+    ):
+        assert dynamic_timeout.MIN_WATCHDOG_S <= floor <= dynamic_timeout.MAX_WATCHDOG_S
+
+
+def test_model_does_not_change_thick_history_path() -> None:
+    # ≥5 samples: the p95×1.5 result is model-agnostic (byte-identical).
+    durations_s = [60, 90, 120, 180, 240, 300, 360, 420, 480, 600]
+    timings = [(s * 1000, "validated") for s in durations_s]
+    expected = 900
+    assert dynamic_timeout.compute_watchdog_seconds(timings) == expected
+    assert dynamic_timeout.compute_watchdog_seconds(timings, model="claude-opus-4-7") == expected
+    assert (
+        dynamic_timeout.compute_watchdog_seconds(timings, model="ollama_chat/qwen3-coder:30b")
+        == expected
+    )
+
+
+def test_cold_start_floor_for_model_classification() -> None:
+    f = dynamic_timeout.cold_start_floor_for_model
+    assert f("claude-opus-4-7") == dynamic_timeout.SLOW_REMOTE_COLD_START_S
+    assert f("claude-opus-4-7-max") == dynamic_timeout.SLOW_REMOTE_COLD_START_S
+    assert f("claude-sonnet-4-5") == dynamic_timeout.FAST_REMOTE_COLD_START_S
+    assert f("claude-haiku-4-5") == dynamic_timeout.FAST_REMOTE_COLD_START_S
+    assert f("ollama_chat/qwen3-coder:30b") == dynamic_timeout.LOCAL_COLD_START_S
+    assert f("lm_studio/some-model") == dynamic_timeout.LOCAL_COLD_START_S
+    assert f(None) == dynamic_timeout.DEFAULT_WATCHDOG_S
+    assert f("") == dynamic_timeout.DEFAULT_WATCHDOG_S
+
+
+def test_host_path_threads_model_into_cold_start_floor(tmp_path: Path) -> None:
+    # Thin/missing history host: the model class drives the floor.
+    opus = dynamic_timeout.watchdog_seconds_for_host(tmp_path, model="claude-opus-4-7")
+    local = dynamic_timeout.watchdog_seconds_for_host(tmp_path, model="ollama_chat/qwen3-coder:30b")
+    assert opus == dynamic_timeout.SLOW_REMOTE_COLD_START_S
+    assert local == dynamic_timeout.LOCAL_COLD_START_S
+    # Default (no model) unchanged from the pre-model host path.
+    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path) == dynamic_timeout.DEFAULT_WATCHDOG_S
+
+
+def test_host_path_thick_history_ignores_model(tmp_path: Path) -> None:
+    # ≥5 samples on a host: model must not change the p95×1.5 result.
+    store = tmp_path / ".minsky" / "experiment-store" / "cross-repo"
+    store.mkdir(parents=True)
+    lines = [
+        '{"verdict":"validated","notes":"120000ms"}',
+        '{"verdict":"validated","notes":"180000ms"}',
+        '{"verdict":"validated","notes":"240000ms"}',
+        '{"verdict":"validated","notes":"300000ms"}',
+        '{"verdict":"validated","notes":"360000ms"}',
+    ]
+    (store / "task-a.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path, model="claude-opus-4-7") == 540
+    assert dynamic_timeout.watchdog_seconds_for_host(tmp_path) == 540
+
+
+# --- CLI arg parsing -----------------------------------------------------
+
+
+def test_parse_cli_args_host_only() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog", "/host"]) == ("/host", None)
+
+
+def test_parse_cli_args_model_space_form() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog", "/host", "--model", "claude-opus-4-7"]) == (
+        "/host",
+        "claude-opus-4-7",
+    )
+
+
+def test_parse_cli_args_model_equals_form() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog", "/host", "--model=claude-opus-4-7"]) == (
+        "/host",
+        "claude-opus-4-7",
+    )
+
+
+def test_parse_cli_args_model_before_host() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog", "--model", "x", "/host"]) == ("/host", "x")
+
+
+def test_parse_cli_args_missing_host_is_malformed() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog"]) == (None, None)
+    assert dynamic_timeout.parse_cli_args(["prog", "--model", "x"]) == (None, None)
+
+
+def test_parse_cli_args_dangling_model_flag_is_malformed() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog", "/host", "--model"]) == (None, None)
+
+
+def test_parse_cli_args_second_positional_is_malformed() -> None:
+    assert dynamic_timeout.parse_cli_args(["prog", "/host", "/other"]) == (None, None)
+
+
 # --- parse_timings_from_jsonl --------------------------------------------
 
 
