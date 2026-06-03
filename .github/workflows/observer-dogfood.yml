@@ -1,0 +1,123 @@
+# observer-dogfood — recurring observer-on-self cadence (rule #9 weekly layer).
+#
+# <!-- pattern: not-applicable — recurring observer-on-self cadence; shares the existing CI-gate + continuous-experimentation-runner structural pattern (Fagerholm 2014; canary/dogfood Beyer 2016) already rowed in vision.md via experiment.yml, so no separate Pattern conformance index row is warranted -->
+#
+# Pattern: continuous experimentation runner (Fagerholm 2014) + canary/dogfood
+# discipline (Beyer et al. 2016, Ch. 27). Source: TASKS.md
+# observer-dogfood-recurring-cadence;
+# experiments/observer-dogfood-recurring-2026-06-02.yaml.
+#
+# Why this exists: the observer skill (skill-plugins/observer/minsky/SKILL.md)
+# surfaces real findings when run against minsky's own repo, but today it only
+# runs when the operator initiates it. This workflow closes the loop on a weekly
+# cadence so continuous regression signal is captured without operator action:
+#
+#   - On a Saturday 09:00 UTC cron (or manual dispatch), run
+#     scripts/observer-dogfood-runner.mjs, which shells
+#     `minsky run --once --no-live --host .`, parses the cross-repo iteration
+#     records, counts findings, and appends a
+#     {run, findings_count, new_tasks_filed} line to
+#     data/observer-dogfood-log.jsonl.
+#   - Upload the JSON summary as an artifact for audit.
+#   - When findings_count > 0, open a DRAFT PR with the appended ledger line so
+#     the operator triages the signal (rule #9 — observer-filed work is
+#     human-reviewed; draft is the right state).
+#
+# Linting / typecheck / tests / rule-* gates live in ci.yml; this workflow is
+# the rule-#9 weekly-cadence layer only.
+
+name: observer-dogfood
+
+on:
+  schedule:
+    # Saturday 09:00 UTC — weekly. Cron is UTC; the cadence is documented in
+    # RECURRING.md so the operator knows when to expect the run.
+    - cron: "0 9 * * 6"
+  workflow_dispatch: {}
+
+concurrency:
+  group: observer-dogfood
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the single iteration can resolve refs if it shells
+          # out to git.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: run observer dogfood
+        id: dogfood
+        run: |
+          set -euo pipefail
+          # --json so the summary is machine-readable; tee to a file for the
+          # artifact upload + the PR-decision step below. The runner exits 0
+          # even when findings > 0 (a finding is signal, not a cron failure).
+          node scripts/observer-dogfood-runner.mjs --host=. --json \
+            | tee /tmp/observer-dogfood-summary.json
+          findings=$(jq -r '.findings_count' /tmp/observer-dogfood-summary.json)
+          echo "findings=$findings" >> "$GITHUB_OUTPUT"
+
+      - name: upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-dogfood-summary
+          path: /tmp/observer-dogfood-summary.json
+          if-no-files-found: warn
+
+      - name: open draft PR when findings > 0
+        if: steps.dogfood.outputs.findings != '0'
+        uses: peter-evans/create-pull-request@v6
+        env:
+          # peter-evans/create-pull-request commits internally (not in a `run:`
+          # block), so the lefthook bypass MUST be the env escape hatch — the
+          # local-dev pre-commit hooks assume darwin-arm64 and hard-fail a bot
+          # commit on a linux/x64 runner. Per AGENTS.md §"bot-commit hook
+          # bypass"; scripts/check-bot-commit-hook-bypass.mjs.
+          LEFTHOOK: "0"
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: observer-dogfood/findings-${{ github.run_id }}
+          base: main
+          draft: true
+          add-paths: data/observer-dogfood-log.jsonl
+          commit-message: "chore(observer): record dogfood run ${{ github.run_id }}"
+          title: "observer: dogfood surfaced ${{ steps.dogfood.outputs.findings }} finding(s)"
+          body: |
+            # observer: recurring dogfood findings
+
+            ## Why this is needed
+
+            The weekly observer-on-self cadence
+            (`.github/workflows/observer-dogfood.yml`) ran
+            `minsky run --once --no-live --host .` and surfaced
+            **${{ steps.dogfood.outputs.findings }} finding(s)**. This draft PR
+            carries the appended ledger line in `data/observer-dogfood-log.jsonl`
+            so the operator can triage the signal. See RECURRING.md §
+            `observer-dogfood` for the loop + ledger schema.
+
+            ## Hypothesis self-grade
+
+            - **Predicted**: the recurring dogfood surfaces real findings without
+              operator action (per
+              `experiments/observer-dogfood-recurring-2026-06-02.yaml`).
+            - **Observed**: ${{ steps.dogfood.outputs.findings }} finding(s) this run.
+            - **Match**: partial (triage decides whether each finding is real or noise).
+            - **Lesson**: cadence captures signal the operator-initiated-only flow misses.
+
+            _Filed by the minsky observer dogfood cron._

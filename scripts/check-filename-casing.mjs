@@ -36,6 +36,7 @@ export const CARDINAL_CASING = Object.freeze({
   "contributing.md": "CONTRIBUTING.md",
   "metrics.md": "METRICS.md",
   "deprecated.md": "DEPRECATED.md",
+  "recurring.md": "RECURRING.md",
   "install.md": "INSTALL.md",
   "research.md": "research.md",
 });
