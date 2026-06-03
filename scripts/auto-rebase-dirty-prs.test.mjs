@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { decideRebaseAction, executeDecisions } from "./auto-rebase-dirty-prs.mjs";
+import { decideRebaseAction, executeDecisions, rollupOutcomes } from "./auto-rebase-dirty-prs.mjs";
 
 const NOW = Date.parse("2026-05-26T18:00:00Z");
 const THREE_H_AGO = new Date(NOW - 3 * 3_600_000).toISOString();
@@ -29,6 +29,28 @@ describe("decideRebaseAction — pure decisions", () => {
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.action).toBe("rebase");
     expect(decisions[0]?.pr).toBe(100);
+    expect(decisions[0]?.stuckState).toBe("DIRTY");
+  });
+
+  test("rebases a daemon-shaped CONFLICTING PR older than 2h (the watchdog extension)", () => {
+    const decisions = decideRebaseAction(
+      [pr({ mergeStateStatus: "CONFLICTING", createdAt: THREE_H_AGO })],
+      { nowMs: NOW },
+    );
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.action).toBe("rebase");
+    expect(decisions[0]?.stuckState).toBe("CONFLICTING");
+    expect(decisions[0]?.reason).toMatch(/CONFLICTING for 3\.0h/);
+  });
+
+  test("skips a CONFLICTING PR younger than 2h (same flake tolerance as DIRTY)", () => {
+    const decisions = decideRebaseAction(
+      [pr({ mergeStateStatus: "CONFLICTING", createdAt: ONE_H_AGO })],
+      { nowMs: NOW },
+    );
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.action).toBe("skip");
+    expect(decisions[0]?.reason).toMatch(/age=1\.0h < 2h/);
   });
 
   test("skips a CLEAN PR — that's the gh-native auto-merge path's job", () => {
@@ -147,5 +169,74 @@ describe("executeDecisions — actions via injected seams", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0]?.outcome).toBe("skipped");
+  });
+
+  test("propagates stuckState=CONFLICTING through to the outcome", () => {
+    const out = executeDecisions(
+      [{ pr: 600, action: "rebase", reason: "CONFLICTING for 3h", stuckState: "CONFLICTING" }],
+      {
+        rebaseFn: () => /** @type {const} */ ("rebased"),
+        closeFn: () => {
+          /* no-op */
+        },
+        dryRun: false,
+      },
+    );
+    expect(out[0]?.stuckState).toBe("CONFLICTING");
+  });
+
+  test("CONFLICTING rebase-fails-close: conflict escalates to close, stuckState preserved", () => {
+    let closeCalled = 0;
+    const out = executeDecisions(
+      [{ pr: 700, action: "rebase", reason: "CONFLICTING for 4h", stuckState: "CONFLICTING" }],
+      {
+        rebaseFn: () => /** @type {const} */ ("conflict"),
+        closeFn: () => {
+          closeCalled += 1;
+        },
+        dryRun: false,
+      },
+    );
+    expect(out[0]?.outcome).toBe("closed-superseded");
+    expect(out[0]?.stuckState).toBe("CONFLICTING");
+    expect(closeCalled).toBe(1);
+  });
+});
+
+describe("rollupOutcomes — supervisor ledger counts", () => {
+  test("conflicting count tallies acted-on CONFLICTING PRs across rebase/close axes", () => {
+    const rollup = rollupOutcomes([
+      { pr: 1, outcome: "rebased", stuckState: "DIRTY" },
+      { pr: 2, outcome: "rebased", stuckState: "CONFLICTING" },
+      { pr: 3, outcome: "closed-superseded", stuckState: "CONFLICTING" },
+      { pr: 4, outcome: "skipped" },
+    ]);
+    expect(rollup.rebased).toBe(2);
+    expect(rollup.closed).toBe(1);
+    expect(rollup.skipped).toBe(1);
+    expect(rollup.conflicting).toBe(2);
+  });
+
+  test("conflicting excludes a skipped CONFLICTING PR (skip is not an act)", () => {
+    const rollup = rollupOutcomes([
+      { pr: 1, outcome: "skipped", stuckState: "CONFLICTING" },
+      { pr: 2, outcome: "rebased", stuckState: "CONFLICTING" },
+    ]);
+    expect(rollup.conflicting).toBe(1);
+  });
+
+  test("rollup shape always carries rebased/closed/skipped/conflicting (Measurement contract)", () => {
+    const rollup = rollupOutcomes([]);
+    expect(rollup).toHaveProperty("rebased");
+    expect(rollup).toHaveProperty("closed");
+    expect(rollup).toHaveProperty("skipped");
+    expect(rollup).toHaveProperty("conflicting");
+    expect(rollup.conflicting).toBe(0);
+  });
+
+  test("dry-run CONFLICTING PR still counts toward conflicting population", () => {
+    const rollup = rollupOutcomes([{ pr: 1, outcome: "dry-run", stuckState: "CONFLICTING" }]);
+    expect(rollup.dryRun).toBe(1);
+    expect(rollup.conflicting).toBe(1);
   });
 });
