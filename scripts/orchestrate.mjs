@@ -34,6 +34,7 @@
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { cpus, loadavg } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRunId } from "@minsky/tick-loop";
@@ -554,15 +555,69 @@ function appendPolicyLedger(records) {
 }
 
 /**
- * One conductor tick: heal-if-needed → Opus-review-gated merge sweep →
- * ledger. Never throws (caught internally) so a bad sweep can't kill the
- * loop; the ledger line is the 10h-uptime + self-metric record. The sweep
- * is injected (`sweepFn`, default `runGateSweep`) so the merge-accounting
- * path — including the worktree-bound-delete soft-fail counted as MERGED —
- * is testable without spawning `gh` (rule #2).
+ * Self-adjusting admission gate for the heavy merge/vet sweep. Each vet is a
+ * full `git clone --shared` + `--stage=full` vitest run; when several overlap
+ * (a vet outlives a tick, or the conductor restarts) they pile up and gridlock
+ * the host — observed 2026-06-03 on a 10-core box: load hit 12–13, the
+ * machine-budget autoscaler throttled workers to 1, and throughput went to ~0.
+ * This defers a NEW sweep whenever the 1-minute load already exceeds the host's
+ * core budget, and resumes automatically when load drops — the same load-
+ * feedback philosophy as `machine-budget-autoscaler.ts`, applied to the sweep
+ * instead of only the worker count. Pure: same inputs ⇒ same decision (rule #10).
+ *
+ * @param {{ load1: number, cpuCount: number, factor?: number | undefined }} s
+ * @returns {{ admit: boolean, reason: string }}
+ */
+export function decideGateAdmission({ load1, cpuCount, factor }) {
+  const cores = Number.isFinite(cpuCount) && cpuCount > 0 ? cpuCount : 1;
+  const f = typeof factor === "number" && factor > 0 ? factor : 0.9;
+  const ceiling = cores * f;
+  if (Number.isFinite(load1) && load1 > ceiling) {
+    return {
+      admit: false,
+      reason: `host oversubscribed: load1 ${load1.toFixed(1)} > ${ceiling.toFixed(1)} (${cores} cores × ${f})`,
+    };
+  }
+  return { admit: true, reason: "" };
+}
+
+/**
+ * Run the vet sweep — but only when the host has CPU headroom. The self-
+ * adjusting gate (`decideGateAdmission`) defers a heavy sweep on an
+ * oversubscribed host so concurrent vets can't gridlock the box, and resumes
+ * automatically once load drops. A sweep that throws is caught (rule #6).
+ * @param {(opts: {limit: number, log: (s: string) => void}) => {merged: {number:number}[], skipped: {number:number}[]}} sweepFn
+ * @param {(s: string) => void} log
+ * @returns {{ res: {merged: {number:number}[], skipped: {number:number}[]}, sweepError: string }}
+ */
+function runGatedSweep(sweepFn, log) {
+  const envFactor = Number(process.env["MINSKY_GATE_LOAD_FACTOR"]);
+  const admission = decideGateAdmission({
+    load1: loadavg()[0] ?? Number.NaN,
+    cpuCount: cpus().length,
+    factor: Number.isFinite(envFactor) && envFactor > 0 ? envFactor : undefined,
+  });
+  if (!admission.admit) {
+    log(`orchestrate: gate sweep DEFERRED — ${admission.reason}; retry next tick\n`);
+    return { res: { merged: [], skipped: [] }, sweepError: "" };
+  }
+  try {
+    return { res: sweepFn({ limit: SWEEP_LIMIT, log }), sweepError: "" };
+  } catch (err) {
+    const sweepError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+    log(`orchestrate: sweep error (continuing): ${sweepError}\n`);
+    return { res: { merged: [], skipped: [] }, sweepError };
+  }
+}
+
+/**
+ * One conductor tick: heal-if-needed → load-gated Opus-review merge sweep →
+ * ledger. Never throws (caught internally) so a bad sweep can't kill the loop;
+ * the ledger line is the uptime + self-metric record. The sweep is injected
+ * (`sweepFn`, default `runGateSweep`) so merge-accounting is testable without
+ * spawning `gh` (rule #2).
  * @param {(s: string) => void} log
  * @param {(opts: {limit: number, log: (s: string) => void}) => {merged: {number:number}[], skipped: {number:number}[]}} [sweepFn]
- * @returns {{res: {merged: {number:number}[], skipped: {number:number}[]}, sweepError: string}}
  */
 export function tick(log, sweepFn = runGateSweep) {
   const aliveBefore = workerDaemonAlive();
@@ -570,15 +625,8 @@ export function tick(log, sweepFn = runGateSweep) {
     log("orchestrate: Sonnet worker daemon DOWN — healing\n");
     healWorkerDaemon(log);
   }
-  /** @type {{merged: {number:number}[], skipped: {number:number}[]}} */
-  let res = { merged: [], skipped: [] };
-  let sweepError = "";
-  try {
-    res = sweepFn({ limit: SWEEP_LIMIT, log });
-  } catch (err) {
-    sweepError = (err instanceof Error ? err.message : String(err)).slice(0, 200);
-    log(`orchestrate: sweep error (continuing): ${sweepError}\n`);
-  }
+  // Self-adjusting load gate runs the sweep only when the host has headroom.
+  const { res, sweepError } = runGatedSweep(sweepFn, log);
   if (existsSync(join(REPO, ".minsky"))) {
     try {
       appendFileSync(
