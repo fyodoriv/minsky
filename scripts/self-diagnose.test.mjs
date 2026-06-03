@@ -30,6 +30,7 @@ import {
   localServerConcurrencyMismatchInvariant,
   mapGhPrListToCiSnapshots,
   modelCatalogInvariantsHoldInvariant,
+  openhandsImportableAtBootInvariant,
   parseEtime,
   parseIterationLogLine,
   runInvariants,
@@ -135,6 +136,52 @@ describe("claudeBinaryReachableInvariant", () => {
     expect(result.evidence).toContain("ENOENT");
     expect(result.suggestedFix).toContain("launchd");
     expect(result.suggestedFix).toContain("run-tick-loop.sh");
+  });
+});
+
+describe("openhandsImportableAtBootInvariant", () => {
+  it("passes when the canonical openhands CLI is on PATH", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => true,
+      shimResolvable: async () => false,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("passes when only the SDK shim is resolvable (fallback backend)", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => false,
+      shimResolvable: async () => true,
+    })();
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails with an operator-action P0 finding when neither backend resolves", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => false,
+      shimResolvable: async () => false,
+    })();
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.id).toBe("openhands-importable-at-boot");
+    expect(result.actor).toBe("operator");
+    expect(result.evidence).toContain("127");
+    expect(result.suggestedFix).toContain("openhands");
+    expect(result.suggestedFix).toContain("minsky-openhands-spawn.py");
+  });
+
+  it("renders a self-contained P0 task block via findingsToTasksMd (writer round-trip)", async () => {
+    const result = await openhandsImportableAtBootInvariant({
+      openhandsOnPath: async () => false,
+      shimResolvable: async () => false,
+    })();
+    if (result.ok) throw new Error("unreachable");
+    const block = findingsToTasksMd([result], "2026-06-02T12:00:00.000Z");
+    expect(block).toContain("self-diagnose-openhands-importable-at-boot-2026-06-02");
+    expect(block).toContain("**Tags**: p0, self-detected, openhands-importable-at-boot");
+    expect(block).toContain("**Measurement**:");
+    expect(block).toContain("**Pivot**:");
+    expect(block).toContain("**Anchor**:");
   });
 });
 
