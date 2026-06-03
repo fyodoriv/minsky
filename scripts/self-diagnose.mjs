@@ -1302,10 +1302,12 @@ export function stripBranchSuffixes(branch) {
  * Returns `[]` when the log file is absent (fresh checkout, supervisor
  * never ran).
  *
- * Conventions: each iteration emits a JSON line with `evt:"iteration"`,
- * `taskId`, and `committedSha` fields when the OTEL adapter is
- * enabled; `committed` is true iff `committedSha` is a non-empty
- * string. Lines that don't parse are silently skipped.
+ * Conventions: each iteration emits the live span line
+ * `[span] tick-loop.iteration {"iteration.index":N,"iteration.status":...,"task.id":...,"iteration.reason":...}`
+ * — the exact shape `novel/dashboard-web/src/activity.ts::parseSpan` and
+ * `scripts/llm-provider-throughput.mjs` already consume. `committed` is
+ * derived from `iteration.status === "completed"`. Lines that don't carry
+ * the span prefix or don't parse are silently skipped.
  *
  * @param {string} logPath
  * @returns {Promise<readonly DaemonIteration[]>}
@@ -1332,22 +1334,42 @@ async function readIterationsFromLog(logPath) {
 }
 
 /**
+ * Live tick-loop span prefix. Mirrors `SPAN_PREFIX` in
+ * `novel/dashboard-web/src/activity.ts` and `scripts/llm-provider-throughput.mjs`
+ * — the single source of truth for the emitter's stdout shape.
+ */
+const ITERATION_SPAN_PREFIX = "[span] tick-loop.iteration ";
+
+/**
+ * Parse one supervisor log line into a `DaemonIteration`, or `null` when the
+ * line isn't a live `tick-loop.iteration` span. Reads the same fields
+ * `activity.ts::parseSpan` consumes — `iteration.index`, `iteration.status`,
+ * `task.id`, `iteration.reason` — and derives `committed` from
+ * `iteration.status === "completed"`. Malformed JSON / non-span lines yield
+ * `null` rather than throwing (rule #7 graceful-degrade for upstream input).
+ *
  * @param {string} line
  * @returns {DaemonIteration | null}
  */
 export function parseIterationLogLine(line) {
-  if (!line) return null;
+  if (!line?.startsWith(ITERATION_SPAN_PREFIX)) return null;
+  const json = line.slice(ITERATION_SPAN_PREFIX.length).trim();
+  if (json === "") return null;
+  let obj;
   try {
-    const obj = JSON.parse(line);
-    if (obj?.evt !== "iteration" || typeof obj?.taskId !== "string") return null;
-    return {
-      taskId: obj.taskId,
-      committed: typeof obj.committedSha === "string" && obj.committedSha.length > 0,
-      timestamp: typeof obj.ts === "string" ? obj.ts : "",
-    };
+    obj = JSON.parse(json);
   } catch {
     return null;
   }
+  if (obj === null || typeof obj !== "object") return null;
+  const status = obj["iteration.status"];
+  const taskId = obj["task.id"];
+  if (typeof status !== "string" || typeof taskId !== "string") return null;
+  return {
+    taskId,
+    committed: status === "completed",
+    timestamp: "",
+  };
 }
 
 /**
