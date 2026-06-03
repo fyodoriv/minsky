@@ -1077,6 +1077,14 @@ EOF
   local -x MINSKY_HOST_ROOT="$host/.minsky"
   local -x MINSKY_TASK_ID="$task_id"
   local -x MINSKY_BRANCH_NAME="$branch"
+  # Point the spawn watchdog's pre-SIGKILL WIP stash at the isolated
+  # worktree (where the agent edits via `--repo "$worktree"`), not the
+  # bash caller's cwd. On a timeout (exit 124) the Stage-0 auto-commit
+  # backstop below never runs (it gates on exit 0), so without this stash
+  # the timed-out iteration's uncommitted implementation is dropped —
+  # recoverable afterwards via `git -C "$worktree" stash list`.
+  # See scripts/spawn_with_watchdog.py (spawn-strategy-pre-sigkill-stash).
+  local -x MINSKY_TIMEOUT_STASH_DIR="$worktree"
 
   # Watchdog binary resolution order (rule #1 — prefer existing solutions):
   #   1. Python wrapper at scripts/spawn_with_watchdog.py — POSIX-portable,
