@@ -1065,7 +1065,7 @@ export const STACK_MANIFEST = Object.freeze([
   {
     // rule #10 enforcement of the calm-tech 3-value Watch invariant
     // (user-story 005 + vision.md success #6 — wrist dwell). Counts the keys
-    // of `WATCH_METRIC_IDS` in novel/dashboard-web/src/watch.ts and fails
+    // of `WATCH_METRIC_IDS` in the live `watch.ts` TUI surface and fails
     // when >3, converting the prose cap into a mechanical gate. Anchor: Card,
     // Mackinlay, Shneiderman 1999 (glanceable 3-number display); vision.md
     // rule #10. Source: TASKS.md `ci-lint-watch-surface-cap`.

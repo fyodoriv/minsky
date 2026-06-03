@@ -1423,8 +1423,8 @@ jobs:
     # rule #10 enforcement of the calm-tech 3-value Watch invariant:
     # user-story 005 + vision.md success #6 (wrist dwell) fix the Watch
     # surface at exactly three readings, but the cap lived only as prose
-    # plus the `WATCH_METRIC_IDS` literal in
-    # `novel/dashboard-web/src/watch.ts`. Without a deterministic gate, a
+    # plus the `WATCH_METRIC_IDS` literal in the live `watch.ts` TUI
+    # surface. Without a deterministic gate, a
     # future PR could add a fourth key and silently bloat the glanceable
     # surface back into a notification-heavy dashboard. This job parses the
     # literal and fails if the key count exceeds 3. Runs on pull_request
