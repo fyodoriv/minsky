@@ -82,7 +82,7 @@ try {
 ## Hypothesis-driven development (rule #9)
 
 - **Hypothesis**: a pure parser module (`~180 LOC` including JSDoc) closes the format-stability half of the parent P0. The fs-watch + lockfile + async layers in subsequent slices build on top with a clean contract.
-- **Success threshold**: `pnpm exec vitest run novel/human-loop/src/qa-log-format.test.ts --reporter=basic` exits 0 with ≥8 tests passing.
+- **Success threshold**: `pnpm exec vitest run novel/human-loop/src/qa-log-format.test.ts --reporter=dot` exits 0 with ≥8 tests passing.
 - **Pivot threshold**: if the Markdown format proves too brittle for humans (parser false-positives >1/week on operator edits), add a `.minsky/qa-log.jsonl` sidecar as source of truth + keep Markdown for human rendering only.
 - **Measurement**: 12 tests passing in 3ms on 2026-05-23 (the day this shipped).
 

@@ -47,6 +47,16 @@ export default defineConfig({
     // tests use cleanEnv() + mkdtemp isolation to prevent state leaks.
     // Track: when retry:0 produces 100% green over 7d CI, remove the retry.
     retry: 2,
+    // vitest 4 carries higher per-test overhead than vitest 2, which pushed
+    // subprocess-heavy integration tests (worktree spawn, `npx minsky init`
+    // tarball, minsky-init bootstrap — all synchronous `execSync` git +
+    // bash runs) past vitest's 5000ms default and made them time out under
+    // the same host oversubscription noted above. 30s gives ~6x headroom
+    // over observed worst-case timings while still surfacing genuine hangs.
+    // (The `test:integration` script already uses 120000ms for the heaviest
+    // suites.)
+    testTimeout: 30000,
+    hookTimeout: 30000,
     include: [
       "novel/**/src/**/*.test.ts",
       "novel/**/test/**/*.test.ts",
