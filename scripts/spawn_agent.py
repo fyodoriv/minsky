@@ -85,6 +85,7 @@ Cross-references
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -104,6 +105,41 @@ DEFAULT_SHIM_PATH = (
     / "bin"
     / "minsky-openhands-spawn.py"
 )
+
+
+def resolve_configured_agent() -> str:
+    """Role-aware backend id from ``~/.minsky/config.json``.
+
+    A worker (``MINSKY_ROLE=worker``) implements on ``local_agent``; any other
+    role (the orchestrator/brain default) uses ``cloud_agent``. Defaults to
+    ``openhands`` when unset/unreadable — the pre-existing behaviour. This is the
+    Python-side mirror of ``decideAgentForRole`` in ``scripts/orchestrate.mjs``;
+    it lets the dispatcher pick the Claude Code (subscription) backend for
+    ``"claude"`` without the bash caller threading an extra flag.
+    """
+    key = "local_agent" if os.environ.get("MINSKY_ROLE") == "worker" else "cloud_agent"
+    try:
+        cfg = json.loads((Path.home() / ".minsky" / "config.json").read_text())
+        return str(cfg.get(key) or "openhands")
+    except Exception:
+        return "openhands"
+
+
+def resolve_claude_argv(brief_file: str, model: str) -> list[str]:
+    """Argv for a Claude Code (subscription) worker spawn — $0 API.
+
+    Runs headless (``-p``) on the operator's Claude subscription (the same auth
+    the brain's ``claude --print`` review uses, no ``ANTHROPIC_API_KEY``). The
+    brief is the prompt; ``--dangerously-skip-permissions`` enables autonomous
+    edits/commands — safe because the caller runs this with ``cwd`` set to an
+    isolated, throwaway git worktree (rule #2 — the worktree IS the sandbox).
+    The caller ships the resulting diff as a PR, same as the openhands path.
+    """
+    try:
+        prompt = Path(brief_file).read_text()
+    except OSError:
+        prompt = "Work on the top unclaimed task in TASKS.md per AGENTS.md + vision.md."
+    return ["claude", "-p", prompt, "--model", model, "--dangerously-skip-permissions"]
 
 
 def resolve_agent_argv(
@@ -273,6 +309,18 @@ def _main(argv: Optional[list[str]] = None) -> int:
     else:
         env_shim = os.environ.get("MINSKY_OPENHANDS_SHIM_PATH")
         shim_path = Path(env_shim) if env_shim else DEFAULT_SHIM_PATH
+
+    # Claude Code (subscription) backend — runs claude headless in the worktree,
+    # $0 API. Selected when config's role-resolved agent is "claude" (the
+    # operator's "Opus brain + Sonnet workers on the subscription" setup).
+    if resolve_configured_agent() == "claude" and shutil.which("claude"):
+        claude_argv = resolve_claude_argv(args.brief_file, args.model)
+        try:
+            completed = subprocess.run(claude_argv, check=False, cwd=args.repo)
+        except FileNotFoundError as exc:
+            print(f"spawn_agent: claude CLI not executable: {exc}", file=sys.stderr)
+            return 127
+        return completed.returncode
 
     resolved = resolve_agent_argv(
         brief_file=args.brief_file,
