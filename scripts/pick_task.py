@@ -8,6 +8,14 @@ file. Same semantics, same fixture-passing behavior.
 The bash counterpart lives at `bin/minsky-run.sh` — see that file for the
 round-robin loop logic.
 
+Rule-#9 `**Success**` aliases: `**Verification**` and `**Acceptance**`
+populate the `success` field when no explicit `**Success**` line is present
+(first-match wins; an explicit `**Success**` always takes precedence over an
+alias). This mirrors `scripts/check-rule-9-tasksmd-fields.mjs`, which already
+treats `**Success**` and `**Acceptance**` as equivalent — so a
+tasks.md-spec-conventional host (or one of minsky's own Acceptance-only
+blocks) parses as rule-9-compliant instead of being silently rejected.
+
 Plan doc: docs/plans/2026-05-24-path-a-aggressive-cut.md § Phase 7
 
 CLI:
@@ -57,6 +65,13 @@ FIELD_REGEXES = {
     "details": re.compile(r"^\*\*Details\*\*:\s*(.+)$"),
     "hypothesis": re.compile(r"^\*\*Hypothesis\*\*:\s*(.+)$"),
     "success": re.compile(r"^\*\*Success\*\*:\s*(.+)$"),
+    # `Verification` and `Acceptance` are accepted aliases that populate the
+    # `success` field. They are matched into a separate parser key so the
+    # precedence rule can be applied (explicit `**Success**` always wins; among
+    # aliases, first-match wins). Mirrors the Success/Acceptance equivalence in
+    # `scripts/check-rule-9-tasksmd-fields.mjs`.
+    "verification": re.compile(r"^\*\*Verification\*\*:\s*(.+)$"),
+    "acceptance": re.compile(r"^\*\*Acceptance\*\*:\s*(.+)$"),
     "pivot": re.compile(r"^\*\*Pivot\*\*:\s*(.+)$"),
     "measurement": re.compile(r"^\*\*Measurement\*\*:\s*(.+)$"),
     "anchor": re.compile(r"^\*\*Anchor\*\*:\s*(.+)$"),
@@ -68,6 +83,13 @@ FIELD_REGEXES = {
     # lint that nudges new tasks toward the canonical `**Blocked**:`.
     "blocked": re.compile(r"^\*\*Blocked(?:-because)?\*\*:\s*(.+)$"),
 }
+
+# Parser keys that are NOT real `ParsedTask` attributes — they alias an
+# existing field. `Verification`/`Acceptance` both feed the `success` field;
+# an explicit `**Success**` line always wins, and among the aliases first-match
+# wins (an earlier `**Verification**` is not clobbered by a later
+# `**Acceptance**`). See the module docstring + the rule-9 lint.
+SUCCESS_ALIAS_KEYS = ("verification", "acceptance")
 
 
 @dataclass
@@ -113,6 +135,11 @@ def parse_tasks_md(content: str) -> list[ParsedTask]:
     # STRICTLY greater get appended; siblings/headings close it.
     field_indent: int | None = None
     field_setter: object | None = None  # callable(extra: str) -> None
+    # True once the active task's `success` field was set by a literal
+    # `**Success**` line. An explicit Success always wins, so once this is set
+    # a later `**Verification**`/`**Acceptance**` alias is ignored. Reset on
+    # every task boundary.
+    success_is_explicit = False
 
     def flush() -> None:
         nonlocal current
@@ -128,6 +155,7 @@ def parse_tasks_md(content: str) -> list[ParsedTask]:
             current_priority = m.group(1)
             field_indent = None
             field_setter = None
+            success_is_explicit = False
             continue
 
         # Checkbox row → start a new task.
@@ -137,6 +165,7 @@ def parse_tasks_md(content: str) -> list[ParsedTask]:
             current = ParsedTask(title=m.group(1).strip(), priority=current_priority)
             field_indent = None
             field_setter = None
+            success_is_explicit = False
             continue
 
         if current is None:
@@ -159,7 +188,27 @@ def parse_tasks_md(content: str) -> list[ParsedTask]:
                 field_indent = indent
                 # Tags don't support continuation in TS — keep matching but no setter.
                 field_setter = None
+            elif field_name in SUCCESS_ALIAS_KEYS:
+                # `Verification`/`Acceptance` feed `success`. Skip when an
+                # explicit `**Success**` already won, or when an earlier alias
+                # already populated the field (first-match wins among aliases).
+                if success_is_explicit or current.success is not None:
+                    matched_field = True
+                    field_indent = indent
+                    field_setter = None  # ignore continuation for a discarded alias
+                    break
+                current.success = value
+                field_indent = indent
+
+                def _append_success(extra: str) -> None:
+                    if current.success is not None:
+                        current.success = current.success + " " + extra
+
+                field_setter = _append_success
             else:
+                if field_name == "success":
+                    # An explicit Success overrides any alias-captured value.
+                    success_is_explicit = True
                 setattr(current, field_name, value)
                 field_indent = indent
 
