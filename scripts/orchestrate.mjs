@@ -37,6 +37,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRunId } from "@minsky/tick-loop";
+import { createErrorReporter, toErrorRecord } from "./lib/error-reporter.mjs";
 import { assertWriteAllowed, buildWriteVerdictRecord } from "./lib/repo-policy.mjs";
 import { landLocalBranch, runGateSweep, setWorkerPauseSeam } from "./local-gate-merge.mjs";
 import {
@@ -505,6 +506,33 @@ function appendOrchestrateLedger(record) {
     appendFileSync(LEDGER, `${JSON.stringify(record)}\n`);
   } catch {
     /* rule #6: ledger best-effort, never gates the caller */
+  }
+  captureLedgerError(record);
+}
+
+// Lazy run-scoped error reporter (task obs-error-capture-and-reporter). File
+// strategy by default; Sentry when SENTRY_DSN is set. report() never throws.
+const errorReporter = createErrorReporter({
+  errorsFile: join(REPO, ".minsky", "runs", RUN_ID, "errors.jsonl"),
+});
+
+/**
+ * Capture a tick's sweep error to the run's full error ledger + external sink.
+ * Fire-and-forget + fully guarded — a capture failure never gates the loop.
+ * @param {Record<string, unknown>} record
+ */
+function captureLedgerError(record) {
+  const sweepError = typeof record["sweepError"] === "string" ? record["sweepError"] : "";
+  const ts = typeof record["ts"] === "string" ? record["ts"] : "";
+  if (!sweepError || !ts) return;
+  try {
+    void errorReporter
+      .report(toErrorRecord({ ts, runId: RUN_ID, message: sweepError }))
+      .catch(() => {
+        /* rule #6: reporter failure is swallowed — never gates the loop */
+      });
+  } catch {
+    /* rule #6: error capture is best-effort */
   }
 }
 

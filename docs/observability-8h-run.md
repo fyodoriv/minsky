@@ -61,9 +61,36 @@ Verify the math: `pnpm vitest run scripts/run-summary.test.mjs`.
 
 —
 
-## Full error list & external reporting — *(obs-error-capture-and-reporter)*
+## Full error list & external reporting
 
-—
+Every sweep error a tick hits is captured — full, untruncated, and classified
+— to `.minsky/runs/<run-id>/errors.jsonl`, and (when configured) shipped to an
+external platform. The capture is wired at the single ledger chokepoint
+(`appendOrchestrateLedger` in `scripts/orchestrate.mjs`), fire-and-forget and
+fully guarded so it can never gate the loop (rule #6).
+
+```bash
+# the full error list for a run, as a JSON array
+node scripts/export-run-errors.mjs --run latest --json | jq
+
+# self-test the reporter (file strategy round-trip)
+node scripts/error-reporter-selftest.mjs        # exits 0 on success
+```
+
+The reporter is a swappable adapter (`scripts/lib/error-reporter.mjs`, rule #2):
+
+| Strategy | When | Behavior |
+|---|---|---|
+| `FileErrorReporter` | default / no DSN | appends classified records to `errors.jsonl` |
+| `SentryErrorReporter` | `SENTRY_DSN` set | ships to Sentry **and** keeps the local file; falls back to file if `@sentry/node` isn't installed — never throws |
+
+Each record is `{ ts, runId, taskId, class, message, stack?, exitCode?, durationMs? }`,
+secret-redacted. `class` ∈ spawn-failed / lint-failed / timeout / gate-failed /
+crash / unknown.
+
+**To turn on hosted Sentry** (the chosen default): create a project, then
+`pnpm add -w @sentry/node` and export `SENTRY_DSN=<dsn>` for the daemon. With no
+DSN the file strategy is used — no setup required.
 
 ## Minsky vs competitors — *(obs-live-competitive-self-column)*
 
